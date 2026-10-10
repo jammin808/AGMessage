@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AGMessage — join meeting</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/theme-init.js"></script>
+</head>
+<body class="join-page">
+  <button id="themeBtn" class="theme-toggle" type="button" title="Toggle dark mode">🌙</button>
+  <main class="join-card">
+    <div class="brand">
+      <div class="brand-mark">AG</div>
+      <h1>AGMessage</h1>
+      <p class="tagline">Research team ⇄ directors on stage.</p>
+    </div>
+
+    <form id="joinForm" autocomplete="off">
+      <label class="field">
+        <span>Your name</span>
+        <input id="name" name="name" maxlength="40" required placeholder="e.g. Sarah Chen" />
+      </label>
+
+      <label class="field">
+        <span>Role</span>
+        <div class="role-grid" role="radiogroup" aria-label="Role">
+          <label class="role-option">
+            <input type="radio" name="role" value="board" />
+            <span class="role-label">
+              <strong>On stage</strong>
+              <small>Board member — big cards, tap answers</small>
+            </span>
+          </label>
+          <label class="role-option">
+            <input type="radio" name="role" value="research" checked />
+            <span class="role-label">
+              <strong>Research team</strong>
+              <small>Send messages, files, action prompts</small>
+            </span>
+          </label>
+          <label class="role-option">
+            <input type="radio" name="role" value="observer" />
+            <span class="role-label">
+              <strong>Observer</strong>
+              <small>Read-only</small>
+            </span>
+          </label>
+        </div>
+      </label>
+
+      <label class="field">
+        <span>Meeting code</span>
+        <input id="code" name="code" maxlength="6" placeholder="e.g. K7P2QX"
+               autocapitalize="characters" spellcheck="false" />
+        <small class="hint" id="codeHint">6-character code from the meeting admin.</small>
+      </label>
+
+      <button class="btn primary big" type="submit">Join meeting</button>
+      <p class="error" id="error" hidden></p>
+    </form>
+
+    <footer class="join-footer">
+      <small>Running on your local network. For remote guests, start a tunnel — see the README.</small>
+    </footer>
+  </main>
+
+  <script src="/join.js"></script>
+</body>
+</html>

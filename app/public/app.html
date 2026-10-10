@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AGMessage</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/theme-init.js"></script>
+</head>
+<body class="app-page" data-role="">
+  <header class="app-header">
+    <div class="app-title">
+      <strong>AGMessage</strong>
+    </div>
+    <div class="app-meta">
+      <span id="whoami"></span>
+      <span class="dot" id="connDot" title="connection"></span>
+      <span class="zoom-controls" role="group" aria-label="Message text size">
+        <button id="zoomOutBtn" class="btn ghost small" title="Smaller text" type="button">A−</button>
+        <button id="zoomResetBtn" class="btn ghost small" title="Reset text size" type="button">A</button>
+        <button id="zoomInBtn" class="btn ghost small" title="Larger text" type="button">A+</button>
+      </span>
+      <button id="stageToggleBtn" class="btn ghost small director-only" title="Collapse / expand the On stage panel" type="button" hidden>📺</button>
+      <button id="themeBtn" class="btn ghost small" title="Toggle dark mode">🌙</button>
+      <button id="peopleBtn" class="btn ghost small" title="Who's here">People</button>
+      <a href="/" class="btn ghost small">Leave</a>
+      <span class="room-chip room-chip-tiny" id="roomChip" title="Meeting code">—</span>
+      <span class="stage-chip" id="stageChip" hidden title="Live from Stagewatch"><b id="stageTime">--:--</b> <span id="stageTitle"></span></span>
+    </div>
+  </header>
+
+  <div class="main-row">
+    <section class="left-col" id="leftCol">
+      <aside class="people-panel" id="peoplePanel" hidden>
+        <h3>In this meeting</h3>
+        <ul id="peopleList"></ul>
+      </aside>
+
+      <section class="pinned-strip" id="pinnedStrip" hidden>
+        <h4>Pinned</h4>
+        <div id="pinnedList"></div>
+      </section>
+
+      <main class="feed" id="feed" aria-live="polite"></main>
+
+      <section class="compose director-compose" id="directorCompose" hidden>
+        <form id="directorForm">
+          <input id="directorInput" maxlength="300" placeholder="Quick note back to the research team…" />
+          <button type="button" class="btn ghost priority-btn" id="dirPriorityBtn" data-priority="0" title="Mark as high priority">🔥</button>
+          <button class="btn primary" type="submit">Send</button>
+        </form>
+      </section>
+
+      <section class="compose research-compose" id="researchCompose" hidden>
+        <div class="compose-tabs" role="tablist">
+          <button class="tab active" data-tab="text" role="tab">Message</button>
+          <button class="tab" data-tab="action" role="tab">Action prompt</button>
+          <button class="tab" data-tab="file" role="tab">File / image</button>
+        </div>
+
+        <form class="pane" id="textPane" data-pane="text">
+          <textarea id="textInput" rows="1" placeholder="Type a message to the stage…"></textarea>
+          <div class="row end">
+            <button type="button" class="btn ghost ai-btn" id="aiDraftBtn" title="Claude drafts an answer to the board's latest question (or the one you're replying to) from the thread and the document on stage. You edit it; nothing is sent until you press Send." hidden>✨ Draft answer</button>
+            <button type="button" class="btn ghost priority-btn" id="textPriorityBtn" data-priority="0" title="Mark as high priority">🔥 Priority</button>
+            <button class="btn primary" type="submit">Send</button>
+          </div>
+        </form>
+
+        <form class="pane hidden" id="actionPane" data-pane="action">
+          <label class="field">
+            <span>Question / suggestion for the directors</span>
+            <textarea id="actionText" rows="2"
+              placeholder="e.g. 'Shareholder asked about 2025 capex. Suggest referring to slide 14?'"></textarea>
+          </label>
+          <label class="field">
+            <span>Response buttons</span>
+            <div id="actionOptions" class="chips"></div>
+            <div class="row">
+              <input id="actionOptionInput" maxlength="24" placeholder="Add option (e.g. Defer)" />
+              <button type="button" class="btn ghost small" id="addOptionBtn">Add</button>
+              <button type="button" class="btn ghost small" id="resetOptionsBtn">Reset to Yes/No</button>
+              <button type="button" class="btn ghost small ai-btn" id="aiOptionsBtn" title="Suggest tap-to-answer buttons for this question" hidden>✨ Suggest</button>
+            </div>
+          </label>
+          <div class="row end">
+            <button type="button" class="btn ghost priority-btn" id="actionPriorityBtn" data-priority="0" title="Mark as high priority">🔥 Priority</button>
+            <button class="btn primary" type="submit">Send to stage</button>
+          </div>
+        </form>
+
+        <form class="pane hidden" id="filePane" data-pane="file">
+          <div class="dropzone" id="dropzone">
+            <input type="file" id="fileInput" hidden accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.docx,.xlsx,.xls,.pptx,.csv,.txt,.md" />
+            <p><strong>Drop a file here</strong> or <button type="button" class="link" id="pickFileBtn">choose</button>.</p>
+            <p class="hint">Max 25 MB. Files render directly on the directors' panel.</p>
+          </div>
+          <div id="filePreview" hidden></div>
+          <label class="field">
+            <span>Optional caption</span>
+            <input id="fileCaption" maxlength="120" placeholder="e.g. 'Slide with the 2025 capex breakdown.'" />
+          </label>
+          <div class="row end">
+            <button type="button" class="btn ghost priority-btn" id="filePriorityBtn" data-priority="0" title="Mark as high priority">🔥 Priority</button>
+            <button class="btn primary" type="submit" id="sendFileBtn" disabled>Send to stage</button>
+          </div>
+        </form>
+      </section>
+    </section>
+
+    <!-- Drag handle: drag horizontally to resize the split between message
+         column and stage panel. Hidden in non-director mode and on mobile. -->
+    <div class="split-resizer" id="splitResizer" role="separator" aria-orientation="vertical" aria-label="Resize panels"></div>
+
+    <aside class="doc-panel" id="docPanel" data-state="empty" aria-label="Document on stage">
+      <button id="docExpandRail" class="doc-expand-rail" type="button" title="Expand stage panel" hidden>📺 On stage ⇤</button>
+      <header class="doc-panel-header">
+        <strong>📺 On stage</strong>
+        <span id="docTitle" class="doc-title"></span>
+        <button id="docCollapseBtn" class="doc-collapse-btn" type="button" title="Collapse / expand">⇥</button>
+      </header>
+
+      <div class="doc-display" id="docDisplay">
+        <div class="empty-state">
+          <p>No document on stage yet.</p>
+          <p class="hint">When the research team pushes a file, it appears here automatically.</p>
+        </div>
+      </div>
+
+      <p class="doc-caption" id="docCaption" hidden></p>
+
+      <div class="doc-actions" id="docActions" hidden>
+        <button id="pinDocBtn" class="btn" data-pinned="0" type="button">📌 Pin</button>
+        <button id="dismissDocBtn" class="btn ghost" type="button">✕ Dismiss</button>
+      </div>
+
+      <section class="doc-pinned" id="docPinnedSection" hidden>
+        <h4>📌 Pinned <span id="docPinnedCount" class="muted"></span></h4>
+        <ul id="docPinnedList"></ul>
+      </section>
+    </aside>
+  </div>
+
+  <template id="msgTpl">
+    <article class="msg">
+      <header>
+        <span class="from"></span>
+        <span class="role-tag"></span>
+        <span class="priority-badge">🔥 HIGH</span>
+        <time></time>
+        <button class="fwd-btn" title="Forward to another room" type="button">↗</button>
+        <button class="pin-btn" title="Pin">📌</button>
+        <button class="stage-btn" title="Show on the speaker's screen (Stagewatch)" type="button" hidden>🖥</button>
+        <button class="del-btn" title="Delete this message" hidden>🗑</button>
+      </header>
+      <div class="body"></div>
+    </article>
+  </template>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/vendor/mammoth.browser.min.js" defer></script>
+  <script src="/vendor/xlsx.full.min.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>

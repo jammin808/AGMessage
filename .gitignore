@@ -1,0 +1,19 @@
+# Meeting data — real transcripts, uploads, the server secret and saved keys. NEVER COMMIT.
+app/data/
+app/uploads/*
+!app/uploads/.gitkeep
+
+# Dependencies and the bundled programs (fetched by tools/fetch-runtime.ps1, verified by checksum)
+node_modules/
+node/
+bin/
+
+# Build and test output
+dist/
+artifacts/
+*.log
+*.download
+
+# OS
+Thumbs.db
+.DS_Store

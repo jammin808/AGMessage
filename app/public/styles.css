@@ -1,0 +1,1606 @@
+/* ---------- Reset & tokens ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #15202b;
+  background: #f5f6f8;
+  -webkit-font-smoothing: antialiased;
+}
+:root {
+  --brand: #2b57d1;
+  --brand-dark: #1c3f9e;
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --border: #e2e6ec;
+  --ink: #15202b;
+  --muted: #6b7280;
+  --accent: #d97706;
+  --accent-soft: #fff4e0;
+  --success: #16a34a;
+  --danger: #dc2626;
+  --director: #7c3aed;
+  --research: #0ea5e9;
+  --observer: #6b7280;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.04);
+}
+
+button { font: inherit; }
+a { color: var(--brand); }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: .55rem .9rem; border-radius: var(--radius);
+  border: 1px solid var(--border); background: #fff; color: var(--ink);
+  cursor: pointer; text-decoration: none; font-weight: 500;
+  transition: background .12s, border-color .12s, transform .05s;
+}
+.btn:hover { border-color: #c7cdd7; }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.btn.primary:hover { background: var(--brand-dark); }
+.btn.ghost { background: transparent; }
+.btn.small { padding: .35rem .6rem; font-size: .9rem; }
+.btn.big { padding: .85rem 1.1rem; font-size: 1.05rem; width: 100%; margin-top: 1rem; }
+.btn.link, .link {
+  background: none; border: none; color: var(--brand); padding: 0; cursor: pointer;
+  text-decoration: underline;
+}
+
+/* ===================== JOIN PAGE ===================== */
+.join-page {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.2rem;
+  background: linear-gradient(180deg, #eef2fb 0%, #f5f6f8 60%);
+}
+.join-card {
+  width: 100%; max-width: 440px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 16px; box-shadow: var(--shadow);
+  padding: 1.8rem;
+}
+.brand { text-align: center; margin-bottom: 1.4rem; }
+.brand-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 12px;
+  background: var(--brand); color: #fff; font-weight: 700; letter-spacing: .5px;
+  margin-bottom: .5rem;
+}
+.brand h1 { font-size: 1.4rem; margin: 0; }
+.tagline { color: var(--muted); margin: .2rem 0 0; font-size: .95rem; }
+
+.field { display: block; margin-bottom: 1rem; }
+.field > span { display: block; font-weight: 600; font-size: .85rem; margin-bottom: .3rem; }
+input[type="text"], input[type="email"], input:not([type]), textarea {
+  width: 100%; padding: .6rem .7rem; border: 1px solid var(--border);
+  border-radius: var(--radius); font: inherit; background: #fff;
+}
+textarea { resize: vertical; min-height: 60px; }
+input:focus, textarea:focus, button:focus-visible {
+  outline: 2px solid var(--brand); outline-offset: 1px;
+}
+
+.role-grid { display: grid; gap: .5rem; }
+.role-option {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .7rem .8rem; border: 1px solid var(--border); border-radius: var(--radius);
+  cursor: pointer; background: #fff;
+}
+.role-option:has(input:checked) { border-color: var(--brand); background: #f1f5ff; }
+.role-option input { margin: 0; }
+.role-label strong { display: block; }
+.role-label small { color: var(--muted); }
+
+.code-row { display: flex; gap: .5rem; }
+.code-row input { text-transform: uppercase; letter-spacing: 2px; font-weight: 600; }
+.hint { color: var(--muted); font-size: .85rem; display: block; margin-top: .3rem; }
+.error { color: var(--danger); margin: .5rem 0 0; }
+
+.join-footer { margin-top: 1rem; color: var(--muted); text-align: center; }
+
+/* ===================== APP LAYOUT =====================
+   New: header at top (full width), then a single 2-column main-row.
+   Left column holds the message section (people / pinned / feed / compose).
+   Right column is the doc panel — top-to-bottom, 50% wide for directors. */
+.app-page {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100dvh;
+  background: var(--bg);
+}
+.app-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .5rem; padding: .65rem 1rem;
+  background: #fff; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 10;
+}
+.app-title { display: flex; align-items: center; gap: .6rem; }
+.app-title strong { font-size: 1rem; }
+.room-chip {
+  background: #eef2fb; color: var(--brand-dark);
+  padding: .15rem .55rem; border-radius: 999px; font-weight: 600;
+  letter-spacing: 1px; font-size: .8rem;
+}
+.app-meta { display: flex; align-items: center; gap: .5rem; font-size: .9rem; color: var(--muted); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: #cbd2de; transition: background .2s; }
+.dot.ok { background: var(--success); }
+
+/* Two-column body row */
+.main-row {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.left-col {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+/* When no doc panel (research/observer), left column takes the full width */
+body:not([data-role="director"]) .left-col { flex: 1 1 100%; }
+
+/* People panel — sits inside left column, no longer page-wide */
+.people-panel { background: #fff; border-bottom: 1px solid var(--border); padding: .7rem 1rem; flex: 0 0 auto; }
+.people-panel h3 { margin: 0 0 .4rem; font-size: .9rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.people-panel ul { list-style: none; margin: 0; padding: 0; display: flex; gap: .6rem; flex-wrap: wrap; }
+.people-panel li { background: #f1f5ff; border: 1px solid #dce5ff; padding: .3rem .55rem; border-radius: 999px; font-size: .9rem; }
+
+/* Pinned strip — also confined to left column now */
+.pinned-strip { background: var(--accent-soft); border-bottom: 1px solid #f3dfb8; padding: .6rem 1rem; max-height: 30vh; overflow: auto; flex: 0 0 auto; }
+.pinned-strip h4 { margin: 0 0 .5rem; font-size: .8rem; color: #7a4d00; letter-spacing: .06em; text-transform: uppercase; }
+
+/* Feed (scrolls; takes remaining space in left column) */
+.feed {
+  flex: 1 1 auto; min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+  display: flex; flex-direction: column; gap: .6rem;
+}
+
+/* Compose pinned to bottom of left column */
+.compose {
+  background: #fff;
+  border-top: 1px solid var(--border);
+  padding: .75rem 1rem;
+  flex: 0 0 auto;
+}
+.compose .row { display: flex; gap: .5rem; align-items: center; margin-top: .4rem; }
+.compose .row.end { justify-content: flex-end; }
+
+/* Right column: doc panel — full-height, 50% width for directors */
+.doc-panel { display: none; }
+body[data-role="director"], body[data-role="board"] .doc-panel,
+body[data-role="research"] .doc-panel {
+  display: flex; flex-direction: column;
+  flex: 0 0 50%;
+  min-width: 0;
+  background: #fff;
+  border-left: 1px solid var(--border);
+  box-shadow: -2px 0 8px rgba(0,0,0,.03);
+  overflow: hidden;
+}
+.doc-panel-header {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .65rem .8rem; border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #f8faff, #fff);
+  flex: 0 0 auto;
+}
+.doc-panel-header strong { color: var(--brand-dark); font-size: 1rem; }
+.doc-title {
+  margin-left: .25rem; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-weight: 500;
+}
+.doc-display {
+  flex: 1 1 auto; min-height: 0;
+  padding: 1rem;
+  overflow: auto;
+  background: #fafbfd;
+}
+.doc-display .empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100%; min-height: 160px; text-align: center; color: var(--muted);
+}
+.doc-display .empty-state p { margin: .25rem 0; }
+.doc-preview img {
+  max-width: 100%; max-height: 100%;
+  display: block; margin: 0 auto;
+  border-radius: 8px; border: 1px solid var(--border); background: #fff;
+}
+.doc-pdf-canvas {
+  display: flex; flex-direction: column; gap: .55rem;
+  background: #f1f3f7; padding: .25rem; border-radius: 6px;
+}
+.pdf-page {
+  display: block; margin: 0 auto;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.12);
+  border-radius: 4px;
+  max-width: 100%;
+}
+.doc-file-card {
+  display: flex; gap: .75rem; align-items: center;
+  background: #fff; border: 1px solid var(--border); border-radius: 10px;
+  padding: 1rem;
+}
+.doc-file-card .ico { font-size: 2rem; }
+.doc-file-card .meta strong { display: block; word-break: break-word; }
+.doc-file-card .meta small { color: var(--muted); }
+.doc-file-card .meta small.muted { display: block; margin-top: .2rem; }
+
+.doc-caption { margin: 0; padding: .55rem .85rem; background: #fff8e6; border-top: 1px solid #f3dfb8; color: #6a4a00; font-style: italic; }
+.doc-actions { display: flex; gap: .4rem; padding: .55rem .65rem; border-top: 1px solid var(--border); background: #fff; flex: 0 0 auto; }
+.doc-actions .btn { flex: 1; }
+#pinDocBtn[data-pinned="1"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.doc-pinned { border-top: 1px solid var(--border); padding: .55rem .8rem .8rem; background: #fffaf0; max-height: 28vh; overflow: auto; flex: 0 0 auto; }
+.doc-pinned h4 { margin: .25rem 0 .35rem; font-size: .8rem; color: #7a4d00; letter-spacing: .06em; text-transform: uppercase; }
+.doc-pinned ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .25rem; }
+.doc-pinned li { display: flex; align-items: stretch; gap: .25rem; }
+.pinned-item {
+  flex: 1; display: flex; align-items: center; gap: .5rem;
+  background: #fff; border: 1px solid #f3dfb8; color: var(--ink);
+  padding: .4rem .6rem; border-radius: 6px;
+  cursor: pointer; text-align: left;
+  font: inherit; font-size: .9rem;
+  overflow: hidden;
+}
+.pinned-item:hover { background: #fff7e6; border-color: var(--accent); }
+.pinned-item .ico { flex-shrink: 0; }
+.pinned-item .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.unpin {
+  background: #fff; border: 1px solid #f3dfb8; cursor: pointer;
+  padding: 0 .55rem; border-radius: 6px; color: var(--muted);
+  font-size: 1rem;
+}
+.unpin:hover { color: var(--danger); border-color: var(--danger); }
+
+/* Director: clickable file in feed re-frames it on the stage panel */
+body[data-role="director"], body[data-role="board"] .file.clickable,
+body[data-role="research"] .file.clickable { cursor: zoom-in; }
+body[data-role="director"], body[data-role="board"] .file.clickable:hover,
+body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+/* Inline document renderers */
+.doc-html, .doc-text {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  font-size: .95rem;
+  line-height: 1.5;
+  color: var(--ink);
+  overflow: auto;
+}
+.doc-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .9rem;
+}
+.doc-html h1, .doc-html h2, .doc-html h3 { margin: 1rem 0 .4rem; line-height: 1.25; }
+.doc-html h1 { font-size: 1.4rem; }
+.doc-html h2 { font-size: 1.2rem; }
+.doc-html h3 { font-size: 1.05rem; }
+.doc-html p { margin: .4rem 0; }
+.doc-html ul, .doc-html ol { padding-left: 1.4rem; margin: .4rem 0; }
+.doc-html img { max-width: 100%; height: auto; border-radius: 4px; }
+.doc-html table { border-collapse: collapse; font-size: .9rem; margin: .6rem 0; }
+.doc-html th, .doc-html td { border: 1px solid var(--border); padding: .3rem .55rem; vertical-align: top; }
+.doc-html th { background: #f4f6fb; font-weight: 600; }
+
+/* Spreadsheet (SheetJS) */
+.doc-sheet { padding: .6rem; }
+.doc-sheet table { font-size: .85rem; min-width: 100%; }
+.sheet-view { overflow: auto; max-width: 100%; }
+.sheet-tabs { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .6rem; }
+.sheet-tab {
+  background: #fff; border: 1px solid var(--border);
+  padding: .3rem .6rem; border-radius: 6px;
+  cursor: pointer; font-size: .85rem; color: var(--ink);
+}
+.sheet-tab.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+/* Error message inside the panel */
+.doc-display .error {
+  color: var(--danger); background: #fef2f2;
+  border: 1px solid #fecaca; border-radius: 8px;
+  padding: .6rem .8rem;
+}
+
+/* Mobile: stack into a single column; doc panel becomes a section beneath */
+@media (max-width: 800px) {
+  .main-row { flex-direction: column; }
+  .left-col { flex: 1 1 auto; }
+  body[data-role="director"], body[data-role="board"] .doc-panel,
+  body[data-role="research"] .doc-panel {
+    /* Stacked layout default: 50/50 split, but never let the panel eat
+       more than 75% so the chat keeps at least 25% (matching the
+       splitter's drag range). Vertical splitter can override via JS-set
+       inline flex within these bounds. */
+    flex: 0 0 50%;
+    min-height: 120px;
+    max-height: 75%;
+    border-left: 0; border-top: 1px solid var(--border);
+    box-shadow: 0 -2px 8px rgba(0,0,0,.04);
+  }
+}
+
+/* Individual message */
+.msg {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .7rem .85rem;
+  box-shadow: 0 1px 1px rgba(0,0,0,.02);
+  max-width: 760px;
+  font-size: calc(1rem * var(--zoom-msg, 1));
+}
+.msg header { display: flex; align-items: center; gap: .5rem; color: var(--muted); margin-bottom: .25rem; }
+.msg .from { font-weight: 600; color: var(--ink); }
+.role-tag {
+  font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  padding: .1rem .4rem; border-radius: 999px;
+  background: #eef2fb; color: var(--brand-dark);
+}
+.role-tag[data-role="director"], .role-tag[data-role="board"] { background: #ede9fe; color: var(--director); }
+.role-tag[data-role="research"] { background: #e0f2fe; color: #0369a1; }
+.role-tag[data-role="observer"] { background: #f1f5f9; color: var(--observer); }
+.msg time { margin-left: auto; font-variant-numeric: tabular-nums; }
+.msg .pin-btn { background: none; border: none; cursor: pointer; padding: 0 .25rem; opacity: .35; font-size: 1rem; }
+.msg .pin-btn:hover { opacity: .9; }
+.msg.pinned .pin-btn { opacity: 1; }
+/* Pinned action prompts are hoisted to the pinned strip — hide the original
+   in the feed so it isn't shown twice. The pinned-strip clone lives in
+   #pinnedList (outside .feed) so it stays visible. Unpinning flips
+   data-pinned back to "0" and the original reappears in place. */
+.feed .msg[data-type="action"][data-pinned="1"] { display: none; }
+.msg .body p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* File body in feed */
+.file img { max-width: 100%; max-height: 420px; border-radius: 8px; border: 1px solid var(--border); background: #fafbfc; }
+.file .caption { margin-top: .35rem; color: var(--muted); font-style: italic; }
+.file-link { display: inline-block; padding: .4rem .6rem; background: #f1f5ff; border-radius: 8px; }
+
+/* Action prompt */
+.msg.is-action { border-color: #fbcf8a; background: #fffaf0; }
+.msg.is-action.answered { border-color: var(--success); background: #f0fdf4; }
+.action-text { font-size: 1rem; font-weight: 500; }
+.action-buttons { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+.action-btn {
+  padding: .7rem 1.1rem; font-size: 1rem; font-weight: 600;
+  background: #fff; border: 1.5px solid var(--accent); color: #7a4d00;
+}
+.action-btn:hover { background: var(--accent); color: #fff; }
+.action-responses { margin-top: .5rem; display: flex; flex-wrap: wrap; gap: .4rem; }
+.response-pill {
+  padding: .2rem .55rem; border-radius: 999px; font-size: .85rem;
+  background: #f1f5f9; border: 1px solid #cbd5e1; color: var(--ink);
+}
+.response-pill .opt { font-weight: 700; }
+/* Yes / approved → green */
+.response-pill.r-yes   { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+/* No / rejected → red */
+.response-pill.r-no    { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+/* Defer / later / maybe → amber */
+.response-pill.r-defer { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+/* Anything else from the option list → indigo */
+.response-pill.r-other { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
+/* Free-text replies (no option clicked) → slate */
+.response-pill.r-note  { background: #f1f5f9; border-color: #cbd5e1; color: #334155; }
+.muted { color: var(--muted); }
+
+/* System message */
+.sys { align-self: center; color: var(--muted); font-size: .85rem; font-style: italic; padding: .15rem .5rem; }
+
+/* Flash on new message — bright burst then 30s fade back to normal */
+.flash {
+  animation: flashIn 30s ease-out;
+  position: relative;
+}
+.flash::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, .55);
+  animation: flashGlow 30s ease-out forwards;
+}
+@keyframes flashIn {
+  0%   { background-color: #fff5b8; }
+  3%   { background-color: #fff5b8; }
+  100% { background-color: transparent; }
+}
+@keyframes flashGlow {
+  0%   { opacity: 1; }
+  3%   { opacity: 1; }
+  100% { opacity: 0; }
+}
+html[data-theme="dark"] @keyframes flashIn { /* placeholder; values override below */ }
+html[data-theme="dark"] .flash { animation-name: flashInDark; }
+@keyframes flashInDark {
+  0%   { background-color: #4a3a10; }
+  3%   { background-color: #4a3a10; }
+  100% { background-color: transparent; }
+}
+
+/* ---------- Compose internals ---------- */
+.director-compose form { display: flex; gap: .5rem; }
+.director-compose input { flex: 1; }
+.director-compose .btn.primary { padding: .7rem 1.1rem; font-size: 1rem; }
+
+.compose-tabs {
+  display: flex; gap: .25rem; border-bottom: 1px solid var(--border);
+  margin: -.75rem -1rem .6rem;
+  padding: .4rem 1rem 0;
+}
+.compose-tabs .tab {
+  background: none; border: none; padding: .55rem .8rem; cursor: pointer;
+  border-bottom: 2px solid transparent; color: var(--muted); font-weight: 500;
+}
+.compose-tabs .tab.active { color: var(--ink); border-color: var(--brand); }
+
+.pane { display: grid; gap: .4rem; }
+.pane.hidden { display: none; }
+
+/* Action options chips */
+.chips { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .3rem; }
+.chip {
+  display: inline-flex; align-items: center; gap: .3rem;
+  background: #eef2fb; border: 1px solid #dce5ff; color: var(--brand-dark);
+  padding: .2rem .55rem; border-radius: 999px; font-size: .9rem;
+}
+.chip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0; }
+
+/* Dropzone */
+.dropzone { border: 2px dashed #c9d2e0; border-radius: var(--radius); padding: 1rem; text-align: center; background: #fafbfd; color: var(--muted); }
+.dropzone.hover { background: #eef2fb; border-color: var(--brand); color: var(--brand); }
+.dropzone p { margin: .2rem 0; }
+.preview-img { max-width: 100%; max-height: 200px; border-radius: 8px; border: 1px solid var(--border); display: block; }
+
+/* DIRECTOR-MODE: bigger text on stage */
+/* Director overrides use `em` so the message zoom variable on .feed
+   actually propagates down. Using rem here would re-anchor to the
+   document root and ignore --zoom-msg. */
+/* Director overrides: every font-size is calc()'d against the same
+   --zoom-msg variable that .feed uses, so the A+/A− buttons reliably
+   scale chat text in director view. */
+body[data-role="director"], body[data-role="board"] .feed { padding: .9rem; gap: .75rem; }
+body[data-role="director"], body[data-role="board"] .msg {
+  font-size: calc(1.05rem * var(--zoom-msg, 1));
+  padding: .9rem 1.05rem;
+}
+body[data-role="director"], body[data-role="board"] .msg.is-action { box-shadow: 0 2px 10px rgba(217,119,6,.18); }
+body[data-role="director"], body[data-role="board"] .action-text {
+  font-size: calc(1.18rem * var(--zoom-msg, 1));
+  line-height: 1.35;
+}
+body[data-role="director"], body[data-role="board"] .action-btn {
+  font-size: calc(1rem * var(--zoom-msg, 1));
+  padding: .8rem 1.3rem;
+}
+body[data-role="director"], body[data-role="board"] .pinned-strip { background: #fff7e6; }
+body[data-role="director"], body[data-role="board"] .pin-btn {
+  font-size: calc(1.15rem * var(--zoom-msg, 1));
+  opacity: .55;
+}
+/* Message headers (name + role tag + time) scale too, in BOTH roles */
+.msg header { font-size: calc(.85rem * var(--zoom-msg, 1)); }
+
+@media (max-width: 540px) {
+  .app-header { padding: .5rem .7rem; }
+  .app-meta .btn { padding: .3rem .55rem; }
+  .feed { padding: .7rem; }
+  .compose { padding: .6rem .7rem; }
+}
+
+/* Smaller room chip when shown on the right side of the header */
+.room-chip-tiny {
+  font-size: .7rem;
+  padding: .1rem .45rem;
+  letter-spacing: 1px;
+}
+
+/* Own messages — right-aligned, brand-tinted bubble */
+.feed { align-items: stretch; }
+.msg.mine {
+  align-self: flex-end;
+  background: #eaf2ff;
+  border-color: #c7d8ff;
+}
+.msg.mine header { color: #4863c0; }
+.msg.mine .from { color: #1c3f9e; }
+
+/* Delete button for own messages */
+.msg .del-btn {
+  background: none; border: none; cursor: pointer;
+  padding: 0 .25rem; opacity: .35; font-size: 1rem;
+}
+.msg .del-btn:hover { opacity: 1; color: var(--danger); }
+
+/* Splitter between message column and stage panel */
+.split-resizer {
+  display: none;
+  width: 6px; flex: 0 0 6px;
+  background: var(--border);
+  cursor: col-resize;
+  transition: background .12s;
+  position: relative;
+}
+.split-resizer::before {
+  content: '';
+  position: absolute;
+  left: -3px; right: -3px; top: 0; bottom: 0;
+}
+.split-resizer:hover { background: var(--brand); }
+body[data-role="director"], body[data-role="board"] .split-resizer,
+body[data-role="research"] .split-resizer { display: block; }
+
+@media (max-width: 800px) {
+  body[data-role="director"], body[data-role="board"] .split-resizer { display: none; }
+}
+
+/* ====================================================================
+   DARK MODE — selectable per user (saved in localStorage as agm.theme)
+   ==================================================================== */
+
+/* Floating toggle on the join page (top-right of viewport) */
+.theme-toggle {
+  position: fixed;
+  top: .8rem; right: .8rem;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: var(--shadow);
+  z-index: 100;
+}
+.theme-toggle:hover { border-color: var(--brand); }
+
+html[data-theme="dark"] {
+  --brand: #5b8dff;
+  --brand-dark: #3a6cdf;
+  --bg: #0f1421;
+  --card: #1a2032;
+  --border: #2c344a;
+  --ink: #e4e7ee;
+  --muted: #9aa3b5;
+  --accent: #f0a14a;
+  --accent-soft: #2a2010;
+  --success: #34d399;
+  --danger: #f87171;
+  --director: #a78bfa;
+  --research: #38bdf8;
+  --observer: #94a3b8;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.3);
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] body {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* Join page in dark mode */
+html[data-theme="dark"] .join-page {
+  background: linear-gradient(180deg, #131a2a 0%, #0f1421 60%);
+}
+html[data-theme="dark"] .join-card {
+  background: var(--card);
+  border-color: var(--border);
+}
+html[data-theme="dark"] .role-option {
+  background: #232b40;
+  border-color: var(--border);
+  color: var(--ink);
+}
+html[data-theme="dark"] .role-option:has(input:checked) {
+  background: #243054;
+  border-color: var(--brand);
+}
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea {
+  background: #232b40;
+  color: var(--ink);
+  border-color: var(--border);
+}
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder { color: #6b7796; }
+html[data-theme="dark"] .theme-toggle { background: var(--card); color: var(--ink); }
+
+/* App page surfaces */
+html[data-theme="dark"] .app-header,
+html[data-theme="dark"] .compose,
+html[data-theme="dark"] .doc-panel,
+html[data-theme="dark"] .doc-panel-header,
+html[data-theme="dark"] .doc-actions,
+html[data-theme="dark"] .people-panel {
+  background: var(--card);
+  border-color: var(--border);
+}
+html[data-theme="dark"] .doc-panel-header {
+  background: linear-gradient(180deg, #1d2538, var(--card));
+}
+html[data-theme="dark"] .doc-display { background: #131a2a; }
+html[data-theme="dark"] .doc-display .empty-state { color: var(--muted); }
+
+html[data-theme="dark"] .room-chip { background: #1f2942; color: #b8c8ff; }
+html[data-theme="dark"] .role-tag { background: #2a3450; color: #c8d3ff; }
+html[data-theme="dark"] .role-tag[data-role="director"], .role-tag[data-role="board"] { background: #2e2655; color: #c4b5fd; }
+html[data-theme="dark"] .role-tag[data-role="research"] { background: #1a3142; color: #7dd3fc; }
+html[data-theme="dark"] .role-tag[data-role="observer"] { background: #232b40; color: #cbd5e1; }
+
+/* Pinned strip */
+html[data-theme="dark"] .pinned-strip { background: #2a2010; border-color: #3a2e15; }
+html[data-theme="dark"] .pinned-strip h4 { color: #f0a14a; }
+
+/* Messages in feed */
+html[data-theme="dark"] .msg {
+  background: #1f2840;
+  border-color: var(--border);
+  color: var(--ink);
+}
+html[data-theme="dark"] .msg header { color: var(--muted); }
+html[data-theme="dark"] .msg .from { color: var(--ink); }
+html[data-theme="dark"] .msg.mine {
+  background: #243054;
+  border-color: #3554a0;
+}
+html[data-theme="dark"] .msg.mine header,
+html[data-theme="dark"] .msg.mine .from { color: #b8c8ff; }
+html[data-theme="dark"] .msg.is-action { background: #2a2415; border-color: #5a4520; }
+html[data-theme="dark"] .msg.is-action.answered { background: #112a1f; border-color: #1d6b41; }
+
+html[data-theme="dark"] .response-pill { background: #112a1f; border-color: #1d6b41; color: #6ee7b7; }
+html[data-theme="dark"] .file-link { background: #1f2942; color: #b8c8ff; }
+
+/* Action buttons */
+html[data-theme="dark"] .action-btn {
+  background: #2a2415; border-color: var(--accent); color: #f5d8a0;
+}
+html[data-theme="dark"] .action-btn:hover { background: var(--accent); color: #0f1421; }
+
+/* Generic buttons */
+html[data-theme="dark"] .btn {
+  background: #1f2840;
+  border-color: var(--border);
+  color: var(--ink);
+}
+html[data-theme="dark"] .btn:hover { border-color: #4a5675; }
+html[data-theme="dark"] .btn.primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #0f1421;
+}
+html[data-theme="dark"] .btn.primary:hover { background: var(--brand-dark); color: #fff; }
+html[data-theme="dark"] .btn.ghost { background: transparent; }
+
+/* Compose tabs / dropzone / chips */
+html[data-theme="dark"] .compose-tabs .tab { color: var(--muted); }
+html[data-theme="dark"] .compose-tabs .tab.active { color: var(--ink); }
+html[data-theme="dark"] .dropzone { background: #131a2a; border-color: #3a4360; color: var(--muted); }
+html[data-theme="dark"] .dropzone.hover { background: #243054; color: #b8c8ff; }
+html[data-theme="dark"] .chip { background: #1f2942; border-color: #2c3450; color: #b8c8ff; }
+
+/* Doc panel: pinned section + items */
+html[data-theme="dark"] .doc-pinned { background: #1d1810; border-color: #3a2e15; }
+html[data-theme="dark"] .doc-pinned h4 { color: #f0a14a; }
+html[data-theme="dark"] .pinned-item { background: #2a2415; border-color: #3a2e15; color: var(--ink); }
+html[data-theme="dark"] .pinned-item:hover { background: #3a2e15; border-color: var(--accent); }
+html[data-theme="dark"] .unpin { background: var(--card); border-color: #3a2e15; color: var(--muted); }
+
+/* Inline document renderers — keep doc body white-ish so PDFs/Word read naturally,
+   but match the panel chrome to dark surroundings */
+html[data-theme="dark"] .doc-html, html[data-theme="dark"] .doc-text {
+  background: #0e1320; color: var(--ink);
+  border-color: var(--border);
+}
+html[data-theme="dark"] .doc-html th { background: #1f2840; }
+html[data-theme="dark"] .doc-html th, html[data-theme="dark"] .doc-html td { border-color: var(--border); }
+html[data-theme="dark"] .sheet-tab { background: #1f2840; color: var(--ink); border-color: var(--border); }
+html[data-theme="dark"] .sheet-tab.active { background: var(--brand); color: #0f1421; border-color: var(--brand); }
+html[data-theme="dark"] .doc-pdf-canvas { background: #131a2a; }
+html[data-theme="dark"] .pdf-page { background: #fff; }   /* keep PDF canvas page bg white */
+html[data-theme="dark"] .doc-file-card { background: #1f2840; border-color: var(--border); color: var(--ink); }
+html[data-theme="dark"] .doc-caption { background: #2a2010; border-color: #3a2e15; color: #f5d8a0; }
+
+/* People panel pills */
+html[data-theme="dark"] .people-panel li { background: #1f2942; border-color: #2c3450; color: #b8c8ff; }
+
+/* Splitter */
+html[data-theme="dark"] .split-resizer { background: var(--border); }
+html[data-theme="dark"] .split-resizer:hover { background: var(--brand); }
+
+/* Error block */
+html[data-theme="dark"] .doc-display .error { background: #2a1414; color: #fca5a5; border-color: #6b2020; }
+
+/* Focus ring stays brand-colored */
+html[data-theme="dark"] input:focus,
+html[data-theme="dark"] textarea:focus,
+html[data-theme="dark"] button:focus-visible {
+  outline-color: var(--brand);
+}
+
+/* ====================================================================
+   HIGH-PRIORITY MESSAGES
+   ==================================================================== */
+
+/* Compose-side toggle button */
+.priority-btn {
+  border: 1px solid var(--border);
+  background: #fff; color: var(--danger);
+  font-weight: 600;
+}
+.priority-btn:hover { border-color: var(--danger); }
+.priority-btn.on {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(220,38,38,.2);
+}
+
+/* Badge inside the message header — only visible on .priority messages */
+.priority-badge {
+  display: none;
+  background: var(--danger); color: #fff;
+  font-size: .68rem; font-weight: 800;
+  padding: .1rem .45rem; border-radius: 999px;
+  letter-spacing: .06em;
+  animation: priority-pulse 1.6s ease-in-out infinite;
+}
+.msg.priority .priority-badge { display: inline-block; }
+
+/* Message bubble styling for priority */
+.msg.priority {
+  border-color: var(--danger);
+  background: #fff5f5;
+  box-shadow: 0 2px 14px rgba(220,38,38,.18);
+}
+.msg.priority.is-action {
+  border-color: var(--danger);
+  background: #fff0f0;
+  box-shadow: 0 2px 16px rgba(220,38,38,.25);
+}
+.msg.priority .from { color: #b91c1c; }
+.msg.priority.mine { background: #ffe4e4; border-color: var(--danger); }
+
+/* Pulse on the badge so directors can't miss it */
+@keyframes priority-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220,38,38,.5); }
+  50%      { transform: scale(1.06); box-shadow: 0 0 0 6px rgba(220,38,38,0); }
+}
+
+/* Doc panel banner when a priority file is on stage */
+.doc-panel.priority {
+  border-left-color: var(--danger);
+  box-shadow: -3px 0 12px rgba(220,38,38,.2);
+}
+.doc-panel.priority .doc-panel-header {
+  background: linear-gradient(180deg, #fff0f0, #fff);
+  border-bottom-color: var(--danger);
+}
+.doc-panel.priority .doc-panel-header strong { color: var(--danger); }
+.doc-panel.priority .doc-panel-header strong::before { content: '🔥 '; }
+
+/* ---- Dark mode for priority ---- */
+html[data-theme="dark"] .priority-btn {
+  background: #1f2840; color: #fca5a5; border-color: var(--border);
+}
+html[data-theme="dark"] .priority-btn:hover { border-color: var(--danger); }
+html[data-theme="dark"] .priority-btn.on {
+  background: var(--danger); color: #0f1421; border-color: var(--danger);
+}
+html[data-theme="dark"] .msg.priority {
+  background: #2a1414; border-color: var(--danger);
+  box-shadow: 0 2px 14px rgba(248,113,113,.25);
+}
+html[data-theme="dark"] .msg.priority.is-action { background: #2c1010; }
+html[data-theme="dark"] .msg.priority .from { color: #fca5a5; }
+html[data-theme="dark"] .msg.priority.mine { background: #3a1c1c; }
+html[data-theme="dark"] .doc-panel.priority .doc-panel-header {
+  background: linear-gradient(180deg, #2a1414, var(--card));
+}
+
+/* ====================================================================
+   ADMIN DASHBOARD
+   ==================================================================== */
+.admin-page { background: var(--bg); min-height: 100vh; }
+.admin-page main.join-card { max-width: 460px; margin: 4rem auto; }
+.admin-login .brand-mark { font-size: 1.4rem; }
+
+#dashboard { display: flex; flex-direction: column; min-height: 100vh; }
+.admin-body {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.admin-sidebar {
+  background: var(--card);
+  border-right: 1px solid var(--border);
+  padding: 1rem;
+  overflow: auto;
+}
+.admin-sidebar h3 {
+  margin: 0 0 .6rem;
+  font-size: .8rem; letter-spacing: .06em;
+  color: var(--muted); text-transform: uppercase;
+}
+.room-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.room-list-item .room-pick {
+  width: 100%;
+  background: #fff; border: 1px solid var(--border);
+  border-radius: 8px; padding: .55rem .7rem;
+  cursor: pointer; text-align: left; font: inherit;
+  color: var(--ink);
+}
+.room-list-item.active .room-pick { background: #eaf2ff; border-color: var(--brand); }
+.room-list-item .room-pick:hover { border-color: var(--brand); }
+.room-list-item strong { display: block; letter-spacing: 2px; }
+.room-list-item small { color: var(--muted); }
+
+.admin-main { padding: 1.2rem 1.5rem; overflow: auto; }
+.admin-empty {
+  text-align: center; color: var(--muted);
+  margin: 4rem auto; max-width: 460px;
+}
+
+.admin-room-header {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 1rem 1.2rem; margin-bottom: 1rem;
+}
+.room-code-big {
+  margin: 0; letter-spacing: 6px;
+  font-size: 2rem; color: var(--brand-dark);
+}
+.admin-room-stats { display: flex; gap: 1.2rem; text-align: right; color: var(--muted); }
+.admin-room-stats strong { font-size: 1.4rem; color: var(--ink); }
+
+.admin-users {
+  width: 100%; border-collapse: collapse;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; overflow: hidden;
+}
+.admin-users th, .admin-users td {
+  text-align: left; padding: .55rem .8rem;
+  border-bottom: 1px solid var(--border);
+}
+.admin-users th { background: #f6f8fb; font-size: .78rem; letter-spacing: .04em; color: var(--muted); text-transform: uppercase; }
+.admin-users tr:last-child td { border-bottom: 0; }
+.role-select { padding: .3rem .5rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+
+.admin-users-section, .admin-messages-section { margin-top: 1.2rem; }
+.admin-users-section h3, .admin-messages-section h3 {
+  margin: 0 0 .5rem;
+  font-size: .8rem; letter-spacing: .06em;
+  color: var(--muted); text-transform: uppercase;
+}
+
+.admin-feed {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: .6rem;
+  max-height: 60vh; overflow: auto;
+  display: flex; flex-direction: column; gap: .4rem;
+}
+.admin-msg {
+  background: #fafbfd; border: 1px solid var(--border);
+  border-radius: 8px; padding: .5rem .7rem;
+  display: grid; grid-template-columns: 1fr auto; gap: .3rem;
+}
+.admin-msg.sys { background: transparent; border: 0; color: var(--muted); font-style: italic; padding: .15rem .5rem; grid-template-columns: 1fr; }
+.admin-msg.priority { border-color: var(--danger); background: #fff5f5; }
+.admin-msg-head { grid-column: 1; display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; font-size: .85rem; color: var(--muted); }
+.admin-msg-head strong { color: var(--ink); }
+.admin-msg-body { grid-column: 1; }
+.admin-msg-body p { margin: .15rem 0; }
+.admin-msg-foot { grid-column: 2; align-self: start; }
+
+@media (max-width: 700px) {
+  .admin-body { grid-template-columns: 1fr; }
+  .admin-sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
+}
+
+/* Dark mode admin */
+html[data-theme="dark"] .admin-sidebar { background: var(--card); }
+html[data-theme="dark"] .room-list-item .room-pick { background: #1f2840; color: var(--ink); border-color: var(--border); }
+html[data-theme="dark"] .room-list-item.active .room-pick { background: #243054; border-color: var(--brand); }
+html[data-theme="dark"] .admin-room-header { background: var(--card); border-color: var(--border); }
+html[data-theme="dark"] .admin-users { background: var(--card); border-color: var(--border); }
+html[data-theme="dark"] .admin-users th { background: #1c2336; color: var(--muted); }
+html[data-theme="dark"] .admin-users th, html[data-theme="dark"] .admin-users td { border-color: var(--border); }
+html[data-theme="dark"] .role-select { background: #1f2840; color: var(--ink); border-color: var(--border); }
+html[data-theme="dark"] .admin-feed { background: var(--card); border-color: var(--border); }
+html[data-theme="dark"] .admin-msg { background: #1f2840; border-color: var(--border); }
+html[data-theme="dark"] .admin-msg.priority { background: #2a1414; border-color: var(--danger); }
+html[data-theme="dark"] .room-code-big { color: #b8c8ff; }
+
+/* ====================================================================
+   ZOOM, COLLAPSE, VERTICAL SPLITTER
+   ==================================================================== */
+
+/* Zoom applies to feed and pinned-strip messages */
+.feed, .pinned-strip {
+  font-size: calc(1rem * var(--zoom-msg, 1));
+}
+.zoom-controls { display: inline-flex; gap: .15rem; }
+.zoom-controls .btn { padding: .2rem .5rem; font-weight: 600; min-width: 1.8rem; }
+
+/* Stage collapse — hide the body & shrink to a thin vertical rail */
+.doc-panel.collapsed {
+  flex: 0 0 36px !important;
+  min-width: 36px;
+  max-width: 36px;
+  overflow: visible;
+  background: var(--card);
+  position: relative;
+}
+.doc-panel.collapsed .doc-panel-header,
+.doc-panel.collapsed .doc-display,
+.doc-panel.collapsed .doc-actions,
+.doc-panel.collapsed .doc-pinned,
+.doc-panel.collapsed .doc-caption {
+  display: none;
+}
+.doc-expand-rail {
+  display: none;
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, #f0f4ff, #fff);
+  border: 0; cursor: pointer;
+  font: inherit; font-weight: 600; color: var(--brand-dark);
+  letter-spacing: .12em;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  padding: 1rem 0;
+}
+.doc-panel.collapsed .doc-expand-rail { display: flex; align-items: center; justify-content: center; }
+.doc-expand-rail:hover { background: linear-gradient(180deg, #e2eaff, #fff); }
+
+/* Inline collapse (⇥) button on the panel header */
+.doc-collapse-btn {
+  margin-left: auto;
+  background: none; border: 1px solid var(--border);
+  border-radius: 6px; padding: .15rem .45rem;
+  cursor: pointer; color: var(--muted); font: inherit;
+  line-height: 1;
+}
+.doc-collapse-btn:hover { color: var(--ink); border-color: var(--brand); }
+
+/* The header-side stage toggle (📺) is only useful for directors */
+.director-only { display: none; }
+body[data-role="director"], body[data-role="board"] .director-only,
+body[data-role="research"] .director-only { display: inline-flex; }
+
+/* Mobile / narrow: stack vertically, splitter is a horizontal bar */
+@media (max-width: 800px) {
+  body[data-role="director"], body[data-role="board"] .split-resizer,
+  body[data-role="research"] .split-resizer {
+    display: block;
+    width: 100%; height: 8px; flex: 0 0 8px;
+    cursor: row-resize;
+  }
+  body[data-role="director"], body[data-role="board"] .doc-panel,
+  body[data-role="research"] .doc-panel {
+    /* Same cap in this duplicate rule block */
+    flex: 0 0 50%;
+    min-height: 120px;
+    max-height: 75%;
+    border-left: 0; border-top: 1px solid var(--border);
+    box-shadow: 0 -2px 8px rgba(0,0,0,.04);
+  }
+  /* When collapsed in mobile, the panel becomes a thin horizontal bar */
+  body[data-role="director"], body[data-role="board"] .doc-panel.collapsed,
+  body[data-role="research"] .doc-panel.collapsed {
+    flex: 0 0 36px !important;
+    width: 100%; max-width: 100%; height: 36px;
+  }
+  .doc-panel.collapsed .doc-expand-rail {
+    writing-mode: horizontal-tb;
+    text-orientation: mixed;
+  }
+}
+
+/* PDFs / images max-width follows the panel naturally */
+.pdf-page { max-width: 100%; height: auto; }
+.doc-preview img { max-width: 100%; height: auto; }
+
+/* Dark-mode tweaks */
+html[data-theme="dark"] .doc-expand-rail {
+  background: linear-gradient(180deg, #1d2538, var(--card));
+  color: #b8c8ff;
+}
+html[data-theme="dark"] .doc-expand-rail:hover { background: linear-gradient(180deg, #243054, var(--card)); }
+html[data-theme="dark"] .doc-collapse-btn { color: var(--muted); border-color: var(--border); }
+html[data-theme="dark"] .doc-collapse-btn:hover { color: var(--ink); border-color: var(--brand); }
+
+/* ====================================================================
+   FORWARD-TO-ANOTHER-ROOM
+   ==================================================================== */
+.msg .fwd-btn {
+  background: none; border: none; cursor: pointer;
+  padding: 0 .25rem; opacity: .35; font-size: 1rem;
+}
+.msg .fwd-btn:hover { opacity: 1; color: var(--brand); }
+
+.fwd-menu {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  z-index: 200;
+  min-width: 180px;
+  padding: .25rem;
+}
+.fwd-menu-title {
+  font-size: .72rem; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); padding: .35rem .55rem;
+}
+.fwd-menu-item {
+  display: block; width: 100%;
+  background: none; border: 0; cursor: pointer;
+  padding: .55rem .65rem; text-align: left;
+  font: inherit; letter-spacing: 2px; font-weight: 700;
+  color: var(--ink); border-radius: 6px;
+}
+.fwd-menu-item:hover { background: #eef2fb; color: var(--brand-dark); }
+
+.fwd-meta {
+  font-size: .82rem;
+  color: var(--muted);
+  font-style: italic;
+  border-left: 3px solid var(--brand);
+  padding: .15rem .5rem;
+  margin-bottom: .35rem;
+  background: #f4f7ff;
+  border-radius: 0 6px 6px 0;
+}
+
+.agm-toast {
+  position: fixed;
+  left: 50%; bottom: 1.5rem; transform: translateX(-50%) translateY(20px);
+  background: var(--ink); color: #fff;
+  padding: .55rem .9rem; border-radius: 999px;
+  font-size: .9rem; font-weight: 500;
+  box-shadow: 0 4px 18px rgba(0,0,0,.25);
+  z-index: 300;
+  opacity: 0; transition: opacity .25s, transform .25s;
+}
+.agm-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+html[data-theme="dark"] .fwd-menu-item:hover { background: #243054; color: #b8c8ff; }
+html[data-theme="dark"] .fwd-meta { background: #1f2942; color: #b8c8ff; }
+html[data-theme="dark"] .agm-toast { background: #fff; color: #15202b; }
+
+/* Make sure [hidden] always wins over class-level display rules.
+   This was why the doc-actions row stayed visible after dismiss — the
+   .doc-actions { display: flex } rule beat the UA [hidden] rule. */
+[hidden] { display: none !important; }
+
+/* Admin "Reset session" button — clearly destructive */
+.admin-reset-btn {
+  align-self: flex-start;
+  background: #fff;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  font-weight: 600;
+}
+.admin-reset-btn:hover { background: var(--danger); color: #fff; }
+html[data-theme="dark"] .admin-reset-btn {
+  background: transparent; color: #fca5a5; border-color: var(--danger);
+}
+html[data-theme="dark"] .admin-reset-btn:hover { background: var(--danger); color: #0f1421; }
+
+
+/* Dark-mode response pill variants */
+html[data-theme="dark"] .response-pill          { background: #232b40; border-color: #2c3450; color: var(--ink); }
+html[data-theme="dark"] .response-pill.r-yes    { background: #112a1f; border-color: #1d6b41; color: #6ee7b7; }
+html[data-theme="dark"] .response-pill.r-no     { background: #2a1414; border-color: #6b2020; color: #fca5a5; }
+html[data-theme="dark"] .response-pill.r-defer  { background: #2a2010; border-color: #5a4520; color: #fbbf24; }
+html[data-theme="dark"] .response-pill.r-other  { background: #1f2436; border-color: #2c3450; color: #a5b4fc; }
+html[data-theme="dark"] .response-pill.r-note   { background: #1f2840; border-color: #2c3450; color: #cbd5e1; }
+
+/* ====================================================================
+   ADMIN: support-view popup (sees a user's session in an iframe)
+   ==================================================================== */
+.user-view-modal {
+  position: fixed; inset: 0;
+  background: rgba(15, 20, 33, .55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 500;
+  padding: 1.5rem;
+}
+.user-view-card {
+  width: min(95vw, 1200px);
+  height: min(85vh, 820px);
+  background: var(--card);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0,0,0,.4);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.user-view-card > header {
+  display: flex; justify-content: space-between; align-items: center; gap: .8rem;
+  padding: .55rem .9rem;
+  background: linear-gradient(180deg, #f4f7ff, #fff);
+  border-bottom: 1px solid var(--border);
+}
+.user-view-card > header strong { color: var(--brand-dark); font-size: .95rem; }
+.user-view-card iframe { flex: 1; border: 0; width: 100%; min-height: 0; }
+html[data-theme="dark"] .user-view-card { background: var(--card); }
+html[data-theme="dark"] .user-view-card > header { background: linear-gradient(180deg, #1d2538, var(--card)); }
+
+/* Banner shown inside the iframed app when adminView=1 */
+.admin-view-banner {
+  background: var(--brand);
+  color: #fff;
+  padding: .35rem .9rem;
+  font-size: .8rem; font-weight: 600;
+  letter-spacing: .04em;
+  text-align: center;
+}
+body.is-admin-view { padding-top: 0; }   /* iframes stack the banner above the page */
+
+/* Observers don't see the room code at all */
+body[data-role="observer"] #roomChip { display: none !important; }
+
+/* ====================================================================
+   THREADING / MENTIONS / REACTIONS / LAZY PDF
+   ==================================================================== */
+
+/* Reply-quote inside a message body */
+.reply-quote {
+  font-size: .82em; color: var(--muted);
+  border-left: 3px solid var(--brand);
+  background: #f4f7ff;
+  padding: .25rem .55rem;
+  margin: 0 0 .35rem;
+  border-radius: 0 6px 6px 0;
+}
+html[data-theme="dark"] .reply-quote { background: #1f2942; color: #b8c8ff; }
+
+/* Reply chip above the composer */
+.reply-chip {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .5rem;
+  background: #eef2fb; border: 1px solid #dce5ff;
+  color: var(--brand-dark);
+  padding: .35rem .6rem; margin-bottom: .35rem; border-radius: 8px;
+  font-size: .85rem;
+}
+.reply-chip .reply-cancel {
+  background: none; border: 0; cursor: pointer; color: var(--muted);
+  font-size: 1.1rem; line-height: 1;
+}
+html[data-theme="dark"] .reply-chip { background: #1f2942; border-color: #2c3450; color: #b8c8ff; }
+
+/* Reply / react buttons in message header */
+.msg .reply-btn, .msg .react-btn {
+  background: none; border: none; cursor: pointer;
+  padding: 0 .25rem; opacity: .35; font-size: .95rem;
+}
+.msg .reply-btn:hover, .msg .react-btn:hover { opacity: 1; color: var(--brand); }
+
+/* Mention pill in rendered text */
+.mention {
+  display: inline; color: var(--brand-dark); font-weight: 600;
+  background: #eef2fb; border-radius: 4px; padding: 0 .2rem;
+}
+html[data-theme="dark"] .mention { background: #1f2942; color: #b8c8ff; }
+
+/* Reactions row + pills */
+.reactions {
+  display: flex; flex-wrap: wrap; gap: .25rem;
+  margin-top: .35rem;
+}
+.reactions[hidden] { display: none !important; }
+.rx-pill {
+  background: #f1f5f9; border: 1px solid var(--border); color: var(--ink);
+  padding: .1rem .45rem; border-radius: 999px;
+  cursor: pointer; font-size: .85rem;
+  display: inline-flex; align-items: center; gap: .15rem;
+  font-family: inherit;
+}
+.rx-pill small { color: var(--muted); font-size: .8em; font-weight: 600; }
+.rx-pill.mine { background: #eaf2ff; border-color: #c7d8ff; color: var(--brand-dark); }
+.rx-pill:hover { border-color: var(--brand); }
+html[data-theme="dark"] .rx-pill { background: #1f2840; border-color: var(--border); color: var(--ink); }
+html[data-theme="dark"] .rx-pill.mine { background: #243054; border-color: #3554a0; color: #b8c8ff; }
+
+/* Reaction picker popover */
+.rx-picker {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow);
+  z-index: 200; padding: .25rem;
+  display: flex; gap: .15rem;
+}
+.rx-picker button {
+  background: none; border: 0; cursor: pointer;
+  font-size: 1.3rem; padding: .3rem .45rem; border-radius: 6px;
+}
+.rx-picker button:hover { background: #eef2fb; }
+html[data-theme="dark"] .rx-picker button:hover { background: #243054; }
+
+/* Lazy-pdf placeholder while a page hasn't been rendered yet */
+.pdf-page-pending {
+  background: #f1f3f7;
+  border: 1px dashed #cbd2de;
+}
+html[data-theme="dark"] .pdf-page-pending {
+  background: #131a2a;
+  border-color: #2c3450;
+}
+
+/* Linked-room chips inside the admin user table */
+.linked-chip {
+  display: inline-flex; align-items: center;
+  background: #fff7e6; border: 1px solid #f3dfb8; color: #7a4d00;
+  padding: .12rem .4rem .12rem .55rem;
+  border-radius: 999px; font-size: .8rem; font-weight: 600;
+  letter-spacing: 1px; gap: .15rem;
+  margin: 0 .2rem .2rem 0;
+}
+.linked-chip .unlink-room {
+  background: none; border: 0; cursor: pointer; color: #7a4d00;
+  font-size: 1rem; line-height: 1; padding: 0 .15rem;
+}
+.linked-chip .unlink-room:hover { color: var(--danger); }
+html[data-theme="dark"] .linked-chip { background: #2a2010; border-color: #3a2e15; color: #f5d8a0; }
+html[data-theme="dark"] .linked-chip .unlink-room { color: #f5d8a0; }
+
+/* Research text-pane: input + priority + send all on one line — saves
+   vertical space, matches the board compose's single-line layout. */
+/* :not(.hidden) so the tab switcher's `.hidden` class still hides this pane.
+   We dropped !important — the tab switcher relies on `.pane.hidden { display: none }`
+   winning when the user is on a different tab. */
+.research-compose #textPane:not(.hidden) {
+  display: flex;
+  gap: .5rem;
+  align-items: flex-end;
+}
+.research-compose #textPane:not(.hidden) > textarea {
+  flex: 1 1 auto;
+  min-height: 38px;
+  resize: vertical;
+}
+.research-compose #textPane:not(.hidden) > .row.end {
+  margin-top: 0;
+  flex: 0 0 auto;
+}
+
+/* On-stage doc panel: page indicator and ergonomics
+   --------------------------------------------------
+   Multi-page PDFs (and only PDFs — DOCX/XLSX/text are single-blob)
+   show a sticky "N / total" chip in the top-right corner of the doc
+   panel so admin/research/board users always know their position. The
+   chip is appended inside .doc-pdf-canvas in renderPdfInline; it is
+   auto-cleared when docDisplay.innerHTML is reset on dismiss or
+   rerender, so we don't need lifecycle plumbing. */
+.doc-page-indicator {
+  position: sticky;
+  top: 6px;
+  align-self: flex-end;
+  z-index: 5;
+  background: rgba(15, 23, 42, .82);
+  color: #fff;
+  padding: .3rem .7rem;
+  border-radius: 999px;
+  font-size: calc(.9rem * var(--zoom-msg, 1));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+  margin-right: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .22);
+  pointer-events: none;
+  user-select: none;
+}
+html[data-theme="dark"] .doc-page-indicator {
+  background: rgba(241, 245, 249, .92);
+  color: #0f172a;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .55);
+}
+
+/* Wider, easier-to-grab scrollbar on the on-stage doc area. The director
+   on stage may need to scroll a multi-page PDF mid-meeting without
+   fumbling for a default-width thumb. WebKit-only properties, but the
+   portable bundle ships for Edge/Chrome on Windows so this lands. */
+.doc-display { scrollbar-gutter: stable; }
+.doc-display::-webkit-scrollbar { width: 22px; height: 22px; }
+.doc-display::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, .04);
+  border-radius: 12px;
+}
+.doc-display::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, .38);
+  background-clip: padding-box;
+  border: 5px solid transparent;
+  border-radius: 12px;
+  min-height: 60px;
+}
+.doc-display::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, .58);
+  background-clip: padding-box;
+  border: 5px solid transparent;
+}
+.doc-display::-webkit-scrollbar-thumb:active {
+  background: rgba(15, 23, 42, .72);
+  background-clip: padding-box;
+  border: 5px solid transparent;
+}
+html[data-theme="dark"] .doc-display::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, .05);
+}
+html[data-theme="dark"] .doc-display::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, .28);
+  background-clip: padding-box;
+  border: 5px solid transparent;
+}
+html[data-theme="dark"] .doc-display::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, .45);
+  background-clip: padding-box;
+  border: 5px solid transparent;
+}
+html[data-theme="dark"] .doc-display::-webkit-scrollbar-thumb:active {
+  background: rgba(255, 255, 255, .6);
+  background-clip: padding-box;
+  border: 5px solid transparent;
+}
+
+/* Forward menu — two-line name + code layout
+   ------------------------------------------
+   When the menu items show a room NAME, render it as the prominent
+   line with the 6-char CODE small underneath. Rooms without a name
+   still show their code, but at the prominent size. The original
+   .fwd-menu-item rule above had letter-spacing: 2px and font-weight: 700
+   that was tuned for code-only display — these rules override that for
+   the new structured contents, scoped via inner classes so they don't
+   apply to legacy code-only items. */
+.fwd-menu-item .fwd-room-name {
+  display: block;
+  font-size: calc(.95rem * var(--zoom-msg, 1));
+  font-weight: 600;
+  letter-spacing: normal;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.fwd-menu-item .fwd-room-code {
+  display: block;
+  font-size: calc(.72rem * var(--zoom-msg, 1));
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  line-height: 1.2;
+  margin-top: .1rem;
+}
+.fwd-menu-item .fwd-room-code.primary {
+  font-size: calc(.95rem * var(--zoom-msg, 1));
+  color: var(--ink);
+  margin-top: 0;
+}
+html[data-theme="dark"] .fwd-menu-item .fwd-room-name { color: #e6ecf5; }
+html[data-theme="dark"] .fwd-menu-item:hover .fwd-room-name { color: #b8c8ff; }
+
+/* Admin link picker — same visual language as the user's forward menu */
+.link-picker {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  z-index: 250;
+  min-width: 280px;
+  max-width: 380px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: .25rem;
+}
+.link-picker-title {
+  font-size: .72rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: .45rem .65rem;
+}
+.link-picker-item {
+  display: flex;
+  flex-direction: column;
+  gap: .1rem;
+  width: 100%;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: .55rem .7rem;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  border-radius: 6px;
+}
+.link-picker-item:hover { background: #eef2fb; color: var(--brand-dark); }
+.link-picker-item .lp-room-name {
+  font-weight: 600;
+  font-size: .95rem;
+  letter-spacing: normal;
+  line-height: 1.2;
+}
+.link-picker-item .lp-room-code {
+  font-weight: 700;
+  font-size: .72rem;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  line-height: 1.2;
+  margin-top: .1rem;
+}
+.link-picker-empty {
+  padding: .55rem .7rem;
+  color: var(--muted);
+  font-size: .85rem;
+  font-style: italic;
+}
+html[data-theme="dark"] .link-picker { background: #1a2030; }
+html[data-theme="dark"] .link-picker-item:hover { background: #243054; color: #b8c8ff; }
+html[data-theme="dark"] .link-picker-item .lp-room-name { color: #e6ecf5; }
+html[data-theme="dark"] .link-picker-item:hover .lp-room-name { color: #b8c8ff; }
+
+/* Linked-chip name + code layout in admin user list */
+.linked-chip .lc-name {
+  font-weight: 700;
+}
+.linked-chip .lc-code {
+  font-weight: 600;
+  font-size: .72rem;
+  opacity: .7;
+  margin-left: .3rem;
+  letter-spacing: 1px;
+}
+
+/* ===== Admin: Cloudflare tunnel control =====
+   A self-contained card with a toggle switch, status states, and a
+   public URL row with copy-to-clipboard. The toggle calls
+   admin:tunnelStart / admin:tunnelStop; live URL arrives via
+   tunnel:status broadcasts. */
+.admin-tunnel-section {
+  margin-top: 1.5rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.2rem 1.2rem;
+}
+.admin-tunnel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; margin-bottom: .85rem;
+}
+.admin-tunnel-header h3 { margin: 0; }
+
+/* Pill-shaped toggle switch */
+.admin-toggle {
+  display: inline-flex; align-items: center; gap: .55rem;
+  cursor: pointer; user-select: none;
+}
+.admin-toggle input {
+  position: absolute; opacity: 0; pointer-events: none;
+}
+.admin-toggle-track {
+  position: relative;
+  width: 46px; height: 26px;
+  background: #cbd5e1; border-radius: 999px;
+  transition: background .15s;
+  flex-shrink: 0;
+}
+.admin-toggle-thumb {
+  position: absolute; top: 3px; left: 3px;
+  width: 20px; height: 20px;
+  background: #fff; border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  transition: left .15s;
+}
+.admin-toggle input:checked + .admin-toggle-track {
+  background: var(--success, #16a34a);
+}
+.admin-toggle input:checked + .admin-toggle-track .admin-toggle-thumb {
+  left: 23px;
+}
+.admin-toggle input:focus-visible + .admin-toggle-track {
+  outline: 2px solid var(--brand); outline-offset: 2px;
+}
+.admin-toggle-label {
+  font-weight: 600; font-size: .85rem;
+  color: var(--muted); min-width: 56px;
+}
+
+.admin-tunnel-body { font-size: .92rem; }
+.admin-tunnel-state { margin-bottom: .6rem; }
+.admin-tunnel-state p { margin: .25rem 0; }
+
+.admin-tunnel-url-row {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .5rem .65rem;
+  background: #f1f5ff; border: 1px solid #d4e1ff;
+  border-radius: 8px;
+  margin: .35rem 0 .55rem;
+}
+.admin-tunnel-url {
+  flex: 1; min-width: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: .92rem; color: var(--brand-dark);
+  overflow-x: auto; white-space: nowrap;
+  padding: .15rem .25rem;
+}
+
+.admin-tunnel-error .error {
+  background: #fef2f2; border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: .55rem .7rem; border-radius: 8px;
+  margin: 0;
+}
+
+.admin-tunnel-instructions {
+  margin-top: .7rem;
+  background: #fafbfd; border: 1px solid var(--border);
+  border-radius: 8px; padding: .5rem .75rem;
+}
+.admin-tunnel-instructions summary {
+  cursor: pointer; font-weight: 600; color: var(--brand-dark);
+  padding: .25rem 0;
+}
+.admin-tunnel-instructions[open] summary { margin-bottom: .35rem; }
+.admin-tunnel-instructions ol {
+  margin: .35rem 0; padding-left: 1.4rem;
+}
+.admin-tunnel-instructions li { margin: .35rem 0; }
+.admin-tunnel-instructions code {
+  background: #eef2fb; padding: .05rem .35rem; border-radius: 4px;
+  font-size: .88em;
+}
+.admin-tunnel-instructions a { color: var(--brand); }
+
+/* Dark theme */
+html[data-theme="dark"] .admin-tunnel-section {
+  background: #15203a; border-color: #28344f;
+}
+html[data-theme="dark"] .admin-toggle-track { background: #475569; }
+html[data-theme="dark"] .admin-tunnel-url-row {
+  background: #1f2942; border-color: #324162;
+}
+html[data-theme="dark"] .admin-tunnel-url { color: #b8c8ff; }
+html[data-theme="dark"] .admin-tunnel-instructions {
+  background: #131a2a; border-color: #28344f;
+}
+html[data-theme="dark"] .admin-tunnel-instructions summary { color: #b8c8ff; }
+html[data-theme="dark"] .admin-tunnel-instructions code {
+  background: #243054; color: #cdd9f6;
+}
+html[data-theme="dark"] .admin-tunnel-error .error {
+  background: #2a1414; border-color: #6b2020; color: #fca5a5;
+}
+
+
+/* ---- 0.2: stage chip, seen receipts, AI drafts, toasts ---- */
+.stage-chip{display:inline-flex;align-items:center;gap:.4rem;padding:.15rem .55rem;border-radius:999px;background:#0b1220;color:#e2e8f0;font-size:.85rem;max-width:22rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage-chip b{font-variant-numeric:tabular-nums;font-size:1rem}
+.stage-chip.stale{opacity:.55;outline:1px dashed #f59e0b}
+.seen-line{font-size:.75rem;color:#6b7280;margin-top:.15rem;text-align:right}
+.ai-hint{font-size:.8rem;color:#4338ca;margin:.3rem 0 0}
+.ai-hint.bad{color:#b91c1c}
+.ai-btn{border-color:#818cf8}
+.stage-btn{background:none;border:0;cursor:pointer;font-size:.95rem;opacity:.7}
+.stage-btn:hover{opacity:1}
+.agm-toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%) translateY(150%);background:#111827;color:#f9fafb;padding:.6rem 1rem;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);z-index:9999;transition:transform .2s ease;max-width:90vw;font-size:.95rem}
+.agm-toast.show{transform:translateX(-50%) translateY(0)}
+.agm-toast.bad{background:#7f1d1d}
+
+.admin-tools{border:1px solid #e2e6ec;border-radius:10px;padding:.8rem 1rem;margin:.6rem 0;background:var(--card-bg,#fff)}
+.admin-inline{display:flex;gap:.5rem;align-items:center;margin:.3rem 0}
+.invite-row{display:flex;gap:.6rem;align-items:center;margin:.35rem 0;flex-wrap:wrap}
+.invite-row code{font-size:.8rem;word-break:break-all}
+.minutes-body{white-space:pre-wrap;font-size:.95rem;line-height:1.45;margin-bottom:.6rem}
+.admin-network-section{border-top:1px solid #e2e6ec;margin-top:1rem;padding-top:.6rem}
+.admin-network-section .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.3rem 0 .8rem}
+.peer-list{list-style:none;padding:0;margin:.2rem 0 1rem;font-size:.9rem}
+.peer-list li{display:flex;gap:.6rem;align-items:center;margin:.2rem 0}
+.sys.presence{font-size:.72rem;opacity:.6;margin:.05rem 0}
+.admin-network-section input{width:auto;flex:1 1 220px;max-width:420px}

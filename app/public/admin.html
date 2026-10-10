@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AGMessage — Admin</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/theme-init.js"></script>
+</head>
+<body class="admin-page">
+  <button id="themeBtn" class="theme-toggle" type="button" title="Toggle dark mode">🌙</button>
+
+  <!-- LOGIN PANEL -->
+  <main id="loginPanel" class="join-card admin-login" hidden>
+    <div class="brand">
+      <div class="brand-mark" style="background:#dc2626">⚙</div>
+      <h1>AGMessage Admin</h1>
+      <p class="tagline">Host-only session control.</p>
+    </div>
+    <p class="hint" id="loginNotice">
+      Enter the admin token printed in the server terminal.
+    </p>
+    <form id="loginForm" autocomplete="off">
+      <label class="field">
+        <span>Admin token</span>
+        <input id="tokenInput" required autocomplete="off"
+               placeholder="e.g. a1b2c3d4e5f6…" />
+      </label>
+      <button class="btn primary big" type="submit">Unlock admin</button>
+      <p class="error" id="loginError" hidden></p>
+    </form>
+  </main>
+
+  <!-- DASHBOARD -->
+  <div id="dashboard" hidden>
+    <header class="app-header">
+      <div class="app-title">
+        <strong>AGMessage Admin</strong>
+        <span id="adminStatus" class="muted" style="font-size:.85rem">connected</span>
+      </div>
+      <div class="app-meta">
+        <button id="newSessionBtn" class="btn primary small">+ Start new session</button>
+        <button id="logoutBtn" class="btn ghost small">Logout</button>
+      </div>
+    </header>
+
+    <div class="admin-body">
+      <aside class="admin-sidebar">
+        <h3>Active rooms</h3>
+        <ul id="roomList" class="room-list"></ul>
+        <p id="noRooms" class="hint">No active sessions yet — click "+ Start new session".</p>
+      </aside>
+
+      <main class="admin-main">
+        <section class="admin-room-header" id="roomHeader" hidden>
+          <div>
+            <div id="watchedRoomName" class="watched-room-name muted" hidden></div>
+            <span class="muted" style="font-size:.8rem; letter-spacing:.06em">SESSION CODE</span>
+            <h2 class="room-code-big" id="watchedRoomCode">—</h2>
+          </div>
+          <div class="admin-room-stats">
+            <div><strong id="userCount">0</strong><br><small>users</small></div>
+            <div><strong id="msgCount">0</strong><br><small>messages</small></div>
+          </div>
+          <button id="exportBtn" class="btn ghost small" type="button" title="Open transcript in a new tab">Export transcript</button>
+          <button id="resetRoomBtn" class="btn ghost small admin-reset-btn" type="button">Reset session</button>
+          <button id="minutesBtn" class="btn ghost small ai-btn" type="button" title="Claude lists decisions, open questions and action items so far. You read it first; post it to the room only if you want.">✨ Minutes</button>
+          <button id="invitesBtn" class="btn ghost small" type="button" title="Lock the board and research roles to invite links">🔒 Roles &amp; invites</button>
+          <button id="closeRoomBtn" class="btn ghost small admin-reset-btn" type="button" title="Close this meeting: everyone leaves, its saved history is deleted">Close meeting…</button>
+        </section>
+
+        <section class="admin-tools" id="roomTools" hidden>
+          <div id="invitesPanel" hidden>
+            <label class="admin-inline"><input type="checkbox" id="lockRoles" /> Board and research seats need an invite link (anyone else joins as an observer)</label>
+            <div id="inviteLinks" class="invite-links"></div>
+          </div>
+          <div id="minutesPanel" hidden>
+            <div id="minutesBody" class="minutes-body"></div>
+            <div class="row end"><button id="postMinutesBtn" class="btn primary small" type="button">Post to the room (pinned)</button><button id="closeMinutesBtn" class="btn ghost small" type="button">Close</button></div>
+          </div>
+          <div id="closePanel" hidden>
+            <p><strong>Close meeting <span id="closeCode"></span>?</strong> Everyone is disconnected and the saved history is deleted. Export the transcript first if you need it.</p>
+            <label class="admin-inline"><input type="checkbox" id="purgeFiles" checked /> Also delete the files shared only in this meeting</label>
+            <div class="row end"><button id="confirmCloseBtn" class="btn primary small admin-reset-btn" type="button">Close and delete</button><button id="cancelCloseBtn" class="btn ghost small" type="button">Cancel</button></div>
+          </div>
+        </section>
+
+        <section class="admin-users-section" id="usersSection" hidden>
+          <h3>Users in this session</h3>
+          <table class="admin-users">
+            <thead>
+              <tr>
+                <th>Name</th><th>Role</th><th>Linked rooms</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="usersTbody"></tbody>
+          </table>
+        </section>
+
+        <section class="admin-messages-section" id="messagesSection" hidden>
+          <h3>Live messages</h3>
+          <div id="adminFeed" class="admin-feed"></div>
+        </section>
+
+        <section class="admin-network-section" id="networkSection">
+          <h3>✨ AI drafts</h3>
+          <p class="hint">Claude drafts answers for the research team, buttons for action prompts and the minutes — always a draft a person edits and sends. Uses model <code id="aiModel">—</code>.</p>
+          <div class="row">
+            <input id="aiKeyInput" type="password" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off" size="40" />
+            <button id="aiKeySave" class="btn small" type="button">Save key</button>
+            <span id="aiStatus" class="muted"></span>
+          </div>
+          <h3>📡 Show network</h3>
+          <p class="hint">Link Stagewatch: everyone sees the live stage timer, and the research team can put an answer on the speaker's confidence monitor (🖥 on a message). Make a <em>control</em> API key in Stagewatch → Settings → Remote → API keys.</p>
+          <div class="row">
+            <input id="swUrl" placeholder="Stagewatch address (e.g. 192.168.1.20)" size="28" />
+            <input id="swKey" type="password" placeholder="Stagewatch control key (swk_…)" autocomplete="off" size="28" />
+            <button id="swSave" class="btn small" type="button">Link</button>
+            <span id="swStatus" class="muted"></span>
+          </div>
+          <ul id="peerList" class="peer-list"></ul>
+        </section>
+
+        <!-- Cloudflare tunnel control: lets remote users (off-LAN) join via a
+             public URL the admin can spin up and tear down from the dashboard. -->
+        <section class="admin-tunnel-section" id="tunnelSection">
+          <header class="admin-tunnel-header">
+            <h3>🌐 Remote access (Cloudflare tunnel)</h3>
+            <label class="admin-toggle" title="Turn the public tunnel on or off">
+              <input type="checkbox" id="tunnelToggle" />
+              <span class="admin-toggle-track"><span class="admin-toggle-thumb"></span></span>
+              <span class="admin-toggle-label" id="tunnelToggleLabel">Off</span>
+            </label>
+          </header>
+
+          <div class="admin-tunnel-body">
+            <div class="admin-tunnel-state admin-tunnel-off" id="tunnelOffState">
+              <p>The meeting is currently reachable only on the venue's local network.
+                 Toggle this on to spawn a Cloudflare tunnel so remote users can join from anywhere.</p>
+            </div>
+
+            <div class="admin-tunnel-state admin-tunnel-starting" id="tunnelStartingState" hidden>
+              <p><strong>Starting tunnel…</strong> waiting for Cloudflare to assign a URL (usually 5–10 seconds).</p>
+            </div>
+
+            <div class="admin-tunnel-state admin-tunnel-on" id="tunnelOnState" hidden>
+              <p class="admin-tunnel-url-label"><strong>Public URL — share with remote users:</strong></p>
+              <div class="admin-tunnel-url-row">
+                <code id="tunnelUrl" class="admin-tunnel-url">—</code>
+                <button id="tunnelCopyBtn" class="btn ghost small" type="button">📋 Copy</button>
+              </div>
+              <p class="hint">The URL stays live until you toggle this off (or stop the server).
+                 Anyone with the URL <em>and</em> the 6-character room code can join.</p>
+            </div>
+
+            <div class="admin-tunnel-state admin-tunnel-error" id="tunnelErrorState" hidden>
+              <p class="error" id="tunnelErrorMsg">—</p>
+            </div>
+
+            <details class="admin-tunnel-instructions">
+              <summary>How a remote user joins via Cloudflare</summary>
+              <ol>
+                <li><strong>cloudflared is bundled with this server</strong> — no separate install needed.
+                    The portable ZIP ships <code>bin/cloudflared.exe</code> alongside <code>node/node.exe</code>.
+                    (If you ever need a manual copy, you can grab one from
+                    <a href="https://github.com/cloudflare/cloudflared/releases" target="_blank" rel="noopener">github.com/cloudflare/cloudflared</a>.)</li>
+                <li>Toggle <strong>Remote access</strong> above to ON. The server spawns
+                    <code>cloudflared tunnel --url http://localhost:&lt;port&gt;</code> for you and watches its output for the public URL.</li>
+                <li>Once the URL appears, click <strong>📋 Copy</strong> and share it with each remote user, along with the meeting's 6-character room code.</li>
+                <li>The remote user opens the URL in any browser, enters the room code, their name and role, and joins as they would on the local network.</li>
+                <li>When the meeting is over, toggle this off to take the tunnel down.</li>
+              </ol>
+              <p class="hint">If you'd rather run cloudflared manually (e.g. with a named tunnel and a stable subdomain),
+                 you can leave this toggle off and start your own — the server doesn't depend on it.</p>
+            </details>
+          </div>
+        </section>
+
+        <section id="adminEmpty" class="admin-empty">
+          <p>Select a room from the sidebar — or click <strong>+ Start new session</strong> to create one.</p>
+          <p class="hint">Once a session is created, share the 6-character code with your team to join.</p>
+        </section>
+      </main>
+    </div>
+  </div>
+
+
+  <!-- Per-user "support view" popup: loads /app.html in an iframe -->
+  <div id="userViewModal" class="user-view-modal" hidden>
+    <div class="user-view-card">
+      <header>
+        <strong id="userViewTitle">Viewing user</strong>
+        <button id="userViewResync" type="button" class="btn ghost small" title="Force a fresh sync from the user">🔄 Resync</button>
+        <button id="userViewClose" type="button" class="btn ghost small">✕ Close user view</button>
+      </header>
+      <iframe id="userViewFrame" src="" title="Support view of selected user"></iframe>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/admin.js"></script>
+  <script src="/admin-plus.js"></script>
+</body>
+</html>
