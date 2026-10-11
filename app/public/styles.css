@@ -1604,3 +1604,20 @@ html[data-theme="dark"] .admin-tunnel-error .error {
 .peer-list li{display:flex;gap:.6rem;align-items:center;margin:.2rem 0}
 .sys.presence{font-size:.72rem;opacity:.6;margin:.05rem 0}
 .admin-network-section input{width:auto;flex:1 1 220px;max-width:420px}
+
+/* Show Bus 1.1: a stage message's receipt and the speaker's acknowledgement, on the message that was sent */
+.stage-line { font-size: .78rem; font-style: normal; margin-top: .25rem; color: var(--muted); }
+.stage-line[data-ack="seen"], .stage-line[data-ack="done"] { color: #16a34a; }
+.sys .stage-line { display: block; text-align: center; }
+.ai-off-note { font-size: .75rem; color: var(--muted); align-self: center; margin-right: auto; }
+body:not([data-role="research"]) .ai-off-note { display: none; }
+
+/* 0.4: proposals to the show desk, and the /tls page */
+.propose-btn{background:none;border:0;cursor:pointer;font-size:.95rem;opacity:.7}
+.propose-btn:hover{opacity:1}
+.proposal-line[data-state="done"]{color:#16a34a}
+.proposal-line[data-state="rejected"],.proposal-line[data-state="failed"],.proposal-line[data-state="undelivered"]{color:#dc2626}
+.btn.danger{background:#dc2626;color:#fff;border-color:#dc2626}
+.tls-page main.tls{max-width:44rem;margin:2rem auto;padding:0 1rem;line-height:1.5}
+.tls-page .fp code{font-size:.85rem;word-break:break-all}
+.tls-page li{margin:.35rem 0}

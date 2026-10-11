@@ -19,7 +19,7 @@ function freePort() {
 
 async function startServer(dataDir, port) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
@@ -195,6 +195,162 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     let last;
     for (let i = 0; i < 14; i++) last = await fetch(base + '/api/rooms/ZZZZZ' + (i % 10));
     assert.equal(last.status, 429);
+  });
+
+  const ctl = await connect(base, cookie); sockets.push(ctl);
+  await t.test('Show Bus context: token or admin only, counts and prompt questions — no messages, names or room names', async () => {
+    assert.equal((await fetch(base + '/api/context')).status, 401);
+    assert.equal((await fetch(base + '/api/context', { headers: { authorization: 'Bearer agn_wrong' } })).status, 401);
+    await new Promise((r) => setTimeout(r, 1500));   // the flood test above emptied this person's rate limit
+    const posted = await emit(research, 'message', { type: 'action', text: 'Refer to slide 14?', options: ['Yes', 'No'] });
+    assert.ok(posted.ok, 'prompt posted: ' + JSON.stringify(posted));
+    const settings = await emit(ctl, 'admin:settings', null);
+    assert.match(settings.contextToken, /^agn_/);
+    assert.match(settings.nodeId, /^[0-9a-f]{8}$/);
+    const r = await fetch(base + '/api/context', { headers: { authorization: 'Bearer ' + settings.contextToken } });
+    assert.equal(r.status, 200);
+    const ctx = await r.json();
+    assert.equal(ctx.v, 1);
+    assert.equal(ctx.node.t, 'messenger');
+    assert.equal(ctx.node.id, settings.nodeId);
+    assert.ok(['green', 'amber', 'red', 'grey'].includes(ctx.light));
+    assert.ok(ctx.items.some((i) => i.kind === 'prompt' && /Refer to slide 14/.test(i.state)), 'open prompt questions are listed');
+    const text = JSON.stringify(ctx);
+    for (const secret of ['Capex is on slide 14', 'Chair', 'Ana', 'AGM 2026', code]) assert.ok(!text.includes(secret), 'context leaks ' + secret);
+    const viaCookie = await fetch(base + '/api/context', { headers: { cookie } });
+    assert.equal(viaCookie.status, 200);
+  });
+
+  await t.test('health: up/down for anyone, the detail only for the admin or this laptop', async () => {
+    const local = await (await fetch(base + '/api/health')).json();
+    assert.ok(local.ok && 'restarts' in local && 'loopMs' in local, 'detail on the host');
+    const remote = await (await fetch(base + '/api/health', { headers: { 'cf-connecting-ip': '203.0.113.9' } })).json();
+    assert.deepEqual(Object.keys(remote).sort(), ['ok', 'uptime', 'version']);
+  });
+
+  await t.test('saved keys are sealed at rest, never in clear', async () => {
+    await emit(ctl, 'admin:settings', { stagewatchUrl: '127.0.0.1:1', stagewatchKey: 'swk_secretvalue123', aiKey: 'sk-ant-secret' });
+    await new Promise((r) => setTimeout(r, 400));   // the write lane coalesces for 100 ms
+    const onDisk = fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8');
+    assert.ok(!onDisk.includes('swk_secretvalue123') && !onDisk.includes('sk-ant-secret'), 'no clear keys on disk');
+    assert.match(onDisk, /enc1:/);
+    const s2 = await emit(ctl, 'admin:settings', null);
+    assert.equal(s2.stagewatchKeySet, true);
+    await emit(ctl, 'admin:settings', { stagewatchUrl: '', stagewatchKey: '', aiKey: '' });
+  });
+
+  await t.test('send to stage: the receipt, then the speaker\'s acknowledgement, show on the message that was sent', async () => {
+    const http = require('http');
+    const { WebSocketServer } = require('ws');
+    let ws = null;
+    const fake = http.createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      if (req.url.startsWith('/api/message/')) return res.end(JSON.stringify({ type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId: 77 } }));
+      res.end('{"ok":true}');
+    });
+    const wss = new WebSocketServer({ server: fake, path: '/ws' });
+    wss.on('connection', (c) => { ws = c; c.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', title: 'Keynote', messageId: 0 })); });
+    await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+    try {
+      await emit(ctl, 'admin:settings', { stagewatchUrl: '127.0.0.1:' + fake.address().port, stagewatchKey: 'swk_node' });
+      for (let i = 0; i < 60 && !ws; i++) await new Promise((r) => setTimeout(r, 50));
+      assert.ok(ws, 'AGMessage linked to the fake Stagewatch');
+      await new Promise((r) => setTimeout(r, 300));
+      const acks = [];
+      board.on('stageAck', (a) => acks.push(a));
+      const sent = await emit(research, 'stage:send', { text: 'Capex was 4.2m' });
+      assert.deepEqual([sent.ok, sent.stage, sent.messageId], [true, 'applied', 77]);
+      ws.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '04:59', title: 'Keynote', messageId: 77, messageAck: 'done', messageAckBy: 'Sam' }));
+      for (let i = 0; i < 60 && !acks.some((a) => a.stage.ack === 'done'); i++) await new Promise((r) => setTimeout(r, 50));
+      const done = acks.find((a) => a.stage.ack === 'done');
+      assert.ok(done, 'acknowledgement reached the room: ' + JSON.stringify(acks));
+      assert.deepEqual([done.stage.by, done.stage.receipt, done.stage.ref], ['Sam', 'applied', 77]);
+    } finally {
+      board.removeAllListeners('stageAck');
+      await emit(ctl, 'admin:settings', { stagewatchUrl: '', stagewatchKey: '' });
+      wss.close(); fake.close();
+    }
+  });
+
+  await t.test('HTTPS on the same port: pages, Socket.io, /tls and the certificate; the fingerprint in health and settings', async () => {
+    const tlsmod = require('../lib/tls');
+    const probe = await tlsmod.probeCertificate('127.0.0.1', port);
+    const pinned = tlsmod.pinnedTlsOptions(probe.pem, probe.fp);
+    const page = await tlsmod.request(`https://127.0.0.1:${port}/app.html`, { tls: pinned });
+    assert.equal(page.status, 200);
+    assert.match(page.text, /<html/i);
+    const cer = await fetch(base + '/tls.cer');
+    assert.equal(cer.headers.get('content-type'), 'application/pkix-cert');
+    assert.equal(tlsmod.fingerprint(Buffer.from(await cer.arrayBuffer())), probe.fp, '/tls.cer is the certificate served');
+    const info = await (await fetch(base + '/tls')).text();
+    assert.ok(info.includes(probe.fp.slice(7, 9).toUpperCase() + ':'), 'the /tls page shows the fingerprint');
+    const s = await emit(ctl, 'admin:settings', null);
+    assert.deepEqual([s.tls.on, s.tls.fingerprint], [true, probe.fp]);
+    // Socket.io over TLS, trusting exactly this certificate.
+    const sec = io(`https://127.0.0.1:${port}`, { transports: ['websocket'], forceNew: true, reconnection: false, ca: probe.pem });
+    await new Promise((resolve, reject) => { sec.once('connect', resolve); sec.once('connect_error', reject); });
+    sec.close();
+    // Require HTTPS never locks this laptop out (loopback), and only takes effect with a certificate.
+    const on = await emit(ctl, 'admin:settings', { requireHttps: true });
+    assert.equal(on.tls.requireHttps, true);
+    assert.equal((await fetch(base + '/app.html')).status, 200, 'plain HTTP still works from this machine');
+    await emit(ctl, 'admin:settings', { requireHttps: false });
+  });
+
+  await t.test('show desk: a proposal\'s state follows on the message; an approved notice for AGMessage runs once and reports', async () => {
+    const http = require('http');
+    const { WebSocketServer } = require('ws');
+    let state = 'pending';
+    const seen = { proposals: [], results: [] };
+    const fake = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (d) => { body += d; });
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        const u = new URL(req.url, 'http://x');
+        if (u.pathname === '/api/proposals' && req.method === 'POST') { seen.proposals.push(JSON.parse(body)); return res.end(JSON.stringify({ id: 'p17', state: 'pending' })); }
+        if (u.pathname === '/api/proposals/p17') return res.end(JSON.stringify({ id: 'p17', state, decidedBy: 'SM', result: state === 'done' ? { ok: true, words: 'Message on the speaker screen' } : null }));
+        if (u.pathname === '/api/proposals' && u.searchParams.get('target'))
+          return res.end(JSON.stringify(seen.results.length ? [] : [{ id: 'p9', state: 'approved', line: 'notice "Break in 5 minutes"', decidedBy: 'SM', target: { t: 'messenger', id: u.searchParams.get('target') } }]));
+        if (u.pathname === '/api/proposals') return res.end('[]');
+        if (u.pathname === '/api/proposals/p9/result') { seen.results.push(JSON.parse(body)); return res.end('{"ok":true}'); }
+        res.end('{"ok":true}');
+      });
+    });
+    const wss = new WebSocketServer({ server: fake, path: '/ws' });
+    wss.on('connection', (c) => c.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', title: 'Keynote', messageId: 0 })));
+    await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+    const updates = [];
+    const notices = [];
+    research.on('proposalUpdate', (u) => updates.push(u));
+    board.on('system', (m) => { if (/From the show desk/.test(m.text)) notices.push(m.text); });
+    try {
+      await emit(ctl, 'admin:settings', { stagewatchUrl: '127.0.0.1:' + fake.address().port, stagewatchKey: 'swk_node' });
+      // The desk is found on the next tick (within ~3 s); proposals are refused until then.
+      let r;
+      for (let i = 0; i < 40; i++) { r = await emit(research, 'stage:propose', { text: 'Capex was "4.2m"', urgency: 'warn' }); if (r.ok) break; await new Promise((x) => setTimeout(x, 200)); }
+      assert.ok(r.ok, 'proposed: ' + JSON.stringify(r));
+      assert.deepEqual([r.proposal.id, r.proposal.state], ['p17', 'pending']);
+      const sent = seen.proposals[0];
+      assert.equal(sent.target.t, 'main');
+      assert.equal(sent.line, 'message "Capex was \'4.2m\'" warn ack', 'Stagewatch\'s grammar, a quote inside can\'t end the text');
+      assert.equal(sent.from.t, 'messenger');
+      state = 'done';
+      for (let i = 0; i < 100 && !updates.some((u) => u.proposal.state === 'done'); i++) await new Promise((x) => setTimeout(x, 100));
+      const done = updates.find((u) => u.proposal.state === 'done');
+      assert.ok(done, 'the state reached the research view: ' + JSON.stringify(updates));
+      assert.deepEqual([done.proposal.by, done.proposal.words], ['SM', 'Message on the speaker screen']);
+      for (let i = 0; i < 100 && !seen.results.length; i++) await new Promise((x) => setTimeout(x, 100));
+      assert.deepEqual(seen.results[0], { ok: true, words: 'shown in 1 meeting' });
+      assert.ok(notices.some((n) => /approved by SM\): Break in 5 minutes/.test(n)), 'the notice is in the meeting: ' + JSON.stringify(notices));
+      const ctx = await (await fetch(base + '/api/context', { headers: { cookie } })).json();
+      assert.ok(ctx.commands.some((c) => c.verb === 'notice <text>' && c.risk === 'review'), 'its context says what may be proposed to it');
+    } finally {
+      research.removeAllListeners('proposalUpdate');
+      board.removeAllListeners('system');
+      await emit(ctl, 'admin:settings', { stagewatchUrl: '', stagewatchKey: '' });
+      wss.close(); fake.close();
+    }
   });
 
   await t.test('history survives a restart (log replay)', async () => {

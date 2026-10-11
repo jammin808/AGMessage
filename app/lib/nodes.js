@@ -1,75 +1,130 @@
 'use strict';
 /**
- * AGMessage as a node of the show network.
+ * AGMessage as a node of the show network (Show Bus 1.1 — docs/SHOWBUS.md).
  *
- *  - Discovery (listen only, never impersonate): Stagewatch hellos on UDP 9928 ({"t":"main",...}) and Patterns
- *    beacons on UDP 9700 ({"patterns":1,"machine":...}). AGMessage announces itself on 9928 as {"t":"messenger"}
- *    — Stagewatch ignores kinds it doesn't know, so this is safe and future-ready. It never sends on 9700: a
- *    Patterns standby twin must never mistake it for a main machine.
- *  - Stagewatch link: a WebSocket to ws://<stagewatch>/ws for the live timer (latest-wins frames, a heartbeat at
- *    least every 2 s; silence = stale, never "fine"), and "send to stage" over HTTP with a control API key.
- *    Reconnects with backoff; nothing is queued while offline.
+ *  - Discovery: one channel, the hello on UDP 9928. AGMessage says {"t":"messenger"} every 2 s and listens to every
+ *    kind (Stagewatch "main", Slides "agent", "patterns", other messengers). A peer is live while hellos come,
+ *    stale after 6 s, gone after 12 s. The hello says what a node is, never what the meeting is doing.
+ *  - Stagewatch link: a WebSocket for the live timer (key in the Authorization header on the upgrade — never in the
+ *    URL), a ping every 2 s that also measures the clock offset, stale after 6 s of silence and redialled after 12 s
+ *    (backoff 0.5 → 5 s with jitter). "Send to stage" carries a request id and reads Stagewatch's receipt (accepted /
+ *    applied, and the message id the speaker's acknowledgement will carry). Nothing is queued while the link is down:
+ *    a send fails at once and says so.
+ *  - Context: AGMessage fetches Stagewatch's /api/context (for the AI's brief and the admin page) and posts its own
+ *    to Stagewatch (/api/peers/context) — counts and action-prompt titles only, never message text.
+ *  - 1.2 §10: when Stagewatch's hello carries "tls" (or the URL is https://), the link is https/wss. Before anything is
+ *    sent — the key above all — the certificate is fetched and checked against the pin for that node (trust on first
+ *    authenticated use; a change is refused as CERTIFICATE CHANGED until the admin accepts it). Each request then trusts
+ *    exactly that certificate.
+ *  - 1.2 §11: Stagewatch as the show desk (cap "approvals"): proposals go there, their state is read back, and approved
+ *    proposals aimed at AGMessage are collected and their results reported.
  */
 const dgram = require('dgram');
 const crypto = require('crypto');
 const os = require('os');
+const WebSocket = require('ws');
+const { ClockSampler, Ring } = require('./resilience');
+const tlsmod = require('./tls');
 
-const SW_PORT = 9928;
-const PATTERNS_PORT = 9700;
+const BUS_PORT = 9928;
+const BEAT_MS = 2000;
 const STALE_MS = 6000;
+const GONE_MS = 12000;
+const KINDS = new Set(['main', 'agent', 'patterns', 'messenger']);
+const CAPS = ['messages', 'action-prompts', 'documents', 'ai', 'context', 'receipts', 'proposals'];
+
+/** A hello off the wire, cleaned; null when it isn't one (pure, tested). */
+function parseHello(msg, address) {
+  if (!msg || typeof msg !== 'object' || msg.v !== 1 || !KINDS.has(msg.t) || typeof msg.id !== 'string' || !msg.id) return null;
+  const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const ports = {};
+  const src = msg.ports && typeof msg.ports === 'object' ? msg.ports : {};
+  for (const k of ['http', 'https', 'ws', 'wire', 'osc']) { const p = Number(src[k]); if (Number.isInteger(p) && p > 0 && p < 65536) ports[k] = p; }
+  // Older Stagewatch / AGMessage hellos named the web port "web".
+  if (!ports.http && Number.isInteger(Number(msg.web)) && Number(msg.web) > 0) ports.http = Number(msg.web);
+  return {
+    t: msg.t, id: str(msg.id, 40), name: str(msg.name, 60), host: str(msg.host || msg.machine, 60), address: str(address, 60),
+    ports, caps: Array.isArray(msg.caps) ? msg.caps.slice(0, 20).map((c) => String(c).slice(0, 24)) : [],
+    proto: Number.isInteger(msg.proto) ? msg.proto : 0,
+    clock: Number.isFinite(msg.clock) ? msg.clock : null,
+    tls: tlsmod.cleanFingerprint(msg.tls),   // "" when the node announces no certificate
+  };
+}
+
+/** live / stale / gone from the time a peer was last heard (pure). */
+function peerStatus(ageMs) { return ageMs < STALE_MS ? 'live' : ageMs < GONE_MS ? 'stale' : 'gone'; }
 
 class Discovery {
-  constructor({ port, name, onChange }) {
-    this.port = port; this.name = name; this.onChange = onChange || (() => {});
-    this.id = 'ag' + crypto.randomBytes(5).toString('hex');
-    this.peers = new Map();   // key -> {kind, name, machine, address, web, wire, http, seen}
-    this.sockets = [];
+  /**
+   * @param {object} o
+   * @param {string} o.id stable per install (persisted by the caller)
+   * @param {number} o.port the HTTP port people and nodes connect to
+   * @param {boolean} [o.announce] false when bound to loopback only (Show Bus §2)
+   */
+  constructor({ id, port, name, announce = true, onChange, tls = '' }) {
+    this.id = id; this.port = port; this.name = name; this.announce = announce; this.onChange = onChange || (() => {});
+    this.tls = tls;   // this node's certificate fingerprint (same port serves HTTPS)
+    this.peers = new Map();   // id -> hello + seen
+    this.sock = null;
     this.timer = null;
   }
 
-  start() {
-    this._listen(SW_PORT, (msg, rinfo) => {
-      if (!msg || msg.v !== 1 || msg.t !== 'main' || typeof msg.id !== 'string') return;
-      this._seen('sw:' + msg.id, { kind: 'stagewatch', name: String(msg.name || '').slice(0, 60), machine: String(msg.machine || '').slice(0, 60), address: rinfo.address, web: Number(msg.web) || 0, caps: Array.isArray(msg.caps) ? msg.caps.slice(0, 20).map(String) : [] });
-    });
-    this._listen(PATTERNS_PORT, (msg, rinfo) => {
-      if (!msg || !(msg.patterns >= 1) || typeof msg.machine !== 'string' || !msg.machine) return;
-      this._seen('pt:' + (msg.instance || msg.machine), { kind: 'patterns', name: msg.machine.slice(0, 60), machine: msg.machine.slice(0, 60), address: rinfo.address, wire: Number(msg.wire) || 0, http: Number(msg.http) || 0, role: String(msg.kind || 'desk').slice(0, 20), live: !!msg.live, program: String(msg.program || '').slice(0, 80) });
-    });
-    // Announce on Stagewatch's port every 2 s (no meeting data, no secrets).
-    const hello = () => {
-      const out = Buffer.from(JSON.stringify({ t: 'messenger', v: 1, id: this.id, name: this.name, machine: os.hostname().slice(0, 40), web: this.port, caps: ['messages', 'action-prompts', 'documents', 'ai'], proto: 1 }));
-      const s = this.sockets.find((x) => x.port === SW_PORT);
-      if (s) s.sock.send(out, SW_PORT, '255.255.255.255', () => {});
-      for (const [k, p] of this.peers) if (Date.now() - p.seen > 15_000) { this.peers.delete(k); this.onChange(); }
-    };
-    this.timer = setInterval(hello, 2000);
-    this.timer.unref();
-    hello();
+  hello() {
+    const h = { t: 'messenger', v: 1, proto: 1, id: this.id, name: this.name, host: os.hostname().slice(0, 40), ports: { http: this.port }, caps: CAPS, clock: Date.now() };
+    if (this.tls) { h.ports.https = this.port; h.tls = this.tls; }
+    return h;
   }
 
-  _listen(port, handle) {
+  start() {
     const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-    sock.on('error', (e) => { console.warn('  [nodes] UDP ' + port + ': ' + e.message); try { sock.close(); } catch { /* ignore */ } });
+    this.sock = sock;
+    sock.on('error', (e) => { console.warn('  [nodes] UDP ' + BUS_PORT + ': ' + e.message); try { sock.close(); } catch { /* ignore */ } });
     sock.on('message', (buf, rinfo) => {
       if (buf.length > 4096) return;
       let msg; try { msg = JSON.parse(buf.toString('utf8')); } catch { return; }   // a stray packet must never throw
-      if (msg && msg.id === this.id) return;
-      try { handle(msg, rinfo); } catch { /* ignore */ }
+      const h = parseHello(msg, rinfo.address);
+      if (!h || h.id === this.id) return;
+      const was = this.peers.get(h.id);
+      this.peers.set(h.id, { ...h, seen: Date.now() });
+      if (!was || was.address !== h.address || was.name !== h.name || peerStatus(Date.now() - was.seen) !== 'live') this.onChange();
     });
-    sock.bind(port, () => { try { sock.setBroadcast(true); } catch { /* ignore */ } });
-    this.sockets.push({ port, sock });
+    sock.bind(BUS_PORT, () => { try { sock.setBroadcast(true); } catch { /* ignore */ } });
+    const tick = () => {
+      if (this.announce) {
+        const out = Buffer.from(JSON.stringify(this.hello()));
+        for (const to of ['255.255.255.255', '127.0.0.1']) sock.send(out, BUS_PORT, to, () => {});
+      }
+      let changed = false;
+      for (const [k, p] of this.peers) {
+        const st = peerStatus(Date.now() - p.seen);
+        if (st === 'gone') { this.peers.delete(k); changed = true; } else if (st !== p.lastStatus) { p.lastStatus = st; changed = true; }
+      }
+      if (changed) this.onChange();
+    };
+    this.timer = setInterval(tick, BEAT_MS);
+    this.timer.unref();
+    tick();
   }
 
-  _seen(key, info) {
-    const was = this.peers.get(key);
-    this.peers.set(key, { ...info, seen: Date.now() });
-    if (!was || was.address !== info.address || was.name !== info.name || was.program !== info.program) this.onChange();
+  /** The live peer of kind t serving at host:port (http or https), or null. */
+  find(t, host, port) {
+    for (const p of this.peers.values()) {
+      if (p.t !== t || peerStatus(Date.now() - p.seen) === 'gone') continue;
+      const hostOk = p.address === host || (p.host && p.host.toLowerCase() === String(host).toLowerCase());
+      if (hostOk && (p.ports.http === port || p.ports.https === port)) return p;
+    }
+    return null;
   }
 
-  list() { return Array.from(this.peers.values()).map((p) => ({ ...p, age: Math.round((Date.now() - p.seen) / 1000) })); }
+  list() {
+    const now = Date.now();
+    return Array.from(this.peers.values()).map((p) => ({
+      t: p.t, id: p.id, name: p.name, host: p.host, address: p.address, ports: p.ports, caps: p.caps, proto: p.proto, tls: p.tls || '',
+      status: peerStatus(now - p.seen), age: Math.round((now - p.seen) / 1000),
+    }));
+  }
 
-  stop() { clearInterval(this.timer); for (const s of this.sockets) { try { s.sock.close(); } catch { /* ignore */ } } }
+  stop() { clearInterval(this.timer); if (this.sock) { try { this.sock.close(); } catch { /* ignore */ } } }
 }
 
 /** "http://10.0.0.5:9924" from what the operator typed ("10.0.0.5", "10.0.0.5:9924", a full URL). */
@@ -89,34 +144,149 @@ function normaliseBase(input) {
 function stageView(frame) {
   if (!frame || typeof frame !== 'object') return null;
   const str = (v, n = 120) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const num = (v) => (Number.isFinite(v) ? v : null);
+  const po = frame.playout && typeof frame.playout === 'object' ? frame.playout : null;
+  const sig = Array.isArray(frame.signals) ? frame.signals : [];
+  const open = sig.filter((g) => g && (g.state === 'sent' || g.state === 'seen'));
   return {
     text: str(frame.speakerText !== undefined && frame.mode === 'countdown' ? frame.speakerText : frame.text, 20),
     title: str(frame.title), next: str(frame.next), color: /^#[0-9A-Fa-f]{6}$/.test(frame.color || '') ? frame.color : '#FFFFFF',
     phase: str(frame.phase, 20), state: str(frame.state, 20), mode: str(frame.mode, 20),
-    seconds: Number.isFinite(frame.seconds) ? frame.seconds : null,
-    message: str(frame.message, 500), messageAck: str(frame.messageAck, 20), messageAckBy: str(frame.messageAckBy, 60),
+    seconds: num(frame.seconds),
+    message: str(frame.message, 500), messageId: Number.isInteger(frame.messageId) ? frame.messageId : 0,
+    messageAck: str(frame.messageAck, 20), messageAckBy: str(frame.messageAckBy, 60),
+    playout: po ? { title: str(po.title, 80), remaining: num(po.remaining), running: po.running === true } : null,
+    cues: { open: open.length, waiting: open.filter((g) => g.state === 'sent').length, unanswered: open.filter((g) => g.escalated === true).length },
     room: str(frame.room, 60),
+    seq: Number.isInteger(frame.seq) ? frame.seq : null,
   };
 }
 
+/** A proposal as the desk reports it (Show Bus §11), cleaned (pure). Tolerant: the desk may add fields. */
+function readProposal(j) {
+  if (!j || typeof j !== 'object' || typeof j.id !== 'string' || !j.id) return null;
+  const STATES = ['pending', 'approved', 'rejected', 'done', 'failed', 'undelivered'];
+  const result = j.result && typeof j.result === 'object' ? j.result : null;
+  const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  return {
+    id: str(j.id, 40), state: STATES.includes(j.state) ? j.state : 'pending', line: str(j.line, 600), reason: str(j.reason, 300),
+    risk: str(j.risk, 10), decidedBy: str(j.decidedBy || j.by, 60),
+    words: str(result ? (result.words ?? result.error ?? '') : (j.words || j.error || ''), 300),
+    ok: result ? result.ok !== false : null,
+    target: j.target && typeof j.target === 'object' ? { t: str(j.target.t, 16), id: str(j.target.id, 40) } : null,
+  };
+}
+/** The desk's list replies: an array, or {proposals:[…]} (pure). */
+const readProposalList = (j) => (Array.isArray(j) ? j : j && Array.isArray(j.proposals) ? j.proposals : []).map(readProposal).filter(Boolean);
+
+/** Stagewatch's receipt for a request (Show Bus §3), from whatever it answered (pure). */
+function readReceipt(status, body, requestId) {
+  const j = body && typeof body === 'object' ? body : {};
+  if (status >= 400 || j.ok === false) return { ok: false, stage: 'refused', error: 'Stagewatch: ' + String(j.error || ('said ' + status)).slice(0, 160) };
+  const refs = j.refs && typeof j.refs === 'object' ? j.refs : {};
+  return {
+    ok: true, id: typeof j.id === 'string' ? j.id : requestId,
+    // An older Stagewatch answers {"ok":true} only: it took the command, it didn't say it ran.
+    stage: j.stage === 'applied' ? 'applied' : 'accepted',
+    effect: typeof j.effect === 'string' ? j.effect.slice(0, 200) : '',
+    messageId: Number.isInteger(refs.messageId) ? refs.messageId : 0,
+  };
+}
+
+const requestId = () => 'ag' + crypto.randomBytes(6).toString('hex');
+const jitter = (ms) => Math.round(ms * (0.8 + Math.random() * 0.4));
+
 class StagewatchLink {
-  constructor({ onState, onStatus }) {
-    this.onState = onState || (() => {}); this.onStatus = onStatus || (() => {});
-    this.base = ''; this.key = '';
+  /**
+   * @param {object} o
+   * @param {(t:string,host:string,port:number)=>object|null} [o.findPeer] the discovery table (hello: id, tls, ports)
+   * @param {object} [o.pins] a tls.PinStore
+   * @param {()=>void} [o.onPins] the pins changed (persist them)
+   */
+  constructor({ onState, onStatus, onContext, findPeer, pins, onPins } = {}) {
+    this.onState = onState || (() => {}); this.onStatus = onStatus || (() => {}); this.onContext = onContext || (() => {});
+    this.findPeer = findPeer || (() => null);
+    this.pins = pins || new tlsmod.PinStore();
+    this.onPins = onPins || (() => {});
+    this.base = ''; this.key = ''; this.fingerprint = '';
+    this.endpoint = null;             // {base, tls: options|null, fp, nodeKey} once resolved
+    this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
+    this.desk = false;                // Stagewatch answers /api/proposals (Show Bus §11)
+    this.deskCheckedAt = 0;
     this.ws = null; this.delay = 500; this.lastHeard = 0; this.view = null; this.status = 'off'; this.lastKey = '';
+    this.clock = new ClockSampler(8);
+    this.rtt = new Ring(60);          // send-to-stage request → receipt, ms
+    this.context = null;              // Stagewatch's /api/context, when it serves one
+    this.contextAt = 0;
     this.timer = setInterval(() => this._watch(), 1000);
     this.timer.unref();   // never keeps a process alive on its own
   }
 
-  configure(base, key) {
+  configure(base, key, fingerprint = '') {
     const b = normaliseBase(base);
     const k = typeof key === 'string' ? key.trim() : '';
-    if (b === this.base && k === this.key) return;
-    this.base = b; this.key = k;
+    const f = tlsmod.cleanFingerprint(fingerprint);
+    if (b === this.base && k === this.key && f === this.fingerprint) return;
+    this.base = b; this.key = k; this.fingerprint = f;
     this._close();
     this.delay = 500;
+    this.clock.reset();
+    this.context = null;
+    this.endpoint = null;
+    this.desk = false; this.deskCheckedAt = 0;
+    this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
     if (this.base) this._open(); else this._set('off', null);
   }
+
+  /**
+   * Where and how to talk to Stagewatch: plain http, or https with a pinned certificate (Show Bus 1.2 §10). Null when
+   * it may not be talked to (a changed or mismatched certificate) — then nothing at all is sent.
+   */
+  async _resolve() {
+    const u = new URL(this.base);
+    const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
+    const peer = this.findPeer('main', u.hostname, port);
+    const wantTls = u.protocol === 'https:' || !!(peer && peer.tls) || !!this.fingerprint;
+    if (!wantTls) { this.tlsState = { on: false, fp: '', pinned: false, problem: '' }; return { base: this.base, tls: null }; }
+    const tport = peer && peer.ports && peer.ports.https ? peer.ports.https : port;
+    const nodeKey = peer ? 'node:' + peer.id : 'url:' + u.hostname + ':' + tport;
+    let cert;
+    try { cert = await tlsmod.probeCertificate(u.hostname, tport); } catch (e) {
+      this.tlsState = { on: true, fp: '', pinned: !!this.pins.pins[nodeKey], problem: 'no TLS answer: ' + (e && e.message ? e.message : '') };
+      return undefined;   // unreachable: retry like any connection failure
+    }
+    const verdict = this.pins.check(nodeKey, cert.fp, this.fingerprint || (peer && peer.tls) || '');
+    this.tlsState = { on: true, fp: cert.fp, pinned: !!this.pins.pins[nodeKey], problem: verdict.ok ? '' : verdict.reason, changed: !!verdict.changed, nodeKey };
+    if (!verdict.ok) return null;
+    return { base: 'https://' + u.hostname + ':' + tport, tls: tlsmod.pinnedTlsOptions(cert.pem, cert.fp), fp: cert.fp, nodeKey };
+  }
+
+  /** The first authenticated success over TLS pins the certificate (trust on first use). */
+  _confirmPin() {
+    const e = this.endpoint;
+    if (!e || !e.tls) return;
+    if (this.pins.confirm(e.nodeKey, e.fp)) { this.tlsState.pinned = true; this.onPins(); }
+  }
+
+  /** The admin accepts a changed certificate: pin what is presented now, then reconnect. */
+  acceptCertificate() {
+    const s = this.tlsState;
+    if (!s.nodeKey || !s.fp) return false;
+    this.pins.accept(s.nodeKey, s.fp);
+    this.onPins();
+    this.tlsState.problem = ''; this.tlsState.changed = false;
+    this._close(); this.endpoint = null; this.delay = 500;
+    if (this.base) this._open();
+    return true;
+  }
+
+  /** One HTTP call to Stagewatch on the resolved endpoint (pinned when TLS). */
+  async _call(path, { method = 'GET', headers = {}, body, timeoutMs = 4000 } = {}) {
+    if (!this.endpoint) throw new Error('not connected');
+    return tlsmod.request(this.endpoint.base + path, { method, headers: this._headers(headers), body, timeoutMs, tls: this.endpoint.tls });
+  }
+
+  get linked() { return this.status === 'connected'; }
 
   _set(status, view) {
     const key = status + '|' + JSON.stringify(view);
@@ -127,61 +297,171 @@ class StagewatchLink {
     this.onState(view, status);
   }
 
+  _headers(extra = {}) { return this.key ? { Authorization: 'Bearer ' + this.key, ...extra } : { ...extra }; }
+
   _open() {
-    if (typeof WebSocket !== 'function') { this._set('this Node has no WebSocket client', null); return; }
-    const url = this.base.replace(/^http/, 'ws') + '/ws?cid=agmessage&page=' + encodeURIComponent('/agmessage') + (this.key ? '&pin=' + encodeURIComponent(this.key) : '');
+    if (this.status === 'off') this._set('connecting', this.view);
+    const base = this.base;
+    this._opening = true;
+    this._resolve().then((ep) => {
+      this._opening = false;
+      if (this.base !== base || this.ws) return;
+      if (ep === null) { this._set(this.tlsState.problem || 'certificate refused', null); this._retry(10_000); return; }
+      if (ep === undefined) { this._retry(); return; }
+      this.endpoint = ep;
+      this._dial(ep);
+    }, () => { this._opening = false; this._retry(); });
+  }
+
+  _dial(ep) {
+    const url = ep.base.replace(/^http/, 'ws') + '/ws?cid=agmessage&page=' + encodeURIComponent('/agmessage');
     let ws;
-    try { ws = new WebSocket(url); } catch { this._retry(); return; }
+    // The key rides in the Authorization header, never in the URL (Show Bus §7); over TLS only to the pinned certificate.
+    try { ws = new WebSocket(url, { headers: this._headers(), handshakeTimeout: 5000, ...(ep.tls || {}) }); } catch { this._retry(); return; }
     this.ws = ws;
-    ws.onopen = () => { this.delay = 500; this.lastHeard = Date.now(); this._set('connected', this.view); };
+    ws.onopen = () => {
+      this.delay = 500; this.lastHeard = Date.now(); this._set('connected', this.view); this._ping(); this.fetchContext();
+    };
     ws.onmessage = (ev) => {
       let msg; try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
       if (msg.type === 'beat') { if (msg.live !== false) this.lastHeard = Date.now(); return; }
       this.lastHeard = Date.now();
-      if (msg.type === 'state') this._set('connected', stageView(msg));
+      if (msg.type === 'state') { this._confirmPin(); this._set('connected', stageView(msg)); }
+      else if (msg.type === 'pong') this.clock.add(Number(msg.t), Number(msg.t2), Number(msg.t3), Date.now());
       else if (msg.type === 'auth' && msg.ok === false) this._set('Stagewatch refused: ' + String(msg.error || 'viewing code or key').slice(0, 80), null);
     };
     ws.onclose = () => { if (this.ws === ws) { this.ws = null; this._retry(); } };
     ws.onerror = () => { /* onclose follows */ };
   }
 
-  _retry() {
+  _ping() {
+    if (this.ws && this.ws.readyState === 1) { try { this.ws.send(JSON.stringify({ cmd: 'ping', t: Date.now() })); } catch { /* close follows */ } }
+  }
+
+  _retry(after) {
     if (!this.base) return;
-    if (this.status === 'connected' || this.status === 'connecting') this._set('reconnecting', this.view ? { ...this.view, stale: true } : null);
-    setTimeout(() => { if (!this.ws && this.base) this._open(); }, this.delay).unref();
-    this.delay = Math.min(5000, this.delay * 2);
+    const refused = this.tlsState.problem && (this.tlsState.changed || /match/.test(this.tlsState.problem));
+    if (!refused && this.status !== 'reconnecting') this._set('reconnecting', this.view ? { ...this.view, stale: true } : null);
+    const base = this.base;
+    setTimeout(() => { if (!this.ws && !this._opening && this.base === base) this._open(); }, jitter(after || this.delay)).unref();
+    if (!after) this.delay = Math.min(5000, this.delay * 2);
   }
 
   _watch() {
-    if (!this.ws || this.status !== 'connected') return;
-    if (Date.now() - this.lastHeard > STALE_MS) {
-      this._set('stale', this.view ? { ...this.view, stale: true } : null);   // silence is never "fine"
-      try { this.ws.close(); } catch { /* onclose reconnects */ }
+    if (!this.ws) return;
+    const quiet = Date.now() - this.lastHeard;
+    if (this.status === 'connected' || this.status === 'stale') {
+      this._ping();
+      if (quiet > GONE_MS) { try { this.ws.close(); } catch { /* onclose redials */ } return; }
+      if (quiet > STALE_MS) this._set('stale', this.view ? { ...this.view, stale: true } : null);   // silence is never "fine"
+      else if (this.status === 'stale') this._set('connected', this.view ? { ...this.view, stale: false } : null);
     }
   }
 
   _close() { if (this.ws) { const w = this.ws; this.ws = null; try { w.close(); } catch { /* ignore */ } } }
 
-  /** Put a message on the speaker's confidence monitor (needs a control key). */
+  /** Clock offset to Stagewatch ({offsetMs, rttMs, apart}) or null before the first pong with times. */
+  clockInfo() { return this.clock.best(); }
+
+  /** Put a message on the speaker's confidence monitor. Returns Stagewatch's receipt, or why it wasn't sent. */
   async sendToStage(text, { urgency = 'info', ack = true } = {}) {
-    if (!this.base) return { ok: false, error: 'Link Stagewatch first (Admin → Show network).' };
-    if (!this.key) return { ok: false, error: 'Stagewatch needs a control API key for this (Stagewatch → Settings → Remote → API keys).' };
+    if (!this.base) return { ok: false, stage: 'not sent', error: 'Link Stagewatch first (Admin → Show network).' };
+    if (!this.key) return { ok: false, stage: 'not sent', error: 'Stagewatch needs a node key for this (Stagewatch → Settings → Remote → API keys, scope "node").' };
+    if (this.status !== 'connected') return { ok: false, stage: 'not sent', error: 'The Stagewatch link is ' + this.status + ' — not sent (nothing is queued; send again when it is connected).' };
     const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 500);
-    if (!t) return { ok: false, error: 'Nothing to send.' };
+    if (!t) return { ok: false, stage: 'not sent', error: 'Nothing to send.' };
     const u = ['info', 'warn', 'crit'].includes(urgency) ? urgency : 'info';
     const path = '/api/message/' + [t, u, 'off'].concat(ack ? ['ack'] : []).map(encodeURIComponent).join('/');
+    const id = requestId();
+    const t0 = Date.now();
     try {
-      const res = await fetch(this.base + path, { method: 'POST', headers: { Authorization: 'Bearer ' + this.key }, signal: AbortSignal.timeout(4000) });
-      if (res.ok) return { ok: true };
-      let err = 'Stagewatch said ' + res.status;
-      try { const j = await res.json(); if (j && j.error) err = 'Stagewatch: ' + String(j.error).slice(0, 120); } catch { /* ignore */ }
-      return { ok: false, error: err };
+      const res = await this._call(path, { method: 'POST', headers: { 'X-Request-Id': id } });
+      this.rtt.push(Date.now() - t0);
+      return readReceipt(res.status, res.body, id);
     } catch (e) {
-      return { ok: false, error: 'Stagewatch unreachable: ' + (e && e.message ? e.message.slice(0, 80) : '') };
+      return { ok: false, stage: 'not sent', error: 'Stagewatch unreachable: ' + (e && e.message ? e.message.slice(0, 80) : '') };
     }
+  }
+
+  /** Stagewatch's context (Show Bus §6), for the AI's brief and the admin page. Quietly null when not served. */
+  async fetchContext() {
+    if (!this.base || !this.key || !this.endpoint) return null;
+    try {
+      const res = await this._call('/api/context', { timeoutMs: 3000 });
+      if (res.status !== 200) return null;
+      const j = res.body;
+      if (!j || j.v !== 1 || !j.node) return null;
+      this.context = j; this.contextAt = Date.now();
+      this.onContext(j);
+      return j;
+    } catch { return null; }
+  }
+
+  /** Post AGMessage's own context to Stagewatch (needs a node-scope key). */
+  async pushContext(ctx) {
+    if (!this.linked || !this.key) return false;
+    try {
+      const res = await this._call('/api/peers/context', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ctx), timeoutMs: 3000 });
+      return res.status >= 200 && res.status < 300;
+    } catch { return false; }
+  }
+
+  // ---------------------------------------------------------------- the show desk (Show Bus 1.2 §11)
+
+  /** Does Stagewatch keep the shared approval queue? (Its hello's caps, else asked once a minute.) */
+  async checkDesk(fromId = 'x') {
+    if (!this.linked || !this.key || !this.endpoint) { this.desk = false; return false; }
+    const u = new URL(this.base);
+    const peer = this.findPeer('main', u.hostname, Number(u.port) || 80);
+    if (peer && Array.isArray(peer.caps) && peer.caps.includes('approvals')) { this.desk = true; this.deskCheckedAt = Date.now(); return true; }
+    try {
+      const res = await this._call('/api/proposals?from=' + encodeURIComponent(fromId), { timeoutMs: 3000 });
+      this.desk = res.status === 200;
+    } catch { this.desk = false; }
+    this.deskCheckedAt = Date.now();
+    return this.desk;
+  }
+
+  /** Send a proposal to the desk. {ok, proposal?, error?} */
+  async propose(body) {
+    if (!this.linked || !this.endpoint) return { ok: false, error: 'The Stagewatch link is ' + this.status + ' — not proposed.' };
+    if (!this.desk) return { ok: false, error: 'This Stagewatch keeps no approval queue (Show Bus 1.2) — send it directly instead.' };
+    try {
+      const res = await this._call('/api/proposals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (res.status >= 400) return { ok: false, error: 'Stagewatch: ' + String((res.body && res.body.error) || ('said ' + res.status)).slice(0, 160) };
+      const p = readProposal(res.body);
+      return p ? { ok: true, proposal: p } : { ok: false, error: 'Stagewatch answered without a proposal id' };
+    } catch (e) { return { ok: false, error: 'Stagewatch unreachable: ' + (e && e.message ? e.message.slice(0, 80) : '') }; }
+  }
+
+  /** One proposal's state, or null. */
+  async proposal(id) {
+    try {
+      const res = await this._call('/api/proposals/' + encodeURIComponent(id), { timeoutMs: 3000 });
+      return res.status === 200 ? readProposal(res.body) : null;
+    } catch { return null; }
+  }
+
+  /** Approved proposals aimed at this node (it runs them and reports). [] when there are none or the desk is away. */
+  async approvedFor(nodeId) {
+    if (!this.desk || !this.linked) return [];
+    try {
+      const res = await this._call('/api/proposals?target=' + encodeURIComponent(nodeId) + '&state=approved', { timeoutMs: 3000 });
+      return res.status === 200 ? readProposalList(res.body) : [];
+    } catch { return []; }
+  }
+
+  /** Report what running an approved proposal did. True when the desk took it. */
+  async reportResult(id, ok, words) {
+    try {
+      const res = await this._call('/api/proposals/' + encodeURIComponent(id) + '/result', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: !!ok, words: String(words || '').slice(0, 300) }), timeoutMs: 3000,
+      });
+      return res.status >= 200 && res.status < 300;
+    } catch { return false; }
   }
 
   stop() { clearInterval(this.timer); this.base = ''; this._close(); }
 }
 
-module.exports = { Discovery, StagewatchLink, normaliseBase, stageView };
+module.exports = { Discovery, StagewatchLink, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, BUS_PORT, STALE_MS, GONE_MS };

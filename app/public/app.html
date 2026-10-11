@@ -61,6 +61,7 @@
         <form class="pane" id="textPane" data-pane="text">
           <textarea id="textInput" rows="1" placeholder="Type a message to the stage…"></textarea>
           <div class="row end">
+            <span class="ai-off-note" title="AI drafts need an Anthropic key (admin) and the internet. Messages, action prompts, documents, the stage link and the show network work without them.">AI drafts off — everything else works offline</span>
             <button type="button" class="btn ghost ai-btn" id="aiDraftBtn" title="Claude drafts an answer to the board's latest question (or the one you're replying to) from the thread and the document on stage. You edit it; nothing is sent until you press Send." hidden>✨ Draft answer</button>
             <button type="button" class="btn ghost priority-btn" id="textPriorityBtn" data-priority="0" title="Mark as high priority">🔥 Priority</button>
             <button class="btn primary" type="submit">Send</button>
@@ -151,6 +152,7 @@
         <button class="fwd-btn" title="Forward to another room" type="button">↗</button>
         <button class="pin-btn" title="Pin">📌</button>
         <button class="stage-btn" title="Show on the speaker's screen (Stagewatch)" type="button" hidden>🖥</button>
+        <button class="propose-btn" title="Propose for the speaker's screen — the show caller approves it in Stagewatch" type="button" hidden>📝</button>
         <button class="del-btn" title="Delete this message" hidden>🗑</button>
       </header>
       <div class="body"></div>

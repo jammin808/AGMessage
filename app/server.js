@@ -33,8 +33,13 @@ const { RoomStore } = require('./lib/store');
 const guard = require('./lib/guard');
 const ai = require('./lib/ai');
 const nodes = require('./lib/nodes');
+const resilience = require('./lib/resilience');
+const secretbox = require('./lib/secretbox');
+const { buildContext, showBrief } = require('./lib/context');
+const tlsmod = require('./lib/tls');
+const { monitorEventLoopDelay } = require('perf_hooks');
 
-const VERSION = '0.2.0';
+const VERSION = '0.4.0';
 const PORT = parseInt(process.env.PORT || '3023', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
@@ -56,17 +61,79 @@ const makeMessageId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12)
 const ROLES = ['board', 'research', 'observer'];
 
 // ---------------------------------------------------------------- settings (AI key, Stagewatch link)
+// Saved through one write lane (tmp -> fsync -> rename, a .bak of the last whole file); keys sealed at rest
+// (lib/secretbox.js) so a copied folder carries none.
+const settingsLane = new resilience.WriteLane(SETTINGS_PATH, { delayMs: 100, keepBak: true, mode: 0o600 });
 function loadSettings() {
-  try { const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')); return s && typeof s === 'object' ? s : {}; } catch { return {}; }
+  const s = resilience.readJsonWithBak(SETTINGS_PATH);
+  return s && typeof s === 'object' ? s : {};
 }
 let settings = loadSettings();
-function saveSettings() {
-  try {
-    fs.writeFileSync(SETTINGS_PATH + '.tmp', JSON.stringify(settings, null, 2), { mode: 0o600 });
-    fs.renameSync(SETTINGS_PATH + '.tmp', SETTINGS_PATH);
-  } catch (e) { console.error('  settings save failed:', e.message); }
+function saveSettings() { settingsLane.save(() => JSON.stringify(settings, null, 2)); }
+// One-time migration from 0.2: keys stored in clear become sealed ones.
+for (const [plain, sealed] of [['aiKey', 'aiKeySealed'], ['stagewatchKey', 'stagewatchKeySealed']]) {
+  if (typeof settings[plain] === 'string') {
+    if (settings[plain]) settings[sealed] = secretbox.seal(settings[plain]);
+    delete settings[plain];
+    saveSettings();
+  }
 }
-const aiKey = () => process.env.ANTHROPIC_API_KEY || settings.aiKey || '';
+// This install's id on the show network (Show Bus §2): stable, so a renamed AGMessage is still the same node.
+if (!/^[0-9a-f]{8}$/.test(settings.nodeId || '')) { settings.nodeId = crypto.randomBytes(4).toString('hex'); saveSettings(); }
+const aiKey = () => process.env.ANTHROPIC_API_KEY || secretbox.open(settings.aiKeySealed) || '';
+const stagewatchKey = () => secretbox.open(settings.stagewatchKeySealed) || '';
+// A read-only token other nodes use for GET /api/context (shown on the admin page).
+function contextToken() {
+  let t = secretbox.open(settings.contextTokenSealed);
+  if (!t) { t = 'agn_' + crypto.randomBytes(18).toString('base64url'); settings.contextTokenSealed = secretbox.seal(t); saveSettings(); }
+  return t;
+}
+
+// ---------------------------------------------------------------- encrypted connections (Show Bus 1.2 §10)
+// One certificate per install, kept beside the machine key (outside the app folder), private key sealed. The same port
+// serves HTTP and HTTPS (lib/tls.js). AGM_TLS=0 turns HTTPS off (tests of the plain path, or a machine that can't).
+let cert = null;
+if (process.env.AGM_TLS !== '0') {
+  try { cert = tlsmod.loadOrCreate({ dir: secretbox.keyDir(), name: 'AGMessage ' + os.hostname(), seal: secretbox.seal, open: secretbox.open }); }
+  catch (e) { console.warn('  [tls] HTTPS off: ' + e.message); }
+}
+const pins = new tlsmod.PinStore(settings.tlsPins && typeof settings.tlsPins === 'object' ? settings.tlsPins : {});
+const isLoopback = (req) => { const a = (req.socket && req.socket.remoteAddress) || ''; return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1'; };
+const isEncrypted = (req) => !!(req.socket && req.socket.encrypted);
+const tlsFacts = () => ({
+  on: !!cert, fingerprint: cert ? cert.fp : '', validTo: cert ? cert.validTo : '', requireHttps: !!settings.requireHttps,
+  link: stageLink.tlsState, desk: stageLink.desk,
+});
+
+// ---------------------------------------------------------------- health: crashes, the loop, latency
+const RESTARTS = parseInt(process.env.AGM_RESTARTS || '0', 10) || 0;
+const CRASH_PATH = path.join(DATA_DIR, 'last-crash.json');
+const lastCrash = resilience.readJsonWithBak(CRASH_PATH);
+const watchdogGaveUp = resilience.readJsonWithBak(path.join(DATA_DIR, 'watchdog.json'));
+if (watchdogGaveUp) { try { fs.renameSync(path.join(DATA_DIR, 'watchdog.json'), path.join(DATA_DIR, 'watchdog.seen.json')); } catch { /* shown once anyway */ } }
+const loopDelay = monitorEventLoopDelay({ resolution: 10 });
+loopDelay.enable();
+const loopRing = new resilience.Ring(120);    // p99 event-loop delay per 5 s, the last 10 minutes
+setInterval(() => { loopRing.push(loopDelay.percentile(99) / 1e6); loopDelay.reset(); }, 5000).unref();
+let rejections = 0;
+function healthFacts() {
+  return {
+    restarts: RESTARTS,
+    lastCrash: lastCrash ? { at: lastCrash.at, message: String(lastCrash.message || '').slice(0, 200) } : null,
+    watchdog: watchdogGaveUp ? { at: watchdogGaveUp.at, reason: String(watchdogGaveUp.reason || '').slice(0, 200) } : null,
+    rejections,
+    loopMs: loopRing.stats(),
+    stageRttMs: stageLink.rtt.stats(),
+    stage: stageLink.status,
+    clock: stageLink.clockInfo(),
+    tls: tlsFacts(),
+    saves: { writes: settingsLane.writes, coalesced: settingsLane.coalesced, error: settingsLane.lastError },
+  };
+}
+
+// Role-level events for the show network's context: never names, never content.
+const recentEvents = [];
+function noteEvent(text) { recentEvents.push({ at: Date.now(), text }); if (recentEvents.length > 40) recentEvents.shift(); }
 
 // ---------------------------------------------------------------- rooms
 const store = new RoomStore(ROOMS_DIR);
@@ -91,6 +158,8 @@ function apply(room, op) {
       if ('responses' in op.f) io.to(room.code).emit('actionUpdate', { messageId: op.id, responses: op.f.responses, seq: s });
       if ('pinned' in op.f) io.to(room.code).emit('pinUpdate', { messageId: op.id, pinned: op.f.pinned, seq: s });
       if ('reactions' in op.f) io.to(room.code).emit('messageReact', { messageId: op.id, reactions: op.f.reactions, seq: s });
+      if ('stage' in op.f) io.to(room.code).emit('stageAck', { messageId: op.id, stage: op.f.stage, seq: s });
+      if ('proposal' in op.f) io.to(room.code).emit('proposalUpdate', { messageId: op.id, proposal: op.f.proposal, seq: s });
       break;
     case 'del': io.to(room.code).emit('messageDeleted', { messageId: op.id, seq: s }); break;
     case 'reset': io.to(room.code).emit('roomReset', { roomCode: room.code, seq: s }); break;
@@ -126,6 +195,43 @@ app.disable('x-powered-by');
 app.set('query parser', 'simple');
 app.set('trust proxy', false);
 app.use(guard.pageHeaders);
+// Require HTTPS (admin setting): plain HTTP only from this machine (which is also how the Cloudflare tunnel connects).
+// A browser asking for a page is sent to the same address over HTTPS; anything else is refused and told why.
+app.use((req, res, next) => {
+  const g = tlsmod.httpsGate({ required: !!settings.requireHttps, on: !!cert, encrypted: isEncrypted(req), loopback: isLoopback(req), method: req.method, path: req.originalUrl, host: req.headers.host });
+  if (g.allow) return next();
+  if (g.redirect) return res.redirect(308, g.redirect);
+  res.status(403).json({ ok: false, error: g.refuse });
+});
+// The certificate, for people to trust it once on each screen (Show Bus §10): public — a fingerprint is not a secret.
+app.get('/tls.cer', (_req, res) => {
+  if (!cert) return res.status(404).json({ ok: false, error: 'HTTPS is off on this AGMessage.' });
+  res.setHeader('Content-Type', 'application/pkix-cert');
+  res.setHeader('Content-Disposition', 'attachment; filename="agmessage.cer"');
+  res.end(cert.der);
+});
+app.get('/tls', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  const fp = cert ? cert.fp.slice(7).match(/../g).join(':').toUpperCase() : '';
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGMessage — secure connection</title><link rel="stylesheet" href="/styles.css"></head><body class="tls-page"><main class="tls">
+<h1>Secure connection</h1>
+${cert ? `<p>This AGMessage encrypts its pages with its own certificate. Browsers warn about it until you trust it once on each device. Before you do, check that the fingerprint below matches the one on the AGMessage laptop (Admin → Show network).</p>
+<p class="fp"><strong>SHA-256 fingerprint</strong><br><code>${esc(fp)}</code></p>
+<p><a class="btn" href="/tls.cer" download>Download the certificate</a> · valid until ${esc(cert.validTo)}</p>
+<h2>Trust it</h2><ul>
+<li><strong>Windows:</strong> open the downloaded file → Install Certificate → Local Machine → "Place all certificates in the following store" → Trusted Root Certification Authorities.</li>
+<li><strong>macOS:</strong> open it in Keychain Access (System keychain) → double-click it → Trust → "When using this certificate: Always Trust".</li>
+<li><strong>iPhone / iPad:</strong> open the download → Settings → Profile Downloaded → Install; then Settings → General → About → Certificate Trust Settings → turn it on.</li>
+<li><strong>Android:</strong> Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate → choose the file.</li>
+</ul>
+<p>Then open this AGMessage with <code>https://</code> instead of <code>http://</code> — the same address and port.</p>
+<p class="meta">Connected now over ${isEncrypted(req) ? 'HTTPS ✓' : 'plain HTTP'}.${settings.requireHttps ? ' This AGMessage requires HTTPS from other devices.' : ''}</p>`
+    : '<p>HTTPS is turned off on this AGMessage.</p>'}
+</main></body></html>`);
+});
 app.use(express.json({ limit: '256kb' }));
 app.get('/admin', (_req, res) => res.redirect('/admin.html'));
 app.use(express.static(PUBLIC_DIR, { index: 'index.html', maxAge: '5m' }));
@@ -161,7 +267,7 @@ app.post('/api/admin/login', (req, res) => {
   adminLockout.ok('host');
   const sid = crypto.randomBytes(24).toString('hex');
   adminSessions.add(sid);
-  res.setHeader('Set-Cookie', 'agm_admin=' + sid + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400');
+  res.setHeader('Set-Cookie', 'agm_admin=' + sid + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400' + (isEncrypted(req) ? '; Secure' : ''));
   res.json({ ok: true });
 });
 app.post('/api/admin/logout', (req, res) => {
@@ -182,8 +288,24 @@ app.get('/api/admin/transcript/:code', (req, res) => {
   res.send(renderTranscriptHtml(room));
 });
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, version: VERSION, rooms: store.rooms.size, uptime: Math.round(process.uptime()), clients: io.engine.clientsCount, stage: stageLink.status });
+// Health: anyone may ask whether it is up; the detail is for the admin (or the host laptop).
+app.get('/api/health', (req, res) => {
+  const base = { ok: true, version: VERSION, uptime: Math.round(process.uptime()) };
+  if (!(isValidAdminCookie(req) || guard.isHostMachine(req))) return res.json(base);
+  res.json({ ...base, rooms: store.rooms.size, clients: io.engine.clientsCount, ...healthFacts() });
+});
+
+// Context (Show Bus §6): what another node's AI, or Patterns' Eye, needs to understand this one. Read-only token or admin.
+function bearer(req) { const h = String(req.headers.authorization || ''); return h.startsWith('Bearer ') ? h.slice(7).trim() : ''; }
+const contextLock = new guard.Lockout(10, 60_000);
+app.get('/api/context', (req, res) => {
+  const ip = guard.clientIp(req);
+  if (contextLock.locked(ip)) return res.status(429).json({ ok: false, error: 'Too many wrong tokens — wait a minute.' });
+  const t = bearer(req);
+  const allowed = isValidAdminCookie(req) || (t && guard.safeEqual(t, contextToken()));
+  if (!allowed) { if (t) contextLock.fail(ip); return res.status(401).json({ ok: false, error: 'A context token is needed (AGMessage admin → Show network).' }); }
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(currentContext());
 });
 
 // Room lookups: rate limited and locked out after guessing.
@@ -258,6 +380,8 @@ app.post('/api/upload', (req, res, next) => {
 
 // ---------------------------------------------------------------- Socket.io
 const server = http.createServer(app);
+// The listening socket: one port, HTTP and HTTPS (the first byte decides) — or plain HTTP only when HTTPS is off.
+const front = cert ? tlsmod.dualPortServer(server, { certPem: cert.certPem, keyPem: cert.keyPem }) : server;
 server.headersTimeout = 15_000;
 server.requestTimeout = 120_000;
 const io = new Server(server, {
@@ -274,6 +398,8 @@ io.use((socket, next) => {
   let b = connBuckets.get(ip);
   if (!b) { b = new guard.Bucket(3, 30); connBuckets.set(ip, b); if (connBuckets.size > 5000) connBuckets.clear(); }
   socket.data.ip = ip;
+  if (settings.requireHttps && cert && !(socket.request && (isEncrypted(socket.request) || isLoopback(socket.request))))
+    return next(new Error('This AGMessage requires HTTPS — open it with https:// (see /tls).'));
   return b.take() ? next() : next(new Error('Too many connections — wait a moment.'));
 });
 
@@ -360,6 +486,7 @@ io.on('connection', (socket) => {
       users: roomUserSummary(r),
       ai: !!aiKey(), stage: stageLink.view ? { ...stageLink.view, status: stageLink.status } : null,
       canSendToStage: !!(stageLink.base && stageLink.key),
+      canPropose: !!(stageLink.desk && stageLink.key),
       seen: seenFor(r),
     });
 
@@ -520,6 +647,7 @@ io.on('connection', (socket) => {
     if (!canDraft()) return ok(ack)({ ok: false, error: 'Drafting is for the research team.' });
     const docText = typeof args.docText === 'string' ? args.docText.slice(0, 60_000) : '';
     runAi(ack, (signal) => ai.draftReply(aiKey(), {
+      show: showBrief({ status: stageLink.status, view: stageLink.view, context: stageLink.context }, discovery ? discovery.list() : []),
       messages: room.messages,
       question: typeof args.question === 'string' ? args.question.slice(0, 2000) : '',
       instruction: typeof args.instruction === 'string' ? args.instruction.slice(0, 500) : '',
@@ -532,7 +660,7 @@ io.on('connection', (socket) => {
     if (!canDraft()) return ok(ack)({ ok: false, error: 'For the research team.' });
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim().slice(0, 1000) : '';
     if (!prompt) return ok(ack)({ ok: false, error: 'Type the question first.' });
-    runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, messages: room.messages }, signal));
+    runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, messages: room.messages, show: showBrief({ status: stageLink.status, view: stageLink.view, context: stageLink.context }, discovery ? discovery.list() : []) }, signal));
   });
 
   // ----- Stagewatch: put an answer on the speaker's confidence monitor (research or admin)
@@ -542,10 +670,47 @@ io.on('connection', (socket) => {
     if (!(me.role === 'research' || socket.data.isAdmin)) return ack({ ok: false, error: 'Sending to the stage is for the research team.' });
     if (!writes.take()) return limited(ack);
     let text = typeof args.text === 'string' ? args.text : '';
-    if (!text && typeof args.messageId === 'string') { const m = room.byId.get(args.messageId); text = (m && m.text) || ''; }
+    const source = typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
+    if (!text && source) text = source.text || '';
     const r = await stageLink.sendToStage(text, { urgency: args.urgency, ack: args.ack !== false });
-    if (r.ok) systemMessage(room, `${me.name} sent to the stage screen: “${text.replace(/\s+/g, ' ').slice(0, 120)}”`);
+    if (r.ok) {
+      // The receipt, and later the speaker's acknowledgement, live on the record of the send (and on the source message).
+      const stage = { ref: r.messageId || 0, receipt: r.stage, ack: r.messageId ? 'sent' : '', by: '', at: Date.now() };
+      const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} sent to the stage screen: “${text.replace(/\s+/g, ' ').slice(0, 120)}”`, at: Date.now(), stage } }).m;
+      if (source) apply(room, { o: 'upd', id: source.id, f: { stage } });
+      if (r.messageId) trackStageSend(r.messageId, room.code, [sys.id].concat(source ? [source.id] : []));
+      noteEvent('research sent a message to the stage screen (' + r.stage + ')');
+    }
     ack(r);
+  });
+
+  // ----- Show desk (Show Bus 1.2 §11): propose a stage message instead of sending it; the show caller approves
+  socket.on('stage:propose', async (args = {}, ack) => {
+    ack = ok(ack);
+    if (!need(ack)) return;
+    if (!(me.role === 'research' || socket.data.isAdmin)) return ack({ ok: false, error: 'Proposing to the stage is for the research team.' });
+    if (!writes.take()) return limited(ack);
+    let text = typeof args.text === 'string' ? args.text : '';
+    const source = typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
+    if (!text && source) text = source.text || '';
+    text = text.replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (!text) return ack({ ok: false, error: 'Nothing to propose.' });
+    const urgency = ['info', 'warn', 'crit'].includes(args.urgency) ? args.urgency : 'info';
+    const r = await stageLink.propose({
+      from: { t: 'messenger', id: settings.nodeId, name: 'AGMessage' },
+      target: { t: 'main' },
+      // Stagewatch's own grammar; a double quote inside would end the text early, so it becomes a single one.
+      line: 'message "' + text.replace(/"/g, "'") + '" ' + urgency + ' ack',
+      reason: 'The research team in AGMessage suggests this for the speaker' + (source && source.ai ? ' (an AI draft a person chose)' : '') + '.',
+      risk: 'review',
+    });
+    if (!r.ok) return ack(r);
+    const proposal = { id: r.proposal.id, state: r.proposal.state, words: '', at: Date.now() };
+    const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} proposed for the stage screen: “${text.slice(0, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
+    if (source) apply(room, { o: 'upd', id: source.id, f: { proposal } });
+    trackProposal(proposal.id, room.code, [sys.id].concat(source ? [source.id] : []), proposal.state);
+    noteEvent('research proposed a stage message to the show desk');
+    ack({ ok: true, proposal });
   });
 
   // ----- ADMIN — only with a valid admin cookie
@@ -677,21 +842,45 @@ io.on('connection', (socket) => {
     if (typeof patch === 'function') { ack = patch; patch = null; }
     if (!admin(ack)) return;
     if (patch && typeof patch === 'object') {
-      if (typeof patch.aiKey === 'string') settings.aiKey = patch.aiKey.trim().slice(0, 200);
+      if (typeof patch.aiKey === 'string') settings.aiKeySealed = secretbox.seal(patch.aiKey.trim().slice(0, 200));
       if (typeof patch.stagewatchUrl === 'string') settings.stagewatchUrl = nodes.normaliseBase(patch.stagewatchUrl);
-      if (typeof patch.stagewatchKey === 'string') settings.stagewatchKey = patch.stagewatchKey.trim().slice(0, 80);
+      if (typeof patch.stagewatchKey === 'string') settings.stagewatchKeySealed = secretbox.seal(patch.stagewatchKey.trim().slice(0, 80));
+      if (typeof patch.stagewatchFingerprint === 'string') settings.stagewatchFingerprint = tlsmod.cleanFingerprint(patch.stagewatchFingerprint);
+      if (typeof patch.requireHttps === 'boolean') settings.requireHttps = patch.requireHttps && !!cert;
+      if (patch.newContextToken === true) delete settings.contextTokenSealed;
       saveSettings();
-      stageLink.configure(settings.stagewatchUrl, settings.stagewatchKey);
+      stageLink.configure(settings.stagewatchUrl, stagewatchKey(), settings.stagewatchFingerprint || '');
     }
     ok(ack)({
       ok: true,
       aiKeySet: !!aiKey(), aiFromEnv: !!process.env.ANTHROPIC_API_KEY, model: ai.MODEL,
-      stagewatchUrl: settings.stagewatchUrl || '', stagewatchKeySet: !!settings.stagewatchKey,
+      stagewatchUrl: settings.stagewatchUrl || '', stagewatchKeySet: !!stagewatchKey(),
       stage: stageLink.status, peers: discovery ? discovery.list() : [],
+      nodeId: settings.nodeId, contextToken: contextToken(), health: healthFacts(),
+      stageContext: stageLink.context ? { headline: stageLink.context.headline, light: stageLink.context.light, peers: stageLink.context.peers || [] } : null,
+      tls: tlsFacts(), stagewatchFingerprint: settings.stagewatchFingerprint || '',
     });
   });
 
   // ----- Cloudflare tunnel control
+  socket.on('admin:acceptCertificate', (ack) => {
+    if (!admin(ack)) return;
+    const was = stageLink.tlsState;
+    if (!stageLink.acceptCertificate()) return ok(ack)({ ok: false, error: 'No certificate to accept.' });
+    noteEvent('the admin accepted a changed Stagewatch certificate');
+    ok(ack)({ ok: true, fingerprint: was.fp });
+  });
+  socket.on('admin:renewCertificate', (ack) => {
+    if (!admin(ack)) return;
+    if (!cert) return ok(ack)({ ok: false, error: 'HTTPS is off on this AGMessage.' });
+    try {
+      cert = tlsmod.loadOrCreate({ dir: secretbox.keyDir(), name: 'AGMessage ' + os.hostname(), seal: secretbox.seal, open: secretbox.open, renew: true });
+      front.setCert({ certPem: cert.certPem, keyPem: cert.keyPem });
+      if (discovery) discovery.tls = cert.fp;
+      noteEvent('the admin renewed this AGMessage\'s certificate');
+      ok(ack)({ ok: true, tls: tlsFacts() });
+    } catch (e) { ok(ack)({ ok: false, error: e.message }); }
+  });
   socket.on('admin:tunnelStart', (ack) => { if (admin(ack)) ok(ack)(startTunnel()); });
   socket.on('admin:tunnelStop', (ack) => { if (admin(ack)) { stopTunnel(); ok(ack)({ ok: true }); } });
   socket.on('admin:tunnelStatus', (ack) => { if (admin(ack)) ok(ack)({ ok: true, running: !!tunnelProc, url: tunnelUrl, error: tunnelError }); });
@@ -802,18 +991,140 @@ function renderTranscriptHtml(room) {
     rows.join('\n') + '<p class="meta" style="margin-top:2rem">— end of transcript —</p></body></html>';
 }
 
-// ---------------------------------------------------------------- show network
+// ---------------------------------------------------------------- show network (Show Bus 1.1)
 const stageLink = new nodes.StagewatchLink({
-  onState: (view, status) => io.emit('stage', view ? { ...view, status } : { status }),
+  onState: (view, status) => { io.emit('stage', view ? { ...view, status, desk: stageLink.desk } : { status, desk: stageLink.desk }); followStageAck(view); },
+  onStatus: (status) => noteEvent('Stagewatch link ' + (/^CERTIFICATE CHANGED/.test(status) ? 'refused: CERTIFICATE CHANGED' : status)),
+  findPeer: (t, host, port) => (discovery ? discovery.find(t, host, port) : null),
+  pins,
+  onPins: () => { settings.tlsPins = pins.toJSON(); saveSettings(); },
 });
 let discovery = null;
 if (process.env.AGM_NODES !== '0') {
-  discovery = new nodes.Discovery({ port: PORT, name: 'AGMessage', onChange: () => {
+  const loopbackOnly = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
+  discovery = new nodes.Discovery({ id: settings.nodeId, port: PORT, name: 'AGMessage', announce: !loopbackOnly, tls: cert ? cert.fp : '', onChange: () => {
     for (const [, s] of io.sockets.sockets) if (s.data && s.data.isAdmin) s.emit('nodes', discovery.list());
   } });
   try { discovery.start(); } catch (e) { console.warn('  [nodes] discovery off:', e.message); }
 }
-stageLink.configure(settings.stagewatchUrl || '', settings.stagewatchKey || '');
+stageLink.configure(settings.stagewatchUrl || '', stagewatchKey(), settings.stagewatchFingerprint || '');
+
+// Stage sends waiting for the speaker: Stagewatch message id -> the AGMessage messages that show its state.
+const stageSends = new Map();
+function trackStageSend(ref, code, ids) {
+  stageSends.set(ref, { code, ids, ack: 'sent', by: '' });
+  if (stageSends.size > 50) stageSends.delete(stageSends.keys().next().value);
+}
+/** The live frame says who acknowledged which message: show it on the message that was sent. */
+function followStageAck(view) {
+  if (!view || !view.messageId || !stageSends.has(view.messageId)) return;
+  const t = stageSends.get(view.messageId);
+  const ack = view.messageAck || 'sent';
+  if (ack === t.ack && (view.messageAckBy || '') === t.by) return;
+  t.ack = ack; t.by = view.messageAckBy || '';
+  const room = store.get(t.code);
+  if (!room) return;
+  for (const id of t.ids) {
+    const m = room.byId.get(id);
+    if (m && m.stage) apply(room, { o: 'upd', id, f: { stage: { ...m.stage, ack, by: t.by } } });
+  }
+  if (ack === 'seen' || ack === 'done') noteEvent('the speaker ' + (ack === 'done' ? 'acknowledged' : 'saw') + ' a stage message');
+}
+
+// ---------------------------------------------------------------- the show desk (Show Bus 1.2 §11)
+// Proposals this AGMessage made, followed until they end: desk id -> the messages that show their state.
+const FINAL = new Set(['rejected', 'done', 'failed', 'undelivered']);
+const proposals = new Map();
+function trackProposal(id, code, ids, state) {
+  if (FINAL.has(state)) return;
+  proposals.set(id, { code, ids, state });
+  if (proposals.size > 100) proposals.delete(proposals.keys().next().value);
+}
+// After a restart, keep following the ones still open (their state lives on the messages).
+for (const room of store.rooms.values()) {
+  for (const m of room.messages) if (m.proposal && m.proposal.id && !FINAL.has(m.proposal.state)) {
+    const t = proposals.get(m.proposal.id);
+    if (t) t.ids.push(m.id); else trackProposal(m.proposal.id, room.code, [m.id], m.proposal.state);
+  }
+}
+function showProposalState(t, p) {
+  const room = store.get(t.code);
+  if (!room) return;
+  for (const id of t.ids) {
+    const m = room.byId.get(id);
+    if (m && m.proposal) apply(room, { o: 'upd', id, f: { proposal: { ...m.proposal, state: p.state, words: p.words || '', by: p.decidedBy || '' } } });
+  }
+}
+// Approved proposals aimed at this AGMessage, already run (so a slow result post never runs one twice).
+const ranProposals = new Map();   // id -> {ok, words, reported}
+
+/**
+ * What AGMessage does when the show desk approves a proposal aimed at it. One verb: "notice <text>" — a notice shown
+ * to everyone in every open meeting (e.g. "Break in 5 minutes"). Its own checks apply: length, and nothing to post
+ * into when no meeting is open. Returns {ok, words}.
+ */
+function runApproved(p) {
+  const m = /^notice\s+(.+)$/i.exec(String(p.line || '').trim());
+  if (!m) return { ok: false, words: 'AGMessage only takes "notice <text>" — not "' + String(p.line || '').slice(0, 60) + '"' };
+  const text = m[1].replace(/^"(.*)"$/, '$1').replace(/\s+/g, ' ').trim().slice(0, 300);
+  if (!text) return { ok: false, words: 'an empty notice' };
+  const rooms = Array.from(store.rooms.values());
+  if (!rooms.length) return { ok: false, words: 'no meeting is open to show it in' };
+  for (const room of rooms) systemMessage(room, '📣 From the show desk' + (p.decidedBy ? ' (approved by ' + p.decidedBy + ')' : '') + ': ' + text);
+  noteEvent('the show desk posted a notice to the meetings');
+  return { ok: true, words: 'shown in ' + rooms.length + ' meeting' + (rooms.length === 1 ? '' : 's') };
+}
+
+let deskBusy = false;
+setInterval(async () => {
+  if (deskBusy || !stageLink.linked) return;
+  deskBusy = true;
+  try {
+    if (Date.now() - stageLink.deskCheckedAt > 60_000) {
+      const was = stageLink.desk;
+      await stageLink.checkDesk(settings.nodeId);
+      if (was !== stageLink.desk) io.emit('stage', { ...(stageLink.view || {}), status: stageLink.status, desk: stageLink.desk });
+    }
+    if (!stageLink.desk) return;
+    // Follow our own proposals.
+    for (const [id, t] of Array.from(proposals)) {
+      const p = await stageLink.proposal(id);
+      if (!p) continue;
+      if (p.state !== t.state) { t.state = p.state; showProposalState(t, p); }
+      if (FINAL.has(p.state)) proposals.delete(id);
+    }
+    // Run what the desk approved for us, then say what happened.
+    for (const p of await stageLink.approvedFor(settings.nodeId)) {
+      let r = ranProposals.get(p.id);
+      if (!r) { r = runApproved(p); ranProposals.set(p.id, r); if (ranProposals.size > 200) ranProposals.delete(ranProposals.keys().next().value); }
+      if (!r.reported) r.reported = await stageLink.reportResult(p.id, r.ok, r.words);
+    }
+  } catch { /* the next tick tries again */ } finally { deskBusy = false; }
+}, 3000).unref();
+
+/** This node's context (Show Bus §6): facts, counts and prompt titles — no message text, no names. */
+function currentContext() {
+  return buildContext({
+    node: { id: settings.nodeId, name: 'AGMessage' },
+    rooms: Array.from(store.rooms.values()),
+    stage: { status: stageLink.status, view: stageLink.view, clock: stageLink.clockInfo(), context: stageLink.context },
+    peers: discovery ? discovery.list() : [],
+    aiOn: !!aiKey(), tunnel: !!tunnelProc, recent: recentEvents,
+  });
+}
+// Post it to Stagewatch when linked: on change, and at least every 5 s. Refresh Stagewatch's own every 5 s.
+let lastPushed = '';
+let lastPushAt = 0;
+setInterval(() => {
+  if (!stageLink.linked) return;
+  const ctx = currentContext();
+  const sig = JSON.stringify({ ...ctx, at: 0 });
+  if (sig !== lastPushed || Date.now() - lastPushAt >= 5000) {
+    lastPushed = sig; lastPushAt = Date.now();
+    stageLink.pushContext(ctx).catch(() => {});
+  }
+  if (Date.now() - stageLink.contextAt >= 5000) stageLink.fetchContext().catch(() => {});
+}, 1000).unref();
 
 // ---------------------------------------------------------------- Cloudflare tunnel (admin-only)
 let tunnelProc = null, tunnelUrl = null, tunnelError = null, cfLogfile = null, cfLogPoll = null;
@@ -900,35 +1211,53 @@ function shutdown(code = 0) {
   if (tunnelProc) { try { tunnelProc.kill('SIGTERM'); } catch { /* ignore */ } }
   console.log('\n  Saving rooms…');
   store.compactAll();
+  settingsLane.flushSync();
   stageLink.stop();
   if (discovery) discovery.stop();
   process.exit(code);
 }
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
-// A live meeting must not stop for one bad event: log it, keep serving, keep the log safe on disk.
-process.on('uncaughtException', (e) => { console.error('  [error]', e && e.stack ? e.stack : e); try { store.compactAll(); } catch { /* ignore */ } });
-process.on('unhandledRejection', (e) => { console.error('  [error] unhandled rejection:', e && e.message ? e.message : e); });
+// An uncaught error leaves Node in an unknown state, so it doesn't carry on: save the rooms, record the crash
+// (shown on the admin page after the restart) and exit for the watchdog (supervise.js) to restart within ~2 s.
+// A rejected promise nobody handled is logged and counted (admin health): the request it belonged to failed,
+// the meeting carries on.
+process.on('uncaughtException', (e) => {
+  console.error('  [error]', e && e.stack ? e.stack : e);
+  try { store.compactAll(); } catch { /* best effort */ }
+  try { settingsLane.flushSync(); } catch { /* best effort */ }
+  try {
+    resilience.writeFileAtomic(CRASH_PATH, JSON.stringify({ at: Date.now(), message: String(e && e.message ? e.message : e).slice(0, 500), stack: String(e && e.stack ? e.stack : '').slice(0, 4000) }));
+    fs.appendFileSync(path.join(DATA_DIR, 'crash.log'), new Date().toISOString() + ' ' + String(e && e.stack ? e.stack : e) + '\n');
+  } catch { /* the console has it */ }
+  process.exit(resilience.EXIT.CRASH);
+});
+process.on('unhandledRejection', (e) => { rejections++; console.error('  [error] unhandled rejection:', e && e.message ? e.message : e); });
 
-server.on('error', (e) => {
+// The watchdog's heartbeat: sent from the event loop, so a hung loop stops it (that silence is what restarts us).
+if (typeof process.send === 'function') setInterval(() => { try { process.send({ t: 'beat' }); } catch { /* supervisor gone */ } }, 1000).unref();
+
+front.on('error', (e) => {
   console.error(e.code === 'EADDRINUSE' ? `\n  Port ${PORT} is already in use. Close the other AGMessage window, or set PORT to another number.\n` : '  Server error: ' + e.message);
-  process.exit(3);   // the launcher won't restart this one
+  process.exit(resilience.EXIT.CONFIG);   // the watchdog won't restart this one
 });
 
-server.listen(PORT, HOST, () => {
+front.listen(PORT, HOST, () => {
   const addresses = [];
   for (const list of Object.values(os.networkInterfaces())) for (const n of list || []) if (n.family === 'IPv4' && !n.internal) addresses.push(n.address);
   console.log('\n  AGMessage ' + VERSION + ' is running');
   console.log('  ---------------------');
   console.log(`  Local:   http://localhost:${PORT}`);
-  for (const a of addresses) console.log(`  LAN:     http://${a}:${PORT}`);
+  for (const a of addresses) console.log(`  LAN:     http://${a}:${PORT}` + (cert ? `   (or https://${a}:${PORT})` : ''));
+  if (cert) console.log('  HTTPS:   on, same port — certificate ' + cert.fp.slice(0, 23) + '…  (trust it once per device: /tls)' + (settings.requireHttps ? ' · required from other devices' : ''));
   console.log('');
   console.log('  ============================================');
   console.log('  Admin login (only from this host laptop):');
   console.log('    URL:   http://localhost:' + PORT + '/admin');
   console.log('    Token: ' + ADMIN_TOKEN);
   console.log('  ============================================');
-  console.log('  AI drafts:   ' + (aiKey() ? 'on (' + ai.MODEL + ')' : 'off — add a key in Admin → AI'));
+  console.log('  AI drafts:   ' + (aiKey() ? 'on (' + ai.MODEL + ')' : 'off — add a key in Admin → AI (messaging and the show network work without it)'));
+  if (RESTARTS) console.log('  Restarted by the watchdog (' + RESTARTS + 'x)' + (lastCrash ? ' — last crash: ' + String(lastCrash.message || '').slice(0, 120) : ''));
   console.log('  Stagewatch:  ' + (settings.stagewatchUrl || 'not linked (Admin → Show network)'));
   console.log('  Saved rooms: ' + ROOMS_DIR);
   console.log('  Uploads:     ' + UPLOAD_DIR + '\n');

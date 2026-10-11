@@ -18,25 +18,67 @@
       $('aiStatus').textContent = s.aiKeySet ? (s.aiFromEnv ? 'on (key from ANTHROPIC_API_KEY)' : 'on') : 'off — no key';
       document.querySelectorAll('.ai-btn').forEach((b) => { b.disabled = !s.aiKeySet; });
       $('swUrl').value = s.stagewatchUrl || '';
-      $('swKey').placeholder = s.stagewatchKeySet ? '•••••• (saved — type to replace)' : 'Stagewatch control key (swk_…)';
-      $('swStatus').textContent = s.stagewatchUrl ? 'Stagewatch: ' + s.stage : '';
+      $('swKey').placeholder = s.stagewatchKeySet ? '•••••• (saved — type to replace)' : 'Stagewatch node key (swk_…)';
+      const clock = s.health && s.health.clock;
+      $('swStatus').textContent = s.stagewatchUrl ? 'Stagewatch: ' + s.stage + (clock && clock.apart ? ' · CLOCKS APART (' + (clock.offsetMs / 1000).toFixed(1) + ' s)' : '') : '';
+      $('swStatus').classList.toggle('bad', !!(clock && clock.apart));
+      const ctx = s.stageContext;
+      $('swContext').hidden = !ctx;
+      if (ctx) $('swContext').textContent = 'Stagewatch says: ' + (ctx.headline || '') + ((ctx.peers || []).length ? ' · it hears ' + ctx.peers.map((p) => p.t + ' “' + (p.name || '') + '”').join(', ') : '');
+      $('ctxToken').textContent = s.contextToken || '—';
+      renderTls(s.tls, s.stagewatchFingerprint);
+      renderHealth(s.health);
       renderPeers(s.peers || []);
     });
+  }
+
+  function pretty(fp) { return fp ? fp.replace(/^sha256:/, '').match(/../g).join(':').toUpperCase() : '—'; }
+  function renderTls(t, typed) {
+    if (!t) return;
+    $('tlsFp').textContent = t.on ? pretty(t.fingerprint) : 'HTTPS is off';
+    $('tlsValid').textContent = t.on && t.validTo ? '(valid until ' + t.validTo + ')' : '';
+    $('tlsRenew').hidden = !t.on;
+    $('requireHttps').checked = !!t.requireHttps;
+    $('requireHttps').disabled = !t.on;
+    if (document.activeElement !== $('swFp')) $('swFp').value = typed || '';
+    const l = t.link || {};
+    $('swAccept').hidden = !l.changed;
+    $('swTls').textContent = !l.on ? 'Link to Stagewatch: plain HTTP (it announces no certificate)'
+      : l.problem ? '⚠ ' + l.problem
+      : 'Link to Stagewatch: encrypted ✓ — certificate ' + pretty(l.fp).slice(0, 23) + '… ' + (l.pinned ? '(pinned)' : '(will be pinned on first use)');
+    $('swTls').classList.toggle('bad', !!l.problem);
+    $('deskLine').textContent = t.desk ? 'Show desk: Stagewatch keeps the shared approval queue — the research team can propose stage messages (📝), and approved "notice" proposals for this AGMessage are shown in every meeting.' : '';
+  }
+
+  function renderHealth(h) {
+    if (!h) return;
+    const parts = [];
+    parts.push(h.restarts ? 'restarted by the watchdog ' + h.restarts + '×' : 'running since start');
+    if (h.watchdog) parts.push('⚠ the watchdog gave up at ' + new Date(h.watchdog.at).toLocaleTimeString() + ': ' + h.watchdog.reason);
+    if (h.lastCrash) parts.push('last crash ' + new Date(h.lastCrash.at).toLocaleString() + ': ' + h.lastCrash.message);
+    if (h.rejections) parts.push(h.rejections + ' failed background task(s)');
+    if (h.loopMs && h.loopMs.count) parts.push('server delay p95 ' + h.loopMs.p95 + ' ms (max ' + h.loopMs.max + ')');
+    if (h.stageRttMs && h.stageRttMs.count) parts.push('send-to-stage ' + h.stageRttMs.p50 + ' ms typical, ' + h.stageRttMs.max + ' worst');
+    if (h.clock) parts.push('clock vs Stagewatch ' + (h.clock.offsetMs >= 0 ? '+' : '') + h.clock.offsetMs + ' ms' + (h.clock.apart ? ' — CLOCKS APART' : ''));
+    if (h.saves && h.saves.error) parts.push('⚠ settings save failed: ' + h.saves.error);
+    if (h.tls && h.tls.link && h.tls.link.changed) parts.push('⚠ CERTIFICATE CHANGED — Stagewatch\'s certificate is not the one pinned; the link is refused until you accept it');
+    $('healthLine').textContent = parts.join(' · ');
   }
 
   function renderPeers(peers) {
     const ul = $('peerList');
     ul.textContent = '';
-    if (!peers.length) { const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'Listening for Stagewatch and Patterns on this network…'; ul.appendChild(li); return; }
+    if (!peers.length) { const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'Listening for Stagewatch, Patterns and presenter PCs on this network (UDP 9928)…'; ul.appendChild(li); return; }
+    const LABEL = { main: '⏱ Stagewatch', agent: '🖥 Presenter PC (Stagewatch Slides)', patterns: '🎛 Patterns', messenger: '💬 AGMessage' };
     for (const p of peers) {
       const li = document.createElement('li');
-      const label = p.kind === 'stagewatch' ? '⏱ Stagewatch' : '🎛 Patterns';
-      const what = p.kind === 'stagewatch' ? (p.name || p.machine) : (p.machine + (p.program ? ' · on air: ' + p.program : ''));
-      li.textContent = label + ' — ' + what + ' (' + p.address + ')';
-      if (p.kind === 'stagewatch' && p.web) {
+      const dot = p.status === 'live' ? '🟢' : '🟠';
+      li.textContent = dot + ' ' + (LABEL[p.t] || p.t) + ' — ' + (p.name || p.host || '') + ' (' + p.address + (p.status === 'live' ? '' : ', not heard for ' + p.age + ' s') + ')';
+      const http = p.ports && p.ports.http;
+      if (p.t === 'main' && http) {
         const b = document.createElement('button');
         b.className = 'btn ghost small'; b.type = 'button'; b.textContent = 'Use';
-        b.onclick = () => { $('swUrl').value = p.address + ':' + p.web; $('swKey').focus(); };
+        b.onclick = () => { $('swUrl').value = p.address + ':' + http; $('swKey').focus(); };
         li.appendChild(b);
       }
       ul.appendChild(li);
@@ -50,9 +92,21 @@
     socket.on('nodes', renderPeers);
     if (socket.connected) loadSettings();
 
+    setInterval(() => { if (socket.connected) loadSettings(); }, 5000);   // health, clock and peers stay current
+    $('ctxCopy').onclick = () => { const t = $('ctxToken').textContent; if (navigator.clipboard && t && t !== '—') navigator.clipboard.writeText(t); };
+    $('ctxNew').onclick = () => loadSettings({ newContextToken: true });
+    $('requireHttps').onchange = () => loadSettings({ requireHttps: $('requireHttps').checked });
+    $('swAccept').onclick = () => {
+      if (!confirm('Accept Stagewatch\'s new certificate? Only do this if you know why it changed (a reinstall, a new certificate made on purpose).')) return;
+      socket.emit('admin:acceptCertificate', () => setTimeout(() => loadSettings(), 800));
+    };
+    $('tlsRenew').onclick = () => {
+      if (!confirm('Make a new certificate? Every device and app that trusted the old one will need to trust the new one.')) return;
+      socket.emit('admin:renewCertificate', () => loadSettings());
+    };
     $('aiKeySave').onclick = () => { loadSettings({ aiKey: $('aiKeyInput').value.trim() }); $('aiKeyInput').value = ''; };
     $('swSave').onclick = () => {
-      const patch = { stagewatchUrl: $('swUrl').value.trim() };
+      const patch = { stagewatchUrl: $('swUrl').value.trim(), stagewatchFingerprint: $('swFp').value.trim() };
       if ($('swKey').value.trim()) patch.stagewatchKey = $('swKey').value.trim();
       loadSettings(patch); $('swKey').value = '';
       setTimeout(() => loadSettings(), 1500);

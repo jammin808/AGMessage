@@ -14,6 +14,7 @@ let UPLOAD_TOKEN = '';
 let lastSeq = -1;            // the newest change we have; resume from here after a drop
 let joined = false;
 let CAN_STAGE = false;
+let CAN_PROPOSE = false;   // Stagewatch keeps the show's approval queue (Show Bus 1.2 §11)
 let AI_ON = false;
 const HAS_STAGE = ROLE === 'board' || ROLE === 'research';
 
@@ -94,8 +95,11 @@ function rejoin() {
     MY_UID = res.uid || MY_UID;
     UPLOAD_TOKEN = res.uploadToken || '';
     CAN_STAGE = !!res.canSendToStage;
+    CAN_PROPOSE = !!res.canPropose;
     AI_ON = !!res.ai;
     document.querySelectorAll('.ai-btn').forEach((b) => { b.hidden = !AI_ON; });
+    // Without AI, nothing else changes: say so where the draft button would be (research team only sees it).
+    document.querySelectorAll('.ai-off-note').forEach((n) => { n.hidden = AI_ON; });
     if (res.note) notify(res.note);
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
     renderStage(res.stage);
@@ -135,6 +139,7 @@ function applyOp(op) {
     if ('responses' in op.f) updateActionResponses(op.id, op.f.responses);
     if ('pinned' in op.f) setMessagePinned(op.id, op.f.pinned);
     if ('reactions' in op.f) onReact({ messageId: op.id, reactions: op.f.reactions });
+    if ('stage' in op.f) setStage(op.id, op.f.stage);
   }
   else if (op.o === 'del') removeMessageLocal(op.id);
   else if (op.o === 'reset') onReset();
@@ -155,7 +160,49 @@ socket.on('pinUpdate', ({ messageId, pinned, seq }) => {
 });
 socket.on('kicked', ({ reason }) => { notify(reason || 'You were removed from the meeting.', true); setTimeout(() => { location.href = '/'; }, 2500); });
 socket.on('roleChanged', ({ role }) => { notify('The admin changed your role to ' + roleLabel(role) + ' — reloading…'); setTimeout(() => { const q = new URLSearchParams(location.search); q.set('role', role); location.search = q.toString(); }, 1500); });
-socket.on('stage', renderStage);
+socket.on('stage', (v) => {
+  const desk = !!(v && v.desk);
+  if (desk !== CAN_PROPOSE) { CAN_PROPOSE = desk; refreshProposeButtons(); }
+  renderStage(v);
+});
+function refreshProposeButtons() {
+  for (const [id, node] of messagesById) { const m = findMessage(id); if (m && m.type !== 'system') rerenderMessage(node, m); }
+}
+// A proposal's state (pending → approved / rejected → done / failed), on the message it came from.
+socket.on('proposalUpdate', ({ messageId, proposal, seq }) => {
+  if (!bump(seq)) return;
+  const msg = findMessage(messageId);
+  if (msg) msg.proposal = proposal;
+  const node = messagesById.get(messageId);
+  if (!node) return;
+  if (msg && msg.type !== 'system') rerenderMessage(node, msg);
+  else renderProposalLine(node, proposal);
+});
+function proposalLineText(p) {
+  if (!p) return '';
+  const by = p.by ? ' by ' + p.by : '';
+  switch (p.state) {
+    case 'pending': return '📝 Waiting for the show desk to approve';
+    case 'approved': return '✓ Approved' + by + ' — running';
+    case 'rejected': return '✗ Not approved' + by;
+    case 'done': return '✓ Approved' + by + ' and done' + (p.words ? ': ' + p.words : '');
+    case 'failed': return '⚠ Approved' + by + ' but it failed' + (p.words ? ': ' + p.words : '');
+    case 'undelivered': return '⚠ Approved' + by + ' but it never reached Stagewatch';
+    default: return '';
+  }
+}
+function renderProposalLine(host, p) {
+  let line = host.querySelector(':scope > .proposal-line, :scope .body > .proposal-line');
+  const text = proposalLineText(p);
+  if (!text) { if (line) line.remove(); return; }
+  if (!line) {
+    line = document.createElement('div');
+    line.className = 'stage-line proposal-line';
+    (host.querySelector('.body') || host).appendChild(line);
+  }
+  line.textContent = text;
+  line.dataset.state = (p && p.state) || '';
+}
 socket.on('seen', (s) => { noteSeen(s); refreshSeenLines(); });
 socket.on('roomReset', ({ seq } = {}) => { if (bump(seq)) onReset(); });
 function onReset() {
@@ -168,6 +215,36 @@ function onReset() {
   if (typeof dismissDoc === 'function') dismissDoc();
 }
 socket.on('messageReact', ({ messageId, reactions, seq }) => { if (bump(seq)) onReact({ messageId, reactions }); });
+// A message sent to the speaker's screen: Stagewatch's receipt, then the speaker's acknowledgement, on that message.
+socket.on('stageAck', ({ messageId, stage, seq }) => { if (bump(seq)) setStage(messageId, stage); });
+function setStage(messageId, stage) {
+  const msg = findMessage(messageId);
+  if (msg) msg.stage = stage;
+  const node = messagesById.get(messageId);
+  if (!node) return;
+  if (msg && msg.type !== 'system') rerenderMessage(node, msg);
+  else renderStageLine(node, stage);
+}
+function stageLineText(st) {
+  if (!st) return '';
+  const by = st.by ? ' by ' + st.by : '';
+  if (st.ack === 'done') return '✓ Acknowledged on stage' + by;
+  if (st.ack === 'seen') return '✓ Seen on stage' + by;
+  if (st.ack === 'sent') return st.receipt === 'applied' ? '⏳ On the speaker\'s screen — waiting for them to acknowledge' : '⏳ Stagewatch took it — waiting for the speaker';
+  return st.receipt === 'applied' ? 'On the speaker\'s screen' : 'Sent to Stagewatch (not confirmed on screen)';
+}
+function renderStageLine(host, stage) {
+  let line = host.querySelector(':scope > .stage-line, :scope .body > .stage-line');
+  const text = stageLineText(stage);
+  if (!text) { if (line) line.remove(); return; }
+  if (!line) {
+    line = document.createElement('div');
+    line.className = 'stage-line';
+    (host.querySelector('.body') || host).appendChild(line);
+  }
+  line.textContent = text;
+  line.dataset.ack = (stage && stage.ack) || '';
+}
 function onReact({ messageId, reactions }) {
   const msg = findMessage(messageId);
   if (msg) msg.reactions = reactions;
@@ -298,6 +375,8 @@ function renderMessage(msg) {
     div.className = 'sys' + (PRESENCE.test(msg.text || '') ? ' presence' : '');
     div.textContent = msg.text;
     div.dataset.id = msg.id;
+    if (msg.stage) renderStageLine(div, msg.stage);
+    if (msg.proposal) renderProposalLine(div, msg.proposal);
     return div;
   }
   const node = tpl.content.firstElementChild.cloneNode(true);
@@ -327,7 +406,21 @@ function rerenderMessage(node, msg) {
       stageBtn.disabled = true;
       socket.emit('stage:send', { messageId: msg.id }, (res) => {
         stageBtn.disabled = false;
-        notify(res && res.ok ? 'On the speaker\'s screen — you\'ll see when they acknowledge it.' : (res && res.error) || 'Could not send to the stage.', !(res && res.ok));
+        notify(res && res.ok
+          ? (res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.')
+          : (res && res.error) || 'Could not send to the stage.', !(res && res.ok));
+      });
+    } : null;
+  }
+  const proposeBtn = node.querySelector('.propose-btn');
+  if (proposeBtn) {
+    const canPropose = CAN_PROPOSE && document.body.dataset.role === 'research' && (msg.type === 'text' || msg.type === 'action') && !!msg.text;
+    proposeBtn.hidden = !canPropose;
+    proposeBtn.onclick = canPropose ? () => {
+      proposeBtn.disabled = true;
+      socket.emit('stage:propose', { messageId: msg.id }, (res) => {
+        proposeBtn.disabled = false;
+        notify(res && res.ok ? 'Proposed — the show caller approves it in Stagewatch; its state shows on the message.' : (res && res.error) || 'Could not propose it.', !(res && res.ok));
       });
     } : null;
   }
@@ -367,6 +460,8 @@ function rerenderMessage(node, msg) {
   } else if (msg.type === 'action') {
     body.appendChild(renderActionBody(msg));
   }
+  if (msg.stage) renderStageLine(node, msg.stage);
+  if (msg.proposal) renderProposalLine(node, msg.proposal);
 
   // Reactions row + add-reaction button. We render after body so it sits beneath the content.
   let rx = node.querySelector('.reactions');

@@ -111,14 +111,30 @@
             <span id="aiStatus" class="muted"></span>
           </div>
           <h3>📡 Show network</h3>
-          <p class="hint">Link Stagewatch: everyone sees the live stage timer, and the research team can put an answer on the speaker's confidence monitor (🖥 on a message). Make a <em>control</em> API key in Stagewatch → Settings → Remote → API keys.</p>
+          <p class="hint">Link Stagewatch: everyone sees the live stage timer, and the research team can put an answer on the speaker's confidence monitor (🖥 on a message) and see when the speaker acknowledges it. Make a <em>node</em> API key in Stagewatch → Settings → Remote → API keys (read, stage messages and this app's status — nothing more). The key is stored encrypted and sent in a header, never in an address. All of this works on the venue network with no internet.</p>
           <div class="row">
             <input id="swUrl" placeholder="Stagewatch address (e.g. 192.168.1.20)" size="28" />
-            <input id="swKey" type="password" placeholder="Stagewatch control key (swk_…)" autocomplete="off" size="28" />
+            <input id="swKey" type="password" placeholder="Stagewatch node key (swk_…)" autocomplete="off" size="28" />
             <button id="swSave" class="btn small" type="button">Link</button>
             <span id="swStatus" class="muted"></span>
           </div>
+          <div class="row">
+            <input id="swFp" placeholder="Stagewatch certificate fingerprint (optional: sha256:…)" size="58" autocomplete="off" />
+            <button id="swAccept" class="btn danger small" type="button" hidden>Accept the new certificate</button>
+          </div>
+          <p id="swTls" class="hint"></p>
+          <p id="deskLine" class="hint"></p>
+          <h3>🔒 Encrypted connections</h3>
+          <p class="hint">This AGMessage has its own certificate and serves HTTPS on the same port as HTTP. Browsers warn about it until it's trusted once on each device — <a href="/tls" target="_blank" rel="noopener">how to trust it</a>. Check the fingerprint matches before trusting it.</p>
+          <p class="hint">Fingerprint: <code id="tlsFp">—</code> <span id="tlsValid" class="muted"></span>
+            <button id="tlsRenew" class="btn ghost small" type="button">New certificate</button></p>
+          <label class="row"><input id="requireHttps" type="checkbox" /> Require HTTPS from other devices (plain HTTP keeps working on this laptop, and for the Cloudflare tunnel)</label>
+          <p id="swContext" class="hint" hidden></p>
           <ul id="peerList" class="peer-list"></ul>
+          <h3>🩺 Health</h3>
+          <p id="healthLine" class="hint">—</p>
+          <p class="hint">Other show systems (Patterns' Eye, Stagewatch's assistant) read this AGMessage's status — counts and action-prompt questions only, never messages or documents — with this read-only token:
+            <code id="ctxToken">—</code> <button id="ctxCopy" class="btn ghost small" type="button">📋 Copy</button> <button id="ctxNew" class="btn ghost small" type="button">New token</button></p>
         </section>
 
         <!-- Cloudflare tunnel control: lets remote users (off-LAN) join via a

@@ -20,11 +20,13 @@ REM Open the local page after a short delay so the server is ready.
 start "" /b cmd /c "timeout /t 2 /nobreak >nul & start "" http://localhost:3023"
 
 REM Launch Node with the bundled runtime. PORT can be overridden.
-REM Supervisor: if the server ever stops unexpectedly mid-meeting it restarts within 2 seconds;
-REM rooms, history and everyone's place come back from the saved log. Ctrl+C stops it for good.
+REM The watchdog (app\supervise.js) runs the server and restarts it if it crashes or stops responding
+REM (heartbeat), backing off 2-30 s; rooms, history and everyone's place come back from the saved log.
+REM It gives up after 6 crashes in 10 minutes and says why on the admin page. Ctrl+C stops it for good.
+REM This loop is the last line of defence, should the watchdog itself ever stop.
 if "%PORT%"=="" set PORT=3023
 :run
-"%~dp0node\node.exe" "%~dp0app\server.js"
+"%~dp0node\node.exe" "%~dp0app\supervise.js"
 set CODE=%ERRORLEVEL%
 if "%CODE%"=="0" goto stopped
 if "%CODE%"=="3" goto stopped

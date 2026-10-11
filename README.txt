@@ -108,8 +108,14 @@ Reliability and speed
     moment gets only what it missed when it reconnects, not the whole history.
   - Quick drop-and-rejoin no longer spams "left / joined"; comings and goings
     fold into one quiet line.
-  - The launcher restarts the server within 2 seconds if it ever stops
-    unexpectedly; everything comes back from the saved log.
+  - A watchdog runs the server: if it crashes or stops responding (no
+    heartbeat for 10 s) it is restarted - after 2 s, then 4, 8, 15, 30 s if
+    it keeps failing - and everything comes back from the saved log. After 6
+    crashes in 10 minutes it stops and the admin page says why. The last crash
+    and the server's own delay are on the admin page (Health).
+  - Saves are crash-safe (written, flushed to disk, then swapped in, with a
+    backup of the last whole copy). Saved keys are encrypted with a key kept
+    outside this folder, so a copied folder carries no usable key.
   - "Seen by" under your own messages: research knows the board has read it.
 
 AI (optional; Admin -> AI drafts, or set ANTHROPIC_API_KEY)
@@ -123,14 +129,39 @@ AI (optional; Admin -> AI drafts, or set ANTHROPIC_API_KEY)
   - What's sent to Anthropic: the conversation, and the text of the document
     you have open when you ask for a draft.
 
-Show network (Stagewatch and Patterns)
-  - Admin -> Show network: link Stagewatch (address + a control API key made
+Show network (Stagewatch, Patterns, presenter PCs) - Show Bus 1.2
+  - Admin -> Show network: link Stagewatch (address + a "node" API key made
     in Stagewatch -> Settings -> Remote -> API keys). Everyone then sees the
     live stage timer in the header, and the research team can press the screen
-    button on a message to put it on the speaker's confidence monitor
-    (with an acknowledgement the speaker taps).
-  - Stagewatch and Patterns machines on the network are found automatically
-    and listed there.
+    button on a message to put it on the speaker's confidence monitor. The
+    message then shows whether it is on screen and when the speaker has seen
+    or acknowledged it.
+  - Stagewatch, Patterns and presenter PCs on the network are found
+    automatically (UDP 9928) and listed there, live or not heard.
+  - "CLOCKS APART" on the admin page: this laptop's clock and Stagewatch's
+    disagree by more than 2 s.
+  - Other show systems can read this AGMessage's status (counts and the
+    action-prompt questions only - never messages, names or documents) with the
+    read-only token on the admin page.
+  - Show desk: when Stagewatch keeps the show's approval queue, the research
+    team can press the notepad button on a message to PROPOSE it for the
+    speaker's screen instead - the show caller approves it in Stagewatch, and
+    the message shows waiting / approved / done. The show desk can also send
+    an approved notice ("Break in 5 minutes") to every open meeting.
+  - All of this works on the venue network with no internet. Only AI drafts
+    and the Cloudflare tunnel need the internet.
+
+Encrypted connections (HTTPS)
+  - AGMessage serves HTTPS on the same port as HTTP, with its own certificate
+    (made on first start, kept outside this folder). Browsers warn until you
+    trust it once on each device: open /tls (e.g. https://192.168.1.20:3023/tls)
+    for the fingerprint and how to trust it on Windows, Mac, iPhone/iPad and
+    Android. Check the fingerprint matches the admin page first.
+  - Admin -> Encrypted connections -> "Require HTTPS": other devices must use
+    https:// (this laptop and the Cloudflare tunnel are unaffected).
+  - The link to Stagewatch is encrypted when Stagewatch offers it, and pinned
+    to Stagewatch's certificate: if that certificate changes, the admin page
+    says CERTIFICATE CHANGED and the link stays off until you accept it.
 
 Sharing this bundle
 -------------------

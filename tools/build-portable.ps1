@@ -16,7 +16,7 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force "$stage\app" | Out-Null
 
 Write-Host "==> Staging $name"
-Copy-Item app\server.js, app\package.json, app\package-lock.json, app\README.md "$stage\app"
+Copy-Item app\server.js, app\supervise.js, app\package.json, app\package-lock.json, app\README.md "$stage\app"
 Copy-Item app\lib "$stage\app\lib" -Recurse
 Copy-Item app\public "$stage\app\public" -Recurse
 New-Item -ItemType Directory -Force "$stage\app\data\rooms", "$stage\app\uploads" | Out-Null

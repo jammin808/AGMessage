@@ -114,7 +114,7 @@ test('Stagewatch link: live frames, stale on silence, send to stage with the key
   });
   const wss = new WebSocketServer({ server: srv, path: '/ws' });
   const conns = [];
-  wss.on('connection', (ws, req) => { conns.push({ ws, url: req.url }); ws.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', speakerText: '5 MIN', title: 'Keynote', next: 'Panel', color: '#22C55E' })); });
+  wss.on('connection', (ws, req) => { conns.push({ ws, url: req.url, auth: req.headers.authorization }); ws.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', speakerText: '5 MIN', title: 'Keynote', next: 'Panel', color: '#22C55E' })); });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const port = srv.address().port;
   const states = [];
@@ -125,12 +125,14 @@ test('Stagewatch link: live frames, stale on silence, send to stage with the key
     const live = states.find((s) => s.v && s.v.text === '5 MIN');
     assert.ok(live, 'got a live frame');
     assert.equal(live.status, 'connected');
-    assert.match(conns[0].url, /pin=swk_testkey/, 'key passes the viewing code');
+    assert.ok(!/pin=|swk_/.test(conns[0].url), 'the key is never in the URL');
+    assert.equal(conns[0].auth, 'Bearer swk_testkey', 'the key rides in the Authorization header');
     const r = await link.sendToStage('Two minutes left, please wrap up', { urgency: 'warn' });
     assert.ok(r.ok);
-    assert.equal(posts[0].method, 'POST');
-    assert.equal(posts[0].auth, 'Bearer swk_testkey');
-    assert.equal(decodeURIComponent(posts[0].url), '/api/message/Two minutes left, please wrap up/warn/off/ack');
+    const post = posts.find((p) => p.method === 'POST');
+    assert.ok(post, 'sent');
+    assert.equal(post.auth, 'Bearer swk_testkey');
+    assert.equal(decodeURIComponent(post.url), '/api/message/Two minutes left, please wrap up/warn/off/ack');
     assert.equal((await new nodes.StagewatchLink({}).sendToStage('x')).ok, false, 'not linked');
   } finally { link.stop(); wss.close(); srv.close(); }
 });

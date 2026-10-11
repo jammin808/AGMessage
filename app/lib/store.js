@@ -10,9 +10,14 @@
  * netcode pattern: sequence numbers, deltas while they cover the gap, a full snapshot otherwise.
  *
  * Ops: {o:'add', m} {o:'upd', id, f} {o:'del', id} {o:'reset'} {o:'meta', name}
+ *
+ * Durability: the op append is synchronous on purpose (an acknowledged message is on disk). A snapshot is written
+ * tmp -> fsync -> rename, keeping the previous snapshot as .bak only when it parses, and a torn snapshot falls back
+ * to the .bak on load — the log is replayed on top of whichever loaded.
  */
 const fs = require('fs');
 const path = require('path');
+const { writeFileAtomic, readJsonWithBak } = require('./resilience');
 
 const RING = 2000;          // ops kept in memory per room for resume
 const COMPACT_EVERY = 500;  // ops between snapshots
@@ -32,12 +37,13 @@ class RoomStore {
   /** Load every room: snapshot + replay of its log. Returns the number loaded. */
   loadAll(onMigrate) {
     let n = 0;
-    for (const f of fs.readdirSync(this.dir)) {
-      if (!f.endsWith('.json')) continue;
-      const code = f.slice(0, -5);
+    // A room whose snapshot was lost mid-rename still has its .bak: both name the room.
+    const codes = new Set(fs.readdirSync(this.dir).map((f) => (/^(.+)\.json(\.bak)?$/.exec(f) || [])[1]).filter(Boolean));
+    for (const code of codes) {
       if (!RoomStore.validCode(code)) continue;
       try {
-        const data = JSON.parse(fs.readFileSync(this.file(code, '.json'), 'utf8'));
+        const data = readJsonWithBak(this.file(code, '.json'));
+        if (!data) throw new Error('snapshot and its backup are both unreadable');
         const room = this._blank(code, typeof data.name === 'string' ? data.name : '', data.createdAt || Date.now());
         room.messages = Array.isArray(data.messages) ? data.messages.filter((m) => m && typeof m.id === 'string') : [];
         room.seq = Number.isInteger(data.seq) ? data.seq : room.messages.length;
@@ -146,10 +152,8 @@ class RoomStore {
     const room = this.rooms.get(code);
     if (!room) return;
     const out = { code: room.code, name: room.name || '', createdAt: room.createdAt, seq: room.seq, settings: room.settings, messages: room.messages, savedAt: Date.now() };
-    const tmp = this.file(code, '.json.tmp');
     try {
-      fs.writeFileSync(tmp, JSON.stringify(out));
-      fs.renameSync(tmp, this.file(code, '.json'));
+      writeFileAtomic(this.file(code, '.json'), JSON.stringify(out), { keepBak: true });
       if (room.logFd !== null) { try { fs.closeSync(room.logFd); } catch { /* ignore */ } room.logFd = null; }
       fs.writeFileSync(this.file(code, '.log'), '');
       room.logCount = 0;
@@ -165,7 +169,7 @@ class RoomStore {
     const room = this.rooms.get(code);
     if (room && room.logFd !== null) { try { fs.closeSync(room.logFd); } catch { /* ignore */ } }
     this.rooms.delete(code);
-    for (const ext of ['.json', '.log', '.json.tmp']) { try { fs.unlinkSync(this.file(code, ext)); } catch { /* ignore */ } }
+    for (const ext of ['.json', '.log', '.json.bak']) { try { fs.unlinkSync(this.file(code, ext)); } catch { /* ignore */ } }
   }
 }
 
