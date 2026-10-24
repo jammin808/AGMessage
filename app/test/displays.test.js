@@ -172,11 +172,27 @@ test('displays end to end: links, takes, confirmations, rights, the countdown, t
     await until(() => fresh.states.length === 1, 3000, 'the new link works');
   });
 
+  await t.test('a new name reaches the screen; remove stops its link; both are display.manage', async () => {
+    const d = (await emit(ctl, 'display:list', { code: hall })).displays.find((x) => x.id === made.display.id);
+    const live = await screen(d.path.slice(3));
+    await until(() => live.states.length === 1, 3000, 'the screen');
+    assert.equal((await emit(tech, 'display:update', { id: d.id, name: 'Mine now' })).ok, false, 'renaming is display.manage');
+    assert.equal((await emit(tech, 'display:remove', { id: d.id })).ok, false, 'removing is display.manage');
+    assert.equal((await emit(ctl, 'display:update', { id: d.id, hall: 'NOSUCH' })).ok, false, 'an unknown hall is refused');
+    assert.ok((await emit(ctl, 'display:update', { id: d.id, name: 'Lectern left' })).ok);
+    await until(() => live.states.some((x) => x.name === 'Lectern left'), 3000, 'the new name on the screen');
+    assert.ok((await emit(ctl, 'display:remove', { id: d.id })).ok);
+    await until(() => live.unknown, 3000, 'the removed screen told');
+    assert.ok(!(await emit(ctl, 'display:list', { code: hall })).displays.some((x) => x.id === d.id));
+    const again = await screen(d.path.slice(3));
+    await until(() => again.unknown, 3000, 'the removed link refused');
+  });
+
   await t.test('the audit log says who put what on which screen — and never a link', async () => {
     const a = await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin });
     const takes = a.body.entries.filter((e) => e.action === 'display.take');
     assert.ok(takes.some((e) => e.actor.name === 'sam' && /Five minutes/.test(e.words)));
-    assert.ok(a.body.entries.some((e) => e.action === 'display.rotate'));
+    for (const action of ['display.rotate', 'display.update', 'display.remove']) assert.ok(a.body.entries.some((e) => e.action === action), action);
     const raw = fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8');
     assert.ok(!raw.includes(token), 'no screen link in the audit log');
     assert.ok(!/\/d\/[A-Za-z0-9_-]{43}/.test(raw));

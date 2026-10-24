@@ -5,37 +5,87 @@ What this is
 ------------
 A self-contained copy of AGMessage that runs on any Windows laptop without
 installing Node.js or anything else. Unzip the folder, double-click the
-launcher, and share the URL with your team.
+launcher, and share the URL with your team. Messages, files, help requests
+and screens for every hall of the event; crew sign in with their own
+accounts, presenters and guests join with a hall's code.
 
-How to use
-----------
-1. Unzip this folder to somewhere convenient on the meeting laptop
-   (e.g. C:\Tools\AGMessage, or just your Desktop).
+The build this copy is (e.g. 0.5.0+17.abc1234) is in the zip's name, the
+black window's first lines, and the admin page.
+
+First time on a new laptop
+--------------------------
+1. Unzip this folder somewhere convenient (e.g. C:\Tools\AGMessage).
 
 2. Double-click:
 
        start-agmessage.bat
 
-   A black terminal window will open and say "AGMessage is starting..."
-   Your default browser will open at http://localhost:3023 after a
-   couple of seconds. LEAVE THE TERMINAL WINDOW OPEN — the server is
-   running inside it.
+   A black window opens and says "AGMessage is starting...". LEAVE IT
+   OPEN — the server runs inside it. Your browser opens at
+   http://localhost:3023.
 
-3. In the terminal window you will also see a line like:
+3. On this laptop only, the sign-in page asks for the FIRST ADMIN: your
+   name, a username and a password (10 characters or more; a few words
+   together is easiest to remember). That account can do everything.
+
+4. Halls -> Accounts: add everyone who works the event. Pick a role
+   (Project manager, Senior tech, Tech, Staff, Viewer) and their halls.
+   Each new person gets a one-time password, shown once — give it to them;
+   they choose their own at their first sign-in. Project managers and
+   senior techs see every hall; techs, staff and viewers see their own.
+
+5. Halls -> New hall: one per hall in use (e.g. "Hall 3", "Hall 4"). Each
+   hall gets a 6-character code (e.g. K7P2QX) for the people who join
+   without an account: presenters on stage, board members, guests.
+
+6. In the black window you will see a line like:
 
        LAN:  http://192.168.1.42:3023
 
-   Share that URL with anyone on the same Wi-Fi / wired network.
-   They open it in any browser — phone, tablet, laptop, it doesn't
-   matter — and join the meeting.
+   Share that URL with everyone on the venue's Wi-Fi or wired network.
+   They open it in any browser — phone, tablet, laptop.
 
-4. One person clicks "Create new" on the join page to generate a
-   6-character meeting code (e.g. K7P2QX). Share that code with the
-   team. Everyone enters it, picks their role (on-stage director,
-   research team, or observer), and joins.
+Every day of the event
+----------------------
+- Crew: open the LAN URL, sign in. The halls board shows every hall you
+  can see: its countdown, who is in, the last message, open help requests
+  and its screens. Click a hall to open it.
+- Presenters and guests: open the LAN URL, choose "Join with a code", type
+  the hall's code, a name, and where you are (on stage, backstage,
+  observer).
+- Help: in a hall, the red Help button asks for Sound, Vision, Lighting,
+  Stage, Presenter or IT. It stays red on the board until someone presses
+  "On my way", and on the board until it is resolved.
+- When the event is over, close the black window (or press Ctrl+C in it).
+  Halls, history and accounts are kept for next time.
 
-5. When the meeting is over, close the terminal window (or press
-   Ctrl+C inside it). The server stops and rooms are cleared.
+Screens (projector PC, lectern monitor, foyer TV)
+-------------------------------------------------
+In a hall, Screens -> Add screen. The screen's link is copied: open it in
+the browser on that screen (double-click for full screen) and leave it.
+From the hall you can then show on it: the holding image, a message, an
+image or PDF page shared in the hall, the hall's countdown with a message
+under it (the speaker's comfort monitor), the clock, or black. The console
+says "on screen" only when the screen confirms it. Anyone with a screen's
+link can see that screen: give it only to that machine. "New link" stops
+the old one at once.
+
+Stagewatch (the countdown) for each hall
+----------------------------------------
+Halls -> a hall's Set up: the address of that hall's Stagewatch and a
+"node" API key made in Stagewatch -> Settings -> Remote -> API keys. Halls
+without their own use the one in Admin -> Show network. The hall's
+countdown then shows in the hall, on the board and on its screens; a
+message can go straight to the speaker's screen, or to the Stagewatch
+operator to approve and pass on (confidence monitor, moderator, backstage,
+interpreter, a department, or just for the operator).
+
+Patterns and PlayMap
+--------------------
+Admin -> Show network -> a Patterns or PlayMap that is heard -> Link...:
+paste its pairing token. Its state then shows on the halls board; project
+managers and senior techs can send it the commands it lists (risky ones go
+to the show desk for a person to approve).
 
 Remote participants (optional)
 ------------------------------
@@ -43,19 +93,18 @@ If someone can't be on the venue's network, expose the local server
 through a free Cloudflare tunnel — built right into the bundle, no
 separate install needed.
 
-  1. Open http://localhost:3023/admin and log in with the admin token
-     printed in the server's terminal window.
-  2. Scroll to the "Remote access (Cloudflare tunnel)" section near
-     the bottom of the dashboard and toggle it ON.
+  1. Open http://localhost:3023/admin on this laptop.
+  2. Scroll to "Remote access (Cloudflare tunnel)" and toggle it ON.
   3. Within 5-10 seconds a public HTTPS URL appears
      (e.g. https://xxxxx.trycloudflare.com) — click Copy and send it
-     to the remote user along with the 6-character meeting code.
-  4. Toggle off when the meeting ends to take the tunnel down.
+     to the remote person with their hall's code or their account.
+  4. Toggle off when the event ends to take the tunnel down.
 
-The bundle ships cloudflared.exe in bin\ — no manual download or PATH
-setup required. If you'd rather run cloudflared yourself (e.g. with
-a named tunnel and a stable subdomain), leave the toggle off and run
-your own from a separate terminal — the server doesn't depend on it.
+Accounts with admin rights cannot sign in through the tunnel unless an
+admin allows it (Admin -> Accounts and access). The bundle ships
+cloudflared.exe in bin\. If you'd rather run cloudflared yourself (e.g. a
+named tunnel with a stable subdomain), leave the toggle off and run your
+own from a separate window — the server doesn't depend on it.
 
 Troubleshooting
 ---------------
@@ -72,11 +121,16 @@ Troubleshooting
       set PORT=3023
   to another free port (e.g. 4023), then relaunch.
 
+- Forgot a password: an admin sets a new one-time password on the
+  Accounts page. Lost the only admin
+  password: on this laptop, the admin token printed in the black window
+  still opens the admin page.
+
 - Uploaded files are kept in:
       app\uploads\
-  Delete this folder after the meeting if you want to clear attachments.
+  Delete this folder after the event if you want to clear attachments.
 
-- Conversation history is now persisted to:
+- Conversation history is kept in:
       app\data\rooms\
   Each room is saved as a JSON file. If the laptop crashes or you close the
   terminal by mistake, just relaunch start-agmessage.bat — every active room
@@ -87,8 +141,30 @@ Troubleshooting
   (app\data\rooms\<CODE>.log) and folded into the .json snapshot regularly,
   so even a power cut loses nothing but the last instant.
 
-What's new in 0.2
+What's new in 0.5
 -----------------
+Halls, accounts and screens
+  - Individual accounts beside the codes: roles, halls per person, single
+    rights an admin can add or remove, and an audit log of every sign-in,
+    change of rights and screen (Halls -> Accounts -> Audit log; "Check the
+    log" says whether any line was changed or removed).
+  - Each hall its own Stagewatch; the halls board; help requests.
+  - Screens: a link per screen, driven from the hall, confirmed on screen.
+  - Send to Stagewatch with a destination for the operator to pass on.
+  - Patterns and PlayMap linked: their state on the board, their commands.
+  - Fixed: 0.4's "propose to the show desk" lines were refused by
+    Stagewatch; PlayMap was not heard on the show network.
+
+Under the bonnet
+  - Node.js 24 LTS and Express 5; every package current.
+  - Every build is numbered: releases 0.5.0+17.abc1234, development builds
+    0.5.0-dev.17+abc1234.
+  - The analyzers, a secret scan, CodeQL and a dependency audit run on
+    every change; each release carries a list of every package it ships
+    (SBOM), the zip's SHA-256 and a build-provenance attestation.
+
+Earlier (0.2 - 0.4)
+-------------------
 Security
   - Only people in a meeting can upload, and only PDF, images, Word, Excel,
     PowerPoint, CSV and text — checked by content, not just by name. Files
@@ -165,13 +241,15 @@ Encrypted connections (HTTPS)
 
 Sharing this bundle
 -------------------
-app\data and app\uploads hold real meeting history and files. Before giving
-the bundle to anyone, double-click make-shareable-copy.bat: it makes a copy
-next to this folder without them.
+app\data and app\uploads hold real meeting history, accounts, the audit
+log and files. Before giving the bundle to anyone, double-click
+make-shareable-copy.bat: it makes a copy next to this folder without them.
 
-Tests (for developers): cd app, then: npm test
+Tests (for developers): cd app, then: npm run check
 
 From a git clone (developers): the two bundled programs aren't in git. Run
-  powershell -ExecutionPolicy Bypass -File toolsetch-runtime.ps1
-once to download them (pinned versions, checksum-verified), or toolsuild-portable.ps1 to make the zip.
-CI (GitHub Actions) runs the tests, the browser smoke test and builds the zip on every push.
+  powershell -ExecutionPolicy Bypass -File tools\fetch-runtime.ps1
+once to download them (pinned versions, checksum-verified), or
+tools\build-portable.ps1 to make the zip. CI (GitHub Actions) runs the
+analyzers, the tests and the browser smoke test, and builds the zip, on
+every push.

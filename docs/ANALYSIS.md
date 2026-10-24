@@ -15,7 +15,7 @@ left out, and the defects the fences found.*
 | Secret scan | `node tools/scan-secrets.js` | CI · analyze | a key, token or private key in a tracked file |
 | Version | `node tools/stamp-build.js --print` / `--check-tag` | CI · analyze | a release tag that names another version |
 | Unit, end-to-end, watchdog, TLS, version, lint-rule tests | `npm test` | CI · Linux (Node 24, 26), Windows | any failure |
-| Coverage gate | `npm run coverage` | CI · Linux (Node 24) | lines < 80 %, branches < 65 %, functions < 75 % of `server.js`, `supervise.js`, `lib/` |
+| Coverage gate | `npm run coverage` | CI · Linux (Node 24) | lines < 85 %, branches < 70 %, functions < 78 % of `server.js`, `supervise.js`, `lib/` |
 | Browser smoke | `npm run smoke` | CI · Linux (Chrome), Windows (Edge) | a page that does not join, render, or that logs a script error or a CSP violation |
 | CodeQL `security-extended` | — | Security · codeql | an alert (shown under the repository's Security tab) |
 | Dependency audit | `npm run audit` | Security · audit | a high or critical advisory in a shipped package; a package whose registry signature or provenance does not verify |
@@ -110,5 +110,11 @@ with its reason (`lib/version.js` joins the list: the version and its stamp, rea
 Measured with Node's own coverage (`--experimental-test-coverage`), which follows the server into the child processes
 the end-to-end tests start. Baseline before the 0.5 features: **lines 83.1 %, branches 68.8 %, functions 77.2 %**
 (`server.js` 71.9 / 54.4 / 58.3; `lib/ai.js` 40 % — the drafts need a key and the internet, so their network path is
-untested by design). The gate sits a little under the baseline and is raised as tests are added, never lowered to make
+untested by design). The gate sits a little under the measure and is raised as tests are added, never lowered to make
 a build green.
+
+At the end of 0.5, with 101 tests (was 53): **lines 89.1 %, branches 71.9 %, functions 81.4 %** (`server.js`
+82.2 / 65.1 / 70.6; `supervise.js` 100 / 54.8 / 88.9). The gate went from 80 / 65 / 75 to **85 / 70 / 78**. What the
+tests still do not reach in `server.js` is mostly the admin page's own room handlers (link a person to a room, delete
+with files, accept a changed certificate), the tunnel, reactions and forwarding between rooms — each exercised by the
+browser smoke or by hand, none yet by a test that counts.
