@@ -63,6 +63,13 @@ function effective(account) {
   return { caps, allHalls, halls: new Set(Array.isArray(account.halls) ? account.halls : []) };
 }
 
+/** Whether the account, enabled, would hold a right only an admin may hand out (users.manage, settings.manage). */
+function holdsAdminOnly(account) {
+  if (!account) return false;
+  const caps = effective({ ...account, disabled: false }).caps;
+  return [...ADMIN_ONLY].some((c) => caps.has(c));
+}
+
 /** May this account do `cap` (in `hall`, for a hall-scoped capability)? */
 function can(account, cap, hall) {
   if (!isCap(cap)) return false;
@@ -88,6 +95,10 @@ function mayChange(actor, target, change, { activeAdmins = 1 } = {}) {
   }
   if ('role' in change && !isRole(change.role)) return 'Unknown role.';
   if ((change.role === 'admin' || (target && target.role === 'admin')) && !actorIsAdmin) return 'Only an admin may make or change an admin.';
+  // An account that may manage accounts or settings is changed (reset, signed out, removed, re-enabled) by an admin
+  // only: otherwise one holder of users.manage could take over another's settings.manage. Read with the account
+  // enabled, so a disabled holder is not re-enabled by a non-admin either. Changing one's own name is not this.
+  if (target && target.id !== actor.id && !actorIsAdmin && holdsAdminOnly(target)) return 'Only an admin may change an account that manages accounts or settings.';
   for (const c of [].concat(change.grant || [])) {
     if (!isCap(c)) return 'Unknown right: ' + String(c).slice(0, 40);
     if (ADMIN_ONLY.has(c) && !actorIsAdmin) return 'Only an admin may grant ' + c + '.';
@@ -109,4 +120,4 @@ function rightsView(account) {
   return { role: account ? account.role : '', roleLabel: account && isRole(account.role) ? ROLES[account.role].label : '', caps: Array.from(e.caps).sort(), allHalls: e.allHalls, halls: Array.from(e.halls).sort() };
 }
 
-module.exports = { CAPS, ROLES, HALL_SCOPED, ADMIN_ONLY, isCap, isRole, effective, can, seesHall, mayChange, roomRoleFor, rightsView };
+module.exports = { CAPS, ROLES, HALL_SCOPED, ADMIN_ONLY, isCap, isRole, effective, can, seesHall, holdsAdminOnly, mayChange, roomRoleFor, rightsView };

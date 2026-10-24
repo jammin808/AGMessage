@@ -5,6 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const rbac = require('../lib/rbac');
@@ -46,6 +47,15 @@ test('rbac: rights never escalate', () => {
   assert.match(rbac.mayChange(admin, { id: 'a9', role: 'admin' }, { role: 'staff' }, { activeAdmins: 1 }), /last active admin/);
   assert.equal(rbac.mayChange(admin, { id: 'a9', role: 'admin' }, { role: 'staff' }, { activeAdmins: 2 }), null);
   assert.match(rbac.mayChange(admin, tech, { grant: ['wizardry'] }), /Unknown right/);
+  // An account that may manage accounts or settings is changed by an admin only — reset, signed out, removed, re-enabled.
+  const peer = { id: 'a4', role: 'staff', grant: ['users.manage'] };
+  const keeper = { id: 'a5', role: 'manager', grant: ['settings.manage'] };
+  assert.match(rbac.mayChange(manager, keeper, {}), /Only an admin may change an account that manages/, 'a reset or a sign-out');
+  assert.match(rbac.mayChange(manager, peer, { disabled: true }), /Only an admin may change an account that manages/, 'a removal');
+  assert.match(rbac.mayChange(manager, { ...keeper, disabled: true }, { disabled: false }), /Only an admin/, 'a disabled holder is not re-enabled by a non-admin');
+  assert.equal(rbac.mayChange(manager, manager, { name: 'Pat P.' }), null, 'one\'s own name');
+  assert.equal(rbac.mayChange(admin, keeper, {}), null, 'an admin may');
+  assert.ok(rbac.holdsAdminOnly(keeper) && rbac.holdsAdminOnly({ ...peer, disabled: true }) && !rbac.holdsAdminOnly(tech));
 });
 
 // ---------------------------------------------------------------- passwords and sessions
@@ -123,6 +133,17 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
   // Nobody has an account: the page says so; the first admin is made on this laptop.
   const me0 = await api(base, 'GET', '/api/auth/me');
   assert.deepEqual(me0.body, { ok: true, account: null, setup: true });
+  // A page served under another name that resolves to this laptop (its Origin matching its Host) is not the laptop.
+  const rebound = await new Promise((resolve, reject) => {
+    const body = JSON.stringify({ username: 'ivy', name: 'Ivy', password: 'the green room kettle' });
+    const host = 'agm.example:' + new URL(base).port;
+    const rq = http.request(base + '/api/setup', { method: 'POST', headers: { host, origin: 'http://' + host, 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } }, (res) => {
+      res.resume(); res.on('end', () => resolve(res.statusCode));
+    });
+    rq.on('error', reject); rq.end(body);
+  });
+  assert.equal(rebound, 403, 'the first admin is not made from a page under another name');
+  assert.equal((await api(base, 'GET', '/api/auth/me')).body.setup, true, 'still no accounts');
   const weak = await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'short' });
   assert.equal(weak.status, 400);
   const setup = await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
@@ -233,5 +254,26 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     const raw = fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8');
     for (const secret of ['the green room kettle', 'mixing desk on stage left', 'clipboard and coffee', tech.body.password, TOKEN]) assert.ok(!raw.includes(secret), 'no secret in the audit log');
     assert.equal((await api(base, 'GET', '/api/audit', undefined, { cookie: pat })).status, 200, 'a project manager reads it too');
+  });
+
+  await t.test('a holder of users.manage cannot reset, sign out, change or remove an account that manages accounts or settings', async () => {
+    const una = await api(base, 'POST', '/api/users', { username: 'una', name: 'Una Rota', role: 'manager', grant: ['users.manage'], password: 'the rota on the wall' }, { cookie: admin });
+    const sid = await api(base, 'POST', '/api/users', { username: 'sid', name: 'Sid Patch', role: 'manager', grant: ['settings.manage'], password: 'the patch bay labels' }, { cookie: admin });
+    const stu = await api(base, 'POST', '/api/users', { username: 'stu', name: 'Stu Foyer', role: 'staff', password: 'the coffee urn table' }, { cookie: admin });
+    assert.ok(una.body.ok && sid.body.ok && stu.body.ok, JSON.stringify([una.body, sid.body, stu.body]));
+    const u = (await api(base, 'POST', '/api/auth/login', { username: 'una', password: 'the rota on the wall' })).cookie;
+    const list = (await api(base, 'GET', '/api/users', undefined, { cookie: u })).body.users;
+    const row = (name) => list.find((x) => x.username === name);
+    assert.match(row('sid').locked, /Only an admin/, 'the page is told, and offers no Edit');
+    assert.match(row('ana').locked, /Only an admin/);
+    assert.equal(row('stu').locked, '');
+    for (const [method, tail, body] of [['POST', '/password', {}], ['POST', '/signout', {}], ['PATCH', '', { name: 'Sid' }], ['DELETE', '', undefined]]) {
+      const r = await api(base, method, '/api/users/' + sid.body.user.id + tail, body, { cookie: u });
+      assert.equal(r.status, 403, method + ' /api/users/:id' + tail + ' ' + JSON.stringify(r.body));
+    }
+    assert.equal((await api(base, 'POST', '/api/users/' + setup.body.account.id + '/signout', {}, { cookie: u })).status, 403, 'nor sign an admin out');
+    assert.equal((await api(base, 'POST', '/api/users/' + stu.body.user.id + '/password', {}, { cookie: u })).status, 200, 'an account without those rights is still theirs to reset');
+    const sidNow = (await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body.users.find((x) => x.username === 'sid');
+    assert.deepEqual([sidNow.mustChange, sidNow.disabled, sidNow.name], [false, false, 'Sid Patch'], 'sid keeps their own password, account and name');
   });
 });

@@ -59,7 +59,15 @@ signatures, dependency review and Dependabot; releases with a CycloneDX SBOM, SH
 fences found and fixed six unescaped values, a pattern-built cookie reader, names stripped of C0 controls only (now
 also C1 and bidi overrides) and a predictable jitter.
 
-Tests: 101 (was 53) plus the browser smoke (20 checks, was 7).
+**Found by an independent review before release, and fixed**
+- A socket that never signed in could stop the server by sending `null` to an event (0.4's handlers had the same
+  shape); every event now reaches its handler through one guard that refuses the request and keeps the event running.
+- The first admin could be made from a page served under another name that leads back to the laptop; the laptop's own
+  requests are now also recognised by being addressed to `localhost`, `127.0.0.1` or `[::1]`.
+- An account given `users.manage` could reset, sign out, change or remove an account holding `settings.manage` or
+  `users.manage`; only an admin may now, and the Accounts page shows those people as "Admin only".
+
+Tests: 103 (was 53) plus the browser smoke (20 checks, was 7).
 
 ## 0.4.0 — 2026-10-11 — encrypted connections and the show desk (Show Bus 1.2)
 

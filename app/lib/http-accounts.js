@@ -144,7 +144,10 @@ function mountAccounts(app, o) {
 
   app.get('/api/users', signedIn('users.manage'), (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ ok: true, users: accounts.list().map((u) => ({ ...u, sessions: sessions.of(u.id).length })), roles: roleList(), caps: rbac.CAPS, halls: hallNames() });
+    // `locked`: why this viewer may not change that person (empty when they may) — the page offers what the server allows.
+    const activeAdmins = accounts.activeAdmins();
+    const users = accounts.list().map((u) => ({ ...u, sessions: sessions.of(u.id).length, locked: rbac.mayChange(req.agm.account, u, {}, { activeAdmins }) || '' }));
+    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames() });
   });
 
   app.post('/api/users', signedIn('users.manage'), async (req, res) => {
@@ -189,6 +192,8 @@ function mountAccounts(app, o) {
   app.post('/api/users/:id/signout', signedIn('users.manage'), (req, res) => {
     const target = accounts.get(req.params.id);
     if (!target) return res.status(404).json({ ok: false, error: 'No such account.' });
+    const refusal = rbac.mayChange(req.agm.account, target, {}, { activeAdmins: accounts.activeAdmins() });
+    if (refusal) return res.status(403).json({ ok: false, error: refusal });
     accounts.signOutEverywhere(target.id);
     onAccountChanged(target.id, 'signout');
     audit.write(actorOf(req.agm), 'user.signout', target.username, 'signed out everywhere', guard.clientIp(req));

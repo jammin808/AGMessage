@@ -134,12 +134,14 @@ loopDelay.enable();
 const loopRing = new resilience.Ring(120);    // p99 event-loop delay per 5 s, the last 10 minutes
 setInterval(() => { loopRing.push(loopDelay.percentile(99) / 1e6); loopDelay.reset(); }, 5000).unref();
 let rejections = 0;
+let handlerFaults = 0;   // socket events refused because their handler threw (guardHandlers)
 function healthFacts() {
   return {
     restarts: RESTARTS,
     lastCrash: lastCrash ? { at: lastCrash.at, message: String(lastCrash.message || '').slice(0, 200) } : null,
     watchdog: watchdogGaveUp ? { at: watchdogGaveUp.at, reason: String(watchdogGaveUp.reason || '').slice(0, 200) } : null,
     rejections,
+    handlerFaults,
     loopMs: loopRing.stats(),
     stageRttMs: stageLink.rtt.stats(),
     stage: stageLink.status,
@@ -466,7 +468,37 @@ const joinLock = new guard.Lockout(10, 60_000);
 let aiRunning = 0;
 const AI_MAX_CONCURRENT = 3;
 
+/**
+ * Every event a socket sends reaches its handler through here, so what a client sends can refuse that one request
+ * but never end the process for everyone. A null argument arrives as undefined (a handler's `= {}` default then
+ * applies), and a handler that throws or rejects is answered with a refusal, logged and counted (admin health),
+ * instead of reaching the uncaught-exception path and the watchdog. `socket.off` still finds a guarded listener.
+ */
+function guardHandlers(socket) {
+  const on = socket.on.bind(socket);
+  socket.on = (event, fn) => {
+    const guarded = (...args) => {
+      const clean = args.map((a) => (a === null ? undefined : a));
+      const ack = typeof clean[clean.length - 1] === 'function' ? clean[clean.length - 1] : null;
+      const refuse = (e) => {
+        handlerFaults++;
+        if (handlerFaults <= 20 || handlerFaults % 100 === 0) console.error('  [socket] ' + String(event).slice(0, 40) + ' refused (' + handlerFaults + '): ' + (e && e.message ? e.message : e));
+        if (ack) { try { ack({ ok: false, error: 'That request could not be handled.' }); } catch { /* the client has gone */ } }
+      };
+      try {
+        const r = fn(...clean);
+        if (r && typeof r.then === 'function') r.then(undefined, refuse);
+        return r;
+      } catch (e) { refuse(e); return undefined; }
+    };
+    guarded.listener = fn.listener || fn;
+    return on(event, guarded);
+  };
+  return socket;
+}
+
 io.on('connection', (socket) => {
+  guardHandlers(socket);
   // A display's browser: it may only receive what its own display shows and say what it showed — nothing else is
   // listened to on this socket (fail closed).
   const displayToken = socket.handshake.auth && typeof socket.handshake.auth.display === 'string' ? socket.handshake.auth.display : '';

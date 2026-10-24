@@ -36,14 +36,17 @@ halls (or "every hall, including new ones"). The rights, as the server checks th
 | `audit.read` | read the audit log |
 
 Rules that keep rights from growing by themselves: deny by default; only an admin makes an admin or hands out
-`users.manage` or `settings.manage`; nobody changes their own role, rights or halls; the last admin who can sign in
-stays one. A code guest's rights come from where they joined: backstage posts, shares files and sends to Stagewatch; on
+`users.manage` or `settings.manage`, and only an admin changes, resets, signs out, turns back on or removes an account
+that holds one of them (the Accounts page shows such a person as "Admin only" to anyone else); nobody changes their own
+role, rights or halls; the last admin who can sign in stays one. A code guest's rights come from where they joined: backstage posts, shares files and sends to Stagewatch; on
 stage posts and shares files; an observer reads. Screens, halls and other show systems need an account.
 
 ## The first admin
 
 A new AGMessage has no accounts. Open it **on the AGMessage laptop** (`http://localhost:3023`): the sign-in page asks
-for the first admin's name, username and password. The admin then adds everyone else on the Accounts page (Halls →
+for the first admin's name, username and password. "On the laptop" means a request from the laptop's own loopback,
+addressed to `localhost`, `127.0.0.1` or `[::1]`, with no proxy or tunnel headers — a page served under any other name
+is refused, even when that name leads back to the laptop. The admin then adds everyone else on the Accounts page (Halls →
 Accounts); each new person gets a **one-time password**, shown once, which they replace at their first sign-in. The host
 laptop's admin token (printed in its window) still opens the admin page there.
 

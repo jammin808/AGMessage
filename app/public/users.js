@@ -57,7 +57,7 @@
       const td = document.createElement('td');
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'btn small'; b.textContent = 'Edit';
-      b.onclick = () => openEditor(u);
+      if (u.locked) { b.disabled = true; b.textContent = 'Admin only'; b.title = u.locked; } else b.onclick = () => openEditor(u);
       td.appendChild(b);
       tr.appendChild(td);
       tb.appendChild(tr);

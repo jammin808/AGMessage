@@ -51,11 +51,15 @@ test('token bucket and lockout', () => {
   l.fail('x', 0); assert.ok(!l.locked('x', 1)); l.fail('x', 2); assert.ok(l.locked('x', 3)); assert.ok(!l.locked('x', 2000));
 });
 
-test('host-only check rejects anything that came through a proxy or tunnel', () => {
-  const req = (addr, headers = {}) => ({ socket: { remoteAddress: addr }, headers });
+test('host-only check: from loopback, to a loopback name, and nothing that came through a proxy or tunnel', () => {
+  const req = (addr, headers = { host: 'localhost:3023' }) => ({ socket: { remoteAddress: addr }, headers });
   assert.ok(guard.isHostMachine(req('127.0.0.1')));
-  assert.ok(!guard.isHostMachine(req('127.0.0.1', { 'cf-connecting-ip': '1.2.3.4' })));
-  assert.ok(!guard.isHostMachine(req('127.0.0.1', { 'x-forwarded-for': '1.2.3.4' })));
+  for (const host of ['127.0.0.1:3023', '[::1]:3023', 'LOCALHOST', 'localhost']) assert.ok(guard.isHostMachine(req('127.0.0.1', { host })), host);
+  for (const host of ['agm.example:3023', '127.0.0.1.nip.io:3023', 'localhost.example', 'localhost:3023 x', '']) {
+    assert.ok(!guard.isHostMachine(req('127.0.0.1', { host })), 'a page served under another name is not this laptop: ' + host);
+  }
+  assert.ok(!guard.isHostMachine(req('127.0.0.1', { host: 'localhost:3023', 'cf-connecting-ip': '1.2.3.4' })));
+  assert.ok(!guard.isHostMachine(req('127.0.0.1', { host: 'localhost:3023', 'x-forwarded-for': '1.2.3.4' })));
   assert.ok(!guard.isHostMachine(req('192.168.1.5')));
   assert.equal(guard.clientIp(req('127.0.0.1', { 'cf-connecting-ip': '1.2.3.4' })), 'cf:1.2.3.4');
 });

@@ -109,11 +109,25 @@ function clientIp(req) {
   return local && typeof cf === 'string' && cf.length < 64 ? 'cf:' + cf : raw;
 }
 
-/** True only for a request typed on this laptop: loopback and no proxy/tunnel headers. */
+/**
+ * The Host header names this machine's loopback — localhost, 127.0.0.1 or [::1], any port. A page served under another
+ * name that resolves to 127.0.0.1 (DNS rebinding) sends its own name here, and its Origin matches it, so loopback
+ * alone does not say the request was typed on this laptop.
+ */
+function loopbackHost(host) {
+  const h = String(host || '').toLowerCase();
+  const name = h.startsWith('[') ? h.slice(0, h.indexOf(']') + 1) : h.split(':')[0];
+  const port = h.slice(name.length);
+  if (port && !/^:\d{1,5}$/.test(port)) return false;
+  return name === 'localhost' || name === '127.0.0.1' || name === '[::1]';
+}
+
+/** True only for a request typed on this laptop: from loopback, to a loopback name, and no proxy/tunnel headers. */
 function isHostMachine(req) {
   const raw = (req.socket && req.socket.remoteAddress) || '';
   if (!(raw === '127.0.0.1' || raw === '::1' || raw === '::ffff:127.0.0.1')) return false;
   const h = req.headers || {};
+  if (!loopbackHost(h.host)) return false;
   return !h['x-forwarded-for'] && !h['cf-connecting-ip'] && !h['cf-ray'] && !h['forwarded'] && !h['x-real-ip'];
 }
 
@@ -182,6 +196,6 @@ function validUploadUrl(url) {
 
 module.exports = {
   loadSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
-  Bucket, Lockout, clientIp, isHostMachine, pageHeaders, CSP,
+  Bucket, Lockout, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP,
   UPLOAD_TYPES, uploadType, validUploadUrl, extOf,
 };
