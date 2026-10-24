@@ -27,7 +27,7 @@ const { Server } = require('socket.io');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const os = require('os');
-const { customAlphabet } = require('nanoid');
+const { customAlphabet } = require('./lib/ids');
 
 const { RoomStore } = require('./lib/store');
 const guard = require('./lib/guard');
@@ -376,6 +376,16 @@ app.post('/api/upload', (req, res, next) => {
     }
     res.json({ url: `/uploads/${req.file.filename}`, filename: String(req.file.originalname).slice(0, 120), mime: type.mime.split(';')[0], size: req.file.size });
   });
+});
+
+// Errors end in one short JSON line, never a stack trace: a malformed body is the caller's (400), anything else is ours
+// (500, logged). Express 5 forwards a rejected async handler here too.
+// eslint-disable-next-line no-unused-vars -- Express tells an error handler by its four parameters
+app.use((err, _req, res, _next) => {
+  const status = Number.isInteger(err && err.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
+  if (status === 500) console.error('  [http] ' + (err && err.stack ? err.stack : err));
+  if (res.headersSent) return;
+  res.status(status).json({ ok: false, error: status === 500 ? 'Server error.' : status === 413 ? 'That request is too large.' : 'Bad request.' });
 });
 
 // ---------------------------------------------------------------- Socket.io

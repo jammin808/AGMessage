@@ -42,12 +42,16 @@ async function ask(apiKey, system, user, schema, effort, maxTokens, signal) {
   const c = getClient(apiKey);
   if (!c) return { error: 'Add an Anthropic API key in Admin → AI (or set ANTHROPIC_API_KEY).' };
   try {
-    const res = await c.messages.create({
+    // A policy decline is re-run server-side on the model Anthropic recommends for that kind of decline (fallbacks
+    // "default"), so a draft is not lost to a false positive; the whole chain declining is still a refusal below.
+    const res = await c.beta.messages.create({
       model: MODEL,
       max_tokens: maxTokens,
       system,
       messages: [{ role: 'user', content: user }],
       output_config: { effort, format: { type: 'json_schema', schema } },
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
     }, { signal, timeout: 90_000 });
     if (res.stop_reason === 'refusal') return { error: 'Claude declined this request.' };
     if (res.stop_reason === 'max_tokens') return { error: 'The answer was cut short — try a narrower request.' };

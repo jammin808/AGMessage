@@ -29,7 +29,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: app/package-lock.json
 
@@ -61,7 +61,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24.22.1'
 
       # Downloads Node and cloudflared at pinned versions (checksum-verified), stages the app with production
       # dependencies and empty data/uploads folders, and zips it.
