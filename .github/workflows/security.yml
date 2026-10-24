@@ -1,0 +1,70 @@
+# AGMessage security checks beyond the build's own fences (ci.yml): CodeQL's security-extended queries over the server
+# and the pages, the dependency audit with registry signatures, and the dependency review on every pull request. Weekly
+# as well as on change, so an advisory published against a shipped package is seen before the next event, not after.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL (security-extended)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:javascript-typescript
+
+  audit:
+    name: Dependency audit and registry signatures
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --no-audit --no-fund
+      # What ships (production dependencies): a high or critical advisory fails the run.
+      - name: npm audit (shipped packages, high and critical)
+        run: npm audit --omit=dev --audit-level=high
+      # Every installed package's registry signature and provenance attestation, so a tampered tarball fails here.
+      - name: npm audit signatures
+        run: npm audit signatures
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: on-failure

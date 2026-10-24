@@ -108,6 +108,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
   });
 
   await t.test('file messages must point at a real upload', async () => {
+    // eslint-disable-next-line no-script-url -- a hostile input this test proves is refused
     for (const url of ['javascript:alert(1)', 'https://evil.example/x.pdf', '/uploads/../server.js', '/uploads/1-abc-x.pdf']) {
       const r = await emit(research, 'message', { type: 'file', url, filename: 'x.pdf' });
       assert.equal(r.ok, false, url);
@@ -226,7 +227,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(local.ok && 'restarts' in local && 'loopMs' in local, 'detail on the host');
     const remote = await (await fetch(base + '/api/health', { headers: { 'cf-connecting-ip': '203.0.113.9' } })).json();
     assert.deepEqual(Object.keys(remote).sort(), ['build', 'ok', 'uptime', 'version']);
-    assert.match(remote.build, new RegExp('^' + remote.version.replace(/\./g, '\\.') + '(-dev|\\+)'), 'the build names its version and channel');
+    assert.ok(remote.build.startsWith(remote.version + '-dev') || remote.build.startsWith(remote.version + '+'), 'the build names its version and channel: ' + remote.build);
   });
 
   await t.test('saved keys are sealed at rest, never in clear', async () => {
@@ -254,7 +255,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     await new Promise((r) => fake.listen(0, '127.0.0.1', r));
     try {
       await emit(ctl, 'admin:settings', { stagewatchUrl: '127.0.0.1:' + fake.address().port, stagewatchKey: 'swk_node' });
-      for (let i = 0; i < 60 && !ws; i++) await new Promise((r) => setTimeout(r, 50));
+      for (let i = 0; i < 60; i++) { if (ws) break; await new Promise((r) => setTimeout(r, 50)); }
       assert.ok(ws, 'AGMessage linked to the fake Stagewatch');
       await new Promise((r) => setTimeout(r, 300));
       const acks = [];

@@ -1,5 +1,6 @@
 // Admin 0.2: AI minutes, role invites, closing a meeting, the AI key and the show network.
 // Shares admin.js's globals (socket, currentRoom, escapeHtml) — loaded after it.
+/* global socket, currentRoom */
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);

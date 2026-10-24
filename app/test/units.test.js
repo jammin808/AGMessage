@@ -37,6 +37,7 @@ test('uploads: name and content must agree', () => {
   assert.ok(guard.uploadType('notes.txt', Buffer.from('Capex: £4.2m')));
   assert.equal(guard.uploadType('notes.txt', Buffer.from('<script>x</script>')), null);
   assert.ok(guard.validUploadUrl('/uploads/1777424589360-onmqm0a3ew2r-IMG_6586.jpeg'));
+  // eslint-disable-next-line no-script-url -- a hostile input this test proves is refused
   for (const u of ['/uploads/../x', 'javascript:alert(1)', '/uploads/a.pdf', 'https://x/uploads/1-abcdefghijkl-a.pdf']) assert.ok(!guard.validUploadUrl(u), u);
 });
 
@@ -85,6 +86,7 @@ test('store: log, resume window, torn writes, compaction', () => {
 test('nodes: Stagewatch address and frame view', () => {
   assert.equal(nodes.normaliseBase('10.0.0.5'), 'http://10.0.0.5:9924');
   assert.equal(nodes.normaliseBase('http://foh-pc:9930/x'), 'http://foh-pc:9930');
+  // eslint-disable-next-line no-script-url -- a hostile input this test proves is refused
   assert.equal(nodes.normaliseBase('javascript:alert(1)'), '');
   assert.equal(nodes.normaliseBase('http://user:pw@x'), '');
   const v = nodes.stageView({ type: 'state', mode: 'countdown', text: '12:34', speakerText: '12 MIN', title: 'Keynote', next: 'Panel', color: '#FF0000', message: 'Wrap up', messageAck: 'done' });

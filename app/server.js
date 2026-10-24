@@ -69,7 +69,7 @@ function loadSettings() {
   const s = resilience.readJsonWithBak(SETTINGS_PATH);
   return s && typeof s === 'object' ? s : {};
 }
-let settings = loadSettings();
+const settings = loadSettings();
 function saveSettings() { settingsLane.save(() => JSON.stringify(settings, null, 2)); }
 // One-time migration from 0.2: keys stored in clear become sealed ones.
 for (const [plain, sealed] of [['aiKey', 'aiKeySealed'], ['stagewatchKey', 'stagewatchKeySealed']]) {
@@ -252,11 +252,7 @@ app.get('/uploads/:name', (req, res) => {
 });
 
 // ----- admin auth
-function readCookie(req, name) {
-  const c = req.headers.cookie || '';
-  const m = c.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
-  return m ? decodeURIComponent(m[1]) : null;
-}
+const readCookie = (req, name) => guard.readCookie(req.headers.cookie, name);
 const isValidAdminCookie = (req) => { const sid = readCookie(req, 'agm_admin'); return !!(sid && adminSessions.has(sid)); };
 const adminLockout = new guard.Lockout(5, 60_000);
 
@@ -381,7 +377,6 @@ app.post('/api/upload', (req, res, next) => {
 
 // Errors end in one short JSON line, never a stack trace: a malformed body is the caller's (400), anything else is ours
 // (500, logged). Express 5 forwards a rejected async handler here too.
-// eslint-disable-next-line no-unused-vars -- Express tells an error handler by its four parameters
 app.use((err, _req, res, _next) => {
   const status = Number.isInteger(err && err.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
   if (status === 500) console.error('  [http] ' + (err && err.stack ? err.stack : err));
@@ -437,7 +432,7 @@ io.on('connection', (socket) => {
     const ip = socket.data.ip;
     if (joinLock.locked(ip)) return ack({ ok: false, error: 'Too many attempts — wait a minute.' });
     const code = String(roomCode || '').toUpperCase().trim();
-    const cleanName = String(name || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 40);
+    const cleanName = guard.cleanText(name, 40);
     let cleanRole = role === 'director' ? 'board' : role;
     cleanRole = ROLES.includes(cleanRole) ? cleanRole : 'observer';
     const isAdminView = !!adminView && socket.data.isAdmin;
@@ -937,7 +932,7 @@ function buildMessage(user, payload) {
     if (!t || !fs.existsSync(path.join(UPLOAD_DIR, payload.url.slice(9)))) return null;
     return {
       ...base, type: 'file', url: payload.url,
-      filename: String(payload.filename || 'file').replace(/[\u0000-\u001f]/g, '').slice(0, 120),
+      filename: guard.cleanText(payload.filename, 120) || 'file',
       mime: t.mime.split(';')[0],
       caption: payload.caption ? String(payload.caption).slice(0, 500) : '',
     };

@@ -16,7 +16,7 @@ test('version: the three channels read apart, and in SemVer order', () => {
   assert.equal(v.compose('0.5.0', { channel: 'dev', build: 17, commit: 'abc1234def' }), '0.5.0-dev.17+abc1234');
   assert.equal(v.compose('0.5.0', { channel: 'local', commit: 'abc1234def' }), '0.5.0-dev+abc1234');
   assert.equal(v.compose('0.5.0', { channel: 'local' }), '0.5.0-dev', 'outside a checkout: no commit, still -dev');
-  assert.match(v.BUILD.full, /^\d+\.\d+\.\d+(-dev(\.\d+)?)?(\+[0-9a-z.]+)?$/);
+  assert.ok(v.BUILD.full.startsWith(v.BUILD.version + '-dev') || v.BUILD.full.startsWith(v.BUILD.version + '+'), v.BUILD.full);
   assert.equal(v.BUILD.version, JSON.parse(fs.readFileSync(path.join(ROOT, 'app', 'package.json'), 'utf8')).version);
 });
 

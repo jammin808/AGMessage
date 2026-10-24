@@ -91,7 +91,7 @@ function rejoin() {
       setTimeout(() => { location.href = '/'; }, 2500);
       return;
     }
-    if (res.identity) { IDENTITY = res.identity; try { localStorage.setItem('agm.id', IDENTITY); } catch (e) {} }
+    if (res.identity) { IDENTITY = res.identity; try { localStorage.setItem('agm.id', IDENTITY); } catch { /* private mode: identity lives for this tab only */ } }
     MY_UID = res.uid || MY_UID;
     UPLOAD_TOKEN = res.uploadToken || '';
     CAN_STAGE = !!res.canSendToStage;
@@ -836,6 +836,8 @@ function setDocText(msg, text) {
 /** Office documents become HTML here: keep the formatting, drop anything active. */
 function sanitizeHtml(html) {
   const t = document.createElement('template');
+  // The sanitiser's own parse: a <template> runs nothing, and only what survives the filter below leaves it.
+  // eslint-disable-next-line agm/no-unescaped-html -- this is the escaper: the markup is parsed inert, then filtered
   t.innerHTML = String(html || '');
   t.content.querySelectorAll('script,style,iframe,object,embed,link,meta,base,form,input,button,textarea,select,svg,math').forEach((n) => n.remove());
   t.content.querySelectorAll('*').forEach((el) => {
@@ -914,7 +916,7 @@ function buildDocPreview(msg) {
     fetch(msg.url).then((r) => r.arrayBuffer()).then((ab) => {
       if (typeof XLSX === 'undefined') throw new Error('Spreadsheet renderer not loaded');
       const wb = XLSX.read(ab, { type: 'array' });
-      try { setDocText(msg, wb.SheetNames.slice(0, 8).map((n) => '# ' + n + '\n' + XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n\n')); } catch (e) {}
+      try { setDocText(msg, wb.SheetNames.slice(0, 8).map((n) => '# ' + n + '\n' + XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n\n')); } catch { /* the preview still shows; only the AI's copy of the text is missing */ }
       host.innerHTML = '';
       const view = document.createElement('div');
       view.className = 'sheet-view';
@@ -1104,7 +1106,7 @@ function refreshDocPinnedList() {
     const ico = (m.mime || '').startsWith('image/') ? '🖼' :
                 (m.mime === 'application/pdf' ? '📕' : '📄');
     open.innerHTML =
-      `<span class="ico">${ico}</span>` +
+      `<span class="ico">${escapeHtml(ico)}</span>` +
       `<span class="name">${escapeHtml(m.filename)}</span>`;
     open.onclick = () => openDocInPanel(m);
     const unpin = document.createElement('button');
@@ -1272,7 +1274,7 @@ function renderUsers(users) {
   list.innerHTML = '';
   users.forEach((u) => {
     const li = document.createElement('li');
-    li.innerHTML = `<span class="role-tag" data-role="${u.role}">${roleLabel(u.role)}</span> ${escapeHtml(u.name)}`;
+    li.innerHTML = `<span class="role-tag" data-role="${escapeHtml(u.role)}">${escapeHtml(roleLabel(u.role))}</span> ${escapeHtml(u.name)}`;
     list.appendChild(li);
   });
   peopleBtn.textContent = `People · ${users.length}`;
@@ -1474,7 +1476,7 @@ async function handleFiles(files) {
   filePreview.textContent = `Uploading ${file.name}…`;
   try {
     const res = await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-AGM-Upload': UPLOAD_TOKEN } });
-    if (!res.ok) { let why = 'Upload failed.'; try { why = (await res.json()).error || why; } catch (e) {} throw new Error(why); }
+    if (!res.ok) { let why = 'Upload failed.'; try { why = (await res.json()).error || why; } catch { /* not JSON: the status words stand */ } throw new Error(why); }
     const data = await res.json();
     pendingFile = data;
     renderFilePreview();
@@ -1731,7 +1733,7 @@ socket.on('userState:push', ({ key, value }) => {
 // ---------- Mentions: highlight @Name in rendered text ----------
 function renderMessageText(text) {
   const safe = escapeHtml(text || '');
-  return safe.replace(/(^|\s)(@[\w][\w.\-]{0,40})/g,
+  return safe.replace(/(^|\s)(@[\w][\w.-]{0,40})/g,
     (_m, pre, mention) => pre + '<span class="mention">' + mention + '</span>');
 }
 
@@ -1756,7 +1758,7 @@ function renderReactions(node, reactions) {
     pill.type = 'button';
     pill.className = 'rx-pill' + (data.mine ? ' mine' : '');
     pill.title = data.names.join(', ');
-    pill.innerHTML = '<span>' + emoji + '</span> <small>' + data.n + '</small>';
+    pill.innerHTML = '<span>' + escapeHtml(emoji) + '</span> <small>' + escapeHtml(String(data.n)) + '</small>';
     pill.onclick = () => socket.emit('react', { messageId: id, emoji });
     rx.appendChild(pill);
   }

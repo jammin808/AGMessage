@@ -198,7 +198,8 @@ function readReceipt(status, body, requestId) {
 }
 
 const requestId = () => 'ag' + crypto.randomBytes(6).toString('hex');
-const jitter = (ms) => Math.round(ms * (0.8 + Math.random() * 0.4));
+// ±20 % from the CSPRNG, so links that dropped together do not redial together.
+const jitter = (ms) => Math.round(ms * (0.8 + crypto.randomInt(0, 401) / 1000));
 
 class StagewatchLink {
   /**

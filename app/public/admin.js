@@ -150,9 +150,9 @@ function renderRoomList(rooms) {
     li.innerHTML =
       `<button type="button" class="room-pick">` +
         (r.name ? `<span class="room-name">${escapeHtml(r.name)}</span>` : '') +
-        `<strong>${r.code}</strong>` +
+        `<strong>${escapeHtml(r.code)}</strong>` +
         `<small>${r.users.length} user${r.users.length === 1 ? '' : 's'}` +
-        ` · ${r.messageCount} msg${r.messageCount === 1 ? '' : 's'}</small>` +
+        ` · ${escapeHtml(String(r.messageCount))} msg${r.messageCount === 1 ? '' : 's'}</small>` +
       `</button>`;
     li.querySelector('.room-pick').onclick = () => watchRoom(r.code);
     list.appendChild(li);
@@ -199,28 +199,28 @@ function renderUsers(users) {
   }
   for (const u of users) {
     const tr = document.createElement('tr');
-    const linkedChips = (u.linkedRooms || []).map((rm) => {
+    const sidHtml = escapeHtml(u.socketId);
+    const linkedChipsHtml = (u.linkedRooms || []).map((rm) => {
       const nm = roomNameForCode(rm);
-      const label = nm
+      const labelHtml = nm
         ? `<span class="lc-name">${escapeHtml(nm)}</span><span class="lc-code">${escapeHtml(rm)}</span>`
         : `<span class="lc-code">${escapeHtml(rm)}</span>`;
-      return `<span class="linked-chip" title="Linked for forwarding: ${escapeHtml(nm || rm)}">${label}` +
-        `<button class="unlink-room" data-sid="${u.socketId}" data-room="${escapeHtml(rm)}" title="Unlink">×</button>` +
+      return `<span class="linked-chip" title="Linked for forwarding: ${escapeHtml(nm || rm)}">${labelHtml}` +
+        `<button class="unlink-room" data-sid="${sidHtml}" data-room="${escapeHtml(rm)}" title="Unlink">×</button>` +
       `</span>`;
     }).join("");
     tr.innerHTML =
       `<td><strong>${escapeHtml(u.name)}</strong></td>` +
-      `<td><select data-sid="${u.socketId}" class="role-select">` +
-        ['board','research','observer'].map((r) =>
-          `<option value="${r}"${r === u.role ? ' selected' : ''}>${r}</option>`).join('') +
+      `<td><select data-sid="${sidHtml}" class="role-select">` +
+        roleOptionsHtml(u.role) +
       `</select></td>` +
       `<td>` +
-        (linkedChips || '<small class="muted">— none —</small>') +
+        (linkedChipsHtml || '<small class="muted">— none —</small>') +
       `</td>` +
       `<td>` +
-        `<button class="btn ghost small view-as" data-sid="${u.socketId}" data-name="${escapeHtml(u.name)}" data-role="${u.role}">View</button> ` +
-        `<button class="btn ghost small link-room" data-sid="${u.socketId}" data-name="${escapeHtml(u.name)}">🔗 Link…</button> ` +
-        `<button class="btn ghost small kick" data-sid="${u.socketId}">Logout</button>` +
+        `<button class="btn ghost small view-as" data-sid="${sidHtml}" data-name="${escapeHtml(u.name)}" data-role="${escapeHtml(u.role)}">View</button> ` +
+        `<button class="btn ghost small link-room" data-sid="${sidHtml}" data-name="${escapeHtml(u.name)}">🔗 Link…</button> ` +
+        `<button class="btn ghost small kick" data-sid="${sidHtml}">Logout</button>` +
       `</td>`;
     tb.appendChild(tr);
   }
@@ -291,19 +291,19 @@ function buildAdminMessage(m) {
     return div;
   }
   if (m.priority) div.classList.add('priority');
-  const who = m.from
-    ? `<strong>${escapeHtml(m.from.name)}</strong> <span class="role-tag" data-role="${m.from.role}">${m.from.role}</span>`
+  const whoHtml = m.from
+    ? `<strong>${escapeHtml(m.from.name)}</strong> <span class="role-tag" data-role="${escapeHtml(m.from.role)}">${escapeHtml(m.from.role)}</span>`
     : '—';
-  let body = '';
-  if (m.type === 'text') body = `<p>${escapeHtml(m.text)}</p>`;
-  else if (m.type === 'file') body = `<p>📄 ${escapeHtml(m.filename)}${m.caption ? ` — <em>${escapeHtml(m.caption)}</em>` : ''}</p>`;
+  let bodyHtml = '';
+  if (m.type === 'text') bodyHtml = `<p>${escapeHtml(m.text)}</p>`;
+  else if (m.type === 'file') bodyHtml = `<p>📄 ${escapeHtml(m.filename)}${m.caption ? ` — <em>${escapeHtml(m.caption)}</em>` : ''}</p>`;
   else if (m.type === 'action') {
-    body = `<p>🟧 <strong>${escapeHtml(m.text)}</strong></p>` +
-           `<p class="muted">Options: ${(m.options||[]).map(escapeHtml).join(' · ')}</p>`;
+    bodyHtml = `<p>🟧 <strong>${escapeHtml(m.text)}</strong></p>` +
+           `<p class="muted">Options: ${escapeHtml((m.options || []).join(' · '))}</p>`;
   }
   div.innerHTML =
-    `<div class="admin-msg-head">${who} <time>${formatTime(m.at)}</time>${m.priority ? ' <span class="priority-badge" style="display:inline-block">🔥 HIGH</span>' : ''}</div>` +
-    `<div class="admin-msg-body">${body}</div>` +
+    `<div class="admin-msg-head">${whoHtml} <time>${escapeHtml(formatTime(m.at))}</time>${m.priority ? ' <span class="priority-badge" style="display:inline-block">🔥 HIGH</span>' : ''}</div>` +
+    `<div class="admin-msg-body">${bodyHtml}</div>` +
     `<div class="admin-msg-foot"><button class="btn ghost small del-any">🗑 Delete</button></div>`;
   div.querySelector('.del-any').onclick = () => {
     if (!confirm('Delete this message? This affects everyone in the meeting.')) return;
@@ -344,6 +344,10 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+/** The role picker's options, the person's own selected. */
+function roleOptionsHtml(current) {
+  return ['board', 'research', 'observer'].map((r) => '<option value="' + r + '"' + (r === current ? ' selected' : '') + '>' + r + '</option>').join('');
 }
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -569,7 +573,7 @@ function showLinkPicker(anchor, sid, name, alreadyLinked) {
         const r = document.createRange(); r.selectNode(u);
         window.getSelection().removeAllRanges();
         window.getSelection().addRange(r);
-        try { document.execCommand('copy'); copyBtn.textContent = '✓ Copied'; } catch (_) {}
+        try { document.execCommand('copy'); copyBtn.textContent = '✓ Copied'; } catch { /* no clipboard: the link stays selected to copy by hand */ }
         window.getSelection().removeAllRanges();
         setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 1500);
       }

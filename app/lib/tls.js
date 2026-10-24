@@ -203,6 +203,8 @@ class PinStore {
 /** The certificate a TLS server presents (nothing else is sent). */
 function probeCertificate(host, port, timeoutMs = 3000) {
   return new Promise((resolve, reject) => {
+    // The probe reads the certificate to compare it with the pin; it sends nothing, so an unverified certificate is all it can be.
+    // eslint-disable-next-line no-restricted-syntax -- the pin is the trust, checked by the caller before any request
     const s = tls.connect({ host, port, servername: net.isIP(host) ? undefined : host, rejectUnauthorized: false, ALPNProtocols: ['http/1.1'] }, () => {
       const c = s.getPeerX509Certificate ? s.getPeerX509Certificate() : null;
       s.destroy();

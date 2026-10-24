@@ -5,7 +5,7 @@
  * error or CSP violation, renders a PDF through pdf.js, and saves screenshots.
  *
  *   npm run smoke            (screenshots in ../artifacts/smoke; set AGM_SMOKE_OUT to change)
- * Exit code 0 when everything passed. Needs Edge (set STAGEWATCH_EDGE / AGM_EDGE to its path if it's elsewhere).
+ * Exit code 0 when everything passed. Needs Edge, Chrome or Chromium (set AGM_BROWSER to its path if it's elsewhere).
  */
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -20,17 +20,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 const report = (ok, what) => { console.log((ok ? 'OK   ' : 'FAIL ') + what); if (!ok) failures++; };
 
-function edgePath() {
-  const c = [process.env.AGM_EDGE, process.env.STAGEWATCH_EDGE,
+/** A Chromium the smoke can drive over DevTools: AGM_BROWSER, then Edge (Windows), then Chrome or Chromium (Linux, macOS). */
+function browserPath() {
+  const c = [process.env.AGM_BROWSER, process.env.AGM_EDGE, process.env.STAGEWATCH_EDGE,
     path.join(process.env['ProgramFiles(x86)'] || '', 'Microsoft/Edge/Application/msedge.exe'),
-    path.join(process.env.ProgramFiles || '', 'Microsoft/Edge/Application/msedge.exe')].filter(Boolean);
-  return c.find((p) => fs.existsSync(p));
+    path.join(process.env.ProgramFiles || '', 'Microsoft/Edge/Application/msedge.exe'),
+    '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/microsoft-edge',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].filter(Boolean);
+  return c.find((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } });
 }
 const freePort = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 
 async function startServer(port, dataDir) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
@@ -43,11 +46,13 @@ async function startServer(port, dataDir) {
 
 /** One headless Edge with a CDP session per tab. */
 async function launchEdge() {
-  const exe = edgePath();
-  if (!exe) throw new Error('Microsoft Edge not found');
+  const exe = browserPath();
+  if (!exe) throw new Error('no Edge, Chrome or Chromium found (set AGM_BROWSER to one)');
   const port = await freePort();
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-edge-'));
-  const proc = spawn(exe, ['--headless=new', '--disable-gpu', '--no-first-run', '--remote-debugging-port=' + port, '--user-data-dir=' + prof, '--window-size=1400,900', 'about:blank'], { stdio: 'ignore' });
+  // A container running as root has no user namespace for Chromium's sandbox; everywhere else the sandbox stays on.
+  const sandbox = typeof process.getuid === 'function' && process.getuid() === 0 ? ['--no-sandbox'] : [];
+  const proc = spawn(exe, ['--headless=new', '--disable-gpu', '--no-first-run', ...sandbox, '--remote-debugging-port=' + port, '--user-data-dir=' + prof, '--window-size=1400,900', 'about:blank'], { stdio: 'ignore' });
   for (let i = 0; i < 60; i++) { try { await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); break; } catch { await sleep(250); } }
   return {
     proc, port, prof,

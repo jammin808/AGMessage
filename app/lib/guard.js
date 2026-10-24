@@ -25,6 +25,26 @@ function mac(secret, text, len = 24) {
   return crypto.createHmac('sha256', secret).update(text).digest('base64url').slice(0, len);
 }
 
+/**
+ * Text a person typed, made safe to show anywhere: control characters (C0, DEL, C1) and the bidirectional overrides and
+ * isolates that let a name or file name read differently from what it is (Trojan Source) are dropped, then it is trimmed
+ * and cut to `max` characters.
+ */
+const UNSAFE_TEXT = /[\p{Cc}\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+function cleanText(s, max = 200) {
+  return String(s == null ? '' : s).replace(UNSAFE_TEXT, '').trim().slice(0, max);
+}
+
+/** The value of one cookie, or null. A parser, not a pattern built from the name. */
+function readCookie(header, name) {
+  for (const part of String(header || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0 || part.slice(0, i).trim() !== name) continue;
+    try { return decodeURIComponent(part.slice(i + 1).trim()); } catch { return null; }
+  }
+  return null;
+}
+
 function safeEqual(a, b) {
   const x = Buffer.from(String(a)), y = Buffer.from(String(b));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
@@ -161,7 +181,7 @@ function validUploadUrl(url) {
 }
 
 module.exports = {
-  loadSecret, mac, safeEqual, newIdentity, checkIdentity, makeInvite, checkInvite,
+  loadSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
   Bucket, Lockout, clientIp, isHostMachine, pageHeaders, CSP,
   UPLOAD_TYPES, uploadType, validUploadUrl, extOf,
 };
