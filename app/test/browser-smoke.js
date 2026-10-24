@@ -146,7 +146,22 @@ function tinyPdf() {
     report(!!(await admin.until(`!document.getElementById('dashboard').hidden && document.body.textContent.includes('${code}') && document.getElementById('aiModel').textContent.includes('claude')`)), 'admin dashboard lists the room and its AI / show-network panels');
     await admin.shot(path.join(OUT, 'admin.png'));
 
-    for (const [name, tab] of [['research', research], ['board', board], ['admin', admin]]) {
+    // Accounts: the first admin is made on the sign-in page; the halls board and the accounts page render under the CSP.
+    const signin = await edge.tab(`${base}/`);
+    report(!!(await signin.until(`!document.getElementById('setupPane').hidden`)), 'sign-in page offers the first admin when there are no accounts');
+    await signin.eval(`(() => { document.getElementById('setupName').value = 'Ana Admin'; document.getElementById('setupUser').value = 'ana'; document.getElementById('setupPass').value = 'the green room kettle'; document.getElementById('setupPane').requestSubmit(); })()`);
+    report(!!(await signin.until(`location.pathname === '/halls.html' && document.querySelectorAll('.hall-row').length >= 1 && document.getElementById('linkState').dataset.ok === '1'`)), 'the first admin lands on the halls board, live, with the hall listed');
+    await sleep(600);
+    await signin.shot(path.join(OUT, 'halls.png'));
+    const users = await edge.tab(`${base}/users.html`);
+    report(!!(await users.until(`document.querySelectorAll('#userRows tr').length === 1`)), 'the accounts page lists the admin');
+    await users.eval(`document.getElementById('newUserBtn').click()`);
+    await users.until(`document.getElementById('userDialog').open`);
+    await users.shot(path.join(OUT, 'accounts.png'));
+    const hallView = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
+    report(!!(await hallView.until(`typeof joined !== "undefined" && joined && document.getElementById('whoami').textContent.startsWith('Ana Admin')`)), 'an account opens its hall with its own name');
+
+    for (const [name, tab] of [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView]]) {
       report(tab.problems.length === 0, `${name}: no script errors or CSP violations${tab.problems.length ? ' — ' + tab.problems.slice(0, 3).join(' | ') : ''}`);
       tab.close();
     }

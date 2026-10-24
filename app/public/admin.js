@@ -34,11 +34,13 @@ let allRooms = [];
 (async function init() {
   // First, check if we're already logged in (cookie set) and on the host
   const me = await fetch('/api/admin/me').then((r) => r.json()).catch(() => ({}));
+  // An admin account works from any device on the venue network; the host's token only on the host laptop.
+  if (me.ok) { showDashboard(); return; }
   if (!me.local) {
     loginPanel.hidden = false;
     loginNotice.innerHTML =
-      '<strong style="color:var(--danger)">Admin can only be accessed from the host laptop.</strong>' +
-      ' Open this URL in a browser running on the machine that started the server.';
+      '<strong>Sign in with an admin account to use this page here.</strong> ' +
+      '<a href="/?next=/admin.html">Sign in</a> — or open it on the AGMessage laptop and use the admin token.';
     tokenInput.disabled = true;
     document.querySelector('#loginForm button').disabled = true;
     return;

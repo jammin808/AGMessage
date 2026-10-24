@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AGMessage — halls</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/theme-init.js"></script>
+</head>
+<body class="acct-page">
+  <header class="acct-bar">
+    <a class="acct-brand" href="/halls.html"><span class="brand-mark small">AG</span> AGMessage</a>
+    <nav class="acct-nav" aria-label="Account">
+      <span class="acct-who" id="who"></span>
+      <a class="btn ghost small" id="usersLink" href="/users.html" hidden>Accounts</a>
+      <a class="btn ghost small" id="adminLink" href="/admin.html" hidden>Admin</a>
+      <button class="btn ghost small" id="passwordBtn" type="button">Password</button>
+      <button class="btn ghost small" id="themeBtn" type="button" title="Toggle dark mode">🌙</button>
+      <button class="btn ghost small" id="signOutBtn" type="button">Sign out</button>
+    </nav>
+  </header>
+
+  <main class="board">
+    <section class="help-strip" id="helpStrip" aria-live="polite" hidden>
+      <h2>Needs help</h2>
+      <ul id="helpList"></ul>
+    </section>
+
+    <section class="board-head">
+      <h1 id="boardTitle">Your halls</h1>
+      <div class="board-tools">
+        <span class="link-state" id="linkState" title="Live connection to AGMessage"></span>
+        <button class="btn small" id="newHallBtn" type="button" hidden>New hall</button>
+      </div>
+    </section>
+
+    <ol class="hall-list" id="hallList" aria-label="Halls"></ol>
+    <p class="empty-note" id="emptyNote" hidden>No halls yet. An admin or project manager makes them, then gives you access.</p>
+  </main>
+
+  <dialog id="passwordDialog" class="agm-dialog">
+    <form id="passwordForm" method="dialog">
+      <h2>Change your password</h2>
+      <input type="text" id="pwUser" autocomplete="username" hidden />
+      <label class="field"><span>Current password</span><input id="pwCurrent" type="password" maxlength="128" required autocomplete="current-password" /></label>
+      <label class="field"><span>New password</span><input id="pwNext" type="password" maxlength="128" required autocomplete="new-password" />
+        <small class="hint">At least 10 characters. Your other devices are signed out.</small></label>
+      <p class="error" id="pwError" role="alert" hidden></p>
+      <div class="row end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn primary" id="pwSave" value="save">Save password</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="hallDialog" class="agm-dialog">
+    <form id="hallForm" method="dialog">
+      <h2>New hall</h2>
+      <label class="field"><span>Name</span><input id="hallName" maxlength="80" required placeholder="e.g. Hall 3" /></label>
+      <p class="hint">It gets a 6-character code: crew without an account join with it.</p>
+      <div class="row end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Create hall</button></div>
+    </form>
+  </dialog>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/common.js"></script>
+  <script src="/halls.js"></script>
+</body>
+</html>

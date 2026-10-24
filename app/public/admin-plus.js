@@ -28,6 +28,9 @@
       if (ctx) $('swContext').textContent = 'Stagewatch says: ' + (ctx.headline || '') + ((ctx.peers || []).length ? ' · it hears ' + ctx.peers.map((p) => p.t + ' “' + (p.name || '') + '”').join(', ') : '');
       $('ctxToken').textContent = s.contextToken || '—';
       renderTls(s.tls, s.stagewatchFingerprint);
+      $('remoteAdmin').checked = !!s.remoteAdmin;
+      $('acctCount').textContent = s.accounts ? s.accounts + ' account' + (s.accounts === 1 ? '' : 's') : 'No accounts yet — sign in on the start page to make the first admin';
+      $('buildLine').textContent = s.build ? 'This is AGMessage ' + s.build + '.' : '';
       renderHealth(s.health);
       renderPeers(s.peers || []);
     });
@@ -97,6 +100,7 @@
     $('ctxCopy').onclick = () => { const t = $('ctxToken').textContent; if (navigator.clipboard && t && t !== '—') navigator.clipboard.writeText(t); };
     $('ctxNew').onclick = () => loadSettings({ newContextToken: true });
     $('requireHttps').onchange = () => loadSettings({ requireHttps: $('requireHttps').checked });
+    $('remoteAdmin').onchange = () => loadSettings({ remoteAdmin: $('remoteAdmin').checked });
     $('swAccept').onclick = () => {
       if (!confirm('Accept Stagewatch\'s new certificate? Only do this if you know why it changed (a reinstall, a new certificate made on purpose).')) return;
       socket.emit('admin:acceptCertificate', () => setTimeout(() => loadSettings(), 800));

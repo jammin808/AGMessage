@@ -131,6 +131,10 @@
           <label class="row"><input id="requireHttps" type="checkbox" /> Require HTTPS from other devices (plain HTTP keeps working on this laptop, and for the Cloudflare tunnel)</label>
           <p id="swContext" class="hint" hidden></p>
           <ul id="peerList" class="peer-list"></ul>
+          <h3>👥 Accounts and access</h3>
+          <p class="hint"><span id="acctCount">—</span> · <a href="/users.html">Manage people, roles and halls</a> · <a href="/users.html#audit">Audit log</a></p>
+          <label class="row"><input id="remoteAdmin" type="checkbox" /> Let accounts with admin rights sign in through the Cloudflare tunnel (off: admins sign in on the venue network only)</label>
+          <p class="hint" id="buildLine"></p>
           <h3>🩺 Health</h3>
           <p id="healthLine" class="hint">—</p>
           <p class="hint">Other show systems (Patterns' Eye, Stagewatch's assistant) read this AGMessage's status — counts and action-prompt questions only, never messages or documents — with this read-only token:

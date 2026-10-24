@@ -37,6 +37,10 @@ const resilience = require('./lib/resilience');
 const secretbox = require('./lib/secretbox');
 const { buildContext, showBrief } = require('./lib/context');
 const tlsmod = require('./lib/tls');
+const { Accounts, Sessions } = require('./lib/accounts');
+const { AuditLog } = require('./lib/audit');
+const rbac = require('./lib/rbac');
+const { mountAccounts } = require('./lib/http-accounts');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD } = require('./lib/version');
@@ -89,6 +93,14 @@ function contextToken() {
   if (!t) { t = 'agn_' + crypto.randomBytes(18).toString('base64url'); settings.contextTokenSealed = secretbox.seal(t); saveSettings(); }
   return t;
 }
+
+// ---------------------------------------------------------------- accounts, sessions, the audit log
+// Individual logins beside the meeting codes (lib/accounts.js, lib/rbac.js); every action that matters is in the
+// hash-chained audit log (lib/audit.js). The host laptop's admin token stays as the way in before any account exists.
+const accounts = new Accounts(path.join(DATA_DIR, 'accounts.json'));
+const sessions = new Sessions(path.join(DATA_DIR, 'sessions.json'), accounts);
+const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'));
+const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
 
 // ---------------------------------------------------------------- encrypted connections (Show Bus 1.2 §10)
 // One certificate per install, kept beside the machine key (outside the app folder), private key sealed. The same port
@@ -234,6 +246,18 @@ ${cert ? `<p>This AGMessage encrypts its pages with its own certificate. Browser
 </main></body></html>`);
 });
 app.use(express.json({ limit: '256kb' }));
+const web = mountAccounts(app, {
+  accounts, sessions, audit, settings, isEncrypted,
+  isTokenAdmin: (req) => isValidAdminCookie(req),
+  hallNames: () => Array.from(store.rooms.values()).map((r) => ({ code: r.code, name: r.name || '' })),
+  onAccountChanged: (id, what) => accountChanged(id, what),
+});
+/** The admin dashboard: the host laptop's token, or an account with admin rights (not through the tunnel unless allowed). */
+function isAdminReq(req) {
+  if (isValidAdminCookie(req)) return true;
+  const w = web.who(req);
+  return !!(w && !w.account.mustChange && rbac.can(w.account, 'settings.manage') && (!web.throughTunnel(req) || settings.remoteAdmin));
+}
 app.get('/admin', (_req, res) => res.redirect('/admin.html'));
 app.use(express.static(PUBLIC_DIR, { index: 'index.html', maxAge: '5m' }));
 
@@ -260,10 +284,11 @@ app.post('/api/admin/login', (req, res) => {
   if (!guard.isHostMachine(req)) return res.status(403).json({ ok: false, error: 'Admin login is only allowed on the host laptop.' });
   if (adminLockout.locked('host')) return res.status(429).json({ ok: false, error: 'Too many wrong tokens — wait a minute.' });
   const t = String((req.body && req.body.token) || '').toLowerCase().trim();
-  if (!t || !guard.safeEqual(t, ADMIN_TOKEN)) { adminLockout.fail('host'); return res.status(401).json({ ok: false, error: 'Invalid admin token.' }); }
+  if (!t || !guard.safeEqual(t, ADMIN_TOKEN)) { adminLockout.fail('host'); audit.write(HOST_ACTOR, 'login.token.fail', 'host', 'a wrong admin token', guard.clientIp(req)); return res.status(401).json({ ok: false, error: 'Invalid admin token.' }); }
   adminLockout.ok('host');
   const sid = crypto.randomBytes(24).toString('hex');
   adminSessions.add(sid);
+  audit.write(HOST_ACTOR, 'login.token', 'host', 'signed in with the host laptop\'s admin token', guard.clientIp(req));
   res.setHeader('Set-Cookie', 'agm_admin=' + sid + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400' + (isEncrypted(req) ? '; Secure' : ''));
   res.json({ ok: true });
 });
@@ -273,10 +298,10 @@ app.post('/api/admin/logout', (req, res) => {
   res.setHeader('Set-Cookie', 'agm_admin=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
   res.json({ ok: true });
 });
-app.get('/api/admin/me', (req, res) => res.json({ ok: isValidAdminCookie(req), local: guard.isHostMachine(req) }));
+app.get('/api/admin/me', (req, res) => res.json({ ok: isAdminReq(req), local: guard.isHostMachine(req), accounts: accounts.size }));
 
 app.get('/api/admin/transcript/:code', (req, res) => {
-  if (!isValidAdminCookie(req)) return res.status(403).send('Forbidden');
+  if (!isAdminReq(req)) return res.status(403).send('Forbidden');
   const room = store.get(String(req.params.code || '').toUpperCase());
   if (!room) return res.status(404).send('Room not found');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -288,7 +313,7 @@ app.get('/api/admin/transcript/:code', (req, res) => {
 // Health: anyone may ask whether it is up; the detail is for the admin (or the host laptop).
 app.get('/api/health', (req, res) => {
   const base = { ok: true, version: VERSION, build: BUILD.full, uptime: Math.round(process.uptime()) };
-  if (!(isValidAdminCookie(req) || guard.isHostMachine(req))) return res.json(base);
+  if (!(isAdminReq(req) || guard.isHostMachine(req))) return res.json(base);
   res.json({ ...base, rooms: store.rooms.size, clients: io.engine.clientsCount, ...healthFacts() });
 });
 
@@ -299,7 +324,7 @@ app.get('/api/context', (req, res) => {
   const ip = guard.clientIp(req);
   if (contextLock.locked(ip)) return res.status(429).json({ ok: false, error: 'Too many wrong tokens — wait a minute.' });
   const t = bearer(req);
-  const allowed = isValidAdminCookie(req) || (t && guard.safeEqual(t, contextToken()));
+  const allowed = isAdminReq(req) || (t && guard.safeEqual(t, contextToken()));
   if (!allowed) { if (t) contextLock.fail(ip); return res.status(401).json({ ok: false, error: 'A context token is needed (AGMessage admin → Show network).' }); }
   res.setHeader('Cache-Control', 'no-store');
   res.json(currentContext());
@@ -316,8 +341,10 @@ function lookupAllowed(ip) {
 }
 
 app.post('/api/rooms', (req, res) => {
-  if (!isValidAdminCookie(req)) return res.status(403).json({ ok: false, error: 'Only admin can create rooms.' });
+  const w = web.who(req);
+  if (!(isAdminReq(req) || (w && !w.account.mustChange && rbac.can(w.account, 'halls.manage')))) return res.status(403).json({ ok: false, error: 'Only admin can create rooms.' });
   const room = newRoom(req.body && typeof req.body.name === 'string' ? req.body.name : '');
+  audit.write(w ? web.actorOf(w) : HOST_ACTOR, 'hall.create', room.code, room.name || '(no name)', guard.clientIp(req));
   res.json({ code: room.code, name: room.name });
 });
 app.get('/api/rooms/:code', (req, res) => {
@@ -327,6 +354,17 @@ app.get('/api/rooms/:code', (req, res) => {
   const room = RoomStore.validCode(code) ? store.get(code) : null;
   if (!room) lookupLock.fail(ip);
   res.json({ code, exists: !!room, name: room ? room.name || '' : '', locked: !!(room && room.settings.lockRoles) });
+});
+
+// The halls a signed-in account may see, for its account area (live detail follows on the socket).
+app.get('/api/halls', web.signedIn(), (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const a = req.agm.account;
+  const halls = Array.from(store.rooms.values()).filter((r) => rbac.seesHall(a, r.code)).map((r) => ({
+    code: r.code, name: r.name || '', people: r.users.size, messages: r.messages.length, locked: !!r.settings.lockRoles,
+    can: { post: rbac.can(a, 'hall.post', r.code), files: rbac.can(a, 'hall.files', r.code), displays: rbac.can(a, 'display.control', r.code), stage: rbac.can(a, 'stage.send', r.code) },
+  })).sort((x, y) => (x.name || x.code).localeCompare(y.name || y.code));
+  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: rbac.can(a, 'users.manage'), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req) });
 });
 
 function newRoom(name) {
@@ -416,15 +454,30 @@ const AI_MAX_CONCURRENT = 3;
 io.on('connection', (socket) => {
   let room = null;
   let me = null;   // {uid, name, role}
-  const cookieHeader = socket.handshake.headers.cookie || '';
-  const cMatch = cookieHeader.match(/(?:^|;\s*)agm_admin=([^;]+)/);
-  socket.data.isAdmin = !!(cMatch && adminSessions.has(decodeURIComponent(cMatch[1])));
+  // Who this is: the host's admin token, a signed-in account (both from the handshake's cookies), or nobody yet — a
+  // meeting code at 'join'. Rights are read once here; a change to the account ends this socket (accountChanged).
+  const hs = { headers: socket.handshake.headers, socket: socket.request && socket.request.socket };
+  const tokenAdmin = !!(adminSessions.has(guard.readCookie(hs.headers.cookie, 'agm_admin') || ''));
+  const acct = web.who(hs);
+  socket.data.account = acct && !acct.account.mustChange ? acct.account : null;
+  socket.data.accountId = socket.data.account ? socket.data.account.id : '';
+  socket.data.isAdmin = tokenAdmin || !!(socket.data.account && rbac.can(socket.data.account, 'settings.manage') && (!web.throughTunnel(hs) || settings.remoteAdmin));
+  socket.data.actor = tokenAdmin ? HOST_ACTOR : socket.data.account ? { t: 'account', id: socket.data.account.id, name: socket.data.account.username } : null;
   const writes = new guard.Bucket(5, 15);      // messages, reactions, pins…
   const chatter = new guard.Bucket(10, 20);    // typing, seen, ui sync
   const aiBucket = new guard.Bucket(0.2, 4);   // one AI request per 5 s, bursts of 4
   let uploadToken = null;
   const ok = (ack) => (typeof ack === 'function' ? ack : () => {});
   const limited = (ack) => { ok(ack)({ ok: false, error: 'Slow down a little.' }); };
+  // What this person may do in the room they are in: an account by its rights in that hall, a code guest by the role
+  // they joined with (backstage: post, files, the stage; on stage: post and files; observer: read), the admin everything.
+  const GUEST_CAPS = { research: ['hall.view', 'hall.post', 'hall.files', 'stage.send'], board: ['hall.view', 'hall.post', 'hall.files'], observer: ['hall.view'] };
+  const allowed = (cap) => {
+    if (socket.data.isAdmin) return true;
+    if (!me || !room) return false;
+    if (me.acct) return rbac.can(socket.data.account, cap, room.code);
+    return (GUEST_CAPS[me.role] || []).includes(cap);
+  };
 
   socket.on('join', (args, ack) => {
     ack = ok(ack);
@@ -432,7 +485,9 @@ io.on('connection', (socket) => {
     const ip = socket.data.ip;
     if (joinLock.locked(ip)) return ack({ ok: false, error: 'Too many attempts — wait a minute.' });
     const code = String(roomCode || '').toUpperCase().trim();
-    const cleanName = guard.cleanText(name, 40);
+    const acct = (args && args.as === 'account') ? socket.data.account : null;
+    if (args && args.as === 'account' && !acct) return ack({ ok: false, error: 'Sign in first.', signIn: true });
+    const cleanName = acct ? acct.name : guard.cleanText(name, 40);
     let cleanRole = role === 'director' ? 'board' : role;
     cleanRole = ROLES.includes(cleanRole) ? cleanRole : 'observer';
     const isAdminView = !!adminView && socket.data.isAdmin;
@@ -440,21 +495,31 @@ io.on('connection', (socket) => {
     const r = RoomStore.validCode(code) ? store.get(code) : null;
     if (!r) { joinLock.fail(ip); return ack({ ok: false, error: 'Room not found' }); }
 
-    // Identity: only the server issues them; anything else gets a fresh one.
-    let id = guard.checkIdentity(SECRET, uid);
-    let identity = null;
-    if (!id) { identity = guard.newIdentity(SECRET); id = guard.checkIdentity(SECRET, identity); }
-
-    // Locked rooms: board and research seats need the admin's invite link.
+    // Identity: an account is itself on every device; anyone else gets one issued (and signed) by the server.
+    let id, identity = null;
     let note = '';
-    if (r.settings.lockRoles && cleanRole !== 'observer' && !socket.data.isAdmin && !guard.checkInvite(SECRET, code, cleanRole, invite)) {
-      cleanRole = 'observer';
-      note = 'This meeting needs an invite link for that role — you joined as an observer.';
+    if (acct) {
+      if (!rbac.seesHall(acct, code)) return ack({ ok: false, error: 'Your account has no access to this hall — ask an admin.' });
+      id = acct.id;
+      cleanRole = rbac.roomRoleFor(acct, code);
+    } else {
+      id = guard.checkIdentity(SECRET, uid);
+      if (!id) { identity = guard.newIdentity(SECRET); id = guard.checkIdentity(SECRET, identity); }
+      // Locked rooms: board and research seats need the admin's invite link.
+      if (r.settings.lockRoles && cleanRole !== 'observer' && !socket.data.isAdmin && !guard.checkInvite(SECRET, code, cleanRole, invite)) {
+        cleanRole = 'observer';
+        note = 'This meeting needs an invite link for that role — you joined as an observer.';
+      }
+      // A code guest cannot take the name of someone with an account: staff are who they say they are.
+      if (!isAdminView && accounts.list().some((a) => a.name.toLowerCase() === cleanName.toLowerCase())) {
+        joinLock.fail(ip);
+        return ack({ ok: false, error: 'That name belongs to an AGMessage account: sign in, or pick another name.' });
+      }
     }
 
     if (!isAdminView) {
       for (const u of r.users.values()) {
-        if (u.name.toLowerCase() === cleanName.toLowerCase() && u.uid !== id) {
+        if (u.name.toLowerCase() === cleanName.toLowerCase() && u.uid !== id && !acct) {
           return ack({ ok: false, error: 'That name is already in use in this meeting. Please pick a different display name.' });
         }
       }
@@ -462,7 +527,7 @@ io.on('connection', (socket) => {
     joinLock.ok(ip);
 
     if (room && room !== r) leaveRoom(true);
-    me = { uid: id, name: cleanName, role: cleanRole, joinedAt: Date.now() };
+    me = { uid: id, name: cleanName, role: cleanRole, joinedAt: Date.now(), ...(acct ? { acct: acct.username } : {}) };
     room = r;
     socket.data.adminView = isAdminView;
     socket.data.userName = cleanName;
@@ -480,8 +545,11 @@ io.on('connection', (socket) => {
     }
 
     if (uploadToken) uploadTokens.delete(uploadToken);
-    uploadToken = crypto.randomBytes(18).toString('base64url');
-    uploadTokens.set(uploadToken, { room: code, uid: id, bucket: new guard.Bucket(0.5, 4) });
+    uploadToken = null;
+    if (allowed('hall.files')) {
+      uploadToken = crypto.randomBytes(18).toString('base64url');
+      uploadTokens.set(uploadToken, { room: code, uid: id, bucket: new guard.Bucket(0.5, 4) });
+    }
 
     // Resume: just what they missed, when we still have it; otherwise the whole history.
     const ops = Number.isInteger(since) ? store.opsSince(r, since) : null;
@@ -491,8 +559,9 @@ io.on('connection', (socket) => {
       ...(ops ? { ops } : { history: r.messages }),
       users: roomUserSummary(r),
       ai: !!aiKey(), stage: stageLink.view ? { ...stageLink.view, status: stageLink.status } : null,
-      canSendToStage: !!(stageLink.base && stageLink.key),
-      canPropose: !!(stageLink.desk && stageLink.key),
+      canSendToStage: !!(stageLink.base && stageLink.key) && allowed('stage.send'),
+      canPropose: !!(stageLink.desk && stageLink.key) && allowed('stage.send'),
+      account: acct ? { username: acct.username, name: acct.name, role: acct.role, roleLabel: rbac.ROLES[acct.role].label } : null,
       seen: seenFor(r),
     });
 
@@ -515,7 +584,8 @@ io.on('connection', (socket) => {
   socket.on('message', (payload, ack) => {
     if (!need(ack)) return;
     if (!writes.take()) return limited(ack);
-    if (me.role === 'observer' && !socket.data.isAdmin) return ok(ack)({ ok: false, error: 'Observers can read but not post.' });
+    if (!allowed('hall.post')) return ok(ack)({ ok: false, error: 'Observers can read but not post.' });
+    if (payload && payload.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: 'Your account may not share files here.' });
     const msg = buildMessage(me, payload);
     if (!msg) return ok(ack)({ ok: false, error: 'Invalid message' });
     if (payload.replyTo && typeof payload.replyTo === 'string') {
@@ -673,7 +743,7 @@ io.on('connection', (socket) => {
   socket.on('stage:send', async (args = {}, ack) => {
     ack = ok(ack);
     if (!need(ack)) return;
-    if (!(me.role === 'research' || socket.data.isAdmin)) return ack({ ok: false, error: 'Sending to the stage is for the research team.' });
+    if (!allowed('stage.send')) return ack({ ok: false, error: 'Sending to the stage is for the backstage team.' });
     if (!writes.take()) return limited(ack);
     let text = typeof args.text === 'string' ? args.text : '';
     const source = typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
@@ -694,7 +764,7 @@ io.on('connection', (socket) => {
   socket.on('stage:propose', async (args = {}, ack) => {
     ack = ok(ack);
     if (!need(ack)) return;
-    if (!(me.role === 'research' || socket.data.isAdmin)) return ack({ ok: false, error: 'Proposing to the stage is for the research team.' });
+    if (!allowed('stage.send')) return ack({ ok: false, error: 'Proposing to the stage is for the backstage team.' });
     if (!writes.take()) return limited(ack);
     let text = typeof args.text === 'string' ? args.text : '';
     const source = typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
@@ -853,6 +923,9 @@ io.on('connection', (socket) => {
       if (typeof patch.stagewatchKey === 'string') settings.stagewatchKeySealed = secretbox.seal(patch.stagewatchKey.trim().slice(0, 80));
       if (typeof patch.stagewatchFingerprint === 'string') settings.stagewatchFingerprint = tlsmod.cleanFingerprint(patch.stagewatchFingerprint);
       if (typeof patch.requireHttps === 'boolean') settings.requireHttps = patch.requireHttps && !!cert;
+      if (typeof patch.remoteAdmin === 'boolean') settings.remoteAdmin = patch.remoteAdmin;
+      const keys = Object.keys(patch).filter((k) => ['aiKey', 'stagewatchUrl', 'stagewatchKey', 'stagewatchFingerprint', 'requireHttps', 'remoteAdmin', 'newContextToken'].includes(k));
+      if (keys.length) audit.write(socket.data.actor, 'settings', keys.join(','), 'changed ' + keys.map((k) => (/Key$|Token$/.test(k) ? k + ' (sealed)' : k + ' → ' + String(patch[k]).slice(0, 60))).join(', '), socket.data.ip);
       if (patch.newContextToken === true) delete settings.contextTokenSealed;
       saveSettings();
       stageLink.configure(settings.stagewatchUrl, stagewatchKey(), settings.stagewatchFingerprint || '');
@@ -865,6 +938,7 @@ io.on('connection', (socket) => {
       nodeId: settings.nodeId, contextToken: contextToken(), health: healthFacts(),
       stageContext: stageLink.context ? { headline: stageLink.context.headline, light: stageLink.context.light, peers: stageLink.context.peers || [] } : null,
       tls: tlsFacts(), stagewatchFingerprint: settings.stagewatchFingerprint || '',
+      remoteAdmin: !!settings.remoteAdmin, accounts: accounts.size, build: BUILD.full,
     });
   });
 
@@ -913,6 +987,19 @@ io.on('connection', (socket) => {
 
 function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : []; }
 
+/**
+ * An account changed (role, rights, halls, password, turned off, removed): every socket it has open is told and closed,
+ * so its next connection is judged by the rights it has now — never by the ones it had.
+ */
+function accountChanged(id, what) {
+  for (const [, s] of io.sockets.sockets) {
+    if (s.data && s.data.accountId === id) {
+      s.emit('account:changed', { what, words: 'Your account was changed by an admin — reconnecting with your current rights.' });
+      setTimeout(() => s.disconnect(true), 50);
+    }
+  }
+}
+
 function invitesFor(code) {
   const out = {};
   for (const role of ['board', 'research']) out[role] = `/?code=${code}&role=${role}&invite=${guard.makeInvite(SECRET, code, role)}`;
@@ -921,7 +1008,7 @@ function invitesFor(code) {
 
 function buildMessage(user, payload) {
   if (!payload || typeof payload !== 'object') return null;
-  const base = { id: makeMessageId(), at: Date.now(), from: { uid: user.uid, name: user.name, role: user.role }, pinned: false, priority: !!payload.priority };
+  const base = { id: makeMessageId(), at: Date.now(), from: { uid: user.uid, name: user.name, role: user.role, ...(user.acct ? { acct: true } : {}) }, pinned: false, priority: !!payload.priority };
   if (payload.type === 'text') {
     const text = String(payload.text || '').trim();
     return text ? { ...base, type: 'text', text: text.slice(0, 4000), ...(payload.aiDraft ? { aiDraft: true } : {}) } : null;

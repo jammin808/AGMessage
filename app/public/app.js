@@ -2,8 +2,12 @@
 
 const qs = new URLSearchParams(location.search);
 const ROOM = (qs.get('code') || '').toUpperCase();
-const NAME = qs.get('name') || '';
+// A signed-in account opens a hall with ?code=…&as=account (its name and rights come from the server); anyone else
+// with ?code=…&name=…&role=… from the join page.
+const AS_ACCOUNT = qs.get('as') === 'account';
+let NAME = AS_ACCOUNT ? '' : (qs.get('name') || '');
 const ROLE = qs.get('role') || 'observer';
+const HOME = AS_ACCOUNT ? '/halls.html' : '/';
 const ADMIN_VIEW = qs.get('adminView') === '1';
 // Identity: issued and signed by the server on first join, kept on this device, so nobody can
 // pick someone else's. MY_UID is the id inside it (what messages and reactions carry).
@@ -26,13 +30,14 @@ const HAS_STAGE = ROLE === 'board' || ROLE === 'research';
 const _pendingStates = [];
 let _applyingRemote = false;
 
-if (!ROOM || !NAME) location.href = '/';
+if (!ROOM || (!NAME && !AS_ACCOUNT)) location.href = '/';
 
 document.body.dataset.role = ROLE;
 const _roomChip = document.getElementById('roomChip');
 _roomChip.textContent = ROOM;
 if (ROLE === 'observer') _roomChip.hidden = true;
-document.getElementById('whoami').textContent = `${NAME} · ${roleLabel(ROLE)}`;
+document.getElementById('whoami').textContent = AS_ACCOUNT ? '' : `${NAME} · ${roleLabel(ROLE)}`;
+document.querySelectorAll('a[href="/"].btn').forEach((a) => { a.href = HOME; if (AS_ACCOUNT) a.textContent = 'All halls'; });
 document.title = `AGMessage · ${ROOM}`;
 
 // ---------------- Theme (dark mode) ----------------
@@ -85,11 +90,17 @@ socket.on('connect', () => {
 
 /** Join (or rejoin after a drop): the server sends only what we missed when it still has it. */
 function rejoin() {
-  socket.emit('join', { roomCode: ROOM, name: NAME, role: ROLE, adminView: ADMIN_VIEW, uid: IDENTITY, invite: INVITE, since: joined ? lastSeq : undefined }, (res) => {
+  const who = AS_ACCOUNT ? { as: 'account' } : { name: NAME, role: ROLE, uid: IDENTITY, invite: INVITE };
+  socket.emit('join', { roomCode: ROOM, adminView: ADMIN_VIEW, since: joined ? lastSeq : undefined, ...who }, (res) => {
     if (!res || !res.ok) {
       notify(res?.error || 'Could not join room', true);
-      setTimeout(() => { location.href = '/'; }, 2500);
+      const to = res && res.signIn ? '/?next=' + encodeURIComponent(location.pathname + location.search) : HOME;
+      setTimeout(() => { location.href = to; }, 2500);
       return;
+    }
+    if (res.account) {
+      NAME = res.account.name;
+      document.getElementById('whoami').textContent = `${res.account.name} · ${res.account.roleLabel}`;
     }
     if (res.identity) { IDENTITY = res.identity; try { localStorage.setItem('agm.id', IDENTITY); } catch { /* private mode: identity lives for this tab only */ } }
     MY_UID = res.uid || MY_UID;
@@ -158,7 +169,9 @@ socket.on('pinUpdate', ({ messageId, pinned, seq }) => {
   if (!bump(seq)) return;
   setMessagePinned(messageId, pinned);
 });
-socket.on('kicked', ({ reason }) => { notify(reason || 'You were removed from the meeting.', true); setTimeout(() => { location.href = '/'; }, 2500); });
+socket.on('kicked', ({ reason }) => { notify(reason || 'You were removed from the meeting.', true); setTimeout(() => { location.href = HOME; }, 2500); });
+// An admin changed this account: the server closes the socket; open the hall again with the rights it has now.
+socket.on('account:changed', ({ words } = {}) => { notify(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1500); });
 socket.on('roleChanged', ({ role }) => { notify('The admin changed your role to ' + roleLabel(role) + ' — reloading…'); setTimeout(() => { const q = new URLSearchParams(location.search); q.set('role', role); location.search = q.toString(); }, 1500); });
 socket.on('stage', (v) => {
   const desk = !!(v && v.desk);
@@ -426,6 +439,9 @@ function rerenderMessage(node, msg) {
   }
   if (msg.from) {
     from.textContent = msg.from.name;
+    // Staff sign in; guests join with a code: the mark says which, so a name alone is never taken on trust.
+    from.classList.toggle('acct', !!msg.from.acct);
+    from.title = msg.from.acct ? 'Signed in with an AGMessage account' : 'Joined with a code';
     rt.textContent = roleLabel(msg.from.role);
     rt.dataset.role = msg.from.role;
   }
@@ -1542,8 +1558,8 @@ filePane?.addEventListener('submit', (e) => {
 // ---------------- Helpers ----------------
 function roleLabel(role) {
   // 'director' is a legacy alias kept for old persisted history
-  return role === 'board' || role === 'director' ? 'Board' :
-         role === 'research' ? 'Research' :
+  return role === 'board' || role === 'director' ? 'On stage' :
+         role === 'research' ? 'Backstage' :
          role === 'observer' ? 'Observer' : role;
 }
 function formatTime(ts) {
