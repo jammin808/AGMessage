@@ -1747,3 +1747,30 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .help-cat { display: inline-flex; align-items: center; gap: .35rem; padding: .4rem .7rem; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; font-size: .92rem; }
 .help-cat:has(input:checked) { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); font-weight: 600; }
 .help-cat input { margin: 0; }
+
+/* Screens: an operator's view of the hall's displays — tick, then take; each line says what its screen confirmed */
+.screen-btn { background: none; border: 0; cursor: pointer; font-size: 1rem; opacity: .7; }
+.screen-btn:hover { opacity: 1; }
+.screens-dialog { max-height: min(92vh, 52rem); }
+.screens-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.screens-head h2 { margin: 0; }
+.screens-pending { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .8rem 0 0; padding: .6rem .8rem; border: 2px solid var(--brand); border-radius: 10px; }
+.inline-field { display: inline-flex; align-items: center; gap: .3rem; font-size: .9rem; }
+.inline-field input { width: 5rem; padding: .3rem .4rem; }
+.screens-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: .9rem 0 .5rem; }
+.screens-bar .check { margin: 0 .4rem 0 0; }
+.screen-msg { display: grid; grid-template-columns: 1fr auto auto auto; gap: .5rem; align-items: center; margin-bottom: .7rem; }
+.screen-msg select { width: auto; }
+@media (max-width: 640px) { .screen-msg { grid-template-columns: 1fr 1fr; } .screen-msg input { grid-column: 1 / -1; } }
+.screen-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+.screen-item { padding: .6rem 0; border-bottom: 1px solid var(--border); display: grid; gap: .25rem; }
+.screen-line { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
+.screen-state { font-size: .85rem; font-weight: 600; }
+.screen-item[data-state="shown"] .screen-state { color: var(--ok); }
+.screen-item[data-state="sending"] .screen-state { color: var(--accent); }
+.screen-item[data-state="offline"] .screen-state, .screen-item[data-state="error"] .screen-state { color: var(--danger); }
+.screen-showing { font-size: .88rem; color: var(--muted); padding-left: 1.6rem; }
+.screen-acts { display: flex; flex-wrap: wrap; gap: .3rem; padding-left: 1.4rem; }
+.screens-manage { margin-top: .9rem; display: grid; gap: .5rem; }
+.screens-manage .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.screens-manage input, .screens-manage select { width: auto; flex: 1 1 14rem; }

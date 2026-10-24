@@ -23,6 +23,7 @@
       <button id="stageToggleBtn" class="btn ghost small director-only" title="Collapse / expand the On stage panel" type="button" hidden>📺</button>
       <button id="themeBtn" class="btn ghost small" title="Toggle dark mode">🌙</button>
       <button id="helpBtn" class="btn small help-btn" type="button" title="Ask the crew and the project managers for help" hidden>Help</button>
+      <button id="screensBtn" class="btn small" type="button" title="What this hall's screens show" hidden>Screens</button>
       <button id="peopleBtn" class="btn ghost small" title="Who's here">People</button>
       <a href="/" class="btn ghost small">Leave</a>
       <span class="room-chip room-chip-tiny" id="roomChip" title="Meeting code">—</span>
@@ -156,6 +157,45 @@
     </form>
   </dialog>
 
+  <dialog id="screensDialog" class="agm-dialog wide screens-dialog" aria-labelledby="screensTitle">
+    <div class="screens-head">
+      <h2 id="screensTitle">Screens in this hall</h2>
+      <button class="btn ghost small" type="button" id="screensClose">Close</button>
+    </div>
+    <div class="screens-pending" id="screensPending" hidden>
+      <span id="pendingWords"></span>
+      <label class="inline-field" id="pendingPageWrap" hidden>page <input id="pendingPage" type="number" min="1" max="9999" value="1" /></label>
+      <button class="btn primary small" type="button" id="pendingShow">Show on the ticked screens</button>
+      <button class="btn ghost small" type="button" id="pendingCancel">Cancel</button>
+    </div>
+    <div class="screens-bar" role="group" aria-label="Show on the ticked screens">
+      <label class="check"><input type="checkbox" id="screensAll" checked /> All</label>
+      <button class="btn small" type="button" data-take="holding">Holding</button>
+      <button class="btn small" type="button" data-take="countdown">Countdown</button>
+      <button class="btn small" type="button" data-take="clock">Clock</button>
+      <button class="btn small" type="button" data-take="black">Black</button>
+    </div>
+    <form id="screenMsgForm" class="screen-msg">
+      <input id="screenMsgText" maxlength="300" autocomplete="off" placeholder="A message for the screen — e.g. Five minutes, please wrap up" />
+      <select id="screenMsgTone" aria-label="How urgent">
+        <option value="info">● Note</option>
+        <option value="warn">▲ Soon</option>
+        <option value="urgent">■ Urgent</option>
+      </select>
+      <label class="check"><input type="checkbox" id="screenMsgUnder" /> Under the countdown</label>
+      <button class="btn primary" type="submit">Show</button>
+    </form>
+    <ul class="screen-list" id="screenList"></ul>
+    <p class="hint" id="screensEmpty" hidden>No screens in this hall yet.</p>
+    <div class="screens-manage" id="screensManage" hidden>
+      <div class="row"><input id="newScreenName" maxlength="60" placeholder="New screen, e.g. Lectern monitor" /><button class="btn small" type="button" id="addScreenBtn">Add screen</button></div>
+      <div class="row"><span class="hint">Holding image: <strong id="holdingName">none</strong></span>
+        <select id="holdingPick" aria-label="Holding image"><option value="">None (black)</option></select>
+        <button class="btn small" type="button" id="holdingSave">Use it</button></div>
+      <p class="hint">A screen's link opens it in any browser: a projector PC, a TV's browser, a tablet on the lectern. Anyone with the link can see that screen, so give it only to the machine that shows it — and choose "New link" if it went further.</p>
+    </div>
+  </dialog>
+
   <template id="msgTpl">
     <article class="msg">
       <header>
@@ -167,6 +207,7 @@
         <button class="pin-btn" title="Pin">📌</button>
         <button class="stage-btn" title="Show on the speaker's screen (Stagewatch)" type="button" hidden>🖥</button>
         <button class="propose-btn" title="Propose for the speaker's screen — the show caller approves it in Stagewatch" type="button" hidden>📝</button>
+        <button class="screen-btn" title="Show on this hall's screens" type="button" hidden>⧉</button>
         <button class="del-btn" title="Delete this message" hidden>🗑</button>
       </header>
       <div class="body"></div>

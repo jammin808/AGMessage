@@ -37,7 +37,7 @@ export default [
     languageOptions: { ecmaVersion: 2025, sourceType: 'commonjs', globals: { ...globals.node } },
     rules: {
       ...js.configs.recommended.rules,
-      'no-unused-vars': ['error', { args: 'after-used', caughtErrors: 'none', argsIgnorePattern: '^_' }],
+      'no-unused-vars': ['error', { args: 'after-used', caughtErrors: 'none', argsIgnorePattern: '^_', ignoreRestSiblings: true }],
       'no-empty': ['error', { allowEmptyCatch: false }],   // a swallowed error says why in a comment
       eqeqeq: ['error', 'smart'],
       'no-var': 'error',

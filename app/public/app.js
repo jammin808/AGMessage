@@ -20,6 +20,7 @@ let joined = false;
 let CAN_STAGE = false;
 let CAN_PROPOSE = false;   // Stagewatch keeps the show's approval queue (Show Bus 1.2 §11)
 let AI_ON = false;
+let CAN_SCREENS = false;   // this account may drive the hall's screens (display.control)
 const HAS_STAGE = ROLE === 'board' || ROLE === 'research';
 
 // ---------------- UI sync state (declared early to avoid TDZ traps) ----------------
@@ -115,6 +116,7 @@ function rejoin() {
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
     renderStage(res.stage);
     document.getElementById('helpBtn').hidden = (res.role || ROLE) === 'observer';
+    if (AS_ACCOUNT || ADMIN_VIEW) Screens.load();
     (res.seen || []).forEach(noteSeen);
     if (res.roomName) {
       const chip = document.getElementById('roomChip');
@@ -416,6 +418,12 @@ function rerenderMessage(node, msg) {
   const body = node.querySelector('.body');
   const pinBtn = node.querySelector('.pin-btn');
   const delBtn = node.querySelector('.del-btn');
+  const screenBtn = node.querySelector('.screen-btn');
+  if (screenBtn) {
+    const showable = (msg.type === 'text' && !!msg.text) || (msg.type === 'file' && /^(image\/(png|jpeg|gif|webp)|application\/pdf)$/.test(msg.mime || ''));
+    screenBtn.hidden = !(CAN_SCREENS && showable);
+    screenBtn.onclick = showable ? () => Screens.offer(msg) : null;
+  }
   const stageBtn = node.querySelector('.stage-btn');
   if (stageBtn) {
     const canStage = CAN_STAGE && document.body.dataset.role === 'research' && (msg.type === 'text' || msg.type === 'action') && !!msg.text;
@@ -1929,4 +1937,137 @@ function consumeReplyTo() {
       notify('Help request sent — it stays up until someone marks it resolved.');
     });
   });
+})();
+
+// ---------------- Screens: what this hall's displays show (accounts with display.control) ----------------
+// Tick the screens, then take: holding, countdown, clock, black, a message (alone, or under the countdown — the
+// speaker's comfort monitor), or a file from the hall. Each screen says what it showed: ✓ on screen only once it has.
+const Screens = (function () {
+  const $ = (id) => document.getElementById(id);
+  const dlg = $('screensDialog');
+  let list = [];
+  let manage = false;
+  let holding = '';
+  let pending = null;           // a message or file offered from the feed, waiting for "Show"
+  const ticked = new Set();
+
+  function load() {
+    socket.emit('display:list', { code: ROOM }, (r) => {
+      if (!r || !r.ok) return;
+      const first = !CAN_SCREENS;
+      CAN_SCREENS = true;
+      $('screensBtn').hidden = false;
+      list = r.displays; manage = r.manage; holding = r.holding || '';
+      if (first) { for (const d of list) ticked.add(d.id); refreshScreenButtons(); }
+      render();
+    });
+  }
+  function refreshScreenButtons() { for (const [id, node] of messagesById) { const m = findMessage(id); if (m && m.type !== 'system') rerenderMessage(node, m); } }
+
+  function render() {
+    const ul = $('screenList');
+    ul.textContent = '';
+    $('screensEmpty').hidden = list.length > 0;
+    $('screensManage').hidden = !manage;
+    for (const d of list) {
+      const li = document.createElement('li');
+      li.className = 'screen-item';
+      li.dataset.state = d.state;
+      const pick = document.createElement('input');
+      pick.type = 'checkbox'; pick.checked = ticked.has(d.id); pick.setAttribute('aria-label', 'Show on ' + d.name);
+      pick.onchange = () => { if (pick.checked) ticked.add(d.id); else ticked.delete(d.id); syncAll(); };
+      const name = document.createElement('strong'); name.textContent = d.name;
+      const st = document.createElement('span'); st.className = 'screen-state'; st.textContent = d.mark + ' ' + d.words;
+      const what = document.createElement('span'); what.className = 'screen-showing'; what.textContent = d.showing;
+      const head = document.createElement('div'); head.className = 'screen-line';
+      head.append(pick, name, st);
+      const acts = document.createElement('div'); acts.className = 'screen-acts';
+      acts.appendChild(btn('Identify', () => socket.emit('display:identify', { id: d.id }, (r) => notify(r && r.ok ? (r.screens ? 'Showing its name on the screen for 6 seconds.' : 'No screen has this link open.') : (r && r.error) || 'Not sent.', !(r && r.ok)))));
+      if (manage) {
+        acts.appendChild(btn('Copy link', () => copy(location.origin + d.path)));
+        const open = document.createElement('a'); open.className = 'btn ghost small'; open.href = d.path; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open';
+        acts.appendChild(open);
+        acts.appendChild(btn('Rename', () => { const n = prompt('Name this screen', d.name); if (n) socket.emit('display:update', { id: d.id, name: n }, done('Renamed.')); }));
+        acts.appendChild(btn('New link', () => { if (confirm('Give ' + d.name + ' a new link? The old one stops at once, on every screen that has it.')) socket.emit('display:rotate', { id: d.id }, (r) => { if (r && r.ok) { copy(location.origin + r.path); notify('New link copied — open it on the screen.'); } else notify((r && r.error) || 'Not changed.', true); }); }));
+        acts.appendChild(btn('Remove', () => { if (confirm('Remove ' + d.name + '? Its link stops working.')) socket.emit('display:remove', { id: d.id }, done('Removed.')); }));
+      }
+      li.append(head, what, acts);
+      ul.appendChild(li);
+    }
+    const pickH = $('holdingPick');
+    pickH.length = 1;
+    const images = allMessages.filter((m) => m.type === 'file' && /^image\/(png|jpeg|gif|webp)$/.test(m.mime || ''));
+    for (const m of images) { const o = document.createElement('option'); o.value = m.url; o.textContent = m.filename; pickH.appendChild(o); }
+    pickH.value = holding;
+    const cur = images.find((m) => m.url === holding);
+    $('holdingName').textContent = holding ? (cur ? cur.filename : 'an image') : 'none';
+    syncAll();
+    renderPending();
+  }
+  function syncAll() { $('screensAll').checked = list.length > 0 && list.every((d) => ticked.has(d.id)); }
+  function btn(label, onclick) { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small'; b.textContent = label; b.onclick = onclick; return b; }
+  function done(words) { return (r) => notify(r && r.ok ? words : (r && r.error) || 'Not changed.', !(r && r.ok)); }
+  async function copy(text) {
+    try { await navigator.clipboard.writeText(text); notify('Link copied.'); } catch { prompt('Copy this screen link', text); }
+  }
+
+  /** Put a content on every ticked screen; say how many took it (each confirms on its own line when it has shown it). */
+  function take(content) {
+    const ids = list.filter((d) => ticked.has(d.id)).map((d) => d.id);
+    if (!ids.length) { notify('Tick at least one screen.', true); return; }
+    let okN = 0, err = '';
+    let left = ids.length;
+    for (const id of ids) socket.emit('display:take', { id, content }, (r) => {
+      if (r && r.ok) okN++; else err = (r && r.error) || 'Not sent.';
+      if (--left === 0) notify(err ? err : 'Sent to ' + okN + ' screen' + (okN === 1 ? '' : 's') + ' — each shows ✓ once it is on screen.', !!err);
+    });
+  }
+
+  function offer(msg) {
+    pending = msg;
+    if (msg.type === 'text') { $('screenMsgText').value = msg.text.slice(0, 300); pending = null; }
+    if (!dlg.open) dlg.showModal();
+    render();
+    if (!pending) $('screenMsgText').focus();
+  }
+  function renderPending() {
+    $('screensPending').hidden = !pending;
+    if (!pending) return;
+    const pdf = pending.mime === 'application/pdf';
+    $('pendingWords').textContent = 'Show “' + pending.filename + '”';
+    $('pendingPageWrap').hidden = !pdf;
+  }
+
+  $('screensBtn').addEventListener('click', () => { load(); dlg.showModal(); });
+  $('screensClose').addEventListener('click', () => dlg.close());
+  $('screensAll').addEventListener('change', () => { ticked.clear(); if ($('screensAll').checked) for (const d of list) ticked.add(d.id); render(); });
+  for (const b of document.querySelectorAll('.screens-bar [data-take]')) b.addEventListener('click', () => take({ kind: b.dataset.take }));
+  $('screenMsgForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = $('screenMsgText').value.trim();
+    const tone = $('screenMsgTone').value;
+    if ($('screenMsgUnder').checked) take({ kind: 'countdown', text, tone });
+    else if (!text) notify('Type the message first.', true);
+    else take({ kind: 'message', text, tone });
+  });
+  $('pendingShow').addEventListener('click', () => {
+    if (!pending) return;
+    take({ kind: 'file', url: pending.url, name: pending.filename, page: Math.max(1, parseInt($('pendingPage').value, 10) || 1) });
+    pending = null; renderPending();
+  });
+  $('pendingCancel').addEventListener('click', () => { pending = null; renderPending(); });
+  $('addScreenBtn').addEventListener('click', () => {
+    const name = $('newScreenName').value.trim();
+    if (!name) { notify('Name the screen first.', true); return; }
+    socket.emit('display:create', { code: ROOM, name }, (r) => {
+      if (!r || !r.ok) { notify((r && r.error) || 'Not added.', true); return; }
+      $('newScreenName').value = '';
+      ticked.add(r.display.id);
+      copy(location.origin + r.display.path);
+      notify(r.display.name + ' added — its link is copied: open it on that screen.');
+    });
+  });
+  $('holdingSave').addEventListener('click', () => socket.emit('display:hallHolding', { code: ROOM, image: $('holdingPick').value }, done('Holding image saved.')));
+  socket.on('displays:changed', ({ code } = {}) => { if (code === ROOM && CAN_SCREENS) load(); });
+  return { load, offer };
 })();

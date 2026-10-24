@@ -42,6 +42,7 @@ const { AuditLog } = require('./lib/audit');
 const rbac = require('./lib/rbac');
 const { mountAccounts } = require('./lib/http-accounts');
 const board = require('./lib/board');
+const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD } = require('./lib/version');
@@ -102,6 +103,7 @@ const accounts = new Accounts(path.join(DATA_DIR, 'accounts.json'));
 const sessions = new Sessions(path.join(DATA_DIR, 'sessions.json'), accounts);
 const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'));
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
+const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
 
 // ---------------------------------------------------------------- encrypted connections (Show Bus 1.2 §10)
 // One certificate per install, kept beside the machine key (outside the app folder), private key sealed. The same port
@@ -303,6 +305,14 @@ app.post('/api/admin/logout', (req, res) => {
 });
 app.get('/api/admin/me', (req, res) => res.json({ ok: isAdminReq(req), local: guard.isHostMachine(req), accounts: accounts.size }));
 
+// A display's page: the same page for every token, valid or not (the socket decides), so the URL itself says nothing.
+// No caching, no referrer (pageHeaders), no indexing: the token is a capability.
+app.get('/d/:token', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  res.sendFile(path.join(PUBLIC_DIR, 'display.html'));
+});
+
 app.get('/api/admin/transcript/:code', (req, res) => {
   if (!isAdminReq(req)) return res.status(403).send('Forbidden');
   const room = store.get(String(req.params.code || '').toUpperCase());
@@ -455,6 +465,10 @@ let aiRunning = 0;
 const AI_MAX_CONCURRENT = 3;
 
 io.on('connection', (socket) => {
+  // A display's browser: it may only receive what its own display shows and say what it showed — nothing else is
+  // listened to on this socket (fail closed).
+  const displayToken = socket.handshake.auth && typeof socket.handshake.auth.display === 'string' ? socket.handshake.auth.display : '';
+  if (displayToken) { serveDisplay(socket, displayToken); return; }
   let room = null;
   let me = null;   // {uid, name, role}
   // Who this is: the host's admin token, a signed-in account (both from the handshake's cookies), or nobody yet — a
@@ -795,6 +809,94 @@ io.on('connection', (socket) => {
     ack({ ok: true, proposal });
   });
 
+  // ----- Displays: a hall's screens. Seeing and changing what they show is display.control; making, renaming, moving,
+  // replacing the link and removing is display.manage. Both are an account's (or the admin's) rights in that hall.
+  const canDisplays = (cap, code) => socket.data.isAdmin || !!(socket.data.account && rbac.can(socket.data.account, cap, code));
+  const actor = () => socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
+  socket.on('display:list', ({ code } = {}, ack) => {
+    ack = ok(ack);
+    const c = String(code || '').toUpperCase();
+    if (!store.has(c) || !canDisplays('display.control', c)) return ack({ ok: false, error: 'Your account may not drive this hall\'s screens.' });
+    const manage = canDisplays('display.manage', c);
+    ack({ ok: true, code: c, manage, holding: displays.hallHolding(c), displays: displays.ofHall(c).map((d) => ({ ...Displays.status(d), ...(manage ? { path: displays.path(d) } : {}) })) });
+  });
+  socket.on('display:take', ({ id, content } = {}, ack) => {
+    ack = ok(ack);
+    const d = displays.get(String(id || ''));
+    if (!d || !canDisplays('display.control', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
+    if (!writes.take()) return limited(ack);
+    const c = cleanContent(content);
+    if (c.error) return ack({ ok: false, error: c.error });
+    const who = actor();
+    displays.take(d.id, c, who.name);
+    io.to('display:' + d.id).emit('display:state', displayState(d));
+    audit.write(who, 'display.take', d.id, d.name + ' → ' + describeContent(c), socket.data.ip);
+    displaysChanged(d.hall);
+    ack({ ok: true, seq: d.seq, status: Displays.status(d) });
+  });
+  socket.on('display:identify', ({ id } = {}, ack) => {
+    ack = ok(ack);
+    const d = displays.get(String(id || ''));
+    if (!d || !canDisplays('display.control', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
+    if (!chatter.take()) return limited(ack);
+    io.to('display:' + d.id).emit('display:identify', { name: d.name, hall: (store.get(d.hall) || {}).name || d.hall, seconds: 6 });
+    ack({ ok: true, screens: d.live.sockets });
+  });
+  socket.on('display:create', ({ code, name } = {}, ack) => {
+    ack = ok(ack);
+    const c = String(code || '').toUpperCase();
+    if (!store.has(c) || !canDisplays('display.manage', c)) return ack({ ok: false, error: 'Your account may not add screens to this hall.' });
+    if (displays.ofHall(c).length >= 50) return ack({ ok: false, error: 'A hall has at most 50 screens.' });
+    const r = displays.create(c, name, actor().name);
+    audit.write(actor(), 'display.create', r.display.id, r.display.name + ' in ' + c, socket.data.ip);
+    displaysChanged(c);
+    ack({ ok: true, display: { ...Displays.status(r.display), path: r.path } });
+  });
+  socket.on('display:update', ({ id, name, hall } = {}, ack) => {
+    ack = ok(ack);
+    const d = displays.get(String(id || ''));
+    const to = typeof hall === 'string' && hall ? hall.toUpperCase() : '';
+    if (!d || !canDisplays('display.manage', d.hall) || (to && (!store.has(to) || !canDisplays('display.manage', to)))) return ack({ ok: false, error: 'No such screen or hall, or not yours to change.' });
+    const from = d.hall;
+    displays.update(d.id, { name, hall: to || undefined });
+    audit.write(actor(), 'display.update', d.id, 'name ' + d.name + (to && to !== from ? ', moved ' + from + ' → ' + to : ''), socket.data.ip);
+    io.to('display:' + d.id).emit('display:state', displayState(d));
+    displaysChanged(from); if (to && to !== from) displaysChanged(to);
+    ack({ ok: true });
+  });
+  socket.on('display:rotate', ({ id } = {}, ack) => {
+    ack = ok(ack);
+    const d = displays.get(String(id || ''));
+    if (!d || !canDisplays('display.manage', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
+    const p = displays.rotate(d.id);
+    revokeDisplaySockets(d.id, 'This screen\'s link was replaced. Open the new link to show it again.');
+    audit.write(actor(), 'display.rotate', d.id, d.name + ': new link, the old one stopped', socket.data.ip);
+    displaysChanged(d.hall);
+    ack({ ok: true, path: p });
+  });
+  socket.on('display:remove', ({ id } = {}, ack) => {
+    ack = ok(ack);
+    const d = displays.get(String(id || ''));
+    if (!d || !canDisplays('display.manage', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
+    revokeDisplaySockets(d.id, 'This screen was removed from AGMessage.');
+    displays.remove(d.id);
+    audit.write(actor(), 'display.remove', d.id, d.name + ' removed', socket.data.ip);
+    displaysChanged(d.hall);
+    ack({ ok: true });
+  });
+  socket.on('display:hallHolding', ({ code, image } = {}, ack) => {
+    ack = ok(ack);
+    const c = String(code || '').toUpperCase();
+    if (!store.has(c) || !(canDisplays('display.manage', c) || canManageHall())) return ack({ ok: false, error: 'Your account may not set this hall\'s holding image.' });
+    const h = cleanContent({ kind: 'holding', image });
+    if (h.error) return ack({ ok: false, error: h.error });
+    displays.setHallHolding(c, h.image || '');
+    for (const d of displays.ofHall(c)) io.to('display:' + d.id).emit('display:state', displayState(d));
+    audit.write(actor(), 'hall.holding', c, h.image ? 'holding image set' : 'holding image cleared', socket.data.ip);
+    displaysChanged(c);
+    ack({ ok: true });
+  });
+
   // ----- The halls board: an account's every hall at a glance (or the admin's), pushed latest-wins on change.
   socket.on('board:watch', (_args, ack) => {
     ack = ok(ack);
@@ -846,7 +948,11 @@ io.on('connection', (socket) => {
     const changed = [];
     if (typeof name === 'string') {
       const n = guard.cleanText(name, 80);
-      if (n && n !== r.name) { store.commit(r, { o: 'meta', name: n }); changed.push('name → ' + n); }
+      if (n && n !== r.name) {
+        store.commit(r, { o: 'meta', name: n });
+        changed.push('name → ' + n);
+        for (const d of displays.ofHall(r.code)) io.to('display:' + d.id).emit('display:state', displayState(d));
+      }
     }
     if (typeof stagewatchUrl === 'string') {
       const prev = hallStagewatch(r.code) || {};
@@ -916,6 +1022,8 @@ io.on('connection', (socket) => {
     io.in(r.code).disconnectSockets(true);
     store.remove(r.code);
     if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
+    for (const d of displays.ofHall(r.code)) revokeDisplaySockets(d.id, 'This screen\'s hall was closed.');
+    displays.removeHall(r.code);
     configureHallLink({ code: r.code });   // its own Stagewatch link, if it had one, stops
     boardDirty();
     audit.write(socket.data.actor || HOST_ACTOR, 'hall.remove', r.code, (r.name || '(no name)') + (purgeFiles ? ', files removed' : ''), socket.data.ip);
@@ -1084,9 +1192,47 @@ function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : [];
 /** A link as the AI's brief reads it. */
 const briefOf = (link) => ({ status: link.status, view: link.view, context: link.context });
 
-/** A Stagewatch's frame moved: the displays that follow it learn the new frame (lib/displays.js, next). */
-function stageChanged(_link) { /* displays follow their hall's link */ }
-const displaysOf = (_code) => [];
+// ---------------------------------------------------------------- displays
+/** Everything a display's page needs: what to show (numbered), the hall's holding image and countdown, the server's time. */
+function displayState(d) {
+  return {
+    id: d.id, name: d.name, hall: d.hall, hallName: (store.get(d.hall) || {}).name || '', seq: d.seq, content: d.content,
+    holding: displays.hallHolding(d.hall), stage: stagePayload(linkFor(d.hall)), now: Date.now(),
+  };
+}
+/** A display's browser connects with its token: it is told what to show, and it says what it showed. */
+function serveDisplay(socket, token) {
+  const d = displays.byToken(token);
+  if (!d) { socket.emit('display:unknown', { words: 'This screen link is not (or no longer) in use. Ask for the current link.' }); setTimeout(() => socket.disconnect(true), 100); return; }
+  socket.data.display = d.id;
+  socket.join('display:' + d.id);
+  d.live.sockets++;
+  const reports = new guard.Bucket(4, 10);
+  socket.emit('display:state', displayState(d));
+  displaysChanged(d.hall);
+  socket.on('display:shown', ({ seq, ok, words } = {}) => {
+    const cur = displays.get(d.id);
+    if (!cur || !reports.take()) return;
+    if (displays.shown(cur, seq, ok, words)) displaysChanged(cur.hall);
+  });
+  socket.on('disconnect', () => {
+    const cur = displays.get(d.id);
+    if (!cur) return;
+    cur.live.sockets = Math.max(0, cur.live.sockets - 1);
+    displaysChanged(cur.hall);
+  });
+}
+function revokeDisplaySockets(id, words) {
+  for (const s of io.sockets.sockets.values()) if (s.data && s.data.display === id) { s.emit('display:unknown', { words }); setTimeout(() => s.disconnect(true), 100); }
+}
+/** A hall's screens changed: its operators re-read them, the board redraws. */
+function displaysChanged(code) { io.to(code).emit('displays:changed', { code }); boardDirty(); }
+/** A Stagewatch's frame moved: the displays of every hall that follows it get the frame. */
+function stageChanged(link) {
+  const payload = stagePayload(link);
+  for (const r of roomsUsing(link)) for (const d of displays.ofHall(r.code)) if (d.live.sockets) io.to('display:' + d.id).emit('display:stage', payload);
+}
+const displaysOf = (code) => displays.ofHall(code).map((d) => { const st = Displays.status(d); return { id: st.id, name: st.name, state: st.state, mark: st.mark, words: st.words + ' — ' + st.showing }; });
 
 // ---------------------------------------------------------------- the halls board
 // Each watcher gets the halls it may see, recomputed when anything on them changes and sent at most every 300 ms
@@ -1488,6 +1634,7 @@ function shutdown(code = 0) {
   console.log('\n  Saving rooms…');
   store.compactAll();
   settingsLane.flushSync();
+  displays.flush(); accounts.flush(); sessions.flush();
   for (const link of allLinks()) link.stop();
   if (discovery) discovery.stop();
   process.exit(code);
@@ -1502,6 +1649,7 @@ process.on('uncaughtException', (e) => {
   console.error('  [error]', e && e.stack ? e.stack : e);
   try { store.compactAll(); } catch { /* best effort */ }
   try { settingsLane.flushSync(); } catch { /* best effort */ }
+  try { displays.flush(); accounts.flush(); sessions.flush(); } catch { /* best effort: their lanes wrote within 500 ms anyway */ }
   try {
     resilience.writeFileAtomic(CRASH_PATH, JSON.stringify({ at: Date.now(), message: String(e && e.message ? e.message : e).slice(0, 500), stack: String(e && e.stack ? e.stack : '').slice(0, 4000) }));
     fs.appendFileSync(path.join(DATA_DIR, 'crash.log'), new Date().toISOString() + ' ' + String(e && e.stack ? e.stack : e) + '\n');
