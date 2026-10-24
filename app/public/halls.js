@@ -83,7 +83,7 @@
         (canManageHalls ? '<button type="button" class="btn ghost small hall-setup" data-code="' + esc(h.code) + '">Set up</button>' : '') +
         '<span title="People in the hall now">' + esc(String(l.people ?? h.people)) + ' in</span>' +
         (helpOpen ? '<span class="help-count" title="Open help requests">■ ' + esc(String(helpOpen)) + ' need help</span>' : '') +
-        displaysHtml +
+        displaysHtml + nodesHtml(l.nodes) +
       '</div>';
     return li;
   }
@@ -138,6 +138,71 @@
   });
   $('setupAccept').addEventListener('click', () => socket.emit('hall:acceptCertificate', { code: setupCode }, (r) => AGM.toast(r && r.ok ? 'New certificate accepted.' : (r && r.error) || 'Not accepted.', !(r && r.ok))));
 
+  const LIGHT_MARK = { green: '✓', amber: '△', red: '✕', grey: '○' };
+  /** A linked Patterns or PlayMap as a chip: its light in a shape and its name; its headline on hover. */
+  function nodesHtml(list) {
+    return (list || []).map((n) => '<span class="node-chip" data-light="' + esc(n.light) + '" title="' + esc((n.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' — ' + (n.headline || n.status)) + '">' + esc(LIGHT_MARK[n.light] || '○') + ' ' + esc(n.name) + '</span>').join('');
+  }
+
+  // ---------------------------------------------------------------- the show network: Patterns and PlayMap, and their verbs
+  const RISK = { low: '● low', review: '▲ review', high: '■ high' };
+  function openNetwork() {
+    socket.emit('nodes:list', {}, (r) => {
+      if (!r || !r.ok) { AGM.toast((r && r.error) || 'Not available.', true); return; }
+      const box = $('networkList');
+      box.textContent = '';
+      if (!r.linked.length) { const p = document.createElement('p'); p.className = 'empty-note'; p.textContent = 'No Patterns or PlayMap is linked yet — the admin links them on the admin page.'; box.appendChild(p); }
+      for (const n of r.linked) box.appendChild(nodeCard(n, r.desk));
+      $('networkDialog').showModal();
+    });
+  }
+  /** A node's items that need attention, as list rows built from escaped parts. */
+  function itemsHtml(items) {
+    return items.map((i) => '<li data-light="' + esc(i.light) + '">' + esc(LIGHT_MARK[i.light]) + ' <strong>' + esc(i.label) + '</strong> ' + esc(i.state) + '</li>').join('');
+  }
+  function nodeCard(n, desk) {
+    const sec = document.createElement('section');
+    sec.className = 'node-card';
+    sec.dataset.light = n.light;
+    const items = (n.items || []).filter((i) => i.light === 'red' || i.light === 'amber').slice(0, 6);
+    sec.innerHTML =
+      '<h3><span aria-hidden="true">' + esc(LIGHT_MARK[n.light] || '○') + '</span> ' + esc(n.name) + ' <small class="muted">' + esc(n.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' · ' + esc(n.status) + (n.hall ? ' · ' + esc(n.hall) : '') + '</small></h3>' +
+      '<p class="node-headline">' + esc(n.headline || n.problem || 'No word from it yet.') + '</p>' +
+      (items.length ? '<ul class="node-items">' + itemsHtml(items) + '</ul>' : '');
+    const form = document.createElement('form');
+    form.className = 'node-cmd';
+    const sel = document.createElement('select');
+    sel.setAttribute('aria-label', 'Verb');
+    for (const c of n.commands) { const o = document.createElement('option'); o.value = c.verb; o.dataset.risk = c.risk; o.textContent = RISK[c.risk] + ' — ' + c.verb + (c.words ? ' (' + c.words + ')' : ''); sel.appendChild(o); }
+    const line = document.createElement('input');
+    line.maxLength = 400; line.placeholder = 'The line to send, e.g. ' + (n.commands[0] ? n.commands[0].verb : 'a verb it lists');
+    line.setAttribute('aria-label', 'Line');
+    const send = document.createElement('button'); send.type = 'button'; send.className = 'btn small'; send.textContent = 'Send now';
+    const propose = document.createElement('button'); propose.type = 'submit'; propose.className = 'btn small primary'; propose.textContent = 'Propose';
+    propose.hidden = !desk;
+    const out = document.createElement('p'); out.className = 'hint node-out';
+    const fill = () => {
+      const c = n.commands.find((x) => x.verb === sel.value);
+      if (!c) return;
+      line.value = c.verb.split(/\s+/).filter((w) => !/^[<[{(]/.test(w)).join(' ').replace(/\s*[<[{(].*$/, '').trim() + ' ';
+      send.disabled = c.risk === 'high';
+      send.title = c.risk === 'high' ? 'High risk: propose it to the show desk' : 'Send it now — ' + n.name + ' answers with a receipt';
+    };
+    sel.onchange = () => { fill(); line.focus(); };
+    if (n.commands.length) fill(); else { line.disabled = true; send.disabled = true; propose.disabled = true; line.placeholder = 'It lists no verbs yet.'; }
+    const run = (mode) => socket.emit('nodes:command', { id: n.id, line: line.value.trim(), mode }, (r) => {
+      out.dataset.ok = r && r.ok ? '1' : '0';
+      out.textContent = !r ? 'No answer.' : !r.ok ? '✕ ' + r.error : mode === 'send' ? '✓ ' + (r.stage === 'applied' ? 'Done' : 'Accepted') + (r.effect ? ': ' + r.effect : '') : '▲ Proposed to the show desk (' + r.proposal.id + ') — a person approves it in Stagewatch.';
+    });
+    send.onclick = () => run('send');
+    form.onsubmit = (e) => { e.preventDefault(); run('propose'); };
+    form.append(sel, line, send, propose);
+    sec.append(form, out);
+    return sec;
+  }
+  $('networkBtn').addEventListener('click', openNetwork);
+  $('networkClose').addEventListener('click', () => $('networkDialog').close());
+
   function renderHelp() {
     const strip = $('helpStrip');
     strip.hidden = helps.length === 0;
@@ -181,6 +246,7 @@
     });
     socket.on('disconnect', () => { ls.dataset.ok = '0'; ls.textContent = '○ Reconnecting'; });
     socket.on('board', applyBoard);
+    socket.on('nodes:changed', () => { if ($('networkDialog').open) openNetwork(); });
     socket.on('account:changed', () => { AGM.toast('Your account was changed — reloading.'); setTimeout(() => location.reload(), 1200); });
   }
   function applyBoard(b) {
@@ -188,6 +254,7 @@
     live = {};
     for (const r of b.halls || []) live[r.code] = r;
     helps = b.help || [];
+    $('networkBtn').hidden = !(b.nodes && b.nodes.length);
     const known = new Set(halls.map((h) => h.code));
     if ((b.halls || []).some((r) => !known.has(r.code)) || (b.halls || []).length !== halls.length) { load(); return; }
     render();

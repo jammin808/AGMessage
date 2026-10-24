@@ -20,6 +20,7 @@ const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
  * @param {boolean} f.aiOn
  * @param {boolean} f.tunnel
  * @param {number} [f.help] open help requests across the halls (a count)
+ * @param {Object<string,{light:string,headline:string}>} [f.peerContexts] linked Patterns / PlayMap nodes' own light and headline
  * @param {Array<{status:string, view:object|null, context:object|null}>} [f.halls] halls' own Stagewatch links
  * @param {Array<{at:number,text:string}>} f.recent role-level events, no content
  * @param {number} [f.now]
@@ -80,7 +81,8 @@ function buildContext(f) {
 
   // Peers, one hop: what each says about itself (Stagewatch's own context when we hold it).
   const peers = (f.peers || []).map((p) => {
-    const fromCtx = st.context && st.context.node && st.context.node.id === p.id ? st.context : null;
+    const fromCtx = st.context && st.context.node && st.context.node.id === p.id ? st.context
+      : f.peerContexts && f.peerContexts[p.id] ? f.peerContexts[p.id] : null;   // a linked Patterns or PlayMap's own words
     return {
       t: p.t, id: p.id, name: p.name,
       light: p.status === 'live' ? (fromCtx && LIGHTS.includes(fromCtx.light) ? fromCtx.light : 'green') : 'amber',
@@ -125,7 +127,12 @@ function showBrief(stage, peers) {
     lines.push(`Stagewatch says: ${ctx.headline || ''} [${ctx.light || 'grey'}]`);
     for (const p of (ctx.peers || []).slice(0, 6)) lines.push(`  peer ${p.t} "${p.name || ''}": ${p.headline || ''} [${p.light || 'grey'}]`);
   }
-  for (const p of (peers || []).slice(0, 8)) if (!ctx || !ctx.node || p.id !== ctx.node.id) lines.push(`Heard on the network: ${p.t} "${p.name || ''}" (${p.status})`);
+  const linked = new Map(((stage && stage.linked) || []).map((l) => [l.id, l]));
+  for (const l of linked.values()) {
+    lines.push(`${l.t === 'playmap' ? 'PlayMap' : 'Patterns'} "${l.name}" (linked, ${l.status}): ${l.headline || 'no headline yet'} [${l.light}]`);
+    for (const i of (l.items || []).filter((x) => x.light === 'red' || x.light === 'amber').slice(0, 4)) lines.push(`  ${i.label}: ${i.state} [${i.light}]`);
+  }
+  for (const p of (peers || []).slice(0, 8)) if ((!ctx || !ctx.node || p.id !== ctx.node.id) && !linked.has(p.id)) lines.push(`Heard on the network: ${p.t} "${p.name || ''}" (${p.status})`);
   return lines.join('\n');
 }
 

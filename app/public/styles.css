@@ -1774,3 +1774,21 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .screens-manage { margin-top: .9rem; display: grid; gap: .5rem; }
 .screens-manage .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 .screens-manage input, .screens-manage select { width: auto; flex: 1 1 14rem; }
+
+/* The show network on the board: a linked Patterns or PlayMap, its light in a shape, its verbs with their risk */
+.node-chip { border: 1px solid var(--border); border-radius: 999px; padding: .05rem .5rem; color: var(--ink); background: var(--card); }
+.node-chip[data-light="green"] { border-color: var(--ok); }
+.node-chip[data-light="amber"] { border-color: var(--accent); }
+.node-chip[data-light="red"] { border-color: var(--danger); }
+.node-card { border: 1px solid var(--border); border-left: 5px solid var(--muted); border-radius: 10px; padding: .7rem .9rem; margin: .7rem 0; }
+.node-card[data-light="green"] { border-left-color: var(--ok); }
+.node-card[data-light="amber"] { border-left-color: var(--accent); }
+.node-card[data-light="red"] { border-left-color: var(--danger); }
+.node-card h3 { margin: 0 0 .25rem; font-size: 1.05rem; }
+.node-headline { margin: 0 0 .4rem; }
+.node-items { margin: 0 0 .5rem; padding-left: 1.1rem; font-size: .9rem; }
+.node-cmd { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(10rem, 1.2fr) auto auto; gap: .4rem; align-items: center; }
+.node-cmd select, .node-cmd input { width: 100%; }
+@media (max-width: 640px) { .node-cmd { grid-template-columns: 1fr 1fr; } .node-cmd select, .node-cmd input { grid-column: 1 / -1; } }
+.node-out[data-ok="1"] { color: var(--ok); }
+.node-out[data-ok="0"] { color: var(--danger); }

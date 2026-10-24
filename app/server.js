@@ -42,6 +42,8 @@ const { AuditLog } = require('./lib/audit');
 const rbac = require('./lib/rbac');
 const { mountAccounts } = require('./lib/http-accounts');
 const board = require('./lib/board');
+const stagelines = require('./lib/stagelines');
+const peerlinks = require('./lib/peerlinks');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
@@ -779,6 +781,19 @@ io.on('connection', (socket) => {
     ack(r);
   });
 
+  // ----- Where a message can go in this hall's Stagewatch: the speaker's screen (sent now, or proposed), role screens,
+  // its departments (from its context), the operator alone (proposed).
+  socket.on('stage:targets', (_args, ack) => {
+    ack = ok(ack);
+    if (!need(ack)) return;
+    const link = linkFor(room.code);
+    ack({
+      ok: true, linked: link.linked, title: (link.context && link.context.node && link.context.node.name) || '',
+      canSend: !!(link.base && link.key) && allowed('stage.send'), canPropose: !!(link.desk && link.key) && allowed('stage.send'),
+      targets: stagelines.destinations(stagelines.departmentsOf(link.context)),
+    });
+  });
+
   // ----- Show desk (Show Bus 1.2 §11): propose a stage message instead of sending it; the show caller approves
   socket.on('stage:propose', async (args = {}, ack) => {
     ack = ok(ack);
@@ -788,21 +803,21 @@ io.on('connection', (socket) => {
     let text = typeof args.text === 'string' ? args.text : '';
     const source = typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
     if (!text && source) text = source.text || '';
-    text = text.replace(/\s+/g, ' ').trim().slice(0, 300);
-    if (!text) return ack({ ok: false, error: 'Nothing to propose.' });
-    const urgency = ['info', 'warn', 'crit'].includes(args.urgency) ? args.urgency : 'info';
+    // Where in Stagewatch it goes (lib/stagelines.js): the speaker's screen, a role screen, a department, or the
+    // operator alone — always in Stagewatch's own grammar, for the show caller to approve.
+    const built = stagelines.lineFor(args.destination || 'speaker', text, args.urgency);
+    if (built.error) return ack({ ok: false, error: built.error });
     const link = linkFor(room.code);
     const r = await link.propose({
       from: { t: 'messenger', id: settings.nodeId, name: 'AGMessage' },
       target: { t: 'main' },
-      // Stagewatch's own grammar; a double quote inside would end the text early, so it becomes a single one.
-      line: 'message "' + text.replace(/"/g, "'") + '" ' + urgency + ' ack',
-      reason: 'The research team in AGMessage suggests this for the speaker' + (source && source.ai ? ' (an AI draft a person chose)' : '') + '.',
+      line: built.line,
+      reason: 'AGMessage (' + (me.acct ? 'crew' : 'backstage') + ') asks for this on ' + built.words + (source && source.aiDraft ? ' — an AI draft a person chose' : '') + '.',
       risk: 'review',
     });
     if (!r.ok) return ack(r);
-    const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, words: '', at: Date.now() };
-    const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} proposed for the stage screen: “${text.slice(0, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
+    const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, words: '', to: built.words, at: Date.now() };
+    const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} asked Stagewatch's operator to put this on ${built.words}: “${stagelines.parse(built.line).text.slice(0, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
     if (source) apply(room, { o: 'upd', id: source.id, f: { proposal } });
     trackProposal(link.id, proposal.id, room.code, [sys.id].concat(source ? [source.id] : []), proposal.state);
     noteEvent('research proposed a stage message to the show desk');
@@ -895,6 +910,80 @@ io.on('connection', (socket) => {
     audit.write(actor(), 'hall.holding', c, h.image ? 'holding image set' : 'holding image cleared', socket.data.ip);
     displaysChanged(c);
     ack({ ok: true });
+  });
+
+  // ----- Patterns and PlayMap: what they are doing, and the verbs they list — sent now (low / review risk) or proposed to
+  // the show desk (any risk; high only ever proposed). Linking a node (its token) is the admin's.
+  socket.on('nodes:list', (_args, ack) => {
+    ack = ok(ack);
+    const any = socket.data.isAdmin || (socket.data.account && rbac.can(socket.data.account, 'nodes.control'));
+    if (!any) return ack({ ok: false, error: 'Your account may not drive other show systems.' });
+    const linked = Array.from(peerLinks.values()).filter((l) => mayDriveNode(socket, l)).map((l) => l.view());
+    const heard = socket.data.isAdmin && discovery ? discovery.list().filter((p) => peerlinks.KINDS.has(p.t) && !peerLinks.has(p.id)) : [];
+    ack({ ok: true, linked, heard, admin: !!socket.data.isAdmin, halls: Array.from(store.rooms.values()).map((r) => ({ code: r.code, name: r.name || '' })), desk: allLinks().some((l) => l.desk) });
+  });
+  socket.on('nodes:link', ({ id, token, hall, url, name, t: typedKind } = {}, ack) => {
+    ack = ok(ack);
+    if (!socket.data.isAdmin) return ack({ ok: false, error: 'Linking another show system is the admin\'s.' });
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(String(id || ''))) return ack({ ok: false, error: 'A node id is the one its hello announces.' });
+    const peer = discovery ? discovery.peers.get(String(id)) : null;
+    const cfg = settings.peerLinks && settings.peerLinks[String(id)];
+    // Heard on the bus, linked before, or typed (a venue network that blocks broadcast): its kind and its address.
+    const t = (peer && peer.t) || (cfg && cfg.t) || (typeof url === 'string' && url.trim() ? typedKind : '');
+    if (!t || !peerlinks.KINDS.has(t)) return ack({ ok: false, error: 'Choose a Patterns or PlayMap that AGMessage hears on the network, or type its kind and address.' });
+    const port = peer ? (peer.ports.http || peer.ports.https) : 0;
+    const base = typeof url === 'string' && url.trim() ? nodes.normaliseBase(url) : peer ? (peer.tls ? 'https://' : 'http://') + peer.address + ':' + (peer.ports.https || port) : cfg.url;
+    if (!base) return ack({ ok: false, error: 'That is not an address.' });
+    const h = typeof hall === 'string' && hall ? hall.toUpperCase() : '';
+    if (h && !store.has(h)) return ack({ ok: false, error: 'No such hall.' });
+    const sealed = typeof token === 'string' && token.trim() ? secretbox.seal(token.trim().slice(0, 200)) : (cfg && cfg.tokenSealed) || '';
+    const next = { t, name: guard.cleanText(name || (peer && peer.name) || (cfg && cfg.name) || t, 60), url: base, tokenSealed: sealed, hall: h };
+    settings.peerLinks = { ...(settings.peerLinks || {}), [String(id)]: next };
+    saveSettings();
+    startPeerLink(String(id), next);
+    audit.write(socket.data.actor || HOST_ACTOR, 'node.link', String(id), t + ' “' + next.name + '” at ' + base + (h ? ' for ' + h : '') + (typeof token === 'string' && token.trim() ? ' (token sealed)' : ''), socket.data.ip);
+    boardDirty(); nodesChanged();
+    ack({ ok: true });
+  });
+  socket.on('nodes:unlink', ({ id } = {}, ack) => {
+    ack = ok(ack);
+    if (!socket.data.isAdmin) return ack({ ok: false, error: 'Unlinking another show system is the admin\'s.' });
+    if (!settings.peerLinks || !settings.peerLinks[String(id)]) return ack({ ok: false, error: 'Not linked.' });
+    const was = settings.peerLinks[String(id)];
+    const rest = { ...settings.peerLinks };
+    delete rest[String(id)];
+    settings.peerLinks = rest;
+    saveSettings();
+    startPeerLink(String(id), null);
+    audit.write(socket.data.actor || HOST_ACTOR, 'node.unlink', String(id), was.t + ' “' + was.name + '” unlinked; its token forgotten', socket.data.ip);
+    boardDirty(); nodesChanged();
+    ack({ ok: true });
+  });
+  socket.on('nodes:command', async ({ id, line, mode } = {}, ack) => {
+    ack = ok(ack);
+    const link = peerLinks.get(String(id || ''));
+    if (!link || !mayDriveNode(socket, link)) return ack({ ok: false, error: 'No such link, or not yours to drive.' });
+    if (!writes.take()) return limited(ack);
+    const text = guard.cleanText(line, 400);
+    const match = link.context ? peerlinks.matchCommand(link.context.commands, text) : null;
+    if (!text || !match) return ack({ ok: false, error: link.node.name + ' does not list that command — only the verbs it lists can be sent.' });
+    const who = socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
+    if (mode === 'send') {
+      if (match.risk === 'high') return ack({ ok: false, error: '“' + match.verb + '” is high risk for ' + link.node.name + ': propose it to the show desk, where a person approves it.' });
+      const r = await link.send(text);
+      audit.write(who, 'node.command', link.node.id, link.node.name + ': ' + text + ' → ' + (r.ok ? r.stage + (r.effect ? ' (' + r.effect + ')' : '') : 'refused: ' + (r.error || '')), socket.data.ip);
+      noteEvent('a person sent a ' + match.risk + '-risk command to ' + link.node.t);
+      return ack({ ...r, risk: match.risk });
+    }
+    const desk = [linkFor(link.hall || (room && room.code) || ''), ...allLinks()].find((l) => l.linked && l.desk);
+    if (!desk) return ack({ ok: false, error: 'No show desk is linked: a Stagewatch with an approval queue takes proposals.' });
+    const r = await desk.propose({
+      from: { t: 'messenger', id: settings.nodeId, name: 'AGMessage' },
+      target: { t: link.node.t, id: link.node.id, name: link.node.name },
+      line: text, reason: 'Asked from AGMessage by ' + who.name + (link.hall ? ' (' + ((store.get(link.hall) || {}).name || link.hall) + ')' : '') + '.', risk: match.risk,
+    });
+    audit.write(who, 'node.propose', link.node.id, link.node.name + ': ' + text + ' → ' + (r.ok ? 'proposed (' + r.proposal.id + ')' : 'refused: ' + r.error), socket.data.ip);
+    ack(r.ok ? { ok: true, proposal: r.proposal, risk: match.risk } : r);
   });
 
   // ----- The halls board: an account's every hall at a glance (or the admin's), pushed latest-wins on change.
@@ -1189,8 +1278,8 @@ io.on('connection', (socket) => {
 
 function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : []; }
 
-/** A link as the AI's brief reads it. */
-const briefOf = (link) => ({ status: link.status, view: link.view, context: link.context });
+/** A link as the AI's brief reads it, with the linked Patterns and PlayMap nodes' own words. */
+const briefOf = (link) => ({ status: link.status, view: link.view, context: link.context, linked: Array.from(peerLinks.values()).map((l) => l.view()) });
 
 // ---------------------------------------------------------------- displays
 /** Everything a display's page needs: what to show (numbered), the hall's holding image and countdown, the server's time. */
@@ -1244,8 +1333,11 @@ function boardFor(socket) {
   const a = socket.data.account;
   const sees = (code) => socket.data.isAdmin || (a && rbac.seesHall(a, code));
   const rooms = Array.from(store.rooms.values()).filter((r) => sees(r.code));
+  const nodeChip = (l) => { const v = l.view(); return { id: v.id, t: v.t, name: v.name, hall: v.hall, status: v.status, light: v.light, headline: v.headline }; };
+  const links = Array.from(peerLinks.values()).filter((l) => (l.hall ? sees(l.hall) : (socket.data.isAdmin || (a && rbac.can(a, 'nodes.control')))));
   return {
-    halls: rooms.map((r) => board.hallRow(r, { stage: stagePayload(linkFor(r.code)), displays: displaysOf(r.code) })),
+    nodes: links.map(nodeChip),
+    halls: rooms.map((r) => ({ ...board.hallRow(r, { stage: stagePayload(linkFor(r.code)), displays: displaysOf(r.code) }), nodes: links.filter((l) => l.hall === r.code).map(nodeChip) })),
     help: rooms.flatMap((r) => board.openHelp(r).map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.can(a, 'hall.post', r.code))) }))),
   };
 }
@@ -1418,6 +1510,31 @@ if (process.env.AGM_NODES !== '0') {
 stageLink.configure(settings.stagewatchUrl || '', stagewatchKey(), settings.stagewatchFingerprint || '');
 for (const room of store.rooms.values()) configureHallLink(room);
 
+// ---------------------------------------------------------------- Patterns and PlayMap (lib/peerlinks.js)
+// Linked by the admin (the node's own token, sealed in settings.json → peerLinks), each read every 5 s and driven only
+// by the verbs it lists. A link may belong to a hall, so the hall's board row and its crew see it.
+const peerLinks = new Map();   // node id -> PeerLink
+function startPeerLink(id, cfg) {
+  const old = peerLinks.get(id);
+  if (old) old.stop();
+  if (!cfg) { peerLinks.delete(id); return null; }
+  const link = new peerlinks.PeerLink({
+    node: { t: cfg.t, id, name: cfg.name || cfg.t }, base: cfg.url, token: secretbox.open(cfg.tokenSealed) || '', hall: cfg.hall || '',
+    pins, onPins: () => { settings.tlsPins = pins.toJSON(); saveSettings(); },
+    findPeer: (nid) => (discovery ? discovery.peers.get(nid) || null : null),
+    onChange: () => { boardDirty(); nodesChanged(); },
+  });
+  peerLinks.set(id, link);
+  return link;
+}
+for (const [id, cfg] of Object.entries(settings.peerLinks && typeof settings.peerLinks === 'object' ? settings.peerLinks : {})) {
+  if (cfg && peerlinks.KINDS.has(cfg.t) && typeof cfg.url === 'string') startPeerLink(id, cfg);
+}
+/** Someone watching the show network (the board, the admin page) should read it again. */
+function nodesChanged() { for (const s of io.sockets.sockets.values()) if (s.data && (s.data.isAdmin || boardSockets.has(s))) s.emit('nodes:changed', {}); }
+/** May this socket drive a linked node? nodes.control in the node's hall, or in any hall for one with none. */
+const mayDriveNode = (socket, link) => socket.data.isAdmin || !!(socket.data.account && rbac.can(socket.data.account, 'nodes.control', link.hall || undefined));
+
 // Stage sends waiting for the speaker: "<link>:<Stagewatch message id>" -> the AGMessage messages that show its state.
 // (A Stagewatch numbers its own messages, so two halls' Stagewatches can both send message 12.)
 const stageSends = new Map();
@@ -1528,6 +1645,7 @@ function currentContext() {
     stage: { status: stageLink.status, view: stageLink.view, clock: stageLink.clockInfo(), context: stageLink.context },
     halls: Array.from(hallLinks.values()).map((l) => ({ status: l.status, view: l.view, clock: l.clockInfo(), context: l.context })),
     help: openHelpCount(),
+    peerContexts: Object.fromEntries(Array.from(peerLinks.values()).filter((l) => l.status === 'live' && l.context).map((l) => [l.node.id, { light: l.context.light, headline: l.context.headline }])),
     peers: discovery ? discovery.list() : [],
     aiOn: !!aiKey(), tunnel: !!tunnelProc, recent: recentEvents,
   });
@@ -1636,6 +1754,7 @@ function shutdown(code = 0) {
   settingsLane.flushSync();
   displays.flush(); accounts.flush(); sessions.flush();
   for (const link of allLinks()) link.stop();
+  for (const link of peerLinks.values()) link.stop();
   if (discovery) discovery.stop();
   process.exit(code);
 }

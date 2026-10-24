@@ -3,7 +3,7 @@
  * AGMessage as a node of the show network (Show Bus 1.1 — docs/SHOWBUS.md).
  *
  *  - Discovery: one channel, the hello on UDP 9928. AGMessage says {"t":"messenger"} every 2 s and listens to every
- *    kind (Stagewatch "main", Slides "agent", "patterns", other messengers). A peer is live while hellos come,
+ *    kind (Stagewatch "main", Slides "agent", "patterns", "playmap", other messengers). A peer is live while hellos come,
  *    stale after 6 s, gone after 12 s. The hello says what a node is, never what the meeting is doing.
  *  - Stagewatch link: a WebSocket for the live timer (key in the Authorization header on the upgrade — never in the
  *    URL), a ping every 2 s that also measures the clock offset, stale after 6 s of silence and redialled after 12 s
@@ -30,8 +30,9 @@ const BUS_PORT = 9928;
 const BEAT_MS = 2000;
 const STALE_MS = 6000;
 const GONE_MS = 12000;
-const KINDS = new Set(['main', 'agent', 'patterns', 'messenger']);
-const CAPS = ['messages', 'action-prompts', 'documents', 'ai', 'context', 'receipts', 'proposals'];
+// Every kind on the bus: Stagewatch (main), its Slides agents, Patterns, PlayMap (Show Bus 1.3 proposal) and other messengers.
+const KINDS = new Set(['main', 'agent', 'patterns', 'playmap', 'messenger']);
+const CAPS = ['messages', 'action-prompts', 'documents', 'ai', 'context', 'receipts', 'proposals', 'displays', 'help'];
 
 /** A hello off the wire, cleaned; null when it isn't one (pure, tested). */
 function parseHello(msg, address) {

@@ -196,6 +196,24 @@
     </div>
   </dialog>
 
+  <dialog id="swDialog" class="agm-dialog" aria-labelledby="swTitle">
+    <form id="swForm" method="dialog">
+      <h2 id="swTitle">Send to Stagewatch</h2>
+      <p class="hint" id="swWhich"></p>
+      <label class="field"><span>Message</span><textarea id="swText" rows="3" maxlength="500"></textarea></label>
+      <label class="field"><span>Where it goes</span><select id="swDest"></select></label>
+      <label class="field" id="swUrgWrap"><span>How urgent</span>
+        <select id="swUrg"><option value="info">● Note</option><option value="warn">▲ Soon</option><option value="crit">■ Urgent</option></select></label>
+      <p class="hint" id="swHow"></p>
+      <p class="error" id="swError" role="alert" hidden></p>
+      <div class="row end">
+        <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn" type="button" id="swNow">Send now</button>
+        <button class="btn primary" value="propose" id="swPropose">Ask the operator</button>
+      </div>
+    </form>
+  </dialog>
+
   <template id="msgTpl">
     <article class="msg">
       <header>
@@ -206,7 +224,7 @@
         <button class="fwd-btn" title="Forward to another room" type="button">↗</button>
         <button class="pin-btn" title="Pin">📌</button>
         <button class="stage-btn" title="Show on the speaker's screen (Stagewatch)" type="button" hidden>🖥</button>
-        <button class="propose-btn" title="Propose for the speaker's screen — the show caller approves it in Stagewatch" type="button" hidden>📝</button>
+        <button class="propose-btn" title="Send to Stagewatch — the speaker's screen, a role screen, a department, or the operator" type="button" hidden>📝</button>
         <button class="screen-btn" title="Show on this hall's screens" type="button" hidden>⧉</button>
         <button class="del-btn" title="Delete this message" hidden>🗑</button>
       </header>

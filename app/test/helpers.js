@@ -60,7 +60,7 @@ const once = (s, ev, ms = 4000) => new Promise((resolve, reject) => { const t = 
  * `proposals`; /api/context answers a context named `name`. Every request is kept in `requests` (method, url, headers,
  * body) so a test can say what reached which Stagewatch.
  */
-async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77 } = {}) {
+async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [] } = {}) {
   const http = require('http');
   const { WebSocketServer } = require('ws');
   const requests = [];
@@ -75,7 +75,7 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
       const json = (code, o) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
       const u = new URL(req.url, 'http://x');
       if (u.pathname.startsWith('/api/message/')) return json(200, { type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId } });
-      if (u.pathname === '/api/context') return json(200, { v: 1, node: { t: 'main', id: 'sw' + name.length, name }, light: 'green', headline: name + ' running', items: [], peers: [] });
+      if (u.pathname === '/api/context') return json(200, { v: 1, node: { t: 'main', id: 'sw' + name.length, name }, light: 'green', headline: name + ' running', items: departments.map((d) => ({ id: 'cue:' + d.toLowerCase(), kind: 'department', label: d, light: 'green', state: 'ready' })), peers: [] });
       if (u.pathname === '/api/peers/context') return json(200, { ok: true });
       if (desk && u.pathname === '/api/proposals' && req.method === 'POST') {
         const p = { ...JSON.parse(body || '{}'), id: 'p' + (++next), state: 'pending' };
@@ -114,6 +114,36 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
   };
 }
 
+/**
+ * A fake Patterns or PlayMap node: GET /api/context answers its context only with the right token in its own header
+ * (X-Patterns-Token / X-PlayMap-Token); POST /api/cmd answers a receipt — Patterns' wire words (OK / ERR), PlayMap's
+ * JSON. Every request is kept in `requests`.
+ */
+async function fakeNode({ t = 'patterns', name = 'Patterns FOH', token = 'node-token', commands = [], light = 'green', headline = 'Programme: VT1 · 3 screens green' } = {}) {
+  const http = require('http');
+  const requests = [];
+  const header = t === 'playmap' ? 'x-playmap-token' : 'x-patterns-token';
+  const srv = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => { body += d; });
+    req.on('end', () => {
+      requests.push({ method: req.method, url: req.url, headers: req.headers, body });
+      const given = Buffer.from(String(req.headers[header] || ''));
+      const want = Buffer.from(token);
+      if (given.length !== want.length || !require('crypto').timingSafeEqual(given, want)) { res.writeHead(401, { 'content-type': 'application/json' }); return res.end('{"ok":false,"error":"not paired"}'); }
+      if (req.url === '/api/context') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ v: 1, node: { t, id: t + '01', name }, light, headline, items: [{ id: 'screen:2', kind: 'screen', label: 'Screen 2', light: 'amber', state: 'no signal' }], recent: [], commands })); }
+      if (req.url === '/api/cmd' && req.method === 'POST') {
+        if (t === 'playmap') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', effect: 'ran ' + body })); }
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        return res.end(/^BLACKOUT/i.test(body) ? 'ERR @' + req.headers['x-request-id'] + ' the air is locked' : 'OK @' + req.headers['x-request-id'] + ' ' + body + ' done');
+      }
+      res.writeHead(404); res.end();
+    });
+  });
+  await new Promise((resolve) => { srv.listen(0, '127.0.0.1', resolve); });
+  return { port: srv.address().port, url: '127.0.0.1:' + srv.address().port, requests, close: () => new Promise((resolve) => { srv.close(resolve); }) };
+}
+
 /** Wait until fn() is truthy (polling every 50 ms), or fail after `ms`. */
 async function until(fn, ms = 6000, what = 'the condition') {
   const end = Date.now() + ms;
@@ -121,4 +151,4 @@ async function until(fn, ms = 6000, what = 'the condition') {
   throw new Error('timed out waiting for ' + what);
 }
 
-module.exports = { ROOT, TOKEN, freePort, wait, until, startServer, stopServer, api, connect, emit, once, fakeStagewatch };
+module.exports = { ROOT, TOKEN, freePort, wait, until, startServer, stopServer, api, connect, emit, once, fakeStagewatch, fakeNode };

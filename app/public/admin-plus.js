@@ -73,7 +73,7 @@
     const ul = $('peerList');
     ul.textContent = '';
     if (!peers.length) { const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'Listening for Stagewatch, Patterns and presenter PCs on this network (UDP 9928)…'; ul.appendChild(li); return; }
-    const LABEL = { main: '⏱ Stagewatch', agent: '🖥 Presenter PC (Stagewatch Slides)', patterns: '🎛 Patterns', messenger: '💬 AGMessage' };
+    const LABEL = { main: '⏱ Stagewatch', agent: '🖥 Presenter PC (Stagewatch Slides)', patterns: '🎛 Patterns', playmap: '🎞 PlayMap', messenger: '💬 AGMessage' };
     for (const p of peers) {
       const li = document.createElement('li');
       const dot = p.status === 'live' ? '🟢' : '🟠';
@@ -85,15 +85,52 @@
         b.onclick = () => { $('swUrl').value = p.address + ':' + http; $('swKey').focus(); };
         li.appendChild(b);
       }
+      // Patterns and PlayMap: link with the node's own token (sealed here), optionally for one hall.
+      if (p.t === 'patterns' || p.t === 'playmap') {
+        const b = document.createElement('button');
+        b.className = 'btn ghost small'; b.type = 'button'; b.textContent = linkedIds.has(p.id) ? 'Linked — change' : 'Link…';
+        b.onclick = () => linkNode(p);
+        li.appendChild(b);
+      }
       ul.appendChild(li);
     }
+  }
+
+  // ---------------------------------------------------------------- Patterns and PlayMap links
+  let linkedIds = new Set();
+  function loadNodes() {
+    socket.emit('nodes:list', {}, (r) => {
+      if (!r || !r.ok) return;
+      linkedIds = new Set(r.linked.map((l) => l.id));
+      const ul = $('nodeLinks');
+      ul.textContent = '';
+      if (!r.linked.length) { const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'No Patterns or PlayMap linked. Link one from the list above when AGMessage hears it.'; ul.appendChild(li); }
+      for (const l of r.linked) {
+        const li = document.createElement('li');
+        const mark = { green: '✓', amber: '△', red: '✕', grey: '○' }[l.light] || '○';
+        li.textContent = mark + ' ' + (l.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' “' + l.name + '” — ' + l.status + (l.problem ? ' (' + l.problem + ')' : '') + (l.headline ? ': ' + l.headline : '') + (l.hall ? ' · hall ' + l.hall : '') + ' · ' + l.commands.length + ' verbs';
+        const b = document.createElement('button');
+        b.className = 'btn ghost small'; b.type = 'button'; b.textContent = 'Unlink';
+        b.onclick = () => { if (confirm('Unlink ' + l.name + '? Its token is forgotten.')) socket.emit('nodes:unlink', { id: l.id }, () => loadNodes()); };
+        li.appendChild(b);
+        ul.appendChild(li);
+      }
+    });
+  }
+  function linkNode(p) {
+    const token = prompt('The pairing token of ' + (p.name || p.t) + ' (' + (p.t === 'playmap' ? 'PlayMap: node settings → Network' : 'Patterns: Remote page → TRUST') + '). Leave empty to keep the saved one.', '');
+    if (typeof token !== 'string') return;   // cancelled
+    const hall = prompt('For one hall? Type its code (e.g. K7P2QX), or leave empty for every hall.', '') || '';
+    socket.emit('nodes:link', { id: p.id, token, hall: hall.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not linked.'); loadNodes(); });
   }
 
   function wire() {
     if (wired || typeof socket === 'undefined' || !socket) return;
     wired = true;
     socket.on('connect', () => loadSettings());
-    socket.on('nodes', renderPeers);
+    socket.on('nodes', (list) => { renderPeers(list); });
+    socket.on('nodes:changed', loadNodes);
+    loadNodes();
     if (socket.connected) loadSettings();
 
     setInterval(() => { if (socket.connected) loadSettings(); }, 5000);   // health, clock and peers stay current

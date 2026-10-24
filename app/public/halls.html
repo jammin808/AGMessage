@@ -30,6 +30,7 @@
       <h1 id="boardTitle">Your halls</h1>
       <div class="board-tools">
         <span class="link-state" id="linkState" title="Live connection to AGMessage"></span>
+        <button class="btn small" id="networkBtn" type="button" hidden>Show network</button>
         <button class="btn small" id="newHallBtn" type="button" hidden>New hall</button>
       </div>
     </section>
@@ -76,6 +77,12 @@
       <p class="error" id="setupError" role="alert" hidden></p>
       <div class="row end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Save</button></div>
     </form>
+  </dialog>
+
+  <dialog id="networkDialog" class="agm-dialog wide" aria-labelledby="networkTitle">
+    <div class="screens-head"><h2 id="networkTitle">Show network</h2><button class="btn ghost small" type="button" id="networkClose">Close</button></div>
+    <p class="hint">Patterns and PlayMap, as each says it is doing now. Send only the verbs each lists: low and review risk can go now; high risk goes to the show desk, where a person approves it.</p>
+    <div id="networkList"></div>
   </dialog>
 
   <script src="/socket.io/socket.io.js"></script>

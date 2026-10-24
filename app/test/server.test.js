@@ -335,7 +335,10 @@ test('AGMessage server: security, resume, persistence', async (t) => {
       assert.deepEqual([r.proposal.id, r.proposal.state], ['p17', 'pending']);
       const sent = seen.proposals[0];
       assert.equal(sent.target.t, 'main');
-      assert.equal(sent.line, 'message "Capex was \'4.2m\'" warn ack', 'Stagewatch\'s grammar, a quote inside can\'t end the text');
+      // Stagewatch's grammar: a quote inside can't end the text, and the flash ("off") comes before "ack" — an "ack" in the
+      // flash's place is refused by Stagewatch ("flash must be off|slow|fast"), the defect 0.4 shipped.
+      assert.equal(sent.line, 'message "Capex was \'4.2m\'" warn off ack');
+      assert.deepEqual(require('../lib/stagelines').parse(sent.line), { verb: 'message', text: 'Capex was \'4.2m\'', urgency: 'warn', flash: 'off', ack: true });
       assert.equal(sent.from.t, 'messenger');
       state = 'done';
       for (let i = 0; i < 100 && !updates.some((u) => u.proposal.state === 'done'); i++) await new Promise((x) => setTimeout(x, 100));

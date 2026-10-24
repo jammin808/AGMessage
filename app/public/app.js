@@ -200,7 +200,7 @@ function proposalLineText(p) {
   if (!p) return '';
   const by = p.by ? ' by ' + p.by : '';
   switch (p.state) {
-    case 'pending': return '📝 Waiting for the show desk to approve';
+    case 'pending': return '📝 Waiting for the show desk to approve' + (p.to ? ' — for ' + p.to : '');
     case 'approved': return '✓ Approved' + by + ' — running';
     case 'rejected': return '✗ Not approved' + by;
     case 'done': return '✓ Approved' + by + ' and done' + (p.words ? ': ' + p.words : '');
@@ -440,15 +440,9 @@ function rerenderMessage(node, msg) {
   }
   const proposeBtn = node.querySelector('.propose-btn');
   if (proposeBtn) {
-    const canPropose = CAN_PROPOSE && document.body.dataset.role === 'research' && (msg.type === 'text' || msg.type === 'action') && !!msg.text;
+    const canPropose = (CAN_PROPOSE || CAN_STAGE) && document.body.dataset.role === 'research' && (msg.type === 'text' || msg.type === 'action') && !!msg.text;
     proposeBtn.hidden = !canPropose;
-    proposeBtn.onclick = canPropose ? () => {
-      proposeBtn.disabled = true;
-      socket.emit('stage:propose', { messageId: msg.id }, (res) => {
-        proposeBtn.disabled = false;
-        notify(res && res.ok ? 'Proposed — the show caller approves it in Stagewatch; its state shows on the message.' : (res && res.error) || 'Could not propose it.', !(res && res.ok));
-      });
-    } : null;
+    proposeBtn.onclick = canPropose ? () => ToStagewatch.open(msg) : null;
   }
   if (msg.from) {
     from.textContent = msg.from.name;
@@ -2070,4 +2064,60 @@ const Screens = (function () {
   $('holdingSave').addEventListener('click', () => socket.emit('display:hallHolding', { code: ROOM, image: $('holdingPick').value }, done('Holding image saved.')));
   socket.on('displays:changed', ({ code } = {}) => { if (code === ROOM && CAN_SCREENS) load(); });
   return { load, offer };
+})();
+
+// ---------------- Send to Stagewatch: where a message goes — sent now (the speaker's screen), or asked of the operator ----------------
+const ToStagewatch = (function () {
+  const $ = (id) => document.getElementById(id);
+  const dlg = $('swDialog');
+  let source = null;
+  let caps = { canSend: false, canPropose: false };
+  function sync() {
+    const dest = $('swDest').value;
+    const speaker = dest === 'speaker';
+    $('swUrgWrap').hidden = !speaker;
+    $('swNow').hidden = !(speaker && caps.canSend);
+    $('swPropose').hidden = !caps.canPropose;
+    $('swHow').textContent = !caps.canPropose && !speaker ? 'This Stagewatch keeps no show desk, so only the speaker\'s screen can be sent to directly.'
+      : caps.canPropose ? 'Ask the operator: the show caller approves it in Stagewatch\'s Copilot, and its state shows on the message.' + (speaker && caps.canSend ? ' Send now puts it on the speaker\'s screen at once.' : '')
+      : 'Send now puts it on the speaker\'s screen at once; their acknowledgement shows on the message.';
+  }
+  function open(msg) {
+    source = msg;
+    $('swText').value = msg ? (msg.text || '').slice(0, 500) : '';
+    $('swError').hidden = true;
+    socket.emit('stage:targets', {}, (r) => {
+      if (!r || !r.ok) { notify((r && r.error) || 'Stagewatch is not linked to this hall.', true); return; }
+      caps = r;
+      $('swWhich').textContent = r.linked ? 'To ' + (r.title || 'this hall\'s Stagewatch') + '.' : 'Stagewatch is not connected right now — nothing is queued; try again when it is.';
+      const sel = $('swDest');
+      sel.textContent = '';
+      for (const t of r.targets) {
+        if (!r.canPropose && !(t.direct && r.canSend)) continue;
+        const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; sel.appendChild(o);
+      }
+      sync();
+      dlg.showModal();
+    });
+  }
+  const fail = (text) => { $('swError').textContent = text; $('swError').hidden = false; };
+  $('swDest').addEventListener('change', sync);
+  $('swNow').addEventListener('click', () => {
+    socket.emit('stage:send', { text: $('swText').value.trim(), urgency: $('swUrg').value, messageId: source && source.text === $('swText').value.trim() ? source.id : undefined }, (res) => {
+      if (!res || !res.ok) return fail((res && res.error) || 'Not sent.');
+      dlg.close();
+      notify(res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.');
+    });
+  });
+  $('swForm').addEventListener('submit', (e) => {
+    if (e.submitter && e.submitter.value === 'cancel') return;
+    e.preventDefault();
+    const text = $('swText').value.trim();
+    socket.emit('stage:propose', { text, destination: $('swDest').value, urgency: $('swUrg').value, messageId: source && source.text === text ? source.id : undefined }, (res) => {
+      if (!res || !res.ok) return fail((res && res.error) || 'Not sent.');
+      dlg.close();
+      notify('Asked — the show caller approves it in Stagewatch; its state shows on the message.');
+    });
+  });
+  return { open };
 })();
