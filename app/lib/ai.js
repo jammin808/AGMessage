@@ -34,6 +34,7 @@ function threadText(messages, max = 60) {
       const answers = (m.responses || []).map((r) => `${r.name} → ${r.optionIndex >= 0 ? (m.options || [])[r.optionIndex] : r.note}`).join('; ');
       return `[${t}] ${who} asked: ${m.text} [options: ${(m.options || []).join(' / ')}]${answers ? ' answers: ' + answers : ''}`;
     }
+    if (m.type === 'help') return `[${t}] ${who} asked for help (${m.category}): ${m.text || ''}${m.help && m.help.state !== 'open' ? ' [' + m.help.state + (m.help.by ? ' by ' + m.help.by : '') + ']' : ''}`;
     return '';
   }).filter(Boolean).join('\n');
 }

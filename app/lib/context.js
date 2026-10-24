@@ -19,6 +19,8 @@ const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
  * @param {Array} f.peers Discovery.list()
  * @param {boolean} f.aiOn
  * @param {boolean} f.tunnel
+ * @param {number} [f.help] open help requests across the halls (a count)
+ * @param {Array<{status:string, view:object|null, context:object|null}>} [f.halls] halls' own Stagewatch links
  * @param {Array<{at:number,text:string}>} f.recent role-level events, no content
  * @param {number} [f.now]
  */
@@ -64,6 +66,15 @@ function buildContext(f) {
   items.push({ id: 'link:stagewatch', kind: 'link', label: 'Stagewatch (stage timer)', light: clock && clock.apart && stLight === 'green' ? 'amber' : stLight, state: stState });
   links.push({ from: 'meetings', to: 'link:stagewatch', kind: 'sends', light: stLight });
 
+  // Help requests open across the halls: a count, never who asked or what for.
+  if (f.help) items.push({ id: 'help', kind: 'room', label: 'Help requests', light: 'red', state: plural(f.help, 'help request') + ' open' });
+  // Halls with a Stagewatch of their own: each link's state, by the Stagewatch's own name (never a hall's).
+  for (const [i, h] of (f.halls || []).entries()) {
+    const ok = h.status === 'connected';
+    const name = h.context && h.context.node && typeof h.context.node.name === 'string' ? h.context.node.name.slice(0, 60) : 'a hall\'s';
+    items.push({ id: 'link:stagewatch:' + (i + 2), kind: 'link', label: 'Stagewatch ' + name, light: ok ? 'green' : h.status === 'off' ? 'grey' : 'amber', state: ok && h.view ? 'timer ' + (h.view.text || '—') : h.status || 'off' });
+    links.push({ from: 'meetings', to: 'link:stagewatch:' + (i + 2), kind: 'sends', light: ok ? 'green' : 'amber' });
+  }
   items.push({ id: 'ai', kind: 'assistant', label: 'AI drafts', light: f.aiOn ? 'green' : 'grey', state: f.aiOn ? 'on (drafts only, a person sends)' : 'off — everything else works offline' });
   items.push({ id: 'tunnel', kind: 'link', label: 'Remote access (Cloudflare)', light: f.tunnel ? 'green' : 'grey', state: f.tunnel ? 'on' : 'off (venue network only)' });
 
@@ -79,6 +90,7 @@ function buildContext(f) {
 
   const light = worst(items.filter((i) => i.light !== 'grey').map((i) => i.light).concat(['green']));
   const parts = [rooms ? plural(rooms, 'meeting') + ', ' + plural(people, 'person', 'people') : 'no meeting open'];
+  if (f.help) parts.push(plural(f.help, 'help request') + ' open');
   if (open.length) parts.push(plural(open.length, 'action prompt') + ' waiting for the board');
   else if (answeredCount) parts.push(plural(answeredCount, 'action prompt') + ' answered');
   parts.push('Stagewatch ' + (st.status === 'connected' ? 'linked' : stState));

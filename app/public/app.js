@@ -114,6 +114,7 @@ function rejoin() {
     if (res.note) notify(res.note);
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
     renderStage(res.stage);
+    document.getElementById('helpBtn').hidden = (res.role || ROLE) === 'observer';
     (res.seen || []).forEach(noteSeen);
     if (res.roomName) {
       const chip = document.getElementById('roomChip');
@@ -151,6 +152,8 @@ function applyOp(op) {
     if ('pinned' in op.f) setMessagePinned(op.id, op.f.pinned);
     if ('reactions' in op.f) onReact({ messageId: op.id, reactions: op.f.reactions });
     if ('stage' in op.f) setStage(op.id, op.f.stage);
+    if ('proposal' in op.f) { const m = findMessage(op.id); if (m) m.proposal = op.f.proposal; const n = messagesById.get(op.id); if (n && m) (m.type === 'system' ? renderProposalLine(n, op.f.proposal) : rerenderMessage(n, m)); }
+    if ('help' in op.f) setHelp(op.id, op.f.help);
   }
   else if (op.o === 'del') removeMessageLocal(op.id);
   else if (op.o === 'reset') onReset();
@@ -403,6 +406,8 @@ function rerenderMessage(node, msg) {
   node.dataset.pinned = msg.pinned ? '1' : '0';
   node.classList.toggle('pinned', !!msg.pinned);
   node.classList.toggle('is-action', msg.type === 'action');
+  node.classList.toggle('is-help', msg.type === 'help');
+  if (msg.type === 'help') node.dataset.help = (msg.help && msg.help.state) || 'open';
   node.classList.toggle('mine', isMine(msg));
   node.classList.toggle('priority', !!msg.priority);
   const from = node.querySelector('.from');
@@ -473,6 +478,8 @@ function rerenderMessage(node, msg) {
     body.appendChild(p);
   } else if (msg.type === 'file') {
     body.appendChild(renderFileBody(msg));
+  } else if (msg.type === 'help') {
+    body.appendChild(renderHelpBody(msg));
   } else if (msg.type === 'action') {
     body.appendChild(renderActionBody(msg));
   }
@@ -572,6 +579,47 @@ function rerenderMessage(node, msg) {
     }
   }
 }
+
+// ---------------- Help requests: the category and the words; who is on the way, then who resolved it ----------------
+const HELP_WORDS = { open: 'Waiting for someone', coming: 'On the way', resolved: 'Resolved' };
+function renderHelpBody(msg) {
+  const wrap = document.createElement('div');
+  wrap.className = 'help-body';
+  const head = document.createElement('p');
+  head.className = 'help-head';
+  const cat = document.createElement('strong');
+  cat.textContent = 'Help — ' + (msg.category || 'Other');
+  head.appendChild(cat);
+  if (msg.text) head.appendChild(document.createTextNode(' ' + msg.text));
+  wrap.appendChild(head);
+  const h = msg.help || { state: 'open' };
+  const line = document.createElement('div');
+  line.className = 'help-line';
+  line.dataset.state = h.state;
+  line.textContent = (h.state === 'resolved' ? '✓ ' : h.state === 'coming' ? '▶ ' : '■ ') + HELP_WORDS[h.state] + (h.by ? ' — ' + h.by : '') + (h.at && h.state !== 'open' ? ' at ' + formatTime(h.at) : '');
+  wrap.appendChild(line);
+  if (h.state !== 'resolved' && document.body.dataset.role !== 'observer') {
+    const row = document.createElement('div');
+    row.className = 'help-actions';
+    const act = (label, state) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn small' + (state === 'coming' ? ' primary' : ''); b.textContent = label;
+      b.onclick = () => socket.emit('help:respond', { code: ROOM, messageId: msg.id, state }, (r) => { if (!r || !r.ok) notify((r && r.error) || 'Not sent.', true); });
+      row.appendChild(b);
+    };
+    if (h.state === 'open') act('On my way', 'coming');
+    act('Resolved', 'resolved');
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+function setHelp(messageId, help) {
+  const msg = findMessage(messageId);
+  if (msg) msg.help = help;
+  const node = messagesById.get(messageId);
+  if (node && msg) rerenderMessage(node, msg);
+}
+socket.on('helpUpdate', ({ messageId, help, seq }) => { if (bump(seq)) setHelp(messageId, help); });
 
 function renderFileBody(msg) {
   const wrap = document.createElement('div');
@@ -1855,3 +1903,30 @@ function consumeReplyTo() {
   if (replyState) cancelReply();
   return r;
 }
+
+// ---------------- Ask for help: a category and a few words, to the hall and to the project managers' board ----------------
+(function () {
+  const CATS = ['Sound', 'Vision', 'Lighting', 'Stage', 'Presenter', 'IT / network', 'Other'];
+  const dlg = document.getElementById('helpDialog');
+  const box = document.getElementById('helpCats');
+  for (const [i, c] of CATS.entries()) {
+    const l = document.createElement('label');
+    l.className = 'help-cat';
+    const r = document.createElement('input');
+    r.type = 'radio'; r.name = 'helpCat'; r.value = c; r.checked = i === 0;
+    l.appendChild(r);
+    l.appendChild(document.createTextNode(c));
+    box.appendChild(l);
+  }
+  document.getElementById('helpBtn').addEventListener('click', () => { document.getElementById('helpText').value = ''; dlg.showModal(); });
+  document.getElementById('helpForm').addEventListener('submit', (e) => {
+    if (e.submitter && e.submitter.value === 'cancel') return;
+    e.preventDefault();
+    const category = (box.querySelector('input:checked') || {}).value || 'Other';
+    socket.emit('message', { type: 'help', category, text: document.getElementById('helpText').value.trim() }, (r) => {
+      if (!r || !r.ok) { notify((r && r.error) || 'Not sent.', true); return; }
+      dlg.close();
+      notify('Help request sent — it stays up until someone marks it resolved.');
+    });
+  });
+})();

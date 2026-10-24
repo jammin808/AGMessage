@@ -59,6 +59,25 @@
     </form>
   </dialog>
 
+  <dialog id="setupDialog" class="agm-dialog wide">
+    <form id="setupForm" method="dialog">
+      <h2 id="setupTitle">Set up the hall</h2>
+      <label class="field"><span>Name</span><input id="setupName" maxlength="80" required /></label>
+      <fieldset class="field">
+        <legend>Its own Stagewatch</legend>
+        <p class="hint" id="setupDefault"></p>
+        <div id="setupHeardWrap"><p class="hint">Heard on the network — choose one to fill in its address:</p><div class="row" id="setupHeard"></div></div>
+        <label class="field"><span>Address</span><input id="setupUrl" maxlength="200" autocapitalize="none" spellcheck="false" placeholder="e.g. 10.0.4.21 or https://hall3-foh:9924" /></label>
+        <label class="field"><span>Node key</span><input id="setupKey" type="password" maxlength="80" autocomplete="off" /></label>
+        <label class="field"><span>Certificate fingerprint <small class="muted">(optional; from its hello when it announces one)</small></span><input id="setupFp" maxlength="100" autocapitalize="none" spellcheck="false" /></label>
+        <p class="hint" id="setupStatus"></p>
+        <button class="btn small" type="button" id="setupAccept" hidden>Accept its new certificate</button>
+      </fieldset>
+      <p class="error" id="setupError" role="alert" hidden></p>
+      <div class="row end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Save</button></div>
+    </form>
+  </dialog>
+
   <script src="/socket.io/socket.io.js"></script>
   <script src="/common.js"></script>
   <script src="/halls.js"></script>

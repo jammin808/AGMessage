@@ -41,6 +41,7 @@ const { Accounts, Sessions } = require('./lib/accounts');
 const { AuditLog } = require('./lib/audit');
 const rbac = require('./lib/rbac');
 const { mountAccounts } = require('./lib/http-accounts');
+const board = require('./lib/board');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD } = require('./lib/version');
@@ -173,10 +174,12 @@ function apply(room, op) {
       if ('reactions' in op.f) io.to(room.code).emit('messageReact', { messageId: op.id, reactions: op.f.reactions, seq: s });
       if ('stage' in op.f) io.to(room.code).emit('stageAck', { messageId: op.id, stage: op.f.stage, seq: s });
       if ('proposal' in op.f) io.to(room.code).emit('proposalUpdate', { messageId: op.id, proposal: op.f.proposal, seq: s });
+      if ('help' in op.f) io.to(room.code).emit('helpUpdate', { messageId: op.id, help: op.f.help, seq: s });
       break;
     case 'del': io.to(room.code).emit('messageDeleted', { messageId: op.id, seq: s }); break;
     case 'reset': io.to(room.code).emit('roomReset', { roomCode: room.code, seq: s }); break;
   }
+  boardDirty();
   return op;
 }
 function systemMessage(room, text) {
@@ -558,9 +561,9 @@ io.on('connection', (socket) => {
       identity, uid: id, note, uploadToken, seq: r.seq,
       ...(ops ? { ops } : { history: r.messages }),
       users: roomUserSummary(r),
-      ai: !!aiKey(), stage: stageLink.view ? { ...stageLink.view, status: stageLink.status } : null,
-      canSendToStage: !!(stageLink.base && stageLink.key) && allowed('stage.send'),
-      canPropose: !!(stageLink.desk && stageLink.key) && allowed('stage.send'),
+      ai: !!aiKey(), stage: stagePayload(linkFor(code)),
+      canSendToStage: !!(linkFor(code).base && linkFor(code).key) && allowed('stage.send'),
+      canPropose: !!(linkFor(code).desk && linkFor(code).key) && allowed('stage.send'),
       account: acct ? { username: acct.username, name: acct.name, role: acct.role, roleLabel: rbac.ROLES[acct.role].label } : null,
       seen: seenFor(r),
     });
@@ -568,6 +571,7 @@ io.on('connection', (socket) => {
     if (!isAdminView) {
       if (!returning) systemMessage(r, `${cleanName} joined as ${cleanRole}`);
       io.to(code).emit('users', roomUserSummary(r));
+      boardDirty();
     } else {
       io.in(code).fetchSockets().then((peers) => {
         for (const p of peers) if (p.id !== socket.id && p.data.userName === cleanName && !p.data.adminView) p.emit('userState:request');
@@ -723,7 +727,7 @@ io.on('connection', (socket) => {
     if (!canDraft()) return ok(ack)({ ok: false, error: 'Drafting is for the research team.' });
     const docText = typeof args.docText === 'string' ? args.docText.slice(0, 60_000) : '';
     runAi(ack, (signal) => ai.draftReply(aiKey(), {
-      show: showBrief({ status: stageLink.status, view: stageLink.view, context: stageLink.context }, discovery ? discovery.list() : []),
+      show: showBrief(briefOf(linkFor(room.code)), discovery ? discovery.list() : []),
       messages: room.messages,
       question: typeof args.question === 'string' ? args.question.slice(0, 2000) : '',
       instruction: typeof args.instruction === 'string' ? args.instruction.slice(0, 500) : '',
@@ -736,7 +740,7 @@ io.on('connection', (socket) => {
     if (!canDraft()) return ok(ack)({ ok: false, error: 'For the research team.' });
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim().slice(0, 1000) : '';
     if (!prompt) return ok(ack)({ ok: false, error: 'Type the question first.' });
-    runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, messages: room.messages, show: showBrief({ status: stageLink.status, view: stageLink.view, context: stageLink.context }, discovery ? discovery.list() : []) }, signal));
+    runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, messages: room.messages, show: showBrief(briefOf(linkFor(room.code)), discovery ? discovery.list() : []) }, signal));
   });
 
   // ----- Stagewatch: put an answer on the speaker's confidence monitor (research or admin)
@@ -748,13 +752,14 @@ io.on('connection', (socket) => {
     let text = typeof args.text === 'string' ? args.text : '';
     const source = typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
     if (!text && source) text = source.text || '';
-    const r = await stageLink.sendToStage(text, { urgency: args.urgency, ack: args.ack !== false });
+    const link = linkFor(room.code);
+    const r = await link.sendToStage(text, { urgency: args.urgency, ack: args.ack !== false });
     if (r.ok) {
       // The receipt, and later the speaker's acknowledgement, live on the record of the send (and on the source message).
       const stage = { ref: r.messageId || 0, receipt: r.stage, ack: r.messageId ? 'sent' : '', by: '', at: Date.now() };
       const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} sent to the stage screen: “${text.replace(/\s+/g, ' ').slice(0, 120)}”`, at: Date.now(), stage } }).m;
       if (source) apply(room, { o: 'upd', id: source.id, f: { stage } });
-      if (r.messageId) trackStageSend(r.messageId, room.code, [sys.id].concat(source ? [source.id] : []));
+      if (r.messageId) trackStageSend(link, r.messageId, room.code, [sys.id].concat(source ? [source.id] : []));
       noteEvent('research sent a message to the stage screen (' + r.stage + ')');
     }
     ack(r);
@@ -772,7 +777,8 @@ io.on('connection', (socket) => {
     text = text.replace(/\s+/g, ' ').trim().slice(0, 300);
     if (!text) return ack({ ok: false, error: 'Nothing to propose.' });
     const urgency = ['info', 'warn', 'crit'].includes(args.urgency) ? args.urgency : 'info';
-    const r = await stageLink.propose({
+    const link = linkFor(room.code);
+    const r = await link.propose({
       from: { t: 'messenger', id: settings.nodeId, name: 'AGMessage' },
       target: { t: 'main' },
       // Stagewatch's own grammar; a double quote inside would end the text early, so it becomes a single one.
@@ -781,12 +787,94 @@ io.on('connection', (socket) => {
       risk: 'review',
     });
     if (!r.ok) return ack(r);
-    const proposal = { id: r.proposal.id, state: r.proposal.state, words: '', at: Date.now() };
+    const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, words: '', at: Date.now() };
     const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} proposed for the stage screen: “${text.slice(0, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
     if (source) apply(room, { o: 'upd', id: source.id, f: { proposal } });
-    trackProposal(proposal.id, room.code, [sys.id].concat(source ? [source.id] : []), proposal.state);
+    trackProposal(link.id, proposal.id, room.code, [sys.id].concat(source ? [source.id] : []), proposal.state);
     noteEvent('research proposed a stage message to the show desk');
     ack({ ok: true, proposal });
+  });
+
+  // ----- The halls board: an account's every hall at a glance (or the admin's), pushed latest-wins on change.
+  socket.on('board:watch', (_args, ack) => {
+    ack = ok(ack);
+    if (!(socket.data.account || socket.data.isAdmin)) return ack({ ok: false, error: 'Sign in first.' });
+    boardSockets.add(socket);
+    ack({ ok: true, board: boardFor(socket) });
+  });
+
+  // ----- Help requests: someone says they are on the way, then that it is resolved. From the hall, or from the board.
+  socket.on('help:respond', ({ code, messageId, state } = {}, ack) => {
+    ack = ok(ack);
+    if (!chatter.take()) return limited(ack);
+    const r = store.get(String(code || (room && room.code) || '').toUpperCase());
+    const m = r && r.byId.get(messageId);
+    if (!m || m.type !== 'help') return ack({ ok: false, error: 'That help request is gone.' });
+    const inRoom = room && room.code === r.code && allowed('hall.post');
+    const byAccount = socket.data.account && rbac.can(socket.data.account, 'hall.post', r.code);
+    if (!(inRoom || byAccount || socket.data.isAdmin)) return ack({ ok: false, error: 'Only people in that hall can answer its help requests.' });
+    if (state !== 'coming' && state !== 'resolved') return ack({ ok: false, error: 'Say "on my way" or "resolved".' });
+    if (m.help && m.help.state === 'resolved') return ack({ ok: false, error: 'Already resolved' + (m.help.by ? ' by ' + m.help.by : '') + '.' });
+    const by = (me && room && room.code === r.code) ? me.name : socket.data.account ? socket.data.account.name : 'Admin';
+    apply(r, { o: 'upd', id: m.id, f: { help: { state, by, at: Date.now() } } });
+    noteEvent('a help request was ' + (state === 'coming' ? 'answered' : 'resolved'));
+    ack({ ok: true });
+  });
+
+  // ----- A hall's own settings: its name and its own Stagewatch (halls.manage).
+  const canManageHall = () => socket.data.isAdmin || (socket.data.account && rbac.can(socket.data.account, 'halls.manage'));
+  socket.on('hall:settings', ({ code } = {}, ack) => {
+    ack = ok(ack);
+    if (!canManageHall()) return ack({ ok: false, error: 'Your account may not set halls up.' });
+    const r = store.get(String(code || '').toUpperCase());
+    if (!r) return ack({ ok: false, error: 'No such hall.' });
+    const sw = hallStagewatch(r.code) || {};
+    const own = hallLinks.get(r.code);
+    ack({
+      ok: true, code: r.code, name: r.name || '',
+      stagewatch: { url: sw.url || '', keySet: !!secretbox.open(sw.keySealed), fp: sw.fp || '', status: own ? own.status : null, tls: own ? own.tlsState : null },
+      defaultStagewatch: settings.stagewatchUrl || '',
+      stagewatches: discovery ? discovery.list().filter((p) => p.t === 'main') : [],
+    });
+  });
+  socket.on('hall:configure', ({ code, name, stagewatchUrl, stagewatchKey, stagewatchFingerprint } = {}, ack) => {
+    ack = ok(ack);
+    if (!canManageHall()) return ack({ ok: false, error: 'Your account may not set halls up.' });
+    if (!writes.take()) return limited(ack);
+    const r = store.get(String(code || '').toUpperCase());
+    if (!r) return ack({ ok: false, error: 'No such hall.' });
+    const changed = [];
+    if (typeof name === 'string') {
+      const n = guard.cleanText(name, 80);
+      if (n && n !== r.name) { store.commit(r, { o: 'meta', name: n }); changed.push('name → ' + n); }
+    }
+    if (typeof stagewatchUrl === 'string') {
+      const prev = hallStagewatch(r.code) || {};
+      const url = stagewatchUrl.trim() ? nodes.normaliseBase(stagewatchUrl) : '';
+      if (stagewatchUrl.trim() && !url) return ack({ ok: false, error: 'That is not a Stagewatch address: type its IP or name, with the port if it is not 9924.' });
+      const next = url ? {
+        url,
+        keySealed: typeof stagewatchKey === 'string' && stagewatchKey.trim() ? secretbox.seal(stagewatchKey.trim().slice(0, 80)) : (url === prev.url ? prev.keySealed || '' : ''),
+        fp: typeof stagewatchFingerprint === 'string' ? tlsmod.cleanFingerprint(stagewatchFingerprint) : (url === prev.url ? prev.fp || '' : ''),
+      } : null;
+      settings.hallStagewatch = { ...(settings.hallStagewatch || {}) };
+      if (next) settings.hallStagewatch[r.code] = next; else delete settings.hallStagewatch[r.code];
+      saveSettings();
+      configureHallLink(r);
+      for (const s2 of io.sockets.sockets.values()) if (s2.rooms.has(r.code)) s2.emit('stage', stagePayload(linkFor(r.code)) || { status: 'off', desk: false });
+      changed.push(url ? 'Stagewatch → ' + url + (typeof stagewatchKey === 'string' && stagewatchKey.trim() ? ' (new key, sealed)' : '') : 'Stagewatch → the default');
+    }
+    if (changed.length) audit.write(socket.data.actor || HOST_ACTOR, 'hall.update', r.code, changed.join('; '), socket.data.ip);
+    boardDirty();
+    ack({ ok: true, changed });
+  });
+  socket.on('hall:acceptCertificate', ({ code } = {}, ack) => {
+    ack = ok(ack);
+    if (!canManageHall()) return ack({ ok: false, error: 'Your account may not set halls up.' });
+    const link = hallLinks.get(String(code || '').toUpperCase());
+    if (!link || !link.acceptCertificate()) return ack({ ok: false, error: 'No changed certificate to accept.' });
+    audit.write(socket.data.actor || HOST_ACTOR, 'hall.certificate', String(code), 'accepted a changed Stagewatch certificate', socket.data.ip);
+    ack({ ok: true });
   });
 
   // ----- ADMIN — only with a valid admin cookie
@@ -827,6 +915,10 @@ io.on('connection', (socket) => {
     io.to(r.code).emit('kicked', { reason: 'This meeting was closed by the admin.' });
     io.in(r.code).disconnectSockets(true);
     store.remove(r.code);
+    if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
+    configureHallLink({ code: r.code });   // its own Stagewatch link, if it had one, stops
+    boardDirty();
+    audit.write(socket.data.actor || HOST_ACTOR, 'hall.remove', r.code, (r.name || '(no name)') + (purgeFiles ? ', files removed' : ''), socket.data.ip);
     let purged = 0;
     if (purgeFiles) {
       const stillUsed = new Set();
@@ -970,6 +1062,7 @@ io.on('connection', (socket) => {
     const r = room, u = me;
     r.users.delete(socket.id);
     io.to(r.code).emit('users', roomUserSummary(r));
+    boardDirty();
     const still = Array.from(r.users.values()).some((x) => x.uid === u.uid);
     if (still) return;
     trackLeave(u.uid, r.code);
@@ -980,12 +1073,43 @@ io.on('connection', (socket) => {
   }
 
   socket.on('disconnect', () => {
+    boardSockets.delete(socket);
     if (uploadToken) uploadTokens.delete(uploadToken);
     leaveRoom(false);
   });
 });
 
 function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : []; }
+
+/** A link as the AI's brief reads it. */
+const briefOf = (link) => ({ status: link.status, view: link.view, context: link.context });
+
+/** A Stagewatch's frame moved: the displays that follow it learn the new frame (lib/displays.js, next). */
+function stageChanged(_link) { /* displays follow their hall's link */ }
+const displaysOf = (_code) => [];
+
+// ---------------------------------------------------------------- the halls board
+// Each watcher gets the halls it may see, recomputed when anything on them changes and sent at most every 300 ms
+// (latest wins: a slow phone gets the newest board, never a backlog).
+const boardSockets = new Set();
+let boardIsDirty = false;
+function boardDirty() { boardIsDirty = true; }
+function boardFor(socket) {
+  const a = socket.data.account;
+  const sees = (code) => socket.data.isAdmin || (a && rbac.seesHall(a, code));
+  const rooms = Array.from(store.rooms.values()).filter((r) => sees(r.code));
+  return {
+    halls: rooms.map((r) => board.hallRow(r, { stage: stagePayload(linkFor(r.code)), displays: displaysOf(r.code) })),
+    help: rooms.flatMap((r) => board.openHelp(r).map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.can(a, 'hall.post', r.code))) }))),
+  };
+}
+setInterval(() => {
+  if (!boardIsDirty) return;
+  boardIsDirty = false;
+  for (const s of boardSockets) s.emit('board', boardFor(s));
+}, 300).unref();
+/** Open help requests across every hall, for the context (a count: never who or what). */
+const openHelpCount = () => Array.from(store.rooms.values()).reduce((n, r) => n + board.openHelp(r).length, 0);
 
 /**
  * An account changed (role, rights, halls, password, turned off, removed): every socket it has open is told and closed,
@@ -1024,6 +1148,7 @@ function buildMessage(user, payload) {
       caption: payload.caption ? String(payload.caption).slice(0, 500) : '',
     };
   }
+  if (payload.type === 'help') return board.helpMessage(base, payload, guard.cleanText);
   if (payload.type === 'action') {
     const text = String(payload.text || '').trim();
     let options = Array.isArray(payload.options) ? payload.options.map((o) => String(o || '').trim().slice(0, 40)).filter(Boolean).slice(0, 6) : [];
@@ -1043,6 +1168,8 @@ function renderTranscriptHtml(room) {
     let content = '';
     if (m.type === 'text') content = '<p>' + esc(m.text).replace(/\n/g, '<br>') + '</p>';
     else if (m.type === 'file') content = '<p>📄 <em>' + esc(m.filename) + '</em>' + (m.caption ? ' — ' + esc(m.caption) : '') + '</p>';
+    else if (m.type === 'help') content = '<p><strong>Help — ' + esc(m.category) + ':</strong> ' + esc(m.text || '') + '</p>' +
+      (m.help ? '<p class="responses">' + esc(m.help.state === 'open' ? 'open' : (m.help.state === 'coming' ? 'on the way' : 'resolved') + (m.help.by ? ' — ' + m.help.by : '') + (m.help.at ? ', ' + fmt(m.help.at) : '')) + '</p>' : '');
     else if (m.type === 'action') {
       content = '<p><strong>Action prompt:</strong> ' + esc(m.text) + '</p>';
       if (Array.isArray(m.options) && m.options.length) content += '<ul>' + m.options.map((o) => '<li>' + esc(o) + '</li>').join('') + '</ul>';
@@ -1085,13 +1212,55 @@ function renderTranscriptHtml(room) {
 }
 
 // ---------------------------------------------------------------- show network (Show Bus 1.1)
-const stageLink = new nodes.StagewatchLink({
-  onState: (view, status) => { io.emit('stage', view ? { ...view, status, desk: stageLink.desk } : { status, desk: stageLink.desk }); followStageAck(view); },
-  onStatus: (status) => noteEvent('Stagewatch link ' + (/^CERTIFICATE CHANGED/.test(status) ? 'refused: CERTIFICATE CHANGED' : status)),
-  findPeer: (t, host, port) => (discovery ? discovery.find(t, host, port) : null),
-  pins,
-  onPins: () => { settings.tlsPins = pins.toJSON(); saveSettings(); },
-});
+// One Stagewatch per hall at a venue with several: each hall may link its own (hall settings), and the default one
+// (Admin → Show network) serves every hall without one. Each is a StagewatchLink of its own, with its own liveness,
+// clock, pin and desk; a hall's countdown, sends and proposals go to its link and nowhere else.
+const hallLinks = new Map();   // hall code -> StagewatchLink
+function makeLink(id) {
+  const link = new nodes.StagewatchLink({
+    onState: (view) => onStageState(link, view),
+    onStatus: (status) => noteEvent('Stagewatch link' + (id === 'default' ? '' : ' of a hall') + ' ' + (/^CERTIFICATE CHANGED/.test(status) ? 'refused: CERTIFICATE CHANGED' : status)),
+    findPeer: (t, host, port) => (discovery ? discovery.find(t, host, port) : null),
+    pins,
+    onPins: () => { settings.tlsPins = pins.toJSON(); saveSettings(); },
+  });
+  link.id = id;
+  return link;
+}
+const stageLink = makeLink('default');
+/** The Stagewatch a hall follows: its own, else the default. */
+const linkFor = (code) => hallLinks.get(code) || stageLink;
+const allLinks = () => [stageLink, ...hallLinks.values()];
+const roomsUsing = (link) => Array.from(store.rooms.values()).filter((r) => linkFor(r.code) === link);
+/** What a page shows of a link: the frame (or nothing yet), its state and whether it keeps a show desk. */
+function stagePayload(link) {
+  if (!link.base) return null;
+  return link.view ? { ...link.view, status: link.status, desk: link.desk } : { status: link.status, desk: link.desk };
+}
+function onStageState(link, view) {
+  const payload = stagePayload(link) || { status: 'off', desk: false };
+  for (const r of roomsUsing(link)) io.to(r.code).emit('stage', payload);
+  followStageAck(link, view);
+  stageChanged(link);
+  boardDirty();
+}
+/**
+ * A hall's own Stagewatch, from the server's settings (settings.json → hallStagewatch[code], key sealed at rest) — never
+ * from the room's own settings, whose changes travel to every client in the room's log. None: the default.
+ */
+const hallStagewatch = (code) => (settings.hallStagewatch && typeof settings.hallStagewatch === 'object' ? settings.hallStagewatch[code] : null) || null;
+function configureHallLink(room) {
+  const sw = hallStagewatch(room.code);
+  const url = sw && typeof sw.url === 'string' ? nodes.normaliseBase(sw.url) : '';
+  let link = hallLinks.get(room.code);
+  if (!url) {
+    if (link) { link.stop(); hallLinks.delete(room.code); }
+    return null;
+  }
+  if (!link) { link = makeLink('hall:' + room.code); hallLinks.set(room.code, link); }
+  link.configure(url, secretbox.open(sw.keySealed) || '', sw.fp || '');
+  return link;
+}
 let discovery = null;
 if (process.env.AGM_NODES !== '0') {
   const loopbackOnly = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
@@ -1101,17 +1270,20 @@ if (process.env.AGM_NODES !== '0') {
   try { discovery.start(); } catch (e) { console.warn('  [nodes] discovery off:', e.message); }
 }
 stageLink.configure(settings.stagewatchUrl || '', stagewatchKey(), settings.stagewatchFingerprint || '');
+for (const room of store.rooms.values()) configureHallLink(room);
 
-// Stage sends waiting for the speaker: Stagewatch message id -> the AGMessage messages that show its state.
+// Stage sends waiting for the speaker: "<link>:<Stagewatch message id>" -> the AGMessage messages that show its state.
+// (A Stagewatch numbers its own messages, so two halls' Stagewatches can both send message 12.)
 const stageSends = new Map();
-function trackStageSend(ref, code, ids) {
-  stageSends.set(ref, { code, ids, ack: 'sent', by: '' });
-  if (stageSends.size > 50) stageSends.delete(stageSends.keys().next().value);
+function trackStageSend(link, ref, code, ids) {
+  stageSends.set(link.id + ':' + ref, { code, ids, ack: 'sent', by: '' });
+  if (stageSends.size > 200) stageSends.delete(stageSends.keys().next().value);
 }
 /** The live frame says who acknowledged which message: show it on the message that was sent. */
-function followStageAck(view) {
-  if (!view || !view.messageId || !stageSends.has(view.messageId)) return;
-  const t = stageSends.get(view.messageId);
+function followStageAck(link, view) {
+  const key = view && view.messageId ? link.id + ':' + view.messageId : '';
+  if (!key || !stageSends.has(key)) return;
+  const t = stageSends.get(key);
   const ack = view.messageAck || 'sent';
   if (ack === t.ack && (view.messageAckBy || '') === t.by) return;
   t.ack = ack; t.by = view.messageAckBy || '';
@@ -1127,17 +1299,19 @@ function followStageAck(view) {
 // ---------------------------------------------------------------- the show desk (Show Bus 1.2 §11)
 // Proposals this AGMessage made, followed until they end: desk id -> the messages that show their state.
 const FINAL = new Set(['rejected', 'done', 'failed', 'undelivered']);
+// Keyed "<link>:<desk id>": each Stagewatch numbers its own proposals.
 const proposals = new Map();
-function trackProposal(id, code, ids, state) {
+function trackProposal(linkId, id, code, ids, state) {
   if (FINAL.has(state)) return;
-  proposals.set(id, { code, ids, state });
-  if (proposals.size > 100) proposals.delete(proposals.keys().next().value);
+  proposals.set(linkId + ':' + id, { link: linkId, id, code, ids, state });
+  if (proposals.size > 200) proposals.delete(proposals.keys().next().value);
 }
-// After a restart, keep following the ones still open (their state lives on the messages).
+// After a restart, keep following the ones still open (their state, and the link they went to, live on the messages).
 for (const room of store.rooms.values()) {
   for (const m of room.messages) if (m.proposal && m.proposal.id && !FINAL.has(m.proposal.state)) {
-    const t = proposals.get(m.proposal.id);
-    if (t) t.ids.push(m.id); else trackProposal(m.proposal.id, room.code, [m.id], m.proposal.state);
+    const linkId = m.proposal.link || 'default';
+    const t = proposals.get(linkId + ':' + m.proposal.id);
+    if (t) t.ids.push(m.id); else trackProposal(linkId, m.proposal.id, room.code, [m.id], m.proposal.state);
   }
 }
 function showProposalState(t, p) {
@@ -1168,29 +1342,34 @@ function runApproved(p) {
   return { ok: true, words: 'shown in ' + rooms.length + ' meeting' + (rooms.length === 1 ? '' : 's') };
 }
 
+// Every linked Stagewatch that keeps a desk, one after another (one request at a time to each): our proposals' states,
+// and what each desk approved for this AGMessage — run once, whichever desk it came from, and reported.
 let deskBusy = false;
 setInterval(async () => {
-  if (deskBusy || !stageLink.linked) return;
+  if (deskBusy) return;
   deskBusy = true;
   try {
-    if (Date.now() - stageLink.deskCheckedAt > 60_000) {
-      const was = stageLink.desk;
-      await stageLink.checkDesk(settings.nodeId);
-      if (was !== stageLink.desk) io.emit('stage', { ...(stageLink.view || {}), status: stageLink.status, desk: stageLink.desk });
-    }
-    if (!stageLink.desk) return;
-    // Follow our own proposals.
-    for (const [id, t] of Array.from(proposals)) {
-      const p = await stageLink.proposal(id);
-      if (!p) continue;
-      if (p.state !== t.state) { t.state = p.state; showProposalState(t, p); }
-      if (FINAL.has(p.state)) proposals.delete(id);
-    }
-    // Run what the desk approved for us, then say what happened.
-    for (const p of await stageLink.approvedFor(settings.nodeId)) {
-      let r = ranProposals.get(p.id);
-      if (!r) { r = runApproved(p); ranProposals.set(p.id, r); if (ranProposals.size > 200) ranProposals.delete(ranProposals.keys().next().value); }
-      if (!r.reported) r.reported = await stageLink.reportResult(p.id, r.ok, r.words);
+    for (const link of allLinks()) {
+      if (!link.linked) continue;
+      if (Date.now() - link.deskCheckedAt > 60_000) {
+        const was = link.desk;
+        await link.checkDesk(settings.nodeId);
+        if (was !== link.desk) onStageState(link, link.view);
+      }
+      if (!link.desk) continue;
+      for (const [key, t] of Array.from(proposals)) {
+        if (t.link !== link.id) continue;
+        const p = await link.proposal(t.id);
+        if (!p) continue;
+        if (p.state !== t.state) { t.state = p.state; showProposalState(t, p); }
+        if (FINAL.has(p.state)) proposals.delete(key);
+      }
+      for (const p of await link.approvedFor(settings.nodeId)) {
+        const key = link.id + ':' + p.id;
+        let r = ranProposals.get(key);
+        if (!r) { r = runApproved(p); ranProposals.set(key, r); if (ranProposals.size > 200) ranProposals.delete(ranProposals.keys().next().value); }
+        if (!r.reported) r.reported = await link.reportResult(p.id, r.ok, r.words);
+      }
     }
   } catch { /* the next tick tries again */ } finally { deskBusy = false; }
 }, 3000).unref();
@@ -1201,6 +1380,8 @@ function currentContext() {
     node: { id: settings.nodeId, name: 'AGMessage' },
     rooms: Array.from(store.rooms.values()),
     stage: { status: stageLink.status, view: stageLink.view, clock: stageLink.clockInfo(), context: stageLink.context },
+    halls: Array.from(hallLinks.values()).map((l) => ({ status: l.status, view: l.view, clock: l.clockInfo(), context: l.context })),
+    help: openHelpCount(),
     peers: discovery ? discovery.list() : [],
     aiOn: !!aiKey(), tunnel: !!tunnelProc, recent: recentEvents,
   });
@@ -1209,14 +1390,16 @@ function currentContext() {
 let lastPushed = '';
 let lastPushAt = 0;
 setInterval(() => {
-  if (!stageLink.linked) return;
+  const linked = allLinks().filter((l) => l.linked);
+  if (!linked.length) return;
   const ctx = currentContext();
   const sig = JSON.stringify({ ...ctx, at: 0 });
-  if (sig !== lastPushed || Date.now() - lastPushAt >= 5000) {
-    lastPushed = sig; lastPushAt = Date.now();
-    stageLink.pushContext(ctx).catch(() => {});
+  const due = sig !== lastPushed || Date.now() - lastPushAt >= 5000;
+  if (due) { lastPushed = sig; lastPushAt = Date.now(); }
+  for (const link of linked) {
+    if (due) link.pushContext(ctx).catch(() => {});
+    if (Date.now() - link.contextAt >= 5000) link.fetchContext().catch(() => {});
   }
-  if (Date.now() - stageLink.contextAt >= 5000) stageLink.fetchContext().catch(() => {});
 }, 1000).unref();
 
 // ---------------------------------------------------------------- Cloudflare tunnel (admin-only)
@@ -1305,7 +1488,7 @@ function shutdown(code = 0) {
   console.log('\n  Saving rooms…');
   store.compactAll();
   settingsLane.flushSync();
-  stageLink.stop();
+  for (const link of allLinks()) link.stop();
   if (discovery) discovery.stop();
   process.exit(code);
 }

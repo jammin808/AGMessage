@@ -1730,3 +1730,20 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 /* A message from a signed-in account carries a mark; a code guest's does not */
 .msg .from.acct::after { content: " ✓"; color: var(--ok); font-weight: 700; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+
+/* Help requests in a hall: a card that cannot be missed until it is resolved; shape and words carry the state */
+.help-btn { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 700; }
+.help-btn:hover { filter: brightness(1.08); }
+.msg.is-help { border-left: 6px solid var(--danger); }
+.msg.is-help[data-help="coming"] { border-left-color: var(--accent); }
+.msg.is-help[data-help="resolved"] { border-left-color: var(--success); opacity: .85; }
+.help-body .help-head { margin: 0 0 .35rem; font-size: calc(1.05rem * var(--zoom-msg, 1)); }
+.help-line { font-size: .88rem; font-weight: 600; }
+.help-line[data-state="open"] { color: var(--danger); }
+.help-line[data-state="coming"] { color: var(--accent); }
+.help-line[data-state="resolved"] { color: var(--success); }
+.help-actions { display: flex; gap: .4rem; margin-top: .45rem; flex-wrap: wrap; }
+.help-cats { display: flex; flex-wrap: wrap; gap: .4rem; }
+.help-cat { display: inline-flex; align-items: center; gap: .35rem; padding: .4rem .7rem; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; font-size: .92rem; }
+.help-cat:has(input:checked) { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); font-weight: 600; }
+.help-cat input { margin: 0; }

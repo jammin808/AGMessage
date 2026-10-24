@@ -80,12 +80,63 @@
       '</div>' +
       '<div class="hall-last">' + (l.last ? '<strong>' + esc(l.last.name) + '</strong> ' + esc(l.last.text) + ' <time>' + esc(AGM.ago(l.last.at)) + '</time>' : '<span class="muted">No messages yet</span>') + '</div>' +
       '<div class="hall-meta">' +
+        (canManageHalls ? '<button type="button" class="btn ghost small hall-setup" data-code="' + esc(h.code) + '">Set up</button>' : '') +
         '<span title="People in the hall now">' + esc(String(l.people ?? h.people)) + ' in</span>' +
         (helpOpen ? '<span class="help-count" title="Open help requests">■ ' + esc(String(helpOpen)) + ' need help</span>' : '') +
         displaysHtml +
       '</div>';
     return li;
   }
+
+  // ---------------------------------------------------------------- a hall's set-up: its name and its own Stagewatch
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.hall-setup');
+    if (b) openSetup(b.dataset.code);
+  });
+  let setupCode = '';
+  function openSetup(code) {
+    if (!socket) return;
+    socket.emit('hall:settings', { code }, (r) => {
+      if (!r || !r.ok) { AGM.toast((r && r.error) || 'Not available.', true); return; }
+      setupCode = code;
+      $('setupTitle').textContent = 'Set up ' + (r.name || r.code);
+      $('setupName').value = r.name;
+      $('setupUrl').value = r.stagewatch.url;
+      $('setupKey').value = '';
+      $('setupKey').placeholder = r.stagewatch.keySet ? 'A key is saved — type a new one to replace it' : 'swk_… (Stagewatch → Settings → Remote → API keys, scope node)';
+      $('setupFp').value = r.stagewatch.fp;
+      $('setupDefault').textContent = r.defaultStagewatch ? 'Leave it empty to follow the default Stagewatch (' + r.defaultStagewatch + ').' : 'Leave it empty for no Stagewatch.';
+      const status = r.stagewatch.status;
+      $('setupStatus').textContent = status ? 'Its own link: ' + status + (r.stagewatch.tls && r.stagewatch.tls.changed ? ' — CERTIFICATE CHANGED' : '') : '';
+      $('setupAccept').hidden = !(r.stagewatch.tls && r.stagewatch.tls.changed);
+      const list = $('setupHeard');
+      list.textContent = '';
+      for (const p of r.stagewatches) {
+        const port = (p.ports && (p.ports.http || p.ports.https)) || 9924;
+        const b2 = document.createElement('button');
+        b2.type = 'button'; b2.className = 'btn small';
+        b2.textContent = (p.name || p.host || p.address) + ' (' + p.address + ':' + port + ')' + (p.status === 'live' ? '' : ' — not heard for ' + p.age + ' s');
+        b2.onclick = () => { $('setupUrl').value = p.address + ':' + port; if (p.tls) $('setupFp').value = p.tls; };
+        list.appendChild(b2);
+      }
+      $('setupHeardWrap').hidden = !r.stagewatches.length;
+      $('setupError').hidden = true;
+      $('setupDialog').showModal();
+    });
+  }
+  $('setupForm').addEventListener('submit', (e) => {
+    if (e.submitter && e.submitter.value === 'cancel') return;
+    e.preventDefault();
+    const patch = { code: setupCode, name: $('setupName').value.trim(), stagewatchUrl: $('setupUrl').value.trim(), stagewatchFingerprint: $('setupFp').value.trim() };
+    if ($('setupKey').value.trim()) patch.stagewatchKey = $('setupKey').value.trim();
+    socket.emit('hall:configure', patch, (r) => {
+      if (!r || !r.ok) { $('setupError').textContent = (r && r.error) || 'Not saved.'; $('setupError').hidden = false; return; }
+      $('setupDialog').close();
+      AGM.toast(r.changed.length ? 'Saved: ' + r.changed.join('; ') : 'Nothing changed.');
+      load();
+    });
+  });
+  $('setupAccept').addEventListener('click', () => socket.emit('hall:acceptCertificate', { code: setupCode }, (r) => AGM.toast(r && r.ok ? 'New certificate accepted.' : (r && r.error) || 'Not accepted.', !(r && r.ok))));
 
   function renderHelp() {
     const strip = $('helpStrip');
@@ -141,15 +192,8 @@
     if ((b.halls || []).some((r) => !known.has(r.code)) || (b.halls || []).length !== halls.length) { load(); return; }
     render();
   }
-  // The countdowns tick between frames from the duration each frame carries (Show Bus: durations, not wall clocks).
-  setInterval(() => {
-    for (const [code, l] of Object.entries(live)) {
-      const st = l.stage;
-      if (!st || st.status !== 'connected' || st.stale || st.state !== 'running' || !Number.isFinite(st.seconds) || !l.at) continue;
-      const el = document.querySelector('.hall-row[data-code="' + CSS.escape(code) + '"] .hall-time');
-      if (el) el.textContent = AGM.clock(st.seconds - (st.countsUp ? -1 : 1) * (Date.now() - l.at) / 1000);
-    }
-  }, 250);
+  // Each Stagewatch sends a frame about every second while it runs, and the board is pushed on every change, so the clock
+  // shown is Stagewatch's own words (a calm "12 MIN" stays "12 MIN"), never a guess made here.
 
   // ---------------------------------------------------------------- account actions
   $('signOutBtn').addEventListener('click', async () => { await AGM.api('POST', '/api/auth/logout'); location.replace('/'); });

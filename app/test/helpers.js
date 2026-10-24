@@ -54,4 +54,71 @@ const connect = (base, cookie) => new Promise((resolve, reject) => {
 const emit = (s, ev, arg) => new Promise((resolve) => { s.emit(ev, arg, resolve); });
 const once = (s, ev, ms = 4000) => new Promise((resolve, reject) => { const t = setTimeout(() => reject(new Error('no ' + ev + ' within ' + ms + ' ms')), ms); s.once(ev, (v) => { clearTimeout(t); resolve(v); }); });
 
-module.exports = { ROOT, TOKEN, freePort, wait, startServer, stopServer, api, connect, emit, once };
+/**
+ * A fake Stagewatch on a free port: /ws sends a state frame on connect (frame(obj) sends another); /api/message/… answers
+ * a receipt; the show desk (/api/proposals: create, read one, list by target and state, result) keeps its queue in
+ * `proposals`; /api/context answers a context named `name`. Every request is kept in `requests` (method, url, headers,
+ * body) so a test can say what reached which Stagewatch.
+ */
+async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77 } = {}) {
+  const http = require('http');
+  const { WebSocketServer } = require('ws');
+  const requests = [];
+  const proposals = new Map();
+  let next = 0;
+  const sockets = new Set();
+  const srv = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => { body += d; });
+    req.on('end', () => {
+      requests.push({ method: req.method, url: req.url, headers: req.headers, body });
+      const json = (code, o) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+      const u = new URL(req.url, 'http://x');
+      if (u.pathname.startsWith('/api/message/')) return json(200, { type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId } });
+      if (u.pathname === '/api/context') return json(200, { v: 1, node: { t: 'main', id: 'sw' + name.length, name }, light: 'green', headline: name + ' running', items: [], peers: [] });
+      if (u.pathname === '/api/peers/context') return json(200, { ok: true });
+      if (desk && u.pathname === '/api/proposals' && req.method === 'POST') {
+        const p = { ...JSON.parse(body || '{}'), id: 'p' + (++next), state: 'pending' };
+        proposals.set(p.id, p);
+        return json(201, { ok: true, id: p.id, state: p.state });
+      }
+      if (desk && u.pathname === '/api/proposals') {
+        const list = Array.from(proposals.values()).filter((p) => (!u.searchParams.get('target') || (p.target && p.target.id === u.searchParams.get('target'))) && (!u.searchParams.get('state') || p.state === u.searchParams.get('state')));
+        return json(200, { proposals: list });
+      }
+      const one = /^\/api\/proposals\/(p\d+)(\/result)?$/.exec(u.pathname);
+      if (desk && one && proposals.has(one[1])) {
+        const p = proposals.get(one[1]);
+        if (one[2]) { const r = JSON.parse(body || '{}'); p.state = r.ok ? 'done' : 'failed'; p.words = r.words; return json(200, { ok: true }); }
+        return json(200, p);
+      }
+      json(404, { ok: false, error: 'not here' });
+    });
+  });
+  const wss = new WebSocketServer({ server: srv, path: '/ws' });
+  let last = { type: 'state', mode: 'countdown', text: '05:00', title: name, seconds: 300, state: 'running', messageId: 0 };
+  wss.on('connection', (c) => {
+    sockets.add(c);
+    c.on('close', () => sockets.delete(c));
+    c.on('message', (d) => { let m; try { m = JSON.parse(String(d)); } catch { return; } if (m.cmd === 'ping') c.send(JSON.stringify({ type: 'pong', t: m.t, t2: Date.now(), t3: Date.now() })); });
+    c.send(JSON.stringify(last));
+  });
+  await new Promise((resolve) => { srv.listen(0, '127.0.0.1', resolve); });
+  const port = srv.address().port;
+  return {
+    port, url: '127.0.0.1:' + port, requests, proposals,
+    get connected() { return sockets.size > 0; },
+    frame(o) { last = { ...last, ...o }; for (const c of sockets) c.send(JSON.stringify(last)); },
+    approve(id, by = 'Show caller') { const p = proposals.get(id); if (p) { p.state = 'approved'; p.decidedBy = by; } },
+    close() { for (const c of sockets) c.terminate(); wss.close(); return new Promise((resolve) => { srv.close(resolve); }); },
+  };
+}
+
+/** Wait until fn() is truthy (polling every 50 ms), or fail after `ms`. */
+async function until(fn, ms = 6000, what = 'the condition') {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (await fn()) return true; await wait(50); }
+  throw new Error('timed out waiting for ' + what);
+}
+
+module.exports = { ROOT, TOKEN, freePort, wait, until, startServer, stopServer, api, connect, emit, once, fakeStagewatch };
