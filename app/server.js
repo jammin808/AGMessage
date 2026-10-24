@@ -39,7 +39,8 @@ const { buildContext, showBrief } = require('./lib/context');
 const tlsmod = require('./lib/tls');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
-const VERSION = '0.4.0';
+const { BUILD } = require('./lib/version');
+const VERSION = BUILD.version;
 const PORT = parseInt(process.env.PORT || '3023', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
@@ -290,7 +291,7 @@ app.get('/api/admin/transcript/:code', (req, res) => {
 
 // Health: anyone may ask whether it is up; the detail is for the admin (or the host laptop).
 app.get('/api/health', (req, res) => {
-  const base = { ok: true, version: VERSION, uptime: Math.round(process.uptime()) };
+  const base = { ok: true, version: VERSION, build: BUILD.full, uptime: Math.round(process.uptime()) };
   if (!(isValidAdminCookie(req) || guard.isHostMachine(req))) return res.json(base);
   res.json({ ...base, rooms: store.rooms.size, clients: io.engine.clientsCount, ...healthFacts() });
 });
@@ -1012,7 +1013,7 @@ const stageLink = new nodes.StagewatchLink({
 let discovery = null;
 if (process.env.AGM_NODES !== '0') {
   const loopbackOnly = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
-  discovery = new nodes.Discovery({ id: settings.nodeId, port: PORT, name: 'AGMessage', announce: !loopbackOnly, tls: cert ? cert.fp : '', onChange: () => {
+  discovery = new nodes.Discovery({ id: settings.nodeId, port: PORT, name: 'AGMessage', build: BUILD.full, announce: !loopbackOnly, tls: cert ? cert.fp : '', onChange: () => {
     for (const [, s] of io.sockets.sockets) if (s.data && s.data.isAdmin) s.emit('nodes', discovery.list());
   } });
   try { discovery.start(); } catch (e) { console.warn('  [nodes] discovery off:', e.message); }
@@ -1255,7 +1256,7 @@ front.on('error', (e) => {
 front.listen(PORT, HOST, () => {
   const addresses = [];
   for (const list of Object.values(os.networkInterfaces())) for (const n of list || []) if (n.family === 'IPv4' && !n.internal) addresses.push(n.address);
-  console.log('\n  AGMessage ' + VERSION + ' is running');
+  console.log('\n  AGMessage ' + BUILD.full + ' is running');
   console.log('  ---------------------');
   console.log(`  Local:   http://localhost:${PORT}`);
   for (const a of addresses) console.log(`  LAN:     http://${a}:${PORT}` + (cert ? `   (or https://${a}:${PORT})` : ''));

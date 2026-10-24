@@ -48,6 +48,8 @@ function parseHello(msg, address) {
     proto: Number.isInteger(msg.proto) ? msg.proto : 0,
     clock: Number.isFinite(msg.clock) ? msg.clock : null,
     tls: tlsmod.cleanFingerprint(msg.tls),   // "" when the node announces no certificate
+    // The build a peer runs (SemVer, e.g. PlayMap's "0.2.0+17.abc1234"); any other value is dropped, the hello kept.
+    build: typeof msg.build === 'string' && /^[0-9A-Za-z.+-]{1,64}$/.test(msg.build) ? msg.build : '',
   };
 }
 
@@ -61,8 +63,9 @@ class Discovery {
    * @param {number} o.port the HTTP port people and nodes connect to
    * @param {boolean} [o.announce] false when bound to loopback only (Show Bus §2)
    */
-  constructor({ id, port, name, announce = true, onChange, tls = '' }) {
+  constructor({ id, port, name, announce = true, onChange, tls = '', build = '' }) {
     this.id = id; this.port = port; this.name = name; this.announce = announce; this.onChange = onChange || (() => {});
+    this.build = build;   // the build this node runs (lib/version.js), so a peer tells builds apart before it connects
     this.tls = tls;   // this node's certificate fingerprint (same port serves HTTPS)
     this.peers = new Map();   // id -> hello + seen
     this.sock = null;
@@ -72,6 +75,7 @@ class Discovery {
   hello() {
     const h = { t: 'messenger', v: 1, proto: 1, id: this.id, name: this.name, host: os.hostname().slice(0, 40), ports: { http: this.port }, caps: CAPS, clock: Date.now() };
     if (this.tls) { h.ports.https = this.port; h.tls = this.tls; }
+    if (this.build) h.build = this.build;
     return h;
   }
 
@@ -119,7 +123,7 @@ class Discovery {
   list() {
     const now = Date.now();
     return Array.from(this.peers.values()).map((p) => ({
-      t: p.t, id: p.id, name: p.name, host: p.host, address: p.address, ports: p.ports, caps: p.caps, proto: p.proto, tls: p.tls || '',
+      t: p.t, id: p.id, name: p.name, host: p.host, address: p.address, ports: p.ports, caps: p.caps, proto: p.proto, tls: p.tls || '', build: p.build || '',
       status: peerStatus(now - p.seen), age: Math.round((now - p.seen) / 1000),
     }));
   }

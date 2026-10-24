@@ -225,7 +225,8 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const local = await (await fetch(base + '/api/health')).json();
     assert.ok(local.ok && 'restarts' in local && 'loopMs' in local, 'detail on the host');
     const remote = await (await fetch(base + '/api/health', { headers: { 'cf-connecting-ip': '203.0.113.9' } })).json();
-    assert.deepEqual(Object.keys(remote).sort(), ['ok', 'uptime', 'version']);
+    assert.deepEqual(Object.keys(remote).sort(), ['build', 'ok', 'uptime', 'version']);
+    assert.match(remote.build, new RegExp('^' + remote.version.replace(/\./g, '\\.') + '(-dev|\\+)'), 'the build names its version and channel');
   });
 
   await t.test('saved keys are sealed at rest, never in clear', async () => {

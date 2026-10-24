@@ -302,6 +302,7 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
     'lib/secretbox.js': { max: 3, why: 'the machine key, read once' },
     'lib/guard.js': { max: 3, why: 'the server secret, read once at startup' },
     'lib/tls.js': { max: 4, why: 'the certificate, read (or made) once at startup and when the admin renews it' },
+    'lib/version.js': { max: 8, why: 'the version and its stamp (or the checkout\'s commit), read once at startup' },
   };
   for (const f of files) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');

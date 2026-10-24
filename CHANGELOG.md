@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 — 2026-10-24 — halls, accounts, displays and the testing environment
+
+**Versions** — one scheme for every build (`app/lib/version.js`): `package.json` names the version; CI stamps the build
+number and commit (`tools/stamp-build.js`). A release reads `0.5.0+17.abc1234`, a CI development build
+`0.5.0-dev.17+abc1234`, a local copy `0.5.0-dev+abc1234`. The console banner, `/api/health` (`build`) and the Show Bus
+hello (`build`) say it; the portable zip is named by it; a release tag that names another version is refused.
+
+**Runtime** — Node.js 24.22.1 LTS (pinned by SHA-256), Express 5.3, multer 2.5, socket.io 4.8.4, ws 8.22, Anthropic SDK
+1.3 (API version 2026-10-21, Apache 2.0); nanoid replaced by `node:crypto`.
+
 ## 0.4.0 — 2026-10-11 — encrypted connections and the show desk (Show Bus 1.2)
 
 **Encrypted connections** (Show Bus §10)
