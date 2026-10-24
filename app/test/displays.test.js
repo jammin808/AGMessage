@@ -13,6 +13,7 @@ const { Displays, cleanContent, describe } = require('../lib/displays');
 const { startServer, stopServer, api, connect, emit, wait, until, fakeStagewatch } = require('./helpers');
 
 const IMG = '/uploads/1777424589360-onmqm0a3ew2r-holding.png';
+const KEY = 'swk_hall3_node_key_00001';   // secret-scan: fixture — a fake node key for the fake Stagewatch
 
 test('displays: content is cleaned, or refused in words', () => {
   assert.deepEqual(cleanContent({ kind: 'holding' }), { kind: 'holding' });
@@ -148,7 +149,7 @@ test('displays end to end: links, takes, confirmations, rights, the countdown, t
   });
 
   await t.test('the hall\'s countdown reaches its screens, with the message under it', async () => {
-    assert.ok((await emit(ctl, 'hall:configure', { code: hall, stagewatchUrl: sw.url, stagewatchKey: 'swk_hall3_node_key_00001' })).ok);
+    assert.ok((await emit(ctl, 'hall:configure', { code: hall, stagewatchUrl: sw.url, stagewatchKey: KEY })).ok);
     await until(() => sw.connected, 6000, 'Stagewatch linked');
     assert.ok((await emit(tech, 'display:take', { id: made.display.id, content: { kind: 'countdown', text: 'Q&A next', tone: 'info' } })).ok);
     await until(() => scr.states.some((s) => s.content.kind === 'countdown'), 3000, 'countdown take');

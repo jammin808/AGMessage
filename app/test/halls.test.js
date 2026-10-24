@@ -11,6 +11,10 @@ const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
 const { startServer, stopServer, api, connect, emit, wait, until, fakeStagewatch } = require('./helpers');
 
+// Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
+const KEY_A = 'swk_hallA_node_key_0001';   // secret-scan: fixture
+const KEY_B = 'swk_hallB_node_key_0002';   // secret-scan: fixture
+
 test('board: a message in one line, the last message, open help, a hall row', () => {
   assert.equal(board.lineOf({ type: 'text', text: 'Radio mic 3\nbattery low' }), 'Radio mic 3 battery low');
   assert.equal(board.lineOf({ type: 'file', filename: 'run.pdf', caption: 'v4' }), '📄 run.pdf — v4');
@@ -68,22 +72,22 @@ test('halls end to end: two Stagewatches, the board, help', async (t) => {
     // eslint-disable-next-line no-script-url -- a hostile input this test proves is refused
     const bad = await emit(ctl, 'hall:configure', { code: hallA, stagewatchUrl: 'javascript:alert(1)' });
     assert.equal(bad.ok, false);
-    assert.ok((await emit(ctl, 'hall:configure', { code: hallA, stagewatchUrl: swA.url, stagewatchKey: 'swk_hallA_node_key_0001' })).ok);
-    assert.ok((await emit(ctl, 'hall:configure', { code: hallB, stagewatchUrl: swB.url, stagewatchKey: 'swk_hallB_node_key_0002', name: 'Hall B (Auditorium)' })).ok);
+    assert.ok((await emit(ctl, 'hall:configure', { code: hallA, stagewatchUrl: swA.url, stagewatchKey: KEY_A })).ok);
+    assert.ok((await emit(ctl, 'hall:configure', { code: hallB, stagewatchUrl: swB.url, stagewatchKey: KEY_B, name: 'Hall B (Auditorium)' })).ok);
     await until(() => swA.connected && swB.connected, 6000, 'both Stagewatches linked');
     const s = await emit(ctl, 'hall:settings', { code: hallA });
     assert.equal(s.stagewatch.keySet, true);
     assert.equal(s.stagewatch.url, 'http://' + swA.url);
     await wait(300);   // the settings lane writes within 100 ms
     const settingsFile = fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8');
-    assert.ok(!settingsFile.includes('swk_hallA_node_key_0001'), 'no clear key on disk');
+    assert.ok(!settingsFile.includes(KEY_A), 'no clear key on disk');
     assert.match(settingsFile, /hallStagewatch/);
     for (const f of fs.readdirSync(path.join(srv.dataDir, 'rooms'))) {
       assert.ok(!/swk_|enc1:/.test(fs.readFileSync(path.join(srv.dataDir, 'rooms', f), 'utf8')), 'nothing of the key in a room file: ' + f);
     }
     const authA = swA.requests.find((r) => r.headers.authorization);
-    assert.equal(authA.headers.authorization, 'Bearer swk_hallA_node_key_0001', 'each hall\'s key goes to its own Stagewatch');
-    assert.ok(!swA.requests.some((r) => r.headers.authorization === 'Bearer swk_hallB_node_key_0002'));
+    assert.equal(authA.headers.authorization, 'Bearer ' + KEY_A, 'each hall\'s key goes to its own Stagewatch');
+    assert.ok(!swA.requests.some((r) => r.headers.authorization === 'Bearer ' + KEY_B));
   });
 
   let crewA, crewB;
