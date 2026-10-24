@@ -70,7 +70,7 @@ test('stamp-build: numbers a CI build, names a release only for its own tag, ref
 
 test('changelog: the newest entry is the version package.json names, every header in the house shape', () => {
   const text = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
-  const headers = text.split('\n').filter((l) => l.startsWith('## '));
+  const headers = text.split(/\r?\n/).filter((l) => l.startsWith('## '));   // a Windows checkout has CRLF
   assert.ok(headers.length >= 1);
   for (const h of headers) assert.match(h, /^## (\d+\.\d+\.\d+) — \d{4}-\d{2}-\d{2} — \S.+$/, h);
   assert.equal(/^## (\d+\.\d+\.\d+)/.exec(headers[0])[1], v.BUILD.version, 'the newest entry names the version being built');
