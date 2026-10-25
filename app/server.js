@@ -45,6 +45,7 @@ const { mountAccounts } = require('./lib/http-accounts');
 const board = require('./lib/board');
 const stagelines = require('./lib/stagelines');
 const peerlinks = require('./lib/peerlinks');
+const deskresults = require('./lib/deskresults');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
@@ -116,8 +117,16 @@ const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json
 const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'));
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
 const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
+// The results of approved show-desk proposals this AGMessage ran that Stagewatch has not taken yet (lib/deskresults.js):
+// read now, written only by the desk loop, which runs once this copy holds the data folder and its port. In memory too:
+// the tries (attempts, posts), when the next is due, the last answer, and the link's generation it was collected under
+// (0 after a restart, so its first try reads the proposal back); `fresh` until its first post.
+const DESK_RESULTS_PATH = path.join(DATA_DIR, 'desk-results.json');
+const deskLane = new resilience.WriteLane(DESK_RESULTS_PATH, { delayMs: 100, keepBak: true, mode: 0o600 });
+const deskResults = deskresults.readRecords(resilience.readJsonWithBak(DESK_RESULTS_PATH), settings.nodeId)
+  .map((r) => ({ ...r, attempts: 0, posts: 0, nextAt: 0, lastStatus: 0, gen: 0, fresh: false }));
 /** Every store saved through a write lane, by the name health and the console give it. */
-const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane]];
+const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['deskResults', deskLane]];
 /** Write every lane and the audit entries still waiting now (shutdown, a crash); what still cannot be written is named on the console. */
 function flushLanes() {
   for (const [name, lane] of saveLanes()) if (!lane.flushSync()) console.error('  [save] ' + name + ' could not be written: ' + lane.lastError);
@@ -164,6 +173,13 @@ function healthFacts() {
     stage: stageLink.status,
     stageKey: stageLink.keyFacts(),
     clock: stageLink.clockInfo(),
+    // Show-desk results Stagewatch has not taken yet: how many, since when, its last answer and when the next try is due.
+    desk: {
+      waiting: deskResults.length,
+      oldestAt: deskResults.length ? Math.min(...deskResults.map((r) => r.ran)) : null,
+      lastStatus: deskResults.reduce((s, r) => r.lastStatus || s, 0),
+      nextAt: deskResults.length ? Math.min(...deskResults.map((r) => r.nextAt)) : null,
+    },
     tls: tlsFacts(),
     saves: {
       writes: settingsLane.writes, coalesced: settingsLane.coalesced, error: settingsLane.lastError,
@@ -2098,9 +2114,54 @@ function showProposalState(t, p) {
     if (m && m.proposal) apply(room, { o: 'upd', id, f: { proposal: { ...m.proposal, state: p.state, ok: typeof p.ok === 'boolean' ? p.ok : null, words: p.words || '', by: p.decidedBy || '' } } });
   }
 }
-// Approved proposals aimed at this AGMessage, already run (so a slow result post never runs one twice). Keyed by the
-// desk's address tag, its id, when it was made and its line: a restarted desk's new p1 is a new proposal.
-const ranProposals = new Map();   // key -> {ok, words, reported, link, sw, gen, id}
+// Approved proposals aimed at this AGMessage, already run, so none is run twice (Stagewatch's claim is the first guard).
+// Keyed by the desk's address tag, its id, when it was made and its line: a restarted desk's new p1 is a new proposal.
+const ranKeys = new Map();   // key -> true, oldest first, at most 500
+const ranKey = (sw, p) => sw + ':' + p.id + ':' + (p.created || 0) + ':' + p.line;
+function rememberRun(key) { ranKeys.set(key, true); if (ranKeys.size > 500) ranKeys.delete(ranKeys.keys().next().value); }
+for (const r of deskResults) rememberRun(ranKey(r.sw, r));   // a result read back off the disk is reported, never run again
+const DESK_AUTH_WAIT_MS = parseInt(process.env.AGM_DESK_AUTH_WAIT_MS || '', 10) > 0 ? parseInt(process.env.AGM_DESK_AUTH_WAIT_MS, 10) : 60_000;
+const saveDeskResults = () => deskLane.save(() => JSON.stringify({ v: 1, results: deskResults.map(deskresults.persisted) }, null, 1));
+/**
+ * The link a waiting result is told through: its hall's Stagewatch (or the default the hall fell back on), while that
+ * is still the Stagewatch it came from; null when nobody is left to tell (the hall closed, or it follows another one now).
+ */
+function deskLinkOf(r) {
+  let link = stageLink;
+  if (r.link !== 'default') { const code = r.link.slice(5); if (!store.get(code)) return null; link = linkFor(code); }
+  return link.tag && link.tag !== r.sw ? null : link;
+}
+/** A result is no longer waiting: said once at role level (no notice text, no ids), and the file follows. */
+function endResult(r, how) {
+  const i = deskResults.indexOf(r);
+  if (i < 0) return;
+  deskResults.splice(i, 1);
+  saveDeskResults();
+  if (how !== 'taken') noteEvent('a show-desk result could not be reported: ' + how, { id: r.link });
+  else if (r.posts > 1) noteEvent('a show-desk result was taken after ' + r.posts + ' tries', { id: r.link });
+}
+/** When the next try of a result that could not be told is due, after this answer. */
+const waitAfter = (answer, attempt) => deskresults.postVerdict(answer, attempt, { authWaitMs: DESK_AUTH_WAIT_MS }).waitMs || deskresults.postVerdict({ status: 0 }, attempt).waitMs;
+/**
+ * One try at telling the desk a result. Its first post goes in the tick that collected it, through that link; every later
+ * one, one after a restart and one through a link made since first reads the desk's proposal back and posts only while
+ * it is still the one that ran and waits. True when the result needs nothing more (taken, or refused or gone for good).
+ */
+async function tellResult(r, link) {
+  if (!r.fresh || r.gen !== link.generation) {
+    const a = await link.proposalAnswer(r.id);
+    const seen = a.status === 200 ? deskresults.readBack(r, a.proposal, { sameStagewatch: r.gen === link.generation }) : a.status === 404 ? 'gone' : 'wait';
+    if (seen === 'taken' || seen === 'gone') { endResult(r, seen); return true; }
+    if (seen === 'wait') { r.attempts++; r.lastStatus = a.status; r.nextAt = Date.now() + waitAfter(a.status === 200 ? { status: 0 } : a, r.attempts); return false; }
+  }
+  r.fresh = false;
+  const res = await link.reportResult(r.id, r.ok, r.words);
+  r.attempts++; r.posts++; r.lastStatus = res.status;
+  const v = deskresults.postVerdict(res, r.attempts, { authWaitMs: DESK_AUTH_WAIT_MS });
+  if (v.final) { endResult(r, v.final); return true; }
+  r.nextAt = Date.now() + v.waitMs;
+  return false;
+}
 
 /**
  * What AGMessage does when the show desk approves a proposal aimed at it. One verb: "notice <text>" — a notice shown
@@ -2119,13 +2180,16 @@ function runApproved(p) {
   return { ok: true, words: 'shown in ' + rooms.length + ' meeting' + (rooms.length === 1 ? '' : 's') };
 }
 
-// Every linked Stagewatch that keeps a desk, one after another (one request at a time to each): our proposals' states,
-// and what each desk approved for this AGMessage — run once, whichever desk it came from, and reported.
+// Every linked Stagewatch that keeps a desk, one after another (one request at a time to each): what it approved for this
+// AGMessage — run once, whichever desk it came from, and reported until it is taken — then our proposals' states. A link
+// Stagewatch asked to wait (Retry-After) is left alone till then. Nothing runs before this copy holds its data folder.
 let deskBusy = false;
+let serving = false;
 setInterval(async () => {
-  if (deskBusy) return;
+  if (deskBusy || !serving) return;
   deskBusy = true;
   try {
+    for (const r of Array.from(deskResults)) if (!deskLinkOf(r)) endResult(r, 'nobody to tell');
     // A hall moved to another Stagewatch, or back on the default (its own link gone): what it proposed at the one it
     // left can no longer be followed — whether or not the one it follows now is up or keeps a desk.
     const byId = new Map(allLinks().map((l) => [l.id, l]));
@@ -2134,13 +2198,31 @@ setInterval(async () => {
       if (!l || (t.sw && t.sw !== l.tag)) loseProposal(key, t, 'the hall moved to another Stagewatch');
     }
     for (const link of allLinks()) {
-      if (!link.linked) continue;
+      if (!link.linked || link.held) continue;
       if (Date.now() - link.deskCheckedAt > 60_000) {
         const was = link.desk;
         await link.checkDesk(settings.nodeId);
         if (was !== link.desk) onStageState(link, link.view);
       }
       if (!link.desk) continue;
+      // Collected first, inside Stagewatch's minute for collecting: run once, on disk, then each first post at once.
+      const fresh = [];
+      for (const p of await link.approvedFor(settings.nodeId)) {
+        const key = ranKey(link.tag, p);
+        if (ranKeys.has(key)) continue;
+        rememberRun(key);
+        const r = { sw: link.tag, link: link.id, id: p.id, created: p.created || 0, line: p.line, target: settings.nodeId, ...runApproved(p), ran: Date.now(), attempts: 0, posts: 0, nextAt: 0, lastStatus: 0, gen: link.generation, fresh: true };
+        deskResults.push(r); fresh.push(r);
+        if (deskResults.length > deskresults.MAX_WAITING) endResult(deskResults[0], 'too many waiting');
+        saveDeskResults(); deskLane.flushSync();   // on disk before it is reported: a restart from here still reports it
+      }
+      // Then the results due, the new ones first and the rest oldest first: the first that must wait stops the rest.
+      const due = fresh.concat(deskResults.filter((r) => !r.fresh && r.nextAt <= Date.now() && deskLinkOf(r) === link));
+      for (const r of due) {
+        if (!deskResults.includes(r)) continue;   // pushed out by the cap meanwhile
+        if (!(await tellResult(r, link)) || link.held || !link.linked) break;
+      }
+      if (link.held || !link.linked) continue;
       for (const [key, t] of Array.from(proposals)) {
         if (t.link !== link.id) continue;
         const p = await link.proposal(t.id);
@@ -2150,21 +2232,7 @@ setInterval(async () => {
         if (!t.created && p.created) t.created = p.created;
         if (p.state !== t.state) { t.state = p.state; showProposalState(t, p); }
         if (FINAL.has(p.state)) proposals.delete(key);
-      }
-      for (const p of await link.approvedFor(settings.nodeId)) {
-        const key = link.tag + ':' + p.id + ':' + (p.created || 0) + ':' + p.line;
-        if (ranProposals.has(key)) continue;
-        ranProposals.set(key, { ...runApproved(p), reported: false, link: link.id, sw: link.tag, gen: link.generation, id: p.id });
-        if (ranProposals.size > 200) ranProposals.delete(ranProposals.keys().next().value);
-      }
-      // Stagewatch hands an approved proposal over once and never lists it again: a result it did not take is posted
-      // again here until it takes it, or refuses it for good (no such proposal, no longer waiting for one) — only to the
-      // Stagewatch it came from, as it was then: a restarted one's proposal of the same number is another proposal.
-      for (const r of Array.from(ranProposals.values())) {
-        if (r.reported || r.link !== link.id) continue;
-        if (r.sw !== link.tag || r.gen !== link.generation) { r.reported = true; continue; }   // that desk is gone: nobody to tell
-        const status = await link.reportResult(r.id, r.ok, r.words);
-        if (status >= 200 && status < 500) r.reported = true;
+        if (link.held || !link.linked) break;
       }
     }
   } catch { /* the next tick tries again */ } finally { deskBusy = false; }
@@ -2193,7 +2261,7 @@ function currentContext(link) {
 // Post each linked Stagewatch its own context: on change, and at least every 5 s. Refresh Stagewatch's own every 5 s.
 setInterval(() => {
   for (const link of allLinks()) {
-    if (!link.linked) continue;
+    if (!link.linked || link.held) continue;
     const ctx = currentContext(link);
     const sig = JSON.stringify({ ...ctx, at: 0 });
     if (sig !== link.lastPushed || Date.now() - (link.lastPushAt || 0) >= 5000) {
@@ -2372,7 +2440,9 @@ function releaseDataFolder() { if (folderHold) { try { folderHold.close(); } cat
 
 holdDataFolder(() => front.listen(PORT, HOST, () => {
   // This copy holds the folder and the port: now it writes. Each replayed log is folded into a fresh snapshot (a torn last
-  // line cut before anything is appended after it), each hall says it was restored, and the audit log is opened.
+  // line cut before anything is appended after it), each hall says it was restored, the audit log is opened, and the show
+  // desk's loop may run (and save what it reports).
+  serving = true;
   store.compactAll();
   for (const room of store.rooms.values()) {
     store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— Session restored (' + room.messages.length + ' messages preserved) —', at: Date.now() } });

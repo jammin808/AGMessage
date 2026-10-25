@@ -103,6 +103,11 @@ function screenIdOf(target) {
  *  contextDelayMs / contextFail  /api/context answers late, or 404 "no context" (its first second) the first n times.
  *  cert           serve HTTPS and WSS with this certificate (tls.makeCertificate).
  *  counts         {upgrades, failures}: failures as its lockout counts them (a wrong key's upgrade, its viewing-code check, each 401).
+ *
+ * Its desk answers a result as ProposalDesk.Result does: 409 for an unknown id or one not waiting for a result (approved,
+ * or undelivered once claimed — a late result is still taken). `answerResults` is a queue of {status, error, retryAfter}
+ * answered to result posts first (status 0: the socket cut with no answer); holdAll(ms) answers every route 429 with
+ * Retry-After for that long, as its per-key budget does; expire(id) is its five minutes without a result.
  */
 async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null } = {}) {
   const http = require('http');
@@ -110,6 +115,8 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
   const { WebSocketServer } = require('ws');
   const tlsmod = require('../lib/tls');
   const counts = { upgrades: 0, failures: 0 };
+  let answerResults = [];
+  let heldUntil = 0;
   const accepts = (h) => key === null || h === 'Bearer ' + key;
   const requests = [];
   const proposals = new Map();
@@ -130,9 +137,10 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     let body = '';
     req.on('data', (d) => { body += d; });
     req.on('end', () => {
-      requests.push({ method: req.method, url: req.url, headers: req.headers, body });
-      const json = (code, o) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+      requests.push({ at: Date.now(), method: req.method, url: req.url, headers: req.headers, body });
+      const json = (code, o, headers = {}) => { res.writeHead(code, { 'content-type': 'application/json', ...headers }); res.end(JSON.stringify(o)); };
       if (!accepts(req.headers.authorization)) { counts.failures++; return json(401, { ok: false, error: 'unknown or revoked API key' }); }
+      if (Date.now() < heldUntil) return json(429, { ok: false, error: 'rate limit: too many requests with this key' }, { 'Retry-After': String(Math.ceil((heldUntil - Date.now()) / 1000)) });
       const u = new URL(req.url, 'http://x');
       if (u.pathname.startsWith('/api/message/')) return json(200, { type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId } });
       if (u.pathname === '/api/context') {
@@ -157,11 +165,17 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
         return json(200, { proposals: list.map(toJson) });
       }
       const one = /^\/api\/proposals\/(p\d+)(\/result)?$/.exec(u.pathname);
+      if (desk && one && one[2] && answerResults.length) {
+        const a = answerResults.shift();
+        if (!a.status) { req.socket.destroy(); return undefined; }
+        return json(a.status, { ok: false, error: a.error || 'refused' }, a.retryAfter ? { 'Retry-After': String(a.retryAfter) } : {});
+      }
       if (desk && one && one[2] && failResults > 0) { failResults--; return json(500, { ok: false, error: 'busy' }); }
+      if (desk && one && one[2] && !proposals.has(one[1])) return json(409, { ok: false, error: 'no such proposal' });
       if (desk && one && proposals.has(one[1])) {
         const p = proposals.get(one[1]);
         if (one[2]) {
-          if (p.state !== 'approved') return json(409, { ok: false, error: 'proposal ' + p.id + ' is ' + p.state });
+          if (p.state !== 'approved' && !(p.state === 'undelivered' && p.claimed)) return json(409, { ok: false, error: 'proposal ' + p.id + ' is ' + p.state });
           const r = JSON.parse(body || '{}'); p.state = r.ok ? 'done' : 'failed'; p.words = r.words; return json(200, { ok: true });
         }
         return json(200, toJson(p));
@@ -212,6 +226,13 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     get connected() { return sockets.size > 0; },
     get items() { return items; },
     set items(v) { items = v; },
+    /** What it answers the next result posts, before its desk reads them: [{status, error, retryAfter}] (0: no answer). */
+    get answerResults() { return answerResults; },
+    set answerResults(v) { answerResults = v; },
+    /** Every route answers 429 with Retry-After for `ms`, as Stagewatch does once a key spent its minute. */
+    holdAll(ms) { heldUntil = Date.now() + ms; },
+    /** Its five minutes pass without a result: an approved proposal is undelivered (claimed: no report; else not collected). */
+    expire(id) { const p = proposals.get(id); if (p && p.state === 'approved') { p.state = 'undelivered'; p.words = 'AGMessage ' + (p.claimed ? 'didn\'t report back' : 'didn\'t collect it'); } },
     /** How many result posts it answers 500 before it takes one (a busy or restarting desk). */
     get failResults() { return failResults; },
     set failResults(n) { failResults = n; },
@@ -258,6 +279,12 @@ async function fakeNode({ t = 'patterns', name = 'Patterns FOH', token = 'node-t
   return { port: srv.address().port, url: '127.0.0.1:' + srv.address().port, requests, close: () => new Promise((resolve) => { srv.closeAllConnections(); srv.close(resolve); }) };
 }
 
+/** The same server stopped (saved first) and started again on its data folder and port, as the watchdog would. */
+async function restartServer(srv, env = {}) {
+  await stopServer(srv.child);
+  return startServer({ AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port), ...env });
+}
+
 /** Wait until fn() is truthy (polling every 50 ms), or fail after `ms`. */
 async function until(fn, ms = 6000, what = 'the condition') {
   const end = Date.now() + ms;
@@ -265,4 +292,4 @@ async function until(fn, ms = 6000, what = 'the condition') {
   throw new Error('timed out waiting for ' + what);
 }
 
-module.exports = { stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode };
+module.exports = { stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode };

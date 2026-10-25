@@ -215,6 +215,13 @@ With no desk on the bus, each app approves its own (as in 1.1).
   through its own command path — its own checks and fences still apply — and reports
   `POST /api/proposals/<id>/result {"ok":true,"words":"…"}`. The desk never holds another app's credentials. The desk
   runs proposals aimed at itself directly, with a receipt.
+- **What the desk answers** (Stagewatch 2.16): a collect hands each approved proposal over once and never lists it
+  again; a result is due within 5 minutes of the collect, after which the proposal is `undelivered` — and a result for
+  it is still taken. The result endpoint answers 200 when taken; 400 for a body that is not `{"ok":bool,"words":…}`; 409
+  for every refusal (`no such proposal`, `this key speaks for another node`, `proposal pN is <state>`); 401 and 403 for
+  the key; 429 with `Retry-After` past the key's 600 requests a minute (every route spends them). `GET` of an unknown id
+  answers 404, as does a Stagewatch with no desk. The queue and its numbers live in memory: a restarted desk numbers from
+  `p1` again, so a target reads a proposal back (its line, its target, its `created`) before it reports again.
 - **Everything is journalled** on the desk (asked, approved or rejected by whom, the result) and each target journals
   what it ran, so the report shows what each AI suggested, who decided and what happened.
 - **Offline:** the queue is plain LAN traffic; it works with no internet (proposals made by a person's own rules, or

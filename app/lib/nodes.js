@@ -27,6 +27,7 @@ const WebSocket = require('ws');
 const { ClockSampler, Ring } = require('./resilience');
 const tlsmod = require('./tls');
 const { departmentsOf } = require('./stagelines');
+const { holdMs } = require('./deskresults');
 
 const BUS_PORT = 9928;
 const BEAT_MS = 2000;
@@ -286,6 +287,9 @@ class StagewatchLink {
     this.acceptances = 0;             // counts acceptances: a 401 to a request made before the latest one refuses nothing
     this.heldView = null;             // the newest frame while a refused key is checked again, shown once it is accepted
     this.redial = null;               // the one pending redial: the latest reason to wait sets when it fires
+    // Until when Stagewatch asked this key to wait (a 429, or a 503 with Retry-After): its budget is per key and every
+    // route spends it, so the desk and the context loops leave the whole link alone till then.
+    this.waitUntil = 0;
     this.endpoint = null;             // {base, tls: options|null, fp, nodeKey} once resolved
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
     this.desk = false;                // Stagewatch answers /api/proposals (Show Bus §11)
@@ -321,6 +325,7 @@ class StagewatchLink {
     this.desk = false; this.deskCheckedAt = 0;
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
     this._resetKey();
+    this.waitUntil = 0;
     if (this.base) this._open(); else this._set('off', null);
   }
 
@@ -370,8 +375,7 @@ class StagewatchLink {
       if (res.status === 401 || res.status === 403) { this._refuse(j && j.error); return; }
       // Not a verdict (404 in Stagewatch's first second, 429, 5xx): still checking, asked again while this socket lives.
       this.keyWords = 'Stagewatch answered ' + res.status;
-      const wait = Number(res.headers && res.headers['retry-after']);
-      again(res.status === 429 && Number.isFinite(wait) ? Math.min(60, Math.max(1, wait)) * 1000 : jitter(this.delay));
+      again(this.held ? this.waitUntil - Date.now() : jitter(this.delay));
     }, (e) => {
       if (this._probing === ws) this._probing = null;
       if (this.ws !== ws) return;
@@ -451,6 +455,7 @@ class StagewatchLink {
     if (!this.endpoint) throw new Error('not connected');
     const accepted = this.keyState === 'accepted' ? this.acceptances : -1;
     const res = await tlsmod.request(this.endpoint.base + path, { method, headers: this._headers(headers), body, timeoutMs, tls: this.endpoint.tls });
+    if (res.status === 429 || (res.status === 503 && res.retryAfter !== null)) this.waitUntil = Math.max(this.waitUntil, Date.now() + holdMs(res.retryAfter));
     // 401 is Stagewatch refusing the key itself (unknown, revoked, the PIN, or this address locked out): never a link.
     // Only for the key the request carried, accepted then and still: a request from before a new key decides nothing.
     if (res.status === 401 && this.keyState === 'accepted' && this.acceptances === accepted) this._refuse(res.body && res.body.error);
@@ -458,6 +463,8 @@ class StagewatchLink {
   }
 
   get linked() { return this.status === 'connected'; }
+  /** Stagewatch asked this key to wait (Retry-After), and the time is not up. */
+  get held() { return Date.now() < this.waitUntil; }
   /** The address this link points at, as a tag (lib/nodes.js addressTag). */
   get tag() { return addressTag(this.base); }
 
@@ -655,10 +662,16 @@ class StagewatchLink {
 
   /** One proposal's state; {gone:true} when the desk has no such proposal (404); null when it could not be asked. */
   async proposal(id) {
+    const a = await this.proposalAnswer(id);
+    return a.status === 200 ? a.proposal : a.status === 404 ? { gone: true } : null;
+  }
+
+  /** One proposal as the desk answered: {status (0 when not reached), retryAfter, proposal (null unless 200)}. */
+  async proposalAnswer(id) {
     try {
       const res = await this._call('/api/proposals/' + encodeURIComponent(id), { timeoutMs: 3000 });
-      return res.status === 200 ? readProposal(res.body) : res.status === 404 ? { gone: true } : null;
-    } catch { return null; }
+      return { status: res.status, retryAfter: res.retryAfter, proposal: res.status === 200 ? readProposal(res.body) : null };
+    } catch { return { status: 0, retryAfter: null, proposal: null }; }
   }
 
   /** Approved proposals aimed at this node (it runs them and reports). [] when there are none or the desk is away. */
@@ -671,14 +684,17 @@ class StagewatchLink {
     } catch { return []; }
   }
 
-  /** Report what running an approved proposal did: the desk's HTTP status (2xx taken, 4xx refused for good), 0 when not reached. */
+  /**
+   * Report what running an approved proposal did: {status (0 when not reached), retryAfter, error (the desk's words)},
+   * for lib/deskresults.js postVerdict to read.
+   */
   async reportResult(id, ok, words) {
     try {
       const res = await this._call('/api/proposals/' + encodeURIComponent(id) + '/result', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: !!ok, words: String(words || '').slice(0, 300) }), timeoutMs: 3000,
       });
-      return res.status;
-    } catch { return 0; }
+      return { status: res.status, retryAfter: res.retryAfter, error: res.body && typeof res.body.error === 'string' ? res.body.error.slice(0, 160) : '' };
+    } catch (e) { return { status: 0, retryAfter: null, error: e && e.message ? e.message.slice(0, 80) : '' }; }
   }
 
   stop() { clearInterval(this.timer); this._cancelRedial(); this.base = ''; this._close(); }

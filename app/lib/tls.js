@@ -240,7 +240,8 @@ function pinnedTlsOptions(certPem, fp) {
 }
 
 /**
- * fetch-like request over http or (pinned) https. Resolves {status, body, text, headers} (body parsed as JSON when it is JSON).
+ * fetch-like request over http or (pinned) https. Resolves {status, body, text, headers, retryAfter} (body parsed as JSON
+ * when it is JSON; retryAfter the whole seconds of a Retry-After header, else null).
  * @param {string} url
  * @param {{method?:string, headers?:object, body?:string, timeoutMs?:number, tls?:object}} o
  */
@@ -259,7 +260,8 @@ function request(url, { method = 'GET', headers = {}, body, timeoutMs = 4000, tl
       res.on('end', () => {
         const text = Buffer.concat(chunks).toString('utf8');
         let parsed = null; try { parsed = JSON.parse(text); } catch { /* not JSON */ }
-        resolve({ status: res.statusCode, body: parsed, text, headers: res.headers });
+        const after = String(res.headers['retry-after'] || '');
+        resolve({ status: res.statusCode, body: parsed, text, headers: res.headers, retryAfter: /^\d{1,5}$/.test(after) ? Number(after) : null });
       });
     });
     req.setTimeout(timeoutMs, () => req.destroy(new Error('timed out')));

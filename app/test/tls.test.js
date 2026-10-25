@@ -159,7 +159,7 @@ test('Stagewatch link over TLS: pinned before the key is sent, proposals to the 
     assert.deepEqual([after.state, after.words, after.decidedBy], ['done', 'Message on the speaker screen', 'SM']);
     const todo = await link.approvedFor('ag1');
     assert.equal(todo[0].line, 'notice "Break in 5 minutes"');
-    assert.ok(await link.reportResult('p9', true, 'shown in 1 meeting'));
+    assert.equal((await link.reportResult('p9', true, 'shown in 1 meeting')).status, 200, 'the desk took it');
     assert.deepEqual(desk.seen.results[0], { ok: true, words: 'shown in 1 meeting' });
 
     // Stagewatch comes back with a different certificate: refused before anything — the key above all — is sent.

@@ -12,6 +12,17 @@ code (2.16 and its newest work) before it was changed.
   A settled state without its boolean `ok`, or a state AGMessage does not know, is shown as unknown (never done, never
   waiting) and asked again. Only a proposal the desk lists as approved for this AGMessage is run. "Not delivered" shows
   Stagewatch's own words.
+- What an approved notice did is reported until Stagewatch takes it or refuses it for good. 0.5.0 counted any 4xx as
+  taken (a 429 at the key's 600-a-minute budget, a 401 in Stagewatch's lockout minute, a 403 for a re-entered key) and
+  kept waiting results only in memory, so a notice shown in every meeting could end "undelivered: AGMessage didn't
+  report back" at the desk. Now a 429 (or a 503 with Retry-After) leaves the whole link alone for its Retry-After (1 to
+  120 s; the context loop too), 401 and 403 wait a minute for the key, no answer or a 5xx backs off from 3 s to a minute,
+  and 409, 404 and other 4xx are final. A waiting result is saved (`desk-results.json`, at most 200, flushed before its
+  first post) and outlives a restart of AGMessage, a hall's link made again and a refused key; after its first post it
+  is posted only once the desk's proposal reads back with the same line, target and time and still waits (a late one
+  after Stagewatch's five minutes included), so a restarted Stagewatch's p1 never gets another proposal's result, which
+  0.5.0 could do when the restart went unseen. Each result that ends untaken, or is taken only after a retry, is said in
+  the recent events (no notice text, no ids), and the admin page's health line counts what is waiting.
 
 **The Stagewatch link**
 - The link dials Stagewatch as this AGMessage, by its Show Bus id (`/ws?node=<id>&t=messenger&cid=<id>`), not as
