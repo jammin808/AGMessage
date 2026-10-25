@@ -47,8 +47,8 @@ paints over the one taken after it.
 
 With `display.manage` (project managers, admins): **Add screen** (the new link is copied — open it on that screen),
 **Copy link**, **Open**, **Rename**, **New link**, **Remove**, and the hall's **holding image** (pick one of the images
-shared in the hall, then **Use it**; the pick stays while the list refreshes). The halls board shows every hall's
-screens and their state, in the same words as the console.
+shared in the hall, then **Use it**; the pick stays while the list refreshes, until the dialog closes). The halls board
+shows every hall's screens and their state, in the same words as the console.
 
 ## The link is a capability
 

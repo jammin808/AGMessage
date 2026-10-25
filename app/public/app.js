@@ -2030,11 +2030,18 @@ const Screens = (function () {
     });
   }
 
+  // The dialog opens with the saved holding image picked, whether Screens or ⧉ opens it: an unsaved pick lives only as
+  // long as the opening it was made in (cleared here, not on "close", which a hidden tab's browser may hold back).
+  function open() {
+    if (dlg.open) return;
+    holdingChoice = null;
+    dlg.showModal();
+  }
   function offer(msg) {
     pending = msg;
     if (msg.type === 'text') { $('screenMsgText').value = msg.text.slice(0, 300); pending = null; }
     else $('pendingPage').value = '1';   // each file offered starts on its first page
-    if (!dlg.open) dlg.showModal();
+    open();
     render();
     if (!pending) $('screenMsgText').focus();
   }
@@ -2046,7 +2053,7 @@ const Screens = (function () {
     $('pendingPageWrap').hidden = !pdf;
   }
 
-  $('screensBtn').addEventListener('click', () => { holdingChoice = null; load(); dlg.showModal(); });
+  $('screensBtn').addEventListener('click', () => { open(); load(); });
   $('screensClose').addEventListener('click', () => dlg.close());
   $('screensAll').addEventListener('change', () => { ticked.clear(); if ($('screensAll').checked) for (const d of list) ticked.add(d.id); render(); });
   for (const b of document.querySelectorAll('.screens-bar [data-take]')) b.addEventListener('click', () => take({ kind: b.dataset.take }));

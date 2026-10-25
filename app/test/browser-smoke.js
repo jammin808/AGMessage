@@ -412,6 +412,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await hallView.eval(`document.getElementById('holdingSave').click()`);
     const saved = await hallView.until(`new Promise((r) => socket.emit('display:list', { code: ROOM }, (x) => r(x.holding)))`, 5000);
     report(keptOnRefresh === sponsor && keptOnTick === sponsor && saved === sponsor, `a holding image picked but not yet saved survives the console's refreshes, and "Use it" saves it (${[keptOnRefresh, keptOnTick, saved].map((u) => (u || 'none').split('-').pop()).join(' / ')})`);
+    // A pick left unsaved when the dialog closes is gone when it opens again, however it opens (here from ⧉ on a file).
+    const reopened = await hallView.eval(`(async () => { const p = document.getElementById('holdingPick'); p.value = ''; p.dispatchEvent(new Event('change'));
+      document.getElementById('screensClose').click(); await new Promise((r) => setTimeout(r, 100));
+      Screens.offer(allMessages.find((m) => m.filename === 'agenda.pdf'));
+      const v = document.getElementById('holdingPick').value; document.getElementById('pendingCancel').click(); return v; })()`);
+    report(reopened === sponsor, `a holding pick left unsaved when the dialog closed does not come back when ⧉ opens it again (it reads ${(reopened || 'none').split('-').pop()})`);
     await sleep(300);
     await hallView.shot(path.join(OUT, 'screens-console-after.png'));
 
