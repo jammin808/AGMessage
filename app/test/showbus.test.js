@@ -410,6 +410,10 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     assert.deepStrictEqual(await outcome('Outcome done'), { state: 'done', ok: true, words: 'message shown on the speaker screen', by: 'operator' });
     assert.deepStrictEqual(await outcome('Outcome failed'), { state: 'failed', ok: false, words: 'not a valid Stagewatch command: flash must be off|slow|fast', by: 'operator' });
     assert.deepStrictEqual(await outcome('Outcome odd'), { state: 'unknown', ok: null, words: 'shown', by: 'operator' });
+    // Unknown is not an end: asked again, the desk's next answer in Stagewatch's own shape settles it.
+    delete sw.proposals.get(odd).served;
+    await until(async () => (await outcome('Outcome odd') || {}).state === 'done', 12000, 'asked again and settled');
+    assert.deepStrictEqual(await outcome('Outcome odd'), { state: 'done', ok: true, words: 'shown', by: 'operator' });
   });
 
   await t.test('C36, C19: a destination Stagewatch does not offer, an unknown urgency or a line the desk would cut is refused before the desk', async () => {
@@ -429,7 +433,7 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     assert.ok(Array.from(sw.proposals.values()).every((p) => sl.parse(p.line).error === undefined && p.line.length <= 400));
   });
 
-  await t.test('only what the desk says is approved for this AGMessage is run: a listed proposal in a state it cannot read is not', async () => {
+  await t.test('only what the desk says is approved for this AGMessage is run: a listed proposal in a state it cannot read, or for another node, is not', async () => {
     const seen = [];
     const crew = await connect(base, sam); sockets.push(crew);
     assert.ok((await emit(crew, 'join', { roomCode: hall, as: 'account' })).ok);
@@ -437,11 +441,13 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     const nodeId = new URL(sw.requests.find((r) => r.url.includes('?target=')).url, 'http://x').searchParams.get('target');
     const odd = sw.add({ line: 'notice Not for running', state: 'approved', decidedBy: 'operator', from: { t: 'main', id: 'swdesk', name: 'Desk' }, target: { t: 'messenger', id: nodeId, name: 'AGMessage' } });
     sw.proposals.get(odd).served = { state: 'expired' };
+    const elsewhere = sw.add({ line: 'notice For another node', state: 'approved', decidedBy: 'operator', from: { t: 'main', id: 'swdesk', name: 'Desk' }, target: { t: 'messenger', id: nodeId, name: 'AGMessage' } });
+    sw.proposals.get(elsewhere).served = { target: { t: 'messenger', id: 'ffffffff', name: 'Another AGMessage' } };   // listed, yet another node's
     const fine = sw.add({ line: 'notice Fine to run', state: 'approved', decidedBy: 'operator', from: { t: 'main', id: 'swdesk', name: 'Desk' }, target: { t: 'messenger', id: nodeId, name: 'AGMessage' } });
     await until(() => sw.proposals.get(fine).state === 'done' && seen.some((x) => /Fine to run/.test(x)), 12000, 'the approved one run, shown and reported');
-    assert.deepStrictEqual([seen.some((x) => /Fine to run/.test(x)), seen.some((x) => /Not for running/.test(x))], [true, false]);
-    assert.ok(!sw.requests.some((r) => r.url === '/api/proposals/' + odd + '/result'), 'nothing reported for it');
-    sw.proposals.delete(odd); sw.proposals.delete(fine);
+    assert.deepStrictEqual([seen.some((x) => /Fine to run/.test(x)), seen.some((x) => /Not for running/.test(x)), seen.some((x) => /For another node/.test(x))], [true, false, false]);
+    assert.ok(!sw.requests.some((r) => r.url === '/api/proposals/' + odd + '/result' || r.url === '/api/proposals/' + elsewhere + '/result'), 'nothing reported for them');
+    sw.proposals.delete(odd); sw.proposals.delete(elsewhere); sw.proposals.delete(fine);
   });
 
   await t.test('C45: a department stays a destination once Stagewatch\'s context stops naming it (messaged, or its GO aged out)', async () => {

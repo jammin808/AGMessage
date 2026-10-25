@@ -26,10 +26,12 @@ code (2.16 and its newest work) before it was changed.
 
 **The Stagewatch link**
 - The link dials Stagewatch as this AGMessage, by its Show Bus id (`/ws?node=<id>&t=messenger&cid=<id>`), not as
-  "agmessage": two AGMessages on one Stagewatch are two of its screens, each found, named and disconnected on its own
-  (0.5.0's shared name made them one row, the oldest one's address, a name given to it applied to all of them, and
-  disconnecting one dropped every one). A name given in Stagewatch → Screens to the old shared "agmessage" row does not
-  carry over: name each AGMessage once. Stagewatch 2.18 needs this address to say whether it accepted the key.
+  "agmessage": two AGMessages on one Stagewatch are two of its screens, each found and named on its own, and a
+  Disconnect in Stagewatch → Screens drops only that one (0.5.0's shared name made them one row, the oldest one's
+  address, a name given to it applied to all of them, and disconnecting one dropped every one). The link still dials
+  again after a Disconnect, as after any drop: it does not yet stay off as a browser screen does. A name given in
+  Stagewatch → Screens to the old shared "agmessage" row does not carry over: name each AGMessage once. Stagewatch 2.18
+  needs this address to say whether it accepted the key.
 - The link is "connected", and a certificate used for the first time is pinned, only once Stagewatch accepted the key:
   2.18's first message on the socket (`{"type":"auth","ok":true}`), or for 2.16, which says nothing of the key on the
   socket and sends its public frames to any key, a 200 to one authenticated read (its context). Each new socket earns its
