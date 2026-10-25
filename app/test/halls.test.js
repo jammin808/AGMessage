@@ -7,6 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const board = require('../lib/board');
 const { buildContext } = require('../lib/context');
@@ -340,6 +341,27 @@ test('C53: a restart keeps following a stage send the speaker has not acknowledg
   assert.equal(after[0].stage.link, 'hall:' + code, 'the send keeps the link it went to');
 });
 
+test('a forward an earlier build stored with its hall\'s code is told without it, and saved without it', async (t) => {
+  // Two halls on disk as an earlier build left them: hall D holds a message forwarded from hall A that names A's code.
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  fs.mkdirSync(path.join(dataDir, 'rooms'));
+  const at = Date.now() - 60_000;
+  const snapshot = (name, messages) => JSON.stringify({ name, createdAt: at, seq: messages.length, settings: {}, messages });
+  const legacy = { id: 'm-legacy', type: 'text', text: 'Doors at seven', at, seq: 1, pinned: false, priority: false, from: { uid: 'u-gus', name: 'Gus', role: 'research' }, forwardedFrom: { roomCode: 'HALLA1', roomName: 'Hall A', originalAuthor: 'Gus', originalAt: at - 1000 } };
+  fs.writeFileSync(path.join(dataDir, 'rooms', 'HALLA1.json'), snapshot('Hall A', []));
+  fs.writeFileSync(path.join(dataDir, 'rooms', 'HALLD1.json'), snapshot('Hall D', [legacy]));
+  const srv = await startServer({ AGM_DATA_DIR: dataDir });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const dot = await connect(srv.base); sockets.push(dot);
+  const j = await emit(dot, 'join', { roomCode: 'HALLD1', name: 'Dot', role: 'observer' });
+  assert.ok(j.ok, JSON.stringify(j));
+  assert.deepEqual(j.history.find((m) => m.id === 'm-legacy').forwardedFrom, { roomName: 'Hall A', originalAuthor: 'Gus', originalAt: at - 1000 });
+  assert.ok(!JSON.stringify(j).includes('HALLA1'), 'an observer of hall D is not told hall A\'s code');
+  await stopServer(srv.child);
+  assert.ok(!fs.readFileSync(path.join(dataDir, 'rooms', 'HALLD1.json'), 'utf8').includes('HALLA1'), 'nor is it kept on disk');
+});
+
 test('rights inside a hall: forwards, read-only members, the room list\'s role select, renames and locks, two devices, who is told a hall\'s code', async (t) => {
   const srv = await startServer();
   const { base } = srv;
@@ -415,7 +437,7 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     assert.ok(fwd.ok, JSON.stringify(fwd));
     await until(() => inB.length === 1, 3000, 'the forward in B');
     const landed = inB[0][1];
-    assert.deepEqual([landed.text, landed.from.name, landed.from.role, landed.from.acct, landed.forwardedFrom.roomCode], ['Revenue was 12m', 'Stu Staff', 'research', true, hallA]);
+    assert.deepEqual([landed.text, landed.from.name, landed.from.role, landed.from.acct, landed.forwardedFrom.roomName], ['Revenue was 12m', 'Stu Staff', 'research', true, 'Hall A']);
 
     // A file needs hall.files in the hall it lands in.
     const up = await png(stuA.j.uploadToken);
@@ -435,6 +457,11 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     assert.deepEqual(inB.map(([, m]) => [m.type, m.from.name]), [['text', 'Stu Staff'], ['text', 'Sue Staff'], ['file', 'Stu Staff']], 'nothing refused reached B');
     assert.deepEqual(inC, [], 'nothing reached the locked hall');
     assert.deepEqual(inD.map(([, m]) => [m.text, m.from.name, m.from.role]), [['Backstage only: the CEO is late', 'Gus Guest', 'research']]);
+    // A forward names the hall it came from, never its code (a guest's way in): Dot, an observer guest of D, may not open A.
+    assert.deepEqual(inD.map(([, m]) => m.forwardedFrom.roomName), ['Hall A']);
+    assert.ok(![inB, inD].some((got) => JSON.stringify(got).includes(hallA)), 'no forward tells the hall it lands in the code of the hall it came from');
+    const late = await guest(hallD, 'Lou', 'observer');
+    assert.ok(!JSON.stringify(late.j).includes(hallA), 'nor does the history a newcomer is sent');
   });
 
   await t.test('a help request is not forwarded: it belongs to its hall, tracked and answered there', async () => {

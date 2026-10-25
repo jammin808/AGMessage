@@ -186,7 +186,10 @@ function noteEvent(text, link) { recentEvents.push({ at: Date.now(), text, link:
 // another copy may be appending to these same files.
 const store = new RoomStore(ROOMS_DIR);
 const restored = store.loadAll((room) => {
-  for (const m of room.messages) if (m.from && m.from.role === 'director') m.from.role = 'board';   // legacy role name
+  for (const m of room.messages) {
+    if (m.from && m.from.role === 'director') m.from.role = 'board';   // legacy role name
+    if (m.forwardedFrom) delete m.forwardedFrom.roomCode;   // a forward names its hall, never its code (an earlier build kept it)
+  }
 }, { compact: false });
 if (restored) console.log('  Restored', restored, 'room(s) from', ROOMS_DIR);
 
@@ -892,7 +895,8 @@ io.on('connection', (socket) => {
     const fwd = {
       id: makeMessageId(), type: src.type, at: Date.now(), from: { uid: me.uid, name: me.name, role: there.role, ...(me.acct ? { acct: true } : {}) },
       pinned: false, priority: !!src.priority,
-      forwardedFrom: { roomCode: room.code, roomName: room.name || '', originalAuthor: (src.from && src.from.name) || 'unknown', originalAt: src.at },
+      // The hall it came from by its name, never its code: a code lets a guest in, and this hall's people may not open that one.
+      forwardedFrom: { roomName: room.name || '', originalAuthor: (src.from && src.from.name) || 'unknown', originalAt: src.at },
     };
     if (src.type === 'text') fwd.text = src.text;
     else if (src.type === 'file') Object.assign(fwd, { url: src.url, filename: src.filename, mime: src.mime, caption: src.caption || '' });
@@ -1775,7 +1779,7 @@ function renderTranscriptHtml(room) {
     if (m.priority) extras += '<span class="prio">🔥 HIGH</span>';
     if (m.pinned) extras += '<span class="pin">📌 pinned</span>';
     if (m.aiDraft) extras += '<span class="pin">✨ drafted with AI, sent by a person</span>';
-    if (m.forwardedFrom) extras += '<div class="fwd">↗ Forwarded from ' + (m.forwardedFrom.roomName ? esc(m.forwardedFrom.roomName) + ' (' + esc(m.forwardedFrom.roomCode) + ')' : esc(m.forwardedFrom.roomCode)) + '</div>';
+    if (m.forwardedFrom) extras += '<div class="fwd">↗ Forwarded from ' + esc(m.forwardedFrom.roomName || 'another hall') + '</div>';
     const cls = ['msg', 'type-' + m.type, m.priority ? 'priority' : ''].filter(Boolean).join(' ');
     rows.push('<article class="' + cls + '"><header><strong>' + who + '</strong><time>' + esc(fmt(m.at)) + '</time></header>' + extras + '<div class="body">' + content + '</div></article>');
   }

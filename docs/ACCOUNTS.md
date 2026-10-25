@@ -66,7 +66,9 @@ one), so it goes only to those who may open that hall: the halls board, the show
 name only the halls an account reaches (an account that does not reach every hall sees another person's other halls as
 a count); a screen's link only shows, and its connection is never told its hall's code (Identify on a hall with no name
 draws no hall); the admin's link that lets one guest forward into another hall reaches that guest and the admin's pages,
-never the rest of the hall.
+never the rest of the hall; a forwarded message names the hall it came from, never its code ("another hall" when that
+hall has no name). The audit log names halls by their code: `audit.read` is a right over every hall (a project
+manager's and the admin's), so an admin who gives it to someone of one hall gives them every hall's code.
 
 ## The first admin
 

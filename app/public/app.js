@@ -566,17 +566,14 @@ function rerenderMessage(node, msg) {
     fwdBtn.onclick = (e) => { e.stopPropagation(); offerForward(fwdBtn, msg.id); };
   }
 
-  // Show "Forwarded from XYZ12 by Sarah" tag if applicable
+  // "Forwarded from Hall 2 · originally by Sarah": the hall by its name (a forward never carries its code).
   if (msg.forwardedFrom) {
     const meta = document.createElement('div');
     meta.className = 'fwd-meta';
     const orig = msg.forwardedFrom.originalAuthor && msg.forwardedFrom.originalAuthor !== msg.from?.name
       ? ' · originally by ' + msg.forwardedFrom.originalAuthor
       : '';
-    const fromLabel = msg.forwardedFrom.roomName
-      ? msg.forwardedFrom.roomName + ' (' + msg.forwardedFrom.roomCode + ')'
-      : msg.forwardedFrom.roomCode;
-    meta.textContent = '↗ Forwarded from ' + fromLabel + orig;
+    meta.textContent = '↗ Forwarded from ' + (msg.forwardedFrom.roomName || 'another hall') + orig;
     body.prepend(meta);
   }
 
