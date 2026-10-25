@@ -145,8 +145,9 @@ server refuses) and 19 (a locked hall's seats across a restart; a stage send who
 pins; a refused Set up save; a test that passed only in its order; the Viewer tabs the smoke had stopped checking). CI's
 Windows job then found what no reader had: on Windows a signal to a child process ends it unsaved (units 17, 17.1).
 Later its Edge began to stall the smoke on a page in a background tab (a screenshot waited minutes) and to drop those
-pages' live connections ("Page entered Back-Forward Cache"): each page the smoke drives now has a window of its own, the
-browser is told never to throttle, freeze or cache one, and a DevTools call with no answer in 60 s fails by name (unit 22).
+pages' live connections ("Page entered Back-Forward Cache.", which Blink logs when it freezes a page, not only for that
+cache): a hidden tab is frozen. Each page the smoke drives now has a window of its own, so it is visible and never frozen
+(the smoke checks that every page says so), and a DevTools call with no answer in 60 s fails by name (units 22, 22.1).
 Left as product decisions: an `audit.read` holder of one hall reads the whole log (the right is node-wide by design);
 a node of another hall heard on the network still appears by name in a hall's posted context; the 40 recent events
 are one ring shared by every hall.

@@ -84,10 +84,11 @@ async function launchEdge() {
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-edge-'));
   // A container running as root has no user namespace for Chromium's sandbox; everywhere else the sandbox stays on.
   const sandbox = typeof process.getuid === 'function' && process.getuid() === 0 ? ['--no-sandbox'] : [];
-  // Each tab stands for a device of its own (a laptop, a phone, a stage screen) whose page is in front: the browser never
-  // throttles, backgrounds, freezes or caches one, or a page not touched for a while stalls a screenshot and loses its
-  // live connection (headless Edge on Windows did both: "Page entered Back-Forward Cache").
-  const awake = ['--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-back-forward-cache'];
+  // Each tab stands for a device of its own (a laptop, a phone, a stage screen) whose page is in front. A page in a hidden
+  // tab is frozen by the browser (Edge's sleeping tabs, Chromium's freezing): its screenshot stalls, and Blink fails its
+  // WebSockets with "Page entered Back-Forward Cache." on any freeze. So every page has a window of its own (tab(), below)
+  // and is visible, which is never frozen; these switches keep the timers and priority of a page that is not focused.
+  const awake = ['--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding'];
   const proc = spawn(exe, ['--headless=new', '--disable-gpu', '--no-first-run', ...awake, ...sandbox, '--remote-debugging-port=' + port, '--user-data-dir=' + prof, '--window-size=1400,900', 'about:blank'], { stdio: 'ignore' });
   let version = null;
   for (let i = 0; i < 60 && !version; i++) { try { version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); } catch { await sleep(250); } }
@@ -580,7 +581,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     }
     report(JSON.stringify(landings) === JSON.stringify(['/halls.html|', 'clean', '/halls.html|', 'clean', '/app.html|' + code, 'clean']), `signing in follows ?next= only to AGMessage's own pages (${landings.join(', ')})`);
 
-    for (const [name, tab] of [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall]]) {
+    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall]];
+    // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).
+    const hidden = [];
+    for (const [name, tab] of tabs) if ((await tab.eval('document.visibilityState')) !== 'visible') hidden.push(name);
+    report(hidden.length === 0, `every page the smoke drives is visible, in a window of its own${hidden.length ? ' — not: ' + hidden.join(', ') : ''}`);
+    for (const [name, tab] of tabs) {
       report(tab.problems.length === 0, `${name}: no script errors or CSP violations${tab.problems.length ? ' — ' + tab.problems.slice(0, 3).join(' | ') : ''}`);
       tab.close();
     }
