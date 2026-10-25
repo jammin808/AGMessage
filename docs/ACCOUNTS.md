@@ -83,9 +83,9 @@ folder.
 Each entry is flushed to disk before the action is acknowledged. When the disk will not take it (full, or the file held
 by another program) the action still goes ahead — a full disk must not stop sign-ins or takes during a show — the entry
 stays in the chain in memory, the console and the admin page's health say so, and it is written ahead of the next
-entry (or when the server stops), so what is on disk stays one whole chain. A half-written last line left by a power cut is cut at the next start
-and the cut is recorded as an entry of its own (`audit.repair`). The log never carries a password, token, key or screen
-link. Project managers and admins read it.
+entry (or when the server stops), so what is on disk stays one whole chain. A half-written last line left by a power
+cut is cut at the next start and the cut is recorded as an entry of its own (`audit.repair`). The log never carries a
+password, token, key or screen link. Project managers and admins read it.
 
 ## Where it lives
 
