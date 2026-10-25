@@ -34,18 +34,19 @@ body[data-tone="urgent"] .message-text .tone-mark { color: #ef4444; }
 /* A file: an image or a PDF page, as large as it fits */
 .file { align-items: center; justify-content: center; background: #000; }
 
-/* The countdown: the time is the screen; the strip under it carries the message to the speaker */
+/* The countdown: the time is the screen; the strip under it carries the message to the speaker, its words fitted
+   (display.js) so it never covers the time */
 .countdown { flex-direction: column; align-items: center; justify-content: center; text-align: center; padding-bottom: 14vh; }
 .cd-title { margin: 0 0 1vh; font-size: 4.5vh; color: #aab3c5; max-width: 90vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cd-time { margin: 0; font-size: min(30vw, 46vh); line-height: .95; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
 .cd-next { margin: 1.5vh 0 0; font-size: 3.4vh; color: #7d879b; }
 .countdown.stale .cd-time { color: #4a5263 !important; }
 .cd-strip { position: absolute; left: 0; right: 0; bottom: 0; min-height: 14vh; padding: 2vh 5vw; display: flex; align-items: center; justify-content: center; gap: .6em;
-  font-size: 6vh; font-weight: 700; line-height: 1.1; background: #1e3a8a; color: #fff; }
+  font-size: 6vh; font-weight: 700; line-height: 1.1; background: #1e3a8a; color: #fff; overflow-wrap: anywhere; }
 body[data-strip="warn"] .cd-strip { background: #b45309; }
 body[data-strip="urgent"] .cd-strip { background: #b91c1c; }
 
-/* The clock: the time of day, from the server's clock (a screen PC's own clock may be wrong) */
+/* The clock: the time of day, from the server's clock and in its time zone (a screen PC's own may be wrong) */
 .clock { flex-direction: column; align-items: center; justify-content: center; }
 .clock-time { margin: 0; font-size: min(22vw, 40vh); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .clock-date { margin: 1vh 0 0; font-size: 4.5vh; color: #aab3c5; }

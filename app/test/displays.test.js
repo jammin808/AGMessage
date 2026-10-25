@@ -27,6 +27,11 @@ test('displays: content is cleaned, or refused in words', () => {
   assert.ok(cleanContent({ kind: 'iframe', url: 'x' }).error, 'an unknown kind is refused');
   assert.equal(describe({ kind: 'message', tone: 'urgent', text: 'Fire alarm test' }), 'urgent message: “Fire alarm test”');
   assert.equal(describe({ kind: 'countdown', text: '' }), 'the countdown');
+  // Holding with no image of its own shows the hall's holding image when the hall has one: the words say so.
+  assert.equal(describe({ kind: 'holding' }, IMG), 'holding image');
+  assert.equal(describe({ kind: 'holding' }), 'holding (black)');
+  assert.equal(describe({ kind: 'holding' }, ''), 'holding (black)');
+  assert.equal(describe({ kind: 'holding', image: IMG }), 'holding image');
 });
 
 test('displays: the token is looked up by its hash, sealed at rest, replaced at once; "shown" only for the newest take', () => {
@@ -45,16 +50,17 @@ test('displays: the token is looked up by its hash, sealed at rest, replaced at 
   assert.ok(!raw.includes(token), 'the token is not on disk in clear');
   assert.ok(!raw.includes('"live"'), 'runtime state is not saved');
   assert.equal(Displays.status(display).state, 'offline');
-  display.live.sockets = 1;
+  store.joined(display, 'projector');
   store.take(display.id, { kind: 'black' }, 'pat');
   assert.equal(Displays.status(display).state, 'sending');
-  assert.equal(store.shown(display, display.seq - 1, true), true, 'an older seq still moves the confirmation forward');
+  assert.equal(store.shown(display, 'projector', display.seq - 1, true), true, 'an older seq still moves the confirmation forward');
   assert.equal(Displays.status(display).state, 'sending', '…but the newest take is not on screen yet');
-  assert.equal(store.shown(display, display.seq, true), true);
+  assert.equal(store.shown(display, 'projector', display.seq, true), true);
   assert.deepEqual([Displays.status(display).state, Displays.status(display).mark], ['shown', '✓']);
-  assert.equal(store.shown(display, display.seq - 2, true), false, 'a late echo of an older take is ignored');
+  assert.equal(store.shown(display, 'projector', display.seq - 2, true), false, 'a late echo of an older take is ignored');
+  assert.equal(store.shown(display, 'nobody', display.seq, true), false, 'a report from a browser not on the link is ignored');
   store.take(display.id, { kind: 'file', url: IMG }, 'pat');
-  store.shown(display, display.seq, false, 'the image did not load');
+  store.shown(display, 'projector', display.seq, false, 'the image did not load');
   assert.deepEqual([Displays.status(display).state, Displays.status(display).mark], ['error', '△']);
   const next = store.rotate(display.id);
   assert.equal(store.byToken(token), null, 'the old link stops at once');
@@ -63,6 +69,61 @@ test('displays: the token is looked up by its hash, sealed at rest, replaced at 
   store.flush();
   assert.equal(new Displays(path.join(dir, 'displays.json'), { seal, open }).byToken(next.slice(3)).name, 'Lectern monitor', 'a restart keeps the screens');
   assert.ok(again);
+});
+
+const scratchStore = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-disp-'));
+  return new Displays(path.join(dir, 'displays.json'), { seal: (t) => 'enc1:' + Buffer.from(t).toString('base64'), open: (x) => Buffer.from(String(x).slice(5), 'base64').toString() });
+};
+
+test('displays: every browser on a link reports for itself — one that could not show a take is never hidden by one that did', () => {
+  const store = scratchStore();
+  const { display: d } = store.create('HALL01', 'Projector', 'pat');
+  store.joined(d, 'projector'); store.joined(d, 'laptop');
+  store.take(d.id, cleanContent({ kind: 'file', url: IMG, name: 'holding.png' }), 'pat');
+  assert.ok(store.shown(d, 'projector', d.seq, false, 'the image did not load'));
+  assert.ok(store.shown(d, 'laptop', d.seq, true));
+  let st = Displays.status(d);
+  assert.deepEqual([st.state, st.mark, st.screens], ['error', '△', 2], 'the laptop\'s ✓ does not hide the projector\'s △');
+  assert.match(st.words, /on 1 of 2 screens/);
+  assert.match(st.words, /the image did not load/);
+  store.take(d.id, { kind: 'black' }, 'pat');
+  st = Displays.status(d);
+  assert.deepEqual([st.state, st.words], ['sending', 'sending'], 'a new take: no browser has shown it yet');
+  store.shown(d, 'laptop', d.seq, true);
+  st = Displays.status(d);
+  assert.deepEqual([st.state, st.mark, st.words], ['sending', '…', 'sending — on 1 of 2 screens'], 'one of two is not ✓');
+  store.shown(d, 'projector', d.seq, true);
+  st = Displays.status(d);
+  assert.deepEqual([st.state, st.mark, st.words], ['shown', '✓', 'on all 2 screens']);
+  store.left(d, 'projector');
+  st = Displays.status(d);
+  assert.deepEqual([st.state, st.words, st.screens], ['shown', 'on screen', 1], 'a browser that left no longer counts');
+  // The same page reconnecting (a blip) is the same screen: its new connection replaces the old one's entry, and the
+  // old connection going later does not take the new one with it.
+  store.joined(d, 'laptop', 'sock-2');
+  assert.equal(Displays.status(d).screens, 1);
+  assert.equal(store.shown(d, 'laptop', d.seq, true, '', 'sock-1'), false, 'a report from the old connection is not the screen\'s');
+  assert.equal(Displays.status(d).state, 'sending', 'the reconnected page has not said what it shows yet');
+  assert.ok(store.shown(d, 'laptop', d.seq, true, '', 'sock-2'));
+  store.left(d, 'laptop', 'sock-1');
+  assert.deepEqual([Displays.status(d).state, Displays.status(d).screens], ['shown', 1]);
+  store.left(d, 'laptop', 'sock-2');
+  assert.equal(Displays.status(d).state, 'offline');
+});
+
+test('displays: a PDF page past the end — the screen\'s note reaches the operator beside ✓', () => {
+  const store = scratchStore();
+  const { display: d } = store.create('HALL01', 'Projector', 'pat');
+  store.joined(d, 'projector');
+  store.take(d.id, cleanContent({ kind: 'file', url: '/uploads/1777424589360-onmqm0a3ew2r-agenda.pdf', name: 'agenda.pdf', page: 7 }), 'pat');
+  store.shown(d, 'projector', d.seq, true, 'the PDF has 2 pages: showing the last');
+  const st = Displays.status(d);
+  assert.deepEqual([st.state, st.mark], ['shown', '✓']);
+  assert.match(st.words + ' — ' + st.showing, /on screen: the PDF has 2 pages: showing the last — PDF page 7 of agenda\.pdf/, 'the board\'s line');
+  store.take(d.id, cleanContent({ kind: 'file', url: '/uploads/1777424589360-onmqm0a3ew2r-agenda.pdf', name: 'agenda.pdf', page: 1 }), 'pat');
+  store.shown(d, 'projector', d.seq, true, '');
+  assert.equal(Displays.status(d).words, 'on screen', 'no note, no words after ✓');
 });
 
 test('displays end to end: links, takes, confirmations, rights, the countdown, the audit', async (t) => {
@@ -205,5 +266,164 @@ test('displays end to end: links, takes, confirmations, rights, the countdown, t
     assert.ok((await emit(ctl, 'admin:deleteRoom', { roomCode: other })).ok);
     await until(() => foyer.unknown, 3000, 'the foyer screen told');
     assert.equal((await emit(ctl, 'display:list', { code: other })).ok, false);
+  });
+});
+
+/** A browser on a screen link: what it was told, and (with `answer`) it says it showed every take, as display.js does. */
+const openScreen = (base, token, sockets, { answer = false, screen } = {}) => new Promise((resolve, reject) => {
+  const s = io(base, { transports: ['websocket'], forceNew: true, reconnection: false, auth: { display: token, ...(screen ? { screen } : {}) } });
+  sockets.push(s);
+  const got = { states: [], socket: s };
+  s.on('display:state', (x) => { got.states.push(x); if (answer) s.emit('display:shown', { seq: x.seq, ok: true, words: '' }); });
+  s.once('connect', () => resolve(got));
+  s.once('connect_error', reject);
+});
+
+test('displays end to end, a hall of screens: every browser counts, one take reaches all, the hall\'s holding image named, the server\'s zone, one re-read per burst', { timeout: 120_000 }, async (t) => {
+  const srv = await startServer({ TZ: 'Europe/London' });
+  const { base } = srv;
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
+  const big = (await api(base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: admin })).body.code;
+  const other = (await api(base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
+  await api(base, 'POST', '/api/users', { username: 'sam', name: 'Sam Tech', role: 'tech', halls: [hall, big], password: 'mixing desk on stage left' }, { cookie: admin });
+  const sam = (await api(base, 'POST', '/api/auth/login', { username: 'sam', password: 'mixing desk on stage left' })).cookie;
+  const ctl = await connect(base, admin); sockets.push(ctl);
+  const tech = await connect(base, sam); sockets.push(tech);
+  const status = async (code, id) => (await emit(ctl, 'display:list', { code })).displays.find((d) => d.id === id);
+
+  await t.test('a screen is told AGMessage\'s time zone with its time, so its clock reads the server\'s time of day', async () => {
+    const made = await emit(ctl, 'display:create', { code: hall, name: 'Foyer clock' });
+    const scr = await openScreen(base, made.display.path.slice(3), sockets);
+    await until(() => scr.states.length === 1, 3000, 'the first state');
+    assert.equal(scr.states[0].tz, 'Europe/London');
+    assert.ok(Number.isFinite(scr.states[0].now));
+    scr.socket.close();
+  });
+
+  await t.test('two browsers on one link: a failure on one is not hidden by the other\'s ✓; the count is in the words', async () => {
+    const made = await emit(ctl, 'display:create', { code: hall, name: 'Projector' });
+    const id = made.display.id;
+    const token = made.display.path.slice(3);
+    const projector = await openScreen(base, token, sockets, { screen: 'a'.repeat(32) });
+    await until(() => projector.states.length === 1, 3000, 'the projector\'s state');
+    const take = await emit(tech, 'display:take', { ids: [id], content: { kind: 'file', url: IMG, name: 'holding.png' } });
+    assert.ok(take.ok, JSON.stringify(take));
+    await until(() => projector.states.length === 2, 3000, 'the take');
+    const seq = projector.states[1].seq;
+    projector.socket.emit('display:shown', { seq, ok: false, words: 'the image did not load' });
+    await until(async () => (await status(hall, id)).state === 'error', 3000, 'the projector says it failed');
+    // The manager clicks "Open" to see why: a laptop tab joins the link, renders the take and says it showed it.
+    const laptop = await openScreen(base, token, sockets, { screen: 'b'.repeat(32) });
+    await until(() => laptop.states.length === 1, 3000, 'the laptop\'s state');
+    assert.equal(laptop.states[0].seq, seq);
+    laptop.socket.emit('display:shown', { seq, ok: true, words: '' });
+    await until(async () => (await status(hall, id)).screens === 2, 3000, 'two screens');
+    await wait(300);
+    let st = await status(hall, id);
+    assert.deepEqual([st.state, st.mark, st.screens], ['error', '△', 2], JSON.stringify(st));
+    assert.match(st.words, /1 of 2/);
+    assert.match(st.words, /the image did not load/);
+    assert.equal((await emit(tech, 'display:identify', { id })).screens, 2);
+    const board = (await emit(ctl, 'board:watch', {})).board.halls.find((h) => h.code === hall).displays.find((d) => d.id === id);
+    assert.equal(board.state, 'error');
+    assert.match(board.words, /could not show it on 1 of 2 screens: the image did not load — image holding\.png/, 'the halls board carries the count');
+
+    assert.ok((await emit(tech, 'display:take', { ids: [id], content: { kind: 'black' } })).ok);
+    await until(() => laptop.states.length === 2 && projector.states.length === 3, 3000, 'black on both');
+    laptop.socket.emit('display:shown', { seq: laptop.states[1].seq, ok: true });
+    await until(async () => /on 1 of 2 screens/.test((await status(hall, id)).words), 3000, 'one of two');
+    st = await status(hall, id);
+    assert.equal(st.state, 'sending', 'one of two browsers confirmed: not ✓ yet');
+    projector.socket.emit('display:shown', { seq: projector.states[2].seq, ok: true });
+    await until(async () => (await status(hall, id)).state === 'shown', 3000, 'both confirmed');
+    assert.equal((await status(hall, id)).words, 'on all 2 screens');
+    // The projector's page blips: its new connection is the same screen, not a third one.
+    const again = await openScreen(base, token, sockets, { screen: 'a'.repeat(32), answer: true });
+    await until(() => again.states.length === 1, 3000, 'the projector back');
+    await until(async () => (await status(hall, id)).state === 'shown', 3000, 'the projector confirms again');
+    assert.deepEqual([(await status(hall, id)).screens, (await status(hall, id)).words], [2, 'on all 2 screens']);
+    projector.socket.close();
+    await wait(300);
+    assert.equal((await status(hall, id)).screens, 2, 'the old connection going does not take the reconnected page with it');
+    laptop.socket.close();
+    await until(async () => (await status(hall, id)).screens === 1, 3000, 'the laptop gone');
+    assert.deepEqual([(await status(hall, id)).state, (await status(hall, id)).words], ['shown', 'on screen']);
+    again.socket.close();
+    await until(async () => (await status(hall, id)).state === 'offline', 3000, 'offline once no browser holds the link');
+  });
+
+  await t.test('Holding names the hall\'s holding image on the console, the board and in the audit log', async () => {
+    const made = await emit(ctl, 'display:create', { code: other, name: 'Green room' });
+    const id = made.display.id;
+    assert.equal(made.display.showing, 'holding (black)');
+    assert.ok((await emit(ctl, 'display:hallHolding', { code: other, image: IMG })).ok);
+    assert.equal((await status(other, id)).showing, 'holding image', 'a screen on Holding shows the hall\'s image');
+    const take = await emit(ctl, 'display:take', { ids: [id], content: { kind: 'holding' } });
+    assert.ok(take.ok, JSON.stringify(take));
+    assert.equal(take.results[0].status.showing, 'holding image');
+    const board = (await emit(ctl, 'board:watch', {})).board.halls.find((h) => h.code === other).displays.find((d) => d.id === id);
+    assert.match(board.words, /— holding image$/);
+    const a = await api(base, 'GET', '/api/audit?limit=50', undefined, { cookie: admin });
+    assert.ok(a.body.entries.some((e) => e.action === 'display.take' && e.target === id && e.words === 'Green room → holding image'), 'the audit row names the image');
+    assert.ok((await emit(ctl, 'display:hallHolding', { code: other, image: '' })).ok);
+    assert.equal((await status(other, id)).showing, 'holding (black)');
+  });
+
+  const screens = [];
+  await t.test('a take on every ticked screen reaches all of them, a second take right after does too; a screen not the operator\'s is refused on its own line', async () => {
+    for (let i = 0; i < 20; i++) screens.push((await emit(ctl, 'display:create', { code: big, name: 'Screen ' + String(i + 1).padStart(2, '0') })).display);
+    for (const d of screens) await openScreen(base, d.path.slice(3), sockets, { answer: true });
+    const ids = screens.map((d) => d.id);
+    const list = async () => (await emit(tech, 'display:list', { code: big })).displays;
+    const urgent = await emit(tech, 'display:take', { ids, content: { kind: 'message', text: 'Evacuate via door B', tone: 'urgent' } });
+    assert.ok(urgent.ok, JSON.stringify(urgent));
+    assert.equal(urgent.results.length, 20);
+    assert.ok(urgent.results.every((r) => r.ok && Number.isInteger(r.seq)), JSON.stringify(urgent.results.filter((r) => !r.ok)));
+    assert.ok((await list()).every((d) => d.content.kind === 'message'));
+    const black = await emit(tech, 'display:take', { ids, content: { kind: 'black' } });
+    assert.ok(black.ok && black.results.every((r) => r.ok), JSON.stringify(black));
+    let now = await list();
+    assert.ok(now.every((d) => d.content.kind === 'black'), 'every screen took black: ' + now.filter((d) => d.content.kind !== 'black').map((d) => d.name).join(', '));
+    assert.ok(!now.some((d) => d.content.kind === 'message'), 'no screen is left on the message');
+    const hold = await emit(tech, 'display:take', { ids: [...ids, ids[0]], content: { kind: 'holding' } });
+    assert.ok(hold.ok && hold.results.length === 20, 'a screen named twice is taken once');
+    now = await list();
+    assert.ok(now.every((d) => d.content.kind === 'holding'));
+    const theirs = (await emit(ctl, 'display:create', { code: other, name: 'Not Sam\'s' })).display.id;
+    const mixed = await emit(tech, 'display:take', { ids: [ids[0], theirs, ids[1]], content: { kind: 'clock' } });
+    assert.equal(mixed.ok, false);
+    assert.deepEqual(mixed.results.map((r) => r.ok), [true, false, true]);
+    assert.match(mixed.results[1].error, /not yours/);
+    assert.match(mixed.error, /1 of 3/);
+    assert.equal((await status(other, theirs)).content.kind, 'holding', 'the other hall\'s screen is untouched');
+    assert.equal((await emit(tech, 'display:take', { ids: 'everything', content: { kind: 'black' } })).ok, false, 'ids is a list');
+    assert.equal((await emit(tech, 'display:take', { ids: [], content: { kind: 'black' } })).ok, false, 'at least one screen');
+    assert.equal((await emit(tech, 'display:take', { ids: Array.from({ length: 51 }, (_, i) => 'd' + i), content: { kind: 'black' } })).ok, false, 'at most 50');
+    const a = await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin });
+    assert.equal(a.body.entries.filter((e) => e.action === 'display.take' && /Evacuate via door B/.test(e.words)).length, 20, 'one audit row per screen');
+  });
+
+  await t.test('one take on 20 screens: each operator in the hall re-reads the list a bounded number of times, and the last read is the newest', async () => {
+    const consoles = [];
+    for (let i = 0; i < 4; i++) {
+      const c = i === 0 ? tech : await connect(base, sam);
+      if (i) sockets.push(c);
+      assert.ok((await emit(c, 'join', { roomCode: big, as: 'account' })).ok);
+      const stats = { events: 0, lists: 0, last: null };
+      c.on('displays:changed', ({ code }) => { stats.events++; if (code === big) c.emit('display:list', { code: big }, (r) => { stats.lists++; stats.last = r; }); });
+      consoles.push(stats);
+    }
+    await wait(1500);
+    for (const s of consoles) { s.events = 0; s.lists = 0; s.last = null; }
+    const r = await emit(tech, 'display:take', { ids: screens.map((d) => d.id), content: { kind: 'black' } });
+    assert.ok(r.ok, JSON.stringify(r));
+    await wait(2000);
+    for (const s of consoles) {
+      assert.ok(s.events >= 1 && s.events <= 3, 'each console heard of the change a bounded number of times: ' + consoles.map((x) => x.events).join(', '));
+      assert.ok(s.last && s.last.displays.length === 20 && s.last.displays.every((d) => d.state === 'shown' && d.content.kind === 'black'), 'the last read is the newest state');
+    }
   });
 });

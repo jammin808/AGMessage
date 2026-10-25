@@ -71,36 +71,93 @@
     report(true);
   }
 
-  let pdfjs = null;
+  // A file. Every file render is numbered and only the newest may touch the screen, so a file taken earlier that loads
+  // late never paints over, or appears beside, the one taken after it. A PDF page is drawn off screen and copied in at
+  // once: the slide on air is never cleared to be redrawn, and a state that changes nothing about the page or the
+  // screen's size (a rename, a reconnect, a new holding image) leaves it alone. One pdf.js worker serves the page's life
+  // and one document is open at a time: stepping through a deck reuses it, another PDF closes it.
+  let pdfjs = null, pdfWorker = null, pdfOpen = null;   // pdfOpen: {url, task}
+  let fileGen = 0, drawnKey = '', drawnWords = '';
+  function loadPdfjs() {
+    pdfjs = pdfjs || import('/vendor/pdf.min.mjs').then((lib) => {
+      lib.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.min.mjs';
+      pdfWorker = new lib.PDFWorker();
+      return lib;
+    }, (e) => { pdfjs = null; throw e; });
+    return pdfjs;
+  }
+  function openPdf(lib, url) {
+    if (!pdfOpen || pdfOpen.url !== url) {
+      const old = pdfOpen;
+      pdfOpen = { url, task: lib.getDocument({ url, worker: pdfWorker, withCredentials: false, isEvalSupported: false, enableXfa: false }) };
+      if (old) closePdf(old.task);
+    }
+    return pdfOpen;
+  }
+  // Frees a document in the shared worker (the worker stays): once it has finished loading, since one closed mid-load
+  // fails inside the worker when its data arrives, or after 30 s whatever it is doing.
+  function closePdf(task) {
+    let closed = false;
+    const close = () => { if (!closed) { closed = true; task.destroy(); } };
+    task.promise.then(close, close);
+    setTimeout(close, 30000);
+  }
   async function renderFile(c) {
     show('file');
     const img = $('fileImg'), canvas = $('fileCanvas');
-    const seq = state.seq;
+    const seq = state.seq, gen = ++fileGen;
+    const current = () => gen === fileGen && !!state && seq === state.seq;
     if (!c.pdf) {
-      canvas.hidden = true;
-      img.onload = () => { img.hidden = false; if (seq === state.seq) report(true); };
-      img.onerror = () => { img.hidden = true; if (seq === state.seq) report(false, 'the image did not load'); };
+      canvas.hidden = true; drawnKey = '';
+      img.onload = () => { if (!current()) return; img.hidden = false; report(true); };
+      img.onerror = () => { if (!current()) return; img.hidden = true; report(false, 'the image did not load'); };
       img.src = c.url;
       return;
     }
-    img.hidden = true;
+    img.onload = img.onerror = null; img.hidden = true; img.removeAttribute('src');
+    const dpr = window.devicePixelRatio || 1;
+    const key = c.url + '#' + (c.page || 1) + '@' + window.innerWidth + 'x' + window.innerHeight + 'x' + dpr;
+    if (key === drawnKey && !canvas.hidden) { report(true, drawnWords); return; }
+    let open = null, loaded = false;
     try {
-      if (!pdfjs) { pdfjs = await import('/vendor/pdf.min.mjs'); pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.min.mjs'; }
-      const doc = await pdfjs.getDocument({ url: c.url, withCredentials: false, isEvalSupported: false, enableXfa: false }).promise;
+      const lib = await loadPdfjs();
+      if (!current()) return;
+      open = openPdf(lib, c.url);
+      const doc = await open.task.promise;
+      loaded = true;
+      if (!current()) return;
       const page = await doc.getPage(Math.min(c.page || 1, doc.numPages));
+      if (!current()) return;
       const base = page.getViewport({ scale: 1 });
-      const scale = Math.min(window.innerWidth / base.width, window.innerHeight / base.height) * (window.devicePixelRatio || 1);
-      const vp = page.getViewport({ scale });
-      canvas.width = Math.floor(vp.width); canvas.height = Math.floor(vp.height);
-      canvas.style.width = Math.floor(vp.width / (window.devicePixelRatio || 1)) + 'px';
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-      if (seq !== state.seq) return;
+      const vp = page.getViewport({ scale: Math.min(window.innerWidth / base.width, window.innerHeight / base.height) * dpr });
+      const off = document.createElement('canvas');
+      off.width = Math.floor(vp.width); off.height = Math.floor(vp.height);
+      await page.render({ canvasContext: off.getContext('2d'), viewport: vp }).promise;
+      page.cleanup();
+      if (!current()) return;
+      canvas.width = off.width; canvas.height = off.height;
+      canvas.style.width = Math.floor(vp.width / dpr) + 'px';
+      canvas.getContext('2d').drawImage(off, 0, 0);
       canvas.hidden = false;
-      report(true, (c.page || 1) > doc.numPages ? 'the PDF has ' + doc.numPages + ' pages: showing the last' : '');
+      drawnKey = key;
+      drawnWords = (c.page || 1) > doc.numPages ? 'the PDF has ' + doc.numPages + ' pages: showing the last' : '';
+      report(true, drawnWords);
     } catch (e) {
-      if (seq === state.seq) report(false, 'the PDF did not render: ' + String(e && e.message || e).slice(0, 80));
+      // A document that did not load, or did not render for the take on screen, is opened afresh next time.
+      if (open && pdfOpen === open && (!loaded || current())) { pdfOpen = null; closePdf(open.task); }
+      if (!current()) return;   // a newer take closed this document or took the screen: nothing to say about this one
+      canvas.hidden = true; drawnKey = '';
+      report(false, 'the PDF did not render: ' + String(e && e.message || e).slice(0, 80));
     }
   }
+
+  // A canvas whose GPU context the browser lost (a driver reset, the GPU process restarting) comes back blank: what it
+  // held is never taken as still on screen, and the take on screen is drawn again once the context is back.
+  $('fileCanvas').addEventListener('contextlost', () => { drawnKey = ''; });
+  $('fileCanvas').addEventListener('contextrestored', () => {
+    drawnKey = '';
+    if (state && state.content && state.content.kind === 'file' && state.content.pdf) render();
+  });
 
   // The countdown is Stagewatch's own frame: its words, its colour. With the link lost it never shows a confident stale
   // time: the digits dim to --:-- until frames come back (Show Bus: silence is never "fine").
@@ -119,19 +176,51 @@
     $('cdStrip').hidden = !text;
     $('cdMark').textContent = text ? MARK[tone] : '';
     $('cdText').textContent = text;
+    fitStrip(text);
+  }
+  // The strip never covers the time it sits under: its words shrink from the stylesheet's size until the strip fits the
+  // room below the time and what's next (an upright tablet on the lectern, a long message from Stagewatch). Fitted
+  // again only when the words or the room change, not on every frame of the countdown.
+  let stripKey = '';
+  function fitStrip(text) {
+    const strip = $('cdStrip');
+    if (!text) { stripKey = ''; return; }
+    const next = $('cdNext');
+    const above = Math.max($('cdTime').getBoundingClientRect().bottom, next.textContent ? next.getBoundingClientRect().bottom : 0);
+    const room = Math.max(window.innerHeight * 0.14, window.innerHeight - above);
+    const key = text + '|' + window.innerWidth + 'x' + window.innerHeight + '|' + Math.round(above);
+    if (key === stripKey) return;
+    stripKey = key;
+    strip.style.fontSize = '';
+    if (strip.scrollHeight <= room && strip.scrollWidth <= window.innerWidth) return;
+    fit(strip, window.innerWidth, room, 12, window.innerHeight * 0.06);
   }
 
+  // The time of day by AGMessage's clock (offset) and in AGMessage's time zone (the screen's computer may be set to
+  // another); a browser that does not know that zone shows its own rather than no clock.
+  let clockFmt = null;
+  function clockFormats(tz) {
+    const t = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+    const d = { weekday: 'long', day: 'numeric', month: 'long' };
+    if (tz) {
+      try { return [new Intl.DateTimeFormat([], { ...t, timeZone: tz }), new Intl.DateTimeFormat([], { ...d, timeZone: tz })]; } catch { /* a zone this browser does not know: its own, below */ }
+    }
+    return [new Intl.DateTimeFormat([], t), new Intl.DateTimeFormat([], d)];
+  }
   function tickClock() {
     const now = new Date(Date.now() + offset);
-    $('clockTime').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    $('clockDate').textContent = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+    if (!clockFmt) clockFmt = clockFormats(state && state.tz);
+    $('clockTime').textContent = clockFmt[0].format(now);
+    $('clockDate').textContent = clockFmt[1].format(now);
   }
   setInterval(() => { if (document.body.dataset.kind === 'clock') tickClock(); }, 250);
 
   // ---------------------------------------------------------------- the link
   let linkUp = false;
   let lostTimer = null;
-  const socket = io({ transports: ['websocket', 'polling'], auth: { display: token } });
+  // This page's own key on the link: after a blip its new connection is the same screen, not a second one.
+  const screenKey = window.crypto && crypto.getRandomValues ? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('') : '';
+  const socket = io({ transports: ['websocket', 'polling'], auth: { display: token, screen: screenKey } });
   socket.on('connect', () => {
     linkUp = true;
     clearTimeout(lostTimer);
@@ -147,6 +236,7 @@
     state = s;
     stage = s.stage;
     offset = Number.isFinite(s.now) ? s.now - Date.now() : 0;
+    clockFmt = clockFormats(s.tz);
     document.title = s.name + ' — AGMessage screen';
     render();
   });
