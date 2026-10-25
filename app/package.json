@@ -8,7 +8,7 @@
     "start": "node supervise.js",
     "dev": "node server.js",
     "test": "node --test \"test/*.test.js\"",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include=server.js --test-coverage-include=supervise.js --test-coverage-include=\"lib/**\" --test-coverage-lines=85 --test-coverage-branches=70 --test-coverage-functions=78 \"test/*.test.js\"",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include=server.js --test-coverage-include=supervise.js --test-coverage-include=\"lib/**\" --test-coverage-lines=92 --test-coverage-branches=80 --test-coverage-functions=88 \"test/*.test.js\"",
     "lint": "cd .. && eslint .",
     "secrets": "node ../tools/scan-secrets.js",
     "audit": "npm audit --omit=dev --audit-level=high && npm audit signatures",

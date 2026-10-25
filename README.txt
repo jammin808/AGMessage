@@ -121,6 +121,16 @@ Troubleshooting
       set PORT=3023
   to another free port (e.g. 4023), then relaunch.
 
+- "AGMessage is already running on this data folder": a second copy of
+  this folder was started while the first runs. It stops before it
+  touches anything; use the window that is already open. (A second copy
+  on another port needs a folder of its own.)
+
+- "The AGMessage laptop is short of disk space, so files are paused":
+  the disk is nearly full (under 1 GB free), so new files are refused
+  before they could fill it; messages, screens and everything else carry
+  on. Free some space and files work again at once.
+
 - Forgot a password: an admin sets a new one-time password on the
   Accounts page. Lost the only admin
   password: on this laptop, the admin token printed in the black window
@@ -154,6 +164,14 @@ Halls, accounts and screens
   - Patterns and PlayMap linked: their state on the board, their commands.
   - Fixed: 0.4's "propose to the show desk" lines were refused by
     Stagewatch; PlayMap was not heard on the show network.
+  - Signing out closes your other open pages of that sign-in too; a
+    page left open and in use stays signed in through a long day.
+  - People who may only read a hall (Viewers, observers) can no longer
+    pin, react or answer action prompts.
+
+Checked before release
+  - Two independent reviews read every change of 0.5; the 59 defects
+    they confirmed were fixed, each with a test (CHANGELOG.md).
 
 Under the bonnet
   - Node.js 24 LTS and Express 5; every package current.

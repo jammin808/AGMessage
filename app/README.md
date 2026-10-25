@@ -11,8 +11,10 @@ npm run check        # the analyzers, the secret scan, every test under the cove
 npm run smoke        # the browser smoke (AGM_BROWSER=<path to Chrome, Edge or Chromium>)
 ```
 
-`AGM_DATA_DIR` moves the data folder (the tests use a throwaway one); `AGM_TLS=0` turns HTTPS off; `ANTHROPIC_API_KEY`
-turns AI drafts on without the admin page.
+`AGM_DATA_DIR` moves the data folder (the tests use a throwaway one; one server per folder, a second is refused) and
+`AGM_UPLOAD_DIR` the uploads; `AGM_UPLOAD_MIN_FREE` (bytes, default 1 GiB) is the free disk below which files pause;
+`AGM_UPLOAD_ORPHAN_MS` (default an hour) how long an upload nobody posted is kept; `AGM_TLS=0` turns HTTPS off;
+`ANTHROPIC_API_KEY` turns AI drafts on without the admin page. `AGM_SESSION_SWEEP_MS` and `AGM_NODES=0` are for tests.
 
 What it does and how to run it at an event: [../README.md](../README.md) and the portable guide
 [../README.txt](../README.txt). Accounts and rights: [../docs/ACCOUNTS.md](../docs/ACCOUNTS.md). Screens:

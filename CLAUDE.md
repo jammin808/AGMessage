@@ -40,6 +40,11 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
   `Math.random` (use `node:crypto`), no shell (`spawn` with an argument array), no `rejectUnauthorized: false` outside
   the pin probe, no `process.exit` in `lib/`, no value into `innerHTML` that is not a literal, escaped, a count or a
   name ending in `Html`. Synchronous file calls per file are capped by a test. A silenced rule says why on its line.
+- **Client input** reaches a socket handler through `guardHandlers` (a throw refuses that request, never the process)
+  and is read by type: `guard.str`, never `String()` on a client value. `test/inputs.test.js` reads the event names
+  from `server.js` and sends each every shape, so a new handler is held to it.
+- **Every store** on disk goes through a `WriteLane` that is in `saveLanes()` (flushed at stop and crash, named in
+  health); one server per data folder (the folder lock), and nothing is written before the lock and the port are held.
 - **Test fixtures that look like keys** carry `// secret-scan: fixture` on their line.
 - **The audit log** gets a row for every security-relevant action, never a secret, token or screen link.
 - **The coverage gate** (`npm run coverage`) is raised as tests are added, never lowered to make a build green.

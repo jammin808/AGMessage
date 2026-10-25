@@ -59,15 +59,36 @@ signatures, dependency review and Dependabot; releases with a CycloneDX SBOM, SH
 fences found and fixed six unescaped values, a pattern-built cookie reader, names stripped of C0 controls only (now
 also C1 and bidi overrides) and a predictable jitter.
 
-**Found by an independent review before release, and fixed**
-- A socket that never signed in could stop the server by sending `null` to an event (0.4's handlers had the same
-  shape); every event now reaches its handler through one guard that refuses the request and keeps the event running.
-- The first admin could be made from a page served under another name that leads back to the laptop; the laptop's own
-  requests are now also recognised by being addressed to `localhost`, `127.0.0.1` or `[::1]`.
-- An account given `users.manage` could reset, sign out, change or remove an account holding `settings.manage` or
-  `users.manage`; only an admin may now, and the Accounts page shows those people as "Admin only".
+**Found by two independent reviews before release, and fixed** (`docs/ANALYSIS.md` §6: 60 findings, 59 confirmed by a
+second reader, every one fixed or answered; units 9 to 15)
+- *Nothing a client sends stops the event.* A socket that never signed in could end the process with `null` or an
+  object `String()` cannot convert (0.4's handlers had the same shape); every event now reaches its handler through one
+  guard, and client values are read by their type. A fence sends every event every shape.
+- *Rights.* The first admin is made only from the laptop itself (a page under another name that leads back to it is
+  refused). Only an admin changes an account that manages accounts or settings, and a non-admin with `users.manage`
+  hands out nothing past its own rights and halls. Forwarding is judged by the person's rights in the hall it lands in;
+  read-only members no longer pin, react or answer action prompts; a node linked for every hall is driven only by those
+  with `nodes.control` in every hall; a hall's commands are proposed only to its own Stagewatch's desk.
+- *Sessions.* Signing out, a session that ends and "admin rights only on the venue network" now reach open pages, not
+  only the next sign-in. A page in use keeps its session past 14 hours idle; seven days still ends it. An account keeps
+  its 20 newest sessions. The admin token's sign-in survives a watchdog restart and ends after a day.
+- *Sign-in.* A stranger's wrong passwords no longer lock the laptop or the venue network out of an account; a refusal
+  never says a password was right; a password typed into the username box is never written to the audit log; a flood
+  of guesses through the tunnel cannot hold sign-ins on the venue network. Two quick clicks make one account, not two.
+- *Screens.* A take reaches every ticked screen as one request (a 16-screen "Black" was partly refused); with two
+  browsers on one link the console says what each shows; an older slide that loads late never paints over a newer one;
+  a deck stepped through keeps one pdf.js worker; the clock shows AGMessage's time zone; the message under the countdown
+  never covers it on an upright tablet.
+- *The show network.* Each Stagewatch gets only the context of its own halls; a pinned node is never spoken to over
+  plain HTTP again, and a changed certificate can be accepted; Stagewatch's and our numbers never cross after a restart
+  or a relink; a silent Stagewatch is redialled after 12 s as documented; PlayMap's own rules rate a line before it is
+  sent; a command's secret is never written to the audit log; the discovery table is bounded.
+- *Data.* A second copy on the same data folder is refused before it writes anything (it used to rewrite the running
+  copy's rooms); a save the disk cuts short fails and is retried instead of replacing a whole file; the audit check reads
+  every rotated file as one chain, off the event loop; uploads stop before the disk fills, and files nobody posted are
+  removed.
 
-Tests: 103 (was 53) plus the browser smoke (20 checks, was 7).
+Tests: 219 (was 53) plus the browser smoke (48 checks, was 7).
 
 ## 0.4.0 — 2026-10-11 — encrypted connections and the show desk (Show Bus 1.2)
 

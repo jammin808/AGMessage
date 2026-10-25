@@ -15,7 +15,7 @@ left out, and the defects the fences found.*
 | Secret scan | `node tools/scan-secrets.js` | CI · analyze | a key, token or private key in a tracked file |
 | Version | `node tools/stamp-build.js --print` / `--check-tag` | CI · analyze | a release tag that names another version |
 | Unit, end-to-end, watchdog, TLS, version, lint-rule tests | `npm test` | CI · Linux (Node 24, 26), Windows | any failure |
-| Coverage gate | `npm run coverage` | CI · Linux (Node 24) | lines < 85 %, branches < 70 %, functions < 78 % of `server.js`, `supervise.js`, `lib/` |
+| Coverage gate | `npm run coverage` | CI · Linux (Node 24) | lines < 92 %, branches < 80 %, functions < 88 % of `server.js`, `supervise.js`, `lib/` |
 | Browser smoke | `npm run smoke` | CI · Linux (Chrome), Windows (Edge) | a page that does not join, render, or that logs a script error or a CSP violation |
 | CodeQL `security-extended` | — | Security · codeql | an alert (shown under the repository's Security tab) |
 | Dependency audit | `npm run audit` | Security · audit | a high or critical advisory in a shipped package; a package whose registry signature or provenance does not verify |
@@ -121,3 +121,30 @@ At the end of 0.5, with 101 tests (was 53): **lines 89.1 %, branches 71.9 %, fun
 tests still do not reach in `server.js` is mostly the admin page's own room handlers (link a person to a room, delete
 with files, accept a changed certificate), the tunnel, reactions and forwarding between rooms — each exercised by the
 browser smoke or by hand, none yet by a test that counts.
+
+After the review below (§6), with 219 tests: **lines 95.3 %, branches 83.5 %, functions 91.6 %**. The gate went to
+**92 / 80 / 88**. The input fence reaches every socket handler, which is most of the rise in functions.
+
+## 6. The review before release
+
+The fences above catch what a rule can name. Before 0.5 shipped, its changes were also read by people-shaped eyes: an
+independent review from six angles (socket inputs, accounts, rights inside a hall, the show network, screens and pages,
+persistence and resources), each finding then given to a second reader whose job was to show it was not a defect,
+reading the code and, mostly, running a test against it. 77 findings merged to 60; 59 were confirmed. Every one was
+fixed with a regression test that failed first for the finding's own reason (units 9 to 15), except the parts a
+finding itself marked as a product decision, which are said in the units' commits: a per-hall upload budget (the
+free-space floor already keeps the stores safe; a hall cap is a governor with no measured cause), discovery bound to
+loopback when AGMessage is, and approved desk notices going only to the desk's own halls.
+
+Units 11 to 15 were worked in parallel and merged; each merge commit says what met where. A last review read them
+together, for what only shows when they meet (one such case — a field one unit replaced and another's new code still
+read — was caught by its test at the merge).
+
+The fences the review added, beside the tests for each finding:
+
+| Fence | Holds |
+|---|---|
+| `test/inputs.test.js` | every event `server.js` listens to (read from its source, so a new handler is held too) is sent every argument shape — null, numbers, strings, lists, an object `String()` cannot convert — from a socket with no sign-in, a crew account, the admin and a screen; the server answers and stays up, and the handler guard has nothing to catch |
+| `test/sessions.test.js` | sign-in refusals say nothing more than a wrong password does; a stranger's guesses cannot lock the laptop or the venue out; a session's end reaches its open pages; a page in use keeps its session, under a moved clock |
+| `test/uploads.test.js` | uploads stop before the disk fills; files nobody posted are removed; a reset or a deletion removes its own files and no one else's |
+| `test/shownet.test.js` | the discovery table is bounded; Stagewatch's numbers never cross a restart or a relink; a changed certificate can be accepted |
