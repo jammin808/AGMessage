@@ -150,6 +150,55 @@ test('a lane whose write fails keeps the content, says so, retries on its own an
   assert.equal(fs.readFileSync(f, 'utf8'), '{"a":3}');
 });
 
+/** Run `fn` while the disk fills part-way: the first write takes half of what it is given, every later one fails. */
+function diskFillsPartway(fn) {
+  const write = fs.writeSync;
+  let calls = 0;
+  fs.writeSync = (fd, data, ...rest) => {
+    if (calls++) throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    const b = Buffer.isBuffer(data) ? data : Buffer.from(String(data));
+    const off = Buffer.isBuffer(data) && typeof rest[0] === 'number' ? rest[0] : 0;
+    const len = Buffer.isBuffer(data) && typeof rest[1] === 'number' ? rest[1] : b.length - off;
+    return write.call(fs, fd, b, off, Math.max(1, Math.floor(len / 2)));
+  };
+  try { return fn(); } finally { fs.writeSync = write; }
+}
+
+test('a save the disk takes only part of never replaces the whole file, and gives its space back', () => {
+  const dir = tmp('agm-full-');
+  const f = path.join(dir, 'accounts.json');
+  r.writeFileAtomic(f, '{"v":1}', { keepBak: true });
+  r.writeFileAtomic(f, '{"v":2}', { keepBak: true });
+  assert.throws(() => diskFillsPartway(() => r.writeFileAtomic(f, JSON.stringify({ v: 3, pad: 'x'.repeat(4000) }), { keepBak: true })), /ENOSPC/);
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"v":2}', 'the whole file stays');
+  assert.equal(fs.readFileSync(f + '.bak', 'utf8'), '{"v":1}');
+  assert.deepEqual(fs.readdirSync(dir).filter((x) => x.endsWith('.tmp')), [], 'the half-written temporary file is gone, and its space with it');
+
+  // A lane: the cut write is a failure, kept and tried again, never a write that "landed".
+  const lane = new r.WriteLane(f, { delayMs: 10_000 });
+  lane.save(() => '{"v":4}');
+  assert.equal(diskFillsPartway(() => lane.flushSync()), false, 'a flush the disk cuts short says so');
+  assert.match(String(lane.lastError), /ENOSPC/);
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"v":2}');
+  assert.equal(lane.flushSync(), true, 'and lands once the disk has room');
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"v":4}');
+
+  // A hall: a snapshot cut short is not taken for one, so its log is not emptied and nothing is lost.
+  const { RoomStore } = require('../lib/store');
+  const rooms = path.join(dir, 'rooms');
+  const a = new RoomStore(rooms);
+  const room = a.create('ABC234', 'Test');
+  const say = (i) => a.commit(room, { o: 'add', m: { id: 'm' + i, type: 'text', text: 'line ' + i + ' ' + 'x'.repeat(200), at: i } });
+  for (let i = 0; i < 20; i++) say(i);
+  a.compact('ABC234');
+  for (let i = 20; i < 40; i++) say(i);
+  diskFillsPartway(() => a.compact('ABC234'));
+  assert.match(String(a.lastError), /ENOSPC/, 'the failed snapshot is said');
+  const b = new RoomStore(rooms);
+  b.loadAll(null, { compact: false });
+  assert.equal(b.get('ABC234').messages.length, 40, 'every message survives a restart');
+});
+
 test('room snapshots: a torn snapshot falls back to its backup, the log replays on top', () => {
   const { RoomStore } = require('../lib/store');
   const dir = tmp('agm-room-');
@@ -325,7 +374,7 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
     'server.js': { max: 16, why: 'startup (dirs, settings, crash record), the crash handler, upload sniffing (4 KB), tunnel log tail' },
     'supervise.js': { max: 3, why: 'the watchdog process: its own log and marker, never on a request' },
     'lib/store.js': { max: 10, why: 'durability: an acknowledged message is appended to disk before the ack; snapshots every 500 ops' },
-    'lib/resilience.js': { max: 9, why: 'the atomic writer itself' },
+    'lib/resilience.js': { max: 10, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full' },
     'lib/secretbox.js': { max: 3, why: 'the machine key, read once' },
     'lib/guard.js': { max: 3, why: 'the server secret, read once at startup' },
     'lib/tls.js': { max: 4, why: 'the certificate, read (or made) once at startup and when the admin renews it' },

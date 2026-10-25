@@ -63,24 +63,36 @@ class SupervisorPolicy {
  * Write a file so a power cut leaves either the old or the new one, never half of either:
  * write a temporary file, flush it to the disk, then rename it over the target. With `keepBak`, the old
  * file is kept as `.bak` — but only when `worthKeeping(oldText)` says it is whole, so a torn file never
- * replaces a good backup.
+ * replaces a good backup. Every byte reaches the temporary file or the write throws: a disk that fills part-way
+ * never has a short file renamed over a whole one. A write that throws removes its temporary file, so it does not
+ * keep the disk full.
  */
 function writeFileAtomic(file, data, { keepBak = false, worthKeeping = isJson, mode } = {}) {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = file + '.' + process.pid + '.tmp';
-  const fd = fs.openSync(tmp, 'w', mode);
+  const bytes = Buffer.from(data);
   try {
-    fs.writeSync(fd, data);
-    fs.fsyncSync(fd);
-  } finally { fs.closeSync(fd); }
-  if (keepBak) {
+    const fd = fs.openSync(tmp, 'w', mode);
     try {
-      const old = fs.readFileSync(file, 'utf8');
-      if (worthKeeping(old)) fs.copyFileSync(file, file + '.bak');
-    } catch { /* no old file yet */ }
+      for (let off = 0; off < bytes.length;) {
+        const n = fs.writeSync(fd, bytes, off, bytes.length - off);
+        if (!(n > 0)) throw new Error('the disk took ' + off + ' of ' + bytes.length + ' bytes');
+        off += n;
+      }
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    if (keepBak) {
+      try {
+        const old = fs.readFileSync(file, 'utf8');
+        if (worthKeeping(old)) fs.copyFileSync(file, file + '.bak');
+      } catch { /* no old file yet */ }
+    }
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch { /* never made, or already gone */ }
+    throw e;
   }
-  fs.renameSync(tmp, file);
 }
 
 function isJson(text) {
