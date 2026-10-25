@@ -103,7 +103,7 @@ reader, then 19 more when the fixes were read together — every one fixed or an
   every rotated file as one chain, off the event loop; uploads stop before the disk fills, and files nobody posted are
   removed.
 
-Tests: 236 (was 53) plus the browser smoke (60 checks, was 7).
+Tests: 236 (was 53) plus the browser smoke (61 checks, was 7).
 
 ## 0.4.0 — 2026-10-11 — encrypted connections and the show desk (Show Bus 1.2)
 

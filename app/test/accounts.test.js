@@ -570,6 +570,18 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  // Every sign-in here comes from one address, whose allowance (5 at once, then one every 2 s) the subtests before it have
+  // spent: a sign-in that is not about that limit waits for its next one, as a person would — a few tries at most.
+  const signIn = async (username, password) => {
+    let r;
+    for (let i = 0; i < 4; i++) {
+      r = await api(base, 'POST', '/api/auth/login', { username, password });
+      if (r.status !== 429 || r.body.busy) break;
+      await wait(2100);
+    }
+    assert.equal(r.status, 200, username + ' signs in: ' + JSON.stringify(r.body));
+    return r.cookie;
+  };
 
   // Nobody has an account: the page says so; the first admin is made on this laptop.
   const me0 = await api(base, 'GET', '/api/auth/me');
@@ -703,7 +715,7 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     const sid = await api(base, 'POST', '/api/users', { username: 'sid', name: 'Sid Patch', role: 'manager', grant: ['settings.manage'], password: 'the patch bay labels' }, { cookie: admin });
     const stu = await api(base, 'POST', '/api/users', { username: 'stu', name: 'Stu Foyer', role: 'staff', password: 'the coffee urn table' }, { cookie: admin });
     assert.ok(una.body.ok && sid.body.ok && stu.body.ok, JSON.stringify([una.body, sid.body, stu.body]));
-    const u = (await api(base, 'POST', '/api/auth/login', { username: 'una', password: 'the rota on the wall' })).cookie;
+    const u = await signIn('una', 'the rota on the wall');
     const list = (await api(base, 'GET', '/api/users', undefined, { cookie: u })).body.users;
     const row = (name) => list.find((x) => x.username === name);
     assert.match(row('sid').locked, /Only an admin/, 'the page is told, and offers no Edit');
