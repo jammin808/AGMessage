@@ -742,7 +742,7 @@ test('two first admins sent at once make one; two accounts of one name sent at o
   assert.equal(JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'accounts.json'), 'utf8')).users.filter((u) => u.username === 'sam').length, 1);
 });
 
-test('a one-hall tech given users.manage manages only accounts within its own rights and halls, and the page is told what it may give', async (t) => {
+test('a one-hall tech given users.manage manages only accounts within its own rights and halls, and the page is told what it may give and no hall it does not hold', async (t) => {
   const srv = await startServer();
   const { base } = srv;
   t.after(() => stopServer(srv.child));
@@ -750,7 +750,7 @@ test('a one-hall tech given users.manage manages only accounts within its own ri
   const hallA = (await api(base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
   const hallB = (await api(base, 'POST', '/api/rooms', { name: 'Hall B' }, { cookie: admin })).body.code;
   const made = {};
-  for (const [username, extra] of [['lee', { role: 'tech', halls: [hallA], grant: ['users.manage'], password: 'freelancer desk lead' }], ['pat', { role: 'manager', password: 'clipboard and coffee' }], ['cam', { role: 'tech', halls: [hallA], password: 'cable reel orange' }]]) {
+  for (const [username, extra] of [['lee', { role: 'tech', halls: [hallA], grant: ['users.manage'], password: 'freelancer desk lead' }], ['pat', { role: 'manager', password: 'clipboard and coffee' }], ['cam', { role: 'tech', halls: [hallA], password: 'cable reel orange' }], ['bob', { role: 'tech', halls: [hallB], password: 'sound check one two' }]]) {
     const r = await api(base, 'POST', '/api/users', { username, name: username.toUpperCase(), ...extra }, { cookie: admin });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     made[username] = r.body.user;
@@ -773,9 +773,33 @@ test('a one-hall tech given users.manage manages only accounts within its own ri
   assert.match(row('pat').locked, /hold yourself/, 'the page shows the richer account locked');
   assert.equal(row('cam').locked, '');
   assert.deepEqual(view.giveable, { admin: false, caps: ['display.control', 'hall.files', 'hall.post', 'hall.view', 'stage.send'], allHalls: false, halls: [hallA] });
-  const now = (await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body.users;
+  // A hall's code is a guest's way in: the one-hall manager is told no code of a hall it does not hold — not on the list
+  // it ticks halls from, not in another person's row (bob's hall B is a count on a Locked row), nowhere in the reply.
+  assert.deepEqual(view.halls.map((h) => h.code), [hallA]);
+  assert.ok(!JSON.stringify(view).includes(hallB), 'hall B\'s code is nowhere in a one-hall manager\'s list');
+  assert.deepEqual([row('bob').halls, row('bob').rights.halls, row('bob').otherHalls], [[], [], 1]);
+  assert.match(row('bob').locked, /hold yourself/);
+  assert.deepEqual([row('cam').halls, row('cam').otherHalls], [[hallA], 0], 'a row it may edit keeps every hall it has');
+  const forAdmin = (await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body;
+  const now = forAdmin.users;
+  assert.deepEqual(forAdmin.halls.map((h) => h.code).sort(), [hallA, hallB].sort(), 'the admin still sees every hall');
+  assert.deepEqual(now.find((u) => u.username === 'bob').halls, [hallB]);
   assert.deepEqual(now.filter((u) => u.username === 'pat').map((u) => [u.mustChange, u.rights.allHalls]), [[false, true]], 'pat keeps their own password');
   assert.equal(now.find((u) => u.username === 'cam').rights.allHalls, false);
+
+  // One's own row: the page sends a new name alone (users.js), and that is taken; the rest of one's own account is
+  // another admin's to change, so a body that names it is refused whatever it says.
+  for (const [who, cookie] of [['lee', lee], ['ana', admin]]) {
+    const own = (await api(base, 'GET', '/api/users', undefined, { cookie })).body.users.find((u) => u.username === who);
+    assert.equal(own.locked, '', who + ': the page offers Edit on one\'s own row');
+    const renamed = await api(base, 'PATCH', '/api/users/' + own.id, { name: own.name + ' Ops' }, { cookie });
+    assert.deepEqual([renamed.status, renamed.body.changed], [200, ['name']], who + ': ' + JSON.stringify(renamed.body));
+    for (const body of [{ name: own.name, role: own.role, halls: own.halls, grant: [], revoke: [] }, { disabled: true }]) {
+      const r = await api(base, 'PATCH', '/api/users/' + own.id, body, { cookie });
+      assert.deepEqual([r.status, r.body.error], [403, 'Nobody changes their own role, rights or halls — ask another admin.'], who + ' ' + JSON.stringify(body));
+    }
+    assert.equal((await api(base, 'DELETE', '/api/users/' + own.id, undefined, { cookie })).status, 403, who + ': nor removes themselves');
+  }
 });
 
 test('saving an account unchanged changes nothing; the device count is what still signs in', async (t) => {

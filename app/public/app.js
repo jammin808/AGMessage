@@ -17,8 +17,11 @@ const INVITE = qs.get('invite') || '';
 let UPLOAD_TOKEN = '';
 let lastSeq = -1;            // the newest change we have; resume from here after a drop
 let joined = false;
+// What this person may do with the hall's Stagewatch (🖥 send now, 📝 propose): the server's answer, from the join and
+// again from stage:targets whenever the link's state or its desk changes — never read off the hall-wide 'stage' event.
 let CAN_STAGE = false;
-let CAN_PROPOSE = false;   // Stagewatch keeps the show's approval queue (Show Bus 1.2 §11)
+let CAN_PROPOSE = false;   // Stagewatch keeps the show's approval queue (Show Bus 1.2 §11) and this person may send there
+let STAGE_KEY = '';        // the link's state and desk the flags were last asked for (a frame moving changes no right)
 let AI_ON = false;
 let CAN_SCREENS = false;   // this account may drive the hall's screens (display.control)
 const HAS_STAGE = ROLE === 'board' || ROLE === 'research';
@@ -118,6 +121,7 @@ function rejoin() {
     UPLOAD_TOKEN = res.uploadToken || '';
     CAN_STAGE = !!res.canSendToStage;
     CAN_PROPOSE = !!res.canPropose;
+    STAGE_KEY = stageKey(res.stage);
     AI_ON = !!res.ai;
     document.querySelectorAll('.ai-btn').forEach((b) => { b.hidden = !AI_ON; });
     // Without AI, nothing else changes: say so where the draft button would be (research team only sees it).
@@ -192,10 +196,17 @@ socket.on('kicked', ({ reason }) => { notify(reason || 'You were removed from th
 // An admin changed this account: the server closes the socket; open the hall again with the rights it has now.
 socket.on('account:changed', ({ words } = {}) => { notify(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1500); });
 socket.on('roleChanged', ({ role }) => { notify('The admin changed your role to ' + roleLabel(role) + ' — reloading…'); setTimeout(() => { const q = new URLSearchParams(location.search); q.set('role', role); location.search = q.toString(); }, 1500); });
+const stageKey = (v) => (v ? v.status || '' : 'off') + '|' + !!(v && v.desk);
 socket.on('stage', (v) => {
-  const desk = !!(v && v.desk);
-  if (desk !== CAN_PROPOSE) { CAN_PROPOSE = desk; refreshProposeButtons(); }
   renderStage(v);
+  const key = stageKey(v);
+  if (!joined || key === STAGE_KEY) return;
+  STAGE_KEY = key;
+  socket.emit('stage:targets', {}, (r) => {
+    if (!r || !r.ok) return;
+    const s = !!r.canSend, p = !!r.canPropose;
+    if (s !== CAN_STAGE || p !== CAN_PROPOSE) { CAN_STAGE = s; CAN_PROPOSE = p; refreshProposeButtons(); }
+  });
 });
 function refreshProposeButtons() {
   for (const [id, node] of messagesById) { const m = findMessage(id); if (m && m.type !== 'system') rerenderMessage(node, m); }
@@ -1657,12 +1668,13 @@ if (ADMIN_VIEW) {
 }
 
 
-/** The forward picker: the server lists only the other halls this person is in and may post in. */
+/** The forward picker: the server lists only the other halls this person is in that would take this message. */
 function offerForward(anchor, messageId) {
-  socket.emit('myRooms', (res) => {
+  socket.emit('myRooms', { messageId }, (res) => {
     if (!res || !res.ok) { alert('Could not check your other halls.'); return; }
     if (!res.rooms.length) {
-      alert('To forward, open another hall where you may post (in another tab, as ' + NAME + ').');
+      const m = findMessage(messageId);
+      alert('To forward, open another hall where you may ' + (m && m.type === 'file' ? 'share files' : 'post') + ' (in another tab, as ' + NAME + ').');
       return;
     }
     showForwardMenu(anchor, res.rooms, messageId);

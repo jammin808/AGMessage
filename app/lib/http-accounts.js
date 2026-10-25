@@ -193,10 +193,19 @@ function mountAccounts(app, o) {
   app.get('/api/users', signedIn('users.manage'), (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     // `locked`: why this viewer may not change that person (empty when they may); `giveable`: the rights and halls this
-    // viewer may hand out — the page offers what the server allows.
+    // viewer may hand out — the page offers what the server allows. A hall's code is a guest's way in, so a viewer who
+    // does not reach every hall is told only the halls it reaches: on the list, and on each person's row (`otherHalls`
+    // counts the rest). A row it may edit holds no other hall (rbac.exceeds would lock it), so a save drops none.
     const activeAdmins = accounts.activeAdmins();
-    const users = accounts.list().map((u) => ({ ...u, sessions: sessions.of(u.id).length, locked: rbac.mayChange(req.agm.account, u, {}, { activeAdmins }) || '' }));
-    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames(), giveable: rbac.giveable(req.agm.account) });
+    const giveable = rbac.giveable(req.agm.account);
+    const reaches = (code) => giveable.allHalls || giveable.halls.includes(code);
+    const users = accounts.list().map((u) => {
+      const row = { ...u, sessions: sessions.of(u.id).length, locked: rbac.mayChange(req.agm.account, u, {}, { activeAdmins }) || '' };
+      if (giveable.allHalls) return row;
+      const halls = u.rights.halls.filter(reaches);
+      return { ...row, halls: u.halls.filter(reaches), rights: { ...u.rights, halls }, otherHalls: u.rights.halls.length - halls.length };
+    });
+    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames().filter((h) => reaches(h.code)), giveable });
   });
 
   app.post('/api/users', signedIn('users.manage'), async (req, res) => {
