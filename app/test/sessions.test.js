@@ -98,6 +98,9 @@ test('a password stored at an older cost is stored again only once its sign-in i
   assert.deepEqual([refused.status, refused.cookie], [401, ''], 'admin rights through the tunnel');
   await wait(400);
   assert.equal(stored(), old, 'the refused right password was not hashed again: its answer took what a wrong one takes');
+  // And it counts as a wrong one: with four more, the name is held through the tunnel.
+  for (let i = 0; i < 4; i++) assert.equal((await login(srv.base, 'ana', 'wrong guess ' + i, visitor())).status, 401);
+  assert.equal((await login(srv.base, 'ana', ANA.password, visitor())).status, 429, 'five refusals, the right password among them');
   assert.equal((await login(srv.base, 'ana', ANA.password)).status, 200);
   await until(() => stored().startsWith('scrypt$' + acc.SCRYPT.logN + '$'), 3000, 'stored again at today\'s cost once let in');
   assert.equal((await login(srv.base, 'ana', ANA.password)).status, 200, 'and the password still signs in');
