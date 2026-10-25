@@ -420,11 +420,12 @@ class TokenSessions {
   save() { this.lane.save(() => JSON.stringify({ v: 1, k: this.tag, sessions: Array.from(this.map.values()) })); }
   flush() { this.lane.flushSync(); }
 
-  /** A new sign-in: its id goes in the cookie, only its hash is kept. */
-  create() {
+  /** A new sign-in: its id goes in the cookie, only its hash is kept. Those whose day is over go as it comes. */
+  create(now = Date.now()) {
+    for (const [k, s] of this.map) if (now - s.created >= TOKEN_SESSION_MS) this.map.delete(k);
     const sid = crypto.randomBytes(24).toString('hex');
     const h = sha256(sid);
-    this.map.set(h, { h, created: Date.now() });
+    this.map.set(h, { h, created: now });
     this.save();
     return sid;
   }

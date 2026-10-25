@@ -225,6 +225,18 @@ test('token sessions: only a hash on disk, kept across a restart under the same 
   a.flush();
 });
 
+test('token sessions: a new sign-in takes the ended ones with it, in memory and on disk', () => {
+  const file = path.join(tmp('agm-acc-'), 'admin-sessions.json');
+  const a = new acc.TokenSessions(file, 'tag-one');
+  const T = Date.now();
+  for (let i = 0; i < 50; i++) a.create(T - acc.TOKEN_SESSION_MS - i);   // signed in more than a day ago, never back
+  const sid = a.create(T);
+  assert.equal(a.map.size, 1, 'only the sign-in whose day is not over');
+  a.flush();
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).sessions.length, 1);
+  assert.ok(a.has(sid));
+});
+
 test('accounts: two creates of one name at once make one, and two first admins at once make one', async () => {
   const dir = tmp('agm-acc-');
   const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
