@@ -158,6 +158,13 @@ function tinyPdf() {
     await users.eval(`document.getElementById('newUserBtn').click()`);
     await users.until(`document.getElementById('userDialog').open`);
     await users.shot(path.join(OUT, 'accounts.png'));
+    // An editor opened and saved untouched changes nothing, even for an account that still holds a hall removed since.
+    await users.eval(`(async () => { document.getElementById('userDialog').close(); await AGM.api('POST', '/api/users', { username: 'kim', name: 'Kim Tech', role: 'tech', halls: ['${code}', 'GONE01'], password: 'mixing desk on stage left' }); location.reload(); })()`);
+    await users.until(`document.querySelectorAll('#userRows tr').length === 2`);
+    await users.eval(`[...document.querySelectorAll('#userRows tr')].find((tr) => tr.textContent.includes('kim')).querySelector('button').click()`);
+    await users.until(`document.getElementById('userDialog').open`);
+    await users.eval(`document.getElementById('userSave').click()`);
+    report(!!(await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — nothing changed.'`)) && !!(await users.eval(`AGM.api('GET', '/api/users').then((r) => r.users.find((u) => u.username === 'kim').halls.includes('GONE01'))`)), 'an untouched Save on the accounts page is no change, a removed hall\'s code included');
     const hallView = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
     report(!!(await hallView.until(`typeof joined !== "undefined" && joined && document.getElementById('whoami').textContent.startsWith('Ana Admin')`)), 'an account opens its hall with its own name');
 

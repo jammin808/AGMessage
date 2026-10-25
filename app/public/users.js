@@ -131,9 +131,12 @@
   function formChange() {
     const role = roleOf($('uRole').value);
     const caps = Array.from($('uCaps').querySelectorAll('input:checked')).map((c) => c.value);
+    // A hall the account holds that is not on the list (removed since) is not shown, so it is not the editor's to drop:
+    // it is sent back as it is, and an untouched Save stays no change — none of that person's pages reload.
+    const unlisted = editing ? editing.halls.filter((code) => !data.halls.some((h) => h.code === code)) : [];
     const change = {
       name: $('uName').value.trim(), role: role.id,
-      halls: Array.from($('uHalls').querySelectorAll('input:checked')).map((c) => c.value),
+      halls: Array.from($('uHalls').querySelectorAll('input:checked')).map((c) => c.value).concat(unlisted),
       grant: caps.filter((c) => !role.caps.includes(c)),
       revoke: role.caps.filter((c) => !caps.includes(c)),
     };
