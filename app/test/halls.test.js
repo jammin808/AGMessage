@@ -7,12 +7,15 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const http = require('http');
 const path = require('path');
+const { WebSocketServer } = require('ws');
 const board = require('../lib/board');
+const tlsmod = require('../lib/tls');
 const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
 const { io } = require('socket.io-client');
-const { startServer, stopServer, api, connect, emit, wait, until, fakeStagewatch } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, wait, until, fakeStagewatch, freePort } = require('./helpers');
 
 // Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
 const KEY_A = 'swk_hallA_node_key_0001';   // secret-scan: fixture
@@ -302,6 +305,30 @@ test('a hall\'s Set up: its screens follow a removed Stagewatch at once; an unch
     assert.equal((await emit(ctl, 'hall:settings', { code })).stagewatch.keySet, true, 'the key is kept');
     assert.deepEqual((await save(code, { stagewatchUrl: '' })).changed, ['Stagewatch → the default'], 'unlinking is a change');
   });
+
+  await t.test('a save refused for its Stagewatch address changes nothing: no page or screen is renamed; the corrected save records the rename', async () => {
+    const code = (await api(base, 'POST', '/api/rooms', { name: 'Hall One' }, { cookie: admin })).body.code;
+    const g = await connect(base); sockets.push(g);
+    const metas = [];
+    g.on('roomMeta', (m) => metas.push(m));
+    assert.ok((await emit(g, 'join', { roomCode: code, name: 'Gil', role: 'board' })).ok);
+    const seen = await screenOf(code);
+    await until(() => seen.length > 0, 3000, 'the screen\'s first state');
+    const n = seen.length;
+    // What halls.js sends on Save: the new name and a port with one digit too many.
+    const refused = await save(code, { name: 'Ballroom', stagewatchUrl: '127.0.0.1:99240' });
+    assert.deepEqual([refused.ok, /not a Stagewatch address/.test(refused.error)], [false, true], JSON.stringify(refused));
+    await wait(300);
+    assert.deepEqual({ name: (await emit(ctl, 'hall:settings', { code })).name, metas: metas.length, screen: seen.length - n, rows: await hallUpdates(code) },
+      { name: 'Hall One', metas: 0, screen: 0, rows: 0 }, 'a refused save renames nothing anywhere');
+    // The person fixes the address and saves again: the rename is applied and recorded with it.
+    const fixed = await save(code, { name: 'Ballroom', stagewatchUrl: hallSw.url });
+    assert.deepEqual(fixed.changed, ['name → Ballroom', 'Stagewatch → http://' + hallSw.url]);
+    const rows = (await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin })).body.entries.filter((e) => e.action === 'hall.update' && e.target === code);
+    assert.deepEqual(rows.map((e) => e.words), ['name → Ballroom; Stagewatch → http://' + hallSw.url]);
+    await until(() => metas.length === 1, 3000, 'the rename on the joined page');
+    assert.deepEqual((await save(code, { stagewatchUrl: '' })).changed, ['Stagewatch → the default']);
+  });
 });
 
 test('C53: a restart keeps following a stage send the speaker has not acknowledged yet', async (t) => {
@@ -340,11 +367,119 @@ test('C53: a restart keeps following a stage send the speaker has not acknowledg
   assert.equal(after[0].stage.link, 'hall:' + code, 'the send keeps the link it went to');
 });
 
+test('a restart follows a stage send only while its Stagewatch is the one it went to; one that restarted since ends it as lost', async (t) => {
+  // Three halls, each on its own Stagewatch, each sending "Two minutes" that becomes that Stagewatch's message 4:
+  // P's Stagewatch restarts while AGMessage runs; Q's restarts while AGMessage is down (overnight); R's carries on.
+  const [swP, swQ, swR] = [await fakeStagewatch({ name: 'P timer', messageId: 4 }), await fakeStagewatch({ name: 'Q timer', messageId: 4 }), await fakeStagewatch({ name: 'R timer', messageId: 4 })];
+  let srv = await startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await swP.close(); await swQ.close(); await swR.close(); });
+  const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  let ctl = await connect(srv.base, setup.cookie); sockets.push(ctl);
+  const halls = {};
+  for (const [k, sw, seq] of [['P', swP, 10], ['Q', swQ, 50], ['R', swR, 20]]) {
+    const code = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall ' + k }, { cookie: setup.cookie })).body.code;
+    assert.ok((await emit(ctl, 'hall:configure', { code, stagewatchUrl: sw.url, stagewatchKey: KEY_A })).ok);
+    await until(() => sw.connected, 6000, k + ' linked');
+    sw.frame({ seq, messageId: 0 });
+    const crew = await connect(srv.base); sockets.push(crew);
+    assert.ok((await emit(crew, 'join', { roomCode: code, name: 'Alex', role: 'research' })).ok);
+    await until(async () => (await emit(ctl, 'hall:settings', { code })).stagewatch.status === 'connected', 3000, k + ' connected');
+    await wait(150);   // the frame of that seq is in before the send
+    const sent = await emit(crew, 'stage:send', { text: 'Two minutes' });
+    assert.deepEqual([sent.ok, sent.messageId], [true, 4], k);
+    halls[k] = { code, crew };
+  }
+  const records = async (c, k) => (await emit(c, 'admin:watchRoom', { roomCode: halls[k].code })).messages.filter((m) => m.stage && m.stage.ref === 4).map((m) => m.stage.ack);
+
+  // P's Stagewatch restarts (its seq goes back): the send can no longer be followed, and its record says so at once.
+  const lost = new Promise((resolve) => { halls.P.crew.on('stageAck', (a) => { if (a.stage.ack === 'lost') resolve(a.stage); }); });
+  swP.frame({ seq: 1, messageId: 0, messageAck: '', messageAckBy: '' });
+  assert.ok(await Promise.race([lost, wait(3000)]), 'the hall told the send is lost');
+  swP.frame({ seq: 2, messageId: 4, messageAck: 'done', messageAckBy: 'Someone else' });
+  await wait(400);
+  assert.deepEqual(await records(ctl, 'P'), ['lost'], 'the restarted Stagewatch\'s message 4 is not ours');
+
+  // AGMessage stops; Q's Stagewatch restarts while it is down; P's and R's carry on. AGMessage starts on the same folder.
+  for (const s of sockets) s.close();
+  await stopServer(srv.child);
+  swQ.frame({ seq: 1, messageId: 0, messageAck: '', messageAckBy: '' });
+  swP.frame({ seq: 3 });
+  swR.frame({ seq: 21 });
+  srv = await startServer({ AGM_DATA_DIR: srv.dataDir });
+  await until(() => swP.connected && swQ.connected && swR.connected, 8000, 'linked again after the restart');
+  await wait(400);
+  const admin = (await api(srv.base, 'POST', '/api/auth/login', { username: 'ana', password: 'the green room kettle' })).cookie;
+  ctl = await connect(srv.base, admin); sockets.push(ctl);
+  swP.frame({ seq: 4, messageId: 4, messageAck: 'done', messageAckBy: 'Someone else again' });
+  swQ.frame({ seq: 2, messageId: 4, messageAck: 'done', messageAckBy: 'Today\'s speaker' });
+  swR.frame({ seq: 22, messageId: 4, messageAck: 'done', messageAckBy: 'Speaker R' });
+  await until(async () => (await records(ctl, 'R')).every((a) => a === 'done'), 4000, 'R\'s speaker acknowledged the send');
+  await wait(300);
+  assert.deepEqual({ P: await records(ctl, 'P'), Q: await records(ctl, 'Q'), R: await records(ctl, 'R') }, { P: ['lost'], Q: ['lost'], R: ['done'] },
+    'only the Stagewatch the send went to, as it was then, acknowledges it');
+  // What the speaker did is a fact: R's Stagewatch restarting afterwards leaves the acknowledgement as it was.
+  swR.frame({ seq: 1, messageId: 0, messageAck: '', messageAckBy: '' });
+  await wait(500);
+  assert.deepEqual(await records(ctl, 'R'), ['done'], 'acknowledged stays acknowledged');
+});
+
+test('closing a hall forgets its own Stagewatch\'s certificate pins, unless another hall still follows that address', async (t) => {
+  // A Stagewatch on one fixed address: first over TLS (pinned on first use), then the same address serving plain HTTP.
+  const stagewatchAt = async (port, cert) => {
+    const app = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ v: 1, node: { t: 'main', id: 'swx', name: 'Hall Stagewatch' }, light: 'green', headline: 'Keynote', items: [], peers: [] })); });
+    const wss = new WebSocketServer({ server: app, path: '/ws' });
+    wss.on('connection', (ws) => ws.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', title: 'Keynote', messageId: 0 })));
+    const front = cert ? tlsmod.dualPortServer(app, { certPem: tlsmod.toPem(cert.certDer), keyPem: cert.keyPem }) : app;
+    await new Promise((resolve) => { front.listen(port, '127.0.0.1', resolve); });
+    return { close: () => new Promise((resolve) => { for (const c of wss.clients) c.terminate(); wss.close(); front.close(() => resolve()); }) };
+  };
+  const port = await freePort();
+  let sw = await stagewatchAt(port, tlsmod.makeCertificate({ name: 'Stagewatch', hosts: ['localhost'], ips: ['127.0.0.1'] }));
+  const srv = await startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
+  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const ctl = await connect(srv.base, admin); sockets.push(ctl);
+  const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
+  const pins = () => Object.keys(JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8')).tlsPins || {});
+  const status = async (code) => (await emit(ctl, 'hall:settings', { code })).stagewatch;
+
+  const [dayOne, alsoThere] = [await hall('Day one'), await hall('Day one, overflow')];
+  assert.ok((await emit(ctl, 'hall:configure', { code: dayOne, stagewatchUrl: 'https://127.0.0.1:' + port })).ok);
+  await until(() => pins().includes('url:127.0.0.1:' + port), 8000, 'the hall\'s Stagewatch pinned on disk');
+  assert.ok((await emit(ctl, 'hall:configure', { code: alsoThere, stagewatchUrl: 'https://127.0.0.1:' + port })).ok);
+  await until(async () => (await status(alsoThere)).status === 'connected', 6000, 'the second hall on the same Stagewatch');
+
+  assert.ok((await emit(ctl, 'admin:deleteRoom', { roomCode: dayOne })).ok);
+  await wait(300);
+  assert.ok(pins().includes('url:127.0.0.1:' + port), 'kept: another hall still follows that address');
+  assert.ok((await emit(ctl, 'admin:deleteRoom', { roomCode: alsoThere })).ok);
+  await until(() => pins().length === 0, 3000, 'the pins gone with the last hall on that address: ' + JSON.stringify(pins()));
+
+  // Next day the address holds a Stagewatch with TLS off, and a new hall is set to it: it links.
+  await sw.close();
+  sw = await stagewatchAt(port, null);
+  const dayTwo = await hall('Day two');
+  assert.ok((await emit(ctl, 'hall:configure', { code: dayTwo, stagewatchUrl: '127.0.0.1:' + port })).ok);
+  await until(async () => (await status(dayTwo)).status === 'connected', 6000, 'the new hall linked in plain HTTP');
+});
+
 test('rights inside a hall: forwards, read-only members, the room list\'s role select, renames and locks, two devices', async (t) => {
   const srv = await startServer();
   const { base } = srv;
   const sockets = [];
-  const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
+  // Every socket here comes from 127.0.0.1 and so draws on one connection bucket on the server (3 a second, bursts of
+  // 30). open() keeps a copy of it and waits for a token with one to spare, so no subtest leans on another's wait. The
+  // copy is never more generous than the server's: each connect is awaited before the next takes its token.
+  const bucket = { tokens: 30, at: Date.now() };
+  const level = () => Math.min(30, bucket.tokens + ((Date.now() - bucket.at) / 1000) * 3);
+  const open = async (cookie) => {
+    while (level() < 2) await wait(Math.ceil(((2 - level()) / 3) * 1000));
+    bucket.tokens = level() - 1;
+    bucket.at = Date.now();
+    const s = await connect(base, cookie); sockets.push(s); return s;
+  };
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
 
   const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
@@ -691,4 +826,55 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     assert.ok((await emit(ctl, 'admin:kick', { socketId: back.s.id })).ok);
     assert.equal((await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity })).j.role, 'observer', 'logged out is not a drop');
   });
+});
+
+test('a locked hall\'s seats outlive the watchdog\'s restart for the pages back in its first seconds; a logout or a seat not taken up does not', async (t) => {
+  // The watchdog restarts a crashed or hung server (SIGKILL) on the same folder and port; every page drops at once and
+  // comes back on its own, with what its link says (name, role, identity) and no invite.
+  const env = (srv) => ({ AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port), AGM_BOOT_SEAT_MS: '6000' });
+  let srv = await startServer({ AGM_BOOT_SEAT_MS: '6000' });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const ctl = await connect(srv.base, admin); sockets.push(ctl);
+  const code = (await api(srv.base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: admin })).body.code;
+  const join = async (name, role, extra = {}) => { const s = await connect(srv.base); sockets.push(s); const j = await emit(s, 'join', { roomCode: code, name, role, ...extra }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
+  const kill = async () => {
+    for (const s of sockets.splice(0)) s.close();
+    srv.child.kill('SIGKILL');
+    await new Promise((resolve) => { if (srv.child.exitCode !== null || srv.child.signalCode !== null) resolve(); else srv.child.once('exit', resolve); });
+    srv = await startServer(env(srv));
+  };
+
+  // Seated before the lock: Sam backstage, Lee on stage, Kim backstage. Oz joins after it and the admin seats him on stage.
+  const sam = await join('Sam Backstage', 'research');
+  const lee = await join('Lee Onstage', 'board');
+  const kim = await join('Kim Backstage', 'research');
+  assert.ok((await emit(ctl, 'admin:lockRoles', { roomCode: code, on: true })).ok);
+  const oz = await join('Oz Onstage', 'observer');
+  assert.equal(oz.j.role, 'observer');
+  assert.ok((await emit(ctl, 'admin:setRole', { roomCode: code, socketId: oz.s.id, role: 'board' })).ok);
+  oz.s.close();
+  const ozBack = await join('Oz Onstage', 'board', { uid: oz.j.identity });
+  assert.equal(ozBack.j.role, 'board', 'the reload after the admin\'s change keeps the seat');
+  assert.ok((await emit(ctl, 'admin:kick', { socketId: kim.s.id })).ok);
+  await wait(300);
+
+  // The server is killed and started again; Sam's and Oz's pages come back, Lee's does not (yet), Kim's was logged out.
+  await kill();
+  const sam2 = await join('Sam Backstage', 'research', { uid: sam.j.identity, since: sam.j.seq });
+  const oz2 = await join('Oz Onstage', 'board', { uid: oz.j.identity, since: ozBack.j.seq });
+  const kim2 = await join('Kim Backstage', 'research', { uid: kim.j.identity });
+  const post = await emit(sam2.s, 'message', { type: 'text', text: 'Slide 4 is next' });
+  assert.deepEqual({ sam: [sam2.j.role, sam2.j.note], oz: [oz2.j.role, oz2.j.note], post: post.ok, kim: kim2.j.role },
+    { sam: ['research', ''], oz: ['board', ''], post: true, kim: 'observer' }, 'after the restart: ' + JSON.stringify(post));
+
+  // Past the boot's first seconds a seat nobody took up is gone, and stays gone through the next restart; the seats
+  // taken up hold again.
+  await wait(6500);
+  await kill();
+  const lee2 = await join('Lee Onstage', 'board', { uid: lee.j.identity });
+  const sam3 = await join('Sam Backstage', 'research', { uid: sam.j.identity });
+  const oz3 = await join('Oz Onstage', 'board', { uid: oz.j.identity });
+  assert.deepEqual({ lee: [lee2.j.role, /invite/.test(lee2.j.note)], sam: sam3.j.role, oz: oz3.j.role }, { lee: ['observer', true], sam: 'research', oz: 'board' });
 });

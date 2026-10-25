@@ -56,7 +56,9 @@ open on a laptop and a phone (or a guest with it open in two tabs) is one person
 once, "left" only when the last page closes, and the room list's role, link and logout reach every one of those pages.
 A locked hall's invite is for people who join later: a code guest already seated there keeps the seat while another of
 their pages is open and for the few seconds before "left" (Wi-Fi drops, the page's reload after the admin changes their
-role), under the same name and role; after the admin logs them out it is gone.
+role), under the same name and role; after the admin logs them out it is gone. The seat also holds across the watchdog's
+restart, which drops every page at once: a locked hall's seats are saved with the hall, and a page back within the first
+30 seconds after the restart takes its seat again; a seat not taken up by then is gone.
 
 ## The first admin
 
