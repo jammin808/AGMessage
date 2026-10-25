@@ -274,6 +274,15 @@ test('hashing: a burst of unknown names before their dummy hash exists makes tha
   } finally { crypto.scrypt = real; }
 });
 
+test('hashing: a hash scrypt refuses to run (a stored cost past its memory cap) gives its slot back', async () => {
+  const tooCostly = ['scrypt', 20, 32, 16, crypto.randomBytes(16).toString('base64url'), crypto.randomBytes(32).toString('base64url')].join('$');
+  assert.ok(acc.parseHash(tooCostly), 'within what a stored hash may say, past what scrypt runs in its memory cap');
+  for (let i = 0; i < acc.LANES.venue.slots; i++) await assert.rejects(acc.verifyPassword('anything at all', tooCostly), { code: 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS' });
+  const pw = 'the green room kettle';
+  const next = (async () => (await acc.verifyPassword(pw, await acc.hashPassword(pw))).ok)();
+  assert.equal(await Promise.race([next, wait(5000).then(() => 'stuck behind slots that were never given back')]), true);
+});
+
 test('limits: a flood of new addresses never hands back an allowance used up, nor lifts a lock that holds', () => {
   const T = 1_000_000;
   const buckets = new guard.Buckets(0.5, 5, 100);

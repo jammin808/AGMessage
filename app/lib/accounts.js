@@ -64,11 +64,15 @@ const canStart = (lane) => running < SLOTS && runningIn[lane] < LANES[lane].slot
 function startHash(job) {
   if (job.signal) job.signal.removeEventListener('abort', job.onAbort);
   running++; runningIn[job.lane]++;
-  crypto.scrypt(job.password, job.salt, job.params.keylen, { N: 2 ** job.params.logN, r: job.params.r, p: job.params.p, maxmem: 256 * 1024 * 1024 }, (err, key) => {
+  const done = (err, key) => {
     running--; runningIn[job.lane]--;
     nextHash();
     if (err) job.reject(err); else job.resolve(key);
-  });
+  };
+  // scrypt refuses some settings a stored hash may name (a cost past the memory cap) by throwing before it starts: that
+  // check fails, and its slot is given back — never held for good, nor thrown out of another hash's callback.
+  try { crypto.scrypt(job.password, job.salt, job.params.keylen, { N: 2 ** job.params.logN, r: job.params.r, p: job.params.p, maxmem: 256 * 1024 * 1024 }, done); }
+  catch (e) { done(e); }
 }
 function nextHash() {
   for (const lane of ['venue', 'tunnel']) {
