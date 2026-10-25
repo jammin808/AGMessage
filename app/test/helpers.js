@@ -174,7 +174,7 @@ async function fakeNode({ t = 'patterns', name = 'Patterns FOH', token = 'node-t
         if (t === 'playmap') return json(200, { type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', effect: 'ran ' + body, error: null, refs: null, msg: 'OK @' + req.headers['x-request-id'] + ' ran' });
         const m = /^@([A-Za-z0-9_-]{1,32}) (.*)$/.exec(body);
         const line = m ? m[2] : body;
-        const reply = /^BLACKOUT|locked/i.test(line) ? 'ERR the air is locked' : 'OK ' + line + ' done';
+        const reply = /^BLACKOUT/i.test(line) || /locked/i.test(line) ? 'ERR the air is locked' : 'OK ' + line + ' done';   // a BLACKOUT, or anything about the lock
         return json(200, m ? { ok: reply.startsWith('OK'), msg: reply, id: m[1] } : { ok: reply.startsWith('OK'), msg: reply });
       }
       res.writeHead(404); res.end();

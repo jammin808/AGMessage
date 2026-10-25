@@ -562,9 +562,13 @@ app.post('/api/upload', async (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     if (err) return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Files can be up to 25 MB.' : 'Upload failed.' });
     if (!req.file) return res.status(400).json({ error: 'That file type isn\'t supported. PDF, images, Word, Excel, PowerPoint, CSV and text work.' });
+    // The stored file, by the name multer gave it (ours, from a cleaned name), held inside the uploads folder.
+    const uploadsRoot = path.resolve(UPLOAD_DIR);
+    const stored = path.resolve(uploadsRoot, req.file.filename);
+    if (!stored.startsWith(uploadsRoot + path.sep)) return res.status(400).json({ error: 'Upload failed.' });
     let head = Buffer.alloc(0);
     try {
-      const fd = fs.openSync(req.file.path, 'r');
+      const fd = fs.openSync(stored, 'r');
       head = Buffer.alloc(4096);
       const n = fs.readSync(fd, head, 0, 4096, 0);
       fs.closeSync(fd);
@@ -572,7 +576,7 @@ app.post('/api/upload', async (req, res, next) => {
     } catch { /* checked below */ }
     const type = guard.uploadType(req.file.originalname, head);
     if (!type) {
-      try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
+      try { fs.unlinkSync(stored); } catch { /* ignore */ }
       return res.status(400).json({ error: 'That file\'s contents don\'t match its type, so it wasn\'t shared.' });
     }
     freshUploads.set(req.file.filename, Date.now());
@@ -2198,7 +2202,9 @@ function startTunnel() {
   tunnelError = null; tunnelUrl = null;
   let proc;
   try {
-    cfLogfile = path.join(os.tmpdir(), 'agm-cloudflared-' + process.pid + '-' + Date.now() + '.log');
+    // In AGMessage's own data folder (one server per folder), not a guessable name in the shared temp folder.
+    cfLogfile = path.join(DATA_DIR, 'cloudflared.log');
+    try { fs.unlinkSync(cfLogfile); } catch { /* none left from an earlier run */ }
     proc = spawn(resolveCloudflaredBin(), ['tunnel', '--url', `http://localhost:${PORT}`, '--no-autoupdate', '--logfile', cfLogfile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   } catch (e) {
     tunnelError = 'Could not start cloudflared: ' + e.message;
@@ -2216,17 +2222,18 @@ function startTunnel() {
   let logFileSize = 0;
   cfLogPoll = setInterval(() => {
     if (!cfLogfile || tunnelUrl) return;
+    // One open handle, then its own size: what is read is the file that was opened (no check-then-open race).
+    let fd = null;
     try {
-      if (!fs.existsSync(cfLogfile)) return;
-      const st = fs.statSync(cfLogfile);
-      if (st.size === logFileSize) return;
-      const fd = fs.openSync(cfLogfile, 'r');
-      const b = Buffer.alloc(Math.min(st.size - logFileSize, 1 << 20));
-      fs.readSync(fd, b, 0, b.length, logFileSize);
-      fs.closeSync(fd);
-      logFileSize = st.size;
-      sniff(b);
-    } catch { /* ignore */ }
+      fd = fs.openSync(cfLogfile, 'r');
+      const size = fs.fstatSync(fd).size;
+      if (size > logFileSize) {
+        const b = Buffer.alloc(Math.min(size - logFileSize, 1 << 20));
+        const n = fs.readSync(fd, b, 0, b.length, logFileSize);
+        logFileSize += n;
+        sniff(b.subarray(0, n));
+      }
+    } catch { /* not written yet: cloudflared makes it as it starts */ } finally { if (fd !== null) { try { fs.closeSync(fd); } catch { /* closed */ } } }
   }, 500);
   setTimeout(() => {
     if (tunnelProc === proc && !tunnelUrl) {

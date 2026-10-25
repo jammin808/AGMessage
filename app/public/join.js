@@ -37,6 +37,18 @@
     document.querySelector('.entry-tabs').hidden = true;
   }
 
+  // Where a sign-in goes next: one of AGMessage's own pages, named here, with the query the link asked for. Nothing the
+  // link carries chooses another site, a scheme (javascript:) or a path of its own.
+  const NEXT_PAGES = ['/halls.html', '/users.html', '/admin.html', '/app.html'];
+  function nextPage() {
+    let u;
+    try { u = new URL(params.get('next') || '/halls.html', location.origin); } catch { return '/halls.html'; }
+    const page = u.origin === location.origin ? NEXT_PAGES.find((x) => x === u.pathname) : undefined;
+    if (!page) return '/halls.html';
+    const q = new URLSearchParams(u.search).toString();
+    return page + (q ? '?' + q : '');
+  }
+
   // ---------------------------------------------------------------- sign in
   $('signInPane').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -44,7 +56,7 @@
     const r = await AGM.api('POST', '/api/auth/login', { username: $('username').value.trim(), password: $('password').value });
     if (!r.ok) { fail('signInError', r.error); $('password').select(); return; }
     if (r.mustChange) { onlyPane('changePane'); $('changeUser').value = r.account.username; $('changeCurrent').value = $('password').value; $('changeNext').focus(); return; }
-    location.replace(params.get('next') && /^\/[a-z]/.test(params.get('next')) ? params.get('next') : '/halls.html');
+    location.replace(nextPage());
   });
 
   // One first admin: while the request is out, a second click or Enter sends nothing (the server holds it to one anyway).

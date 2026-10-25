@@ -21,6 +21,9 @@ const ROOT = path.join(__dirname, '..');
 const OUT = process.env.AGM_SMOKE_OUT || path.join(ROOT, '..', 'artifacts', 'smoke');
 const TOKEN = 'smokeadmintoken1';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A value written into code a page evaluates: JSON, with the characters that could end a string or a script escaped.
+const CODE_ESCAPES = { '<': '\\u003C', '>': '\\u003E', '/': '\\u002F', '\\': '\\\\', '\b': '\\b', '\f': '\\f', '\n': '\\n', '\r': '\\r', '\t': '\\t', '\0': '\\0', '\u2028': '\\u2028', '\u2029': '\\u2029' };
+const codeLiteral = (v) => JSON.stringify(v).replace(/[<>\b\f\n\r\t\0\u2028\u2029]/g, (c) => CODE_ESCAPES[c]);
 // The server's own time zone for the smoke: a screen in another zone must still show this one's time of day.
 const SERVER_TZ = 'Europe/London';
 const KEY = 'swk_smoke_node_key_00001';   // secret-scan: fixture — a fake node key for the fake Stagewatch
@@ -290,7 +293,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
 
     // The countdown's strip never covers the time it sits under: on an upright tablet, a 4:3 screen and a wide one; with
     // the operator's words, and with a long message from Stagewatch.
-    const takeOn = (id, content) => hallView.eval(`new Promise((r) => socket.emit('display:take', { ids: ['${id}'], content: ${JSON.stringify(content)} }, r))`);
+    const takeOn = (id, content) => hallView.eval(`new Promise((r) => socket.emit('display:take', { ids: [${codeLiteral(id)}], content: ${codeLiteral(content)} }, r))`);
     const STRIP = `(() => { const s = document.getElementById('cdStrip'); const t = document.getElementById('cdTime').getBoundingClientRect(); const n = document.getElementById('cdNext');
       return { hidden: s.hidden, top: Math.round(s.getBoundingClientRect().top), above: Math.round(Math.max(t.bottom, n.textContent ? n.getBoundingClientRect().bottom : 0)), text: document.getElementById('cdText').textContent }; })()`;
     const words156 = 'Please wrap up now: the next speaker is waiting in the wings, the panel starts at half past and the coffee break is cut to ten minutes today. Thank you all.';
@@ -520,6 +523,22 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await research.eval(`socket.connect()`);
     const back = await research.until(`socket.connected && joined && !CAN_STAGE && JSON.stringify({ shown: [...document.querySelectorAll('.msg[data-type="text"] .stage-btn')].filter((b) => !b.hidden).length })`, 8000);
     report(sendsBefore > 0 && removed && back === JSON.stringify({ shown: 0 }), `a page back from a drop while its hall lost its Stagewatch offers 🖥 no more (${sendsBefore} before; ${removed}; ${back})`);
+
+    // Signing in follows ?next= only to AGMessage's own pages: a script URL or another site lands on the halls board, and
+    // one of our pages keeps the query it asked for.
+    const landings = [];
+    // eslint-disable-next-line no-script-url -- the check is that a script URL in ?next= is never followed
+    const scriptUrl = 'javascript:alert(document.domain)';
+    for (const next of [scriptUrl, '//evil.example/x', '/app.html?code=' + code + '&as=account&role=observer']) {
+      await signin.send('Network.deleteCookies', { name: 'agm_s', url: base + '/' });
+      const entry = await edge.tab(`${base}/?next=${encodeURIComponent(next)}`);
+      await entry.until(`typeof document.getElementById('signInPane') === 'object' && !document.getElementById('signInPane').hidden`);
+      await entry.eval(`(() => { document.getElementById('username').value = 'ana'; document.getElementById('password').value = 'the green room kettle'; document.getElementById('signInPane').requestSubmit(); })()`);
+      landings.push((await entry.until(`location.pathname !== '/' && location.pathname + '|' + (new URLSearchParams(location.search).get('code') || '')`, 8000)) || 'stayed on the sign-in page');   // the hall page sets the role the server gives
+      landings.push(entry.problems.length ? 'script errors: ' + entry.problems.slice(0, 2).join(' | ') : 'clean');
+      entry.close();
+    }
+    report(JSON.stringify(landings) === JSON.stringify(['/halls.html|', 'clean', '/halls.html|', 'clean', '/app.html|' + code, 'clean']), `signing in follows ?next= only to AGMessage's own pages (${landings.join(', ')})`);
 
     for (const [name, tab] of [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall]]) {
       report(tab.problems.length === 0, `${name}: no script errors or CSP violations${tab.problems.length ? ' — ' + tab.problems.slice(0, 3).join(' | ') : ''}`);
