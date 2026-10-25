@@ -30,14 +30,19 @@ function buildContext(f) {
   const items = [];
   const links = [];
 
-  // People, by role (never by name).
+  // People, by role (never by name): one person with a hall open on two pages is one, as the halls board counts them.
   const roles = { board: 0, research: 0, observer: 0 };
   let open = [];
   let answeredCount = 0;
   let rooms = 0;
   for (const r of f.rooms || []) {
     rooms++;
-    for (const u of r.users ? r.users.values() : []) if (u && roles[u.role] !== undefined) roles[u.role]++;
+    const counted = new Set();
+    for (const u of r.users ? r.users.values() : []) {
+      if (!u || roles[u.role] === undefined || (u.uid && counted.has(u.uid))) continue;
+      if (u.uid) counted.add(u.uid);
+      roles[u.role]++;
+    }
     for (const m of r.messages || []) {
       if (!m || m.type !== 'action') continue;
       // A prompt is open until someone on stage answers it; answered ones are only counted.

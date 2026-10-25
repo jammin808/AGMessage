@@ -50,6 +50,10 @@ test('context: help requests are a count, never who or what; a hall\'s own Stage
   assert.equal(ctx.light, 'red');
   assert.match(ctx.headline, /2 help requests open/);
   assert.equal(ctx.items.find((i) => i.id === 'link:stagewatch:2').label, 'Stagewatch Hall B timer');
+  // People, as the board counts them: an account on a laptop and a phone is one person.
+  const users = new Map([['laptop', { uid: 'a1', role: 'research' }], ['phone', { uid: 'a1', role: 'research' }], ['tab', { uid: 'g7', role: 'observer' }]]);
+  const two = buildContext({ node: { id: 'ab12cd34', name: 'AGMessage' }, rooms: [{ users, messages: [] }], stage: { status: 'off' }, peers: [], aiOn: false, tunnel: false, recent: [] });
+  assert.equal(two.items.find((i) => i.id === 'meetings').state, '1 meeting · 2 people (0 board, 1 research, 1 observer)');
 });
 
 test('halls end to end: two Stagewatches, the board, help', async (t) => {
