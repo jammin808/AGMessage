@@ -218,6 +218,40 @@ test('audit: one failed write is kept and written with the next, so the chain on
   assert.ok(fs.readFileSync(file, 'utf8').includes('second, while the disk would not take it'), 'the entry that failed is on disk now');
 });
 
+test('audit: a write the disk takes only part of is cut back, on Windows too, and the chain on disk stays whole', async () => {
+  const dir = tmp('agm-audit-');
+  const file = path.join(dir, 'audit.jsonl');
+  const log = new AuditLog(file);
+  log.write({ t: 'system' }, 'boot', '', 'first');
+  const before = fs.readFileSync(file, 'utf8');
+  // As on Windows: a handle opened for appending writes only at the end and cannot cut the file back.
+  const { openSync, writeSync, ftruncateSync } = fs;
+  const appending = new Set();
+  fs.openSync = (p, flags, ...rest) => {
+    const fd = openSync.call(fs, p, flags, ...rest);
+    if (typeof flags === 'string' ? flags.startsWith('a') : (flags & fs.constants.O_APPEND) !== 0) appending.add(fd); else appending.delete(fd);
+    return fd;
+  };
+  fs.ftruncateSync = (fd, ...rest) => {
+    if (appending.has(fd)) throw Object.assign(new Error('EPERM: operation not permitted, ftruncate'), { code: 'EPERM' });
+    return ftruncateSync.call(fs, fd, ...rest);
+  };
+  fs.writeSync = (fd, buf, off = 0, len = buf.length - off, pos = null) => {
+    fs.writeSync = writeSync;   // the disk is full for this one write: it takes half
+    return writeSync.call(fs, fd, buf, off, Math.floor(len / 2), pos);
+  };
+  try {
+    log.write({ t: 'account', id: 'a1', name: 'sam' }, 'login', 'sam', 'second, while the disk was full');
+    assert.match(String(log.lastError), /took \d+ of \d+ bytes/);
+    assert.equal(log.unwritten, 1);
+    assert.equal(fs.readFileSync(file, 'utf8'), before, 'the part that was written is cut back');
+    log.write({ t: 'system' }, 'x', '', 'third');
+  } finally { Object.assign(fs, { openSync, writeSync, ftruncateSync }); }
+  assert.equal(log.unwritten, 0);
+  assert.deepEqual(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).words), ['first', 'second, while the disk was full', 'third']);
+  assert.deepEqual(await log.verify(), { ok: true, entries: 3 });
+});
+
 for (const [what, tail] of [['a half-written last line', '{"seq":4,"at":17'], ['a NUL-filled tail (NTFS after a power cut)', Buffer.alloc(180)]]) {
   test('audit: ' + what + ' is cut at the next start, the cut is an entry, and the chain goes on whole', async () => {
     const dir = tmp('agm-audit-');

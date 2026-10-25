@@ -132,10 +132,12 @@ class AuditLog {
     if (this.size > ROTATE_BYTES) this._rotate();
     let fd = null;
     try {
-      fd = fs.openSync(this.file, 'a', 0o600);
+      // Written at the file's end through a handle that can also cut it back: Windows does not truncate through a
+      // handle opened for appending, so there a short write would stay as a fragment the next entry is glued to.
+      fd = fs.openSync(this.file, fs.constants.O_WRONLY | fs.constants.O_CREAT, 0o600);
       const before = fs.fstatSync(fd).size;
       const bytes = Buffer.from(this.pending);
-      const n = fs.writeSync(fd, bytes);
+      const n = fs.writeSync(fd, bytes, 0, bytes.length, before);
       if (n !== bytes.length) { fs.ftruncateSync(fd, before); throw new Error('the disk took ' + n + ' of ' + bytes.length + ' bytes'); }
       this.size = before + n;
       this.pending = ''; this.unwritten = 0;
