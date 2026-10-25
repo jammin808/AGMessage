@@ -8,6 +8,7 @@
  */
 
 const LIGHTS = ['grey', 'green', 'amber', 'red'];
+const MAX_PEERS = 32;   // one-hop peers in a context
 const worst = (lights) => lights.reduce((w, l) => (LIGHTS.indexOf(l) > LIGHTS.indexOf(w) ? l : w), 'green');
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
 
@@ -19,6 +20,9 @@ const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
  * @param {Array} f.peers Discovery.list()
  * @param {boolean} f.aiOn
  * @param {boolean} f.tunnel
+ * @param {number} [f.help] open help requests across the halls (a count)
+ * @param {Object<string,{light:string,headline:string}>} [f.peerContexts] linked Patterns / PlayMap nodes' own light and headline
+ * @param {Array<{status:string, view:object|null, context:object|null}>} [f.halls] halls' own Stagewatch links
  * @param {Array<{at:number,text:string}>} f.recent role-level events, no content
  * @param {number} [f.now]
  */
@@ -27,14 +31,19 @@ function buildContext(f) {
   const items = [];
   const links = [];
 
-  // People, by role (never by name).
+  // People, by role (never by name): one person with a hall open on two pages is one, as the halls board counts them.
   const roles = { board: 0, research: 0, observer: 0 };
   let open = [];
   let answeredCount = 0;
   let rooms = 0;
   for (const r of f.rooms || []) {
     rooms++;
-    for (const u of r.users ? r.users.values() : []) if (u && roles[u.role] !== undefined) roles[u.role]++;
+    const counted = new Set();
+    for (const u of r.users ? r.users.values() : []) {
+      if (!u || roles[u.role] === undefined || (u.uid && counted.has(u.uid))) continue;
+      if (u.uid) counted.add(u.uid);
+      roles[u.role]++;
+    }
     for (const m of r.messages || []) {
       if (!m || m.type !== 'action') continue;
       // A prompt is open until someone on stage answers it; answered ones are only counted.
@@ -64,12 +73,24 @@ function buildContext(f) {
   items.push({ id: 'link:stagewatch', kind: 'link', label: 'Stagewatch (stage timer)', light: clock && clock.apart && stLight === 'green' ? 'amber' : stLight, state: stState });
   links.push({ from: 'meetings', to: 'link:stagewatch', kind: 'sends', light: stLight });
 
+  // Help requests open across the halls: a count, never who asked or what for.
+  if (f.help) items.push({ id: 'help', kind: 'room', label: 'Help requests', light: 'red', state: plural(f.help, 'help request') + ' open' });
+  // Halls with a Stagewatch of their own: each link's state, by the Stagewatch's own name (never a hall's).
+  for (const [i, h] of (f.halls || []).entries()) {
+    const ok = h.status === 'connected';
+    const name = h.context && h.context.node && typeof h.context.node.name === 'string' ? h.context.node.name.slice(0, 60) : 'a hall\'s';
+    items.push({ id: 'link:stagewatch:' + (i + 2), kind: 'link', label: 'Stagewatch ' + name, light: ok ? 'green' : h.status === 'off' ? 'grey' : 'amber', state: ok && h.view ? 'timer ' + (h.view.text || '—') : h.status || 'off' });
+    links.push({ from: 'meetings', to: 'link:stagewatch:' + (i + 2), kind: 'sends', light: ok ? 'green' : 'amber' });
+  }
   items.push({ id: 'ai', kind: 'assistant', label: 'AI drafts', light: f.aiOn ? 'green' : 'grey', state: f.aiOn ? 'on (drafts only, a person sends)' : 'off — everything else works offline' });
   items.push({ id: 'tunnel', kind: 'link', label: 'Remote access (Cloudflare)', light: f.tunnel ? 'green' : 'grey', state: f.tunnel ? 'on' : 'off (venue network only)' });
 
-  // Peers, one hop: what each says about itself (Stagewatch's own context when we hold it).
-  const peers = (f.peers || []).map((p) => {
-    const fromCtx = st.context && st.context.node && st.context.node.id === p.id ? st.context : null;
+  // Peers, one hop: what each says about itself (Stagewatch's own context when we hold it). At most MAX_PEERS, the
+  // live ones first: the table is fed by unauthenticated hellos, and this goes to every linked Stagewatch.
+  const heard = f.peers || [];
+  const peers = heard.filter((p) => p.status === 'live').concat(heard.filter((p) => p.status !== 'live')).slice(0, MAX_PEERS).map((p) => {
+    const fromCtx = st.context && st.context.node && st.context.node.id === p.id ? st.context
+      : f.peerContexts && f.peerContexts[p.id] ? f.peerContexts[p.id] : null;   // a linked Patterns or PlayMap's own words
     return {
       t: p.t, id: p.id, name: p.name,
       light: p.status === 'live' ? (fromCtx && LIGHTS.includes(fromCtx.light) ? fromCtx.light : 'green') : 'amber',
@@ -79,6 +100,7 @@ function buildContext(f) {
 
   const light = worst(items.filter((i) => i.light !== 'grey').map((i) => i.light).concat(['green']));
   const parts = [rooms ? plural(rooms, 'meeting') + ', ' + plural(people, 'person', 'people') : 'no meeting open'];
+  if (f.help) parts.push(plural(f.help, 'help request') + ' open');
   if (open.length) parts.push(plural(open.length, 'action prompt') + ' waiting for the board');
   else if (answeredCount) parts.push(plural(answeredCount, 'action prompt') + ' answered');
   parts.push('Stagewatch ' + (st.status === 'connected' ? 'linked' : stState));
@@ -113,8 +135,28 @@ function showBrief(stage, peers) {
     lines.push(`Stagewatch says: ${ctx.headline || ''} [${ctx.light || 'grey'}]`);
     for (const p of (ctx.peers || []).slice(0, 6)) lines.push(`  peer ${p.t} "${p.name || ''}": ${p.headline || ''} [${p.light || 'grey'}]`);
   }
-  for (const p of (peers || []).slice(0, 8)) if (!ctx || !ctx.node || p.id !== ctx.node.id) lines.push(`Heard on the network: ${p.t} "${p.name || ''}" (${p.status})`);
+  const linked = new Map(((stage && stage.linked) || []).map((l) => [l.id, l]));
+  for (const l of linked.values()) {
+    lines.push(`${l.t === 'playmap' ? 'PlayMap' : 'Patterns'} "${l.name}" (linked, ${l.status}): ${l.headline || 'no headline yet'} [${l.light}]`);
+    for (const i of (l.items || []).filter((x) => x.light === 'red' || x.light === 'amber').slice(0, 4)) lines.push(`  ${i.label}: ${i.state} [${i.light}]`);
+  }
+  for (const p of (peers || []).slice(0, 8)) if ((!ctx || !ctx.node || p.id !== ctx.node.id) && !linked.has(p.id)) lines.push(`Heard on the network: ${p.t} "${p.name || ''}" (${p.status})`);
   return lines.join('\n');
 }
 
-module.exports = { buildContext, showBrief, worst };
+/**
+ * The show network one hall's AI is told (pure): that hall's Stagewatch, and the Patterns and PlayMap nodes linked for
+ * that hall or for every hall — never one linked for another hall, neither as linked nor as heard on the network. (The
+ * context posted to a hall's Stagewatch leaves out such a node's own light and headline too, and names it at most as
+ * heard on the network.)
+ * @param {string} code the hall
+ * @param {{status:string, view:object|null, context:object|null}} stage the Stagewatch link that hall follows
+ * @param {Array<{id:string, hall:string}>} links every linked node, as its link's view() says it
+ * @param {Array<{id:string}>} peers Discovery.list()
+ */
+function hallBrief(code, stage, links, peers) {
+  const elsewhere = new Set((links || []).filter((l) => l.hall && l.hall !== code).map((l) => l.id));
+  return showBrief({ ...stage, linked: (links || []).filter((l) => !elsewhere.has(l.id)) }, (peers || []).filter((p) => !elsewhere.has(p.id)));
+}
+
+module.exports = { buildContext, showBrief, hallBrief, worst };

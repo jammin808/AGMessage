@@ -20,8 +20,9 @@ function freePort() {
 async function startServer(dataDir, port) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
     env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '' },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
+  if (child.channel) child.channel.unref();
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
@@ -32,7 +33,7 @@ async function startServer(dataDir, port) {
   child.kill();
   throw new Error('server did not start:\n' + out);
 }
-function stop(child) { return new Promise((r) => { child.once('exit', r); child.kill('SIGTERM'); setTimeout(r, 3000); }); }
+const { stopServer: stop } = require('./helpers');   // asked over IPC, so it saves first on Windows too
 
 const emit = (s, ev, arg) => new Promise((resolve) => s.emit(ev, arg, resolve));
 const connect = (base, cookie) => new Promise((resolve, reject) => {
@@ -108,6 +109,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
   });
 
   await t.test('file messages must point at a real upload', async () => {
+    // eslint-disable-next-line no-script-url -- a hostile input this test proves is refused
     for (const url of ['javascript:alert(1)', 'https://evil.example/x.pdf', '/uploads/../server.js', '/uploads/1-abc-x.pdf']) {
       const r = await emit(research, 'message', { type: 'file', url, filename: 'x.pdf' });
       assert.equal(r.ok, false, url);
@@ -175,6 +177,33 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     await emit(adminSock, 'admin:lockRoles', { roomCode: code, on: false });
   });
 
+  await t.test('the admin page closing the hall it is watching gets its answer and stays connected; the hall\'s people are sent home', async () => {
+    const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+    const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
+    const page = await connect(base, cookie); sockets.push(page);
+    const other = await connect(base, cookie); sockets.push(other);   // a second admin tab on the same hall
+    const made = await emit(page, 'admin:createRoom', { name: 'Close me' });
+    assert.ok((await emit(page, 'admin:watchRoom', { roomCode: made.code })).ok);
+    assert.ok((await emit(other, 'admin:watchRoom', { roomCode: made.code })).ok);
+    const member = await connect(base); sockets.push(member);
+    assert.ok((await emit(member, 'join', { roomCode: made.code, name: 'Last one', role: 'board' })).ok);
+    const kicked = [];
+    page.on('kicked', (k) => kicked.push(k));
+    other.on('kicked', (k) => kicked.push(k));
+    const memberKicked = new Promise((resolve) => { member.once('kicked', resolve); });
+    const memberGone = new Promise((resolve) => { member.once('disconnect', resolve); });
+    const otherTold = new Promise((resolve) => { other.once('roomClosed', resolve); });
+    const answer = await Promise.race([emit(page, 'admin:deleteRoom', { roomCode: made.code, purgeFiles: false }), wait(3000).then(() => 'no answer')]);
+    assert.deepEqual({ answer, connected: page.connected }, { answer: { ok: true, purged: 0 }, connected: true });
+    assert.deepEqual(await otherTold, { code: made.code }, 'the other admin tab is told, not cut off');
+    assert.equal((await memberKicked).reason, 'This meeting was closed by the admin.');
+    assert.equal(await memberGone, 'io server disconnect');
+    const rooms = await ask(page, 'admin:listRooms');
+    assert.ok(rooms.ok && !rooms.rooms.some((r) => r.code === made.code));
+    assert.ok((await ask(other, 'admin:listRooms')).ok && other.connected);
+    assert.deepEqual(kicked, [], 'no admin page was sent home');
+  });
+
   await t.test('AI and stage refuse politely when not configured', async () => {
     const d = await emit(research, 'ai:draft', { question: 'What was capex?' });
     assert.equal(d.ok, false);
@@ -225,7 +254,8 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const local = await (await fetch(base + '/api/health')).json();
     assert.ok(local.ok && 'restarts' in local && 'loopMs' in local, 'detail on the host');
     const remote = await (await fetch(base + '/api/health', { headers: { 'cf-connecting-ip': '203.0.113.9' } })).json();
-    assert.deepEqual(Object.keys(remote).sort(), ['ok', 'uptime', 'version']);
+    assert.deepEqual(Object.keys(remote).sort(), ['build', 'ok', 'uptime', 'version']);
+    assert.ok(remote.build.startsWith(remote.version + '-dev') || remote.build.startsWith(remote.version + '+'), 'the build names its version and channel: ' + remote.build);
   });
 
   await t.test('saved keys are sealed at rest, never in clear', async () => {
@@ -253,7 +283,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     await new Promise((r) => fake.listen(0, '127.0.0.1', r));
     try {
       await emit(ctl, 'admin:settings', { stagewatchUrl: '127.0.0.1:' + fake.address().port, stagewatchKey: 'swk_node' });
-      for (let i = 0; i < 60 && !ws; i++) await new Promise((r) => setTimeout(r, 50));
+      for (let i = 0; i < 60; i++) { if (ws) break; await new Promise((r) => setTimeout(r, 50)); }
       assert.ok(ws, 'AGMessage linked to the fake Stagewatch');
       await new Promise((r) => setTimeout(r, 300));
       const acks = [];
@@ -333,7 +363,10 @@ test('AGMessage server: security, resume, persistence', async (t) => {
       assert.deepEqual([r.proposal.id, r.proposal.state], ['p17', 'pending']);
       const sent = seen.proposals[0];
       assert.equal(sent.target.t, 'main');
-      assert.equal(sent.line, 'message "Capex was \'4.2m\'" warn ack', 'Stagewatch\'s grammar, a quote inside can\'t end the text');
+      // Stagewatch's grammar: a quote inside can't end the text, and the flash ("off") comes before "ack" — an "ack" in the
+      // flash's place is refused by Stagewatch ("flash must be off|slow|fast"), the defect 0.4 shipped.
+      assert.equal(sent.line, 'message "Capex was \'4.2m\'" warn off ack');
+      assert.deepEqual(require('../lib/stagelines').parse(sent.line), { verb: 'message', text: 'Capex was \'4.2m\'', urgency: 'warn', flash: 'off', ack: true });
       assert.equal(sent.from.t, 'messenger');
       state = 'done';
       for (let i = 0; i < 100 && !updates.some((u) => u.proposal.state === 'done'); i++) await new Promise((x) => setTimeout(x, 100));

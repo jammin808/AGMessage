@@ -1,0 +1,23 @@
+# Dependency updates: the app's npm packages and the workflows' actions, weekly, grouped so a show week sees one pull
+# request each, not twenty. Security updates arrive as they are published, whatever this schedule says.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      runtime:
+        dependency-type: production
+      tooling:
+        dependency-type: development
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ['*']

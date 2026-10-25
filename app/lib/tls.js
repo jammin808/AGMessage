@@ -102,6 +102,20 @@ function cleanFingerprint(s) {
   const hex = String(s || '').trim().toLowerCase().replace(/^sha256:/, '').replace(/[:\s]/g, '');
   return /^[0-9a-f]{64}$/.test(hex) ? 'sha256:' + hex : '';
 }
+// The fewest characters of a fingerprint that confirm a certificate: 16 hex characters, 64 bits. A fingerprint is public
+// (every hello carries it), so its start must be too long to match with a certificate made for the purpose.
+const TYPED_MIN = 16;
+/** The start of a fingerprint as a person typed it from a node's own screen: TYPED_MIN to 64 hex characters, else '' (pure). */
+function typedFingerprint(s) {
+  const hex = String(s || '').trim().toLowerCase().replace(/^sha256:/, '').replace(/[:\s]/g, '');
+  return hex.length >= TYPED_MIN && /^[0-9a-f]{1,64}$/.test(hex) ? hex : '';
+}
+/** Whether what a person typed (at least TYPED_MIN hex characters) is the start of this certificate's fingerprint (pure). */
+function fingerprintStarts(fp, typed) {
+  const t = typedFingerprint(typed);
+  const full = cleanFingerprint(fp);
+  return !!t && !!full && full.slice('sha256:'.length).startsWith(t);
+}
 
 function lanAddresses() {
   const out = [];
@@ -161,7 +175,8 @@ function dualPortServer(httpServer, { certPem, keyPem }) {
 
 /**
  * Trust on first use, by node: the fingerprint a peer presents is checked against its pin, or — before there is one —
- * against what its hello (or the operator) said. A pin is set only after the first authenticated success.
+ * against what its hello (or the operator) said. A pin is set after the first authenticated success (confirm), or when
+ * a person vouches for the certificate presented (accept); a link decides which of the two it may use.
  */
 class PinStore {
   /** @param {Object<string,string>} pins node key -> fingerprint (persisted by the caller) */
@@ -203,6 +218,8 @@ class PinStore {
 /** The certificate a TLS server presents (nothing else is sent). */
 function probeCertificate(host, port, timeoutMs = 3000) {
   return new Promise((resolve, reject) => {
+    // The probe reads the certificate to compare it with the pin; it sends nothing, so an unverified certificate is all it can be.
+    // eslint-disable-next-line no-restricted-syntax -- the pin is the trust, checked by the caller before any request
     const s = tls.connect({ host, port, servername: net.isIP(host) ? undefined : host, rejectUnauthorized: false, ALPNProtocols: ['http/1.1'] }, () => {
       const c = s.getPeerX509Certificate ? s.getPeerX509Certificate() : null;
       s.destroy();
@@ -264,4 +281,4 @@ function httpsGate({ required, on, encrypted, loopback, method = 'GET', path = '
   return { refuse: 'This AGMessage requires HTTPS — use https:// (see /tls to trust its certificate).' };
 }
 
-module.exports = { httpsGate, makeCertificate, fingerprint, cleanFingerprint, toPem, loadOrCreate, dualPortServer, PinStore, probeCertificate, pinnedTlsOptions, request, FP_RE, lanAddresses };
+module.exports = { httpsGate, makeCertificate, fingerprint, cleanFingerprint, typedFingerprint, fingerprintStarts, TYPED_MIN, toPem, loadOrCreate, dualPortServer, PinStore, probeCertificate, pinnedTlsOptions, request, FP_RE, lanAddresses };

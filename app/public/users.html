@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AGMessage — accounts</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="/theme-init.js"></script>
+</head>
+<body class="acct-page">
+  <header class="acct-bar">
+    <a class="acct-brand" href="/halls.html"><span class="brand-mark small">AG</span> AGMessage</a>
+    <nav class="acct-nav" aria-label="Account">
+      <span class="acct-who" id="who"></span>
+      <a class="btn ghost small" href="/halls.html">Halls</a>
+      <button class="btn ghost small" id="themeBtn" type="button" title="Toggle dark mode">🌙</button>
+    </nav>
+  </header>
+
+  <main class="accounts">
+    <div class="entry-tabs page-tabs" role="tablist" aria-label="Accounts and audit">
+      <button class="entry-tab active" id="tabPeople" role="tab" aria-selected="true" aria-controls="peoplePane" type="button">People</button>
+      <button class="entry-tab" id="tabAudit" role="tab" aria-selected="false" aria-controls="auditPane" type="button">Audit log</button>
+    </div>
+
+    <section id="peoplePane" role="tabpanel" aria-labelledby="tabPeople">
+      <div class="board-head">
+        <h1>People</h1>
+        <button class="btn primary small" id="newUserBtn" type="button">Add a person</button>
+      </div>
+      <div class="table-wrap">
+        <table class="acct-table">
+          <thead><tr><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Halls</th><th scope="col">Last signed in</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody id="userRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="auditPane" role="tabpanel" aria-labelledby="tabAudit" hidden>
+      <div class="board-head">
+        <h1>Audit log</h1>
+        <div class="board-tools">
+          <span class="chain-state" id="chainState"></span>
+          <button class="btn small" id="verifyBtn" type="button">Check the log</button>
+        </div>
+      </div>
+      <p class="hint">Every sign-in, change of rights, hall, display and send to another show system, newest first. Each entry is chained to the one before it, so an edited or removed line shows here.</p>
+      <ol class="audit-list" id="auditList"></ol>
+    </section>
+  </main>
+
+  <dialog id="userDialog" class="agm-dialog wide">
+    <form id="userForm" method="dialog">
+      <h2 id="userTitle">Add a person</h2>
+      <div class="form-grid">
+        <label class="field"><span>Name</span><input id="uName" maxlength="40" required autocomplete="off" /></label>
+        <label class="field"><span>Username</span><input id="uUser" maxlength="32" required autocapitalize="none" spellcheck="false" autocomplete="off" /></label>
+      </div>
+      <label class="field"><span>Role</span><select id="uRole"></select><small class="hint" id="uRoleWords"></small></label>
+      <fieldset class="field">
+        <legend>Halls</legend>
+        <label class="check"><input type="checkbox" id="uAll" /> Every hall, including new ones</label>
+        <div class="check-grid" id="uHalls"></div>
+      </fieldset>
+      <fieldset class="field">
+        <legend>Rights</legend>
+        <p class="hint">Ticked by the role; change one to make an exception for this person.</p>
+        <div class="check-list" id="uCaps"></div>
+      </fieldset>
+      <p class="error" id="userError" role="alert" hidden></p>
+      <div class="row spread">
+        <div class="row" id="userDanger">
+          <button class="btn small" id="resetBtn" type="button">New one-time password</button>
+          <button class="btn small" id="signOutAllBtn" type="button">Sign out everywhere</button>
+          <button class="btn small" id="disableBtn" type="button">Turn off</button>
+          <button class="btn small danger" id="removeBtn" type="button">Remove</button>
+        </div>
+        <div class="row end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save" id="userSave">Save</button></div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="secretDialog" class="agm-dialog">
+    <form method="dialog">
+      <h2>One-time password</h2>
+      <p>Give this to <strong id="secretWho"></strong> in person or by phone. It works once: they choose their own at first sign-in. It is not shown again.</p>
+      <p class="secret" id="secretValue"></p>
+      <div class="row end"><button class="btn" type="button" id="copySecret">Copy</button><button class="btn primary" value="ok">Done</button></div>
+    </form>
+  </dialog>
+
+  <script src="/common.js"></script>
+  <script src="/users.js"></script>
+</body>
+</html>

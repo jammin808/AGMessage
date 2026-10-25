@@ -1,10 +1,13 @@
-# AGMessage CI: every push and pull request runs the unit and end-to-end tests and the browser smoke test (headless
-# Edge), then builds the portable Windows zip. A tag like v0.2.0 also publishes a GitHub Release with the zip.
+# AGMessage CI. Every push (any branch) and pull request runs the analyzers, the secret scan, every test suite with its
+# coverage gate on Linux (Node 24 LTS, and Node 26 beside it), the tests and the browser smoke on Windows with Edge and on
+# Linux with Chrome, then builds the portable Windows zip, numbered by this run (tools/stamp-build.js): a development
+# build 0.5.0-dev.<run>+<sha> on a branch, a release 0.5.0+<run>.<sha> on the tag v0.5.0. A tag publishes a GitHub
+# Release with the zip, its SBOM, SHA256SUMS and a build-provenance attestation, once every job above is green.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -16,63 +19,145 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # The runtime the portable bundle ships (tools/fetch-runtime.ps1 pins the same version by SHA-256).
+  NODE_LTS: '24.22.1'
+
 jobs:
-  test:
-    name: Tests and browser smoke
-    runs-on: windows-latest
+  analyze:
+    name: Analyzers, secret scan, version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_LTS }}
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: app
+      # The fences (eslint.config.mjs; docs/ANALYSIS.md): any finding fails the build.
+      - name: Analyzers (ESLint, the security rules, the banned calls, HTML only from escaped parts)
+        run: npm run lint
+        working-directory: app
+      - name: Secret scan (tools/scan-secrets.js)
+        run: node tools/scan-secrets.js
+      - name: The version this commit builds as
+        run: |
+          node tools/stamp-build.js --print
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then node tools/stamp-build.js --check-tag "${GITHUB_REF_NAME}"; fi
+
+  test-linux:
+    name: Tests (Node ${{ matrix.node }}, Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 24 is the LTS the bundle ships; 26 enters LTS on 2026-10-28 and is proven here before the bundle moves to it.
+        node: ['24.22.1', '26']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: app
+      - name: Unit, end-to-end and watchdog tests with the coverage gate
+        if: matrix.node == env.NODE_LTS
+        run: npm run coverage
+        working-directory: app
+      - name: Unit, end-to-end and watchdog tests
+        if: matrix.node != env.NODE_LTS
+        run: npm test
+        working-directory: app
+      - name: Browser smoke (headless Chrome)
+        if: matrix.node == env.NODE_LTS
+        run: npm run smoke
+        working-directory: app
+        env:
+          AGM_BROWSER: /usr/bin/google-chrome
+          AGM_SMOKE_OUT: ${{ github.workspace }}/artifacts/smoke-linux
+      - name: Upload screenshots
+        if: always() && matrix.node == env.NODE_LTS
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-linux-${{ github.sha }}
+          path: artifacts/smoke-linux
+          if-no-files-found: ignore
+
+  test-windows:
+    name: Tests and browser smoke (Windows, Edge)
+    runs-on: windows-latest
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: app
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_LTS }}
           cache: npm
           cache-dependency-path: app/package-lock.json
-
       - run: npm ci --no-audit --no-fund
-
-      - name: Unit and end-to-end tests
+      - name: Unit, end-to-end and watchdog tests
         run: npm test
-
-      - name: Browser smoke test (headless Edge)
+      - name: Browser smoke (headless Microsoft Edge)
         run: npm run smoke
         env:
-          AGM_SMOKE_OUT: ${{ github.workspace }}/artifacts/smoke
-
+          AGM_SMOKE_OUT: ${{ github.workspace }}/artifacts/smoke-windows
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: smoke-screenshots-${{ github.sha }}
-          path: artifacts/smoke
+          name: smoke-windows-${{ github.sha }}
+          path: artifacts/smoke-windows
           if-no-files-found: warn
 
   package:
     name: Portable Windows zip
-    needs: test
+    needs: [analyze, test-linux, test-windows]
     runs-on: windows-latest
     timeout-minutes: 20
+    outputs:
+      full: ${{ steps.stamp.outputs.full }}
+      channel: ${{ steps.stamp.outputs.channel }}
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
-
+          node-version: ${{ env.NODE_LTS }}
+      # This run's number and commit, and the channel: release for the tag v<version>, dev for anything else.
+      - name: Stamp the build (tools/stamp-build.js)
+        id: stamp
+        shell: pwsh
+        run: node tools/stamp-build.js --run ${{ github.run_number }} --commit ${{ github.sha }} --ref ${{ github.ref }}
       # Downloads Node and cloudflared at pinned versions (checksum-verified), stages the app with production
-      # dependencies and empty data/uploads folders, and zips it.
+      # dependencies and empty data/uploads folders, and zips it under the build's name.
       - name: Build the portable bundle (tools/build-portable.ps1)
         shell: pwsh
         run: ./tools/build-portable.ps1
-
+      # The bill of materials (CycloneDX): every package the bundle ships, at its version — the SOUP list a reviewer reads.
+      - name: Software bill of materials
+        shell: pwsh
+        run: |
+          npm sbom --sbom-format cyclonedx --omit dev --package-lock-only --prefix app | Out-File -Encoding utf8 dist/agmessage-sbom.cdx.json
+          # The list is taken before SHA256SUMS is written, so the file being written is never one being hashed.
+          $files = @(Get-ChildItem dist -File | Where-Object { $_.Name -ne 'SHA256SUMS' })
+          $lines = foreach ($f in $files) { '{0}  {1}' -f (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower(), $f.Name }
+          Set-Content -Path dist/SHA256SUMS -Value $lines -Encoding ascii
+          Get-Content dist/SHA256SUMS
       - uses: actions/upload-artifact@v7
         with:
           name: agmessage-portable-${{ github.sha }}
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/agmessage-sbom.cdx.json
+            dist/SHA256SUMS
           if-no-files-found: error
 
   release:
@@ -82,15 +167,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@v8
         with:
           name: agmessage-portable-${{ github.sha }}
           path: dist
-
+      - name: Refuse anything but a release build
+        run: test "${{ needs.package.outputs.channel }}" = "release" || { echo "::error::the package job built ${{ needs.package.outputs.full }}, not a release"; exit 1; }
+      - name: Build provenance (who built which zip from which commit)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.zip
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AGMessage ${GITHUB_REF_NAME#v}" \
-            --generate-notes dist/*.zip
+            --notes "Build ${{ needs.package.outputs.full }}. The zip's SHA-256 is in SHA256SUMS; its packages are listed in agmessage-sbom.cdx.json." \
+            --generate-notes dist/*.zip dist/agmessage-sbom.cdx.json dist/SHA256SUMS

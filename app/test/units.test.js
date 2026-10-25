@@ -37,6 +37,7 @@ test('uploads: name and content must agree', () => {
   assert.ok(guard.uploadType('notes.txt', Buffer.from('Capex: £4.2m')));
   assert.equal(guard.uploadType('notes.txt', Buffer.from('<script>x</script>')), null);
   assert.ok(guard.validUploadUrl('/uploads/1777424589360-onmqm0a3ew2r-IMG_6586.jpeg'));
+  // eslint-disable-next-line no-script-url -- a hostile input this test proves is refused
   for (const u of ['/uploads/../x', 'javascript:alert(1)', '/uploads/a.pdf', 'https://x/uploads/1-abcdefghijkl-a.pdf']) assert.ok(!guard.validUploadUrl(u), u);
 });
 
@@ -50,11 +51,15 @@ test('token bucket and lockout', () => {
   l.fail('x', 0); assert.ok(!l.locked('x', 1)); l.fail('x', 2); assert.ok(l.locked('x', 3)); assert.ok(!l.locked('x', 2000));
 });
 
-test('host-only check rejects anything that came through a proxy or tunnel', () => {
-  const req = (addr, headers = {}) => ({ socket: { remoteAddress: addr }, headers });
+test('host-only check: from loopback, to a loopback name, and nothing that came through a proxy or tunnel', () => {
+  const req = (addr, headers = { host: 'localhost:3023' }) => ({ socket: { remoteAddress: addr }, headers });
   assert.ok(guard.isHostMachine(req('127.0.0.1')));
-  assert.ok(!guard.isHostMachine(req('127.0.0.1', { 'cf-connecting-ip': '1.2.3.4' })));
-  assert.ok(!guard.isHostMachine(req('127.0.0.1', { 'x-forwarded-for': '1.2.3.4' })));
+  for (const host of ['127.0.0.1:3023', '[::1]:3023', 'LOCALHOST', 'localhost']) assert.ok(guard.isHostMachine(req('127.0.0.1', { host })), host);
+  for (const host of ['agm.example:3023', '127.0.0.1.nip.io:3023', 'localhost.example', 'localhost:3023 x', '']) {
+    assert.ok(!guard.isHostMachine(req('127.0.0.1', { host })), 'a page served under another name is not this laptop: ' + host);
+  }
+  assert.ok(!guard.isHostMachine(req('127.0.0.1', { host: 'localhost:3023', 'cf-connecting-ip': '1.2.3.4' })));
+  assert.ok(!guard.isHostMachine(req('127.0.0.1', { host: 'localhost:3023', 'x-forwarded-for': '1.2.3.4' })));
   assert.ok(!guard.isHostMachine(req('192.168.1.5')));
   assert.equal(guard.clientIp(req('127.0.0.1', { 'cf-connecting-ip': '1.2.3.4' })), 'cf:1.2.3.4');
 });
@@ -82,9 +87,91 @@ test('store: log, resume window, torn writes, compaction', () => {
   assert.equal(b.opsSince(r2, 3), null, 'after a restart the gap needs a full history');
 });
 
+test('store: a load that may not write leaves the files as they were', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const r = a.create('ABC234', 'Test');
+  a.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } });
+  const files = () => fs.readdirSync(dir).sort().map((f) => f + ':' + fs.readFileSync(path.join(dir, f), 'utf8'));
+  const before = files();
+  const b = new RoomStore(dir);
+  assert.equal(b.loadAll(null, { compact: false }), 1);
+  assert.equal(b.get('ABC234').messages.length, 1, 'the log replayed in memory');
+  assert.deepEqual(files(), before, 'nothing written');
+});
+
+test('store: a failed append is said, and the room is snapshotted as soon as the disk takes writes again', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const r = a.create('ABC234', 'Test');
+  const log = path.join(dir, 'ABC234.log');
+  fs.unlinkSync(log);
+  fs.mkdirSync(log);   // the log cannot be opened, as when the disk is full or another program holds it
+  a.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } });
+  assert.ok(a.lastError, 'the failure is kept for health');
+  assert.deepEqual(a.unsaved(), ['ABC234']);
+  fs.rmdirSync(log);
+  a.commit(r, { o: 'add', m: { id: 'm2', type: 'text', text: 'two', at: 2 } });
+  assert.deepEqual(a.unsaved(), [], 'the next append that lands snapshots the room');
+  assert.equal(a.lastError, null);
+  const b = new RoomStore(dir);
+  b.loadAll();
+  assert.deepEqual(b.get('ABC234').messages.map((m) => m.id), ['m1', 'm2'], 'the op the log missed is on disk');
+});
+
+test('store: a log line the disk cut short, or a power cut tore, never swallows the next op', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const r = a.create('ABC234', 'Test');
+  a.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } });
+  const write = fs.writeSync;
+  fs.writeSync = (fd, data) => { fs.writeSync = write; return write.call(fs, fd, Buffer.from(String(data)), 0, 12); };   // the disk takes 12 bytes
+  a.commit(r, { o: 'add', m: { id: 'm2', type: 'text', text: 'two, cut short', at: 2 } });
+  assert.deepEqual(a.unsaved(), ['ABC234']);
+  // The next op lands whole, but the snapshot that would fold both in cannot be written (the snapshot is held).
+  const rename = fs.renameSync;
+  fs.renameSync = (from, to) => { if (String(to).endsWith('.json')) throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }); return rename.call(fs, from, to); };
+  try { a.commit(r, { o: 'add', m: { id: 'm3', type: 'text', text: 'three, whole', at: 3 } }); } finally { fs.renameSync = rename; }
+  const b = new RoomStore(dir);
+  b.loadAll(null, { compact: false });   // as after a crash: the snapshot and the log as they are
+  assert.deepEqual(b.get('ABC234').messages.map((m) => m.id), ['m1', 'm3'], 'the op after the cut one replays');
+
+  // A power cut tore the last line: the first op after the restart is a line of its own, not glued to the fragment.
+  fs.appendFileSync(path.join(dir, 'ABC234.log'), '{"o":"add","m":{"id":"m4","ty');
+  const c = new RoomStore(dir);
+  c.loadAll(null, { compact: false });
+  c.commit(c.get('ABC234'), { o: 'add', m: { id: 'm5', type: 'text', text: 'five, after the restart', at: 5 } });
+  const d = new RoomStore(dir);
+  d.loadAll(null, { compact: false });
+  assert.deepEqual(d.get('ABC234').messages.map((m) => m.id), ['m1', 'm3', 'm5']);
+});
+
+test('board: a hall\'s messages are read once per change, whoever watches, and never served stale', () => {
+  const board = require('../lib/board');
+  const messages = [];
+  for (let i = 0; i < 3000; i++) messages.push(i % 3 ? { id: 'm' + i, type: 'text', text: 'line ' + i, at: i, from: { name: 'Sam' } } : { id: 'm' + i, type: 'system', text: 'Sam joined', at: i });
+  messages.push({ id: 'h1', type: 'help', category: 'Sound', text: 'radio mic 3', at: 3001, from: { name: 'Alex' }, help: { state: 'open' } });
+  messages.push({ id: 'h2', type: 'help', category: 'Vision', text: 'done', at: 3002, from: { name: 'Alex' }, help: { state: 'resolved' } });
+  const room = { code: 'HALL01', name: 'Hall 1', users: new Map(), seq: 3002, messages };
+  let scans = 0;
+  const filter = messages.filter.bind(messages);
+  messages.filter = (...args) => { scans++; return filter(...args); };
+  for (let w = 0; w < 30; w++) { board.hallRow(room); board.openHelp(room); }   // thirty watchers, one tick
+  assert.equal(scans, 1, 'one scan for every watcher');
+  assert.equal(board.openHelp(room).length, 1);
+  assert.equal(board.hallRow(room).help, 1);
+  assert.ok(Object.isFrozen(board.openHelp(room)[0]), 'what is shared cannot be changed by one watcher');
+  Object.assign(messages[3000], { help: { state: 'resolved', by: 'Pat', at: 4000 } });   // as the store applies an update
+  room.seq++;
+  assert.equal(board.openHelp(room).length, 0, 'the change is seen at once');
+  assert.equal(board.hallRow(room).help, 0);
+  assert.equal(scans, 2, 'and read once more');
+});
+
 test('nodes: Stagewatch address and frame view', () => {
   assert.equal(nodes.normaliseBase('10.0.0.5'), 'http://10.0.0.5:9924');
   assert.equal(nodes.normaliseBase('http://foh-pc:9930/x'), 'http://foh-pc:9930');
+  // eslint-disable-next-line no-script-url -- a hostile input this test proves is refused
   assert.equal(nodes.normaliseBase('javascript:alert(1)'), '');
   assert.equal(nodes.normaliseBase('http://user:pw@x'), '');
   const v = nodes.stageView({ type: 'state', mode: 'countdown', text: '12:34', speakerText: '12 MIN', title: 'Keynote', next: 'Panel', color: '#FF0000', message: 'Wrap up', messageAck: 'done' });
@@ -135,4 +222,47 @@ test('Stagewatch link: live frames, stale on silence, send to stage with the key
     assert.equal(decodeURIComponent(post.url), '/api/message/Two minutes left, please wrap up/warn/off/ack');
     assert.equal((await new nodes.StagewatchLink({}).sendToStage('x')).ok, false, 'not linked');
   } finally { link.stop(); wss.close(); srv.close(); }
+});
+
+test('C21: a Stagewatch gone silent is dropped at 12 s quiet and redialled at once, not after a 30 s close handshake', async () => {
+  // The rule, deterministically: a silent socket answers no close frame, so it is terminated, never closed politely.
+  const stub = new nodes.StagewatchLink();
+  const calls = [];
+  stub.ws = { readyState: 1, send() {}, close() { calls.push('close'); }, terminate() { calls.push('terminate'); }, onmessage() {} };
+  stub.status = 'connected';
+  stub.lastHeard = Date.now() - (nodes.GONE_MS + 1000);
+  stub._watch();
+  assert.deepEqual(calls, ['terminate']);
+  const old = stub.ws;
+  stub._close();
+  assert.equal(old.onmessage, null, 'a dropped socket\'s late frames never reach the link');
+  stub.stop();
+
+  // A real socket whose peer stops reading (a laptop that lost power or Wi-Fi: TCP half-open).
+  const http = require('http');
+  const { WebSocketServer } = require('ws');
+  const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); });
+  const wss = new WebSocketServer({ server: srv, path: '/ws' });
+  let dials = 0;
+  wss.on('connection', (c) => {
+    dials++;
+    c.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', title: 'Keynote' }));
+    if (dials === 1) setTimeout(() => c._socket.pause(), 100);   // the first link goes silent: no pong, no close frame read
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const seen = [];
+  const link = new nodes.StagewatchLink({ onStatus: (s) => seen.push(s) });
+  try {
+    link.configure('127.0.0.1:' + srv.address().port, 'swk_testkey');   // secret-scan: fixture
+    for (let i = 0; i < 60 && !link.linked; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(link.linked);
+    await new Promise((r) => setTimeout(r, 200));
+    link.lastHeard = Date.now() - (nodes.GONE_MS + 500);   // 12 s of silence, without waiting for them
+    const t0 = Date.now();
+    const back = () => dials === 2 && link.linked;
+    for (let i = 0; i < 80 && !back(); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(seen.includes('reconnecting'), 'it said so: ' + seen.join(','));
+    assert.equal(dials, 2, 'redialled');
+    assert.ok(link.linked && Date.now() - t0 < 4000, 'connected again within seconds: ' + (Date.now() - t0) + ' ms');
+  } finally { link.stop(); for (const c of wss.clients) c.terminate(); wss.close(); srv.close(); }
 });

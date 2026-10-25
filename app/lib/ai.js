@@ -34,6 +34,7 @@ function threadText(messages, max = 60) {
       const answers = (m.responses || []).map((r) => `${r.name} → ${r.optionIndex >= 0 ? (m.options || [])[r.optionIndex] : r.note}`).join('; ');
       return `[${t}] ${who} asked: ${m.text} [options: ${(m.options || []).join(' / ')}]${answers ? ' answers: ' + answers : ''}`;
     }
+    if (m.type === 'help') return `[${t}] ${who} asked for help (${m.category}): ${m.text || ''}${m.help && m.help.state !== 'open' ? ' [' + m.help.state + (m.help.by ? ' by ' + m.help.by : '') + ']' : ''}`;
     return '';
   }).filter(Boolean).join('\n');
 }
@@ -42,12 +43,16 @@ async function ask(apiKey, system, user, schema, effort, maxTokens, signal) {
   const c = getClient(apiKey);
   if (!c) return { error: 'Add an Anthropic API key in Admin → AI (or set ANTHROPIC_API_KEY).' };
   try {
-    const res = await c.messages.create({
+    // A policy decline is re-run server-side on the model Anthropic recommends for that kind of decline (fallbacks
+    // "default"), so a draft is not lost to a false positive; the whole chain declining is still a refusal below.
+    const res = await c.beta.messages.create({
       model: MODEL,
       max_tokens: maxTokens,
       system,
       messages: [{ role: 'user', content: user }],
       output_config: { effort, format: { type: 'json_schema', schema } },
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
     }, { signal, timeout: 90_000 });
     if (res.stop_reason === 'refusal') return { error: 'Claude declined this request.' };
     if (res.stop_reason === 'max_tokens') return { error: 'The answer was cut short — try a narrower request.' };

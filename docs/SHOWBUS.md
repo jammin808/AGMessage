@@ -139,6 +139,9 @@ one shape:
   address).
 - **AGMessage**: holds the Stagewatch key encrypted at rest (Windows DPAPI where available, else AES with a machine key
   file outside `data/`), sends it in a header — never `?pin=` in a WebSocket URL — and asks for a `node`-scope key.
+  A Patterns' or PlayMap's pairing token it holds the same way, and sends only to a loopback address or over TLS to a
+  certificate pinned for that node or confirmed by a person (at least 16 characters of its fingerprint typed); it never
+  drives them with it — its lines are proposals (§11) — until they issue it a scoped key.
 
 ## 8. What each node publishes and consumes
 
@@ -175,7 +178,8 @@ Show data and keys cross the local network; from 1.2 every web endpoint can be r
   certificate fingerprint, never its name or a certificate authority: the fingerprint from the node's hello (or typed by
   the operator) is pinned per node id on first successful authenticated use, and a later change is refused with
   "CERTIFICATE CHANGED" until the operator accepts it (as SSH does). The hello is unauthenticated, so the pin — not the
-  hello — is the trust.
+  hello — is the trust. AGMessage's links to a Patterns or PlayMap on another machine trust no hello and no first use: the
+  certificate is pinned only once a person types the start of its fingerprint from the node's own screen (§7).
 - **Browsers.** A self-signed certificate shows a browser warning. Each node serves `GET /tls` (a page with the
   fingerprint, how to trust it on Windows, macOS, iOS and Android) and `GET /tls.cer` (the certificate, DER), so a show
   laptop's screens can trust it once. Plain HTTP keeps working unless the operator turns on **Require HTTPS**, which

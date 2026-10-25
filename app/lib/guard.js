@@ -25,6 +25,33 @@ function mac(secret, text, len = 24) {
   return crypto.createHmac('sha256', secret).update(text).digest('base64url').slice(0, len);
 }
 
+/**
+ * Text a person typed, made safe to show anywhere: control characters (C0, DEL, C1) and the bidirectional overrides and
+ * isolates that let a name or file name read differently from what it is (Trojan Source) are dropped, then it is trimmed
+ * and cut to `max` characters.
+ */
+const UNSAFE_TEXT = /[\p{Cc}\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+function cleanText(s, max = 200) {
+  return str(s).replace(UNSAFE_TEXT, '').trim().slice(0, max);
+}
+
+/**
+ * A value a client sent, as a string: a string as it is, a finite number in digits, anything else (an object, a list,
+ * null, true) the empty string. String() is never called on client JSON: an object whose toString is not a function
+ * makes it throw.
+ */
+const str = (v) => (typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
+
+/** The value of one cookie, or null. A parser, not a pattern built from the name. */
+function readCookie(header, name) {
+  for (const part of String(header || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0 || part.slice(0, i).trim() !== name) continue;
+    try { return decodeURIComponent(part.slice(i + 1).trim()); } catch { return null; }
+  }
+  return null;
+}
+
 function safeEqual(a, b) {
   const x = Buffer.from(String(a)), y = Buffer.from(String(b));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
@@ -55,9 +82,11 @@ function checkInvite(secret, room, role, token) {
 
 // ---------- token bucket: `rate` per second, bursts of `burst` ----------
 class Bucket {
-  constructor(rate, burst) { this.rate = rate; this.burst = burst; this.tokens = burst; this.at = Date.now(); }
+  constructor(rate, burst, now = Date.now()) { this.rate = rate; this.burst = burst; this.tokens = burst; this.at = now; }
+  /** The tokens it holds at `now`, taking none. */
+  level(now = Date.now()) { return Math.min(this.burst, this.tokens + ((now - this.at) / 1000) * this.rate); }
   take(n = 1, now = Date.now()) {
-    this.tokens = Math.min(this.burst, this.tokens + ((now - this.at) / 1000) * this.rate);
+    this.tokens = this.level(now);
     this.at = now;
     if (this.tokens < n) return false;
     this.tokens -= n;
@@ -65,9 +94,34 @@ class Bucket {
   }
 }
 
-/** Per-key failure counting: `max` failures in `windowMs` locks the key out until the window passes. */
+/**
+ * A token bucket per key (an address), `cap` keys at most. Past that the fullest buckets go first — a full bucket is the
+ * same as a new one — so a flood of new keys never hands back the allowance of a key that has used its own.
+ */
+class Buckets {
+  constructor(rate, burst, cap = 5000) { this.rate = rate; this.burst = burst; this.cap = cap; this.map = new Map(); }
+  take(key, now = Date.now()) {
+    let b = this.map.get(key);
+    if (!b) {
+      if (this.map.size >= this.cap) this.trim(now);
+      b = new Bucket(this.rate, this.burst, now);
+      this.map.set(key, b);
+    }
+    return b.take(1, now);
+  }
+  trim(now) {
+    const fullest = Array.from(this.map).sort((x, y) => y[1].level(now) - x[1].level(now));
+    for (const [k] of fullest.slice(0, this.map.size - Math.floor(this.cap * 0.9))) this.map.delete(k);
+  }
+}
+
+/**
+ * Per-key failure counting: `max` failures in `windowMs` locks the key out until `windowMs` after the first of them.
+ * At most `cap` keys are kept; past that, ended windows go first and then the keys with the fewest failures, so a flood
+ * of new keys never lifts a lock that is holding.
+ */
 class Lockout {
-  constructor(max = 8, windowMs = 60_000) { this.max = max; this.windowMs = windowMs; this.map = new Map(); }
+  constructor(max = 8, windowMs = 60_000, cap = 10_000) { this.max = max; this.windowMs = windowMs; this.cap = cap; this.map = new Map(); }
   locked(key, now = Date.now()) {
     const e = this.map.get(key);
     return !!e && e.n >= this.max && now - e.t < this.windowMs;
@@ -76,9 +130,18 @@ class Lockout {
     const e = this.map.get(key);
     if (!e || now - e.t > this.windowMs) this.map.set(key, { n: 1, t: now });
     else e.n++;
-    if (this.map.size > 10_000) this.map.clear();
+    if (this.map.size > this.cap) this.trim(now);
   }
   ok(key) { this.map.delete(key); }
+  /** Forget every key `pick` chooses (an admin's new one-time password ends the wait for that name). */
+  forget(pick) { for (const k of this.map.keys()) if (pick(k)) this.map.delete(k); }
+  trim(now) {
+    const keep = Math.floor(this.cap * 0.9);
+    for (const [k, e] of this.map) if (now - e.t > this.windowMs) this.map.delete(k);
+    if (this.map.size <= keep) return;
+    const fewest = Array.from(this.map).sort((x, y) => x[1].n - y[1].n);
+    for (const [k] of fewest.slice(0, this.map.size - keep)) this.map.delete(k);
+  }
 }
 
 /** The caller's address, honouring Cloudflare's header only when the request came through the local tunnel. */
@@ -89,11 +152,25 @@ function clientIp(req) {
   return local && typeof cf === 'string' && cf.length < 64 ? 'cf:' + cf : raw;
 }
 
-/** True only for a request typed on this laptop: loopback and no proxy/tunnel headers. */
+/**
+ * The Host header names this machine's loopback — localhost, 127.0.0.1 or [::1], any port. A page served under another
+ * name that resolves to 127.0.0.1 (DNS rebinding) sends its own name here, and its Origin matches it, so loopback
+ * alone does not say the request was typed on this laptop.
+ */
+function loopbackHost(host) {
+  const h = String(host || '').toLowerCase();
+  const name = h.startsWith('[') ? h.slice(0, h.indexOf(']') + 1) : h.split(':')[0];
+  const port = h.slice(name.length);
+  if (port && !/^:\d{1,5}$/.test(port)) return false;
+  return name === 'localhost' || name === '127.0.0.1' || name === '[::1]';
+}
+
+/** True only for a request typed on this laptop: from loopback, to a loopback name, and no proxy/tunnel headers. */
 function isHostMachine(req) {
   const raw = (req.socket && req.socket.remoteAddress) || '';
   if (!(raw === '127.0.0.1' || raw === '::1' || raw === '::ffff:127.0.0.1')) return false;
   const h = req.headers || {};
+  if (!loopbackHost(h.host)) return false;
   return !h['x-forwarded-for'] && !h['cf-connecting-ip'] && !h['cf-ray'] && !h['forwarded'] && !h['x-real-ip'];
 }
 
@@ -161,7 +238,7 @@ function validUploadUrl(url) {
 }
 
 module.exports = {
-  loadSecret, mac, safeEqual, newIdentity, checkIdentity, makeInvite, checkInvite,
-  Bucket, Lockout, clientIp, isHostMachine, pageHeaders, CSP,
+  loadSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
+  Bucket, Buckets, Lockout, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, str,
   UPLOAD_TYPES, uploadType, validUploadUrl, extOf,
 };

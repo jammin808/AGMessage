@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>AGMessage screen</title>
+  <link rel="stylesheet" href="/display.css" />
+</head>
+<body class="screen" data-kind="black">
+  <!-- One thing at a time, filling the screen. The operator's console says what is on it; this page confirms it. -->
+  <main id="stage" class="stage" aria-live="polite">
+    <section class="layer holding" id="holding"><img id="holdingImg" alt="" hidden /><p class="idle-name" id="idleName"></p></section>
+
+    <section class="layer message" id="message">
+      <div class="tone-band" id="toneBand"><span class="tone-mark" id="toneMark" aria-hidden="true"></span></div>
+      <p class="message-text" id="messageText"></p>
+      <p class="message-sub" id="messageSub"></p>
+    </section>
+
+    <section class="layer file" id="file"><img id="fileImg" alt="" hidden /><canvas id="fileCanvas" hidden></canvas></section>
+
+    <section class="layer countdown" id="countdown">
+      <p class="cd-title" id="cdTitle"></p>
+      <p class="cd-time" id="cdTime">--:--</p>
+      <p class="cd-next" id="cdNext"></p>
+      <div class="cd-strip" id="cdStrip" hidden><span class="tone-mark" id="cdMark" aria-hidden="true"></span><span id="cdText"></span></div>
+    </section>
+
+    <section class="layer clock" id="clock"><p class="clock-time" id="clockTime"></p><p class="clock-date" id="clockDate"></p></section>
+  </main>
+
+  <div class="identify" id="identify" hidden><strong id="idName"></strong><span id="idHall"></span></div>
+  <div class="notice" id="notice" hidden></div>
+  <span class="link-dot" id="linkDot" title="Link to AGMessage"></span>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/display.js"></script>
+</body>
+</html>

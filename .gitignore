@@ -17,3 +17,6 @@ artifacts/
 # OS
 Thumbs.db
 .DS_Store
+
+# The CI build stamp (tools/stamp-build.js); a checkout reads as a local -dev build without it
+app/build.json

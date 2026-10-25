@@ -1,0 +1,6 @@
+# CodeQL reads AGMessage's own code. The vendored browser libraries (pdf.js, mammoth, SheetJS) are pinned upstream
+# releases, checked by their own projects and by the dependency audit; their minified sources only add noise here.
+name: AGMessage
+paths-ignore:
+  - app/public/vendor
+  - app/node_modules

@@ -9,14 +9,22 @@ $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 & (Join-Path $PSScriptRoot 'fetch-runtime.ps1')
 
+# The name says which build this is (app/lib/version.js): a release is AGMessage-Portable-Windows-0.5.0, a CI development
+# build AGMessage-Portable-Windows-0.5.0-dev.17_abc1234, a local one ...-0.5.0-dev_abc1234. CI stamps app\build.json first
+# (tools/stamp-build.js); the bundle carries it, so the running app, /api/health and its hello say the same.
+$full = (& (Join-Path $root 'node\node.exe') (Join-Path $PSScriptRoot 'stamp-build.js') --print).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $full) { throw 'Could not read the version (tools/stamp-build.js --print)' }
+$channel = if (Test-Path app\build.json) { (Get-Content app\build.json -Raw | ConvertFrom-Json).channel } else { 'local' }
 $version = (Get-Content app\package.json -Raw | ConvertFrom-Json).version
-$name = "AGMessage-Portable-Windows-$version"
+$label = if ($channel -eq 'release') { $version } else { $full -replace '\+', '_' }
+$name = "AGMessage-Portable-Windows-$label"
 $stage = Join-Path $root "dist\$name"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force "$stage\app" | Out-Null
 
-Write-Host "==> Staging $name"
+Write-Host "==> Staging $name ($full, $channel)"
 Copy-Item app\server.js, app\supervise.js, app\package.json, app\package-lock.json, app\README.md "$stage\app"
+if (Test-Path app\build.json) { Copy-Item app\build.json "$stage\app" }
 Copy-Item app\lib "$stage\app\lib" -Recurse
 Copy-Item app\public "$stage\app\public" -Recurse
 New-Item -ItemType Directory -Force "$stage\app\data\rooms", "$stage\app\uploads" | Out-Null

@@ -2,8 +2,12 @@
 
 const qs = new URLSearchParams(location.search);
 const ROOM = (qs.get('code') || '').toUpperCase();
-const NAME = qs.get('name') || '';
+// A signed-in account opens a hall with ?code=…&as=account (its name and rights come from the server); anyone else
+// with ?code=…&name=…&role=… from the join page.
+const AS_ACCOUNT = qs.get('as') === 'account';
+let NAME = AS_ACCOUNT ? '' : (qs.get('name') || '');
 const ROLE = qs.get('role') || 'observer';
+const HOME = AS_ACCOUNT ? '/halls.html' : '/';
 const ADMIN_VIEW = qs.get('adminView') === '1';
 // Identity: issued and signed by the server on first join, kept on this device, so nobody can
 // pick someone else's. MY_UID is the id inside it (what messages and reactions carry).
@@ -13,10 +17,16 @@ const INVITE = qs.get('invite') || '';
 let UPLOAD_TOKEN = '';
 let lastSeq = -1;            // the newest change we have; resume from here after a drop
 let joined = false;
+// What this person may do with the hall's Stagewatch (🖥 send now, 📝 propose): the server's answer, from the join and
+// again from stage:targets whenever the link's state or its desk changes — never read off the hall-wide 'stage' event.
 let CAN_STAGE = false;
-let CAN_PROPOSE = false;   // Stagewatch keeps the show's approval queue (Show Bus 1.2 §11)
+let CAN_PROPOSE = false;   // Stagewatch keeps the show's approval queue (Show Bus 1.2 §11) and this person may send there
+let STAGE_KEY = '';        // the link's state and desk the flags were last asked for (a frame moving changes no right)
 let AI_ON = false;
+let CAN_SCREENS = false;   // this account may drive the hall's screens (display.control)
 const HAS_STAGE = ROLE === 'board' || ROLE === 'research';
+// Read only (an observer, a Viewer account): the server refuses posts, pins, reactions and answers, so none is offered.
+const readOnly = () => document.body.dataset.role === 'observer';
 
 // ---------------- UI sync state (declared early to avoid TDZ traps) ----------------
 // These are accessed by pushUserState / setStageCollapsed / setZoom / applyTheme,
@@ -26,13 +36,14 @@ const HAS_STAGE = ROLE === 'board' || ROLE === 'research';
 const _pendingStates = [];
 let _applyingRemote = false;
 
-if (!ROOM || !NAME) location.href = '/';
+if (!ROOM || (!NAME && !AS_ACCOUNT)) location.href = '/';
 
 document.body.dataset.role = ROLE;
 const _roomChip = document.getElementById('roomChip');
 _roomChip.textContent = ROOM;
 if (ROLE === 'observer') _roomChip.hidden = true;
-document.getElementById('whoami').textContent = `${NAME} · ${roleLabel(ROLE)}`;
+document.getElementById('whoami').textContent = AS_ACCOUNT ? '' : `${NAME} · ${roleLabel(ROLE)}`;
+document.querySelectorAll('a[href="/"].btn').forEach((a) => { a.href = HOME; if (AS_ACCOUNT) a.textContent = 'All halls'; });
 document.title = `AGMessage · ${ROOM}`;
 
 // ---------------- Theme (dark mode) ----------------
@@ -85,35 +96,50 @@ socket.on('connect', () => {
 
 /** Join (or rejoin after a drop): the server sends only what we missed when it still has it. */
 function rejoin() {
-  socket.emit('join', { roomCode: ROOM, name: NAME, role: ROLE, adminView: ADMIN_VIEW, uid: IDENTITY, invite: INVITE, since: joined ? lastSeq : undefined }, (res) => {
+  const who = AS_ACCOUNT ? { as: 'account' } : { name: NAME, role: ROLE, uid: IDENTITY, invite: INVITE };
+  socket.emit('join', { roomCode: ROOM, adminView: ADMIN_VIEW, since: joined ? lastSeq : undefined, ...who }, (res) => {
     if (!res || !res.ok) {
       notify(res?.error || 'Could not join room', true);
-      setTimeout(() => { location.href = '/'; }, 2500);
+      const to = res && res.signIn ? '/?next=' + encodeURIComponent(location.pathname + location.search) : HOME;
+      setTimeout(() => { location.href = to; }, 2500);
       return;
     }
-    if (res.identity) { IDENTITY = res.identity; try { localStorage.setItem('agm.id', IDENTITY); } catch (e) {} }
+    // An account's role in a hall is the server's, from its rights; the page is built for the URL's at load, so a URL
+    // that says otherwise (a bookmark, an old link) opens again with the right one. Once: the next join agrees.
+    if (AS_ACCOUNT && res.role && res.role !== ROLE) {
+      const q = new URLSearchParams(location.search);
+      q.set('role', res.role);
+      location.replace(location.pathname + '?' + q.toString());
+      return;
+    }
+    if (res.account) {
+      NAME = res.account.name;
+      document.getElementById('whoami').textContent = `${res.account.name} · ${res.account.roleLabel}`;
+    }
+    if (res.identity) { IDENTITY = res.identity; try { localStorage.setItem('agm.id', IDENTITY); } catch { /* private mode: identity lives for this tab only */ } }
     MY_UID = res.uid || MY_UID;
     UPLOAD_TOKEN = res.uploadToken || '';
+    const flagsWere = CAN_STAGE + '|' + CAN_PROPOSE;
     CAN_STAGE = !!res.canSendToStage;
     CAN_PROPOSE = !!res.canPropose;
+    STAGE_KEY = stageKey(res.stage);
     AI_ON = !!res.ai;
     document.querySelectorAll('.ai-btn').forEach((b) => { b.hidden = !AI_ON; });
     // Without AI, nothing else changes: say so where the draft button would be (research team only sees it).
     document.querySelectorAll('.ai-off-note').forEach((n) => { n.hidden = AI_ON; });
     if (res.note) notify(res.note);
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
+    if (readOnly()) { document.getElementById('directorCompose').hidden = true; document.getElementById('researchCompose').hidden = true; }
     renderStage(res.stage);
+    document.getElementById('helpBtn').hidden = (res.role || ROLE) === 'observer';
+    if (AS_ACCOUNT || ADMIN_VIEW) Screens.load();
     (res.seen || []).forEach(noteSeen);
-    if (res.roomName) {
-      const chip = document.getElementById('roomChip');
-      if (chip) chip.title = 'Meeting: ' + res.roomName + ' (' + ROOM + ')';
-      const titleStrong = document.querySelector('.app-title strong');
-      if (titleStrong && res.roomName) {
-        titleStrong.textContent = res.roomName;
-      }
-    }
+    if (res.roomName) setRoomTitle(res.roomName);
     if (Array.isArray(res.ops)) {
       for (const op of res.ops) applyOp(op);       // just the gap
+      // The hall's Stagewatch may have come or gone while the page was away: the messages already drawn offer what it
+      // offers now.
+      if (flagsWere !== CAN_STAGE + '|' + CAN_PROPOSE) refreshProposeButtons();
     } else {
       renderHistory(res.history || []);
     }
@@ -123,6 +149,15 @@ function rejoin() {
     refreshSeenLines();
     reportSeen();
   });
+}
+
+/** The hall's name in the header (a rename arrives as a numbered change, like everything else). */
+function setRoomTitle(name) {
+  if (!name) return;
+  const chip = document.getElementById('roomChip');
+  if (chip) chip.title = 'Meeting: ' + name + ' (' + ROOM + ')';
+  const titleStrong = document.querySelector('.app-title strong');
+  if (titleStrong) titleStrong.textContent = name;
 }
 
 // Every change carries the room's sequence number. A jump means we missed one: resume from what we have.
@@ -140,9 +175,12 @@ function applyOp(op) {
     if ('pinned' in op.f) setMessagePinned(op.id, op.f.pinned);
     if ('reactions' in op.f) onReact({ messageId: op.id, reactions: op.f.reactions });
     if ('stage' in op.f) setStage(op.id, op.f.stage);
+    if ('proposal' in op.f) { const m = findMessage(op.id); if (m) m.proposal = op.f.proposal; const n = messagesById.get(op.id); if (n && m) (m.type === 'system' ? renderProposalLine(n, op.f.proposal) : rerenderMessage(n, m)); }
+    if ('help' in op.f) setHelp(op.id, op.f.help);
   }
   else if (op.o === 'del') removeMessageLocal(op.id);
   else if (op.o === 'reset') onReset();
+  else if (op.o === 'meta' && typeof op.name === 'string') setRoomTitle(op.name);
   if (op.s > lastSeq) lastSeq = op.s;
 }
 
@@ -158,12 +196,21 @@ socket.on('pinUpdate', ({ messageId, pinned, seq }) => {
   if (!bump(seq)) return;
   setMessagePinned(messageId, pinned);
 });
-socket.on('kicked', ({ reason }) => { notify(reason || 'You were removed from the meeting.', true); setTimeout(() => { location.href = '/'; }, 2500); });
+socket.on('kicked', ({ reason }) => { notify(reason || 'You were removed from the meeting.', true); setTimeout(() => { location.href = HOME; }, 2500); });
+// An admin changed this account: the server closes the socket; open the hall again with the rights it has now.
+socket.on('account:changed', ({ words } = {}) => { notify(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1500); });
 socket.on('roleChanged', ({ role }) => { notify('The admin changed your role to ' + roleLabel(role) + ' — reloading…'); setTimeout(() => { const q = new URLSearchParams(location.search); q.set('role', role); location.search = q.toString(); }, 1500); });
+const stageKey = (v) => (v ? v.status || '' : 'off') + '|' + !!(v && v.desk);
 socket.on('stage', (v) => {
-  const desk = !!(v && v.desk);
-  if (desk !== CAN_PROPOSE) { CAN_PROPOSE = desk; refreshProposeButtons(); }
   renderStage(v);
+  const key = stageKey(v);
+  if (!joined || key === STAGE_KEY) return;
+  STAGE_KEY = key;
+  socket.emit('stage:targets', {}, (r) => {
+    if (!r || !r.ok) return;
+    const s = !!r.canSend, p = !!r.canPropose;
+    if (s !== CAN_STAGE || p !== CAN_PROPOSE) { CAN_STAGE = s; CAN_PROPOSE = p; refreshProposeButtons(); }
+  });
 });
 function refreshProposeButtons() {
   for (const [id, node] of messagesById) { const m = findMessage(id); if (m && m.type !== 'system') rerenderMessage(node, m); }
@@ -182,12 +229,13 @@ function proposalLineText(p) {
   if (!p) return '';
   const by = p.by ? ' by ' + p.by : '';
   switch (p.state) {
-    case 'pending': return '📝 Waiting for the show desk to approve';
+    case 'pending': return '📝 Waiting for the show desk to approve' + (p.to ? ' — for ' + p.to : '');
     case 'approved': return '✓ Approved' + by + ' — running';
     case 'rejected': return '✗ Not approved' + by;
     case 'done': return '✓ Approved' + by + ' and done' + (p.words ? ': ' + p.words : '');
     case 'failed': return '⚠ Approved' + by + ' but it failed' + (p.words ? ': ' + p.words : '');
     case 'undelivered': return '⚠ Approved' + by + ' but it never reached Stagewatch';
+    case 'lost': return '⚠ ' + (p.words || 'Stagewatch no longer has this request — ask again if it is still wanted');
     default: return '';
   }
 }
@@ -205,6 +253,7 @@ function renderProposalLine(host, p) {
 }
 socket.on('seen', (s) => { noteSeen(s); refreshSeenLines(); });
 socket.on('roomReset', ({ seq } = {}) => { if (bump(seq)) onReset(); });
+socket.on('roomMeta', ({ name, seq } = {}) => { if (bump(seq)) setRoomTitle(name); });
 function onReset() {
   // Admin cleared the room. Wipe local state but stay joined.
   feed.innerHTML = '';
@@ -230,6 +279,7 @@ function stageLineText(st) {
   const by = st.by ? ' by ' + st.by : '';
   if (st.ack === 'done') return '✓ Acknowledged on stage' + by;
   if (st.ack === 'seen') return '✓ Seen on stage' + by;
+  if (st.ack === 'lost') return '✕ No longer followed: that Stagewatch restarted, or this hall now follows another — the speaker\'s acknowledgement cannot be read';
   if (st.ack === 'sent') return st.receipt === 'applied' ? '⏳ On the speaker\'s screen — waiting for them to acknowledge' : '⏳ Stagewatch took it — waiting for the speaker';
   return st.receipt === 'applied' ? 'On the speaker\'s screen' : 'Sent to Stagewatch (not confirmed on screen)';
 }
@@ -390,6 +440,8 @@ function rerenderMessage(node, msg) {
   node.dataset.pinned = msg.pinned ? '1' : '0';
   node.classList.toggle('pinned', !!msg.pinned);
   node.classList.toggle('is-action', msg.type === 'action');
+  node.classList.toggle('is-help', msg.type === 'help');
+  if (msg.type === 'help') node.dataset.help = (msg.help && msg.help.state) || 'open';
   node.classList.toggle('mine', isMine(msg));
   node.classList.toggle('priority', !!msg.priority);
   const from = node.querySelector('.from');
@@ -398,6 +450,12 @@ function rerenderMessage(node, msg) {
   const body = node.querySelector('.body');
   const pinBtn = node.querySelector('.pin-btn');
   const delBtn = node.querySelector('.del-btn');
+  const screenBtn = node.querySelector('.screen-btn');
+  if (screenBtn) {
+    const showable = (msg.type === 'text' && !!msg.text) || (msg.type === 'file' && /^(image\/(png|jpeg|gif|webp)|application\/pdf)$/.test(msg.mime || ''));
+    screenBtn.hidden = !(CAN_SCREENS && showable);
+    screenBtn.onclick = showable ? () => Screens.offer(msg) : null;
+  }
   const stageBtn = node.querySelector('.stage-btn');
   if (stageBtn) {
     const canStage = CAN_STAGE && document.body.dataset.role === 'research' && (msg.type === 'text' || msg.type === 'action') && !!msg.text;
@@ -414,18 +472,15 @@ function rerenderMessage(node, msg) {
   }
   const proposeBtn = node.querySelector('.propose-btn');
   if (proposeBtn) {
-    const canPropose = CAN_PROPOSE && document.body.dataset.role === 'research' && (msg.type === 'text' || msg.type === 'action') && !!msg.text;
+    const canPropose = (CAN_PROPOSE || CAN_STAGE) && document.body.dataset.role === 'research' && (msg.type === 'text' || msg.type === 'action') && !!msg.text;
     proposeBtn.hidden = !canPropose;
-    proposeBtn.onclick = canPropose ? () => {
-      proposeBtn.disabled = true;
-      socket.emit('stage:propose', { messageId: msg.id }, (res) => {
-        proposeBtn.disabled = false;
-        notify(res && res.ok ? 'Proposed — the show caller approves it in Stagewatch; its state shows on the message.' : (res && res.error) || 'Could not propose it.', !(res && res.ok));
-      });
-    } : null;
+    proposeBtn.onclick = canPropose ? () => ToStagewatch.open(msg) : null;
   }
   if (msg.from) {
     from.textContent = msg.from.name;
+    // Staff sign in; guests join with a code: the mark says which, so a name alone is never taken on trust.
+    from.classList.toggle('acct', !!msg.from.acct);
+    from.title = msg.from.acct ? 'Signed in with an AGMessage account' : 'Joined with a code';
     rt.textContent = roleLabel(msg.from.role);
     rt.dataset.role = msg.from.role;
   }
@@ -457,6 +512,8 @@ function rerenderMessage(node, msg) {
     body.appendChild(p);
   } else if (msg.type === 'file') {
     body.appendChild(renderFileBody(msg));
+  } else if (msg.type === 'help') {
+    body.appendChild(renderHelpBody(msg));
   } else if (msg.type === 'action') {
     body.appendChild(renderActionBody(msg));
   }
@@ -507,36 +564,21 @@ function rerenderMessage(node, msg) {
     socket.emit('pin', { messageId: msg.id, pinned });
   };
 
-  // Forward button — opens a small picker of other rooms the user is in
+  // Forward button — opens a small picker of the other halls this person may post in (a help request stays in its hall)
   const fwdBtn = node.querySelector('.fwd-btn');
   if (fwdBtn) {
-    fwdBtn.onclick = (e) => {
-      e.stopPropagation();
-      socket.emit('myRooms', (res) => {
-        if (!res || !res.ok) {
-          alert('Could not check your other rooms.');
-          return;
-        }
-        if (!res.rooms.length) {
-          alert('To forward: open AGMessage in another tab and join another room with the same name (' + NAME + ').');
-          return;
-        }
-        showForwardMenu(fwdBtn, res.rooms, msg.id);
-      });
-    };
+    fwdBtn.hidden = msg.type === 'help';
+    fwdBtn.onclick = (e) => { e.stopPropagation(); offerForward(fwdBtn, msg.id); };
   }
 
-  // Show "Forwarded from XYZ12 by Sarah" tag if applicable
+  // "Forwarded from Hall 2 · originally by Sarah": the hall by its name (a forward never carries its code).
   if (msg.forwardedFrom) {
     const meta = document.createElement('div');
     meta.className = 'fwd-meta';
     const orig = msg.forwardedFrom.originalAuthor && msg.forwardedFrom.originalAuthor !== msg.from?.name
       ? ' · originally by ' + msg.forwardedFrom.originalAuthor
       : '';
-    const fromLabel = msg.forwardedFrom.roomName
-      ? msg.forwardedFrom.roomName + ' (' + msg.forwardedFrom.roomCode + ')'
-      : msg.forwardedFrom.roomCode;
-    meta.textContent = '↗ Forwarded from ' + fromLabel + orig;
+    meta.textContent = '↗ Forwarded from ' + (msg.forwardedFrom.roomName || 'another hall') + orig;
     body.prepend(meta);
   }
 
@@ -556,6 +598,47 @@ function rerenderMessage(node, msg) {
     }
   }
 }
+
+// ---------------- Help requests: the category and the words; who is on the way, then who resolved it ----------------
+const HELP_WORDS = { open: 'Waiting for someone', coming: 'On the way', resolved: 'Resolved' };
+function renderHelpBody(msg) {
+  const wrap = document.createElement('div');
+  wrap.className = 'help-body';
+  const head = document.createElement('p');
+  head.className = 'help-head';
+  const cat = document.createElement('strong');
+  cat.textContent = 'Help — ' + (msg.category || 'Other');
+  head.appendChild(cat);
+  if (msg.text) head.appendChild(document.createTextNode(' ' + msg.text));
+  wrap.appendChild(head);
+  const h = msg.help || { state: 'open' };
+  const line = document.createElement('div');
+  line.className = 'help-line';
+  line.dataset.state = h.state;
+  line.textContent = (h.state === 'resolved' ? '✓ ' : h.state === 'coming' ? '▶ ' : '■ ') + HELP_WORDS[h.state] + (h.by ? ' — ' + h.by : '') + (h.at && h.state !== 'open' ? ' at ' + formatTime(h.at) : '');
+  wrap.appendChild(line);
+  if (h.state !== 'resolved' && document.body.dataset.role !== 'observer') {
+    const row = document.createElement('div');
+    row.className = 'help-actions';
+    const act = (label, state) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn small' + (state === 'coming' ? ' primary' : ''); b.textContent = label;
+      b.onclick = () => socket.emit('help:respond', { code: ROOM, messageId: msg.id, state }, (r) => { if (!r || !r.ok) notify((r && r.error) || 'Not sent.', true); });
+      row.appendChild(b);
+    };
+    if (h.state === 'open') act('On my way', 'coming');
+    act('Resolved', 'resolved');
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+function setHelp(messageId, help) {
+  const msg = findMessage(messageId);
+  if (msg) msg.help = help;
+  const node = messagesById.get(messageId);
+  if (node && msg) rerenderMessage(node, msg);
+}
+socket.on('helpUpdate', ({ messageId, help, seq }) => { if (bump(seq)) setHelp(messageId, help); });
 
 function renderFileBody(msg) {
   const wrap = document.createElement('div');
@@ -605,14 +688,15 @@ function renderActionBody(msg) {
     b.className = 'btn action-btn';
     b.dataset.idx = String(i);
     b.textContent = opt;
+    b.disabled = readOnly();
     b.onclick = () => {
       socket.emit('actionResponse', { messageId: msg.id, optionIndex: i });
     };
     btnRow.appendChild(b);
   });
   // Both board and research can free-text reply to an action prompt.
-  // Observers are read-only.
-  if (HAS_STAGE) {
+  // Observers are read-only: they see the options and the tally, and answer nothing.
+  if (HAS_STAGE && !readOnly()) {
     const other = document.createElement('button');
     other.type = 'button';
     other.className = 'btn ghost small reply-text-btn';
@@ -744,17 +828,8 @@ function refreshPinned() {
     // re-wired here.
     const fb = clone.querySelector(".fwd-btn");
     if (fb) {
-      fb.onclick = (e) => {
-        e.stopPropagation();
-        socket.emit("myRooms", (res) => {
-          if (!res || !res.ok) { alert("Could not check your other rooms."); return; }
-          if (!res.rooms.length) {
-            alert("To forward: open AGMessage in another tab and join another room with the same name (" + NAME + ").");
-            return;
-          }
-          showForwardMenu(fb, res.rooms, m.id);
-        });
-      };
+      fb.hidden = m.type === 'help';
+      fb.onclick = (e) => { e.stopPropagation(); offerForward(fb, m.id); };
     }
     const rxb = clone.querySelector(".react-btn");
     if (rxb) {
@@ -836,6 +911,8 @@ function setDocText(msg, text) {
 /** Office documents become HTML here: keep the formatting, drop anything active. */
 function sanitizeHtml(html) {
   const t = document.createElement('template');
+  // The sanitiser's own parse: a <template> runs nothing, and only what survives the filter below leaves it.
+  // eslint-disable-next-line agm/no-unescaped-html -- this is the escaper: the markup is parsed inert, then filtered
   t.innerHTML = String(html || '');
   t.content.querySelectorAll('script,style,iframe,object,embed,link,meta,base,form,input,button,textarea,select,svg,math').forEach((n) => n.remove());
   t.content.querySelectorAll('*').forEach((el) => {
@@ -914,7 +991,7 @@ function buildDocPreview(msg) {
     fetch(msg.url).then((r) => r.arrayBuffer()).then((ab) => {
       if (typeof XLSX === 'undefined') throw new Error('Spreadsheet renderer not loaded');
       const wb = XLSX.read(ab, { type: 'array' });
-      try { setDocText(msg, wb.SheetNames.slice(0, 8).map((n) => '# ' + n + '\n' + XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n\n')); } catch (e) {}
+      try { setDocText(msg, wb.SheetNames.slice(0, 8).map((n) => '# ' + n + '\n' + XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n\n')); } catch { /* the preview still shows; only the AI's copy of the text is missing */ }
       host.innerHTML = '';
       const view = document.createElement('div');
       view.className = 'sheet-view';
@@ -1104,7 +1181,7 @@ function refreshDocPinnedList() {
     const ico = (m.mime || '').startsWith('image/') ? '🖼' :
                 (m.mime === 'application/pdf' ? '📕' : '📄');
     open.innerHTML =
-      `<span class="ico">${ico}</span>` +
+      `<span class="ico">${escapeHtml(ico)}</span>` +
       `<span class="name">${escapeHtml(m.filename)}</span>`;
     open.onclick = () => openDocInPanel(m);
     const unpin = document.createElement('button');
@@ -1272,7 +1349,7 @@ function renderUsers(users) {
   list.innerHTML = '';
   users.forEach((u) => {
     const li = document.createElement('li');
-    li.innerHTML = `<span class="role-tag" data-role="${u.role}">${roleLabel(u.role)}</span> ${escapeHtml(u.name)}`;
+    li.innerHTML = `<span class="role-tag" data-role="${escapeHtml(u.role)}">${escapeHtml(roleLabel(u.role))}</span> ${escapeHtml(u.name)}`;
     list.appendChild(li);
   });
   peopleBtn.textContent = `People · ${users.length}`;
@@ -1474,7 +1551,7 @@ async function handleFiles(files) {
   filePreview.textContent = `Uploading ${file.name}…`;
   try {
     const res = await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-AGM-Upload': UPLOAD_TOKEN } });
-    if (!res.ok) { let why = 'Upload failed.'; try { why = (await res.json()).error || why; } catch (e) {} throw new Error(why); }
+    if (!res.ok) { let why = 'Upload failed.'; try { why = (await res.json()).error || why; } catch { /* not JSON: the status words stand */ } throw new Error(why); }
     const data = await res.json();
     pendingFile = data;
     renderFilePreview();
@@ -1540,8 +1617,8 @@ filePane?.addEventListener('submit', (e) => {
 // ---------------- Helpers ----------------
 function roleLabel(role) {
   // 'director' is a legacy alias kept for old persisted history
-  return role === 'board' || role === 'director' ? 'Board' :
-         role === 'research' ? 'Research' :
+  return role === 'board' || role === 'director' ? 'On stage' :
+         role === 'research' ? 'Backstage' :
          role === 'observer' ? 'Observer' : role;
 }
 function formatTime(ts) {
@@ -1592,6 +1669,19 @@ if (ADMIN_VIEW) {
   });
 }
 
+
+/** The forward picker: the server lists only the other halls this person is in that would take this message. */
+function offerForward(anchor, messageId) {
+  socket.emit('myRooms', { messageId }, (res) => {
+    if (!res || !res.ok) { alert('Could not check your other halls.'); return; }
+    if (!res.rooms.length) {
+      const m = findMessage(messageId);
+      alert('To forward, open another hall where you may ' + (m && m.type === 'file' ? 'share files' : 'post') + ' (in another tab, as ' + NAME + ').');
+      return;
+    }
+    showForwardMenu(anchor, res.rooms, messageId);
+  });
+}
 
 function showForwardMenu(anchor, otherRooms, messageId) {
   const old = document.getElementById('fwdMenu');
@@ -1731,7 +1821,7 @@ socket.on('userState:push', ({ key, value }) => {
 // ---------- Mentions: highlight @Name in rendered text ----------
 function renderMessageText(text) {
   const safe = escapeHtml(text || '');
-  return safe.replace(/(^|\s)(@[\w][\w.\-]{0,40})/g,
+  return safe.replace(/(^|\s)(@[\w][\w.-]{0,40})/g,
     (_m, pre, mention) => pre + '<span class="mention">' + mention + '</span>');
 }
 
@@ -1756,7 +1846,8 @@ function renderReactions(node, reactions) {
     pill.type = 'button';
     pill.className = 'rx-pill' + (data.mine ? ' mine' : '');
     pill.title = data.names.join(', ');
-    pill.innerHTML = '<span>' + emoji + '</span> <small>' + data.n + '</small>';
+    pill.innerHTML = '<span>' + escapeHtml(emoji) + '</span> <small>' + escapeHtml(String(data.n)) + '</small>';
+    pill.disabled = readOnly();
     pill.onclick = () => socket.emit('react', { messageId: id, emoji });
     rx.appendChild(pill);
   }
@@ -1837,3 +1928,244 @@ function consumeReplyTo() {
   if (replyState) cancelReply();
   return r;
 }
+
+// ---------------- Ask for help: a category and a few words, to the hall and to the project managers' board ----------------
+(function () {
+  const CATS = ['Sound', 'Vision', 'Lighting', 'Stage', 'Presenter', 'IT / network', 'Other'];
+  const dlg = document.getElementById('helpDialog');
+  const box = document.getElementById('helpCats');
+  for (const [i, c] of CATS.entries()) {
+    const l = document.createElement('label');
+    l.className = 'help-cat';
+    const r = document.createElement('input');
+    r.type = 'radio'; r.name = 'helpCat'; r.value = c; r.checked = i === 0;
+    l.appendChild(r);
+    l.appendChild(document.createTextNode(c));
+    box.appendChild(l);
+  }
+  document.getElementById('helpBtn').addEventListener('click', () => { document.getElementById('helpText').value = ''; dlg.showModal(); });
+  document.getElementById('helpForm').addEventListener('submit', (e) => {
+    if (e.submitter && e.submitter.value === 'cancel') return;
+    e.preventDefault();
+    const category = (box.querySelector('input:checked') || {}).value || 'Other';
+    socket.emit('message', { type: 'help', category, text: document.getElementById('helpText').value.trim() }, (r) => {
+      if (!r || !r.ok) { notify((r && r.error) || 'Not sent.', true); return; }
+      dlg.close();
+      notify('Help request sent — it stays up until someone marks it resolved.');
+    });
+  });
+})();
+
+// ---------------- Screens: what this hall's displays show (accounts with display.control) ----------------
+// Tick the screens, then take: holding, countdown, clock, black, a message (alone, or under the countdown — the
+// speaker's comfort monitor), or a file from the hall. Each screen says what it showed: ✓ on screen only once it has.
+const Screens = (function () {
+  const $ = (id) => document.getElementById(id);
+  const dlg = $('screensDialog');
+  let list = [];
+  let manage = false;
+  let holding = '';
+  let holdingChoice = null;     // the manager's pick in the holding list, not saved yet ("Use it"): kept across refreshes
+  let pending = null;           // a message or file offered from the feed, waiting for "Show"
+  const ticked = new Set();
+  const refused = new Map();    // screen id -> why the last take did not reach it (its row says so until the next take)
+
+  function load() {
+    socket.emit('display:list', { code: ROOM }, (r) => {
+      if (!r || !r.ok) return;
+      const first = !CAN_SCREENS;
+      CAN_SCREENS = true;
+      $('screensBtn').hidden = false;
+      list = r.displays; manage = r.manage; holding = r.holding || '';
+      if (first) { for (const d of list) ticked.add(d.id); refreshScreenButtons(); }
+      render();
+    });
+  }
+  function refreshScreenButtons() { for (const [id, node] of messagesById) { const m = findMessage(id); if (m && m.type !== 'system') rerenderMessage(node, m); } }
+
+  function render() {
+    const ul = $('screenList');
+    ul.textContent = '';
+    $('screensEmpty').hidden = list.length > 0;
+    $('screensManage').hidden = !manage;
+    for (const d of list) {
+      const li = document.createElement('li');
+      li.className = 'screen-item';
+      li.dataset.state = d.state;
+      const pick = document.createElement('input');
+      pick.type = 'checkbox'; pick.checked = ticked.has(d.id); pick.setAttribute('aria-label', 'Show on ' + d.name);
+      pick.onchange = () => { if (pick.checked) ticked.add(d.id); else ticked.delete(d.id); syncAll(); };
+      const name = document.createElement('strong'); name.textContent = d.name;
+      const st = document.createElement('span'); st.className = 'screen-state'; st.textContent = d.mark + ' ' + d.words;
+      const what = document.createElement('span'); what.className = 'screen-showing'; what.textContent = d.showing;
+      const head = document.createElement('div'); head.className = 'screen-line';
+      head.append(pick, name, st);
+      if (refused.has(d.id)) { const no = document.createElement('span'); no.className = 'screen-refused'; no.textContent = '✕ the last take did not reach it: ' + refused.get(d.id); head.append(no); }
+      const acts = document.createElement('div'); acts.className = 'screen-acts';
+      acts.appendChild(btn('Identify', () => socket.emit('display:identify', { id: d.id }, (r) => notify(r && r.ok ? (r.screens ? 'Showing its name on ' + (r.screens > 1 ? 'its ' + r.screens + ' screens' : 'the screen') + ' for 6 seconds.' : 'No screen has this link open.') : (r && r.error) || 'Not sent.', !(r && r.ok)))));
+      if (manage) {
+        acts.appendChild(btn('Copy link', () => copy(location.origin + d.path)));
+        const open = document.createElement('a'); open.className = 'btn ghost small'; open.href = d.path; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open';
+        acts.appendChild(open);
+        acts.appendChild(btn('Rename', () => { const n = prompt('Name this screen', d.name); if (n) socket.emit('display:update', { id: d.id, name: n }, done('Renamed.')); }));
+        acts.appendChild(btn('New link', () => { if (confirm('Give ' + d.name + ' a new link? The old one stops at once, on every screen that has it.')) socket.emit('display:rotate', { id: d.id }, (r) => { if (r && r.ok) { copy(location.origin + r.path); notify('New link copied — open it on the screen.'); } else notify((r && r.error) || 'Not changed.', true); }); }));
+        acts.appendChild(btn('Remove', () => { if (confirm('Remove ' + d.name + '? Its link stops working.')) socket.emit('display:remove', { id: d.id }, done('Removed.')); }));
+      }
+      li.append(head, what, acts);
+      ul.appendChild(li);
+    }
+    const pickH = $('holdingPick');
+    const want = holdingChoice !== null ? holdingChoice : holding;
+    pickH.length = 1;
+    const images = allMessages.filter((m) => m.type === 'file' && /^image\/(png|jpeg|gif|webp)$/.test(m.mime || ''));
+    for (const m of images) { const o = document.createElement('option'); o.value = m.url; o.textContent = m.filename; pickH.appendChild(o); }
+    pickH.value = want;
+    if (pickH.value !== want) { pickH.value = holding; holdingChoice = null; }   // the picked image is gone from the hall
+    const cur = images.find((m) => m.url === holding);
+    $('holdingName').textContent = holding ? (cur ? cur.filename : 'an image') : 'none';
+    syncAll();
+    renderPending();
+  }
+  function syncAll() { $('screensAll').checked = list.length > 0 && list.every((d) => ticked.has(d.id)); }
+  function btn(label, onclick) { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small'; b.textContent = label; b.onclick = onclick; return b; }
+  function done(words) { return (r) => notify(r && r.ok ? words : (r && r.error) || 'Not changed.', !(r && r.ok)); }
+  async function copy(text) {
+    try { await navigator.clipboard.writeText(text); notify('Link copied.'); } catch { prompt('Copy this screen link', text); }
+  }
+
+  /**
+   * Put a content on every ticked screen, in one request however many are ticked; say how many took it (each confirms on
+   * its own line when it has shown it) and name the ones it did not reach.
+   */
+  function take(content) {
+    const ids = list.filter((d) => ticked.has(d.id)).map((d) => d.id);
+    if (!ids.length) { notify('Tick at least one screen.', true); return; }
+    const names = new Map(list.map((d) => [d.id, d.name]));   // as ticked, though the list may be re-read meanwhile
+    socket.emit('display:take', { ids, content }, (r) => {
+      const results = r && Array.isArray(r.results) ? r.results : [];
+      if (!results.length) { notify((r && r.error) || 'Not sent.', true); return; }
+      refused.clear();
+      for (const x of results) if (!x.ok) refused.set(x.id, x.error || 'not sent');
+      const sent = results.length - refused.size;
+      if (!refused.size) notify('Sent to ' + sent + ' screen' + (sent === 1 ? '' : 's') + ' — each shows ✓ once it is on screen.');
+      else notify('Sent to ' + sent + ' of ' + results.length + ' screens. Not to ' + Array.from(refused.keys(), (id) => names.get(id) || id).join(', ') + ': ' + refused.values().next().value, true);
+      render();
+    });
+  }
+
+  // The dialog opens with the saved holding image picked, whether Screens or ⧉ opens it: an unsaved pick lives only as
+  // long as the opening it was made in (cleared here, not on "close", which a hidden tab's browser may hold back).
+  function open() {
+    if (dlg.open) return;
+    holdingChoice = null;
+    dlg.showModal();
+  }
+  function offer(msg) {
+    pending = msg;
+    if (msg.type === 'text') { $('screenMsgText').value = msg.text.slice(0, 300); pending = null; }
+    else $('pendingPage').value = '1';   // each file offered starts on its first page
+    open();
+    render();
+    if (!pending) $('screenMsgText').focus();
+  }
+  function renderPending() {
+    $('screensPending').hidden = !pending;
+    if (!pending) return;
+    const pdf = pending.mime === 'application/pdf';
+    $('pendingWords').textContent = 'Show “' + pending.filename + '”';
+    $('pendingPageWrap').hidden = !pdf;
+  }
+
+  $('screensBtn').addEventListener('click', () => { open(); load(); });
+  $('screensClose').addEventListener('click', () => dlg.close());
+  $('screensAll').addEventListener('change', () => { ticked.clear(); if ($('screensAll').checked) for (const d of list) ticked.add(d.id); render(); });
+  for (const b of document.querySelectorAll('.screens-bar [data-take]')) b.addEventListener('click', () => take({ kind: b.dataset.take }));
+  $('screenMsgForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = $('screenMsgText').value.trim();
+    const tone = $('screenMsgTone').value;
+    if ($('screenMsgUnder').checked) take({ kind: 'countdown', text, tone });
+    else if (!text) notify('Type the message first.', true);
+    else take({ kind: 'message', text, tone });
+  });
+  $('pendingShow').addEventListener('click', () => {
+    if (!pending) return;
+    take({ kind: 'file', url: pending.url, name: pending.filename, page: Math.max(1, parseInt($('pendingPage').value, 10) || 1) });
+    pending = null; renderPending();
+  });
+  $('pendingCancel').addEventListener('click', () => { pending = null; renderPending(); });
+  $('addScreenBtn').addEventListener('click', () => {
+    const name = $('newScreenName').value.trim();
+    if (!name) { notify('Name the screen first.', true); return; }
+    socket.emit('display:create', { code: ROOM, name }, (r) => {
+      if (!r || !r.ok) { notify((r && r.error) || 'Not added.', true); return; }
+      $('newScreenName').value = '';
+      ticked.add(r.display.id);
+      copy(location.origin + r.display.path);
+      notify(r.display.name + ' added — its link is copied: open it on that screen.');
+    });
+  });
+  $('holdingPick').addEventListener('change', () => { holdingChoice = $('holdingPick').value === holding ? null : $('holdingPick').value; });
+  $('holdingSave').addEventListener('click', () => {
+    const image = $('holdingPick').value;
+    socket.emit('display:hallHolding', { code: ROOM, image }, (r) => { if (r && r.ok) { holding = image; holdingChoice = null; } done('Holding image saved.')(r); });
+  });
+  socket.on('displays:changed', ({ code } = {}) => { if (code === ROOM && CAN_SCREENS) load(); });
+  return { load, offer };
+})();
+
+// ---------------- Send to Stagewatch: where a message goes — sent now (the speaker's screen), or asked of the operator ----------------
+const ToStagewatch = (function () {
+  const $ = (id) => document.getElementById(id);
+  const dlg = $('swDialog');
+  let source = null;
+  let caps = { canSend: false, canPropose: false };
+  function sync() {
+    const dest = $('swDest').value;
+    const speaker = dest === 'speaker';
+    $('swUrgWrap').hidden = !speaker;
+    $('swNow').hidden = !(speaker && caps.canSend);
+    $('swPropose').hidden = !caps.canPropose;
+    $('swHow').textContent = !caps.canPropose && !speaker ? 'This Stagewatch keeps no show desk, so only the speaker\'s screen can be sent to directly.'
+      : caps.canPropose ? 'Ask the operator: the show caller approves it in Stagewatch\'s Copilot, and its state shows on the message.' + (speaker && caps.canSend ? ' Send now puts it on the speaker\'s screen at once.' : '')
+      : 'Send now puts it on the speaker\'s screen at once; their acknowledgement shows on the message.';
+  }
+  function open(msg) {
+    source = msg;
+    $('swText').value = msg ? (msg.text || '').slice(0, 500) : '';
+    $('swError').hidden = true;
+    socket.emit('stage:targets', {}, (r) => {
+      if (!r || !r.ok) { notify((r && r.error) || 'Stagewatch is not linked to this hall.', true); return; }
+      caps = r;
+      $('swWhich').textContent = r.linked ? 'To ' + (r.title || 'this hall\'s Stagewatch') + '.' : 'Stagewatch is not connected right now — nothing is queued; try again when it is.';
+      const sel = $('swDest');
+      sel.textContent = '';
+      for (const t of r.targets) {
+        if (!r.canPropose && !(t.direct && r.canSend)) continue;
+        const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; sel.appendChild(o);
+      }
+      sync();
+      dlg.showModal();
+    });
+  }
+  const fail = (text) => { $('swError').textContent = text; $('swError').hidden = false; };
+  $('swDest').addEventListener('change', sync);
+  $('swNow').addEventListener('click', () => {
+    socket.emit('stage:send', { text: $('swText').value.trim(), urgency: $('swUrg').value, messageId: source && source.text === $('swText').value.trim() ? source.id : undefined }, (res) => {
+      if (!res || !res.ok) return fail((res && res.error) || 'Not sent.');
+      dlg.close();
+      notify(res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.');
+    });
+  });
+  $('swForm').addEventListener('submit', (e) => {
+    if (e.submitter && e.submitter.value === 'cancel') return;
+    e.preventDefault();
+    const text = $('swText').value.trim();
+    socket.emit('stage:propose', { text, destination: $('swDest').value, urgency: $('swUrg').value, messageId: source && source.text === text ? source.id : undefined }, (res) => {
+      if (!res || !res.ok) return fail((res && res.error) || 'Not sent.');
+      dlg.close();
+      notify('Asked — the show caller approves it in Stagewatch; its state shows on the message.');
+    });
+  });
+  return { open };
+})();
