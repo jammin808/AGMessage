@@ -108,8 +108,11 @@ function screenIdOf(target) {
  * or undelivered once claimed — a late result is still taken). `answerResults` is a queue of {status, error, retryAfter}
  * answered to result posts first (status 0: the socket cut with no answer); holdAll(ms) answers every route 429 with
  * Retry-After for that long, as its per-key budget does; expire(id) is its five minutes without a result.
+ * `answerDeskChecks` and `answerContext` are such queues for GET /api/proposals?from= (whether it keeps a desk) and GET
+ * /api/context; onRequest(request) and onResultPost(id) are called as one arrives, before it is answered; `messageDelayMs` holds a send
+ * that long before its key is judged (a request made under one key, answered after the key changed).
  */
-async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null } = {}) {
+async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null, answerDeskChecks = [], answerContext = [], messageDelayMs = 0 } = {}) {
   const http = require('http');
   const https = require('https');
   const { WebSocketServer } = require('ws');
@@ -117,6 +120,8 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
   const counts = { upgrades: 0, failures: 0 };
   let answerResults = [];
   let heldUntil = 0;
+  let onResultPost = null;
+  let onRequest = null;
   const accepts = (h) => key === null || h === 'Bearer ' + key;
   const requests = [];
   const proposals = new Map();
@@ -136,13 +141,14 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
   const handler = (req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; });
-    req.on('end', () => {
-      requests.push({ at: Date.now(), method: req.method, url: req.url, headers: req.headers, body });
+    const serve = () => {
       const json = (code, o, headers = {}) => { res.writeHead(code, { 'content-type': 'application/json', ...headers }); res.end(JSON.stringify(o)); };
+      const queued = (q) => { const a = q.shift(); return json(a.status, { ok: false, error: a.error || 'busy' }, a.retryAfter ? { 'Retry-After': String(a.retryAfter) } : {}); };
       if (!accepts(req.headers.authorization)) { counts.failures++; return json(401, { ok: false, error: 'unknown or revoked API key' }); }
       if (Date.now() < heldUntil) return json(429, { ok: false, error: 'rate limit: too many requests with this key' }, { 'Retry-After': String(Math.ceil((heldUntil - Date.now()) / 1000)) });
       const u = new URL(req.url, 'http://x');
       if (u.pathname.startsWith('/api/message/')) return json(200, { type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId } });
+      if (u.pathname === '/api/context' && answerContext.length) return queued(answerContext);
       if (u.pathname === '/api/context') {
         const answer = () => (contextFail > 0 ? (contextFail--, json(404, { ok: false, error: 'no context' }))
           : json(200, { v: 1, node: { t: 'main', id: 'sw' + name.length, name }, light: 'green', headline: name + ' running', items, peers: [] }));
@@ -157,6 +163,7 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
         proposals.set(p.id, p);
         return json(201, { ok: true, id: p.id, state: p.state, risk: p.risk });
       }
+      if (desk && u.pathname === '/api/proposals' && u.searchParams.has('from') && answerDeskChecks.length) return queued(answerDeskChecks);
       if (desk && u.pathname === '/api/proposals') {
         // As Stagewatch's Collect: a target's approved proposals are handed over once (claimed), never listed again.
         const target = u.searchParams.get('target');
@@ -165,6 +172,7 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
         return json(200, { proposals: list.map(toJson) });
       }
       const one = /^\/api\/proposals\/(p\d+)(\/result)?$/.exec(u.pathname);
+      if (desk && one && one[2] && onResultPost) onResultPost(one[1]);
       if (desk && one && one[2] && answerResults.length) {
         const a = answerResults.shift();
         if (!a.status) { req.socket.destroy(); return undefined; }
@@ -181,6 +189,11 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
         return json(200, toJson(p));
       }
       json(404, { ok: false, error: desk && one ? 'no such proposal' : 'not here' });
+    };
+    req.on('end', () => {
+      requests.push({ at: Date.now(), method: req.method, url: req.url, headers: req.headers, body });
+      if (onRequest) onRequest(requests[requests.length - 1]);
+      if (messageDelayMs && req.url.startsWith('/api/message/')) setTimeout(serve, messageDelayMs); else serve();
     });
   };
   const srv = cert ? https.createServer({ cert: tlsmod.toPem(cert.certDer), key: cert.keyPem }, handler) : http.createServer(handler);
@@ -229,6 +242,10 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     /** What it answers the next result posts, before its desk reads them: [{status, error, retryAfter}] (0: no answer). */
     get answerResults() { return answerResults; },
     set answerResults(v) { answerResults = v; },
+    /** Called with each request as it arrives, before it is answered (null: nothing). */
+    set onRequest(fn) { onRequest = fn; },
+    /** Called with the id as each result post arrives, before it is answered (null: nothing). */
+    set onResultPost(fn) { onResultPost = fn; },
     /** Every route answers 429 with Retry-After for `ms`, as Stagewatch does once a key spent its minute. */
     holdAll(ms) { heldUntil = Date.now() + ms; },
     /** Its five minutes pass without a result: an approved proposal is undelivered (claimed: no report; else not collected). */

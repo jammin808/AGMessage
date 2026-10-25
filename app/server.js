@@ -125,6 +125,7 @@ const DESK_RESULTS_PATH = path.join(DATA_DIR, 'desk-results.json');
 const deskLane = new resilience.WriteLane(DESK_RESULTS_PATH, { delayMs: 100, keepBak: true, mode: 0o600 });
 const deskResults = deskresults.readRecords(resilience.readJsonWithBak(DESK_RESULTS_PATH), settings.nodeId)
   .map((r) => ({ ...r, attempts: 0, posts: 0, nextAt: 0, lastStatus: 0, gen: 0, fresh: false }));
+let deskLastAnswer = { status: null, at: null };   // the desk's last answer to a result post (health)
 /** Every store saved through a write lane, by the name health and the console give it. */
 const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['deskResults', deskLane]];
 /** Write every lane and the audit entries still waiting now (shutdown, a crash); what still cannot be written is named on the console. */
@@ -174,12 +175,7 @@ function healthFacts() {
     stageKey: stageLink.keyFacts(),
     clock: stageLink.clockInfo(),
     // Show-desk results Stagewatch has not taken yet: how many, since when, its last answer and when the next try is due.
-    desk: {
-      waiting: deskResults.length,
-      oldestAt: deskResults.length ? Math.min(...deskResults.map((r) => r.ran)) : null,
-      lastStatus: deskResults.reduce((s, r) => r.lastStatus || s, 0),
-      nextAt: deskResults.length ? Math.min(...deskResults.map((r) => r.nextAt)) : null,
-    },
+    desk: deskFacts(),
     tls: tlsFacts(),
     saves: {
       writes: settingsLane.writes, coalesced: settingsLane.coalesced, error: settingsLane.lastError,
@@ -2131,6 +2127,22 @@ function deskLinkOf(r) {
   if (r.link !== 'default') { const code = r.link.slice(5); if (!store.get(code)) return null; link = linkFor(code); }
   return link.tag && link.tag !== r.sw ? null : link;
 }
+/**
+ * The show-desk results waiting, as health shows them: how many, since when, the desk's last answer to a result post
+ * (status 0: none came) and when, and when the next try is due — only over results whose Stagewatch is linked with a
+ * desk now (null: none will be tried until one is).
+ */
+function deskFacts() {
+  const tried = deskResults.filter((r) => { const l = deskLinkOf(r); return l && l.linked && l.desk; });
+  const now = Date.now();
+  const nextAt = tried.length ? Math.max(now, Math.min(...tried.map((r) => Math.max(r.nextAt, deskLinkOf(r).waitUntil)))) : null;
+  return {
+    waiting: deskResults.length,
+    oldestAt: deskResults.length ? Math.min(...deskResults.map((r) => r.ran)) : null,
+    lastStatus: deskLastAnswer.status, lastAt: deskLastAnswer.at,
+    nextAt, nextInMs: nextAt === null ? null : nextAt - now,   // the page reads the wait, not this laptop's clock
+  };
+}
 /** A result is no longer waiting: said once at role level (no notice text, no ids), and the file follows. */
 function endResult(r, how) {
   const i = deskResults.indexOf(r);
@@ -2157,6 +2169,7 @@ async function tellResult(r, link) {
   r.fresh = false;
   const res = await link.reportResult(r.id, r.ok, r.words);
   r.attempts++; r.posts++; r.lastStatus = res.status;
+  deskLastAnswer = { status: res.status, at: Date.now() };
   const v = deskresults.postVerdict(res, r.attempts, { authWaitMs: DESK_AUTH_WAIT_MS });
   if (v.final) { endResult(r, v.final); return true; }
   r.nextAt = Date.now() + v.waitMs;
@@ -2198,13 +2211,15 @@ setInterval(async () => {
       if (!l || (t.sw && t.sw !== l.tag)) loseProposal(key, t, 'the hall moved to another Stagewatch');
     }
     for (const link of allLinks()) {
-      if (!link.linked || link.held) continue;
-      if (Date.now() - link.deskCheckedAt > 60_000) {
+      // Stagewatch asked this key to wait, or no longer takes it: nothing more goes to it this tick, whatever was next.
+      const stop = () => !link.linked || link.held;
+      if (stop()) continue;
+      if (Date.now() - link.deskCheckedAt > nodes.DESK_CHECK_MS) {
         const was = link.desk;
         await link.checkDesk(settings.nodeId);
         if (was !== link.desk) onStageState(link, link.view);
       }
-      if (!link.desk) continue;
+      if (!link.desk || stop()) continue;
       // Collected first, inside Stagewatch's minute for collecting: run once, on disk, then each first post at once.
       const fresh = [];
       for (const p of await link.approvedFor(settings.nodeId)) {
@@ -2214,16 +2229,22 @@ setInterval(async () => {
         const r = { sw: link.tag, link: link.id, id: p.id, created: p.created || 0, line: p.line, target: settings.nodeId, ...runApproved(p), ran: Date.now(), attempts: 0, posts: 0, nextAt: 0, lastStatus: 0, gen: link.generation, fresh: true };
         deskResults.push(r); fresh.push(r);
         if (deskResults.length > deskresults.MAX_WAITING) endResult(deskResults[0], 'too many waiting');
-        saveDeskResults(); deskLane.flushSync();   // on disk before it is reported: a restart from here still reports it
       }
-      // Then the results due, the new ones first and the rest oldest first: the first that must wait stops the rest.
-      const due = fresh.concat(deskResults.filter((r) => !r.fresh && r.nextAt <= Date.now() && deskLinkOf(r) === link));
-      for (const r of due) {
-        if (!deskResults.includes(r)) continue;   // pushed out by the cap meanwhile
-        if (!(await tellResult(r, link)) || link.held || !link.linked) break;
-      }
-      if (link.held || !link.linked) continue;
+      // On disk before any is reported, once for all collected: a restart from here still reports them. (A disk that
+      // will not take it leaves them in memory, still reported, and the lane's own retry names the failure in health.)
+      if (fresh.length) { saveDeskResults(); deskLane.flushSync(); }
+      // Then the results due, the new ones first and the rest oldest first: the first that must wait stops the rest. A new
+      // one this tick did not reach is no longer new: its turn comes with the rest, its proposal read back first.
+      const due = fresh.concat(deskResults.filter((r) => !fresh.includes(r) && r.nextAt <= Date.now() && deskLinkOf(r) === link));
+      try {
+        for (const r of due) {
+          if (stop()) break;
+          if (!deskResults.includes(r)) continue;   // pushed out by the cap meanwhile
+          if (!(await tellResult(r, link))) break;
+        }
+      } finally { for (const r of fresh) r.fresh = false; }
       for (const [key, t] of Array.from(proposals)) {
+        if (stop()) break;
         if (t.link !== link.id) continue;
         const p = await link.proposal(t.id);
         if (!p) continue;   // the desk could not be asked: the next tick asks again
@@ -2232,7 +2253,6 @@ setInterval(async () => {
         if (!t.created && p.created) t.created = p.created;
         if (p.state !== t.state) { t.state = p.state; showProposalState(t, p); }
         if (FINAL.has(p.state)) proposals.delete(key);
-        if (link.held || !link.linked) break;
       }
     }
   } catch { /* the next tick tries again */ } finally { deskBusy = false; }

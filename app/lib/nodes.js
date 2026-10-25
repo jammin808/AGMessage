@@ -40,6 +40,9 @@ const CHANGE_MS = 500;          // the table's change is told at most this often
 // Stagewatch locks an address out for the rest of a minute after 5 wrong keys or PINs from it (WebServer.cs Authorize):
 // a key it refused is tried again only after that minute, so a wrong key never locks out this machine's other links.
 const REFUSED_RETRY_MS = 61_000;
+// The desk is asked whether it is one once a minute (when no hello says so), and again 5 s after an answer that said nothing.
+const DESK_CHECK_MS = 60_000;
+const DESK_RECHECK_MS = 5000;
 /** Stagewatch's words for a refusal, as a status may show them: plain text, short, and never a key. */
 const refusalWords = (w) => (typeof w === 'string' ? w : '').replace(/\p{Cc}/gu, ' ').replace(/swk_\S*/g, 'swk_…').replace(/\s+/g, ' ').trim().slice(0, 120);
 // Every kind on the bus: Stagewatch (main), its Slides agents, Patterns, PlayMap (Show Bus 1.3 proposal) and other messengers.
@@ -633,17 +636,19 @@ class StagewatchLink {
 
   // ---------------------------------------------------------------- the show desk (Show Bus 1.2 §11)
 
-  /** Does Stagewatch keep the shared approval queue? (Its hello's caps, else asked once a minute.) */
+  /** Does Stagewatch keep the shared approval queue? (Its hello's caps, else asked every DESK_CHECK_MS.) */
   async checkDesk(fromId = 'x') {
     if (!this.linked || !this.key || !this.endpoint) { this.desk = false; return false; }
     const u = new URL(this.base);
     const peer = this.findPeer('main', u.hostname, Number(u.port) || 80);
     if (peer && Array.isArray(peer.caps) && peer.caps.includes('approvals')) { this.desk = true; this.deskCheckedAt = Date.now(); return true; }
-    try {
-      const res = await this._call('/api/proposals?from=' + encodeURIComponent(fromId), { timeoutMs: 3000 });
-      this.desk = res.status === 200;
-    } catch { this.desk = false; }
-    this.deskCheckedAt = Date.now();
+    // Only a verdict changes it: 200 is a desk, 404 or 405 none. No answer, a busy desk, the key's spent minute or a
+    // refused key say nothing of it: the desk stays as it was and is asked again in seconds (after any Retry-After),
+    // so a 429 never hides a desk, and what it approves meanwhile is still collected inside Stagewatch's minute.
+    let res = null;
+    try { res = await this._call('/api/proposals?from=' + encodeURIComponent(fromId), { timeoutMs: 3000 }); } catch { /* no answer: asked again soon */ }
+    if (res && [200, 404, 405].includes(res.status)) { this.desk = res.status === 200; this.deskCheckedAt = Date.now(); }
+    else this.deskCheckedAt = Date.now() - (res && res.status === 403 ? 0 : DESK_CHECK_MS - DESK_RECHECK_MS);
     return this.desk;
   }
 
@@ -700,4 +705,4 @@ class StagewatchLink {
   stop() { clearInterval(this.timer); this._cancelRedial(); this.base = ''; this._close(); }
 }
 
-module.exports = { REFUSED_RETRY_MS, refusalWords, Discovery, StagewatchLink, wsUrl, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };
+module.exports = { REFUSED_RETRY_MS, DESK_CHECK_MS, refusalWords, Discovery, StagewatchLink, wsUrl, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };

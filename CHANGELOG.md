@@ -22,7 +22,9 @@ code (2.16 and its newest work) before it was changed.
   is posted only once the desk's proposal reads back with the same line, target and time and still waits (a late one
   after Stagewatch's five minutes included), so a restarted Stagewatch's p1 never gets another proposal's result, which
   0.5.0 could do when the restart went unseen. Each result that ends untaken, or is taken only after a retry, is said in
-  the recent events (no notice text, no ids), and the admin page's health line counts what is waiting.
+  the recent events (no notice text, no ids), and the admin page's health line counts what is waiting. Whether
+  Stagewatch keeps a desk changes only on its verdict (200, or 404/405): a 429 or no answer to that check no longer hides
+  the desk for a minute, in which what it approved would have expired uncollected.
 
 **The Stagewatch link**
 - The link dials Stagewatch as this AGMessage, by its Show Bus id (`/ws?node=<id>&t=messenger&cid=<id>`), not as

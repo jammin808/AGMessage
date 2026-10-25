@@ -23,7 +23,7 @@ async function deskSetup(t, { sw: swOptions = {}, env = {}, hallLink = false } =
   ctx.nodeId = (await emit(ctx.ctl, 'admin:settings')).nodeId;
   if (hallLink) assert.ok((await emit(ctx.ctl, 'hall:configure', { code: ctx.hall, stagewatchUrl: sw.url, stagewatchKey: KEY })).ok);
   else assert.ok((await emit(ctx.ctl, 'admin:settings', { stagewatchUrl: sw.url, stagewatchKey: KEY })).ok);
-  await until(() => sw.requests.some((r) => r.url.includes('?target=')), 10000, 'AGMessage collects from the desk');
+  await until(() => sw.requests.some((r) => r.url.includes('?target=')), 15000, 'AGMessage collects from the desk');
   return ctx;
 }
 const forUs = (ctx, line) => ({ line, state: 'approved', decidedBy: 'SM', from: { t: 'main', id: 'swdesk', name: 'Desk' }, target: { t: 'messenger', id: ctx.nodeId, name: 'AGMessage' } });
@@ -32,6 +32,19 @@ const notices = async (ctx, words) => (await emit(ctx.ctl, 'admin:watchRoom', { 
 const health = async (ctx) => (await api(ctx.srv.base, 'GET', '/api/health', undefined, { cookie: ctx.admin })).body;
 const recent = async (ctx) => (await api(ctx.srv.base, 'GET', '/api/context', undefined, { cookie: ctx.admin })).body.recent.map((e) => e.text);
 const onDisk = (ctx) => JSON.parse(fs.readFileSync(path.join(ctx.srv.dataDir, 'desk-results.json'), 'utf8'));
+/**
+ * What reached Stagewatch after `first` met its 429, inside the `ms` it asked for: '' when the hold was kept. AGMessage's
+ * two loops each await their own requests, so at most one more of the desk's, and the context loop's push and fetch of a
+ * second that began before the 429 was read, may already be on their way; nothing may follow once it was read (1.5 s).
+ */
+function holdBroken(sw, first, ms) {
+  const during = sw.requests.filter((r) => r.at > first.at && r.at < first.at + ms - 100);
+  const desk = during.filter((r) => r.url.startsWith('/api/proposals'));
+  const context = during.filter((r) => r.url === '/api/context' || r.url === '/api/peers/context');
+  const late = during.filter((r) => r.at > first.at + 1500);
+  return desk.length <= 1 && context.length <= 2 && desk.length + context.length === during.length && !late.length ? ''
+    : during.map((r) => '+' + (r.at - first.at) + ' ms ' + r.method + ' ' + r.url).join(', ');
+}
 
 test('what an answer to a result post means, and which proposal read back is still ours', () => {
   const v = (status, retryAfter = null, attempt = 1) => deskresults.postVerdict({ status, retryAfter }, attempt, { authWaitMs: 60000 });
@@ -47,6 +60,7 @@ test('what an answer to a result post means, and which proposal read back is sti
   assert.equal(deskresults.readBack(rec, p), 'post');
   assert.equal(deskresults.readBack(rec, { ...p, state: 'undelivered' }), 'post', 'Stagewatch takes a late result');
   assert.equal(deskresults.readBack(rec, { ...p, state: 'done' }), 'taken', 'an earlier post landed');
+  assert.equal(deskresults.readBack(rec, { ...p, state: 'failed' }), 'taken', 'an earlier post of a failure landed');
   assert.equal(deskresults.readBack(rec, { ...p, state: 'unknown' }), 'wait');
   for (const other of [{ line: 'notice Hello' }, { created: 1700000000001 }, { target: { t: 'messenger', id: 'ff00ff00' } }, { state: 'pending' }, { state: 'rejected' }]) {
     assert.equal(deskresults.readBack(rec, { ...p, ...other }), 'gone', JSON.stringify(other));
@@ -68,15 +82,15 @@ test('what an answer to a result post means, and which proposal read back is sti
 test('a 429 waits its Retry-After across the whole link, then the result is taken: the notice shown once', async (t) => {
   const ctx = await deskSetup(t);
   const { sw } = ctx;
-  sw.answerResults = [{ status: 429, error: 'rate limit: too many requests with this key', retryAfter: 2 }];
+  // Longer than the desk's 3 s tick and the context's 5 s: without the hold, both would ask inside it.
+  sw.answerResults = [{ status: 429, error: 'rate limit: too many requests with this key', retryAfter: 6 }];
   const id = sw.add(forUs(ctx, 'notice Break in five minutes'));
-  await until(() => sw.proposals.get(id).state === 'done', 15000, 'taken at the second try');
+  await until(() => sw.proposals.get(id).state === 'done', 20000, 'taken at the second try');
   assert.equal(sw.proposals.get(id).words, 'shown in 1 meeting');
   const [first, second] = posts(sw, id);
   assert.equal(posts(sw, id).length, 2);
-  assert.ok(second.at >= first.at + 2000, 'not before its Retry-After: ' + (second.at - first.at) + ' ms');
-  const during = sw.requests.filter((r) => r.at > first.at + 100 && r.at < first.at + 1900);
-  assert.deepEqual(during.map((r) => r.method + ' ' + r.url), [], 'nothing at all from that link while Stagewatch asked it to wait');
+  assert.ok(second.at >= first.at + 6000, 'not before its Retry-After: ' + (second.at - first.at) + ' ms');
+  assert.equal(holdBroken(sw, first, 6000), '', 'nothing more from that link while Stagewatch asked it to wait');
   assert.equal(await notices(ctx, 'Break in five minutes'), 1);
   await until(async () => (await health(ctx)).desk.waiting === 0, 4000, 'nothing waiting');
 });
@@ -84,12 +98,13 @@ test('a 429 waits its Retry-After across the whole link, then the result is take
 test('401 and 403: the result waits for the key, never dropped — taken once Stagewatch takes the key again', async (t) => {
   const ctx = await deskSetup(t, { env: { AGM_DESK_AUTH_WAIT_MS: '1000' } });
   const { sw } = ctx;
-  sw.answerResults = [{ status: 403, error: 'this API key is read only' }, { status: 403, error: 'this API key is read only' }];
+  sw.answerResults = [{ status: 503, error: 'busy', retryAfter: 2 }, { status: 403, error: 'this API key is read only' }, { status: 403, error: 'this API key is read only' }];
   const id = sw.add(forUs(ctx, 'notice Lunch is served'));
-  await until(() => sw.proposals.get(id).state === 'done', 15000, 'taken at the third try');
+  await until(() => sw.proposals.get(id).state === 'done', 20000, 'taken at the fourth try');
   const p = posts(sw, id);
-  assert.equal(p.length, 3);
-  assert.ok(p[1].at - p[0].at >= 1000 && p[2].at - p[1].at >= 1000, 'each after the wait');
+  assert.equal(p.length, 4);
+  assert.ok(p[1].at - p[0].at >= 2000, 'a 503 with Retry-After waits as it says');
+  assert.ok(p[2].at - p[1].at >= 1000 && p[3].at - p[2].at >= 1000, 'each 403 after the wait');
 
   // A 401 is Stagewatch not taking the key at all: the link is refused (it asks again after Stagewatch's lockout minute),
   // the result stays waiting, and it is told once the key is taken again.
@@ -97,7 +112,8 @@ test('401 and 403: the result waits for the key, never dropped — taken once St
   const later = sw.add(forUs(ctx, 'notice Doors close'));
   await until(async () => /^key refused/.test((await emit(ctx.ctl, 'admin:settings')).stage), 10000, 'the link refused');
   assert.equal(sw.proposals.get(later).state, 'approved');
-  assert.equal((await health(ctx)).desk.waiting, 1, 'kept');
+  const held = (await health(ctx)).desk;
+  assert.deepEqual([held.waiting, held.lastStatus, held.nextInMs], [1, 401, null], 'kept; no try is due while the link is refused');
   assert.equal(onDisk(ctx).results.length, 1, 'kept on disk');
   assert.ok((await emit(ctx.ctl, 'admin:settings', { stagewatchKey: 'swk_desk_results_key_0002' /* secret-scan: fixture */ })).ok);
   await until(() => sw.proposals.get(later).state === 'done', 15000, 'taken through the link accepted again');
@@ -204,4 +220,72 @@ test('a result past Stagewatch\'s five minutes (undelivered, collected) is still
   sw.expire(id);
   assert.deepEqual([sw.proposals.get(id).state, sw.proposals.get(id).words], ['undelivered', 'AGMessage didn\'t report back']);
   await until(() => sw.proposals.get(id).state === 'done', 15000, 'taken late');
+});
+
+test('several results collected in one tick, the first not taken: none is stranded, each is told', async (t) => {
+  const ctx = await deskSetup(t);
+  const { sw } = ctx;
+  sw.failResults = 1;   // the first post of the tick is not taken
+  const ids = ['notice Doors open', 'notice Coffee is out', 'notice Mind the step'].map((line) => sw.add(forUs(ctx, line)));
+  await until(() => ids.every((id) => sw.proposals.get(id).state === 'done'), 20000, 'every one taken');
+  for (const w of ['Doors open', 'Coffee is out', 'Mind the step']) assert.equal(await notices(ctx, w), 1, w + ': run once');
+  assert.equal((await health(ctx)).desk.waiting, 0);
+});
+
+test('a 429 or a refused key met while following proposals stops the link at once: nothing more into the hold, no lockout', async (t) => {
+  const ctx = await deskSetup(t);
+  const { sw } = ctx;
+  const crew = await connect(ctx.srv.base); ctx.sockets.push(crew);
+  assert.ok((await emit(crew, 'join', { roomCode: ctx.hall, name: 'Alex', role: 'research' })).ok);
+  await until(async () => (await emit(crew, 'stage:targets', {})).canPropose, 10000, 'the desk known');
+  for (let i = 1; i <= 5; i++) assert.ok((await emit(crew, 'stage:propose', { text: 'Follow me ' + i, destination: 'speaker' })).ok);
+  await wait(3500);   // every one followed at least once
+  // The hold begins with a follow: that GET is the first to meet it, with the rest of the tick's follows still to come.
+  let first = null;
+  sw.onRequest = (r) => { if (/^\/api\/proposals\/p\d+$/.test(r.url)) { sw.onRequest = null; first = r; sw.holdAll(6000); } };
+  await until(() => first, 6000, 'a follow, and the hold');
+  await wait(6500);
+  assert.equal(holdBroken(sw, first, 6000), '', 'one request met the 429, nothing followed it into the hold');
+
+  const before = sw.counts.failures;
+  sw.key = 'swk_desk_results_other_9';   // secret-scan: fixture — the operator revoked AGMessage's key
+  await until(async () => /^key refused/.test((await emit(ctx.ctl, 'admin:settings')).stage), 10000, 'refused');
+  await wait(4000);
+  assert.ok(sw.counts.failures - before <= 2, 'the refused key is not sent on: ' + (sw.counts.failures - before) + ' wrong-key requests');
+});
+
+test('a 429 on the desk check keeps the desk and asks again in seconds: a notice approved meanwhile is still collected', async (t) => {
+  const ctx = await deskSetup(t, { sw: { answerDeskChecks: [{ status: 429, error: 'rate limit: too many requests with this key', retryAfter: 1 }] } });
+  const { sw } = ctx;
+  const id = sw.add(forUs(ctx, 'notice Last train at eleven'));
+  await until(() => sw.proposals.get(id).state === 'done', 15000, 'collected, run and reported');
+});
+
+test('on disk before its first post: AGMessage killed as that post leaves still reports it after the restart', async (t) => {
+  const ctx = await deskSetup(t);
+  const { sw } = ctx;
+  sw.answerResults = [{ status: 0 }];
+  sw.onResultPost = () => { sw.onResultPost = null; ctx.srv.child.kill('SIGKILL'); };   // no stop, no save: as a power cut
+  const id = sw.add(forUs(ctx, 'notice The bar is open'));
+  await until(() => ctx.srv.child.exitCode !== null || ctx.srv.child.signalCode !== null, 10000, 'killed');
+  assert.deepEqual(onDisk(ctx).results.map((r) => r.id), [id], 'it was on disk before it left');
+  ctx.srv = await restartServer(ctx.srv);
+  ctx.ctl = await connect(ctx.srv.base, ctx.admin); ctx.sockets.push(ctx.ctl);
+  await until(() => sw.proposals.get(id).state === 'done', 15000, 'taken after the restart');
+  assert.equal(await notices(ctx, 'The bar is open'), 1, 'run once');
+});
+
+test('a hall moved to another Stagewatch: its result still waiting is told to nobody, never to the new one', async (t) => {
+  const ctx = await deskSetup(t, { hallLink: true });
+  const { sw } = ctx;
+  const other = await fakeStagewatch({ name: 'Other desk' });
+  t.after(() => other.close());
+  sw.failResults = 1000;
+  const id = sw.add(forUs(ctx, 'notice Coffee is out'));
+  await until(() => posts(sw, id).length >= 1, 10000, 'posted, not taken');
+  assert.ok((await emit(ctx.ctl, 'hall:configure', { code: ctx.hall, stagewatchUrl: other.url, stagewatchKey: KEY })).ok);
+  await until(async () => (await recent(ctx)).includes('a show-desk result could not be reported: nobody to tell'), 10000, 'said');
+  assert.equal((await health(ctx)).desk.waiting, 0);
+  await until(() => onDisk(ctx).results.length === 0, 4000, 'the file empties');
+  assert.ok(!other.requests.some((r) => r.url.startsWith('/api/proposals/' + id)), 'the other Stagewatch is never told');
 });

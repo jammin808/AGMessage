@@ -72,9 +72,10 @@
       else if (st && st.unwritten) parts.push('⚠ ' + st.unwritten + ' ' + name + ' entries not yet on disk');
     }
     if (h.desk && h.desk.waiting) {
-      const next = h.desk.nextAt ? Math.max(0, Math.round((h.desk.nextAt - Date.now()) / 1000)) : 0;
-      parts.push('⚠ ' + h.desk.waiting + ' show-desk result' + (h.desk.waiting === 1 ? '' : 's') + ' waiting for Stagewatch to take ' + (h.desk.waiting === 1 ? 'it' : 'them')
-        + (h.desk.lastStatus ? ' (last answer ' + h.desk.lastStatus + ', next try in ' + next + ' s)' : h.desk.lastStatus === 0 && next ? ' (no answer, next try in ' + next + ' s)' : ''));
+      const n = h.desk.waiting;
+      const last = h.desk.lastStatus === null ? '' : h.desk.lastStatus ? 'last answer ' + h.desk.lastStatus : 'no answer to the last try';
+      const next = h.desk.nextInMs === null ? 'tried once its Stagewatch is linked and keeps a desk' : 'next try in ' + Math.round(h.desk.nextInMs / 1000) + ' s';
+      parts.push('⚠ ' + n + ' show-desk result' + (n === 1 ? '' : 's') + ' waiting for Stagewatch to take ' + (n === 1 ? 'it' : 'them') + ' (' + [last, next].filter(Boolean).join(', ') + ')');
     }
     if (h.tls && h.tls.link && h.tls.link.changed) parts.push('⚠ CERTIFICATE CHANGED — Stagewatch\'s certificate is not the one pinned; the link is refused until you accept it');
     $('healthLine').textContent = parts.join(' · ');

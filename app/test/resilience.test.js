@@ -415,7 +415,7 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   // Synchronous fs calls block every meeting on the server while they run. These are allowed — each with its reason —
   // and the count may not grow without someone deciding it here.
   const allowed = {
-    'server.js': { max: 16, why: 'startup (dirs, settings, crash record), the crash handler, upload sniffing (4 KB), tunnel log tail' },
+    'server.js': { max: 16, why: 'startup (dirs, settings, crash record), the crash handler, upload sniffing (4 KB), tunnel log tail (and, through its lane, the show desk results a tick collects, flushed once before they are reported)' },
     'supervise.js': { max: 3, why: 'the watchdog process: its own log and marker, never on a request' },
     'lib/store.js': { max: 10, why: 'durability: an acknowledged message is appended to disk before the ack; snapshots every 500 ops' },
     'lib/resilience.js': { max: 10, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full' },
