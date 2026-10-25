@@ -40,8 +40,9 @@ as the same screen, not a second one; a browser that vanished without closing co
 about 18 seconds).
 
 A screen keeps one PDF open and draws each page off screen before it swaps it in: stepping through a deck never blanks
-the slide, and a rename or a reconnect leaves the picture alone. A file taken earlier that is still loading never
-paints over the one taken after it.
+the slide, and a rename or a reconnect leaves the picture alone. A slide the browser had to clear (its graphics reset)
+is drawn again, never taken as still on screen. A file taken earlier that is still loading never paints over the one
+taken after it.
 
 ## Managing screens
 

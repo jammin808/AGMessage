@@ -151,6 +151,14 @@
     }
   }
 
+  // A canvas whose GPU context the browser lost (a driver reset, the GPU process restarting) comes back blank: what it
+  // held is never taken as still on screen, and the take on screen is drawn again once the context is back.
+  $('fileCanvas').addEventListener('contextlost', () => { drawnKey = ''; });
+  $('fileCanvas').addEventListener('contextrestored', () => {
+    drawnKey = '';
+    if (state && state.content && state.content.kind === 'file' && state.content.pdf) render();
+  });
+
   // The countdown is Stagewatch's own frame: its words, its colour. With the link lost it never shows a confident stale
   // time: the digits dim to --:-- until frames come back (Show Bus: silence is never "fine").
   function renderCountdown() {
