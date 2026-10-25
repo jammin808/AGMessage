@@ -48,9 +48,10 @@ rights there decide: an account's rights in that hall (and `hall.files` for a fi
 locked hall's observer seat stays an observer's), or, where the guest has no seat, the admin's link. The forward carries
 the role and the account mark a post there would carry, and the picker lists only the halls that would take it. A help
 request is not forwarded: it is tracked and answered in its own hall. An account's role in a hall follows its rights, so
-the admin page's room list changes a code guest's role and refuses an account's (that is the Accounts page's). An account
-with a hall open on a laptop and a phone is one person there: announced once, counted once, and "left" only when its
-last page closes.
+the admin page's room list changes a code guest's role and refuses an account's (that is the Accounts page's); its link
+lets a code guest forward into a hall, and is refused for an account that may not post there. An account with a hall
+open on a laptop and a phone (or a guest with it open in two tabs) is one person there: listed, announced and counted
+once, "left" only when the last page closes, and the room list's role, link and logout reach every one of those pages.
 
 ## The first admin
 

@@ -356,6 +356,45 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     assert.ok(!lines.some(([, m]) => /Ted Tech role changed/.test(m.text)), 'the refused one is not');
   });
 
+  await t.test('the room list shows a person once, and what the admin does to that row reaches every page they have open there', async () => {
+    const hallH = await hall('Hall H');
+    const hallI = await hall('Hall I');
+    const tab1 = await guest(hallH, 'Max', 'research');
+    const tab2 = await guest(hallH, 'Max', 'research', { uid: tab1.j.identity });   // the same browser, a second tab
+    const rows = async () => (await ask(ctl, 'admin:listRooms')).rooms.find((r) => r.code === hallH).users;
+    const max = (await rows()).filter((u) => u.name === 'Max');
+    assert.equal(max.length, 1, 'one row for the person');
+    const sid = max[0].socketId;
+    const offered = async () => Promise.all([tab1, tab2].map(async (tab) => (await myRooms(tab.s)).rooms.map((r) => r.code)));
+
+    assert.ok((await emit(ctl, 'admin:linkRoom', { socketId: sid, targetRoom: hallI })).ok);
+    assert.deepEqual(await offered(), [[hallI], [hallI]], 'linked on both pages');
+    assert.equal((await rows()).find((u) => u.name === 'Max').linkedRooms[0], hallI);
+    assert.ok((await emit(ctl, 'admin:unlinkRoom', { socketId: sid, targetRoom: hallI })).ok);
+    assert.deepEqual(await offered(), [[], []], 'unlinked on both pages');
+
+    const told = [tab1, tab2].map((tab) => new Promise((resolve) => { tab.s.once('roleChanged', resolve); }));
+    assert.ok((await emit(ctl, 'admin:setRole', { roomCode: hallH, socketId: sid, role: 'observer' })).ok);
+    assert.deepEqual(await Promise.all(told), [{ role: 'observer' }, { role: 'observer' }]);
+    const posts = await Promise.all([tab1, tab2].map(async (tab) => (await emit(tab.s, 'message', { type: 'text', text: 'still backstage?' })).ok));
+    assert.deepEqual(posts, [false, false], 'the demotion holds on every page, not only the one listed');
+
+    const gone = [tab1, tab2].map((tab) => new Promise((resolve) => { tab.s.once('disconnect', resolve); }));
+    assert.ok((await emit(ctl, 'admin:kick', { socketId: sid })).ok);
+    assert.deepEqual(await Promise.all(gone), ['io server disconnect', 'io server disconnect'], 'logged out of every page');
+    assert.ok(!(await rows()).some((u) => u.name === 'Max'));
+
+    // An account forwards by its own rights in a hall, so the admin's link cannot give it one it does not hold.
+    const vicA = await asAccount(vic, hallA);
+    const refused = await emit(ctl, 'admin:linkRoom', { socketId: vicA.s.id, targetRoom: hallB });
+    assert.equal(refused.ok, false);
+    assert.match(refused.error, /Accounts page/);
+    assert.deepEqual((await myRooms(vicA.s)).rooms, []);
+    const stuA = await asAccount(stu, hallA);
+    assert.ok((await emit(ctl, 'admin:linkRoom', { socketId: stuA.s.id, targetRoom: hallB })).ok, 'one that may post there is linked');
+    assert.deepEqual((await myRooms(stuA.s)).rooms.map((r) => r.code), [hallB]);
+  });
+
   // A page as app.js runs it: lastSeq, joined, bump() rejoining on the same socket at a gap in the numbers.
   const page = async (code, name, role, cookie) => {
     const s = await open(cookie);

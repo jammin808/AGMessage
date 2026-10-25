@@ -204,6 +204,9 @@ function roomUserSummary(room) {
     account: !!u.acct,
   }));
 }
+/** Every seat one person has in a room ([socketId, seat] pairs): the room list shows the person once, so what the admin
+ *  does to that row (role, link, logout) is done to each of their pages there. */
+const seatsOf = (room, uid) => Array.from(room.users).filter(([, u]) => u.uid === uid);
 
 // Rooms each person (by server identity) is in — forwarding only between rooms they're actually in.
 const userRooms = new Map();
@@ -1226,9 +1229,11 @@ io.on('connection', (socket) => {
     // nothing the server checks, and would be undone at the page's next join.
     if (target.acct) return ok(ack)({ ok: false, error: target.name + ' signs in with an account: change their rights on the Accounts page.' });
     const prev = target.role;
-    target.role = role;
-    const s = io.sockets.sockets.get(socketId);
-    if (s) s.emit('roleChanged', { role });
+    for (const [sid, seat] of seatsOf(r, target.uid)) {
+      seat.role = role;
+      const s = io.sockets.sockets.get(sid);
+      if (s) s.emit('roleChanged', { role });
+    }
     io.to(r.code).emit('users', roomUserSummary(r));
     systemMessage(r, `${target.name} role changed from ${prev} to ${role} by admin`);
     ok(ack)({ ok: true });
@@ -1250,11 +1255,18 @@ io.on('connection', (socket) => {
     const target = io.sockets.sockets.get(socketId);
     const code = guard.str(targetRoom).toUpperCase();
     if (!target || !store.has(code)) return ok(ack)({ ok: false, error: 'User or room not found' });
-    const u = store.get(target.data.userRoom) && store.get(target.data.userRoom).users.get(socketId);
+    const r = store.get(target.data.userRoom);
+    const u = r && r.users.get(socketId);
     if (!u) return ok(ack)({ ok: false, error: 'User not in room' });
-    u.linkedRooms = u.linkedRooms || new Set();
-    u.linkedRooms.add(code);
-    target.emit('linkedRoomsChanged', { added: code });
+    // A link lets a code guest forward into a hall; an account forwards by its own rights there, so a link would give it
+    // nothing it may not already do.
+    if (u.acct && !rbac.can(target.data.account, 'hall.post', code)) return ok(ack)({ ok: false, error: u.name + ' signs in with an account that may not post in that hall: give the account that hall on the Accounts page.' });
+    for (const [sid, seat] of seatsOf(r, u.uid)) {
+      seat.linkedRooms = seat.linkedRooms || new Set();
+      seat.linkedRooms.add(code);
+      const s = io.sockets.sockets.get(sid);
+      if (s) s.emit('linkedRoomsChanged', { added: code });
+    }
     ok(ack)({ ok: true, linked: Array.from(u.linkedRooms) });
   });
   socket.on('admin:unlinkRoom', ({ socketId, targetRoom } = {}, ack) => {
@@ -1262,18 +1274,28 @@ io.on('connection', (socket) => {
     const target = io.sockets.sockets.get(socketId);
     if (!target) return ok(ack)({ ok: false, error: 'User not connected' });
     const code = guard.str(targetRoom).toUpperCase();
-    const u = store.get(target.data.userRoom) && store.get(target.data.userRoom).users.get(socketId);
+    const r = store.get(target.data.userRoom);
+    const u = r && r.users.get(socketId);
     if (!u || !u.linkedRooms) return ok(ack)({ ok: true });
-    u.linkedRooms.delete(code);
-    target.emit('linkedRoomsChanged', { removed: code });
+    for (const [sid, seat] of seatsOf(r, u.uid)) {
+      if (!seat.linkedRooms || !seat.linkedRooms.delete(code)) continue;
+      const s = io.sockets.sockets.get(sid);
+      if (s) s.emit('linkedRoomsChanged', { removed: code });
+    }
     ok(ack)({ ok: true, linked: Array.from(u.linkedRooms) });
   });
   socket.on('admin:kick', ({ socketId } = {}, ack) => {
     if (!admin(ack)) return;
     const target = io.sockets.sockets.get(socketId);
     if (!target) return ok(ack)({ ok: false, error: 'User not connected' });
-    target.emit('kicked', { reason: 'Removed by admin' });
-    target.disconnect(true);
+    // The person leaves the hall: every page they have open there, not only the one the room list names.
+    const r = store.get(target.data.userRoom);
+    const u = r && r.users.get(socketId);
+    const pages = u ? seatsOf(r, u.uid).map(([sid]) => io.sockets.sockets.get(sid)).filter(Boolean) : [target];
+    for (const p of pages) {
+      p.emit('kicked', { reason: 'Removed by admin' });
+      p.disconnect(true);
+    }
     ok(ack)({ ok: true });
   });
   socket.on('admin:summary', ({ roomCode } = {}, ack) => {
