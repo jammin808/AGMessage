@@ -216,12 +216,14 @@ test('C18: a Stagewatch\'s numbers never cross a link made again, a restart or a
     sw2.failResults = 1000;   // the desk is busy: every result post fails until it restarts
     const first = sw2.add(forUs('bogus line for AGMessage'));
     await until(() => sw2.requests.some((r) => r.method === 'POST' && r.url === '/api/proposals/' + first + '/result'), 8000, 'run, its result not taken');
-    // Stagewatch restarts: its queue is gone, it numbers from p1 again and its frames' seq starts again.
+    // Stagewatch restarts: its queue is gone, it numbers from p1 again and its frames' seq starts again (heard before its
+    // desk is asked, as a restarted Stagewatch's first frame always is: the link is down until it comes).
     sw2.restart();
     sw2.frame({ seq: 2, text: '04:00' });
+    await until(() => stages.some((s) => s.text === '04:00'), 4000, 'the restarted Stagewatch\'s frame');
     const second = sw2.add(forUs('notice Doors open'));
     assert.equal(second, first, 'the same number, another proposal');
-    await until(() => stages.some((s) => s.text === '04:00'), 4000, 'the restarted Stagewatch\'s frame');
+    await until(() => sw2.proposals.get(second).claimed, 8000, 'the new one collected (its result not taken yet either)');
     sw2.failResults = 0;
     await until(() => sw2.proposals.get(second).state !== 'approved', 12000, 'the new proposal reported');
     const p = sw2.proposals.get(second);
