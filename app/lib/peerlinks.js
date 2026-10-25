@@ -42,6 +42,9 @@ const UNLISTED_HIGH_FOR = { playmap: { 'assistant set': ['ENABLED', 'PROVIDER'] 
 const RANK = { low: 0, review: 1, high: 2 };
 const higher = (a, b) => (RANK[b] > RANK[a] ? b : a);
 const MAX_CARRIED = 4;   // lines carrying lines carrying lines…: past this depth the line is high (PlayMap's MaxEmbedding)
+// Carried lines a line's rating reads, at every depth together, before the line counts as high (PlayMap's
+// MaxCarriedReadings): a line of bindings carrying bindings is never read on and on.
+const MAX_READINGS = 256;
 const SECRET_SLOTS = new Set(['token', 'key', 'secret', 'password', 'pass']);
 
 /** A template whose line carries another line: a slot named "…line>" (BIND ADD … TO <target line>), or the node says so. */
@@ -51,19 +54,38 @@ const isFixedForm = (template, words) => String(template).split(/\s+\|\s+/).some
   const fw = f.trim().split(/\s+/);
   return fw.length === words.length && fw.every((w, i) => !/[<[{|]/.test(w) && w.toLowerCase() === words[i]);
 });
-/** The words a carrying line carries (PlayMap's EmbeddedLine): after the first TO for a "TO <…line>" row, else after an optional "FROM <x>". */
-function carriedWords(template, raw, words, n) {
-  if (/\bTO\s+<[^<>]*\bline>/i.test(template)) { const to = words.indexOf('to', n); return to < 0 ? [] : raw.slice(to + 1); }
-  return raw.slice(words[n] === 'from' ? n + 2 : n);
+/**
+ * Where each line a carrying line could be read to carry starts (PlayMap's CarriedReadings): after every TO for a
+ * "TO <…line>" row (an input's own words may hold one — the riskiest reading counts), else after an optional "FROM <x>".
+ */
+function carriedStarts(template, words, n) {
+  if (!/\bTO\s+<[^<>]*\bline>/i.test(template)) return [words[n] === 'from' ? n + 2 : n];
+  const out = [];
+  for (let i = n; i < words.length; i++) if (words[i] === 'to') out.push(i + 1);
+  return out;
 }
+/** The "target" strings (in any case, at any depth) of a JSON argument — the lines it carries — or null when it is not JSON. */
+function jsonTargets(text) {
+  let j; try { j = JSON.parse(text); } catch { return null; }
+  const out = [];
+  const walk = (v, d) => {
+    if (d > 8 || out.length > 32 || !v || typeof v !== 'object') return;
+    for (const [k, x] of Object.entries(v)) { if (/^target$/i.test(k) && typeof x === 'string') out.push(x); else walk(x, d + 1); }
+  };
+  walk(j, 0);
+  return out;
+}
+const firstOf = (a, b) => (a < 0 ? b : b < 0 ? a : Math.min(a, b));
 
 /**
  * The node's own entry for a line, rated as the node rates that line, or null — a line no listed verb starts is never
  * sent (pure). The risk starts at the row's, is raised (never lowered: fail closed) by a riskWhen rule its words match
  * (the word at argument `arg`, or anywhere after the verb for -1) and to high by a highFor first argument, and a line
  * that carries a line takes at least the carried line's risk — high when that is JSON, quoted, unlisted or too deep.
+ * `secretFrom` is the word its secret starts at — its own verb's, or that of a line it carries (a binding to LINK
+ * PATTERNS <host> <token>; a JSON argument holding one is kept back whole) — and `secrets` the words that are secret.
  */
-function matchCommand(commands, line, depth = 0) {
+function matchCommand(commands, line, depth = 0, budget = { left: MAX_READINGS }) {
   const raw = String(line || '').trim().split(/\s+/).filter(Boolean);
   const words = raw.map((w) => w.toLowerCase());
   let best = null;
@@ -80,15 +102,35 @@ function matchCommand(commands, line, depth = 0) {
     if (r.arg >= 0 ? words[n + r.arg] === want : words.slice(n).includes(want)) risk = higher(risk, r.risk);
   }
   if (Array.isArray(entry.highFor) && n < words.length && entry.highFor.some((h) => String(h).toLowerCase() === words[n])) risk = 'high';
+  const own = secretFrom(entry.verb);
+  let secret = own >= 0 && raw.length > own ? own : -1;
+  const inner = [];   // secret words a JSON argument's carried lines hold
+  const carried = (text) => (--budget.left < 0 || depth >= MAX_CARRIED ? null : matchCommand(commands, text, depth + 1, budget));
   if (carriesLine(entry) && !isFixedForm(entry.verb, words)) {
-    const carried = carriedWords(String(entry.verb), raw, words, n);
-    if (raw.slice(n).some((w) => w.startsWith('{')) || carried.some((w) => w.includes('"'))) risk = 'high';
-    else if (carried.length) {
-      const m = depth < MAX_CARRIED ? matchCommand(commands, carried.join(' '), depth + 1) : null;
-      risk = m ? higher(risk, m.risk) : 'high';
+    const json = raw.findIndex((w, i) => i >= n && w.startsWith('{'));
+    if (json >= 0) {
+      risk = 'high';
+      const targets = jsonTargets(raw.slice(json).join(' '));
+      // A JSON argument no reader can read may hold anything: it is kept back if it names a verb that carries a secret.
+      const holds = targets ? targets.some((t) => { const m = carried(t); if (m && m.secretFrom >= 0) inner.push(...m.secrets); return m && m.secretFrom >= 0; })
+        : (Array.isArray(commands) ? commands : []).some((c) => secretFrom(c && c.verb) >= 0 && verbWords(c.verb).length && raw.slice(json).join(' ').toLowerCase().includes(verbWords(c.verb).join(' ')));
+      if (holds) secret = firstOf(secret, json);
+    } else {
+      for (const at of carriedStarts(String(entry.verb), words, n)) {
+        const tail = raw.slice(at);
+        if (!tail.length) continue;
+        // A quoted carried line is read as the node may read it, without its quotes, for its secret; its risk is high.
+        const quoted = tail.some((w) => w.includes('"'));
+        const m = carried(tail.map((w) => w.replace(/"/g, '') || '""').join(' '));
+        risk = quoted || !m ? 'high' : higher(risk, m.risk);
+        if (m && m.secretFrom >= 0) secret = firstOf(secret, at + m.secretFrom);
+      }
     }
   }
-  return { verb: String(entry.verb).slice(0, 120), risk, words: String(entry.words || '').slice(0, 200), secretFrom: secretFrom(entry.verb) };
+  return {
+    verb: String(entry.verb).slice(0, 120), risk, words: String(entry.words || '').slice(0, 200),
+    secretFrom: secret, secrets: (secret >= 0 ? raw.slice(secret).concat(inner) : inner).flatMap((w) => (w.includes('"') ? [w, w.replace(/"/g, '')] : [w])),
+  };
 }
 
 /**
@@ -194,6 +236,9 @@ class PeerLink {
     this.status = 'connecting'; this.problem = ''; this.context = null; this.okAt = 0; this.endpoint = null;
     this.tlsState = null;   // {fp, nodeKey, changed} while a certificate is refused
     this.rules = null;      // PlayMap's own risk rules per verb (GET /api/verbs), read once per connection
+    // Whether a line can be rated yet: PlayMap's rules read (or known absent: an older build serves none). Until then
+    // nothing is sent now — a line its rules raise to high must never go out as its row's lower risk.
+    this.rulesKnown = node.t !== 'playmap';
     this.busy = false;
     this.timer = setInterval(() => this.poll(), POLL_MS);
     this.timer.unref();
@@ -260,7 +305,8 @@ class PeerLink {
       if (this.endpoint.tls && this.pins.confirm(this.endpoint.nodeKey, this.endpoint.fp)) this.onPins();
       if (this.node.t === 'playmap' && this.endpoint.rules === undefined) this.endpoint.rules = await this._readRules();
       const changed = !this.context || this.context.light !== ctx.light || this.context.headline !== ctx.headline;
-      this.context = ctx; this.okAt = Date.now(); this.rules = this.endpoint.rules || null;
+      this.context = ctx; this.okAt = Date.now();
+      if (this.endpoint.rules !== undefined) { this.rules = this.endpoint.rules; this.rulesKnown = true; }   // else: asked again at the next poll
       if (changed) this.onChange();
       this._set('live');
     } catch (e) {
@@ -275,12 +321,16 @@ class PeerLink {
     } finally { this.busy = false; }
   }
 
-  /** PlayMap's own risk rules per verb (its vocabulary), or null when it serves none (an older build: the listed risks stand). */
+  /**
+   * PlayMap's own risk rules per verb (its vocabulary); null when it serves none (404: an older build — the listed risks
+   * stand); undefined when it could not be read now (unreachable, busy, an odd answer), so the next poll asks again.
+   */
   async _readRules() {
     try {
       const res = await tlsmod.request(this.endpoint.base + '/api/verbs', { headers: this._headers(), timeoutMs: 3000, tls: this.endpoint.tls });
-      return res.status === 200 && Array.isArray(res.body) ? readVerbRules(res.body) : null;
-    } catch { return null; }
+      if (res.status === 200 && Array.isArray(res.body)) return readVerbRules(res.body);
+      return res.status === 404 ? null : undefined;
+    } catch { return undefined; }
   }
 
   /** The verbs it lists, each with the node's rules for rating a line: what a command is matched against. */

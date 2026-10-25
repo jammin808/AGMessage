@@ -140,6 +140,26 @@ test('peerlinks: a line is rated as the node rates it; Patterns\' receipts read;
   assert.equal(pl.redactLine('VIDEO END 10', -1), 'VIDEO END 10');
   assert.equal(pl.redactWords('ran LINK PATTERNS 10.0.0.5:9696 K7QM-3XWD-P9RA', ['K7QM-3XWD-P9RA']), 'ran LINK PATTERNS 10.0.0.5:9696 …');
   assert.equal(pl.matchCommand([{ verb: 'LINK PATTERNS <host[:port]>|OFF [<token>]', risk: 'review' }], 'LINK PATTERNS 10.0.0.5 tok').secretFrom, 3);
+  // …and a line that carries one: a binding to LINK PATTERNS <host> <token> keeps its token back too (PlayMap's
+  // CarriedSecretAt), as a JSON argument holding one is kept back whole; a carried line with no secret words keeps all.
+  const withLink = table.concat([{ verb: 'LINK PATTERNS <host[:port]>|OFF [<token>] | LINK PATTERNS FOLLOW-BLACKOUT ON|OFF', risk: 'review' }]);
+  const cut = (line) => { const m = pl.matchCommand(withLink, line); return [m.risk, pl.redactLine(line, m.secretFrom), m.secrets]; };
+  assert.deepEqual(cut('BIND ADD OSC /a TO LINK PATTERNS 10.0.0.5:9696 tok'), ['review', 'BIND ADD OSC /a TO LINK PATTERNS 10.0.0.5:9696 …', ['tok']]);
+  assert.deepEqual(cut('BIND LEARN FROM MIDI LINK PATTERNS 10.0.0.5 tok'), ['review', 'BIND LEARN FROM MIDI LINK PATTERNS 10.0.0.5 …', ['tok']]);
+  assert.deepEqual(cut('BIND ADD OSC /a TO "LINK PATTERNS 10.0.0.5 tok"').slice(0, 2), ['high', 'BIND ADD OSC /a TO "LINK PATTERNS 10.0.0.5 …']);
+  assert.ok(cut('BIND ADD OSC /a TO "LINK PATTERNS 10.0.0.5 tok"')[2].includes('tok'), 'the secret as the node reads it, without its quote');
+  const json = cut('BIND ADD {"input":"OSC /a","target":"LINK PATTERNS 10.0.0.5 tok"}');
+  assert.deepEqual(json.slice(0, 2), ['high', 'BIND ADD …']);
+  assert.ok(json[2].includes('tok'), 'the carried line\'s own secret words, for the receipt');
+  assert.deepEqual(cut('BIND ADD {"input":"OSC /a","target":"LINK PATTERNS OFF"}').slice(0, 2), ['high', 'BIND ADD {"input":"OSC /a","target":"LINK PATTERNS OFF"}']);
+  assert.deepEqual(cut('BIND ADD {not json LINK PATTERNS 10.0.0.5 tok').slice(0, 2), ['high', 'BIND ADD …'], 'JSON no reader can read: kept back when it names a verb with a secret');
+  assert.deepEqual(cut('BIND ADD OSC /a TO LINK PATTERNS OFF'), ['review', 'BIND ADD OSC /a TO LINK PATTERNS OFF', []]);
+  // Every TO's tail is read, the riskiest counts (an input's own words may hold one); a line of bindings is read a bounded number of times.
+  assert.equal(risk('BIND ADD OSC /x TO SET a b TO BLACKOUT ON'), 'high');
+  const deep = 'BIND ADD x TO '.repeat(28) + 'SET a b c';
+  const started = process.hrtime.bigint();
+  assert.equal(risk(deep), 'high', 'bindings carrying bindings past the depth PlayMap reads');
+  assert.ok(process.hrtime.bigint() - started < 500_000_000n, 'read in bounded time');
 });
 
 test('hello: PlayMap is heard (it was dropped before 0.5); its build is read; AGMessage says it has displays and help', () => {
@@ -319,6 +339,12 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     const r = await emit(senior, 'nodes:command', { id: 'playmap01', line: 'LINK PATTERNS 10.0.0.5:9696 ' + secret, mode: 'send' });
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.ok(pm.requests.some((x) => x.url === '/api/cmd' && x.body === 'LINK PATTERNS 10.0.0.5:9696 ' + secret), 'the node gets the whole line');
+    // A binding that carries it: the node gets it whole, the record keeps it back, the desk is never given it.
+    const bindLine = 'BIND ADD OSC /fader/9 TO LINK PATTERNS 10.0.0.5:9696 ' + secret;
+    const bound = await emit(senior, 'nodes:command', { id: 'playmap01', line: bindLine, mode: 'send' });
+    assert.deepEqual([bound.ok, bound.risk], [true, 'review'], JSON.stringify(bound));
+    assert.ok(pm.requests.some((x) => x.url === '/api/cmd' && x.body === bindLine));
+    assert.match((await emit(senior, 'nodes:command', { id: 'playmap01', line: bindLine, mode: 'propose' })).error, /carries a secret/);
     const before = sw.proposals.size;
     const prop = await emit(senior, 'nodes:command', { id: 'playmap01', line: 'LINK PATTERNS 10.0.0.5:9696 ' + secret, mode: 'propose' });
     assert.equal(prop.ok, false);
@@ -326,6 +352,7 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     assert.equal(sw.proposals.size, before, 'never put in the desk\'s queue');
     const a = await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin });
     assert.ok(a.body.entries.some((e) => e.action === 'node.command' && e.words.startsWith('Stage left: LINK PATTERNS 10.0.0.5:9696 … →')));
+    assert.ok(a.body.entries.some((e) => e.action === 'node.command' && e.words.startsWith('Stage left: BIND ADD OSC /fader/9 TO LINK PATTERNS 10.0.0.5:9696 … →')));
     assert.ok(!JSON.stringify(a.body).includes(secret), 'not in the audit log, nor in the receipt\'s words it keeps');
     for (const f of fs.readdirSync(srv.dataDir).filter((x) => x.startsWith('audit'))) assert.ok(!fs.readFileSync(path.join(srv.dataDir, f), 'utf8').includes(secret), f);
   });

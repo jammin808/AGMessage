@@ -1023,10 +1023,12 @@ io.on('connection', (socket) => {
     const match = link.context ? peerlinks.matchCommand(link.commandTable(), text) : null;
     if (!text || !match) return ack({ ok: false, error: link.node.name + ' does not list that command — only the verbs it lists can be sent.' });
     const who = socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
-    // A verb's secret words (a pairing token, a key) are never written down: the audit row keeps the line up to them.
-    const secrets = match.secretFrom >= 0 ? text.split(/\s+/).slice(match.secretFrom) : [];
+    // A verb's secret words (a pairing token, a key — its own, or a carried line's) are never written down: the audit row
+    // keeps the line up to them.
+    const secrets = match.secrets;
     const shown = peerlinks.redactLine(text, match.secretFrom);
     if (mode === 'send') {
+      if (!link.rulesKnown) return ack({ ok: false, error: link.node.name + '\'s own risk rules could not be read yet — nothing sent; try again in a moment, or propose it to the show desk.' });
       if (match.risk === 'high') return ack({ ok: false, error: '“' + shown + '” is high risk for ' + link.node.name + ': propose it to the show desk, where a person approves it.' });
       const r = await link.send(text);
       audit.write(who, 'node.command', link.node.id, link.node.name + ': ' + shown + ' → ' + peerlinks.redactWords(r.ok ? r.stage + (r.effect ? ' (' + r.effect + ')' : '') : 'refused: ' + (r.error || ''), secrets), socket.data.ip);
@@ -1034,7 +1036,7 @@ io.on('connection', (socket) => {
       return ack({ ...r, risk: match.risk });
     }
     // A proposal keeps its line in the desk's queue and journal: a line with a secret is never proposed.
-    if (secrets.length) return ack({ ok: false, error: '“' + shown + '” carries a secret: send it now, or set it on ' + link.node.name + ' itself — a proposal would keep it in the show desk\'s queue.' });
+    if (secrets.length) return ack({ ok: false, error: '“' + shown + '” carries a secret: ' + (match.risk === 'high' ? '' : 'send it now, or ') + 'set it on ' + link.node.name + ' itself — a proposal would keep it in the show desk\'s queue.' });
     // The show desk of the node's own hall, or none: a hall's proposals never go to another hall's show caller.
     const { link: desk, desk: hasDesk } = deskFor(link);
     if (!hasDesk) {

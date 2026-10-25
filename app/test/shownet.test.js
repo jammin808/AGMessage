@@ -249,3 +249,32 @@ test('C18: a Stagewatch\'s numbers never cross a link made again, a restart or a
     await until(async () => (await roomMessages()).some((m) => m.proposal && m.proposal.id === r.proposal.id && m.proposal.at === r.proposal.at && m.proposal.state === 'approved'), 12000, 'approved');
   });
 });
+
+test('C22: a PlayMap line is never sent now before PlayMap\'s own risk rules are read — a busy /api/verbs is asked again', async (t) => {
+  const { fakeNode } = require('./helpers');
+  const PLAYMAP_TOKEN = 'pm-fake-pairing-token';   // secret-scan: fixture
+  const decode = 'DECODE POLICY AUTO|DIRECT|GPU-COPY|COPY-BACK|SOFTWARE [FORCE]';
+  const pm = await fakeNode({
+    t: 'playmap', name: 'Stage right', token: PLAYMAP_TOKEN, commands: [{ verb: decode, risk: 'review' }], failVerbs: 1,
+    verbs: [{ name: 'DECODE POLICY', syntax: decode, risk: 'review', riskWhen: [{ arg: -1, word: 'FORCE', risk: 'high' }] }],
+  });
+  const srv = await startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await pm.close(); });
+  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const ctl = await connect(srv.base, admin); sockets.push(ctl);
+  assert.ok((await emit(ctl, 'nodes:link', { id: 'playmap01', t: 'playmap', url: pm.url, name: 'Stage right', token: PLAYMAP_TOKEN })).ok);
+  await until(async () => ((await emit(ctl, 'nodes:list', {})).linked.find((n) => n.id === 'playmap01') || {}).status === 'live', 8000, 'live');
+  const verbsAsked = () => pm.requests.filter((x) => x.url === '/api/verbs').length;
+  assert.equal(verbsAsked(), 1, 'its vocabulary asked for once, and it was busy');
+  const cmds = () => pm.requests.filter((x) => x.url === '/api/cmd').length;
+  const early = await emit(ctl, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT FORCE', mode: 'send' });
+  assert.equal(early.ok, false, JSON.stringify(early));
+  assert.match(early.error, /risk rules could not be read yet/);
+  assert.equal(cmds(), 0, 'nothing reached PlayMap while its rules were unknown');
+  await until(() => verbsAsked() >= 2, 8000, 'asked again at the next poll');
+  await until(async () => /high risk/.test((await emit(ctl, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT FORCE', mode: 'send' })).error || ''), 4000, 'rated high by its rules');
+  assert.equal(cmds(), 0);
+  const fine = await emit(ctl, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT', mode: 'send' });
+  assert.deepEqual([fine.ok, fine.risk], [true, 'review']);
+});
