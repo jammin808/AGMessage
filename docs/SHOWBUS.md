@@ -139,6 +139,9 @@ one shape:
   address).
 - **AGMessage**: holds the Stagewatch key encrypted at rest (Windows DPAPI where available, else AES with a machine key
   file outside `data/`), sends it in a header — never `?pin=` in a WebSocket URL — and asks for a `node`-scope key.
+  A Patterns' or PlayMap's pairing token it holds the same way, and sends only to a loopback address or over TLS to a
+  certificate pinned for that node or confirmed by a person (at least 8 characters of its fingerprint typed); it never
+  drives them with it — its lines are proposals (§11) — until they issue it a scoped key.
 
 ## 8. What each node publishes and consumes
 

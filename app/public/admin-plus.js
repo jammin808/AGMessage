@@ -114,14 +114,16 @@
         const li = document.createElement('li');
         const mark = { green: '✓', amber: '△', red: '✕', grey: '○' }[l.light] || '○';
         li.textContent = mark + ' ' + (l.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' “' + l.name + '” — ' + l.status + (l.problem ? ' (' + l.problem + ')' : '') + (l.headline ? ': ' + l.headline : '') + (l.hall ? ' · hall ' + l.hall : '') + ' · ' + l.commands.length + ' verbs';
-        // A changed certificate is refused until the admin accepts the one the node presents now (shown here).
-        if (l.certificateChanged) {
+        // A certificate that waits (changed, or never confirmed) is confirmed by typing the start of the fingerprint the
+        // node shows on its own screen; this page is never told the fingerprint, so it cannot be copied from here.
+        if (l.certificateWaits) {
           const acc = document.createElement('button');
-          acc.className = 'btn ghost small'; acc.type = 'button'; acc.textContent = 'Accept certificate';
-          acc.title = 'It now presents ' + pretty(l.certificate);
+          acc.className = 'btn ghost small'; acc.type = 'button'; acc.textContent = l.certificateChanged ? 'Accept new certificate…' : 'Confirm certificate…';
           acc.onclick = () => {
-            if (!confirm('Accept ' + l.name + '\'s new certificate (' + pretty(l.certificate).slice(0, 23) + '…)? Only do this if you know why it changed (a renewal, a reinstall, a new laptop).')) return;
-            socket.emit('nodes:acceptCertificate', { id: l.id }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not accepted.'); loadNodes(); });
+            const typed = prompt((l.certificateChanged ? l.name + '\'s certificate changed. Only accept it if you know why (a renewal, a reinstall, a new laptop). ' : '')
+              + 'Type the first 8 or more characters of the certificate fingerprint ' + l.name + ' shows on its own screen.', '');
+            if (typeof typed !== 'string' || !typed.trim()) return;
+            socket.emit('nodes:acceptCertificate', { id: l.id, fingerprint: typed.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not accepted.'); loadNodes(); });
           };
           li.appendChild(acc);
         }
@@ -137,7 +139,9 @@
     const token = prompt('The pairing token of ' + (p.name || p.t) + ' (' + (p.t === 'playmap' ? 'PlayMap: node settings → Network' : 'Patterns: Remote page → TRUST') + '). Leave empty to keep the saved one.', '');
     if (typeof token !== 'string') return;   // cancelled
     const hall = prompt('For one hall? Type its code (e.g. K7P2QX), or leave empty for every hall.', '') || '';
-    socket.emit('nodes:link', { id: p.id, token, hall: hall.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not linked.'); loadNodes(); });
+    // The token goes to another machine only over HTTPS to a certificate a person confirmed (or one pinned before).
+    const fingerprint = prompt('Its certificate: type the first 8 or more characters of the fingerprint ' + (p.name || p.t) + ' shows on its own screen. Leave empty when it runs on this laptop, or its certificate is confirmed already.', '') || '';
+    socket.emit('nodes:link', { id: p.id, token, hall: hall.trim(), fingerprint: fingerprint.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not linked.'); loadNodes(); });
   }
 
   function wire() {

@@ -182,28 +182,29 @@
     sel.setAttribute('aria-label', 'Verb');
     for (const c of n.commands) { const o = document.createElement('option'); o.value = c.verb; o.dataset.risk = c.risk; o.textContent = RISK[c.risk] + ' — ' + c.verb + (c.words ? ' (' + c.words + ')' : ''); sel.appendChild(o); }
     const line = document.createElement('input');
-    line.maxLength = 400; line.placeholder = 'The line to send, e.g. ' + (n.commands[0] ? n.commands[0].verb : 'a verb it lists');
+    line.maxLength = 400; line.placeholder = 'The line to propose, e.g. ' + (n.commands[0] ? n.commands[0].verb : 'a verb it lists');
     line.setAttribute('aria-label', 'Line');
-    const send = document.createElement('button'); send.type = 'button'; send.className = 'btn small'; send.textContent = 'Send now';
+    // Only proposed: AGMessage holds just the node's pairing token (full control of it), so a person at the show desk
+    // approves each line and the node collects it with its own key — nothing here drives it directly.
     const propose = document.createElement('button'); propose.type = 'submit'; propose.className = 'btn small primary'; propose.textContent = 'Propose';
-    propose.hidden = !desk;
+    propose.title = 'To the show desk: a person approves it in Stagewatch, then ' + n.name + ' runs it';
     const out = document.createElement('p'); out.className = 'hint node-out';
     const fill = () => {
       const c = n.commands.find((x) => x.verb === sel.value);
       if (!c) return;
       line.value = c.verb.split(/\s+/).filter((w) => !/^[<[{(]/.test(w)).join(' ').replace(/\s*[<[{(].*$/, '').trim() + ' ';
-      send.disabled = c.risk === 'high';
-      send.title = c.risk === 'high' ? 'High risk: propose it to the show desk' : 'Send it now — ' + n.name + ' answers with a receipt';
     };
     sel.onchange = () => { fill(); line.focus(); };
-    if (n.commands.length) fill(); else { line.disabled = true; send.disabled = true; propose.disabled = true; line.placeholder = 'It lists no verbs yet.'; }
-    const run = (mode) => socket.emit('nodes:command', { id: n.id, line: line.value.trim(), mode }, (r) => {
-      out.dataset.ok = r && r.ok ? '1' : '0';
-      out.textContent = !r ? 'No answer.' : !r.ok ? '✕ ' + r.error : mode === 'send' ? '✓ ' + (r.stage === 'applied' ? 'Done' : 'Accepted') + (r.effect ? ': ' + r.effect : '') : '▲ Proposed to the show desk (' + r.proposal.id + ') — a person approves it in Stagewatch.';
-    });
-    send.onclick = () => run('send');
-    form.onsubmit = (e) => { e.preventDefault(); run('propose'); };
-    form.append(sel, line, send, propose);
+    if (n.commands.length) fill(); else { line.disabled = true; propose.disabled = true; line.placeholder = 'It lists no verbs yet.'; }
+    if (!desk) { propose.disabled = true; out.textContent = 'Lines to ' + n.name + ' go to the show desk, and ' + (n.hall ? 'its hall\'s' : 'the default') + ' Stagewatch keeps none — nothing can be proposed now.'; }
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      socket.emit('nodes:command', { id: n.id, line: line.value.trim(), mode: 'propose' }, (r) => {
+        out.dataset.ok = r && r.ok ? '1' : '0';
+        out.textContent = !r ? 'No answer.' : !r.ok ? '✕ ' + r.error : '▲ Proposed to the show desk (' + r.proposal.id + ', ' + r.risk + ' risk) — a person approves it in Stagewatch.';
+      });
+    };
+    form.append(sel, line, propose);
     sec.append(form, out);
     return sec;
   }

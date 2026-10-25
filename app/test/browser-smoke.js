@@ -476,6 +476,11 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     patterns = await fakeNode({ name: 'Smoke Patterns' });
     await hallView.eval(`new Promise((r) => socket.emit('nodes:link', { id: 'smokepat', t: 'patterns', url: '${patterns.url}', token: 'node-token', hall: ROOM, name: 'Smoke Patterns' }, r))`);
     report(!!(await signin.until(`!document.getElementById('networkBtn').hidden && document.body.textContent.includes('Smoke Patterns')`)), 'the admin\'s halls board offers Show network once a Patterns is linked');
+    // AG-1: AGMessage holds only a node's pairing token, so the Show network dialog only proposes to the show desk.
+    await signin.eval(`document.getElementById('networkBtn').click()`);
+    const netButtons = await signin.until(`(() => { const c = document.querySelector('#networkDialog[open] #networkList .node-card'); return c ? JSON.stringify([...c.querySelectorAll('button')].map((x) => x.textContent)) : ''; })()`);
+    await signin.eval(`document.getElementById('networkDialog').close()`);
+    report(netButtons === JSON.stringify(['Propose']), `Show network only proposes a node's verbs to the show desk — nothing drives it directly (${netButtons})`);
     // The admin page signed this browser in with the host's admin token: from here its pages are judged by the accounts
     // they sign in with alone (the pages already open keep their connections).
     await signin.send('Network.deleteCookies', { name: 'agm_admin', url: base + '/' });

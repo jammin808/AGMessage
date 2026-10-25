@@ -1,23 +1,28 @@
 'use strict';
 /**
- * Links to Patterns and PlayMap (Show Bus 1.2): read what they are doing, and drive them — within their own rules.
+ * Links to Patterns and PlayMap (Show Bus 1.2): read what they are doing, and propose lines to them — within their own rules.
  *
+ *  - The token: the pairing token AGMessage holds for a node is full control of it. It goes only to this machine (a
+ *    loopback address) or over TLS to a certificate pinned for that node or confirmed by a person (at least 8 characters
+ *    of its fingerprint typed from the node's own screen). A node on another machine that offers no TLS, or whose
+ *    certificate no person has confirmed, is refused with words and sent nothing (_resolve).
  *  - Read: each linked node's context (GET /api/context, §6) every 5 s with its token in a header — X-Patterns-Token for
  *    Patterns, X-PlayMap-Token for PlayMap — never in a URL. Its light, headline, items, recent lines and the verbs it
  *    lists (`commands`, each with its risk) are shown on the halls board and the admin page, and go to the AI's brief.
  *    Live while answers come, stale after 12 s without one; a refused token says so.
- *  - Drive: only a verb the node itself lists in its context (fail closed: anything else is refused before it is sent),
- *    rated as the node rates the line: its listed risk, raised by the words the node says raise it (riskWhen, highFor —
- *    from the context, or PlayMap's GET /api/verbs), and for a line that carries a line (BIND … TO <line>) at least the
- *    carried line's risk. A low- or review-risk line may be sent now (POST /api/cmd, one line → the node's receipt: the
- *    request id rides as X-Request-Id for PlayMap, as Patterns' "@id " prefix for Patterns); a high-risk one is only
- *    ever proposed to the show desk (Show Bus §11), where a person approves it and the node collects it with its own
- *    key. Either way the node's own checks still apply. A verb's secret words (a pairing token) are never written down.
+ *  - Propose, never drive: the token is never used to drive a node (send() refuses with words). A line is only a verb the
+ *    node itself lists in its context (fail closed: anything else is refused), rated as the node rates the line: its
+ *    listed risk, raised by the words the node says raise it (riskWhen, highFor — from the context, or PlayMap's GET
+ *    /api/verbs), and for a line that carries a line (BIND … TO <line>) at least the carried line's risk. It is proposed
+ *    to the show desk (Show Bus §11) with that risk, where a person approves it and the node collects it with its own key
+ *    and its own checks. Driving a node directly waits for a key scoped for AGMessage (Patterns' ptk_, PlayMap's pmk_).
+ *    A verb's secret words (a pairing token) are never written down.
  *  - TLS: when the node's hello announces a certificate, the address is https:// or the node is pinned, the certificate
  *    is fetched and checked against the pin for that node before anything — the token above all — is sent (lib/tls.js
- *    PinStore). A changed one is refused until the admin accepts the one presented (acceptCertificate).
+ *    PinStore). A changed one, or one no person has confirmed, is refused until a person types the start of its
+ *    fingerprint (acceptCertificate).
  */
-const crypto = require('crypto');
+const net = require('net');
 const tlsmod = require('./tls');
 
 const STALE_MS = 12_000;
@@ -25,6 +30,17 @@ const POLL_MS = 5_000;
 const KINDS = new Set(['patterns', 'playmap']);
 const RISKS = new Set(['low', 'review', 'high']);
 const HEADER = { patterns: 'X-Patterns-Token', playmap: 'X-PlayMap-Token' };
+const LOOPBACK = new net.BlockList();
+LOOPBACK.addSubnet('127.0.0.0', 8, 'ipv4');
+LOOPBACK.addAddress('::1', 'ipv6');
+
+/** Whether an address's host is this machine — 127.0.0.0/8, ::1 (IPv4-mapped too) or localhost — where a token never crosses the network (pure). */
+function isLoopback(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/^\[(.*)\]$/, '$1');
+  if (h === 'localhost') return true;
+  const family = net.isIP(h);
+  return family !== 0 && LOOPBACK.check(h, family === 6 ? 'ipv6' : 'ipv4');
+}
 
 /** The literal words a verb template starts with ("VIDEO END <seconds>" → ["VIDEO", "END"]) (pure). */
 function verbWords(template) {
@@ -83,7 +99,8 @@ const firstOf = (a, b) => (a < 0 ? b : b < 0 ? a : Math.min(a, b));
  * (the word at argument `arg`, or anywhere after the verb for -1) and to high by a highFor first argument, and a line
  * that carries a line takes at least the carried line's risk — high when that is JSON, quoted, unlisted or too deep.
  * `secretFrom` is the word its secret starts at — its own verb's, or that of a line it carries (a binding to LINK
- * PATTERNS <host> <token>; a JSON argument holding one is kept back whole) — and `secrets` the words that are secret.
+ * PATTERNS <host> <token>; a JSON argument holding one is kept back whole) — and `secrets` the words that are secret:
+ * a line with any is never proposed (the desk would keep it).
  */
 function matchCommand(commands, line, depth = 0, budget = { left: MAX_READINGS }) {
   const raw = String(line || '').trim().split(/\s+/).filter(Boolean);
@@ -150,12 +167,6 @@ function redactLine(line, from) {
   const w = String(line || '').trim().split(/\s+/);
   return from >= 0 && w.length > from ? w.slice(0, from).concat('…').join(' ') : String(line || '').trim();
 }
-/** Any of the secret words in what a node answered, as "…" (pure). */
-function redactWords(text, secrets) {
-  let t = String(text || '');
-  for (const sw of secrets || []) if (sw) t = t.split(sw).join('…');
-  return t;
-}
 
 /** A command row's own risk rules, cleaned and bounded (pure): riskWhen [{arg, word, risk}], highFor [words], embedsLine. */
 function readRules(c) {
@@ -194,50 +205,27 @@ function readContext(j) {
   };
 }
 
-/**
- * A node's answer to a command, as a receipt (pure): Show Bus receipts (PlayMap's {type:"receipt", stage, effect, error}),
- * Patterns' {ok, msg} — its wire's OK / ERR words, with HTTP 200 even for ERR — or the wire's OK / ERR lines.
- */
-function readReceipt(status, body, text, id) {
-  if (body && typeof body === 'object' && typeof body.msg === 'string' && body.type !== 'receipt' && typeof body.stage !== 'string') {
-    return readReceipt(status, null, body.msg, typeof body.id === 'string' ? body.id : id);
-  }
-  if (body && typeof body === 'object') {
-    if (status >= 400 || body.ok === false) return { ok: false, stage: 'refused', error: String(body.error || body.words || ('said ' + status)).slice(0, 200) };
-    return { ok: true, id: typeof body.id === 'string' ? body.id : id, stage: body.stage === 'applied' ? 'applied' : 'accepted', effect: String(body.effect || body.words || '').slice(0, 200) };
-  }
-  const t = String(text || '').trim();
-  const first = t.split(/\s/, 1)[0].toUpperCase();
-  if (status < 400 && first === 'OK') return { ok: true, id, stage: 'applied', effect: wordsAfter(t).slice(0, 200) };
-  return { ok: false, stage: 'refused', error: ((first === 'ERR' || first === 'ERROR' ? wordsAfter(t) : t) || 'said ' + status).slice(0, 200) };
-}
-/** "OK @a1 Clip ends in 10 s" → "Clip ends in 10 s": the words after the verdict and its request id (no pattern). */
-function wordsAfter(line) {
-  let rest = line.slice(line.split(/\s/, 1)[0].length).trimStart();
-  if (rest.startsWith('@')) { const sp = rest.search(/\s/); rest = sp < 0 ? '' : rest.slice(sp).trimStart(); }
-  return rest;
-}
-
 class PeerLink {
   /**
    * @param {object} o
    * @param {{t:string,id:string,name:string}} o.node
    * @param {string} o.base http(s)://host:port
    * @param {string} o.token
+   * @param {string} [o.confirmFp] the start of its certificate's fingerprint a person typed (8 to 64 hex characters)
    * @param {object} o.pins a tls.PinStore
    * @param {()=>void} o.onPins the pins changed
    * @param {(id:string)=>object|null} o.findPeer the discovery table, by node id
    * @param {()=>void} o.onChange the light, headline or status changed
    */
-  constructor({ node, base, token, hall = '', pins, onPins, findPeer, onChange }) {
+  constructor({ node, base, token, confirmFp = '', hall = '', pins, onPins, findPeer, onChange }) {
     if (!KINDS.has(node.t)) throw new Error('a link is to Patterns or PlayMap');
-    this.node = node; this.base = base; this.token = token; this.hall = hall;
+    this.node = node; this.base = base; this.token = token; this.confirmFp = confirmFp; this.hall = hall;
     this.pins = pins; this.onPins = onPins || (() => {}); this.findPeer = findPeer || (() => null); this.onChange = onChange || (() => {});
     this.status = 'connecting'; this.problem = ''; this.context = null; this.okAt = 0; this.endpoint = null;
-    this.tlsState = null;   // {fp, nodeKey, changed} while a certificate is refused
+    this.tlsState = null;   // {fp, nodeKey, changed} while a certificate is refused: it waits for a person to confirm it
     this.rules = null;      // PlayMap's own risk rules per verb (GET /api/verbs), read once per connection
-    // Whether a line can be rated yet: PlayMap's rules read (or known absent: an older build serves none). Until then
-    // nothing is sent now — a line its rules raise to high must never go out as its row's lower risk.
+    // Whether a line can be rated yet: PlayMap's rules read (or known absent: an older build serves none). Until then a
+    // line is proposed as high — one its rules raise to high must never reach the desk as its row's lower risk.
     this.rulesKnown = node.t !== 'playmap';
     this.busy = false;
     this.timer = setInterval(() => this.poll(), POLL_MS);
@@ -260,33 +248,57 @@ class PeerLink {
     return new URL(this.base).protocol === 'https:' || !!(peer && peer.tls) || !!this.pins.pins['node:' + this.node.id];
   }
 
-  /** Where and how to reach the node: plain, or pinned TLS. Null when it may not be talked to. */
+  /**
+   * Where and how to reach the node — plain only on this machine, else pinned TLS — or null when it may not be sent its
+   * token: another machine without TLS, or a certificate that is not the pinned one and that no person has confirmed.
+   */
   async _resolve() {
     const u = new URL(this.base);
     const peer = this.findPeer(this.node.id);
-    if (!this._wantsTls(peer)) return { base: this.base, tls: null };
+    const local = isLoopback(u.hostname);
+    if (!this._wantsTls(peer)) {
+      if (local) return { base: this.base, tls: null };
+      this._set('refused', 'it offers no encrypted connection, and its token — full control of it — is never sent in the clear to another machine: turn HTTPS on in ' + this.node.name + ' and link it by its https:// address');
+      return null;
+    }
     // The https port: the address's own when it is https://, else the one the hello names, else the address's (a node that
     // serves both on one port); a node with another HTTPS port is unreachable — nothing sent — until its hello is heard.
     const port = (u.protocol === 'https:' && Number(u.port)) || (peer && peer.ports && peer.ports.https) || Number(u.port) || 443;
     const nodeKey = 'node:' + this.node.id;
     const cert = await tlsmod.probeCertificate(u.hostname, port);
     const verdict = this.pins.check(nodeKey, cert.fp, (peer && peer.tls) || '');
-    // What the admin is shown, and accepts: the certificate presented now, never one fetched again at accept time.
-    this.tlsState = verdict.ok ? null : { fp: cert.fp, nodeKey, changed: !!verdict.changed };
-    if (!verdict.ok) { this._set('refused', verdict.reason); return null; }
+    // A certificate nothing vouches for yet (the hello is unauthenticated): on this machine pinned after its first answer;
+    // on another only once a person typed the start of its fingerprint, read from the node's own screen.
+    const unconfirmed = verdict.ok && verdict.firstUse && !local && !tlsmod.fingerprintStarts(cert.fp, this.confirmFp);
+    // What a person confirms: the certificate presented now, never one fetched again at confirm time.
+    this.tlsState = verdict.ok && !unconfirmed ? null : { fp: cert.fp, nodeKey, changed: !!verdict.changed };
+    if (unconfirmed) {
+      this._set('refused', this.confirmFp
+        ? 'its certificate does not start with the characters typed for it — check the fingerprint on ' + this.node.name + '\'s own screen; another machine may be answering as it'
+        : 'its certificate is not confirmed yet — type the first 8 or more characters of the fingerprint ' + this.node.name + ' shows on its own screen');
+      return null;
+    }
+    // A changed certificate's words name none of its fingerprint: its start is typed from the node's own screen.
+    if (!verdict.ok) { this._set('refused', verdict.changed ? 'CERTIFICATE CHANGED — it presents another certificate than the one pinned; if you know why (a renewal, a reinstall), type the first 8 or more characters of the fingerprint ' + this.node.name + ' shows on its own screen' : verdict.reason); return null; }
+    if (verdict.firstUse && !local && this.pins.accept(nodeKey, cert.fp)) this.onPins();
     return { base: 'https://' + u.hostname + ':' + port, tls: tlsmod.pinnedTlsOptions(cert.pem, cert.fp), fp: cert.fp, nodeKey };
   }
 
-  /** The admin accepts a changed certificate: pin the one that was refused, then read the node again. False when none was. */
-  acceptCertificate() {
+  /**
+   * A person confirms the certificate refused now (changed, or never confirmed) by typing the start of its fingerprint
+   * from the node's own screen: it is pinned and the node read again. {ok:false, error} when none waits or the
+   * characters typed are not its start.
+   */
+  acceptCertificate(typed) {
     const s = this.tlsState;
-    if (!s || !s.changed) return false;
+    if (!s) return { ok: false, error: 'No certificate of ' + this.node.name + ' waits to be confirmed.' };
+    if (!tlsmod.fingerprintStarts(s.fp, typed)) return { ok: false, error: 'Those are not the first characters of the certificate ' + this.node.name + ' presents — type at least 8 from the fingerprint on its own screen.' };
     this.pins.accept(s.nodeKey, s.fp);
     this.onPins();
     this.tlsState = null; this.endpoint = null;
     this._set('connecting');
     this.poll();
-    return true;
+    return { ok: true, changed: s.changed };
   }
 
   _headers(extra = {}) { return { [HEADER[this.node.t]]: this.token, ...extra }; }
@@ -342,18 +354,14 @@ class PeerLink {
     }) : [];
   }
 
-  /** Send one line now. The caller checked it is a listed, non-high verb. Returns the node's receipt. */
-  async send(line) {
-    if (this.status !== 'live' || !this.endpoint) return { ok: false, stage: 'not sent', error: 'The link to ' + this.node.name + ' is ' + this.status + ' — not sent (nothing is queued).' };
-    const id = 'agm' + crypto.randomBytes(5).toString('hex');
-    // Patterns reads the request id only as the line's "@id " prefix (Show Bus §3 on its wire); PlayMap takes the header.
-    const body = this.node.t === 'patterns' ? '@' + id + ' ' + line : line;
-    try {
-      const res = await tlsmod.request(this.endpoint.base + '/api/cmd', { method: 'POST', headers: this._headers({ 'Content-Type': 'text/plain; charset=utf-8', 'X-Request-Id': id }), body, timeoutMs: 4000, tls: this.endpoint.tls });
-      return readReceipt(res.status, res.body, res.text, id);
-    } catch (e) {
-      return { ok: false, stage: 'not sent', error: 'unreachable: ' + (e && e.message ? String(e.message).slice(0, 80) : '') };
-    }
+  /**
+   * Drive the node directly: refused, with words, and nothing is sent. The only credential held is its pairing token —
+   * full control of it — so a line goes to the show desk instead, where a person approves it and the node collects it
+   * with its own key; driving it directly waits for a key scoped for AGMessage.
+   */
+  send() {
+    const n = this.node.name;
+    return { ok: false, stage: 'not sent', error: 'Not sent: AGMessage holds only ' + n + '\'s pairing token, which is full control of it, so it never drives ' + n + ' directly — propose the line to the show desk, where a person approves it and ' + n + ' collects it with its own key.' };
   }
 
   /** What a page may know about the link: never its token. */
@@ -361,7 +369,9 @@ class PeerLink {
     const c = this.context;
     return {
       id: this.node.id, t: this.node.t, name: this.node.name, hall: this.hall, status: this.status, problem: this.problem,
-      certificateChanged: !!(this.tlsState && this.tlsState.changed), certificate: this.tlsState ? this.tlsState.fp : '',
+      // That a certificate waits for a person, never its fingerprint: the characters typed to confirm it come from the
+      // node's own screen, not from this page.
+      certificateWaits: !!this.tlsState, certificateChanged: !!(this.tlsState && this.tlsState.changed),
       light: this.status === 'live' && c ? c.light : this.status === 'refused' ? 'red' : 'amber',
       headline: c ? c.headline : '', items: c ? c.items : [], recent: c ? c.recent : [], commands: c ? c.commands.map((x) => ({ verb: x.verb, risk: x.risk, words: x.words })) : [],
       age: this.okAt ? Math.round((Date.now() - this.okAt) / 1000) : null,
@@ -371,4 +381,4 @@ class PeerLink {
   stop() { this.stopped = true; clearInterval(this.timer); }
 }
 
-module.exports = { PeerLink, verbWords, matchCommand, readContext, readReceipt, readVerbRules, withRules, secretFrom, redactLine, redactWords, KINDS };
+module.exports = { PeerLink, isLoopback, verbWords, matchCommand, readContext, readVerbRules, withRules, secretFrom, redactLine, KINDS };

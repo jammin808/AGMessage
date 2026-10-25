@@ -149,12 +149,11 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
 
 /**
  * A fake Patterns or PlayMap node: GET /api/context answers its context only with the right token in its own header
- * (X-Patterns-Token / X-PlayMap-Token); POST /api/cmd answers as each does — Patterns (ControlService) HTTP 200 JSON
- * {"ok","msg":"OK …|ERR …"} even for ERR, with "id" only when the line starts "@<id> " (it never reads X-Request-Id);
- * PlayMap a Show Bus receipt for its X-Request-Id. `verbs`, when given, is PlayMap's GET /api/verbs (answered 503 the first
- * `failVerbs` times). Every request is kept in `requests`.
+ * (X-Patterns-Token / X-PlayMap-Token). `verbs`, when given, is PlayMap's GET /api/verbs (answered 503 the first
+ * `failVerbs` times). Anything else is 404. Every request is kept in `requests`. It listens on `host` (127.0.0.1 unless
+ * a test needs it reachable from another address).
  */
-async function fakeNode({ t = 'patterns', name = 'Patterns FOH', token = 'node-token', commands = [], verbs = null, failVerbs = 0, light = 'green', headline = 'Programme: VT1 · 3 screens green' } = {}) {
+async function fakeNode({ t = 'patterns', name = 'Patterns FOH', token = 'node-token', commands = [], verbs = null, failVerbs = 0, light = 'green', headline = 'Programme: VT1 · 3 screens green', host = '127.0.0.1' } = {}) {
   const http = require('http');
   const requests = [];
   const header = t === 'playmap' ? 'x-playmap-token' : 'x-patterns-token';
@@ -166,22 +165,15 @@ async function fakeNode({ t = 'patterns', name = 'Patterns FOH', token = 'node-t
       const given = Buffer.from(String(req.headers[header] || ''));
       const want = Buffer.from(token);
       const json = (code, o) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
-      if (given.length !== want.length || !require('crypto').timingSafeEqual(given, want)) return json(t === 'patterns' && req.url === '/api/cmd' ? 403 : 401, t === 'patterns' ? { ok: false, msg: 'ERR not paired' } : { ok: false, error: 'not paired' });
+      if (given.length !== want.length || !require('crypto').timingSafeEqual(given, want)) return json(401, t === 'patterns' ? { ok: false, msg: 'ERR not paired' } : { ok: false, error: 'not paired' });
       if (req.url === '/api/context') return json(200, { v: 1, node: { t, id: t + '01', name }, light, headline, items: [{ id: 'screen:2', kind: 'screen', label: 'Screen 2', light: 'amber', state: 'no signal' }], recent: [], commands });
       if (req.url === '/api/verbs' && verbs && failVerbs > 0) { failVerbs--; return json(503, { ok: false, error: 'busy' }); }
       if (req.url === '/api/verbs' && verbs) return json(200, verbs);
-      if (req.url === '/api/cmd' && req.method === 'POST') {
-        if (t === 'playmap') return json(200, { type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', effect: 'ran ' + body, error: null, refs: null, msg: 'OK @' + req.headers['x-request-id'] + ' ran' });
-        const m = /^@([A-Za-z0-9_-]{1,32}) (.*)$/.exec(body);
-        const line = m ? m[2] : body;
-        const reply = /^BLACKOUT/i.test(line) || /locked/i.test(line) ? 'ERR the air is locked' : 'OK ' + line + ' done';   // a BLACKOUT, or anything about the lock
-        return json(200, m ? { ok: reply.startsWith('OK'), msg: reply, id: m[1] } : { ok: reply.startsWith('OK'), msg: reply });
-      }
       res.writeHead(404); res.end();
     });
   });
-  await new Promise((resolve) => { srv.listen(0, '127.0.0.1', resolve); });
-  return { port: srv.address().port, url: '127.0.0.1:' + srv.address().port, requests, close: () => new Promise((resolve) => { srv.close(resolve); }) };
+  await new Promise((resolve) => { srv.listen(0, host, resolve); });
+  return { port: srv.address().port, url: '127.0.0.1:' + srv.address().port, requests, close: () => new Promise((resolve) => { srv.closeAllConnections(); srv.close(resolve); }) };
 }
 
 /** Wait until fn() is truthy (polling every 50 ms), or fail after `ms`. */

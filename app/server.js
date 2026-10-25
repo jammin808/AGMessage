@@ -1182,8 +1182,8 @@ io.on('connection', (socket) => {
     ack({ ok: true });
   });
 
-  // ----- Patterns and PlayMap: what they are doing, and the verbs they list — sent now (low / review risk) or proposed to
-  // the show desk (any risk; high only ever proposed). Linking a node (its token) is the admin's.
+  // ----- Patterns and PlayMap: what they are doing, and the verbs they list — proposed to the show desk, never driven
+  // directly (AGMessage holds only their pairing token, full control of them). Linking a node (its token) is the admin's.
   socket.on('nodes:list', (_args, ack) => {
     ack = ok(ack);
     const any = socket.data.isAdmin || (socket.data.account && rbac.can(socket.data.account, 'nodes.control'));
@@ -1195,7 +1195,7 @@ io.on('connection', (socket) => {
     const halls = Array.from(store.rooms.values()).filter((r) => socket.data.isAdmin || (socket.data.account && rbac.seesHall(socket.data.account, r.code))).map((r) => ({ code: r.code, name: r.name || '' }));
     ack({ ok: true, linked, heard, admin: !!socket.data.isAdmin, halls, desk: linked.some((l) => l.desk) });
   });
-  socket.on('nodes:link', ({ id, token, hall, url, name, t: typedKind } = {}, ack) => {
+  socket.on('nodes:link', ({ id, token, hall, url, name, fingerprint, t: typedKind } = {}, ack) => {
     ack = ok(ack);
     if (!socket.data.isAdmin) return ack({ ok: false, error: 'Linking another show system is the admin\'s.' });
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(guard.str(id))) return ack({ ok: false, error: 'A node id is the one its hello announces.' });
@@ -1209,12 +1209,16 @@ io.on('connection', (socket) => {
     if (!base) return ack({ ok: false, error: 'That is not an address.' });
     const h = typeof hall === 'string' && hall ? hall.toUpperCase() : '';
     if (h && !store.has(h)) return ack({ ok: false, error: 'No such hall.' });
+    // The start of its certificate's fingerprint, typed from the node's own screen: what lets its token go to it over TLS
+    // on another machine (lib/peerlinks.js). Public, so kept as typed.
+    const typedFp = tlsmod.typedFingerprint(guard.str(fingerprint));
+    if (guard.str(fingerprint).trim() && !typedFp) return ack({ ok: false, error: 'Type at least 8 characters of its certificate\'s fingerprint (0–9, a–f), as the node shows it on its own screen.' });
     const sealed = typeof token === 'string' && token.trim() ? secretbox.seal(token.trim().slice(0, 200)) : (cfg && cfg.tokenSealed) || '';
-    const next = { t, name: guard.cleanText(name || (peer && peer.name) || (cfg && cfg.name) || t, 60), url: base, tokenSealed: sealed, hall: h };
+    const next = { t, name: guard.cleanText(name || (peer && peer.name) || (cfg && cfg.name) || t, 60), url: base, tokenSealed: sealed, hall: h, fpTyped: typedFp || (cfg && cfg.fpTyped) || '' };
     settings.peerLinks = { ...(settings.peerLinks || {}), [guard.str(id)]: next };
     saveSettings();
     startPeerLink(guard.str(id), next);
-    audit.write(socket.data.actor || HOST_ACTOR, 'node.link', guard.str(id), t + ' “' + next.name + '” at ' + base + (h ? ' for ' + h : '') + (typeof token === 'string' && token.trim() ? ' (token sealed)' : ''), socket.data.ip);
+    audit.write(socket.data.actor || HOST_ACTOR, 'node.link', guard.str(id), t + ' “' + next.name + '” at ' + base + (h ? ' for ' + h : '') + (typeof token === 'string' && token.trim() ? ' (token sealed)' : '') + (typedFp ? ' (' + typedFp.length + ' characters of its certificate\'s fingerprint typed)' : ''), socket.data.ip);
     boardDirty(); nodesChanged();
     ack({ ok: true });
   });
@@ -1235,12 +1239,15 @@ io.on('connection', (socket) => {
     boardDirty(); nodesChanged();
     ack({ ok: true });
   });
-  socket.on('nodes:acceptCertificate', ({ id } = {}, ack) => {
+  // A node's certificate that waits (changed, or never confirmed) is confirmed by typing the start of its fingerprint.
+  socket.on('nodes:acceptCertificate', ({ id, fingerprint } = {}, ack) => {
     ack = ok(ack);
     if (!socket.data.isAdmin) return ack({ ok: false, error: 'Accepting a node\'s certificate is the admin\'s.' });
     const link = peerLinks.get(guard.str(id));
-    if (!link || !link.acceptCertificate()) return ack({ ok: false, error: 'No changed certificate to accept.' });
-    audit.write(socket.data.actor || HOST_ACTOR, 'node.certificate', link.node.id, 'accepted a changed ' + link.node.t + ' certificate for “' + link.node.name + '”', socket.data.ip);
+    if (!link) return ack({ ok: false, error: 'Not linked.' });
+    const r = link.acceptCertificate(guard.str(fingerprint));
+    if (!r.ok) return ack(r);
+    audit.write(socket.data.actor || HOST_ACTOR, 'node.certificate', link.node.id, (r.changed ? 'accepted a changed ' : 'confirmed the ') + link.node.t + ' certificate of “' + link.node.name + '” (the start of its fingerprint typed)', socket.data.ip);
     boardDirty(); nodesChanged();
     ack({ ok: true });
   });
@@ -1249,25 +1256,20 @@ io.on('connection', (socket) => {
     const link = peerLinks.get(guard.str(id));
     if (!link || !mayDriveNode(socket, link)) return ack({ ok: false, error: 'No such link, or not yours to drive.' });
     if (!writes.take()) return limited(ack);
+    // Never driven directly: the only credential held is the node's pairing token (PeerLink.send says so). Fail closed.
+    if (mode !== 'propose') return ack(mode === 'send' ? link.send() : { ok: false, error: 'Unknown mode — a line is proposed to the show desk.' });
     const text = guard.cleanText(line, 400);
     // Rated as the node rates this line (its rules and any line it carries), not only by the verb it starts with.
     const match = link.context ? peerlinks.matchCommand(link.commandTable(), text) : null;
-    if (!text || !match) return ack({ ok: false, error: link.node.name + ' does not list that command — only the verbs it lists can be sent.' });
+    if (!text || !match) return ack({ ok: false, error: link.node.name + ' does not list that command — only the verbs it lists can be proposed.' });
     const who = socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
     // A verb's secret words (a pairing token, a key — its own, or a carried line's) are never written down: the audit row
     // keeps the line up to them.
-    const secrets = match.secrets;
     const shown = peerlinks.redactLine(text, match.secretFrom);
-    if (mode === 'send') {
-      if (!link.rulesKnown) return ack({ ok: false, error: link.node.name + '\'s own risk rules could not be read yet — nothing sent; try again in a moment, or propose it to the show desk.' });
-      if (match.risk === 'high') return ack({ ok: false, error: '“' + shown + '” is high risk for ' + link.node.name + ': propose it to the show desk, where a person approves it.' });
-      const r = await link.send(text);
-      audit.write(who, 'node.command', link.node.id, link.node.name + ': ' + shown + ' → ' + peerlinks.redactWords(r.ok ? r.stage + (r.effect ? ' (' + r.effect + ')' : '') : 'refused: ' + (r.error || ''), secrets), socket.data.ip);
-      noteEvent('a person sent a ' + match.risk + '-risk command to ' + link.node.t, link.hall ? linkFor(link.hall) : null);
-      return ack({ ...r, risk: match.risk });
-    }
+    // Until PlayMap's own rules are read, a line is high: the desk is never told a lower risk than the node's.
+    const risk = link.rulesKnown ? match.risk : 'high';
     // A proposal keeps its line in the desk's queue and journal: a line with a secret is never proposed.
-    if (secrets.length) return ack({ ok: false, error: '“' + shown + '” carries a secret: ' + (match.risk === 'high' ? '' : 'send it now, or ') + 'set it on ' + link.node.name + ' itself — a proposal would keep it in the show desk\'s queue.' });
+    if (match.secrets.length) return ack({ ok: false, error: '“' + shown + '” carries a secret: set it on ' + link.node.name + ' itself — a proposal would keep it in the show desk\'s queue.' });
     // The show desk of the node's own hall, or none: a hall's proposals never go to another hall's show caller.
     const { link: desk, desk: hasDesk } = deskFor(link);
     if (!hasDesk) {
@@ -1277,10 +1279,10 @@ io.on('connection', (socket) => {
     const r = await desk.propose({
       from: { t: 'messenger', id: settings.nodeId, name: 'AGMessage' },
       target: { t: link.node.t, id: link.node.id, name: link.node.name },
-      line: text, reason: 'Asked from AGMessage by ' + who.name + (link.hall ? ' (' + ((store.get(link.hall) || {}).name || link.hall) + ')' : '') + '.', risk: match.risk,
+      line: text, reason: 'Asked from AGMessage by ' + who.name + (link.hall ? ' (' + ((store.get(link.hall) || {}).name || link.hall) + ')' : '') + '.', risk,
     });
     audit.write(who, 'node.propose', link.node.id, link.node.name + ': ' + shown + ' → ' + (r.ok ? 'proposed (' + r.proposal.id + ')' : 'refused: ' + r.error), socket.data.ip);
-    ack(r.ok ? { ok: true, proposal: r.proposal, risk: match.risk } : r);
+    ack(r.ok ? { ok: true, proposal: r.proposal, risk } : r);
   });
 
   // ----- The halls board: an account's every hall at a glance (or the admin's), pushed latest-wins on change.
@@ -1940,15 +1942,16 @@ stageLink.configure(settings.stagewatchUrl || '', stagewatchKey(), settings.stag
 for (const room of store.rooms.values()) configureHallLink(room);
 
 // ---------------------------------------------------------------- Patterns and PlayMap (lib/peerlinks.js)
-// Linked by the admin (the node's own token, sealed in settings.json → peerLinks), each read every 5 s and driven only
-// by the verbs it lists. A link may belong to a hall, so the hall's board row and its crew see it.
+// Linked by the admin (the node's own token, sealed in settings.json → peerLinks; the start of its certificate's
+// fingerprint as typed, fpTyped), each read every 5 s; the verbs it lists are proposed to the show desk. A link may
+// belong to a hall, so the hall's board row and its crew see it.
 const peerLinks = new Map();   // node id -> PeerLink
 function startPeerLink(id, cfg) {
   const old = peerLinks.get(id);
   if (old) old.stop();
   if (!cfg) { peerLinks.delete(id); return null; }
   const link = new peerlinks.PeerLink({
-    node: { t: cfg.t, id, name: cfg.name || cfg.t }, base: cfg.url, token: secretbox.open(cfg.tokenSealed) || '', hall: cfg.hall || '',
+    node: { t: cfg.t, id, name: cfg.name || cfg.t }, base: cfg.url, token: secretbox.open(cfg.tokenSealed) || '', confirmFp: tlsmod.typedFingerprint(cfg.fpTyped), hall: cfg.hall || '',
     pins, onPins: () => { settings.tlsPins = pins.toJSON(); saveSettings(); },
     findPeer: (nid) => (discovery ? discovery.peers.get(nid) || null : null),
     onChange: () => { boardDirty(); nodesChanged(); },

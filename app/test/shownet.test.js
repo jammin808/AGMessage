@@ -59,7 +59,7 @@ test('C03 end to end: a hello flood on UDP 9928 reaches the admin page and Stage
   assert.ok(posted.every((c) => c.peers.length <= 32), 'the context posted to Stagewatch stays bounded');
 });
 
-test('C20: a Patterns certificate that changes is refused until the admin accepts it; unlinking forgets the pin', async (t) => {
+test('C20: a Patterns certificate that changes is refused until the admin types the start of the new one; unlinking forgets the pin', async (t) => {
   const https = require('https');
   const tlsmod = require('../lib/tls');
   const make = () => tlsmod.makeCertificate({ name: 'Patterns', hosts: ['localhost'], ips: ['127.0.0.1'] });
@@ -88,14 +88,22 @@ test('C20: a Patterns certificate that changes is refused until the admin accept
   await until(async () => (await view()).status === 'refused', 15000, 'refused');
   const v = await view();
   assert.match(v.problem, /CERTIFICATE CHANGED/);
-  assert.deepEqual([v.certificateChanged, v.certificate], [true, fpB], 'the page is told which certificate it would accept');
-  assert.equal((await answer(sol, 'nodes:acceptCertificate', { id: 'patx' })).ok, false, 'accepting is the admin\'s');
-  assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'patx' }), { ok: true });
+  assert.deepEqual([v.certificateWaits, v.certificateChanged, JSON.stringify(v).includes(fpB.slice(7, 23))], [true, true, false], 'the page is told a certificate waits, never which: its start is typed from the node\'s own screen');
+  const typed = fpB.slice(7, 19).toUpperCase().match(/../g).join(':');   // as it reads on the node's screen
+  assert.equal((await answer(sol, 'nodes:acceptCertificate', { id: 'patx', fingerprint: typed })).ok, false, 'accepting is the admin\'s');
+  for (const fingerprint of [undefined, '', fpB.slice(7, 14), fpB.slice(8, 20)]) {
+    const r = await answer(ctl, 'nodes:acceptCertificate', { id: 'patx', fingerprint });
+    assert.equal(r.ok, false, String(fingerprint));
+    assert.match(r.error, /not the first characters of the certificate Patterns TLS presents — type at least 8/, String(fingerprint));
+  }
+  assert.equal((await view()).status, 'refused', 'still refused');
+  assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'patx', fingerprint: typed }), { ok: true });
   await until(async () => (await view()).status === 'live', 8000, 'live again');
   await until(() => pinOnDisk() === fpB, 3000, 'the new certificate pinned');
-  assert.equal((await answer(ctl, 'nodes:acceptCertificate', { id: 'patx' })).ok, false, 'nothing left to accept');
+  assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'patx', fingerprint: typed }), { ok: false, error: 'No certificate of Patterns TLS waits to be confirmed.' }, 'nothing left to accept');
+  assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'nobody', fingerprint: typed }), { ok: false, error: 'Not linked.' });
   const audit = await api(srv.base, 'GET', '/api/audit?limit=50', undefined, { cookie: admin });
-  assert.ok(audit.body.entries.some((e) => e.action === 'node.certificate' && e.target === 'patx'));
+  assert.ok(audit.body.entries.some((e) => e.action === 'node.certificate' && e.target === 'patx' && /^accepted a changed patterns certificate of “Patterns TLS” \(the start of its fingerprint typed\)$/.test(e.words)));
 
   renew();
   assert.ok((await emit(ctl, 'nodes:unlink', { id: 'patx' })).ok);
@@ -252,7 +260,7 @@ test('C18: a Stagewatch\'s numbers never cross a link made again, a restart or a
   });
 });
 
-test('C22: a PlayMap line is never sent now before PlayMap\'s own risk rules are read — a busy /api/verbs is asked again', async (t) => {
+test('C22: until PlayMap\'s own risk rules are read, a line reaches the show desk as high — a busy /api/verbs is asked again', async (t) => {
   const { fakeNode } = require('./helpers');
   const PLAYMAP_TOKEN = 'pm-fake-pairing-token';   // secret-scan: fixture
   const decode = 'DECODE POLICY AUTO|DIRECT|GPU-COPY|COPY-BACK|SOFTWARE [FORCE]';
@@ -260,23 +268,24 @@ test('C22: a PlayMap line is never sent now before PlayMap\'s own risk rules are
     t: 'playmap', name: 'Stage right', token: PLAYMAP_TOKEN, commands: [{ verb: decode, risk: 'review' }], failVerbs: 1,
     verbs: [{ name: 'DECODE POLICY', syntax: decode, risk: 'review', riskWhen: [{ arg: -1, word: 'FORCE', risk: 'high' }] }],
   });
+  const sw = await fakeStagewatch({ name: 'Hall desk' });
   const srv = await startServer();
   const sockets = [];
-  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await pm.close(); });
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await pm.close(); await sw.close(); });
   const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
-  assert.ok((await emit(ctl, 'nodes:link', { id: 'playmap01', t: 'playmap', url: pm.url, name: 'Stage right', token: PLAYMAP_TOKEN })).ok);
-  await until(async () => ((await emit(ctl, 'nodes:list', {})).linked.find((n) => n.id === 'playmap01') || {}).status === 'live', 8000, 'live');
+  assert.ok((await emit(ctl, 'hall:configure', { code: hall, stagewatchUrl: sw.url, stagewatchKey: 'swk_hall1_node_key_00009' /* secret-scan: fixture */ })).ok);
+  assert.ok((await emit(ctl, 'nodes:link', { id: 'playmap01', t: 'playmap', url: pm.url, name: 'Stage right', token: PLAYMAP_TOKEN, hall })).ok);
+  await until(async () => { const n = (await emit(ctl, 'nodes:list', {})).linked.find((x) => x.id === 'playmap01') || {}; return n.status === 'live' && n.desk; }, 8000, 'live, with its hall\'s desk');
   const verbsAsked = () => pm.requests.filter((x) => x.url === '/api/verbs').length;
   assert.equal(verbsAsked(), 1, 'its vocabulary asked for once, and it was busy');
-  const cmds = () => pm.requests.filter((x) => x.url === '/api/cmd').length;
-  const early = await emit(ctl, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT FORCE', mode: 'send' });
-  assert.equal(early.ok, false, JSON.stringify(early));
-  assert.match(early.error, /risk rules could not be read yet/);
-  assert.equal(cmds(), 0, 'nothing reached PlayMap while its rules were unknown');
+  const propose = (line) => emit(ctl, 'nodes:command', { id: 'playmap01', line, mode: 'propose' });
+  const early = await propose('DECODE POLICY DIRECT');
+  assert.deepEqual([early.ok, early.risk], [true, 'high'], JSON.stringify(early));
+  assert.equal(sw.proposals.get(early.proposal.id).risk, 'high', 'the desk is never told a lower risk than PlayMap\'s own');
   await until(() => verbsAsked() >= 2, 8000, 'asked again at the next poll');
-  await until(async () => /high risk/.test((await emit(ctl, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT FORCE', mode: 'send' })).error || ''), 4000, 'rated high by its rules');
-  assert.equal(cmds(), 0);
-  const fine = await emit(ctl, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT', mode: 'send' });
-  assert.deepEqual([fine.ok, fine.risk], [true, 'review']);
+  await until(async () => (await propose('DECODE POLICY DIRECT')).risk === 'review', 4000, 'its rules read');
+  assert.equal((await propose('DECODE POLICY DIRECT FORCE')).risk, 'high', 'rated high by its rules');
+  assert.ok(!pm.requests.some((x) => x.url === '/api/cmd'), 'nothing was ever sent to PlayMap');
 });

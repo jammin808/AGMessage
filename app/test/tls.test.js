@@ -59,6 +59,17 @@ test('pins: trust on first authenticated use; a change is refused until accepted
   assert.equal(new tlsmod.PinStore(JSON.parse(JSON.stringify(pins))).pins['node:sw1'], 'sha256:' + 'b'.repeat(64), 'pins persist as JSON');
 });
 
+test('AG-1: the start of a fingerprint a person types — at least 8 hex characters, any case, with colons or "sha256:"', () => {
+  const fp = 'sha256:' + '0123456789abcdef'.repeat(4);
+  assert.equal(tlsmod.typedFingerprint('SHA256:01:23:45:67'), '01234567');
+  assert.equal(tlsmod.typedFingerprint(fp), fp.slice(7), 'the whole of it');
+  for (const s of ['', '0123456', 'not hex!', 'g1234567', fp + '00', null, undefined]) assert.equal(tlsmod.typedFingerprint(s), '', String(s));
+  assert.ok(tlsmod.fingerprintStarts(fp, '01 23 45 67 89'));
+  assert.ok(tlsmod.fingerprintStarts(fp, fp.toUpperCase()));
+  for (const typed of ['1234567', '12345678', '0123456', 'fedcba98', '']) assert.ok(!tlsmod.fingerprintStarts(fp, typed), typed + ': not its start, or too short');
+  assert.ok(!tlsmod.fingerprintStarts('not a fingerprint', '01234567'));
+});
+
 test('Require HTTPS: plain HTTP only from this machine; pages redirect, the API is refused', () => {
   const g = (o) => tlsmod.httpsGate({ required: true, on: true, encrypted: false, loopback: false, host: '10.0.0.5:3023', ...o });
   assert.deepEqual(g({ path: '/app.html' }), { redirect: 'https://10.0.0.5:3023/app.html' });

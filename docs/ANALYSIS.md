@@ -124,7 +124,7 @@ browser smoke or by hand, none yet by a test that counts.
 
 After the review below (§6), with 233 tests: **lines 96.7 %, branches 84.4 %, functions 92.8 %**. The gate went to
 **92 / 80 / 88**, then **94 / 82 / 90**. The input fence reaches every socket handler, which is most of the rise in
-functions.
+functions. With AG-1 (§6), 236 tests: **96.8 / 84.6 / 92.8**; the gate stays at 94 / 82 / 90.
 
 ## 6. The review before release
 
@@ -148,6 +148,16 @@ Left as product decisions: an `audit.read` holder of one hall reads the whole lo
 a node of another hall heard on the network still appears by name in a hall's posted context; the 40 recent events
 are one ring shared by every hall.
 
+A review of the Show Bus across the four apps then found one more before the tag (AG-1): a linked Patterns' or
+PlayMap's pairing token — full control of that node — went in its header over plain HTTP to a node on another machine
+that was neither pinned nor announcing a certificate, and AGMessage drove the node with it. Unit 21: the token goes
+only to a loopback address, or over TLS to a certificate pinned for that node or confirmed by a person typing at least
+8 characters of its fingerprint from the node's own screen; anything else is refused with words and sent nothing; and
+no line is sent to a node directly — it is proposed to the show desk, or refused with words. The direct path waits for
+a key the node issues to AGMessage alone (Patterns' `ptk_`, PlayMap's `pmk_`). Left for 0.5.1, from the same review:
+Stagewatch's top-level `ok`/`words` on a proposal's outcome, a result report retried after one failure, the Stagewatch
+link dialling with its own Show Bus id, and "connected" only once Stagewatch says it took the key.
+
 The fences the review added, beside the tests for each finding:
 
 | Fence | Holds |
@@ -155,4 +165,5 @@ The fences the review added, beside the tests for each finding:
 | `test/inputs.test.js` | every event `server.js` listens to (read from its source, so a new handler is held too) is sent every argument shape — null, numbers, strings, lists, an object `String()` cannot convert — from a socket with no sign-in, a crew account, the admin and a screen; the server answers and stays up, and the handler guard has nothing to catch |
 | `test/sessions.test.js` | sign-in refusals say nothing more than a wrong password does; a stranger's guesses cannot lock the laptop or the venue out; a session's end reaches its open pages; a page in use keeps its session, under a moved clock |
 | `test/uploads.test.js` | uploads stop before the disk fills; files nobody posted are removed; a reset or a deletion removes its own files and no one else's |
-| `test/shownet.test.js` | the discovery table is bounded; Stagewatch's numbers never cross a restart or a relink; a changed certificate can be accepted |
+| `test/shownet.test.js` | the discovery table is bounded; Stagewatch's numbers never cross a restart or a relink; a node's changed certificate is accepted only by typing the start of its fingerprint, and the page is never told it |
+| `test/showbus.test.js` (AG-1) | a node's token never leaves on a plain connection to another machine, nor over TLS to a certificate nobody confirmed (every request a link makes is recorded); `send()` and `mode: "send"` are refused with words and nothing is posted to a node |

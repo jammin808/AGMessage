@@ -83,9 +83,16 @@ interpreter, a department, or just for the operator).
 Patterns and PlayMap
 --------------------
 Admin -> Show network -> a Patterns or PlayMap that is heard -> Link...:
-paste its pairing token. Its state then shows on the halls board; project
-managers and senior techs can send it the commands it lists (risky ones go
-to the show desk for a person to approve).
+paste its pairing token, then type the first 8 or more characters of the
+certificate fingerprint it shows on its own screen. Its state then shows
+on the halls board; project managers and senior techs can propose the
+commands it lists to the show desk, where a person approves them.
+Its pairing token is full control of it, so AGMessage sends it only to
+this laptop, or over HTTPS to a certificate you confirmed that way. A
+Patterns or PlayMap on another machine without HTTPS shows red and is sent
+nothing: turn HTTPS on in it. A changed certificate is refused until you
+type the start of the new one (Confirm certificate... / Accept new
+certificate...).
 
 Remote participants (optional)
 ------------------------------
@@ -161,7 +168,9 @@ Halls, accounts and screens
   - Each hall its own Stagewatch; the halls board; help requests.
   - Screens: a link per screen, driven from the hall, confirmed on screen.
   - Send to Stagewatch with a destination for the operator to pass on.
-  - Patterns and PlayMap linked: their state on the board, their commands.
+  - Patterns and PlayMap linked: their state on the board, their commands
+    proposed to the show desk; their token only to this laptop or to a
+    certificate you confirmed.
   - Fixed: 0.4's "propose to the show desk" lines were refused by
     Stagewatch; PlayMap was not heard on the show network.
   - Signing out closes your other open pages of that sign-in too; a

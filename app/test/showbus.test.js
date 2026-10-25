@@ -73,7 +73,7 @@ test('stagelines: every destination is a line Stagewatch takes, and says what it
   assert.deepEqual(sl.destinations(['Sound']).map((d) => d.id), ['speaker', 'moderator', 'backstage', 'interpreter', 'dept:Sound', 'operator']);
 });
 
-test('peerlinks: only listed verbs, the longest match, high when unknown; contexts and receipts read tolerantly', () => {
+test('peerlinks: only listed verbs, the longest match, high when unknown; contexts read tolerantly', () => {
   const commands = [{ verb: 'VIDEO END <seconds>', risk: 'review' }, { verb: 'VIDEO <clip>', risk: 'low' }, { verb: 'BLACKOUT on|off', risk: 'high' }, { verb: 'EYE FOCUS <screen>', risk: 'wizard' }];
   assert.deepEqual(pl.verbWords('VIDEO END <seconds>'), ['video', 'end']);
   assert.equal(pl.matchCommand(commands, 'video end 10').verb, 'VIDEO END <seconds>', 'the longest listed verb wins');
@@ -87,10 +87,91 @@ test('peerlinks: only listed verbs, the longest match, high when unknown; contex
   assert.equal(ctx.headline.length, 200);
   assert.equal(ctx.commands.length, 256);
   assert.equal(pl.readContext({ v: 2 }), null);
-  assert.deepEqual(pl.readReceipt(200, null, 'OK @agm1 VIDEO END 10 done', 'agm1'), { ok: true, id: 'agm1', stage: 'applied', effect: 'VIDEO END 10 done' });
-  assert.deepEqual(pl.readReceipt(200, null, 'ERR @agm1 the air is locked', 'agm1'), { ok: false, stage: 'refused', error: 'the air is locked' });
-  assert.equal(pl.readReceipt(200, { ok: true, stage: 'applied', effect: 'ran' }, '', 'x').effect, 'ran');
-  assert.equal(pl.readReceipt(409, { ok: false, error: 'no' }, '', 'x').error, 'no');
+  // AG-1: this machine, where a token never crosses the network: 127.0.0.0/8, ::1 and localhost — never a name that only looks local.
+  for (const h of ['127.0.0.1', '127.200.1.1', '[::1]', '::1', 'localhost', 'LOCALHOST', '[::ffff:7f00:1]', new URL('http://[::ffff:127.0.0.1]:1/').hostname]) assert.ok(pl.isLoopback(h), h);
+  for (const h of ['192.168.1.20', '10.0.0.1', '[::ffff:a00:1]', 'patterns.local', '0.0.0.0', '', '[fe80::1]', '127.0.0.1.nip.io', 'localhost.example']) assert.ok(!pl.isLoopback(h), h);
+});
+
+test('AG-1: a node\'s token goes only to this machine, or over TLS to a certificate pinned or confirmed by a person; send() refuses with words', async () => {
+  const tlsmod = require('../lib/tls');
+  const token = 'pat-operator-token-x';   // secret-scan: fixture
+  const sent = [];     // every request a link made: where, and whether it carried the token, over TLS or not
+  const probed = [];   // every certificate read (a TLS handshake, nothing sent)
+  let presented = 'sha256:' + '0123456789abcdef'.repeat(4);
+  const real = { request: tlsmod.request, probeCertificate: tlsmod.probeCertificate };
+  tlsmod.request = async (url, o) => {
+    sent.push({ url, token: (o.headers || {})['X-Patterns-Token'] === token, tls: !!o.tls });
+    return { status: 200, body: { v: 1, node: { t: 'patterns', id: 'p1', name: 'Patterns FOH' }, light: 'green', headline: 'Programme', commands: [{ verb: 'VIDEO END <seconds>', risk: 'review' }] }, text: '' };
+  };
+  tlsmod.probeCertificate = async (host, port) => { probed.push(host + ':' + port); return { pem: 'pem', fp: presented }; };
+  const links = [];
+  const make = (base, extra = {}) => {
+    const l = new pl.PeerLink({ node: { t: 'patterns', id: 'p1', name: 'Patterns FOH' }, base, token, pins: new tlsmod.PinStore(), ...extra });
+    links.push(l);
+    return l;
+  };
+  const settled = (l, status) => until(() => l.status === status && !l.busy, 3000, l.base + ' ' + status);
+  try {
+    // Another machine in plain HTTP: refused with words, red, and nothing sent — not even a certificate asked for.
+    const plain = make('http://192.0.2.10:9696');
+    await settled(plain, 'refused');
+    assert.match(plain.problem, /offers no encrypted connection, and its token — full control of it — is never sent in the clear to another machine/);
+    assert.equal(plain.view().light, 'red');
+    await plain.poll();
+    assert.deepEqual([sent.length, probed.length], [0, 0], 'the token never leaves on a plain connection to another machine');
+
+    // This machine in plain HTTP: the token goes, and never crosses the network.
+    for (const base of ['http://127.0.0.1:9696', 'http://[::1]:9696', 'http://localhost:9696', 'http://127.4.5.6:9696']) await settled(make(base), 'live');
+    assert.ok(sent.length >= 4 && sent.every((r) => r.token && !r.tls && /^http:\/\/(127\.|\[::1\]|localhost)/.test(r.url)), JSON.stringify(sent));
+    sent.length = 0;
+
+    // Another machine over TLS, its certificate never confirmed: refused; only its certificate is read.
+    const far = make('https://192.0.2.10:9443');
+    await settled(far, 'refused');
+    assert.match(far.problem, /not confirmed yet — type the first 8 or more characters of the fingerprint Patterns FOH shows on its own screen/);
+    assert.deepEqual([far.view().certificateWaits, far.view().certificateChanged, 'certificate' in far.view()], [true, false, false], 'a page is told a certificate waits, never its fingerprint');
+    assert.ok(probed.includes('192.0.2.10:9443'));
+    assert.equal(sent.length, 0);
+    // A person confirms it: too few characters, or not its start, are refused; its start, typed any way, pins it.
+    for (const typed of ['', '0123456', 'b2b2b2b2', presented.slice(8, 16)]) assert.match(far.acceptCertificate(typed).error, /not the first characters .* type at least 8/, typed);
+    assert.equal(sent.length, 0);
+    assert.deepEqual(far.acceptCertificate('SHA256:01:23:45:67:89'), { ok: true, changed: false });
+    await settled(far, 'live');
+    assert.equal(far.pins.pins['node:p1'], presented, 'pinned');
+    assert.ok(sent.length > 0 && sent.every((r) => r.token && r.tls && r.url.startsWith('https://192.0.2.10:9443/')), JSON.stringify(sent));
+    // Its certificate changes: refused again until a person types the start of the new one.
+    presented = 'sha256:' + 'fedcba9876543210'.repeat(4);
+    sent.length = 0;
+    far.endpoint = null;
+    await far.poll();
+    assert.deepEqual([far.status, far.view().certificateChanged], ['refused', true]);
+    assert.match(far.problem, /CERTIFICATE CHANGED/);
+    assert.equal(sent.length, 0);
+    assert.equal(far.acceptCertificate('01234567').ok, false, 'the old certificate\'s start confirms nothing');
+    assert.deepEqual(far.acceptCertificate('fedcba98'), { ok: true, changed: true });
+    await settled(far, 'live');
+
+    // Typed when linked: confirmed at once, pinned; typed wrong: refused, and nothing sent to it.
+    const typed = make('https://192.0.2.11:9443', { confirmFp: 'fedcba9876' });
+    await settled(typed, 'live');
+    assert.equal(typed.pins.pins['node:p1'], presented);
+    const wrong = make('https://192.0.2.12:9443', { confirmFp: 'deadbeef' });
+    await settled(wrong, 'refused');
+    assert.match(wrong.problem, /does not start with the characters typed for it/);
+    assert.equal(sent.filter((r) => r.url.includes('192.0.2.12')).length, 0);
+    assert.equal(wrong.pins.pins['node:p1'], undefined, 'nothing pinned');
+
+    // send() is off: refused with words, and nothing is sent.
+    const before = sent.length;
+    const r = typed.send('VIDEO END 10');
+    assert.deepEqual([r.ok, r.stage], [false, 'not sent']);
+    assert.equal(r.error, 'Not sent: AGMessage holds only Patterns FOH\'s pairing token, which is full control of it, so it never drives Patterns FOH directly — propose the line to the show desk, where a person approves it and Patterns FOH collects it with its own key.');
+    assert.equal(sent.length, before);
+    assert.ok(!sent.some((x) => x.url.endsWith('/api/cmd')), 'no line is ever posted to a node');
+  } finally {
+    links.forEach((l) => l.stop());
+    Object.assign(tlsmod, real);
+  }
 });
 
 test('stagelines: every line means the same after the show desk keeps 400 characters; urgencies and departments as Stagewatch has them (C19, C36, C45)', () => {
@@ -122,7 +203,7 @@ test('stagelines: every line means the same after the show desk keeps 400 charac
   ] }), ['Lighting', 'Sound']);
 });
 
-test('peerlinks: a line is rated as the node rates it; Patterns\' receipts read; a verb\'s secret never written down (C22, C43, C44)', () => {
+test('peerlinks: a line is rated as the node rates it; a verb\'s secret never written down (C22, C44)', () => {
   // C22: PlayMap's catalogue raises some lines above their row (riskWhen, highFor) and a line that carries a line takes its risk.
   const c = [
     { verb: 'BIND ADD <input words> TO <target line> | BIND ADD <json>', risk: 'review' },
@@ -153,13 +234,6 @@ test('peerlinks: a line is rated as the node rates it; Patterns\' receipts read;
   const ctx = pl.readContext({ v: 1, node: {}, commands: [{ verb: 'X <y>', risk: 'review', riskWhen: [{ arg: 0, word: 'NOW', risk: 'high' }, { arg: 'x', word: 1, risk: 'odd' }], highFor: ['A', 7], embedsLine: 'yes' }] });
   assert.deepEqual(ctx.commands[0], { verb: 'X <y>', risk: 'review', words: '', riskWhen: [{ arg: 0, word: 'NOW', risk: 'high' }], highFor: ['A'], embedsLine: false }, 'a node\'s own rules, when it lists them, read and bounded');
 
-  // C43: Patterns answers {"ok","msg"} (its wire's OK / ERR words) with HTTP 200 even for ERR; PlayMap's receipt carries msg too.
-  assert.deepEqual(pl.readReceipt(200, { ok: false, msg: 'ERR the air is locked' }, '', 'agm1'), { ok: false, stage: 'refused', error: 'the air is locked' });
-  assert.deepEqual(pl.readReceipt(200, { ok: true, msg: 'OK Eye on screen 2', id: 'agm1' }, '', 'agm1'), { ok: true, id: 'agm1', stage: 'applied', effect: 'Eye on screen 2' });
-  assert.equal(pl.readReceipt(403, { ok: false, msg: 'ERR not paired' }, '', 'x').error, 'not paired');
-  assert.deepEqual(pl.readReceipt(200, { type: 'receipt', id: 'a1', ok: true, stage: 'accepted', effect: 'queued', msg: 'OK @a1 {"stage":"accepted"}' }, '', 'a1'), { ok: true, id: 'a1', stage: 'accepted', effect: 'queued' });
-  assert.equal(pl.readReceipt(409, { type: 'receipt', id: 'a1', ok: false, stage: 'refused', error: 'not paired', msg: 'ERR @a1 not paired' }, '', 'a1').error, 'not paired');
-
   // C44: where a verb's secret starts (PlayMap's SecretFrom), from its template; the line as it may be written down.
   assert.equal(pl.secretFrom('LINK PATTERNS <host[:port]>|OFF [<token>] | LINK PATTERNS FOLLOW-BLACKOUT ON|OFF'), 3);
   assert.equal(pl.secretFrom('LINK STAGEWATCH <host[:port]>|""|OFF [<key>]'), 3);
@@ -170,7 +244,6 @@ test('peerlinks: a line is rated as the node rates it; Patterns\' receipts read;
   assert.equal(pl.redactLine('LINK PATTERNS 10.0.0.5:9696 K7QM-3XWD-P9RA', 3), 'LINK PATTERNS 10.0.0.5:9696 …');
   assert.equal(pl.redactLine('LINK PATTERNS OFF', 3), 'LINK PATTERNS OFF');
   assert.equal(pl.redactLine('VIDEO END 10', -1), 'VIDEO END 10');
-  assert.equal(pl.redactWords('ran LINK PATTERNS 10.0.0.5:9696 K7QM-3XWD-P9RA', ['K7QM-3XWD-P9RA']), 'ran LINK PATTERNS 10.0.0.5:9696 …');
   assert.equal(pl.matchCommand([{ verb: 'LINK PATTERNS <host[:port]>|OFF [<token>]', risk: 'review' }], 'LINK PATTERNS 10.0.0.5 tok').secretFrom, 3);
   // …and a line that carries one: a binding to LINK PATTERNS <host> <token> keeps its token back too (PlayMap's
   // CarriedSecretAt), as a JSON argument holding one is kept back whole; a carried line with no secret words keeps all.
@@ -182,7 +255,7 @@ test('peerlinks: a line is rated as the node rates it; Patterns\' receipts read;
   assert.ok(cut('BIND ADD OSC /a TO "LINK PATTERNS 10.0.0.5 tok"')[2].includes('tok'), 'the secret as the node reads it, without its quote');
   const json = cut('BIND ADD {"input":"OSC /a","target":"LINK PATTERNS 10.0.0.5 tok"}');
   assert.deepEqual(json.slice(0, 2), ['high', 'BIND ADD …']);
-  assert.ok(json[2].includes('tok'), 'the carried line\'s own secret words, for the receipt');
+  assert.ok(json[2].includes('tok'), 'the carried line\'s own secret words: the line is never proposed');
   assert.deepEqual(cut('BIND ADD {"input":"OSC /a","target":"LINK PATTERNS OFF"}').slice(0, 2), ['high', 'BIND ADD {"input":"OSC /a","target":"LINK PATTERNS OFF"}']);
   assert.deepEqual(cut('BIND ADD {not json LINK PATTERNS 10.0.0.5 tok').slice(0, 2), ['high', 'BIND ADD …'], 'JSON no reader can read: kept back when it names a verb with a secret');
   assert.deepEqual(cut('BIND ADD OSC /a TO LINK PATTERNS OFF'), ['review', 'BIND ADD OSC /a TO LINK PATTERNS OFF', []]);
@@ -296,6 +369,34 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     assert.ok(!audit.includes(PATTERNS_TOKEN) && audit.includes('(token sealed)'));
   });
 
+  await t.test('AG-1: a Patterns on another machine that offers no TLS is refused with words, and never sent its token', async () => {
+    // Reached by this machine's own network address (not loopback): as a Patterns on another laptop would be.
+    const lan = require('../lib/tls').lanAddresses()[0] || '192.0.2.1';
+    const far = await fakeNode({ t: 'patterns', name: 'Patterns far', token: PATTERNS_TOKEN, host: '0.0.0.0', commands: [{ verb: 'VIDEO END <seconds>', risk: 'review' }] });
+    try {
+      assert.ok((await emit(ctl, 'nodes:link', { id: 'farpat', t: 'patterns', url: lan + ':' + far.port, name: 'Patterns far', token: PATTERNS_TOKEN })).ok);
+      let v;
+      await until(async () => { v = (await emit(ctl, 'nodes:list', {})).linked.find((n) => n.id === 'farpat'); return v && v.status === 'refused'; }, 8000, 'refused');
+      assert.match(v.problem, /offers no encrypted connection, and its token — full control of it — is never sent in the clear to another machine: turn HTTPS on in Patterns far/);
+      assert.equal(v.light, 'red');
+      await wait(300);
+      assert.deepEqual(far.requests, [], 'nothing reached it — its token least of all');
+      // A fingerprint is typed as at least 8 of its hex characters, or the link is refused with words.
+      for (const fingerprint of ['abc1234', 'not-hex-at-all', 'sha256:xyz12345']) {
+        const r = await emit(ctl, 'nodes:link', { id: 'farpat', fingerprint });
+        assert.deepEqual([r.ok, r.error], [false, 'Type at least 8 characters of its certificate\'s fingerprint (0–9, a–f), as the node shows it on its own screen.'], fingerprint);
+      }
+      assert.ok((await emit(ctl, 'nodes:link', { id: 'farpat', fingerprint: 'AB:CD:EF:01' })).ok, 'kept as typed; it offers no TLS, so still refused');
+      await wait(300);
+      assert.deepEqual(far.requests, []);
+      const audit = fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8');
+      assert.ok(audit.includes('(8 characters of its certificate\'s fingerprint typed)'));
+    } finally {
+      assert.ok((await emit(ctl, 'nodes:unlink', { id: 'farpat' })).ok);
+      await far.close();
+    }
+  });
+
   await t.test('the board shows each node on its hall (or for those who drive every hall), with its light and headline', async () => {
     const pmView = await connect(base, sol); sockets.push(pmView);
     let b;
@@ -309,83 +410,65 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     assert.equal(ctx.status, 200);
   });
 
-  await t.test('driving: a listed verb now with a receipt; an unlisted one never sent; high risk only to the desk', async () => {
+  await t.test('AG-1: no line is ever sent to a node directly — refused with words; a listed verb is proposed with the node\'s risk', async () => {
     const senior = await connect(base, sol); sockets.push(senior);
     const list = await emit(senior, 'nodes:list', {});
     assert.ok(list.ok && list.desk);
     assert.deepEqual(list.linked.find((n) => n.id === 'patterns01').commands.map((c) => c.verb), ['VIDEO END <seconds>', 'BLACKOUT on|off']);
-    const r = await emit(senior, 'nodes:command', { id: 'patterns01', line: 'VIDEO END 10', mode: 'send' });
-    assert.deepEqual([r.ok, r.stage, r.risk], [true, 'applied', 'review']);
-    assert.match(r.effect, /VIDEO END 10 done/);
-    const cmd = pat.requests.find((x) => x.url === '/api/cmd');
-    assert.match(cmd.body, /^@agm[0-9a-f]{10} VIDEO END 10$/, 'Patterns reads its request id from the line');
-    assert.equal(cmd.headers['x-patterns-token'], PATTERNS_TOKEN);
-    assert.match(r.id, /^agm[0-9a-f]{10}$/);
-    assert.equal(cmd.body.split(' ')[0], '@' + r.id, 'the receipt is the one for this line');
-    // C43: Patterns refuses with HTTP 200 and its words; the person and the audit read them, not "said 200".
-    const locked = await emit(senior, 'nodes:command', { id: 'patterns01', line: 'VIDEO END locked', mode: 'send' });
-    assert.deepEqual([locked.ok, locked.stage, locked.error], [false, 'refused', 'the air is locked']);
-    const sentBefore = pat.requests.filter((x) => x.url === '/api/cmd').length;
-    const no = await emit(senior, 'nodes:command', { id: 'patterns01', line: 'SHUTDOWN now', mode: 'send' });
+    const sent = await emit(senior, 'nodes:command', { id: 'patterns01', line: 'VIDEO END 10', mode: 'send' });
+    assert.deepEqual([sent.ok, sent.stage], [false, 'not sent']);
+    assert.match(sent.error, /^Not sent: AGMessage holds only Patterns FOH's pairing token, which is full control of it, so it never drives Patterns FOH directly — propose the line to the show desk/);
+    for (const mode of [undefined, 'now', 'SEND', 'constructor', 3]) {
+      const r = await emit(senior, 'nodes:command', { id: 'patterns01', line: 'VIDEO END 10', mode });
+      assert.equal(r.ok, false, String(mode));
+      assert.match(r.error, /Unknown mode/, String(mode));
+    }
+    const no = await emit(senior, 'nodes:command', { id: 'patterns01', line: 'SHUTDOWN now', mode: 'propose' });
     assert.equal(no.ok, false);
     assert.match(no.error, /does not list that command/);
-    const high = await emit(senior, 'nodes:command', { id: 'patterns01', line: 'BLACKOUT on', mode: 'send' });
-    assert.equal(high.ok, false);
-    assert.match(high.error, /high risk/);
-    assert.equal(pat.requests.filter((x) => x.url === '/api/cmd').length, sentBefore, 'neither reached Patterns');
+    const review = await emit(senior, 'nodes:command', { id: 'patterns01', line: 'VIDEO END 10', mode: 'propose' });
+    assert.deepEqual([review.ok, review.risk], [true, 'review'], JSON.stringify(review));
     const prop = await emit(senior, 'nodes:command', { id: 'patterns01', line: 'BLACKOUT on', mode: 'propose' });
     assert.ok(prop.ok, JSON.stringify(prop));
     const p = sw.proposals.get(prop.proposal.id);
     assert.deepEqual([p.line, p.risk, p.target.t, p.target.id], ['BLACKOUT on', 'high', 'patterns', 'patterns01']);
-    const playmap = await emit(senior, 'nodes:command', { id: 'playmap01', line: 'PLAYLIST GO show', mode: 'send' });
-    assert.deepEqual([playmap.ok, playmap.effect], [true, 'ran PLAYLIST GO show']);
+    assert.equal(sw.proposals.get(review.proposal.id).risk, 'review', 'the desk is told the node\'s own risk');
+    assert.ok([pat, pm].every((n) => n.requests.every((x) => x.method === 'GET' && x.url !== '/api/cmd')), 'neither node was ever driven');
     const a = await api(base, 'GET', '/api/audit?limit=100', undefined, { cookie: admin });
-    assert.ok(a.body.entries.some((e) => e.action === 'node.command' && /VIDEO END 10 → applied/.test(e.words)));
-    assert.ok(a.body.entries.some((e) => e.action === 'node.command' && /VIDEO END locked → refused: the air is locked$/.test(e.words)), 'the node\'s own words, not "said 200"');
+    assert.ok(a.body.entries.some((e) => e.action === 'node.propose' && /VIDEO END 10 → proposed/.test(e.words)));
     assert.ok(a.body.entries.some((e) => e.action === 'node.propose' && /BLACKOUT on → proposed/.test(e.words)));
+    assert.ok(!a.body.entries.some((e) => e.action === 'node.command'), 'nothing was sent, so nothing is recorded as sent');
   });
 
-  await t.test('C22: a PlayMap line its own catalogue rates high is never sent now — only proposed, rated high', async () => {
+  await t.test('C22: a PlayMap line its own catalogue rates high reaches the show desk rated high', async () => {
     const senior = await connect(base, sol); sockets.push(senior);
     assert.ok((await emit(ctl, 'nodes:link', { id: 'playmap01', hall })).ok, 'PlayMap moves to Hall 1, whose Stagewatch keeps the desk');
     await until(async () => { const n = (await emit(senior, 'nodes:list', {})).linked.find((x) => x.id === 'playmap01'); return n.status === 'live' && n.commands.length === 6 && n.desk; }, 8000, 'PlayMap\'s verbs');
     assert.ok(pm.requests.some((x) => x.url === '/api/verbs' && x.headers['x-playmap-token'] === PLAYMAP_TOKEN), 'its vocabulary read with its token');
-    const cmds = () => pm.requests.filter((x) => x.url === '/api/cmd').map((x) => x.body);
-    const before = cmds().length;
     for (const line of ['BIND ADD MIDI APC40 NOTE 1 53 TO BLACKOUT OFF', 'BIND LEARN BLACKOUT ON', 'DECODE POLICY DIRECT FORCE', 'BIND ADD {"input":"OSC /x","target":"BLACKOUT ON"}']) {
-      const r = await emit(senior, 'nodes:command', { id: 'playmap01', line, mode: 'send' });
-      assert.equal(r.ok, false, line);
-      assert.match(r.error, /high risk/, line);
+      const r = await emit(senior, 'nodes:command', { id: 'playmap01', line, mode: 'propose' });
+      assert.deepEqual([r.ok, r.risk], [true, 'high'], line + ': ' + JSON.stringify(r));
+      assert.equal(sw.proposals.get(r.proposal.id).risk, 'high', line + ': the desk is told it is high');
     }
-    assert.equal(cmds().length, before, 'none reached PlayMap');
-    const ok = await emit(senior, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT', mode: 'send' });
+    const ok = await emit(senior, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT', mode: 'propose' });
     assert.deepEqual([ok.ok, ok.risk], [true, 'review']);
-    const prop = await emit(senior, 'nodes:command', { id: 'playmap01', line: 'BIND LEARN BLACKOUT ON', mode: 'propose' });
-    assert.deepEqual([prop.ok, prop.risk], [true, 'high']);
-    assert.equal(sw.proposals.get(prop.proposal.id).risk, 'high', 'the desk is told it is high');
+    assert.ok(!pm.requests.some((x) => x.url === '/api/cmd'), 'none reached PlayMap');
   });
 
-  await t.test('C44: a verb\'s secret reaches the node, and never the audit log or the show desk', async () => {
+  await t.test('C44: a line carrying a secret is neither sent nor proposed, and its secret is written down nowhere', async () => {
     const secret = 'K7QM-3XWD-P9RB';   // secret-scan: fixture — a fake Patterns pairing token inside a PlayMap verb
     const senior = await connect(base, sol); sockets.push(senior);
-    const r = await emit(senior, 'nodes:command', { id: 'playmap01', line: 'LINK PATTERNS 10.0.0.5:9696 ' + secret, mode: 'send' });
-    assert.equal(r.ok, true, JSON.stringify(r));
-    assert.ok(pm.requests.some((x) => x.url === '/api/cmd' && x.body === 'LINK PATTERNS 10.0.0.5:9696 ' + secret), 'the node gets the whole line');
-    // A binding that carries it: the node gets it whole, the record keeps it back, the desk is never given it.
-    const bindLine = 'BIND ADD OSC /fader/9 TO LINK PATTERNS 10.0.0.5:9696 ' + secret;
-    const bound = await emit(senior, 'nodes:command', { id: 'playmap01', line: bindLine, mode: 'send' });
-    assert.deepEqual([bound.ok, bound.risk], [true, 'review'], JSON.stringify(bound));
-    assert.ok(pm.requests.some((x) => x.url === '/api/cmd' && x.body === bindLine));
-    assert.match((await emit(senior, 'nodes:command', { id: 'playmap01', line: bindLine, mode: 'propose' })).error, /carries a secret/);
     const before = sw.proposals.size;
-    const prop = await emit(senior, 'nodes:command', { id: 'playmap01', line: 'LINK PATTERNS 10.0.0.5:9696 ' + secret, mode: 'propose' });
-    assert.equal(prop.ok, false);
-    assert.match(prop.error, /carries a secret/);
+    for (const [line, shown] of [['LINK PATTERNS 10.0.0.5:9696 ' + secret, 'LINK PATTERNS 10.0.0.5:9696 …'], ['BIND ADD OSC /fader/9 TO LINK PATTERNS 10.0.0.5:9696 ' + secret, 'BIND ADD OSC /fader/9 TO LINK PATTERNS 10.0.0.5:9696 …'],
+      ['BIND ADD {"input":"OSC /a","target":"LINK PATTERNS 10.0.0.5 ' + secret + '"}', 'BIND ADD …']]) {
+      const prop = await emit(senior, 'nodes:command', { id: 'playmap01', line, mode: 'propose' });
+      assert.deepEqual([prop.ok, prop.error], [false, '“' + shown + '” carries a secret: set it on Stage left itself — a proposal would keep it in the show desk\'s queue.'], line);
+      assert.equal((await emit(senior, 'nodes:command', { id: 'playmap01', line, mode: 'send' })).stage, 'not sent', line);
+    }
     assert.equal(sw.proposals.size, before, 'never put in the desk\'s queue');
+    assert.ok(!pm.requests.some((x) => JSON.stringify(x).includes(secret)), 'never reached PlayMap');
     const a = await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin });
-    assert.ok(a.body.entries.some((e) => e.action === 'node.command' && e.words.startsWith('Stage left: LINK PATTERNS 10.0.0.5:9696 … →')));
-    assert.ok(a.body.entries.some((e) => e.action === 'node.command' && e.words.startsWith('Stage left: BIND ADD OSC /fader/9 TO LINK PATTERNS 10.0.0.5:9696 … →')));
-    assert.ok(!JSON.stringify(a.body).includes(secret), 'not in the audit log, nor in the receipt\'s words it keeps');
+    assert.ok(!JSON.stringify(a.body).includes(secret), 'not in the audit log');
     for (const f of fs.readdirSync(srv.dataDir).filter((x) => x.startsWith('audit'))) assert.ok(!fs.readFileSync(path.join(srv.dataDir, f), 'utf8').includes(secret), f);
   });
 
@@ -454,13 +537,14 @@ test('show network rights: a one-hall driver sees only its halls and nodes, a no
     assert.deepEqual(l.linked.map((n) => n.id), ['h1pat']);
     const b = (await emit(sid, 'board:watch', {})).board;
     assert.deepEqual(b.nodes.map((n) => n.id), ['h1pat'], 'the board shows the one-hall senior its own hall\'s node only');
-    const before = venue.requests.filter((x) => x.url === '/api/cmd').length;
-    assert.equal((await emit(sid, 'nodes:command', { id: 'venue01', line: 'PLAYLIST GO walkout', mode: 'send' })).ok, false);
-    assert.equal((await emit(sid, 'nodes:command', { id: 'h2pat', line: 'VIDEO END 10', mode: 'send' })).ok, false);
-    assert.equal(venue.requests.filter((x) => x.url === '/api/cmd').length, before, 'nothing reached the venue-wide node');
+    for (const [id, line] of [['venue01', 'PLAYLIST GO walkout'], ['h2pat', 'VIDEO END 10']]) {
+      for (const mode of ['propose', 'send']) assert.deepEqual(await emit(sid, 'nodes:command', { id, line, mode }), { ok: false, error: 'No such link, or not yours to drive.' }, id + ' ' + mode);
+    }
+    assert.ok(venue.requests.every((x) => x.url !== '/api/cmd'), 'nothing reached the venue-wide node');
     const sol = await connect(base, solC); sockets.push(sol);
     assert.deepEqual((await emit(sol, 'nodes:list', {})).linked.map((n) => n.id).sort(), ['h1pat', 'h2pat', 'venue01'], 'a senior with every hall still drives them all');
-    assert.equal((await emit(sol, 'nodes:command', { id: 'venue01', line: 'PLAYLIST GO walkout', mode: 'send' })).ok, true);
+    // Past the rights: the venue-wide node's line goes to the default Stagewatch's desk, and there is none here.
+    assert.deepEqual(await emit(sol, 'nodes:command', { id: 'venue01', line: 'PLAYLIST GO walkout', mode: 'propose' }), { ok: false, error: 'The default Stagewatch is not linked — not proposed.' });
   });
 
   await t.test('the board offers Show network exactly to those it lets in; a hall\'s crew still sees its node\'s chip', async () => {

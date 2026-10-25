@@ -39,8 +39,14 @@ Stagewatch, crews with their own logins, project managers seeing every hall, scr
 - Fixed: 0.4 proposed `message "…" <urgency> ack`, which Stagewatch refused ("flash must be off|slow|fast"); the line
   is now `… <urgency> off ack`, and every line is held to a port of Stagewatch's own parser.
 - PlayMap's hellos are heard (they were dropped). Patterns and PlayMap can be linked with their own tokens: their
-  light, headline and attention items on the halls board and in the AI's brief; their listed verbs sent now (low and
-  review risk, with the node's receipt) or proposed to the show desk (any risk; high only ever proposed).
+  light, headline and attention items on the halls board and in the AI's brief; their listed verbs proposed to the
+  show desk with the node's own risk, where a person approves them and the node collects them with its own key.
+- A linked node's pairing token is full control of it, so it goes only to this laptop, or over HTTPS to a certificate
+  that is pinned or that a person confirmed by typing the first 8 or more characters of the fingerprint the node shows
+  on its own screen (when linking, or with Confirm certificate on the admin page). A node on another machine with no
+  HTTPS, or whose certificate nobody confirmed, shows red with the reason and is sent nothing. AGMessage never drives
+  a node directly with that token: driving it waits for a key the node issues to AGMessage alone (Patterns' `ptk_`,
+  PlayMap's `pmk_`). Found by a review of the Show Bus across the four apps (AG-1, unit 21).
 
 **Versions** — one scheme for every build (`app/lib/version.js`): `package.json` names the version; CI stamps the build
 number and commit (`tools/stamp-build.js`). A release reads `0.5.0+17.abc1234`, a CI development build
@@ -85,8 +91,8 @@ reader, then 19 more when the fixes were read together — every one fixed or an
   never covers it on an upright tablet.
 - *The show network.* Each Stagewatch gets only the context of its own halls; a pinned node is never spoken to over
   plain HTTP again, and a changed certificate can be accepted; Stagewatch's and our numbers never cross after a restart
-  or a relink; a silent Stagewatch is redialled after 12 s as documented; PlayMap's own rules rate a line before it is
-  sent; a command's secret is never written to the audit log; the discovery table is bounded.
+  or a relink; a silent Stagewatch is redialled after 12 s as documented; PlayMap's own rules rate a line before it
+  reaches the show desk (high until they are read); a command's secret is never written to the audit log; the discovery table is bounded.
 - *Data.* On Windows, Ctrl+C, closing the console window and the watchdog's own stop now let the server save first:
   a signal sent to a child process there ends it at once, so the last half-second of saves and any audit entries still
   waiting were lost (CI's Windows job found it). The stop is asked over IPC. A server whose watchdog has gone saves and
@@ -97,7 +103,7 @@ reader, then 19 more when the fixes were read together — every one fixed or an
   every rotated file as one chain, off the event loop; uploads stop before the disk fills, and files nobody posted are
   removed.
 
-Tests: 233 (was 53) plus the browser smoke (58 checks, was 7).
+Tests: 236 (was 53) plus the browser smoke (60 checks, was 7).
 
 ## 0.4.0 — 2026-10-11 — encrypted connections and the show desk (Show Bus 1.2)
 
