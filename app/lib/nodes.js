@@ -39,6 +39,9 @@ const CHANGE_MS = 500;          // the table's change is told at most this often
 // Every kind on the bus: Stagewatch (main), its Slides agents, Patterns, PlayMap (Show Bus 1.3 proposal) and other messengers.
 const KINDS = new Set(['main', 'agent', 'patterns', 'playmap', 'messenger']);
 const CAPS = ['messages', 'action-prompts', 'documents', 'ai', 'context', 'receipts', 'proposals', 'displays', 'help'];
+// A Stagewatch as one link sees it at one time: unique across every link of this process, so a link made again for a
+// hall (its Stagewatch removed, then another set) never shares a number with the one it replaced.
+let generations = 0;
 
 /** A hello off the wire, cleaned; null when it isn't one (pure, tested). */
 function parseHello(msg, address) {
@@ -246,9 +249,9 @@ class StagewatchLink {
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
     this.desk = false;                // Stagewatch answers /api/proposals (Show Bus §11)
     this.deskCheckedAt = 0;
-    // Which Stagewatch, as it is now: a new one each time the link is pointed elsewhere or its frames' seq goes back (it
-    // restarted, Show Bus §4) — its message and proposal numbers start again, so nothing followed before carries over.
-    this.generation = 0;
+    // Which Stagewatch, as it is now: a new one each time the link is made, pointed elsewhere or its frames' seq goes back
+    // (it restarted, Show Bus §4) — its message and proposal numbers start again, so nothing followed before carries over.
+    this.generation = ++generations;
     this.lastSeq = null;
     this.ws = null; this.delay = 500; this.lastHeard = 0; this.view = null; this.status = 'off'; this.lastKey = '';
     this.clock = new ClockSampler(8);
@@ -267,7 +270,7 @@ class StagewatchLink {
     const k = typeof key === 'string' ? key.trim() : '';
     const f = tlsmod.cleanFingerprint(fingerprint);
     if (b === this.base && k === this.key && f === this.fingerprint) return;
-    if (b !== this.base) { this.generation++; this.lastSeq = null; }
+    if (b !== this.base) { this.generation = ++generations; this.lastSeq = null; }
     this.base = b; this.key = k; this.fingerprint = f;
     this._close();
     this.delay = 500;
@@ -394,7 +397,7 @@ class StagewatchLink {
       this.lastHeard = Date.now();
       if (msg.type === 'state') {
         this._confirmPin();
-        if (Number.isInteger(msg.seq)) { if (this.lastSeq !== null && msg.seq < this.lastSeq) this.generation++; this.lastSeq = msg.seq; }
+        if (Number.isInteger(msg.seq)) { if (this.lastSeq !== null && msg.seq < this.lastSeq) this.generation = ++generations; this.lastSeq = msg.seq; }
         this._set('connected', stageView(msg));
       }
       else if (msg.type === 'pong') this.clock.add(Number(msg.t), Number(msg.t2), Number(msg.t3), Date.now());

@@ -1672,11 +1672,17 @@ for (const room of store.rooms.values()) {
 // Proposals this AGMessage made, followed until they end: desk id -> the messages that show their state. "lost": the
 // desk no longer has it (it restarted, or the hall moved to another Stagewatch) — never another proposal's decision.
 const FINAL = new Set(['rejected', 'done', 'failed', 'undelivered', 'lost']);
-// Keyed "<link>:<desk id>": each Stagewatch numbers its own proposals; `sw` and `line` say which one of that number is ours.
+// Keyed "<link>:<desk id>": each Stagewatch numbers its own proposals; `sw`, `line` and the link's generation (the
+// Stagewatch as it was then) say which one of that number is ours.
 const proposals = new Map();
 function trackProposal(linkId, id, code, ids, state, { sw = '', line = '' } = {}) {
   if (FINAL.has(state)) return;
-  proposals.set(linkId + ':' + id, { link: linkId, id, code, ids, state, sw, line, created: 0 });
+  const key = linkId + ':' + id;
+  // The desk handed out a number it had handed out before (it restarted): the proposal followed under it is gone.
+  const was = proposals.get(key);
+  if (was && !ids.some((x) => was.ids.includes(x))) loseProposal(key, was, 'it restarted');
+  const link = allLinks().find((l) => l.id === linkId);
+  proposals.set(key, { link: linkId, id, code, ids, state, sw, line, created: 0, gen: link ? link.generation : 0 });
   if (proposals.size > 200) proposals.delete(proposals.keys().next().value);
 }
 // After a restart, keep following the ones still open (their state, and the link they went to, live on the messages).
@@ -1690,7 +1696,7 @@ for (const room of store.rooms.values()) {
 /** Why the desk's proposal of this number is not the one we made, or '' when it is (pure on its facts). */
 function notOurs(t, p, link) {
   if (t.sw && t.sw !== link.tag) return 'the hall moved to another Stagewatch';
-  if (p.gone) return 'it restarted';
+  if (p.gone || (t.gen && t.gen !== link.generation)) return 'it restarted';
   if ((p.from && p.from.id && p.from.id !== settings.nodeId) || (t.line && p.line && p.line !== t.line) || (t.created && p.created && p.created !== t.created)) return 'it restarted';
   return '';
 }
@@ -1708,7 +1714,7 @@ function showProposalState(t, p) {
 }
 // Approved proposals aimed at this AGMessage, already run (so a slow result post never runs one twice). Keyed by the
 // desk's address tag, its id, when it was made and its line: a restarted desk's new p1 is a new proposal.
-const ranProposals = new Map();   // key -> {ok, words, reported, link, sw, id}
+const ranProposals = new Map();   // key -> {ok, words, reported, link, sw, gen, id}
 
 /**
  * What AGMessage does when the show desk approves a proposal aimed at it. One verb: "notice <text>" — a notice shown
@@ -1762,13 +1768,15 @@ setInterval(async () => {
       for (const p of await link.approvedFor(settings.nodeId)) {
         const key = link.tag + ':' + p.id + ':' + (p.created || 0) + ':' + p.line;
         if (ranProposals.has(key)) continue;
-        ranProposals.set(key, { ...runApproved(p), reported: false, link: link.id, sw: link.tag, id: p.id });
+        ranProposals.set(key, { ...runApproved(p), reported: false, link: link.id, sw: link.tag, gen: link.generation, id: p.id });
         if (ranProposals.size > 200) ranProposals.delete(ranProposals.keys().next().value);
       }
       // Stagewatch hands an approved proposal over once and never lists it again: a result it did not take is posted
-      // again here until it takes it, or refuses it for good (no such proposal, no longer waiting for one).
-      for (const r of ranProposals.values()) {
-        if (r.reported || r.link !== link.id || r.sw !== link.tag) continue;
+      // again here until it takes it, or refuses it for good (no such proposal, no longer waiting for one) — only to the
+      // Stagewatch it came from, as it was then: a restarted one's proposal of the same number is another proposal.
+      for (const r of Array.from(ranProposals.values())) {
+        if (r.reported || r.link !== link.id) continue;
+        if (r.sw !== link.tag || r.gen !== link.generation) { r.reported = true; continue; }   // that desk is gone: nobody to tell
         const status = await link.reportResult(r.id, r.ok, r.words);
         if (status >= 200 && status < 500) r.reported = true;
       }

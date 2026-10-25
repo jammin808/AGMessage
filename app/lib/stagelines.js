@@ -30,7 +30,9 @@ const LINE_MAX = 400;      // Stagewatch's show desk keeps 400 characters of a p
 const SW_ROLES = new Set(['speaker', 'moderator', 'backstage', 'chair', 'interpreter', '*']);
 
 const quote = (t) => '"' + String(t).replace(/"/g, '\'') + '"';
-const clean = (t, max) => String(t || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+// Whitespace as one space, and no other control character: Stagewatch drops those from a line it keeps (ProposalDesk's
+// Str), so the line AGMessage proposes is the line the desk holds, word for word.
+const clean = (t, max) => String(t || '').replace(/[\r\n\t\v\f]+/g, ' ').replace(/\p{Cc}/gu, '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /** Where a message can go, for a Stagewatch whose context lists these departments (pure). */
 function destinations(departments = []) {

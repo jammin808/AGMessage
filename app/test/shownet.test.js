@@ -173,3 +173,79 @@ test('C18: the show desk\'s ids are its own — after a Stagewatch restart or a 
     await until(() => acks.some((a) => a.by === 'Speaker B' && a.ack === 'done'), 4000, 'a send to the Stagewatch as it is now is followed');
   });
 });
+
+test('C18: a Stagewatch\'s numbers never cross a link made again, a restart or a number handed out twice; a line is followed as the desk keeps it', async (t) => {
+  const sw1 = await fakeStagewatch({ name: 'Desk one', messageId: 4 });
+  const sw2 = await fakeStagewatch({ name: 'Desk two', messageId: 4 });
+  const srv = await startServer();
+  const { base } = srv;
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw1.close(); await sw2.close(); });
+  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
+  const ctl = await connect(base, admin); sockets.push(ctl);
+  const configure = async (sw, key) => assert.ok((await emit(ctl, 'hall:configure', { code: hall, stagewatchUrl: sw ? sw.url : '', stagewatchKey: key })).ok);
+  await configure(sw1, 'swk_desk_one_node_key_01' /* secret-scan: fixture */);
+  const crew = await connect(base); sockets.push(crew);
+  assert.ok((await emit(crew, 'join', { roomCode: hall, name: 'Alex', role: 'research' })).ok);
+  const acks = [];
+  const stages = [];
+  crew.on('stageAck', (a) => acks.push(a.stage));
+  crew.on('stage', (s) => stages.push(s));
+  const roomMessages = async () => (await emit(ctl, 'admin:watchRoom', { roomCode: hall })).messages;
+  await until(() => sw1.connected, 6000, 'hall linked');
+
+  await t.test('a hall\'s Stagewatch removed, then another set: a send to the first is not acknowledged by the second\'s message of that number', async () => {
+    const sent = await emit(crew, 'stage:send', { text: 'Two minutes' });
+    assert.deepEqual([sent.ok, sent.messageId], [true, 4]);
+    await configure(null);
+    await configure(sw2, 'swk_desk_two_node_key_02' /* secret-scan: fixture */);
+    await until(() => sw2.connected, 6000, 'linked again, to another Stagewatch');
+    sw2.frame({ messageId: 4, messageAck: 'done', messageAckBy: 'Other speaker' });
+    await until(() => stages.some((s) => s.messageAckBy === 'Other speaker'), 4000, 'the frame reached the hall');
+    await new Promise((resolve) => { setTimeout(resolve, 300); });
+    assert.ok(!acks.some((a) => a.by === 'Other speaker'), JSON.stringify(acks));
+    assert.equal((await roomMessages()).find((m) => m.stage && m.stage.ref === 4 && /Two minutes/.test(m.text || '')).stage.ack, 'sent');
+  });
+
+  await t.test('a result the desk did not take before it restarted is never posted to its new proposal of the same number', async () => {
+    await until(() => sw2.requests.some((r) => r.url.includes('?target=')), 8000, 'AGMessage collects from the desk');
+    const nodeId = new URL(sw2.requests.find((r) => r.url.includes('?target=')).url, 'http://x').searchParams.get('target');
+    const forUs = (line) => ({ line, state: 'approved', decidedBy: 'SM', from: { t: 'main', id: 'swdesk', name: 'Desk two' }, target: { t: 'messenger', id: nodeId, name: 'AGMessage' } });
+    sw2.frame({ seq: 10, messageId: 0, messageAck: '', messageAckBy: '', text: '05:00' });
+    sw2.failResults = 1000;   // the desk is busy: every result post fails until it restarts
+    const first = sw2.add(forUs('bogus line for AGMessage'));
+    await until(() => sw2.requests.some((r) => r.method === 'POST' && r.url === '/api/proposals/' + first + '/result'), 8000, 'run, its result not taken');
+    // Stagewatch restarts: its queue is gone, it numbers from p1 again and its frames' seq starts again.
+    sw2.restart();
+    sw2.frame({ seq: 2, text: '04:00' });
+    const second = sw2.add(forUs('notice Doors open'));
+    assert.equal(second, first, 'the same number, another proposal');
+    await until(() => stages.some((s) => s.text === '04:00'), 4000, 'the restarted Stagewatch\'s frame');
+    sw2.failResults = 0;
+    await until(() => sw2.proposals.get(second).state !== 'approved', 12000, 'the new proposal reported');
+    const p = sw2.proposals.get(second);
+    assert.deepEqual([p.state, p.words], ['done', 'shown in 1 meeting'], 'its own result, not the one its number had before');
+  });
+
+  await t.test('a number the desk hands out twice (it restarted): the proposal followed under it before ends lost, never the new one\'s', async () => {
+    sw2.restart();
+    const before = await emit(crew, 'stage:propose', { text: 'Wrap up please', destination: 'speaker' });
+    assert.ok(before.ok, JSON.stringify(before));
+    sw2.restart();
+    const after = await emit(crew, 'stage:propose', { text: 'Lights down', destination: 'speaker' });
+    assert.deepEqual([after.ok, after.proposal.id], [true, before.proposal.id]);
+    sw2.approve(after.proposal.id, 'Show caller');
+    await until(async () => (await roomMessages()).some((m) => m.proposal && /Lights down/.test(m.text || '') && m.proposal.state === 'approved'), 12000, 'the new one approved');
+    const old = (await roomMessages()).find((m) => m.proposal && /Wrap up please/.test(m.text || ''));
+    assert.deepEqual([old.proposal.state, old.proposal.by], ['lost', ''], JSON.stringify(old.proposal));
+  });
+
+  await t.test('a line with a control character is the line the desk keeps: followed, not lost', async () => {
+    const r = await emit(crew, 'stage:propose', { text: 'Mic\u0007 3 is\u0085live', destination: 'speaker' });
+    assert.ok(r.ok, JSON.stringify(r));
+    assert.equal(sw2.proposals.get(r.proposal.id).line, r.proposal.line, 'proposed exactly as the desk keeps it');
+    sw2.approve(r.proposal.id, 'Show caller');
+    await until(async () => (await roomMessages()).some((m) => m.proposal && m.proposal.id === r.proposal.id && m.proposal.at === r.proposal.at && m.proposal.state === 'approved'), 12000, 'approved');
+  });
+});

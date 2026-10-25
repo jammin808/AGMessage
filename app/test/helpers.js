@@ -82,7 +82,10 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
       if (u.pathname === '/api/context') return json(200, { v: 1, node: { t: 'main', id: 'sw' + name.length, name }, light: 'green', headline: name + ' running', items, peers: [] });
       if (u.pathname === '/api/peers/context') return json(200, { ok: true });
       if (desk && u.pathname === '/api/proposals' && req.method === 'POST') {
-        const p = { ...JSON.parse(body || '{}'), id: 'p' + (++next), state: 'pending', created: Date.now() };
+        const j = JSON.parse(body || '{}');
+        // As ProposalDesk.Submit stores them (Str): control characters dropped, trimmed, at most 400 characters.
+        const kept = (v) => (typeof v === 'string' ? v.replace(/\p{Cc}/gu, '').trim().slice(0, 400) : '');
+        const p = { ...j, line: kept(j.line), reason: kept(j.reason), id: 'p' + (++next), state: 'pending', created: Date.now() };
         proposals.set(p.id, p);
         return json(201, { ok: true, id: p.id, state: p.state, risk: p.risk });
       }
@@ -121,6 +124,9 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     get connected() { return sockets.size > 0; },
     get items() { return items; },
     set items(v) { items = v; },
+    /** How many result posts it answers 500 before it takes one (a busy or restarting desk). */
+    get failResults() { return failResults; },
+    set failResults(n) { failResults = n; },
     frame(o) { last = { ...last, ...o }; for (const c of sockets) c.send(JSON.stringify(last)); },
     approve(id, by = 'Show caller') { const p = proposals.get(id); if (p) { p.state = 'approved'; p.decidedBy = by; } },
     /** Another node's proposal on this desk (its own id, or the next one), as Stagewatch would hold it. */
