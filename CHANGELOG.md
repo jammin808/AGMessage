@@ -44,7 +44,10 @@ code (2.16 and its newest work) before it was changed.
   before they are tried and 🖥 is withdrawn; the socket is let go and the key asked again only after 61 s. 0.5.0 called a
   wrong key connected and pinned the certificate from the first frame, kept every gate open, and asked again about 1.4
   times a second, which locked this machine's address out of Stagewatch (5 wrong keys a minute) for every hall's link.
-  A refusal or an acceptance is one `stagewatch.key` audit row per change, never the key.
+  A refusal or an acceptance is one `stagewatch.key` audit row per change, never the key. The links of one AGMessage
+  share Stagewatch's lockout minute: refused keys at one Stagewatch are asked again one at a time, at most four wrong a
+  minute in all. Nothing authenticated goes while the key is not accepted but the verdict's own read, an answer that
+  comes after a refusal is not shown, and a new key shows "connecting", never the last key's "connected" and timer.
 
 ## 0.5.0 — 2026-10-24 — halls, accounts, screens and the testing environment
 

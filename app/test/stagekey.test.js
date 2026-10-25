@@ -35,11 +35,15 @@ test('2.18: the auth message comes first — checking until ok:true, then connec
     await wait(150);
     assert.equal(link.status, 'checking key', 'not connected before Stagewatch says it accepted the key: ' + statuses.join(' → '));
     assert.deepEqual(Object.keys(pins.pins), [], 'nothing pinned before the key is accepted');
+    assert.match((await link.propose({ line: 'x' })).error, /has not accepted this AGMessage's key yet — not proposed/);
+    assert.equal((await link.reportResult('p1', true, 'x')).status, 0, 'nothing authenticated goes before the verdict');
+    assert.deepEqual(sw.requests, [], 'not one request');
     await until(() => link.status === 'connected', 3000, 'connected after auth ok');
     assert.deepEqual([link.keyState, link.keyVia, link.keyNode], ['accepted', 'auth', 'ab12cd34'], 'its node is what it said back');
     assert.equal(pins.pins['url:127.0.0.1:' + sw.port], sw.fp, 'pinned once accepted');
     assert.deepEqual(verdicts.map((v) => v.state), ['accepted']);
     await until(() => link.view && link.view.text === '05:00', 2000, 'the frame that waited behind the auth message');
+    await until(() => link.context && link.context.v === 1, 2000, 'its context read once the key is accepted');
   } finally { link.stop(); await sw.close(); }
 });
 
@@ -138,6 +142,7 @@ test('a key revoked while connected: the next authenticated answer (401) refuses
   try {
     link.configure(sw.url, KEY);
     await until(() => link.status === 'connected', 4000, 'connected');
+    assert.ok(await link.checkDesk('ab12cd34') && link.context, 'a desk and a context while accepted');
     sw.key = OTHER;   // the operator revoked AGMessage's key
     const r = await link.sendToStage('Two minutes');
     assert.deepEqual([r.ok, r.stage], [false, 'refused']);
@@ -148,6 +153,11 @@ test('a key revoked while connected: the next authenticated answer (401) refuses
     assert.equal(again.stage, 'not sent');
     assert.equal(sw.requests.filter((q) => q.url.startsWith('/api/message/')).length, sends, 'the next send is not even tried');
     assert.equal((await link.propose({ line: 'x' })).ok, false);
+    assert.deepEqual([link.context, link.desk], [null, false], 'what the refused key read is not shown, the desk asked again later');
+    const asked = sw.requests.length;
+    for (const a of [await link.proposalAnswer('p1'), await link.reportResult('p1', true, 'x')]) assert.equal(a.status, 0);
+    assert.equal(await link.checkDesk('ab12cd34'), false);
+    assert.equal(sw.requests.length, asked, 'the refused key goes nowhere: no follow, no result, no desk check');
   } finally { link.stop(); await sw.close(); }
 });
 
@@ -223,6 +233,11 @@ test('the context and the AI\'s brief: one light for a link\'s state, its own or
     assert.equal(own.state, words);
     assert.equal(hall.state, words);
   }
+  // A certificate problem met while a refused key is asked again shows as itself, not as the key's refusal.
+  const changed = { status: 'CERTIFICATE CHANGED for Stagewatch — refused until the admin accepts it', key: 'refused', keyWords: 'unknown or revoked API key' };
+  const cctx = buildContext({ node: { id: 'ab12cd34', name: 'AGMessage' }, rooms: [], stage: changed, halls: [changed], peers: [], recent: [] });
+  assert.deepEqual(cctx.items.filter((i) => i.kind === 'link' && /stagewatch/.test(i.id)).map((i) => [i.light, i.state]), [[ 'red', changed.status ], [ 'red', changed.status ]]);
+  assert.match(showBrief({ ...changed, view: null }, []), /^Stage timer: Stagewatch link is CERTIFICATE CHANGED/);
   const brief = showBrief({ status: 'key refused: unknown or revoked API key', key: 'refused', keyWords: 'unknown or revoked API key', view: null }, []);
   assert.match(brief, /refused AGMessage's key \(unknown or revoked API key\): nothing can be sent to its stage/);
   assert.match(showBrief({ status: 'checking key', key: 'checking', view: { text: '05:00' } }, []), /key is being checked: nothing is sent/);
@@ -270,6 +285,8 @@ test('end to end: a wrong key reads "key refused" on every page, sends nothing, 
   assert.equal(refusedRows[0].words, 'Stagewatch refused the key: unknown or revoked API key');
   assert.ok(!JSON.stringify(refusedRows).includes('swk_'), 'never the key');
 
+  const late = await connect(base); sockets.push(late);
+  assert.equal((await emit(late, 'join', { roomCode: hall, name: 'Bea', role: 'research' })).canSendToStage, false, 'a page opened now is offered no send');
   assert.ok((await emit(ctl, 'admin:settings', { stagewatchKey: KEY })).ok);   // the admin enters the key Stagewatch lists
   await until(async () => (await emit(ctl, 'admin:settings')).stage === 'connected', 6000, 'connected with the right key');
   await until(() => seen.some((v) => v.status === 'connected' && v.text === '05:00'), 4000, 'the hall shows the timer');
@@ -277,4 +294,124 @@ test('end to end: a wrong key reads "key refused" on every page, sends nothing, 
   const rowsNow = await keyRows();
   assert.equal(rowsNow.length, 2);
   assert.match(rowsNow[0].words, /^Stagewatch accepted the key \(an authenticated read\), certificate pinned$/);
+  sw.drop();   // the network dropped: the same key accepted again on a new socket is no news
+  await until(async () => (await emit(ctl, 'admin:settings')).stage === 'connected' && sw.counts.upgrades >= 3, 8000, 'connected again');
+  assert.equal((await keyRows()).length, 2);
+  sw.key = OTHER;   // a new key, listed: its verdict is news
+  assert.ok((await emit(ctl, 'admin:settings', { stagewatchKey: OTHER })).ok);
+  await until(async () => (await keyRows()).length === 3, 8000, 'the new key\'s acceptance recorded');
+});
+
+test('the hold and the words: longer than Stagewatch\'s lockout minute; a refusal shown without control characters or a key', () => {
+  assert.ok(nodes.REFUSED_RETRY_MS > nodes.LOCKOUT_MS && nodes.LOCKOUT_MS >= 60_000);
+  assert.equal(nodes.refusalWords('unknown key swk_abcdefgh12345 \u0007from\nhere'), 'unknown key swk_… from here');
+  assert.equal(nodes.refusalWords('x'.repeat(300)).length, 120);
+  assert.equal(nodes.refusalWords(42), '');
+});
+
+test('a new key or address shows nothing of the last: "connecting" at once, no old timer, nothing sent until its verdict', async () => {
+  const sw = await fakeStagewatch({ key: KEY, auth18: true, authDelayMs: 600 });
+  const { link } = linkWith();
+  try {
+    link.configure(sw.url, KEY);
+    await until(() => link.status === 'connected' && link.view, 4000, 'connected');
+    link.configure(sw.url, WRONG);
+    assert.deepEqual([link.status, link.view, link.linked], ['connecting', null, false], 'not connected with the last key\'s timer');
+    assert.equal((await link.pushContext({ v: 1 })), false);
+    await until(() => link.keyState === 'refused', 4000, 'refused');
+    assert.deepEqual(sw.requests.filter((q) => q.headers.authorization === 'Bearer ' + WRONG).map((q) => q.url), [], 'nothing went with the new key before its verdict');
+  } finally { link.stop(); await sw.close(); }
+});
+
+test('a 401 to a request made under the last key refuses nothing once a new key is accepted', async () => {
+  const sw = await fakeStagewatch({ key: KEY, messageDelayMs: 800 });
+  const { link } = linkWith();
+  try {
+    link.configure(sw.url, KEY);
+    await until(() => link.status === 'connected', 4000, 'connected');
+    const late = link.sendToStage('Two minutes');   // judged by Stagewatch only after the key has changed
+    sw.key = OTHER;
+    link.configure(sw.url, OTHER);
+    await until(() => link.status === 'connected', 4000, 'connected with the new key');
+    assert.equal((await late).stage, 'refused', 'the old request was refused');
+    assert.equal(link.status, 'connected', 'and the new key stays accepted');
+  } finally { link.stop(); await sw.close(); }
+});
+
+test('an answer that comes after the refusal is not taken: no context shown for a refused key', async () => {
+  const sw = await fakeStagewatch({ key: KEY, contextDelayMs: 600 });
+  const { link } = linkWith();
+  try {
+    link.configure(sw.url, KEY);
+    await until(() => link.status === 'connected', 6000, 'connected');
+    const pending = link.fetchContext();   // judged under the key now, answered 600 ms later
+    await wait(150);
+    sw.key = OTHER;
+    await link.sendToStage('x');           // the 401 that refuses the key comes first
+    assert.equal(link.keyState, 'refused');
+    assert.equal(await pending, null);
+    assert.equal(link.context, null, 'the late context is not shown');
+  } finally { link.stop(); await sw.close(); }
+});
+
+test('the verdict\'s read: a 403 refuses, a 429 waits its Retry-After, and a refused key asked again keeps its own words', async () => {
+  const forbidden = await fakeStagewatch({ key: KEY, answerContext: [{ status: 403, error: 'HTTPS is required for keys' }] });
+  const a = linkWith();
+  try {
+    a.link.configure(forbidden.url, KEY);
+    await until(() => a.link.keyState === 'refused', 4000, 'refused');
+    assert.equal(a.link.status, 'key refused: HTTPS is required for keys');
+  } finally { a.link.stop(); await forbidden.close(); }
+
+  const busy = await fakeStagewatch({ key: KEY, answerContext: [{ status: 429, error: 'rate limit: too many requests with this key', retryAfter: 2 }] });
+  const b = linkWith();
+  try {
+    b.link.configure(busy.url, KEY);
+    await until(() => b.link.status === 'connected', 6000, 'connected after its Retry-After');
+    const reads = busy.requests.filter((q) => q.url === '/api/context');
+    assert.ok(reads[1].at - reads[0].at >= 2000, 'asked again only after Retry-After: ' + (reads[1].at - reads[0].at) + ' ms');
+  } finally { b.link.stop(); await busy.close(); }
+
+  const sw = await fakeStagewatch({ key: KEY });
+  const c = linkWith({ refusedRetryMs: 500 });
+  try {
+    c.link.configure(sw.url, WRONG);
+    await until(() => c.link.keyState === 'refused', 4000, 'refused');
+    // The key is listed now, but its minute is spent: Stagewatch answers the read 429 (Authorize, then Spend).
+    sw.key = WRONG;
+    sw.answerContext = [{ status: 429, error: 'rate limit: too many requests with this key', retryAfter: 5 }];
+    await until(() => sw.answerContext.length === 0, 4000, 'asked again, and met a 429');
+    await wait(100);
+    assert.equal(c.link.keyState, 'refused');
+    assert.equal(c.link.keyWords, 'unknown or revoked API key', 'still its refusal\'s words');
+    assert.match((await c.link.sendToStage('x')).error, /\(unknown or revoked API key\)/);
+  } finally { c.link.stop(); await sw.close(); }
+});
+
+test('a certificate is accepted only when the link refused one: never a way round a refused key\'s hold', async () => {
+  const sw = await fakeStagewatch({ key: KEY, cert: certOf() });
+  const { link } = linkWith();
+  try {
+    link.configure(sw.url, WRONG);
+    await until(() => link.keyState === 'refused', 4000, 'refused');
+    const n = sw.counts.upgrades;
+    assert.equal(link.acceptCertificate(), false, 'no certificate problem: nothing to accept');
+    await wait(500);
+    assert.deepEqual([sw.counts.upgrades, link.keyState], [n, 'refused'], 'no dial with the refused key');
+  } finally { link.stop(); await sw.close(); }
+});
+
+test('three links of this machine refused by one Stagewatch share its lockout: never five wrong keys in its window', async () => {
+  const sw = await fakeStagewatch({ key: KEY });
+  // Stagewatch's minute as 3 s, each link's own hold 300 ms: on its own, each would ask again ten times a window.
+  const links = [1, 2, 3].map(() => linkWith({ refusedRetryMs: 300, lockoutMs: 3000 }).link);
+  try {
+    const start = Date.now();
+    for (const l of links) l.configure(sw.url, WRONG);
+    await wait(10_000);
+    const times = sw.failureTimes.filter((x) => x >= start + 3500);   // the first refusals of all three, aged out
+    assert.ok(times.length >= 4, 'they did ask again: ' + times.length);
+    const worst = Math.max(...times.map((x) => times.filter((y) => y >= x && y < x + 3000).length));
+    assert.ok(worst <= 4, 'wrong keys in any window: ' + worst);
+  } finally { for (const l of links) l.stop(); await sw.close(); }
 });

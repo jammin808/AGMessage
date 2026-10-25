@@ -118,6 +118,8 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
   const { WebSocketServer } = require('ws');
   const tlsmod = require('../lib/tls');
   const counts = { upgrades: 0, failures: 0 };
+  const failureTimes = [];   // when each failure its lockout would count came
+  const fail = () => { counts.failures++; failureTimes.push(Date.now()); };
   let answerResults = [];
   let heldUntil = 0;
   let onResultPost = null;
@@ -144,7 +146,7 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     const serve = () => {
       const json = (code, o, headers = {}) => { res.writeHead(code, { 'content-type': 'application/json', ...headers }); res.end(JSON.stringify(o)); };
       const queued = (q) => { const a = q.shift(); return json(a.status, { ok: false, error: a.error || 'busy' }, a.retryAfter ? { 'Retry-After': String(a.retryAfter) } : {}); };
-      if (!accepts(req.headers.authorization)) { counts.failures++; return json(401, { ok: false, error: 'unknown or revoked API key' }); }
+      if (!accepts(req.headers.authorization)) { fail(); return json(401, { ok: false, error: 'unknown or revoked API key' }); }
       if (Date.now() < heldUntil) return json(429, { ok: false, error: 'rate limit: too many requests with this key' }, { 'Retry-After': String(Math.ceil((heldUntil - Date.now()) / 1000)) });
       const u = new URL(req.url, 'http://x');
       if (u.pathname.startsWith('/api/message/')) return json(200, { type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId } });
@@ -204,10 +206,10 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     upgrades.push({ url: req.url, headers: req.headers });
     counts.upgrades++;
     const good = accepts(req.headers.authorization);
-    if (!good && req.headers.authorization) counts.failures++;
+    if (!good && req.headers.authorization) fail();
     c.on('message', (d) => { let m; try { m = JSON.parse(String(d)); } catch { return; } if (m.cmd === 'ping') c.send(JSON.stringify({ type: 'pong', t: m.t, t2: Date.now(), t3: Date.now() })); });
     if (!good && viewCode) {
-      counts.failures++;   // its viewing-code check asks Authorize again
+      fail();   // its viewing-code check asks Authorize again
       c.send(JSON.stringify({ type: 'auth', ok: false, view: true, error: 'This screen needs the viewing code' }));
       c.close(1008, 'viewing code');
       return;
@@ -227,7 +229,7 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
   await new Promise((resolve) => { srv.listen(0, '127.0.0.1', resolve); });
   const port = srv.address().port;
   return {
-    port, url: (cert ? 'https://' : '') + '127.0.0.1:' + port, requests, proposals, upgrades, counts, fp: cert ? tlsmod.fingerprint(cert.certDer) : '',
+    port, url: (cert ? 'https://' : '') + '127.0.0.1:' + port, requests, proposals, upgrades, counts, failureTimes, fp: cert ? tlsmod.fingerprint(cert.certDer) : '',
     /** Sockets open on its /ws, refused ones too until they close. */
     get open() { return wss.clients.size; },
     /** The one key it takes now (null: any): the operator adds, rotates or revokes it. */
@@ -242,6 +244,11 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     /** What it answers the next result posts, before its desk reads them: [{status, error, retryAfter}] (0: no answer). */
     get answerResults() { return answerResults; },
     set answerResults(v) { answerResults = v; },
+    /** What it answers the next reads of its context, and the next desk checks, first: [{status, error, retryAfter}]. */
+    get answerContext() { return answerContext; },
+    set answerContext(v) { answerContext = v; },
+    get answerDeskChecks() { return answerDeskChecks; },
+    set answerDeskChecks(v) { answerDeskChecks = v; },
     /** Called with each request as it arrives, before it is answered (null: nothing). */
     set onRequest(fn) { onRequest = fn; },
     /** Called with the id as each result post arrives, before it is answered (null: nothing). */

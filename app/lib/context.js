@@ -29,7 +29,8 @@ function stageWords(s) {
   if (status === 'off') return 'not linked';
   if (status === 'checking key') return 'checking AGMessage\'s key';
   if (status === 'viewing') return 'viewing — no key, nothing is sent to the stage';
-  if (s.key === 'refused') return 'refused AGMessage\'s ' + (status.startsWith('key ') ? 'key' : 'view') + ': ' + String(s.keyWords || '').slice(0, 120);
+  // The refusal's words while the refusal is what the link shows; a certificate problem met meanwhile shows as itself.
+  if (s.key === 'refused' && /^(key )?refused: /.test(status)) return 'refused AGMessage\'s ' + (status.startsWith('key ') ? 'key' : 'view') + ': ' + String(s.keyWords || '').slice(0, 120);
   return status;
 }
 
@@ -147,7 +148,7 @@ function buildContext(f) {
 function showBrief(stage, peers) {
   const lines = [];
   const ctx = stage && stage.context;
-  if (stage && stage.key === 'refused') {
+  if (stage && stage.key === 'refused' && /^(key )?refused: /.test(String(stage.status))) {
     lines.push('Stagewatch refused AGMessage\'s ' + (String(stage.status).startsWith('key ') ? 'key' : 'view') + ' (' + String(stage.keyWords || '').slice(0, 120) + '): nothing can be sent to its stage and its timer is not shown.');
   } else if (stage && stage.status === 'checking key') {
     lines.push('Stage timer: AGMessage\'s key is being checked: nothing is sent until Stagewatch accepts it.');

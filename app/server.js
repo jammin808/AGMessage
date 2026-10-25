@@ -1893,10 +1893,11 @@ function makeLink(id) {
     nodeId: settings.nodeId,
     onState: (view) => onStageState(link, view),
     onStatus: (status) => noteEvent('Stagewatch link' + (id === 'default' ? '' : ' of a hall') + ' ' + (/^CERTIFICATE CHANGED/.test(status) ? 'refused: CERTIFICATE CHANGED' : status), link),
-    // Stagewatch's verdict on the key, once per change: never the key, and Stagewatch's words already cut and redacted.
-    onKey: (k) => {
-      const seen = k.state + '|' + k.words;
-      if ((k.state !== 'accepted' && k.state !== 'refused') || seen === link.keyAudited) return;   // a redial accepted again is no change
+    // Stagewatch's verdict on the key, once per change: never the key, and Stagewatch's words already cut and redacted. A
+    // redial accepted again is no change; a new key, address or certificate (its epoch) makes its verdict news again.
+    onKey: (k, epoch) => {
+      const seen = epoch + '|' + k.state + '|' + k.words;
+      if ((k.state !== 'accepted' && k.state !== 'refused') || seen === link.keyAudited) return;
       link.keyAudited = seen;
       audit.write({ t: 'system' }, 'stagewatch.key', id === 'default' ? 'default' : id, k.state === 'accepted'
         ? 'Stagewatch accepted the key (' + (k.via === 'auth' ? 'its auth message' : 'an authenticated read') + ')' + (link.tlsState.on && link.tlsState.pinned ? ', certificate pinned' : '')

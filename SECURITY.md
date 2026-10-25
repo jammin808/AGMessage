@@ -39,8 +39,9 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
 - Uploads are allow-listed by type and checked by content; they are served so they cannot run script.
 - Pages carry a strict Content-Security-Policy with no inline script.
 - Links to Stagewatch, Patterns and PlayMap pin each peer's certificate; keys travel in headers, never in a URL. A
-  Stagewatch certificate is pinned only once Stagewatch accepted the link's key, and a refused key is asked again at
-  most once a minute, so it never locks this machine's other links out of Stagewatch.
+  Stagewatch certificate is pinned only once Stagewatch accepted the link's key; the key goes in no request but the one
+  that asks for that verdict until then; and refused keys are asked again at most once a minute, shared by every link
+  of this machine to that Stagewatch, so they never lock this machine out of it.
 - A Patterns or PlayMap pairing token is full control of that node: it goes only to a loopback address, or over TLS to
   a certificate that is pinned or that a person confirmed by typing at least 16 characters of its fingerprint from the
   node's own screen; AGMessage never drives a node with it — lines are proposed to the show desk (Show Bus §11).
