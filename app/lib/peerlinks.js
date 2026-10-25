@@ -3,7 +3,7 @@
  * Links to Patterns and PlayMap (Show Bus 1.2): read what they are doing, and propose lines to them — within their own rules.
  *
  *  - The token: the pairing token AGMessage holds for a node is full control of it. It goes only to this machine (a
- *    loopback address) or over TLS to a certificate pinned for that node or confirmed by a person (at least 8 characters
+ *    loopback address) or over TLS to a certificate pinned for that node or confirmed by a person (at least 16 characters
  *    of its fingerprint typed from the node's own screen). A node on another machine that offers no TLS, or whose
  *    certificate no person has confirmed, is refused with words and sent nothing (_resolve).
  *  - Read: each linked node's context (GET /api/context, §6) every 5 s with its token in a header — X-Patterns-Token for
@@ -284,13 +284,13 @@ class PeerLink {
     if (unconfirmed) {
       this._set('refused', this.confirmFp
         ? 'its certificate does not start with the characters typed for it — check the fingerprint on ' + this.node.name + '\'s own screen; another machine may be answering as it'
-        : 'its certificate is not confirmed yet — type the first 8 or more characters of the fingerprint ' + this.node.name + ' shows on its own screen');
+        : 'its certificate is not confirmed yet — type the first ' + tlsmod.TYPED_MIN + ' or more characters of the fingerprint ' + this.node.name + ' shows on its own screen');
       return null;
     }
     // The words name no fingerprint — neither the one presented nor the one a hello announced (anyone can send a hello): the
     // characters a person types come from the node's own screen.
     if (!verdict.ok) {
-      const read = 'type the first 8 or more characters of the fingerprint ' + this.node.name + ' shows on its own screen';
+      const read = 'type the first ' + tlsmod.TYPED_MIN + ' or more characters of the fingerprint ' + this.node.name + ' shows on its own screen';
       this._set('refused', verdict.changed ? 'CERTIFICATE CHANGED — it presents another certificate than the one pinned; if you know why (a renewal, a reinstall), ' + read
         : cert.fp ? 'its certificate is not the one its hello announces — another machine may be answering as it; to confirm the one it presents, ' + read : verdict.reason);
       return null;
@@ -307,7 +307,7 @@ class PeerLink {
   acceptCertificate(typed) {
     const s = this.tlsState;
     if (!s) return { ok: false, error: 'No certificate of ' + this.node.name + ' waits to be confirmed.' };
-    if (!tlsmod.fingerprintStarts(s.fp, typed)) return { ok: false, error: 'Those are not the first characters of the certificate ' + this.node.name + ' presents — type at least 8 from the fingerprint on its own screen.' };
+    if (!tlsmod.fingerprintStarts(s.fp, typed)) return { ok: false, error: 'Those are not the first characters of the certificate ' + this.node.name + ' presents — type at least ' + tlsmod.TYPED_MIN + ' from the fingerprint on its own screen.' };
     this.pins.accept(s.nodeKey, s.fp);
     this.onPins();
     this.tlsState = null; this.endpoint = null;

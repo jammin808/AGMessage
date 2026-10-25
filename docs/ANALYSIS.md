@@ -156,7 +156,7 @@ A review of the Show Bus across the four apps then found one more before the tag
 PlayMap's pairing token — full control of that node — went in its header over plain HTTP to a node on another machine
 that was neither pinned nor announcing a certificate, and AGMessage drove the node with it. Unit 21: the token goes
 only to a loopback address, or over TLS to a certificate pinned for that node or confirmed by a person typing at least
-8 characters of its fingerprint from the node's own screen; anything else is refused with words and sent nothing; and
+16 characters of its fingerprint from the node's own screen; anything else is refused with words and sent nothing; and
 no line is sent to a node directly — it is proposed to the show desk, or refused with words. The direct path waits for
 a key the node issues to AGMessage alone (Patterns' `ptk_`, PlayMap's `pmk_`). Unit 21 was then read the same way as
 the rest — five angles, two readers set to refute each finding — and unit 21.1 fixed what held: a pin the Stagewatch link
@@ -164,8 +164,9 @@ had made on first use, under an id from an unauthenticated hello, counted as a p
 PlayMap links now pin under a key of their own, `peer:<id>`); a refusal and the heard-nodes list still put announced
 fingerprints on the page; a node on this laptop heard from its LAN address was refused as another machine; and the
 tests let two one-line regressions through (a hello vouching for a certificate, a page told 8 to 15 of its characters).
-Seven such mutations now fail the tests. Left as the owner's call: 8 typed characters are 32 bits of a fingerprint that
-is public in the hello, which a prepared certificate can match with about 2^32 signatures. Left for 0.5.1, from the
+Seven such mutations now fail the tests. The review also weighed the typed minimum: 8 characters are 32 bits of a
+fingerprint that is public in the hello, which a certificate made for the purpose matches after about 2^32 signatures;
+the owner chose 16 (64 bits, unit 21.2). Left for 0.5.1, from the
 cross-app review:
 Stagewatch's top-level `ok`/`words` on a proposal's outcome, a result report retried after one failure, the Stagewatch
 link dialling with its own Show Bus id, and "connected" only once Stagewatch says it took the key.

@@ -1213,7 +1213,7 @@ io.on('connection', (socket) => {
     // The start of its certificate's fingerprint, typed from the node's own screen: what lets its token go to it over TLS
     // on another machine (lib/peerlinks.js). Public, so kept unsealed, as hex.
     const typedFp = tlsmod.typedFingerprint(guard.str(fingerprint));
-    if (guard.str(fingerprint).trim() && !typedFp) return ack({ ok: false, error: 'Type at least 8 characters of its certificate\'s fingerprint (0–9, a–f), as the node shows it on its own screen.' });
+    if (guard.str(fingerprint).trim() && !typedFp) return ack({ ok: false, error: 'Type at least ' + tlsmod.TYPED_MIN + ' characters of its certificate\'s fingerprint (0–9, a–f), as the node shows it on its own screen.' });
     const sealed = typeof token === 'string' && token.trim() ? secretbox.seal(token.trim().slice(0, 200)) : (cfg && cfg.tokenSealed) || '';
     const next = { t, name: guard.cleanText(name || (peer && peer.name) || (cfg && cfg.name) || t, 60), url: base, tokenSealed: sealed, hall: h, fpTyped: typedFp || (cfg && cfg.fpTyped) || '' };
     settings.peerLinks = { ...(settings.peerLinks || {}), [guard.str(id)]: next };

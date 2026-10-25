@@ -115,7 +115,7 @@ test('AG-1: a node\'s token goes only to this machine, or over TLS to a certific
     return l;
   };
   const settled = (l, status) => until(() => l.status === status && !l.busy, 3000, l.base + ' ' + status);
-  // No 8 characters of a certificate's fingerprint — enough to confirm it — anywhere a page could read them.
+  // No 8 characters of a certificate's fingerprint (half of what confirms it) anywhere a page could read them.
   const tellsNone = (l, ...fps) => {
     const seen = JSON.stringify(l.view());
     for (const fp of fps) for (let i = 7; i + 8 <= fp.length; i++) assert.ok(!seen.includes(fp.slice(i, i + 8)), 'the page is told ' + fp.slice(i, i + 8) + ': ' + seen);
@@ -137,15 +137,15 @@ test('AG-1: a node\'s token goes only to this machine, or over TLS to a certific
     // Another machine over TLS, its certificate never confirmed: refused; only its certificate is read.
     const far = make('https://192.0.2.10:9443');
     await settled(far, 'refused');
-    assert.match(far.problem, /not confirmed yet — type the first 8 or more characters of the fingerprint Patterns FOH shows on its own screen/);
+    assert.match(far.problem, /not confirmed yet — type the first 16 or more characters of the fingerprint Patterns FOH shows on its own screen/);
     assert.deepEqual([far.view().certificateWaits, far.view().certificateChanged], [true, false]);
     tellsNone(far, presented);
     assert.ok(probed.includes('192.0.2.10:9443'));
     assert.equal(sent.length, 0);
     // A person confirms it: too few characters, or not its start, are refused; its start, typed any way, pins it.
-    for (const typed of ['', '0123456', 'b2b2b2b2', presented.slice(8, 16)]) assert.match(far.acceptCertificate(typed).error, /not the first characters .* type at least 8/, typed);
+    for (const typed of ['', presented.slice(7, 15), presented.slice(7, 22), 'b2b2b2b2b2b2b2b2', presented.slice(8, 24)]) assert.match(far.acceptCertificate(typed).error, /not the first characters .* type at least 16/, typed + ': too short, or not its start');
     assert.equal(sent.length, 0);
-    assert.deepEqual(far.acceptCertificate('SHA256:01:23:45:67:89'), { ok: true, changed: false });
+    assert.deepEqual(far.acceptCertificate('SHA256:01:23:45:67:89:AB:CD:EF'), { ok: true, changed: false });
     await settled(far, 'live');
     assert.equal(far.pins.pins[pl.pinKey('p1')], presented, 'pinned');
     assert.ok(sent.length > 0 && sent.every((r) => r.token && r.tls && r.url.startsWith('https://192.0.2.10:9443/')), JSON.stringify(sent));
@@ -158,15 +158,15 @@ test('AG-1: a node\'s token goes only to this machine, or over TLS to a certific
     assert.match(far.problem, /CERTIFICATE CHANGED/);
     tellsNone(far, presented, 'sha256:' + '0123456789abcdef'.repeat(4));
     assert.equal(sent.length, 0);
-    assert.equal(far.acceptCertificate('01234567').ok, false, 'the old certificate\'s start confirms nothing');
-    assert.deepEqual(far.acceptCertificate('fedcba98'), { ok: true, changed: true });
+    assert.equal(far.acceptCertificate('0123456789abcdef').ok, false, 'the old certificate\'s start confirms nothing');
+    assert.deepEqual(far.acceptCertificate('fedcba9876543210'), { ok: true, changed: true });
     await settled(far, 'live');
 
     // Typed when linked: confirmed at once, pinned; typed wrong: refused, and nothing sent to it.
-    const typed = make('https://192.0.2.11:9443', { confirmFp: 'fedcba9876' });
+    const typed = make('https://192.0.2.11:9443', { confirmFp: 'fedcba9876543210' });
     await settled(typed, 'live');
     assert.equal(typed.pins.pins[pl.pinKey('p1')], presented);
-    const wrong = make('https://192.0.2.12:9443', { confirmFp: 'deadbeef' });
+    const wrong = make('https://192.0.2.12:9443', { confirmFp: 'deadbeefdeadbeef' });
     await settled(wrong, 'refused');
     assert.match(wrong.problem, /does not start with the characters typed for it/);
     tellsNone(wrong, presented);
@@ -181,16 +181,16 @@ test('AG-1: a node\'s token goes only to this machine, or over TLS to a certific
     tellsNone(heard, presented);
     assert.equal(sent.filter((r) => r.url.includes('192.0.2.14')).length, 0, 'the token never reaches it');
     assert.equal(heard.pins.pins[pl.pinKey('p1')], undefined, 'nothing pinned');
-    assert.ok(heard.acceptCertificate(presented.slice(7, 15)).ok);
+    assert.ok(heard.acceptCertificate(presented.slice(7, 23)).ok);
     await settled(heard, 'live');
     assert.ok(sent.some((r) => r.url.startsWith('https://192.0.2.14:9443/') && r.token && r.tls), 'its token goes over TLS once a person confirmed it');
     const announced = 'sha256:' + '89abcdef01234567'.repeat(4);
     const spoofed = make('http://192.0.2.15:9696', { findPeer: () => ({ id: 'p1', tls: announced, ports: { https: 9443 } }) });
     await settled(spoofed, 'refused');
-    assert.match(spoofed.problem, /its certificate is not the one its hello announces — another machine may be answering as it; to confirm the one it presents, type the first 8 or more characters/);
+    assert.match(spoofed.problem, /its certificate is not the one its hello announces — another machine may be answering as it; to confirm the one it presents, type the first 16 or more characters/);
     tellsNone(spoofed, presented, announced);
     assert.equal(sent.filter((r) => r.url.includes('192.0.2.15')).length, 0);
-    assert.equal(spoofed.acceptCertificate(announced.slice(7, 15)).ok, false, 'the hello\'s fingerprint confirms nothing');
+    assert.equal(spoofed.acceptCertificate(announced.slice(7, 23)).ok, false, 'the hello\'s fingerprint confirms nothing');
 
     // A pin the Stagewatch link made on first use, under an id from an unauthenticated hello ("node:<id>"), is no person's
     // confirmation: a node announcing that id on another machine is still refused until someone types its start.
@@ -426,16 +426,16 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
       assert.equal(v.light, 'red');
       await wait(300);
       assert.deepEqual(far.requests, [], 'nothing reached it — its token least of all');
-      // A fingerprint is typed as at least 8 of its hex characters, or the link is refused with words.
-      for (const fingerprint of ['abc1234', 'not-hex-at-all', 'sha256:xyz12345']) {
+      // A fingerprint is typed as at least 16 of its hex characters, or the link is refused with words.
+      for (const fingerprint of ['abcdef01', 'abcdef0123456789'.slice(0, 15), 'not-hex-at-all-at-all', 'sha256:xyz123456789abcd']) {
         const r = await emit(ctl, 'nodes:link', { id: 'farpat', fingerprint });
-        assert.deepEqual([r.ok, r.error], [false, 'Type at least 8 characters of its certificate\'s fingerprint (0–9, a–f), as the node shows it on its own screen.'], fingerprint);
+        assert.deepEqual([r.ok, r.error], [false, 'Type at least 16 characters of its certificate\'s fingerprint (0–9, a–f), as the node shows it on its own screen.'], fingerprint);
       }
-      assert.ok((await emit(ctl, 'nodes:link', { id: 'farpat', fingerprint: 'AB:CD:EF:01' })).ok, 'kept as typed; it offers no TLS, so still refused');
+      assert.ok((await emit(ctl, 'nodes:link', { id: 'farpat', fingerprint: 'AB:CD:EF:01:23:45:67:89' })).ok, 'kept as hex; it offers no TLS, so still refused');
       await wait(300);
       assert.deepEqual(far.requests, []);
       const audit = fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8');
-      assert.ok(audit.includes('(8 characters of its certificate\'s fingerprint typed)'));
+      assert.ok(audit.includes('(16 characters of its certificate\'s fingerprint typed)'));
     } finally {
       await emit(ctl, 'nodes:unlink', { id: 'farpat' });   // whatever failed above: never left linked for the next subtest
       await far.close();

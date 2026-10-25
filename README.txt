@@ -83,7 +83,7 @@ interpreter, a department, or just for the operator).
 Patterns and PlayMap
 --------------------
 Admin -> Show network -> a Patterns or PlayMap that is heard -> Link...:
-paste its pairing token, then type the first 8 or more characters of the
+paste its pairing token, then type the first 16 or more characters of the
 certificate fingerprint it shows on its own screen. Its state then shows
 on the halls board; project managers and senior techs can propose the
 commands it lists to the show desk, where a person approves them.

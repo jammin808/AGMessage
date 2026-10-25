@@ -121,7 +121,7 @@
           acc.className = 'btn ghost small'; acc.type = 'button'; acc.textContent = l.certificateChanged ? 'Accept new certificate…' : 'Confirm certificate…';
           acc.onclick = () => {
             const typed = prompt((l.certificateChanged ? l.name + '\'s certificate changed. Only accept it if you know why (a renewal, a reinstall, a new laptop). ' : '')
-              + 'Type the first 8 or more characters of the certificate fingerprint ' + l.name + ' shows on its own screen.', '');
+              + 'Type the first 16 or more characters of the certificate fingerprint ' + l.name + ' shows on its own screen.', '');
             if (typeof typed !== 'string' || !typed.trim()) return;
             socket.emit('nodes:acceptCertificate', { id: l.id, fingerprint: typed.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not accepted.'); loadNodes(); });
           };
@@ -140,7 +140,7 @@
     if (typeof token !== 'string') return;   // cancelled
     const hall = prompt('For one hall? Type its code (e.g. K7P2QX), or leave empty for every hall.', '') || '';
     // The token goes to another machine only over HTTPS to a certificate a person confirmed (or one pinned before).
-    const fingerprint = prompt('Its certificate: type the first 8 or more characters of the fingerprint ' + (p.name || p.t) + ' shows on its own screen. Leave empty when it runs on this laptop, or its certificate is confirmed already.', '') || '';
+    const fingerprint = prompt('Its certificate: type the first 16 or more characters of the fingerprint ' + (p.name || p.t) + ' shows on its own screen. Leave empty when it runs on this laptop, or its certificate is confirmed already.', '') || '';
     socket.emit('nodes:link', { id: p.id, token, hall: hall.trim(), fingerprint: fingerprint.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not linked.'); loadNodes(); });
   }
 

@@ -40,7 +40,7 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
 - Pages carry a strict Content-Security-Policy with no inline script.
 - Links to Stagewatch, Patterns and PlayMap pin each peer's certificate; keys travel in headers, never in a URL.
 - A Patterns or PlayMap pairing token is full control of that node: it goes only to a loopback address, or over TLS to
-  a certificate that is pinned or that a person confirmed by typing at least 8 characters of its fingerprint from the
+  a certificate that is pinned or that a person confirmed by typing at least 16 characters of its fingerprint from the
   node's own screen; AGMessage never drives a node with it — lines are proposed to the show desk (Show Bus §11).
 - Security-relevant actions (sign-ins, permission changes, what a display was told to show) are written to a
   hash-chained audit log that shows tampering.

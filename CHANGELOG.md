@@ -42,7 +42,7 @@ Stagewatch, crews with their own logins, project managers seeing every hall, scr
   light, headline and attention items on the halls board and in the AI's brief; their listed verbs proposed to the
   show desk with the node's own risk, where a person approves them and the node collects them with its own key.
 - A linked node's pairing token is full control of it, so it goes only to this laptop, or over HTTPS to a certificate
-  that is pinned or that a person confirmed by typing the first 8 or more characters of the fingerprint the node shows
+  that is pinned or that a person confirmed by typing the first 16 or more characters of the fingerprint the node shows
   on its own screen (when linking, or with Confirm certificate on the admin page). A node on another machine with no
   HTTPS, or whose certificate nobody confirmed, shows red with the reason and is sent nothing. A node's hello (anyone
   can send one), and a certificate the Stagewatch link trusted on first use, confirm nothing; no page shows a fingerprint

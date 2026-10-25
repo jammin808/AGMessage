@@ -91,12 +91,12 @@ test('C20: a Patterns certificate that changes is refused until the admin types 
   assert.deepEqual([v.certificateWaits, v.certificateChanged], [true, true]);
   const listed = JSON.stringify(await emit(ctl, 'nodes:list', {}));
   for (let i = 7; i + 8 <= fpB.length; i++) assert.ok(!listed.includes(fpB.slice(i, i + 8)), 'never 8 characters of the certificate: its start is typed from the node\'s own screen');
-  const typed = fpB.slice(7, 19).toUpperCase().match(/../g).join(':');   // as it reads on the node's screen
+  const typed = fpB.slice(7, 23).toUpperCase().match(/../g).join(':');   // as it reads on the node's screen
   assert.equal((await answer(sol, 'nodes:acceptCertificate', { id: 'patx', fingerprint: typed })).ok, false, 'accepting is the admin\'s');
-  for (const fingerprint of [undefined, '', fpB.slice(7, 14), fpB.slice(8, 20)]) {
+  for (const fingerprint of [undefined, '', fpB.slice(7, 15), fpB.slice(7, 22), fpB.slice(8, 24)]) {
     const r = await answer(ctl, 'nodes:acceptCertificate', { id: 'patx', fingerprint });
     assert.equal(r.ok, false, String(fingerprint));
-    assert.match(r.error, /not the first characters of the certificate Patterns TLS presents — type at least 8/, String(fingerprint));
+    assert.match(r.error, /not the first characters of the certificate Patterns TLS presents — type at least 16/, String(fingerprint));
   }
   assert.equal((await view()).status, 'refused', 'still refused');
   assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'patx', fingerprint: typed }), { ok: true });
@@ -142,20 +142,21 @@ test('AG-1: a Patterns over HTTPS on another machine gets its token only once a 
   const view = async (id) => (await emit(ctl, 'nodes:list', {})).linked.find((n) => n.id === id);
   const onDisk = () => JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8'));
   const tellsNone = (text) => { for (let i = 7; i + 8 <= fp.length; i++) assert.ok(!text.includes(fp.slice(i, i + 8)), 'a page is told ' + fp.slice(i, i + 8)); };
-  const wrongStart = fp.startsWith('sha256:a') ? 'b1b2b3b4' : 'a1b2c3d4';   // 8 hex characters that are not its start
+  const wrongStart = fp.startsWith('sha256:a') ? 'b1b2b3b4b5b6b7b8' : 'a1b2c3d4e5f60718';   // 16 hex characters that are not its start
 
   // Linked with nothing typed: refused, its certificate waiting for a person; nothing reaches it, the page is told no fingerprint.
   assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan', t: 'patterns', url, name: 'Patterns LAN', token: PATTERNS_TOKEN })).ok);
   await until(async () => ((await view('patlan')) || {}).status === 'refused', 8000, 'refused');
   const v = await view('patlan');
   assert.deepEqual([v.certificateWaits, v.certificateChanged], [true, false]);
-  assert.match(v.problem, /not confirmed yet — type the first 8 or more characters of the fingerprint Patterns LAN shows on its own screen/);
+  assert.match(v.problem, /not confirmed yet — type the first 16 or more characters of the fingerprint Patterns LAN shows on its own screen/);
+  assert.equal((await answer(ctl, 'nodes:acceptCertificate', { id: 'patlan', fingerprint: fp.slice(7, 15) })).ok, false, '8 characters confirm nothing');
   tellsNone(JSON.stringify(await emit(ctl, 'nodes:list', {})));
   await new Promise((resolve) => { setTimeout(resolve, 300); });
   assert.deepEqual(seen, [], 'no request reached it — its token least of all');
   // Confirmed by its start: pinned under the link's own key, live, its token over TLS, the confirmation audited.
   assert.equal((await answer(ctl, 'nodes:acceptCertificate', { id: 'patlan', fingerprint: wrongStart })).ok, false);
-  assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'patlan', fingerprint: fp.slice(7, 15).toUpperCase() }), { ok: true });
+  assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'patlan', fingerprint: fp.slice(7, 23).toUpperCase() }), { ok: true });
   await until(async () => (await view('patlan')).status === 'live', 8000, 'live');
   await until(() => (onDisk().tlsPins || {})[peerlinks.pinKey('patlan')] === fp, 3000, 'pinned on disk');
   assert.ok(seen.length > 0 && seen.every((r) => r.token), 'its token, over TLS to the certificate a person confirmed');
@@ -163,13 +164,13 @@ test('AG-1: a Patterns over HTTPS on another machine gets its token only once a 
   assert.ok(audit.body.entries.some((e) => e.action === 'node.certificate' && e.target === 'patlan' && e.words === 'confirmed the patterns certificate of “Patterns LAN” (the start of its fingerprint typed)'));
 
   // Typed when it is linked: live at once; the typed start is kept as hex, and kept when it is linked again for a hall.
-  assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan2', t: 'patterns', url, name: 'Patterns LAN 2', token: PATTERNS_TOKEN, fingerprint: fp.slice(7, 19).toUpperCase().match(/../g).join(':') })).ok);
+  assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan2', t: 'patterns', url, name: 'Patterns LAN 2', token: PATTERNS_TOKEN, fingerprint: fp.slice(7, 23).toUpperCase().match(/../g).join(':') })).ok);
   await until(async () => ((await view('patlan2')) || {}).status === 'live', 8000, 'live on the typed start');
-  await until(() => ((onDisk().peerLinks || {}).patlan2 || {}).fpTyped === fp.slice(7, 19), 3000, 'the typed start on disk, as hex');
+  await until(() => ((onDisk().peerLinks || {}).patlan2 || {}).fpTyped === fp.slice(7, 23), 3000, 'the typed start on disk, as hex');
   assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan2', hall })).ok);
   await until(async () => ((await view('patlan2')) || {}).hall === hall, 3000, 'moved to the hall');
   await until(() => ((onDisk().peerLinks || {}).patlan2 || {}).hall === hall, 3000, 'saved');
-  assert.equal(onDisk().peerLinks.patlan2.fpTyped, fp.slice(7, 19), 'kept across a link again');
+  assert.equal(onDisk().peerLinks.patlan2.fpTyped, fp.slice(7, 23), 'kept across a link again');
   // Typed wrong: refused, and nothing sent to it (the links that are live go first, so whatever arrives now is its).
   for (const id of ['patlan', 'patlan2']) assert.ok((await emit(ctl, 'nodes:unlink', { id })).ok);
   await until(() => (onDisk().tlsPins || {})[peerlinks.pinKey('patlan')] === undefined, 3000, 'unlinking forgets its pin');

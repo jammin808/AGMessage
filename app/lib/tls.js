@@ -102,12 +102,15 @@ function cleanFingerprint(s) {
   const hex = String(s || '').trim().toLowerCase().replace(/^sha256:/, '').replace(/[:\s]/g, '');
   return /^[0-9a-f]{64}$/.test(hex) ? 'sha256:' + hex : '';
 }
-/** The start of a fingerprint as a person typed it from a node's own screen: 8 to 64 hex characters, else '' (pure). */
+// The fewest characters of a fingerprint that confirm a certificate: 16 hex characters, 64 bits. A fingerprint is public
+// (every hello carries it), so its start must be too long to match with a certificate made for the purpose.
+const TYPED_MIN = 16;
+/** The start of a fingerprint as a person typed it from a node's own screen: TYPED_MIN to 64 hex characters, else '' (pure). */
 function typedFingerprint(s) {
   const hex = String(s || '').trim().toLowerCase().replace(/^sha256:/, '').replace(/[:\s]/g, '');
-  return /^[0-9a-f]{8,64}$/.test(hex) ? hex : '';
+  return hex.length >= TYPED_MIN && /^[0-9a-f]{1,64}$/.test(hex) ? hex : '';
 }
-/** Whether what a person typed (at least 8 hex characters) is the start of this certificate's fingerprint (pure). */
+/** Whether what a person typed (at least TYPED_MIN hex characters) is the start of this certificate's fingerprint (pure). */
 function fingerprintStarts(fp, typed) {
   const t = typedFingerprint(typed);
   const full = cleanFingerprint(fp);
@@ -278,4 +281,4 @@ function httpsGate({ required, on, encrypted, loopback, method = 'GET', path = '
   return { refuse: 'This AGMessage requires HTTPS — use https:// (see /tls to trust its certificate).' };
 }
 
-module.exports = { httpsGate, makeCertificate, fingerprint, cleanFingerprint, typedFingerprint, fingerprintStarts, toPem, loadOrCreate, dualPortServer, PinStore, probeCertificate, pinnedTlsOptions, request, FP_RE, lanAddresses };
+module.exports = { httpsGate, makeCertificate, fingerprint, cleanFingerprint, typedFingerprint, fingerprintStarts, TYPED_MIN, toPem, loadOrCreate, dualPortServer, PinStore, probeCertificate, pinnedTlsOptions, request, FP_RE, lanAddresses };

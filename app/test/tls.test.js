@@ -60,15 +60,16 @@ test('pins: trust on first authenticated use; a change is refused until accepted
   assert.equal(new tlsmod.PinStore(JSON.parse(JSON.stringify(pins))).pins['node:sw1'], 'sha256:' + 'b'.repeat(64), 'pins persist as JSON');
 });
 
-test('AG-1: the start of a fingerprint a person types — at least 8 hex characters, any case, with colons or "sha256:"', () => {
+test('AG-1: the start of a fingerprint a person types — at least 16 hex characters (64 bits), any case, with colons or "sha256:"', () => {
   const fp = 'sha256:' + '0123456789abcdef'.repeat(4);
-  assert.equal(tlsmod.typedFingerprint('SHA256:01:23:45:67'), '01234567');
+  assert.equal(tlsmod.TYPED_MIN, 16);
+  assert.equal(tlsmod.typedFingerprint('SHA256:01:23:45:67:89:AB:CD:EF'), '0123456789abcdef');
   assert.equal(tlsmod.typedFingerprint(fp), fp.slice(7), 'the whole of it');
-  for (const s of ['', '0123456', 'not hex!', 'g1234567', fp + '00', null, undefined]) assert.equal(tlsmod.typedFingerprint(s), '', String(s));
-  assert.ok(tlsmod.fingerprintStarts(fp, '01 23 45 67 89'));
+  for (const s of ['', '01234567', '0123456789abcde', 'SHA256:01:23:45:67', 'not hex at all!!', 'g123456789abcdef', fp + '00', null, undefined]) assert.equal(tlsmod.typedFingerprint(s), '', String(s));
+  assert.ok(tlsmod.fingerprintStarts(fp, '01 23 45 67 89 ab cd ef'));
   assert.ok(tlsmod.fingerprintStarts(fp, fp.toUpperCase()));
-  for (const typed of ['1234567', '12345678', '0123456', 'fedcba98', '']) assert.ok(!tlsmod.fingerprintStarts(fp, typed), typed + ': not its start, or too short');
-  assert.ok(!tlsmod.fingerprintStarts('not a fingerprint', '01234567'));
+  for (const typed of ['01234567', '0123456789abcde', '123456789abcdef0', 'fedcba9876543210', '']) assert.ok(!tlsmod.fingerprintStarts(fp, typed), typed + ': too short, or not its start');
+  assert.ok(!tlsmod.fingerprintStarts('not a fingerprint', '0123456789abcdef'));
 });
 
 test('Require HTTPS: plain HTTP only from this machine; pages redirect, the API is refused', () => {
