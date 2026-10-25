@@ -157,7 +157,7 @@ test('C18: the show desk\'s ids are its own — after a Stagewatch restart or a 
     assert.match(updates.find((p) => p.state === 'lost').words, /no longer has this request/);
     assert.ok(!acks.some((a) => a.by === 'Other speaker'), 'another Stagewatch\'s message 4 acknowledges nothing of ours');
     const room = (await emit(ctl, 'admin:watchRoom', { roomCode: hall })).messages;
-    assert.equal(room.find((m) => m.stage && m.stage.ref === 4).stage.ack, 'sent');
+    assert.equal(room.find((m) => m.stage && m.stage.ref === 4).stage.ack, 'lost', 'no longer followed, and the record says so');
   });
 
   await t.test('(c) the same Stagewatch restarts (its frames\' seq goes back): a send to it before is not acknowledged by its new message of that number', async () => {
@@ -205,7 +205,7 @@ test('C18: a Stagewatch\'s numbers never cross a link made again, a restart or a
     await until(() => stages.some((s) => s.messageAckBy === 'Other speaker'), 4000, 'the frame reached the hall');
     await new Promise((resolve) => { setTimeout(resolve, 300); });
     assert.ok(!acks.some((a) => a.by === 'Other speaker'), JSON.stringify(acks));
-    assert.equal((await roomMessages()).find((m) => m.stage && m.stage.ref === 4 && /Two minutes/.test(m.text || '')).stage.ack, 'sent');
+    assert.equal((await roomMessages()).find((m) => m.stage && m.stage.ref === 4 && /Two minutes/.test(m.text || '')).stage.ack, 'lost', 'no longer followed, and the record says so');
   });
 
   await t.test('a result the desk did not take before it restarted is never posted to its new proposal of the same number', async () => {

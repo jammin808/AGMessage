@@ -254,16 +254,60 @@ const trackJoin = (uid, code) => { if (!userRooms.has(uid)) userRooms.set(uid, n
 const trackLeave = (uid, code) => { const s = userRooms.get(uid); if (s) { s.delete(code); if (!s.size) userRooms.delete(uid); } };
 
 // Venue Wi-Fi drops people for a second: announce "left" only if they don't come straight back.
-const pendingLeaves = new Map();   // room|uid -> {timer, name, role} (role null: the server sent them away, no seat held)
+const pendingLeaves = new Map();   // room|uid -> {timer, name, role, guest} (role null: the server sent them away, no seat held)
 const LEAVE_GRACE_MS = 8000;
+// The watchdog's restart drops every page at once and starts with nobody seated: a locked room's code-guest seats (board
+// and research) are saved with the room (settings.seats: uid -> {name, role}, in its op log like a message: what every
+// page in the hall already reads in its people list), and for the boot's first seconds a page that comes back takes its
+// saved seat as from a drop. A seat not taken up by then is gone.
+const BOOT_AT = Date.now();
+const BOOT_SEAT_MS = Math.max(1000, Number(process.env.AGM_BOOT_SEAT_MS) || 30_000);
+const savedSeat = (room, uid) => (room.settings.seats && Object.hasOwn(room.settings.seats, uid) ? room.settings.seats[uid] : null);
 /** Whether this person (identity and name) holds a seat with this role in the room: on a page of theirs still there, or
  *  on one that dropped within the grace (Wi-Fi, the reload after the admin changed their role) and was not sent away by
- *  the server. A locked room's invite is for people who join later; someone already seated keeps the seat. */
+ *  the server, or saved before the restart this process booted from. A locked room's invite is for people who join
+ *  later; someone already seated keeps the seat. */
 function holdsSeat(room, uid, name, role) {
   for (const [sid, u] of room.users) if (u.uid === uid && u.name === name && u.role === role && io.sockets.sockets.has(sid)) return true;
   const p = pendingLeaves.get(room.code + '|' + uid);
-  return !!p && p.name === name && p.role === role;
+  if (p) return p.name === name && p.role === role;
+  const s = Date.now() - BOOT_AT < BOOT_SEAT_MS ? savedSeat(room, uid) : null;
+  return !!s && s.name === name && s.role === role;
 }
+/** The code-guest seats (board, research) a room holds now: on a page still there, in a drop's grace, or saved before the
+ *  restart and not yet taken up while the boot's first seconds last. One seat per person, a page's before a drop's. */
+function seatsNow(room) {
+  const seats = {};
+  const here = new Set();
+  for (const [sid, u] of room.users) {
+    if (!io.sockets.sockets.has(sid)) continue;
+    here.add(u.uid);
+    if (!u.acct && u.role !== 'observer' && !seats[u.uid]) seats[u.uid] = { name: u.name, role: u.role };
+  }
+  const prefix = room.code + '|';
+  for (const [k, p] of pendingLeaves) {
+    const uid = k.slice(prefix.length);
+    if (k.startsWith(prefix) && p.guest && p.role && p.role !== 'observer' && !here.has(uid)) seats[uid] = { name: p.name, role: p.role };
+  }
+  if (Date.now() - BOOT_AT < BOOT_SEAT_MS) {
+    for (const uid of Object.keys(room.settings.seats || {})) {
+      const s = savedSeat(room, uid);
+      if (s && !here.has(uid) && !pendingLeaves.has(prefix + uid)) seats[uid] = { name: s.name, role: s.role };
+    }
+  }
+  return seats;
+}
+/** A locked room's saved seats follow the seats it holds: one numbered change, only when they differ. */
+function syncSeats(room) {
+  if (!store.has(room.code) || !room.settings.lockRoles) return;
+  const next = seatsNow(room);
+  const was = room.settings.seats || {};
+  const keys = Object.keys(next);
+  const same = keys.length === Object.keys(was).length && keys.every((uid) => { const s = savedSeat(room, uid); return !!s && s.name === next[uid].name && s.role === next[uid].role; });
+  if (!same) apply(room, { o: 'meta', settings: { seats: next } });
+}
+// The boot's first seconds are over: a seat saved before the restart that nobody took up goes, as after a drop's grace.
+setTimeout(() => { for (const room of store.rooms.values()) if (Object.keys(room.settings.seats || {}).length) syncSeats(room); }, BOOT_SEAT_MS + 100).unref();
 
 // Upload tokens, issued at join: an upload must come from someone in a meeting. The rate is the connection's and the
 // address's, not the token's, so joining again or opening more sockets refills nothing.
@@ -743,6 +787,7 @@ io.on('connection', (socket) => {
     });
 
     if (!isAdminView) {
+      if (!acct) syncSeats(r);
       if (!returning) systemMessage(r, `${cleanName} joined as ${cleanRole}`);
       emitUsers(r);
       boardDirty();
@@ -967,11 +1012,12 @@ io.on('connection', (socket) => {
     const r = await link.sendToStage(text, { urgency: args.urgency, ack: args.ack !== false });
     if (r.ok) {
       // The receipt, and later the speaker's acknowledgement, live on the record of the send (and on the source message).
-      // …with the link it went to and that Stagewatch's address tag, so a restart keeps following it (and only there).
-      const stage = { ref: r.messageId || 0, receipt: r.stage, ack: r.messageId ? 'sent' : '', by: '', at: Date.now(), link: link.id, sw: link.tag };
+      // …with the link it went to, that Stagewatch's address tag and the seq of its frames then, so a restart keeps
+      // following it only where it went, and only while that Stagewatch has not restarted since.
+      const stage = { ref: r.messageId || 0, receipt: r.stage, ack: r.messageId ? 'sent' : '', by: '', at: Date.now(), link: link.id, sw: link.tag, seq: link.lastSeq ?? 0 };
       const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} sent to the stage screen: “${text.replace(/\s+/g, ' ').slice(0, 120)}”`, at: Date.now(), stage } }).m;
       if (source) apply(room, { o: 'upd', id: source.id, f: { stage } });
-      if (r.messageId) trackStageSend(link, r.messageId, room.code, [sys.id].concat(source ? [source.id] : []), 'sent', '', stage.at);
+      if (r.messageId) trackStageSend(link, r.messageId, room.code, [sys.id].concat(source ? [source.id] : []), { at: stage.at, seq: stage.seq });
       noteEvent('research sent a message to the stage screen (' + r.stage + ')', link);
     }
     ack(r);
@@ -1281,6 +1327,9 @@ io.on('connection', (socket) => {
     if (!writes.take()) return limited(ack);
     const r = store.get(guard.str(code).toUpperCase());
     if (!r) return ack({ ok: false, error: 'No such hall.' });
+    // The page sends the name and the address together: a save refused for its address applies nothing, the name neither.
+    const url = typeof stagewatchUrl === 'string' && stagewatchUrl.trim() ? nodes.normaliseBase(stagewatchUrl) : '';
+    if (typeof stagewatchUrl === 'string' && stagewatchUrl.trim() && !url) return ack({ ok: false, error: 'That is not a Stagewatch address: type its IP or name, with the port if it is not 9924.' });
     const changed = [];
     if (typeof name === 'string') {
       const n = guard.cleanText(name, 80);
@@ -1292,8 +1341,6 @@ io.on('connection', (socket) => {
     }
     if (typeof stagewatchUrl === 'string') {
       const prev = hallStagewatch(r.code) || {};
-      const url = stagewatchUrl.trim() ? nodes.normaliseBase(stagewatchUrl) : '';
-      if (stagewatchUrl.trim() && !url) return ack({ ok: false, error: 'That is not a Stagewatch address: type its IP or name, with the port if it is not 9924.' });
       const next = url ? {
         url,
         keySealed: typeof stagewatchKey === 'string' && stagewatchKey.trim() ? secretbox.seal(stagewatchKey.trim().slice(0, 80)) : (url === prev.url ? prev.keySealed || '' : ''),
@@ -1377,6 +1424,9 @@ io.on('connection', (socket) => {
     if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
     for (const d of displays.ofHall(r.code)) revokeDisplaySockets(d.id, 'This screen\'s hall was closed.');
     displays.removeHall(r.code);
+    // Its own Stagewatch's address goes with it, and so do that Stagewatch's pins: read while the link still has its
+    // address, and kept when another link follows the same one.
+    if (hallLinks.has(r.code)) forgetStagewatchPins(hallLinks.get(r.code));
     configureHallLink({ code: r.code });   // its own Stagewatch link, if it had one, stops
     boardDirty();
     audit.write(socket.data.actor || HOST_ACTOR, 'hall.remove', r.code, (r.name || '(no name)') + (purgeFiles ? ', files removed' : ''), socket.data.ip);
@@ -1407,6 +1457,7 @@ io.on('connection', (socket) => {
       if (s) s.emit('roleChanged', { role });
     }
     emitUsers(r);
+    syncSeats(r);
     systemMessage(r, `${target.name} role changed from ${prev} to ${role} by admin`);
     ok(ack)({ ok: true });
   });
@@ -1414,7 +1465,8 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const r = store.get(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
-    apply(r, { o: 'meta', settings: { lockRoles: !!on } });
+    // Locked, the seats taken now are kept (saved, so a restart keeps them too); unlocked, there is nothing to keep.
+    apply(r, { o: 'meta', settings: { lockRoles: !!on, seats: on ? seatsNow(r) : {} } });
     ok(ack)({ ok: true, locked: !!on, invites: on ? invitesFor(r.code) : null });
   });
   socket.on('admin:invites', ({ roomCode } = {}, ack) => {
@@ -1468,6 +1520,7 @@ io.on('connection', (socket) => {
       p.emit('kicked', { reason: 'Removed by admin' });
       p.disconnect(true);
     }
+    if (r) syncSeats(r);   // logged out: the seat goes now, not after a restart
     ok(ack)({ ok: true });
   });
   socket.on('admin:summary', ({ roomCode } = {}, ack) => {
@@ -1555,15 +1608,22 @@ io.on('connection', (socket) => {
     emitUsers(r);
     boardDirty();
     const still = Array.from(r.users.values()).some((x) => x.uid === u.uid);
-    if (still) return;
-    trackLeave(u.uid, r.code);
-    const k = r.code + '|' + u.uid;
-    const announce = () => { pendingLeaves.delete(k); if (store.has(r.code) && !Array.from(r.users.values()).some((x) => x.uid === u.uid)) systemMessage(r, `${u.name} left`); };
-    if (now) announce();
-    else {
-      if (pendingLeaves.has(k)) clearTimeout(pendingLeaves.get(k).timer);
-      pendingLeaves.set(k, { timer: setTimeout(announce, LEAVE_GRACE_MS), name: u.name, role: holdSeat ? u.role : null });
+    if (!still) {
+      trackLeave(u.uid, r.code);
+      const k = r.code + '|' + u.uid;
+      const announce = () => {
+        pendingLeaves.delete(k);
+        if (!store.has(r.code) || Array.from(r.users.values()).some((x) => x.uid === u.uid)) return;
+        syncSeats(r);
+        systemMessage(r, `${u.name} left`);
+      };
+      if (now) announce();
+      else {
+        if (pendingLeaves.has(k)) clearTimeout(pendingLeaves.get(k).timer);
+        pendingLeaves.set(k, { timer: setTimeout(announce, LEAVE_GRACE_MS), name: u.name, role: holdSeat ? u.role : null, guest: !u.acct });
+      }
     }
+    if (store.has(r.code)) syncSeats(r);
   }
 
   socket.on('disconnect', (reason) => {
@@ -1908,18 +1968,39 @@ const deskFor = (node) => { const l = linkFor(node.hall || ''); return { link: l
 // Stage sends waiting for the speaker: "<link>:<Stagewatch message id>" -> the AGMessage messages that show its state.
 // A Stagewatch numbers its own messages, from 1 again when it restarts: two halls' Stagewatches can both send message 12,
 // and so can one Stagewatch before and after a restart, or a link pointed elsewhere — each send is followed only while
-// its link is still on the Stagewatch it went to (the link's generation).
+// its link is still on the Stagewatch it went to (the link's generation), and one still waiting when it can no longer be
+// followed reads "lost" on its record, never "sent" waiting for an acknowledgement that cannot come. A send followed again
+// after AGMessage's own restart has no generation (0) until the link's first frame shows that Stagewatch has not
+// restarted since: its seq is not below the seq of the send.
 const stageSends = new Map();
-function trackStageSend(link, ref, code, ids, ack = 'sent', by = '', at = 0) {
-  stageSends.set(link.id + ':' + ref, { code, ids, ack, by, at, gen: link.generation });
+function trackStageSend(link, ref, code, ids, { ack = 'sent', by = '', at = 0, seq = 0, gen = link.generation } = {}) {
+  stageSends.set(link.id + ':' + ref, { link: link.id, code, ids, ack, by, at, seq, gen });
   if (stageSends.size > 200) stageSends.delete(stageSends.keys().next().value);
+}
+/** A send whose Stagewatch is no longer the one it went to: no longer followed, and a record still waiting ("sent") says
+ *  so. One the speaker saw or acknowledged keeps what they did. */
+function loseStageSend(key, t) {
+  stageSends.delete(key);
+  const room = store.get(t.code);
+  if (!room) return;
+  for (const id of t.ids) {
+    const m = room.byId.get(id);
+    if (m && m.stage && m.stage.ack === 'sent') apply(room, { o: 'upd', id, f: { stage: { ...m.stage, ack: 'lost' } } });
+  }
 }
 /** The live frame says who acknowledged which message: show it on the message that was sent. */
 function followStageAck(link, view) {
-  const key = view && view.messageId ? link.id + ':' + view.messageId : '';
+  if (!view) return;
+  for (const [key, t] of Array.from(stageSends)) {
+    if (t.link !== link.id) continue;
+    if (!t.gen) {
+      if (view.seq !== null && view.seq < t.seq) loseStageSend(key, t);   // restarted since the send
+      else t.gen = link.generation;
+    } else if (t.gen !== link.generation) loseStageSend(key, t);   // restarted, or the link now points elsewhere
+  }
+  const key = view.messageId ? link.id + ':' + view.messageId : '';
   if (!key || !stageSends.has(key)) return;
   const t = stageSends.get(key);
-  if (t.gen !== link.generation) { stageSends.delete(key); return; }   // that Stagewatch's message of the same number, not ours
   const ack = view.messageAck || 'sent';
   if (ack === t.ack && (view.messageAckBy || '') === t.by) return;
   t.ack = ack; t.by = view.messageAckBy || '';
@@ -1932,18 +2013,19 @@ function followStageAck(link, view) {
   if (ack === 'seen' || ack === 'done') noteEvent('the speaker ' + (ack === 'done' ? 'acknowledged' : 'saw') + ' a stage message', link);
 }
 
-// After a restart, keep following the sends the speaker has not acknowledged yet: the send's link and its Stagewatch's
-// address tag live on the message (a send saved without them went to its hall's link). One whose hall now follows another
-// Stagewatch is left: its acknowledgement can only come from the one it went to. This runs before any frame can arrive.
+// After a restart, keep following the sends the speaker has not acknowledged yet: the send's link, its Stagewatch's
+// address tag and the seq of its frames then live on the message (a send saved without them went to its hall's link).
+// One whose hall now follows another Stagewatch is left: its acknowledgement can only come from the one it went to.
+// This runs before any frame can arrive, and writes nothing (the data folder is not held yet).
 for (const room of store.rooms.values()) {
   for (const m of room.messages) {
     const st = m.stage;
-    if (!st || !st.ref || !st.ack || st.ack === 'done') continue;
+    if (!st || !st.ref || !st.ack || st.ack === 'done' || st.ack === 'lost') continue;
     const link = st.link ? allLinks().find((l) => l.id === st.link) : linkFor(room.code);
     if (!link || (st.sw && st.sw !== link.tag)) continue;
     const t = stageSends.get(link.id + ':' + st.ref);
     if (t && t.code === room.code && t.at === (st.at || 0)) t.ids.push(m.id);   // the send's record and its source message
-    else trackStageSend(link, st.ref, room.code, [m.id], st.ack, st.by || '', st.at || 0);
+    else trackStageSend(link, st.ref, room.code, [m.id], { ack: st.ack, by: st.by || '', at: st.at || 0, seq: Number.isInteger(st.seq) ? st.seq : 0, gen: 0 });
   }
 }
 

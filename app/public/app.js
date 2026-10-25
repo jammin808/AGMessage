@@ -279,6 +279,7 @@ function stageLineText(st) {
   const by = st.by ? ' by ' + st.by : '';
   if (st.ack === 'done') return '✓ Acknowledged on stage' + by;
   if (st.ack === 'seen') return '✓ Seen on stage' + by;
+  if (st.ack === 'lost') return '✕ No longer followed: that Stagewatch restarted, or this hall now follows another — the speaker\'s acknowledgement cannot be read';
   if (st.ack === 'sent') return st.receipt === 'applied' ? '⏳ On the speaker\'s screen — waiting for them to acknowledge' : '⏳ Stagewatch took it — waiting for the speaker';
   return st.receipt === 'applied' ? 'On the speaker\'s screen' : 'Sent to Stagewatch (not confirmed on screen)';
 }

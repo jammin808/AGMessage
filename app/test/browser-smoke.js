@@ -497,6 +497,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     })()`);
     report(shown === JSON.stringify({ composer: false, stage: false, pin: false, react: false, answer: false, replyText: false }), `the Viewer is offered nothing the server refuses (${shown})`);
     await viewerHall.shot(path.join(OUT, 'hall-viewer.png'));
+    // A stage send the server no longer follows (its Stagewatch restarted, or the hall moved) reads so, never "waiting".
+    const lostLine = await research.eval(`stageLineText({ ack: 'lost', receipt: 'applied' })`);
+    report(/^✕ No longer followed/.test(lostLine || ''), `a stage send no longer followed says so (${lostLine})`);
 
     // A Staff account (messages and files, no Stagewatch) is seated backstage: while the hall's Stagewatch keeps a show
     // desk and its frames move, it is offered neither 📝 nor 🖥 — the server would refuse both.
@@ -518,7 +521,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const back = await research.until(`socket.connected && joined && !CAN_STAGE && JSON.stringify({ shown: [...document.querySelectorAll('.msg[data-type="text"] .stage-btn')].filter((b) => !b.hidden).length })`, 8000);
     report(sendsBefore > 0 && removed && back === JSON.stringify({ shown: 0 }), `a page back from a drop while its hall lost its Stagewatch offers 🖥 no more (${sendsBefore} before; ${removed}; ${back})`);
 
-    for (const [name, tab] of [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer]]) {
+    for (const [name, tab] of [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall]]) {
       report(tab.problems.length === 0, `${name}: no script errors or CSP violations${tab.problems.length ? ' — ' + tab.problems.slice(0, 3).join(' | ') : ''}`);
       tab.close();
     }
