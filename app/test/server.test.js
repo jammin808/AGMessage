@@ -176,6 +176,33 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     await emit(adminSock, 'admin:lockRoles', { roomCode: code, on: false });
   });
 
+  await t.test('the admin page closing the hall it is watching gets its answer and stays connected; the hall\'s people are sent home', async () => {
+    const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+    const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
+    const page = await connect(base, cookie); sockets.push(page);
+    const other = await connect(base, cookie); sockets.push(other);   // a second admin tab on the same hall
+    const made = await emit(page, 'admin:createRoom', { name: 'Close me' });
+    assert.ok((await emit(page, 'admin:watchRoom', { roomCode: made.code })).ok);
+    assert.ok((await emit(other, 'admin:watchRoom', { roomCode: made.code })).ok);
+    const member = await connect(base); sockets.push(member);
+    assert.ok((await emit(member, 'join', { roomCode: made.code, name: 'Last one', role: 'board' })).ok);
+    const kicked = [];
+    page.on('kicked', (k) => kicked.push(k));
+    other.on('kicked', (k) => kicked.push(k));
+    const memberKicked = new Promise((resolve) => { member.once('kicked', resolve); });
+    const memberGone = new Promise((resolve) => { member.once('disconnect', resolve); });
+    const otherTold = new Promise((resolve) => { other.once('roomClosed', resolve); });
+    const answer = await Promise.race([emit(page, 'admin:deleteRoom', { roomCode: made.code, purgeFiles: false }), wait(3000).then(() => 'no answer')]);
+    assert.deepEqual({ answer, connected: page.connected }, { answer: { ok: true, purged: 0 }, connected: true });
+    assert.deepEqual(await otherTold, { code: made.code }, 'the other admin tab is told, not cut off');
+    assert.equal((await memberKicked).reason, 'This meeting was closed by the admin.');
+    assert.equal(await memberGone, 'io server disconnect');
+    const rooms = await ask(page, 'admin:listRooms');
+    assert.ok(rooms.ok && !rooms.rooms.some((r) => r.code === made.code));
+    assert.ok((await ask(other, 'admin:listRooms')).ok && other.connected);
+    assert.deepEqual(kicked, [], 'no admin page was sent home');
+  });
+
   await t.test('AI and stage refuse politely when not configured', async () => {
     const d = await emit(research, 'ai:draft', { question: 'What was capex?' });
     assert.equal(d.ok, false);

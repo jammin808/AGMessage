@@ -443,6 +443,36 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await sleep(300);
     await hallView.shot(path.join(OUT, 'screens-console-after.png'));
 
+
+    // Rights inside a hall: the admin's room list offers no role select for an account; a Viewer's halls board opens a
+    // help request's hall read only, and an old link that says research opens again as the server seats it — with no
+    // composer, pin, reaction or answer offered. A help request offers no forward.
+    await admin.eval(`watchRoom('${code}')`);
+    report(!!(await admin.until(`Array.from(document.querySelectorAll('#usersTbody tr')).some((tr) => tr.textContent.includes('Ana Admin') && !tr.querySelector('.role-select') && tr.querySelector('.role-fixed')) && !!document.querySelector('#usersTbody .role-select')`)), 'the admin\'s room list: an account\'s role is its rights (no select), a code guest\'s has one');
+    await admin.shot(path.join(OUT, 'admin-room.png'));
+    await research.eval(`Promise.all([new Promise((r) => socket.emit('message', { type: 'help', category: 'Sound', text: 'radio mic 3 dead' }, r)), new Promise((r) => socket.emit('message', { type: 'action', text: 'Ready for Q&A?', options: ['Yes', 'No'] }, r))])`);
+    report(!!(await research.until(`(() => { const h = document.querySelector('.msg[data-type="help"] .fwd-btn'); const t = Array.from(document.querySelectorAll('.msg[data-type="text"] .fwd-btn')); return h && h.hidden && t.length && t.every((b) => !b.hidden); })()`)), 'a help request offers no forward; a message does');
+    const made2 = await signin.eval(`fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'vic', name: 'Vic Viewer', role: 'viewer', halls: ['${code}'], password: 'only looking at screens' }) }).then((r) => r.status)`);
+    const vicIn = await signin.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'vic', password: 'only looking at screens' }) }).then((r) => r.status)`);
+    const viewerBoard = await edge.tab(`${base}/halls.html`);
+    const helpHref = await viewerBoard.until(`(() => { const a = document.querySelector('#helpStrip:not([hidden]) .help-item a'); return a ? a.getAttribute('href') : ''; })()`);
+    report(made2 === 200 && vicIn === 200 && /role=observer/.test(helpHref || ''), `a Viewer's help strip opens the hall read only (${helpHref})`);
+    const viewerHall = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
+    report(!!(await viewerHall.until(`location.search.includes('role=observer') && typeof joined !== 'undefined' && joined && allMessages.some((m) => m.type === 'action')`)), 'an old link that says research opens again as the Viewer is seated: observer');
+    const shown = await viewerHall.eval(`(() => {
+      const visible = (el) => !!el && getComputedStyle(el).display !== 'none' && !el.closest('[hidden]');
+      return JSON.stringify({
+        composer: visible(document.getElementById('researchCompose')) || visible(document.getElementById('directorCompose')),
+        stage: visible(document.getElementById('stageToggleBtn')),
+        pin: Array.from(document.querySelectorAll('.msg .pin-btn')).some(visible),
+        react: Array.from(document.querySelectorAll('.msg .react-btn')).some(visible),
+        answer: Array.from(document.querySelectorAll('.action-btn')).some((b) => !b.disabled),
+        replyText: !!document.querySelector('.reply-text-btn'),
+      });
+    })()`);
+    report(shown === JSON.stringify({ composer: false, stage: false, pin: false, react: false, answer: false, replyText: false }), `the Viewer is offered nothing the server refuses (${shown})`);
+    await viewerHall.shot(path.join(OUT, 'hall-viewer.png'));
+
     for (const [name, tab] of [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer]]) {
       report(tab.problems.length === 0, `${name}: no script errors or CSP violations${tab.problems.length ? ' — ' + tab.problems.slice(0, 3).join(' | ') : ''}`);
       tab.close();

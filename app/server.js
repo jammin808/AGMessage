@@ -73,6 +73,8 @@ const ADMIN_TOKEN = (process.env.ADMIN_TOKEN || crypto.randomBytes(8).toString('
 const makeRoomCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 const makeMessageId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
 const ROLES = ['board', 'research', 'observer'];
+// What may be forwarded into another hall: messages that stand on their own there (allow-list; a new type is refused).
+const FORWARDABLE = new Set(['text', 'file', 'action']);
 
 // ---------------------------------------------------------------- settings (AI key, Stagewatch link)
 // Saved through one write lane (tmp -> fsync -> rename, a .bak of the last whole file); keys sealed at rest
@@ -205,6 +207,7 @@ function apply(room, op) {
       break;
     case 'del': io.to(room.code).emit('messageDeleted', { messageId: op.id, seq: s }); break;
     case 'reset': io.to(room.code).emit('roomReset', { roomCode: room.code, seq: s }); break;
+    case 'meta': io.to(room.code).emit('roomMeta', { name: room.name || '', seq: s }); break;
   }
   boardDirty();
   return op;
@@ -213,12 +216,18 @@ function systemMessage(room, text) {
   return apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text, at: Date.now() } }).m;
 }
 
+/** Who is in a room: one row per person (an account open on two devices is one person), the first of their sockets. */
 function roomUserSummary(room) {
-  return Array.from(room.users.entries()).map(([sid, u]) => ({
+  const seen = new Set();
+  return Array.from(room.users.entries()).filter(([, u]) => !seen.has(u.uid) && seen.add(u.uid)).map(([sid, u]) => ({
     socketId: sid, uid: u.uid, name: u.name, role: u.role,
     linkedRooms: u.linkedRooms instanceof Set ? Array.from(u.linkedRooms) : [],
+    account: !!u.acct,
   }));
 }
+/** Every seat one person has in a room ([socketId, seat] pairs): the room list shows the person once, so what the admin
+ *  does to that row (role, link, logout) is done to each of their pages there. */
+const seatsOf = (room, uid) => Array.from(room.users).filter(([, u]) => u.uid === uid);
 
 // Rooms each person (by server identity) is in — forwarding only between rooms they're actually in.
 const userRooms = new Map();
@@ -226,8 +235,16 @@ const trackJoin = (uid, code) => { if (!userRooms.has(uid)) userRooms.set(uid, n
 const trackLeave = (uid, code) => { const s = userRooms.get(uid); if (s) { s.delete(code); if (!s.size) userRooms.delete(uid); } };
 
 // Venue Wi-Fi drops people for a second: announce "left" only if they don't come straight back.
-const pendingLeaves = new Map();   // room|uid -> timer
+const pendingLeaves = new Map();   // room|uid -> {timer, name, role} (role null: the server sent them away, no seat held)
 const LEAVE_GRACE_MS = 8000;
+/** Whether this person (identity and name) holds a seat with this role in the room: on a page of theirs still there, or
+ *  on one that dropped within the grace (Wi-Fi, the reload after the admin changed their role) and was not sent away by
+ *  the server. A locked room's invite is for people who join later; someone already seated keeps the seat. */
+function holdsSeat(room, uid, name, role) {
+  for (const [sid, u] of room.users) if (u.uid === uid && u.name === name && u.role === role && io.sockets.sockets.has(sid)) return true;
+  const p = pendingLeaves.get(room.code + '|' + uid);
+  return !!p && p.name === name && p.role === role;
+}
 
 // Upload tokens, issued at join: an upload must come from someone in a meeting. The rate is the connection's and the
 // address's, not the token's, so joining again or opening more sockets refills nothing.
@@ -439,7 +456,7 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const a = req.agm.account;
   const halls = Array.from(store.rooms.values()).filter((r) => rbac.seesHall(a, r.code)).map((r) => ({
-    code: r.code, name: r.name || '', people: r.users.size, messages: r.messages.length, locked: !!r.settings.lockRoles,
+    code: r.code, name: r.name || '', people: board.peopleIn(r), messages: r.messages.length, locked: !!r.settings.lockRoles,
     can: { post: rbac.can(a, 'hall.post', r.code), files: rbac.can(a, 'hall.files', r.code), displays: rbac.can(a, 'display.control', r.code), stage: rbac.can(a, 'stage.send', r.code) },
   })).sort((x, y) => (x.name || x.code).localeCompare(y.name || y.code));
   res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: rbac.can(a, 'users.manage') && !web.adminBlocked(req, a), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req) });
@@ -623,6 +640,10 @@ io.on('connection', (socket) => {
     const r = RoomStore.validCode(code) ? store.get(code) : null;
     if (!r) { joinLock.fail(ip); return ack({ ok: false, error: 'Room not found' }); }
 
+    // The same page joining again on its own socket (it saw a gap in the room's numbers and is catching up) is still
+    // seated: it keeps its role and the admin's links, nobody is told it joined, and a lock ticked since does not unseat it.
+    const seated = (who) => !isAdminView && room === r && !!me && r.users.get(socket.id) === me && me.uid === who && me.name === cleanName;
+
     // Identity: an account is itself on every device; anyone else gets one issued (and signed) by the server.
     let id, identity = null;
     let note = '';
@@ -633,8 +654,10 @@ io.on('connection', (socket) => {
     } else {
       id = guard.checkIdentity(SECRET, uid);
       if (!id) { identity = guard.newIdentity(SECRET); id = guard.checkIdentity(SECRET, identity); }
-      // Locked rooms: board and research seats need the admin's invite link.
-      if (r.settings.lockRoles && cleanRole !== 'observer' && !socket.data.isAdmin && !guard.checkInvite(SECRET, code, cleanRole, invite)) {
+      // Seated already: the role stays. Otherwise, in a locked room, board and research seats need the admin's invite link
+      // (or a seat this person already holds there).
+      if (seated(id)) cleanRole = me.role;
+      else if (r.settings.lockRoles && cleanRole !== 'observer' && !socket.data.isAdmin && !guard.checkInvite(SECRET, code, cleanRole, invite) && !holdsSeat(r, id, cleanName, cleanRole)) {
         cleanRole = 'observer';
         note = 'This meeting needs an invite link for that role — you joined as an observer.';
       }
@@ -654,8 +677,9 @@ io.on('connection', (socket) => {
     }
     joinLock.ok(ip);
 
+    const stillSeated = seated(id);
     if (room && room !== r) leaveRoom(true);
-    me = { uid: id, name: cleanName, role: cleanRole, joinedAt: Date.now(), ...(acct ? { acct: acct.username } : {}) };
+    if (!stillSeated) me = { uid: id, name: cleanName, role: cleanRole, joinedAt: Date.now(), ...(acct ? { acct: acct.username } : {}) };
     room = r;
     socket.data.adminView = isAdminView;
     socket.data.userName = cleanName;
@@ -663,11 +687,17 @@ io.on('connection', (socket) => {
     socket.data.userRoom = code;
     socket.join(code);
 
-    let returning = false;
+    let returning = stillSeated;
     if (!isAdminView) {
       const k = code + '|' + id;
-      if (pendingLeaves.has(k)) { clearTimeout(pendingLeaves.get(k)); pendingLeaves.delete(k); returning = true; }
-      for (const [sid, u] of r.users) if (u.uid === id && sid !== socket.id) r.users.delete(sid);   // a stale socket of the same person
+      if (pendingLeaves.has(k)) { clearTimeout(pendingLeaves.get(k).timer); pendingLeaves.delete(k); returning = true; }
+      // The same person on another device or tab stays in (and this one is not announced again); only a socket that
+      // has already gone is cleared.
+      for (const [sid, u] of r.users) {
+        if (u.uid !== id || sid === socket.id) continue;
+        if (io.sockets.sockets.has(sid)) returning = true;
+        else r.users.delete(sid);
+      }
       r.users.set(socket.id, me);
       trackJoin(id, code);
     }
@@ -709,11 +739,18 @@ io.on('connection', (socket) => {
     if (!store.has(room.code)) { ok(ack)({ ok: false, error: 'Room gone' }); return false; }
     return true;
   };
+  // Posting, answering a prompt, pinning and reacting change what everyone in the hall sees: they need hall.post.
+  // Someone who may only read (an observer, a Viewer account) is refused, and nothing reaches the hall.
+  const mayPost = (ack) => {
+    if (allowed('hall.post')) return true;
+    ok(ack)({ ok: false, error: 'Observers can read but not post.' });
+    return false;
+  };
 
   socket.on('message', (payload, ack) => {
     if (!need(ack)) return;
     if (!writes.take()) return limited(ack);
-    if (!allowed('hall.post')) return ok(ack)({ ok: false, error: 'Observers can read but not post.' });
+    if (!mayPost(ack)) return;
     if (payload && payload.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: 'Your account may not share files here.' });
     const msg = buildMessage(me, payload);
     if (!msg) return ok(ack)({ ok: false, error: 'Invalid message' });
@@ -733,6 +770,7 @@ io.on('connection', (socket) => {
   socket.on('actionResponse', ({ messageId, optionIndex, note } = {}, ack) => {
     if (!need(ack)) return;
     if (!writes.take()) return limited(ack);
+    if (!mayPost(ack)) return;
     const msg = room.byId.get(messageId);
     if (!msg || msg.type !== 'action') return ok(ack)({ ok: false, error: 'Action prompt not found' });
     const responses = (msg.responses || []).filter((r) => (r.uid ? r.uid !== me.uid : r.name !== me.name));
@@ -745,6 +783,7 @@ io.on('connection', (socket) => {
   socket.on('pin', ({ messageId, pinned } = {}, ack) => {
     if (!need(ack)) return;
     if (!writes.take()) return limited(ack);
+    if (!mayPost(ack)) return;
     if (!room.byId.has(messageId)) return ok(ack)({ ok: false, error: 'Message not found' });
     apply(room, { o: 'upd', id: messageId, f: { pinned: !!pinned } });
     ok(ack)({ ok: true });
@@ -764,6 +803,7 @@ io.on('connection', (socket) => {
   socket.on('react', ({ messageId, emoji } = {}, ack) => {
     if (!need(ack)) return;
     if (!writes.take()) return limited(ack);
+    if (!mayPost(ack)) return;
     const msg = room.byId.get(messageId);
     if (!msg) return ok(ack)({ ok: false, error: 'Message not found' });
     if (typeof emoji !== 'string' || !emoji.length || emoji.length > 8 || /[<>&"'\s]/.test(emoji)) return ok(ack)({ ok: false, error: 'Bad emoji' });
@@ -776,7 +816,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('typing', ({ isTyping } = {}) => {
-    if (!room || !me || !chatter.take()) return;
+    if (!room || !me || !allowed('hall.post') || !chatter.take()) return;
     socket.to(room.code).emit('typing', { name: me.name, role: me.role, isTyping: !!isTyping });
   });
 
@@ -791,10 +831,22 @@ io.on('connection', (socket) => {
     io.to(room.code).emit('seen', { uid: me.uid, name: me.name, role: me.role, seq });
   });
 
+  // Forwarding posts in another hall, so the person's rights there decide, never the hall the message comes from: an
+  // account goes by its rights in that hall; a code guest by their own seat there (a locked hall's observer seat
+  // included), or, with no seat there, by the admin's link (post and share files).
+  const rightsIn = (r) => {
+    if (socket.data.isAdmin) return { role: me.role, may: () => true };
+    if (me.acct) return { role: rbac.roomRoleFor(socket.data.account, r.code), may: (cap) => rbac.can(socket.data.account, cap, r.code) };
+    const seats = Array.from(r.users.values()).filter((u) => u.uid === me.uid);
+    const seat = seats.find((u) => (GUEST_CAPS[u.role] || []).includes('hall.post')) || seats[0];
+    const linked = me.linkedRooms instanceof Set && me.linkedRooms.has(r.code);
+    const caps = seat ? GUEST_CAPS[seat.role] || [] : linked ? GUEST_CAPS.board : [];
+    return { role: seat ? seat.role : me.role, may: (cap) => caps.includes(cap) };
+  };
   socket.on('myRooms', (ack) => {
     if (!me) return ok(ack)({ ok: false, error: 'Not joined' });
     const linked = me.linkedRooms instanceof Set ? Array.from(me.linkedRooms) : [];
-    const others = Array.from(new Set([...(userRooms.get(me.uid) || []), ...linked])).filter((c) => c !== room.code && store.has(c));
+    const others = Array.from(new Set([...(userRooms.get(me.uid) || []), ...linked])).filter((c) => c !== room.code && store.has(c) && rightsIn(store.get(c)).may('hall.post'));
     ok(ack)({ ok: true, rooms: others.map((c) => ({ code: c, name: store.get(c).name || '' })) });
   });
 
@@ -807,9 +859,13 @@ io.on('connection', (socket) => {
     const linked = me.linkedRooms instanceof Set ? me.linkedRooms : new Set();
     if (!mine.has(dst.code) && !linked.has(dst.code)) return ok(ack)({ ok: false, error: 'You must be in the target room too (or ask admin to link you)' });
     const src = room.byId.get(messageId);
-    if (!src || src.type === 'system') return ok(ack)({ ok: false, error: 'Cannot forward this message' });
+    // Only what stands on its own in another hall; a help request is tracked and answered in its own hall.
+    if (!src || !FORWARDABLE.has(src.type)) return ok(ack)({ ok: false, error: src && src.type === 'help' ? 'A help request belongs to its hall — ask in the other hall instead.' : 'Cannot forward this message' });
+    const there = rightsIn(dst);
+    if (!there.may('hall.post')) return ok(ack)({ ok: false, error: 'You may read that hall but not post in it.' });
+    if (src.type === 'file' && !there.may('hall.files')) return ok(ack)({ ok: false, error: 'You may not share files in that hall.' });
     const fwd = {
-      id: makeMessageId(), type: src.type, at: Date.now(), from: { uid: me.uid, name: me.name, role: me.role },
+      id: makeMessageId(), type: src.type, at: Date.now(), from: { uid: me.uid, name: me.name, role: there.role, ...(me.acct ? { acct: true } : {}) },
       pinned: false, priority: !!src.priority,
       forwardedFrom: { roomCode: room.code, roomName: room.name || '', originalAuthor: (src.from && src.from.name) || 'unknown', originalAt: src.at },
     };
@@ -1200,7 +1256,7 @@ io.on('connection', (socket) => {
     if (typeof name === 'string') {
       const n = guard.cleanText(name, 80);
       if (n && n !== r.name) {
-        store.commit(r, { o: 'meta', name: n });
+        apply(r, { o: 'meta', name: n });
         changed.push('name → ' + n);
         for (const d of displays.ofHall(r.code)) io.to('display:' + d.id).emit('display:state', displayState(d));
       }
@@ -1277,6 +1333,15 @@ io.on('connection', (socket) => {
     const r = store.get(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
     const files = fileNamesOf(r.messages);
+    // The admin pages watching this hall (this one among them) leave it first: they are told, not cut off, so this
+    // page gets its answer and a second admin tab stays live. Everyone else in the hall is sent home.
+    for (const id of Array.from(io.sockets.adapter.rooms.get(r.code) || [])) {
+      const w = io.sockets.sockets.get(id);
+      if (!w || w.data.watching !== r.code) continue;
+      w.leave(r.code);
+      w.data.watching = null;
+      if (w !== socket) w.emit('roomClosed', { code: r.code });
+    }
     io.to(r.code).emit('kicked', { reason: 'This meeting was closed by the admin.' });
     io.in(r.code).disconnectSockets(true);
     store.remove(r.code);
@@ -1303,10 +1368,15 @@ io.on('connection', (socket) => {
     const r = store.get(roomCode);
     const target = r && r.users.get(socketId);
     if (!target) return ok(ack)({ ok: false, error: 'User not in room' });
+    // An account's role in a hall follows its rights, which are set on the Accounts page: a role set here would change
+    // nothing the server checks, and would be undone at the page's next join.
+    if (target.acct) return ok(ack)({ ok: false, error: target.name + ' signs in with an account: change their rights on the Accounts page.' });
     const prev = target.role;
-    target.role = role;
-    const s = io.sockets.sockets.get(socketId);
-    if (s) s.emit('roleChanged', { role });
+    for (const [sid, seat] of seatsOf(r, target.uid)) {
+      seat.role = role;
+      const s = io.sockets.sockets.get(sid);
+      if (s) s.emit('roleChanged', { role });
+    }
     io.to(r.code).emit('users', roomUserSummary(r));
     systemMessage(r, `${target.name} role changed from ${prev} to ${role} by admin`);
     ok(ack)({ ok: true });
@@ -1315,7 +1385,7 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const r = store.get(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
-    store.commit(r, { o: 'meta', settings: { lockRoles: !!on } });
+    apply(r, { o: 'meta', settings: { lockRoles: !!on } });
     ok(ack)({ ok: true, locked: !!on, invites: on ? invitesFor(r.code) : null });
   });
   socket.on('admin:invites', ({ roomCode } = {}, ack) => {
@@ -1328,11 +1398,18 @@ io.on('connection', (socket) => {
     const target = io.sockets.sockets.get(socketId);
     const code = guard.str(targetRoom).toUpperCase();
     if (!target || !store.has(code)) return ok(ack)({ ok: false, error: 'User or room not found' });
-    const u = store.get(target.data.userRoom) && store.get(target.data.userRoom).users.get(socketId);
+    const r = store.get(target.data.userRoom);
+    const u = r && r.users.get(socketId);
     if (!u) return ok(ack)({ ok: false, error: 'User not in room' });
-    u.linkedRooms = u.linkedRooms || new Set();
-    u.linkedRooms.add(code);
-    target.emit('linkedRoomsChanged', { added: code });
+    // A link lets a code guest forward into a hall; an account forwards by its own rights there, so a link would give it
+    // nothing it may not already do.
+    if (u.acct && !rbac.can(target.data.account, 'hall.post', code)) return ok(ack)({ ok: false, error: u.name + ' signs in with an account that may not post in that hall: give the account that hall on the Accounts page.' });
+    for (const [sid, seat] of seatsOf(r, u.uid)) {
+      seat.linkedRooms = seat.linkedRooms || new Set();
+      seat.linkedRooms.add(code);
+      const s = io.sockets.sockets.get(sid);
+      if (s) s.emit('linkedRoomsChanged', { added: code });
+    }
     ok(ack)({ ok: true, linked: Array.from(u.linkedRooms) });
   });
   socket.on('admin:unlinkRoom', ({ socketId, targetRoom } = {}, ack) => {
@@ -1340,18 +1417,28 @@ io.on('connection', (socket) => {
     const target = io.sockets.sockets.get(socketId);
     if (!target) return ok(ack)({ ok: false, error: 'User not connected' });
     const code = guard.str(targetRoom).toUpperCase();
-    const u = store.get(target.data.userRoom) && store.get(target.data.userRoom).users.get(socketId);
+    const r = store.get(target.data.userRoom);
+    const u = r && r.users.get(socketId);
     if (!u || !u.linkedRooms) return ok(ack)({ ok: true });
-    u.linkedRooms.delete(code);
-    target.emit('linkedRoomsChanged', { removed: code });
+    for (const [sid, seat] of seatsOf(r, u.uid)) {
+      if (!seat.linkedRooms || !seat.linkedRooms.delete(code)) continue;
+      const s = io.sockets.sockets.get(sid);
+      if (s) s.emit('linkedRoomsChanged', { removed: code });
+    }
     ok(ack)({ ok: true, linked: Array.from(u.linkedRooms) });
   });
   socket.on('admin:kick', ({ socketId } = {}, ack) => {
     if (!admin(ack)) return;
     const target = io.sockets.sockets.get(socketId);
     if (!target) return ok(ack)({ ok: false, error: 'User not connected' });
-    target.emit('kicked', { reason: 'Removed by admin' });
-    target.disconnect(true);
+    // The person leaves the hall: every page they have open there, not only the one the room list names.
+    const r = store.get(target.data.userRoom);
+    const u = r && r.users.get(socketId);
+    const pages = u ? seatsOf(r, u.uid).map(([sid]) => io.sockets.sockets.get(sid)).filter(Boolean) : [target];
+    for (const p of pages) {
+      p.emit('kicked', { reason: 'Removed by admin' });
+      p.disconnect(true);
+    }
     ok(ack)({ ok: true });
   });
   socket.on('admin:summary', ({ roomCode } = {}, ack) => {
@@ -1432,7 +1519,7 @@ io.on('connection', (socket) => {
   socket.on('admin:tunnelStop', (ack) => { if (admin(ack)) { stopTunnel(); ok(ack)({ ok: true }); } });
   socket.on('admin:tunnelStatus', (ack) => { if (admin(ack)) ok(ack)({ ok: true, running: !!tunnelProc, url: tunnelUrl, error: tunnelError }); });
 
-  function leaveRoom(now) {
+  function leaveRoom(now, holdSeat = false) {
     if (!room || !me || socket.data.adminView) return;
     const r = room, u = me;
     r.users.delete(socket.id);
@@ -1444,13 +1531,17 @@ io.on('connection', (socket) => {
     const k = r.code + '|' + u.uid;
     const announce = () => { pendingLeaves.delete(k); if (store.has(r.code) && !Array.from(r.users.values()).some((x) => x.uid === u.uid)) systemMessage(r, `${u.name} left`); };
     if (now) announce();
-    else { if (pendingLeaves.has(k)) clearTimeout(pendingLeaves.get(k)); pendingLeaves.set(k, setTimeout(announce, LEAVE_GRACE_MS)); }
+    else {
+      if (pendingLeaves.has(k)) clearTimeout(pendingLeaves.get(k).timer);
+      pendingLeaves.set(k, { timer: setTimeout(announce, LEAVE_GRACE_MS), name: u.name, role: holdSeat ? u.role : null });
+    }
   }
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
     boardSockets.delete(socket);
     if (uploadToken) uploadTokens.delete(uploadToken);
-    leaveRoom(false);
+    // A page that dropped keeps its seat for the grace; one the server sent away (a logout, a closed hall) does not.
+    leaveRoom(false, reason !== 'server namespace disconnect');
   });
 });
 
