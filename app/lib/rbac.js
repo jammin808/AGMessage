@@ -7,8 +7,9 @@
  * account, or a hall outside the account's list is refused.
  *
  * Hall-scoped capabilities need access to that hall as well; global ones (managing halls, accounts, settings, reading
- * the audit log) do not. Two rules keep the rights from escalating: only an admin may make an admin or hand out
- * users.manage or settings.manage, and nobody changes their own role or rights.
+ * the audit log) do not. Three rules keep the rights from escalating: only an admin may make an admin or hand out
+ * users.manage or settings.manage; an account that is not an admin manages only accounts within its own rights and halls,
+ * and hands out only those; and nobody changes their own role or rights.
  */
 
 const CAPS = Object.freeze({
@@ -104,11 +105,56 @@ function mayChange(actor, target, change, { activeAdmins = 1 } = {}) {
     if (ADMIN_ONLY.has(c) && !actorIsAdmin) return 'Only an admin may grant ' + c + '.';
   }
   for (const c of [].concat(change.revoke || [])) if (!isCap(c)) return 'Unknown right: ' + String(c).slice(0, 40);
+  // A holder of users.manage who is not an admin reaches no further through the accounts it manages than it reaches
+  // itself: it neither makes nor widens an account past its own rights and halls, nor resets, signs out or removes one
+  // that holds more (a reset hands it that account's one-time password).
+  if (!actorIsAdmin) {
+    if (target && target.id !== actor.id && exceeds(target, actor)) return 'You may only manage accounts whose rights and halls you hold yourself.';
+    if (exceeds(afterChange(target, change), actor)) return 'You may only give rights and halls you hold yourself.';
+  }
   // The last admin who can still sign in stays one: a venue is never left with nobody able to manage it.
   if (target && target.role === 'admin' && !target.disabled && activeAdmins <= 1 && ((change.role && change.role !== 'admin') || change.disabled === true)) {
     return 'This is the last active admin: make another admin first.';
   }
   return null;
+}
+
+/** Whether `account`, enabled, would hold a right or reach a hall that `actor` does not. */
+function exceeds(account, actor) {
+  const mine = effective(actor);
+  const theirs = effective({ ...account, disabled: false });
+  for (const c of theirs.caps) if (!mine.caps.has(c)) return true;
+  if (mine.allHalls) return false;
+  if (theirs.allHalls) return true;
+  for (const h of theirs.halls) if (!mine.halls.has(h)) return true;
+  return false;
+}
+
+/**
+ * The account as it would be after `change` (a new one when `target` is null), read as Accounts.create and update
+ * apply it: a role only when it is one, halls and revokes only as lists, a grant as whatever it names (never fewer rights
+ * than would be stored), and an allHalls that is not true or false meaning the role's own.
+ */
+function afterChange(target, change) {
+  const a = { ...(target || { role: 'staff', halls: [], grant: [], revoke: [] }) };
+  if (isRole(change.role)) a.role = change.role;
+  if (Array.isArray(change.halls)) a.halls = change.halls.map((h) => (typeof h === 'string' ? h.toUpperCase() : ''));
+  if ('grant' in change) a.grant = [].concat(change.grant || []);
+  if (Array.isArray(change.revoke)) a.revoke = change.revoke;
+  if ('allHalls' in change) { if (typeof change.allHalls === 'boolean') a.allHalls = change.allHalls; else delete a.allHalls; }
+  return a;
+}
+
+/**
+ * What `actor` may hand out on the Accounts page, so it offers no more than mayChange allows: {admin, caps, allHalls,
+ * halls} (halls empty when allHalls). An admin gives everything; anyone else the rights and halls it holds, never
+ * users.manage or settings.manage.
+ */
+function giveable(actor) {
+  const e = effective(actor);
+  const admin = !!actor && actor.role === 'admin' && !actor.disabled;
+  if (admin) return { admin: true, caps: Object.keys(CAPS), allHalls: true, halls: [] };
+  return { admin: false, caps: Array.from(e.caps).filter((c) => !ADMIN_ONLY.has(c)).sort(), allHalls: e.allHalls, halls: e.allHalls ? [] : Array.from(e.halls).sort() };
 }
 
 /** The room view an account joins a hall with: crew (can post) or observer (read only). */
@@ -120,4 +166,4 @@ function rightsView(account) {
   return { role: account ? account.role : '', roleLabel: account && isRole(account.role) ? ROLES[account.role].label : '', caps: Array.from(e.caps).sort(), allHalls: e.allHalls, halls: Array.from(e.halls).sort() };
 }
 
-module.exports = { CAPS, ROLES, HALL_SCOPED, ADMIN_ONLY, isCap, isRole, effective, can, seesHall, holdsAdminOnly, mayChange, roomRoleFor, rightsView };
+module.exports = { CAPS, ROLES, HALL_SCOPED, ADMIN_ONLY, isCap, isRole, effective, can, seesHall, holdsAdminOnly, mayChange, giveable, roomRoleFor, rightsView };

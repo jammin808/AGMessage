@@ -47,12 +47,19 @@
     location.replace(params.get('next') && /^\/[a-z]/.test(params.get('next')) ? params.get('next') : '/halls.html');
   });
 
+  // One first admin: while the request is out, a second click or Enter sends nothing (the server holds it to one anyway).
+  let settingUp = false;
   $('setupPane').addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (settingUp) return;
+    const btn = $('setupPane').querySelector('button[type="submit"]');
+    settingUp = true; btn.disabled = true;
     fail('setupError', '');
-    const r = await AGM.api('POST', '/api/setup', { name: $('setupName').value.trim(), username: $('setupUser').value.trim(), password: $('setupPass').value });
-    if (!r.ok) { fail('setupError', r.error); return; }
-    location.replace('/halls.html');
+    try {
+      const r = await AGM.api('POST', '/api/setup', { name: $('setupName').value.trim(), username: $('setupUser').value.trim(), password: $('setupPass').value });
+      if (!r.ok) { fail('setupError', r.error); return; }
+      location.replace('/halls.html');
+    } finally { settingUp = false; btn.disabled = false; }
   });
 
   $('changePane').addEventListener('submit', async (e) => {

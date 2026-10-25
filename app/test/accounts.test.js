@@ -4,6 +4,7 @@
 // rights changed under a live socket, the origin check, and the audit log that records it all.
 const test = require('node:test');
 const assert = require('node:assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const os = require('os');
@@ -11,7 +12,8 @@ const path = require('path');
 const rbac = require('../lib/rbac');
 const acc = require('../lib/accounts');
 const { AuditLog } = require('../lib/audit');
-const { startServer, stopServer, api, connect, emit, once, wait, TOKEN } = require('./helpers');
+const guard = require('../lib/guard');
+const { startServer, stopServer, api, connect, emit, once, wait, until, TOKEN } = require('./helpers');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
@@ -58,6 +60,32 @@ test('rbac: rights never escalate', () => {
   assert.ok(rbac.holdsAdminOnly(keeper) && rbac.holdsAdminOnly({ ...peer, disabled: true }) && !rbac.holdsAdminOnly(tech));
 });
 
+test('rbac: a holder of users.manage who is not an admin makes, widens and takes over nothing past its own rights and halls', () => {
+  const lead = { id: 'a4', role: 'tech', halls: ['HALLA1'], grant: ['users.manage'] };
+  const crew = { id: 'a5', role: 'tech', halls: ['HALLA1'] };
+  for (const [target, change, why] of [
+    [null, { role: 'manager' }, 'a project manager: every hall, halls.manage, audit.read'],
+    [null, { role: 'staff', allHalls: true }, 'every hall'],
+    [crew, { halls: ['HALLA1', 'HALLB2'] }, 'a hall it is not in'],
+    [crew, { allHalls: true }, 'every hall, to another'],
+    [crew, { grant: ['nodes.control'] }, 'a right it does not hold'],
+    [crew, { grant: 'audit.read' }, 'a grant that is not a list is read as what it names'],
+    [{ id: 'a6', role: 'manager' }, {}, 'a reset or sign-out of a richer account (the reset would hand it the password)'],
+    [{ id: 'a7', role: 'tech', halls: ['HALLB2'] }, { disabled: true }, 'a removal in a hall it is not in'],
+    [{ id: 'a6', role: 'manager', disabled: true }, { disabled: false }, 'turning a richer account back on'],
+  ]) assert.match(rbac.mayChange(lead, target, change) || 'allowed', /hold yourself/, why);
+  assert.equal(rbac.mayChange(lead, null, { role: 'staff', halls: ['halla1'] }), null, 'staff in its own hall');
+  assert.equal(rbac.mayChange(lead, crew, { role: 'viewer' }), null);
+  assert.equal(rbac.mayChange(lead, crew, {}), null, 'a reset of an account within its rights');
+  assert.equal(rbac.mayChange(lead, lead, { name: 'Lee L.' }), null, 'its own name');
+  assert.equal(rbac.mayChange(lead, null, { role: 'senior', allHalls: false, halls: ['HALLA1'], revoke: ['nodes.control'] }), null, 'a richer role with what it lacks taken off');
+  assert.equal(rbac.mayChange({ id: 'a2', role: 'manager', grant: ['users.manage'] }, crew, { allHalls: true, grant: ['nodes.control'] }), null, 'a project manager holds every hall');
+  // What the Accounts page offers: exactly what mayChange allows.
+  assert.deepEqual(rbac.giveable(lead), { admin: false, caps: ['display.control', 'hall.files', 'hall.post', 'hall.view', 'stage.send'], allHalls: false, halls: ['HALLA1'] });
+  assert.deepEqual(rbac.giveable({ id: 'a1', role: 'admin' }), { admin: true, caps: Object.keys(rbac.CAPS), allHalls: true, halls: [] });
+  assert.deepEqual(rbac.giveable({ id: 'a2', role: 'manager', grant: ['users.manage'] }).halls, [], 'every hall: no list');
+});
+
 // ---------------------------------------------------------------- passwords and sessions
 test('passwords: scrypt, the same work for an unknown name, the policy', async () => {
   const h = await acc.hashPassword('purple stage lights');
@@ -96,6 +124,158 @@ test('sessions: only a hash on disk; idle, age, a moved epoch and a turned-off a
   accounts.update(account.id, { disabled: true });
   assert.equal(sessions.resolve(t3), null, 'a turned-off account');
   assert.equal(sessions.resolve('x'.repeat(10)), null);
+});
+
+test('sessions: an account\'s device count is the sessions that still let it in', async () => {
+  const dir = tmp('agm-acc-');
+  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
+  const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
+  const { account } = await accounts.create({ username: 'sam', name: 'Sam Patel', role: 'tech', password: 'blue door at the back' });
+  sessions.create(account); sessions.create(account);
+  assert.equal(sessions.of(account.id).length, 2);
+  accounts.signOutEverywhere(account.id);
+  assert.equal(sessions.of(account.id).length, 0, 'signed out everywhere: no devices');
+  sessions.create(accounts.get(account.id));
+  assert.equal(sessions.of(account.id).length, 1);
+  assert.equal(sessions.of(account.id, Date.now() + acc.IDLE_MS + 1).length, 0, 'idle too long');
+  accounts.update(account.id, { disabled: true });
+  assert.equal(sessions.of(account.id).length, 0, 'turned off');
+  sessions.flush(); accounts.flush();
+});
+
+test('sessions: a session with a page open is in use, and the sweep names the open ones that have ended', async () => {
+  const HOUR = 3600_000;
+  const dir = tmp('agm-acc-');
+  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
+  const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
+  const { account } = await accounts.create({ username: 'ana', name: 'Ana', role: 'admin', password: 'the green room kettle' });
+  const T = Date.now();
+  const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
+  const token = sessions.create(account);
+  const h = sha(token);
+  const idle = sha(sessions.create(account));
+  assert.ok(sessions.touch(h, T + 13 * HOUR), 'in use at hour 13');
+  assert.ok(sessions.resolve(token, T + 14.5 * HOUR), 'so not idle at 14.5 h, though 14.5 h after sign-in');
+  assert.deepEqual([...sessions.sweep(new Set([h, 'f'.repeat(64)]), T + 27 * HOUR)], ['f'.repeat(64)], 'an open socket keeps its session; an unknown one has ended');
+  assert.ok(!sessions.map.has(idle), 'a session nobody uses is dropped by the sweep');
+  assert.deepEqual([...sessions.sweep(new Set([h]), T + acc.MAX_AGE_MS + HOUR)], [h], 'seven days old: ended, however much it is used');
+  assert.equal(sessions.touch(h), null);
+  sessions.flush(); accounts.flush();
+});
+
+test('sessions: one account signing in again and again keeps its 20 newest and never signs anyone else out', async () => {
+  const dir = tmp('agm-acc-');
+  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
+  const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
+  const ana = (await accounts.create({ username: 'ana', name: 'Ana', role: 'admin', password: 'the green room kettle' })).account;
+  const vic = (await accounts.create({ username: 'vic', name: 'Vic', role: 'viewer', password: 'a viewer password here' })).account;
+  const [MAX, PER] = [5000, 20];
+  const anaToken = sessions.create(ana);
+  let last = '';
+  for (let i = 0; i < MAX; i++) last = sessions.create(vic);
+  assert.ok(sessions.resolve(anaToken), 'the admin is still signed in after the viewer\'s 5000 sign-ins');
+  assert.equal(sessions.of(vic.id).length, PER, 'the viewer keeps its 20 newest');
+  assert.ok(sessions.resolve(last), 'the newest sign-in holds');
+  assert.deepEqual([acc.MAX_SESSIONS, acc.MAX_PER_ACCOUNT], [MAX, PER]);
+  // Past MAX_SESSIONS in all, the account with the most gives up its oldest: an account with one keeps it.
+  const many = new acc.Sessions(path.join(dir, 'many.json'), { get: (id) => ({ id, epoch: 1 }) });
+  const lone = many.create({ id: 'lone' });
+  for (let u = 0; u <= MAX / PER; u++) for (let i = 0; i < PER; i++) many.create({ id: 'u' + u });
+  assert.equal(many.map.size, MAX);
+  assert.ok(many.resolve(lone), 'the account with one session keeps it');
+  sessions.flush(); accounts.flush(); many.flush();
+});
+
+test('token sessions: only a hash on disk, kept across a restart under the same token, ended by a new token, a day at most', () => {
+  const dir = tmp('agm-acc-');
+  const file = path.join(dir, 'admin-sessions.json');
+  const a = new acc.TokenSessions(file, 'tag-one');
+  const sid = a.create();
+  const gone = a.create();
+  assert.ok(a.has(sid) && a.has(gone));
+  a.destroy(gone);
+  assert.ok(!a.has(gone), 'signed out');
+  a.flush();
+  assert.ok(!fs.readFileSync(file, 'utf8').includes(sid), 'the cookie itself is never stored');
+  assert.ok(new acc.TokenSessions(file, 'tag-one').has(sid), 'a restart with the same token keeps it');
+  assert.ok(!new acc.TokenSessions(file, 'tag-two').has(sid), 'a new token ends it');
+  assert.ok(!a.has(sid, Date.now() + acc.TOKEN_SESSION_MS), 'a day at most');
+  assert.ok(!a.has(sid) && !a.has('') && !a.has(undefined));
+  a.flush();
+});
+
+test('accounts: two creates of one name at once make one, and two first admins at once make one', async () => {
+  const dir = tmp('agm-acc-');
+  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
+  const pw = 'blue door at the back';
+  const [x, y] = await Promise.all([accounts.create({ username: 'sam', role: 'tech', password: pw }), accounts.create({ username: 'Sam', role: 'tech', password: pw })]);
+  assert.deepEqual([x, y].map((r) => (r.account ? 'made' : r.error)).sort(), ['That username is taken.', 'made'], 'the name is reserved before its hash is made');
+  const fresh = new acc.Accounts(path.join(dir, 'fresh.json'));
+  const [a, b] = await Promise.all(['ada', 'ben'].map((u) => fresh.create({ username: u, role: 'admin', password: pw }, 'setup', { firstAdmin: true })));
+  assert.deepEqual([a, b].map((r) => (r.account ? 'made' : r.exists ? 'exists' : r.error)).sort(), ['exists', 'made'], 'one first admin');
+  assert.equal(fresh.size, 1);
+  assert.equal((await fresh.create({ username: 'cy', role: 'admin', password: pw }, 'setup', { firstAdmin: true })).exists, true, 'and none once there are accounts');
+  accounts.flush(); fresh.flush();
+});
+
+test('accounts: what an untouched editor sends back is no change; only a field that now holds something else is one', async () => {
+  const dir = tmp('agm-acc-');
+  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
+  const pw = 'blue door at the back';
+  const { account } = await accounts.create({ username: 'kim', name: 'Kim Tech', role: 'tech', halls: ['HALL01'], allHalls: false, grant: ['nodes.control'], revoke: ['stage.send'], password: pw });
+  assert.deepEqual(accounts.update(account.id, { name: 'Kim Tech', role: 'tech', halls: ['hall01', 'HALL01'], allHalls: false, grant: ['nodes.control', 'nodes.control'], revoke: ['stage.send'] }), []);
+  assert.deepEqual(accounts.update(account.id, { allHalls: null, grant: ['nodes.control'], revoke: [] }), ['allHalls', 'revoke']);
+  assert.deepEqual(accounts.update(account.id, { allHalls: 'x' }), [], 'not true or false: the role\'s own, as it is now');
+  assert.deepEqual(accounts.update(account.id, { halls: ['HALL02', 'HALL01'], grant: [] }), ['halls', 'grant']);
+  assert.deepEqual([accounts.get(account.id).halls.sort(), accounts.get(account.id).grant, 'allHalls' in accounts.get(account.id)], [['HALL01', 'HALL02'], [], false]);
+  accounts.flush();
+});
+
+test('hashing: a check through the tunnel waits in a short queue of its own, leaves it when its request goes, and never holds the venue back', async () => {
+  const stored = await acc.hashPassword('the green room kettle');
+  const order = [];
+  const gone = new AbortController();
+  const tunnel = [];
+  // One slot for the tunnel: one check runs, LANES.tunnel.queue wait, the next is refused at once.
+  for (let i = 0; i <= acc.LANES.tunnel.queue; i++) {
+    const signal = i === 3 ? gone.signal : new AbortController().signal;
+    tunnel.push(acc.verifyPassword('wrong guess ' + i, stored, { lane: 'tunnel', signal }).then(() => { order.push('tunnel'); return 'hashed'; }, (e) => e.code));
+  }
+  assert.equal(await acc.verifyPassword('one more guess', stored, { lane: 'tunnel', signal: new AbortController().signal }).then(() => 'hashed', (e) => e.code), 'BUSY');
+  const already = new AbortController(); already.abort();
+  assert.equal(await acc.verifyPassword('gone already', stored, { lane: 'tunnel', signal: already.signal }).then(() => 'hashed', (e) => e.code), 'ABANDONED');
+  gone.abort();
+  const venue = await acc.verifyPassword('the green room kettle', stored, { lane: 'venue', signal: new AbortController().signal });
+  order.push('venue');
+  const made = acc.hashPassword('a new password here', acc.SCRYPT, { lane: 'tunnel' });   // no request: waits its turn, never refused
+  assert.equal(venue.ok, true);
+  const outcomes = await Promise.all(tunnel);
+  assert.equal(outcomes[3], 'ABANDONED', 'a check whose request went is dropped unhashed');
+  assert.equal(outcomes.filter((o) => o === 'hashed').length, acc.LANES.tunnel.queue, 'the rest are hashed in turn');
+  assert.ok(order.indexOf('venue') <= 2, 'the venue check ran on its own slot, not behind the tunnel\'s queue: ' + order.join(' '));
+  assert.match(await made, /^scrypt\$/);
+});
+
+test('limits: a flood of new addresses never hands back an allowance used up, nor lifts a lock that holds', () => {
+  const T = 1_000_000;
+  const buckets = new guard.Buckets(0.5, 5, 100);
+  for (let i = 0; i < 5; i++) assert.ok(buckets.take('198.51.100.7', T));
+  assert.equal(buckets.take('198.51.100.7', T), false);
+  for (let i = 0; i < 1000; i++) buckets.take('2001:db8::' + i, T + i);
+  assert.ok(buckets.map.size <= 100, 'bounded: ' + buckets.map.size);
+  assert.equal(buckets.take('198.51.100.7', T + 1000), false, 'the slowed address is still slowed');
+  assert.equal(buckets.take('198.51.100.7', T + 2000), true, 'until it has earned a try back');
+  const lock = new guard.Lockout(5, 60_000, 100);
+  for (let i = 0; i < 5; i++) lock.fail('ana|tunnel', T);
+  for (let i = 0; i < 1000; i++) lock.fail('guess' + i + '|tunnel', T + i);
+  assert.ok(lock.map.size <= 100, 'bounded: ' + lock.map.size);
+  assert.ok(lock.locked('ana|tunnel', T + 1000), 'the lock still holds');
+  lock.fail('late|tunnel', T + 120_000);
+  for (let i = 0; i < 200; i++) lock.fail('later' + i, T + 120_000);
+  assert.ok(!lock.map.has('ana|tunnel'), 'an ended window goes first');
+  lock.fail('sam|tunnel', T + 120_000); lock.fail('sam|10.0.0.9', T + 120_000);
+  lock.forget((k) => k.startsWith('sam|'));
+  assert.ok(!lock.map.has('sam|tunnel') && !lock.map.has('sam|10.0.0.9'), 'an admin\'s reset forgets the name');
 });
 
 // ---------------------------------------------------------------- the audit chain
@@ -194,7 +374,8 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     assert.equal(r.status, 403);
     assert.match(r.body.error, /another site/);
     const tunnel = await api(base, 'POST', '/api/auth/login', { username: 'ana', password: 'the green room kettle' }, { headers: { 'cf-connecting-ip': '203.0.113.9' } });
-    assert.equal(tunnel.status, 403, 'admin rights do not sign in through the tunnel by default');
+    const wrong = await api(base, 'POST', '/api/auth/login', { username: 'ana', password: 'not the password at all' }, { headers: { 'cf-connecting-ip': '203.0.113.9' } });
+    assert.deepEqual([tunnel.status, tunnel.body.error, tunnel.cookie], [401, wrong.body.error, ''], 'admin rights do not sign in through the tunnel by default — answered as a wrong password is');
     const techTunnel = await api(base, 'POST', '/api/auth/login', { username: 'sam', password: 'mixing desk on stage left' }, { headers: { 'cf-connecting-ip': '203.0.113.9' } });
     assert.equal(techTunnel.status, 200, 'everyone else may');
   });
@@ -275,5 +456,122 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     assert.equal((await api(base, 'POST', '/api/users/' + stu.body.user.id + '/password', {}, { cookie: u })).status, 200, 'an account without those rights is still theirs to reset');
     const sidNow = (await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body.users.find((x) => x.username === 'sid');
     assert.deepEqual([sidNow.mustChange, sidNow.disabled, sidNow.name], [false, false, 'Sid Patch'], 'sid keeps their own password, account and name');
+  });
+});
+
+// ---------------------------------------------------------------- managing accounts, end to end
+test('two first admins sent at once make one; two accounts of one name sent at once make one, and its one-time password signs in', async (t) => {
+  const srv = await startServer();
+  const { base } = srv;
+  t.after(() => stopServer(srv.child));
+  const pw = 'purple stage lights';
+  const [a, b] = await Promise.all([api(base, 'POST', '/api/setup', { name: 'Ada Lovelace', username: 'ada', password: pw }), api(base, 'POST', '/api/setup', { name: 'Ben Admin', username: 'ben', password: pw })]);
+  assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+  const admin = (a.status === 200 ? a : b).cookie;
+  assert.equal((await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body.users.length, 1, 'one first admin');
+  const body = { username: 'sam', name: 'Sam Crew', role: 'staff' };
+  const [x, y] = await Promise.all([api(base, 'POST', '/api/users', body, { cookie: admin }), api(base, 'POST', '/api/users', body, { cookie: admin })]);
+  assert.deepEqual([x.status, y.status].sort(), [200, 400]);
+  const [made, refused] = x.status === 200 ? [x, y] : [y, x];
+  assert.equal(refused.body.error, 'That username is taken.');
+  const list = (await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body.users;
+  assert.equal(list.filter((u) => u.username === 'sam').length, 1);
+  assert.equal((await api(base, 'POST', '/api/auth/login', { username: 'sam', password: made.body.password })).status, 200, 'the one-time password shown signs in');
+  await until(() => JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'accounts.json'), 'utf8')).users.length === 2, 3000, 'accounts.json written');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'accounts.json'), 'utf8')).users.filter((u) => u.username === 'sam').length, 1);
+});
+
+test('a one-hall tech given users.manage manages only accounts within its own rights and halls, and the page is told what it may give', async (t) => {
+  const srv = await startServer();
+  const { base } = srv;
+  t.after(() => stopServer(srv.child));
+  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hallA = (await api(base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
+  const hallB = (await api(base, 'POST', '/api/rooms', { name: 'Hall B' }, { cookie: admin })).body.code;
+  const made = {};
+  for (const [username, extra] of [['lee', { role: 'tech', halls: [hallA], grant: ['users.manage'], password: 'freelancer desk lead' }], ['pat', { role: 'manager', password: 'clipboard and coffee' }], ['cam', { role: 'tech', halls: [hallA], password: 'cable reel orange' }]]) {
+    const r = await api(base, 'POST', '/api/users', { username, name: username.toUpperCase(), ...extra }, { cookie: admin });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    made[username] = r.body.user;
+  }
+  const lee = (await api(base, 'POST', '/api/auth/login', { username: 'lee', password: 'freelancer desk lead' })).cookie;
+  for (const [method, url, body, why] of [
+    ['POST', '/api/users', { username: 'lee2', name: 'Second Lee', role: 'manager' }, 'a project manager, whose one-time password it would be handed'],
+    ['PATCH', '/api/users/' + made.cam.id, { allHalls: true }, 'every hall'],
+    ['PATCH', '/api/users/' + made.cam.id, { halls: [hallA, hallB] }, 'a hall it is not in'],
+    ['POST', '/api/users/' + made.pat.id + '/password', {}, 'a richer account\'s new password'],
+    ['POST', '/api/users/' + made.pat.id + '/signout', {}, 'a richer account signed out'],
+  ]) {
+    const r = await api(base, method, url, body, { cookie: lee });
+    assert.equal(r.status, 403, why + ': ' + r.status + ' ' + JSON.stringify(r.body));
+    assert.match(r.body.error, /hold yourself/);
+  }
+  assert.equal((await api(base, 'POST', '/api/users', { username: 'fred', name: 'Fred', role: 'staff', halls: [hallA] }, { cookie: lee })).status, 200, 'staff in its own hall');
+  const view = (await api(base, 'GET', '/api/users', undefined, { cookie: lee })).body;
+  const row = (name) => view.users.find((u) => u.username === name);
+  assert.match(row('pat').locked, /hold yourself/, 'the page shows the richer account locked');
+  assert.equal(row('cam').locked, '');
+  assert.deepEqual(view.giveable, { admin: false, caps: ['display.control', 'hall.files', 'hall.post', 'hall.view', 'stage.send'], allHalls: false, halls: [hallA] });
+  const now = (await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body.users;
+  assert.deepEqual(now.filter((u) => u.username === 'pat').map((u) => [u.mustChange, u.rights.allHalls]), [[false, true]], 'pat keeps their own password');
+  assert.equal(now.find((u) => u.username === 'cam').rights.allHalls, false);
+});
+
+test('saving an account unchanged changes nothing; the device count is what still signs in', async (t) => {
+  const srv = await startServer();
+  const { base } = srv;
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
+  const users = {};
+  for (const username of ['sam', 'kim', 'lee']) {
+    const r = await api(base, 'POST', '/api/users', { username, name: username.toUpperCase() + ' Tech', role: 'tech', halls: [hall], grant: ['nodes.control'], password: 'mixing desk on stage left' }, { cookie: admin });
+    users[username] = r.body.user;
+  }
+  // Two devices each, from addresses of their own (one sign-in allowance each).
+  let n = 0;
+  const signIn = async (username) => {
+    const r = await api(base, 'POST', '/api/auth/login', { username, password: 'mixing desk on stage left' }, { headers: { 'cf-connecting-ip': '198.51.100.' + (++n) } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    return r.cookie;
+  };
+  const sam = await signIn('sam');
+  for (const u of ['sam', 'kim', 'kim', 'lee', 'lee']) await signIn(u);
+  const devices = async () => Object.fromEntries((await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body.users.filter((u) => users[u.username]).map((u) => [u.username, u.sessions]));
+  assert.deepEqual(await devices(), { kim: 2, lee: 2, sam: 2 });
+
+  await t.test('an untouched editor\'s Save: nothing changed, no reconnect, no audit row; a real change still reconnects', async () => {
+    const s = await connect(base, sam); sockets.push(s);
+    assert.ok((await emit(s, 'join', { roomCode: hall, as: 'account' })).ok);
+    let told = false;
+    s.on('account:changed', () => { told = true; });
+    const view = (await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body;
+    const u = view.users.find((x) => x.username === 'sam');
+    const role = view.roles.find((r) => r.id === u.role);
+    // What users.js formChange() sends for an editor opened and saved untouched.
+    const body = { name: u.name, role: u.role, halls: u.halls, grant: u.grant.filter((c) => !role.caps.includes(c)), revoke: u.revoke.filter((c) => role.caps.includes(c)) };
+    if (u.allHalls !== null || u.rights.allHalls !== role.allHalls) body.allHalls = u.rights.allHalls;
+    const audits = async () => (await api(base, 'GET', '/api/audit?limit=500', undefined, { cookie: admin })).body.entries.filter((e) => e.action === 'user.update').length;
+    const before = await audits();
+    const r = await api(base, 'PATCH', '/api/users/' + u.id, body, { cookie: admin });
+    assert.deepEqual(r.body.changed, []);
+    await wait(300);
+    assert.equal(told, false, 'the open page is not told to reload');
+    assert.equal(s.connected, true);
+    assert.equal(await audits(), before, 'no audit row for a change that did not happen');
+    const gone = once(s, 'disconnect');
+    const renamed = await api(base, 'PATCH', '/api/users/' + u.id, { ...body, name: 'Sam Tech-Lead' }, { cookie: admin });
+    assert.deepEqual(renamed.body.changed, ['name']);
+    await gone;
+    assert.equal(told, true);
+    assert.equal(await audits(), before + 1);
+  });
+
+  await t.test('signed out everywhere, turned off, a new password: no devices left on the list', async () => {
+    assert.equal((await api(base, 'POST', '/api/users/' + users.sam.id + '/signout', {}, { cookie: admin })).status, 200);
+    assert.equal((await api(base, 'PATCH', '/api/users/' + users.kim.id, { disabled: true }, { cookie: admin })).status, 200);
+    assert.equal((await api(base, 'POST', '/api/users/' + users.lee.id + '/password', {}, { cookie: admin })).status, 200);
+    assert.deepEqual(await devices(), { kim: 0, lee: 0, sam: 0 });
   });
 });

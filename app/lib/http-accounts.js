@@ -8,22 +8,49 @@
  * log with who, from where, and what — never a password or a token.
  *
  * Through the Cloudflare tunnel (a request that came in over loopback with Cloudflare's headers) an account with admin
- * rights may not sign in unless the admin turned on "Admin sign-in through the tunnel"; everyone else may.
+ * rights (users.manage, settings.manage) may not sign in, nor use those rights on a session it has, unless the admin
+ * turned on "Admin sign-in through the tunnel"; everyone else may. A refused sign-in gets the same answer as a wrong
+ * password, so it never tells a stranger that a password was right.
  */
-const { Accounts, passwordProblem, temporaryPassword } = require('./accounts');
+const { Accounts, passwordProblem, temporaryPassword, NO_MATCH } = require('./accounts');
 const rbac = require('./rbac');
 const guard = require('./guard');
 
 const COOKIE = 'agm_s';
+const TUNNEL_ADMIN = 'Accounts with admin rights work on the venue network, not through the tunnel (an admin can allow it in Settings).';
+const BUSY = 'Sign-in is busy — try again in a moment.';
+const UNKNOWN_NAME = '(unknown username)';
+const FAIL_WORDS = { unknown: 'no such username', wrong: 'wrong password', disabled: 'the account is turned off' };
 
 function mountAccounts(app, o) {
-  const { accounts, sessions, audit, settings, isEncrypted, onAccountChanged, hallNames } = o;
-  const ipBuckets = new Map();
+  const { accounts, sessions, audit, settings, isEncrypted, isLoopback, onAccountChanged, onSessionEnded, hallNames } = o;
+  const ipBuckets = new guard.Buckets(0.5, 5, 5000);
+  // Wrong passwords for a username count where they come from: a device on the venue network by its address, the whole
+  // tunnel as one place (anyone on the internet is there). A stranger's guesses hold that username only where the
+  // stranger is, and never on the AGMessage laptop; twenty from one address hold that address. A signed-in person's
+  // own password change counts on its session alone.
   const userLock = new guard.Lockout(5, 15 * 60_000);
   const ipLock = new guard.Lockout(20, 15 * 60_000);
+  const pwLock = new guard.Lockout(5, 15 * 60_000);
 
   const throughTunnel = (req) => { const h = req.headers || {}; return !!(h['cf-connecting-ip'] || h['cf-ray'] || h['x-forwarded-for'] || h.forwarded); };
-  const cookie = (req, token, maxAge) => COOKIE + '=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=' + maxAge + (isEncrypted(req) ? '; Secure' : '');
+  /** Admin rights through the tunnel while the admin has not allowed them: judged on every request, not only at sign-in. */
+  const adminBlocked = (req, a) => throughTunnel(req) && !settings.remoteAdmin && rbac.holdsAdminOnly(a);
+  // The browser's own scheme: our TLS, or Cloudflare saying the visitor used HTTPS — believed only over loopback, which
+  // is how cloudflared reaches us, so a device on the venue network cannot claim it.
+  const browserHttps = (req) => {
+    if (isEncrypted(req)) return true;
+    if (!isLoopback(req) || !throughTunnel(req)) return false;
+    const h = req.headers || {};
+    return /"scheme"\s*:\s*"https"/.test(String(h['cf-visitor'] || '')) || String(h['x-forwarded-proto'] || '').toLowerCase() === 'https';
+  };
+  const cookie = (req, token, maxAge) => COOKIE + '=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=' + maxAge + (browserHttps(req) ? '; Secure' : '');
+  /** Where a request's password check waits (the tunnel's lane or the venue's); it leaves the queue when the request goes. */
+  function hashOpts(req, res) {
+    const ac = new AbortController();
+    res.on('close', () => { if (!res.writableFinished) ac.abort(); });
+    return { lane: throughTunnel(req) ? 'tunnel' : 'venue', signal: ac.signal };
+  }
 
   /** The signed-in account for a request: {account, session, token} or null. */
   function who(req) {
@@ -53,6 +80,7 @@ function mountAccounts(app, o) {
     if (!w) return res.status(401).json({ ok: false, error: 'Sign in first.' });
     if (w.account.mustChange) return res.status(403).json({ ok: false, error: 'Choose your own password first.', mustChange: true });
     if (cap && !rbac.can(w.account, cap)) return res.status(403).json({ ok: false, error: 'Your account may not do that.' });
+    if (cap && rbac.ADMIN_ONLY.has(cap) && adminBlocked(req, w.account)) return res.status(403).json({ ok: false, error: TUNNEL_ADMIN });
     req.agm = w;
     next();
   };
@@ -61,25 +89,35 @@ function mountAccounts(app, o) {
 
   app.post('/api/auth/login', async (req, res) => {
     const ip = guard.clientIp(req);
-    let b = ipBuckets.get(ip);
-    if (!b) { b = new guard.Bucket(0.5, 5); ipBuckets.set(ip, b); if (ipBuckets.size > 5000) ipBuckets.clear(); }
     const username = String((req.body && req.body.username) || '').trim().toLowerCase().slice(0, 40);
     const password = String((req.body && req.body.password) || '');
-    if (!b.take() || ipLock.locked(ip) || userLock.locked(username)) return res.status(429).json({ ok: false, error: 'Too many attempts — wait a few minutes and try again.' });
+    const host = guard.isHostMachine(req);
+    const where = username + '|' + (throughTunnel(req) ? 'tunnel' : ip);
+    if (!ipBuckets.take(ip) || ipLock.locked(ip) || (!host && userLock.locked(where))) return res.status(429).json({ ok: false, error: 'Too many attempts — wait a few minutes and try again.' });
     if (!username || !password) return res.status(400).json({ ok: false, error: 'Type your username and password.' });
-    const r = await accounts.authenticate(username, password);
+    // Every refusal says the same: an unknown name, a wrong password, a turned-off account, and admin rights through the
+    // tunnel (with the right password) are told apart only in the audit log.
+    const noMatch = NO_MATCH + (throughTunnel(req) && !settings.remoteAdmin ? ' Accounts with admin rights sign in on the venue network, not through the tunnel.' : '');
+    const failed = () => { if (!host) userLock.fail(where); ipLock.fail(ip); };
+    const r = await accounts.authenticate(username, password, hashOpts(req, res));
+    if (r.abandoned) return undefined;   // the request went before its turn: nobody is waiting for the answer
+    if (r.busy) return res.status(429).json({ ok: false, error: BUSY, busy: true });
     if (r.error) {
-      userLock.fail(username); ipLock.fail(ip);
-      audit.write({ t: 'account', id: '', name: username }, 'login.fail', username, r.error, ip);
-      return res.status(401).json({ ok: false, error: r.error });
+      failed();
+      // A name that is no account may be a password typed into the wrong box: it is never written down.
+      const known = accounts.byUsername(username);
+      audit.write(known ? actorOf({ account: known }) : { t: 'account', id: '', name: UNKNOWN_NAME }, 'login.fail', known ? known.username : UNKNOWN_NAME, FAIL_WORDS[r.reason] || 'refused', ip);
+      return res.status(401).json({ ok: false, error: noMatch });
     }
     const a = r.account;
-    if (throughTunnel(req) && rbac.can(a, 'users.manage') && !settings.remoteAdmin) {
+    if (adminBlocked(req, a)) {
+      failed();
       audit.write(actorOf({ account: a }), 'login.refused', a.username, 'admin rights through the tunnel', ip);
-      return res.status(403).json({ ok: false, error: 'Accounts with admin rights sign in on the venue network, not through the tunnel (an admin can allow it in Settings).' });
+      return res.status(401).json({ ok: false, error: noMatch });
     }
-    userLock.ok(username); ipLock.ok(ip);
+    userLock.ok(where); ipLock.ok(ip);
     const token = sessions.create(a, { ip, ua: req.headers['user-agent'] });
+    accounts.signedIn(a);
     res.setHeader('Set-Cookie', cookie(req, token, 7 * 86400));
     audit.write(actorOf({ account: a }), 'login', a.username, a.mustChange ? 'signed in with a one-time password' : 'signed in', ip);
     res.json({ ok: true, account: Accounts.view(a), mustChange: !!a.mustChange });
@@ -87,7 +125,11 @@ function mountAccounts(app, o) {
 
   app.post('/api/auth/logout', (req, res) => {
     const w = who(req);
-    if (w) { sessions.destroy(w.token); audit.write(actorOf(w), 'logout', w.account.username, 'signed out', guard.clientIp(req)); }
+    if (w) {
+      sessions.destroy(w.token);
+      onSessionEnded(w.session.h);   // the pages this session has open are told and closed, not left with its rights
+      audit.write(actorOf(w), 'logout', w.account.username, 'signed out', guard.clientIp(req));
+    }
     res.setHeader('Set-Cookie', cookie(req, '', 0));
     res.json({ ok: true });
   });
@@ -104,14 +146,16 @@ function mountAccounts(app, o) {
     if (!w) return res.status(401).json({ ok: false, error: 'Sign in first.' });
     const current = String((req.body && req.body.current) || '');
     const next = String((req.body && req.body.next) || '');
-    if (userLock.locked(w.account.username)) return res.status(429).json({ ok: false, error: 'Too many attempts — wait a few minutes and try again.' });
-    const check = await accounts.authenticate(w.account.username, current);
+    if (pwLock.locked(w.session.h)) return res.status(429).json({ ok: false, error: 'Too many attempts — wait a few minutes and try again.' });
+    const check = await accounts.authenticate(w.account.username, current, hashOpts(req, res));
+    if (check.abandoned) return undefined;
+    if (check.busy) return res.status(429).json({ ok: false, error: BUSY, busy: true });
     if (check.error) {
-      userLock.fail(w.account.username);
+      pwLock.fail(w.session.h);
       audit.write(actorOf(w), 'password.fail', w.account.username, 'wrong current password', guard.clientIp(req));
       return res.status(401).json({ ok: false, error: 'Your current password is not right.' });
     }
-    userLock.ok(w.account.username);
+    pwLock.ok(w.session.h);
     if (next === current) return res.status(400).json({ ok: false, error: 'Choose a password you have not used here.' });
     const problem = passwordProblem(next, { username: w.account.username, name: w.account.name });
     if (problem) return res.status(400).json({ ok: false, error: problem });
@@ -130,7 +174,8 @@ function mountAccounts(app, o) {
     const b = req.body || {};
     const problem = passwordProblem(b.password, { username: b.username, name: b.name });
     if (problem) return res.status(400).json({ ok: false, error: problem });
-    const r = await accounts.create({ username: b.username, name: b.name, role: 'admin', password: b.password }, 'setup');
+    const r = await accounts.create({ username: b.username, name: b.name, role: 'admin', password: b.password }, 'setup', { firstAdmin: true });
+    if (r.exists) return res.status(409).json({ ok: false, error: r.error });
     if (r.error) return res.status(400).json({ ok: false, error: r.error });
     const token = sessions.create(r.account, { ip: guard.clientIp(req), ua: req.headers['user-agent'] });
     res.setHeader('Set-Cookie', cookie(req, token, 7 * 86400));
@@ -144,10 +189,11 @@ function mountAccounts(app, o) {
 
   app.get('/api/users', signedIn('users.manage'), (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    // `locked`: why this viewer may not change that person (empty when they may) — the page offers what the server allows.
+    // `locked`: why this viewer may not change that person (empty when they may); `giveable`: the rights and halls this
+    // viewer may hand out — the page offers what the server allows.
     const activeAdmins = accounts.activeAdmins();
     const users = accounts.list().map((u) => ({ ...u, sessions: sessions.of(u.id).length, locked: rbac.mayChange(req.agm.account, u, {}, { activeAdmins }) || '' }));
-    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames() });
+    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames(), giveable: rbac.giveable(req.agm.account) });
   });
 
   app.post('/api/users', signedIn('users.manage'), async (req, res) => {
@@ -184,6 +230,7 @@ function mountAccounts(app, o) {
     if (target.role === 'admin' && req.agm.account.role !== 'admin') return res.status(403).json({ ok: false, error: 'Only an admin may reset an admin\'s password.' });
     const password = temporaryPassword();
     await accounts.setPassword(target.id, password, { mustChange: true });
+    userLock.forget((k) => k.startsWith(target.username + '|'));   // the new one-time password works at once
     onAccountChanged(target.id, 'password');
     audit.write(actorOf(req.agm), 'user.reset', target.username, 'one-time password issued; signed out everywhere', guard.clientIp(req));
     res.json({ ok: true, password });
@@ -219,7 +266,7 @@ function mountAccounts(app, o) {
   });
   app.get('/api/audit/verify', signedIn('audit.read'), (req, res) => res.json({ ok: true, ...audit.verify() }));
 
-  return { who, signedIn, actorOf, throughTunnel, COOKIE };
+  return { who, signedIn, actorOf, throughTunnel, adminBlocked, COOKIE };
 }
 
 function pick(o, keys) { const out = {}; for (const k of keys) if (Object.prototype.hasOwnProperty.call(o, k)) out[k] = o[k]; return out; }

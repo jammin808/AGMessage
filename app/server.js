@@ -37,7 +37,7 @@ const resilience = require('./lib/resilience');
 const secretbox = require('./lib/secretbox');
 const { buildContext, showBrief } = require('./lib/context');
 const tlsmod = require('./lib/tls');
-const { Accounts, Sessions } = require('./lib/accounts');
+const { Accounts, Sessions, TokenSessions } = require('./lib/accounts');
 const { AuditLog } = require('./lib/audit');
 const rbac = require('./lib/rbac');
 const { mountAccounts } = require('./lib/http-accounts');
@@ -63,7 +63,6 @@ const SECRET = guard.loadSecret(DATA_DIR);
 
 // One-time admin token printed at boot; login only from the host laptop (never through the tunnel).
 const ADMIN_TOKEN = (process.env.ADMIN_TOKEN || crypto.randomBytes(8).toString('hex')).toLowerCase();
-const adminSessions = new Set();
 
 const makeRoomCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 const makeMessageId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
@@ -103,6 +102,9 @@ function contextToken() {
 // hash-chained audit log (lib/audit.js). The host laptop's admin token stays as the way in before any account exists.
 const accounts = new Accounts(path.join(DATA_DIR, 'accounts.json'));
 const sessions = new Sessions(path.join(DATA_DIR, 'sessions.json'), accounts);
+// The admin token's sign-ins survive a watchdog restart (the supervisor hands every restart the same token) and end
+// when AGMessage starts again with a new one: they are kept under a keyed hash of the token.
+const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json'), guard.mac(SECRET, 'admin-token:' + ADMIN_TOKEN, 43));
 const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'));
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
 const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
@@ -256,16 +258,17 @@ ${cert ? `<p>This AGMessage encrypts its pages with its own certificate. Browser
 });
 app.use(express.json({ limit: '256kb' }));
 const web = mountAccounts(app, {
-  accounts, sessions, audit, settings, isEncrypted,
+  accounts, sessions, audit, settings, isEncrypted, isLoopback,
   isTokenAdmin: (req) => isValidAdminCookie(req),
   hallNames: () => Array.from(store.rooms.values()).map((r) => ({ code: r.code, name: r.name || '' })),
   onAccountChanged: (id, what) => accountChanged(id, what),
+  onSessionEnded: (h) => endSockets((s) => s.data.sessionHash === h, 'signout', SIGNED_OUT),
 });
 /** The admin dashboard: the host laptop's token, or an account with admin rights (not through the tunnel unless allowed). */
 function isAdminReq(req) {
   if (isValidAdminCookie(req)) return true;
   const w = web.who(req);
-  return !!(w && !w.account.mustChange && rbac.can(w.account, 'settings.manage') && (!web.throughTunnel(req) || settings.remoteAdmin));
+  return !!(w && !w.account.mustChange && rbac.can(w.account, 'settings.manage') && !web.adminBlocked(req, w.account));
 }
 app.get('/admin', (_req, res) => res.redirect('/admin.html'));
 app.use(express.static(PUBLIC_DIR, { index: 'index.html', maxAge: '5m' }));
@@ -286,7 +289,7 @@ app.get('/uploads/:name', (req, res) => {
 
 // ----- admin auth
 const readCookie = (req, name) => guard.readCookie(req.headers.cookie, name);
-const isValidAdminCookie = (req) => { const sid = readCookie(req, 'agm_admin'); return !!(sid && adminSessions.has(sid)); };
+const isValidAdminCookie = (req) => tokenSessions.has(readCookie(req, 'agm_admin'));
 const adminLockout = new guard.Lockout(5, 60_000);
 
 app.post('/api/admin/login', (req, res) => {
@@ -295,15 +298,18 @@ app.post('/api/admin/login', (req, res) => {
   const t = String((req.body && req.body.token) || '').toLowerCase().trim();
   if (!t || !guard.safeEqual(t, ADMIN_TOKEN)) { adminLockout.fail('host'); audit.write(HOST_ACTOR, 'login.token.fail', 'host', 'a wrong admin token', guard.clientIp(req)); return res.status(401).json({ ok: false, error: 'Invalid admin token.' }); }
   adminLockout.ok('host');
-  const sid = crypto.randomBytes(24).toString('hex');
-  adminSessions.add(sid);
+  const sid = tokenSessions.create();
   audit.write(HOST_ACTOR, 'login.token', 'host', 'signed in with the host laptop\'s admin token', guard.clientIp(req));
   res.setHeader('Set-Cookie', 'agm_admin=' + sid + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400' + (isEncrypted(req) ? '; Secure' : ''));
   res.json({ ok: true });
 });
 app.post('/api/admin/logout', (req, res) => {
   const sid = readCookie(req, 'agm_admin');
-  if (sid) adminSessions.delete(sid);
+  if (tokenSessions.has(sid)) {
+    tokenSessions.destroy(sid);
+    endSockets((s) => s.data.adminSid === sid, 'signout', SIGNED_OUT);   // every admin page this sign-in has open, too
+    audit.write(HOST_ACTOR, 'logout.token', 'host', 'signed out the host laptop\'s admin token', guard.clientIp(req));
+  }
   res.setHeader('Set-Cookie', 'agm_admin=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
   res.json({ ok: true });
 });
@@ -381,7 +387,7 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
     code: r.code, name: r.name || '', people: r.users.size, messages: r.messages.length, locked: !!r.settings.lockRoles,
     can: { post: rbac.can(a, 'hall.post', r.code), files: rbac.can(a, 'hall.files', r.code), displays: rbac.can(a, 'display.control', r.code), stage: rbac.can(a, 'stage.send', r.code) },
   })).sort((x, y) => (x.name || x.code).localeCompare(y.name || y.code));
-  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: rbac.can(a, 'users.manage'), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req) });
+  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: rbac.can(a, 'users.manage') && !web.adminBlocked(req, a), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req) });
 });
 
 function newRoom(name) {
@@ -506,13 +512,19 @@ io.on('connection', (socket) => {
   let room = null;
   let me = null;   // {uid, name, role}
   // Who this is: the host's admin token, a signed-in account (both from the handshake's cookies), or nobody yet — a
-  // meeting code at 'join'. Rights are read once here; a change to the account ends this socket (accountChanged).
+  // meeting code at 'join'. Rights are read once here, with the session they came from: a change to the account
+  // (accountChanged), the session ending (sign-out, expiry: endSockets, sweepSessions) or admin through the tunnel turned
+  // off ends this socket, and the next connection is judged afresh.
   const hs = { headers: socket.handshake.headers, socket: socket.request && socket.request.socket };
-  const tokenAdmin = !!(adminSessions.has(guard.readCookie(hs.headers.cookie, 'agm_admin') || ''));
+  const adminSid = guard.readCookie(hs.headers.cookie, 'agm_admin') || '';
+  const tokenAdmin = tokenSessions.has(adminSid);
   const acct = web.who(hs);
   socket.data.account = acct && !acct.account.mustChange ? acct.account : null;
   socket.data.accountId = socket.data.account ? socket.data.account.id : '';
-  socket.data.isAdmin = tokenAdmin || !!(socket.data.account && rbac.can(socket.data.account, 'settings.manage') && (!web.throughTunnel(hs) || settings.remoteAdmin));
+  socket.data.sessionHash = socket.data.account ? acct.session.h : '';
+  socket.data.adminSid = tokenAdmin ? adminSid : '';
+  socket.data.viaTunnel = web.throughTunnel(hs);
+  socket.data.isAdmin = tokenAdmin || !!(socket.data.account && rbac.can(socket.data.account, 'settings.manage') && !web.adminBlocked(hs, socket.data.account));
   socket.data.actor = tokenAdmin ? HOST_ACTOR : socket.data.account ? { t: 'account', id: socket.data.account.id, name: socket.data.account.username } : null;
   const writes = new guard.Bucket(5, 15);      // messages, reactions, pins…
   const chatter = new guard.Bucket(10, 20);    // typing, seen, ui sync
@@ -1246,7 +1258,13 @@ io.on('connection', (socket) => {
       if (typeof patch.stagewatchKey === 'string') { settings.stagewatchKeySealed = secretbox.seal(patch.stagewatchKey.trim().slice(0, 80)); taken.push('stagewatchKey (sealed)'); }
       if (typeof patch.stagewatchFingerprint === 'string') { settings.stagewatchFingerprint = tlsmod.cleanFingerprint(patch.stagewatchFingerprint); taken.push('stagewatchFingerprint → ' + settings.stagewatchFingerprint.slice(0, 60)); }
       if (typeof patch.requireHttps === 'boolean') { settings.requireHttps = patch.requireHttps && !!cert; taken.push('requireHttps → ' + settings.requireHttps); }
-      if (typeof patch.remoteAdmin === 'boolean') { settings.remoteAdmin = patch.remoteAdmin; taken.push('remoteAdmin → ' + settings.remoteAdmin); }
+      if (typeof patch.remoteAdmin === 'boolean') {
+        const was = !!settings.remoteAdmin;
+        settings.remoteAdmin = patch.remoteAdmin;
+        taken.push('remoteAdmin → ' + settings.remoteAdmin);
+        // Turned off: an account that is admin through the tunnel stops being one now, not at its next connection.
+        if (was && !settings.remoteAdmin) endSockets((s) => !!(s.data.viaTunnel && s.data.account && s.data.isAdmin), 'remoteAdmin', 'Admin rights through the tunnel were turned off — reconnecting with the rights this connection has.');
+      }
       if (patch.newContextToken === true) { delete settings.contextTokenSealed; taken.push('newContextToken (sealed)'); }
       if (taken.length) audit.write(socket.data.actor, 'settings', taken.map((t) => t.split(' ')[0]).join(','), 'changed ' + taken.join(', '), socket.data.ip);
       saveSettings();
@@ -1382,18 +1400,38 @@ setInterval(() => {
 /** Open help requests across every hall, for the context (a count: never who or what). */
 const openHelpCount = () => Array.from(store.rooms.values()).reduce((n, r) => n + board.openHelp(r).length, 0);
 
+/** Every open socket `match` picks is told why (the pages reload on it) and closed: its next connection is judged afresh. */
+function endSockets(match, what, words) {
+  for (const [, s] of io.sockets.sockets) {
+    if (s.data && match(s)) {
+      s.emit('account:changed', { what, words });
+      setTimeout(() => s.disconnect(true), 50);
+    }
+  }
+}
+const SIGNED_OUT = 'Signed out — sign in again to carry on.';
+
 /**
  * An account changed (role, rights, halls, password, turned off, removed): every socket it has open is told and closed,
  * so its next connection is judged by the rights it has now — never by the ones it had.
  */
 function accountChanged(id, what) {
-  for (const [, s] of io.sockets.sockets) {
-    if (s.data && s.data.accountId === id) {
-      s.emit('account:changed', { what, words: 'Your account was changed by an admin — reconnecting with your current rights.' });
-      setTimeout(() => s.disconnect(true), 50);
-    }
-  }
+  endSockets((s) => s.data.accountId === id, what, 'Your account was changed by an admin — reconnecting with your current rights.');
 }
+
+/**
+ * Once a minute: a session with a page open on it is in use, so it is touched (a page open all day is not idle), and a
+ * socket whose session has ended meanwhile — 7 days old, given up for a newer one, the admin token's day over — is
+ * closed. Ending a session by hand (sign-out) closes its sockets at once.
+ */
+const SESSION_SWEEP_MS = Math.max(50, Number(process.env.AGM_SESSION_SWEEP_MS) || 60_000);
+function sweepSessions() {
+  const open = new Set();
+  for (const [, s] of io.sockets.sockets) if (s.data && s.data.sessionHash) open.add(s.data.sessionHash);
+  const ended = sessions.sweep(open);
+  endSockets((s) => (!!s.data.sessionHash && ended.has(s.data.sessionHash)) || (!!s.data.adminSid && !tokenSessions.has(s.data.adminSid)), 'expired', SIGNED_OUT);
+}
+setInterval(sweepSessions, SESSION_SWEEP_MS).unref();
 
 function invitesFor(code) {
   const out = {};
@@ -1785,7 +1823,7 @@ function shutdown(code = 0) {
   console.log('\n  Saving rooms…');
   store.compactAll();
   settingsLane.flushSync();
-  displays.flush(); accounts.flush(); sessions.flush();
+  displays.flush(); accounts.flush(); sessions.flush(); tokenSessions.flush();
   for (const link of allLinks()) link.stop();
   for (const link of peerLinks.values()) link.stop();
   if (discovery) discovery.stop();
@@ -1801,7 +1839,7 @@ process.on('uncaughtException', (e) => {
   console.error('  [error]', e && e.stack ? e.stack : e);
   try { store.compactAll(); } catch { /* best effort */ }
   try { settingsLane.flushSync(); } catch { /* best effort */ }
-  try { displays.flush(); accounts.flush(); sessions.flush(); } catch { /* best effort: their lanes wrote within 500 ms anyway */ }
+  try { displays.flush(); accounts.flush(); sessions.flush(); tokenSessions.flush(); } catch { /* best effort: their lanes wrote within 500 ms anyway */ }
   try {
     resilience.writeFileAtomic(CRASH_PATH, JSON.stringify({ at: Date.now(), message: String(e && e.message ? e.message : e).slice(0, 500), stack: String(e && e.stack ? e.stack : '').slice(0, 4000) }));
     fs.appendFileSync(path.join(DATA_DIR, 'crash.log'), new Date().toISOString() + ' ' + String(e && e.stack ? e.stack : e) + '\n');

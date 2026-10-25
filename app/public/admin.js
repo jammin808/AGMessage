@@ -84,7 +84,17 @@ function showDashboard() {
   loginPanel.hidden = true;
   dashboard.hidden = false;
   socket = io();
-  socket.on('connect', () => {
+  // A sign-out in another tab, a change to this account or admin through the tunnel turned off closes this socket: the
+  // page starts again and asks for what it needs. After a restart it reconnects by itself; it starts again only when
+  // its sign-in no longer holds (a new admin token), never on a failed check.
+  socket.on('account:changed', () => { setTimeout(() => location.reload(), 300); });
+  let connectedOnce = false;
+  socket.on('connect', async () => {
+    if (connectedOnce) {
+      const now = await fetch('/api/admin/me').then((r) => r.json()).catch(() => ({ ok: true }));
+      if (!now.ok) { location.reload(); return; }
+    }
+    connectedOnce = true;
     refreshRooms();
   });
   socket.on('disconnect', () => {

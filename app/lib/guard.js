@@ -82,9 +82,11 @@ function checkInvite(secret, room, role, token) {
 
 // ---------- token bucket: `rate` per second, bursts of `burst` ----------
 class Bucket {
-  constructor(rate, burst) { this.rate = rate; this.burst = burst; this.tokens = burst; this.at = Date.now(); }
+  constructor(rate, burst, now = Date.now()) { this.rate = rate; this.burst = burst; this.tokens = burst; this.at = now; }
+  /** The tokens it holds at `now`, taking none. */
+  level(now = Date.now()) { return Math.min(this.burst, this.tokens + ((now - this.at) / 1000) * this.rate); }
   take(n = 1, now = Date.now()) {
-    this.tokens = Math.min(this.burst, this.tokens + ((now - this.at) / 1000) * this.rate);
+    this.tokens = this.level(now);
     this.at = now;
     if (this.tokens < n) return false;
     this.tokens -= n;
@@ -92,9 +94,34 @@ class Bucket {
   }
 }
 
-/** Per-key failure counting: `max` failures in `windowMs` locks the key out until the window passes. */
+/**
+ * A token bucket per key (an address), `cap` keys at most. Past that the fullest buckets go first — a full bucket is the
+ * same as a new one — so a flood of new keys never hands back the allowance of a key that has used its own.
+ */
+class Buckets {
+  constructor(rate, burst, cap = 5000) { this.rate = rate; this.burst = burst; this.cap = cap; this.map = new Map(); }
+  take(key, now = Date.now()) {
+    let b = this.map.get(key);
+    if (!b) {
+      if (this.map.size >= this.cap) this.trim(now);
+      b = new Bucket(this.rate, this.burst, now);
+      this.map.set(key, b);
+    }
+    return b.take(1, now);
+  }
+  trim(now) {
+    const fullest = Array.from(this.map).sort((x, y) => y[1].level(now) - x[1].level(now));
+    for (const [k] of fullest.slice(0, this.map.size - Math.floor(this.cap * 0.9))) this.map.delete(k);
+  }
+}
+
+/**
+ * Per-key failure counting: `max` failures in `windowMs` locks the key out until `windowMs` after the first of them.
+ * At most `cap` keys are kept; past that, ended windows go first and then the keys with the fewest failures, so a flood
+ * of new keys never lifts a lock that is holding.
+ */
 class Lockout {
-  constructor(max = 8, windowMs = 60_000) { this.max = max; this.windowMs = windowMs; this.map = new Map(); }
+  constructor(max = 8, windowMs = 60_000, cap = 10_000) { this.max = max; this.windowMs = windowMs; this.cap = cap; this.map = new Map(); }
   locked(key, now = Date.now()) {
     const e = this.map.get(key);
     return !!e && e.n >= this.max && now - e.t < this.windowMs;
@@ -103,9 +130,18 @@ class Lockout {
     const e = this.map.get(key);
     if (!e || now - e.t > this.windowMs) this.map.set(key, { n: 1, t: now });
     else e.n++;
-    if (this.map.size > 10_000) this.map.clear();
+    if (this.map.size > this.cap) this.trim(now);
   }
   ok(key) { this.map.delete(key); }
+  /** Forget every key `pick` chooses (an admin's new one-time password ends the wait for that name). */
+  forget(pick) { for (const k of this.map.keys()) if (pick(k)) this.map.delete(k); }
+  trim(now) {
+    const keep = Math.floor(this.cap * 0.9);
+    for (const [k, e] of this.map) if (now - e.t > this.windowMs) this.map.delete(k);
+    if (this.map.size <= keep) return;
+    const fewest = Array.from(this.map).sort((x, y) => x[1].n - y[1].n);
+    for (const [k] of fewest.slice(0, this.map.size - keep)) this.map.delete(k);
+  }
 }
 
 /** The caller's address, honouring Cloudflare's header only when the request came through the local tunnel. */
@@ -203,6 +239,6 @@ function validUploadUrl(url) {
 
 module.exports = {
   loadSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
-  Bucket, Lockout, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, str,
+  Bucket, Buckets, Lockout, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, str,
   UPLOAD_TYPES, uploadType, validUploadUrl, extOf,
 };

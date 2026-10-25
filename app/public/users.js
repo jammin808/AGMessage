@@ -1,5 +1,6 @@
 // Accounts and the audit log. An admin (or anyone given users.manage) adds people with a role, their halls and any
-// exception to the role's rights; a new person gets a one-time password shown once. The audit log reads newest first
+// exception to the role's rights; a new person gets a one-time password shown once. Someone who is not an admin is
+// offered only the rights and halls they hold themselves (the server's `giveable`). The audit log reads newest first
 // and checks its own chain on demand.
 (function () {
   'use strict';
@@ -7,8 +8,9 @@
   const esc = AGM.esc;
   AGM.theme();
 
-  let data = null;          // {users, roles, caps, halls}
+  let data = null;          // {users, roles, caps, halls, giveable}
   let editing = null;       // the account being edited, or null for a new one
+  let saving = false;       // a save in flight: a second click or Enter sends nothing
 
   // ---------------------------------------------------------------- tabs
   function tab(which) {
@@ -34,12 +36,18 @@
     if (!canUsers && canAudit) tab('audit');
     if (!canUsers) return;
     const r = await AGM.api('GET', '/api/users');
-    if (!r.ok) { AGM.toast(r.error, true); return; }
+    if (!r.ok) { $('tabPeople').hidden = true; if (canAudit) tab('audit'); else $('peoplePane').hidden = true; AGM.toast(r.error, true); return; }
     data = r;
     renderUsers();
   }
 
   const roleOf = (id) => data.roles.find((r) => r.id === id) || { label: id, caps: [], allHalls: false };
+  // What this viewer may hand out: a right, a hall, every hall (an admin: everything).
+  const mayGive = {
+    cap: (c) => data.giveable.admin || data.giveable.caps.includes(c),
+    hall: (code) => data.giveable.allHalls || data.giveable.halls.includes(code),
+    allHalls: () => data.giveable.allHalls,
+  };
   const hallName = (code) => { const h = data.halls.find((x) => x.code === code); return h ? (h.name || h.code) : code; };
 
   function renderUsers() {
@@ -57,7 +65,7 @@
       const td = document.createElement('td');
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'btn small'; b.textContent = 'Edit';
-      if (u.locked) { b.disabled = true; b.textContent = 'Admin only'; b.title = u.locked; } else b.onclick = () => openEditor(u);
+      if (u.locked) { b.disabled = true; b.textContent = u.locked.startsWith('Only an admin') ? 'Admin only' : 'Locked'; b.title = u.locked; } else b.onclick = () => openEditor(u);
       td.appendChild(b);
       tr.appendChild(td);
       tb.appendChild(tr);
@@ -74,18 +82,19 @@
     $('uUser').disabled = !!u;
     const sel = $('uRole');
     sel.textContent = '';
-    for (const r of data.roles) { const o = document.createElement('option'); o.value = r.id; o.textContent = r.label; sel.appendChild(o); }
+    for (const r of data.roles) { const o = document.createElement('option'); o.value = r.id; o.textContent = r.label; o.disabled = r.id === 'admin' && !data.giveable.admin; sel.appendChild(o); }
     sel.value = u ? u.role : 'staff';
     const hallsBox = $('uHalls');
     hallsBox.textContent = '';
     for (const h of data.halls) {
       const l = document.createElement('label'); l.className = 'check';
-      const c = document.createElement('input'); c.type = 'checkbox'; c.value = h.code; c.checked = !!(u && u.halls.includes(h.code));
+      const c = document.createElement('input'); c.type = 'checkbox'; c.value = h.code; c.disabled = !mayGive.hall(h.code); c.checked = !c.disabled && !!(u && u.halls.includes(h.code));
       l.appendChild(c); l.appendChild(document.createTextNode(' ' + (h.name || h.code) + ' (' + h.code + ')'));
       hallsBox.appendChild(l);
     }
     if (!data.halls.length) hallsBox.textContent = 'No halls yet.';
-    $('uAll').checked = u ? u.rights.allHalls : roleOf(sel.value).allHalls;
+    $('uAll').disabled = !mayGive.allHalls();
+    $('uAll').checked = !$('uAll').disabled && (u ? u.rights.allHalls : roleOf(sel.value).allHalls);
     $('uAll').dataset.touched = u && u.allHalls !== null ? '1' : '';
     renderCaps(u);
     $('userDanger').hidden = !u;
@@ -100,9 +109,10 @@
     box.textContent = '';
     for (const [cap, words] of Object.entries(data.caps)) {
       const fromRole = role.caps.includes(cap);
-      const on = u ? (fromRole ? !u.revoke.includes(cap) : u.grant.includes(cap)) : fromRole;
+      const given = mayGive.cap(cap);
+      const on = given && (u ? (fromRole ? !u.revoke.includes(cap) : u.grant.includes(cap)) : fromRole);
       const l = document.createElement('label'); l.className = 'check';
-      const c = document.createElement('input'); c.type = 'checkbox'; c.value = cap; c.checked = on;
+      const c = document.createElement('input'); c.type = 'checkbox'; c.value = cap; c.checked = on; c.disabled = !given;
       l.appendChild(c);
       const t = document.createElement('span');
       t.textContent = ' ' + words;
@@ -112,7 +122,7 @@
     }
   }
   $('uRole').addEventListener('change', () => {
-    if (!$('uAll').dataset.touched) $('uAll').checked = roleOf($('uRole').value).allHalls;
+    if (!$('uAll').dataset.touched) $('uAll').checked = !$('uAll').disabled && roleOf($('uRole').value).allHalls;
     renderCaps(editing && editing.role === $('uRole').value ? editing : null);
   });
   $('uAll').addEventListener('change', () => { $('uAll').dataset.touched = '1'; });
@@ -134,15 +144,19 @@
   $('userForm').addEventListener('submit', async (e) => {
     if (e.submitter && e.submitter.value === 'cancel') return;
     e.preventDefault();
-    const change = formChange();
-    const r = editing
-      ? await AGM.api('PATCH', '/api/users/' + encodeURIComponent(editing.id), change)
-      : await AGM.api('POST', '/api/users', { ...change, username: $('uUser').value.trim().toLowerCase() });
-    if (!r.ok) { $('userError').textContent = r.error; $('userError').hidden = false; return; }
-    $('userDialog').close();
-    if (r.password) showSecret(r.user.name, r.password);
-    else AGM.toast(editing ? 'Saved — ' + (r.changed.length ? 'their open pages reconnect with the new rights.' : 'nothing changed.') : 'Added.');
-    load();
+    if (saving) return;
+    saving = true; $('userSave').disabled = true;
+    try {
+      const change = formChange();
+      const r = editing
+        ? await AGM.api('PATCH', '/api/users/' + encodeURIComponent(editing.id), change)
+        : await AGM.api('POST', '/api/users', { ...change, username: $('uUser').value.trim().toLowerCase() });
+      if (!r.ok) { $('userError').textContent = r.error; $('userError').hidden = false; return; }
+      $('userDialog').close();
+      if (r.password) showSecret(r.user.name, r.password);
+      else AGM.toast(editing ? 'Saved — ' + (r.changed.length ? 'their open pages reconnect with the new rights.' : 'nothing changed.') : 'Added.');
+      load();
+    } finally { saving = false; $('userSave').disabled = false; }
   });
 
   async function act(method, url, body, done) {

@@ -247,7 +247,7 @@
     socket.on('disconnect', () => { ls.dataset.ok = '0'; ls.textContent = '○ Reconnecting'; });
     socket.on('board', applyBoard);
     socket.on('nodes:changed', () => { if ($('networkDialog').open) openNetwork(); });
-    socket.on('account:changed', () => { AGM.toast('Your account was changed — reloading.'); setTimeout(() => location.reload(), 1200); });
+    socket.on('account:changed', ({ words } = {}) => { AGM.toast(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1200); });
   }
   function applyBoard(b) {
     if (!b) return;
