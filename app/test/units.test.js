@@ -119,6 +119,33 @@ test('store: a failed append is said, and the room is snapshotted as soon as the
   assert.deepEqual(b.get('ABC234').messages.map((m) => m.id), ['m1', 'm2'], 'the op the log missed is on disk');
 });
 
+test('store: a log line the disk cut short, or a power cut tore, never swallows the next op', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const r = a.create('ABC234', 'Test');
+  a.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } });
+  const write = fs.writeSync;
+  fs.writeSync = (fd, data) => { fs.writeSync = write; return write.call(fs, fd, Buffer.from(String(data)), 0, 12); };   // the disk takes 12 bytes
+  a.commit(r, { o: 'add', m: { id: 'm2', type: 'text', text: 'two, cut short', at: 2 } });
+  assert.deepEqual(a.unsaved(), ['ABC234']);
+  // The next op lands whole, but the snapshot that would fold both in cannot be written (the snapshot is held).
+  const rename = fs.renameSync;
+  fs.renameSync = (from, to) => { if (String(to).endsWith('.json')) throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }); return rename.call(fs, from, to); };
+  try { a.commit(r, { o: 'add', m: { id: 'm3', type: 'text', text: 'three, whole', at: 3 } }); } finally { fs.renameSync = rename; }
+  const b = new RoomStore(dir);
+  b.loadAll(null, { compact: false });   // as after a crash: the snapshot and the log as they are
+  assert.deepEqual(b.get('ABC234').messages.map((m) => m.id), ['m1', 'm3'], 'the op after the cut one replays');
+
+  // A power cut tore the last line: the first op after the restart is a line of its own, not glued to the fragment.
+  fs.appendFileSync(path.join(dir, 'ABC234.log'), '{"o":"add","m":{"id":"m4","ty');
+  const c = new RoomStore(dir);
+  c.loadAll(null, { compact: false });
+  c.commit(c.get('ABC234'), { o: 'add', m: { id: 'm5', type: 'text', text: 'five, after the restart', at: 5 } });
+  const d = new RoomStore(dir);
+  d.loadAll(null, { compact: false });
+  assert.deepEqual(d.get('ABC234').messages.map((m) => m.id), ['m1', 'm3', 'm5']);
+});
+
 test('board: a hall\'s messages are read once per change, whoever watches, and never served stale', () => {
   const board = require('../lib/board');
   const messages = [];

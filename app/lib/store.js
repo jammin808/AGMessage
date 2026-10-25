@@ -3,7 +3,8 @@
  * Room store: every change is an operation with a per-room sequence number, appended to an
  * append-only log (data/rooms/<CODE>.log, one JSON line per op) — O(1) per change instead of
  * rewriting the whole room — and compacted into the snapshot (<CODE>.json) every N ops, at boot
- * and at shutdown. A torn last line (power cut mid-write) is skipped, never fatal.
+ * and at shutdown. A torn last line (power cut mid-write, or a disk that took only part of it) is skipped, never
+ * fatal, and the next append starts on a line of its own, so the op after it is never lost with it.
  *
  * Recent ops stay in memory (a ring per room), so a client that drops off for a moment resumes
  * with just what it missed (`opsSince(seq)`) instead of reloading the whole history — the game
@@ -67,14 +68,15 @@ class RoomStore {
   }
 
   _blank(code, name, createdAt) {
-    return { code, name, createdAt, messages: [], byId: new Map(), seq: 0, ring: [], users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false };
+    return { code, name, createdAt, messages: [], byId: new Map(), seq: 0, ring: [], users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false, ragged: false };
   }
 
   _replay(room) {
     const logPath = this.file(room.code, '.log');
     if (!fs.existsSync(logPath)) return;
-    const lines = fs.readFileSync(logPath, 'utf8').split('\n');
-    for (const line of lines) {
+    const text = fs.readFileSync(logPath, 'utf8');
+    room.ragged = text.length > 0 && !text.endsWith('\n');   // a torn last line: the next append ends it first
+    for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let op;
       try { op = JSON.parse(line); } catch { continue; }   // torn write: skip
@@ -136,9 +138,15 @@ class RoomStore {
     let appended = false;
     try {
       if (room.logFd === null) room.logFd = fs.openSync(this.file(room.code, '.log'), 'a');
-      const line = JSON.stringify(op) + '\n';
+      // After a line the disk cut short (or a power cut tore), this one starts on a line of its own: replay skips the
+      // fragment and reads this op, instead of both being lost as one unreadable line.
+      const line = (room.ragged ? '\n' : '') + JSON.stringify(op) + '\n';
       const n = fs.writeSync(room.logFd, line);
-      if (n !== Buffer.byteLength(line)) throw new Error('the disk took ' + n + ' of ' + Buffer.byteLength(line) + ' bytes');
+      if (n !== Buffer.byteLength(line)) {
+        if (n > 0) room.ragged = true;
+        throw new Error('the disk took ' + n + ' of ' + Buffer.byteLength(line) + ' bytes');
+      }
+      room.ragged = false;
       appended = true;
     } catch (e) {
       room.unsaved = true;   // the op is in memory only: the next snapshot puts it on disk
@@ -171,6 +179,7 @@ class RoomStore {
       fs.writeFileSync(this.file(code, '.log'), '');
       room.logCount = 0;
       room.unsaved = false;
+      room.ragged = false;
       if (!this.unsaved().length) this.lastError = null;
     } catch (e) {
       this.lastError = e.message;   // the log still holds what the snapshot did not
