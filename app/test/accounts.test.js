@@ -256,6 +256,24 @@ test('hashing: a check through the tunnel waits in a short queue of its own, lea
   assert.match(await made, /^scrypt\$/);
 });
 
+test('hashing: a burst of unknown names before their dummy hash exists makes that hash once, not once per guess', async () => {
+  // A fresh copy of the module: its dummy hash is not made yet, as after a restart.
+  const file = require.resolve('../lib/accounts');
+  const kept = require.cache[file];
+  delete require.cache[file];
+  const fresh = require('../lib/accounts');
+  require.cache[file] = kept;
+  const real = crypto.scrypt;
+  let hashes = 0;
+  crypto.scrypt = (...args) => { hashes++; return real(...args); };
+  try {
+    const outcomes = await Promise.all(Array.from({ length: 20 }, (_, i) => fresh.verifyPassword('guess ' + i, '', { lane: 'tunnel', signal: new AbortController().signal }).then(() => 'hashed', (e) => e.code)));
+    const hashed = outcomes.filter((o) => o === 'hashed').length;
+    assert.equal(hashes, 1 + hashed, 'one dummy hash, then one per check that was hashed — not a dummy per guess: ' + hashes + ' hashes');
+    assert.equal(hashed, 1 + fresh.LANES.tunnel.queue, 'the tunnel\'s slot and queue, and the rest told busy at once');
+  } finally { crypto.scrypt = real; }
+});
+
 test('limits: a flood of new addresses never hands back an allowance used up, nor lifts a lock that holds', () => {
   const T = 1_000_000;
   const buckets = new guard.Buckets(0.5, 5, 100);

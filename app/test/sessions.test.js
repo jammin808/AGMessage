@@ -138,8 +138,10 @@ test('a flood of guesses through the tunnel holds no sign-in on the venue networ
   t.after(() => stopServer(srv.child));
   assert.equal((await api(base, 'POST', '/api/setup', ANA)).status, 200);
   const failLines = () => fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter((l) => l.includes('"login.fail"')).length;
+  // One hash, timed on a name that is an account: the flood below is the first to ask about names that are none, as after
+  // a restart, so the hash those are checked against is not made yet when it starts.
   const t1 = Date.now();
-  await login(base, 'nobody', 'not the password');
+  await login(base, 'ana', 'not the password');
   const oneHash = Math.max(Date.now() - t1, 100);
   const N = 120;
   const guess = (i, signal) => fetch(base + '/api/auth/login', {

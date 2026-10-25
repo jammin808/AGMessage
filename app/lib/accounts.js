@@ -107,9 +107,14 @@ function parseHash(stored) {
   return { logN, r, p: pp, keylen: key.length, salt, key };
 }
 
-// A well-formed hash of nothing anyone knows: an unknown username is verified against it, so it costs the same.
+// A well-formed hash of nothing anyone knows: an unknown username is verified against it, so it costs the same. It is
+// made once: every check that needs it before it exists waits for that one hash (a promise, not a value), so a burst of
+// unknown names never queues a hash of its own per guess — unbounded, on the venue's lane, ahead of the crew.
 let dummy = null;
-async function dummyHash() { if (!dummy) dummy = await hashPassword(crypto.randomBytes(18).toString('base64url')); return dummy; }
+function dummyHash() {
+  if (!dummy) dummy = hashPassword(crypto.randomBytes(18).toString('base64url')).catch((e) => { dummy = null; throw e; });
+  return dummy;
+}
 
 /**
  * {ok, rehash}: whether the password matches, and whether its stored cost is older than today's. `opts` ({lane,
