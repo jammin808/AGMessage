@@ -535,7 +535,7 @@ io.on('connection', (socket) => {
     const { roomCode, name, role, adminView, uid, since, invite } = args || {};
     const ip = socket.data.ip;
     if (joinLock.locked(ip)) return ack({ ok: false, error: 'Too many attempts — wait a minute.' });
-    const code = String(roomCode || '').toUpperCase().trim();
+    const code = guard.str(roomCode).toUpperCase().trim();
     const acct = (args && args.as === 'account') ? socket.data.account : null;
     if (args && args.as === 'account' && !acct) return ack({ ok: false, error: 'Sign in first.', signIn: true });
     const cleanName = acct ? acct.name : guard.cleanText(name, 40);
@@ -723,7 +723,7 @@ io.on('connection', (socket) => {
   socket.on('forward', ({ messageId, targetRoom } = {}, ack) => {
     if (!need(ack)) return;
     if (!writes.take()) return limited(ack);
-    const dst = store.get(String(targetRoom || '').toUpperCase());
+    const dst = store.get(guard.str(targetRoom).toUpperCase());
     if (!dst) return ok(ack)({ ok: false, error: 'Target room not found' });
     const mine = userRooms.get(me.uid) || new Set();
     const linked = me.linkedRooms instanceof Set ? me.linkedRooms : new Set();
@@ -862,14 +862,14 @@ io.on('connection', (socket) => {
   const actor = () => socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
   socket.on('display:list', ({ code } = {}, ack) => {
     ack = ok(ack);
-    const c = String(code || '').toUpperCase();
+    const c = guard.str(code).toUpperCase();
     if (!store.has(c) || !canDisplays('display.control', c)) return ack({ ok: false, error: 'Your account may not drive this hall\'s screens.' });
     const manage = canDisplays('display.manage', c);
     ack({ ok: true, code: c, manage, holding: displays.hallHolding(c), displays: displays.ofHall(c).map((d) => ({ ...Displays.status(d), ...(manage ? { path: displays.path(d) } : {}) })) });
   });
   socket.on('display:take', ({ id, content } = {}, ack) => {
     ack = ok(ack);
-    const d = displays.get(String(id || ''));
+    const d = displays.get(guard.str(id));
     if (!d || !canDisplays('display.control', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
     if (!writes.take()) return limited(ack);
     const c = cleanContent(content);
@@ -883,7 +883,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:identify', ({ id } = {}, ack) => {
     ack = ok(ack);
-    const d = displays.get(String(id || ''));
+    const d = displays.get(guard.str(id));
     if (!d || !canDisplays('display.control', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
     if (!chatter.take()) return limited(ack);
     io.to('display:' + d.id).emit('display:identify', { name: d.name, hall: (store.get(d.hall) || {}).name || d.hall, seconds: 6 });
@@ -891,7 +891,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:create', ({ code, name } = {}, ack) => {
     ack = ok(ack);
-    const c = String(code || '').toUpperCase();
+    const c = guard.str(code).toUpperCase();
     if (!store.has(c) || !canDisplays('display.manage', c)) return ack({ ok: false, error: 'Your account may not add screens to this hall.' });
     if (displays.ofHall(c).length >= 50) return ack({ ok: false, error: 'A hall has at most 50 screens.' });
     const r = displays.create(c, name, actor().name);
@@ -901,7 +901,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:update', ({ id, name, hall } = {}, ack) => {
     ack = ok(ack);
-    const d = displays.get(String(id || ''));
+    const d = displays.get(guard.str(id));
     const to = typeof hall === 'string' && hall ? hall.toUpperCase() : '';
     if (!d || !canDisplays('display.manage', d.hall) || (to && (!store.has(to) || !canDisplays('display.manage', to)))) return ack({ ok: false, error: 'No such screen or hall, or not yours to change.' });
     const from = d.hall;
@@ -913,7 +913,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:rotate', ({ id } = {}, ack) => {
     ack = ok(ack);
-    const d = displays.get(String(id || ''));
+    const d = displays.get(guard.str(id));
     if (!d || !canDisplays('display.manage', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
     const p = displays.rotate(d.id);
     revokeDisplaySockets(d.id, 'This screen\'s link was replaced. Open the new link to show it again.');
@@ -923,7 +923,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:remove', ({ id } = {}, ack) => {
     ack = ok(ack);
-    const d = displays.get(String(id || ''));
+    const d = displays.get(guard.str(id));
     if (!d || !canDisplays('display.manage', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
     revokeDisplaySockets(d.id, 'This screen was removed from AGMessage.');
     displays.remove(d.id);
@@ -933,7 +933,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:hallHolding', ({ code, image } = {}, ack) => {
     ack = ok(ack);
-    const c = String(code || '').toUpperCase();
+    const c = guard.str(code).toUpperCase();
     if (!store.has(c) || !(canDisplays('display.manage', c) || canManageHall())) return ack({ ok: false, error: 'Your account may not set this hall\'s holding image.' });
     const h = cleanContent({ kind: 'holding', image });
     if (h.error) return ack({ ok: false, error: h.error });
@@ -957,9 +957,9 @@ io.on('connection', (socket) => {
   socket.on('nodes:link', ({ id, token, hall, url, name, t: typedKind } = {}, ack) => {
     ack = ok(ack);
     if (!socket.data.isAdmin) return ack({ ok: false, error: 'Linking another show system is the admin\'s.' });
-    if (!/^[A-Za-z0-9_-]{1,40}$/.test(String(id || ''))) return ack({ ok: false, error: 'A node id is the one its hello announces.' });
-    const peer = discovery ? discovery.peers.get(String(id)) : null;
-    const cfg = settings.peerLinks && settings.peerLinks[String(id)];
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(guard.str(id))) return ack({ ok: false, error: 'A node id is the one its hello announces.' });
+    const peer = discovery ? discovery.peers.get(guard.str(id)) : null;
+    const cfg = settings.peerLinks && settings.peerLinks[guard.str(id)];
     // Heard on the bus, linked before, or typed (a venue network that blocks broadcast): its kind and its address.
     const t = (peer && peer.t) || (cfg && cfg.t) || (typeof url === 'string' && url.trim() ? typedKind : '');
     if (!t || !peerlinks.KINDS.has(t)) return ack({ ok: false, error: 'Choose a Patterns or PlayMap that AGMessage hears on the network, or type its kind and address.' });
@@ -970,30 +970,30 @@ io.on('connection', (socket) => {
     if (h && !store.has(h)) return ack({ ok: false, error: 'No such hall.' });
     const sealed = typeof token === 'string' && token.trim() ? secretbox.seal(token.trim().slice(0, 200)) : (cfg && cfg.tokenSealed) || '';
     const next = { t, name: guard.cleanText(name || (peer && peer.name) || (cfg && cfg.name) || t, 60), url: base, tokenSealed: sealed, hall: h };
-    settings.peerLinks = { ...(settings.peerLinks || {}), [String(id)]: next };
+    settings.peerLinks = { ...(settings.peerLinks || {}), [guard.str(id)]: next };
     saveSettings();
-    startPeerLink(String(id), next);
-    audit.write(socket.data.actor || HOST_ACTOR, 'node.link', String(id), t + ' “' + next.name + '” at ' + base + (h ? ' for ' + h : '') + (typeof token === 'string' && token.trim() ? ' (token sealed)' : ''), socket.data.ip);
+    startPeerLink(guard.str(id), next);
+    audit.write(socket.data.actor || HOST_ACTOR, 'node.link', guard.str(id), t + ' “' + next.name + '” at ' + base + (h ? ' for ' + h : '') + (typeof token === 'string' && token.trim() ? ' (token sealed)' : ''), socket.data.ip);
     boardDirty(); nodesChanged();
     ack({ ok: true });
   });
   socket.on('nodes:unlink', ({ id } = {}, ack) => {
     ack = ok(ack);
     if (!socket.data.isAdmin) return ack({ ok: false, error: 'Unlinking another show system is the admin\'s.' });
-    if (!settings.peerLinks || !settings.peerLinks[String(id)]) return ack({ ok: false, error: 'Not linked.' });
-    const was = settings.peerLinks[String(id)];
+    if (!settings.peerLinks || !settings.peerLinks[guard.str(id)]) return ack({ ok: false, error: 'Not linked.' });
+    const was = settings.peerLinks[guard.str(id)];
     const rest = { ...settings.peerLinks };
-    delete rest[String(id)];
+    delete rest[guard.str(id)];
     settings.peerLinks = rest;
     saveSettings();
-    startPeerLink(String(id), null);
-    audit.write(socket.data.actor || HOST_ACTOR, 'node.unlink', String(id), was.t + ' “' + was.name + '” unlinked; its token forgotten', socket.data.ip);
+    startPeerLink(guard.str(id), null);
+    audit.write(socket.data.actor || HOST_ACTOR, 'node.unlink', guard.str(id), was.t + ' “' + was.name + '” unlinked; its token forgotten', socket.data.ip);
     boardDirty(); nodesChanged();
     ack({ ok: true });
   });
   socket.on('nodes:command', async ({ id, line, mode } = {}, ack) => {
     ack = ok(ack);
-    const link = peerLinks.get(String(id || ''));
+    const link = peerLinks.get(guard.str(id));
     if (!link || !mayDriveNode(socket, link)) return ack({ ok: false, error: 'No such link, or not yours to drive.' });
     if (!writes.take()) return limited(ack);
     const text = guard.cleanText(line, 400);
@@ -1030,7 +1030,7 @@ io.on('connection', (socket) => {
   socket.on('help:respond', ({ code, messageId, state } = {}, ack) => {
     ack = ok(ack);
     if (!chatter.take()) return limited(ack);
-    const r = store.get(String(code || (room && room.code) || '').toUpperCase());
+    const r = store.get(guard.str(code || (room && room.code)).toUpperCase());
     const m = r && r.byId.get(messageId);
     if (!m || m.type !== 'help') return ack({ ok: false, error: 'That help request is gone.' });
     const inRoom = room && room.code === r.code && allowed('hall.post');
@@ -1049,7 +1049,7 @@ io.on('connection', (socket) => {
   socket.on('hall:settings', ({ code } = {}, ack) => {
     ack = ok(ack);
     if (!canManageHall()) return ack({ ok: false, error: 'Your account may not set halls up.' });
-    const r = store.get(String(code || '').toUpperCase());
+    const r = store.get(guard.str(code).toUpperCase());
     if (!r) return ack({ ok: false, error: 'No such hall.' });
     const sw = hallStagewatch(r.code) || {};
     const own = hallLinks.get(r.code);
@@ -1064,7 +1064,7 @@ io.on('connection', (socket) => {
     ack = ok(ack);
     if (!canManageHall()) return ack({ ok: false, error: 'Your account may not set halls up.' });
     if (!writes.take()) return limited(ack);
-    const r = store.get(String(code || '').toUpperCase());
+    const r = store.get(guard.str(code).toUpperCase());
     if (!r) return ack({ ok: false, error: 'No such hall.' });
     const changed = [];
     if (typeof name === 'string') {
@@ -1098,9 +1098,9 @@ io.on('connection', (socket) => {
   socket.on('hall:acceptCertificate', ({ code } = {}, ack) => {
     ack = ok(ack);
     if (!canManageHall()) return ack({ ok: false, error: 'Your account may not set halls up.' });
-    const link = hallLinks.get(String(code || '').toUpperCase());
+    const link = hallLinks.get(guard.str(code).toUpperCase());
     if (!link || !link.acceptCertificate()) return ack({ ok: false, error: 'No changed certificate to accept.' });
-    audit.write(socket.data.actor || HOST_ACTOR, 'hall.certificate', String(code), 'accepted a changed Stagewatch certificate', socket.data.ip);
+    audit.write(socket.data.actor || HOST_ACTOR, 'hall.certificate', guard.str(code), 'accepted a changed Stagewatch certificate', socket.data.ip);
     ack({ ok: true });
   });
 
@@ -1192,7 +1192,7 @@ io.on('connection', (socket) => {
   socket.on('admin:linkRoom', ({ socketId, targetRoom } = {}, ack) => {
     if (!admin(ack)) return;
     const target = io.sockets.sockets.get(socketId);
-    const code = String(targetRoom || '').toUpperCase();
+    const code = guard.str(targetRoom).toUpperCase();
     if (!target || !store.has(code)) return ok(ack)({ ok: false, error: 'User or room not found' });
     const u = store.get(target.data.userRoom) && store.get(target.data.userRoom).users.get(socketId);
     if (!u) return ok(ack)({ ok: false, error: 'User not in room' });
@@ -1205,7 +1205,7 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const target = io.sockets.sockets.get(socketId);
     if (!target) return ok(ack)({ ok: false, error: 'User not connected' });
-    const code = String(targetRoom || '').toUpperCase();
+    const code = guard.str(targetRoom).toUpperCase();
     const u = store.get(target.data.userRoom) && store.get(target.data.userRoom).users.get(socketId);
     if (!u || !u.linkedRooms) return ok(ack)({ ok: true });
     u.linkedRooms.delete(code);
@@ -1239,15 +1239,16 @@ io.on('connection', (socket) => {
     if (typeof patch === 'function') { ack = patch; patch = null; }
     if (!admin(ack)) return;
     if (patch && typeof patch === 'object') {
-      if (typeof patch.aiKey === 'string') settings.aiKeySealed = secretbox.seal(patch.aiKey.trim().slice(0, 200));
-      if (typeof patch.stagewatchUrl === 'string') settings.stagewatchUrl = nodes.normaliseBase(patch.stagewatchUrl);
-      if (typeof patch.stagewatchKey === 'string') settings.stagewatchKeySealed = secretbox.seal(patch.stagewatchKey.trim().slice(0, 80));
-      if (typeof patch.stagewatchFingerprint === 'string') settings.stagewatchFingerprint = tlsmod.cleanFingerprint(patch.stagewatchFingerprint);
-      if (typeof patch.requireHttps === 'boolean') settings.requireHttps = patch.requireHttps && !!cert;
-      if (typeof patch.remoteAdmin === 'boolean') settings.remoteAdmin = patch.remoteAdmin;
-      const keys = Object.keys(patch).filter((k) => ['aiKey', 'stagewatchUrl', 'stagewatchKey', 'stagewatchFingerprint', 'requireHttps', 'remoteAdmin', 'newContextToken'].includes(k));
-      if (keys.length) audit.write(socket.data.actor, 'settings', keys.join(','), 'changed ' + keys.map((k) => (/Key$|Token$/.test(k) ? k + ' (sealed)' : k + ' → ' + String(patch[k]).slice(0, 60))).join(', '), socket.data.ip);
-      if (patch.newContextToken === true) delete settings.contextTokenSealed;
+      // Each setting is taken only in its own type; the audit row names exactly what was taken (a secret as sealed).
+      const taken = [];
+      if (typeof patch.aiKey === 'string') { settings.aiKeySealed = secretbox.seal(patch.aiKey.trim().slice(0, 200)); taken.push('aiKey (sealed)'); }
+      if (typeof patch.stagewatchUrl === 'string') { settings.stagewatchUrl = nodes.normaliseBase(patch.stagewatchUrl); taken.push('stagewatchUrl → ' + settings.stagewatchUrl.slice(0, 60)); }
+      if (typeof patch.stagewatchKey === 'string') { settings.stagewatchKeySealed = secretbox.seal(patch.stagewatchKey.trim().slice(0, 80)); taken.push('stagewatchKey (sealed)'); }
+      if (typeof patch.stagewatchFingerprint === 'string') { settings.stagewatchFingerprint = tlsmod.cleanFingerprint(patch.stagewatchFingerprint); taken.push('stagewatchFingerprint → ' + settings.stagewatchFingerprint.slice(0, 60)); }
+      if (typeof patch.requireHttps === 'boolean') { settings.requireHttps = patch.requireHttps && !!cert; taken.push('requireHttps → ' + settings.requireHttps); }
+      if (typeof patch.remoteAdmin === 'boolean') { settings.remoteAdmin = patch.remoteAdmin; taken.push('remoteAdmin → ' + settings.remoteAdmin); }
+      if (patch.newContextToken === true) { delete settings.contextTokenSealed; taken.push('newContextToken (sealed)'); }
+      if (taken.length) audit.write(socket.data.actor, 'settings', taken.map((t) => t.split(' ')[0]).join(','), 'changed ' + taken.join(', '), socket.data.ip);
       saveSettings();
       stageLink.configure(settings.stagewatchUrl, stagewatchKey(), settings.stagewatchFingerprint || '');
     }
@@ -1404,7 +1405,7 @@ function buildMessage(user, payload) {
   if (!payload || typeof payload !== 'object') return null;
   const base = { id: makeMessageId(), at: Date.now(), from: { uid: user.uid, name: user.name, role: user.role, ...(user.acct ? { acct: true } : {}) }, pinned: false, priority: !!payload.priority };
   if (payload.type === 'text') {
-    const text = String(payload.text || '').trim();
+    const text = guard.str(payload.text).trim();
     return text ? { ...base, type: 'text', text: text.slice(0, 4000), ...(payload.aiDraft ? { aiDraft: true } : {}) } : null;
   }
   if (payload.type === 'file') {
@@ -1415,13 +1416,13 @@ function buildMessage(user, payload) {
       ...base, type: 'file', url: payload.url,
       filename: guard.cleanText(payload.filename, 120) || 'file',
       mime: t.mime.split(';')[0],
-      caption: payload.caption ? String(payload.caption).slice(0, 500) : '',
+      caption: guard.str(payload.caption).slice(0, 500),
     };
   }
   if (payload.type === 'help') return board.helpMessage(base, payload, guard.cleanText);
   if (payload.type === 'action') {
-    const text = String(payload.text || '').trim();
-    let options = Array.isArray(payload.options) ? payload.options.map((o) => String(o || '').trim().slice(0, 40)).filter(Boolean).slice(0, 6) : [];
+    const text = guard.str(payload.text).trim();
+    let options = Array.isArray(payload.options) ? payload.options.map((o) => guard.str(o).trim().slice(0, 40)).filter(Boolean).slice(0, 6) : [];
     if (!options.length) options = ['Yes', 'No'];
     return text ? { ...base, type: 'action', text: text.slice(0, 1000), options, responses: [] } : null;
   }
@@ -1626,8 +1627,8 @@ const ranProposals = new Map();   // id -> {ok, words, reported}
  * into when no meeting is open. Returns {ok, words}.
  */
 function runApproved(p) {
-  const m = /^notice\s+(.+)$/i.exec(String(p.line || '').trim());
-  if (!m) return { ok: false, words: 'AGMessage only takes "notice <text>" — not "' + String(p.line || '').slice(0, 60) + '"' };
+  const m = /^notice\s+(.+)$/i.exec(guard.str(p.line).trim());
+  if (!m) return { ok: false, words: 'AGMessage only takes "notice <text>" — not "' + guard.str(p.line).slice(0, 60) + '"' };
   const text = m[1].replace(/^"(.*)"$/, '$1').replace(/\s+/g, ' ').trim().slice(0, 300);
   if (!text) return { ok: false, words: 'an empty notice' };
   const rooms = Array.from(store.rooms.values());

@@ -32,8 +32,15 @@ function mac(secret, text, len = 24) {
  */
 const UNSAFE_TEXT = /[\p{Cc}\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 function cleanText(s, max = 200) {
-  return String(s == null ? '' : s).replace(UNSAFE_TEXT, '').trim().slice(0, max);
+  return str(s).replace(UNSAFE_TEXT, '').trim().slice(0, max);
 }
+
+/**
+ * A value a client sent, as a string: a string as it is, a finite number in digits, anything else (an object, a list,
+ * null, true) the empty string. String() is never called on client JSON: an object whose toString is not a function
+ * makes it throw.
+ */
+const str = (v) => (typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
 
 /** The value of one cookie, or null. A parser, not a pattern built from the name. */
 function readCookie(header, name) {
@@ -196,6 +203,6 @@ function validUploadUrl(url) {
 
 module.exports = {
   loadSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
-  Bucket, Lockout, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP,
+  Bucket, Lockout, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, str,
   UPLOAD_TYPES, uploadType, validUploadUrl, extOf,
 };
