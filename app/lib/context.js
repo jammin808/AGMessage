@@ -146,8 +146,9 @@ function showBrief(stage, peers) {
 
 /**
  * The show network one hall's AI is told (pure): that hall's Stagewatch, and the Patterns and PlayMap nodes linked for
- * that hall or for every hall — never one linked for another hall, neither as linked nor as heard on the network. The
- * rule the context posted to each hall's Stagewatch keeps.
+ * that hall or for every hall — never one linked for another hall, neither as linked nor as heard on the network. (The
+ * context posted to a hall's Stagewatch leaves out such a node's own light and headline too, and names it at most as
+ * heard on the network.)
  * @param {string} code the hall
  * @param {{status:string, view:object|null, context:object|null}} stage the Stagewatch link that hall follows
  * @param {Array<{id:string, hall:string}>} links every linked node, as its link's view() says it
