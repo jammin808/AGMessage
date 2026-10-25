@@ -167,6 +167,37 @@ test('halls end to end: two Stagewatches, the board, help', async (t) => {
     assert.match(await tr.text(), /Help — Sound:<\/strong> Radio mic 3 has no signal[\s\S]*resolved — Alex/);
   });
 
+  await t.test('one board tick for every watcher: each gets only the halls it may see, and may answer only where it may post', async () => {
+    const pm = await connect(base, pat); sockets.push(pm);
+    const tech = await connect(base, sam); sockets.push(tech);
+    await emit(pm, 'board:watch', {});
+    await emit(tech, 'board:watch', {});
+    const seenByTech = [];
+    tech.on('board', (b) => seenByTech.push(b));
+    const next = (s, ok) => new Promise((resolve) => { const on = (b) => { if (ok(b)) { s.off('board', on); resolve(b); } }; s.on('board', on); });
+
+    const bAsked = next(pm, (b) => b.help.some((h) => h.code === hallB));
+    const hb = await emit(crewB, 'message', { type: 'help', category: 'Vision', text: 'Screen 2 is dark' });
+    assert.ok(hb.ok);
+    const pmB = await bAsked;
+    assert.deepEqual(pmB.help.filter((h) => h.code === hallB).map((h) => [h.text, h.canRespond]), [['Screen 2 is dark', true]]);
+
+    const aAsked = (s) => next(s, (b) => b.help.some((h) => h.code === hallA));
+    const both = Promise.all([aAsked(pm), aAsked(tech)]);
+    const ha = await emit(crewA, 'message', { type: 'help', category: 'Sound', text: 'Lectern mic hum' });
+    assert.ok(ha.ok);
+    const [pmA, techA] = await both;
+    assert.deepEqual(techA.help.map((h) => [h.code, h.text, h.canRespond]), [[hallA, 'Lectern mic hum', true]], 'the tech answers in their own hall');
+    assert.ok(seenByTech.length >= 1 && seenByTech.every((b) => b.halls.every((h) => h.code === hallA) && b.help.every((h) => h.code === hallA)), 'nothing of hall B ever reached the tech');
+    const rowOf = (b) => { const { nodes, at, stage, ...row } = b.halls.find((h) => h.code === hallA); return row; };
+    assert.deepEqual(rowOf(techA), rowOf(pmA), 'hall A\'s row is the same for both');
+
+    const cleared = Promise.all([next(pm, (b) => !b.help.length), next(tech, (b) => !b.help.length)]);
+    assert.ok((await emit(crewA, 'help:respond', { messageId: ha.id, state: 'resolved' })).ok);
+    assert.ok((await emit(crewB, 'help:respond', { messageId: hb.id, state: 'resolved' })).ok);
+    await cleared;
+  });
+
   await t.test('a hall back on the default: its own link stops and its key is forgotten', async () => {
     assert.ok((await emit(ctl, 'hall:configure', { code: hallB, stagewatchUrl: '' })).ok);
     await until(() => !swB.connected, 6000, 'hall B\'s link closed');
