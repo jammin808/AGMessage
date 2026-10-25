@@ -119,6 +119,7 @@ function rejoin() {
     if (res.identity) { IDENTITY = res.identity; try { localStorage.setItem('agm.id', IDENTITY); } catch { /* private mode: identity lives for this tab only */ } }
     MY_UID = res.uid || MY_UID;
     UPLOAD_TOKEN = res.uploadToken || '';
+    const flagsWere = CAN_STAGE + '|' + CAN_PROPOSE;
     CAN_STAGE = !!res.canSendToStage;
     CAN_PROPOSE = !!res.canPropose;
     STAGE_KEY = stageKey(res.stage);
@@ -136,6 +137,9 @@ function rejoin() {
     if (res.roomName) setRoomTitle(res.roomName);
     if (Array.isArray(res.ops)) {
       for (const op of res.ops) applyOp(op);       // just the gap
+      // The hall's Stagewatch may have come or gone while the page was away: the messages already drawn offer what it
+      // offers now.
+      if (flagsWere !== CAN_STAGE + '|' + CAN_PROPOSE) refreshProposeButtons();
     } else {
       renderHistory(res.history || []);
     }
