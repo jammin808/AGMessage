@@ -8,6 +8,7 @@
  */
 
 const LIGHTS = ['grey', 'green', 'amber', 'red'];
+const MAX_PEERS = 32;   // one-hop peers in a context
 const worst = (lights) => lights.reduce((w, l) => (LIGHTS.indexOf(l) > LIGHTS.indexOf(w) ? l : w), 'green');
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
 
@@ -79,8 +80,10 @@ function buildContext(f) {
   items.push({ id: 'ai', kind: 'assistant', label: 'AI drafts', light: f.aiOn ? 'green' : 'grey', state: f.aiOn ? 'on (drafts only, a person sends)' : 'off — everything else works offline' });
   items.push({ id: 'tunnel', kind: 'link', label: 'Remote access (Cloudflare)', light: f.tunnel ? 'green' : 'grey', state: f.tunnel ? 'on' : 'off (venue network only)' });
 
-  // Peers, one hop: what each says about itself (Stagewatch's own context when we hold it).
-  const peers = (f.peers || []).map((p) => {
+  // Peers, one hop: what each says about itself (Stagewatch's own context when we hold it). At most MAX_PEERS, the
+  // live ones first: the table is fed by unauthenticated hellos, and this goes to every linked Stagewatch.
+  const heard = f.peers || [];
+  const peers = heard.filter((p) => p.status === 'live').concat(heard.filter((p) => p.status !== 'live')).slice(0, MAX_PEERS).map((p) => {
     const fromCtx = st.context && st.context.node && st.context.node.id === p.id ? st.context
       : f.peerContexts && f.peerContexts[p.id] ? f.peerContexts[p.id] : null;   // a linked Patterns or PlayMap's own words
     return {
