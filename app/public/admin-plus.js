@@ -22,7 +22,8 @@
       $('swKey').placeholder = s.stagewatchKeySet ? '•••••• (saved — type to replace)' : 'Stagewatch node key (swk_…)';
       const clock = s.health && s.health.clock;
       $('swStatus').textContent = s.stagewatchUrl ? 'Stagewatch: ' + s.stage + (clock && clock.apart ? ' · CLOCKS APART (' + (clock.offsetMs / 1000).toFixed(1) + ' s)' : '') : '';
-      $('swStatus').classList.toggle('bad', !!(clock && clock.apart));
+      const keyState = s.health && s.health.stageKey ? s.health.stageKey.state : '';
+      $('swStatus').classList.toggle('bad', !!(clock && clock.apart) || keyState === 'refused');
       const ctx = s.stageContext;
       $('swContext').hidden = !ctx;
       if (ctx) $('swContext').textContent = 'Stagewatch says: ' + (ctx.headline || '') + ((ctx.peers || []).length ? ' · it hears ' + ctx.peers.map((p) => p.t + ' “' + (p.name || '') + '”').join(', ') : '');
@@ -49,7 +50,7 @@
     $('swAccept').hidden = !l.changed;
     $('swTls').textContent = !l.on ? 'Link to Stagewatch: plain HTTP (it announces no certificate)'
       : l.problem ? '⚠ ' + l.problem
-      : 'Link to Stagewatch: encrypted ✓ — certificate ' + pretty(l.fp).slice(0, 23) + '… ' + (l.pinned ? '(pinned)' : '(will be pinned on first use)');
+      : 'Link to Stagewatch: encrypted ✓ — certificate ' + pretty(l.fp).slice(0, 23) + '… ' + (l.pinned ? '(pinned)' : '(pinned once Stagewatch accepts the key)');
     $('swTls').classList.toggle('bad', !!l.problem);
     $('deskLine').textContent = t.desk ? 'Show desk: Stagewatch keeps the shared approval queue — the research team can propose stage messages (📝), and approved "notice" proposals for this AGMessage are shown in every meeting.' : '';
   }

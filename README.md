@@ -23,8 +23,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   and a crash or power cut loses nothing. A watchdog restarts the server after a crash or a hang.
 - **The show network (Show Bus 1.2).** Send to Stagewatch — straight to the speaker's screen, or to the operator to
   approve and pass on to the confidence monitor, a moderator, backstage or interpreter screen, a department, or keep.
-  Patterns and PlayMap linked: their state on the board, and the verbs they list proposed to the show desk. Their
-  pairing token goes only to this laptop or over HTTPS to a certificate a person confirmed.
+  A Stagewatch link is connected, and its certificate pinned, only once Stagewatch accepts AGMessage's key; a refused
+  key says so on every page and never locks the laptop out. Patterns and PlayMap linked: their state on the board, and
+  the verbs they list proposed to the show desk. Their pairing token goes only to this laptop or over HTTPS to a
+  certificate a person confirmed.
   [docs/NODES.md](docs/NODES.md)
 - **AI drafts (optional, Claude).** Answers for the backstage team from the thread and the document on stage, buttons
   for action prompts, the minutes — always a draft a person edits and sends. Everything else works offline.

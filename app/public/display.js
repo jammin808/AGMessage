@@ -160,10 +160,11 @@
   });
 
   // The countdown is Stagewatch's own frame: its words, its colour. With the link lost it never shows a confident stale
-  // time: the digits dim to --:-- until frames come back (Show Bus: silence is never "fine").
+  // time: the digits dim to --:-- until frames come back (Show Bus: silence is never "fine"), and while Stagewatch has
+  // not accepted AGMessage's key, or refused it (a link without a key views the public frame).
   function renderCountdown() {
     const box = $('countdown');
-    const live = !!(stage && stage.status === 'connected' && !stage.stale && linkUp);
+    const live = !!(stage && (stage.status === 'connected' || stage.status === 'viewing') && !stage.stale && linkUp);
     box.classList.toggle('stale', !live);
     $('cdTime').textContent = live && stage.text ? stage.text : '--:--';
     $('cdTime').style.color = live && stage.color ? stage.color : '';

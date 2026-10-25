@@ -162,6 +162,7 @@ function healthFacts() {
     loopMs: loopRing.stats(),
     stageRttMs: stageLink.rtt.stats(),
     stage: stageLink.status,
+    stageKey: stageLink.keyFacts(),
     clock: stageLink.clockInfo(),
     tls: tlsFacts(),
     saves: {
@@ -784,7 +785,7 @@ io.on('connection', (socket) => {
       ...(ops ? { ops } : { history: r.messages }),
       users: roomUserSummary(r, { links: socket.data.isAdmin }),
       ai: !!aiKey(), stage: stagePayload(linkFor(code)),
-      canSendToStage: !!(linkFor(code).base && linkFor(code).key) && allowed('stage.send'),
+      canSendToStage: !!(linkFor(code).base && linkFor(code).key && linkFor(code).keyState !== 'refused') && allowed('stage.send'),
       canPropose: !!(linkFor(code).desk && linkFor(code).key) && allowed('stage.send'),
       account: acct ? { username: acct.username, name: acct.name, role: acct.role, roleLabel: rbac.ROLES[acct.role].label } : null,
       seen: seenFor(r),
@@ -1034,8 +1035,8 @@ io.on('connection', (socket) => {
     if (!need(ack)) return;
     const link = linkFor(room.code);
     ack({
-      ok: true, linked: link.linked, title: (link.context && link.context.node && link.context.node.name) || '',
-      canSend: !!(link.base && link.key) && allowed('stage.send'), canPropose: !!(link.desk && link.key) && allowed('stage.send'),
+      ok: true, linked: link.linked, key: link.keyState, title: (link.context && link.context.node && link.context.node.name) || '',
+      canSend: !!(link.base && link.key && link.keyState !== 'refused') && allowed('stage.send'), canPropose: !!(link.desk && link.key) && allowed('stage.send'),
       targets: stagelines.destinations(link.departments),
     });
   });
@@ -1275,7 +1276,8 @@ io.on('connection', (socket) => {
     const { link: desk, desk: hasDesk } = deskFor(link);
     if (!hasDesk) {
       const where = link.hall ? ((store.get(link.hall) || {}).name || link.hall) + '\'s Stagewatch' : 'The default Stagewatch';
-      return ack({ ok: false, error: where + (desk.linked ? ' keeps no show desk' : desk.base ? ' is ' + desk.status : ' is not linked') + ' — not proposed.' });
+      const held = desk.base && desk.key ? desk.keyHeld('proposed') : '';
+      return ack({ ok: false, error: held ? where + ': ' + held : where + (desk.linked ? ' keeps no show desk' : desk.base ? ' is ' + desk.status : ' is not linked') + ' — not proposed.' });
     }
     const r = await desk.propose({
       from: { t: 'messenger', id: settings.nodeId, name: 'AGMessage' },
@@ -1323,7 +1325,7 @@ io.on('connection', (socket) => {
     const own = hallLinks.get(r.code);
     ack({
       ok: true, code: r.code, name: r.name || '',
-      stagewatch: { url: sw.url || '', keySet: !!secretbox.open(sw.keySealed), fp: sw.fp || '', status: own ? own.status : null, tls: own ? own.tlsState : null },
+      stagewatch: { url: sw.url || '', keySet: !!secretbox.open(sw.keySealed), fp: sw.fp || '', status: own ? own.status : null, tls: own ? own.tlsState : null, key: own ? own.keyFacts() : null },
       defaultStagewatch: settings.stagewatchUrl || '',
       stagewatches: discovery ? discovery.list().filter((p) => p.t === 'main') : [],
     });
@@ -1646,7 +1648,7 @@ function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : [];
 /** What a hall's AI is told of the show network: its Stagewatch, and the nodes of that hall and of every hall in their own words (lib/context.js hallBrief). */
 function briefFor(code) {
   const link = linkFor(code);
-  return hallBrief(code, { status: link.status, view: link.view, context: link.context }, Array.from(peerLinks.values()).map((l) => l.view()), discovery ? discovery.list() : []);
+  return hallBrief(code, { status: link.status, key: link.keyState, keyWords: link.keyWords, view: link.view, context: link.context }, Array.from(peerLinks.values()).map((l) => l.view()), discovery ? discovery.list() : []);
 }
 
 // ---------------------------------------------------------------- displays
@@ -1879,6 +1881,15 @@ function makeLink(id) {
     nodeId: settings.nodeId,
     onState: (view) => onStageState(link, view),
     onStatus: (status) => noteEvent('Stagewatch link' + (id === 'default' ? '' : ' of a hall') + ' ' + (/^CERTIFICATE CHANGED/.test(status) ? 'refused: CERTIFICATE CHANGED' : status), link),
+    // Stagewatch's verdict on the key, once per change: never the key, and Stagewatch's words already cut and redacted.
+    onKey: (k) => {
+      const seen = k.state + '|' + k.words;
+      if ((k.state !== 'accepted' && k.state !== 'refused') || seen === link.keyAudited) return;   // a redial accepted again is no change
+      link.keyAudited = seen;
+      audit.write({ t: 'system' }, 'stagewatch.key', id === 'default' ? 'default' : id, k.state === 'accepted'
+        ? 'Stagewatch accepted the key (' + (k.via === 'auth' ? 'its auth message' : 'an authenticated read') + ')' + (link.tlsState.on && link.tlsState.pinned ? ', certificate pinned' : '')
+        : 'Stagewatch refused the ' + (link.key ? 'key' : 'view') + ': ' + k.words);
+    },
     findPeer: (t, host, port) => (discovery ? discovery.find(t, host, port) : null),
     pins,
     onPins: () => { settings.tlsPins = pins.toJSON(); saveSettings(); },
@@ -1894,7 +1905,7 @@ const roomsUsing = (link) => Array.from(store.rooms.values()).filter((r) => link
 /** What a page shows of a link: the frame (or nothing yet), its state and whether it keeps a show desk. */
 function stagePayload(link) {
   if (!link.base) return null;
-  return link.view ? { ...link.view, status: link.status, desk: link.desk } : { status: link.status, desk: link.desk };
+  return link.view ? { ...link.view, status: link.status, desk: link.desk, key: link.keyState } : { status: link.status, desk: link.desk, key: link.keyState };
 }
 /** A Stagewatch the admin removed: its pins go, unless another link still follows that address (its pin guards that one too). */
 function forgetStagewatchPins(link) {
@@ -2171,8 +2182,8 @@ function currentContext(link) {
   return buildContext({
     node: { id: settings.nodeId, name: 'AGMessage' },
     rooms,
-    stage: { status: own.status, view: own.view, clock: own.clockInfo(), context: own.context },
-    halls: link ? [] : Array.from(hallLinks.values()).map((l) => ({ status: l.status, view: l.view, clock: l.clockInfo(), context: l.context })),
+    stage: { status: own.status, key: own.keyState, keyWords: own.keyWords, view: own.view, clock: own.clockInfo(), context: own.context },
+    halls: link ? [] : Array.from(hallLinks.values()).map((l) => ({ status: l.status, key: l.keyState, keyWords: l.keyWords, view: l.view, clock: l.clockInfo(), context: l.context })),
     help: rooms.reduce((n, r) => n + board.openHelp(r).length, 0),
     peerContexts: Object.fromEntries(Array.from(peerLinks.values()).filter((l) => l.status === 'live' && l.context && (!link || !l.hall || codes.has(l.hall))).map((l) => [l.node.id, { light: l.context.light, headline: l.context.headline }])),
     peers: discovery ? discovery.list() : [],

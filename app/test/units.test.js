@@ -197,7 +197,7 @@ test('Stagewatch link: live frames, stale on silence, send to stage with the key
   const posts = [];
   const srv = http.createServer((req, res) => {
     posts.push({ url: req.url, auth: req.headers.authorization, method: req.method });
-    res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
+    res.writeHead(200, { 'content-type': 'application/json' }); res.end(req.url === '/api/context' ? '{"v":1,"node":{"t":"main","id":"sw1","name":"Keynote"}}' : '{"ok":true}');
   });
   const wss = new WebSocketServer({ server: srv, path: '/ws' });
   const conns = [];
@@ -209,7 +209,8 @@ test('Stagewatch link: live frames, stale on silence, send to stage with the key
   try {
     link.configure('127.0.0.1:' + port, 'swk_testkey');
     for (let i = 0; i < 50 && !states.some((s) => s.v && s.v.text === '5 MIN'); i++) await new Promise((r) => setTimeout(r, 50));
-    const live = states.find((s) => s.v && s.v.text === '5 MIN');
+    for (let i = 0; i < 50 && !states.some((s) => s.v && s.v.text === '5 MIN' && s.status === 'connected'); i++) await new Promise((r) => setTimeout(r, 50));
+    const live = states.find((s) => s.v && s.v.text === '5 MIN' && s.status === 'connected');
     assert.ok(live, 'got a live frame');
     assert.equal(live.status, 'connected');
     assert.ok(!/pin=|swk_/.test(conns[0].url), 'the key is never in the URL');
@@ -255,7 +256,7 @@ test('C21: a Stagewatch gone silent is dropped at 12 s quiet and redialled at on
   // A real socket whose peer stops reading (a laptop that lost power or Wi-Fi: TCP half-open).
   const http = require('http');
   const { WebSocketServer } = require('ws');
-  const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); });
+  const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(req.url === '/api/context' ? '{"v":1,"node":{"t":"main","id":"sw1","name":"Keynote"}}' : '{}'); });
   const wss = new WebSocketServer({ server: srv, path: '/ws' });
   let dials = 0;
   wss.on('connection', (c) => {

@@ -141,6 +141,8 @@ one shape:
   file outside `data/`), sends it in a header — never `?pin=` in a WebSocket URL — and asks for a `node`-scope key.
   It reads Stagewatch's `/ws` as itself: `?node=<its id>&t=messenger&cid=<its id>`, each key once (Stagewatch keeps the
   last value of a repeated key), the id from its hello and context — never a shared name, a per-hall id or a secret.
+  It is linked only once Stagewatch accepted the key (2.18's first `{"type":"auth","ok":true}` on the socket, or a 200
+  to an authenticated read on 2.16, whose frames go to any key); a refused key is asked again only after a minute.
   A Patterns' or PlayMap's pairing token it holds the same way, and sends only to a loopback address or over TLS to a
   certificate pinned for that node or confirmed by a person (at least 16 characters of its fingerprint typed); it never
   drives them with it — its lines are proposals (§11) — until they issue it a scoped key.
@@ -178,7 +180,9 @@ Show data and keys cross the local network; from 1.2 every web endpoint can be r
   handshake is TLS); Patterns and AGMessage may use the same trick or a second port, as `ports.https` says.
 - **App-to-app: pinned, not trusted by name.** A client that connects to another node over TLS checks the server's
   certificate fingerprint, never its name or a certificate authority: the fingerprint from the node's hello (or typed by
-  the operator) is pinned per node id on first successful authenticated use, and a later change is refused with
+  the operator) is pinned per node id on first successful authenticated use — for a Stagewatch link, Stagewatch accepting
+  the key (its auth message, or a 200 to an authenticated read; frames are not, since Stagewatch sends them to anyone
+  when no viewing code is set, and a link without a key never pins) — and a later change is refused with
   "CERTIFICATE CHANGED" until the operator accepts it (as SSH does). The hello is unauthenticated, so the pin — not the
   hello — is the trust. AGMessage's links to a Patterns or PlayMap on another machine trust no hello and no first use: the
   certificate is pinned only once a person types the start of its fingerprint from the node's own screen (§7).

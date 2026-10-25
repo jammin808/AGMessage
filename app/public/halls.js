@@ -39,11 +39,15 @@
     over: { mark: '■', words: 'over time' },
     idle: { mark: '○', words: 'not running' },
     stale: { mark: '?', words: 'link lost — last known' },
+    checking: { mark: '…', words: 'checking Stagewatch\'s key' },
+    refused: { mark: '✕', words: 'Stagewatch refused the key' },
     none: { mark: '○', words: 'no Stagewatch linked' },
   };
   function stageState(st) {
     if (!st || !st.status || st.status === 'off') return 'none';
-    if (st.status !== 'connected' || st.stale) return 'stale';
+    if (st.key === 'refused') return 'refused';
+    if (st.status === 'checking key') return 'checking';
+    if ((st.status !== 'connected' && st.status !== 'viewing') || st.stale) return 'stale';
     if (Number.isFinite(st.seconds) && st.seconds < 0) return 'over';
     if (st.state === 'running') return 'running';
     if (st.state === 'paused') return 'paused';
@@ -82,7 +86,7 @@
         '<span class="hall-code" title="Crew without an account join with this code">' + esc(h.code) + '</span>' +
       '</a>' +
       '<div class="hall-clock" title="' + esc(STATE[state].words) + '">' +
-        '<span class="hall-time" style="' + (st && st.color && state !== 'stale' ? 'color:' + esc(st.color) : '') + '">' + timeHtml + '</span>' +
+        '<span class="hall-time" style="' + (st && st.color && !['stale', 'checking', 'refused'].includes(state) ? 'color:' + esc(st.color) : '') + '">' + timeHtml + '</span>' +
         '<span class="hall-state"><span aria-hidden="true">' + esc(STATE[state].mark) + '</span> ' + esc(STATE[state].words) + (titleHtml ? ' — ' + titleHtml : '') + '</span>' +
       '</div>' +
       '<div class="hall-last">' + (l.last ? '<strong>' + esc(l.last.name) + '</strong> ' + esc(l.last.text) + ' <time>' + esc(AGM.ago(l.last.at)) + '</time>' : '<span class="muted">No messages yet</span>') + '</div>' +
@@ -114,7 +118,8 @@
       $('setupFp').value = r.stagewatch.fp;
       $('setupDefault').textContent = r.defaultStagewatch ? 'Leave it empty to follow the default Stagewatch (' + r.defaultStagewatch + ').' : 'Leave it empty for no Stagewatch.';
       const status = r.stagewatch.status;
-      $('setupStatus').textContent = status ? 'Its own link: ' + status + (r.stagewatch.tls && r.stagewatch.tls.changed ? ' — CERTIFICATE CHANGED' : '') : '';
+      $('setupStatus').textContent = status ? 'Its own link: ' + status + (r.stagewatch.tls && r.stagewatch.tls.changed ? ' — CERTIFICATE CHANGED' : '')
+        + (r.stagewatch.key && r.stagewatch.key.state === 'refused' ? ' — make a node key in Stagewatch (Settings → Remote → API keys) and enter it here' : '') : '';
       $('setupAccept').hidden = !(r.stagewatch.tls && r.stagewatch.tls.changed);
       const list = $('setupHeard');
       list.textContent = '';

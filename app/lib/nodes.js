@@ -36,6 +36,11 @@ const GONE_MS = 12000;
 const MAX_PEERS = 256;          // a venue's show network is tens of nodes
 const MAX_PER_ADDRESS = 8;      // one machine runs a few nodes (Stagewatch, its Slides agents, Patterns, PlayMap…)
 const CHANGE_MS = 500;          // the table's change is told at most this often, latest wins
+// Stagewatch locks an address out for the rest of a minute after 5 wrong keys or PINs from it (WebServer.cs Authorize):
+// a key it refused is tried again only after that minute, so a wrong key never locks out this machine's other links.
+const REFUSED_RETRY_MS = 61_000;
+/** Stagewatch's words for a refusal, as a status may show them: plain text, short, and never a key. */
+const refusalWords = (w) => (typeof w === 'string' ? w : '').replace(/\p{Cc}/gu, ' ').replace(/swk_\S*/g, 'swk_…').replace(/\s+/g, ' ').trim().slice(0, 120);
 // Every kind on the bus: Stagewatch (main), its Slides agents, Patterns, PlayMap (Show Bus 1.3 proposal) and other messengers.
 const KINDS = new Set(['main', 'agent', 'patterns', 'playmap', 'messenger']);
 // What this node is on the bus: its hello's t, and the t its Stagewatch links announce on /ws.
@@ -261,7 +266,7 @@ class StagewatchLink {
    * @param {object} [o.pins] a tls.PinStore
    * @param {()=>void} [o.onPins] the pins changed (persist them)
    */
-  constructor({ nodeId, onState, onStatus, onContext, findPeer, pins, onPins } = {}) {
+  constructor({ nodeId, onState, onStatus, onContext, onKey, findPeer, pins, onPins, refusedRetryMs = REFUSED_RETRY_MS } = {}) {
     // Every link of this node dials as this node: no link without the id its hello, context and desk use.
     if (!isNodeId(nodeId)) throw new TypeError('a Stagewatch link needs this node\'s Show Bus id');
     this.nodeId = nodeId;
@@ -269,7 +274,18 @@ class StagewatchLink {
     this.findPeer = findPeer || (() => null);
     this.pins = pins || new tlsmod.PinStore();
     this.onPins = onPins || (() => {});
+    this.onKey = onKey || (() => {});
+    this.refusedRetryMs = refusedRetryMs;
     this.base = ''; this.key = ''; this.fingerprint = '';
+    // Whether Stagewatch accepted the key: 'none' (no key: the link only views), 'checking', 'accepted' (its auth message
+    // said ok, or an authenticated request succeeded), 'refused' (with its words). Only an accepted key makes the link
+    // connected and confirms a first-use pin; each socket earns its own verdict.
+    this.keyState = 'none'; this.keyWords = ''; this.keyVia = ''; this.keyNode = ''; this.keyAt = 0;
+    this._probing = null;
+    this.refusals = 0;                // counts refusals: an open that was resolving when one came never dials
+    this.acceptances = 0;             // counts acceptances: a 401 to a request made before the latest one refuses nothing
+    this.heldView = null;             // the newest frame while a refused key is checked again, shown once it is accepted
+    this.redial = null;               // the one pending redial: the latest reason to wait sets when it fires
     this.endpoint = null;             // {base, tls: options|null, fp, nodeKey} once resolved
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
     this.desk = false;                // Stagewatch answers /api/proposals (Show Bus §11)
@@ -297,14 +313,71 @@ class StagewatchLink {
     if (b === this.base && k === this.key && f === this.fingerprint) return;
     if (b !== this.base) { this.generation = ++generations; this.lastSeq = null; }
     this.base = b; this.key = k; this.fingerprint = f;
-    this._close();
+    this._close(); this._cancelRedial();
     this.delay = 500;
     this.clock.reset();
     this.context = null; this.departments = [];
     this.endpoint = null;
     this.desk = false; this.deskCheckedAt = 0;
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
+    this._resetKey();
     if (this.base) this._open(); else this._set('off', null);
+  }
+
+  _resetKey() { this.keyState = this.key ? 'checking' : 'none'; this.keyWords = ''; this.keyVia = ''; this.keyNode = ''; this.keyAt = 0; this.heldView = null; }
+  /** The status of a socket whose frames are fresh: connected only with an accepted key. */
+  _liveStatus() { return this.keyState === 'accepted' ? 'connected' : this.keyState === 'none' ? 'viewing' : 'checking key'; }
+  /** The key's verdict as every reader shows it (never the key). */
+  keyFacts() { return { state: this.keyState, words: this.keyWords, via: this.keyVia, node: this.keyNode, at: this.keyAt }; }
+
+  /** Stagewatch accepted the key: the link is connected, and a certificate used for the first time is pinned. */
+  _accept(via, node) {
+    if (!this.key || this.keyState === 'accepted') return;   // no key, nothing authenticated: a keyless link never pins
+    this.acceptances++;
+    this.keyState = 'accepted'; this.keyVia = via; this.keyNode = typeof node === 'string' ? refusalWords(node).slice(0, 40) : ''; this.keyWords = ''; this.keyAt = Date.now();
+    this.delay = 500;
+    this._confirmPin();
+    this._set(this.status === 'stale' ? 'stale' : 'connected', this.view || this.heldView);
+    this.heldView = null;
+    this.onKey(this.keyFacts());
+    if (via === 'auth') this.fetchContext();
+  }
+
+  /** Stagewatch refused the key (or a keyless link's view): nothing more is read or sent; tried again after the lockout minute. */
+  _refuse(words) {
+    const w = refusalWords(words) || 'the key or the viewing code';
+    const changed = this.keyState !== 'refused' || this.keyWords !== w;
+    this.keyState = 'refused'; this.keyWords = w; this.keyVia = ''; this.keyNode = ''; this.keyAt = Date.now();
+    this.refusals++; this.heldView = null;
+    this._close(); this._probing = null;
+    // What a refused key read is not shown or quoted, and the desk is asked again after the next acceptance.
+    this.context = null; this.desk = false; this.deskCheckedAt = 0;
+    this._set((this.key ? 'key refused: ' : 'refused: ') + w, null);
+    if (changed) this.onKey(this.keyFacts());
+    this._retry(this.refusedRetryMs);
+  }
+
+  /** Stagewatch 2.16 says nothing on the socket: one authenticated read (its context) is the key's verdict. */
+  _probe(ws) {
+    if (this._probing === ws || !this.key || this.keyState === 'accepted') return;
+    this._probing = ws;
+    const again = (ms) => setTimeout(() => { if (this.ws === ws && this.keyState !== 'accepted') this._probe(ws); }, ms).unref();
+    this._call('/api/context', { timeoutMs: 3000 }).then((res) => {
+      if (this._probing === ws) this._probing = null;
+      if (this.ws !== ws) return;   // that socket is gone: its answer decides nothing
+      const j = res.body;
+      if (res.status === 200 && j && j.v === 1 && j.node) { this._takeContext(j); this._accept('request'); return; }
+      if (res.status === 401 || res.status === 403) { this._refuse(j && j.error); return; }
+      // Not a verdict (404 in Stagewatch's first second, 429, 5xx): still checking, asked again while this socket lives.
+      this.keyWords = 'Stagewatch answered ' + res.status;
+      const wait = Number(res.headers && res.headers['retry-after']);
+      again(res.status === 429 && Number.isFinite(wait) ? Math.min(60, Math.max(1, wait)) * 1000 : jitter(this.delay));
+    }, (e) => {
+      if (this._probing === ws) this._probing = null;
+      if (this.ws !== ws) return;
+      this.keyWords = 'Stagewatch did not answer: ' + (e && e.message ? e.message.slice(0, 60) : '');
+      again(jitter(this.delay));
+    });
   }
 
   /**
@@ -336,7 +409,7 @@ class StagewatchLink {
     return { base: 'https://' + u.hostname + ':' + tport, tls: tlsmod.pinnedTlsOptions(cert.pem, cert.fp), fp: cert.fp, nodeKey, keys };
   }
 
-  /** The first authenticated success over TLS pins the certificate (trust on first use), under every key the link checks. */
+  /** Stagewatch accepting the key over TLS pins the certificate (trust on first authenticated use), under every key the link checks. */
   _confirmPin() {
     const e = this.endpoint;
     if (!e || !e.tls) return;
@@ -352,7 +425,8 @@ class StagewatchLink {
     for (const k of s.keys || [s.nodeKey]) this.pins.accept(k, s.fp);
     this.onPins();
     this.tlsState.problem = ''; this.tlsState.changed = false;
-    this._close(); this.endpoint = null; this.delay = 500;
+    this._close(); this._cancelRedial(); this.endpoint = null; this.delay = 500;
+    this._resetKey();
     if (this.base) this._open();
     return true;
   }
@@ -375,7 +449,12 @@ class StagewatchLink {
   /** One HTTP call to Stagewatch on the resolved endpoint (pinned when TLS). */
   async _call(path, { method = 'GET', headers = {}, body, timeoutMs = 4000 } = {}) {
     if (!this.endpoint) throw new Error('not connected');
-    return tlsmod.request(this.endpoint.base + path, { method, headers: this._headers(headers), body, timeoutMs, tls: this.endpoint.tls });
+    const accepted = this.keyState === 'accepted' ? this.acceptances : -1;
+    const res = await tlsmod.request(this.endpoint.base + path, { method, headers: this._headers(headers), body, timeoutMs, tls: this.endpoint.tls });
+    // 401 is Stagewatch refusing the key itself (unknown, revoked, the PIN, or this address locked out): never a link.
+    // Only for the key the request carried, accepted then and still: a request from before a new key decides nothing.
+    if (res.status === 401 && this.keyState === 'accepted' && this.acceptances === accepted) this._refuse(res.body && res.body.error);
+    return res;
   }
 
   get linked() { return this.status === 'connected'; }
@@ -396,10 +475,12 @@ class StagewatchLink {
   _open() {
     if (this.status === 'off') this._set('connecting', this.view);
     const base = this.base;
+    const refusals = this.refusals;
     this._opening = true;
     this._resolve().then((ep) => {
       this._opening = false;
-      if (this.base !== base || this.ws) return;
+      // Pointed elsewhere, already open, or the key refused while this resolved (its hold's redial opens again).
+      if (this.base !== base || this.ws || this.refusals !== refusals) return;
       if (ep === null) { this._set(this.tlsState.problem || 'certificate refused', null); this._retry(10_000); return; }
       if (ep === undefined) { this._retry(); return; }
       this.endpoint = ep;
@@ -413,20 +494,38 @@ class StagewatchLink {
     // The key rides in the Authorization header, never in the URL (Show Bus §7); over TLS only to the pinned certificate.
     try { ws = new WebSocket(url, { headers: this._headers(), handshakeTimeout: 5000, ...(ep.tls || {}) }); } catch { this._retry(); return; }
     this.ws = ws;
+    // A new socket earns its own verdict: an acceptance never carries over from the last one; a refusal stands until one.
+    if (this.keyState === 'accepted') this._resetKey();
+    let first = true;
     ws.onopen = () => {
-      this.delay = 500; this.lastHeard = Date.now(); this._set('connected', this.view); this._ping(); this.fetchContext();
+      this.lastHeard = Date.now();
+      if (this.keyState === 'none') this.delay = 500;
+      if (this.keyState !== 'refused') this._set(this._liveStatus(), this.view);
+      this._ping();
     };
     ws.onmessage = (ev) => {
       let msg; try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
+      if (this.ws !== ws || !msg || typeof msg !== 'object') return;
+      // Stagewatch 2.18 says first whether it accepted the key; only ok === true accepts, anything else is no verdict.
+      if (msg.type === 'auth') {
+        if (msg.ok === true) { first = false; this._accept('auth', msg.node); } else if (msg.ok === false) { first = false; this._refuse(msg.words ?? msg.error); }
+        return;
+      }
+      // A Stagewatch whose first frame (or beat) came without a word on the key (2.16): one authenticated read is the verdict.
+      // A keyless link Stagewatch sends frames to again (its viewing code lifted) is viewing again.
+      if (first && (msg.type === 'state' || msg.type === 'beat')) {
+        first = false;
+        if (this.key) this._probe(ws);
+        else if (this.keyState === 'refused') { this._resetKey(); this.delay = 500; this.onKey(this.keyFacts()); }
+      }
       if (msg.type === 'beat') { if (msg.live !== false) this.lastHeard = Date.now(); return; }
       this.lastHeard = Date.now();
       if (msg.type === 'state') {
-        this._confirmPin();
         if (Number.isInteger(msg.seq)) { if (this.lastSeq !== null && msg.seq < this.lastSeq) this.generation = ++generations; this.lastSeq = msg.seq; }
-        this._set('connected', stageView(msg));
+        if (this.keyState === 'refused') this.heldView = stageView(msg);   // not shown before the key is accepted again
+        else this._set(this._liveStatus(), stageView(msg));
       }
       else if (msg.type === 'pong') this.clock.add(Number(msg.t), Number(msg.t2), Number(msg.t3), Date.now());
-      else if (msg.type === 'auth' && msg.ok === false) this._set('Stagewatch refused: ' + String(msg.error || 'viewing code or key').slice(0, 80), null);
     };
     ws.onclose = () => { if (this.ws === ws) { this.ws = null; this._retry(); } };
     ws.onerror = () => { /* onclose follows */ };
@@ -438,23 +537,28 @@ class StagewatchLink {
 
   _retry(after) {
     if (!this.base) return;
-    const refused = this.tlsState.problem && (this.tlsState.changed || /match/.test(this.tlsState.problem));
+    const held = this.keyState === 'refused';   // a refused key waits out Stagewatch's lockout minute, never less
+    const refused = held || (this.tlsState.problem && (this.tlsState.changed || /match/.test(this.tlsState.problem)));
     if (!refused && this.status !== 'reconnecting') this._set('reconnecting', this.view ? { ...this.view, stale: true } : null);
     const base = this.base;
-    setTimeout(() => { if (!this.ws && !this._opening && this.base === base) this._open(); }, jitter(after || this.delay)).unref();
-    if (!after) this.delay = Math.min(5000, this.delay * 2);
+    const ms = held ? this.refusedRetryMs + crypto.randomInt(0, Math.floor(this.refusedRetryMs / 5) + 1) : jitter(after || this.delay);
+    this._cancelRedial();
+    this.redial = setTimeout(() => { this.redial = null; if (!this.ws && !this._opening && this.base === base) this._open(); }, ms);
+    this.redial.unref();
+    if (!after && !held) this.delay = Math.min(5000, this.delay * 2);
   }
 
+  _cancelRedial() { if (this.redial) { clearTimeout(this.redial); this.redial = null; } }
+
   _watch() {
-    if (!this.ws) return;
+    if (!this.ws || this.ws.readyState !== 1) return;   // open sockets only: onopen set lastHeard
     const quiet = Date.now() - this.lastHeard;
-    if (this.status === 'connected' || this.status === 'stale') {
-      this._ping();
-      // A silent peer answers no close frame (ws would wait 30 s for one): drop the socket now, so onclose redials at 12 s.
-      if (quiet > GONE_MS) { try { this.ws.terminate(); } catch { /* onclose redials */ } return; }
-      if (quiet > STALE_MS) this._set('stale', this.view ? { ...this.view, stale: true } : null);   // silence is never "fine"
-      else if (this.status === 'stale') this._set('connected', this.view ? { ...this.view, stale: false } : null);
-    }
+    this._ping();
+    // A silent peer answers no close frame (ws would wait 30 s for one): drop the socket now, so onclose redials at 12 s.
+    if (quiet > GONE_MS) { try { this.ws.terminate(); } catch { /* onclose redials */ } return; }
+    if (!['connected', 'stale', 'checking key', 'viewing'].includes(this.status)) return;   // a refusal's words stay up
+    if (quiet > STALE_MS) this._set('stale', this.view ? { ...this.view, stale: true } : null);   // silence is never "fine"
+    else if (this.status === 'stale') this._set(this._liveStatus(), this.view ? { ...this.view, stale: false } : null);
   }
 
   /** Let go of the socket (reconfigured, a certificate accepted, stopped): its late frames no longer reach this link. */
@@ -467,6 +571,8 @@ class StagewatchLink {
   async sendToStage(text, { urgency = 'info', ack = true } = {}) {
     if (!this.base) return { ok: false, stage: 'not sent', error: 'Link Stagewatch first (Admin → Show network).' };
     if (!this.key) return { ok: false, stage: 'not sent', error: 'Stagewatch needs a node key for this (Stagewatch → Settings → Remote → API keys, scope "node").' };
+    const held = this.keyHeld();
+    if (held) return { ok: false, stage: 'not sent', error: held };
     if (this.status !== 'connected') return { ok: false, stage: 'not sent', error: 'The Stagewatch link is ' + this.status + ' — not sent (nothing is queued; send again when it is connected).' };
     const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 500);
     if (!t) return { ok: false, stage: 'not sent', error: 'Nothing to send.' };
@@ -483,19 +589,30 @@ class StagewatchLink {
     }
   }
 
+  /** Why nothing authenticated may go to Stagewatch while its verdict on the key is not "accepted" ('' when it may). */
+  keyHeld(what = 'sent') {
+    if (this.keyState === 'refused') return 'Stagewatch refused this AGMessage\'s key (' + this.keyWords + ') — not ' + what + '. Enter a node key Stagewatch lists (Stagewatch → Settings → Remote → API keys).';
+    if (this.keyState === 'checking') return 'Stagewatch has not accepted this AGMessage\'s key yet — not ' + what + ' (nothing is queued).';
+    return '';
+  }
+
   /** Stagewatch's context (Show Bus §6), for the AI's brief and the admin page. Quietly null when not served. */
   async fetchContext() {
-    if (!this.base || !this.key || !this.endpoint) return null;
+    if (!this.base || !this.key || !this.endpoint || this.keyState !== 'accepted') return null;
     try {
       const res = await this._call('/api/context', { timeoutMs: 3000 });
       if (res.status !== 200) return null;
       const j = res.body;
       if (!j || j.v !== 1 || !j.node) return null;
-      this.context = j; this.contextAt = Date.now();
-      this.departments = Array.from(new Set(this.departments.concat(departmentsOf(j)))).slice(0, 20);
-      this.onContext(j);
+      this._takeContext(j);
       return j;
     } catch { return null; }
+  }
+
+  _takeContext(j) {
+    this.context = j; this.contextAt = Date.now();
+    this.departments = Array.from(new Set(this.departments.concat(departmentsOf(j)))).slice(0, 20);
+    this.onContext(j);
   }
 
   /** Post AGMessage's own context to Stagewatch (needs a node-scope key). */
@@ -525,6 +642,7 @@ class StagewatchLink {
 
   /** Send a proposal to the desk. {ok, proposal?, error?} */
   async propose(body) {
+    if (this.keyHeld('proposed')) return { ok: false, error: this.keyHeld('proposed') };
     if (!this.linked || !this.endpoint) return { ok: false, error: 'The Stagewatch link is ' + this.status + ' — not proposed.' };
     if (!this.desk) return { ok: false, error: 'This Stagewatch keeps no approval queue (Show Bus 1.2) — send it directly instead.' };
     try {
@@ -563,7 +681,7 @@ class StagewatchLink {
     } catch { return 0; }
   }
 
-  stop() { clearInterval(this.timer); this.base = ''; this._close(); }
+  stop() { clearInterval(this.timer); this._cancelRedial(); this.base = ''; this._close(); }
 }
 
-module.exports = { Discovery, StagewatchLink, wsUrl, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };
+module.exports = { REFUSED_RETRY_MS, refusalWords, Discovery, StagewatchLink, wsUrl, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };

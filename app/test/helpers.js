@@ -67,13 +67,6 @@ const answer = (s, ev, arg, ms = 3000) => Promise.race([emit(s, ev, arg), new Pr
 const once = (s, ev, ms = 4000) => new Promise((resolve, reject) => { const t = setTimeout(() => reject(new Error('no ' + ev + ' within ' + ms + ' ms')), ms); s.once(ev, (v) => { clearTimeout(t); resolve(v); }); });
 
 /**
- * A fake Stagewatch on a free port: /ws sends a state frame on connect (frame(obj) sends another); /api/message/… answers
- * a receipt; the show desk (/api/proposals: create, read one, list by target and state, result) keeps its queue in
- * `proposals`; /api/context answers a context named `name` whose `items` a test may change (each department as
- * Stagewatch lists a target by its newest cue: kind "department" while that is a standby). Every request is kept in
- * `requests` (method, url, headers, body) so a test can say what reached which Stagewatch.
- */
-/**
  * A /ws request's query as Stagewatch reads it (WebServer.cs HttpRequest.ReadAsync): keys case-insensitive, the last
  * value of a repeated key wins, '+' is a space.
  */
@@ -93,9 +86,31 @@ function screenIdOf(target) {
   return typeof cid === 'string' && /^[A-Za-z0-9_-]{6,32}$/.test(cid) ? cid : 'anon-' + require('crypto').randomBytes(4).toString('hex');
 }
 
-async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0 } = {}) {
+/**
+ * A fake Stagewatch on a free port: /ws sends a state frame on connect (frame(obj) sends another); /api/message/… answers
+ * a receipt; the show desk (/api/proposals: create, read one, list by target and state, result) keeps its queue in
+ * `proposals`; /api/context answers a context named `name` whose `items` a test may change (each department as
+ * Stagewatch lists a target by its newest cue: kind "department" while that is a standby). Every request is kept in
+ * `requests` (method, url, headers, body) so a test can say what reached which Stagewatch.
+ *
+ * How it judges a key, as Stagewatch does (WebServer.cs Authorize, HandleWebSocketAsync):
+ *  key            null accepts every request; else only `Bearer <key>`, and any other gets 401 {"ok":false,"error":"unknown
+ *                 or revoked API key"}. The /ws upgrade is taken whatever the key (2.16 says nothing of it on the socket).
+ *  auth18         2.18: the first /ws message is {"type":"auth","ok":<accepted>,"node":<?node=>,"words":…}; a refused socket
+ *                 gets no frames (closed too with closeOnRefuse). authDelayMs: how long it takes to say it.
+ *  viewCode       2.16 with a viewing code: a socket without an accepted key gets {"type":"auth","ok":false,"view":true,
+ *                 "error":…} and is closed (1008).
+ *  contextDelayMs / contextFail  /api/context answers late, or 404 "no context" (its first second) the first n times.
+ *  cert           serve HTTPS and WSS with this certificate (tls.makeCertificate).
+ *  counts         {upgrades, failures}: failures as its lockout counts them (a wrong key's upgrade, its viewing-code check, each 401).
+ */
+async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null } = {}) {
   const http = require('http');
+  const https = require('https');
   const { WebSocketServer } = require('ws');
+  const tlsmod = require('../lib/tls');
+  const counts = { upgrades: 0, failures: 0 };
+  const accepts = (h) => key === null || h === 'Bearer ' + key;
   const requests = [];
   const proposals = new Map();
   let next = 0;
@@ -111,15 +126,20 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     ok: Object.hasOwn(OUTCOME, p.state) ? OUTCOME[p.state] : null, words: p.words || '', ...(p.served || {}),
   });
   let items = departments.map((d) => ({ id: 'cue:' + d.toLowerCase(), kind: 'department', label: d, light: 'amber', state: 'standing by' }));
-  const srv = http.createServer((req, res) => {
+  const handler = (req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; });
     req.on('end', () => {
       requests.push({ method: req.method, url: req.url, headers: req.headers, body });
       const json = (code, o) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+      if (!accepts(req.headers.authorization)) { counts.failures++; return json(401, { ok: false, error: 'unknown or revoked API key' }); }
       const u = new URL(req.url, 'http://x');
       if (u.pathname.startsWith('/api/message/')) return json(200, { type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId } });
-      if (u.pathname === '/api/context') return json(200, { v: 1, node: { t: 'main', id: 'sw' + name.length, name }, light: 'green', headline: name + ' running', items, peers: [] });
+      if (u.pathname === '/api/context') {
+        const answer = () => (contextFail > 0 ? (contextFail--, json(404, { ok: false, error: 'no context' }))
+          : json(200, { v: 1, node: { t: 'main', id: 'sw' + name.length, name }, light: 'green', headline: name + ' running', items, peers: [] }));
+        return contextDelayMs ? void setTimeout(answer, contextDelayMs) : answer();
+      }
       if (u.pathname === '/api/peers/context') return json(200, { ok: true });
       if (desk && u.pathname === '/api/proposals' && req.method === 'POST') {
         const j = JSON.parse(body || '{}');
@@ -148,21 +168,45 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
       }
       json(404, { ok: false, error: desk && one ? 'no such proposal' : 'not here' });
     });
-  });
+  };
+  const srv = cert ? https.createServer({ cert: tlsmod.toPem(cert.certDer), key: cert.keyPem }, handler) : http.createServer(handler);
   const wss = new WebSocketServer({ server: srv, path: '/ws' });
   let last = { type: 'state', mode: 'countdown', text: '05:00', title: name, seconds: 300, state: 'running', messageId: 0 };
   wss.on('connection', (c, req) => {
     c.screenId = screenIdOf(req.url);
     upgrades.push({ url: req.url, headers: req.headers });
-    sockets.add(c);
-    c.on('close', () => sockets.delete(c));
+    counts.upgrades++;
+    const good = accepts(req.headers.authorization);
+    if (!good && req.headers.authorization) counts.failures++;
     c.on('message', (d) => { let m; try { m = JSON.parse(String(d)); } catch { return; } if (m.cmd === 'ping') c.send(JSON.stringify({ type: 'pong', t: m.t, t2: Date.now(), t3: Date.now() })); });
-    c.send(JSON.stringify(last));
+    if (!good && viewCode) {
+      counts.failures++;   // its viewing-code check asks Authorize again
+      c.send(JSON.stringify({ type: 'auth', ok: false, view: true, error: 'This screen needs the viewing code' }));
+      c.close(1008, 'viewing code');
+      return;
+    }
+    const start = () => {
+      if (c.readyState !== 1) return;
+      if (auth18) {
+        c.send(JSON.stringify({ type: 'auth', ok: good, node: stagewatchQuery(req.url).get('node') || '', words: good ? '' : 'unknown or revoked API key' }));
+        if (!good) { if (closeOnRefuse) c.close(1008, 'key'); return; }
+      }
+      sockets.add(c);
+      c.on('close', () => sockets.delete(c));
+      c.send(JSON.stringify(last));
+    };
+    if (authDelayMs) setTimeout(start, authDelayMs); else start();
   });
   await new Promise((resolve) => { srv.listen(0, '127.0.0.1', resolve); });
   const port = srv.address().port;
   return {
-    port, url: '127.0.0.1:' + port, requests, proposals, upgrades,
+    port, url: (cert ? 'https://' : '') + '127.0.0.1:' + port, requests, proposals, upgrades, counts, fp: cert ? tlsmod.fingerprint(cert.certDer) : '',
+    /** Sockets open on its /ws, refused ones too until they close. */
+    get open() { return wss.clients.size; },
+    /** The one key it takes now (null: any): the operator adds, rotates or revokes it. */
+    set key(k) { key = k; },
+    /** Whether it asks a socket without an accepted key for the viewing code. */
+    set viewCode(v) { viewCode = v; },
     /** Its Screens as Stagewatch lists them (WebServer.cs ListScreens): open sockets grouped by id, each with its count of tabs. */
     screens() { const by = new Map(); for (const c of sockets) by.set(c.screenId, (by.get(c.screenId) || 0) + 1); return Array.from(by, ([id, tabs]) => ({ id, tabs })); },
     get connected() { return sockets.size > 0; },
@@ -179,7 +223,9 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     add(p) { const id = p.id || 'p' + (++next); proposals.set(id, { state: 'pending', reason: '', risk: 'review', ...p, id, created: p.created || Date.now() }); return id; },
     /** Stagewatch restarts: its queue is gone and it numbers from p1 again (it keeps both in memory only). */
     restart() { proposals.clear(); next = 0; },
-    close() { for (const c of sockets) c.terminate(); wss.close(); return new Promise((resolve) => { srv.close(resolve); }); },
+    /** Every socket it holds is cut without a close frame (its network dropped). */
+    drop() { for (const c of wss.clients) c.terminate(); },
+    close() { for (const c of wss.clients) c.terminate(); wss.close(); return new Promise((resolve) => { srv.closeAllConnections(); srv.close(resolve); }); },
   };
 }
 

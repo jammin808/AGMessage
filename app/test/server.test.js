@@ -276,6 +276,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const fake = http.createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       if (req.url.startsWith('/api/message/')) return res.end(JSON.stringify({ type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId: 77 } }));
+      if (req.url === '/api/context') return res.end('{"v":1,"node":{"t":"main","id":"sw1","name":"Keynote"}}');
       res.end('{"ok":true}');
     });
     const wss = new WebSocketServer({ server: fake, path: '/ws' });
@@ -345,6 +346,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
           return res.end(JSON.stringify(seen.results.length ? [] : [{ id: 'p9', state: 'approved', line: 'notice "Break in 5 minutes"', decidedBy: 'SM', target: { t: 'messenger', id: u.searchParams.get('target') } }]));
         if (u.pathname === '/api/proposals') return res.end('[]');
         if (u.pathname === '/api/proposals/p9/result') { seen.results.push(JSON.parse(body)); return res.end('{"ok":true}'); }
+        if (u.pathname === '/api/context') return res.end('{"v":1,"node":{"t":"main","id":"sw1","name":"Keynote"}}');
         res.end('{"ok":true}');
       });
     });

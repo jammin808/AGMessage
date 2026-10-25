@@ -354,6 +354,23 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(!sm.hidden && sm.text === speaker && sm.top >= sm.above, `1920x1080: Stagewatch's ${speaker.length}-character message in the strip sits below the time (strip top ${sm.top}, time bottom ${sm.above})`);
     await screen.send('Emulation.clearDeviceMetricsOverride');
 
+    // A key Stagewatch stops listing is refused at the link's next authenticated read: the screen's countdown dims to
+    // --:--, the halls board marks the hall ✕ in Stagewatch's words, its Set up says so, and the hall offers 🖥 no more.
+    sw.key = 'swk_smoke_revoked_key_0002';   // secret-scan: fixture — the operator revoked AGMessage's key
+    const dimmed = await screen.until(`document.getElementById('cdTime').textContent === '--:--'`, 10000);
+    const marked = await signin.until(`(() => { const r = document.querySelector('.hall-row[data-code="${code}"]'); return !!r && r.dataset.state === 'refused' && r.querySelector('.hall-state').textContent.includes('✕ Stagewatch refused the key'); })()`, 8000);
+    const noSend = await research.until(`!CAN_STAGE`, 5000);
+    await signin.eval(`document.querySelector('.hall-setup[data-code="${code}"]').click()`);
+    const said = await signin.until(`document.getElementById('setupDialog').open && document.getElementById('setupStatus').textContent`, 5000);
+    await signin.shot(path.join(OUT, 'halls-key-refused.png'));
+    await signin.eval(`document.getElementById('setupDialog').close()`);
+    report(!!dimmed && !!marked && !!noSend && /^Its own link: key refused: unknown or revoked API key/.test(said || ''), `a revoked key: the screen shows --:--, the board ✕, 🖥 is withdrawn, Set up says "${said}"`);
+    // Listed again and entered again, it is linked at once (left alone, the link asks again after Stagewatch's lockout minute).
+    sw.key = null;
+    await hallView.eval(`new Promise((r) => socket.emit('hall:configure', { code: ROOM, stagewatchUrl: '' }, r))`);
+    await hallView.eval(`new Promise((r) => socket.emit('hall:configure', { code: ROOM, stagewatchUrl: '${sw.url}', stagewatchKey: '${KEY}' }, r))`);
+    report(!!(await screen.until(`document.getElementById('cdTime').textContent === '05:00'`, 8000)) && !!(await research.until(`CAN_STAGE`, 5000)), 'the key entered again: the countdown and 🖥 are back');
+
     // The clock shows AGMessage's time of day, though the screen's computer is set to another zone; a browser that knows
     // no zone but its own still shows a clock.
     await screen.send('Emulation.setTimezoneOverride', { timezoneId: 'America/New_York' });

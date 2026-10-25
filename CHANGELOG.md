@@ -19,6 +19,17 @@ code (2.16 and its newest work) before it was changed.
   (0.5.0's shared name made them one row, the oldest one's address, a name given to it applied to all of them, and
   disconnecting one dropped every one). A name given in Stagewatch → Screens to the old shared "agmessage" row does not
   carry over: name each AGMessage once. Stagewatch 2.18 needs this address to say whether it accepted the key.
+- The link is "connected", and a certificate used for the first time is pinned, only once Stagewatch accepted the key:
+  2.18's first message on the socket (`{"type":"auth","ok":true}`), or for 2.16, which says nothing of the key on the
+  socket and sends its public frames to any key, a 200 to one authenticated read (its context). Each new socket earns its
+  own verdict. Until then the link reads "checking key" (amber; nothing is sent, the screens show `--:--`); a link with
+  no key reads "viewing" (the public timer, nothing sent, nothing pinned). A wrong or revoked key, or one Stagewatch stops
+  listing while linked (its next 401), reads "key refused: <Stagewatch's words>" on the admin page, the hall's Set up,
+  the halls board (✕), the screens (`--:--`), the context (red) and the AI's brief; sends and proposals are refused
+  before they are tried and 🖥 is withdrawn; the socket is let go and the key asked again only after 61 s. 0.5.0 called a
+  wrong key connected and pinned the certificate from the first frame, kept every gate open, and asked again about 1.4
+  times a second, which locked this machine's address out of Stagewatch (5 wrong keys a minute) for every hall's link.
+  A refusal or an acceptance is one `stagewatch.key` audit row per change, never the key.
 
 ## 0.5.0 — 2026-10-24 — halls, accounts, screens and the testing environment
 

@@ -447,9 +447,9 @@ test('closing a hall forgets its own Stagewatch\'s certificate pins, unless anot
   const status = async (code) => (await emit(ctl, 'hall:settings', { code })).stagewatch;
 
   const [dayOne, alsoThere] = [await hall('Day one'), await hall('Day one, overflow')];
-  assert.ok((await emit(ctl, 'hall:configure', { code: dayOne, stagewatchUrl: 'https://127.0.0.1:' + port })).ok);
+  assert.ok((await emit(ctl, 'hall:configure', { code: dayOne, stagewatchUrl: 'https://127.0.0.1:' + port, stagewatchKey: 'swk_day_one_node_key_01' /* secret-scan: fixture */ })).ok);
   await until(() => pins().includes('url:127.0.0.1:' + port), 8000, 'the hall\'s Stagewatch pinned on disk');
-  assert.ok((await emit(ctl, 'hall:configure', { code: alsoThere, stagewatchUrl: 'https://127.0.0.1:' + port })).ok);
+  assert.ok((await emit(ctl, 'hall:configure', { code: alsoThere, stagewatchUrl: 'https://127.0.0.1:' + port, stagewatchKey: 'swk_day_one_node_key_01' /* secret-scan: fixture */ })).ok);
   await until(async () => (await status(alsoThere)).status === 'connected', 6000, 'the second hall on the same Stagewatch');
 
   assert.ok((await emit(ctl, 'admin:deleteRoom', { roomCode: dayOne })).ok);
@@ -462,7 +462,7 @@ test('closing a hall forgets its own Stagewatch\'s certificate pins, unless anot
   await sw.close();
   sw = await stagewatchAt(port, null);
   const dayTwo = await hall('Day two');
-  assert.ok((await emit(ctl, 'hall:configure', { code: dayTwo, stagewatchUrl: '127.0.0.1:' + port })).ok);
+  assert.ok((await emit(ctl, 'hall:configure', { code: dayTwo, stagewatchUrl: '127.0.0.1:' + port, stagewatchKey: 'swk_day_two_node_key_02' /* secret-scan: fixture */ })).ok);
   await until(async () => (await status(dayTwo)).status === 'connected', 6000, 'the new hall linked in plain HTTP');
 });
 
