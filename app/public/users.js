@@ -10,6 +10,7 @@
 
   let data = null;          // {users, roles, caps, halls, giveable}
   let editing = null;       // the account being edited, or null for a new one
+  let meId = '';            // the signed-in account: on its own row only the name is the viewer's to change
   let saving = false;       // a save in flight: a second click or Enter sends nothing
 
   // ---------------------------------------------------------------- tabs
@@ -29,6 +30,7 @@
   async function load() {
     const me = await AGM.api('GET', '/api/auth/me');
     if (!me.account) { location.replace('/?next=/users.html'); return; }
+    meId = me.account.id;
     $('who').textContent = me.account.name + ' · ' + me.account.rights.roleLabel;
     const canUsers = me.account.rights.caps.includes('users.manage');
     const canAudit = me.account.rights.caps.includes('audit.read');
@@ -56,7 +58,9 @@
     for (const u of data.users) {
       const tr = document.createElement('tr');
       if (u.disabled) tr.className = 'off';
-      const hallsWords = u.rights.allHalls ? 'Every hall' : (u.rights.halls.map(hallName).join(', ') || 'None');
+      // A viewer that does not reach every hall is told only its own halls' codes: the rest of a person's are a count.
+      const listed = u.rights.halls.map(hallName).concat(u.otherHalls ? [u.otherHalls + ' other hall' + (u.otherHalls === 1 ? '' : 's')] : []);
+      const hallsWords = u.rights.allHalls ? 'Every hall' : (listed.join(', ') || 'None');
       tr.innerHTML =
         '<td><strong>' + esc(u.name) + '</strong><br><span class="muted">' + esc(u.username) + (u.disabled ? ' · turned off' : '') + (u.mustChange ? ' · one-time password' : '') + '</span></td>' +
         '<td>' + esc(roleOf(u.role).label) + (u.grant.length || u.revoke.length ? ' <span class="muted" title="Rights changed for this person">(adjusted)</span>' : '') + '</td>' +
@@ -73,8 +77,12 @@
   }
 
   // ---------------------------------------------------------------- the editor
+  // Nobody changes their own role, rights or halls, nor turns themselves off or removes themselves (rbac.mayChange): on
+  // one's own row those are shown and not offered, and a Save sends the name alone.
+  const isSelf = (u) => !!u && u.id === meId;
   function openEditor(u) {
     editing = u || null;
+    const self = isSelf(u);
     $('userTitle').textContent = u ? 'Edit ' + u.name : 'Add a person';
     $('userError').hidden = true;
     $('uName').value = u ? u.name : '';
@@ -84,20 +92,24 @@
     sel.textContent = '';
     for (const r of data.roles) { const o = document.createElement('option'); o.value = r.id; o.textContent = r.label; o.disabled = r.id === 'admin' && !data.giveable.admin; sel.appendChild(o); }
     sel.value = u ? u.role : 'staff';
+    sel.disabled = self;
     const hallsBox = $('uHalls');
     hallsBox.textContent = '';
     for (const h of data.halls) {
       const l = document.createElement('label'); l.className = 'check';
-      const c = document.createElement('input'); c.type = 'checkbox'; c.value = h.code; c.disabled = !mayGive.hall(h.code); c.checked = !c.disabled && !!(u && u.halls.includes(h.code));
+      const c = document.createElement('input'); c.type = 'checkbox'; c.value = h.code; c.disabled = self || !mayGive.hall(h.code); c.checked = (self || !c.disabled) && !!(u && u.halls.includes(h.code));
       l.appendChild(c); l.appendChild(document.createTextNode(' ' + (h.name || h.code) + ' (' + h.code + ')'));
       hallsBox.appendChild(l);
     }
     if (!data.halls.length) hallsBox.textContent = 'No halls yet.';
-    $('uAll').disabled = !mayGive.allHalls();
-    $('uAll').checked = !$('uAll').disabled && (u ? u.rights.allHalls : roleOf(sel.value).allHalls);
+    $('uAll').disabled = self || !mayGive.allHalls();
+    $('uAll').checked = (self || !$('uAll').disabled) && (u ? u.rights.allHalls : roleOf(sel.value).allHalls);
     $('uAll').dataset.touched = u && u.allHalls !== null ? '1' : '';
     renderCaps(u);
+    if (self) $('uRoleWords').textContent = 'Nobody changes their own role, rights or halls — ask another admin.';
     $('userDanger').hidden = !u;
+    $('disableBtn').hidden = self;
+    $('removeBtn').hidden = self;
     if (u) $('disableBtn').textContent = u.disabled ? 'Turn on' : 'Turn off';
     $('userDialog').showModal();
   }
@@ -109,10 +121,11 @@
     box.textContent = '';
     for (const [cap, words] of Object.entries(data.caps)) {
       const fromRole = role.caps.includes(cap);
+      const self = isSelf(editing);
       const given = mayGive.cap(cap);
-      const on = given && (u ? (fromRole ? !u.revoke.includes(cap) : u.grant.includes(cap)) : fromRole);
+      const on = (given || self) && (u ? (fromRole ? !u.revoke.includes(cap) : u.grant.includes(cap)) : fromRole);
       const l = document.createElement('label'); l.className = 'check';
-      const c = document.createElement('input'); c.type = 'checkbox'; c.value = cap; c.checked = on; c.disabled = !given;
+      const c = document.createElement('input'); c.type = 'checkbox'; c.value = cap; c.checked = on; c.disabled = !given || self;
       l.appendChild(c);
       const t = document.createElement('span');
       t.textContent = ' ' + words;
@@ -129,6 +142,7 @@
 
   /** The form as a change: role, halls, and the rights that differ from the role's (grant / revoke). */
   function formChange() {
+    if (isSelf(editing)) return { name: $('uName').value.trim() };
     const role = roleOf($('uRole').value);
     const caps = Array.from($('uCaps').querySelectorAll('input:checked')).map((c) => c.value);
     // A hall the account holds that is not on the list (removed since) is not shown, so it is not the editor's to drop:

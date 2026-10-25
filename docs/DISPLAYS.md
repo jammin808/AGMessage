@@ -55,7 +55,9 @@ shows every hall's screens and their state, in the same words as the console.
 
 `/d/<token>`: 256 random bits. It follows the W3C's good practice for capability URLs:
 
-- it can only show — a screen's connection is listened to for nothing but its "shown" reports;
+- it can only show — a screen's connection is listened to for nothing but its "shown" reports, and is never told its
+  hall's code, which would let that browser into the hall as a guest (it is told the hall's name; Identify on a hall
+  with no name draws no hall);
 - the page is the same for any token (the server says nothing about a link by its URL), never cached, never indexed,
   and sends no referrer;
 - AGMessage looks it up by its SHA-256; the token itself is sealed at rest so a manager can copy it again; it is never

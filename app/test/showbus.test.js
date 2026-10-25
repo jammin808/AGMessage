@@ -9,10 +9,42 @@ const path = require('path');
 const sl = require('../lib/stagelines');
 const pl = require('../lib/peerlinks');
 const nodes = require('../lib/nodes');
-const { startServer, stopServer, api, connect, emit, answer, until, fakeStagewatch, fakeNode } = require('./helpers');
+const { hallBrief } = require('../lib/context');
+const { startServer, stopServer, api, connect, emit, answer, wait, until, fakeStagewatch, fakeNode } = require('./helpers');
 
 const PATTERNS_TOKEN = 'K7QM-3XWD-P9RA';   // secret-scan: fixture — a fake pairing token for the fake Patterns
 const PLAYMAP_TOKEN = 'pm-fake-pairing-token';   // secret-scan: fixture
+
+/** A fake Anthropic Messages endpoint: every request body kept in `bodies`, each answered with a draft and options. */
+async function fakeModel() {
+  const http = require('http');
+  const bodies = [];
+  const srv = http.createServer((req, res) => {
+    let b = '';
+    req.on('data', (d) => { b += d; });
+    req.on('end', () => {
+      bodies.push(b);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: 'x', stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ draft: 'ok', gaps: [], confidence: 'low', options: ['Yes', 'No'] }) }], usage: { input_tokens: 1, output_tokens: 1 } }));
+    });
+  });
+  await new Promise((resolve) => { srv.listen(0, '127.0.0.1', resolve); });
+  return { url: 'http://127.0.0.1:' + srv.address().port, bodies, close: () => new Promise((resolve) => { srv.close(resolve); }) };
+}
+
+test('the AI\'s brief of a hall: the nodes of that hall and of every hall, linked or heard — never another hall\'s', () => {
+  const node = (id, name, hall) => ({ id, t: 'patterns', name, hall, status: 'live', light: 'amber', headline: name + ' headline', items: [{ label: 'Screen 2', state: 'no signal', light: 'red' }] });
+  const links = [node('pa', 'Hall A Patterns', 'HALLAA'), node('pb', 'Hall B Patterns', 'HALLBB'), node('v', 'Main wall', '')];
+  const heard = [{ id: 'pb', t: 'patterns', name: 'Hall B Patterns', status: 'live' }, { id: 'pa', t: 'patterns', name: 'Hall A Patterns', status: 'live' }, { id: 'sw2', t: 'main', name: 'Foyer timer', status: 'live' }];
+  const a = hallBrief('HALLAA', { status: 'off' }, links, heard);
+  assert.match(a, /^Patterns "Hall A Patterns" \(linked, live\): Hall A Patterns headline \[amber\]\n {2}Screen 2: no signal \[red\]$/m);
+  assert.match(a, /^Patterns "Main wall" \(linked, live\)/m, 'a node of every hall is in every hall\'s brief');
+  assert.match(a, /^Heard on the network: main "Foyer timer" \(live\)$/m);
+  assert.doesNotMatch(a, /Hall B/, 'another hall\'s node is in it neither as linked nor as heard');
+  assert.doesNotMatch(a, /Heard on the network: patterns "Hall A Patterns"/, 'a linked node is not heard twice');
+  const b = hallBrief('HALLBB', { status: 'off' }, links, heard);
+  assert.ok(b.includes('Hall B Patterns headline') && b.includes('Main wall') && !b.includes('Hall A'), b);
+});
 
 test('stagelines: every destination is a line Stagewatch takes, and says what it does', () => {
   const cases = [
@@ -368,17 +400,18 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
   });
 });
 
-test('show network rights: a one-hall driver sees only its halls and nodes, and a node proposes only to its own hall\'s desk', async (t) => {
+test('show network rights: a one-hall driver sees only its halls and nodes, a node proposes only to its own hall\'s desk, and a hall\'s facts reach only its own readers', async (t) => {
   const swA = await fakeStagewatch({ name: 'Hall A timer', desk: false });
   const swB = await fakeStagewatch({ name: 'Hall B timer', desk: true });
   const swA2 = await fakeStagewatch({ name: 'Hall A desk', desk: true });
   const venue = await fakeNode({ t: 'playmap', name: 'Main wall', token: PLAYMAP_TOKEN, commands: [{ verb: 'PLAYLIST GO <name>', risk: 'low' }] });
   const nodeA = await fakeNode({ t: 'patterns', name: 'Hall A Patterns', token: PATTERNS_TOKEN, commands: [{ verb: 'VIDEO END <seconds>', risk: 'review' }, { verb: 'BLACKOUT on|off', risk: 'high' }] });
   const nodeB = await fakeNode({ t: 'patterns', name: 'Hall B Patterns', token: PATTERNS_TOKEN, commands: [{ verb: 'VIDEO END <seconds>', risk: 'review' }] });
-  const srv = await startServer();
+  const model = await fakeModel();
+  const srv = await startServer({ ANTHROPIC_API_KEY: 'a-key-for-the-fake-model', ANTHROPIC_BASE_URL: model.url });
   const { base } = srv;
   const sockets = [];
-  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); for (const x of [swA, swB, swA2, venue, nodeA, nodeB]) await x.close(); });
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); for (const x of [swA, swB, swA2, venue, nodeA, nodeB, model]) await x.close(); });
 
   const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hallA = (await api(base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
@@ -387,10 +420,14 @@ test('show network rights: a one-hall driver sees only its halls and nodes, and 
   await api(base, 'POST', '/api/users', { username: 'tom', name: 'Tom Tech', role: 'tech', halls: [hallA], grant: ['nodes.control'], password: 'gaffer tape on the riser' }, { cookie: admin });
   await api(base, 'POST', '/api/users', { username: 'sid', name: 'Sid Senior', role: 'senior', allHalls: false, halls: [hallA], password: 'cable run under stage' }, { cookie: admin });
   await api(base, 'POST', '/api/users', { username: 'sol', name: 'Sol Senior', role: 'senior', password: 'radio check one two' }, { cookie: admin });
+  await api(base, 'POST', '/api/users', { username: 'tim', name: 'Tim Tech', role: 'tech', halls: [hallA], password: 'patch bay on the left' }, { cookie: admin });
+  await api(base, 'POST', '/api/users', { username: 'val', name: 'Val Viewer', role: 'viewer', halls: [hallA], password: 'a quiet seat at the back' }, { cookie: admin });
   const login = async (username, password) => (await api(base, 'POST', '/api/auth/login', { username, password })).cookie;
   const tomC = await login('tom', 'gaffer tape on the riser');
   const sidC = await login('sid', 'cable run under stage');
   const solC = await login('sol', 'radio check one two');
+  const timC = await login('tim', 'patch bay on the left');
+  const valC = await login('val', 'a quiet seat at the back');
   const ctl = await connect(base, admin); sockets.push(ctl);
   assert.ok((await emit(ctl, 'hall:configure', { code: hallA, stagewatchUrl: swA.url, stagewatchKey: 'swk_hallA_node_key_00001' /* secret-scan: fixture */ })).ok);
   assert.ok((await emit(ctl, 'hall:configure', { code: hallB, stagewatchUrl: swB.url, stagewatchKey: 'swk_hallB_node_key_00002' /* secret-scan: fixture */ })).ok);
@@ -424,6 +461,51 @@ test('show network rights: a one-hall driver sees only its halls and nodes, and 
     const sol = await connect(base, solC); sockets.push(sol);
     assert.deepEqual((await emit(sol, 'nodes:list', {})).linked.map((n) => n.id).sort(), ['h1pat', 'h2pat', 'venue01'], 'a senior with every hall still drives them all');
     assert.equal((await emit(sol, 'nodes:command', { id: 'venue01', line: 'PLAYLIST GO walkout', mode: 'send' })).ok, true);
+  });
+
+  await t.test('the board offers Show network exactly to those it lets in; a hall\'s crew still sees its node\'s chip', async () => {
+    for (const [who, cookie, drives] of [['a tech', timC, false], ['a viewer', valC, false], ['a tech given nodes.control', tomC, true], ['a one-hall senior', sidC, true], ['a senior of every hall', solC, true]]) {
+      const s = await connect(base, cookie); sockets.push(s);
+      const b = (await emit(s, 'board:watch', {})).board;
+      const list = await emit(s, 'nodes:list', {});
+      assert.deepEqual(b.halls.find((h) => h.code === hallA).nodes.map((n) => n.id), ['h1pat'], who + ': hall A\'s row keeps its node');
+      assert.deepEqual([b.canDrive, !!(list.ok && list.linked.length)], [drives, drives], who + ': the button is offered exactly when the dialog it opens lists a node');
+    }
+  });
+
+  await t.test('a hall\'s AI brief names its own hall\'s nodes and those of every hall, never another hall\'s', async () => {
+    for (const [code, own, other] of [[hallA, 'Hall A Patterns', 'Hall B Patterns'], [hallB, 'Hall B Patterns', 'Hall A Patterns']]) {
+      const g = await connect(base); sockets.push(g);
+      assert.ok((await emit(g, 'join', { roomCode: code, name: 'Gus', role: 'research' })).ok);
+      model.bodies.length = 0;
+      const draft = await emit(g, 'ai:draft', { question: 'What do the show systems say?' });
+      const options = await emit(g, 'ai:options', { prompt: 'Are the screens ready?' });
+      assert.ok(draft.ok && options.ok, JSON.stringify([draft, options]));
+      assert.equal(model.bodies.length, 2);
+      for (const body of model.bodies) {
+        assert.ok(body.includes(own) && body.includes('Main wall'), code + ': its own node and the one of every hall');
+        assert.ok(!body.includes(other), code + ': never ' + other);
+      }
+    }
+  });
+
+  await t.test('each hall\'s Stagewatch is posted its own hall\'s recent events, never another hall\'s; the node\'s context keeps all', async () => {
+    const bea = await connect(base); sockets.push(bea);
+    assert.ok((await emit(bea, 'join', { roomCode: hallB, name: 'Bea', role: 'research' })).ok);
+    const help = await emit(bea, 'message', { type: 'help', category: 'Sound', text: 'mic 3 down' });
+    assert.ok(help.ok);
+    assert.ok((await emit(bea, 'help:respond', { messageId: help.id, state: 'resolved' })).ok);
+    assert.ok((await emit(bea, 'stage:send', { text: 'Wrap up' })).ok);
+    const posted = (sw) => sw.requests.filter((r) => r.url === '/api/peers/context').map((r) => JSON.parse(r.body));
+    const hallEvents = (ctx) => ctx.recent.map((r) => r.text).filter((x) => /help request|stage screen|stage message/.test(x));
+    const want = ['a help request was resolved', 'research sent a message to the stage screen (applied)'];
+    await until(() => posted(swB).length && JSON.stringify(hallEvents(posted(swB).at(-1))) === JSON.stringify(want), 8000, 'hall B\'s Stagewatch posted its hall\'s events');
+    await wait(1300);   // one more push round for every link
+    assert.ok(posted(swA).length > 0, 'hall A\'s Stagewatch is posted its context');
+    assert.deepEqual(posted(swA).flatMap(hallEvents), [], 'hall A had no help request and sent nothing to its stage: none of hall B\'s reach it');
+    const whole = (await api(base, 'GET', '/api/context', undefined, { cookie: admin })).body;
+    assert.deepEqual(hallEvents(whole), want, 'the node\'s own context keeps every hall\'s');
+    assert.ok(!JSON.stringify(whole.recent).includes('hall:'), 'the link an event belongs to is never published');
   });
 
   await t.test('C15: a node\'s proposal goes to its own hall\'s desk or nowhere, never another hall\'s', async () => {

@@ -36,7 +36,7 @@ const ai = require('./lib/ai');
 const nodes = require('./lib/nodes');
 const resilience = require('./lib/resilience');
 const secretbox = require('./lib/secretbox');
-const { buildContext, showBrief } = require('./lib/context');
+const { buildContext, hallBrief } = require('./lib/context');
 const tlsmod = require('./lib/tls');
 const { Accounts, Sessions, TokenSessions } = require('./lib/accounts');
 const { AuditLog } = require('./lib/audit');
@@ -175,16 +175,21 @@ function healthFacts() {
   };
 }
 
-// Role-level events for the show network's context: never names, never content.
+// Role-level events for the show network's context: never names, never content. Each keeps the Stagewatch link of the
+// halls it happened in (none: the whole node's), so a link's own context carries only its halls' events; the tag never
+// leaves the server (buildContext keeps at and text).
 const recentEvents = [];
-function noteEvent(text) { recentEvents.push({ at: Date.now(), text }); if (recentEvents.length > 40) recentEvents.shift(); }
+function noteEvent(text, link) { recentEvents.push({ at: Date.now(), text, link: link ? link.id : '' }); if (recentEvents.length > 40) recentEvents.shift(); }
 
 // ---------------------------------------------------------------- rooms
 // Loaded without writing: until this copy holds the data folder and its port (`holdDataFolder`, at the end of this file),
 // another copy may be appending to these same files.
 const store = new RoomStore(ROOMS_DIR);
 const restored = store.loadAll((room) => {
-  for (const m of room.messages) if (m.from && m.from.role === 'director') m.from.role = 'board';   // legacy role name
+  for (const m of room.messages) {
+    if (m.from && m.from.role === 'director') m.from.role = 'board';   // legacy role name
+    if (m.forwardedFrom) delete m.forwardedFrom.roomCode;   // a forward names its hall, never its code (an earlier build kept it)
+  }
 }, { compact: false });
 if (restored) console.log('  Restored', restored, 'room(s) from', ROOMS_DIR);
 
@@ -216,14 +221,28 @@ function systemMessage(room, text) {
   return apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text, at: Date.now() } }).m;
 }
 
-/** Who is in a room: one row per person (an account open on two devices is one person), the first of their sockets. */
-function roomUserSummary(room) {
+/**
+ * Who is in a room: one row per person (an account open on two devices is one person), the first of their sockets. The
+ * admin's links (`links`) are hall codes, a guest's way into those halls: only the admin's pages are given them.
+ */
+function roomUserSummary(room, { links = false } = {}) {
   const seen = new Set();
   return Array.from(room.users.entries()).filter(([, u]) => !seen.has(u.uid) && seen.add(u.uid)).map(([sid, u]) => ({
     socketId: sid, uid: u.uid, name: u.name, role: u.role,
-    linkedRooms: u.linkedRooms instanceof Set ? Array.from(u.linkedRooms) : [],
+    ...(links ? { linkedRooms: u.linkedRooms instanceof Set ? Array.from(u.linkedRooms) : [] } : {}),
     account: !!u.acct,
   }));
+}
+/**
+ * The room's people to every page in it: one broadcast without the links (encoded once, however many are in the hall),
+ * and the admin's pages, a few, each the list with them (their chips and Unlink).
+ */
+function emitUsers(room) {
+  const admins = Array.from(io.sockets.adapter.rooms.get(room.code) || []).filter((sid) => { const s = io.sockets.sockets.get(sid); return !!(s && s.data.isAdmin); });
+  io.to(room.code).except(admins).emit('users', roomUserSummary(room));
+  if (!admins.length) return;
+  const full = roomUserSummary(room, { links: true });
+  for (const sid of admins) io.sockets.sockets.get(sid).emit('users', full);
 }
 /** Every seat one person has in a room ([socketId, seat] pairs): the room list shows the person once, so what the admin
  *  does to that row (role, link, logout) is done to each of their pages there. */
@@ -715,7 +734,7 @@ io.on('connection', (socket) => {
       ok: true, roomCode: code, roomName: r.name || '', role: cleanRole, name: cleanName, adminView: isAdminView,
       identity, uid: id, note, uploadToken, seq: r.seq,
       ...(ops ? { ops } : { history: r.messages }),
-      users: roomUserSummary(r),
+      users: roomUserSummary(r, { links: socket.data.isAdmin }),
       ai: !!aiKey(), stage: stagePayload(linkFor(code)),
       canSendToStage: !!(linkFor(code).base && linkFor(code).key) && allowed('stage.send'),
       canPropose: !!(linkFor(code).desk && linkFor(code).key) && allowed('stage.send'),
@@ -725,7 +744,7 @@ io.on('connection', (socket) => {
 
     if (!isAdminView) {
       if (!returning) systemMessage(r, `${cleanName} joined as ${cleanRole}`);
-      io.to(code).emit('users', roomUserSummary(r));
+      emitUsers(r);
       boardDirty();
     } else {
       io.in(code).fetchSockets().then((peers) => {
@@ -843,10 +862,19 @@ io.on('connection', (socket) => {
     const caps = seat ? GUEST_CAPS[seat.role] || [] : linked ? GUEST_CAPS.board : [];
     return { role: seat ? seat.role : me.role, may: (cap) => caps.includes(cap) };
   };
-  socket.on('myRooms', (ack) => {
+  // The forward picker: the other halls the forward of this message (`messageId`; none: a text) would be taken in — a
+  // file needs hall.files there too, as forward asks.
+  socket.on('myRooms', (q, ack) => {
+    if (typeof q === 'function') [ack, q] = [q, {}];
     if (!me) return ok(ack)({ ok: false, error: 'Not joined' });
+    const src = q && typeof q === 'object' ? room.byId.get(guard.str(q.messageId)) : null;
+    const needs = src && src.type === 'file' ? ['hall.post', 'hall.files'] : ['hall.post'];
     const linked = me.linkedRooms instanceof Set ? Array.from(me.linkedRooms) : [];
-    const others = Array.from(new Set([...(userRooms.get(me.uid) || []), ...linked])).filter((c) => c !== room.code && store.has(c) && rightsIn(store.get(c)).may('hall.post'));
+    const others = Array.from(new Set([...(userRooms.get(me.uid) || []), ...linked])).filter((c) => {
+      if (c === room.code || !store.has(c)) return false;
+      const there = rightsIn(store.get(c));
+      return needs.every((cap) => there.may(cap));
+    });
     ok(ack)({ ok: true, rooms: others.map((c) => ({ code: c, name: store.get(c).name || '' })) });
   });
 
@@ -867,7 +895,8 @@ io.on('connection', (socket) => {
     const fwd = {
       id: makeMessageId(), type: src.type, at: Date.now(), from: { uid: me.uid, name: me.name, role: there.role, ...(me.acct ? { acct: true } : {}) },
       pinned: false, priority: !!src.priority,
-      forwardedFrom: { roomCode: room.code, roomName: room.name || '', originalAuthor: (src.from && src.from.name) || 'unknown', originalAt: src.at },
+      // The hall it came from by its name, never its code: a code lets a guest in, and this hall's people may not open that one.
+      forwardedFrom: { roomName: room.name || '', originalAuthor: (src.from && src.from.name) || 'unknown', originalAt: src.at },
     };
     if (src.type === 'text') fwd.text = src.text;
     else if (src.type === 'file') Object.assign(fwd, { url: src.url, filename: src.filename, mime: src.mime, caption: src.caption || '' });
@@ -909,7 +938,7 @@ io.on('connection', (socket) => {
     if (!canDraft()) return ok(ack)({ ok: false, error: 'Drafting is for the research team.' });
     const docText = typeof args.docText === 'string' ? args.docText.slice(0, 60_000) : '';
     runAi(ack, (signal) => ai.draftReply(aiKey(), {
-      show: showBrief(briefOf(linkFor(room.code)), discovery ? discovery.list() : []),
+      show: briefFor(room.code),
       messages: room.messages,
       question: typeof args.question === 'string' ? args.question.slice(0, 2000) : '',
       instruction: typeof args.instruction === 'string' ? args.instruction.slice(0, 500) : '',
@@ -922,7 +951,7 @@ io.on('connection', (socket) => {
     if (!canDraft()) return ok(ack)({ ok: false, error: 'For the research team.' });
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim().slice(0, 1000) : '';
     if (!prompt) return ok(ack)({ ok: false, error: 'Type the question first.' });
-    runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, messages: room.messages, show: showBrief(briefOf(linkFor(room.code)), discovery ? discovery.list() : []) }, signal));
+    runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, messages: room.messages, show: briefFor(room.code) }, signal));
   });
 
   // ----- Stagewatch: put an answer on the speaker's confidence monitor (research or admin)
@@ -943,7 +972,7 @@ io.on('connection', (socket) => {
       const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} sent to the stage screen: “${text.replace(/\s+/g, ' ').slice(0, 120)}”`, at: Date.now(), stage } }).m;
       if (source) apply(room, { o: 'upd', id: source.id, f: { stage } });
       if (r.messageId) trackStageSend(link, r.messageId, room.code, [sys.id].concat(source ? [source.id] : []), 'sent', '', stage.at);
-      noteEvent('research sent a message to the stage screen (' + r.stage + ')');
+      noteEvent('research sent a message to the stage screen (' + r.stage + ')', link);
     }
     ack(r);
   });
@@ -993,7 +1022,7 @@ io.on('connection', (socket) => {
     const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} asked Stagewatch's operator to put this on ${built.words}: “${parsed.text.slice(0, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
     if (source) apply(room, { o: 'upd', id: source.id, f: { proposal } });
     trackProposal(link.id, proposal.id, room.code, [sys.id].concat(source ? [source.id] : []), proposal.state, proposal);
-    noteEvent('research proposed a stage message to the show desk');
+    noteEvent('research proposed a stage message to the show desk', link);
     ack({ ok: true, proposal });
   });
 
@@ -1045,7 +1074,7 @@ io.on('connection', (socket) => {
     const d = displays.get(guard.str(id));
     if (!d || !canDisplays('display.control', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
     if (!chatter.take()) return limited(ack);
-    io.to('display:' + d.id).emit('display:identify', { name: d.name, hall: (store.get(d.hall) || {}).name || d.hall, seconds: 6 });
+    io.to('display:' + d.id).emit('display:identify', { name: d.name, hall: (store.get(d.hall) || {}).name || '', seconds: 6 });   // its name, never its code
     ack({ ok: true, screens: Displays.screens(d) });
   });
   socket.on('display:create', ({ code, name } = {}, ack) => {
@@ -1184,7 +1213,7 @@ io.on('connection', (socket) => {
       if (match.risk === 'high') return ack({ ok: false, error: '“' + shown + '” is high risk for ' + link.node.name + ': propose it to the show desk, where a person approves it.' });
       const r = await link.send(text);
       audit.write(who, 'node.command', link.node.id, link.node.name + ': ' + shown + ' → ' + peerlinks.redactWords(r.ok ? r.stage + (r.effect ? ' (' + r.effect + ')' : '') : 'refused: ' + (r.error || ''), secrets), socket.data.ip);
-      noteEvent('a person sent a ' + match.risk + '-risk command to ' + link.node.t);
+      noteEvent('a person sent a ' + match.risk + '-risk command to ' + link.node.t, link.hall ? linkFor(link.hall) : null);
       return ack({ ...r, risk: match.risk });
     }
     // A proposal keeps its line in the desk's queue and journal: a line with a secret is never proposed.
@@ -1226,7 +1255,7 @@ io.on('connection', (socket) => {
     if (m.help && m.help.state === 'resolved') return ack({ ok: false, error: 'Already resolved' + (m.help.by ? ' by ' + m.help.by : '') + '.' });
     const by = (me && room && room.code === r.code) ? me.name : socket.data.account ? socket.data.account.name : 'Admin';
     apply(r, { o: 'upd', id: m.id, f: { help: { state, by, at: Date.now() } } });
-    noteEvent('a help request was ' + (state === 'coming' ? 'answered' : 'resolved'));
+    noteEvent('a help request was ' + (state === 'coming' ? 'answered' : 'resolved'), linkFor(r.code));
     ack({ ok: true });
   });
 
@@ -1301,7 +1330,7 @@ io.on('connection', (socket) => {
 
   socket.on('admin:listRooms', (ack) => {
     if (!admin(ack)) return;
-    ok(ack)({ ok: true, rooms: Array.from(store.rooms.values()).map((r) => ({ code: r.code, name: r.name || '', createdAt: r.createdAt, users: roomUserSummary(r), messageCount: r.messages.length, locked: !!r.settings.lockRoles })) });
+    ok(ack)({ ok: true, rooms: Array.from(store.rooms.values()).map((r) => ({ code: r.code, name: r.name || '', createdAt: r.createdAt, users: roomUserSummary(r, { links: true }), messageCount: r.messages.length, locked: !!r.settings.lockRoles })) });
   });
   socket.on('admin:watchRoom', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
@@ -1310,7 +1339,7 @@ io.on('connection', (socket) => {
     if (socket.data.watching && socket.data.watching !== roomCode) socket.leave(socket.data.watching);
     socket.join(roomCode);
     socket.data.watching = roomCode;
-    ok(ack)({ ok: true, code: roomCode, name: r.name || '', messages: r.messages, users: roomUserSummary(r), locked: !!r.settings.lockRoles });
+    ok(ack)({ ok: true, code: roomCode, name: r.name || '', messages: r.messages, users: roomUserSummary(r, { links: true }), locked: !!r.settings.lockRoles });
   });
   socket.on('admin:createRoom', (arg, ack) => {
     if (typeof arg === 'function') { ack = arg; arg = {}; }
@@ -1377,7 +1406,7 @@ io.on('connection', (socket) => {
       const s = io.sockets.sockets.get(sid);
       if (s) s.emit('roleChanged', { role });
     }
-    io.to(r.code).emit('users', roomUserSummary(r));
+    emitUsers(r);
     systemMessage(r, `${target.name} role changed from ${prev} to ${role} by admin`);
     ok(ack)({ ok: true });
   });
@@ -1501,7 +1530,7 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const was = stageLink.tlsState;
     if (!stageLink.acceptCertificate()) return ok(ack)({ ok: false, error: 'No certificate to accept.' });
-    noteEvent('the admin accepted a changed Stagewatch certificate');
+    noteEvent('the admin accepted a changed Stagewatch certificate', stageLink);
     ok(ack)({ ok: true, fingerprint: was.fp });
   });
   socket.on('admin:renewCertificate', (ack) => {
@@ -1523,7 +1552,7 @@ io.on('connection', (socket) => {
     if (!room || !me || socket.data.adminView) return;
     const r = room, u = me;
     r.users.delete(socket.id);
-    io.to(r.code).emit('users', roomUserSummary(r));
+    emitUsers(r);
     boardDirty();
     const still = Array.from(r.users.values()).some((x) => x.uid === u.uid);
     if (still) return;
@@ -1547,17 +1576,23 @@ io.on('connection', (socket) => {
 
 function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : []; }
 
-/** A link as the AI's brief reads it, with the linked Patterns and PlayMap nodes' own words. */
-const briefOf = (link) => ({ status: link.status, view: link.view, context: link.context, linked: Array.from(peerLinks.values()).map((l) => l.view()) });
+/** What a hall's AI is told of the show network: its Stagewatch, and the nodes of that hall and of every hall in their own words (lib/context.js hallBrief). */
+function briefFor(code) {
+  const link = linkFor(code);
+  return hallBrief(code, { status: link.status, view: link.view, context: link.context }, Array.from(peerLinks.values()).map((l) => l.view()), discovery ? discovery.list() : []);
+}
 
 // ---------------------------------------------------------------- displays
 // AGMessage's own time zone (an IANA name, on Windows too): a screen's clock shows the time of day here, whatever zone
 // the screen's own computer was set to.
 const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-/** Everything a display's page needs: what to show (numbered), the hall's holding image and countdown, the server's time and zone. */
+/**
+ * Everything a display's page needs: what to show (numbered), the hall's holding image and countdown, the server's time
+ * and zone. A screen link only shows: its connection is never told its hall's code, which would let its browser in.
+ */
 function displayState(d) {
   return {
-    id: d.id, name: d.name, hall: d.hall, hallName: (store.get(d.hall) || {}).name || '', seq: d.seq, content: d.content,
+    id: d.id, name: d.name, hallName: (store.get(d.hall) || {}).name || '', seq: d.seq, content: d.content,
     holding: displays.hallHolding(d.hall), stage: stagePayload(linkFor(d.hall)), now: Date.now(), tz: TIME_ZONE,
   };
 }
@@ -1635,6 +1670,7 @@ function boardFor(socket, shared = new Map()) {
   const links = Array.from(peerLinks.values()).filter((l) => (l.hall ? sees(l.hall) : mayDriveNode(socket, l)));
   return {
     nodes: links.map(nodeChip),
+    canDrive: Array.from(peerLinks.values()).some((l) => mayDriveNode(socket, l)),   // what nodes:list would list: Show network
     halls: rooms.map((r) => ({ ...hallParts(r, shared).row, nodes: links.filter((l) => l.hall === r.code).map(nodeChip) })),
     help: rooms.flatMap((r) => hallParts(r, shared).help.map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.can(a, 'hall.post', r.code))) }))),
   };
@@ -1743,7 +1779,7 @@ function renderTranscriptHtml(room) {
     if (m.priority) extras += '<span class="prio">🔥 HIGH</span>';
     if (m.pinned) extras += '<span class="pin">📌 pinned</span>';
     if (m.aiDraft) extras += '<span class="pin">✨ drafted with AI, sent by a person</span>';
-    if (m.forwardedFrom) extras += '<div class="fwd">↗ Forwarded from ' + (m.forwardedFrom.roomName ? esc(m.forwardedFrom.roomName) + ' (' + esc(m.forwardedFrom.roomCode) + ')' : esc(m.forwardedFrom.roomCode)) + '</div>';
+    if (m.forwardedFrom) extras += '<div class="fwd">↗ Forwarded from ' + esc(m.forwardedFrom.roomName || 'another hall') + '</div>';
     const cls = ['msg', 'type-' + m.type, m.priority ? 'priority' : ''].filter(Boolean).join(' ');
     rows.push('<article class="' + cls + '"><header><strong>' + who + '</strong><time>' + esc(fmt(m.at)) + '</time></header>' + extras + '<div class="body">' + content + '</div></article>');
   }
@@ -1774,7 +1810,7 @@ const hallLinks = new Map();   // hall code -> StagewatchLink
 function makeLink(id) {
   const link = new nodes.StagewatchLink({
     onState: (view) => onStageState(link, view),
-    onStatus: (status) => noteEvent('Stagewatch link' + (id === 'default' ? '' : ' of a hall') + ' ' + (/^CERTIFICATE CHANGED/.test(status) ? 'refused: CERTIFICATE CHANGED' : status)),
+    onStatus: (status) => noteEvent('Stagewatch link' + (id === 'default' ? '' : ' of a hall') + ' ' + (/^CERTIFICATE CHANGED/.test(status) ? 'refused: CERTIFICATE CHANGED' : status), link),
     findPeer: (t, host, port) => (discovery ? discovery.find(t, host, port) : null),
     pins,
     onPins: () => { settings.tlsPins = pins.toJSON(); saveSettings(); },
@@ -1893,7 +1929,7 @@ function followStageAck(link, view) {
     const m = room.byId.get(id);
     if (m && m.stage) apply(room, { o: 'upd', id, f: { stage: { ...m.stage, ack, by: t.by } } });
   }
-  if (ack === 'seen' || ack === 'done') noteEvent('the speaker ' + (ack === 'done' ? 'acknowledged' : 'saw') + ' a stage message');
+  if (ack === 'seen' || ack === 'done') noteEvent('the speaker ' + (ack === 'done' ? 'acknowledged' : 'saw') + ' a stage message', link);
 }
 
 // After a restart, keep following the sends the speaker has not acknowledged yet: the send's link and its Stagewatch's
@@ -2044,7 +2080,7 @@ function currentContext(link) {
     help: rooms.reduce((n, r) => n + board.openHelp(r).length, 0),
     peerContexts: Object.fromEntries(Array.from(peerLinks.values()).filter((l) => l.status === 'live' && l.context && (!link || !l.hall || codes.has(l.hall))).map((l) => [l.node.id, { light: l.context.light, headline: l.context.headline }])),
     peers: discovery ? discovery.list() : [],
-    aiOn: !!aiKey(), tunnel: !!tunnelProc, recent: recentEvents,
+    aiOn: !!aiKey(), tunnel: !!tunnelProc, recent: link ? recentEvents.filter((e) => !e.link || e.link === link.id) : recentEvents,
   });
 }
 // Post each linked Stagewatch its own context: on change, and at least every 5 s. Refresh Stagewatch's own every 5 s.

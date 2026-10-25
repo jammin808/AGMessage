@@ -39,8 +39,10 @@ Rules that keep rights from growing by themselves: deny by default; only an admi
 `users.manage` or `settings.manage`, and only an admin changes, resets, signs out, turns back on or removes an account
 that holds one of them (the Accounts page shows such a person as "Admin only" to anyone else); an account that is not an
 admin manages only accounts within its own rights and halls, and hands out only those — it cannot make a richer account,
-widen one, or reset a richer one's password (the page offers only what it holds, and shows a richer person as
-"Locked"); nobody changes their own role, rights or halls; the last admin who can sign in stays one. A code guest's rights come from where they joined: backstage posts, shares files and sends to Stagewatch; on
+widen one, or reset a richer one's password (the page offers only what it holds, names only the halls it holds — a
+person's other halls are a count — and shows a richer person as "Locked"); nobody changes their own role, rights or
+halls, nor turns themselves off or removes themselves (on one's own row the page offers the name, a new one-time
+password and Sign out everywhere); the last admin who can sign in stays one. A code guest's rights come from where they joined: backstage posts, shares files and sends to Stagewatch; on
 stage posts and shares files; an observer reads. Screens, halls and other show systems need an account.
 
 **Inside a hall.** Reading is `hall.view`; everything that changes what the others see — a message, a reply, a help
@@ -48,8 +50,9 @@ request, an answer to an action prompt, a pin, a reaction — is `hall.post`, so
 prompt's options and its tally, and is offered nothing to press. Forwarding a message posts it in the other hall, so the
 rights there decide: an account's rights in that hall (and `hall.files` for a file), a code guest's own seat there (a
 locked hall's observer seat stays an observer's), or, where the guest has no seat, the admin's link. The forward carries
-the role and the account mark a post there would carry, and the picker lists only the halls that would take it. A help
-request is not forwarded: it is tracked and answered in its own hall. An account's role in a hall follows its rights, so
+the role and the account mark a post there would carry, and the picker lists only the halls that would take that
+message (for a file, those where they may share files too). A help request is not forwarded: it is tracked and
+answered in its own hall. An account's role in a hall follows its rights, so
 the admin page's room list changes a code guest's role and refuses an account's (that is the Accounts page's); its link
 lets a code guest forward into a hall, and is refused for an account that may not post there. An account with a hall
 open on a laptop and a phone (or a guest with it open in two tabs) is one person there: listed, announced and counted
@@ -57,6 +60,15 @@ once, "left" only when the last page closes, and the room list's role, link and 
 A locked hall's invite is for people who join later: a code guest already seated there keeps the seat while another of
 their pages is open and for the few seconds before "left" (Wi-Fi drops, the page's reload after the admin changes their
 role), under the same name and role; after the admin logs them out it is gone.
+
+**Who is told a hall's code.** A code lets anyone in as a guest (backstage in an unlocked hall, an observer in a locked
+one), so it goes only to those who may open that hall: the halls board, the show network's list and the Accounts page
+name only the halls an account reaches (an account that does not reach every hall sees another person's other halls as
+a count); a screen's link only shows, and its connection is never told its hall's code (Identify on a hall with no name
+draws no hall); the admin's link that lets one guest forward into another hall reaches that guest and the admin's pages,
+never the rest of the hall; a forwarded message names the hall it came from, never its code ("another hall" when that
+hall has no name). The audit log names halls by their code: `audit.read` is a right over every hall (a project
+manager's and the admin's), so an admin who gives it to someone of one hall gives them every hall's code.
 
 ## The first admin
 

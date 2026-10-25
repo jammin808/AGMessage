@@ -15,7 +15,7 @@ const zlib = require('zlib');
 const os = require('os');
 const path = require('path');
 const net = require('net');
-const { fakeStagewatch } = require('./helpers');
+const { fakeStagewatch, fakeNode } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = process.env.AGM_SMOKE_OUT || path.join(ROOT, '..', 'artifacts', 'smoke');
@@ -196,6 +196,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
   const server = await startServer(port, dataDir);
   const edge = await launchEdge();
   let sw = null;
+  let patterns = null;
   try {
     const login = await fetch(base + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
     const cookie = login.headers.get('set-cookie').split(';')[0];
@@ -255,6 +256,15 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await users.until(`document.getElementById('userDialog').open`);
     await users.eval(`document.getElementById('userSave').click()`);
     report(!!(await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — nothing changed.'`)) && !!(await users.eval(`AGM.api('GET', '/api/users').then((r) => r.users.find((u) => u.username === 'kim').halls.includes('GONE01'))`)), 'an untouched Save on the accounts page is no change, a removed hall\'s code included');
+    // One's own row: the name is one's own; role, halls, rights, Turn off and Remove are shown and not offered, and a Save
+    // sends what the server takes from oneself (the name alone).
+    await users.until(`!document.getElementById('userDialog').open`);
+    await users.eval(`(() => { document.getElementById('agmToast').textContent = ''; [...document.querySelectorAll('#userRows tr')].find((tr) => tr.querySelector('td .muted').textContent.split(' ')[0] === 'ana').querySelector('button').click(); })()`);
+    await users.until(`document.getElementById('userDialog').open`);
+    const selfForm = await users.eval(`JSON.stringify({ name: !document.getElementById('uName').disabled, role: document.getElementById('uRole').disabled, every: document.getElementById('uAll').disabled, halls: [...document.querySelectorAll('#uHalls input')].every((c) => c.disabled), rights: [...document.querySelectorAll('#uCaps input')].every((c) => c.disabled), off: document.getElementById('disableBtn').hidden, remove: document.getElementById('removeBtn').hidden })`);
+    await users.eval(`document.getElementById('userSave').click()`);
+    const selfSaved = await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — nothing changed.' && !document.getElementById('userDialog').open`, 5000);
+    report(selfForm === JSON.stringify({ name: true, role: true, every: true, halls: true, rights: true, off: true, remove: true }) && !!selfSaved, `one's own row: a Save is taken; role, halls, rights, Turn off and Remove are not offered (${selfForm}${selfSaved ? '' : '; ' + (await users.eval(`document.getElementById('userError').textContent`))})`);
     const hallView = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
     report(!!(await hallView.until(`typeof joined !== "undefined" && joined && document.getElementById('whoami').textContent.startsWith('Ana Admin')`)), 'an account opens its hall with its own name');
 
@@ -453,11 +463,25 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await admin.shot(path.join(OUT, 'admin-room.png'));
     await research.eval(`Promise.all([new Promise((r) => socket.emit('message', { type: 'help', category: 'Sound', text: 'radio mic 3 dead' }, r)), new Promise((r) => socket.emit('message', { type: 'action', text: 'Ready for Q&A?', options: ['Yes', 'No'] }, r))])`);
     report(!!(await research.until(`(() => { const h = document.querySelector('.msg[data-type="help"] .fwd-btn'); const t = Array.from(document.querySelectorAll('.msg[data-type="text"] .fwd-btn')); return h && h.hidden && t.length && t.every((b) => !b.hidden); })()`)), 'a help request offers no forward; a message does');
+    // A page opened before its hall had a Stagewatch offers 🖥 once it has one (the server's answer, asked again when the
+    // link's state changes).
+    report(!!(await research.until(`CAN_STAGE && [...document.querySelectorAll('.msg[data-type="text"] .stage-btn')].some((b) => !b.hidden)`)), 'a page opened before its hall had a Stagewatch offers 🖥 once it has one');
     const made2 = await signin.eval(`fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'vic', name: 'Vic Viewer', role: 'viewer', halls: ['${code}'], password: 'only looking at screens' }) }).then((r) => r.status)`);
+    const madeSid = await signin.eval(`fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sid', name: 'Sid Staff', role: 'staff', halls: ['${code}'], password: 'cable ties and gaffer' }) }).then((r) => r.status)`);
+    // A Patterns linked for the hall: its chip is on the hall's row for everyone who sees the hall; Show network, which
+    // opens what that account may drive, only for those who may drive it (the admin here, not the Viewer).
+    patterns = await fakeNode({ name: 'Smoke Patterns' });
+    await hallView.eval(`new Promise((r) => socket.emit('nodes:link', { id: 'smokepat', t: 'patterns', url: '${patterns.url}', token: 'node-token', hall: ROOM, name: 'Smoke Patterns' }, r))`);
+    report(!!(await signin.until(`!document.getElementById('networkBtn').hidden && document.body.textContent.includes('Smoke Patterns')`)), 'the admin\'s halls board offers Show network once a Patterns is linked');
+    // The admin page signed this browser in with the host's admin token: from here its pages are judged by the accounts
+    // they sign in with alone (the pages already open keep their connections).
+    await signin.send('Network.deleteCookies', { name: 'agm_admin', url: base + '/' });
     const vicIn = await signin.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'vic', password: 'only looking at screens' }) }).then((r) => r.status)`);
     const viewerBoard = await edge.tab(`${base}/halls.html`);
     const helpHref = await viewerBoard.until(`(() => { const a = document.querySelector('#helpStrip:not([hidden]) .help-item a'); return a ? a.getAttribute('href') : ''; })()`);
     report(made2 === 200 && vicIn === 200 && /role=observer/.test(helpHref || ''), `a Viewer's help strip opens the hall read only (${helpHref})`);
+    const viewerNet = await viewerBoard.until(`Array.from(document.querySelectorAll('.node-chip')).some((c) => c.textContent.includes('Smoke Patterns')) && JSON.stringify({ chip: true, button: !document.getElementById('networkBtn').hidden })`);
+    report(viewerNet === JSON.stringify({ chip: true, button: false }), `a Viewer sees the hall's Patterns on its row and is not offered Show network (${viewerNet})`);
     const viewerHall = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
     report(!!(await viewerHall.until(`location.search.includes('role=observer') && typeof joined !== 'undefined' && joined && allMessages.some((m) => m.type === 'action')`)), 'an old link that says research opens again as the Viewer is seated: observer');
     const shown = await viewerHall.eval(`(() => {
@@ -474,7 +498,27 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(shown === JSON.stringify({ composer: false, stage: false, pin: false, react: false, answer: false, replyText: false }), `the Viewer is offered nothing the server refuses (${shown})`);
     await viewerHall.shot(path.join(OUT, 'hall-viewer.png'));
 
-    for (const [name, tab] of [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer]]) {
+    // A Staff account (messages and files, no Stagewatch) is seated backstage: while the hall's Stagewatch keeps a show
+    // desk and its frames move, it is offered neither 📝 nor 🖥 — the server would refuse both.
+    const sidIn = await signin.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sid', password: 'cable ties and gaffer' }) }).then((r) => r.status)`);
+    const staffHall = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
+    const staffIn = await staffHall.until(`typeof joined !== 'undefined' && joined && document.getElementById('whoami').textContent.startsWith('Sid Staff') && !document.getElementById('stageChip').hidden`);
+    sw.frame({ text: '04:58', seconds: 298 });
+    await staffHall.until(`document.getElementById('stageTime').textContent === '04:58'`);
+    await sleep(500);
+    const staffShown = await staffHall.eval(`JSON.stringify({ who: document.getElementById('whoami').textContent, role: document.body.dataset.role, texts: allMessages.some((m) => m.type === 'text'), propose: CAN_PROPOSE, send: CAN_STAGE, buttons: [...document.querySelectorAll('.msg .propose-btn, .msg .stage-btn')].filter((b) => !b.hidden).length })`);
+    report(madeSid === 200 && sidIn === 200 && !!staffIn && staffShown === JSON.stringify({ who: 'Sid Staff · Staff', role: 'research', texts: true, propose: false, send: false, buttons: 0 }), `a Staff account is offered neither 📝 nor 🖥 while the hall's Stagewatch keeps a desk and its frames move (${madeSid} ${sidIn} ${staffShown})`);
+
+    // A page away while its hall loses its Stagewatch: back (it resumes from what it missed), the messages it had drawn
+    // offer 🖥 no more.
+    const sendsBefore = await research.eval(`[...document.querySelectorAll('.msg[data-type="text"] .stage-btn')].filter((b) => !b.hidden).length`);
+    await research.eval(`socket.disconnect()`);
+    const removed = await hallView.eval(`new Promise((r) => socket.emit('hall:configure', { code: ROOM, stagewatchUrl: '' }, (x) => r(!!(x && x.ok))))`);
+    await research.eval(`socket.connect()`);
+    const back = await research.until(`socket.connected && joined && !CAN_STAGE && JSON.stringify({ shown: [...document.querySelectorAll('.msg[data-type="text"] .stage-btn')].filter((b) => !b.hidden).length })`, 8000);
+    report(sendsBefore > 0 && removed && back === JSON.stringify({ shown: 0 }), `a page back from a drop while its hall lost its Stagewatch offers 🖥 no more (${sendsBefore} before; ${removed}; ${back})`);
+
+    for (const [name, tab] of [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer]]) {
       report(tab.problems.length === 0, `${name}: no script errors or CSP violations${tab.problems.length ? ' — ' + tab.problems.slice(0, 3).join(' | ') : ''}`);
       tab.close();
     }
@@ -482,6 +526,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(false, 'smoke run: ' + e.message);
   } finally {
     if (sw) await sw.close();
+    if (patterns) await patterns.close();
     edge.close();
     try { server.send({ t: 'stop' }); } catch { server.kill(); }   // as the watchdog stops it: saved first
     setTimeout(() => { try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* ignore */ } }, 1000);

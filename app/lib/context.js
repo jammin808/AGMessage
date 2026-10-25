@@ -144,4 +144,19 @@ function showBrief(stage, peers) {
   return lines.join('\n');
 }
 
-module.exports = { buildContext, showBrief, worst };
+/**
+ * The show network one hall's AI is told (pure): that hall's Stagewatch, and the Patterns and PlayMap nodes linked for
+ * that hall or for every hall — never one linked for another hall, neither as linked nor as heard on the network. (The
+ * context posted to a hall's Stagewatch leaves out such a node's own light and headline too, and names it at most as
+ * heard on the network.)
+ * @param {string} code the hall
+ * @param {{status:string, view:object|null, context:object|null}} stage the Stagewatch link that hall follows
+ * @param {Array<{id:string, hall:string}>} links every linked node, as its link's view() says it
+ * @param {Array<{id:string}>} peers Discovery.list()
+ */
+function hallBrief(code, stage, links, peers) {
+  const elsewhere = new Set((links || []).filter((l) => l.hall && l.hall !== code).map((l) => l.id));
+  return showBrief({ ...stage, linked: (links || []).filter((l) => !elsewhere.has(l.id)) }, (peers || []).filter((p) => !elsewhere.has(p.id)));
+}
+
+module.exports = { buildContext, showBrief, hallBrief, worst };

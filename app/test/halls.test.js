@@ -7,12 +7,13 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const board = require('../lib/board');
 const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
 const { io } = require('socket.io-client');
-const { startServer, stopServer, api, connect, emit, wait, until, fakeStagewatch } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, answer, wait, until, fakeStagewatch } = require('./helpers');
 
 // Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
 const KEY_A = 'swk_hallA_node_key_0001';   // secret-scan: fixture
@@ -340,7 +341,28 @@ test('C53: a restart keeps following a stage send the speaker has not acknowledg
   assert.equal(after[0].stage.link, 'hall:' + code, 'the send keeps the link it went to');
 });
 
-test('rights inside a hall: forwards, read-only members, the room list\'s role select, renames and locks, two devices', async (t) => {
+test('a forward an earlier build stored with its hall\'s code is told without it, and saved without it', async (t) => {
+  // Two halls on disk as an earlier build left them: hall D holds a message forwarded from hall A that names A's code.
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  fs.mkdirSync(path.join(dataDir, 'rooms'));
+  const at = Date.now() - 60_000;
+  const snapshot = (name, messages) => JSON.stringify({ name, createdAt: at, seq: messages.length, settings: {}, messages });
+  const legacy = { id: 'm-legacy', type: 'text', text: 'Doors at seven', at, seq: 1, pinned: false, priority: false, from: { uid: 'u-gus', name: 'Gus', role: 'research' }, forwardedFrom: { roomCode: 'HALLA1', roomName: 'Hall A', originalAuthor: 'Gus', originalAt: at - 1000 } };
+  fs.writeFileSync(path.join(dataDir, 'rooms', 'HALLA1.json'), snapshot('Hall A', []));
+  fs.writeFileSync(path.join(dataDir, 'rooms', 'HALLD1.json'), snapshot('Hall D', [legacy]));
+  const srv = await startServer({ AGM_DATA_DIR: dataDir });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const dot = await connect(srv.base); sockets.push(dot);
+  const j = await emit(dot, 'join', { roomCode: 'HALLD1', name: 'Dot', role: 'observer' });
+  assert.ok(j.ok, JSON.stringify(j));
+  assert.deepEqual(j.history.find((m) => m.id === 'm-legacy').forwardedFrom, { roomName: 'Hall A', originalAuthor: 'Gus', originalAt: at - 1000 });
+  assert.ok(!JSON.stringify(j).includes('HALLA1'), 'an observer of hall D is not told hall A\'s code');
+  await stopServer(srv.child);
+  assert.ok(!fs.readFileSync(path.join(dataDir, 'rooms', 'HALLD1.json'), 'utf8').includes('HALLA1'), 'nor is it kept on disk');
+});
+
+test('rights inside a hall: forwards, read-only members, the room list\'s role select, renames and locks, two devices, who is told a hall\'s code', async (t) => {
   const srv = await startServer();
   const { base } = srv;
   const sockets = [];
@@ -415,7 +437,7 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     assert.ok(fwd.ok, JSON.stringify(fwd));
     await until(() => inB.length === 1, 3000, 'the forward in B');
     const landed = inB[0][1];
-    assert.deepEqual([landed.text, landed.from.name, landed.from.role, landed.from.acct, landed.forwardedFrom.roomCode], ['Revenue was 12m', 'Stu Staff', 'research', true, hallA]);
+    assert.deepEqual([landed.text, landed.from.name, landed.from.role, landed.from.acct, landed.forwardedFrom.roomName], ['Revenue was 12m', 'Stu Staff', 'research', true, 'Hall A']);
 
     // A file needs hall.files in the hall it lands in.
     const up = await png(stuA.j.uploadToken);
@@ -424,12 +446,22 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     const sueA = await asAccount(sue, hallA);
     await asAccount(sue, hallB);
     assert.equal((await emit(sueA.s, 'forward', { messageId: file.id, targetRoom: hallB })).ok, false, 'no files right in B: no file forwarded into it');
+    // The picker is asked for the message it is for, and lists only the halls that would take that forward.
+    const picker = async (s, messageId) => (await answer(s, 'myRooms', { messageId })).rooms.map((r) => r.code);
+    assert.deepEqual(await picker(sueA.s, file.id), [], 'the picker offers no hall that would refuse her file');
+    assert.deepEqual(await picker(sueA.s, sent.id), [hallB], 'and still offers B for her text');
+    assert.deepEqual(await picker(stuA.s, file.id), [hallB], 'and B for his file');
     assert.ok((await emit(sueA.s, 'forward', { messageId: sent.id, targetRoom: hallB })).ok, 'her text still forwards');
     assert.ok((await emit(stuA.s, 'forward', { messageId: file.id, targetRoom: hallB })).ok, 'his file does');
     await wait(300);
     assert.deepEqual(inB.map(([, m]) => [m.type, m.from.name]), [['text', 'Stu Staff'], ['text', 'Sue Staff'], ['file', 'Stu Staff']], 'nothing refused reached B');
     assert.deepEqual(inC, [], 'nothing reached the locked hall');
     assert.deepEqual(inD.map(([, m]) => [m.text, m.from.name, m.from.role]), [['Backstage only: the CEO is late', 'Gus Guest', 'research']]);
+    // A forward names the hall it came from, never its code (a guest's way in): Dot, an observer guest of D, may not open A.
+    assert.deepEqual(inD.map(([, m]) => m.forwardedFrom.roomName), ['Hall A']);
+    assert.ok(![inB, inD].some((got) => JSON.stringify(got).includes(hallA)), 'no forward tells the hall it lands in the code of the hall it came from');
+    const late = await guest(hallD, 'Lou', 'observer');
+    assert.ok(!JSON.stringify(late.j).includes(hallA), 'nor does the history a newcomer is sent');
   });
 
   await t.test('a help request is not forwarded: it belongs to its hall, tracked and answered there', async () => {
@@ -690,5 +722,53 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     assert.equal((await guest(hallJ, 'Oz', 'board', { uid: oz.j.identity })).j.role, 'observer');
     assert.ok((await emit(ctl, 'admin:kick', { socketId: back.s.id })).ok);
     assert.equal((await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity })).j.role, 'observer', 'logged out is not a drop');
+  });
+
+  // A hall's code is a guest's way in (lookups and joins are rate limited and locked out): it is told only to those who
+  // may have it.
+  await t.test('the admin\'s link for one guest reaches that guest and the admin\'s pages, never the rest of the hall', async () => {
+    const [hallK, hallL] = [await hall('Hall K'), await hall('Hall L')];
+    const desk = await open(admin);
+    const deskLists = [];
+    desk.on('users', (u) => deskLists.push(u));
+    assert.ok((await emit(desk, 'admin:watchRoom', { roomCode: hallK })).ok);
+    const gus = await guest(hallK, 'Gus', 'research');
+    const olly = await guest(hallK, 'Olly', 'observer');
+    const ollyLists = [];
+    olly.s.on('users', (u) => ollyLists.push(u));
+    assert.ok((await emit(desk, 'admin:linkRoom', { socketId: gus.s.id, targetRoom: hallL })).ok);
+    const late = await guest(hallK, 'Late', 'observer');
+    await until(() => ollyLists.some((l) => l.some((u) => u.name === 'Late')) && deskLists.some((l) => l.some((u) => u.name === 'Late')), 3000, 'hall K\'s people list after the newcomer');
+    assert.ok(!JSON.stringify(ollyLists).includes(hallL), 'an observer in hall K is not sent hall L\'s code');
+    assert.ok(!JSON.stringify(late.j.users).includes(hallL), 'nor is a newcomer in its join answer');
+    assert.deepEqual(deskLists.at(-1).find((u) => u.name === 'Gus').linkedRooms, [hallL], 'the admin page keeps the link\'s chip and its Unlink');
+    assert.deepEqual((await emit(desk, 'admin:watchRoom', { roomCode: hallK })).users.find((u) => u.name === 'Gus').linkedRooms, [hallL]);
+    assert.deepEqual((await ask(desk, 'admin:listRooms')).rooms.find((r) => r.code === hallK).users.find((u) => u.name === 'Gus').linkedRooms, [hallL]);
+    assert.deepEqual((await myRooms(gus.s)).rooms.map((r) => r.code), [hallL], 'the guest still learns its own link');
+  });
+
+  await t.test('a screen\'s connection is never told its hall\'s code, which would let its browser in as a guest', async () => {
+    const unnamed = (await api(base, 'POST', '/api/rooms', {}, { cookie: admin })).body.code;
+    const hallM = await hall('Hall M');
+    for (const [code, name] of [[unnamed, ''], [hallM, 'Hall M']]) {
+      const made = await emit(ctl, 'display:create', { code, name: 'Foyer screen' });
+      assert.ok(made.ok, JSON.stringify(made));
+      const screen = io(base, { transports: ['websocket'], forceNew: true, reconnection: false, auth: { display: made.display.path.split('/d/')[1] } });
+      sockets.push(screen);
+      const frames = [];
+      screen.onAny((ev, x) => frames.push([ev, x]));
+      const states = () => frames.filter(([ev]) => ev === 'display:state').map(([, x]) => x);
+      await until(() => states().length === 1, 4000, 'the screen\'s state');
+      // Every path that tells a screen something: identify, a rename, a take, the hall's holding image, the hall renamed.
+      assert.ok((await emit(ctl, 'display:identify', { id: made.display.id })).ok);
+      assert.ok((await emit(ctl, 'display:update', { id: made.display.id, name: 'Foyer left' })).ok);
+      assert.ok((await emit(ctl, 'display:take', { id: made.display.id, content: { kind: 'message', text: 'Doors at seven' } })).ok);
+      assert.ok((await emit(ctl, 'display:hallHolding', { code, image: '' })).ok);
+      if (name) assert.ok((await emit(ctl, 'hall:configure', { code, name: name + ' (Foyer)' })).ok);
+      await until(() => states().length === (name ? 5 : 4) && frames.some(([ev]) => ev === 'display:identify'), 4000, 'every frame');
+      assert.deepEqual(frames.find(([ev]) => ev === 'display:identify')[1], { name: 'Foyer screen', hall: name, seconds: 6 }, 'identify draws the hall\'s name, or none');
+      assert.deepEqual(states().map((s) => s.hallName), name ? [name, name, name, name, name + ' (Foyer)'] : ['', '', '', '']);
+      assert.ok(!JSON.stringify(frames).includes(code), 'no frame a screen hears carries its hall\'s code: ' + JSON.stringify(frames.map(([ev]) => ev)));
+    }
   });
 });

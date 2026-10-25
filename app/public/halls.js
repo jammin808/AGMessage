@@ -261,7 +261,9 @@
     live = {};
     for (const r of b.halls || []) live[r.code] = r;
     helps = b.help || [];
-    $('networkBtn').hidden = !(b.nodes && b.nodes.length);
+    // Show network opens nodes:list, which lists the nodes this account may drive: offered only when there is one (a
+    // hall's crew still sees its nodes' lights on the hall's row).
+    $('networkBtn').hidden = !b.canDrive;
     const known = new Set(halls.map((h) => h.code));
     if ((b.halls || []).some((r) => !known.has(r.code)) || (b.halls || []).length !== halls.length) { load(); return; }
     render();
