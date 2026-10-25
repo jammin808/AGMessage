@@ -2180,7 +2180,9 @@ process.on('uncaughtException', (e) => {
 process.on('unhandledRejection', (e) => { rejections++; console.error('  [error] unhandled rejection:', e && e.message ? e.message : e); });
 
 // The watchdog's heartbeat: sent from the event loop, so a hung loop stops it (that silence is what restarts us).
-if (typeof process.send === 'function') setInterval(() => { try { process.send({ t: 'beat' }); } catch { /* supervisor gone */ } }, 1000).unref();
+// A send's failure (the watchdog gone, its pipe broken) comes to the callback: without one it would be an 'error' event on
+// the process, unhandled, and end it before 'disconnect' lets it save.
+if (typeof process.send === 'function') setInterval(() => { if (process.connected) process.send({ t: 'beat' }, () => { /* the watchdog gone: 'disconnect' stops us */ }); }, 1000).unref();
 
 front.on('error', (e) => {
   console.error(e.code === 'EADDRINUSE' ? `\n  Port ${PORT} is already in use. Close the other AGMessage window, or set PORT to another number.\n` : '  Server error: ' + e.message);

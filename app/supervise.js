@@ -10,7 +10,8 @@
  *  - Exit codes carry intent (lib/resilience.js EXIT): 0 stopped, 3 can't start as configured, 82 restart now.
  *  - The admin token is made once here and handed to every restart, so a restart doesn't change it.
  *  - Ctrl+C, closing the window or a stop: the server is asked over IPC and saves before it goes (a signal to a child
- *    on Windows would end it unsaved); if the watchdog itself is ended, the server sees its channel close and saves.
+ *    on Windows would end it unsaved). If the watchdog itself is ended: elsewhere the server sees its channel close and
+ *    saves; on Windows the job libuv puts every child in ends the server with it, so no orphan is left either way.
  *
  * Rooms, history and everyone's place come back from the saved log on every restart (lib/store.js).
  */
@@ -99,5 +100,8 @@ function stop() {
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
 process.on('SIGHUP', stop);   // the console window closed
+// Whatever runs the watchdog over IPC (a test, a service wrapper) asks it to stop the same way; on Windows a signal sent
+// to it would end it at once, and Windows ends its server with it (the job libuv puts every child in).
+if (typeof process.send === 'function') process.on('message', (m) => { if (m && m.t === 'stop') stop(); });
 
 start();

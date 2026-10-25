@@ -122,7 +122,7 @@ tests still do not reach in `server.js` is mostly the admin page's own room hand
 with files, accept a changed certificate), the tunnel, reactions and forwarding between rooms — each exercised by the
 browser smoke or by hand, none yet by a test that counts.
 
-After the review below (§6), with 221 tests: **lines 95.3 %, branches 83.5 %, functions 91.4 %**. The gate went to
+After the review below (§6), with 222 tests: **lines 95.3 %, branches 83.5 %, functions 91.6 %**. The gate went to
 **92 / 80 / 88**. The input fence reaches every socket handler, which is most of the rise in functions.
 
 ## 6. The review before release

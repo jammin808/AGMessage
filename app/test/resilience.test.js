@@ -52,15 +52,15 @@ fs.writeFileSync(runs, String(n));
 const saveAndGo = (why) => { fs.writeFileSync(path.join(${JSON.stringify(dir)}, 'saved'), why); process.exit(0); };
 process.on('message', (m) => { if (m && m.t === 'stop') saveAndGo('asked to stop'); });
 process.on('disconnect', () => saveAndGo('the watchdog went away'));
-const beat = () => setInterval(() => process.send && process.send({ t: 'beat' }), 100);
+const beat = () => setInterval(() => { if (process.connected) process.send({ t: 'beat' }, () => { /* the watchdog gone */ }); }, 100);   // as the server beats
 ${body}
 `);
   return f;
 }
-function supervise(dir, child, extra = {}) {
+function supervise(dir, child, extra = {}, { ipc = false } = {}) {
   const p = spawn(process.execPath, [path.join(ROOT, 'supervise.js')], {
     env: { ...process.env, AGM_CHILD: child, AGM_DATA_DIR: dir, AGM_BACKOFF: '0.05', AGM_HANG_MS: '1200', AGM_STARTUP_MS: '3000', ...extra },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ipc ? ['ignore', 'pipe', 'pipe', 'ipc'] : ['ignore', 'pipe', 'pipe'],
   });
   p.out = '';
   p.stdout.on('data', (d) => { p.out += d; }); p.stderr.on('data', (d) => { p.out += d; });
@@ -101,16 +101,32 @@ test('watchdog: stays stopped on a clean exit; gives up on a crash loop and leav
   assert.match(marker.reason, /7 times/);
 });
 
-test('watchdog: a stop lets the server save before it goes, on every platform', async () => {
+test('watchdog: a stop asked of it lets its server save before it goes, on every platform', async () => {
   const dir = tmp('agm-wd-');
-  const p = supervise(dir, fakeChild(dir, `beat();`));
-  assert.ok(await until(() => runs(dir) === 1 && p.out.length >= 0), 'started');
-  await new Promise((resolve) => { setTimeout(resolve, 400); });
-  p.kill('SIGTERM');   // POSIX: the watchdog asks its server over IPC; Windows: the watchdog ends at once, its channel closes
-  await p.done;
+  const p = supervise(dir, fakeChild(dir, `beat(); fs.writeFileSync(path.join(path.dirname(runs), 'pid'), String(process.pid));`), {}, { ipc: true });
+  assert.ok(await until(() => fs.existsSync(path.join(dir, 'pid'))), 'started:\n' + p.out);
+  p.send({ t: 'stop' });   // as Ctrl+C or the window closing reach it: the watchdog asks its server over IPC
+  assert.equal(await p.done, 0);
   assert.ok(await until(() => fs.existsSync(path.join(dir, 'saved')), 6000), 'the server saved before it went:\n' + p.out);
-  assert.match(fs.readFileSync(path.join(dir, 'saved'), 'utf8'), /asked to stop|the watchdog went away/);
-  if (process.platform !== 'win32') assert.equal(fs.readFileSync(path.join(dir, 'saved'), 'utf8'), 'asked to stop', 'a signalled watchdog asks; it does not kill');
+  assert.equal(fs.readFileSync(path.join(dir, 'saved'), 'utf8'), 'asked to stop');
+});
+
+test('watchdog: a signal to it leaves no server behind — asked to stop where signals reach it, ended with it on Windows', async () => {
+  const dir = tmp('agm-wd-');
+  const p = supervise(dir, fakeChild(dir, `beat(); fs.writeFileSync(path.join(path.dirname(runs), 'pid'), String(process.pid));`));
+  assert.ok(await until(() => fs.existsSync(path.join(dir, 'pid'))), 'started:\n' + p.out);
+  const pid = Number(fs.readFileSync(path.join(dir, 'pid'), 'utf8'));
+  p.kill('SIGTERM');
+  await p.done;
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  assert.ok(await until(() => !alive(), 6000), 'no server outlives its watchdog');
+  if (process.platform === 'win32') {
+    // A signal ends the watchdog at once, and the job libuv puts every child in ends its server with it: no orphan, and
+    // nothing saved. Ctrl+C and the window closing reach the server itself (SIGINT, SIGHUP), so they still save.
+    assert.ok(!fs.existsSync(path.join(dir, 'saved')));
+  } else {
+    assert.equal(fs.readFileSync(path.join(dir, 'saved'), 'utf8'), 'asked to stop', 'a signalled watchdog asks its server; it does not kill it');
+  }
 });
 
 test('a server whose watchdog has gone saves what is waiting and leaves, so no orphan holds the folder', async () => {
