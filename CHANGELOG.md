@@ -59,8 +59,8 @@ signatures, dependency review and Dependabot; releases with a CycloneDX SBOM, SH
 fences found and fixed six unescaped values, a pattern-built cookie reader, names stripped of C0 controls only (now
 also C1 and bidi overrides) and a predictable jitter.
 
-**Found by two independent reviews before release, and fixed** (`docs/ANALYSIS.md` §6: 60 findings, 59 confirmed by a
-second reader, every one fixed or answered; units 9 to 15)
+**Found by independent reviews before release, and fixed** (`docs/ANALYSIS.md` §6: 59 findings confirmed by a second
+reader, then 19 more when the fixes were read together — every one fixed or answered; units 9 to 19)
 - *Nothing a client sends stops the event.* A socket that never signed in could end the process with `null` or an
   object `String()` cannot convert (0.4's handlers had the same shape); every event now reaches its handler through one
   guard, and client values are read by their type. A fence sends every event every shape.
@@ -69,6 +69,10 @@ second reader, every one fixed or answered; units 9 to 15)
   hands out nothing past its own rights and halls. Forwarding is judged by the person's rights in the hall it lands in;
   read-only members no longer pin, react or answer action prompts; a node linked for every hall is driven only by those
   with `nodes.control` in every hall; a hall's commands are proposed only to its own Stagewatch's desk.
+- *Who is told what.* A hall's join code reaches only those who may open it (not a one-hall manager's Accounts page,
+  not a screen, not everyone in a hall the admin linked one guest from); a hall's AI brief and the context posted to
+  its Stagewatch carry its own halls' facts and events, never another hall's; pages offer no button the server would
+  refuse (Show network, send to stage, an untouched Save of one's own account).
 - *Sessions.* Signing out, a session that ends and "admin rights only on the venue network" now reach open pages, not
   only the next sign-in. A page in use keeps its session past 14 hours idle; seven days still ends it. An account keeps
   its 20 newest sessions. The admin token's sign-in survives a watchdog restart and ends after a day.
@@ -86,12 +90,14 @@ second reader, every one fixed or answered; units 9 to 15)
 - *Data.* On Windows, Ctrl+C, closing the console window and the watchdog's own stop now let the server save first:
   a signal sent to a child process there ends it at once, so the last half-second of saves and any audit entries still
   waiting were lost (CI's Windows job found it). The stop is asked over IPC. A server whose watchdog has gone saves and
-  leaves; on Windows, Windows ends it with the watchdog — either way no copy is left holding the folder. A second copy on the same data folder is refused before it writes anything (it used to rewrite the running
-  copy's rooms); a save the disk cuts short fails and is retried instead of replacing a whole file; the audit check reads
+  leaves; on Windows, Windows ends it with the watchdog — either way no copy is left holding the folder. A locked
+  hall's seats survive the watchdog's restart; a stage send whose Stagewatch restarted reads "lost", never "sent"
+  waiting for an acknowledgement that cannot come. A second copy on the same data folder is refused before it writes
+  anything (it used to rewrite the running copy's rooms); a save the disk cuts short fails and is retried instead of replacing a whole file; the audit check reads
   every rotated file as one chain, off the event loop; uploads stop before the disk fills, and files nobody posted are
   removed.
 
-Tests: 222 (was 53) plus the browser smoke (48 checks, was 7).
+Tests: 233 (was 53) plus the browser smoke (58 checks, was 7).
 
 ## 0.4.0 — 2026-10-11 — encrypted connections and the show desk (Show Bus 1.2)
 

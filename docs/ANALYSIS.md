@@ -15,7 +15,7 @@ left out, and the defects the fences found.*
 | Secret scan | `node tools/scan-secrets.js` | CI · analyze | a key, token or private key in a tracked file |
 | Version | `node tools/stamp-build.js --print` / `--check-tag` | CI · analyze | a release tag that names another version |
 | Unit, end-to-end, watchdog, TLS, version, lint-rule tests | `npm test` | CI · Linux (Node 24, 26), Windows | any failure |
-| Coverage gate | `npm run coverage` | CI · Linux (Node 24) | lines < 92 %, branches < 80 %, functions < 88 % of `server.js`, `supervise.js`, `lib/` |
+| Coverage gate | `npm run coverage` | CI · Linux (Node 24) | lines < 94 %, branches < 82 %, functions < 90 % of `server.js`, `supervise.js`, `lib/` |
 | Browser smoke | `npm run smoke` | CI · Linux (Chrome), Windows (Edge) | a page that does not join, render, or that logs a script error or a CSP violation |
 | CodeQL `security-extended` | — | Security · codeql | an alert (shown under the repository's Security tab) |
 | Dependency audit | `npm run audit` | Security · audit | a high or critical advisory in a shipped package; a package whose registry signature or provenance does not verify |
@@ -122,8 +122,9 @@ tests still do not reach in `server.js` is mostly the admin page's own room hand
 with files, accept a changed certificate), the tunnel, reactions and forwarding between rooms — each exercised by the
 browser smoke or by hand, none yet by a test that counts.
 
-After the review below (§6), with 222 tests: **lines 95.3 %, branches 83.5 %, functions 91.6 %**. The gate went to
-**92 / 80 / 88**. The input fence reaches every socket handler, which is most of the rise in functions.
+After the review below (§6), with 233 tests: **lines 96.7 %, branches 84.4 %, functions 92.8 %**. The gate went to
+**92 / 80 / 88**, then **94 / 82 / 90**. The input fence reaches every socket handler, which is most of the rise in
+functions.
 
 ## 6. The review before release
 
@@ -136,9 +137,16 @@ finding itself marked as a product decision, which are said in the units' commit
 free-space floor already keeps the stores safe; a hall cap is a governor with no measured cause), discovery bound to
 loopback when AGMessage is, and approved desk notices going only to the desk's own halls.
 
-Units 11 to 15 were worked in parallel and merged; each merge commit says what met where. A last review read them
-together, for what only shows when they meet (one such case — a field one unit replaced and another's new code still
-read — was caught by its test at the merge).
+Units 11 to 15 were worked in parallel and merged; each merge commit says what met where (one case — a field one unit
+replaced and another's new code still read — was caught by its test at the merge). A last review then read them
+together, four angles and a second reader per finding: 19 findings, all confirmed. Three were the papers lagging the
+code (fixed in unit 16); the rest were fixed in units 18 (who is told a hall's code and facts; pages offering what the
+server refuses) and 19 (a locked hall's seats across a restart; a stage send whose Stagewatch restarted; a closed hall's
+pins; a refused Set up save; a test that passed only in its order; the Viewer tabs the smoke had stopped checking). CI's
+Windows job then found what no reader had: on Windows a signal to a child process ends it unsaved (units 17, 17.1).
+Left as product decisions: an `audit.read` holder of one hall reads the whole log (the right is node-wide by design);
+a node of another hall heard on the network still appears by name in a hall's posted context; the 40 recent events
+are one ring shared by every hall.
 
 The fences the review added, beside the tests for each finding:
 
