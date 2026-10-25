@@ -267,7 +267,11 @@ function mountAccounts(app, o) {
     res.setHeader('Cache-Control', 'no-store');
     res.json({ ok: true, entries: audit.latest(Number(req.query.limit) || 200) });
   });
-  app.get('/api/audit/verify', signedIn('audit.read'), (req, res) => res.json({ ok: true, ...audit.verify() }));
+  // The check reads every file of the chain off the event loop, in slices; clicks while one runs share it.
+  app.get('/api/audit/verify', signedIn('audit.read'), async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, ...(await audit.verify()) });
+  });
 
   return { who, signedIn, actorOf, throughTunnel, adminBlocked, COOKIE };
 }

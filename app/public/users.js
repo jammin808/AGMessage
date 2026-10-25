@@ -206,11 +206,22 @@
       ol.appendChild(li);
     }
   }
+  // One check at a time: the button rests while the server reads the chain (every file of it), and only an answer that
+  // says intact reads as intact.
   $('verifyBtn').addEventListener('click', async () => {
-    const r = await AGM.api('GET', '/api/audit/verify');
+    const btn = $('verifyBtn');
     const el = $('chainState');
-    el.dataset.ok = r.ok && r.ok !== false && !r.why ? '1' : '0';
-    el.textContent = r.why ? '✕ Broken at line ' + r.brokenAt + ': ' + r.why : '✓ Intact — ' + r.entries + ' entries';
+    btn.disabled = true;
+    el.dataset.ok = '';
+    el.textContent = 'Checking the whole log…';
+    try {
+      const r = await AGM.api('GET', '/api/audit/verify');
+      const intact = r.ok === true && !r.why && Number.isInteger(r.entries);
+      el.dataset.ok = intact ? '1' : '0';
+      if (r.why) el.textContent = '✕ Broken' + (r.brokenAt ? ' at line ' + r.brokenAt : '') + (r.file && r.file !== 'audit.jsonl' ? ' of ' + r.file : '') + ': ' + r.why;
+      else if (!intact) el.textContent = '✕ Not checked: ' + (r.error || 'no answer from the server');
+      else el.textContent = '✓ Intact — ' + r.entries + ' entries' + (r.unwritten ? ' · ⚠ ' + r.unwritten + ' newer not yet on disk (the disk would not take them; they are tried again with the next entry)' : '');
+    } finally { btn.disabled = false; }
   });
 
   load().then(() => { if (location.hash === '#audit') tab('audit'); });

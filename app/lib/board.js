@@ -30,7 +30,7 @@ function lineOf(m) {
 }
 
 /** The newest message a person sent (system lines and presence are not news). */
-function lastMessage(room) {
+function lastMessageScan(room) {
   for (let i = room.messages.length - 1; i >= 0; i--) {
     const m = room.messages[i];
     if (m && m.type !== 'system' && m.from) return { name: String(m.from.name || '').slice(0, 40), text: lineOf(m), at: m.at };
@@ -39,18 +39,34 @@ function lastMessage(room) {
 }
 
 /** Help requests not yet resolved, oldest first. */
-function openHelp(room) {
+function openHelpScan(room) {
   return room.messages.filter((m) => m && m.type === 'help' && m.help && m.help.state !== 'resolved').map((m) => ({
     code: room.code, hallName: room.name || room.code, id: m.id, category: m.category, text: m.text || '',
     from: (m.from && m.from.name) || '', at: m.at, state: m.help.state, by: m.help.by || '',
   }));
 }
 
+// What the board reads from a hall's messages, kept per room until its seq moves: every change to a room — a message,
+// a help request answered, a deletion, a reset, a new name — is a store commit, which moves the seq. So a board tick
+// reads only the halls that changed, once, however many people watch. Shared, so frozen: a watcher copies before adding.
+const memo = new WeakMap();
+function scan(room) {
+  const hit = memo.get(room);
+  if (hit && hit.seq === room.seq) return hit;
+  const last = lastMessageScan(room);
+  const v = { seq: room.seq, last: last && Object.freeze(last), help: Object.freeze(openHelpScan(room).map(Object.freeze)) };
+  memo.set(room, v);
+  return v;
+}
+const lastMessage = (room) => scan(room).last;
+const openHelp = (room) => scan(room).help;
+
 /** One hall's row on the board. `stage` is the hall's Stagewatch as a page shows it (or null); `displays` its screens. */
 function hallRow(room, { stage = null, displays = [], now = Date.now() } = {}) {
+  const { last, help } = scan(room);
   return {
     code: room.code, name: room.name || '', people: room.users ? room.users.size : 0,
-    last: lastMessage(room), help: openHelp(room).length, stage, displays, at: now,
+    last, help: help.length, stage, displays, at: now,
   };
 }
 

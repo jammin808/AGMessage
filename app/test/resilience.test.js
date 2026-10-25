@@ -123,6 +123,82 @@ test('atomic writes keep a backup only of a whole file; the lane coalesces and f
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'lane.json'), 'utf8')), { i: 21 });
 });
 
+test('a lane whose write fails keeps the content, says so, retries on its own and lands it', async () => {
+  const dir = tmp('agm-lane-');
+  const f = path.join(dir, 'lane.json');
+  fs.mkdirSync(f);   // a rename over a directory fails, as one over a file another program holds does on Windows
+  const lane = new r.WriteLane(f, { delayMs: 20 });
+  lane.save(() => '{"a":1}');
+  await wait(100);
+  assert.match(String(lane.lastError), /EISDIR|EPERM|ENOTEMPTY|EEXIST/, 'the failure is kept for health: ' + lane.lastError);
+  assert.equal(lane.failures, 1);
+  assert.equal(lane.writes, 0);
+  fs.rmdirSync(f);
+  assert.ok(await until(() => lane.writes === 1, 3000), 'retried without another save');
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"a":1}');
+  assert.equal(lane.lastError, null);
+  assert.equal(lane.failures, 0);
+
+  // At shutdown: a flush that cannot write says so, and one that can writes the newest content.
+  fs.renameSync(f, f + '.held'); fs.mkdirSync(f);
+  lane.save(() => '{"a":2}');
+  assert.equal(lane.flushSync(), false, 'a flush that cannot write says so');
+  assert.equal(lane.failures, 3, 'tried three times');
+  fs.rmdirSync(f);
+  lane.save(() => '{"a":3}');
+  assert.equal(lane.flushSync(), true, 'nothing left to write');
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"a":3}');
+});
+
+/** Run `fn` while the disk fills part-way: the first write takes half of what it is given, every later one fails. */
+function diskFillsPartway(fn) {
+  const write = fs.writeSync;
+  let calls = 0;
+  fs.writeSync = (fd, data, ...rest) => {
+    if (calls++) throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    const b = Buffer.isBuffer(data) ? data : Buffer.from(String(data));
+    const off = Buffer.isBuffer(data) && typeof rest[0] === 'number' ? rest[0] : 0;
+    const len = Buffer.isBuffer(data) && typeof rest[1] === 'number' ? rest[1] : b.length - off;
+    return write.call(fs, fd, b, off, Math.max(1, Math.floor(len / 2)));
+  };
+  try { return fn(); } finally { fs.writeSync = write; }
+}
+
+test('a save the disk takes only part of never replaces the whole file, and gives its space back', () => {
+  const dir = tmp('agm-full-');
+  const f = path.join(dir, 'accounts.json');
+  r.writeFileAtomic(f, '{"v":1}', { keepBak: true });
+  r.writeFileAtomic(f, '{"v":2}', { keepBak: true });
+  assert.throws(() => diskFillsPartway(() => r.writeFileAtomic(f, JSON.stringify({ v: 3, pad: 'x'.repeat(4000) }), { keepBak: true })), /ENOSPC/);
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"v":2}', 'the whole file stays');
+  assert.equal(fs.readFileSync(f + '.bak', 'utf8'), '{"v":1}');
+  assert.deepEqual(fs.readdirSync(dir).filter((x) => x.endsWith('.tmp')), [], 'the half-written temporary file is gone, and its space with it');
+
+  // A lane: the cut write is a failure, kept and tried again, never a write that "landed".
+  const lane = new r.WriteLane(f, { delayMs: 10_000 });
+  lane.save(() => '{"v":4}');
+  assert.equal(diskFillsPartway(() => lane.flushSync()), false, 'a flush the disk cuts short says so');
+  assert.match(String(lane.lastError), /ENOSPC/);
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"v":2}');
+  assert.equal(lane.flushSync(), true, 'and lands once the disk has room');
+  assert.equal(fs.readFileSync(f, 'utf8'), '{"v":4}');
+
+  // A hall: a snapshot cut short is not taken for one, so its log is not emptied and nothing is lost.
+  const { RoomStore } = require('../lib/store');
+  const rooms = path.join(dir, 'rooms');
+  const a = new RoomStore(rooms);
+  const room = a.create('ABC234', 'Test');
+  const say = (i) => a.commit(room, { o: 'add', m: { id: 'm' + i, type: 'text', text: 'line ' + i + ' ' + 'x'.repeat(200), at: i } });
+  for (let i = 0; i < 20; i++) say(i);
+  a.compact('ABC234');
+  for (let i = 20; i < 40; i++) say(i);
+  diskFillsPartway(() => a.compact('ABC234'));
+  assert.match(String(a.lastError), /ENOSPC/, 'the failed snapshot is said');
+  const b = new RoomStore(rooms);
+  b.loadAll(null, { compact: false });
+  assert.equal(b.get('ABC234').messages.length, 40, 'every message survives a restart');
+});
+
 test('room snapshots: a torn snapshot falls back to its backup, the log replays on top', () => {
   const { RoomStore } = require('../lib/store');
   const dir = tmp('agm-room-');
@@ -295,15 +371,15 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   // Synchronous fs calls block every meeting on the server while they run. These are allowed — each with its reason —
   // and the count may not grow without someone deciding it here.
   const allowed = {
-    'server.js': { max: 17, why: 'startup (dirs, settings, crash record), the crash handler, upload sniffing (4 KB), tunnel log tail, room deletion' },
+    'server.js': { max: 16, why: 'startup (dirs, settings, crash record), the crash handler, upload sniffing (4 KB), tunnel log tail' },
     'supervise.js': { max: 3, why: 'the watchdog process: its own log and marker, never on a request' },
     'lib/store.js': { max: 10, why: 'durability: an acknowledged message is appended to disk before the ack; snapshots every 500 ops' },
-    'lib/resilience.js': { max: 9, why: 'the atomic writer itself' },
+    'lib/resilience.js': { max: 10, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full' },
     'lib/secretbox.js': { max: 3, why: 'the machine key, read once' },
     'lib/guard.js': { max: 3, why: 'the server secret, read once at startup' },
     'lib/tls.js': { max: 4, why: 'the certificate, read (or made) once at startup and when the admin renews it' },
     'lib/version.js': { max: 8, why: 'the version and its stamp (or the checkout\'s commit), read once at startup' },
-    'lib/audit.js': { max: 10, why: 'the audit trail: an entry is on disk (fsync) before the action is acknowledged; read once at startup and on verify' },
+    'lib/audit.js': { max: 11, why: 'the audit trail: an entry is on disk (fsync) before the action is acknowledged, a short write cut back, the file rotated at 20 MB; read once at startup; verify reads asynchronously in slices' },
   };
   for (const f of files) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
@@ -314,4 +390,53 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   }
   const nodesSrc = fs.readFileSync(path.join(ROOT, 'lib/nodes.js'), 'utf8');
   assert.ok(!/[?&]pin=/.test(nodesSrc), 'no key in a WebSocket URL (Show Bus §7)');
+});
+
+// ---------------------------------------------------------------- one server per data folder
+test('a second start on the same data folder changes nothing and goes away; every acknowledged message survives', async (t) => {
+  const h = require('./helpers');
+  const second = (env) => new Promise((resolve) => {
+    const c = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
+      env: { ...process.env, HOST: '127.0.0.1', AGM_KEY_DIR: env.AGM_DATA_DIR + '-keys', ADMIN_TOKEN: h.TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
+    const stop = setTimeout(() => c.kill('SIGKILL'), 8000);   // a second copy that ran is a failure, not a hang
+    c.on('exit', (code) => { clearTimeout(stop); resolve({ code, out }); });
+  });
+  const a = await h.startServer();
+  let guest = null;
+  t.after(async () => { if (guest) guest.close(); if (a.child.exitCode === null && a.child.signalCode === null) await h.stopServer(a.child); });
+  const login = await h.api(a.base, 'POST', '/api/admin/login', { token: h.TOKEN });
+  const code = (await h.api(a.base, 'POST', '/api/rooms', { name: 'AGM' }, { cookie: login.cookie })).body.code;
+  guest = await h.connect(a.base);
+  assert.ok((await h.emit(guest, 'join', { roomCode: code, name: 'Ana', role: 'research' })).ok);
+  assert.ok((await h.emit(guest, 'message', { type: 'text', text: 'before the second start' })).ok);
+  const roomFiles = () => ['.json', '.log'].map((ext) => fs.readFileSync(path.join(a.dataDir, 'rooms', code + ext), 'utf8'));
+  const auditFile = () => fs.readFileSync(path.join(a.dataDir, 'audit.jsonl'), 'utf8');
+  const before = { rooms: roomFiles(), audit: auditFile() };
+
+  const samePort = await second({ PORT: String(a.port), AGM_DATA_DIR: a.dataDir });
+  assert.equal(samePort.code, 3, 'the port is taken: "cannot run as configured", which the watchdog does not restart:\n' + samePort.out);
+  const otherPort = await second({ PORT: String(await h.freePort()), AGM_DATA_DIR: a.dataDir });
+  assert.equal(otherPort.code, 3, 'another port, the same folder: refused as well:\n' + otherPort.out);
+  assert.match(otherPort.out, /already running on this data folder/);
+  assert.deepEqual(roomFiles(), before.rooms, 'the running server\'s room files are untouched');
+  assert.equal(auditFile(), before.audit, 'and so is its audit log');
+
+  assert.ok((await h.emit(guest, 'message', { type: 'text', text: 'after the second start' })).ok, 'acknowledged by the running server');
+  guest.close(); guest = null;
+  a.child.kill('SIGKILL');   // a stop that does not compact: the watchdog's hang kill, a power cut, the console window closed
+  await new Promise((resolve) => { a.child.once('exit', resolve); });
+
+  const b = await h.startServer({ AGM_DATA_DIR: a.dataDir });
+  try {
+    const v = await h.connect(b.base);
+    const j = await h.emit(v, 'join', { roomCode: code, name: 'Obs', role: 'observer' });
+    v.close();
+    const texts = j.history.map((m) => m.text);
+    assert.ok(texts.includes('before the second start') && texts.includes('after the second start'), JSON.stringify(texts));
+    assert.equal(texts.filter((x) => /Session restored/.test(x)).length, 1, 'one restore line, from the real restart: ' + JSON.stringify(texts));
+  } finally { await h.stopServer(b.child); }
 });

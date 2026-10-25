@@ -64,7 +64,12 @@
     if (h.loopMs && h.loopMs.count) parts.push('server delay p95 ' + h.loopMs.p95 + ' ms (max ' + h.loopMs.max + ')');
     if (h.stageRttMs && h.stageRttMs.count) parts.push('send-to-stage ' + h.stageRttMs.p50 + ' ms typical, ' + h.stageRttMs.max + ' worst');
     if (h.clock) parts.push('clock vs Stagewatch ' + (h.clock.offsetMs >= 0 ? '+' : '') + h.clock.offsetMs + ' ms' + (h.clock.apart ? ' — CLOCKS APART' : ''));
-    if (h.saves && h.saves.error) parts.push('⚠ settings save failed: ' + h.saves.error);
+    // Each store that could not be saved, by name: what it holds is kept and tried again until it is on disk.
+    const stores = (h.saves && h.saves.stores) || {};
+    for (const [name, st] of Object.entries(stores)) {
+      if (st && st.error) parts.push('⚠ ' + name + ' save failed (kept, tried again): ' + st.error);
+      else if (st && st.unwritten) parts.push('⚠ ' + st.unwritten + ' ' + name + ' entries not yet on disk');
+    }
     if (h.tls && h.tls.link && h.tls.link.changed) parts.push('⚠ CERTIFICATE CHANGED — Stagewatch\'s certificate is not the one pinned; the link is refused until you accept it');
     $('healthLine').textContent = parts.join(' · ');
   }

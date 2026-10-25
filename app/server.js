@@ -21,6 +21,7 @@
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const net = require('net');
 const express = require('express');
 const multer = require('multer');
 const { Server } = require('socket.io');
@@ -51,7 +52,12 @@ const { BUILD } = require('./lib/version');
 const VERSION = BUILD.version;
 const PORT = parseInt(process.env.PORT || '3023', 10);
 const HOST = process.env.HOST || '0.0.0.0';
-const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const UPLOAD_DIR = process.env.AGM_UPLOAD_DIR || path.join(__dirname, 'uploads');
+const envNumber = (name, dflt) => { const v = Number(process.env[name]); return process.env[name] !== undefined && process.env[name] !== '' && Number.isFinite(v) && v >= 0 ? v : dflt; };
+// Files pause while the disk has less than this free, so the room logs, the audit log and the saves always have room.
+const UPLOAD_MIN_FREE = envNumber('AGM_UPLOAD_MIN_FREE', 1024 ** 3);
+// A file uploaded but not posted within this long is removed (the page posts it when its sender presses Send).
+const UPLOAD_ORPHAN_MS = envNumber('AGM_UPLOAD_ORPHAN_MS', 60 * 60_000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = process.env.AGM_DATA_DIR || path.join(__dirname, 'data');
 const ROOMS_DIR = path.join(DATA_DIR, 'rooms');
@@ -108,6 +114,13 @@ const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json
 const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'));
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
 const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
+/** Every store saved through a write lane, by the name health and the console give it. */
+const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane]];
+/** Write every lane and the audit entries still waiting now (shutdown, a crash); what still cannot be written is named on the console. */
+function flushLanes() {
+  for (const [name, lane] of saveLanes()) if (!lane.flushSync()) console.error('  [save] ' + name + ' could not be written: ' + lane.lastError);
+  if (!audit.flush()) console.error('  [audit] ' + audit.unwritten + ' entries could not be written: ' + audit.lastError);
+}
 
 // ---------------------------------------------------------------- encrypted connections (Show Bus 1.2 §10)
 // One certificate per install, kept beside the machine key (outside the app folder), private key sealed. The same port
@@ -149,7 +162,14 @@ function healthFacts() {
     stage: stageLink.status,
     clock: stageLink.clockInfo(),
     tls: tlsFacts(),
-    saves: { writes: settingsLane.writes, coalesced: settingsLane.coalesced, error: settingsLane.lastError },
+    saves: {
+      writes: settingsLane.writes, coalesced: settingsLane.coalesced, error: settingsLane.lastError,
+      stores: {
+        ...Object.fromEntries(saveLanes().map(([name, l]) => [name, { writes: l.writes, error: l.lastError, failures: l.failures }])),
+        rooms: { error: store.lastError, unsaved: store.unsaved().length },
+        audit: { error: audit.lastError, unwritten: audit.unwritten },
+      },
+    },
   };
 }
 
@@ -158,13 +178,12 @@ const recentEvents = [];
 function noteEvent(text) { recentEvents.push({ at: Date.now(), text }); if (recentEvents.length > 40) recentEvents.shift(); }
 
 // ---------------------------------------------------------------- rooms
+// Loaded without writing: until this copy holds the data folder and its port (`holdDataFolder`, at the end of this file),
+// another copy may be appending to these same files.
 const store = new RoomStore(ROOMS_DIR);
 const restored = store.loadAll((room) => {
   for (const m of room.messages) if (m.from && m.from.role === 'director') m.from.role = 'board';   // legacy role name
-});
-for (const room of store.rooms.values()) {
-  store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— Session restored (' + room.messages.length + ' messages preserved) —', at: Date.now() } });
-}
+}, { compact: false });
 if (restored) console.log('  Restored', restored, 'room(s) from', ROOMS_DIR);
 
 /** Commit an op and broadcast it under its legacy event name, carrying its seq. */
@@ -210,8 +229,44 @@ const trackLeave = (uid, code) => { const s = userRooms.get(uid); if (s) { s.del
 const pendingLeaves = new Map();   // room|uid -> timer
 const LEAVE_GRACE_MS = 8000;
 
-// Upload tokens, issued at join: an upload must come from someone in a meeting.
-const uploadTokens = new Map();    // token -> {room, uid, bucket}
+// Upload tokens, issued at join: an upload must come from someone in a meeting. The rate is the connection's and the
+// address's, not the token's, so joining again or opening more sockets refills nothing.
+const uploadTokens = new Map();    // token -> {room, uid, bucket (the connection's), ip}
+const uploadBuckets = new Map();   // address -> its upload bucket
+function addressUploads(ip) {
+  let b = uploadBuckets.get(ip);
+  if (!b) { b = new guard.Bucket(0.5, 8); uploadBuckets.set(ip, b); if (uploadBuckets.size > 5000) uploadBuckets.clear(); }
+  return b;
+}
+// Files uploaded in this run and not yet past their wait: one nobody posted by then is removed.
+const freshUploads = new Map();    // file name -> uploaded at
+
+/** Every upload something still points at: a message in any hall, what a screen shows, a hall's holding image. */
+function uploadsInUse() {
+  const used = new Set();
+  const add = (u) => { if (guard.validUploadUrl(u)) used.add(u.slice(9)); };
+  for (const r of store.rooms.values()) for (const m of r.messages) if (m.type === 'file') add(m.url);
+  for (const d of displays.list.values()) if (d.content) { add(d.content.url); add(d.content.image); }
+  for (const code of Object.keys(displays.halls)) add(displays.hallHolding(code));
+  return used;
+}
+/** Remove those of `names` nothing points at any more (a reset, a deletion, a hall removed). Resolves to how many went. */
+async function removeUnused(names) {
+  const used = uploadsInUse();
+  let n = 0;
+  for (const f of new Set(names)) {
+    if (used.has(f) || !guard.validUploadUrl('/uploads/' + f)) continue;
+    freshUploads.delete(f);
+    try { await fs.promises.unlink(path.join(UPLOAD_DIR, f)); n++; } catch { /* already gone */ }
+  }
+  return n;
+}
+const fileNamesOf = (messages) => messages.filter((m) => m && m.type === 'file' && guard.validUploadUrl(m.url)).map((m) => m.url.slice(9));
+setInterval(() => {
+  const due = Array.from(freshUploads).filter(([, at]) => Date.now() - at >= UPLOAD_ORPHAN_MS).map(([f]) => f);
+  for (const f of due) freshUploads.delete(f);
+  if (due.length) removeUnused(due).catch(() => { /* the next sweep tries the rest */ });
+}, Math.max(100, Math.min(60_000, UPLOAD_ORPHAN_MS))).unref();
 
 // ---------------------------------------------------------------- HTTP
 const app = express();
@@ -409,10 +464,18 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, !!guard.UPLOAD_TYPES[guard.extOf(file.originalname)]),
 });
 
-app.post('/api/upload', (req, res, next) => {
+let statfsWarned = false;
+app.post('/api/upload', async (req, res, next) => {
   const t = uploadTokens.get(String(req.headers['x-agm-upload'] || ''));
   if (!t) return res.status(403).json({ error: 'Join a meeting to share files.' });
-  if (!t.bucket.take()) return res.status(429).json({ error: 'Slow down — one file at a time.' });
+  if (!t.bucket.take() || !addressUploads(t.ip).take()) return res.status(429).json({ error: 'Slow down — one file at a time.' });
+  // Before anything is written: a disk short of space keeps it for the messages, the logs and the saves.
+  try {
+    const st = await fs.promises.statfs(UPLOAD_DIR);
+    if (st.bavail * st.bsize < UPLOAD_MIN_FREE) return res.status(507).json({ error: 'The AGMessage laptop is short of disk space, so files are paused. Messages still work.' });
+  } catch (e) {
+    if (!statfsWarned) { statfsWarned = true; console.warn('  [uploads] free space cannot be read (' + e.code + '): files are not paused when the disk fills'); }
+  }
   req.agmUploader = t;
   next();
 }, (req, res) => {
@@ -432,6 +495,7 @@ app.post('/api/upload', (req, res, next) => {
       try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
       return res.status(400).json({ error: 'That file\'s contents don\'t match its type, so it wasn\'t shared.' });
     }
+    freshUploads.set(req.file.filename, Date.now());
     res.json({ url: `/uploads/${req.file.filename}`, filename: String(req.file.originalname).slice(0, 120), mime: type.mime.split(';')[0], size: req.file.size });
   });
 });
@@ -529,6 +593,7 @@ io.on('connection', (socket) => {
   const writes = new guard.Bucket(5, 15);      // messages, reactions, pins…
   const chatter = new guard.Bucket(10, 20);    // typing, seen, ui sync
   const aiBucket = new guard.Bucket(0.2, 4);   // one AI request per 5 s, bursts of 4
+  const uploadBucket = new guard.Bucket(0.5, 4);   // files from this connection, whichever hall or token
   let uploadToken = null;
   const ok = (ack) => (typeof ack === 'function' ? ack : () => {});
   const limited = (ack) => { ok(ack)({ ok: false, error: 'Slow down a little.' }); };
@@ -611,7 +676,7 @@ io.on('connection', (socket) => {
     uploadToken = null;
     if (allowed('hall.files')) {
       uploadToken = crypto.randomBytes(18).toString('base64url');
-      uploadTokens.set(uploadToken, { room: code, uid: id, bucket: new guard.Bucket(0.5, 4) });
+      uploadTokens.set(uploadToken, { room: code, uid: id, bucket: uploadBucket, ip: socket.data.ip });
     }
 
     // Resume: just what they missed, when we still have it; otherwise the whole history.
@@ -692,6 +757,7 @@ io.on('connection', (socket) => {
     if (msg.type === 'system') return ok(ack)({ ok: false, error: 'Cannot delete system message' });
     if (!msg.from || !msg.from.uid || msg.from.uid !== me.uid) return ok(ack)({ ok: false, error: 'Only the author can delete this message' });
     apply(room, { o: 'del', id: messageId });
+    removeUnused(fileNamesOf([msg])).catch(() => { /* a file left behind is only space */ });
     ok(ack)({ ok: true });
   });
 
@@ -1200,15 +1266,17 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const r = store.get(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
+    const files = fileNamesOf(r.messages);
     apply(r, { o: 'reset' });
     systemMessage(r, '— Session reset by admin: messages and documents cleared —');
-    ok(ack)({ ok: true });
+    // Its documents leave the disk too, unless another hall or a screen still shows them.
+    removeUnused(files).then((n) => ok(ack)({ ok: true, removed: n }), () => ok(ack)({ ok: true, removed: 0 }));
   });
-  socket.on('admin:deleteRoom', ({ roomCode, purgeFiles } = {}, ack) => {
+  socket.on('admin:deleteRoom', async ({ roomCode, purgeFiles } = {}, ack) => {
     if (!admin(ack)) return;
     const r = store.get(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
-    const files = new Set(r.messages.filter((m) => m.type === 'file' && guard.validUploadUrl(m.url)).map((m) => m.url.slice(9)));
+    const files = fileNamesOf(r.messages);
     io.to(r.code).emit('kicked', { reason: 'This meeting was closed by the admin.' });
     io.in(r.code).disconnectSockets(true);
     store.remove(r.code);
@@ -1218,20 +1286,16 @@ io.on('connection', (socket) => {
     configureHallLink({ code: r.code });   // its own Stagewatch link, if it had one, stops
     boardDirty();
     audit.write(socket.data.actor || HOST_ACTOR, 'hall.remove', r.code, (r.name || '(no name)') + (purgeFiles ? ', files removed' : ''), socket.data.ip);
-    let purged = 0;
-    if (purgeFiles) {
-      const stillUsed = new Set();
-      for (const other of store.rooms.values()) for (const m of other.messages) if (m.type === 'file' && guard.validUploadUrl(m.url)) stillUsed.add(m.url.slice(9));
-      for (const f of files) if (!stillUsed.has(f)) { try { fs.unlinkSync(path.join(UPLOAD_DIR, f)); purged++; } catch { /* ignore */ } }
-    }
+    const purged = purgeFiles ? await removeUnused(files) : 0;
     ok(ack)({ ok: true, purged });
   });
   socket.on('admin:deleteMessage', ({ roomCode, messageId } = {}, ack) => {
     if (!admin(ack)) return;
     const r = store.get(roomCode);
     if (!r || !r.byId.has(messageId)) return ok(ack)({ ok: false, error: 'Message not found' });
+    const files = fileNamesOf([r.byId.get(messageId)]);
     apply(r, { o: 'del', id: messageId });
-    ok(ack)({ ok: true });
+    removeUnused(files).then(() => ok(ack)({ ok: true }), () => ok(ack)({ ok: true }));
   });
   socket.on('admin:setRole', ({ roomCode, socketId, role } = {}, ack) => {
     if (!admin(ack)) return;
@@ -1462,11 +1526,17 @@ const displaysOf = (code) => displays.ofHall(code).map((d) => { const st = Displ
 
 // ---------------------------------------------------------------- the halls board
 // Each watcher gets the halls it may see, recomputed when anything on them changes and sent at most every 300 ms
-// (latest wins: a slow phone gets the newest board, never a backlog).
+// (latest wins: a slow phone gets the newest board, never a backlog). A hall's row is built once per tick for every
+// watcher (`shared`); what differs per watcher — which halls, which links, whether it may answer — is added on top.
 const boardSockets = new Set();
 let boardIsDirty = false;
 function boardDirty() { boardIsDirty = true; }
-function boardFor(socket) {
+function hallParts(r, shared) {
+  let p = shared.get(r.code);
+  if (!p) { p = { row: board.hallRow(r, { stage: stagePayload(linkFor(r.code)), displays: displaysOf(r.code) }), help: board.openHelp(r) }; shared.set(r.code, p); }
+  return p;
+}
+function boardFor(socket, shared = new Map()) {
   const a = socket.data.account;
   const sees = (code) => socket.data.isAdmin || (a && rbac.seesHall(a, code));
   const rooms = Array.from(store.rooms.values()).filter((r) => sees(r.code));
@@ -1474,14 +1544,15 @@ function boardFor(socket) {
   const links = Array.from(peerLinks.values()).filter((l) => (l.hall ? sees(l.hall) : mayDriveNode(socket, l)));
   return {
     nodes: links.map(nodeChip),
-    halls: rooms.map((r) => ({ ...board.hallRow(r, { stage: stagePayload(linkFor(r.code)), displays: displaysOf(r.code) }), nodes: links.filter((l) => l.hall === r.code).map(nodeChip) })),
-    help: rooms.flatMap((r) => board.openHelp(r).map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.can(a, 'hall.post', r.code))) }))),
+    halls: rooms.map((r) => ({ ...hallParts(r, shared).row, nodes: links.filter((l) => l.hall === r.code).map(nodeChip) })),
+    help: rooms.flatMap((r) => hallParts(r, shared).help.map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.can(a, 'hall.post', r.code))) }))),
   };
 }
 setInterval(() => {
   if (!boardIsDirty) return;
   boardIsDirty = false;
-  for (const s of boardSockets) s.emit('board', boardFor(s));
+  const shared = new Map();
+  for (const s of boardSockets) s.emit('board', boardFor(s, shared));
 }, 300).unref();
 
 /** Every open socket `match` picks is told why (the pages reload on it) and closed: its next connection is judged afresh. */
@@ -1984,11 +2055,11 @@ function shutdown(code = 0) {
   if (tunnelProc) { try { tunnelProc.kill('SIGTERM'); } catch { /* ignore */ } }
   console.log('\n  Saving rooms…');
   store.compactAll();
-  settingsLane.flushSync();
-  displays.flush(); accounts.flush(); sessions.flush(); tokenSessions.flush();
+  flushLanes();
   for (const link of allLinks()) link.stop();
   for (const link of peerLinks.values()) link.stop();
   if (discovery) discovery.stop();
+  releaseDataFolder();
   process.exit(code);
 }
 process.on('SIGINT', () => shutdown(0));
@@ -2000,12 +2071,12 @@ process.on('SIGTERM', () => shutdown(0));
 process.on('uncaughtException', (e) => {
   console.error('  [error]', e && e.stack ? e.stack : e);
   try { store.compactAll(); } catch { /* best effort */ }
-  try { settingsLane.flushSync(); } catch { /* best effort */ }
-  try { displays.flush(); accounts.flush(); sessions.flush(); tokenSessions.flush(); } catch { /* best effort: their lanes wrote within 500 ms anyway */ }
+  try { flushLanes(); } catch { /* best effort: a lane that cannot write has said so on the console */ }
   try {
     resilience.writeFileAtomic(CRASH_PATH, JSON.stringify({ at: Date.now(), message: String(e && e.message ? e.message : e).slice(0, 500), stack: String(e && e.stack ? e.stack : '').slice(0, 4000) }));
     fs.appendFileSync(path.join(DATA_DIR, 'crash.log'), new Date().toISOString() + ' ' + String(e && e.stack ? e.stack : e) + '\n');
   } catch { /* the console has it */ }
+  releaseDataFolder();
   process.exit(resilience.EXIT.CRASH);
 });
 process.on('unhandledRejection', (e) => { rejections++; console.error('  [error] unhandled rejection:', e && e.message ? e.message : e); });
@@ -2015,10 +2086,52 @@ if (typeof process.send === 'function') setInterval(() => { try { process.send({
 
 front.on('error', (e) => {
   console.error(e.code === 'EADDRINUSE' ? `\n  Port ${PORT} is already in use. Close the other AGMessage window, or set PORT to another number.\n` : '  Server error: ' + e.message);
+  releaseDataFolder();
   process.exit(resilience.EXIT.CONFIG);   // the watchdog won't restart this one
 });
 
-front.listen(PORT, HOST, () => {
+// ---------------------------------------------------------------- one server per data folder
+// Two copies on one folder would each number the same rooms' ops, chain the same audit log and save the same accounts.
+// The folder is held by a local socket named after it — a named pipe on Windows, gone with the process; a Unix socket
+// elsewhere, a leftover of a killed process known by nobody answering it — and a second copy that finds it held stops
+// (code 3, which the watchdog does not restart) before it has written anything.
+let folderHold = null;
+function holdDataFolder(then) {
+  const id = crypto.createHash('sha256').update(process.platform === 'win32' ? path.resolve(DATA_DIR).toLowerCase() : path.resolve(DATA_DIR)).digest('hex').slice(0, 16);
+  const where = process.platform === 'win32' ? '\\\\.\\pipe\\agmessage-' + id : path.join(os.tmpdir(), 'agmessage-' + id + '.sock');
+  let started = false;
+  const go = () => { if (!started) { started = true; then(); } };
+  const refuse = () => {
+    console.error('\n  AGMessage is already running on this data folder (' + DATA_DIR + '). Use that window, or give this copy a folder of its own.\n');
+    process.exit(resilience.EXIT.CONFIG);
+  };
+  const unchecked = (e) => { console.warn('  [folder] could not hold the data folder (' + (e.code || e.message) + '): a second copy on it is not refused'); folderHold = null; go(); };
+  const hold = net.createServer((c) => { c.on('error', () => { /* a second copy that asked and went: nothing to answer */ }); c.end(); });
+  hold.unref();
+  folderHold = hold;
+  hold.once('error', (e) => {
+    if (e.code !== 'EADDRINUSE') return unchecked(e);
+    if (process.platform === 'win32') return refuse();
+    const probe = net.connect(where);
+    probe.once('connect', () => { probe.destroy(); refuse(); });
+    probe.once('error', () => {
+      hold.once('error', unchecked);
+      fs.unlink(where, () => { hold.listen(where, go); });
+    });
+  });
+  hold.listen(where, go);
+}
+/** Let go of the data folder (a clean stop): the next start finds it free at once. */
+function releaseDataFolder() { if (folderHold) { try { folderHold.close(); } catch { /* the process is ending: the OS frees it */ } folderHold = null; } }
+
+holdDataFolder(() => front.listen(PORT, HOST, () => {
+  // This copy holds the folder and the port: now it writes. Each replayed log is folded into a fresh snapshot (a torn last
+  // line cut before anything is appended after it), each hall says it was restored, and the audit log is opened.
+  store.compactAll();
+  for (const room of store.rooms.values()) {
+    store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— Session restored (' + room.messages.length + ' messages preserved) —', at: Date.now() } });
+  }
+  audit.open();
   const addresses = [];
   for (const list of Object.values(os.networkInterfaces())) for (const n of list || []) if (n.family === 'IPv4' && !n.internal) addresses.push(n.address);
   console.log('\n  AGMessage ' + BUILD.full + ' is running');
@@ -2037,6 +2150,6 @@ front.listen(PORT, HOST, () => {
   console.log('  Stagewatch:  ' + (settings.stagewatchUrl || 'not linked (Admin → Show network)'));
   console.log('  Saved rooms: ' + ROOMS_DIR);
   console.log('  Uploads:     ' + UPLOAD_DIR + '\n');
-});
+}));
 
 module.exports = { app, server, io, store, buildMessage };

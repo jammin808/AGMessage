@@ -1,6 +1,6 @@
 'use strict';
-// Shared by the end-to-end tests: a real server in a child process on a free port with a throwaway data folder and key
-// folder, and a Socket.io client that carries a cookie.
+// Shared by the end-to-end tests: a real server in a child process on a free port with a throwaway data folder, key
+// folder and upload folder (never the tree's), and a Socket.io client that carries a cookie.
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -19,7 +19,7 @@ async function startServer(env = {}) {
   const dataDir = env.AGM_DATA_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
   const port = env.PORT ? Number(env.PORT) : await freePort();
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', ...env },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', AGM_UPLOAD_DIR: dataDir + '-uploads', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
