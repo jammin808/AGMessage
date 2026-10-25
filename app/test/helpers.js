@@ -80,6 +80,15 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
   const proposals = new Map();
   let next = 0;
   const sockets = new Set();
+  // As SharedProposal.ToJson (Stagewatch src/Timer.Core/Approvals.cs:20-32): result and words the same string, ok true when
+  // done, false when failed or undelivered, null until it ran. `served` stands for a desk that is not Stagewatch.
+  const OUTCOME = { done: true, failed: false, undelivered: false };
+  const node = (r) => ({ t: (r && r.t) || '', id: (r && r.id) || '', name: (r && r.name) || '' });
+  const toJson = (p) => ({
+    id: p.id, from: node(p.from), target: node(p.target), line: p.line || '', reason: p.reason || '', risk: p.risk || 'high', state: p.state,
+    created: p.created, decided: p.decided ?? null, decidedBy: p.decidedBy || '', result: p.words || '',
+    ok: Object.hasOwn(OUTCOME, p.state) ? OUTCOME[p.state] : null, words: p.words || '', ...(p.served || {}),
+  });
   let items = departments.map((d) => ({ id: 'cue:' + d.toLowerCase(), kind: 'department', label: d, light: 'amber', state: 'standing by' }));
   const srv = http.createServer((req, res) => {
     let body = '';
@@ -104,7 +113,7 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
         const target = u.searchParams.get('target');
         const list = Array.from(proposals.values()).filter((p) => (!target || (p.target && p.target.id === target && !p.claimed)) && (!u.searchParams.get('state') || p.state === u.searchParams.get('state')));
         if (target) for (const p of list) p.claimed = true;
-        return json(200, { proposals: list });
+        return json(200, { proposals: list.map(toJson) });
       }
       const one = /^\/api\/proposals\/(p\d+)(\/result)?$/.exec(u.pathname);
       if (desk && one && one[2] && failResults > 0) { failResults--; return json(500, { ok: false, error: 'busy' }); }
@@ -114,7 +123,7 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
           if (p.state !== 'approved') return json(409, { ok: false, error: 'proposal ' + p.id + ' is ' + p.state });
           const r = JSON.parse(body || '{}'); p.state = r.ok ? 'done' : 'failed'; p.words = r.words; return json(200, { ok: true });
         }
-        return json(200, p);
+        return json(200, toJson(p));
       }
       json(404, { ok: false, error: desk && one ? 'no such proposal' : 'not here' });
     });
@@ -138,7 +147,9 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     get failResults() { return failResults; },
     set failResults(n) { failResults = n; },
     frame(o) { last = { ...last, ...o }; for (const c of sockets) c.send(JSON.stringify(last)); },
-    approve(id, by = 'Show caller') { const p = proposals.get(id); if (p) { p.state = 'approved'; p.decidedBy = by; } },
+    approve(id, by = 'Show caller') { const p = proposals.get(id); if (p) { p.state = 'approved'; p.decidedBy = by; p.decided = Date.now(); } },
+    /** The desk ran an approved proposal aimed at itself (ProposalDesk.Finished): done or failed, with its receipt's words. */
+    finish(id, ok, words) { const p = proposals.get(id); if (p && p.state === 'approved') { p.state = ok ? 'done' : 'failed'; p.words = words; } },
     /** Another node's proposal on this desk (its own id, or the next one), as Stagewatch would hold it. */
     add(p) { const id = p.id || 'p' + (++next); proposals.set(id, { state: 'pending', reason: '', risk: 'review', ...p, id, created: p.created || Date.now() }); return id; },
     /** Stagewatch restarts: its queue is gone and it numbers from p1 again (it keeps both in memory only). */

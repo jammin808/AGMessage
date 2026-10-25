@@ -191,19 +191,25 @@ function stageView(frame) {
 }
 
 /**
- * A proposal as the desk reports it (Show Bus §11), cleaned (pure). Tolerant: the desk may add fields. `created` and
- * `from` tell one proposal from another of the same id: a desk numbers from p1 again after it restarts.
+ * A proposal as the desk reports it (Show Bus §11, Stagewatch's SharedProposal.ToJson), cleaned (pure). Tolerant: the desk
+ * may add fields. `created` and `from` tell one proposal from another of the same id: a desk numbers from p1 again after
+ * it restarts. The outcome is read as Stagewatch states it, at the top level: `ok` true when done, false when failed or
+ * undelivered, null until it ran; `words` the target's (or the desk's) words. A settled state stands only beside that
+ * boolean; a state not listed here, or a settled one whose ok is missing, not a boolean or says otherwise, is `unknown`
+ * (ok null) — never done, never pending. A submit's receipt ({ok:true,id,state:"pending"}) carries the request's ok,
+ * never an outcome: a proposal that has not run has none.
  */
+const PROPOSAL_STATES = new Set(['pending', 'approved', 'rejected', 'done', 'failed', 'undelivered']);
+const PROPOSAL_OUTCOME = new Map([['done', true], ['failed', false], ['undelivered', false]]);
 function readProposal(j) {
-  if (!j || typeof j !== 'object' || typeof j.id !== 'string' || !j.id) return null;
-  const STATES = ['pending', 'approved', 'rejected', 'done', 'failed', 'undelivered'];
-  const result = j.result && typeof j.result === 'object' ? j.result : null;
+  if (!j || typeof j !== 'object' || Array.isArray(j) || typeof j.id !== 'string' || !j.id) return null;
   const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const said = PROPOSAL_STATES.has(j.state) ? j.state : '';
+  const state = !said || (PROPOSAL_OUTCOME.has(said) && j.ok !== PROPOSAL_OUTCOME.get(said)) ? 'unknown' : said;
   return {
-    id: str(j.id, 40), state: STATES.includes(j.state) ? j.state : 'pending', line: str(j.line, 600), reason: str(j.reason, 300),
-    risk: str(j.risk, 10), decidedBy: str(j.decidedBy || j.by, 60),
-    words: str(result ? (result.words ?? result.error ?? '') : (j.words || j.error || ''), 300),
-    ok: result ? result.ok !== false : null,
+    id: str(j.id, 40), state, ok: PROPOSAL_OUTCOME.has(state) ? PROPOSAL_OUTCOME.get(state) : null,
+    line: str(j.line, 600), reason: str(j.reason, 300), risk: str(j.risk, 10), decidedBy: str(j.decidedBy || j.by, 60),
+    words: str(typeof j.words === 'string' ? j.words : j.result, 300),
     target: j.target && typeof j.target === 'object' ? { t: str(j.target.t, 16), id: str(j.target.id, 40) } : null,
     created: Number.isFinite(j.created) ? j.created : 0,
     from: j.from && typeof j.from === 'object' ? { t: str(j.from.t, 16), id: str(j.from.id, 40) } : null,
@@ -523,7 +529,8 @@ class StagewatchLink {
     if (!this.desk || !this.linked) return [];
     try {
       const res = await this._call('/api/proposals?target=' + encodeURIComponent(nodeId) + '&state=approved', { timeoutMs: 3000 });
-      return res.status === 200 ? readProposalList(res.body) : [];
+      // Only what the desk says is approved for this node is run: Stagewatch's collect lists nothing else.
+      return res.status === 200 ? readProposalList(res.body).filter((p) => p.state === 'approved' && p.target && p.target.id === nodeId) : [];
     } catch { return []; }
   }
 

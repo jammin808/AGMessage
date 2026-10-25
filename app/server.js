@@ -1068,7 +1068,7 @@ io.on('connection', (socket) => {
     if (!r.ok) return ack(r);
     // The desk's id is its own (it numbers from p1 again after a restart): the line and the Stagewatch's address tag
     // travel with it, so a proposal of the same number that is not this one is never taken for it.
-    const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, words: '', to: built.words, at: Date.now(), sw: link.tag, line: built.line };
+    const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, ok: null, words: '', to: built.words, at: Date.now(), sw: link.tag, line: built.line };
     const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} asked Stagewatch's operator to put this on ${built.words}: “${parsed.text.slice(0, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
     if (source) apply(room, { o: 'upd', id: source.id, f: { proposal } });
     trackProposal(link.id, proposal.id, room.code, [sys.id].concat(source ? [source.id] : []), proposal.state, proposal);
@@ -2083,7 +2083,7 @@ function showProposalState(t, p) {
   if (!room) return;
   for (const id of t.ids) {
     const m = room.byId.get(id);
-    if (m && m.proposal) apply(room, { o: 'upd', id, f: { proposal: { ...m.proposal, state: p.state, words: p.words || '', by: p.decidedBy || '' } } });
+    if (m && m.proposal) apply(room, { o: 'upd', id, f: { proposal: { ...m.proposal, state: p.state, ok: typeof p.ok === 'boolean' ? p.ok : null, words: p.words || '', by: p.decidedBy || '' } } });
   }
 }
 // Approved proposals aimed at this AGMessage, already run (so a slow result post never runs one twice). Keyed by the

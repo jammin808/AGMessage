@@ -93,9 +93,10 @@ test('show bus: hellos carry the certificate; proposals read tolerantly', () => 
   const d = new nodes.Discovery({ id: 'ag1', port: 3023, name: 'AGMessage', tls: fp });
   assert.deepEqual([d.hello().tls, d.hello().ports.https], [fp, 3023]);
   assert.ok(d.hello().caps.includes('proposals'));
-  const p = nodes.readProposal({ id: 'p1', state: 'done', decidedBy: 'SM', result: { ok: true, words: 'Message on the speaker screen' } });
+  // As Stagewatch's SharedProposal.ToJson: result and words one string, ok at the top level.
+  const p = nodes.readProposal({ id: 'p1', state: 'done', decidedBy: 'SM', result: 'Message on the speaker screen', ok: true, words: 'Message on the speaker screen' });
   assert.deepEqual([p.state, p.decidedBy, p.ok, p.words], ['done', 'SM', true, 'Message on the speaker screen']);
-  assert.equal(nodes.readProposal({ id: 'p2', state: 'nonsense' }).state, 'pending');
+  assert.equal(nodes.readProposal({ id: 'p2', state: 'nonsense' }).state, 'unknown', 'a state it does not know is never taken for one it does');
   assert.equal(nodes.readProposal({ state: 'done' }), null);
   assert.equal(nodes.readProposalList({ proposals: [{ id: 'a' }, null, { id: 'b' }] }).length, 2);
   assert.equal(nodes.readProposalList([{ id: 'a' }]).length, 1);
@@ -115,8 +116,8 @@ function fakeDesk({ cert }) {
       const u = new URL(req.url, 'https://x');
       if (u.pathname === '/api/context') return res.end(JSON.stringify({ v: 1, node: { t: 'main', id: 'sw1', name: 'Hall A' }, light: 'green', headline: 'Keynote', peers: [] }));
       if (u.pathname === '/api/proposals' && req.method === 'POST') { seen.proposals.push(JSON.parse(body)); return res.end(JSON.stringify({ id: 'p17', state: 'pending' })); }
-      if (u.pathname === '/api/proposals/p17') return res.end(JSON.stringify({ id: 'p17', state, decidedBy: 'SM', result: state === 'done' ? { ok: true, words: 'Message on the speaker screen' } : null }));
-      if (u.pathname === '/api/proposals' && u.searchParams.get('target')) return res.end(JSON.stringify({ proposals: [{ id: 'p9', state: 'approved', line: 'notice "Break in 5 minutes"', decidedBy: 'SM' }] }));
+      if (u.pathname === '/api/proposals/p17') { const words = state === 'done' ? 'Message on the speaker screen' : ''; return res.end(JSON.stringify({ id: 'p17', state, decidedBy: 'SM', result: words, ok: state === 'done' ? true : null, words })); }
+      if (u.pathname === '/api/proposals' && u.searchParams.get('target')) return res.end(JSON.stringify({ proposals: [{ id: 'p9', state: 'approved', line: 'notice "Break in 5 minutes"', decidedBy: 'SM', target: { t: 'messenger', id: u.searchParams.get('target'), name: 'AGMessage' } }] }));
       if (u.pathname === '/api/proposals') return res.end('[]');
       if (u.pathname === '/api/proposals/p9/result') { seen.results.push(JSON.parse(body)); return res.end('{"ok":true}'); }
       res.end(JSON.stringify({ type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId: 5 } }));

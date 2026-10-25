@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.1 — 2026-10-25 — the show desk and the Stagewatch link, as Stagewatch states them
+
+From the cross-app review of the Show Bus (the four items it left for after 0.5.0), each read against Stagewatch's own
+code (2.16 and its newest work) before it was changed.
+
+**The show desk**
+- A proposal's outcome is read as Stagewatch states it: `ok` and `words` at the top level, `result` a string. 0.5.0
+  looked for `ok` inside an object `result` that Stagewatch never sends, so every outcome read as unknown (the page's
+  "done" or "failed" came from the state alone), and a result object would have been read as success whatever it said.
+  A settled state without its boolean `ok`, or a state AGMessage does not know, is shown as unknown (never done, never
+  waiting) and asked again. Only a proposal the desk lists as approved for this AGMessage is run. "Not delivered" shows
+  Stagewatch's own words.
+
 ## 0.5.0 — 2026-10-24 — halls, accounts, screens and the testing environment
 
 For a venue with several halls at once (the ICC in Birmingham, say): each hall its own message room and its own

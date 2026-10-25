@@ -339,7 +339,8 @@ test('AGMessage server: security, resume, persistence', async (t) => {
         res.writeHead(200, { 'content-type': 'application/json' });
         const u = new URL(req.url, 'http://x');
         if (u.pathname === '/api/proposals' && req.method === 'POST') { seen.proposals.push(JSON.parse(body)); return res.end(JSON.stringify({ id: 'p17', state: 'pending' })); }
-        if (u.pathname === '/api/proposals/p17') return res.end(JSON.stringify({ id: 'p17', state, decidedBy: 'SM', result: state === 'done' ? { ok: true, words: 'Message on the speaker screen' } : null }));
+        // As Stagewatch's SharedProposal.ToJson: result and words one string, ok at the top level (null until it ran).
+        if (u.pathname === '/api/proposals/p17') { const words = state === 'done' ? 'Message on the speaker screen' : ''; return res.end(JSON.stringify({ id: 'p17', state, decidedBy: 'SM', result: words, ok: state === 'done' ? true : null, words })); }
         if (u.pathname === '/api/proposals' && u.searchParams.get('target'))
           return res.end(JSON.stringify(seen.results.length ? [] : [{ id: 'p9', state: 'approved', line: 'notice "Break in 5 minutes"', decidedBy: 'SM', target: { t: 'messenger', id: u.searchParams.get('target') } }]));
         if (u.pathname === '/api/proposals') return res.end('[]');
@@ -372,7 +373,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
       for (let i = 0; i < 100 && !updates.some((u) => u.proposal.state === 'done'); i++) await new Promise((x) => setTimeout(x, 100));
       const done = updates.find((u) => u.proposal.state === 'done');
       assert.ok(done, 'the state reached the research view: ' + JSON.stringify(updates));
-      assert.deepEqual([done.proposal.by, done.proposal.words], ['SM', 'Message on the speaker screen']);
+      assert.deepEqual([done.proposal.by, done.proposal.ok, done.proposal.words], ['SM', true, 'Message on the speaker screen']);
       for (let i = 0; i < 100 && !seen.results.length; i++) await new Promise((x) => setTimeout(x, 100));
       assert.deepEqual(seen.results[0], { ok: true, words: 'shown in 1 meeting' });
       assert.ok(notices.some((n) => /approved by SM\): Break in 5 minutes/.test(n)), 'the notice is in the meeting: ' + JSON.stringify(notices));

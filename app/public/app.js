@@ -234,7 +234,8 @@ function proposalLineText(p) {
     case 'rejected': return '✗ Not approved' + by;
     case 'done': return '✓ Approved' + by + ' and done' + (p.words ? ': ' + p.words : '');
     case 'failed': return '⚠ Approved' + by + ' but it failed' + (p.words ? ': ' + p.words : '');
-    case 'undelivered': return '⚠ Approved' + by + ' but it never reached Stagewatch';
+    case 'undelivered': return '⚠ Approved' + by + ' but not delivered' + (p.words ? ': ' + p.words : '');
+    case 'unknown': return '⚠ Stagewatch\'s answer about this request is not one AGMessage can read — see the show desk' + (p.words ? ' (' + p.words + ')' : '');
     case 'lost': return '⚠ ' + (p.words || 'Stagewatch no longer has this request — ask again if it is still wanted');
     default: return '';
   }

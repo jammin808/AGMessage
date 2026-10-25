@@ -319,6 +319,39 @@ test('hello: PlayMap is heard (it was dropped before 0.5); its build is read; AG
   assert.equal(hello.build, '0.5.0+1.abc1234');
 });
 
+// Stagewatch's proposal JSON (SharedProposal.ToJson, src/Timer.Core/Approvals.cs:20-32) as System.Text.Json writes it:
+// declared order, nulls kept, result and words the same string, ok at the top level.
+const swProposal = (state, { result = '', target = { t: 'main', id: 'sw01', name: '' } } = {}) => ({
+  id: 'p3', from: { t: 'messenger', id: 'a1b2c3d4', name: 'AGMessage' }, target,
+  line: 'message "Two minutes" warn off ack', reason: 'asks', risk: 'review', state,
+  created: 1761390000000, decided: state === 'pending' ? null : 1761390005000, decidedBy: state === 'pending' ? '' : 'operator', result,
+  ok: state === 'done' ? true : state === 'failed' || state === 'undelivered' ? false : null, words: result,
+});
+const outcomeOf = (j) => { const p = nodes.readProposal(JSON.parse(JSON.stringify(j))); return p && { state: p.state, ok: p.ok, words: p.words }; };
+
+test('a proposal\'s outcome as Stagewatch states it: ok and words at the top level, result a string', () => {
+  assert.deepStrictEqual(outcomeOf(swProposal('done', { result: 'message shown' })), { state: 'done', ok: true, words: 'message shown' });
+  assert.deepStrictEqual(outcomeOf(swProposal('failed', { result: 'not a valid Stagewatch command: unknown verb' })), { state: 'failed', ok: false, words: 'not a valid Stagewatch command: unknown verb' });
+  assert.deepStrictEqual(outcomeOf(swProposal('undelivered', { result: "Patterns FOH didn't collect it", target: { t: 'patterns', id: '9f8e7d6c', name: 'Patterns FOH' } })),
+    { state: 'undelivered', ok: false, words: "Patterns FOH didn't collect it" });
+  for (const s of ['pending', 'approved', 'rejected']) assert.deepStrictEqual(outcomeOf(swProposal(s)), { state: s, ok: null, words: '' }, s);
+  // The submit receipt's ok is the request's (Stagewatch MainViewModel.Desk.cs:32), never the outcome of one that has not run.
+  assert.deepStrictEqual(outcomeOf({ ok: true, id: 'p3', state: 'pending', risk: 'review' }), { state: 'pending', ok: null, words: '' });
+  assert.deepStrictEqual(nodes.readProposalList({ proposals: [swProposal('approved')] }).map((p) => [p.state, p.ok]), [['approved', null]]);
+});
+
+test('a proposal\'s outcome fails closed: a non-boolean or contradicting ok, a nested result, an unknown state', () => {
+  const done = swProposal('done', { result: 'x' });
+  for (const ok of ['true', 1, null, undefined, false, {}]) assert.deepStrictEqual(outcomeOf({ ...done, ok }), { state: 'unknown', ok: null, words: 'x' }, String(ok));
+  assert.deepStrictEqual(outcomeOf({ ...swProposal('failed', { result: 'no' }), ok: true }), { state: 'unknown', ok: null, words: 'no' });
+  // Never Stagewatch's shape: a result object is not read, whatever it says.
+  assert.deepStrictEqual(outcomeOf({ id: 'p1', state: 'failed', result: { ok: 'no' } }), { state: 'unknown', ok: null, words: '' });
+  assert.deepStrictEqual(outcomeOf({ id: 'p1', state: 'done', result: {} }), { state: 'unknown', ok: null, words: '' });
+  assert.deepStrictEqual(outcomeOf({ ...swProposal('approved'), state: 'expired' }), { state: 'unknown', ok: null, words: '' });
+  assert.equal(nodes.readProposal({ state: 'done', ok: true }), null, 'no id: not a proposal (nor a /ws auth message)');
+  assert.equal(nodes.readProposal([{ id: 'p1' }]), null, 'a list is not a proposal');
+});
+
 test('show bus end to end: destinations through the desk; Patterns and PlayMap linked, read and driven', async (t) => {
   const sw = await fakeStagewatch({ name: 'Hall 1 timer', departments: ['Lighting', 'Sound'] });
   const pat = await fakeNode({ t: 'patterns', token: PATTERNS_TOKEN, commands: [{ verb: 'VIDEO END <seconds>', risk: 'review', words: 'end the clip' }, { verb: 'BLACKOUT on|off', risk: 'high', words: 'black every screen' }] });
@@ -362,6 +395,23 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     assert.ok(Array.from(sw.proposals.values()).every((p) => p.risk === 'review' && p.target.t === 'main'));
   });
 
+  await t.test('a proposal\'s outcome as Stagewatch states it reaches the message: done and failed with their words; anything else is unknown', async () => {
+    const crew = await connect(base, sam); sockets.push(crew);
+    assert.ok((await emit(crew, 'join', { roomCode: hall, as: 'account' })).ok);
+    const ask = async (text) => { const r = await emit(crew, 'stage:propose', { text, destination: 'speaker', urgency: 'info' }); assert.ok(r.ok, JSON.stringify(r)); return r.proposal.id; };
+    const done = await ask('Outcome done'), failed = await ask('Outcome failed'), odd = await ask('Outcome odd');
+    for (const id of [done, failed, odd]) sw.approve(id, 'operator');
+    sw.finish(done, true, 'message shown on the speaker screen');
+    sw.finish(failed, false, 'not a valid Stagewatch command: flash must be off|slow|fast');
+    sw.finish(odd, true, 'shown');
+    sw.proposals.get(odd).served = { ok: 'true' };   // not Stagewatch's: a string where it puts a boolean
+    const outcome = async (text) => { const m = (await emit(ctl, 'admin:watchRoom', { roomCode: hall })).messages.find((x) => x.type === 'system' && x.proposal && x.text.includes(text)); return m && { state: m.proposal.state, ok: m.proposal.ok, words: m.proposal.words, by: m.proposal.by }; };
+    await until(async () => ['done', 'failed'].includes((await outcome('Outcome failed') || {}).state) && (await outcome('Outcome done') || {}).state === 'done' && (await outcome('Outcome odd') || {}).state !== 'approved', 12000, 'settled');
+    assert.deepStrictEqual(await outcome('Outcome done'), { state: 'done', ok: true, words: 'message shown on the speaker screen', by: 'operator' });
+    assert.deepStrictEqual(await outcome('Outcome failed'), { state: 'failed', ok: false, words: 'not a valid Stagewatch command: flash must be off|slow|fast', by: 'operator' });
+    assert.deepStrictEqual(await outcome('Outcome odd'), { state: 'unknown', ok: null, words: 'shown', by: 'operator' });
+  });
+
   await t.test('C36, C19: a destination Stagewatch does not offer, an unknown urgency or a line the desk would cut is refused before the desk', async () => {
     const crew = await connect(base, sam); sockets.push(crew);
     assert.ok((await emit(crew, 'join', { roomCode: hall, as: 'account' })).ok);
@@ -377,6 +427,21 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     assert.match(long.error, /at most 377 characters/);
     assert.equal(sw.proposals.size, before, 'nothing reached the desk');
     assert.ok(Array.from(sw.proposals.values()).every((p) => sl.parse(p.line).error === undefined && p.line.length <= 400));
+  });
+
+  await t.test('only what the desk says is approved for this AGMessage is run: a listed proposal in a state it cannot read is not', async () => {
+    const seen = [];
+    const crew = await connect(base, sam); sockets.push(crew);
+    assert.ok((await emit(crew, 'join', { roomCode: hall, as: 'account' })).ok);
+    crew.on('system', (m) => { if (/From the show desk/.test(m.text)) seen.push(m.text); });
+    const nodeId = new URL(sw.requests.find((r) => r.url.includes('?target=')).url, 'http://x').searchParams.get('target');
+    const odd = sw.add({ line: 'notice Not for running', state: 'approved', decidedBy: 'operator', from: { t: 'main', id: 'swdesk', name: 'Desk' }, target: { t: 'messenger', id: nodeId, name: 'AGMessage' } });
+    sw.proposals.get(odd).served = { state: 'expired' };
+    const fine = sw.add({ line: 'notice Fine to run', state: 'approved', decidedBy: 'operator', from: { t: 'main', id: 'swdesk', name: 'Desk' }, target: { t: 'messenger', id: nodeId, name: 'AGMessage' } });
+    await until(() => sw.proposals.get(fine).state === 'done' && seen.some((x) => /Fine to run/.test(x)), 12000, 'the approved one run, shown and reported');
+    assert.deepStrictEqual([seen.some((x) => /Fine to run/.test(x)), seen.some((x) => /Not for running/.test(x))], [true, false]);
+    assert.ok(!sw.requests.some((r) => r.url === '/api/proposals/' + odd + '/result'), 'nothing reported for it');
+    sw.proposals.delete(odd); sw.proposals.delete(fine);
   });
 
   await t.test('C45: a department stays a destination once Stagewatch\'s context stops naming it (messaged, or its GO aged out)', async () => {
