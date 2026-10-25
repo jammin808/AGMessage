@@ -30,9 +30,18 @@ const POLL_MS = 5_000;
 const KINDS = new Set(['patterns', 'playmap']);
 const RISKS = new Set(['low', 'review', 'high']);
 const HEADER = { patterns: 'X-Patterns-Token', playmap: 'X-PlayMap-Token' };
+// A Patterns or PlayMap link's own pin, apart from the Stagewatch link's "node:<id>" pins: those are trusted on first use
+// under an id from an unauthenticated hello, and are never a person's confirmation of a certificate this token may go to.
+const pinKey = (id) => 'peer:' + id;
 const LOOPBACK = new net.BlockList();
 LOOPBACK.addSubnet('127.0.0.0', 8, 'ipv4');
 LOOPBACK.addAddress('::1', 'ipv6');
+
+/** Where a node heard on the network is linked: its hello's address, or 127.0.0.1 when that is one of this machine's own (pure). */
+function baseFor(peer, ownAddresses = []) {
+  const host = ownAddresses.includes(peer.address) ? '127.0.0.1' : peer.address;
+  return (peer.tls ? 'https://' : 'http://') + host + ':' + (peer.ports.https || peer.ports.http);
+}
 
 /** Whether an address's host is this machine — 127.0.0.0/8, ::1 (IPv4-mapped too) or localhost — where a token never crosses the network (pure). */
 function isLoopback(hostname) {
@@ -245,7 +254,7 @@ class PeerLink {
    * never talked to in plain HTTP again (Show Bus §10: the pin, not the hello, is the trust).
    */
   _wantsTls(peer = this.findPeer(this.node.id)) {
-    return new URL(this.base).protocol === 'https:' || !!(peer && peer.tls) || !!this.pins.pins['node:' + this.node.id];
+    return new URL(this.base).protocol === 'https:' || !!(peer && peer.tls) || !!this.pins.pins[pinKey(this.node.id)];
   }
 
   /**
@@ -258,13 +267,13 @@ class PeerLink {
     const local = isLoopback(u.hostname);
     if (!this._wantsTls(peer)) {
       if (local) return { base: this.base, tls: null };
-      this._set('refused', 'it offers no encrypted connection, and its token — full control of it — is never sent in the clear to another machine: turn HTTPS on in ' + this.node.name + ' and link it by its https:// address');
+      this._set('refused', 'it offers no encrypted connection, and its token — full control of it — is never sent in the clear to another machine: turn HTTPS on in ' + this.node.name);
       return null;
     }
     // The https port: the address's own when it is https://, else the one the hello names, else the address's (a node that
     // serves both on one port); a node with another HTTPS port is unreachable — nothing sent — until its hello is heard.
     const port = (u.protocol === 'https:' && Number(u.port)) || (peer && peer.ports && peer.ports.https) || Number(u.port) || 443;
-    const nodeKey = 'node:' + this.node.id;
+    const nodeKey = pinKey(this.node.id);
     const cert = await tlsmod.probeCertificate(u.hostname, port);
     const verdict = this.pins.check(nodeKey, cert.fp, (peer && peer.tls) || '');
     // A certificate nothing vouches for yet (the hello is unauthenticated): on this machine pinned after its first answer;
@@ -278,8 +287,14 @@ class PeerLink {
         : 'its certificate is not confirmed yet — type the first 8 or more characters of the fingerprint ' + this.node.name + ' shows on its own screen');
       return null;
     }
-    // A changed certificate's words name none of its fingerprint: its start is typed from the node's own screen.
-    if (!verdict.ok) { this._set('refused', verdict.changed ? 'CERTIFICATE CHANGED — it presents another certificate than the one pinned; if you know why (a renewal, a reinstall), type the first 8 or more characters of the fingerprint ' + this.node.name + ' shows on its own screen' : verdict.reason); return null; }
+    // The words name no fingerprint — neither the one presented nor the one a hello announced (anyone can send a hello): the
+    // characters a person types come from the node's own screen.
+    if (!verdict.ok) {
+      const read = 'type the first 8 or more characters of the fingerprint ' + this.node.name + ' shows on its own screen';
+      this._set('refused', verdict.changed ? 'CERTIFICATE CHANGED — it presents another certificate than the one pinned; if you know why (a renewal, a reinstall), ' + read
+        : cert.fp ? 'its certificate is not the one its hello announces — another machine may be answering as it; to confirm the one it presents, ' + read : verdict.reason);
+      return null;
+    }
     if (verdict.firstUse && !local && this.pins.accept(nodeKey, cert.fp)) this.onPins();
     return { base: 'https://' + u.hostname + ':' + port, tls: tlsmod.pinnedTlsOptions(cert.pem, cert.fp), fp: cert.fp, nodeKey };
   }
@@ -326,7 +341,7 @@ class PeerLink {
       this.endpoint = null;
       if (Date.now() - this.okAt > STALE_MS) this._set(this.okAt ? 'stale' : 'unreachable', e && e.message ? String(e.message).slice(0, 80) : '');
       // The node no longer serves the pinned certificate: say so now (its certificate probed against the pin), not after
-      // the stale wait — the admin sees which certificate it presents and may accept it.
+      // the stale wait — a person confirms the one it presents by typing the start of the fingerprint on its own screen.
       if (certRefused) {
         try { this.endpoint = await this._resolve(); } catch { /* unreachable: the next poll says so */ }
       }
@@ -381,4 +396,4 @@ class PeerLink {
   stop() { this.stopped = true; clearInterval(this.timer); }
 }
 
-module.exports = { PeerLink, isLoopback, verbWords, matchCommand, readContext, readVerbRules, withRules, secretFrom, redactLine, KINDS };
+module.exports = { PeerLink, pinKey, baseFor, isLoopback, verbWords, matchCommand, readContext, readVerbRules, withRules, secretFrom, redactLine, KINDS };

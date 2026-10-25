@@ -29,7 +29,7 @@ halls (or "every hall, including new ones"). The rights, as the server checks th
 | `display.control` | change what a hall's screens show |
 | `display.manage` | add, rename, move, re-link and remove screens; the hall's holding image |
 | `stage.send` | send to Stagewatch: the speaker's screen, or to the operator to pass on |
-| `nodes.control` | propose or send commands to Patterns and PlayMap |
+| `nodes.control` | propose commands to Patterns and PlayMap (to the show desk; never sent to them directly) |
 | `halls.manage` | create halls and set them up (their own Stagewatch) |
 | `users.manage` | create accounts and set roles, halls and rights |
 | `settings.manage` | app settings: AI key, HTTPS, the tunnel, the show network |

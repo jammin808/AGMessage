@@ -80,7 +80,7 @@ test('C20: a Patterns certificate that changes is refused until the admin types 
   const sol = await connect(srv.base, (await api(srv.base, 'POST', '/api/auth/login', { username: 'sol', password: 'radio check one two' })).cookie); sockets.push(sol);
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
   const view = async () => (await emit(ctl, 'nodes:list', {})).linked.find((n) => n.id === 'patx');
-  const pinOnDisk = () => (JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8')).tlsPins || {})['node:patx'];
+  const pinOnDisk = () => (JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8')).tlsPins || {})[require('../lib/peerlinks').pinKey('patx')];
 
   assert.ok((await emit(ctl, 'nodes:link', { id: 'patx', t: 'patterns', url, name: 'Patterns TLS', token: PATTERNS_TOKEN })).ok);
   await until(async () => (await view()).status === 'live' && pinOnDisk() === tlsmod.fingerprint(cert.certDer), 8000, 'live and pinned');
@@ -88,7 +88,9 @@ test('C20: a Patterns certificate that changes is refused until the admin types 
   await until(async () => (await view()).status === 'refused', 15000, 'refused');
   const v = await view();
   assert.match(v.problem, /CERTIFICATE CHANGED/);
-  assert.deepEqual([v.certificateWaits, v.certificateChanged, JSON.stringify(v).includes(fpB.slice(7, 23))], [true, true, false], 'the page is told a certificate waits, never which: its start is typed from the node\'s own screen');
+  assert.deepEqual([v.certificateWaits, v.certificateChanged], [true, true]);
+  const listed = JSON.stringify(await emit(ctl, 'nodes:list', {}));
+  for (let i = 7; i + 8 <= fpB.length; i++) assert.ok(!listed.includes(fpB.slice(i, i + 8)), 'never 8 characters of the certificate: its start is typed from the node\'s own screen');
   const typed = fpB.slice(7, 19).toUpperCase().match(/../g).join(':');   // as it reads on the node's screen
   assert.equal((await answer(sol, 'nodes:acceptCertificate', { id: 'patx', fingerprint: typed })).ok, false, 'accepting is the admin\'s');
   for (const fingerprint of [undefined, '', fpB.slice(7, 14), fpB.slice(8, 20)]) {
@@ -111,6 +113,74 @@ test('C20: a Patterns certificate that changes is refused until the admin types 
   assert.ok((await emit(ctl, 'nodes:link', { id: 'patx', t: 'patterns', url, name: 'Patterns TLS', token: PATTERNS_TOKEN })).ok);
   await until(async () => (await view()).status === 'live', 8000, 'linked again with the node\'s new certificate');
   await until(() => pinOnDisk() === tlsmod.fingerprint(cert.certDer), 3000, 'pinned to the new one');
+});
+
+test('AG-1: a Patterns over HTTPS on another machine gets its token only once a person typed the start of its fingerprint', async (t) => {
+  const https = require('https');
+  const tlsmod = require('../lib/tls');
+  const peerlinks = require('../lib/peerlinks');
+  const lan = tlsmod.lanAddresses()[0];
+  assert.ok(lan, 'this test needs a network address that is not loopback (every CI runner and show laptop has one)');
+  const cert = tlsmod.makeCertificate({ name: 'Patterns', hosts: ['localhost'], ips: [lan] });
+  const fp = tlsmod.fingerprint(cert.certDer);
+  const seen = [];   // every request that reached it, with whether it carried the token
+  const node = https.createServer({ cert: tlsmod.toPem(cert.certDer), key: cert.keyPem }, (req, res) => {
+    seen.push({ url: req.url, token: req.headers['x-patterns-token'] === PATTERNS_TOKEN });
+    if (req.headers['x-patterns-token'] !== PATTERNS_TOKEN) { res.writeHead(403); return res.end(); }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ v: 1, node: { t: 'patterns', id: 'patlan', name: 'Patterns LAN' }, light: 'green', headline: 'Programme', commands: [] }));
+  });
+  await new Promise((resolve) => { node.listen(0, '0.0.0.0', resolve); });
+  const url = 'https://' + lan + ':' + node.address().port;
+  assert.equal((await tlsmod.probeCertificate(lan, node.address().port)).fp, fp, 'that address reaches it');
+  const srv = await startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); node.closeAllConnections(); await new Promise((resolve) => { node.close(resolve); }); });
+  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
+  const ctl = await connect(srv.base, admin); sockets.push(ctl);
+  const view = async (id) => (await emit(ctl, 'nodes:list', {})).linked.find((n) => n.id === id);
+  const onDisk = () => JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8'));
+  const tellsNone = (text) => { for (let i = 7; i + 8 <= fp.length; i++) assert.ok(!text.includes(fp.slice(i, i + 8)), 'a page is told ' + fp.slice(i, i + 8)); };
+  const wrongStart = fp.startsWith('sha256:a') ? 'b1b2b3b4' : 'a1b2c3d4';   // 8 hex characters that are not its start
+
+  // Linked with nothing typed: refused, its certificate waiting for a person; nothing reaches it, the page is told no fingerprint.
+  assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan', t: 'patterns', url, name: 'Patterns LAN', token: PATTERNS_TOKEN })).ok);
+  await until(async () => ((await view('patlan')) || {}).status === 'refused', 8000, 'refused');
+  const v = await view('patlan');
+  assert.deepEqual([v.certificateWaits, v.certificateChanged], [true, false]);
+  assert.match(v.problem, /not confirmed yet — type the first 8 or more characters of the fingerprint Patterns LAN shows on its own screen/);
+  tellsNone(JSON.stringify(await emit(ctl, 'nodes:list', {})));
+  await new Promise((resolve) => { setTimeout(resolve, 300); });
+  assert.deepEqual(seen, [], 'no request reached it — its token least of all');
+  // Confirmed by its start: pinned under the link's own key, live, its token over TLS, the confirmation audited.
+  assert.equal((await answer(ctl, 'nodes:acceptCertificate', { id: 'patlan', fingerprint: wrongStart })).ok, false);
+  assert.deepEqual(await answer(ctl, 'nodes:acceptCertificate', { id: 'patlan', fingerprint: fp.slice(7, 15).toUpperCase() }), { ok: true });
+  await until(async () => (await view('patlan')).status === 'live', 8000, 'live');
+  await until(() => (onDisk().tlsPins || {})[peerlinks.pinKey('patlan')] === fp, 3000, 'pinned on disk');
+  assert.ok(seen.length > 0 && seen.every((r) => r.token), 'its token, over TLS to the certificate a person confirmed');
+  const audit = await api(srv.base, 'GET', '/api/audit?limit=50', undefined, { cookie: admin });
+  assert.ok(audit.body.entries.some((e) => e.action === 'node.certificate' && e.target === 'patlan' && e.words === 'confirmed the patterns certificate of “Patterns LAN” (the start of its fingerprint typed)'));
+
+  // Typed when it is linked: live at once; the typed start is kept as hex, and kept when it is linked again for a hall.
+  assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan2', t: 'patterns', url, name: 'Patterns LAN 2', token: PATTERNS_TOKEN, fingerprint: fp.slice(7, 19).toUpperCase().match(/../g).join(':') })).ok);
+  await until(async () => ((await view('patlan2')) || {}).status === 'live', 8000, 'live on the typed start');
+  await until(() => ((onDisk().peerLinks || {}).patlan2 || {}).fpTyped === fp.slice(7, 19), 3000, 'the typed start on disk, as hex');
+  assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan2', hall })).ok);
+  await until(async () => ((await view('patlan2')) || {}).hall === hall, 3000, 'moved to the hall');
+  await until(() => ((onDisk().peerLinks || {}).patlan2 || {}).hall === hall, 3000, 'saved');
+  assert.equal(onDisk().peerLinks.patlan2.fpTyped, fp.slice(7, 19), 'kept across a link again');
+  // Typed wrong: refused, and nothing sent to it (the links that are live go first, so whatever arrives now is its).
+  for (const id of ['patlan', 'patlan2']) assert.ok((await emit(ctl, 'nodes:unlink', { id })).ok);
+  await until(() => (onDisk().tlsPins || {})[peerlinks.pinKey('patlan')] === undefined, 3000, 'unlinking forgets its pin');
+  await new Promise((resolve) => { setTimeout(resolve, 300); });
+  seen.length = 0;
+  assert.ok((await emit(ctl, 'nodes:link', { id: 'patlan3', t: 'patterns', url, name: 'Patterns LAN 3', token: PATTERNS_TOKEN, fingerprint: wrongStart })).ok);
+  await until(async () => ((await view('patlan3')) || {}).status === 'refused', 8000, 'refused on the wrong start');
+  assert.match((await view('patlan3')).problem, /does not start with the characters typed for it/);
+  await new Promise((resolve) => { setTimeout(resolve, 300); });
+  assert.deepEqual(seen, [], 'nothing sent to a certificate whose start was typed wrong');
+  assert.ok((await emit(ctl, 'nodes:unlink', { id: 'patlan3' })).ok);
 });
 
 test('C18: the show desk\'s ids are its own — after a Stagewatch restart or a hall moved to another one, nothing is skipped and nothing crosses', async (t) => {
@@ -287,5 +357,6 @@ test('C22: until PlayMap\'s own risk rules are read, a line reaches the show des
   await until(() => verbsAsked() >= 2, 8000, 'asked again at the next poll');
   await until(async () => (await propose('DECODE POLICY DIRECT')).risk === 'review', 4000, 'its rules read');
   assert.equal((await propose('DECODE POLICY DIRECT FORCE')).risk, 'high', 'rated high by its rules');
+  assert.equal((await emit(ctl, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT', mode: 'send' })).stage, 'not sent');
   assert.ok(!pm.requests.some((x) => x.url === '/api/cmd'), 'nothing was ever sent to PlayMap');
 });

@@ -48,6 +48,7 @@ test('pins: trust on first authenticated use; a change is refused until accepted
   const fpB = 'SHA256:' + 'B'.repeat(64).match(/../g).join(':');   // as a person might type it
   const pins = new tlsmod.PinStore();
   assert.deepEqual(pins.check('node:sw1', fpA), { ok: true, firstUse: true });
+  assert.deepEqual(pins.check('node:sw1', fpA, fpA), { ok: true, firstUse: true }, 'a hello that announces the certificate presented is still a first use, never a pin');
   assert.equal(pins.check('node:sw1', fpA, fpB).ok, false, 'must match what its hello (or the admin) announced');
   assert.ok(pins.confirm('node:sw1', fpA));
   assert.ok(!pins.confirm('node:sw1', tlsmod.cleanFingerprint(fpB)), 'a pin is never silently replaced');
@@ -241,7 +242,7 @@ test('C17: a PlayMap pinned over TLS is never polled in plain HTTP after a resta
   const node = await dualNode({ cert, context: { v: 1, node: { t: 'playmap', id: 'pm1', name: 'Stage left' }, light: 'green', headline: 'Playing', commands: [] } });
   const token = 'pm-secret-token';   // secret-scan: fixture
   // Linked over http:// (before the node turned TLS on); pinned since. AGMessage restarts: the hello is not heard yet.
-  const pins = new tlsmod.PinStore({ 'node:pm1': fp });
+  const pins = new tlsmod.PinStore({ [peerlinks.pinKey('pm1')]: fp });
   let hello = null;
   const link = new peerlinks.PeerLink({ node: { t: 'playmap', id: 'pm1', name: 'Stage left' }, base: 'http://127.0.0.1:' + node.port, token, pins, findPeer: () => hello });
   try {
@@ -253,7 +254,7 @@ test('C17: a PlayMap pinned over TLS is never polled in plain HTTP after a resta
     assert.ok(node.seen.length >= 3, 'polled: ' + node.seen.length);
     assert.ok(node.seen.every((r) => r.encrypted), 'every request with the token went over TLS: ' + JSON.stringify(node.seen.map((r) => r.encrypted)));
     assert.ok(link.endpoint && link.endpoint.tls, 'the link stays on pinned TLS');
-    assert.equal(pins.pins['node:pm1'], fp, 'the pin is unchanged');
+    assert.equal(pins.pins[peerlinks.pinKey('pm1')], fp, 'the pin is unchanged');
   } finally { link.stop(); node.close(); }
 
   // Never pinned, no tls heard: plain; its hello then announces a certificate: the next poll moves to TLS, no error needed.

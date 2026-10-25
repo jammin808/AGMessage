@@ -90,6 +90,10 @@ test('peerlinks: only listed verbs, the longest match, high when unknown; contex
   // AG-1: this machine, where a token never crosses the network: 127.0.0.0/8, ::1 and localhost — never a name that only looks local.
   for (const h of ['127.0.0.1', '127.200.1.1', '[::1]', '::1', 'localhost', 'LOCALHOST', '[::ffff:7f00:1]', new URL('http://[::ffff:127.0.0.1]:1/').hostname]) assert.ok(pl.isLoopback(h), h);
   for (const h of ['192.168.1.20', '10.0.0.1', '[::ffff:a00:1]', 'patterns.local', '0.0.0.0', '', '[fe80::1]', '127.0.0.1.nip.io', 'localhost.example']) assert.ok(!pl.isLoopback(h), h);
+  // A node heard from one of this machine's own addresses (its broadcast hello) is linked by 127.0.0.1; another stays where it is.
+  assert.equal(pl.baseFor({ address: '192.0.2.2', tls: '', ports: { http: 9696 } }, ['192.0.2.2']), 'http://127.0.0.1:9696');
+  assert.equal(pl.baseFor({ address: '192.0.2.9', tls: '', ports: { http: 9696 } }, ['192.0.2.2']), 'http://192.0.2.9:9696');
+  assert.equal(pl.baseFor({ address: '192.0.2.9', tls: 'sha256:' + 'a'.repeat(64), ports: { http: 9696, https: 9697 } }, []), 'https://192.0.2.9:9697');
 });
 
 test('AG-1: a node\'s token goes only to this machine, or over TLS to a certificate pinned or confirmed by a person; send() refuses with words', async () => {
@@ -111,6 +115,11 @@ test('AG-1: a node\'s token goes only to this machine, or over TLS to a certific
     return l;
   };
   const settled = (l, status) => until(() => l.status === status && !l.busy, 3000, l.base + ' ' + status);
+  // No 8 characters of a certificate's fingerprint — enough to confirm it — anywhere a page could read them.
+  const tellsNone = (l, ...fps) => {
+    const seen = JSON.stringify(l.view());
+    for (const fp of fps) for (let i = 7; i + 8 <= fp.length; i++) assert.ok(!seen.includes(fp.slice(i, i + 8)), 'the page is told ' + fp.slice(i, i + 8) + ': ' + seen);
+  };
   try {
     // Another machine in plain HTTP: refused with words, red, and nothing sent — not even a certificate asked for.
     const plain = make('http://192.0.2.10:9696');
@@ -129,7 +138,8 @@ test('AG-1: a node\'s token goes only to this machine, or over TLS to a certific
     const far = make('https://192.0.2.10:9443');
     await settled(far, 'refused');
     assert.match(far.problem, /not confirmed yet — type the first 8 or more characters of the fingerprint Patterns FOH shows on its own screen/);
-    assert.deepEqual([far.view().certificateWaits, far.view().certificateChanged, 'certificate' in far.view()], [true, false, false], 'a page is told a certificate waits, never its fingerprint');
+    assert.deepEqual([far.view().certificateWaits, far.view().certificateChanged], [true, false]);
+    tellsNone(far, presented);
     assert.ok(probed.includes('192.0.2.10:9443'));
     assert.equal(sent.length, 0);
     // A person confirms it: too few characters, or not its start, are refused; its start, typed any way, pins it.
@@ -137,7 +147,7 @@ test('AG-1: a node\'s token goes only to this machine, or over TLS to a certific
     assert.equal(sent.length, 0);
     assert.deepEqual(far.acceptCertificate('SHA256:01:23:45:67:89'), { ok: true, changed: false });
     await settled(far, 'live');
-    assert.equal(far.pins.pins['node:p1'], presented, 'pinned');
+    assert.equal(far.pins.pins[pl.pinKey('p1')], presented, 'pinned');
     assert.ok(sent.length > 0 && sent.every((r) => r.token && r.tls && r.url.startsWith('https://192.0.2.10:9443/')), JSON.stringify(sent));
     // Its certificate changes: refused again until a person types the start of the new one.
     presented = 'sha256:' + 'fedcba9876543210'.repeat(4);
@@ -146,6 +156,7 @@ test('AG-1: a node\'s token goes only to this machine, or over TLS to a certific
     await far.poll();
     assert.deepEqual([far.status, far.view().certificateChanged], ['refused', true]);
     assert.match(far.problem, /CERTIFICATE CHANGED/);
+    tellsNone(far, presented, 'sha256:' + '0123456789abcdef'.repeat(4));
     assert.equal(sent.length, 0);
     assert.equal(far.acceptCertificate('01234567').ok, false, 'the old certificate\'s start confirms nothing');
     assert.deepEqual(far.acceptCertificate('fedcba98'), { ok: true, changed: true });
@@ -154,12 +165,41 @@ test('AG-1: a node\'s token goes only to this machine, or over TLS to a certific
     // Typed when linked: confirmed at once, pinned; typed wrong: refused, and nothing sent to it.
     const typed = make('https://192.0.2.11:9443', { confirmFp: 'fedcba9876' });
     await settled(typed, 'live');
-    assert.equal(typed.pins.pins['node:p1'], presented);
+    assert.equal(typed.pins.pins[pl.pinKey('p1')], presented);
     const wrong = make('https://192.0.2.12:9443', { confirmFp: 'deadbeef' });
     await settled(wrong, 'refused');
     assert.match(wrong.problem, /does not start with the characters typed for it/);
+    tellsNone(wrong, presented);
     assert.equal(sent.filter((r) => r.url.includes('192.0.2.12')).length, 0);
-    assert.equal(wrong.pins.pins['node:p1'], undefined, 'nothing pinned');
+    assert.equal(wrong.pins.pins[pl.pinKey('p1')], undefined, 'nothing pinned');
+
+    // A hello announcing TLS for a node on another machine (anyone can send one): its certificate is still refused until
+    // a person types its start — the hello's word for it, matching or not, is no confirmation, and is never shown.
+    const heard = make('http://192.0.2.14:9696', { findPeer: () => ({ id: 'p1', tls: presented, ports: { https: 9443 } }) });
+    await settled(heard, 'refused');
+    assert.match(heard.problem, /not confirmed yet/);
+    tellsNone(heard, presented);
+    assert.equal(sent.filter((r) => r.url.includes('192.0.2.14')).length, 0, 'the token never reaches it');
+    assert.equal(heard.pins.pins[pl.pinKey('p1')], undefined, 'nothing pinned');
+    assert.ok(heard.acceptCertificate(presented.slice(7, 15)).ok);
+    await settled(heard, 'live');
+    assert.ok(sent.some((r) => r.url.startsWith('https://192.0.2.14:9443/') && r.token && r.tls), 'its token goes over TLS once a person confirmed it');
+    const announced = 'sha256:' + '89abcdef01234567'.repeat(4);
+    const spoofed = make('http://192.0.2.15:9696', { findPeer: () => ({ id: 'p1', tls: announced, ports: { https: 9443 } }) });
+    await settled(spoofed, 'refused');
+    assert.match(spoofed.problem, /its certificate is not the one its hello announces — another machine may be answering as it; to confirm the one it presents, type the first 8 or more characters/);
+    tellsNone(spoofed, presented, announced);
+    assert.equal(sent.filter((r) => r.url.includes('192.0.2.15')).length, 0);
+    assert.equal(spoofed.acceptCertificate(announced.slice(7, 15)).ok, false, 'the hello\'s fingerprint confirms nothing');
+
+    // A pin the Stagewatch link made on first use, under an id from an unauthenticated hello ("node:<id>"), is no person's
+    // confirmation: a node announcing that id on another machine is still refused until someone types its start.
+    const shared = new tlsmod.PinStore({ ['node:p1']: presented });
+    const borrowed = make('https://192.0.2.13:9443', { pins: shared });
+    await settled(borrowed, 'refused');
+    assert.match(borrowed.problem, /not confirmed yet/);
+    assert.equal(sent.filter((r) => r.url.includes('192.0.2.13')).length, 0, 'the token never reaches it');
+    assert.deepEqual(shared.pins, { 'node:p1': presented }, 'and the Stagewatch link\'s pin is left as it was');
 
     // send() is off: refused with words, and nothing is sent.
     const before = sent.length;
@@ -371,9 +411,14 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
 
   await t.test('AG-1: a Patterns on another machine that offers no TLS is refused with words, and never sent its token', async () => {
     // Reached by this machine's own network address (not loopback): as a Patterns on another laptop would be.
-    const lan = require('../lib/tls').lanAddresses()[0] || '192.0.2.1';
+    const lan = require('../lib/tls').lanAddresses()[0];
+    assert.ok(lan, 'this test needs a network address that is not loopback (every CI runner and show laptop has one)');
     const far = await fakeNode({ t: 'patterns', name: 'Patterns far', token: PATTERNS_TOKEN, host: '0.0.0.0', commands: [{ verb: 'VIDEO END <seconds>', risk: 'review' }] });
     try {
+      // That address reaches the fake: "nothing reached it" below is about the gate, not a road that goes nowhere.
+      assert.equal((await fetch('http://' + lan + ':' + far.port + '/reach')).status, 401, 'it answers there (without its token, as it should)');
+      assert.deepEqual(far.requests.map((r) => r.url), ['/reach']);
+      far.requests.length = 0;
       assert.ok((await emit(ctl, 'nodes:link', { id: 'farpat', t: 'patterns', url: lan + ':' + far.port, name: 'Patterns far', token: PATTERNS_TOKEN })).ok);
       let v;
       await until(async () => { v = (await emit(ctl, 'nodes:list', {})).linked.find((n) => n.id === 'farpat'); return v && v.status === 'refused'; }, 8000, 'refused');
@@ -392,9 +437,10 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
       const audit = fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8');
       assert.ok(audit.includes('(8 characters of its certificate\'s fingerprint typed)'));
     } finally {
-      assert.ok((await emit(ctl, 'nodes:unlink', { id: 'farpat' })).ok);
+      await emit(ctl, 'nodes:unlink', { id: 'farpat' });   // whatever failed above: never left linked for the next subtest
       await far.close();
     }
+    assert.equal((await emit(ctl, 'nodes:list', {})).linked.some((n) => n.id === 'farpat'), false);
   });
 
   await t.test('the board shows each node on its hall (or for those who drive every hall), with its light and headline', async () => {
@@ -452,7 +498,8 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     }
     const ok = await emit(senior, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT', mode: 'propose' });
     assert.deepEqual([ok.ok, ok.risk], [true, 'review']);
-    assert.ok(!pm.requests.some((x) => x.url === '/api/cmd'), 'none reached PlayMap');
+    assert.equal((await emit(senior, 'nodes:command', { id: 'playmap01', line: 'DECODE POLICY DIRECT', mode: 'send' })).stage, 'not sent');
+    assert.ok(!pm.requests.some((x) => x.url === '/api/cmd'), 'none reached PlayMap, sent or proposed');
   });
 
   await t.test('C44: a line carrying a secret is neither sent nor proposed, and its secret is written down nowhere', async () => {

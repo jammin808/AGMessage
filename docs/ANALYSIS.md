@@ -124,7 +124,7 @@ browser smoke or by hand, none yet by a test that counts.
 
 After the review below (§6), with 233 tests: **lines 96.7 %, branches 84.4 %, functions 92.8 %**. The gate went to
 **92 / 80 / 88**, then **94 / 82 / 90**. The input fence reaches every socket handler, which is most of the rise in
-functions. With AG-1 (§6), 236 tests: **96.8 / 84.6 / 92.8**; the gate stays at 94 / 82 / 90.
+functions. With AG-1 (§6), 237 tests: **96.8 / 84.6 / 92.9**; the gate stays at 94 / 82 / 90.
 
 ## 6. The review before release
 
@@ -158,7 +158,15 @@ that was neither pinned nor announcing a certificate, and AGMessage drove the no
 only to a loopback address, or over TLS to a certificate pinned for that node or confirmed by a person typing at least
 8 characters of its fingerprint from the node's own screen; anything else is refused with words and sent nothing; and
 no line is sent to a node directly — it is proposed to the show desk, or refused with words. The direct path waits for
-a key the node issues to AGMessage alone (Patterns' `ptk_`, PlayMap's `pmk_`). Left for 0.5.1, from the same review:
+a key the node issues to AGMessage alone (Patterns' `ptk_`, PlayMap's `pmk_`). Unit 21 was then read the same way as
+the rest — five angles, two readers set to refute each finding — and unit 21.1 fixed what held: a pin the Stagewatch link
+had made on first use, under an id from an unauthenticated hello, counted as a person's confirmation (the Patterns and
+PlayMap links now pin under a key of their own, `peer:<id>`); a refusal and the heard-nodes list still put announced
+fingerprints on the page; a node on this laptop heard from its LAN address was refused as another machine; and the
+tests let two one-line regressions through (a hello vouching for a certificate, a page told 8 to 15 of its characters).
+Seven such mutations now fail the tests. Left as the owner's call: 8 typed characters are 32 bits of a fingerprint that
+is public in the hello, which a prepared certificate can match with about 2^32 signatures. Left for 0.5.1, from the
+cross-app review:
 Stagewatch's top-level `ok`/`words` on a proposal's outcome, a result report retried after one failure, the Stagewatch
 link dialling with its own Show Bus id, and "connected" only once Stagewatch says it took the key.
 

@@ -44,9 +44,11 @@ Stagewatch, crews with their own logins, project managers seeing every hall, scr
 - A linked node's pairing token is full control of it, so it goes only to this laptop, or over HTTPS to a certificate
   that is pinned or that a person confirmed by typing the first 8 or more characters of the fingerprint the node shows
   on its own screen (when linking, or with Confirm certificate on the admin page). A node on another machine with no
-  HTTPS, or whose certificate nobody confirmed, shows red with the reason and is sent nothing. AGMessage never drives
+  HTTPS, or whose certificate nobody confirmed, shows red with the reason and is sent nothing. A node's hello (anyone
+  can send one), and a certificate the Stagewatch link trusted on first use, confirm nothing; no page shows a fingerprint
+  to copy; a node on this laptop heard from its network address is linked on the laptop itself. AGMessage never drives
   a node directly with that token: driving it waits for a key the node issues to AGMessage alone (Patterns' `ptk_`,
-  PlayMap's `pmk_`). Found by a review of the Show Bus across the four apps (AG-1, unit 21).
+  PlayMap's `pmk_`). Found by a review of the Show Bus across the four apps (AG-1, units 21 and 21.1).
 
 **Versions** — one scheme for every build (`app/lib/version.js`): `package.json` names the version; CI stamps the build
 number and commit (`tools/stamp-build.js`). A release reads `0.5.0+17.abc1234`, a CI development build
@@ -103,7 +105,7 @@ reader, then 19 more when the fixes were read together — every one fixed or an
   every rotated file as one chain, off the event loop; uploads stop before the disk fills, and files nobody posted are
   removed.
 
-Tests: 236 (was 53) plus the browser smoke (61 checks, was 7).
+Tests: 237 (was 53) plus the browser smoke (61 checks, was 7).
 
 ## 0.4.0 — 2026-10-11 — encrypted connections and the show desk (Show Bus 1.2)
 

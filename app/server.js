@@ -1191,7 +1191,7 @@ io.on('connection', (socket) => {
     // Each node with whether its own hall's Stagewatch (its own, else the default) keeps a show desk: Propose is offered
     // only where a proposal can go. The halls named are those this socket may see (a hall code is a guest's credential).
     const linked = Array.from(peerLinks.values()).filter((l) => mayDriveNode(socket, l)).map((l) => ({ ...l.view(), desk: deskFor(l).desk }));
-    const heard = socket.data.isAdmin && discovery ? discovery.list().filter((p) => peerlinks.KINDS.has(p.t) && !peerLinks.has(p.id)) : [];
+    const heard = socket.data.isAdmin && discovery ? forPages(discovery.list()).filter((p) => peerlinks.KINDS.has(p.t) && !peerLinks.has(p.id)) : [];
     const halls = Array.from(store.rooms.values()).filter((r) => socket.data.isAdmin || (socket.data.account && rbac.seesHall(socket.data.account, r.code))).map((r) => ({ code: r.code, name: r.name || '' }));
     ack({ ok: true, linked, heard, admin: !!socket.data.isAdmin, halls, desk: linked.some((l) => l.desk) });
   });
@@ -1204,13 +1204,14 @@ io.on('connection', (socket) => {
     // Heard on the bus, linked before, or typed (a venue network that blocks broadcast): its kind and its address.
     const t = (peer && peer.t) || (cfg && cfg.t) || (typeof url === 'string' && url.trim() ? typedKind : '');
     if (!t || !peerlinks.KINDS.has(t)) return ack({ ok: false, error: 'Choose a Patterns or PlayMap that AGMessage hears on the network, or type its kind and address.' });
-    const port = peer ? (peer.ports.http || peer.ports.https) : 0;
-    const base = typeof url === 'string' && url.trim() ? nodes.normaliseBase(url) : peer ? (peer.tls ? 'https://' : 'http://') + peer.address + ':' + (peer.ports.https || port) : cfg.url;
+    // A node on this laptop is heard from its LAN address too (its broadcast hello): it is linked by 127.0.0.1, so its token
+    // stays on this machine.
+    const base = typeof url === 'string' && url.trim() ? nodes.normaliseBase(url) : peer ? peerlinks.baseFor(peer, tlsmod.lanAddresses()) : cfg.url;
     if (!base) return ack({ ok: false, error: 'That is not an address.' });
     const h = typeof hall === 'string' && hall ? hall.toUpperCase() : '';
     if (h && !store.has(h)) return ack({ ok: false, error: 'No such hall.' });
     // The start of its certificate's fingerprint, typed from the node's own screen: what lets its token go to it over TLS
-    // on another machine (lib/peerlinks.js). Public, so kept as typed.
+    // on another machine (lib/peerlinks.js). Public, so kept unsealed, as hex.
     const typedFp = tlsmod.typedFingerprint(guard.str(fingerprint));
     if (guard.str(fingerprint).trim() && !typedFp) return ack({ ok: false, error: 'Type at least 8 characters of its certificate\'s fingerprint (0–9, a–f), as the node shows it on its own screen.' });
     const sealed = typeof token === 'string' && token.trim() ? secretbox.seal(token.trim().slice(0, 200)) : (cfg && cfg.tokenSealed) || '';
@@ -1231,7 +1232,7 @@ io.on('connection', (socket) => {
     delete rest[guard.str(id)];
     settings.peerLinks = rest;
     // Its certificate's pin goes with it: linking it again trusts the certificate it serves then (a renewed or new one).
-    pins.forget('node:' + guard.str(id));
+    pins.forget(peerlinks.pinKey(guard.str(id)));
     settings.tlsPins = pins.toJSON();
     saveSettings();
     startPeerLink(guard.str(id), null);
@@ -1263,8 +1264,8 @@ io.on('connection', (socket) => {
     const match = link.context ? peerlinks.matchCommand(link.commandTable(), text) : null;
     if (!text || !match) return ack({ ok: false, error: link.node.name + ' does not list that command — only the verbs it lists can be proposed.' });
     const who = socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
-    // A verb's secret words (a pairing token, a key — its own, or a carried line's) are never written down: the audit row
-    // keeps the line up to them.
+    // A verb's secret words (a pairing token, a key — its own, or a carried line's) are never written down: a line with them
+    // is refused before it is proposed or recorded, and the refusal shows the line up to them.
     const shown = peerlinks.redactLine(text, match.secretFrom);
     // Until PlayMap's own rules are read, a line is high: the desk is never told a lower risk than the node's.
     const risk = link.rulesKnown ? match.risk : 'high';
@@ -1576,7 +1577,7 @@ io.on('connection', (socket) => {
       ok: true,
       aiKeySet: !!aiKey(), aiFromEnv: !!process.env.ANTHROPIC_API_KEY, model: ai.MODEL,
       stagewatchUrl: settings.stagewatchUrl || '', stagewatchKeySet: !!stagewatchKey(),
-      stage: stageLink.status, peers: discovery ? discovery.list() : [],
+      stage: stageLink.status, peers: discovery ? forPages(discovery.list()) : [],
       nodeId: settings.nodeId, contextToken: contextToken(), health: healthFacts(),
       stageContext: stageLink.context ? { headline: stageLink.context.headline, light: stageLink.context.light, peers: stageLink.context.peers || [] } : null,
       tls: tlsFacts(), stagewatchFingerprint: settings.stagewatchFingerprint || '',
@@ -1933,7 +1934,7 @@ if (process.env.AGM_NODES !== '0') {
   const loopbackOnly = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
   discovery = new nodes.Discovery({ id: settings.nodeId, port: PORT, name: 'AGMessage', build: BUILD.full, announce: !loopbackOnly, tls: cert ? cert.fp : '', onChange: () => {
     // Read once, and volatile: a slow or sleeping admin page gets the newest table, never a backlog (its 5 s refresh reads it again).
-    const list = discovery.list();
+    const list = forPages(discovery.list());
     for (const [, s] of io.sockets.sockets) if (s.data && s.data.isAdmin) s.volatile.emit('nodes', list);
   } });
   try { discovery.start(); } catch (e) { console.warn('  [nodes] discovery off:', e.message); }
@@ -1946,6 +1947,11 @@ for (const room of store.rooms.values()) configureHallLink(room);
 // fingerprint as typed, fpTyped), each read every 5 s; the verbs it lists are proposed to the show desk. A link may
 // belong to a hall, so the hall's board row and its crew see it.
 const peerLinks = new Map();   // node id -> PeerLink
+/**
+ * The nodes heard on the network, as pages are told them: a Patterns' or PlayMap's announced certificate only as there or
+ * not — never its fingerprint, which anyone can announce; the characters that confirm one are read from the node's screen.
+ */
+function forPages(list) { return list.map((p) => (peerlinks.KINDS.has(p.t) ? { ...p, tls: !!p.tls } : p)); }
 function startPeerLink(id, cfg) {
   const old = peerLinks.get(id);
   if (old) old.stop();
