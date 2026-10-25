@@ -109,9 +109,20 @@
         const li = document.createElement('li');
         const mark = { green: '✓', amber: '△', red: '✕', grey: '○' }[l.light] || '○';
         li.textContent = mark + ' ' + (l.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' “' + l.name + '” — ' + l.status + (l.problem ? ' (' + l.problem + ')' : '') + (l.headline ? ': ' + l.headline : '') + (l.hall ? ' · hall ' + l.hall : '') + ' · ' + l.commands.length + ' verbs';
+        // A changed certificate is refused until the admin accepts the one the node presents now (shown here).
+        if (l.certificateChanged) {
+          const acc = document.createElement('button');
+          acc.className = 'btn ghost small'; acc.type = 'button'; acc.textContent = 'Accept certificate';
+          acc.title = 'It now presents ' + pretty(l.certificate);
+          acc.onclick = () => {
+            if (!confirm('Accept ' + l.name + '\'s new certificate (' + pretty(l.certificate).slice(0, 23) + '…)? Only do this if you know why it changed (a renewal, a reinstall, a new laptop).')) return;
+            socket.emit('nodes:acceptCertificate', { id: l.id }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not accepted.'); loadNodes(); });
+          };
+          li.appendChild(acc);
+        }
         const b = document.createElement('button');
         b.className = 'btn ghost small'; b.type = 'button'; b.textContent = 'Unlink';
-        b.onclick = () => { if (confirm('Unlink ' + l.name + '? Its token is forgotten.')) socket.emit('nodes:unlink', { id: l.id }, () => loadNodes()); };
+        b.onclick = () => { if (confirm('Unlink ' + l.name + '? Its token and its certificate pin are forgotten.')) socket.emit('nodes:unlink', { id: l.id }, () => loadNodes()); };
         li.appendChild(b);
         ul.appendChild(li);
       }

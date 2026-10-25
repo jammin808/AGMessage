@@ -206,6 +206,7 @@ function proposalLineText(p) {
     case 'done': return '✓ Approved' + by + ' and done' + (p.words ? ': ' + p.words : '');
     case 'failed': return '⚠ Approved' + by + ' but it failed' + (p.words ? ': ' + p.words : '');
     case 'undelivered': return '⚠ Approved' + by + ' but it never reached Stagewatch';
+    case 'lost': return '⚠ ' + (p.words || 'Stagewatch no longer has this request — ask again if it is still wanted');
     default: return '';
   }
 }

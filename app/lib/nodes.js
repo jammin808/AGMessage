@@ -4,7 +4,8 @@
  *
  *  - Discovery: one channel, the hello on UDP 9928. AGMessage says {"t":"messenger"} every 2 s and listens to every
  *    kind (Stagewatch "main", Slides "agent", "patterns", "playmap", other messengers). A peer is live while hellos come,
- *    stale after 6 s, gone after 12 s. The hello says what a node is, never what the meeting is doing.
+ *    stale after 6 s, gone after 12 s. The hello says what a node is, never what the meeting is doing. Anyone can send
+ *    one, so the table is bounded (MAX_PEERS, MAX_PER_ADDRESS) and its change is told at most every CHANGE_MS.
  *  - Stagewatch link: a WebSocket for the live timer (key in the Authorization header on the upgrade — never in the
  *    URL), a ping every 2 s that also measures the clock offset, stale after 6 s of silence and redialled after 12 s
  *    (backoff 0.5 → 5 s with jitter). "Send to stage" carries a request id and reads Stagewatch's receipt (accepted /
@@ -12,10 +13,10 @@
  *    a send fails at once and says so.
  *  - Context: AGMessage fetches Stagewatch's /api/context (for the AI's brief and the admin page) and posts its own
  *    to Stagewatch (/api/peers/context) — counts and action-prompt titles only, never message text.
- *  - 1.2 §10: when Stagewatch's hello carries "tls" (or the URL is https://), the link is https/wss. Before anything is
- *    sent — the key above all — the certificate is fetched and checked against the pin for that node (trust on first
- *    authenticated use; a change is refused as CERTIFICATE CHANGED until the admin accepts it). Each request then trusts
- *    exactly that certificate.
+ *  - 1.2 §10: when Stagewatch's hello carries "tls", the URL is https://, a fingerprint is typed or the certificate is
+ *    pinned, the link is https/wss. Before anything is sent — the key above all — the certificate is fetched and checked
+ *    against the pins for that node and that address (trust on first authenticated use; a change is refused as
+ *    CERTIFICATE CHANGED until the admin accepts it). Each request then trusts exactly that certificate.
  *  - 1.2 §11: Stagewatch as the show desk (cap "approvals"): proposals go there, their state is read back, and approved
  *    proposals aimed at AGMessage are collected and their results reported.
  */
@@ -25,14 +26,22 @@ const os = require('os');
 const WebSocket = require('ws');
 const { ClockSampler, Ring } = require('./resilience');
 const tlsmod = require('./tls');
+const { departmentsOf } = require('./stagelines');
 
 const BUS_PORT = 9928;
 const BEAT_MS = 2000;
 const STALE_MS = 6000;
 const GONE_MS = 12000;
+// The peers table is fed by unauthenticated UDP: a flood of fresh ids must not grow it, nor what it is pushed to.
+const MAX_PEERS = 256;          // a venue's show network is tens of nodes
+const MAX_PER_ADDRESS = 8;      // one machine runs a few nodes (Stagewatch, its Slides agents, Patterns, PlayMap…)
+const CHANGE_MS = 500;          // the table's change is told at most this often, latest wins
 // Every kind on the bus: Stagewatch (main), its Slides agents, Patterns, PlayMap (Show Bus 1.3 proposal) and other messengers.
 const KINDS = new Set(['main', 'agent', 'patterns', 'playmap', 'messenger']);
 const CAPS = ['messages', 'action-prompts', 'documents', 'ai', 'context', 'receipts', 'proposals', 'displays', 'help'];
+// A Stagewatch as one link sees it at one time: unique across every link of this process, so a link made again for a
+// hall (its Stagewatch removed, then another set) never shares a number with the one it replaced.
+let generations = 0;
 
 /** A hello off the wire, cleaned; null when it isn't one (pure, tested). */
 function parseHello(msg, address) {
@@ -69,8 +78,17 @@ class Discovery {
     this.build = build;   // the build this node runs (lib/version.js), so a peer tells builds apart before it connects
     this.tls = tls;   // this node's certificate fingerprint (same port serves HTTPS)
     this.peers = new Map();   // id -> hello + seen
+    this.dropped = 0;         // hellos with a new id refused because the table, or that address's share of it, is full
     this.sock = null;
     this.timer = null;
+    this._changeTimer = null;
+  }
+
+  /** The table changed: tell onChange once within CHANGE_MS, reading the table as it is then (latest wins, no backlog). */
+  _changed() {
+    if (this._changeTimer) return;
+    this._changeTimer = setTimeout(() => { this._changeTimer = null; this.onChange(); }, CHANGE_MS);
+    this._changeTimer.unref();
   }
 
   hello() {
@@ -90,8 +108,11 @@ class Discovery {
       const h = parseHello(msg, rinfo.address);
       if (!h || h.id === this.id) return;
       const was = this.peers.get(h.id);
+      // A new id takes a place only while the table and its address's share have room; ids already heard keep
+      // refreshing, so a flood of fresh ids never pushes the real peers out.
+      if (!was && (this.peers.size >= MAX_PEERS || this._idsAt(h.address) >= MAX_PER_ADDRESS)) { this.dropped++; return; }
       this.peers.set(h.id, { ...h, seen: Date.now() });
-      if (!was || was.address !== h.address || was.name !== h.name || peerStatus(Date.now() - was.seen) !== 'live') this.onChange();
+      if (!was || was.address !== h.address || was.name !== h.name || peerStatus(Date.now() - was.seen) !== 'live') this._changed();
     });
     sock.bind(BUS_PORT, () => { try { sock.setBroadcast(true); } catch { /* ignore */ } });
     const tick = () => {
@@ -104,12 +125,14 @@ class Discovery {
         const st = peerStatus(Date.now() - p.seen);
         if (st === 'gone') { this.peers.delete(k); changed = true; } else if (st !== p.lastStatus) { p.lastStatus = st; changed = true; }
       }
-      if (changed) this.onChange();
+      if (changed) this._changed();
     };
     this.timer = setInterval(tick, BEAT_MS);
     this.timer.unref();
     tick();
   }
+
+  _idsAt(address) { let n = 0; for (const p of this.peers.values()) if (p.address === address) n++; return n; }
 
   /** The live peer of kind t serving at host:port (http or https), or null. */
   find(t, host, port) {
@@ -129,7 +152,7 @@ class Discovery {
     }));
   }
 
-  stop() { clearInterval(this.timer); if (this.sock) { try { this.sock.close(); } catch { /* ignore */ } } }
+  stop() { clearInterval(this.timer); clearTimeout(this._changeTimer); this._changeTimer = null; if (this.sock) { try { this.sock.close(); } catch { /* ignore */ } } }
 }
 
 /** "http://10.0.0.5:9924" from what the operator typed ("10.0.0.5", "10.0.0.5:9924", a full URL). */
@@ -167,7 +190,10 @@ function stageView(frame) {
   };
 }
 
-/** A proposal as the desk reports it (Show Bus §11), cleaned (pure). Tolerant: the desk may add fields. */
+/**
+ * A proposal as the desk reports it (Show Bus §11), cleaned (pure). Tolerant: the desk may add fields. `created` and
+ * `from` tell one proposal from another of the same id: a desk numbers from p1 again after it restarts.
+ */
 function readProposal(j) {
   if (!j || typeof j !== 'object' || typeof j.id !== 'string' || !j.id) return null;
   const STATES = ['pending', 'approved', 'rejected', 'done', 'failed', 'undelivered'];
@@ -179,8 +205,12 @@ function readProposal(j) {
     words: str(result ? (result.words ?? result.error ?? '') : (j.words || j.error || ''), 300),
     ok: result ? result.ok !== false : null,
     target: j.target && typeof j.target === 'object' ? { t: str(j.target.t, 16), id: str(j.target.id, 40) } : null,
+    created: Number.isFinite(j.created) ? j.created : 0,
+    from: j.from && typeof j.from === 'object' ? { t: str(j.from.t, 16), id: str(j.from.id, 40) } : null,
   };
 }
+/** Where a link points, as a short tag (never the address itself): what a send or proposal records of its Stagewatch. */
+const addressTag = (base) => (base ? crypto.createHash('sha256').update(String(base)).digest('hex').slice(0, 12) : '');
 /** The desk's list replies: an array, or {proposals:[…]} (pure). */
 const readProposalList = (j) => (Array.isArray(j) ? j : j && Array.isArray(j.proposals) ? j.proposals : []).map(readProposal).filter(Boolean);
 
@@ -219,11 +249,18 @@ class StagewatchLink {
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
     this.desk = false;                // Stagewatch answers /api/proposals (Show Bus §11)
     this.deskCheckedAt = 0;
+    // Which Stagewatch, as it is now: a new one each time the link is made, pointed elsewhere or its frames' seq goes back
+    // (it restarted, Show Bus §4) — its message and proposal numbers start again, so nothing followed before carries over.
+    this.generation = ++generations;
+    this.lastSeq = null;
     this.ws = null; this.delay = 500; this.lastHeard = 0; this.view = null; this.status = 'off'; this.lastKey = '';
     this.clock = new ClockSampler(8);
     this.rtt = new Ring(60);          // send-to-stage request → receipt, ms
     this.context = null;              // Stagewatch's /api/context, when it serves one
     this.contextAt = 0;
+    // Every department its context has named since it was linked: Stagewatch lists one only while it has a live cue,
+    // so a department messaged a moment ago (or whose GO aged out) stays a destination.
+    this.departments = [];
     this.timer = setInterval(() => this._watch(), 1000);
     this.timer.unref();   // never keeps a process alive on its own
   }
@@ -233,11 +270,12 @@ class StagewatchLink {
     const k = typeof key === 'string' ? key.trim() : '';
     const f = tlsmod.cleanFingerprint(fingerprint);
     if (b === this.base && k === this.key && f === this.fingerprint) return;
+    if (b !== this.base) { this.generation = ++generations; this.lastSeq = null; }
     this.base = b; this.key = k; this.fingerprint = f;
     this._close();
     this.delay = 500;
     this.clock.reset();
-    this.context = null;
+    this.context = null; this.departments = [];
     this.endpoint = null;
     this.desk = false; this.deskCheckedAt = 0;
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
@@ -252,38 +290,61 @@ class StagewatchLink {
     const u = new URL(this.base);
     const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
     const peer = this.findPeer('main', u.hostname, port);
-    const wantTls = u.protocol === 'https:' || !!(peer && peer.tls) || !!this.fingerprint;
+    // The certificate is pinned under the node's id (from its hello) and under the link's own address: the hello is
+    // unauthenticated and absent right after a restart, so once pinned at this address the link is never plain again, and
+    // a hello naming another id cannot swap in a pin of its own (Show Bus §10: the pin, not the hello, is the trust).
+    const urlKey = 'url:' + u.hostname + ':' + port;
+    const keys = Array.from(new Set([peer ? 'node:' + peer.id : urlKey, urlKey]));
+    const wantTls = u.protocol === 'https:' || !!(peer && peer.tls) || !!this.fingerprint || keys.some((k) => this.pins.pins[k]);
     if (!wantTls) { this.tlsState = { on: false, fp: '', pinned: false, problem: '' }; return { base: this.base, tls: null }; }
     const tport = peer && peer.ports && peer.ports.https ? peer.ports.https : port;
-    const nodeKey = peer ? 'node:' + peer.id : 'url:' + u.hostname + ':' + tport;
+    const nodeKey = keys[0];
     let cert;
     try { cert = await tlsmod.probeCertificate(u.hostname, tport); } catch (e) {
       this.tlsState = { on: true, fp: '', pinned: !!this.pins.pins[nodeKey], problem: 'no TLS answer: ' + (e && e.message ? e.message : '') };
       return undefined;   // unreachable: retry like any connection failure
     }
-    const verdict = this.pins.check(nodeKey, cert.fp, this.fingerprint || (peer && peer.tls) || '');
-    this.tlsState = { on: true, fp: cert.fp, pinned: !!this.pins.pins[nodeKey], problem: verdict.ok ? '' : verdict.reason, changed: !!verdict.changed, nodeKey };
+    const expected = this.fingerprint || (peer && peer.tls) || '';
+    const verdict = keys.map((k) => this.pins.check(k, cert.fp, expected)).find((v) => !v.ok) || { ok: true };
+    this.tlsState = { on: true, fp: cert.fp, pinned: !!this.pins.pins[nodeKey], problem: verdict.ok ? '' : verdict.reason, changed: !!verdict.changed, nodeKey, keys };
     if (!verdict.ok) return null;
-    return { base: 'https://' + u.hostname + ':' + tport, tls: tlsmod.pinnedTlsOptions(cert.pem, cert.fp), fp: cert.fp, nodeKey };
+    return { base: 'https://' + u.hostname + ':' + tport, tls: tlsmod.pinnedTlsOptions(cert.pem, cert.fp), fp: cert.fp, nodeKey, keys };
   }
 
-  /** The first authenticated success over TLS pins the certificate (trust on first use). */
+  /** The first authenticated success over TLS pins the certificate (trust on first use), under every key the link checks. */
   _confirmPin() {
     const e = this.endpoint;
     if (!e || !e.tls) return;
-    if (this.pins.confirm(e.nodeKey, e.fp)) { this.tlsState.pinned = true; this.onPins(); }
+    let pinned = false;
+    for (const k of e.keys || [e.nodeKey]) if (this.pins.confirm(k, e.fp)) pinned = true;
+    if (pinned) { this.tlsState.pinned = true; this.onPins(); }
   }
 
   /** The admin accepts a changed certificate: pin what is presented now, then reconnect. */
   acceptCertificate() {
     const s = this.tlsState;
     if (!s.nodeKey || !s.fp) return false;
-    this.pins.accept(s.nodeKey, s.fp);
+    for (const k of s.keys || [s.nodeKey]) this.pins.accept(k, s.fp);
     this.onPins();
     this.tlsState.problem = ''; this.tlsState.changed = false;
     this._close(); this.endpoint = null; this.delay = 500;
     if (this.base) this._open();
     return true;
+  }
+
+  /**
+   * The admin removed this Stagewatch: forget its certificate's pins — its address's, and its node's (the node pins
+   * holding the same certificate) — so the address linked again trusts what it serves then.
+   */
+  forgetPins() {
+    if (!this.base) return;
+    const u = new URL(this.base);
+    const keys = new Set(['url:' + u.hostname + ':' + (Number(u.port) || (u.protocol === 'https:' ? 443 : 80))].concat(this.tlsState.keys || []));
+    const fps = new Set([this.tlsState.fp].concat(Array.from(keys, (k) => this.pins.pins[k])).filter(Boolean));
+    for (const [k, fp] of Object.entries(this.pins.pins)) if (k.startsWith('node:') && fps.has(fp)) keys.add(k);
+    let gone = false;
+    for (const k of keys) if (this.pins.pins[k]) { this.pins.forget(k); gone = true; }
+    if (gone) this.onPins();
   }
 
   /** One HTTP call to Stagewatch on the resolved endpoint (pinned when TLS). */
@@ -293,6 +354,8 @@ class StagewatchLink {
   }
 
   get linked() { return this.status === 'connected'; }
+  /** The address this link points at, as a tag (lib/nodes.js addressTag). */
+  get tag() { return addressTag(this.base); }
 
   _set(status, view) {
     const key = status + '|' + JSON.stringify(view);
@@ -332,7 +395,11 @@ class StagewatchLink {
       let msg; try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
       if (msg.type === 'beat') { if (msg.live !== false) this.lastHeard = Date.now(); return; }
       this.lastHeard = Date.now();
-      if (msg.type === 'state') { this._confirmPin(); this._set('connected', stageView(msg)); }
+      if (msg.type === 'state') {
+        this._confirmPin();
+        if (Number.isInteger(msg.seq)) { if (this.lastSeq !== null && msg.seq < this.lastSeq) this.generation = ++generations; this.lastSeq = msg.seq; }
+        this._set('connected', stageView(msg));
+      }
       else if (msg.type === 'pong') this.clock.add(Number(msg.t), Number(msg.t2), Number(msg.t3), Date.now());
       else if (msg.type === 'auth' && msg.ok === false) this._set('Stagewatch refused: ' + String(msg.error || 'viewing code or key').slice(0, 80), null);
     };
@@ -358,13 +425,15 @@ class StagewatchLink {
     const quiet = Date.now() - this.lastHeard;
     if (this.status === 'connected' || this.status === 'stale') {
       this._ping();
-      if (quiet > GONE_MS) { try { this.ws.close(); } catch { /* onclose redials */ } return; }
+      // A silent peer answers no close frame (ws would wait 30 s for one): drop the socket now, so onclose redials at 12 s.
+      if (quiet > GONE_MS) { try { this.ws.terminate(); } catch { /* onclose redials */ } return; }
       if (quiet > STALE_MS) this._set('stale', this.view ? { ...this.view, stale: true } : null);   // silence is never "fine"
       else if (this.status === 'stale') this._set('connected', this.view ? { ...this.view, stale: false } : null);
     }
   }
 
-  _close() { if (this.ws) { const w = this.ws; this.ws = null; try { w.close(); } catch { /* ignore */ } } }
+  /** Let go of the socket (reconfigured, a certificate accepted, stopped): its late frames no longer reach this link. */
+  _close() { if (this.ws) { const w = this.ws; this.ws = null; w.onmessage = null; w.onopen = null; try { w.close(); } catch { /* ignore */ } } }
 
   /** Clock offset to Stagewatch ({offsetMs, rttMs, apart}) or null before the first pong with times. */
   clockInfo() { return this.clock.best(); }
@@ -398,6 +467,7 @@ class StagewatchLink {
       const j = res.body;
       if (!j || j.v !== 1 || !j.node) return null;
       this.context = j; this.contextAt = Date.now();
+      this.departments = Array.from(new Set(this.departments.concat(departmentsOf(j)))).slice(0, 20);
       this.onContext(j);
       return j;
     } catch { return null; }
@@ -440,11 +510,11 @@ class StagewatchLink {
     } catch (e) { return { ok: false, error: 'Stagewatch unreachable: ' + (e && e.message ? e.message.slice(0, 80) : '') }; }
   }
 
-  /** One proposal's state, or null. */
+  /** One proposal's state; {gone:true} when the desk has no such proposal (404); null when it could not be asked. */
   async proposal(id) {
     try {
       const res = await this._call('/api/proposals/' + encodeURIComponent(id), { timeoutMs: 3000 });
-      return res.status === 200 ? readProposal(res.body) : null;
+      return res.status === 200 ? readProposal(res.body) : res.status === 404 ? { gone: true } : null;
     } catch { return null; }
   }
 
@@ -457,17 +527,17 @@ class StagewatchLink {
     } catch { return []; }
   }
 
-  /** Report what running an approved proposal did. True when the desk took it. */
+  /** Report what running an approved proposal did: the desk's HTTP status (2xx taken, 4xx refused for good), 0 when not reached. */
   async reportResult(id, ok, words) {
     try {
       const res = await this._call('/api/proposals/' + encodeURIComponent(id) + '/result', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: !!ok, words: String(words || '').slice(0, 300) }), timeoutMs: 3000,
       });
-      return res.status >= 200 && res.status < 300;
-    } catch { return false; }
+      return res.status;
+    } catch { return 0; }
   }
 
   stop() { clearInterval(this.timer); this.base = ''; this._close(); }
 }
 
-module.exports = { Discovery, StagewatchLink, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, BUS_PORT, STALE_MS, GONE_MS };
+module.exports = { Discovery, StagewatchLink, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };

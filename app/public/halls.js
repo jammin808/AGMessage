@@ -152,7 +152,7 @@
       const box = $('networkList');
       box.textContent = '';
       if (!r.linked.length) { const p = document.createElement('p'); p.className = 'empty-note'; p.textContent = 'No Patterns or PlayMap is linked yet — the admin links them on the admin page.'; box.appendChild(p); }
-      for (const n of r.linked) box.appendChild(nodeCard(n, r.desk));
+      for (const n of r.linked) box.appendChild(nodeCard(n, n.desk));   // Propose only where its own hall keeps a show desk
       $('networkDialog').showModal();
     });
   }

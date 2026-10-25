@@ -9,6 +9,7 @@ const path = require('path');
 const board = require('../lib/board');
 const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
+const { io } = require('socket.io-client');
 const { startServer, stopServer, api, connect, emit, wait, until, fakeStagewatch } = require('./helpers');
 
 // Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
@@ -167,6 +168,24 @@ test('halls end to end: two Stagewatches, the board, help', async (t) => {
     assert.match(await tr.text(), /Help — Sound:<\/strong> Radio mic 3 has no signal[\s\S]*resolved — Alex/);
   });
 
+  await t.test('C16: the context posted to hall A\'s Stagewatch carries nothing of hall B\'s meeting', async () => {
+    const bodies = (sw) => sw.requests.filter((r) => r.url === '/api/peers/context').map((r) => r.body);
+    assert.ok((await emit(crewB, 'message', { type: 'action', text: 'Approve the Client X acquisition price?', options: ['Yes', 'No'] })).ok);
+    assert.ok((await emit(crewB, 'message', { type: 'help', category: 'Sound', text: 'mic 3 down' })).ok);
+    await until(() => bodies(swB).some((b) => b.includes('Client X acquisition')), 8000, 'hall B\'s own Stagewatch gets its prompt');
+    await wait(1300);   // one more push round for every link
+    assert.ok(!bodies(swA).some((b) => b.includes('Client X acquisition')), 'hall B\'s prompt is never posted to hall A\'s Stagewatch');
+    const lastA = JSON.parse(bodies(swA).at(-1));
+    assert.ok(!lastA.items.some((i) => i.id === 'help'), 'no help count from another hall');
+    assert.ok(!lastA.items.some((i) => /Hall B timer/.test(i.label)), 'no other hall\'s Stagewatch');
+    assert.doesNotMatch(lastA.headline, /Stagewatch not linked/, 'its own link is the one it reads about');
+    assert.equal(lastA.items.find((i) => i.id === 'link:stagewatch').light, 'green');
+    const lastB = JSON.parse(bodies(swB).at(-1));
+    assert.equal(lastB.items.find((i) => i.id === 'help').state, '1 help request open');
+    const whole = await api(base, 'GET', '/api/context', undefined, { cookie: admin });
+    assert.ok(JSON.stringify(whole.body).includes('Client X acquisition') && whole.body.items.some((i) => i.id === 'help'), 'the node-wide context still has every hall');
+  });
+
   await t.test('a hall back on the default: its own link stops and its key is forgotten', async () => {
     assert.ok((await emit(ctl, 'hall:configure', { code: hallB, stagewatchUrl: '' })).ok);
     await until(() => !swB.connected, 6000, 'hall B\'s link closed');
@@ -176,4 +195,108 @@ test('halls end to end: two Stagewatches, the board, help', async (t) => {
     assert.equal(s.stagewatch.url, '');
     assert.equal(s.stagewatch.keySet, false);
   });
+});
+
+test('a hall\'s Set up: its screens follow a removed Stagewatch at once; an unchanged save changes and records nothing', async (t) => {
+  const hallSw = await fakeStagewatch({ name: 'Lectern timer' });
+  const defSw = await fakeStagewatch({ name: 'Default timer' });
+  const srv = await startServer();
+  const { base } = srv;
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await hallSw.close(); await defSw.close(); });
+  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const ctl = await connect(base, admin); sockets.push(ctl);
+  const hallUpdates = async (code) => (await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin })).body.entries.filter((e) => e.action === 'hall.update' && e.target === code).length;
+  // What halls.js sends on Save: the dialog's fields as hall:settings filled them, with the person's edits.
+  const save = async (code, edits = {}) => {
+    const s = await emit(ctl, 'hall:settings', { code });
+    return emit(ctl, 'hall:configure', { code, name: s.name, stagewatchUrl: s.stagewatch.url, stagewatchFingerprint: s.stagewatch.fp, ...edits });
+  };
+  const screenOf = async (code) => {
+    const made = await emit(ctl, 'display:create', { code, name: 'Lectern monitor' });
+    const s = io(base, { transports: ['websocket'], forceNew: true, reconnection: false, auth: { display: made.display.path.slice(3) } });
+    sockets.push(s);
+    const seen = [];
+    s.on('display:state', (x) => seen.push(x.stage));
+    s.on('display:stage', (x) => seen.push(x));
+    await new Promise((resolve) => { s.once('connect', resolve); });
+    return seen;
+  };
+  const live = (st) => !!(st && st.status === 'connected' && !st.stale);
+
+  await t.test('C27: removing a hall\'s own Stagewatch reaches its countdown screens (no default, then an idle default)', async () => {
+    const code = (await api(base, 'POST', '/api/rooms', { name: 'Hall S' }, { cookie: admin })).body.code;
+    const seen = await screenOf(code);
+    assert.ok((await emit(ctl, 'hall:configure', { code, stagewatchUrl: hallSw.url, stagewatchKey: KEY_A })).ok);
+    await until(() => hallSw.connected, 6000, 'the hall\'s Stagewatch linked');
+    hallSw.frame({ text: '07:42' });
+    await until(() => live(seen.at(-1)) && seen.at(-1).text === '07:42', 6000, '07:42 on the screen');
+    const n = seen.length;
+    assert.ok((await emit(ctl, 'hall:configure', { code, stagewatchUrl: '' })).ok);
+    await until(() => seen.length > n, 2500, 'the screen told');
+    assert.ok(!live(seen.at(-1)), 'no confident time from a Stagewatch the hall no longer follows: ' + JSON.stringify(seen.at(-1)));
+    // An idle default (paused, beats only): the screen shows the default's frame, not the old hall's.
+    await emit(ctl, 'admin:settings', { stagewatchUrl: defSw.url, stagewatchKey: KEY_B });
+    await until(() => defSw.connected, 6000, 'the default linked');
+    defSw.frame({ text: '15:00', state: 'paused' });
+    assert.ok((await emit(ctl, 'hall:configure', { code, stagewatchUrl: hallSw.url, stagewatchKey: KEY_A })).ok);
+    hallSw.frame({ text: '07:42' });
+    await until(() => live(seen.at(-1)) && seen.at(-1).text === '07:42' && seen.at(-1).title === 'Lectern timer', 6000, 'the hall\'s own again');
+    const m = seen.length;
+    assert.ok((await emit(ctl, 'hall:configure', { code, stagewatchUrl: '' })).ok);
+    await until(() => seen.length > m, 2500, 'the screen told');
+    assert.equal(seen.at(-1).text, '15:00', 'the default\'s frame, not the removed one\'s');
+    await emit(ctl, 'admin:settings', { stagewatchUrl: '' });
+  });
+
+  await t.test('C51: saving Set up unchanged records nothing; a rename records the name alone', async () => {
+    const code = (await api(base, 'POST', '/api/rooms', { name: 'Hall X' }, { cookie: admin })).body.code;
+    const none = await save(code);
+    assert.deepEqual(none.changed, [], 'a hall with no Stagewatch of its own, saved as it is');
+    assert.equal(await hallUpdates(code), 0);
+    const linked = await save(code, { stagewatchUrl: hallSw.url, stagewatchKey: KEY_A });
+    assert.deepEqual(linked.changed, ['Stagewatch → http://' + hallSw.url + ' (new key, sealed)']);
+    assert.equal(await hallUpdates(code), 1);
+    assert.deepEqual((await save(code)).changed, [], 'linked, saved as it is');
+    assert.equal(await hallUpdates(code), 1, 'no audit line for a change that did not happen');
+    assert.deepEqual((await save(code, { name: 'Hall X (Main)' })).changed, ['name → Hall X (Main)']);
+    assert.equal((await emit(ctl, 'hall:settings', { code })).stagewatch.keySet, true, 'the key is kept');
+    assert.deepEqual((await save(code, { stagewatchUrl: '' })).changed, ['Stagewatch → the default'], 'unlinking is a change');
+  });
+});
+
+test('C53: a restart keeps following a stage send the speaker has not acknowledged yet', async (t) => {
+  const sw = await fakeStagewatch({ name: 'Lectern timer', messageId: 77 });
+  let srv = await startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
+  const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const code = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall R' }, { cookie: setup.cookie })).body.code;
+  const ctl = await connect(srv.base, setup.cookie); sockets.push(ctl);
+  assert.ok((await emit(ctl, 'hall:configure', { code, stagewatchUrl: sw.url, stagewatchKey: KEY_A })).ok);
+  await until(() => sw.connected, 6000, 'linked');
+  const crew = await connect(srv.base); sockets.push(crew);
+  assert.ok((await emit(crew, 'join', { roomCode: code, name: 'Alex', role: 'research' })).ok);
+  const sent = await emit(crew, 'stage:send', { text: 'Wrap up please' });
+  assert.deepEqual([sent.ok, sent.messageId], [true, 77]);
+
+  // The watchdog restarts AGMessage on the same data folder before the speaker answers.
+  await stopServer(srv.child);
+  await until(() => !sw.connected, 6000, 'the old link gone');
+  srv = await startServer({ AGM_DATA_DIR: srv.dataDir });
+  await until(() => sw.connected, 8000, 'linked again after the restart');
+  const admin = (await api(srv.base, 'POST', '/api/auth/login', { username: 'ana', password: 'the green room kettle' })).cookie;
+  const ctl2 = await connect(srv.base, admin); sockets.push(ctl2);
+  const before = (await emit(ctl2, 'admin:watchRoom', { roomCode: code })).messages.find((m) => m.stage && m.stage.ref === 77);
+  assert.equal(before.stage.ack, 'sent');
+  const crew2 = await connect(srv.base); sockets.push(crew2);
+  assert.ok((await emit(crew2, 'join', { roomCode: code, name: 'Alex', role: 'research' })).ok);
+  const acked = new Promise((resolve) => crew2.on('stageAck', (a) => { if (a.stage.ack === 'done') resolve(a.stage); }));
+  sw.frame({ messageId: 77, messageAck: 'done', messageAckBy: 'Speaker A' });
+  const st = await Promise.race([acked, new Promise((resolve) => { setTimeout(() => resolve(null), 4000); })]);
+  assert.ok(st, 'the acknowledgement reaches the hall');
+  assert.equal(st.by, 'Speaker A');
+  const after = (await emit(ctl2, 'admin:watchRoom', { roomCode: code })).messages.filter((m) => m.stage && m.stage.ref === 77);
+  assert.ok(after.length >= 1 && after.every((m) => m.stage.ack === 'done'), 'on the record of the send');
+  assert.equal(after[0].stage.link, 'hall:' + code, 'the send keeps the link it went to');
 });

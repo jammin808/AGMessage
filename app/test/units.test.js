@@ -142,3 +142,46 @@ test('Stagewatch link: live frames, stale on silence, send to stage with the key
     assert.equal((await new nodes.StagewatchLink({}).sendToStage('x')).ok, false, 'not linked');
   } finally { link.stop(); wss.close(); srv.close(); }
 });
+
+test('C21: a Stagewatch gone silent is dropped at 12 s quiet and redialled at once, not after a 30 s close handshake', async () => {
+  // The rule, deterministically: a silent socket answers no close frame, so it is terminated, never closed politely.
+  const stub = new nodes.StagewatchLink();
+  const calls = [];
+  stub.ws = { readyState: 1, send() {}, close() { calls.push('close'); }, terminate() { calls.push('terminate'); }, onmessage() {} };
+  stub.status = 'connected';
+  stub.lastHeard = Date.now() - (nodes.GONE_MS + 1000);
+  stub._watch();
+  assert.deepEqual(calls, ['terminate']);
+  const old = stub.ws;
+  stub._close();
+  assert.equal(old.onmessage, null, 'a dropped socket\'s late frames never reach the link');
+  stub.stop();
+
+  // A real socket whose peer stops reading (a laptop that lost power or Wi-Fi: TCP half-open).
+  const http = require('http');
+  const { WebSocketServer } = require('ws');
+  const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); });
+  const wss = new WebSocketServer({ server: srv, path: '/ws' });
+  let dials = 0;
+  wss.on('connection', (c) => {
+    dials++;
+    c.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', title: 'Keynote' }));
+    if (dials === 1) setTimeout(() => c._socket.pause(), 100);   // the first link goes silent: no pong, no close frame read
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const seen = [];
+  const link = new nodes.StagewatchLink({ onStatus: (s) => seen.push(s) });
+  try {
+    link.configure('127.0.0.1:' + srv.address().port, 'swk_testkey');   // secret-scan: fixture
+    for (let i = 0; i < 60 && !link.linked; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(link.linked);
+    await new Promise((r) => setTimeout(r, 200));
+    link.lastHeard = Date.now() - (nodes.GONE_MS + 500);   // 12 s of silence, without waiting for them
+    const t0 = Date.now();
+    const back = () => dials === 2 && link.linked;
+    for (let i = 0; i < 80 && !back(); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(seen.includes('reconnecting'), 'it said so: ' + seen.join(','));
+    assert.equal(dials, 2, 'redialled');
+    assert.ok(link.linked && Date.now() - t0 < 4000, 'connected again within seconds: ' + (Date.now() - t0) + ' ms');
+  } finally { link.stop(); for (const c of wss.clients) c.terminate(); wss.close(); srv.close(); }
+});

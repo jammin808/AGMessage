@@ -202,3 +202,83 @@ test('one port: HTTP and HTTPS side by side, Socket.io-sized upgrades included',
     assert.equal(got, 'hi', 'wss on the same port');
   } finally { wss.close(); front.close(); }
 });
+
+// ---------------------------------------------------------------- a pinned node is never talked to in plain HTTP
+
+/** A node serving HTTP and HTTPS on one port (as Stagewatch, Patterns and PlayMap do), recording how each request came. */
+async function dualNode({ cert, context }) {
+  const seen = [];
+  const app = http.createServer((req, res) => {
+    seen.push({ url: req.url, encrypted: !!req.socket.encrypted, token: req.headers['x-playmap-token'] || '', auth: req.headers.authorization || '' });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(context));
+  });
+  const wss = new WebSocketServer({ server: app, path: '/ws' });
+  wss.on('connection', (ws, req) => {
+    seen.push({ url: req.url, encrypted: !!req.socket.encrypted, auth: req.headers.authorization || '', upgrade: true });
+    ws.send(JSON.stringify({ type: 'state', mode: 'countdown', text: '05:00', title: 'Keynote', messageId: 0 }));
+  });
+  const front = tlsmod.dualPortServer(app, { certPem: tlsmod.toPem(cert.certDer), keyPem: cert.keyPem });
+  await new Promise((r) => front.listen(0, '127.0.0.1', r));
+  return { port: front.address().port, seen, close: () => { wss.close(); front.close(); } };
+}
+
+test('C17: a PlayMap pinned over TLS is never polled in plain HTTP after a restart or while its hello is not heard', async () => {
+  const peerlinks = require('../lib/peerlinks');
+  const cert = tlsmod.makeCertificate({ name: 'PlayMap', hosts: ['localhost'], ips: ['127.0.0.1'] });
+  const fp = tlsmod.fingerprint(cert.certDer);
+  const node = await dualNode({ cert, context: { v: 1, node: { t: 'playmap', id: 'pm1', name: 'Stage left' }, light: 'green', headline: 'Playing', commands: [] } });
+  const token = 'pm-secret-token';   // secret-scan: fixture
+  // Linked over http:// (before the node turned TLS on); pinned since. AGMessage restarts: the hello is not heard yet.
+  const pins = new tlsmod.PinStore({ 'node:pm1': fp });
+  let hello = null;
+  const link = new peerlinks.PeerLink({ node: { t: 'playmap', id: 'pm1', name: 'Stage left' }, base: 'http://127.0.0.1:' + node.port, token, pins, findPeer: () => hello });
+  try {
+    assert.ok(await until(() => link.status === 'live', 4000), 'live: ' + link.status + ' ' + link.problem);
+    hello = { t: 'playmap', id: 'pm1', tls: fp, ports: { https: node.port } };
+    await link.poll();
+    hello = { t: 'playmap', id: 'pm1', tls: '', ports: { http: node.port } };   // a hello without tls (spoofed, or an old build)
+    await link.poll();
+    assert.ok(node.seen.length >= 3, 'polled: ' + node.seen.length);
+    assert.ok(node.seen.every((r) => r.encrypted), 'every request with the token went over TLS: ' + JSON.stringify(node.seen.map((r) => r.encrypted)));
+    assert.ok(link.endpoint && link.endpoint.tls, 'the link stays on pinned TLS');
+    assert.equal(pins.pins['node:pm1'], fp, 'the pin is unchanged');
+  } finally { link.stop(); node.close(); }
+
+  // Never pinned, no tls heard: plain; its hello then announces a certificate: the next poll moves to TLS, no error needed.
+  const node2 = await dualNode({ cert, context: { v: 1, node: { t: 'playmap', id: 'pm2', name: 'Stage right' }, light: 'green', headline: 'Playing', commands: [] } });
+  let hello2 = null;
+  const link2 = new peerlinks.PeerLink({ node: { t: 'playmap', id: 'pm2', name: 'Stage right' }, base: 'http://127.0.0.1:' + node2.port, token, pins: new tlsmod.PinStore(), findPeer: () => hello2 });
+  try {
+    assert.ok(await until(() => link2.status === 'live', 4000));
+    assert.equal(node2.seen.at(-1).encrypted, false, 'nothing said TLS yet');
+    hello2 = { t: 'playmap', id: 'pm2', tls: fp, ports: { https: node2.port } };
+    await link2.poll();
+    assert.equal(node2.seen.at(-1).encrypted, true, 'upgraded at the next poll');
+  } finally { link2.stop(); node2.close(); }
+});
+
+test('C17: a Stagewatch pinned once opens no plain WebSocket with its key while its hello is not heard', async () => {
+  const cert = tlsmod.makeCertificate({ name: 'Stagewatch', hosts: ['localhost'], ips: ['127.0.0.1'] });
+  const fp = tlsmod.fingerprint(cert.certDer);
+  const sw = await dualNode({ cert, context: { v: 1, node: { t: 'main', id: 'sw1', name: 'Hall A' }, light: 'green', headline: 'Keynote', peers: [] } });
+  const pins = new tlsmod.PinStore();
+  const hello = { t: 'main', id: 'sw1', address: '127.0.0.1', ports: { http: sw.port, https: sw.port }, tls: fp };
+  const first = new nodes.StagewatchLink({ findPeer: (t, h, p) => (t === 'main' && p === sw.port ? hello : null), pins });
+  try {
+    first.configure('127.0.0.1:' + sw.port, 'swk_secretnodekey');   // secret-scan: fixture
+    assert.ok(await until(() => first.linked && !!pins.pins['node:sw1'], 4000), 'linked over wss and pinned');
+  } finally { first.stop(); }
+  sw.seen.length = 0;
+  // AGMessage restarts (or the hello stops): the link's own address keeps its pin, so TLS is never dropped.
+  const again = new nodes.StagewatchLink({ findPeer: () => null, pins });
+  try {
+    again.configure('127.0.0.1:' + sw.port, 'swk_secretnodekey');   // secret-scan: fixture
+    assert.ok(await until(() => again.linked, 4000), 'linked again: ' + again.status);
+    assert.ok(sw.seen.some((r) => r.upgrade), 'it dialled');
+    assert.ok(sw.seen.filter((r) => r.auth).every((r) => r.encrypted), 'the key never went in clear: ' + JSON.stringify(sw.seen));
+    assert.ok(again.tlsState.on && again.tlsState.fp === fp);
+    again.forgetPins();   // the admin removes this Stagewatch: linked again, it trusts what it serves then
+    assert.deepEqual(Object.keys(pins.pins), []);
+  } finally { again.stop(); sw.close(); }
+});

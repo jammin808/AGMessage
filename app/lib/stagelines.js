@@ -21,13 +21,18 @@
  */
 
 const ROLES = ['moderator', 'backstage', 'interpreter'];
-const URGENCY = { info: 'info', warn: 'warn', crit: 'crit', urgent: 'crit', warning: 'warn' };
+const URGENCY = Object.freeze({ info: 'info', warn: 'warn', crit: 'crit', urgent: 'crit', warning: 'warn' });
 const MESSAGE_MAX = 500;   // Stagewatch cuts a message at 500
 const SIGNAL_MAX = 200;    // …and a signal's body at 200
 const NOTE_MAX = 300;      // …and a note at 300
+const LINE_MAX = 400;      // Stagewatch's show desk keeps 400 characters of a proposed line (ProposalDesk.MaxLine)
+// Stagewatch's own targets (SignalBoard.NormaliseTarget): a cue to one of these is not a department.
+const SW_ROLES = new Set(['speaker', 'moderator', 'backstage', 'chair', 'interpreter', '*']);
 
 const quote = (t) => '"' + String(t).replace(/"/g, '\'') + '"';
-const clean = (t, max) => String(t || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+// Whitespace as one space, and no other control character: Stagewatch drops those from a line it keeps (ProposalDesk's
+// Str), so the line AGMessage proposes is the line the desk holds, word for word.
+const clean = (t, max) => String(t || '').replace(/[\r\n\t\v\f]+/g, ' ').replace(/\p{Cc}/gu, '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /** Where a message can go, for a Stagewatch whose context lists these departments (pure). */
 function destinations(departments = []) {
@@ -42,39 +47,56 @@ function destinations(departments = []) {
   return out;
 }
 
-/** The departments a Stagewatch's context names (its items of kind "department"). */
+/**
+ * The departments a Stagewatch's context names. Stagewatch lists each target by its newest cue: kind "department" while
+ * that is a standby or a GO, "cue" once it is a message (as AGMessage's own) — both are the department, by its label;
+ * its role targets (speaker, moderator…) are not.
+ */
 function departmentsOf(context) {
   const items = context && Array.isArray(context.items) ? context.items : [];
-  const names = items.filter((i) => i && i.kind === 'department' && typeof i.label === 'string').map((i) => clean(i.label, 40)).filter(Boolean);
+  const names = items.filter((i) => i && typeof i.label === 'string' && !SW_ROLES.has(i.label.trim().toLowerCase())
+    && (i.kind === 'department' || (i.kind === 'cue' && typeof i.id === 'string' && i.id.startsWith('cue:'))))
+    .map((i) => clean(i.label, 40)).filter(Boolean);
   return Array.from(new Set(names));
 }
 
 /**
  * The line for a destination: {line, words} — or {error}. `urgency` is info / warn / crit (the speaker's screen colours
- * it; the role and department pages carry the words alone).
+ * it; the role and department pages carry the words alone); an unknown one is refused, never defaulted. Every line fits
+ * the 400 characters the desk keeps, so none loses its urgency or its "Got it" when it is stored.
  */
 function lineFor(destination, text, urgency = 'info') {
-  const dest = String(destination || 'speaker');
+  const u = urgency === undefined || urgency === null || urgency === '' ? 'info'
+    : typeof urgency === 'string' && Object.hasOwn(URGENCY, urgency) ? URGENCY[urgency] : '';
+  if (!u) return { error: 'Unknown urgency.' };
+  const built = build(String(destination || 'speaker'), text, u);
+  if (built.line && built.line.length > LINE_MAX) {
+    const room = LINE_MAX - (built.line.length - built.text.length);
+    return { error: 'Asked of the show desk, this is at most ' + room + ' characters (Stagewatch keeps ' + LINE_MAX + ' of a line) — shorten it' + (destination === 'speaker' || !destination ? ', or use Send now' : '') + '.' };
+  }
+  return built.line ? { line: built.line, words: built.words } : built;
+}
+function build(dest, text, u) {
   if (dest === 'speaker') {
     const t = clean(text, MESSAGE_MAX);
     if (!t) return { error: 'Nothing to send.' };
-    return { line: 'message ' + quote(t) + ' ' + (URGENCY[urgency] || 'info') + ' off ack', words: 'the speaker\'s screen' };
+    return { line: 'message ' + quote(t) + ' ' + u + ' off ack', words: 'the speaker\'s screen', text: t };
   }
   if (ROLES.includes(dest)) {
     const t = clean(text, SIGNAL_MAX);
     if (!t) return { error: 'Nothing to send.' };
-    return { line: 'signal message ' + dest + ' ' + quote(t), words: 'the ' + dest + ' screen' };
+    return { line: 'signal message ' + dest + ' ' + quote(t), words: 'the ' + dest + ' screen', text: t };
   }
   if (dest.startsWith('dept:')) {
     const name = clean(dest.slice(5), 40);
     const t = clean(text, SIGNAL_MAX);
     if (!name || !t) return { error: 'Choose a department and type the message.' };
-    return { line: 'signal message ' + quote(name) + ' ' + quote(t), words: name };
+    return { line: 'signal message ' + quote(name) + ' ' + quote(t), words: name, text: t };
   }
   if (dest === 'operator') {
     const t = clean(text, NOTE_MAX);
     if (!t) return { error: 'Nothing to send.' };
-    return { line: 'note ' + quote(t), words: 'the operator' };
+    return { line: 'note ' + quote(t), words: 'the operator', text: t };
   }
   return { error: 'Unknown destination.' };
 }
@@ -117,4 +139,4 @@ function parse(line) {
   }
 }
 
-module.exports = { destinations, departmentsOf, lineFor, tokenize, parse, ROLES };
+module.exports = { destinations, departmentsOf, lineFor, tokenize, parse, ROLES, LINE_MAX };
