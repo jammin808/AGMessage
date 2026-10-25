@@ -99,7 +99,8 @@ function mountAccounts(app, o) {
     // tunnel (with the right password) are told apart only in the audit log.
     const noMatch = NO_MATCH + (throughTunnel(req) && !settings.remoteAdmin ? ' Accounts with admin rights sign in on the venue network, not through the tunnel.' : '');
     const failed = () => { if (!host) userLock.fail(where); ipLock.fail(ip); };
-    const r = await accounts.authenticate(username, password, hashOpts(req, res));
+    const opts = hashOpts(req, res);
+    const r = await accounts.authenticate(username, password, opts);
     if (r.abandoned) return undefined;   // the request went before its turn: nobody is waiting for the answer
     if (r.busy) return res.status(429).json({ ok: false, error: BUSY, busy: true });
     if (r.error) {
@@ -115,6 +116,8 @@ function mountAccounts(app, o) {
       audit.write(actorOf({ account: a }), 'login.refused', a.username, 'admin rights through the tunnel', ip);
       return res.status(401).json({ ok: false, error: noMatch });
     }
+    // Only now, let in: a password stored at an older cost is stored again at today's.
+    if (r.rehash) await accounts.upgrade(a, password, opts);
     userLock.ok(where); ipLock.ok(ip);
     const token = sessions.create(a, { ip, ua: req.headers['user-agent'] });
     accounts.signedIn(a);

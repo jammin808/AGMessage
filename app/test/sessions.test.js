@@ -10,6 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { io } = require('socket.io-client');
+const acc = require('../lib/accounts');
 const { startServer, stopServer, api, connect, emit, once, wait, until, TOKEN } = require('./helpers');
 
 let addr = 0;
@@ -80,6 +81,26 @@ test('a refused sign-in never says a password was right, nor writes down a passw
     assert.ok(!fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').includes(ANA.password), 'nor in the file');
     assert.equal((await api(base, 'GET', '/api/audit/verify', undefined, { cookie: pat })).body.ok, true);
   });
+});
+
+test('a password stored at an older cost is stored again only once its sign-in is let in: a refused one does no more than a wrong one', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  const old = await acc.hashPassword(ANA.password, { ...acc.SCRYPT, logN: acc.SCRYPT.logN - 1 });
+  const at = Date.now();
+  fs.writeFileSync(path.join(dataDir, 'accounts.json'), JSON.stringify({ v: 1, users: [{
+    id: 'aoldcost0001', username: 'ana', name: ANA.name, role: 'admin', halls: [], grant: [], revoke: [], disabled: false, mustChange: false,
+    pw: old, pwSetAt: at, epoch: 1, createdAt: at, createdBy: 'setup', lastLoginAt: 0,
+  }] }));
+  const srv = await startServer({ AGM_DATA_DIR: dataDir });
+  t.after(() => stopServer(srv.child));
+  const stored = () => JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf8')).users[0].pw;
+  const refused = await login(srv.base, 'ana', ANA.password, visitor());
+  assert.deepEqual([refused.status, refused.cookie], [401, ''], 'admin rights through the tunnel');
+  await wait(400);
+  assert.equal(stored(), old, 'the refused right password was not hashed again: its answer took what a wrong one takes');
+  assert.equal((await login(srv.base, 'ana', ANA.password)).status, 200);
+  await until(() => stored().startsWith('scrypt$' + acc.SCRYPT.logN + '$'), 3000, 'stored again at today\'s cost once let in');
+  assert.equal((await login(srv.base, 'ana', ANA.password)).status, 200, 'and the password still signs in');
 });
 
 // ---------------------------------------------------------------- whom wrong passwords hold, and the cookie

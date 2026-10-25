@@ -126,6 +126,27 @@ test('sessions: only a hash on disk; idle, age, a moved epoch and a turned-off a
   assert.equal(sessions.resolve('x'.repeat(10)), null);
 });
 
+test('accounts: a check changes nothing; a password at an older cost is stored again by upgrade, never over a new one', async () => {
+  const dir = tmp('agm-acc-');
+  const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
+  const pw = 'blue door at the back';
+  const { account } = await accounts.create({ username: 'sam', role: 'tech', password: pw });
+  const old = await acc.hashPassword(pw, { ...acc.SCRYPT, logN: acc.SCRYPT.logN - 1 });
+  account.pw = old;
+  const r = await accounts.authenticate('sam', pw);
+  assert.deepEqual([r.account === account, r.rehash, account.pw, account.lastLoginAt], [true, true, old, 0], 'checked, not yet let in: nothing written');
+  await accounts.upgrade(account, pw + 'x'.repeat(200));
+  assert.ok(account.pw.startsWith('scrypt$' + acc.SCRYPT.logN + '$'), 'at today\'s cost');
+  assert.equal((await accounts.authenticate('sam', pw + 'x'.repeat(200))).rehash, false, 'stored as it was checked: its first 128 characters');
+  const other = await acc.hashPassword('a new password while it hashed');
+  account.pw = old;
+  const racing = accounts.upgrade(account, pw);
+  account.pw = other;   // a new password set while the upgrade's hash is made
+  await racing;
+  assert.equal(account.pw, other, 'a password changed meanwhile is kept');
+  accounts.flush();
+});
+
 test('sessions: an account\'s device count is the sessions that still let it in', async () => {
   const dir = tmp('agm-acc-');
   const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));

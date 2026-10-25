@@ -265,10 +265,12 @@ class Accounts {
   remove(id) { const ok = this.users.delete(id); if (ok) this.save(); return ok; }
 
   /**
-   * Check a username and password: {account}, or {error, reason} — the same work and the same words for an unknown
-   * name, a wrong password and a turned-off account, so the answer never says which names exist or that a password was
-   * right; `reason` (unknown, wrong, disabled) is for the audit log only. {busy} or {abandoned} when the check was never
-   * hashed (`opts`: {lane, signal}, see scrypt). A sign-in is stamped by the caller once a session is made.
+   * Check a username and password: {account, rehash}, or {error, reason} — the same work and the same words for an
+   * unknown name, a wrong password and a turned-off account, so the answer never says which names exist or that a
+   * password was right; `reason` (unknown, wrong, disabled) is for the audit log only. {busy} or {abandoned} when the
+   * check was never hashed (`opts`: {lane, signal}, see scrypt). It changes nothing: a sign-in is stamped (signedIn)
+   * and a password stored at an older cost stored again (`rehash`: upgrade) by the caller once it lets the sign-in in,
+   * so a sign-in it refuses with the right password costs what a wrong one costs.
    */
   async authenticate(username, password, opts = {}) {
     const a = this.byUsername(username);
@@ -282,8 +284,19 @@ class Accounts {
     if (!a) return { error: NO_MATCH, reason: 'unknown' };
     if (!r.ok) return { error: NO_MATCH, reason: 'wrong' };
     if (a.disabled) return { error: NO_MATCH, reason: 'disabled' };
-    if (r.rehash) { a.pw = await hashPassword(password, SCRYPT, { lane: opts.lane }); this.save(); }
-    return { account: a };
+    return { account: a, rehash: r.rehash };
+  }
+
+  /**
+   * A sign-in that was let in, with its password stored at an older cost: stored again at today's — the password as it
+   * was checked (cut to MAX_PW), and never over one changed while this hash was made.
+   */
+  async upgrade(a, password, { lane } = {}) {
+    const before = a.pw;
+    const pw = await hashPassword(String(password || '').slice(0, MAX_PW), SCRYPT, { lane });
+    if (a.pw !== before) return;
+    a.pw = pw;
+    this.save();
   }
 
   /** A sign-in happened: the Accounts page shows when. */
