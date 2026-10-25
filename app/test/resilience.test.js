@@ -48,7 +48,10 @@ const fs = require('fs'); const path = require('path');
 const runs = path.join(${JSON.stringify(dir)}, 'runs');
 const n = (fs.existsSync(runs) ? Number(fs.readFileSync(runs, 'utf8')) : 0) + 1;
 fs.writeFileSync(runs, String(n));
-process.on('disconnect', () => process.exit(0));   // the watchdog went away: so do we
+// As the server does: a stop asked over IPC, or the watchdog's channel closing, saves (here: a marker) and exits.
+const saveAndGo = (why) => { fs.writeFileSync(path.join(${JSON.stringify(dir)}, 'saved'), why); process.exit(0); };
+process.on('message', (m) => { if (m && m.t === 'stop') saveAndGo('asked to stop'); });
+process.on('disconnect', () => saveAndGo('the watchdog went away'));
 const beat = () => setInterval(() => process.send && process.send({ t: 'beat' }), 100);
 ${body}
 `);
@@ -96,6 +99,31 @@ test('watchdog: stays stopped on a clean exit; gives up on a crash loop and leav
   assert.equal(runs(d2), 7);
   const marker = JSON.parse(fs.readFileSync(path.join(d2, 'watchdog.json'), 'utf8'));
   assert.match(marker.reason, /7 times/);
+});
+
+test('watchdog: a stop lets the server save before it goes, on every platform', async () => {
+  const dir = tmp('agm-wd-');
+  const p = supervise(dir, fakeChild(dir, `beat();`));
+  assert.ok(await until(() => runs(dir) === 1 && p.out.length >= 0), 'started');
+  await new Promise((resolve) => { setTimeout(resolve, 400); });
+  p.kill('SIGTERM');   // POSIX: the watchdog asks its server over IPC; Windows: the watchdog ends at once, its channel closes
+  await p.done;
+  assert.ok(await until(() => fs.existsSync(path.join(dir, 'saved')), 6000), 'the server saved before it went:\n' + p.out);
+  assert.match(fs.readFileSync(path.join(dir, 'saved'), 'utf8'), /asked to stop|the watchdog went away/);
+  if (process.platform !== 'win32') assert.equal(fs.readFileSync(path.join(dir, 'saved'), 'utf8'), 'asked to stop', 'a signalled watchdog asks; it does not kill');
+});
+
+test('a server whose watchdog has gone saves what is waiting and leaves, so no orphan holds the folder', async () => {
+  const { startServer, api } = require('./helpers');
+  const srv = await startServer();
+  const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  assert.equal(setup.status, 200);
+  const gone = new Promise((resolve) => { srv.child.once('exit', (code) => resolve(code)); });
+  srv.child.disconnect();   // the watchdog ended without a word (Task Manager, a crash of its own)
+  const code = await Promise.race([gone, new Promise((resolve) => { setTimeout(() => resolve('still running'), 5000); })]);
+  assert.equal(code, 0, 'it stopped as asked to stop');
+  const saved = JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'sessions.json'), 'utf8'));
+  assert.equal(saved.sessions.length, 1, 'the sign-in made a moment before (its lane writes after 500 ms) is on disk');
 });
 
 // ---------------------------------------------------------------- safe saves

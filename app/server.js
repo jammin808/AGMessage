@@ -2155,6 +2155,13 @@ function shutdown(code = 0) {
 }
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
+process.on('SIGHUP', () => shutdown(0));   // the console window closed (Windows allows about 10 s) or the terminal went away
+// A stop asked over IPC (the watchdog, a test) saves exactly as a signal does: on Windows a signal sent to a child is not
+// delivered, the process just ends, and nothing would be saved. A watchdog gone (its channel closed) leaves no server.
+if (typeof process.send === 'function') {
+  process.on('message', (m) => { if (m && m.t === 'stop') shutdown(0); });
+  process.on('disconnect', () => shutdown(0));
+}
 // An uncaught error leaves Node in an unknown state, so it doesn't carry on: save the rooms, record the crash
 // (shown on the admin page after the restart) and exit for the watchdog (supervise.js) to restart within ~2 s.
 // A rejected promise nobody handled is logged and counted (admin health): the request it belonged to failed,

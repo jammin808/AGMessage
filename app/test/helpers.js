@@ -20,8 +20,9 @@ async function startServer(env = {}) {
   const port = env.PORT ? Number(env.PORT) : await freePort();
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
     env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', AGM_UPLOAD_DIR: dataDir + '-uploads', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', ...env },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
+  if (child.channel) child.channel.unref();   // the channel carries the stop; it keeps no test run alive
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
@@ -32,7 +33,16 @@ async function startServer(env = {}) {
   child.kill();
   throw new Error('server did not start:\n' + out);
 }
-const stopServer = (child) => new Promise((resolve) => { child.once('exit', resolve); child.kill('SIGTERM'); setTimeout(resolve, 3000); });
+/**
+ * Stop a server as the watchdog does: asked over IPC, so it saves first on every platform (on Windows a signal sent to a
+ * child ends it at once, unsaved). One that has not gone in 3 s is ended.
+ */
+const stopServer = (child) => new Promise((resolve) => {
+  if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
+  child.once('exit', resolve);
+  try { child.send({ t: 'stop' }); } catch { child.kill('SIGTERM'); }
+  setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } resolve(); }, 3000);
+});
 
 /** fetch with JSON in and out; returns {status, body, cookie, headers}. */
 async function api(base, method, url, body, { cookie, headers = {} } = {}) {

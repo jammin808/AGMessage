@@ -20,8 +20,9 @@ function freePort() {
 async function startServer(dataDir, port) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
     env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '' },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
+  if (child.channel) child.channel.unref();
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
@@ -32,7 +33,7 @@ async function startServer(dataDir, port) {
   child.kill();
   throw new Error('server did not start:\n' + out);
 }
-function stop(child) { return new Promise((r) => { child.once('exit', r); child.kill('SIGTERM'); setTimeout(r, 3000); }); }
+const { stopServer: stop } = require('./helpers');   // asked over IPC, so it saves first on Windows too
 
 const emit = (s, ev, arg) => new Promise((resolve) => s.emit(ev, arg, resolve));
 const connect = (base, cookie) => new Promise((resolve, reject) => {

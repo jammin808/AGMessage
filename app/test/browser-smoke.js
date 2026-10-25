@@ -41,8 +41,9 @@ const freePort = () => new Promise((r) => { const s = net.createServer(); s.list
 async function startServer(port, dataDir) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
     env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '', TZ: SERVER_TZ },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
+  if (child.channel) child.channel.unref();
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
@@ -482,7 +483,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
   } finally {
     if (sw) await sw.close();
     edge.close();
-    server.kill();
+    try { server.send({ t: 'stop' }); } catch { server.kill(); }   // as the watchdog stops it: saved first
     setTimeout(() => { try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* ignore */ } }, 1000);
   }
   console.log(failures === 0 ? `ALL OK (screenshots in ${OUT})` : `${failures} FAILED`);

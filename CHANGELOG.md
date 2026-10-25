@@ -83,12 +83,15 @@ second reader, every one fixed or answered; units 9 to 15)
   plain HTTP again, and a changed certificate can be accepted; Stagewatch's and our numbers never cross after a restart
   or a relink; a silent Stagewatch is redialled after 12 s as documented; PlayMap's own rules rate a line before it is
   sent; a command's secret is never written to the audit log; the discovery table is bounded.
-- *Data.* A second copy on the same data folder is refused before it writes anything (it used to rewrite the running
+- *Data.* On Windows, Ctrl+C, closing the console window and the watchdog's own stop now let the server save first:
+  a signal sent to a child process there ends it at once, so the last half-second of saves and any audit entries still
+  waiting were lost (CI's Windows job found it). The stop is asked over IPC; a server whose watchdog has gone saves and
+  leaves. A second copy on the same data folder is refused before it writes anything (it used to rewrite the running
   copy's rooms); a save the disk cuts short fails and is retried instead of replacing a whole file; the audit check reads
   every rotated file as one chain, off the event loop; uploads stop before the disk fills, and files nobody posted are
   removed.
 
-Tests: 219 (was 53) plus the browser smoke (48 checks, was 7).
+Tests: 221 (was 53) plus the browser smoke (48 checks, was 7).
 
 ## 0.4.0 — 2026-10-11 — encrypted connections and the show desk (Show Bus 1.2)
 
