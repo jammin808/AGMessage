@@ -58,6 +58,13 @@
     renderHelp();
   }
 
+  // The way into a hall, as this account may use it: backstage where it may post, read only where it may not (the
+  // server seats it by its rights either way; the page is built for the role in its link).
+  function hallHref(code) {
+    const h = halls.find((x) => x.code === code);
+    return '/app.html?' + new URLSearchParams({ code, as: 'account', role: h && h.can.post ? 'research' : 'observer' }).toString();
+  }
+
   function row(h, l) {
     const li = document.createElement('li');
     li.className = 'hall-row';
@@ -70,7 +77,7 @@
     const titleHtml = st && st.title ? esc(st.title) : '';
     const displaysHtml = (l.displays || []).map((d) => '<span class="disp-chip" data-ok="' + esc(d.state) + '" title="' + esc(d.words) + '">' + esc(d.mark) + ' ' + esc(d.name) + '</span>').join('');
     li.innerHTML =
-      '<a class="hall-open" href="/app.html?' + esc(new URLSearchParams({ code: h.code, as: 'account', role: h.can.post ? 'research' : 'observer' }).toString()) + '">' +
+      '<a class="hall-open" href="' + esc(hallHref(h.code)) + '">' +
         '<span class="hall-name">' + esc(h.name || h.code) + '</span>' +
         '<span class="hall-code" title="Crew without an account join with this code">' + esc(h.code) + '</span>' +
       '</a>' +
@@ -218,7 +225,7 @@
         '<span class="help-who">' + esc(x.from) + ' · ' + esc(AGM.ago(x.at)) + (x.by ? ' · ' + esc(x.by) + (x.state === 'coming' ? ' is on the way' : '') : '') + '</span>';
       const open = document.createElement('a');
       open.className = 'btn small';
-      open.href = '/app.html?' + new URLSearchParams({ code: x.code, as: 'account', role: 'research' }).toString();
+      open.href = hallHref(x.code);
       open.textContent = 'Open hall';
       li.appendChild(open);
       if (x.canRespond) {

@@ -22,6 +22,8 @@ let CAN_PROPOSE = false;   // Stagewatch keeps the show's approval queue (Show B
 let AI_ON = false;
 let CAN_SCREENS = false;   // this account may drive the hall's screens (display.control)
 const HAS_STAGE = ROLE === 'board' || ROLE === 'research';
+// Read only (an observer, a Viewer account): the server refuses posts, pins, reactions and answers, so none is offered.
+const readOnly = () => document.body.dataset.role === 'observer';
 
 // ---------------- UI sync state (declared early to avoid TDZ traps) ----------------
 // These are accessed by pushUserState / setStageCollapsed / setZoom / applyTheme,
@@ -99,6 +101,14 @@ function rejoin() {
       setTimeout(() => { location.href = to; }, 2500);
       return;
     }
+    // An account's role in a hall is the server's, from its rights; the page is built for the URL's at load, so a URL
+    // that says otherwise (a bookmark, an old link) opens again with the right one. Once: the next join agrees.
+    if (AS_ACCOUNT && res.role && res.role !== ROLE) {
+      const q = new URLSearchParams(location.search);
+      q.set('role', res.role);
+      location.replace(location.pathname + '?' + q.toString());
+      return;
+    }
     if (res.account) {
       NAME = res.account.name;
       document.getElementById('whoami').textContent = `${res.account.name} · ${res.account.roleLabel}`;
@@ -114,18 +124,12 @@ function rejoin() {
     document.querySelectorAll('.ai-off-note').forEach((n) => { n.hidden = AI_ON; });
     if (res.note) notify(res.note);
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
+    if (readOnly()) { document.getElementById('directorCompose').hidden = true; document.getElementById('researchCompose').hidden = true; }
     renderStage(res.stage);
     document.getElementById('helpBtn').hidden = (res.role || ROLE) === 'observer';
     if (AS_ACCOUNT || ADMIN_VIEW) Screens.load();
     (res.seen || []).forEach(noteSeen);
-    if (res.roomName) {
-      const chip = document.getElementById('roomChip');
-      if (chip) chip.title = 'Meeting: ' + res.roomName + ' (' + ROOM + ')';
-      const titleStrong = document.querySelector('.app-title strong');
-      if (titleStrong && res.roomName) {
-        titleStrong.textContent = res.roomName;
-      }
-    }
+    if (res.roomName) setRoomTitle(res.roomName);
     if (Array.isArray(res.ops)) {
       for (const op of res.ops) applyOp(op);       // just the gap
     } else {
@@ -137,6 +141,15 @@ function rejoin() {
     refreshSeenLines();
     reportSeen();
   });
+}
+
+/** The hall's name in the header (a rename arrives as a numbered change, like everything else). */
+function setRoomTitle(name) {
+  if (!name) return;
+  const chip = document.getElementById('roomChip');
+  if (chip) chip.title = 'Meeting: ' + name + ' (' + ROOM + ')';
+  const titleStrong = document.querySelector('.app-title strong');
+  if (titleStrong) titleStrong.textContent = name;
 }
 
 // Every change carries the room's sequence number. A jump means we missed one: resume from what we have.
@@ -159,6 +172,7 @@ function applyOp(op) {
   }
   else if (op.o === 'del') removeMessageLocal(op.id);
   else if (op.o === 'reset') onReset();
+  else if (op.o === 'meta' && typeof op.name === 'string') setRoomTitle(op.name);
   if (op.s > lastSeq) lastSeq = op.s;
 }
 
@@ -223,6 +237,7 @@ function renderProposalLine(host, p) {
 }
 socket.on('seen', (s) => { noteSeen(s); refreshSeenLines(); });
 socket.on('roomReset', ({ seq } = {}) => { if (bump(seq)) onReset(); });
+socket.on('roomMeta', ({ name, seq } = {}) => { if (bump(seq)) setRoomTitle(name); });
 function onReset() {
   // Admin cleared the room. Wipe local state but stay joined.
   feed.innerHTML = '';
@@ -532,23 +547,11 @@ function rerenderMessage(node, msg) {
     socket.emit('pin', { messageId: msg.id, pinned });
   };
 
-  // Forward button — opens a small picker of other rooms the user is in
+  // Forward button — opens a small picker of the other halls this person may post in (a help request stays in its hall)
   const fwdBtn = node.querySelector('.fwd-btn');
   if (fwdBtn) {
-    fwdBtn.onclick = (e) => {
-      e.stopPropagation();
-      socket.emit('myRooms', (res) => {
-        if (!res || !res.ok) {
-          alert('Could not check your other rooms.');
-          return;
-        }
-        if (!res.rooms.length) {
-          alert('To forward: open AGMessage in another tab and join another room with the same name (' + NAME + ').');
-          return;
-        }
-        showForwardMenu(fwdBtn, res.rooms, msg.id);
-      });
-    };
+    fwdBtn.hidden = msg.type === 'help';
+    fwdBtn.onclick = (e) => { e.stopPropagation(); offerForward(fwdBtn, msg.id); };
   }
 
   // Show "Forwarded from XYZ12 by Sarah" tag if applicable
@@ -671,14 +674,15 @@ function renderActionBody(msg) {
     b.className = 'btn action-btn';
     b.dataset.idx = String(i);
     b.textContent = opt;
+    b.disabled = readOnly();
     b.onclick = () => {
       socket.emit('actionResponse', { messageId: msg.id, optionIndex: i });
     };
     btnRow.appendChild(b);
   });
   // Both board and research can free-text reply to an action prompt.
-  // Observers are read-only.
-  if (HAS_STAGE) {
+  // Observers are read-only: they see the options and the tally, and answer nothing.
+  if (HAS_STAGE && !readOnly()) {
     const other = document.createElement('button');
     other.type = 'button';
     other.className = 'btn ghost small reply-text-btn';
@@ -810,17 +814,8 @@ function refreshPinned() {
     // re-wired here.
     const fb = clone.querySelector(".fwd-btn");
     if (fb) {
-      fb.onclick = (e) => {
-        e.stopPropagation();
-        socket.emit("myRooms", (res) => {
-          if (!res || !res.ok) { alert("Could not check your other rooms."); return; }
-          if (!res.rooms.length) {
-            alert("To forward: open AGMessage in another tab and join another room with the same name (" + NAME + ").");
-            return;
-          }
-          showForwardMenu(fb, res.rooms, m.id);
-        });
-      };
+      fb.hidden = m.type === 'help';
+      fb.onclick = (e) => { e.stopPropagation(); offerForward(fb, m.id); };
     }
     const rxb = clone.querySelector(".react-btn");
     if (rxb) {
@@ -1661,6 +1656,18 @@ if (ADMIN_VIEW) {
 }
 
 
+/** The forward picker: the server lists only the other halls this person is in and may post in. */
+function offerForward(anchor, messageId) {
+  socket.emit('myRooms', (res) => {
+    if (!res || !res.ok) { alert('Could not check your other halls.'); return; }
+    if (!res.rooms.length) {
+      alert('To forward, open another hall where you may post (in another tab, as ' + NAME + ').');
+      return;
+    }
+    showForwardMenu(anchor, res.rooms, messageId);
+  });
+}
+
 function showForwardMenu(anchor, otherRooms, messageId) {
   const old = document.getElementById('fwdMenu');
   if (old) old.remove();
@@ -1825,6 +1832,7 @@ function renderReactions(node, reactions) {
     pill.className = 'rx-pill' + (data.mine ? ' mine' : '');
     pill.title = data.names.join(', ');
     pill.innerHTML = '<span>' + escapeHtml(emoji) + '</span> <small>' + escapeHtml(String(data.n)) + '</small>';
+    pill.disabled = readOnly();
     pill.onclick = () => socket.emit('react', { messageId: id, emoji });
     rx.appendChild(pill);
   }

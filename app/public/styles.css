@@ -1083,6 +1083,18 @@ html[data-theme="dark"] .agm-toast { background: #fff; color: #15202b; }
    .doc-actions { display: flex } rule beat the UA [hidden] rule. */
 [hidden] { display: none !important; }
 
+/* Read only (an observer, a Viewer account): the server refuses pins, reactions, replies and answers, so the page offers
+   none of them; an action prompt's options and its tally still show, as words, not buttons to press. */
+body[data-role="observer"] .msg .pin-btn,
+body[data-role="observer"] .msg .react-btn,
+body[data-role="observer"] .msg .reply-btn,
+body[data-role="observer"] .unpin,
+body[data-role="observer"] #pinDocBtn { display: none !important; }
+.action-btn:disabled, .rx-pill:disabled { cursor: default; opacity: .7; }
+.action-btn:disabled:hover { background: #fff; color: #7a4d00; }
+.rx-pill:disabled:hover { border-color: var(--border); }
+html[data-theme="dark"] .action-btn:disabled:hover { background: #2a2415; color: #f5d8a0; }
+
 /* Admin "Reset session" button — clearly destructive */
 .admin-reset-btn {
   align-self: flex-start;

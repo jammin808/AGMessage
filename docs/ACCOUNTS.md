@@ -24,8 +24,8 @@ halls (or "every hall, including new ones"). The rights, as the server checks th
 | Right | Meaning |
 |---|---|
 | `hall.view` | see a hall: its messages, files, countdown and screens |
-| `hall.post` | send messages, replies, action prompts and help requests |
-| `hall.files` | share files and push them to a hall |
+| `hall.post` | send messages, replies, action prompts and help requests; answer a prompt, pin, react; forward into the hall |
+| `hall.files` | share files and push them to a hall, or forward one into it |
 | `display.control` | change what a hall's screens show |
 | `display.manage` | add, rename, move, re-link and remove screens; the hall's holding image |
 | `stage.send` | send to Stagewatch: the speaker's screen, or to the operator to pass on |
@@ -40,6 +40,17 @@ Rules that keep rights from growing by themselves: deny by default; only an admi
 that holds one of them (the Accounts page shows such a person as "Admin only" to anyone else); nobody changes their own
 role, rights or halls; the last admin who can sign in stays one. A code guest's rights come from where they joined: backstage posts, shares files and sends to Stagewatch; on
 stage posts and shares files; an observer reads. Screens, halls and other show systems need an account.
+
+**Inside a hall.** Reading is `hall.view`; everything that changes what the others see — a message, a reply, a help
+request, an answer to an action prompt, a pin, a reaction — is `hall.post`, so an observer or a Viewer reads, sees a
+prompt's options and its tally, and is offered nothing to press. Forwarding a message posts it in the other hall, so the
+rights there decide: an account's rights in that hall (and `hall.files` for a file), a code guest's own seat there (a
+locked hall's observer seat stays an observer's), or, where the guest has no seat, the admin's link. The forward carries
+the role and the account mark a post there would carry, and the picker lists only the halls that would take it. A help
+request is not forwarded: it is tracked and answered in its own hall. An account's role in a hall follows its rights, so
+the admin page's room list changes a code guest's role and refuses an account's (that is the Accounts page's). An account
+with a hall open on a laptop and a phone is one person there: announced once, counted once, and "left" only when its
+last page closes.
 
 ## The first admin
 

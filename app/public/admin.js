@@ -104,6 +104,8 @@ function showDashboard() {
     updateCounts();
   });
   socket.on('actionUpdate', () => { /* admin doesn't need to render */ });
+  // Another admin tab closed the hall this one is watching: show what is left.
+  socket.on('roomClosed', ({ code } = {}) => { if (currentRoom && currentRoom.code === code) location.reload(); else refreshRooms(); });
   socket.on('pinUpdate', () => { /* same */ });
 
   document.getElementById('newSessionBtn').addEventListener('click', createNewRoom);
@@ -211,11 +213,13 @@ function renderUsers(users) {
         `<button class="unlink-room" data-sid="${sidHtml}" data-room="${escapeHtml(rm)}" title="Unlink">×</button>` +
       `</span>`;
     }).join("");
+    // A code guest's role is set here; an account's follows its rights, which are set on the Accounts page.
+    const roleCellHtml = u.account
+      ? `<span class="role-fixed">${escapeHtml(u.role)}</span> <small class="muted">account · <a href="/users.html" target="_blank" rel="noopener">rights on the Accounts page</a></small>`
+      : `<select data-sid="${sidHtml}" class="role-select">${roleOptionsHtml(u.role)}</select>`;
     tr.innerHTML =
       `<td><strong>${escapeHtml(u.name)}</strong></td>` +
-      `<td><select data-sid="${sidHtml}" class="role-select">` +
-        roleOptionsHtml(u.role) +
-      `</select></td>` +
+      `<td>${roleCellHtml}</td>` +
       `<td>` +
         (linkedChipsHtml || '<small class="muted">— none —</small>') +
       `</td>` +

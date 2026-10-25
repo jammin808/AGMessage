@@ -46,12 +46,15 @@ function openHelp(room) {
   }));
 }
 
+/** How many people are in a hall: people, not sockets (an account with it open on a laptop and a phone is one). */
+const peopleIn = (room) => (room.users ? new Set(Array.from(room.users.values(), (u) => u.uid)).size : 0);
+
 /** One hall's row on the board. `stage` is the hall's Stagewatch as a page shows it (or null); `displays` its screens. */
 function hallRow(room, { stage = null, displays = [], now = Date.now() } = {}) {
   return {
-    code: room.code, name: room.name || '', people: room.users ? room.users.size : 0,
+    code: room.code, name: room.name || '', people: peopleIn(room),
     last: lastMessage(room), help: openHelp(room).length, stage, displays, at: now,
   };
 }
 
-module.exports = { HELP_CATEGORIES, HELP_STATES, helpMessage, lineOf, lastMessage, openHelp, hallRow };
+module.exports = { HELP_CATEGORIES, HELP_STATES, helpMessage, lineOf, lastMessage, openHelp, peopleIn, hallRow };
