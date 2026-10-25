@@ -11,8 +11,9 @@
  * itself is sealed at rest (lib/secretbox.js) so a manager can copy the link again.
  *
  * Attempts are not facts: a take is numbered (seq); the display renders it and says so ("shown" with the seq, or what
- * went wrong). The operator sees "on screen" only for a seq the display confirmed, "sending" until then, and "offline"
- * when no browser holds the link.
+ * went wrong). Every browser holding the link (a projector and its backup, a manager's laptop after "Open") reports for
+ * itself: the operator sees "on screen" only once every one of them confirmed the newest seq, "could not show it" as long
+ * as any one of them could not, "sending" until then, and "offline" when no browser holds the link.
  */
 const crypto = require('crypto');
 const { WriteLane, readJsonWithBak } = require('./resilience');
@@ -25,6 +26,8 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const makeId = customAlphabet('abcdefghijkmnopqrstuvwxyz23456789', 8);
 const sha256 = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp']);
+// Runtime state, never saved: each browser on the link by its screen key -> its connection and what it last showed.
+const freshLive = () => ({ reports: new Map() });
 
 /**
  * A content an operator asked for, made safe — or {error}. (Pure.) An upload must be one of ours and of a type a
@@ -54,11 +57,14 @@ function cleanContent(c) {
   }
 }
 
-/** What is on a screen, in a few words for the operator, the board and the audit log (pure). */
-function describe(c) {
+/**
+ * What is on a screen, in a few words for the operator, the board and the audit log (pure). Holding with no image of its
+ * own shows the hall's holding image (`hallHolding`) when the hall has one.
+ */
+function describe(c, hallHolding = '') {
   if (!c) return 'nothing yet';
   switch (c.kind) {
-    case 'holding': return c.image ? 'holding image' : 'holding (black)';
+    case 'holding': return c.image || hallHolding ? 'holding image' : 'holding (black)';
     case 'message': return (c.tone === 'urgent' ? 'urgent message' : c.tone === 'warn' ? 'warning' : 'message') + ': “' + c.text.slice(0, 60) + '”';
     case 'file': return (c.pdf ? 'PDF page ' + c.page + ' of ' : 'image ') + (c.name || 'a file');
     case 'countdown': return 'the countdown' + (c.text ? ' with “' + c.text.slice(0, 40) + '”' : '');
@@ -78,7 +84,7 @@ class Displays {
     this.halls = data.halls && typeof data.halls === 'object' ? data.halls : {};   // CODE -> {holding}
     for (const d of Array.isArray(data.displays) ? data.displays : []) {
       if (!d || typeof d.id !== 'string' || !/^[0-9a-f]{64}$/.test(d.tokenHash || '')) continue;
-      d.live = { sockets: 0, shownSeq: 0, ok: true, words: '', seenAt: 0 };
+      d.live = freshLive();
       this.list.set(d.id, d);
       this.byHash.set(d.tokenHash, d);
     }
@@ -102,7 +108,7 @@ class Displays {
     const d = {
       id: 'd' + makeId(), hall, name: guard.cleanText(name, 60) || 'Screen', tokenHash: sha256(token), tokenSealed: this.seal(token),
       content: { kind: 'holding' }, seq: 1, createdAt: Date.now(), updatedAt: Date.now(), updatedBy: by,
-      live: { sockets: 0, shownSeq: 0, ok: true, words: '', seenAt: 0 },
+      live: freshLive(),
     };
     this.list.set(d.id, d);
     this.byHash.set(d.tokenHash, d);
@@ -136,15 +142,28 @@ class Displays {
     const d = this.get(id);
     if (!d) return null;
     d.content = content; d.seq += 1; d.updatedAt = Date.now(); d.updatedBy = by;
-    d.live.ok = true; d.live.words = '';
     this.save();
     return d;
   }
 
-  /** The display says what it showed. Only the newest seq counts; an older report is a late echo. */
-  shown(d, seq, ok, words) {
-    if (!Number.isInteger(seq) || seq < d.live.shownSeq || seq > d.seq) return false;
-    d.live.shownSeq = seq; d.live.ok = ok !== false; d.live.words = guard.cleanText(words, 160); d.live.seenAt = Date.now();
+  /**
+   * A browser opened the link. `key` is the screen (its page's own key, so a reconnect after a blip is the same screen
+   * again, not a second one), `sid` its connection: the newest connection of a screen is the one that counts.
+   */
+  joined(d, key, sid = key) { d.live.reports.set(key, { sid, seq: 0, ok: true, words: '', seenAt: 0 }); }
+  /** A connection closed: its screen leaves the link, unless the screen has come back on a newer connection. */
+  left(d, key, sid = key) { const r = d.live.reports.get(key); if (r && r.sid === sid) d.live.reports.delete(key); }
+  /** How many browsers hold the link. */
+  static screens(d) { return d.live.reports.size; }
+
+  /**
+   * One browser says what it showed. Only its newest seq counts (an older report is a late echo), and only from the
+   * screen's current connection.
+   */
+  shown(d, key, seq, ok, words, sid = key) {
+    const r = d.live.reports.get(key);
+    if (!r || r.sid !== sid || !Number.isInteger(seq) || seq < r.seq || seq > d.seq) return false;
+    r.seq = seq; r.ok = ok !== false; r.words = guard.cleanText(words, 160); r.seenAt = Date.now();
     return true;
   }
 
@@ -161,15 +180,27 @@ class Displays {
   hallHolding(code) { return (this.halls[code] && this.halls[code].holding) || ''; }
   setHallHolding(code, url) { this.halls[code] = { ...(this.halls[code] || {}), holding: url || '' }; if (!url) delete this.halls[code]; this.save(); }
 
-  /** A display as an operator sees it: its state in a word and a shape (never colour alone), and what is on it. */
-  static status(d) {
-    const l = d.live;
+  /**
+   * A display as an operator sees it: its state in a word and a shape (never colour alone), and what is on it. With
+   * several browsers on the link the words carry the count; a screen's note on a take it showed (a PDF page past the end)
+   * follows "on screen". `hallHolding` is the hall's holding image, which Holding shows when it has none of its own.
+   */
+  static status(d, hallHolding = '') {
+    const reports = Array.from(d.live.reports.values());
+    const n = reports.length;
+    const newest = reports.filter((r) => r.seq === d.seq);
+    const failed = newest.filter((r) => !r.ok);
+    const done = newest.length - failed.length;
+    const of = (k) => ' on ' + k + ' of ' + n + ' screens';
     let state, mark, words;
-    if (!l.sockets) { state = 'offline'; mark = '✕'; words = 'offline — no screen has this link open'; }
-    else if (l.shownSeq < d.seq) { state = 'sending'; mark = '…'; words = 'sending'; }
-    else if (!l.ok) { state = 'error'; mark = '△'; words = 'could not show it: ' + (l.words || 'unknown'); }
-    else { state = 'shown'; mark = '✓'; words = 'on screen'; }
-    return { id: d.id, name: d.name, hall: d.hall, state, mark, words, showing: describe(d.content), content: d.content, seq: d.seq, screens: l.sockets, updatedAt: d.updatedAt };
+    if (!n) { state = 'offline'; mark = '✕'; words = 'offline — no screen has this link open'; }
+    else if (failed.length) { state = 'error'; mark = '△'; words = 'could not show it' + (n > 1 ? of(failed.length) : '') + ': ' + (failed[0].words || 'unknown'); }
+    else if (done < n) { state = 'sending'; mark = '…'; words = 'sending' + (done ? ' —' + of(done) : ''); }
+    else {
+      const note = newest.map((r) => r.words).find(Boolean);
+      state = 'shown'; mark = '✓'; words = (n > 1 ? 'on all ' + n + ' screens' : 'on screen') + (note ? ': ' + note : '');
+    }
+    return { id: d.id, name: d.name, hall: d.hall, state, mark, words, showing: describe(d.content, hallHolding), content: d.content, seq: d.seq, screens: n, updatedAt: d.updatedAt };
   }
 }
 

@@ -1770,6 +1770,7 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .screen-item[data-state="sending"] .screen-state { color: var(--accent); }
 .screen-item[data-state="offline"] .screen-state, .screen-item[data-state="error"] .screen-state { color: var(--danger); }
 .screen-showing { font-size: .88rem; color: var(--muted); padding-left: 1.6rem; }
+.screen-refused { font-size: .85rem; font-weight: 600; color: var(--danger); }
 .screen-acts { display: flex; flex-wrap: wrap; gap: .3rem; padding-left: 1.4rem; }
 .screens-manage { margin-top: .9rem; display: grid; gap: .5rem; }
 .screens-manage .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }

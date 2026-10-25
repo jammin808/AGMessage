@@ -865,21 +865,39 @@ io.on('connection', (socket) => {
     const c = guard.str(code).toUpperCase();
     if (!store.has(c) || !canDisplays('display.control', c)) return ack({ ok: false, error: 'Your account may not drive this hall\'s screens.' });
     const manage = canDisplays('display.manage', c);
-    ack({ ok: true, code: c, manage, holding: displays.hallHolding(c), displays: displays.ofHall(c).map((d) => ({ ...Displays.status(d), ...(manage ? { path: displays.path(d) } : {}) })) });
+    const holding = displays.hallHolding(c);
+    ack({ ok: true, code: c, manage, holding, displays: displays.ofHall(c).map((d) => ({ ...Displays.status(d, holding), ...(manage ? { path: displays.path(d) } : {}) })) });
   });
-  socket.on('display:take', ({ id, content } = {}, ack) => {
+  // A take: one content on the ticked screens (`ids`, or one `id`) in one request, so "All" reaches every screen of a
+  // hall (up to 50) at one write's cost. Each screen is checked, taken and audited on its own; the answer says, screen by
+  // screen, which took it (`results`) and, for one screen, its seq and status as well.
+  socket.on('display:take', ({ id, ids, content } = {}, ack) => {
     ack = ok(ack);
-    const d = displays.get(guard.str(id));
-    if (!d || !canDisplays('display.control', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
+    const wanted = ids === undefined ? [guard.str(id)] : Array.isArray(ids) ? [...new Set(ids.map(guard.str))] : [];
+    if (!wanted.length || wanted.length > 50) return ack({ ok: false, error: 'Tick between 1 and 50 screens.' });
     if (!writes.take()) return limited(ack);
     const c = cleanContent(content);
     if (c.error) return ack({ ok: false, error: c.error });
     const who = actor();
-    displays.take(d.id, c, who.name);
-    io.to('display:' + d.id).emit('display:state', displayState(d));
-    audit.write(who, 'display.take', d.id, d.name + ' → ' + describeContent(c), socket.data.ip);
-    displaysChanged(d.hall);
-    ack({ ok: true, seq: d.seq, status: Displays.status(d) });
+    const halls = new Set();
+    const results = wanted.map((sid) => {
+      const d = displays.get(sid);
+      if (!d || !canDisplays('display.control', d.hall)) return { id: sid, ok: false, error: 'No such screen, or not yours to change.' };
+      displays.take(d.id, c, who.name);
+      io.to('display:' + d.id).emit('display:state', displayState(d));
+      const holding = displays.hallHolding(d.hall);
+      audit.write(who, 'display.take', d.id, d.name + ' → ' + describeContent(c, holding), socket.data.ip);
+      halls.add(d.hall);
+      return { id: d.id, ok: true, seq: d.seq, status: Displays.status(d, holding) };
+    });
+    for (const h of halls) displaysChanged(h);
+    const refused = results.filter((r) => !r.ok).length;
+    const one = results.length === 1 ? results[0] : null;
+    ack({
+      ok: !refused, results,
+      ...(one && one.ok ? { seq: one.seq, status: one.status } : {}),
+      ...(refused ? { error: one ? one.error : 'Not sent to ' + refused + ' of ' + results.length + ' screens: no such screen, or not yours to change.' } : {}),
+    });
   });
   socket.on('display:identify', ({ id } = {}, ack) => {
     ack = ok(ack);
@@ -887,7 +905,7 @@ io.on('connection', (socket) => {
     if (!d || !canDisplays('display.control', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
     if (!chatter.take()) return limited(ack);
     io.to('display:' + d.id).emit('display:identify', { name: d.name, hall: (store.get(d.hall) || {}).name || d.hall, seconds: 6 });
-    ack({ ok: true, screens: d.live.sockets });
+    ack({ ok: true, screens: Displays.screens(d) });
   });
   socket.on('display:create', ({ code, name } = {}, ack) => {
     ack = ok(ack);
@@ -897,7 +915,7 @@ io.on('connection', (socket) => {
     const r = displays.create(c, name, actor().name);
     audit.write(actor(), 'display.create', r.display.id, r.display.name + ' in ' + c, socket.data.ip);
     displaysChanged(c);
-    ack({ ok: true, display: { ...Displays.status(r.display), path: r.path } });
+    ack({ ok: true, display: { ...Displays.status(r.display, displays.hallHolding(c)), path: r.path } });
   });
   socket.on('display:update', ({ id, name, hall } = {}, ack) => {
     ack = ok(ack);
@@ -1315,46 +1333,69 @@ function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : [];
 const briefOf = (link) => ({ status: link.status, view: link.view, context: link.context, linked: Array.from(peerLinks.values()).map((l) => l.view()) });
 
 // ---------------------------------------------------------------- displays
-/** Everything a display's page needs: what to show (numbered), the hall's holding image and countdown, the server's time. */
+// AGMessage's own time zone (an IANA name, on Windows too): a screen's clock shows the time of day here, whatever zone
+// the screen's own computer was set to.
+const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+/** Everything a display's page needs: what to show (numbered), the hall's holding image and countdown, the server's time and zone. */
 function displayState(d) {
   return {
     id: d.id, name: d.name, hall: d.hall, hallName: (store.get(d.hall) || {}).name || '', seq: d.seq, content: d.content,
-    holding: displays.hallHolding(d.hall), stage: stagePayload(linkFor(d.hall)), now: Date.now(),
+    holding: displays.hallHolding(d.hall), stage: stagePayload(linkFor(d.hall)), now: Date.now(), tz: TIME_ZONE,
   };
 }
+// A screen page's own key (display.js makes one per page load): its reconnections are the same screen.
+const SCREEN_KEY = /^[0-9a-f]{32}$/;
 /** A display's browser connects with its token: it is told what to show, and it says what it showed. */
 function serveDisplay(socket, token) {
   const d = displays.byToken(token);
   if (!d) { socket.emit('display:unknown', { words: 'This screen link is not (or no longer) in use. Ask for the current link.' }); setTimeout(() => socket.disconnect(true), 100); return; }
   socket.data.display = d.id;
   socket.join('display:' + d.id);
-  d.live.sockets++;
+  const asked = guard.str(socket.handshake.auth.screen);
+  const key = SCREEN_KEY.test(asked) ? asked : socket.id;
+  displays.joined(d, key, socket.id);
   const reports = new guard.Bucket(4, 10);
   socket.emit('display:state', displayState(d));
   displaysChanged(d.hall);
   socket.on('display:shown', ({ seq, ok, words } = {}) => {
     const cur = displays.get(d.id);
     if (!cur || !reports.take()) return;
-    if (displays.shown(cur, seq, ok, words)) displaysChanged(cur.hall);
+    if (displays.shown(cur, key, seq, ok, words, socket.id)) displaysChanged(cur.hall);
   });
   socket.on('disconnect', () => {
     const cur = displays.get(d.id);
     if (!cur) return;
-    cur.live.sockets = Math.max(0, cur.live.sockets - 1);
+    displays.left(cur, key, socket.id);
     displaysChanged(cur.hall);
   });
 }
 function revokeDisplaySockets(id, words) {
   for (const s of io.sockets.sockets.values()) if (s.data && s.data.display === id) { s.emit('display:unknown', { words }); setTimeout(() => s.disconnect(true), 100); }
 }
-/** A hall's screens changed: its operators re-read them, the board redraws. */
-function displaysChanged(code) { io.to(code).emit('displays:changed', { code }); boardDirty(); }
+/**
+ * A hall's screens changed: the board redraws, and its operators are told once per 150 ms at most, however many takes,
+ * reports and connections came in that time (latest wins: they re-read the list after the event, so the newest state is
+ * what they read — a take on 50 screens is one re-read per console, not a hundred).
+ */
+const screensDirty = new Set();
+let screensTimer = null;
+function displaysChanged(code) {
+  boardDirty();
+  screensDirty.add(code);
+  if (screensTimer) return;
+  screensTimer = setTimeout(() => {
+    screensTimer = null;
+    for (const c of screensDirty) io.to(c).emit('displays:changed', { code: c });
+    screensDirty.clear();
+  }, 150);
+  screensTimer.unref();
+}
 /** A Stagewatch's frame moved: the displays of every hall that follows it get the frame. */
 function stageChanged(link) {
   const payload = stagePayload(link);
-  for (const r of roomsUsing(link)) for (const d of displays.ofHall(r.code)) if (d.live.sockets) io.to('display:' + d.id).emit('display:stage', payload);
+  for (const r of roomsUsing(link)) for (const d of displays.ofHall(r.code)) if (Displays.screens(d)) io.to('display:' + d.id).emit('display:stage', payload);
 }
-const displaysOf = (code) => displays.ofHall(code).map((d) => { const st = Displays.status(d); return { id: st.id, name: st.name, state: st.state, mark: st.mark, words: st.words + ' — ' + st.showing }; });
+const displaysOf = (code) => displays.ofHall(code).map((d) => { const st = Displays.status(d, displays.hallHolding(code)); return { id: st.id, name: st.name, state: st.state, mark: st.mark, words: st.words + ' — ' + st.showing }; });
 
 // ---------------------------------------------------------------- the halls board
 // Each watcher gets the halls it may see, recomputed when anything on them changes and sent at most every 300 ms

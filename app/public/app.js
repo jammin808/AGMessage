@@ -1942,8 +1942,10 @@ const Screens = (function () {
   let list = [];
   let manage = false;
   let holding = '';
+  let holdingChoice = null;     // the manager's pick in the holding list, not saved yet ("Use it"): kept across refreshes
   let pending = null;           // a message or file offered from the feed, waiting for "Show"
   const ticked = new Set();
+  const refused = new Map();    // screen id -> why the last take did not reach it (its row says so until the next take)
 
   function load() {
     socket.emit('display:list', { code: ROOM }, (r) => {
@@ -1975,8 +1977,9 @@ const Screens = (function () {
       const what = document.createElement('span'); what.className = 'screen-showing'; what.textContent = d.showing;
       const head = document.createElement('div'); head.className = 'screen-line';
       head.append(pick, name, st);
+      if (refused.has(d.id)) { const no = document.createElement('span'); no.className = 'screen-refused'; no.textContent = '✕ the last take did not reach it: ' + refused.get(d.id); head.append(no); }
       const acts = document.createElement('div'); acts.className = 'screen-acts';
-      acts.appendChild(btn('Identify', () => socket.emit('display:identify', { id: d.id }, (r) => notify(r && r.ok ? (r.screens ? 'Showing its name on the screen for 6 seconds.' : 'No screen has this link open.') : (r && r.error) || 'Not sent.', !(r && r.ok)))));
+      acts.appendChild(btn('Identify', () => socket.emit('display:identify', { id: d.id }, (r) => notify(r && r.ok ? (r.screens ? 'Showing its name on ' + (r.screens > 1 ? 'its ' + r.screens + ' screens' : 'the screen') + ' for 6 seconds.' : 'No screen has this link open.') : (r && r.error) || 'Not sent.', !(r && r.ok)))));
       if (manage) {
         acts.appendChild(btn('Copy link', () => copy(location.origin + d.path)));
         const open = document.createElement('a'); open.className = 'btn ghost small'; open.href = d.path; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open';
@@ -1989,10 +1992,12 @@ const Screens = (function () {
       ul.appendChild(li);
     }
     const pickH = $('holdingPick');
+    const want = holdingChoice !== null ? holdingChoice : holding;
     pickH.length = 1;
     const images = allMessages.filter((m) => m.type === 'file' && /^image\/(png|jpeg|gif|webp)$/.test(m.mime || ''));
     for (const m of images) { const o = document.createElement('option'); o.value = m.url; o.textContent = m.filename; pickH.appendChild(o); }
-    pickH.value = holding;
+    pickH.value = want;
+    if (pickH.value !== want) { pickH.value = holding; holdingChoice = null; }   // the picked image is gone from the hall
     const cur = images.find((m) => m.url === holding);
     $('holdingName').textContent = holding ? (cur ? cur.filename : 'an image') : 'none';
     syncAll();
@@ -2005,21 +2010,30 @@ const Screens = (function () {
     try { await navigator.clipboard.writeText(text); notify('Link copied.'); } catch { prompt('Copy this screen link', text); }
   }
 
-  /** Put a content on every ticked screen; say how many took it (each confirms on its own line when it has shown it). */
+  /**
+   * Put a content on every ticked screen, in one request however many are ticked; say how many took it (each confirms on
+   * its own line when it has shown it) and name the ones it did not reach.
+   */
   function take(content) {
     const ids = list.filter((d) => ticked.has(d.id)).map((d) => d.id);
     if (!ids.length) { notify('Tick at least one screen.', true); return; }
-    let okN = 0, err = '';
-    let left = ids.length;
-    for (const id of ids) socket.emit('display:take', { id, content }, (r) => {
-      if (r && r.ok) okN++; else err = (r && r.error) || 'Not sent.';
-      if (--left === 0) notify(err ? err : 'Sent to ' + okN + ' screen' + (okN === 1 ? '' : 's') + ' — each shows ✓ once it is on screen.', !!err);
+    const names = new Map(list.map((d) => [d.id, d.name]));   // as ticked, though the list may be re-read meanwhile
+    socket.emit('display:take', { ids, content }, (r) => {
+      const results = r && Array.isArray(r.results) ? r.results : [];
+      if (!results.length) { notify((r && r.error) || 'Not sent.', true); return; }
+      refused.clear();
+      for (const x of results) if (!x.ok) refused.set(x.id, x.error || 'not sent');
+      const sent = results.length - refused.size;
+      if (!refused.size) notify('Sent to ' + sent + ' screen' + (sent === 1 ? '' : 's') + ' — each shows ✓ once it is on screen.');
+      else notify('Sent to ' + sent + ' of ' + results.length + ' screens. Not to ' + Array.from(refused.keys(), (id) => names.get(id) || id).join(', ') + ': ' + refused.values().next().value, true);
+      render();
     });
   }
 
   function offer(msg) {
     pending = msg;
     if (msg.type === 'text') { $('screenMsgText').value = msg.text.slice(0, 300); pending = null; }
+    else $('pendingPage').value = '1';   // each file offered starts on its first page
     if (!dlg.open) dlg.showModal();
     render();
     if (!pending) $('screenMsgText').focus();
@@ -2032,7 +2046,7 @@ const Screens = (function () {
     $('pendingPageWrap').hidden = !pdf;
   }
 
-  $('screensBtn').addEventListener('click', () => { load(); dlg.showModal(); });
+  $('screensBtn').addEventListener('click', () => { holdingChoice = null; load(); dlg.showModal(); });
   $('screensClose').addEventListener('click', () => dlg.close());
   $('screensAll').addEventListener('change', () => { ticked.clear(); if ($('screensAll').checked) for (const d of list) ticked.add(d.id); render(); });
   for (const b of document.querySelectorAll('.screens-bar [data-take]')) b.addEventListener('click', () => take({ kind: b.dataset.take }));
@@ -2061,7 +2075,11 @@ const Screens = (function () {
       notify(r.display.name + ' added — its link is copied: open it on that screen.');
     });
   });
-  $('holdingSave').addEventListener('click', () => socket.emit('display:hallHolding', { code: ROOM, image: $('holdingPick').value }, done('Holding image saved.')));
+  $('holdingPick').addEventListener('change', () => { holdingChoice = $('holdingPick').value === holding ? null : $('holdingPick').value; });
+  $('holdingSave').addEventListener('click', () => {
+    const image = $('holdingPick').value;
+    socket.emit('display:hallHolding', { code: ROOM, image }, (r) => { if (r && r.ok) { holding = image; holdingChoice = null; } done('Holding image saved.')(r); });
+  });
   socket.on('displays:changed', ({ code } = {}) => { if (code === ROOM && CAN_SCREENS) load(); });
   return { load, offer };
 })();
