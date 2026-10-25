@@ -55,7 +55,28 @@ async function startServer(port, dataDir) {
   return child;
 }
 
-/** One headless Edge with a CDP session per tab. */
+// A DevTools call that has had no answer by then is a failure with its name, never a run that hangs.
+const CDP_MS = 60_000;
+/** One DevTools connection: send(method, params) answers the reply, or {error} when none came within CDP_MS. */
+async function devtools(url, onEvent = () => {}) {
+  const ws = new WebSocket(url);
+  await new Promise((r, j) => { ws.addEventListener('open', r); ws.addEventListener('error', () => j(new Error('no DevTools connection at ' + url))); });
+  let id = 0; const pending = new Map();
+  ws.addEventListener('message', (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+    if (m.method) onEvent(m);
+  });
+  const send = (method, params = {}) => new Promise((r) => {
+    const i = ++id;
+    const timer = setTimeout(() => { pending.delete(i); r({ error: { message: method + ' had no answer in ' + CDP_MS / 1000 + ' s' } }); }, CDP_MS);
+    pending.set(i, (m) => { clearTimeout(timer); r(m); });
+    ws.send(JSON.stringify({ id: i, method, params }));
+  });
+  return { ws, send };
+}
+
+/** One headless Edge; each tab a window of its own, with a DevTools session. */
 async function launchEdge() {
   const exe = browserPath();
   if (!exe) throw new Error('no Edge, Chrome or Chromium found (set AGM_BROWSER to one)');
@@ -63,25 +84,34 @@ async function launchEdge() {
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-edge-'));
   // A container running as root has no user namespace for Chromium's sandbox; everywhere else the sandbox stays on.
   const sandbox = typeof process.getuid === 'function' && process.getuid() === 0 ? ['--no-sandbox'] : [];
-  const proc = spawn(exe, ['--headless=new', '--disable-gpu', '--no-first-run', ...sandbox, '--remote-debugging-port=' + port, '--user-data-dir=' + prof, '--window-size=1400,900', 'about:blank'], { stdio: 'ignore' });
-  for (let i = 0; i < 60; i++) { try { await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); break; } catch { await sleep(250); } }
+  // Each tab stands for a device of its own (a laptop, a phone, a stage screen) whose page is in front: the browser never
+  // throttles, backgrounds, freezes or caches one, or a page not touched for a while stalls a screenshot and loses its
+  // live connection (headless Edge on Windows did both: "Page entered Back-Forward Cache").
+  const awake = ['--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-back-forward-cache'];
+  const proc = spawn(exe, ['--headless=new', '--disable-gpu', '--no-first-run', ...awake, ...sandbox, '--remote-debugging-port=' + port, '--user-data-dir=' + prof, '--window-size=1400,900', 'about:blank'], { stdio: 'ignore' });
+  let version = null;
+  for (let i = 0; i < 60 && !version; i++) { try { version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); } catch { await sleep(250); } }
+  if (!version) throw new Error('the browser opened no DevTools port');
+  const browser = await devtools(version.webSocketDebuggerUrl);
   return {
     proc, port, prof,
     /** A tab on `url`: `init` runs before the page's own scripts, `metrics` {width, height} is its viewport, `timezone` its zone. */
     async tab(url, { init, metrics, timezone } = {}) {
-      const t = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json();
-      const ws = new WebSocket(t.webSocketDebuggerUrl);
-      await new Promise((r) => ws.addEventListener('open', r));
-      let id = 0; const pending = new Map(); const problems = []; const listeners = new Map(); const expected = [];
-      ws.addEventListener('message', (ev) => {
-        const m = JSON.parse(ev.data);
-        if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
-        if (m.method && listeners.has(m.method)) listeners.get(m.method)(m.params);
+      // A window of its own, so its page is always the one in front (never a hidden tab behind another).
+      const made = await browser.send('Target.createTarget', { url: 'about:blank', newWindow: true, width: 1400, height: 900 });
+      if (!made.result) throw new Error('no new window: ' + (made.error ? made.error.message : 'no answer'));
+      const problems = []; const listeners = new Map(); const expected = [];
+      const { ws, send: call } = await devtools(`ws://127.0.0.1:${port}/devtools/page/${made.result.targetId}`, (m) => {
+        if (listeners.has(m.method)) listeners.get(m.method)(m.params);
         if (m.method === 'Runtime.exceptionThrown') problems.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text).split('\n')[0]);
         if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error' && !/favicon/.test(m.params.entry.url || m.params.entry.text) && !expected.some((r) => r.test(m.params.entry.url || ''))) problems.push('log: ' + m.params.entry.text);
         if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') problems.push('console: ' + m.params.args.map((a) => a.value ?? a.description).join(' '));
       });
-      const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
+      const send = async (method, params) => {
+        const m = await call(method, params);
+        if (m.error && / had no answer in /.test(m.error.message)) problems.push('DevTools: ' + m.error.message);
+        return m;
+      };
       await send('Runtime.enable'); await send('Log.enable'); await send('Page.enable');
       if (init) await send('Page.addScriptToEvaluateOnNewDocument', { source: init });
       if (metrics) await send('Emulation.setDeviceMetricsOverride', { width: metrics.width, height: metrics.height, deviceScaleFactor: 1, mobile: false });
@@ -101,11 +131,16 @@ async function launchEdge() {
         release: () => send('Fetch.disable'),
         eval: async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true })).result?.result?.value,
         async until(expr, ms = 15000) { const end = Date.now() + ms; while (Date.now() < end) { const v = await this.eval(expr); if (v) return v; await sleep(250); } return null; },
-        async shot(file) { const s = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(file, Buffer.from(s.result.data, 'base64')); },
+        async shot(file) {
+          await send('Page.bringToFront');
+          const s = await send('Page.captureScreenshot', { format: 'png' });
+          if (s.result) fs.writeFileSync(file, Buffer.from(s.result.data, 'base64'));
+          else report(false, 'screenshot ' + path.basename(file) + ': ' + (s.error ? s.error.message : 'no answer'));
+        },
         close: () => ws.close(),
       };
     },
-    close() { try { proc.kill(); } catch { /* ignore */ } setTimeout(() => { try { fs.rmSync(prof, { recursive: true, force: true }); } catch { /* ignore */ } }, 1500); },
+    close() { try { browser.ws.close(); proc.kill(); } catch { /* ignore */ } setTimeout(() => { try { fs.rmSync(prof, { recursive: true, force: true }); } catch { /* ignore */ } }, 1500); },
   };
 }
 
