@@ -218,6 +218,34 @@ test('audit: one failed write is kept and written with the next, so the chain on
   assert.ok(fs.readFileSync(file, 'utf8').includes('second, while the disk would not take it'), 'the entry that failed is on disk now');
 });
 
+test('audit: an entry still waiting when the server stops is put on disk by the stop, not lost with it', async (t) => {
+  const log = new AuditLog(path.join(tmp('agm-audit-'), 'audit.jsonl'));
+  log.write({ t: 'system' }, 'boot', '', 'first');
+  fs.renameSync(log.file, log.file + '.held'); fs.mkdirSync(log.file);
+  log.write({ t: 'account', id: 'a1', name: 'sam' }, 'login', 'sam', 'second, while the disk would not take it');
+  assert.equal(log.flush(), false, 'a flush that still cannot write says so');
+  fs.rmdirSync(log.file); fs.renameSync(log.file + '.held', log.file);
+  assert.equal(log.flush(), true);
+  assert.equal(log.unwritten, 0);
+  assert.deepEqual(await log.verify(), { ok: true, entries: 2 });
+
+  // End to end: the disk refuses one audited action; it is back by the time the server stops (SIGTERM).
+  const srv = await startServer();
+  let up = true;
+  t.after(async () => { if (up) await stopServer(srv.child); });
+  const file = path.join(srv.dataDir, 'audit.jsonl');
+  assert.equal((await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).status, 200);
+  assert.ok(fs.existsSync(file), 'the first sign-in is on disk');
+  fs.renameSync(file, file + '.held'); fs.mkdirSync(file);
+  assert.equal((await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).status, 200);
+  assert.equal((await api(srv.base, 'GET', '/api/health')).body.saves.stores.audit.unwritten, 1, 'health says one entry waits');
+  fs.rmdirSync(file); fs.renameSync(file + '.held', file);
+  await stopServer(srv.child); up = false;
+  const actions = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).action);
+  assert.deepEqual(actions, ['login.token', 'login.token'], 'the second sign-in is on disk after the stop');
+  assert.deepEqual(await new AuditLog(file).verify(), { ok: true, entries: actions.length });
+});
+
 test('audit: a write the disk takes only part of is cut back, on Windows too, and the chain on disk stays whole', async () => {
   const dir = tmp('agm-audit-');
   const file = path.join(dir, 'audit.jsonl');

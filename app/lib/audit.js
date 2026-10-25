@@ -12,9 +12,10 @@
  *
  * Written synchronously and flushed: an entry is on disk (fsync) before the action is acknowledged. When the disk will
  * not take it (full, or the file held by another program) the entry stays chained in memory, the console and health say
- * so, and it is written ahead of the next one, so the chain on disk stays whole. A half-written last line left by a
- * power cut is cut when the log is opened, and the cut is an entry of its own ('audit.repair'). Nothing is written until
- * the first `write()` or `open()`: a second copy of the server reading the folder changes nothing.
+ * so, and it is written ahead of the next one (or by `flush()` when the server stops), so the chain on disk stays
+ * whole. A half-written last line left by a power cut is cut when the log is opened, and the cut is an entry of its own
+ * ('audit.repair'). Nothing is written until the first `write()` or `open()`: a second copy of the server reading the
+ * folder changes nothing.
  *
  * Never a secret: passwords, tokens, keys and display URLs are not fields an entry can carry (the caller passes words
  * and ids, and `write()` keeps only the listed fields, each cut short).
@@ -150,6 +151,12 @@ class AuditLog {
     } finally {
       if (fd !== null) { try { fs.closeSync(fd); } catch { /* the write itself said what went wrong */ } }
     }
+  }
+
+  /** Put the entries still waiting on disk now (a stop, a crash), so they are not lost with the process. True when none is left. */
+  flush() {
+    if (this.pending) this._put();
+    return !this.pending;
   }
 
   /** Rename the full file aside; the chain goes on in a new one. A rename that fails leaves it growing, and is tried again. */

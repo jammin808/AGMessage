@@ -114,9 +114,10 @@ const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage lapt
 const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
 /** Every store saved through a write lane, by the name health and the console give it. */
 const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['screens', displays.lane]];
-/** Write every lane now (shutdown, a crash); a store that still cannot be written is named on the console. */
+/** Write every lane and the audit entries still waiting now (shutdown, a crash); what still cannot be written is named on the console. */
 function flushLanes() {
   for (const [name, lane] of saveLanes()) if (!lane.flushSync()) console.error('  [save] ' + name + ' could not be written: ' + lane.lastError);
+  if (!audit.flush()) console.error('  [audit] ' + audit.unwritten + ' entries could not be written: ' + audit.lastError);
 }
 
 // ---------------------------------------------------------------- encrypted connections (Show Bus 1.2 §10)
