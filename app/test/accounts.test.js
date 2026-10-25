@@ -10,8 +10,8 @@ const os = require('os');
 const path = require('path');
 const rbac = require('../lib/rbac');
 const acc = require('../lib/accounts');
-const { AuditLog } = require('../lib/audit');
-const { startServer, stopServer, api, connect, emit, once, wait, TOKEN } = require('./helpers');
+const { AuditLog, hashOf, GENESIS } = require('../lib/audit');
+const { startServer, stopServer, api, connect, emit, once, wait, until, TOKEN } = require('./helpers');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
@@ -99,28 +99,167 @@ test('sessions: only a hash on disk; idle, age, a moved epoch and a turned-off a
 });
 
 // ---------------------------------------------------------------- the audit chain
-test('audit: hash-chained; an edited, removed or reordered line is found; no secret fields', () => {
+test('audit: hash-chained; an edited, removed or reordered line is found; no secret fields', async () => {
   const dir = tmp('agm-audit-');
   const file = path.join(dir, 'audit.jsonl');
   const log = new AuditLog(file);
   for (let i = 0; i < 5; i++) log.write({ t: 'account', id: 'a1', name: 'sam' }, 'display.take', 'D1', 'message ' + i, '10.0.0.' + i);
-  assert.deepEqual(log.verify(), { ok: true, entries: 5 });
+  assert.deepEqual(await log.verify(), { ok: true, entries: 5 });
   const reopened = new AuditLog(file);
   reopened.write({ t: 'system' }, 'boot', '', 'restarted');
-  assert.deepEqual(reopened.verify(), { ok: true, entries: 6 }, 'the chain goes on across a restart');
+  assert.deepEqual(await reopened.verify(), { ok: true, entries: 6 }, 'the chain goes on across a restart');
   assert.equal(reopened.latest(2)[0].action, 'boot', 'newest first');
 
   const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
   const edited = lines.slice(); edited[2] = edited[2].replace('message 2', 'message X');
   fs.writeFileSync(file, edited.join('\n') + '\n');
-  assert.match(new AuditLog(file).verify().why, /changed after it was written/);
+  assert.match((await new AuditLog(file).verify()).why, /changed after it was written/);
   fs.writeFileSync(file, lines.filter((_, i) => i !== 3).join('\n') + '\n');
-  assert.equal(new AuditLog(file).verify().ok, false, 'a removed line breaks the chain');
+  assert.equal((await new AuditLog(file).verify()).ok, false, 'a removed line breaks the chain');
   const swapped = lines.slice(); [swapped[1], swapped[2]] = [swapped[2], swapped[1]];
   fs.writeFileSync(file, swapped.join('\n') + '\n');
-  assert.equal(new AuditLog(file).verify().ok, false, 'reordered lines break it');
+  assert.equal((await new AuditLog(file).verify()).ok, false, 'reordered lines break it');
   const e = new AuditLog(path.join(dir, 'b.jsonl')).write({ t: 'account', id: 'a1', name: 'sam', password: 'x' }, 'login', 'sam', 'ok', '', { token: 'y' });
   assert.deepEqual(Object.keys(e.actor).sort(), ['id', 'name', 't'], 'only the listed fields are kept');
+});
+
+const fiveEntries = () => {
+  const file = path.join(tmp('agm-audit-'), 'audit.jsonl');
+  const log = new AuditLog(file);
+  for (let i = 0; i < 5; i++) log.write({ t: 'account', id: 'a1', name: 'sam' }, 'login', 'sam', 'entry ' + i);
+  return { file, log, lines: fs.readFileSync(file, 'utf8').trim().split('\n') };
+};
+
+test('audit: the first line, the last line and the whole file are part of the chain', async () => {
+  const a = fiveEntries();
+  fs.writeFileSync(a.file, a.lines.slice(1).join('\n') + '\n');
+  const first = await new AuditLog(a.file).verify();
+  assert.equal(first.ok, false, 'the oldest line removed: ' + JSON.stringify(first));
+  assert.equal(first.brokenAt, 1);
+  assert.match(first.why, /entry 1 is missing/);
+
+  const b = fiveEntries();
+  fs.writeFileSync(b.file, b.lines.slice(0, -1).join('\n') + '\n');
+  const last = await b.log.verify();
+  assert.equal(last.ok, false, 'the newest line removed while the server runs: ' + JSON.stringify(last));
+  assert.match(last.why, /after entry 4, entry 5 is missing/);
+
+  const c = fiveEntries();
+  fs.unlinkSync(c.file);
+  const gone = await c.log.verify();
+  assert.equal(gone.ok, false, 'the file removed while the server runs: ' + JSON.stringify(gone));
+  assert.match(gone.why, /missing/);
+  c.log.write({ t: 'system' }, 'boot', '', 'one more');
+  const after = await c.log.verify();
+  assert.equal(after.ok, false, 'one more entry does not hide it: ' + JSON.stringify(after));
+  assert.match(after.why, /entries 1 to 5 are missing/);
+});
+
+/** A whole chain of `n` entries from the genesis hash, as the log writes them (fast: no file per entry). */
+function chainOf(n, words = (i) => 'Lectern screen ' + (i % 4) + ' \u2192 message \u201cFive minutes left\u201d', at = 1_700_000_000_000) {
+  let prev = GENESIS;
+  const out = [];
+  for (let i = 1; i <= n; i++) {
+    const e = { seq: i, at: at + i, actor: { t: 'account', id: 'a1', name: 'sam' }, action: 'display.take', target: 'dlectern1', words: words(i), ip: '10.0.0.9', prev };
+    e.h = hashOf(e);
+    prev = e.h;
+    out.push(JSON.stringify(e));
+  }
+  return out.join('\n') + '\n';
+}
+
+test('audit: a rotated log is checked with the current one as one chain', async () => {
+  const dir = tmp('agm-audit-');
+  const file = path.join(dir, 'audit.jsonl');
+  const text = chainOf(36_000, (i) => 'take ' + i + ' ' + 'x'.repeat(300));   // just over 20 MB
+  assert.ok(text.length > 20 * 1024 * 1024);
+  fs.writeFileSync(file, text);
+  const log = new AuditLog(file);
+  log.write({ t: 'system' }, 'boot', '', 'the first entry of the next file');
+  const rotated = fs.readdirSync(dir).filter((f) => /^audit-.+\.jsonl$/.test(f));
+  assert.equal(rotated.length, 1, 'rotated at 20 MB');
+  assert.deepEqual(await log.verify(), { ok: true, entries: 36_001 }, 'both files, one chain');
+  assert.deepEqual(await new AuditLog(file).verify(), { ok: true, entries: 36_001 }, 'and after a restart');
+
+  const old = path.join(dir, rotated[0]);
+  const lines = fs.readFileSync(old, 'utf8').split('\n');
+  lines[10] = lines[10].replace('take 11 ', 'take 99 ');
+  fs.writeFileSync(old, lines.join('\n'));
+  const edited = await log.verify();
+  assert.deepEqual([edited.ok, edited.file, edited.brokenAt], [false, rotated[0], 11], JSON.stringify(edited));
+  assert.match(edited.why, /entry 11 was changed/);
+
+  fs.unlinkSync(old);
+  const removed = await log.verify();
+  assert.equal(removed.ok, false, 'a rotated file removed: ' + JSON.stringify(removed));
+  assert.equal(removed.file, 'audit.jsonl');
+  assert.match(removed.why, /entries 1 to 36000 are missing/);
+});
+
+test('audit: one failed write is kept and written with the next, so the chain on disk stays whole', async () => {
+  const dir = tmp('agm-audit-');
+  const file = path.join(dir, 'audit.jsonl');
+  const log = new AuditLog(file);
+  log.write({ t: 'system' }, 'boot', '', 'first');
+  fs.renameSync(file, file + '.held');
+  fs.mkdirSync(file);   // the next open fails, as a full disk or a held file does
+  log.write({ t: 'account', id: 'a1', name: 'sam' }, 'login', 'sam', 'second, while the disk would not take it');
+  assert.ok(log.lastError, 'the failure is kept for health');
+  assert.equal(log.unwritten, 1);
+  fs.rmdirSync(file);
+  fs.renameSync(file + '.held', file);
+  const waiting = await log.verify();
+  assert.deepEqual(waiting, { ok: true, entries: 1, unwritten: 1 }, 'what is on disk is whole, and one entry waits');
+  log.write({ t: 'system' }, 'x', '', 'third');
+  log.write({ t: 'system' }, 'x', '', 'fourth');
+  assert.equal(log.unwritten, 0);
+  assert.equal(log.lastError, null);
+  assert.deepEqual(await log.verify(), { ok: true, entries: 4 });
+  assert.ok(fs.readFileSync(file, 'utf8').includes('second, while the disk would not take it'), 'the entry that failed is on disk now');
+});
+
+for (const [what, tail] of [['a half-written last line', '{"seq":4,"at":17'], ['a NUL-filled tail (NTFS after a power cut)', Buffer.alloc(180)]]) {
+  test('audit: ' + what + ' is cut at the next start, the cut is an entry, and the chain goes on whole', async () => {
+    const dir = tmp('agm-audit-');
+    const file = path.join(dir, 'audit.jsonl');
+    const log = new AuditLog(file);
+    for (let i = 0; i < 3; i++) log.write({ t: 'system' }, 'x', '', 'message ' + i);
+    fs.appendFileSync(file, tail);
+    const again = new AuditLog(file);
+    again.write({ t: 'account', id: 'a1', name: 'ana' }, 'login', 'ana', 'signed in after the restart');
+    const entries = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    assert.deepEqual(entries.map((e) => e.action), ['x', 'x', 'x', 'audit.repair', 'login'], 'every line whole, the repair before the sign-in');
+    assert.match(entries[3].words, /half-written last line \(\d+ bytes\)/);
+    assert.deepEqual(await again.verify(), { ok: true, entries: 5 });
+  });
+}
+
+test('audit: checking a full-size log keeps the event loop turning, one check at a time, and still finds an edited line', async () => {
+  const dir = tmp('agm-audit-');
+  const file = path.join(dir, 'audit.jsonl');
+  const n = 56_000;
+  fs.writeFileSync(file, chainOf(n));   // about 20 MB, just under the rotation size
+  const log = new AuditLog(file);
+  let turns = 0;
+  let done = false;
+  let worst = 0;
+  let lastTick = performance.now();
+  const spin = () => { if (done) return; const now = performance.now(); worst = Math.max(worst, now - lastTick); lastTick = now; turns++; setImmediate(spin); };
+  setImmediate(spin);
+  const check = log.verify();
+  assert.strictEqual(log.verify(), check, 'a second click shares the running check');
+  const r = await check;
+  done = true;
+  assert.deepEqual(r, { ok: true, entries: n });
+  assert.ok(turns >= 40, 'the loop turned ' + turns + ' times during the check');
+  assert.ok(worst < 250, 'the longest the loop waited: ' + Math.round(worst) + ' ms');
+
+  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  lines[100] = lines[100].replace('Lectern', 'Foyer');
+  fs.writeFileSync(file, lines.join('\n'));
+  const edited = await log.verify();
+  assert.deepEqual([edited.ok, edited.brokenAt], [false, 101]);
+  assert.match(edited.why, /changed after it was written/);
 });
 
 // ---------------------------------------------------------------- end to end
@@ -276,4 +415,64 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     const sidNow = (await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body.users.find((x) => x.username === 'sid');
     assert.deepEqual([sidNow.mustChange, sidNow.disabled, sidNow.name], [false, false, 'Sid Patch'], 'sid keeps their own password, account and name');
   });
+});
+
+// ---------------------------------------------------------------- saves that fail
+test('a change to accounts.json that cannot be written is retried until it lands, and health names it meanwhile', async (t) => {
+  let srv = await startServer();
+  const { dataDir } = srv;
+  t.after(async () => { await stopServer(srv.child); });
+  const file = path.join(dataDir, 'accounts.json');
+  const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const admin = setup.cookie;
+  const bob = await api(srv.base, 'POST', '/api/users', { username: 'bob', name: 'Bob Staff', role: 'staff', password: 'clipboard and coffee' }, { cookie: admin });
+  assert.equal(bob.status, 200, JSON.stringify(bob.body));
+  await until(() => fs.existsSync(file) && fs.readFileSync(file, 'utf8').includes('"bob"'), 3000, 'bob on disk');
+
+  // Another program holds accounts.json for a moment: the rename over it fails.
+  fs.renameSync(file, file + '.held');
+  fs.mkdirSync(file);
+  const off = await api(srv.base, 'PATCH', '/api/users/' + bob.body.user.id, { disabled: true }, { cookie: admin });
+  assert.equal(off.status, 200, JSON.stringify(off.body));
+  await wait(300);
+  const during = (await api(srv.base, 'GET', '/api/health')).body.saves;
+  assert.ok(during.stores && during.stores.accounts && during.stores.accounts.error, 'health names the store that could not be saved: ' + JSON.stringify(during));
+  assert.equal(during.stores.settings.error, null, 'and only that one');
+  fs.rmdirSync(file);
+  fs.renameSync(file + '.held', file);
+  await until(() => JSON.parse(fs.readFileSync(file, 'utf8')).users.find((u) => u.username === 'bob').disabled === true, 4000, 'the retry to write bob turned off');
+  assert.equal((await api(srv.base, 'GET', '/api/health')).body.saves.stores.accounts.error, null, 'health clears once it is written');
+
+  await stopServer(srv.child);
+  srv = await startServer({ AGM_DATA_DIR: dataDir });
+  const login = await api(srv.base, 'POST', '/api/auth/login', { username: 'bob', password: 'clipboard and coffee' });
+  assert.equal(login.status, 401, 'a turned-off account stays off after a restart');
+  assert.match(login.body.error, /turned off/);
+});
+
+test('six quick clicks on Check the log share one check and do not hold up anyone else', async (t) => {
+  const dataDir = tmp('agm-e2e-');
+  const n = 56_000;
+  fs.writeFileSync(path.join(dataDir, 'audit.jsonl'), chainOf(n));
+  const srv = await startServer({ AGM_DATA_DIR: dataDir });
+  t.after(async () => { await stopServer(srv.child); });
+  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  let worst = 0;
+  const state = { running: true };
+  const probe = (async () => {
+    while (state.running) {
+      const t0 = performance.now();
+      await api(srv.base, 'GET', '/api/auth/me');
+      worst = Math.max(worst, performance.now() - t0);
+    }
+  })();
+  const checks = await Promise.all(Array.from({ length: 6 }, () => api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin })));
+  state.running = false;
+  await probe;
+  for (const c of checks) {
+    assert.equal(c.status, 200);
+    assert.equal(c.body.ok, true, JSON.stringify(c.body));
+    assert.ok(c.body.entries > n, 'the seeded chain and the server\'s own entries: ' + c.body.entries);
+  }
+  assert.ok(worst < 300, 'a page asking meanwhile waited at most ' + Math.round(worst) + ' ms');
 });

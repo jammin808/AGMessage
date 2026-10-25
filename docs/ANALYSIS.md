@@ -92,7 +92,9 @@ today; each is escaped now, so a later change to what the server sends cannot ma
 ### 3.4 The source guard rail (`test/resilience.test.js`)
 
 Unchanged from 0.3 and still a fence: no `eval`, no key in a URL, and the synchronous file calls per file capped, each
-with its reason (`lib/version.js` joins the list: the version and its stamp, read once at startup).
+with its reason (`lib/version.js` joins the list: the version and its stamp, read once at startup). `lib/audit.js` is
+allowed 11 (an append cut back when the disk takes only part of it, the rotation; its check now reads asynchronously)
+and `server.js` 16 (removing files went asynchronous).
 
 ## 4. Considered and not adopted
 

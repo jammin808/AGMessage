@@ -3,7 +3,7 @@
  * Resilience parts with no I/O policy of their own (pure or file-only), tested in test/units.test.js:
  *   SupervisorPolicy : when the watchdog restarts the server, how long it waits, when it gives up
  *   writeFileAtomic  : tmp → fsync → rename, with a .bak kept only when the old file is whole
- *   WriteLane        : one writer for a file; bursts coalesce (latest wins); flush on shutdown with a cap
+ *   WriteLane        : one writer for a file; bursts coalesce (latest wins); a failed write is retried until it lands
  *   Ring             : a fixed-size window of numbers with percentiles (latency, loop delay)
  *   ClockSampler     : NTP-style offset to a peer, from the exchange with the smallest round trip of the last 8
  */
@@ -97,15 +97,17 @@ function readJsonWithBak(file) {
 
 /**
  * One writer for one file. `save(produce)` asks for a write; bursts coalesce (only the latest
- * content is written) and writes never overlap or land out of order. `flushSync(capMs)` writes what is
- * pending at once (shutdown), within a cap.
+ * content is written) and writes never overlap or land out of order. A write that fails (a file another program holds,
+ * a full disk) keeps its content and is tried again on its own, sooner at first, then every 30 s at most, until it
+ * lands; `lastError` says why it has not. `flushSync()` writes what is pending at once (shutdown) and returns false
+ * when it still cannot.
  */
 class WriteLane {
   constructor(file, { delayMs = 200, keepBak = true, mode } = {}) {
     this.file = file; this.delayMs = delayMs; this.keepBak = keepBak; this.mode = mode;
     this.pending = null;      // () => string, the latest content
     this.timer = null;
-    this.writes = 0; this.coalesced = 0; this.lastError = null;
+    this.writes = 0; this.coalesced = 0; this.lastError = null; this.failures = 0;
   }
 
   save(produce) {
@@ -126,16 +128,26 @@ class WriteLane {
       writeFileAtomic(this.file, produce(), { keepBak: this.keepBak, mode: this.mode });
       this.writes++;
       this.lastError = null;
+      this.failures = 0;
     } catch (e) {
       this.lastError = e.message;
-      console.error('  save failed for', path.basename(this.file) + ':', e.message);
+      this.failures++;
+      console.error('  save failed for', path.basename(this.file) + ' (' + this.failures + '×, kept and tried again):', e.message);
+      // `produce` reads the live state, so the retry writes whatever is newest by then.
+      if (!this.pending) this.pending = produce;
+      if (!this.timer) {
+        this.timer = setTimeout(() => this._run(), Math.min(30_000, 1000 * 2 ** (this.failures - 1)));
+        this.timer.unref();
+      }
     }
   }
 
-  /** Write whatever is pending now. Returns true when nothing is left (the cap is for callers that loop). */
+  /** Write whatever is pending now, trying three times. Returns true when nothing is left unwritten. */
   flushSync() {
-    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
-    this._run();
+    for (let i = 0; i < 3 && this.pending; i++) {
+      if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+      this._run();
+    }
     return this.pending === null;
   }
 }

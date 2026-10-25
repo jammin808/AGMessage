@@ -28,14 +28,19 @@ class RoomStore {
     this.dir = dir;
     fs.mkdirSync(dir, { recursive: true });
     this.rooms = new Map();
+    this.lastError = null;   // the last append or snapshot that failed, until every room is on disk again
   }
 
   static validCode(code) { return typeof code === 'string' && CODE_RE.test(code); }
 
   file(code, ext) { return path.join(this.dir, code + ext); }
 
-  /** Load every room: snapshot + replay of its log. Returns the number loaded. */
-  loadAll(onMigrate) {
+  /**
+   * Load every room: snapshot + replay of its log. Returns the number loaded. With `compact: false` nothing is written
+   * (a server that does not yet own its port must not touch the files another copy may be appending to); the caller
+   * compacts once it does.
+   */
+  loadAll(onMigrate, { compact = true } = {}) {
     let n = 0;
     // A room whose snapshot was lost mid-rename still has its .bak: both name the room.
     const codes = new Set(fs.readdirSync(this.dir).map((f) => (/^(.+)\.json(\.bak)?$/.exec(f) || [])[1]).filter(Boolean));
@@ -52,7 +57,7 @@ class RoomStore {
         this._replay(room);
         if (onMigrate) onMigrate(room);
         this.rooms.set(code, room);
-        this.compact(code);   // fold the replayed log into a fresh snapshot
+        if (compact) this.compact(code);   // fold the replayed log into a fresh snapshot
         n++;
       } catch (e) {
         console.warn('  Failed to load room', code, e.message);
@@ -62,7 +67,7 @@ class RoomStore {
   }
 
   _blank(code, name, createdAt) {
-    return { code, name, createdAt, messages: [], byId: new Map(), seq: 0, ring: [], users: new Map(), settings: {}, logCount: 0, logFd: null };
+    return { code, name, createdAt, messages: [], byId: new Map(), seq: 0, ring: [], users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false };
   }
 
   _replay(room) {
@@ -128,13 +133,21 @@ class RoomStore {
     this._apply(room, op);
     room.ring.push(op);
     if (room.ring.length > RING) room.ring.splice(0, room.ring.length - RING);
+    let appended = false;
     try {
       if (room.logFd === null) room.logFd = fs.openSync(this.file(room.code, '.log'), 'a');
-      fs.writeSync(room.logFd, JSON.stringify(op) + '\n');
+      const line = JSON.stringify(op) + '\n';
+      const n = fs.writeSync(room.logFd, line);
+      if (n !== Buffer.byteLength(line)) throw new Error('the disk took ' + n + ' of ' + Buffer.byteLength(line) + ' bytes');
+      appended = true;
     } catch (e) {
+      room.unsaved = true;   // the op is in memory only: the next snapshot puts it on disk
+      this.lastError = e.message;
+      this._closeLog(room);  // the next append opens the log again
       console.error('  log append failed for', room.code, e.message);
     }
-    if (++room.logCount >= COMPACT_EVERY) this.compact(room.code);
+    // A room with an op missing from its log is snapshotted as soon as the disk takes writes again.
+    if (++room.logCount >= COMPACT_EVERY || (appended && room.unsaved)) this.compact(room.code);
     return op;
   }
 
@@ -154,20 +167,30 @@ class RoomStore {
     const out = { code: room.code, name: room.name || '', createdAt: room.createdAt, seq: room.seq, settings: room.settings, messages: room.messages, savedAt: Date.now() };
     try {
       writeFileAtomic(this.file(code, '.json'), JSON.stringify(out), { keepBak: true });
-      if (room.logFd !== null) { try { fs.closeSync(room.logFd); } catch { /* ignore */ } room.logFd = null; }
+      this._closeLog(room);
       fs.writeFileSync(this.file(code, '.log'), '');
       room.logCount = 0;
+      room.unsaved = false;
+      if (!this.unsaved().length) this.lastError = null;
     } catch (e) {
+      this.lastError = e.message;   // the log still holds what the snapshot did not
       console.error('  snapshot failed for', code, e.message);
     }
   }
 
   compactAll() { for (const code of this.rooms.keys()) this.compact(code); }
 
+  _closeLog(room) {
+    if (room.logFd !== null) { try { fs.closeSync(room.logFd); } catch { /* already closed: nothing to release */ } room.logFd = null; }
+  }
+
+  /** Codes of the rooms holding a change that is not on disk yet. */
+  unsaved() { return Array.from(this.rooms.values()).filter((r) => r.unsaved).map((r) => r.code); }
+
   /** Remove a room and its files. */
   remove(code) {
     const room = this.rooms.get(code);
-    if (room && room.logFd !== null) { try { fs.closeSync(room.logFd); } catch { /* ignore */ } }
+    if (room) this._closeLog(room);
     this.rooms.delete(code);
     for (const ext of ['.json', '.log', '.json.bak']) { try { fs.unlinkSync(this.file(code, ext)); } catch { /* ignore */ } }
   }

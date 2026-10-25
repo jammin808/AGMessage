@@ -87,6 +87,60 @@ test('store: log, resume window, torn writes, compaction', () => {
   assert.equal(b.opsSince(r2, 3), null, 'after a restart the gap needs a full history');
 });
 
+test('store: a load that may not write leaves the files as they were', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const r = a.create('ABC234', 'Test');
+  a.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } });
+  const files = () => fs.readdirSync(dir).sort().map((f) => f + ':' + fs.readFileSync(path.join(dir, f), 'utf8'));
+  const before = files();
+  const b = new RoomStore(dir);
+  assert.equal(b.loadAll(null, { compact: false }), 1);
+  assert.equal(b.get('ABC234').messages.length, 1, 'the log replayed in memory');
+  assert.deepEqual(files(), before, 'nothing written');
+});
+
+test('store: a failed append is said, and the room is snapshotted as soon as the disk takes writes again', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const r = a.create('ABC234', 'Test');
+  const log = path.join(dir, 'ABC234.log');
+  fs.unlinkSync(log);
+  fs.mkdirSync(log);   // the log cannot be opened, as when the disk is full or another program holds it
+  a.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } });
+  assert.ok(a.lastError, 'the failure is kept for health');
+  assert.deepEqual(a.unsaved(), ['ABC234']);
+  fs.rmdirSync(log);
+  a.commit(r, { o: 'add', m: { id: 'm2', type: 'text', text: 'two', at: 2 } });
+  assert.deepEqual(a.unsaved(), [], 'the next append that lands snapshots the room');
+  assert.equal(a.lastError, null);
+  const b = new RoomStore(dir);
+  b.loadAll();
+  assert.deepEqual(b.get('ABC234').messages.map((m) => m.id), ['m1', 'm2'], 'the op the log missed is on disk');
+});
+
+test('board: a hall\'s messages are read once per change, whoever watches, and never served stale', () => {
+  const board = require('../lib/board');
+  const messages = [];
+  for (let i = 0; i < 3000; i++) messages.push(i % 3 ? { id: 'm' + i, type: 'text', text: 'line ' + i, at: i, from: { name: 'Sam' } } : { id: 'm' + i, type: 'system', text: 'Sam joined', at: i });
+  messages.push({ id: 'h1', type: 'help', category: 'Sound', text: 'radio mic 3', at: 3001, from: { name: 'Alex' }, help: { state: 'open' } });
+  messages.push({ id: 'h2', type: 'help', category: 'Vision', text: 'done', at: 3002, from: { name: 'Alex' }, help: { state: 'resolved' } });
+  const room = { code: 'HALL01', name: 'Hall 1', users: new Map(), seq: 3002, messages };
+  let scans = 0;
+  const filter = messages.filter.bind(messages);
+  messages.filter = (...args) => { scans++; return filter(...args); };
+  for (let w = 0; w < 30; w++) { board.hallRow(room); board.openHelp(room); }   // thirty watchers, one tick
+  assert.equal(scans, 1, 'one scan for every watcher');
+  assert.equal(board.openHelp(room).length, 1);
+  assert.equal(board.hallRow(room).help, 1);
+  assert.ok(Object.isFrozen(board.openHelp(room)[0]), 'what is shared cannot be changed by one watcher');
+  Object.assign(messages[3000], { help: { state: 'resolved', by: 'Pat', at: 4000 } });   // as the store applies an update
+  room.seq++;
+  assert.equal(board.openHelp(room).length, 0, 'the change is seen at once');
+  assert.equal(board.hallRow(room).help, 0);
+  assert.equal(scans, 2, 'and read once more');
+});
+
 test('nodes: Stagewatch address and frame view', () => {
   assert.equal(nodes.normaliseBase('10.0.0.5'), 'http://10.0.0.5:9924');
   assert.equal(nodes.normaliseBase('http://foh-pc:9930/x'), 'http://foh-pc:9930');
