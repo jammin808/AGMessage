@@ -38,6 +38,12 @@ const MAX_PER_ADDRESS = 8;      // one machine runs a few nodes (Stagewatch, its
 const CHANGE_MS = 500;          // the table's change is told at most this often, latest wins
 // Every kind on the bus: Stagewatch (main), its Slides agents, Patterns, PlayMap (Show Bus 1.3 proposal) and other messengers.
 const KINDS = new Set(['main', 'agent', 'patterns', 'playmap', 'messenger']);
+// What this node is on the bus: its hello's t, and the t its Stagewatch links announce on /ws.
+const KIND = 'messenger';
+// A Show Bus id as Stagewatch keeps one for a /ws link (Screens.ValidId: 6-32 letters, digits, '-' or '_') and for a context's
+// node.id (PeerContexts.Parse: letters, digits, '-' or '_'); AGMessage's own is 8 hex characters (server.js).
+const NODE_ID = /^[A-Za-z0-9_-]{6,32}$/;
+const isNodeId = (id) => typeof id === 'string' && NODE_ID.test(id);
 const CAPS = ['messages', 'action-prompts', 'documents', 'ai', 'context', 'receipts', 'proposals', 'displays', 'help'];
 // A Stagewatch as one link sees it at one time: unique across every link of this process, so a link made again for a
 // hall (its Stagewatch removed, then another set) never shares a number with the one it replaced.
@@ -92,7 +98,7 @@ class Discovery {
   }
 
   hello() {
-    const h = { t: 'messenger', v: 1, proto: 1, id: this.id, name: this.name, host: os.hostname().slice(0, 40), ports: { http: this.port }, caps: CAPS, clock: Date.now() };
+    const h = { t: KIND, v: 1, proto: 1, id: this.id, name: this.name, host: os.hostname().slice(0, 40), ports: { http: this.port }, caps: CAPS, clock: Date.now() };
     if (this.tls) { h.ports.https = this.port; h.tls = this.tls; }
     if (this.build) h.build = this.build;
     return h;
@@ -234,6 +240,16 @@ function readReceipt(status, body, requestId) {
   };
 }
 
+/**
+ * The /ws address a Stagewatch link dials: this node by its own Show Bus id — node and cid the same id, t its kind — so
+ * Stagewatch tells one AGMessage from another, and a name it gives one sticks to that one. The key is never in it (Show
+ * Bus §7: the Authorization header). Each key once: Stagewatch reads the query as a dictionary, the last value winning.
+ */
+function wsUrl(base, nodeId) {
+  if (!isNodeId(nodeId)) throw new TypeError('a Stagewatch link dials only as a node with a Show Bus id');
+  return base.replace(/^http/, 'ws') + '/ws?' + new URLSearchParams({ node: nodeId, t: KIND, cid: nodeId, page: '/agmessage' }).toString();
+}
+
 const requestId = () => 'ag' + crypto.randomBytes(6).toString('hex');
 // ±20 % from the CSPRNG, so links that dropped together do not redial together.
 const jitter = (ms) => Math.round(ms * (0.8 + crypto.randomInt(0, 401) / 1000));
@@ -245,7 +261,10 @@ class StagewatchLink {
    * @param {object} [o.pins] a tls.PinStore
    * @param {()=>void} [o.onPins] the pins changed (persist them)
    */
-  constructor({ onState, onStatus, onContext, findPeer, pins, onPins } = {}) {
+  constructor({ nodeId, onState, onStatus, onContext, findPeer, pins, onPins } = {}) {
+    // Every link of this node dials as this node: no link without the id its hello, context and desk use.
+    if (!isNodeId(nodeId)) throw new TypeError('a Stagewatch link needs this node\'s Show Bus id');
+    this.nodeId = nodeId;
     this.onState = onState || (() => {}); this.onStatus = onStatus || (() => {}); this.onContext = onContext || (() => {});
     this.findPeer = findPeer || (() => null);
     this.pins = pins || new tlsmod.PinStore();
@@ -389,7 +408,7 @@ class StagewatchLink {
   }
 
   _dial(ep) {
-    const url = ep.base.replace(/^http/, 'ws') + '/ws?cid=agmessage&page=' + encodeURIComponent('/agmessage');
+    const url = wsUrl(ep.base, this.nodeId);
     let ws;
     // The key rides in the Authorization header, never in the URL (Show Bus §7); over TLS only to the pinned certificate.
     try { ws = new WebSocket(url, { headers: this._headers(), handshakeTimeout: 5000, ...(ep.tls || {}) }); } catch { this._retry(); return; }
@@ -547,4 +566,4 @@ class StagewatchLink {
   stop() { clearInterval(this.timer); this.base = ''; this._close(); }
 }
 
-module.exports = { Discovery, StagewatchLink, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };
+module.exports = { Discovery, StagewatchLink, wsUrl, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };

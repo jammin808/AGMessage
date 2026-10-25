@@ -205,7 +205,7 @@ test('Stagewatch link: live frames, stale on silence, send to stage with the key
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const port = srv.address().port;
   const states = [];
-  const link = new nodes.StagewatchLink({ onState: (v, status) => states.push({ v, status }) });
+  const link = new nodes.StagewatchLink({ nodeId: 'ab12cd34', onState: (v, status) => states.push({ v, status }) });
   try {
     link.configure('127.0.0.1:' + port, 'swk_testkey');
     for (let i = 0; i < 50 && !states.some((s) => s.v && s.v.text === '5 MIN'); i++) await new Promise((r) => setTimeout(r, 50));
@@ -213,6 +213,10 @@ test('Stagewatch link: live frames, stale on silence, send to stage with the key
     assert.ok(live, 'got a live frame');
     assert.equal(live.status, 'connected');
     assert.ok(!/pin=|swk_/.test(conns[0].url), 'the key is never in the URL');
+    // It dials as this node, by its Show Bus id, as Stagewatch reads the query (the last value of a key wins).
+    const q = require('./helpers').stagewatchQuery(conns[0].url);
+    assert.deepEqual([...q.keys()].sort(), ['cid', 'node', 'page', 't']);
+    assert.deepEqual([q.get('node'), q.get('cid'), q.get('t'), q.get('page')], ['ab12cd34', 'ab12cd34', 'messenger', '/agmessage']);
     assert.equal(conns[0].auth, 'Bearer swk_testkey', 'the key rides in the Authorization header');
     const r = await link.sendToStage('Two minutes left, please wrap up', { urgency: 'warn' });
     assert.ok(r.ok);
@@ -220,13 +224,23 @@ test('Stagewatch link: live frames, stale on silence, send to stage with the key
     assert.ok(post, 'sent');
     assert.equal(post.auth, 'Bearer swk_testkey');
     assert.equal(decodeURIComponent(post.url), '/api/message/Two minutes left, please wrap up/warn/off/ack');
-    assert.equal((await new nodes.StagewatchLink({}).sendToStage('x')).ok, false, 'not linked');
+    assert.equal((await new nodes.StagewatchLink({ nodeId: 'ab12cd34' }).sendToStage('x')).ok, false, 'not linked');
   } finally { link.stop(); wss.close(); srv.close(); }
+});
+
+test('no Stagewatch link without this node\'s Show Bus id; the address it dials names it and nothing secret', () => {
+  for (const bad of [undefined, '', 'abc', 'agmessage!', 'x'.repeat(33), 12345678, { id: 'ab12cd34' }]) {
+    assert.throws(() => new nodes.StagewatchLink({ nodeId: bad }), TypeError, String(bad));
+  }
+  assert.equal(new nodes.StagewatchLink({ nodeId: '9dd46605' }).nodeId, '9dd46605');
+  assert.equal(nodes.wsUrl('https://10.0.0.5:9924', '9dd46605'), 'wss://10.0.0.5:9924/ws?node=9dd46605&t=messenger&cid=9dd46605&page=%2Fagmessage');
+  assert.equal(nodes.wsUrl('http://10.0.0.5:9924', '9dd46605'), 'ws://10.0.0.5:9924/ws?node=9dd46605&t=messenger&cid=9dd46605&page=%2Fagmessage');
+  assert.throws(() => nodes.wsUrl('http://10.0.0.5:9924', 'agmessage&pin=1'), TypeError);
 });
 
 test('C21: a Stagewatch gone silent is dropped at 12 s quiet and redialled at once, not after a 30 s close handshake', async () => {
   // The rule, deterministically: a silent socket answers no close frame, so it is terminated, never closed politely.
-  const stub = new nodes.StagewatchLink();
+  const stub = new nodes.StagewatchLink({ nodeId: 'ab12cd34' });
   const calls = [];
   stub.ws = { readyState: 1, send() {}, close() { calls.push('close'); }, terminate() { calls.push('terminate'); }, onmessage() {} };
   stub.status = 'connected';
@@ -251,7 +265,7 @@ test('C21: a Stagewatch gone silent is dropped at 12 s quiet and redialled at on
   });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const seen = [];
-  const link = new nodes.StagewatchLink({ onStatus: (s) => seen.push(s) });
+  const link = new nodes.StagewatchLink({ nodeId: 'ab12cd34', onStatus: (s) => seen.push(s) });
   try {
     link.configure('127.0.0.1:' + srv.address().port, 'swk_testkey');   // secret-scan: fixture
     for (let i = 0; i < 60 && !link.linked; i++) await new Promise((r) => setTimeout(r, 50));

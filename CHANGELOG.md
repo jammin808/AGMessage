@@ -13,6 +13,13 @@ code (2.16 and its newest work) before it was changed.
   waiting) and asked again. Only a proposal the desk lists as approved for this AGMessage is run. "Not delivered" shows
   Stagewatch's own words.
 
+**The Stagewatch link**
+- The link dials Stagewatch as this AGMessage, by its Show Bus id (`/ws?node=<id>&t=messenger&cid=<id>`), not as
+  "agmessage": two AGMessages on one Stagewatch are two of its screens, each found, named and disconnected on its own
+  (0.5.0's shared name made them one row, the oldest one's address, a name given to it applied to all of them, and
+  disconnecting one dropped every one). A name given in Stagewatch → Screens to the old shared "agmessage" row does not
+  carry over: name each AGMessage once. Stagewatch 2.18 needs this address to say whether it accepted the key.
+
 ## 0.5.0 — 2026-10-24 — halls, accounts, screens and the testing environment
 
 For a venue with several halls at once (the ICC in Birmingham, say): each hall its own message room and its own

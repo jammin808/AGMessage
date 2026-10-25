@@ -380,7 +380,7 @@ test('Stagewatch link: header key, receipts with the message id, clock offset, c
   await new Promise((res) => srv.listen(0, '127.0.0.1', res));
   const port = srv.address().port;
   const contexts = [];
-  const link = new nodes.StagewatchLink({ onContext: (c) => contexts.push(c) });
+  const link = new nodes.StagewatchLink({ nodeId: 'ab12cd34', onContext: (c) => contexts.push(c) });
   try {
     link.configure('127.0.0.1:' + port, 'swk_node');
     assert.ok(await until(() => link.linked));

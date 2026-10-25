@@ -139,7 +139,7 @@ test('Stagewatch link over TLS: pinned before the key is sent, proposals to the 
   let pinSaves = 0;
   // Its hello says it serves TLS with certificate A (as Stagewatch 2.16 announces).
   const hello = { t: 'main', id: 'sw1', address: '127.0.0.1', ports: { http: port, https: port }, caps: ['approvals'], tls: fpA };
-  const link = new nodes.StagewatchLink({ findPeer: (t, h, p) => (t === 'main' && h === '127.0.0.1' && p === port ? hello : null), pins, onPins: () => { pinSaves++; } });
+  const link = new nodes.StagewatchLink({ nodeId: 'ab12cd34', findPeer: (t, h, p) => (t === 'main' && h === '127.0.0.1' && p === port ? hello : null), pins, onPins: () => { pinSaves++; } });
   try {
     link.configure('127.0.0.1:' + port, 'swk_node');
     assert.ok(await until(() => link.linked), 'linked over wss');
@@ -183,7 +183,7 @@ test('Stagewatch link: a typed fingerprint guards the very first connection', as
   const cert = tlsmod.makeCertificate({ name: 'Stagewatch', hosts: ['localhost'], ips: ['127.0.0.1'] });
   const desk = fakeDesk({ cert });
   await new Promise((r) => desk.srv.listen(0, '127.0.0.1', r));
-  const link = new nodes.StagewatchLink({ pins: new tlsmod.PinStore() });
+  const link = new nodes.StagewatchLink({ nodeId: 'ab12cd34', pins: new tlsmod.PinStore() });
   try {
     link.configure('https://127.0.0.1:' + desk.srv.address().port, 'swk_node', 'sha256:' + '0'.repeat(64));
     assert.ok(await until(() => !!link.tlsState.problem, 4000));
@@ -278,14 +278,14 @@ test('C17: a Stagewatch pinned once opens no plain WebSocket with its key while 
   const sw = await dualNode({ cert, context: { v: 1, node: { t: 'main', id: 'sw1', name: 'Hall A' }, light: 'green', headline: 'Keynote', peers: [] } });
   const pins = new tlsmod.PinStore();
   const hello = { t: 'main', id: 'sw1', address: '127.0.0.1', ports: { http: sw.port, https: sw.port }, tls: fp };
-  const first = new nodes.StagewatchLink({ findPeer: (t, h, p) => (t === 'main' && p === sw.port ? hello : null), pins });
+  const first = new nodes.StagewatchLink({ nodeId: 'ab12cd34', findPeer: (t, h, p) => (t === 'main' && p === sw.port ? hello : null), pins });
   try {
     first.configure('127.0.0.1:' + sw.port, 'swk_secretnodekey');   // secret-scan: fixture
     assert.ok(await until(() => first.linked && !!pins.pins['node:sw1'], 4000), 'linked over wss and pinned');
   } finally { first.stop(); }
   sw.seen.length = 0;
   // AGMessage restarts (or the hello stops): the link's own address keeps its pin, so TLS is never dropped.
-  const again = new nodes.StagewatchLink({ findPeer: () => null, pins });
+  const again = new nodes.StagewatchLink({ nodeId: 'ab12cd34', findPeer: () => null, pins });
   try {
     again.configure('127.0.0.1:' + sw.port, 'swk_secretnodekey');   // secret-scan: fixture
     assert.ok(await until(() => again.linked, 4000), 'linked again: ' + again.status);

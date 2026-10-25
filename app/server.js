@@ -1876,6 +1876,7 @@ function renderTranscriptHtml(room) {
 const hallLinks = new Map();   // hall code -> StagewatchLink
 function makeLink(id) {
   const link = new nodes.StagewatchLink({
+    nodeId: settings.nodeId,
     onState: (view) => onStageState(link, view),
     onStatus: (status) => noteEvent('Stagewatch link' + (id === 'default' ? '' : ' of a hall') + ' ' + (/^CERTIFICATE CHANGED/.test(status) ? 'refused: CERTIFICATE CHANGED' : status), link),
     findPeer: (t, host, port) => (discovery ? discovery.find(t, host, port) : null),

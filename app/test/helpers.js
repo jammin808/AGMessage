@@ -73,6 +73,26 @@ const once = (s, ev, ms = 4000) => new Promise((resolve, reject) => { const t = 
  * Stagewatch lists a target by its newest cue: kind "department" while that is a standby). Every request is kept in
  * `requests` (method, url, headers, body) so a test can say what reached which Stagewatch.
  */
+/**
+ * A /ws request's query as Stagewatch reads it (WebServer.cs HttpRequest.ReadAsync): keys case-insensitive, the last
+ * value of a repeated key wins, '+' is a space.
+ */
+function stagewatchQuery(target) {
+  const q = new Map();
+  const i = target.indexOf('?');
+  for (const pair of i < 0 ? [] : target.slice(i + 1).split('&').filter(Boolean)) {
+    const eq = pair.indexOf('=');
+    const un = (v) => { try { return decodeURIComponent(v.replace(/\+/g, ' ')); } catch { return v; } };
+    q.set(un(eq >= 0 ? pair.slice(0, eq) : pair).toLowerCase(), eq >= 0 ? un(pair.slice(eq + 1)) : '');
+  }
+  return q;
+}
+/** The id Stagewatch keys a /ws socket by in its Screens (HandleWebSocketAsync, Screens.ValidId): cid, or an anonymous one. */
+function screenIdOf(target) {
+  const cid = stagewatchQuery(target).get('cid');
+  return typeof cid === 'string' && /^[A-Za-z0-9_-]{6,32}$/.test(cid) ? cid : 'anon-' + require('crypto').randomBytes(4).toString('hex');
+}
+
 async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0 } = {}) {
   const http = require('http');
   const { WebSocketServer } = require('ws');
@@ -80,6 +100,7 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
   const proposals = new Map();
   let next = 0;
   const sockets = new Set();
+  const upgrades = [];   // every /ws request: its URL and headers, in the order they came
   // As SharedProposal.ToJson (Stagewatch src/Timer.Core/Approvals.cs:20-32): result and words the same string, ok true when
   // done, false when failed or undelivered, null until it ran. `served` stands for a desk that is not Stagewatch.
   const OUTCOME = { done: true, failed: false, undelivered: false };
@@ -130,7 +151,9 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
   });
   const wss = new WebSocketServer({ server: srv, path: '/ws' });
   let last = { type: 'state', mode: 'countdown', text: '05:00', title: name, seconds: 300, state: 'running', messageId: 0 };
-  wss.on('connection', (c) => {
+  wss.on('connection', (c, req) => {
+    c.screenId = screenIdOf(req.url);
+    upgrades.push({ url: req.url, headers: req.headers });
     sockets.add(c);
     c.on('close', () => sockets.delete(c));
     c.on('message', (d) => { let m; try { m = JSON.parse(String(d)); } catch { return; } if (m.cmd === 'ping') c.send(JSON.stringify({ type: 'pong', t: m.t, t2: Date.now(), t3: Date.now() })); });
@@ -139,7 +162,9 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
   await new Promise((resolve) => { srv.listen(0, '127.0.0.1', resolve); });
   const port = srv.address().port;
   return {
-    port, url: '127.0.0.1:' + port, requests, proposals,
+    port, url: '127.0.0.1:' + port, requests, proposals, upgrades,
+    /** Its Screens as Stagewatch lists them (WebServer.cs ListScreens): open sockets grouped by id, each with its count of tabs. */
+    screens() { const by = new Map(); for (const c of sockets) by.set(c.screenId, (by.get(c.screenId) || 0) + 1); return Array.from(by, ([id, tabs]) => ({ id, tabs })); },
     get connected() { return sockets.size > 0; },
     get items() { return items; },
     set items(v) { items = v; },
@@ -194,4 +219,4 @@ async function until(fn, ms = 6000, what = 'the condition') {
   throw new Error('timed out waiting for ' + what);
 }
 
-module.exports = { ROOT, TOKEN, freePort, wait, until, startServer, stopServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode };
+module.exports = { stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode };

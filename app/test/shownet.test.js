@@ -59,6 +59,46 @@ test('C03 end to end: a hello flood on UDP 9928 reaches the admin page and Stage
   assert.ok(posted.every((c) => c.peers.length <= 32), 'the context posted to Stagewatch stays bounded');
 });
 
+test('two AGMessages and a hall link on one Stagewatch: each dials as its own Show Bus id, its context under the same id', async (t) => {
+  const { stagewatchQuery } = require('./helpers');
+  const sw = await fakeStagewatch({ name: 'Shared timer' });
+  const a = await startServer();
+  const b = await startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(a.child); await stopServer(b.child); await sw.close(); });
+  const link = async (srv, key) => {
+    const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+    const ctl = await connect(srv.base, admin); sockets.push(ctl);
+    const r = await emit(ctl, 'admin:settings', { stagewatchUrl: sw.url, stagewatchKey: key });
+    return { admin, ctl, nodeId: r.nodeId };
+  };
+  const A = await link(a, 'swk_agm_a_node_key_00001');   // secret-scan: fixture
+  const B = await link(b, 'swk_agm_b_node_key_00002');   // secret-scan: fixture
+  assert.notEqual(A.nodeId, B.nodeId);
+  await until(() => sw.upgrades.length >= 2, 8000, 'both linked');
+  const ids = [A.nodeId, B.nodeId].sort();
+  assert.deepEqual(sw.upgrades.map((u) => stagewatchQuery(u.url).get('cid')).sort(), ids, 'not one shared "agmessage"');
+  for (const u of sw.upgrades) {
+    const q = stagewatchQuery(u.url);
+    assert.deepEqual([...q.keys()].sort(), ['cid', 'node', 'page', 't']);
+    assert.deepEqual([q.get('node'), q.get('t'), q.get('page')], [q.get('cid'), 'messenger', '/agmessage']);
+  }
+  assert.deepEqual(sw.screens().map((x) => [x.id, x.tabs]).sort(), ids.map((id) => [id, 1]), 'Stagewatch\'s Screens list each AGMessage once');
+  // A hall of A on the same Stagewatch: the same id as A's default link (one node), and nothing of the hall in the address.
+  const hall = (await api(a.base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: A.admin })).body.code;
+  const n = sw.upgrades.length;
+  assert.ok((await emit(A.ctl, 'hall:configure', { code: hall, stagewatchUrl: sw.url, stagewatchKey: 'swk_agm_a_node_key_00001' /* secret-scan: fixture */ })).ok);
+  await until(() => sw.upgrades.length > n, 8000, 'the hall linked');
+  const q = stagewatchQuery(sw.upgrades[n].url);
+  assert.deepEqual([q.get('cid'), q.get('node')], [A.nodeId, A.nodeId]);
+  assert.ok(![...q.values()].some((v) => v.includes(hall)), 'the hall\'s code is never in the address');
+  assert.deepEqual(sw.screens().map((x) => [x.id, x.tabs]).sort(), [[A.nodeId, 2], [B.nodeId, 1]].sort());
+  // The id each dials as is the one its context names.
+  const posted = () => new Set(sw.requests.filter((r) => r.url === '/api/peers/context').map((r) => JSON.parse(r.body).node.id));
+  await until(() => posted().size === 2, 8000, 'both contexts posted');
+  assert.deepEqual([...posted()].sort(), ids);
+});
+
 test('C20: a Patterns certificate that changes is refused until the admin types the start of the new one; unlinking forgets the pin', async (t) => {
   const https = require('https');
   const tlsmod = require('../lib/tls');

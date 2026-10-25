@@ -139,6 +139,8 @@ one shape:
   address).
 - **AGMessage**: holds the Stagewatch key encrypted at rest (Windows DPAPI where available, else AES with a machine key
   file outside `data/`), sends it in a header — never `?pin=` in a WebSocket URL — and asks for a `node`-scope key.
+  It reads Stagewatch's `/ws` as itself: `?node=<its id>&t=messenger&cid=<its id>`, each key once (Stagewatch keeps the
+  last value of a repeated key), the id from its hello and context — never a shared name, a per-hall id or a secret.
   A Patterns' or PlayMap's pairing token it holds the same way, and sends only to a loopback address or over TLS to a
   certificate pinned for that node or confirmed by a person (at least 16 characters of its fingerprint typed); it never
   drives them with it — its lines are proposals (§11) — until they issue it a scoped key.
