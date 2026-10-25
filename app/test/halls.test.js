@@ -498,4 +498,43 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     await until(() => lines.some(([, x]) => x.text === 'Ted Tech left'), 3000, 'Ted Tech left');
     assert.deepEqual(await people(), { api: 1, board: 1 });
   });
+
+  await t.test('in a locked hall a seat outlives its page dropping and coming back (Wi-Fi, the reload after the admin\'s change); a logout does not', async () => {
+    const hallJ = await hall('Hall J');
+    const { lines } = await watcher(hallJ);
+    const rows = async () => (await ask(ctl, 'admin:listRooms')).rooms.find((r) => r.code === hallJ).users;
+    const listed = async (name) => (await rows()).some((u) => u.name === name);
+    const eve = await guest(hallJ, 'Eve', 'board');
+    const oz = await guest(hallJ, 'Oz', 'observer');
+    assert.ok((await emit(ctl, 'admin:lockRoles', { roomCode: hallJ, on: true })).ok);
+    await wait(200);
+    lines.length = 0;
+
+    // Eve's Wi-Fi drops; her page comes back on a new connection with what its link says: board, no invite.
+    eve.s.close();
+    await until(async () => !(await listed('Eve')), 3000, 'Eve\'s page gone');
+    const back = await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity });
+    assert.deepEqual([back.j.role, back.j.note], ['board', ''], 'her seat, not an observer\'s');
+    assert.ok((await emit(back.s, 'message', { type: 'text', text: 'Board still here' })).ok);
+    const second = await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity });
+    assert.equal(second.j.role, 'board', 'a second page of hers, while the first is open');
+
+    // The admin seats Oz backstage; the page reloads with that role in its link, and keeps it.
+    const told = new Promise((resolve) => { oz.s.once('roleChanged', resolve); });
+    assert.ok((await emit(ctl, 'admin:setRole', { roomCode: hallJ, socketId: oz.s.id, role: 'research' })).ok);
+    assert.equal((await told).role, 'research');
+    oz.s.close();
+    await until(async () => !(await listed('Oz')), 3000, 'Oz\'s old page gone');
+    const reloaded = await guest(hallJ, 'Oz', 'research', { uid: oz.j.identity });
+    assert.equal(reloaded.j.role, 'research', 'the admin\'s change outlives the reload');
+    assert.ok((await emit(reloaded.s, 'message', { type: 'text', text: 'Research on it' })).ok);
+    await wait(300);
+    assert.deepEqual(lines.filter(([, x]) => /joined|left/.test(x.text)).map(([, x]) => x.text), [], 'quiet: they never left');
+
+    // Not a seat of theirs: another name on the same browser, another role, or after the admin's logout.
+    assert.equal((await guest(hallJ, 'Not Eve', 'board', { uid: eve.j.identity })).j.role, 'observer');
+    assert.equal((await guest(hallJ, 'Oz', 'board', { uid: oz.j.identity })).j.role, 'observer');
+    assert.ok((await emit(ctl, 'admin:kick', { socketId: back.s.id })).ok);
+    assert.equal((await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity })).j.role, 'observer', 'logged out is not a drop');
+  });
 });

@@ -214,8 +214,16 @@ const trackJoin = (uid, code) => { if (!userRooms.has(uid)) userRooms.set(uid, n
 const trackLeave = (uid, code) => { const s = userRooms.get(uid); if (s) { s.delete(code); if (!s.size) userRooms.delete(uid); } };
 
 // Venue Wi-Fi drops people for a second: announce "left" only if they don't come straight back.
-const pendingLeaves = new Map();   // room|uid -> timer
+const pendingLeaves = new Map();   // room|uid -> {timer, name, role} (role null: the server sent them away, no seat held)
 const LEAVE_GRACE_MS = 8000;
+/** Whether this person (identity and name) holds a seat with this role in the room: on a page of theirs still there, or
+ *  on one that dropped within the grace (Wi-Fi, the reload after the admin changed their role) and was not sent away by
+ *  the server. A locked room's invite is for people who join later; someone already seated keeps the seat. */
+function holdsSeat(room, uid, name, role) {
+  for (const [sid, u] of room.users) if (u.uid === uid && u.name === name && u.role === role && io.sockets.sockets.has(sid)) return true;
+  const p = pendingLeaves.get(room.code + '|' + uid);
+  return !!p && p.name === name && p.role === role;
+}
 
 // Upload tokens, issued at join: an upload must come from someone in a meeting.
 const uploadTokens = new Map();    // token -> {room, uid, bucket}
@@ -569,9 +577,10 @@ io.on('connection', (socket) => {
     } else {
       id = guard.checkIdentity(SECRET, uid);
       if (!id) { identity = guard.newIdentity(SECRET); id = guard.checkIdentity(SECRET, identity); }
-      // Seated already: the role stays. Otherwise, in a locked room, board and research seats need the admin's invite link.
+      // Seated already: the role stays. Otherwise, in a locked room, board and research seats need the admin's invite link
+      // (or a seat this person already holds there).
       if (seated(id)) cleanRole = me.role;
-      else if (r.settings.lockRoles && cleanRole !== 'observer' && !socket.data.isAdmin && !guard.checkInvite(SECRET, code, cleanRole, invite)) {
+      else if (r.settings.lockRoles && cleanRole !== 'observer' && !socket.data.isAdmin && !guard.checkInvite(SECRET, code, cleanRole, invite) && !holdsSeat(r, id, cleanName, cleanRole)) {
         cleanRole = 'observer';
         note = 'This meeting needs an invite link for that role — you joined as an observer.';
       }
@@ -604,7 +613,7 @@ io.on('connection', (socket) => {
     let returning = stillSeated;
     if (!isAdminView) {
       const k = code + '|' + id;
-      if (pendingLeaves.has(k)) { clearTimeout(pendingLeaves.get(k)); pendingLeaves.delete(k); returning = true; }
+      if (pendingLeaves.has(k)) { clearTimeout(pendingLeaves.get(k).timer); pendingLeaves.delete(k); returning = true; }
       // The same person on another device or tab stays in (and this one is not announced again); only a socket that
       // has already gone is cleared.
       for (const [sid, u] of r.users) {
@@ -1365,7 +1374,7 @@ io.on('connection', (socket) => {
   socket.on('admin:tunnelStop', (ack) => { if (admin(ack)) { stopTunnel(); ok(ack)({ ok: true }); } });
   socket.on('admin:tunnelStatus', (ack) => { if (admin(ack)) ok(ack)({ ok: true, running: !!tunnelProc, url: tunnelUrl, error: tunnelError }); });
 
-  function leaveRoom(now) {
+  function leaveRoom(now, holdSeat = false) {
     if (!room || !me || socket.data.adminView) return;
     const r = room, u = me;
     r.users.delete(socket.id);
@@ -1377,13 +1386,17 @@ io.on('connection', (socket) => {
     const k = r.code + '|' + u.uid;
     const announce = () => { pendingLeaves.delete(k); if (store.has(r.code) && !Array.from(r.users.values()).some((x) => x.uid === u.uid)) systemMessage(r, `${u.name} left`); };
     if (now) announce();
-    else { if (pendingLeaves.has(k)) clearTimeout(pendingLeaves.get(k)); pendingLeaves.set(k, setTimeout(announce, LEAVE_GRACE_MS)); }
+    else {
+      if (pendingLeaves.has(k)) clearTimeout(pendingLeaves.get(k).timer);
+      pendingLeaves.set(k, { timer: setTimeout(announce, LEAVE_GRACE_MS), name: u.name, role: holdSeat ? u.role : null });
+    }
   }
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
     boardSockets.delete(socket);
     if (uploadToken) uploadTokens.delete(uploadToken);
-    leaveRoom(false);
+    // A page that dropped keeps its seat for the grace; one the server sent away (a logout, a closed hall) does not.
+    leaveRoom(false, reason !== 'server namespace disconnect');
   });
 });
 

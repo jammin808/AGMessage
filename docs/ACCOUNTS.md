@@ -52,6 +52,9 @@ the admin page's room list changes a code guest's role and refuses an account's 
 lets a code guest forward into a hall, and is refused for an account that may not post there. An account with a hall
 open on a laptop and a phone (or a guest with it open in two tabs) is one person there: listed, announced and counted
 once, "left" only when the last page closes, and the room list's role, link and logout reach every one of those pages.
+A locked hall's invite is for people who join later: a code guest already seated there keeps the seat while another of
+their pages is open and for the few seconds before "left" (Wi-Fi drops, the page's reload after the admin changes their
+role), under the same name and role; after the admin logs them out it is gone.
 
 ## The first admin
 
