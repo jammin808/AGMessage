@@ -120,7 +120,8 @@
       $('setupDefault').textContent = r.defaultStagewatch ? 'Leave it empty to follow the default Stagewatch (' + r.defaultStagewatch + ').' : 'Leave it empty for no Stagewatch.';
       const status = r.stagewatch.status;
       $('setupStatus').textContent = status ? 'Its own link: ' + status + (r.stagewatch.tls && r.stagewatch.tls.changed ? ' — CERTIFICATE CHANGED' : '')
-        + (r.stagewatch.key && r.stagewatch.key.state === 'refused' ? ' — make a node key in Stagewatch (Settings → Remote → API keys) and enter it here' : '') : '';
+        + (r.stagewatch.key && r.stagewatch.key.state === 'refused' ? ' — make a node key in Stagewatch (Settings → Remote → API keys) and enter it here' : '')
+        + (r.stagewatch.deskRefusal ? ' — its show desk refuses this AGMessage (' + r.stagewatch.deskRefusal + '): give AGMessage a node key of its own' : '') : '';
       $('setupAccept').hidden = !(r.stagewatch.tls && r.stagewatch.tls.changed);
       const list = $('setupHeard');
       list.textContent = '';

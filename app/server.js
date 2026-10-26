@@ -147,7 +147,7 @@ const isLoopback = (req) => { const a = (req.socket && req.socket.remoteAddress)
 const isEncrypted = (req) => !!(req.socket && req.socket.encrypted);
 const tlsFacts = () => ({
   on: !!cert, fingerprint: cert ? cert.fp : '', validTo: cert ? cert.validTo : '', requireHttps: !!settings.requireHttps,
-  link: stageLink.tlsState, desk: stageLink.desk,
+  link: stageLink.tlsState, desk: stageLink.desk, deskRefusal: stageLink.deskRefusal,
 });
 
 // ---------------------------------------------------------------- health: crashes, the loop, latency
@@ -798,7 +798,7 @@ io.on('connection', (socket) => {
       users: roomUserSummary(r, { links: socket.data.isAdmin }),
       ai: !!aiKey(), stage: stagePayload(linkFor(code)),
       canSendToStage: !!(linkFor(code).base && linkFor(code).key && linkFor(code).keyState !== 'refused') && allowed('stage.send'),
-      canPropose: !!(linkFor(code).desk && linkFor(code).key) && allowed('stage.send'),
+      canPropose: !!(linkFor(code).desk && linkFor(code).key && !linkFor(code).deskRefusal) && allowed('stage.send'),
       account: acct ? { username: acct.username, name: acct.name, role: acct.role, roleLabel: rbac.ROLES[acct.role].label } : null,
       seen: seenFor(r),
     });
@@ -1048,7 +1048,7 @@ io.on('connection', (socket) => {
     const link = linkFor(room.code);
     ack({
       ok: true, linked: link.linked, key: link.keyState, title: (link.context && link.context.node && link.context.node.name) || '',
-      canSend: !!(link.base && link.key && link.keyState !== 'refused') && allowed('stage.send'), canPropose: !!(link.desk && link.key) && allowed('stage.send'),
+      canSend: !!(link.base && link.key && link.keyState !== 'refused') && allowed('stage.send'), canPropose: !!(link.desk && link.key && !link.deskRefusal) && allowed('stage.send'),
       targets: stagelines.destinations(link.departments),
     });
   });
@@ -1289,7 +1289,8 @@ io.on('connection', (socket) => {
     if (!hasDesk) {
       const where = link.hall ? ((store.get(link.hall) || {}).name || link.hall) + '\'s Stagewatch' : 'The default Stagewatch';
       const held = desk.base && desk.key ? desk.keyHeld('proposed') : '';
-      return ack({ ok: false, error: held ? where + ': ' + held : where + (desk.linked ? ' keeps no show desk' : desk.base ? ' is ' + desk.status : ' is not linked') + ' — not proposed.' });
+      const refused = desk.deskRefusal ? ' refuses this AGMessage at its show desk (' + desk.deskRefusal + ')' : '';
+      return ack({ ok: false, error: held ? where + ': ' + held : where + (refused || (desk.linked ? ' keeps no show desk' : desk.base ? ' is ' + desk.status : ' is not linked')) + ' — not proposed.' });
     }
     const r = await desk.propose({
       from: { t: 'messenger', id: settings.nodeId, name: 'AGMessage' },
@@ -1337,7 +1338,7 @@ io.on('connection', (socket) => {
     const own = hallLinks.get(r.code);
     ack({
       ok: true, code: r.code, name: r.name || '',
-      stagewatch: { url: sw.url || '', keySet: !!secretbox.open(sw.keySealed), fp: sw.fp || '', status: own ? own.status : null, tls: own ? own.tlsState : null, key: own ? own.keyFacts() : null },
+      stagewatch: { url: sw.url || '', keySet: !!secretbox.open(sw.keySealed), fp: sw.fp || '', status: own ? own.status : null, tls: own ? own.tlsState : null, key: own ? own.keyFacts() : null, deskRefusal: own ? own.deskRefusal : '' },
       defaultStagewatch: settings.stagewatchUrl || '',
       stagewatches: discovery ? discovery.list().filter((p) => p.t === 'main') : [],
     });
@@ -2001,7 +2002,7 @@ function nodesChanged() { for (const s of io.sockets.sockets.values()) if (s.dat
  */
 const mayDriveNode = (socket, link) => socket.data.isAdmin || !!(socket.data.account && rbac.can(socket.data.account, 'nodes.control', link.hall || undefined) && (link.hall || rbac.effective(socket.data.account).allHalls));
 /** The Stagewatch a node's proposals go to — its hall's (its own, else the default; the default for a node of every hall) — and whether it keeps a desk now. */
-const deskFor = (node) => { const l = linkFor(node.hall || ''); return { link: l, desk: !!(l.linked && l.desk) }; };
+const deskFor = (node) => { const l = linkFor(node.hall || ''); return { link: l, desk: !!(l.linked && l.desk && !l.deskRefusal) }; };
 
 // Stage sends waiting for the speaker: "<link>:<Stagewatch message id>" -> the AGMessage messages that show its state.
 // A Stagewatch numbers its own messages, from 1 again when it restarts: two halls' Stagewatches can both send message 12,
@@ -2161,8 +2162,10 @@ const waitAfter = (answer, attempt) => deskresults.postVerdict(answer, attempt, 
  * it is still the one that ran and waits. True when the result needs nothing more (taken, or refused or gone for good).
  */
 async function tellResult(r, link) {
-  if (!r.fresh || r.gen !== link.generation) {
+  const gen = link.generation;
+  if (!r.fresh || r.gen !== gen) {
     const a = await link.proposalAnswer(r.id);
+    if (link.generation !== gen || link.tag !== r.sw) return false;   // pointed elsewhere meanwhile: the next tick decides
     const seen = a.status === 200 ? deskresults.readBack(r, a.proposal, { sameStagewatch: r.gen === link.generation }) : a.status === 404 ? 'gone' : 'wait';
     if (seen === 'taken' || seen === 'gone') { endResult(r, seen); return true; }
     if (seen === 'wait') { r.attempts++; r.lastStatus = a.status; r.nextAt = Date.now() + waitAfter(a.status === 200 ? { status: 0 } : a, r.attempts); return false; }
@@ -2221,13 +2224,20 @@ setInterval(async () => {
         if (was !== link.desk) onStageState(link, link.view);
       }
       if (!link.desk || stop()) continue;
-      // Collected first, inside Stagewatch's minute for collecting: run once, on disk, then each first post at once.
+      // Collected first, inside Stagewatch's minute for collecting: run once, on disk, then each first post at once. What
+      // a collect hands over belongs to the Stagewatch it was asked of, even if the link was pointed elsewhere meanwhile.
       const fresh = [];
-      for (const p of await link.approvedFor(settings.nodeId)) {
-        const key = ranKey(link.tag, p);
+      const tag = link.tag, gen = link.generation, refusalWas = link.deskRefusal;
+      const approved = await link.approvedFor(settings.nodeId);
+      if (link.deskRefusal !== refusalWas) {
+        noteEvent(link.deskRefusal ? 'Stagewatch\'s show desk refuses to hand AGMessage what it approves: ' + link.deskRefusal : 'Stagewatch\'s show desk hands AGMessage what it approves again', link);
+        onStageState(link, link.view);
+      }
+      for (const p of approved) {
+        const key = ranKey(tag, p);
         if (ranKeys.has(key)) continue;
         rememberRun(key);
-        const r = { sw: link.tag, link: link.id, id: p.id, created: p.created || 0, line: p.line, target: settings.nodeId, ...runApproved(p), ran: Date.now(), attempts: 0, posts: 0, nextAt: 0, lastStatus: 0, gen: link.generation, fresh: true };
+        const r = { sw: tag, link: link.id, id: p.id, created: p.created || 0, line: p.line, target: settings.nodeId, ...runApproved(p), ran: Date.now(), attempts: 0, posts: 0, nextAt: 0, lastStatus: 0, gen, fresh: true };
         deskResults.push(r); fresh.push(r);
         if (deskResults.length > deskresults.MAX_WAITING) endResult(deskResults[0], 'too many waiting');
       }
@@ -2236,7 +2246,7 @@ setInterval(async () => {
       if (fresh.length) { saveDeskResults(); deskLane.flushSync(); }
       // Then the results due, the new ones first and the rest oldest first: the first that must wait stops the rest. A new
       // one this tick did not reach is no longer new: its turn comes with the rest, its proposal read back first.
-      const due = fresh.concat(deskResults.filter((r) => !fresh.includes(r) && r.nextAt <= Date.now() && deskLinkOf(r) === link));
+      const due = fresh.concat(deskResults.filter((r) => !fresh.includes(r) && r.nextAt <= Date.now())).filter((r) => deskLinkOf(r) === link);
       try {
         for (const r of due) {
           if (stop()) break;
@@ -2244,11 +2254,12 @@ setInterval(async () => {
           if (!(await tellResult(r, link))) break;
         }
       } finally { for (const r of fresh) r.fresh = false; }
-      for (const [key, t] of Array.from(proposals)) {
-        if (stop()) break;
-        if (t.link !== link.id) continue;
-        const p = await link.proposal(t.id);
-        if (!p) continue;   // the desk could not be asked: the next tick asks again
+      // Our proposals at this desk, all in one read of what this node proposed: one request a tick however many wait for
+      // the show caller, so following them never spends the key's minute. One the desk no longer lists is gone.
+      const mine = Array.from(proposals).filter(([, t]) => t.link === link.id);
+      const listed = mine.length && !stop() ? await link.proposalsFrom(settings.nodeId) : null;
+      for (const [key, t] of listed ? mine : []) {
+        const p = listed.get(t.id) || { gone: true };
         const why = notOurs(t, p, link);
         if (why) { loseProposal(key, t, why); continue; }
         if (!t.created && p.created) t.created = p.created;

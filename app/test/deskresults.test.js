@@ -240,9 +240,10 @@ test('a 429 or a refused key met while following proposals stops the link at onc
   await until(async () => (await emit(crew, 'stage:targets', {})).canPropose, 10000, 'the desk known');
   for (let i = 1; i <= 5; i++) assert.ok((await emit(crew, 'stage:propose', { text: 'Follow me ' + i, destination: 'speaker' })).ok);
   await wait(3500);   // every one followed at least once
-  // The hold begins with a follow: that GET is the first to meet it, with the rest of the tick's follows still to come.
+  // The hold begins with the follow (one read of all this node proposed): it is the first to meet it, and nothing of
+  // that tick or the next may follow it into the hold.
   let first = null;
-  sw.onRequest = (r) => { if (/^\/api\/proposals\/p\d+$/.test(r.url)) { sw.onRequest = null; first = r; sw.holdAll(6000); } };
+  sw.onRequest = (r) => { if (r.url.includes('?from=')) { sw.onRequest = null; first = r; sw.holdAll(6000); } };
   await until(() => first, 6000, 'a follow, and the hold');
   await wait(6500);
   assert.equal(holdBroken(sw, first, 6000), '', 'one request met the 429, nothing followed it into the hold');
@@ -288,4 +289,56 @@ test('a hall moved to another Stagewatch: its result still waiting is told to no
   assert.equal((await health(ctx)).desk.waiting, 0);
   await until(() => onDisk(ctx).results.length === 0, 4000, 'the file empties');
   assert.ok(!other.requests.some((r) => r.url.startsWith('/api/proposals/' + id)), 'the other Stagewatch is never told');
+});
+
+test('following our proposals costs one read a tick however many wait for the show caller, and their states still arrive', async (t) => {
+  const ctx = await deskSetup(t);
+  const { sw } = ctx;
+  const crew = await connect(ctx.srv.base); ctx.sockets.push(crew);
+  assert.ok((await emit(crew, 'join', { roomCode: ctx.hall, name: 'Alex', role: 'research' })).ok);
+  await until(async () => (await emit(crew, 'stage:targets', {})).canPropose, 10000, 'the desk known');
+  const ids = [];
+  for (let i = 1; i <= 10; i++) ids.push((await emit(crew, 'stage:propose', { text: 'Waiting ' + i, destination: 'speaker' })).proposal.id);
+  const t0 = Date.now();
+  await wait(7000);
+  const since = sw.requests.filter((r) => r.at >= t0 && r.url.startsWith('/api/proposals'));
+  assert.equal(since.filter((r) => /^\/api\/proposals\/p\d+$/.test(r.url)).length, 0, 'no read per proposal');
+  assert.ok(since.filter((r) => r.url.includes('?from=')).length <= 4, 'one read of all of them a tick: ' + since.map((r) => r.url).join(' '));
+  sw.approve(ids[4], 'Show caller');
+  await until(async () => (await emit(ctx.ctl, 'admin:watchRoom', { roomCode: ctx.hall })).messages.some((m) => m.proposal && m.proposal.id === ids[4] && m.proposal.state === 'approved'), 8000, 'its state followed');
+});
+
+test('a link pointed at another Stagewatch while a collect is out: what the first handed over is never reported to the second', async (t) => {
+  const ctx = await deskSetup(t);
+  const a = ctx.sw;
+  const b = await fakeStagewatch({ name: 'Desk B' });
+  t.after(() => b.close());
+  // Each desk numbers from p1: its own p1 for this AGMessage, with different lines.
+  const fromA = a.add(forUs(ctx, 'bogus line from desk A'));
+  const fromB = b.add(forUs(ctx, 'notice From desk B'));
+  assert.equal(fromA, fromB);
+  a.collectDelayMs = 1500;
+  a.onRequest = (r) => { if (r.url.includes('?target=')) { a.onRequest = null; emit(ctx.ctl, 'admin:settings', { stagewatchUrl: b.url }); } };
+  await until(() => b.proposals.get(fromB).state === 'done', 15000, 'desk B\'s own p1 run and reported');
+  await wait(3500);
+  const toB = posts(b, fromB).map((r) => JSON.parse(r.body));
+  assert.deepEqual(toB, [{ ok: true, words: 'shown in 1 meeting' }], 'only its own result');
+  assert.equal(a.proposals.get(fromA).state, 'approved', 'desk A is no longer linked: nobody to tell it');
+  assert.ok((await recent(ctx)).includes('a show-desk result could not be reported: nobody to tell'));
+});
+
+test('a collect the desk refuses (the key speaks for another node) is said on every page and proposals are not offered', async (t) => {
+  const ctx = await deskSetup(t);
+  const { sw } = ctx;
+  const crew = await connect(ctx.srv.base); ctx.sockets.push(crew);
+  assert.ok((await emit(crew, 'join', { roomCode: ctx.hall, name: 'Alex', role: 'research' })).ok);
+  await until(async () => (await emit(crew, 'stage:targets', {})).canPropose, 10000, 'the desk known');
+  sw.collectRefusal = { status: 403, error: 'this key speaks for another node (or that node has its own key)' };
+  await until(async () => (await emit(ctx.ctl, 'admin:settings')).tls.deskRefusal, 8000, 'the admin page says it');
+  assert.equal((await emit(ctx.ctl, 'admin:settings')).tls.deskRefusal, 'this key speaks for another node (or that node has its own key)');
+  assert.equal((await emit(crew, 'stage:targets', {})).canPropose, false, 'no proposal offered');
+  assert.match((await emit(crew, 'stage:propose', { text: 'x', destination: 'speaker' })).error, /refuses this AGMessage/);
+  assert.ok((await recent(ctx)).some((e) => /refuses to hand AGMessage what it approves: this key speaks for another node/.test(e)));
+  sw.collectRefusal = null;
+  await until(async () => (await emit(crew, 'stage:targets', {})).canPropose, 8000, 'offered again once it hands them over');
 });

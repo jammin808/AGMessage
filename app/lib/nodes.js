@@ -353,6 +353,9 @@ class StagewatchLink {
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
     this.desk = false;                // Stagewatch answers /api/proposals (Show Bus §11)
     this.deskCheckedAt = 0;
+    // Stagewatch's words when its desk refuses to hand this node what it approved (its collect answered 401/403: the key
+    // speaks for another node), '' while it hands them over: proposals are not offered meanwhile, and the pages say why.
+    this.deskRefusal = '';
     // Which Stagewatch, as it is now: a new one each time the link is made, pointed elsewhere or its frames' seq goes back
     // (it restarted, Show Bus §4) — its message and proposal numbers start again, so nothing followed before carries over.
     this.generation = ++generations;
@@ -385,7 +388,7 @@ class StagewatchLink {
     this.clock.reset();
     this.context = null; this.departments = [];
     this.endpoint = null;
-    this.desk = false; this.deskCheckedAt = 0;
+    this.desk = false; this.deskCheckedAt = 0; this.deskRefusal = '';
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
     if (keep) { this._set(this._refusedStatus(), null); return; }
     this._resetKey();
@@ -430,7 +433,7 @@ class StagewatchLink {
     this.refusals++; this.heldView = null;
     this._close(); this._probing = null;
     // What a refused key read is not shown or quoted, and the desk is asked again after the next acceptance.
-    this.context = null; this.desk = false; this.deskCheckedAt = 0;
+    this.context = null; this.desk = false; this.deskCheckedAt = 0; this.deskRefusal = '';
     this._set(this._refusedStatus(), null);
     if (changed) this.onKey(this.keyFacts(), this.keyEpoch);
     releasePlaces(this);
@@ -765,6 +768,7 @@ class StagewatchLink {
     if (this.keyHeld('proposed')) return { ok: false, error: this.keyHeld('proposed') };
     if (!this.linked || !this.endpoint) return { ok: false, error: 'The Stagewatch link is ' + this.status + ' — not proposed.' };
     if (!this.desk) return { ok: false, error: 'This Stagewatch keeps no approval queue (Show Bus 1.2) — send it directly instead.' };
+    if (this.deskRefusal) return { ok: false, error: 'Stagewatch\'s show desk refuses this AGMessage (' + this.deskRefusal + ') — not proposed. Give this AGMessage a node key of its own (Stagewatch → Settings → Remote → API keys).' };
     try {
       const res = await this._call('/api/proposals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (res.status >= 400) return { ok: false, error: 'Stagewatch: ' + String((res.body && res.body.error) || ('said ' + res.status)).slice(0, 160) };
@@ -792,9 +796,26 @@ class StagewatchLink {
     if (!this.desk || !this.linked) return [];
     try {
       const res = await this._call('/api/proposals?target=' + encodeURIComponent(nodeId) + '&state=approved', { timeoutMs: 3000 });
+      // A refusal of the collect itself (not a busy key, not a desk away) is kept, in Stagewatch's words, until one is taken.
+      if (res.status === 200) this.deskRefusal = '';
+      else if (res.status === 401 || res.status === 403) this.deskRefusal = refusalWords(res.body && res.body.error) || 'Stagewatch answered ' + res.status;
       // Only what the desk says is approved for this node is run: Stagewatch's collect lists nothing else.
       return res.status === 200 ? readProposalList(res.body).filter((p) => p.state === 'approved' && p.target && p.target.id === nodeId) : [];
     } catch { return []; }
+  }
+
+  /**
+   * Every proposal this node made at the desk, by id, in one read (Stagewatch's own list of what a node proposed), or null
+   * when it could not be read. One request however many wait for the show caller; a 200 also says the desk is there.
+   */
+  async proposalsFrom(nodeId) {
+    try {
+      const acceptance = this.acceptances;
+      const res = await this._call('/api/proposals?from=' + encodeURIComponent(nodeId), { timeoutMs: 3000 });
+      if (res.status !== 200 || this.keyState !== 'accepted' || this.acceptances !== acceptance) return null;
+      this.desk = true; this.deskCheckedAt = Date.now();
+      return new Map(readProposalList(res.body).map((p) => [p.id, p]));
+    } catch { return null; }
   }
 
   /**

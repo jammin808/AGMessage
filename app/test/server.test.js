@@ -341,7 +341,11 @@ test('AGMessage server: security, resume, persistence', async (t) => {
         const u = new URL(req.url, 'http://x');
         if (u.pathname === '/api/proposals' && req.method === 'POST') { seen.proposals.push(JSON.parse(body)); return res.end(JSON.stringify({ id: 'p17', state: 'pending' })); }
         // As Stagewatch's SharedProposal.ToJson: result and words one string, ok at the top level (null until it ran).
-        if (u.pathname === '/api/proposals/p17') { const words = state === 'done' ? 'Message on the speaker screen' : ''; return res.end(JSON.stringify({ id: 'p17', state, decidedBy: 'SM', result: words, ok: state === 'done' ? true : null, words })); }
+        const words = state === 'done' ? 'Message on the speaker screen' : '';
+        const p17 = { id: 'p17', state, decidedBy: 'SM', result: words, ok: state === 'done' ? true : null, words };
+        if (u.pathname === '/api/proposals/p17') return res.end(JSON.stringify(p17));
+        // ProposalsFrom: all this node proposed, as {proposals: […]}.
+        if (u.pathname === '/api/proposals' && u.searchParams.get('from')) return res.end(JSON.stringify({ proposals: seen.proposals.length ? [p17] : [] }));
         if (u.pathname === '/api/proposals' && u.searchParams.get('target'))
           return res.end(JSON.stringify(seen.results.length ? [] : [{ id: 'p9', state: 'approved', line: 'notice "Break in 5 minutes"', decidedBy: 'SM', target: { t: 'messenger', id: u.searchParams.get('target') } }]));
         if (u.pathname === '/api/proposals') return res.end('[]');

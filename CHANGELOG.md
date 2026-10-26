@@ -24,7 +24,11 @@ code (2.16 and its newest work) before it was changed.
   0.5.0 could do when the restart went unseen. Each result that ends untaken, or is taken only after a retry, is said in
   the recent events (no notice text, no ids), and the admin page's health line counts what is waiting. Whether
   Stagewatch keeps a desk changes only on its verdict (200, or 404/405): a 429 or no answer to that check no longer hides
-  the desk for a minute, in which what it approved would have expired uncollected.
+  the desk for a minute, in which what it approved would have expired uncollected. Our own proposals are followed with
+  one read a tick of all this AGMessage proposed (0.5.0 read each, so forty open ones spent the key's 600 a minute and a
+  send to the stage came back 429); a collect answered after the link was pointed elsewhere is reported to nobody,
+  never to the new Stagewatch's proposal of the same number; and a collect the desk refuses (the key speaks for another
+  node) is said on the admin page, the Set up and the recent events, with proposals off until one is taken.
 
 **The Stagewatch link**
 - The link dials Stagewatch as this AGMessage, by its Show Bus id (`/ws?node=<id>&t=messenger&cid=<id>`), not as

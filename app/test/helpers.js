@@ -113,7 +113,7 @@ function screenIdOf(target) {
  * holds a new socket's first message (and so the link's key read) that long; `messageDelayMs` holds a send
  * that long before its key is judged (a request made under one key, answered after the key changed).
  */
-async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null, answerDeskChecks = [], answerContext = [], messageDelayMs = 0, firstFrameDelayMs = 0 } = {}) {
+async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null, answerDeskChecks = [], answerContext = [], messageDelayMs = 0, firstFrameDelayMs = 0, collectDelayMs = 0, collectRefusal = null } = {}) {
   const http = require('http');
   const https = require('https');
   const { WebSocketServer } = require('ws');
@@ -168,11 +168,17 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
       }
       if (desk && u.pathname === '/api/proposals' && u.searchParams.has('from') && answerDeskChecks.length) return queued(answerDeskChecks);
       if (desk && u.pathname === '/api/proposals') {
-        // As Stagewatch's Collect: a target's approved proposals are handed over once (claimed), never listed again.
+        // As Stagewatch's Collect: a target's approved proposals are handed over once (claimed), never listed again; a
+        // refused collect is 403 in its words (the key speaks for another node). ProposalsFrom: all a node proposed.
         const target = u.searchParams.get('target');
-        const list = Array.from(proposals.values()).filter((p) => (!target || (p.target && p.target.id === target && !p.claimed)) && (!u.searchParams.get('state') || p.state === u.searchParams.get('state')));
-        if (target) for (const p of list) p.claimed = true;
-        return json(200, { proposals: list.map(toJson) });
+        const from = u.searchParams.get('from');
+        if (target && collectRefusal) return json(collectRefusal.status, { ok: false, error: collectRefusal.error });
+        const collect = () => {
+          const list = Array.from(proposals.values()).filter((p) => (!target || (p.target && p.target.id === target && !p.claimed)) && (!from || (p.from && p.from.id === from)) && (!u.searchParams.get('state') || p.state === u.searchParams.get('state')));
+          if (target) for (const p of list) p.claimed = true;
+          return json(200, { proposals: list.map(toJson) });
+        };
+        return target && collectDelayMs ? void setTimeout(collect, collectDelayMs) : collect();
       }
       const one = /^\/api\/proposals\/(p\d+)(\/result)?$/.exec(u.pathname);
       if (desk && one && one[2] && onResultPost) onResultPost(one[1]);
@@ -246,6 +252,9 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     /** What it answers the next result posts, before its desk reads them: [{status, error, retryAfter}] (0: no answer). */
     get answerResults() { return answerResults; },
     set answerResults(v) { answerResults = v; },
+    /** A collect answered `ms` late (it claims what it lists when it answers), and one refused ({status, error}) or not (null). */
+    set collectDelayMs(ms) { collectDelayMs = ms; },
+    set collectRefusal(v) { collectRefusal = v; },
     /** How long a socket that connects from now on waits for its first message (a slow network: its key read comes late). */
     set firstFrameDelayMs(ms) { firstFrameDelayMs = ms; },
     /** What it answers the next reads of its context, and the next desk checks, first: [{status, error, retryAfter}]. */
