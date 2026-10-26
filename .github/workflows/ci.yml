@@ -177,7 +177,7 @@ jobs:
       - name: Refuse anything but a release build
         run: test "${{ needs.package.outputs.channel }}" = "release" || { echo "::error::the package job built ${{ needs.package.outputs.full }}, not a release"; exit 1; }
       - name: Build provenance (who built which zip from which commit)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*.zip
       - name: Publish the release
