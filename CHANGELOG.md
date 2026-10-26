@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.5.1 — 2026-10-25 — the show desk and the Stagewatch link, as Stagewatch states them
+## 0.5.1 — 2026-10-26 — the show desk and the Stagewatch link, as Stagewatch states them
 
 From the cross-app review of the Show Bus (the four items it left for after 0.5.0), each read against Stagewatch's own
-code (2.16 and its newest work) before it was changed.
+code (2.16 and its newest work) before it was changed; then two rounds of independent review of the changes, whose
+upheld findings are fixed below (docs/ANALYSIS.md §6).
 
 **The show desk**
 - A proposal's outcome is read as Stagewatch states it: `ok` and `words` at the top level, `result` a string. 0.5.0

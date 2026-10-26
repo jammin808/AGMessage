@@ -4,7 +4,7 @@
 // key, so one authenticated read (GET /api/context) is the verdict. A refused key lets the socket go, shows Stagewatch's
 // words everywhere and is asked again only after Stagewatch's lockout minute, so a wrong key never locks this machine out.
 const test = require('node:test');
-const assert = require('node:assert');
+const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const nodes = require('../lib/nodes');
@@ -22,7 +22,8 @@ function linkWith(extra = {}) {
   const statuses = [];
   const verdicts = [];
   let pinSaves = 0;
-  const link = new nodes.StagewatchLink({ nodeId: 'ab12cd34', pins, onStatus: (s) => statuses.push(s), onKey: (k) => verdicts.push(k), onPins: () => { pinSaves++; }, ...extra });
+  const { onKey, ...rest } = extra;
+  const link = new nodes.StagewatchLink({ nodeId: 'ab12cd34', pins, onStatus: (s) => statuses.push(s), onKey: (k, epoch) => { verdicts.push(k); if (onKey) onKey(k, epoch); }, onPins: () => { pinSaves++; }, ...rest });
   return { link, pins, statuses, verdicts, saves: () => pinSaves };
 }
 
@@ -552,4 +553,76 @@ test('end to end: a changed certificate reads as itself on the board and the hal
   assert.match(certRows[0].words, /^accepted a changed Stagewatch certificate \(sha256:[0-9a-f]{16}…\)$/);
   await until(async () => (await emit(ctl, 'admin:settings')).stage === 'connected', 8000, 'connected again');
   assert.equal((await keyRows()).length, before + 1, 'the new certificate\'s first acceptance is news');
+});
+
+test('a changed certificate accepted while the key is refused: the refusal and its hold stand, nothing is dialled', async () => {
+  const sw = await fakeStagewatch({ key: KEY, cert: certOf() });
+  const { link } = linkWith({ refusedRetryMs: 2500, lockoutMs: 2500 });
+  try {
+    link.configure(sw.url, KEY);
+    await until(() => link.status === 'connected', 4000, 'connected, its certificate pinned');
+    sw.key = OTHER;
+    await link.sendToStage('x');
+    assert.equal(link.keyState, 'refused');
+    sw.setCertificate(certOf());
+    await until(() => link.tlsState.changed, 8000, 'the re-ask met the changed certificate');
+    const [n, f] = [sw.counts.upgrades, sw.counts.failures];
+    assert.equal(link.acceptCertificate(), true);
+    assert.deepEqual([link.keyState, link.status], ['refused', 'key refused: unknown or revoked API key']);
+    await wait(1000);
+    assert.deepEqual([sw.counts.upgrades, sw.counts.failures], [n, f], 'no dial, no wrong key, inside the hold');
+  } finally { link.stop(); await sw.close(); }
+});
+
+test('a changed certificate accepted under an accepted key: "connecting" at once, and its next acceptance is news (a new epoch)', async () => {
+  const sw = await fakeStagewatch({ key: KEY, cert: certOf() });
+  const epochs = [];
+  const { link } = linkWith({ onKey: (k, epoch) => { if (k.state === 'accepted') epochs.push(epoch); } });
+  try {
+    link.configure(sw.url, KEY);
+    await until(() => link.status === 'connected', 4000, 'connected');
+    sw.setCertificate(certOf());
+    sw.drop();
+    await until(() => link.tlsState.changed, 8000, 'refused: certificate changed');
+    assert.equal(link.acceptCertificate(), true);
+    assert.equal(link.status, 'connecting');
+    await until(() => link.status === 'connected', 6000, 'connected again');
+    assert.equal(epochs.length, 2);
+    assert.notEqual(epochs[1], epochs[0]);
+  } finally { link.stop(); await sw.close(); }
+});
+
+test('a link pointed at another Stagewatch while its context is being read takes nothing of the first: no context, no departments', async () => {
+  const first = await fakeStagewatch({ name: 'Desk A', key: KEY, contextDelayMs: 600, departments: ['Pyro'] });
+  const second = await fakeStagewatch({ name: 'Desk B', key: KEY, auth18: true });
+  const { link } = linkWith();
+  try {
+    link.configure(first.url, KEY);
+    await until(() => link.status === 'connected', 6000, 'connected to the first');
+    link.departments = [];
+    const pending = link.fetchContext();   // the first's answer comes 600 ms later
+    await wait(100);
+    link.configure(second.url, KEY);
+    await until(() => link.status === 'connected', 4000, 'accepted by the second');
+    assert.equal(await pending, null);
+    assert.ok(!link.context || link.context.node.name !== 'Desk A', 'the first Stagewatch\'s context is not shown for the second');
+    assert.ok(!link.departments.includes('Pyro'), 'nor its departments offered');
+  } finally { link.stop(); await first.close(); await second.close(); }
+});
+
+test('whether Stagewatch keeps a desk: a 429 says nothing of a desk known before, a 403 waits a whole interval', async () => {
+  const sw = await fakeStagewatch({ key: KEY });
+  const { link } = linkWith();
+  try {
+    link.configure(sw.url, KEY);
+    await until(() => link.status === 'connected', 4000, 'connected');
+    assert.equal(await link.checkDesk('ab12cd34'), true);
+    sw.answerDeskChecks = [{ status: 429, error: 'rate limit: too many requests with this key', retryAfter: 1 }];
+    assert.equal(await link.checkDesk('ab12cd34'), true, 'a busy key hides no desk');
+    assert.ok(Date.now() - link.deskCheckedAt >= link.deskCheckMs - 5000 - 50, 'asked again in seconds');
+    await wait(1100);
+    sw.answerDeskChecks = [{ status: 403, error: 'HTTPS is required for keys from another machine' }];
+    assert.equal(await link.checkDesk('ab12cd34'), true);
+    assert.ok(Date.now() - link.deskCheckedAt < 1000, 'a 403 is asked again only after a whole interval');
+  } finally { link.stop(); await sw.close(); }
 });

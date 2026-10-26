@@ -3,7 +3,7 @@
 // oracle that shows 0.4's proposal line was refused), PlayMap heard on the bus, and Patterns and PlayMap linked: read,
 // shown on the board, driven only by the verbs they list, high risk only through the show desk, their tokens sealed.
 const test = require('node:test');
-const assert = require('node:assert');
+const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const sl = require('../lib/stagelines');

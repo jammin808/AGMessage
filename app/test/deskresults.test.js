@@ -4,7 +4,7 @@
 // result came, so a result that met a busy key (429), a key it would not take that minute (401/403), no answer, or a
 // restart of AGMessage is told again — and only to the proposal that ran: a restarted desk's p1 is another proposal.
 const test = require('node:test');
-const assert = require('node:assert');
+const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const deskresults = require('../lib/deskresults');
@@ -152,8 +152,8 @@ test('a Stagewatch restart the link does not see: its new p1 gets its own result
   sw.failResults = 1000;
   const old = sw.add(forUs(ctx, 'bogus line for AGMessage'));
   await until(() => posts(sw, old).length >= 1, 10000, 'its result posted, not taken');
+  const before = posts(sw, old).length;   // the old result's own posts, made to the old p1 before the restart
   sw.restart();
-  const restarted = Date.now();
   sw.frame({ seq: 40 });   // its frames counted on past the last one heard: the restart is not seen
   const fresh = sw.add(forUs(ctx, 'notice Doors open'));
   assert.equal(fresh, old, 'the same number, another proposal');
@@ -161,7 +161,7 @@ test('a Stagewatch restart the link does not see: its new p1 gets its own result
   await until(() => sw.proposals.get(fresh).state === 'done', 15000, 'the new p1 reported');
   assert.equal(sw.proposals.get(fresh).words, 'shown in 1 meeting');
   await wait(3500);   // the old result's next try comes and goes
-  assert.ok(!posts(sw, fresh, restarted).some((r) => JSON.parse(r.body).ok === false), 'the old result never reached the new p1');
+  assert.ok(!posts(sw, fresh).slice(before).some((r) => JSON.parse(r.body).ok === false), 'the old result never reached the new p1');
   assert.ok((await recent(ctx)).includes('a show-desk result could not be reported: gone'));
   assert.equal((await health(ctx)).desk.waiting, 0);
 });
@@ -201,8 +201,8 @@ test('Stagewatch restarted while AGMessage was down: a result kept on disk never
   await until(() => posts(sw, old).length >= 1, 10000, 'posted, unanswered');
   await stopServer(ctx.srv.child);
   sw.answerResults = [];
+  const before = posts(sw, old).length;
   sw.restart();
-  const restarted = Date.now();
   const fresh = sw.add(forUs(ctx, 'notice Hello again'));
   assert.equal(fresh, old);
   ctx.srv = await restartServer(ctx.srv);
@@ -210,7 +210,7 @@ test('Stagewatch restarted while AGMessage was down: a result kept on disk never
   await until(() => sw.proposals.get(fresh).state === 'done', 15000, 'the new p1 reported');
   assert.equal(sw.proposals.get(fresh).words, 'shown in 1 meeting');
   await until(() => onDisk(ctx).results.length === 0, 6000, 'the old one ended (gone), the file empty');
-  assert.ok(!posts(sw, fresh, restarted).some((r) => JSON.parse(r.body).ok === false), 'the old result never reached the new p1');
+  assert.ok(!posts(sw, fresh).slice(before).some((r) => JSON.parse(r.body).ok === false), 'the old result never reached the new p1');
 });
 
 test('a result past Stagewatch\'s five minutes (undelivered, collected) is still told, and taken', async (t) => {
@@ -231,6 +231,10 @@ test('several results collected in one tick, the first not taken: none is strand
   const ids = ['notice Doors open', 'notice Coffee is out', 'notice Mind the step'].map((line) => sw.add(forUs(ctx, line)));
   await until(() => ids.every((id) => sw.proposals.get(id).state === 'done'), 20000, 'every one taken');
   for (const w of ['Doors open', 'Coffee is out', 'Mind the step']) assert.equal(await notices(ctx, w), 1, w + ': run once');
+  for (const id of ids.slice(1)) {   // not reached in the tick that collected them: read back before they are posted
+    const asked = sw.requests.filter((r) => r.url === '/api/proposals/' + id || r.url === '/api/proposals/' + id + '/result').map((r) => r.method);
+    assert.deepEqual(asked.slice(0, 2), ['GET', 'POST'], id);
+  }
   assert.equal((await health(ctx)).desk.waiting, 0);
 });
 
@@ -343,4 +347,39 @@ test('a collect the desk refuses (the key speaks for another node) is said on ev
   assert.ok((await recent(ctx)).some((e) => /refuses to hand AGMessage what it approves: this key speaks for another node/.test(e)));
   sw.collectRefusal = null;
   await until(async () => (await emit(crew, 'stage:targets', {})).canPropose, 8000, 'offered again once it hands them over');
+});
+
+test('a desk check met by a 429 longer than its re-check: nothing goes to the desk until the Retry-After is out', async (t) => {
+  const ctx = await deskSetup(t, { sw: { answerDeskChecks: [{ status: 429, error: 'rate limit: too many requests with this key', retryAfter: 10 }] } });
+  const { sw } = ctx;
+  const met = sw.requests.find((r) => r.url.includes('?from='));
+  const next = sw.requests.find((r) => r.at > met.at && r.url.startsWith('/api/proposals'));
+  assert.ok(next.at - met.at >= 9900, 'the next desk request came ' + (next.at - met.at) + ' ms after the 429');
+});
+
+test('a known desk whose next check meets a 429: no collect goes into the hold', async (t) => {
+  const ctx = await deskSetup(t, { env: { AGM_DESK_CHECK_MS: '4000' } });
+  const { sw } = ctx;
+  const from = sw.requests.length;
+  sw.answerDeskChecks = [{ status: 429, error: 'rate limit: too many requests with this key', retryAfter: 6 }];
+  await until(() => sw.answerDeskChecks.length === 0, 8000, 'the next check met the 429');
+  const met = sw.requests.slice(from).find((r) => r.url.includes('?from='));
+  await wait(6500);
+  const collects = sw.requests.filter((r) => r.at > met.at && r.at < met.at + 5900 && r.url.includes('?target='));
+  assert.deepEqual(collects.map((r) => '+' + (r.at - met.at)), [], 'no collect into the hold');
+});
+
+test('health: the next try waits out a held link\'s Retry-After, and the last answer is the desk\'s to a post, not a read-back', async (t) => {
+  const ctx = await deskSetup(t);
+  const { sw } = ctx;
+  sw.answerResults = [{ status: 0 }];
+  const id = sw.add(forUs(ctx, 'notice Health check'));
+  await until(() => posts(sw, id).length >= 1, 10000, 'posted, unanswered');
+  await until(async () => (await health(ctx)).desk.lastStatus === 0, 4000, 'no answer, said');
+  sw.holdAll(20_000);
+  await until(async () => (await health(ctx)).desk.nextInMs >= 12_000, 10_000, 'the next try after the Retry-After');
+  sw.holdAll(0);
+  sw.proposals.delete(id);   // its next try reads it back: 404, gone
+  await until(async () => (await health(ctx)).desk.waiting === 0, 30_000, 'ended');
+  assert.equal((await health(ctx)).desk.lastStatus, 0, 'a read-back\'s 404 is not the desk\'s answer to a post');
 });

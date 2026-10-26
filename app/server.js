@@ -1891,9 +1891,12 @@ function renderTranscriptHtml(room) {
 // (Admin → Show network) serves every hall without one. Each is a StagewatchLink of its own, with its own liveness,
 // clock, pin and desk; a hall's countdown, sends and proposals go to its link and nowhere else.
 const hallLinks = new Map();   // hall code -> StagewatchLink
+// How often a desk is asked whether it is one (a test's AGM_DESK_CHECK_MS; Stagewatch's minute otherwise).
+const DESK_CHECK_MS = parseInt(process.env.AGM_DESK_CHECK_MS || '', 10) > 0 ? parseInt(process.env.AGM_DESK_CHECK_MS, 10) : nodes.DESK_CHECK_MS;
 function makeLink(id) {
   const link = new nodes.StagewatchLink({
     nodeId: settings.nodeId,
+    deskCheckMs: DESK_CHECK_MS,
     onState: (view) => onStageState(link, view),
     onStatus: (status) => noteEvent('Stagewatch link' + (id === 'default' ? '' : ' of a hall') + ' ' + (/^CERTIFICATE CHANGED/.test(status) ? 'refused: CERTIFICATE CHANGED' : status), link),
     // Stagewatch's verdict on the key, once per change: never the key, and Stagewatch's words already cut and redacted. A
@@ -2222,7 +2225,7 @@ setInterval(async () => {
       // Stagewatch asked this key to wait, or no longer takes it: nothing more goes to it this tick, whatever was next.
       const stop = () => !link.linked || link.held;
       if (stop()) continue;
-      if (Date.now() - link.deskCheckedAt > nodes.DESK_CHECK_MS) {
+      if (Date.now() - link.deskCheckedAt > link.deskCheckMs) {
         const was = link.desk;
         await link.checkDesk(settings.nodeId);
         if (was !== link.desk) onStageState(link, link.view);

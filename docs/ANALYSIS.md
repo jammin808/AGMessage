@@ -15,7 +15,7 @@ left out, and the defects the fences found.*
 | Secret scan | `node tools/scan-secrets.js` | CI · analyze | a key, token or private key in a tracked file |
 | Version | `node tools/stamp-build.js --print` / `--check-tag` | CI · analyze | a release tag that names another version |
 | Unit, end-to-end, watchdog, TLS, version, lint-rule tests | `npm test` | CI · Linux (Node 24, 26), Windows | any failure |
-| Coverage gate | `npm run coverage` | CI · Linux (Node 24) | lines < 94 %, branches < 82 %, functions < 90 % of `server.js`, `supervise.js`, `lib/` |
+| Coverage gate | `npm run coverage` | CI · Linux (Node 24) | lines < 95 %, branches < 84 %, functions < 91 % of `server.js`, `supervise.js`, `lib/` |
 | Browser smoke | `npm run smoke` | CI · Linux (Chrome), Windows (Edge) | a page that does not join, render, or that logs a script error or a CSP violation |
 | CodeQL `security-extended` | — | Security · codeql | an alert (shown under the repository's Security tab) |
 | Dependency audit | `npm run audit` | Security · audit | a high or critical advisory in a shipped package; a package whose registry signature or provenance does not verify |
@@ -124,7 +124,8 @@ browser smoke or by hand, none yet by a test that counts.
 
 After the review below (§6), with 233 tests: **lines 96.7 %, branches 84.4 %, functions 92.8 %**. The gate went to
 **92 / 80 / 88**, then **94 / 82 / 90**. The input fence reaches every socket handler, which is most of the rise in
-functions. With AG-1 (§6), 237 tests: **96.8 / 84.6 / 92.9**; the gate stays at 94 / 82 / 90.
+functions. With AG-1 (§6), 237 tests: **96.8 / 84.6 / 92.9**; the gate stays at 94 / 82 / 90. 0.5.1, with 294 tests:
+**97.0 / 86.2 / 93.2**; the gate goes to **95 / 84 / 91**.
 
 ## 6. The review before release
 
@@ -170,6 +171,21 @@ the owner chose 16 (64 bits, unit 21.2). Left for 0.5.1, from the
 cross-app review:
 Stagewatch's top-level `ok`/`words` on a proposal's outcome, a result report retried after one failure, the Stagewatch
 link dialling with its own Show Bus id, and "connected" only once Stagewatch says it took the key.
+
+0.5.1 closed those four (units 1 to 4), each read first against Stagewatch's own code (2.16, and the newest work on
+two branches) and each test shown to fail on the code before it. Three readers then reviewed the units independently,
+each given the code and Stagewatch's source rather than the author's conclusions, and proved what they found with
+scripts (units 4.1 to 4.3). A second round reviewed those fixes from four angles — key egress and the lockout, the
+desk loop, every reader, the tests' power under mutation — with each of 26 findings put to three skeptics (does it
+reproduce, is it true of Stagewatch, does it matter); the 22 that two of three upheld were fixed (units 4.4 to 4.7):
+Stagewatch's lockout counted as it counts it (every wrong attempt, by the Stagewatch's address, on a monotonic clock),
+the desk followed in one read, a re-pointed collect, a refused collect, a read-only key, a changed certificate, and
+eleven test gaps. Every mutant either round named now fails a test. The three test files of 0.5.1 assert strictly
+(`node:assert/strict`): the loose `deepEqual` passes `[954]` against `[null]`.
+Left as the owner's calls: whether AGMessage honours Stagewatch's Screens → Disconnect ("stay off") instead of dialling
+again; whether a hall's own Stagewatch's notices reach only its own halls; whether a hall given the default
+Stagewatch's address with another key should be refused (Stagewatch binds one key per node); whether keyless links are
+kept; and the first dial of several wrong keys at once, the one burst the shared minute cannot see coming.
 
 The fences the review added, beside the tests for each finding:
 

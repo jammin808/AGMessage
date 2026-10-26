@@ -323,7 +323,7 @@ class StagewatchLink {
    * @param {object} [o.pins] a tls.PinStore
    * @param {()=>void} [o.onPins] the pins changed (persist them)
    */
-  constructor({ nodeId, onState, onStatus, onContext, onKey, findPeer, pins, onPins, refusedRetryMs = REFUSED_RETRY_MS, lockoutMs = LOCKOUT_MS } = {}) {
+  constructor({ nodeId, onState, onStatus, onContext, onKey, findPeer, pins, onPins, refusedRetryMs = REFUSED_RETRY_MS, lockoutMs = LOCKOUT_MS, deskCheckMs = DESK_CHECK_MS } = {}) {
     // Every link of this node dials as this node: no link without the id its hello, context and desk use.
     if (!isNodeId(nodeId)) throw new TypeError('a Stagewatch link needs this node\'s Show Bus id');
     this.nodeId = nodeId;
@@ -334,6 +334,7 @@ class StagewatchLink {
     this.onKey = onKey || (() => {});
     this.refusedRetryMs = refusedRetryMs;
     this.lockoutMs = lockoutMs;
+    this.deskCheckMs = deskCheckMs;   // how often the desk is asked whether it is one (when no hello says so)
     this.where = '';                  // the Stagewatch as its lockout counts: its resolved address and port (budget key)
     this.keyEpoch = 0;                // a new key, address or certificate: its verdicts are news again (the audit)
     this.base = ''; this.key = ''; this.fingerprint = '';
@@ -752,7 +753,7 @@ class StagewatchLink {
 
   // ---------------------------------------------------------------- the show desk (Show Bus 1.2 §11)
 
-  /** Does Stagewatch keep the shared approval queue? (Its hello's caps, else asked every DESK_CHECK_MS.) */
+  /** Does Stagewatch keep the shared approval queue? (Its hello's caps, else asked every deskCheckMs.) */
   async checkDesk(fromId = 'x') {
     if (!this.linked || !this.key || !this.endpoint) { this.desk = false; return false; }
     const u = new URL(this.base);
@@ -766,7 +767,7 @@ class StagewatchLink {
     try { res = await this._call('/api/proposals?from=' + encodeURIComponent(fromId), { timeoutMs: 3000 }); } catch { /* no answer: asked again soon */ }
     if (this.keyState !== 'accepted' || this.acceptances !== acceptance) return this.desk;   // refused meanwhile: says nothing
     if (res && [200, 404, 405].includes(res.status)) { this.desk = res.status === 200; this.deskCheckedAt = Date.now(); }
-    else this.deskCheckedAt = Date.now() - (res && res.status === 403 ? 0 : DESK_CHECK_MS - DESK_RECHECK_MS);
+    else this.deskCheckedAt = Date.now() - (res && res.status === 403 ? 0 : this.deskCheckMs - DESK_RECHECK_MS);
     return this.desk;
   }
 
