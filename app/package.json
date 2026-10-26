@@ -1,6 +1,6 @@
 {
   "name": "agmessage",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Messaging, displays and show-network links for live events: halls, crews, presenters and their screens.",
   "main": "server.js",
   "private": true,
@@ -8,7 +8,7 @@
     "start": "node supervise.js",
     "dev": "node server.js",
     "test": "node --test \"test/*.test.js\"",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include=server.js --test-coverage-include=supervise.js --test-coverage-include=\"lib/**\" --test-coverage-lines=94 --test-coverage-branches=82 --test-coverage-functions=90 \"test/*.test.js\"",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include=server.js --test-coverage-include=supervise.js --test-coverage-include=\"lib/**\" --test-coverage-lines=95 --test-coverage-branches=84 --test-coverage-functions=91 \"test/*.test.js\"",
     "lint": "cd .. && eslint .",
     "secrets": "node ../tools/scan-secrets.js",
     "audit": "npm audit --omit=dev --audit-level=high && npm audit signatures",

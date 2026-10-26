@@ -93,9 +93,10 @@ test('show bus: hellos carry the certificate; proposals read tolerantly', () => 
   const d = new nodes.Discovery({ id: 'ag1', port: 3023, name: 'AGMessage', tls: fp });
   assert.deepEqual([d.hello().tls, d.hello().ports.https], [fp, 3023]);
   assert.ok(d.hello().caps.includes('proposals'));
-  const p = nodes.readProposal({ id: 'p1', state: 'done', decidedBy: 'SM', result: { ok: true, words: 'Message on the speaker screen' } });
+  // As Stagewatch's SharedProposal.ToJson: result and words one string, ok at the top level.
+  const p = nodes.readProposal({ id: 'p1', state: 'done', decidedBy: 'SM', result: 'Message on the speaker screen', ok: true, words: 'Message on the speaker screen' });
   assert.deepEqual([p.state, p.decidedBy, p.ok, p.words], ['done', 'SM', true, 'Message on the speaker screen']);
-  assert.equal(nodes.readProposal({ id: 'p2', state: 'nonsense' }).state, 'pending');
+  assert.equal(nodes.readProposal({ id: 'p2', state: 'nonsense' }).state, 'unknown', 'a state it does not know is never taken for one it does');
   assert.equal(nodes.readProposal({ state: 'done' }), null);
   assert.equal(nodes.readProposalList({ proposals: [{ id: 'a' }, null, { id: 'b' }] }).length, 2);
   assert.equal(nodes.readProposalList([{ id: 'a' }]).length, 1);
@@ -115,8 +116,8 @@ function fakeDesk({ cert }) {
       const u = new URL(req.url, 'https://x');
       if (u.pathname === '/api/context') return res.end(JSON.stringify({ v: 1, node: { t: 'main', id: 'sw1', name: 'Hall A' }, light: 'green', headline: 'Keynote', peers: [] }));
       if (u.pathname === '/api/proposals' && req.method === 'POST') { seen.proposals.push(JSON.parse(body)); return res.end(JSON.stringify({ id: 'p17', state: 'pending' })); }
-      if (u.pathname === '/api/proposals/p17') return res.end(JSON.stringify({ id: 'p17', state, decidedBy: 'SM', result: state === 'done' ? { ok: true, words: 'Message on the speaker screen' } : null }));
-      if (u.pathname === '/api/proposals' && u.searchParams.get('target')) return res.end(JSON.stringify({ proposals: [{ id: 'p9', state: 'approved', line: 'notice "Break in 5 minutes"', decidedBy: 'SM' }] }));
+      if (u.pathname === '/api/proposals/p17') { const words = state === 'done' ? 'Message on the speaker screen' : ''; return res.end(JSON.stringify({ id: 'p17', state, decidedBy: 'SM', result: words, ok: state === 'done' ? true : null, words })); }
+      if (u.pathname === '/api/proposals' && u.searchParams.get('target')) return res.end(JSON.stringify({ proposals: [{ id: 'p9', state: 'approved', line: 'notice "Break in 5 minutes"', decidedBy: 'SM', target: { t: 'messenger', id: u.searchParams.get('target'), name: 'AGMessage' } }] }));
       if (u.pathname === '/api/proposals') return res.end('[]');
       if (u.pathname === '/api/proposals/p9/result') { seen.results.push(JSON.parse(body)); return res.end('{"ok":true}'); }
       res.end(JSON.stringify({ type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId: 5 } }));
@@ -138,7 +139,7 @@ test('Stagewatch link over TLS: pinned before the key is sent, proposals to the 
   let pinSaves = 0;
   // Its hello says it serves TLS with certificate A (as Stagewatch 2.16 announces).
   const hello = { t: 'main', id: 'sw1', address: '127.0.0.1', ports: { http: port, https: port }, caps: ['approvals'], tls: fpA };
-  const link = new nodes.StagewatchLink({ findPeer: (t, h, p) => (t === 'main' && h === '127.0.0.1' && p === port ? hello : null), pins, onPins: () => { pinSaves++; } });
+  const link = new nodes.StagewatchLink({ nodeId: 'ab12cd34', findPeer: (t, h, p) => (t === 'main' && h === '127.0.0.1' && p === port ? hello : null), pins, onPins: () => { pinSaves++; } });
   try {
     link.configure('127.0.0.1:' + port, 'swk_node');
     assert.ok(await until(() => link.linked), 'linked over wss');
@@ -158,7 +159,7 @@ test('Stagewatch link over TLS: pinned before the key is sent, proposals to the 
     assert.deepEqual([after.state, after.words, after.decidedBy], ['done', 'Message on the speaker screen', 'SM']);
     const todo = await link.approvedFor('ag1');
     assert.equal(todo[0].line, 'notice "Break in 5 minutes"');
-    assert.ok(await link.reportResult('p9', true, 'shown in 1 meeting'));
+    assert.equal((await link.reportResult('p9', true, 'shown in 1 meeting')).status, 200, 'the desk took it');
     assert.deepEqual(desk.seen.results[0], { ok: true, words: 'shown in 1 meeting' });
 
     // Stagewatch comes back with a different certificate: refused before anything — the key above all — is sent.
@@ -182,7 +183,7 @@ test('Stagewatch link: a typed fingerprint guards the very first connection', as
   const cert = tlsmod.makeCertificate({ name: 'Stagewatch', hosts: ['localhost'], ips: ['127.0.0.1'] });
   const desk = fakeDesk({ cert });
   await new Promise((r) => desk.srv.listen(0, '127.0.0.1', r));
-  const link = new nodes.StagewatchLink({ pins: new tlsmod.PinStore() });
+  const link = new nodes.StagewatchLink({ nodeId: 'ab12cd34', pins: new tlsmod.PinStore() });
   try {
     link.configure('https://127.0.0.1:' + desk.srv.address().port, 'swk_node', 'sha256:' + '0'.repeat(64));
     assert.ok(await until(() => !!link.tlsState.problem, 4000));
@@ -277,14 +278,14 @@ test('C17: a Stagewatch pinned once opens no plain WebSocket with its key while 
   const sw = await dualNode({ cert, context: { v: 1, node: { t: 'main', id: 'sw1', name: 'Hall A' }, light: 'green', headline: 'Keynote', peers: [] } });
   const pins = new tlsmod.PinStore();
   const hello = { t: 'main', id: 'sw1', address: '127.0.0.1', ports: { http: sw.port, https: sw.port }, tls: fp };
-  const first = new nodes.StagewatchLink({ findPeer: (t, h, p) => (t === 'main' && p === sw.port ? hello : null), pins });
+  const first = new nodes.StagewatchLink({ nodeId: 'ab12cd34', findPeer: (t, h, p) => (t === 'main' && p === sw.port ? hello : null), pins });
   try {
     first.configure('127.0.0.1:' + sw.port, 'swk_secretnodekey');   // secret-scan: fixture
     assert.ok(await until(() => first.linked && !!pins.pins['node:sw1'], 4000), 'linked over wss and pinned');
   } finally { first.stop(); }
   sw.seen.length = 0;
   // AGMessage restarts (or the hello stops): the link's own address keeps its pin, so TLS is never dropped.
-  const again = new nodes.StagewatchLink({ findPeer: () => null, pins });
+  const again = new nodes.StagewatchLink({ nodeId: 'ab12cd34', findPeer: () => null, pins });
   try {
     again.configure('127.0.0.1:' + sw.port, 'swk_secretnodekey');   // secret-scan: fixture
     assert.ok(await until(() => again.linked, 4000), 'linked again: ' + again.status);

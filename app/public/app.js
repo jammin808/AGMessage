@@ -234,7 +234,8 @@ function proposalLineText(p) {
     case 'rejected': return '✗ Not approved' + by;
     case 'done': return '✓ Approved' + by + ' and done' + (p.words ? ': ' + p.words : '');
     case 'failed': return '⚠ Approved' + by + ' but it failed' + (p.words ? ': ' + p.words : '');
-    case 'undelivered': return '⚠ Approved' + by + ' but it never reached Stagewatch';
+    case 'undelivered': return '⚠ Approved' + by + ' but not delivered' + (p.words ? ': ' + p.words : '');
+    case 'unknown': return '⚠ Stagewatch\'s answer about this request is not one AGMessage can read — see the show desk' + (p.words ? ' (' + p.words + ')' : '');
     case 'lost': return '⚠ ' + (p.words || 'Stagewatch no longer has this request — ask again if it is still wanted');
     default: return '';
   }
@@ -343,8 +344,9 @@ function renderStage(v) {
   document.getElementById('stageTime').textContent = v.text;
   document.getElementById('stageTime').style.color = v.color || '';
   document.getElementById('stageTitle').textContent = v.title || '';
-  chip.classList.toggle('stale', !!v.stale || (v.status && v.status !== 'connected'));
-  chip.title = (v.stale ? 'Stagewatch link lost — last known: ' : 'Live from Stagewatch: ') + (v.title || '') + (v.next ? ' · Next: ' + v.next : '') +
+  const live = !v.stale && (v.status === 'connected' || v.status === 'viewing');
+  chip.classList.toggle('stale', !live);
+  chip.title = (v.status === 'checking key' ? 'Stagewatch has not accepted this AGMessage\'s key yet: ' : live ? 'Live from Stagewatch: ' : 'Stagewatch link lost — last known: ') + (v.title || '') + (v.next ? ' · Next: ' + v.next : '') +
     (v.messageAck === 'done' ? ' · Speaker acknowledged the message' : '');
 }
 
@@ -2137,7 +2139,11 @@ const ToStagewatch = (function () {
     socket.emit('stage:targets', {}, (r) => {
       if (!r || !r.ok) { notify((r && r.error) || 'Stagewatch is not linked to this hall.', true); return; }
       caps = r;
-      $('swWhich').textContent = r.linked ? 'To ' + (r.title || 'this hall\'s Stagewatch') + '.' : 'Stagewatch is not connected right now — nothing is queued; try again when it is.';
+      $('swWhich').textContent = r.linked ? 'To ' + (r.title || 'this hall\'s Stagewatch') + '.'
+        : r.cert ? 'Stagewatch\'s certificate changed — nothing can be sent until an admin accepts it (Halls → Set up, or Admin → Show network).'
+        : r.key === 'refused' ? 'Stagewatch refused this AGMessage\'s key — nothing can be sent until an admin enters a node key it lists (Halls → Set up).'
+        : r.key === 'checking' ? 'Stagewatch has not accepted this AGMessage\'s key yet — nothing is queued; try again in a moment.'
+        : 'Stagewatch is not connected right now — nothing is queued; try again when it is.';
       const sel = $('swDest');
       sel.textContent = '';
       for (const t of r.targets) {

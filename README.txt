@@ -239,6 +239,13 @@ Show network (Stagewatch, Patterns, presenter PCs) - Show Bus 1.2
     button on a message to put it on the speaker's confidence monitor. The
     message then shows whether it is on screen and when the speaker has seen
     or acknowledged it.
+  - The link says "connected" only once Stagewatch accepted the key. Until
+    then it says "checking key" and nothing is sent. "key refused: ..." (with
+    Stagewatch's own words) means Stagewatch does not list that key: make a
+    node key in Stagewatch -> Settings -> Remote -> API keys and enter it in
+    Admin -> Show network or the hall's Set up. A refused key is tried again
+    once a minute, so it never locks this laptop out of Stagewatch. With no
+    key the link only shows the timer ("viewing").
   - Stagewatch, Patterns and presenter PCs on the network are found
     automatically (UDP 9928) and listed there, live or not heard.
   - "CLOCKS APART" on the admin page: this laptop's clock and Stagewatch's
@@ -263,8 +270,9 @@ Encrypted connections (HTTPS)
   - Admin -> Encrypted connections -> "Require HTTPS": other devices must use
     https:// (this laptop and the Cloudflare tunnel are unaffected).
   - The link to Stagewatch is encrypted when Stagewatch offers it, and pinned
-    to Stagewatch's certificate: if that certificate changes, the admin page
-    says CERTIFICATE CHANGED and the link stays off until you accept it.
+    to Stagewatch's certificate once Stagewatch accepts the key: if that
+    certificate changes, the admin page says CERTIFICATE CHANGED and the link
+    stays off until you accept it.
 
 Sharing this bundle
 -------------------

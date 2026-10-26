@@ -22,11 +22,14 @@
  */
 const dgram = require('dgram');
 const crypto = require('crypto');
+const dns = require('dns');
+const { performance } = require('perf_hooks');
 const os = require('os');
 const WebSocket = require('ws');
 const { ClockSampler, Ring } = require('./resilience');
 const tlsmod = require('./tls');
 const { departmentsOf } = require('./stagelines');
+const { holdMs } = require('./deskresults');
 
 const BUS_PORT = 9928;
 const BEAT_MS = 2000;
@@ -36,8 +39,73 @@ const GONE_MS = 12000;
 const MAX_PEERS = 256;          // a venue's show network is tens of nodes
 const MAX_PER_ADDRESS = 8;      // one machine runs a few nodes (Stagewatch, its Slides agents, Patterns, PlayMap…)
 const CHANGE_MS = 500;          // the table's change is told at most this often, latest wins
+// Stagewatch locks an address out for the rest of a minute after 5 wrong keys or PINs from it (WebServer.cs Authorize):
+// a key it refused is tried again only after that minute, so a wrong key never locks out this machine's other links.
+const REFUSED_RETRY_MS = 61_000;
+// The desk is asked whether it is one once a minute (when no hello says so), and again 5 s after an answer that said nothing.
+const DESK_CHECK_MS = 60_000;
+const DESK_RECHECK_MS = 5000;
+// Stagewatch counts wrong keys per asking address, 5 in a minute locking it out (WebServer.cs Authorize), whichever link
+// of this machine they came from. Every wrong attempt a link of this process made at a Stagewatch is counted where it is
+// known — each 401 to a request that carried the key, a refused upgrade, a viewing-code check — on a monotonic clock (a
+// laptop's clock set forward or back moves no window), against the Stagewatch's resolved address. A refused key is asked
+// again (two attempts: the upgrade, then the read or the viewing-code check) only while at most two wrong ones from here
+// are in that Stagewatch's last minute, so never more than four. A re-ask holds its two places from when it dials (two
+// due at once cannot both see room) until its verdict, when its attempts are counted as they were.
+const LOCKOUT_MS = 60_000;
+const WRONG_AT_MOST = 4;   // under Stagewatch's 5
+const REASK_COSTS = 2;
+const mono = () => performance.now();
+const wrongAt = new Map();   // Stagewatch (address:port) -> [{t, by?}]: the last minute's wrong attempts from here, and held places
+function recentWrong(where, now, windowMs) {
+  const kept = (wrongAt.get(where) || []).filter((e) => now - e.t < windowMs && e.t <= now + 1);
+  if (kept.length) wrongAt.set(where, kept); else wrongAt.delete(where);
+  return kept;
+}
+/** How long a refused key must still wait before it may be asked at `where` again (0: now; at most the window). */
+function lockoutRoomIn(where, windowMs = LOCKOUT_MS, now = mono()) {
+  const kept = recentWrong(where, now, windowMs).map((e) => e.t).sort((a, b) => a - b);
+  const over = kept.length + REASK_COSTS - WRONG_AT_MOST;   // the oldest that must age out first
+  return over <= 0 ? 0 : Math.min(windowMs + 1, Math.max(1, Math.ceil(kept[over - 1] + windowMs - now) + 1));
+}
+/** `n` wrong attempts made at `where` just now. */
+function noteWrong(where, n, windowMs = LOCKOUT_MS, now = mono()) {
+  const list = recentWrong(where, now, windowMs);
+  for (let i = 0; i < n; i++) list.push({ t: now });
+  wrongAt.set(where, list);
+}
+/** A re-ask holds its places (`by` its link) until its verdict: a place left by one that never got one stays counted. */
+function holdPlaces(where, by, windowMs = LOCKOUT_MS, now = mono()) {
+  const list = recentWrong(where, now, windowMs).map((e) => (e.by === by ? { t: e.t } : e));
+  for (let i = 0; i < REASK_COSTS; i++) list.push({ t: now, by });
+  wrongAt.set(where, list);
+}
+/** A link stopped while it held places: they stay counted, as attempts it may have made. */
+function settlePlaces(by) {
+  for (const [where, list] of wrongAt) if (list.some((e) => e.by === by)) wrongAt.set(where, list.map((e) => (e.by === by ? { t: e.t } : e)));
+}
+function releasePlaces(by) {
+  for (const [where, list] of wrongAt) if (list.some((e) => e.by === by)) wrongAt.set(where, list.filter((e) => e.by !== by));
+}
+/**
+ * A Stagewatch as its lockout counts this machine: by the address it is reached at (IPv4 first, as a venue network
+ * is), so two spellings of one Stagewatch — its name and its address — share one budget. The spelling when unresolved.
+ */
+async function whereIs(hostname, port) {
+  const name = hostname.replace(/^\[|\]$/g, '');
+  try { return (await dns.promises.lookup(name, { family: 4 })).address + ':' + port; } catch { /* no IPv4 address */ }
+  try { return (await dns.promises.lookup(name)).address + ':' + port; } catch { return name + ':' + port; }
+}
+/** Stagewatch's words for a refusal, as a status may show them: plain text, short, and never a key. */
+const refusalWords = (w) => (typeof w === 'string' ? w : '').replace(/\p{Cc}/gu, ' ').replace(/swk_\S*/g, 'swk_…').replace(/\s+/g, ' ').trim().slice(0, 120);
 // Every kind on the bus: Stagewatch (main), its Slides agents, Patterns, PlayMap (Show Bus 1.3 proposal) and other messengers.
 const KINDS = new Set(['main', 'agent', 'patterns', 'playmap', 'messenger']);
+// What this node is on the bus: its hello's t, and the t its Stagewatch links announce on /ws.
+const KIND = 'messenger';
+// A Show Bus id as Stagewatch keeps one for a /ws link (Screens.ValidId: 6-32 letters, digits, '-' or '_') and for a context's
+// node.id (PeerContexts.Parse: letters, digits, '-' or '_'); AGMessage's own is 8 hex characters (server.js).
+const NODE_ID = /^[A-Za-z0-9_-]{6,32}$/;
+const isNodeId = (id) => typeof id === 'string' && NODE_ID.test(id);
 const CAPS = ['messages', 'action-prompts', 'documents', 'ai', 'context', 'receipts', 'proposals', 'displays', 'help'];
 // A Stagewatch as one link sees it at one time: unique across every link of this process, so a link made again for a
 // hall (its Stagewatch removed, then another set) never shares a number with the one it replaced.
@@ -92,7 +160,7 @@ class Discovery {
   }
 
   hello() {
-    const h = { t: 'messenger', v: 1, proto: 1, id: this.id, name: this.name, host: os.hostname().slice(0, 40), ports: { http: this.port }, caps: CAPS, clock: Date.now() };
+    const h = { t: KIND, v: 1, proto: 1, id: this.id, name: this.name, host: os.hostname().slice(0, 40), ports: { http: this.port }, caps: CAPS, clock: Date.now() };
     if (this.tls) { h.ports.https = this.port; h.tls = this.tls; }
     if (this.build) h.build = this.build;
     return h;
@@ -191,19 +259,25 @@ function stageView(frame) {
 }
 
 /**
- * A proposal as the desk reports it (Show Bus §11), cleaned (pure). Tolerant: the desk may add fields. `created` and
- * `from` tell one proposal from another of the same id: a desk numbers from p1 again after it restarts.
+ * A proposal as the desk reports it (Show Bus §11, Stagewatch's SharedProposal.ToJson), cleaned (pure). Tolerant: the desk
+ * may add fields. `created` and `from` tell one proposal from another of the same id: a desk numbers from p1 again after
+ * it restarts. The outcome is read as Stagewatch states it, at the top level: `ok` true when done, false when failed or
+ * undelivered, null until it ran; `words` the target's (or the desk's) words. A settled state stands only beside that
+ * boolean; a state not listed here, or a settled one whose ok is missing, not a boolean or says otherwise, is `unknown`
+ * (ok null) — never done, never pending. A submit's receipt ({ok:true,id,state:"pending"}) carries the request's ok,
+ * never an outcome: a proposal that has not run has none.
  */
+const PROPOSAL_STATES = new Set(['pending', 'approved', 'rejected', 'done', 'failed', 'undelivered']);
+const PROPOSAL_OUTCOME = new Map([['done', true], ['failed', false], ['undelivered', false]]);
 function readProposal(j) {
-  if (!j || typeof j !== 'object' || typeof j.id !== 'string' || !j.id) return null;
-  const STATES = ['pending', 'approved', 'rejected', 'done', 'failed', 'undelivered'];
-  const result = j.result && typeof j.result === 'object' ? j.result : null;
+  if (!j || typeof j !== 'object' || Array.isArray(j) || typeof j.id !== 'string' || !j.id) return null;
   const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const said = PROPOSAL_STATES.has(j.state) ? j.state : '';
+  const state = !said || (PROPOSAL_OUTCOME.has(said) && j.ok !== PROPOSAL_OUTCOME.get(said)) ? 'unknown' : said;
   return {
-    id: str(j.id, 40), state: STATES.includes(j.state) ? j.state : 'pending', line: str(j.line, 600), reason: str(j.reason, 300),
-    risk: str(j.risk, 10), decidedBy: str(j.decidedBy || j.by, 60),
-    words: str(result ? (result.words ?? result.error ?? '') : (j.words || j.error || ''), 300),
-    ok: result ? result.ok !== false : null,
+    id: str(j.id, 40), state, ok: PROPOSAL_OUTCOME.has(state) ? PROPOSAL_OUTCOME.get(state) : null,
+    line: str(j.line, 600), reason: str(j.reason, 300), risk: str(j.risk, 10), decidedBy: str(j.decidedBy || j.by, 60),
+    words: str(typeof j.words === 'string' ? j.words : j.result, 300),
     target: j.target && typeof j.target === 'object' ? { t: str(j.target.t, 16), id: str(j.target.id, 40) } : null,
     created: Number.isFinite(j.created) ? j.created : 0,
     from: j.from && typeof j.from === 'object' ? { t: str(j.from.t, 16), id: str(j.from.id, 40) } : null,
@@ -228,6 +302,16 @@ function readReceipt(status, body, requestId) {
   };
 }
 
+/**
+ * The /ws address a Stagewatch link dials: this node by its own Show Bus id — node and cid the same id, t its kind — so
+ * Stagewatch tells one AGMessage from another, and a name it gives one sticks to that one. The key is never in it (Show
+ * Bus §7: the Authorization header). Each key once: Stagewatch reads the query as a dictionary, the last value winning.
+ */
+function wsUrl(base, nodeId) {
+  if (!isNodeId(nodeId)) throw new TypeError('a Stagewatch link dials only as a node with a Show Bus id');
+  return base.replace(/^http/, 'ws') + '/ws?' + new URLSearchParams({ node: nodeId, t: KIND, cid: nodeId, page: '/agmessage' }).toString();
+}
+
 const requestId = () => 'ag' + crypto.randomBytes(6).toString('hex');
 // ±20 % from the CSPRNG, so links that dropped together do not redial together.
 const jitter = (ms) => Math.round(ms * (0.8 + crypto.randomInt(0, 401) / 1000));
@@ -239,16 +323,40 @@ class StagewatchLink {
    * @param {object} [o.pins] a tls.PinStore
    * @param {()=>void} [o.onPins] the pins changed (persist them)
    */
-  constructor({ onState, onStatus, onContext, findPeer, pins, onPins } = {}) {
+  constructor({ nodeId, onState, onStatus, onContext, onKey, findPeer, pins, onPins, refusedRetryMs = REFUSED_RETRY_MS, lockoutMs = LOCKOUT_MS, deskCheckMs = DESK_CHECK_MS } = {}) {
+    // Every link of this node dials as this node: no link without the id its hello, context and desk use.
+    if (!isNodeId(nodeId)) throw new TypeError('a Stagewatch link needs this node\'s Show Bus id');
+    this.nodeId = nodeId;
     this.onState = onState || (() => {}); this.onStatus = onStatus || (() => {}); this.onContext = onContext || (() => {});
     this.findPeer = findPeer || (() => null);
     this.pins = pins || new tlsmod.PinStore();
     this.onPins = onPins || (() => {});
+    this.onKey = onKey || (() => {});
+    this.refusedRetryMs = refusedRetryMs;
+    this.lockoutMs = lockoutMs;
+    this.deskCheckMs = deskCheckMs;   // how often the desk is asked whether it is one (when no hello says so)
+    this.where = '';                  // the Stagewatch as its lockout counts: its resolved address and port (budget key)
+    this.keyEpoch = 0;                // a new key, address or certificate: its verdicts are news again (the audit)
     this.base = ''; this.key = ''; this.fingerprint = '';
+    // Whether Stagewatch accepted the key: 'none' (no key: the link only views), 'checking', 'accepted' (its auth message
+    // said ok, or an authenticated request succeeded), 'refused' (with its words). Only an accepted key makes the link
+    // connected and confirms a first-use pin; each socket earns its own verdict.
+    this.keyState = 'none'; this.keyWords = ''; this.keyVia = ''; this.keyNode = ''; this.keyAt = 0;
+    this._probing = null;
+    this.refusals = 0;                // counts refusals: an open that was resolving when one came never dials
+    this.acceptances = 0;             // counts acceptances: a 401 to a request made before the latest one refuses nothing
+    this.heldView = null;             // the newest frame while a refused key is checked again, shown once it is accepted
+    this.redial = null;               // the one pending redial: the latest reason to wait sets when it fires
+    // Until when Stagewatch asked this key to wait (a 429, or a 503 with Retry-After): its budget is per key and every
+    // route spends it, so the desk and the context loops leave the whole link alone till then.
+    this.waitUntil = 0;
     this.endpoint = null;             // {base, tls: options|null, fp, nodeKey} once resolved
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
     this.desk = false;                // Stagewatch answers /api/proposals (Show Bus §11)
     this.deskCheckedAt = 0;
+    // Stagewatch's words when its desk refuses to hand this node what it approved (its collect answered 401/403: the key
+    // speaks for another node), '' while it hands them over: proposals are not offered meanwhile, and the pages say why.
+    this.deskRefusal = '';
     // Which Stagewatch, as it is now: a new one each time the link is made, pointed elsewhere or its frames' seq goes back
     // (it restarted, Show Bus §4) — its message and proposal numbers start again, so nothing followed before carries over.
     this.generation = ++generations;
@@ -270,16 +378,94 @@ class StagewatchLink {
     const k = typeof key === 'string' ? key.trim() : '';
     const f = tlsmod.cleanFingerprint(fingerprint);
     if (b === this.base && k === this.key && f === this.fingerprint) return;
+    // Only the certificate's fingerprint changed for a key Stagewatch refused: the key stays refused and its hold stands
+    // (the fingerprint is used when it is asked again). A new key or address asks at once.
+    const keep = b === this.base && k === this.key && this.keyState === 'refused';
     if (b !== this.base) { this.generation = ++generations; this.lastSeq = null; }
     this.base = b; this.key = k; this.fingerprint = f;
     this._close();
+    if (!keep) this._cancelRedial();
     this.delay = 500;
     this.clock.reset();
     this.context = null; this.departments = [];
     this.endpoint = null;
-    this.desk = false; this.deskCheckedAt = 0;
+    this.desk = false; this.deskCheckedAt = 0; this.deskRefusal = '';
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
-    if (this.base) this._open(); else this._set('off', null);
+    if (keep) { this._set(this._refusedStatus(), null); return; }
+    this._resetKey();
+    this.waitUntil = 0;
+    this.keyEpoch++;
+    // Nothing of the last key or address is shown while the new one is checked: no "connected", no old timer.
+    this._set(this.base ? 'connecting' : 'off', null);
+    if (this.base) this._open();
+  }
+
+  _resetKey() { this.keyState = this.key ? 'checking' : 'none'; this.keyWords = ''; this.keyVia = ''; this.keyNode = ''; this.keyAt = 0; this.heldView = null; }
+  /** What a refusal reads: a key's, or a keyless link's view refused (its viewing code). */
+  _refusedStatus() { return (this.key ? 'key refused: ' : 'refused: ') + this.keyWords; }
+  /** The status of a socket whose frames are fresh: connected only with an accepted key. */
+  _liveStatus() { return this.keyState === 'accepted' ? 'connected' : this.keyState === 'none' ? 'viewing' : 'checking key'; }
+  /** The key's verdict as every reader shows it (never the key). */
+  keyFacts() { return { state: this.keyState, words: this.keyWords, via: this.keyVia, node: this.keyNode, at: this.keyAt }; }
+
+  /** Stagewatch accepted the key: the link is connected, and a certificate used for the first time is pinned. */
+  _accept(via, node) {
+    if (!this.key || this.keyState === 'accepted') return;   // no key, nothing authenticated: a keyless link never pins
+    this.acceptances++;
+    releasePlaces(this);   // its upgrade was no wrong attempt
+    this.keyState = 'accepted'; this.keyVia = via; this.keyNode = typeof node === 'string' ? refusalWords(node).slice(0, 40) : ''; this.keyWords = ''; this.keyAt = Date.now();
+    this.delay = 500;
+    this._confirmPin();
+    this._set(this.status === 'stale' ? 'stale' : 'connected', this.view || this.heldView);
+    this.heldView = null;
+    this.onKey(this.keyFacts(), this.keyEpoch);
+    if (via === 'auth') this.fetchContext();
+  }
+
+  /** Stagewatch refused the key (or a keyless link's view): nothing more is read or sent; tried again after the lockout minute. */
+  /**
+   * Stagewatch refused the key (or a keyless link's view). `wrong` counts the attempts it took that Stagewatch has not
+   * yet been counted for (the 401s themselves are counted as they come back; see _call).
+   */
+  _refuse(words, wrong = 0) {
+    const w = refusalWords(words) || 'the key or the viewing code';
+    const changed = this.keyState !== 'refused' || this.keyWords !== w;
+    this.keyState = 'refused'; this.keyWords = w; this.keyVia = ''; this.keyNode = ''; this.keyAt = Date.now();
+    this.refusals++; this.heldView = null;
+    this._close(); this._probing = null;
+    // What a refused key read is not shown or quoted, and the desk is asked again after the next acceptance.
+    this.context = null; this.desk = false; this.deskCheckedAt = 0; this.deskRefusal = '';
+    this._set(this._refusedStatus(), null);
+    if (changed) this.onKey(this.keyFacts(), this.keyEpoch);
+    releasePlaces(this);
+    if (wrong && this.where) noteWrong(this.where, wrong, this.lockoutMs);
+    this._retry(this.refusedRetryMs);
+  }
+
+  /** Stagewatch 2.16 says nothing on the socket: one authenticated read (its context) is the key's verdict. */
+  _probe(ws) {
+    if (this._probing === ws || !this.key || this.keyState === 'accepted') return;
+    this._probing = ws;
+    const again = (ms) => setTimeout(() => { if (this.ws === ws && this.keyState !== 'accepted') this._probe(ws); }, ms).unref();
+    // The one request that goes before the verdict, and the verdict's own: a read with no side effect.
+    this._call('/api/context', { timeoutMs: 3000, verdict: true }).then((res) => {
+      if (this._probing === ws) this._probing = null;
+      if (this.ws !== ws) return;   // that socket is gone: its answer decides nothing
+      const j = res.body;
+      if (res.status === 200 && j && j.v === 1 && j.node) { this._takeContext(j); this._accept('request'); return; }
+      // 401: the key itself (its upgrade was a wrong attempt too; this read was counted as it came back). 403: not a key
+      // Stagewatch counts as wrong (HTTPS required, a scope), still no verdict for this link.
+      if (res.status === 401 || res.status === 403) { this._refuse(j && j.error, res.status === 401 ? 1 : 0); return; }
+      // Not a verdict (404 in Stagewatch's first second, 429, 5xx): still checking, asked again while this socket lives.
+      // A refused key being asked again keeps its refusal's words until the answer is one.
+      if (this.keyState === 'checking') this.keyWords = 'Stagewatch answered ' + res.status;
+      again(this.held ? this.waitUntil - Date.now() : jitter(this.delay));
+    }, (e) => {
+      if (this._probing === ws) this._probing = null;
+      if (this.ws !== ws) return;
+      if (this.keyState === 'checking') this.keyWords = 'Stagewatch did not answer: ' + (e && e.message ? e.message.slice(0, 60) : '');
+      again(jitter(this.delay));
+    });
   }
 
   /**
@@ -290,6 +476,7 @@ class StagewatchLink {
     const u = new URL(this.base);
     const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
     const peer = this.findPeer('main', u.hostname, port);
+    this.where = await whereIs(u.hostname, port);
     // The certificate is pinned under the node's id (from its hello) and under the link's own address: the hello is
     // unauthenticated and absent right after a restart, so once pinned at this address the link is never plain again, and
     // a hello naming another id cannot swap in a pin of its own (Show Bus §10: the pin, not the hello, is the trust).
@@ -311,7 +498,7 @@ class StagewatchLink {
     return { base: 'https://' + u.hostname + ':' + tport, tls: tlsmod.pinnedTlsOptions(cert.pem, cert.fp), fp: cert.fp, nodeKey, keys };
   }
 
-  /** The first authenticated success over TLS pins the certificate (trust on first use), under every key the link checks. */
+  /** Stagewatch accepting the key over TLS pins the certificate (trust on first authenticated use), under every key the link checks. */
   _confirmPin() {
     const e = this.endpoint;
     if (!e || !e.tls) return;
@@ -323,11 +510,17 @@ class StagewatchLink {
   /** The admin accepts a changed certificate: pin what is presented now, then reconnect. */
   acceptCertificate() {
     const s = this.tlsState;
-    if (!s.nodeKey || !s.fp) return false;
+    if (!s.nodeKey || !s.fp || !s.problem) return false;   // only a certificate the link refused is accepted
     for (const k of s.keys || [s.nodeKey]) this.pins.accept(k, s.fp);
     this.onPins();
     this.tlsState.problem = ''; this.tlsState.changed = false;
     this._close(); this.endpoint = null; this.delay = 500;
+    // A key Stagewatch refused stays refused, and its hold stands: the accepted certificate is used when it asks again.
+    if (this.keyState === 'refused') { this._set(this._refusedStatus(), null); return true; }
+    this._cancelRedial();
+    this._resetKey();
+    this.keyEpoch++;
+    this._set('connecting', null);
     if (this.base) this._open();
     return true;
   }
@@ -348,12 +541,33 @@ class StagewatchLink {
   }
 
   /** One HTTP call to Stagewatch on the resolved endpoint (pinned when TLS). */
-  async _call(path, { method = 'GET', headers = {}, body, timeoutMs = 4000 } = {}) {
+  async _call(path, { method = 'GET', headers = {}, body, timeoutMs = 4000, verdict = false } = {}) {
     if (!this.endpoint) throw new Error('not connected');
-    return tlsmod.request(this.endpoint.base + path, { method, headers: this._headers(headers), body, timeoutMs, tls: this.endpoint.tls });
+    // The key goes nowhere Stagewatch has not accepted it, but in the one read that asks it (the verdict's own).
+    if (this.keyState !== 'accepted' && !verdict) throw new Error('not sent: Stagewatch has not accepted this AGMessage\'s key');
+    const accepted = this.keyState === 'accepted' ? this.acceptances : -1;
+    const res = await tlsmod.request(this.endpoint.base + path, { method, headers: this._headers(headers), body, timeoutMs, tls: this.endpoint.tls });
+    if (res.status === 429 || (res.status === 503 && res.retryAfter !== null)) this.waitUntil = Math.max(this.waitUntil, Date.now() + holdMs(res.retryAfter));
+    // 401 is Stagewatch refusing the key itself (unknown, revoked, the PIN, or this address locked out): never a link.
+    // Each one is a wrong attempt its lockout counted, however many were on their way. Only for the key the request
+    // carried, accepted then and still, does it refuse: a request from before a new key decides nothing.
+    if (res.status === 401 && this.key) noteWrong(this.where || this.host, 1, this.lockoutMs);
+    if (res.status === 401 && this.keyState === 'accepted' && this.acceptances === accepted) this._refuse(res.body && res.body.error);
+    // A key every scope may read with (its verdict's read) can still lack the node scope this link needs: the first route
+    // that needs it (a send, AGMessage's context, a proposal, the collect, a result) answering 403 "this API key is …"
+    // refuses it in Stagewatch's words — the link is no use with it. Not a wrong key to Stagewatch's lockout.
+    if (res.status === 403 && this.keyState === 'accepted' && this.acceptances === accepted && (method !== 'GET' || /[?&]target=/.test(path))) {
+      const words = res.body && typeof res.body.error === 'string' ? res.body.error : '';
+      if (/^this API key is /.test(words)) this._refuse(words);
+    }
+    return res;
   }
 
   get linked() { return this.status === 'connected'; }
+  /** The Stagewatch this link points at, as host:port ('' when none): what its lockout counts by. */
+  get host() { return this.base ? new URL(this.base).host : ''; }
+  /** Stagewatch asked this key to wait (Retry-After), and the time is not up. */
+  get held() { return Date.now() < this.waitUntil; }
   /** The address this link points at, as a tag (lib/nodes.js addressTag). */
   get tag() { return addressTag(this.base); }
 
@@ -371,10 +585,12 @@ class StagewatchLink {
   _open() {
     if (this.status === 'off') this._set('connecting', this.view);
     const base = this.base;
+    const refusals = this.refusals;
     this._opening = true;
     this._resolve().then((ep) => {
       this._opening = false;
-      if (this.base !== base || this.ws) return;
+      // Pointed elsewhere, already open, or the key refused while this resolved (its hold's redial opens again).
+      if (this.base !== base || this.ws || this.refusals !== refusals) return;
       if (ep === null) { this._set(this.tlsState.problem || 'certificate refused', null); this._retry(10_000); return; }
       if (ep === undefined) { this._retry(); return; }
       this.endpoint = ep;
@@ -383,25 +599,44 @@ class StagewatchLink {
   }
 
   _dial(ep) {
-    const url = ep.base.replace(/^http/, 'ws') + '/ws?cid=agmessage&page=' + encodeURIComponent('/agmessage');
+    const url = wsUrl(ep.base, this.nodeId);
     let ws;
     // The key rides in the Authorization header, never in the URL (Show Bus §7); over TLS only to the pinned certificate.
     try { ws = new WebSocket(url, { headers: this._headers(), handshakeTimeout: 5000, ...(ep.tls || {}) }); } catch { this._retry(); return; }
     this.ws = ws;
+    // A new socket earns its own verdict: an acceptance never carries over from the last one; a refusal stands until one.
+    if (this.keyState === 'accepted') this._resetKey();
+    let first = true;
     ws.onopen = () => {
-      this.delay = 500; this.lastHeard = Date.now(); this._set('connected', this.view); this._ping(); this.fetchContext();
+      this.lastHeard = Date.now();
+      if (this.keyState === 'none') this.delay = 500;
+      if (this.keyState !== 'refused') this._set(this._liveStatus(), this.view);
+      this._ping();
     };
     ws.onmessage = (ev) => {
       let msg; try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
+      if (this.ws !== ws || !msg || typeof msg !== 'object') return;
+      // Stagewatch 2.18 says first whether it accepted the key; only ok === true accepts, anything else is no verdict.
+      if (msg.type === 'auth') {
+        // A refusal on the socket took two attempts Stagewatch counted: the upgrade, then the key's or the viewing code's check.
+        if (msg.ok === true) { first = false; this._accept('auth', msg.node); } else if (msg.ok === false) { first = false; this._refuse(msg.words ?? msg.error, 2); }
+        return;
+      }
+      // A Stagewatch whose first frame (or beat) came without a word on the key (2.16): one authenticated read is the verdict.
+      // A keyless link Stagewatch sends frames to again (its viewing code lifted) is viewing again.
+      if (first && (msg.type === 'state' || msg.type === 'beat')) {
+        first = false;
+        if (this.key) this._probe(ws);
+        else if (this.keyState === 'refused') { this._resetKey(); this.delay = 500; this.onKey(this.keyFacts(), this.keyEpoch); }
+      }
       if (msg.type === 'beat') { if (msg.live !== false) this.lastHeard = Date.now(); return; }
       this.lastHeard = Date.now();
       if (msg.type === 'state') {
-        this._confirmPin();
         if (Number.isInteger(msg.seq)) { if (this.lastSeq !== null && msg.seq < this.lastSeq) this.generation = ++generations; this.lastSeq = msg.seq; }
-        this._set('connected', stageView(msg));
+        if (this.keyState === 'refused') this.heldView = stageView(msg);   // not shown before the key is accepted again
+        else this._set(this._liveStatus(), stageView(msg));
       }
       else if (msg.type === 'pong') this.clock.add(Number(msg.t), Number(msg.t2), Number(msg.t3), Date.now());
-      else if (msg.type === 'auth' && msg.ok === false) this._set('Stagewatch refused: ' + String(msg.error || 'viewing code or key').slice(0, 80), null);
     };
     ws.onclose = () => { if (this.ws === ws) { this.ws = null; this._retry(); } };
     ws.onerror = () => { /* onclose follows */ };
@@ -413,23 +648,42 @@ class StagewatchLink {
 
   _retry(after) {
     if (!this.base) return;
-    const refused = this.tlsState.problem && (this.tlsState.changed || /match/.test(this.tlsState.problem));
+    const held = this.keyState === 'refused';   // a refused key waits out Stagewatch's lockout minute, never less
+    const refused = held || (this.tlsState.problem && (this.tlsState.changed || /match/.test(this.tlsState.problem)));
     if (!refused && this.status !== 'reconnecting') this._set('reconnecting', this.view ? { ...this.view, stale: true } : null);
-    const base = this.base;
-    setTimeout(() => { if (!this.ws && !this._opening && this.base === base) this._open(); }, jitter(after || this.delay)).unref();
-    if (!after) this.delay = Math.min(5000, this.delay * 2);
+    this._schedule(held ? this.refusedRetryMs + crypto.randomInt(0, Math.floor(this.refusedRetryMs / 5) + 1) : jitter(after || this.delay));
+    if (!after && !held) this.delay = Math.min(5000, this.delay * 2);
   }
 
+  /** The one pending redial. A refused key's waits, besides, for room under Stagewatch's lockout at that address. */
+  _schedule(ms) {
+    const base = this.base;
+    this._cancelRedial();
+    this.redial = setTimeout(() => {
+      this.redial = null;
+      if (this.ws || this._opening || this.base !== base) return;
+      if (this.keyState === 'refused') {
+        const where = this.where || this.host;
+        const room = lockoutRoomIn(where, this.lockoutMs);
+        if (room > 0) { this._schedule(room); return; }
+        holdPlaces(where, this, this.lockoutMs);   // its two places, taken before it dials
+      }
+      this._open();
+    }, ms);
+    this.redial.unref();
+  }
+
+  _cancelRedial() { if (this.redial) { clearTimeout(this.redial); this.redial = null; } }
+
   _watch() {
-    if (!this.ws) return;
+    if (!this.ws || this.ws.readyState !== 1) return;   // open sockets only: onopen set lastHeard
     const quiet = Date.now() - this.lastHeard;
-    if (this.status === 'connected' || this.status === 'stale') {
-      this._ping();
-      // A silent peer answers no close frame (ws would wait 30 s for one): drop the socket now, so onclose redials at 12 s.
-      if (quiet > GONE_MS) { try { this.ws.terminate(); } catch { /* onclose redials */ } return; }
-      if (quiet > STALE_MS) this._set('stale', this.view ? { ...this.view, stale: true } : null);   // silence is never "fine"
-      else if (this.status === 'stale') this._set('connected', this.view ? { ...this.view, stale: false } : null);
-    }
+    this._ping();
+    // A silent peer answers no close frame (ws would wait 30 s for one): drop the socket now, so onclose redials at 12 s.
+    if (quiet > GONE_MS) { try { this.ws.terminate(); } catch { /* onclose redials */ } return; }
+    if (!['connected', 'stale', 'checking key', 'viewing'].includes(this.status)) return;   // a refusal's words stay up
+    if (quiet > STALE_MS) this._set('stale', this.view ? { ...this.view, stale: true } : null);   // silence is never "fine"
+    else if (this.status === 'stale') this._set(this._liveStatus(), this.view ? { ...this.view, stale: false } : null);
   }
 
   /** Let go of the socket (reconfigured, a certificate accepted, stopped): its late frames no longer reach this link. */
@@ -442,6 +696,8 @@ class StagewatchLink {
   async sendToStage(text, { urgency = 'info', ack = true } = {}) {
     if (!this.base) return { ok: false, stage: 'not sent', error: 'Link Stagewatch first (Admin → Show network).' };
     if (!this.key) return { ok: false, stage: 'not sent', error: 'Stagewatch needs a node key for this (Stagewatch → Settings → Remote → API keys, scope "node").' };
+    const held = this.keyHeld();
+    if (held) return { ok: false, stage: 'not sent', error: held };
     if (this.status !== 'connected') return { ok: false, stage: 'not sent', error: 'The Stagewatch link is ' + this.status + ' — not sent (nothing is queued; send again when it is connected).' };
     const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 500);
     if (!t) return { ok: false, stage: 'not sent', error: 'Nothing to send.' };
@@ -458,19 +714,32 @@ class StagewatchLink {
     }
   }
 
+  /** Why nothing authenticated may go to Stagewatch while its verdict on the key is not "accepted" ('' when it may). */
+  keyHeld(what = 'sent') {
+    if (this.keyState === 'refused') return 'Stagewatch refused this AGMessage\'s key (' + this.keyWords + ') — not ' + what + '. Enter a node key Stagewatch lists (Stagewatch → Settings → Remote → API keys).';
+    if (this.keyState === 'checking') return 'Stagewatch has not accepted this AGMessage\'s key yet — not ' + what + ' (nothing is queued).';
+    return '';
+  }
+
   /** Stagewatch's context (Show Bus §6), for the AI's brief and the admin page. Quietly null when not served. */
   async fetchContext() {
-    if (!this.base || !this.key || !this.endpoint) return null;
+    if (!this.base || !this.key || !this.endpoint || this.keyState !== 'accepted') return null;
+    const acceptance = this.acceptances;
     try {
       const res = await this._call('/api/context', { timeoutMs: 3000 });
       if (res.status !== 200) return null;
       const j = res.body;
       if (!j || j.v !== 1 || !j.node) return null;
-      this.context = j; this.contextAt = Date.now();
-      this.departments = Array.from(new Set(this.departments.concat(departmentsOf(j)))).slice(0, 20);
-      this.onContext(j);
+      if (this.keyState !== 'accepted' || this.acceptances !== acceptance) return null;   // refused meanwhile: not shown
+      this._takeContext(j);
       return j;
     } catch { return null; }
+  }
+
+  _takeContext(j) {
+    this.context = j; this.contextAt = Date.now();
+    this.departments = Array.from(new Set(this.departments.concat(departmentsOf(j)))).slice(0, 20);
+    this.onContext(j);
   }
 
   /** Post AGMessage's own context to Stagewatch (needs a node-scope key). */
@@ -484,24 +753,30 @@ class StagewatchLink {
 
   // ---------------------------------------------------------------- the show desk (Show Bus 1.2 §11)
 
-  /** Does Stagewatch keep the shared approval queue? (Its hello's caps, else asked once a minute.) */
+  /** Does Stagewatch keep the shared approval queue? (Its hello's caps, else asked every deskCheckMs.) */
   async checkDesk(fromId = 'x') {
     if (!this.linked || !this.key || !this.endpoint) { this.desk = false; return false; }
     const u = new URL(this.base);
     const peer = this.findPeer('main', u.hostname, Number(u.port) || 80);
     if (peer && Array.isArray(peer.caps) && peer.caps.includes('approvals')) { this.desk = true; this.deskCheckedAt = Date.now(); return true; }
-    try {
-      const res = await this._call('/api/proposals?from=' + encodeURIComponent(fromId), { timeoutMs: 3000 });
-      this.desk = res.status === 200;
-    } catch { this.desk = false; }
-    this.deskCheckedAt = Date.now();
+    // Only a verdict changes it: 200 is a desk, 404 or 405 none. No answer, a busy desk, the key's spent minute or a
+    // refused key say nothing of it: the desk stays as it was and is asked again in seconds (after any Retry-After),
+    // so a 429 never hides a desk, and what it approves meanwhile is still collected inside Stagewatch's minute.
+    let res = null;
+    const acceptance = this.acceptances;
+    try { res = await this._call('/api/proposals?from=' + encodeURIComponent(fromId), { timeoutMs: 3000 }); } catch { /* no answer: asked again soon */ }
+    if (this.keyState !== 'accepted' || this.acceptances !== acceptance) return this.desk;   // refused meanwhile: says nothing
+    if (res && [200, 404, 405].includes(res.status)) { this.desk = res.status === 200; this.deskCheckedAt = Date.now(); }
+    else this.deskCheckedAt = Date.now() - (res && res.status === 403 ? 0 : this.deskCheckMs - DESK_RECHECK_MS);
     return this.desk;
   }
 
   /** Send a proposal to the desk. {ok, proposal?, error?} */
   async propose(body) {
+    if (this.keyHeld('proposed')) return { ok: false, error: this.keyHeld('proposed') };
     if (!this.linked || !this.endpoint) return { ok: false, error: 'The Stagewatch link is ' + this.status + ' — not proposed.' };
     if (!this.desk) return { ok: false, error: 'This Stagewatch keeps no approval queue (Show Bus 1.2) — send it directly instead.' };
+    if (this.deskRefusal) return { ok: false, error: 'Stagewatch\'s show desk refuses this AGMessage (' + this.deskRefusal + ') — not proposed. Give this AGMessage a node key of its own (Stagewatch → Settings → Remote → API keys).' };
     try {
       const res = await this._call('/api/proposals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (res.status >= 400) return { ok: false, error: 'Stagewatch: ' + String((res.body && res.body.error) || ('said ' + res.status)).slice(0, 160) };
@@ -512,10 +787,16 @@ class StagewatchLink {
 
   /** One proposal's state; {gone:true} when the desk has no such proposal (404); null when it could not be asked. */
   async proposal(id) {
+    const a = await this.proposalAnswer(id);
+    return a.status === 200 ? a.proposal : a.status === 404 ? { gone: true } : null;
+  }
+
+  /** One proposal as the desk answered: {status (0 when not reached), retryAfter, proposal (null unless 200)}. */
+  async proposalAnswer(id) {
     try {
       const res = await this._call('/api/proposals/' + encodeURIComponent(id), { timeoutMs: 3000 });
-      return res.status === 200 ? readProposal(res.body) : res.status === 404 ? { gone: true } : null;
-    } catch { return null; }
+      return { status: res.status, retryAfter: res.retryAfter, proposal: res.status === 200 ? readProposal(res.body) : null };
+    } catch { return { status: 0, retryAfter: null, proposal: null }; }
   }
 
   /** Approved proposals aimed at this node (it runs them and reports). [] when there are none or the desk is away. */
@@ -523,21 +804,42 @@ class StagewatchLink {
     if (!this.desk || !this.linked) return [];
     try {
       const res = await this._call('/api/proposals?target=' + encodeURIComponent(nodeId) + '&state=approved', { timeoutMs: 3000 });
-      return res.status === 200 ? readProposalList(res.body) : [];
+      // A refusal of the collect itself (not a busy key, not a desk away) is kept, in Stagewatch's words, until one is taken.
+      if (res.status === 200) this.deskRefusal = '';
+      else if (res.status === 401 || res.status === 403) this.deskRefusal = refusalWords(res.body && res.body.error) || 'Stagewatch answered ' + res.status;
+      // Only what the desk says is approved for this node is run: Stagewatch's collect lists nothing else.
+      return res.status === 200 ? readProposalList(res.body).filter((p) => p.state === 'approved' && p.target && p.target.id === nodeId) : [];
     } catch { return []; }
   }
 
-  /** Report what running an approved proposal did: the desk's HTTP status (2xx taken, 4xx refused for good), 0 when not reached. */
+  /**
+   * Every proposal this node made at the desk, by id, in one read (Stagewatch's own list of what a node proposed), or null
+   * when it could not be read. One request however many wait for the show caller; a 200 also says the desk is there.
+   */
+  async proposalsFrom(nodeId) {
+    try {
+      const acceptance = this.acceptances;
+      const res = await this._call('/api/proposals?from=' + encodeURIComponent(nodeId), { timeoutMs: 3000 });
+      if (res.status !== 200 || this.keyState !== 'accepted' || this.acceptances !== acceptance) return null;
+      this.desk = true; this.deskCheckedAt = Date.now();
+      return new Map(readProposalList(res.body).map((p) => [p.id, p]));
+    } catch { return null; }
+  }
+
+  /**
+   * Report what running an approved proposal did: {status (0 when not reached), retryAfter, error (the desk's words)},
+   * for lib/deskresults.js postVerdict to read.
+   */
   async reportResult(id, ok, words) {
     try {
       const res = await this._call('/api/proposals/' + encodeURIComponent(id) + '/result', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: !!ok, words: String(words || '').slice(0, 300) }), timeoutMs: 3000,
       });
-      return res.status;
-    } catch { return 0; }
+      return { status: res.status, retryAfter: res.retryAfter, error: res.body && typeof res.body.error === 'string' ? res.body.error.slice(0, 160) : '' };
+    } catch (e) { return { status: 0, retryAfter: null, error: e && e.message ? e.message.slice(0, 80) : '' }; }
   }
 
-  stop() { clearInterval(this.timer); this.base = ''; this._close(); }
+  stop() { clearInterval(this.timer); this._cancelRedial(); this.base = ''; this._close(); settlePlaces(this); }
 }
 
-module.exports = { Discovery, StagewatchLink, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };
+module.exports = { REFUSED_RETRY_MS, DESK_CHECK_MS, LOCKOUT_MS, lockoutRoomIn, noteWrong, refusalWords, Discovery, StagewatchLink, wsUrl, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };

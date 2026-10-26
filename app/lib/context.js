@@ -13,16 +13,38 @@ const worst = (lights) => lights.reduce((w, l) => (LIGHTS.indexOf(l) > LIGHTS.in
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
 
 /**
+ * A Stagewatch link's light, its own and a hall's alike: green only once Stagewatch accepted AGMessage's key; amber
+ * while the key is checked, while it views without one or is being reached; red when the key or the certificate is
+ * refused; grey when nothing is linked.
+ */
+function stageLight(s) {
+  const status = (s && s.status) || 'off';
+  if (status === 'off') return 'grey';
+  if (status === 'connected') return 'green';
+  return ['checking key', 'viewing', 'stale', 'reconnecting', 'connecting'].includes(status) ? 'amber' : 'red';
+}
+/** A Stagewatch link's state in words, without its timer (Stagewatch's own refusal words, never a key). */
+function stageWords(s) {
+  const status = (s && s.status) || 'off';
+  if (status === 'off') return 'not linked';
+  if (status === 'checking key') return 'checking AGMessage\'s key';
+  if (status === 'viewing') return 'viewing — no key, nothing is sent to the stage';
+  // The refusal's words while the refusal is what the link shows; a certificate problem met meanwhile shows as itself.
+  if (s.key === 'refused' && /^(key )?refused: /.test(status)) return 'refused AGMessage\'s ' + (status.startsWith('key ') ? 'key' : 'view') + ': ' + String(s.keyWords || '').slice(0, 120);
+  return status;
+}
+
+/**
  * @param {object} f facts gathered by the server
  * @param {{id:string,name:string}} f.node
  * @param {Array<{users:Map, messages:Array}>} f.rooms
- * @param {{status:string, view:object|null, clock:object|null, context:object|null}} f.stage
+ * @param {{status:string, key?:string, keyWords?:string, view:object|null, clock:object|null, context:object|null}} f.stage
  * @param {Array} f.peers Discovery.list()
  * @param {boolean} f.aiOn
  * @param {boolean} f.tunnel
  * @param {number} [f.help] open help requests across the halls (a count)
  * @param {Object<string,{light:string,headline:string}>} [f.peerContexts] linked Patterns / PlayMap nodes' own light and headline
- * @param {Array<{status:string, view:object|null, context:object|null}>} [f.halls] halls' own Stagewatch links
+ * @param {Array<{status:string, key?:string, keyWords?:string, view:object|null, context:object|null}>} [f.halls] halls' own Stagewatch links
  * @param {Array<{at:number,text:string}>} f.recent role-level events, no content
  * @param {number} [f.now]
  */
@@ -65,9 +87,9 @@ function buildContext(f) {
 
   // The Stagewatch link.
   const st = f.stage || {};
-  const stLight = st.status === 'connected' ? 'green' : st.status === 'off' || !st.status ? 'grey' : st.status === 'stale' || st.status === 'reconnecting' || st.status === 'connecting' ? 'amber' : 'red';
+  const stLight = stageLight(st);
   const clock = st.clock;
-  let stState = st.status === 'off' || !st.status ? 'not linked' : st.status;
+  let stState = stageWords(st);
   if (st.status === 'connected' && st.view) stState = 'timer ' + (st.view.text || '—') + (st.view.title ? ' · ' + st.view.title : '');
   if (clock && clock.apart) stState += ' · CLOCKS APART (' + Math.round(clock.offsetMs / 100) / 10 + ' s)';
   items.push({ id: 'link:stagewatch', kind: 'link', label: 'Stagewatch (stage timer)', light: clock && clock.apart && stLight === 'green' ? 'amber' : stLight, state: stState });
@@ -79,8 +101,9 @@ function buildContext(f) {
   for (const [i, h] of (f.halls || []).entries()) {
     const ok = h.status === 'connected';
     const name = h.context && h.context.node && typeof h.context.node.name === 'string' ? h.context.node.name.slice(0, 60) : 'a hall\'s';
-    items.push({ id: 'link:stagewatch:' + (i + 2), kind: 'link', label: 'Stagewatch ' + name, light: ok ? 'green' : h.status === 'off' ? 'grey' : 'amber', state: ok && h.view ? 'timer ' + (h.view.text || '—') : h.status || 'off' });
-    links.push({ from: 'meetings', to: 'link:stagewatch:' + (i + 2), kind: 'sends', light: ok ? 'green' : 'amber' });
+    const hLight = stageLight(h);
+    items.push({ id: 'link:stagewatch:' + (i + 2), kind: 'link', label: 'Stagewatch ' + name, light: hLight, state: ok && h.view ? 'timer ' + (h.view.text || '—') : stageWords(h) });
+    links.push({ from: 'meetings', to: 'link:stagewatch:' + (i + 2), kind: 'sends', light: hLight === 'grey' ? 'amber' : hLight });
   }
   items.push({ id: 'ai', kind: 'assistant', label: 'AI drafts', light: f.aiOn ? 'green' : 'grey', state: f.aiOn ? 'on (drafts only, a person sends)' : 'off — everything else works offline' });
   items.push({ id: 'tunnel', kind: 'link', label: 'Remote access (Cloudflare)', light: f.tunnel ? 'green' : 'grey', state: f.tunnel ? 'on' : 'off (venue network only)' });
@@ -125,9 +148,13 @@ function buildContext(f) {
 function showBrief(stage, peers) {
   const lines = [];
   const ctx = stage && stage.context;
-  if (stage && stage.status === 'connected' && stage.view) {
+  if (stage && stage.key === 'refused' && /^(key )?refused: /.test(String(stage.status))) {
+    lines.push('Stagewatch refused AGMessage\'s ' + (String(stage.status).startsWith('key ') ? 'key' : 'view') + ' (' + String(stage.keyWords || '').slice(0, 120) + '): nothing can be sent to its stage and its timer is not shown.');
+  } else if (stage && stage.status === 'checking key') {
+    lines.push('Stage timer: AGMessage\'s key is being checked: nothing is sent until Stagewatch accepts it.');
+  } else if (stage && (stage.status === 'connected' || stage.status === 'viewing') && stage.view) {
     const v = stage.view;
-    lines.push(`Stage timer (Stagewatch, live): ${v.title || '(no title)'} — ${v.text || ''}${v.next ? '; next: ' + v.next : ''}${v.message ? '; on the speaker screen: "' + v.message + '"' + (v.messageAck ? ' (' + v.messageAck + ')' : '') : ''}${v.playout ? '; video "' + v.playout.title + '" ' + (v.playout.remaining ?? '?') + ' s left' : ''}`);
+    lines.push(`Stage timer (Stagewatch, live): ${v.title || '(no title)'} — ${v.text || ''}${v.next ? '; next: ' + v.next : ''}${v.message ? '; on the speaker screen: "' + v.message + '"' + (v.messageAck ? ' (' + v.messageAck + ')' : '') : ''}${v.playout ? '; video "' + v.playout.title + '" ' + (v.playout.remaining ?? '?') + ' s left' : ''}${stage.status === 'viewing' ? ' (no key: nothing can be sent to the stage)' : ''}`);
   } else if (stage && stage.status && stage.status !== 'off') {
     lines.push('Stage timer: Stagewatch link is ' + stage.status + ' — its last values may be out of date.');
   }
@@ -159,4 +186,4 @@ function hallBrief(code, stage, links, peers) {
   return showBrief({ ...stage, linked: (links || []).filter((l) => !elsewhere.has(l.id)) }, (peers || []).filter((p) => !elsewhere.has(p.id)));
 }
 
-module.exports = { buildContext, showBrief, hallBrief, worst };
+module.exports = { buildContext, showBrief, hallBrief, stageLight, stageWords, worst };

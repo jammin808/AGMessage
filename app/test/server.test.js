@@ -276,6 +276,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const fake = http.createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       if (req.url.startsWith('/api/message/')) return res.end(JSON.stringify({ type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId: 77 } }));
+      if (req.url === '/api/context') return res.end('{"v":1,"node":{"t":"main","id":"sw1","name":"Keynote"}}');
       res.end('{"ok":true}');
     });
     const wss = new WebSocketServer({ server: fake, path: '/ws' });
@@ -339,11 +340,17 @@ test('AGMessage server: security, resume, persistence', async (t) => {
         res.writeHead(200, { 'content-type': 'application/json' });
         const u = new URL(req.url, 'http://x');
         if (u.pathname === '/api/proposals' && req.method === 'POST') { seen.proposals.push(JSON.parse(body)); return res.end(JSON.stringify({ id: 'p17', state: 'pending' })); }
-        if (u.pathname === '/api/proposals/p17') return res.end(JSON.stringify({ id: 'p17', state, decidedBy: 'SM', result: state === 'done' ? { ok: true, words: 'Message on the speaker screen' } : null }));
+        // As Stagewatch's SharedProposal.ToJson: result and words one string, ok at the top level (null until it ran).
+        const words = state === 'done' ? 'Message on the speaker screen' : '';
+        const p17 = { id: 'p17', state, decidedBy: 'SM', result: words, ok: state === 'done' ? true : null, words };
+        if (u.pathname === '/api/proposals/p17') return res.end(JSON.stringify(p17));
+        // ProposalsFrom: all this node proposed, as {proposals: […]}.
+        if (u.pathname === '/api/proposals' && u.searchParams.get('from')) return res.end(JSON.stringify({ proposals: seen.proposals.length ? [p17] : [] }));
         if (u.pathname === '/api/proposals' && u.searchParams.get('target'))
           return res.end(JSON.stringify(seen.results.length ? [] : [{ id: 'p9', state: 'approved', line: 'notice "Break in 5 minutes"', decidedBy: 'SM', target: { t: 'messenger', id: u.searchParams.get('target') } }]));
         if (u.pathname === '/api/proposals') return res.end('[]');
         if (u.pathname === '/api/proposals/p9/result') { seen.results.push(JSON.parse(body)); return res.end('{"ok":true}'); }
+        if (u.pathname === '/api/context') return res.end('{"v":1,"node":{"t":"main","id":"sw1","name":"Keynote"}}');
         res.end('{"ok":true}');
       });
     });
@@ -372,7 +379,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
       for (let i = 0; i < 100 && !updates.some((u) => u.proposal.state === 'done'); i++) await new Promise((x) => setTimeout(x, 100));
       const done = updates.find((u) => u.proposal.state === 'done');
       assert.ok(done, 'the state reached the research view: ' + JSON.stringify(updates));
-      assert.deepEqual([done.proposal.by, done.proposal.words], ['SM', 'Message on the speaker screen']);
+      assert.deepEqual([done.proposal.by, done.proposal.ok, done.proposal.words], ['SM', true, 'Message on the speaker screen']);
       for (let i = 0; i < 100 && !seen.results.length; i++) await new Promise((x) => setTimeout(x, 100));
       assert.deepEqual(seen.results[0], { ok: true, words: 'shown in 1 meeting' });
       assert.ok(notices.some((n) => /approved by SM\): Break in 5 minutes/.test(n)), 'the notice is in the meeting: ' + JSON.stringify(notices));

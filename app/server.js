@@ -45,6 +45,7 @@ const { mountAccounts } = require('./lib/http-accounts');
 const board = require('./lib/board');
 const stagelines = require('./lib/stagelines');
 const peerlinks = require('./lib/peerlinks');
+const deskresults = require('./lib/deskresults');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
@@ -116,8 +117,17 @@ const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json
 const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'));
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
 const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
+// The results of approved show-desk proposals this AGMessage ran that Stagewatch has not taken yet (lib/deskresults.js):
+// read now, written only by the desk loop, which runs once this copy holds the data folder and its port. In memory too:
+// the tries (attempts, posts), when the next is due, the last answer, and the link's generation it was collected under
+// (0 after a restart, so its first try reads the proposal back); `fresh` until its first post.
+const DESK_RESULTS_PATH = path.join(DATA_DIR, 'desk-results.json');
+const deskLane = new resilience.WriteLane(DESK_RESULTS_PATH, { delayMs: 100, keepBak: true, mode: 0o600 });
+const deskResults = deskresults.readRecords(resilience.readJsonWithBak(DESK_RESULTS_PATH), settings.nodeId)
+  .map((r) => ({ ...r, attempts: 0, posts: 0, nextAt: 0, lastStatus: 0, gen: 0, fresh: false }));
+let deskLastAnswer = { status: null, at: null };   // the desk's last answer to a result post (health)
 /** Every store saved through a write lane, by the name health and the console give it. */
-const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane]];
+const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['deskResults', deskLane]];
 /** Write every lane and the audit entries still waiting now (shutdown, a crash); what still cannot be written is named on the console. */
 function flushLanes() {
   for (const [name, lane] of saveLanes()) if (!lane.flushSync()) console.error('  [save] ' + name + ' could not be written: ' + lane.lastError);
@@ -137,7 +147,7 @@ const isLoopback = (req) => { const a = (req.socket && req.socket.remoteAddress)
 const isEncrypted = (req) => !!(req.socket && req.socket.encrypted);
 const tlsFacts = () => ({
   on: !!cert, fingerprint: cert ? cert.fp : '', validTo: cert ? cert.validTo : '', requireHttps: !!settings.requireHttps,
-  link: stageLink.tlsState, desk: stageLink.desk,
+  link: stageLink.tlsState, desk: stageLink.desk, deskRefusal: stageLink.deskRefusal,
 });
 
 // ---------------------------------------------------------------- health: crashes, the loop, latency
@@ -162,7 +172,10 @@ function healthFacts() {
     loopMs: loopRing.stats(),
     stageRttMs: stageLink.rtt.stats(),
     stage: stageLink.status,
+    stageKey: stageLink.keyFacts(),
     clock: stageLink.clockInfo(),
+    // Show-desk results Stagewatch has not taken yet: how many, since when, its last answer and when the next try is due.
+    desk: deskFacts(),
     tls: tlsFacts(),
     saves: {
       writes: settingsLane.writes, coalesced: settingsLane.coalesced, error: settingsLane.lastError,
@@ -784,8 +797,8 @@ io.on('connection', (socket) => {
       ...(ops ? { ops } : { history: r.messages }),
       users: roomUserSummary(r, { links: socket.data.isAdmin }),
       ai: !!aiKey(), stage: stagePayload(linkFor(code)),
-      canSendToStage: !!(linkFor(code).base && linkFor(code).key) && allowed('stage.send'),
-      canPropose: !!(linkFor(code).desk && linkFor(code).key) && allowed('stage.send'),
+      canSendToStage: !!(linkFor(code).base && linkFor(code).key && linkFor(code).keyState !== 'refused') && allowed('stage.send'),
+      canPropose: !!(linkFor(code).desk && linkFor(code).key && !linkFor(code).deskRefusal) && allowed('stage.send'),
       account: acct ? { username: acct.username, name: acct.name, role: acct.role, roleLabel: rbac.ROLES[acct.role].label } : null,
       seen: seenFor(r),
     });
@@ -1034,8 +1047,8 @@ io.on('connection', (socket) => {
     if (!need(ack)) return;
     const link = linkFor(room.code);
     ack({
-      ok: true, linked: link.linked, title: (link.context && link.context.node && link.context.node.name) || '',
-      canSend: !!(link.base && link.key) && allowed('stage.send'), canPropose: !!(link.desk && link.key) && allowed('stage.send'),
+      ok: true, linked: link.linked, key: link.keyState, cert: !!(link.tlsState && link.tlsState.problem), title: (link.context && link.context.node && link.context.node.name) || '',
+      canSend: !!(link.base && link.key && link.keyState !== 'refused') && allowed('stage.send'), canPropose: !!(link.desk && link.key && !link.deskRefusal) && allowed('stage.send'),
       targets: stagelines.destinations(link.departments),
     });
   });
@@ -1068,7 +1081,7 @@ io.on('connection', (socket) => {
     if (!r.ok) return ack(r);
     // The desk's id is its own (it numbers from p1 again after a restart): the line and the Stagewatch's address tag
     // travel with it, so a proposal of the same number that is not this one is never taken for it.
-    const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, words: '', to: built.words, at: Date.now(), sw: link.tag, line: built.line };
+    const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, ok: null, words: '', to: built.words, at: Date.now(), sw: link.tag, line: built.line };
     const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} asked Stagewatch's operator to put this on ${built.words}: “${parsed.text.slice(0, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
     if (source) apply(room, { o: 'upd', id: source.id, f: { proposal } });
     trackProposal(link.id, proposal.id, room.code, [sys.id].concat(source ? [source.id] : []), proposal.state, proposal);
@@ -1275,7 +1288,9 @@ io.on('connection', (socket) => {
     const { link: desk, desk: hasDesk } = deskFor(link);
     if (!hasDesk) {
       const where = link.hall ? ((store.get(link.hall) || {}).name || link.hall) + '\'s Stagewatch' : 'The default Stagewatch';
-      return ack({ ok: false, error: where + (desk.linked ? ' keeps no show desk' : desk.base ? ' is ' + desk.status : ' is not linked') + ' — not proposed.' });
+      const held = desk.base && desk.key ? desk.keyHeld('proposed') : '';
+      const refused = desk.deskRefusal ? ' refuses this AGMessage at its show desk (' + desk.deskRefusal + ')' : '';
+      return ack({ ok: false, error: held ? where + ': ' + held : where + (refused || (desk.linked ? ' keeps no show desk' : desk.base ? ' is ' + desk.status : ' is not linked')) + ' — not proposed.' });
     }
     const r = await desk.propose({
       from: { t: 'messenger', id: settings.nodeId, name: 'AGMessage' },
@@ -1323,7 +1338,7 @@ io.on('connection', (socket) => {
     const own = hallLinks.get(r.code);
     ack({
       ok: true, code: r.code, name: r.name || '',
-      stagewatch: { url: sw.url || '', keySet: !!secretbox.open(sw.keySealed), fp: sw.fp || '', status: own ? own.status : null, tls: own ? own.tlsState : null },
+      stagewatch: { url: sw.url || '', keySet: !!secretbox.open(sw.keySealed), fp: sw.fp || '', status: own ? own.status : null, tls: own ? own.tlsState : null, key: own ? own.keyFacts() : null, deskRefusal: own ? own.deskRefusal : '' },
       defaultStagewatch: settings.stagewatchUrl || '',
       stagewatches: discovery ? discovery.list().filter((p) => p.t === 'main') : [],
     });
@@ -1591,6 +1606,8 @@ io.on('connection', (socket) => {
     const was = stageLink.tlsState;
     if (!stageLink.acceptCertificate()) return ok(ack)({ ok: false, error: 'No certificate to accept.' });
     noteEvent('the admin accepted a changed Stagewatch certificate', stageLink);
+    // A trust decision a person made: who, from where, and which certificate (its public fingerprint, cut).
+    audit.write(socket.data.actor || HOST_ACTOR, 'stagewatch.certificate', 'default', 'accepted a changed Stagewatch certificate (' + String(was.fp || '').slice(0, 23) + '…)', socket.data.ip);
     ok(ack)({ ok: true, fingerprint: was.fp });
   });
   socket.on('admin:renewCertificate', (ack) => {
@@ -1646,7 +1663,7 @@ function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : [];
 /** What a hall's AI is told of the show network: its Stagewatch, and the nodes of that hall and of every hall in their own words (lib/context.js hallBrief). */
 function briefFor(code) {
   const link = linkFor(code);
-  return hallBrief(code, { status: link.status, view: link.view, context: link.context }, Array.from(peerLinks.values()).map((l) => l.view()), discovery ? discovery.list() : []);
+  return hallBrief(code, { status: link.status, key: link.keyState, keyWords: link.keyWords, view: link.view, context: link.context }, Array.from(peerLinks.values()).map((l) => l.view()), discovery ? discovery.list() : []);
 }
 
 // ---------------------------------------------------------------- displays
@@ -1874,10 +1891,24 @@ function renderTranscriptHtml(room) {
 // (Admin → Show network) serves every hall without one. Each is a StagewatchLink of its own, with its own liveness,
 // clock, pin and desk; a hall's countdown, sends and proposals go to its link and nowhere else.
 const hallLinks = new Map();   // hall code -> StagewatchLink
+// How often a desk is asked whether it is one (a test's AGM_DESK_CHECK_MS; Stagewatch's minute otherwise).
+const DESK_CHECK_MS = parseInt(process.env.AGM_DESK_CHECK_MS || '', 10) > 0 ? parseInt(process.env.AGM_DESK_CHECK_MS, 10) : nodes.DESK_CHECK_MS;
 function makeLink(id) {
   const link = new nodes.StagewatchLink({
+    nodeId: settings.nodeId,
+    deskCheckMs: DESK_CHECK_MS,
     onState: (view) => onStageState(link, view),
     onStatus: (status) => noteEvent('Stagewatch link' + (id === 'default' ? '' : ' of a hall') + ' ' + (/^CERTIFICATE CHANGED/.test(status) ? 'refused: CERTIFICATE CHANGED' : status), link),
+    // Stagewatch's verdict on the key, once per change: never the key, and Stagewatch's words already cut and redacted. A
+    // redial accepted again is no change; a new key, address or certificate (its epoch) makes its verdict news again.
+    onKey: (k, epoch) => {
+      const seen = epoch + '|' + k.state + '|' + k.words;
+      if ((k.state !== 'accepted' && k.state !== 'refused') || seen === link.keyAudited) return;
+      link.keyAudited = seen;
+      audit.write({ t: 'system' }, 'stagewatch.key', id === 'default' ? 'default' : id, k.state === 'accepted'
+        ? 'Stagewatch accepted the key (' + (k.via === 'auth' ? 'its auth message' : 'an authenticated read') + ')' + (link.tlsState.on && link.tlsState.pinned ? ', certificate pinned' : '')
+        : 'Stagewatch refused the ' + (link.key ? 'key' : 'view') + ': ' + k.words);
+    },
     findPeer: (t, host, port) => (discovery ? discovery.find(t, host, port) : null),
     pins,
     onPins: () => { settings.tlsPins = pins.toJSON(); saveSettings(); },
@@ -1893,7 +1924,9 @@ const roomsUsing = (link) => Array.from(store.rooms.values()).filter((r) => link
 /** What a page shows of a link: the frame (or nothing yet), its state and whether it keeps a show desk. */
 function stagePayload(link) {
   if (!link.base) return null;
-  return link.view ? { ...link.view, status: link.status, desk: link.desk } : { status: link.status, desk: link.desk };
+  // `cert`: the link refuses Stagewatch's certificate (changed, or not the one announced) until an admin accepts it.
+  const facts = { status: link.status, desk: link.desk, key: link.keyState, cert: !!(link.tlsState && link.tlsState.problem) };
+  return link.view ? { ...link.view, ...facts } : facts;
 }
 /** A Stagewatch the admin removed: its pins go, unless another link still follows that address (its pin guards that one too). */
 function forgetStagewatchPins(link) {
@@ -1976,7 +2009,7 @@ function nodesChanged() { for (const s of io.sockets.sockets.values()) if (s.dat
  */
 const mayDriveNode = (socket, link) => socket.data.isAdmin || !!(socket.data.account && rbac.can(socket.data.account, 'nodes.control', link.hall || undefined) && (link.hall || rbac.effective(socket.data.account).allHalls));
 /** The Stagewatch a node's proposals go to — its hall's (its own, else the default; the default for a node of every hall) — and whether it keeps a desk now. */
-const deskFor = (node) => { const l = linkFor(node.hall || ''); return { link: l, desk: !!(l.linked && l.desk) }; };
+const deskFor = (node) => { const l = linkFor(node.hall || ''); return { link: l, desk: !!(l.linked && l.desk && !l.deskRefusal) }; };
 
 // Stage sends waiting for the speaker: "<link>:<Stagewatch message id>" -> the AGMessage messages that show its state.
 // A Stagewatch numbers its own messages, from 1 again when it restarts: two halls' Stagewatches can both send message 12,
@@ -2083,12 +2116,76 @@ function showProposalState(t, p) {
   if (!room) return;
   for (const id of t.ids) {
     const m = room.byId.get(id);
-    if (m && m.proposal) apply(room, { o: 'upd', id, f: { proposal: { ...m.proposal, state: p.state, words: p.words || '', by: p.decidedBy || '' } } });
+    if (m && m.proposal) apply(room, { o: 'upd', id, f: { proposal: { ...m.proposal, state: p.state, ok: typeof p.ok === 'boolean' ? p.ok : null, words: p.words || '', by: p.decidedBy || '' } } });
   }
 }
-// Approved proposals aimed at this AGMessage, already run (so a slow result post never runs one twice). Keyed by the
-// desk's address tag, its id, when it was made and its line: a restarted desk's new p1 is a new proposal.
-const ranProposals = new Map();   // key -> {ok, words, reported, link, sw, gen, id}
+// Approved proposals aimed at this AGMessage, already run, so none is run twice (Stagewatch's claim is the first guard).
+// Keyed by the desk's address tag, its id, when it was made and its line: a restarted desk's new p1 is a new proposal.
+const ranKeys = new Map();   // key -> true, oldest first, at most 500
+const ranKey = (sw, p) => sw + ':' + p.id + ':' + (p.created || 0) + ':' + p.line;
+function rememberRun(key) { ranKeys.set(key, true); if (ranKeys.size > 500) ranKeys.delete(ranKeys.keys().next().value); }
+for (const r of deskResults) rememberRun(ranKey(r.sw, r));   // a result read back off the disk is reported, never run again
+const DESK_AUTH_WAIT_MS = parseInt(process.env.AGM_DESK_AUTH_WAIT_MS || '', 10) > 0 ? parseInt(process.env.AGM_DESK_AUTH_WAIT_MS, 10) : 60_000;
+const saveDeskResults = () => deskLane.save(() => JSON.stringify({ v: 1, results: deskResults.map(deskresults.persisted) }, null, 1));
+/**
+ * The link a waiting result is told through: its hall's Stagewatch (or the default the hall fell back on), while that
+ * is still the Stagewatch it came from; null when nobody is left to tell (the hall closed, or it follows another one now).
+ */
+function deskLinkOf(r) {
+  let link = stageLink;
+  if (r.link !== 'default') { const code = r.link.slice(5); if (!store.get(code)) return null; link = linkFor(code); }
+  return link.tag && link.tag !== r.sw ? null : link;
+}
+/**
+ * The show-desk results waiting, as health shows them: how many, since when, the desk's last answer to a result post
+ * (status 0: none came) and when, and when the next try is due — only over results whose Stagewatch is linked with a
+ * desk now (null: none will be tried until one is).
+ */
+function deskFacts() {
+  const tried = deskResults.filter((r) => { const l = deskLinkOf(r); return l && l.linked && l.desk; });
+  const now = Date.now();
+  const nextAt = tried.length ? Math.max(now, Math.min(...tried.map((r) => Math.max(r.nextAt, deskLinkOf(r).waitUntil)))) : null;
+  return {
+    waiting: deskResults.length,
+    oldestAt: deskResults.length ? Math.min(...deskResults.map((r) => r.ran)) : null,
+    lastStatus: deskLastAnswer.status, lastAt: deskLastAnswer.at,
+    nextAt, nextInMs: nextAt === null ? null : nextAt - now,   // the page reads the wait, not this laptop's clock
+  };
+}
+/** A result is no longer waiting: said once at role level (no notice text, no ids), and the file follows. */
+function endResult(r, how) {
+  const i = deskResults.indexOf(r);
+  if (i < 0) return;
+  deskResults.splice(i, 1);
+  saveDeskResults();
+  if (how !== 'taken') noteEvent('a show-desk result could not be reported: ' + how, { id: r.link });
+  else if (r.posts > 1) noteEvent('a show-desk result was taken after ' + r.posts + ' tries', { id: r.link });
+}
+/** When the next try of a result that could not be told is due, after this answer. */
+const waitAfter = (answer, attempt) => deskresults.postVerdict(answer, attempt, { authWaitMs: DESK_AUTH_WAIT_MS }).waitMs || deskresults.postVerdict({ status: 0 }, attempt).waitMs;
+/**
+ * One try at telling the desk a result. Its first post goes in the tick that collected it, through that link; every later
+ * one, one after a restart and one through a link made since first reads the desk's proposal back and posts only while
+ * it is still the one that ran and waits. True when the result needs nothing more (taken, or refused or gone for good).
+ */
+async function tellResult(r, link) {
+  const gen = link.generation;
+  if (!r.fresh || r.gen !== gen) {
+    const a = await link.proposalAnswer(r.id);
+    if (link.generation !== gen || link.tag !== r.sw) return false;   // pointed elsewhere meanwhile: the next tick decides
+    const seen = a.status === 200 ? deskresults.readBack(r, a.proposal, { sameStagewatch: r.gen === link.generation }) : a.status === 404 ? 'gone' : 'wait';
+    if (seen === 'taken' || seen === 'gone') { endResult(r, seen); return true; }
+    if (seen === 'wait') { r.attempts++; r.lastStatus = a.status; r.nextAt = Date.now() + waitAfter(a.status === 200 ? { status: 0 } : a, r.attempts); return false; }
+  }
+  r.fresh = false;
+  const res = await link.reportResult(r.id, r.ok, r.words);
+  r.attempts++; r.posts++; r.lastStatus = res.status;
+  deskLastAnswer = { status: res.status, at: Date.now() };
+  const v = deskresults.postVerdict(res, r.attempts, { authWaitMs: DESK_AUTH_WAIT_MS });
+  if (v.final) { endResult(r, v.final); return true; }
+  r.nextAt = Date.now() + v.waitMs;
+  return false;
+}
 
 /**
  * What AGMessage does when the show desk approves a proposal aimed at it. One verb: "notice <text>" — a notice shown
@@ -2107,13 +2204,16 @@ function runApproved(p) {
   return { ok: true, words: 'shown in ' + rooms.length + ' meeting' + (rooms.length === 1 ? '' : 's') };
 }
 
-// Every linked Stagewatch that keeps a desk, one after another (one request at a time to each): our proposals' states,
-// and what each desk approved for this AGMessage — run once, whichever desk it came from, and reported.
+// Every linked Stagewatch that keeps a desk, one after another (one request at a time to each): what it approved for this
+// AGMessage — run once, whichever desk it came from, and reported until it is taken — then our proposals' states. A link
+// Stagewatch asked to wait (Retry-After) is left alone till then. Nothing runs before this copy holds its data folder.
 let deskBusy = false;
+let serving = false;
 setInterval(async () => {
-  if (deskBusy) return;
+  if (deskBusy || !serving) return;
   deskBusy = true;
   try {
+    for (const r of Array.from(deskResults)) if (!deskLinkOf(r)) endResult(r, 'nobody to tell');
     // A hall moved to another Stagewatch, or back on the default (its own link gone): what it proposed at the one it
     // left can no longer be followed — whether or not the one it follows now is up or keeps a desk.
     const byId = new Map(allLinks().map((l) => [l.id, l]));
@@ -2122,37 +2222,56 @@ setInterval(async () => {
       if (!l || (t.sw && t.sw !== l.tag)) loseProposal(key, t, 'the hall moved to another Stagewatch');
     }
     for (const link of allLinks()) {
-      if (!link.linked) continue;
-      if (Date.now() - link.deskCheckedAt > 60_000) {
+      // Stagewatch asked this key to wait, or no longer takes it: nothing more goes to it this tick, whatever was next.
+      const stop = () => !link.linked || link.held;
+      if (stop()) continue;
+      if (Date.now() - link.deskCheckedAt > link.deskCheckMs) {
         const was = link.desk;
         await link.checkDesk(settings.nodeId);
         if (was !== link.desk) onStageState(link, link.view);
       }
-      if (!link.desk) continue;
-      for (const [key, t] of Array.from(proposals)) {
-        if (t.link !== link.id) continue;
-        const p = await link.proposal(t.id);
-        if (!p) continue;   // the desk could not be asked: the next tick asks again
+      if (!link.desk || stop()) continue;
+      // Collected first, inside Stagewatch's minute for collecting: run once, on disk, then each first post at once. What
+      // a collect hands over belongs to the Stagewatch it was asked of, even if the link was pointed elsewhere meanwhile.
+      const fresh = [];
+      const tag = link.tag, gen = link.generation, refusalWas = link.deskRefusal;
+      const approved = await link.approvedFor(settings.nodeId);
+      if (link.deskRefusal !== refusalWas) {
+        noteEvent(link.deskRefusal ? 'Stagewatch\'s show desk refuses to hand AGMessage what it approves: ' + link.deskRefusal : 'Stagewatch\'s show desk hands AGMessage what it approves again', link);
+        onStageState(link, link.view);
+      }
+      for (const p of approved) {
+        const key = ranKey(tag, p);
+        if (ranKeys.has(key)) continue;
+        rememberRun(key);
+        const r = { sw: tag, link: link.id, id: p.id, created: p.created || 0, line: p.line, target: settings.nodeId, ...runApproved(p), ran: Date.now(), attempts: 0, posts: 0, nextAt: 0, lastStatus: 0, gen, fresh: true };
+        deskResults.push(r); fresh.push(r);
+        if (deskResults.length > deskresults.MAX_WAITING) endResult(deskResults[0], 'too many waiting');
+      }
+      // On disk before any is reported, once for all collected: a restart from here still reports them. (A disk that
+      // will not take it leaves them in memory, still reported, and the lane's own retry names the failure in health.)
+      if (fresh.length) { saveDeskResults(); deskLane.flushSync(); }
+      // Then the results due, the new ones first and the rest oldest first: the first that must wait stops the rest. A new
+      // one this tick did not reach is no longer new: its turn comes with the rest, its proposal read back first.
+      const due = fresh.concat(deskResults.filter((r) => !fresh.includes(r) && r.nextAt <= Date.now())).filter((r) => deskLinkOf(r) === link);
+      try {
+        for (const r of due) {
+          if (stop()) break;
+          if (!deskResults.includes(r)) continue;   // pushed out by the cap meanwhile
+          if (!(await tellResult(r, link))) break;
+        }
+      } finally { for (const r of fresh) r.fresh = false; }
+      // Our proposals at this desk, all in one read of what this node proposed: one request a tick however many wait for
+      // the show caller, so following them never spends the key's minute. One the desk no longer lists is gone.
+      const mine = Array.from(proposals).filter(([, t]) => t.link === link.id);
+      const listed = mine.length && !stop() ? await link.proposalsFrom(settings.nodeId) : null;
+      for (const [key, t] of listed ? mine : []) {
+        const p = listed.get(t.id) || { gone: true };
         const why = notOurs(t, p, link);
         if (why) { loseProposal(key, t, why); continue; }
         if (!t.created && p.created) t.created = p.created;
         if (p.state !== t.state) { t.state = p.state; showProposalState(t, p); }
         if (FINAL.has(p.state)) proposals.delete(key);
-      }
-      for (const p of await link.approvedFor(settings.nodeId)) {
-        const key = link.tag + ':' + p.id + ':' + (p.created || 0) + ':' + p.line;
-        if (ranProposals.has(key)) continue;
-        ranProposals.set(key, { ...runApproved(p), reported: false, link: link.id, sw: link.tag, gen: link.generation, id: p.id });
-        if (ranProposals.size > 200) ranProposals.delete(ranProposals.keys().next().value);
-      }
-      // Stagewatch hands an approved proposal over once and never lists it again: a result it did not take is posted
-      // again here until it takes it, or refuses it for good (no such proposal, no longer waiting for one) — only to the
-      // Stagewatch it came from, as it was then: a restarted one's proposal of the same number is another proposal.
-      for (const r of Array.from(ranProposals.values())) {
-        if (r.reported || r.link !== link.id) continue;
-        if (r.sw !== link.tag || r.gen !== link.generation) { r.reported = true; continue; }   // that desk is gone: nobody to tell
-        const status = await link.reportResult(r.id, r.ok, r.words);
-        if (status >= 200 && status < 500) r.reported = true;
       }
     }
   } catch { /* the next tick tries again */ } finally { deskBusy = false; }
@@ -2170,8 +2289,8 @@ function currentContext(link) {
   return buildContext({
     node: { id: settings.nodeId, name: 'AGMessage' },
     rooms,
-    stage: { status: own.status, view: own.view, clock: own.clockInfo(), context: own.context },
-    halls: link ? [] : Array.from(hallLinks.values()).map((l) => ({ status: l.status, view: l.view, clock: l.clockInfo(), context: l.context })),
+    stage: { status: own.status, key: own.keyState, keyWords: own.keyWords, view: own.view, clock: own.clockInfo(), context: own.context },
+    halls: link ? [] : Array.from(hallLinks.values()).map((l) => ({ status: l.status, key: l.keyState, keyWords: l.keyWords, view: l.view, clock: l.clockInfo(), context: l.context })),
     help: rooms.reduce((n, r) => n + board.openHelp(r).length, 0),
     peerContexts: Object.fromEntries(Array.from(peerLinks.values()).filter((l) => l.status === 'live' && l.context && (!link || !l.hall || codes.has(l.hall))).map((l) => [l.node.id, { light: l.context.light, headline: l.context.headline }])),
     peers: discovery ? discovery.list() : [],
@@ -2181,7 +2300,7 @@ function currentContext(link) {
 // Post each linked Stagewatch its own context: on change, and at least every 5 s. Refresh Stagewatch's own every 5 s.
 setInterval(() => {
   for (const link of allLinks()) {
-    if (!link.linked) continue;
+    if (!link.linked || link.held) continue;
     const ctx = currentContext(link);
     const sig = JSON.stringify({ ...ctx, at: 0 });
     if (sig !== link.lastPushed || Date.now() - (link.lastPushAt || 0) >= 5000) {
@@ -2360,7 +2479,9 @@ function releaseDataFolder() { if (folderHold) { try { folderHold.close(); } cat
 
 holdDataFolder(() => front.listen(PORT, HOST, () => {
   // This copy holds the folder and the port: now it writes. Each replayed log is folded into a fresh snapshot (a torn last
-  // line cut before anything is appended after it), each hall says it was restored, and the audit log is opened.
+  // line cut before anything is appended after it), each hall says it was restored, the audit log is opened, and the show
+  // desk's loop may run (and save what it reports).
+  serving = true;
   store.compactAll();
   for (const room of store.rooms.values()) {
     store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— Session restored (' + room.messages.length + ' messages preserved) —', at: Date.now() } });

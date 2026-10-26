@@ -22,7 +22,8 @@
       $('swKey').placeholder = s.stagewatchKeySet ? '•••••• (saved — type to replace)' : 'Stagewatch node key (swk_…)';
       const clock = s.health && s.health.clock;
       $('swStatus').textContent = s.stagewatchUrl ? 'Stagewatch: ' + s.stage + (clock && clock.apart ? ' · CLOCKS APART (' + (clock.offsetMs / 1000).toFixed(1) + ' s)' : '') : '';
-      $('swStatus').classList.toggle('bad', !!(clock && clock.apart));
+      const keyState = s.health && s.health.stageKey ? s.health.stageKey.state : '';
+      $('swStatus').classList.toggle('bad', !!(clock && clock.apart) || keyState === 'refused');
       const ctx = s.stageContext;
       $('swContext').hidden = !ctx;
       if (ctx) $('swContext').textContent = 'Stagewatch says: ' + (ctx.headline || '') + ((ctx.peers || []).length ? ' · it hears ' + ctx.peers.map((p) => p.t + ' “' + (p.name || '') + '”').join(', ') : '');
@@ -49,9 +50,11 @@
     $('swAccept').hidden = !l.changed;
     $('swTls').textContent = !l.on ? 'Link to Stagewatch: plain HTTP (it announces no certificate)'
       : l.problem ? '⚠ ' + l.problem
-      : 'Link to Stagewatch: encrypted ✓ — certificate ' + pretty(l.fp).slice(0, 23) + '… ' + (l.pinned ? '(pinned)' : '(will be pinned on first use)');
+      : 'Link to Stagewatch: encrypted ✓ — certificate ' + pretty(l.fp).slice(0, 23) + '… ' + (l.pinned ? '(pinned)' : '(pinned once Stagewatch accepts the key)');
     $('swTls').classList.toggle('bad', !!l.problem);
-    $('deskLine').textContent = t.desk ? 'Show desk: Stagewatch keeps the shared approval queue — the research team can propose stage messages (📝), and approved "notice" proposals for this AGMessage are shown in every meeting.' : '';
+    $('deskLine').textContent = t.deskRefusal ? '⚠ Show desk: Stagewatch refuses to hand this AGMessage what it approves (' + t.deskRefusal + ') — proposals are off until it takes this AGMessage\'s collect; give AGMessage a node key of its own.'
+      : t.desk ? 'Show desk: Stagewatch keeps the shared approval queue — the research team can propose stage messages (📝), and approved "notice" proposals for this AGMessage are shown in every meeting.' : '';
+    $('deskLine').classList.toggle('bad', !!t.deskRefusal);
   }
 
   function renderHealth(h) {
@@ -69,6 +72,12 @@
     for (const [name, st] of Object.entries(stores)) {
       if (st && st.error) parts.push('⚠ ' + name + ' save failed (kept, tried again): ' + st.error);
       else if (st && st.unwritten) parts.push('⚠ ' + st.unwritten + ' ' + name + ' entries not yet on disk');
+    }
+    if (h.desk && h.desk.waiting) {
+      const n = h.desk.waiting;
+      const last = h.desk.lastStatus === null ? '' : h.desk.lastStatus ? 'last answer ' + h.desk.lastStatus : 'no answer to the last try';
+      const next = h.desk.nextInMs === null ? 'tried once its Stagewatch is linked and keeps a desk' : 'next try in ' + Math.round(h.desk.nextInMs / 1000) + ' s';
+      parts.push('⚠ ' + n + ' show-desk result' + (n === 1 ? '' : 's') + ' waiting for Stagewatch to take ' + (n === 1 ? 'it' : 'them') + ' (' + [last, next].filter(Boolean).join(', ') + ')');
     }
     if (h.tls && h.tls.link && h.tls.link.changed) parts.push('⚠ CERTIFICATE CHANGED — Stagewatch\'s certificate is not the one pinned; the link is refused until you accept it');
     $('healthLine').textContent = parts.join(' · ');

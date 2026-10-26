@@ -139,6 +139,10 @@ one shape:
   address).
 - **AGMessage**: holds the Stagewatch key encrypted at rest (Windows DPAPI where available, else AES with a machine key
   file outside `data/`), sends it in a header — never `?pin=` in a WebSocket URL — and asks for a `node`-scope key.
+  It reads Stagewatch's `/ws` as itself: `?node=<its id>&t=messenger&cid=<its id>`, each key once (Stagewatch keeps the
+  last value of a repeated key), the id from its hello and context — never a shared name, a per-hall id or a secret.
+  It is linked only once Stagewatch accepted the key (2.18's first `{"type":"auth","ok":true}` on the socket, or a 200
+  to an authenticated read on 2.16, whose frames go to any key); a refused key is asked again only after a minute.
   A Patterns' or PlayMap's pairing token it holds the same way, and sends only to a loopback address or over TLS to a
   certificate pinned for that node or confirmed by a person (at least 16 characters of its fingerprint typed); it never
   drives them with it — its lines are proposals (§11) — until they issue it a scoped key.
@@ -176,7 +180,9 @@ Show data and keys cross the local network; from 1.2 every web endpoint can be r
   handshake is TLS); Patterns and AGMessage may use the same trick or a second port, as `ports.https` says.
 - **App-to-app: pinned, not trusted by name.** A client that connects to another node over TLS checks the server's
   certificate fingerprint, never its name or a certificate authority: the fingerprint from the node's hello (or typed by
-  the operator) is pinned per node id on first successful authenticated use, and a later change is refused with
+  the operator) is pinned per node id on first successful authenticated use — for a Stagewatch link, Stagewatch accepting
+  the key (its auth message, or a 200 to an authenticated read; frames are not, since Stagewatch sends them to anyone
+  when no viewing code is set, and a link without a key never pins) — and a later change is refused with
   "CERTIFICATE CHANGED" until the operator accepts it (as SSH does). The hello is unauthenticated, so the pin — not the
   hello — is the trust. AGMessage's links to a Patterns or PlayMap on another machine trust no hello and no first use: the
   certificate is pinned only once a person types the start of its fingerprint from the node's own screen (§7).
@@ -209,6 +215,13 @@ With no desk on the bus, each app approves its own (as in 1.1).
   through its own command path — its own checks and fences still apply — and reports
   `POST /api/proposals/<id>/result {"ok":true,"words":"…"}`. The desk never holds another app's credentials. The desk
   runs proposals aimed at itself directly, with a receipt.
+- **What the desk answers** (Stagewatch 2.16): a collect hands each approved proposal over once and never lists it
+  again; a result is due within 5 minutes of the collect, after which the proposal is `undelivered` — and a result for
+  it is still taken. The result endpoint answers 200 when taken; 400 for a body that is not `{"ok":bool,"words":…}`; 409
+  for every refusal (`no such proposal`, `this key speaks for another node`, `proposal pN is <state>`); 401 and 403 for
+  the key; 429 with `Retry-After` past the key's 600 requests a minute (every route spends them). `GET` of an unknown id
+  answers 404, as does a Stagewatch with no desk. The queue and its numbers live in memory: a restarted desk numbers from
+  `p1` again, so a target reads a proposal back (its line, its target, its `created`) before it reports again.
 - **Everything is journalled** on the desk (asked, approved or rejected by whom, the result) and each target journals
   what it ran, so the report shows what each AI suggested, who decided and what happened.
 - **Offline:** the queue is plain LAN traffic; it works with no internet (proposals made by a person's own rules, or

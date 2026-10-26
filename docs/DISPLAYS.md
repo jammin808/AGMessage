@@ -11,7 +11,7 @@ double-click) and leave it; the hall's operators change what it shows from AGMes
 | **Holding** | the hall's holding image; with none, black with the screen's name, faint, so the crew knows which it is (`?idle=blank` hides the name) |
 | **Message** | the words as large as the screen holds; how urgent is a band and a shape as well as a colour: ● note, ▲ soon, ■ urgent; an optional second line |
 | **File** | an image, or one page of a PDF, shared in the hall; a page past the PDF's end shows its last page, and the console says so beside ✓ |
-| **Countdown** | the hall's Stagewatch countdown in its own words and colour, its title and what's next — and a message strip under it: the speaker's comfort monitor. The strip's words shrink so it never covers the time, on an upright tablet too. With the link to Stagewatch lost it shows `--:--`, never a confident stale time |
+| **Countdown** | the hall's Stagewatch countdown in its own words and colour, its title and what's next — and a message strip under it: the speaker's comfort monitor. The strip's words shrink so it never covers the time, on an upright tablet too. With the link to Stagewatch lost it shows `--:--`, never a confident stale time — and while Stagewatch has not accepted AGMessage's key, or after it refused it |
 | **Clock** | the time of day from AGMessage's own clock, in AGMessage's time zone (a screen PC's clock or zone may be wrong; a browser that does not know that zone shows its own) |
 | **Black** | nothing |
 | **Identify** | the screen's name, large, for six seconds, over whatever it shows |

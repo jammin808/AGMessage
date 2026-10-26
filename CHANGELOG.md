@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.5.1 — 2026-10-26 — the show desk and the Stagewatch link, as Stagewatch states them
+
+From the cross-app review of the Show Bus (the four items it left for after 0.5.0), each read against Stagewatch's own
+code (2.16 and its newest work) before it was changed; then two rounds of independent review of the changes, whose
+upheld findings are fixed below (docs/ANALYSIS.md §6).
+
+**The show desk**
+- A proposal's outcome is read as Stagewatch states it: `ok` and `words` at the top level, `result` a string. 0.5.0
+  looked for `ok` inside an object `result` that Stagewatch never sends, so every outcome read as unknown (the page's
+  "done" or "failed" came from the state alone), and a result object would have been read as success whatever it said.
+  A settled state without its boolean `ok`, or a state AGMessage does not know, is shown as unknown (never done, never
+  waiting) and asked again. Only a proposal the desk lists as approved for this AGMessage is run. "Not delivered" shows
+  Stagewatch's own words.
+- What an approved notice did is reported until Stagewatch takes it or refuses it for good. 0.5.0 counted any 4xx as
+  taken (a 429 at the key's 600-a-minute budget, a 401 in Stagewatch's lockout minute, a 403 for a re-entered key) and
+  kept waiting results only in memory, so a notice shown in every meeting could end "undelivered: AGMessage didn't
+  report back" at the desk. Now a 429 (or a 503 with Retry-After) leaves the whole link alone for its Retry-After (1 to
+  120 s; the context loop too), 401 and 403 wait a minute for the key, no answer or a 5xx backs off from 3 s to a minute,
+  and 409, 404 and other 4xx are final. A waiting result is saved (`desk-results.json`, at most 200, flushed before its
+  first post) and outlives a restart of AGMessage, a hall's link made again and a refused key; after its first post it
+  is posted only once the desk's proposal reads back with the same line, target and time and still waits (a late one
+  after Stagewatch's five minutes included), so a restarted Stagewatch's p1 never gets another proposal's result, which
+  0.5.0 could do when the restart went unseen. Each result that ends untaken, or is taken only after a retry, is said in
+  the recent events (no notice text, no ids), and the admin page's health line counts what is waiting. Whether
+  Stagewatch keeps a desk changes only on its verdict (200, or 404/405): a 429 or no answer to that check no longer hides
+  the desk for a minute, in which what it approved would have expired uncollected. Our own proposals are followed with
+  one read a tick of all this AGMessage proposed (0.5.0 read each, so forty open ones spent the key's 600 a minute and a
+  send to the stage came back 429); a collect answered after the link was pointed elsewhere is reported to nobody,
+  never to the new Stagewatch's proposal of the same number; and a collect the desk refuses (the key speaks for another
+  node) is said on the admin page, the Set up and the recent events, with proposals off until one is taken.
+
+**The Stagewatch link**
+- The link dials Stagewatch as this AGMessage, by its Show Bus id (`/ws?node=<id>&t=messenger&cid=<id>`), not as
+  "agmessage": two AGMessages on one Stagewatch are two of its screens, each found and named on its own, and a
+  Disconnect in Stagewatch → Screens drops only that one (0.5.0's shared name made them one row, the oldest one's
+  address, a name given to it applied to all of them, and disconnecting one dropped every one). The link still dials
+  again after a Disconnect, as after any drop: it does not yet stay off as a browser screen does. A name given in
+  Stagewatch → Screens to the old shared "agmessage" row does not carry over: name each AGMessage once. Stagewatch 2.18
+  needs this address to say whether it accepted the key.
+- The link is "connected", and a certificate used for the first time is pinned, only once Stagewatch accepted the key:
+  2.18's first message on the socket (`{"type":"auth","ok":true}`), or for 2.16, which says nothing of the key on the
+  socket and sends its public frames to any key, a 200 to one authenticated read (its context). Each new socket earns its
+  own verdict. Until then the link reads "checking key" (amber; nothing is sent, the screens show `--:--`); a link with
+  no key reads "viewing" (the public timer, nothing sent, nothing pinned). A wrong or revoked key, or one Stagewatch stops
+  listing while linked (its next 401), reads "key refused: <Stagewatch's words>" on the admin page, the hall's Set up,
+  the halls board (✕), the screens (`--:--`), the context (red) and the AI's brief; sends and proposals are refused
+  before they are tried and 🖥 is withdrawn; the socket is let go and the key asked again only after 61 s. 0.5.0 called a
+  wrong key connected and pinned the certificate from the first frame, kept every gate open, and asked again about 1.4
+  times a second, which locked this machine's address out of Stagewatch (5 wrong keys a minute) for every hall's link.
+  A refusal or an acceptance is one `stagewatch.key` audit row per change, never the key. The links of one AGMessage
+  share Stagewatch's lockout minute: every wrong attempt is counted (each 401, however many were on their way when a key
+  was revoked), by the Stagewatch's resolved address and on a monotonic clock, and a refused key is asked again only while
+  that leaves at most four wrong a minute in all; a fingerprint edited for a refused key does not ask it again early.
+  A read-only (or MCP) key, which reads its verdict but can never act as a node, is refused in Stagewatch's words at
+  its first node request; a changed certificate reads as itself on the halls board and the hall's send dialog, and
+  accepting the default Stagewatch's is audited. Nothing authenticated goes while the key is not accepted but the
+  verdict's own read, an answer that
+  comes after a refusal is not shown, and a new key shows "connecting", never the last key's "connected" and timer.
+
 ## 0.5.0 — 2026-10-24 — halls, accounts, screens and the testing environment
 
 For a venue with several halls at once (the ICC in Birmingham, say): each hall its own message room and its own
