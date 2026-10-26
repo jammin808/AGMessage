@@ -1683,9 +1683,11 @@ html[data-theme="dark"] input, html[data-theme="dark"] textarea { background: va
 .hall-state { font-size: .78rem; color: var(--stage-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hall-row[data-state="over"] .hall-clock { box-shadow: inset 4px 0 0 #ef4444; }
 .hall-row[data-state="stale"] .hall-time, .hall-row[data-state="none"] .hall-time,
-.hall-row[data-state="checking"] .hall-time, .hall-row[data-state="refused"] .hall-time, .hall-row[data-state="refusedView"] .hall-time { opacity: .45; }
+.hall-row[data-state="checking"] .hall-time, .hall-row[data-state="refused"] .hall-time, .hall-row[data-state="refusedView"] .hall-time,
+.hall-row[data-state="certificate"] .hall-time { opacity: .45; }
 .hall-row[data-state="stale"] .hall-clock, .hall-row[data-state="checking"] .hall-clock { outline: 1px dashed #f59e0b; }
-.hall-row[data-state="refused"] .hall-clock, .hall-row[data-state="refusedView"] .hall-clock { box-shadow: inset 4px 0 0 #ef4444; }
+.hall-row[data-state="refused"] .hall-clock, .hall-row[data-state="refusedView"] .hall-clock,
+.hall-row[data-state="certificate"] .hall-clock { box-shadow: inset 4px 0 0 #ef4444; }
 .hall-last { font-size: .92rem; line-height: 1.35; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .hall-last time { color: var(--muted); font-size: .8rem; margin-left: .25rem; }
 .hall-meta { display: flex; flex-wrap: wrap; gap: .35rem; justify-content: flex-end; font-size: .82rem; color: var(--muted); }

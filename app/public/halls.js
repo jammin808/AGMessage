@@ -42,11 +42,13 @@
     checking: { mark: '…', words: 'checking Stagewatch\'s key' },
     refused: { mark: '✕', words: 'Stagewatch refused the key' },
     refusedView: { mark: '✕', words: 'Stagewatch refused the view (its viewing code)' },
+    certificate: { mark: '✕', words: 'Stagewatch\'s certificate changed — an admin must accept it' },
     none: { mark: '○', words: 'no Stagewatch linked' },
   };
   function stageState(st) {
     if (!st || !st.status || st.status === 'off') return 'none';
-    if (st.key === 'refused') return /^refused: /.test(st.status) ? 'refusedView' : 'refused';
+    if (st.cert) return 'certificate';   // until an admin accepts it, whatever the key's verdict
+    if (st.key === 'refused' && /^(key )?refused: /.test(st.status)) return /^refused: /.test(st.status) ? 'refusedView' : 'refused';
     if (st.status === 'checking key') return 'checking';
     if ((st.status !== 'connected' && st.status !== 'viewing') || st.stale) return 'stale';
     if (Number.isFinite(st.seconds) && st.seconds < 0) return 'over';
@@ -87,7 +89,7 @@
         '<span class="hall-code" title="Crew without an account join with this code">' + esc(h.code) + '</span>' +
       '</a>' +
       '<div class="hall-clock" title="' + esc(STATE[state].words) + '">' +
-        '<span class="hall-time" style="' + (st && st.color && !['stale', 'checking', 'refused', 'refusedView'].includes(state) ? 'color:' + esc(st.color) : '') + '">' + timeHtml + '</span>' +
+        '<span class="hall-time" style="' + (st && st.color && !['stale', 'checking', 'refused', 'refusedView', 'certificate'].includes(state) ? 'color:' + esc(st.color) : '') + '">' + timeHtml + '</span>' +
         '<span class="hall-state"><span aria-hidden="true">' + esc(STATE[state].mark) + '</span> ' + esc(STATE[state].words) + (titleHtml ? ' — ' + titleHtml : '') + '</span>' +
       '</div>' +
       '<div class="hall-last">' + (l.last ? '<strong>' + esc(l.last.name) + '</strong> ' + esc(l.last.text) + ' <time>' + esc(AGM.ago(l.last.at)) + '</time>' : '<span class="muted">No messages yet</span>') + '</div>' +

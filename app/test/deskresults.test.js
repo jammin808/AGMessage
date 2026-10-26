@@ -98,7 +98,9 @@ test('a 429 waits its Retry-After across the whole link, then the result is take
 test('401 and 403: the result waits for the key, never dropped — taken once Stagewatch takes the key again', async (t) => {
   const ctx = await deskSetup(t, { env: { AGM_DESK_AUTH_WAIT_MS: '1000' } });
   const { sw } = ctx;
-  sw.answerResults = [{ status: 503, error: 'busy', retryAfter: 2 }, { status: 403, error: 'this API key is read only' }, { status: 403, error: 'this API key is read only' }];
+  // 403 here is Stagewatch's other one: HTTPS required of a key from another machine (a key's scope refuses the key itself).
+  const https = 'HTTPS is required for keys from another machine';
+  sw.answerResults = [{ status: 503, error: 'busy', retryAfter: 2 }, { status: 403, error: https }, { status: 403, error: https }];
   const id = sw.add(forUs(ctx, 'notice Lunch is served'));
   await until(() => sw.proposals.get(id).state === 'done', 20000, 'taken at the fourth try');
   const p = posts(sw, id);

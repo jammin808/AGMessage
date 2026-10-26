@@ -113,7 +113,7 @@ function screenIdOf(target) {
  * holds a new socket's first message (and so the link's key read) that long; `messageDelayMs` holds a send
  * that long before its key is judged (a request made under one key, answered after the key changed).
  */
-async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null, answerDeskChecks = [], answerContext = [], messageDelayMs = 0, firstFrameDelayMs = 0, collectDelayMs = 0, collectRefusal = null } = {}) {
+async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null, answerDeskChecks = [], answerContext = [], messageDelayMs = 0, firstFrameDelayMs = 0, collectDelayMs = 0, collectRefusal = null, scope = 'node' } = {}) {
   const http = require('http');
   const https = require('https');
   const { WebSocketServer } = require('ws');
@@ -148,6 +148,9 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
       const json = (code, o, headers = {}) => { res.writeHead(code, { 'content-type': 'application/json', ...headers }); res.end(JSON.stringify(o)); };
       const queued = (q) => { const a = q.shift(); return json(a.status, { ok: false, error: a.error || 'busy' }, a.retryAfter ? { 'Retry-After': String(a.retryAfter) } : {}); };
       if (!accepts(req.headers.authorization)) { fail(); return json(401, { ok: false, error: 'unknown or revoked API key' }); }
+      // A key of another scope reads (every scope may) but is refused, in Stagewatch's words, where the node scope is needed.
+      const nodeRoute = req.method !== 'GET' || /[?&]target=/.test(req.url);
+      if (scope !== 'node' && nodeRoute) return json(403, { ok: false, error: 'this API key is ' + (scope === 'read' ? 'read only' : scope) });
       if (Date.now() < heldUntil) return json(429, { ok: false, error: 'rate limit: too many requests with this key' }, { 'Retry-After': String(Math.ceil((heldUntil - Date.now()) / 1000)) });
       const u = new URL(req.url, 'http://x');
       if (u.pathname.startsWith('/api/message/')) return json(200, { type: 'receipt', id: req.headers['x-request-id'], ok: true, stage: 'applied', refs: { messageId } });
@@ -252,6 +255,10 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     /** What it answers the next result posts, before its desk reads them: [{status, error, retryAfter}] (0: no answer). */
     get answerResults() { return answerResults; },
     set answerResults(v) { answerResults = v; },
+    /** The scope of the key it lists: 'node', or 'read' (reads, and is refused 403 on every node route). */
+    set scope(v) { scope = v; },
+    /** It now presents another certificate (as after a renewal or a reinstall): new connections see it. */
+    setCertificate(c) { srv.setSecureContext({ cert: tlsmod.toPem(c.certDer), key: c.keyPem }); this.fp = tlsmod.fingerprint(c.certDer); },
     /** A collect answered `ms` late (it claims what it lists when it answers), and one refused ({status, error}) or not (null). */
     set collectDelayMs(ms) { collectDelayMs = ms; },
     set collectRefusal(v) { collectRefusal = v; },

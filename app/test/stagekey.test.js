@@ -495,3 +495,61 @@ test('only the certificate\'s fingerprint changed for a refused key: it stays re
     assert.deepEqual([sw.counts.upgrades, link.keyState, link.status], [n, 'refused', 'key refused: unknown or revoked API key'], 'no dial with the refused key');
   } finally { link.stop(); await sw.close(); }
 });
+
+test('a key of the read scope reads (its verdict) but cannot be a node: refused at its first node request, in Stagewatch\'s words', async () => {
+  const sw = await fakeStagewatch({ key: KEY, scope: 'read' });
+  const { link, verdicts } = linkWith();
+  try {
+    link.configure(sw.url, KEY);
+    await until(() => link.status === 'connected', 4000, 'accepted by its read');
+    assert.equal(await link.pushContext({ v: 1 }), false);
+    assert.equal(link.status, 'key refused: this API key is read only');
+    assert.equal((await link.sendToStage('x')).stage, 'not sent');
+    assert.deepEqual(verdicts.map((v) => v.state), ['accepted', 'refused']);
+    assert.equal(sw.counts.failures, 0, 'a scope is no wrong key to the lockout');
+  } finally { link.stop(); await sw.close(); }
+});
+
+test('a keyless link\'s refusal keeps its own words through an edited fingerprint (never "key refused")', async () => {
+  const sw = await fakeStagewatch({ key: KEY, viewCode: true, cert: certOf() });
+  const { link } = linkWith();
+  try {
+    link.configure(sw.url, '');
+    await until(() => link.keyState === 'refused', 4000, 'refused by the viewing code');
+    link.configure(sw.url, '', sw.fp);
+    assert.equal(link.status, 'refused: This screen needs the viewing code');
+  } finally { link.stop(); await sw.close(); }
+});
+
+test('end to end: a changed certificate reads as itself on the board and the hall page, and accepting it is audited', async (t) => {
+  const sw = await fakeStagewatch({ name: 'Keynote timer', key: KEY, cert: certOf() });
+  const srv = await startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
+  const { base } = srv;
+  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: admin })).body.code;
+  const ctl = await connect(base, admin); sockets.push(ctl);
+  assert.ok((await emit(ctl, 'admin:settings', { stagewatchUrl: sw.url, stagewatchKey: KEY })).ok);
+  await until(async () => (await emit(ctl, 'admin:settings')).stage === 'connected', 8000, 'connected, its certificate pinned');
+  sw.setCertificate(certOf());   // Stagewatch reinstalled: another certificate
+  sw.drop();
+  await until(async () => /^CERTIFICATE CHANGED/.test((await emit(ctl, 'admin:settings')).stage), 8000, 'refused');
+  const crew = await connect(base); sockets.push(crew);
+  const joined = await emit(crew, 'join', { roomCode: hall, name: 'Alex', role: 'research' });
+  assert.equal(joined.stage.cert, true, 'the hall page is told it is the certificate');
+  const targets = await emit(crew, 'stage:targets', {});
+  assert.deepEqual([targets.cert, targets.linked], [true, false]);
+  const row = (await emit(ctl, 'board:watch', {})).board.halls.find((h) => h.code === hall);
+  assert.equal(row.stage.cert, true, 'the board is told it too');
+  const keyRows = async () => (await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin })).body.entries.filter((e) => e.action === 'stagewatch.key');
+  const before = (await keyRows()).length;
+  const accepted = await new Promise((resolve) => { ctl.emit('admin:acceptCertificate', resolve); });   // as the admin page asks it
+  assert.equal(accepted.ok, true);
+  const certRows = (await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin })).body.entries.filter((e) => e.action === 'stagewatch.certificate');
+  assert.equal(certRows.length, 1, 'who accepted it, and which');
+  assert.equal(certRows[0].actor.name, 'ana');
+  assert.match(certRows[0].words, /^accepted a changed Stagewatch certificate \(sha256:[0-9a-f]{16}…\)$/);
+  await until(async () => (await emit(ctl, 'admin:settings')).stage === 'connected', 8000, 'connected again');
+  assert.equal((await keyRows()).length, before + 1, 'the new certificate\'s first acceptance is news');
+});

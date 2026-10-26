@@ -2140,6 +2140,7 @@ const ToStagewatch = (function () {
       if (!r || !r.ok) { notify((r && r.error) || 'Stagewatch is not linked to this hall.', true); return; }
       caps = r;
       $('swWhich').textContent = r.linked ? 'To ' + (r.title || 'this hall\'s Stagewatch') + '.'
+        : r.cert ? 'Stagewatch\'s certificate changed — nothing can be sent until an admin accepts it (Halls → Set up, or Admin → Show network).'
         : r.key === 'refused' ? 'Stagewatch refused this AGMessage\'s key — nothing can be sent until an admin enters a node key it lists (Halls → Set up).'
         : r.key === 'checking' ? 'Stagewatch has not accepted this AGMessage\'s key yet — nothing is queued; try again in a moment.'
         : 'Stagewatch is not connected right now — nothing is queued; try again when it is.';

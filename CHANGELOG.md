@@ -51,7 +51,11 @@ code (2.16 and its newest work) before it was changed.
   A refusal or an acceptance is one `stagewatch.key` audit row per change, never the key. The links of one AGMessage
   share Stagewatch's lockout minute: every wrong attempt is counted (each 401, however many were on their way when a key
   was revoked), by the Stagewatch's resolved address and on a monotonic clock, and a refused key is asked again only while
-  that leaves at most four wrong a minute in all; a fingerprint edited for a refused key does not ask it again early. Nothing authenticated goes while the key is not accepted but the verdict's own read, an answer that
+  that leaves at most four wrong a minute in all; a fingerprint edited for a refused key does not ask it again early.
+  A read-only (or MCP) key, which reads its verdict but can never act as a node, is refused in Stagewatch's words at
+  its first node request; a changed certificate reads as itself on the halls board and the hall's send dialog, and
+  accepting the default Stagewatch's is audited. Nothing authenticated goes while the key is not accepted but the
+  verdict's own read, an answer that
   comes after a refusal is not shown, and a new key shows "connecting", never the last key's "connected" and timer.
 
 ## 0.5.0 — 2026-10-24 — halls, accounts, screens and the testing environment

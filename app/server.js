@@ -1047,7 +1047,7 @@ io.on('connection', (socket) => {
     if (!need(ack)) return;
     const link = linkFor(room.code);
     ack({
-      ok: true, linked: link.linked, key: link.keyState, title: (link.context && link.context.node && link.context.node.name) || '',
+      ok: true, linked: link.linked, key: link.keyState, cert: !!(link.tlsState && link.tlsState.problem), title: (link.context && link.context.node && link.context.node.name) || '',
       canSend: !!(link.base && link.key && link.keyState !== 'refused') && allowed('stage.send'), canPropose: !!(link.desk && link.key && !link.deskRefusal) && allowed('stage.send'),
       targets: stagelines.destinations(link.departments),
     });
@@ -1606,6 +1606,8 @@ io.on('connection', (socket) => {
     const was = stageLink.tlsState;
     if (!stageLink.acceptCertificate()) return ok(ack)({ ok: false, error: 'No certificate to accept.' });
     noteEvent('the admin accepted a changed Stagewatch certificate', stageLink);
+    // A trust decision a person made: who, from where, and which certificate (its public fingerprint, cut).
+    audit.write(socket.data.actor || HOST_ACTOR, 'stagewatch.certificate', 'default', 'accepted a changed Stagewatch certificate (' + String(was.fp || '').slice(0, 23) + '…)', socket.data.ip);
     ok(ack)({ ok: true, fingerprint: was.fp });
   });
   socket.on('admin:renewCertificate', (ack) => {
@@ -1919,7 +1921,9 @@ const roomsUsing = (link) => Array.from(store.rooms.values()).filter((r) => link
 /** What a page shows of a link: the frame (or nothing yet), its state and whether it keeps a show desk. */
 function stagePayload(link) {
   if (!link.base) return null;
-  return link.view ? { ...link.view, status: link.status, desk: link.desk, key: link.keyState } : { status: link.status, desk: link.desk, key: link.keyState };
+  // `cert`: the link refuses Stagewatch's certificate (changed, or not the one announced) until an admin accepts it.
+  const facts = { status: link.status, desk: link.desk, key: link.keyState, cert: !!(link.tlsState && link.tlsState.problem) };
+  return link.view ? { ...link.view, ...facts } : facts;
 }
 /** A Stagewatch the admin removed: its pins go, unless another link still follows that address (its pin guards that one too). */
 function forgetStagewatchPins(link) {

@@ -552,6 +552,13 @@ class StagewatchLink {
     // carried, accepted then and still, does it refuse: a request from before a new key decides nothing.
     if (res.status === 401 && this.key) noteWrong(this.where || this.host, 1, this.lockoutMs);
     if (res.status === 401 && this.keyState === 'accepted' && this.acceptances === accepted) this._refuse(res.body && res.body.error);
+    // A key every scope may read with (its verdict's read) can still lack the node scope this link needs: the first route
+    // that needs it (a send, AGMessage's context, a proposal, the collect, a result) answering 403 "this API key is …"
+    // refuses it in Stagewatch's words — the link is no use with it. Not a wrong key to Stagewatch's lockout.
+    if (res.status === 403 && this.keyState === 'accepted' && this.acceptances === accepted && (method !== 'GET' || /[?&]target=/.test(path))) {
+      const words = res.body && typeof res.body.error === 'string' ? res.body.error : '';
+      if (/^this API key is /.test(words)) this._refuse(words);
+    }
     return res;
   }
 
