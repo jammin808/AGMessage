@@ -401,17 +401,97 @@ test('a certificate is accepted only when the link refused one: never a way roun
   } finally { link.stop(); await sw.close(); }
 });
 
-test('three links of this machine refused by one Stagewatch share its lockout: never five wrong keys in its window', async () => {
+/** The most wrong keys Stagewatch counted from here in any `windowMs`, from its failure times (at or after `from`). */
+const worstWindow = (times, windowMs, from = 0) => { const t = times.filter((x) => x >= from); return t.length ? Math.max(...t.map((x) => t.filter((y) => y >= x && y < x + windowMs).length)) : 0; };
+
+test('the shared minute\'s arithmetic: room while at most two wrong attempts are in the window, never a wait past it', () => {
+  const at = 'budget-arithmetic:1';
+  assert.equal(nodes.lockoutRoomIn(at, 3000, 1000), 0, 'nothing counted');
+  nodes.noteWrong(at, 2, 3000, 1000);
+  assert.equal(nodes.lockoutRoomIn(at, 3000, 1500), 0, 'two in the window: a re-ask (two more) makes four');
+  nodes.noteWrong(at, 1, 3000, 1500);
+  assert.equal(nodes.lockoutRoomIn(at, 3000, 1600), 2401, 'three: until the oldest is out of the window');
+  assert.equal(nodes.lockoutRoomIn(at, 3000, 4001), 0, 'it has aged out');
+  nodes.noteWrong(at, 3, 3000, 50_000);
+  assert.ok(nodes.lockoutRoomIn(at, 3000, 50_000) <= 3001, 'never a wait longer than the window');
+});
+
+test('three links of this machine refused by one Stagewatch, by its address and by its name, share its lockout: never five wrong keys in its window', async () => {
   const sw = await fakeStagewatch({ key: KEY });
   // Stagewatch's minute as 3 s, each link's own hold 300 ms: on its own, each would ask again ten times a window.
   const links = [1, 2, 3].map(() => linkWith({ refusedRetryMs: 300, lockoutMs: 3000 }).link);
   try {
     const start = Date.now();
-    for (const l of links) l.configure(sw.url, WRONG);
+    links.forEach((l, i) => l.configure(i === 2 ? 'localhost:' + sw.port : sw.url, WRONG));
     await wait(10_000);
     const times = sw.failureTimes.filter((x) => x >= start + 3500);   // the first refusals of all three, aged out
     assert.ok(times.length >= 4, 'they did ask again: ' + times.length);
-    const worst = Math.max(...times.map((x) => times.filter((y) => y >= x && y < x + 3000).length));
-    assert.ok(worst <= 4, 'wrong keys in any window: ' + worst);
+    assert.ok(worstWindow(times, 3000) <= 4, 'wrong keys in any window: ' + worstWindow(times, 3000));
   } finally { for (const l of links) l.stop(); await sw.close(); }
+});
+
+test('a revoked key\'s requests already on their way are each counted: another refused key waits for room', async () => {
+  const sw = await fakeStagewatch({ key: KEY });
+  const a = linkWith({ refusedRetryMs: 3600, lockoutMs: 3000 }).link;
+  const b = linkWith({ refusedRetryMs: 3600, lockoutMs: 3000 }).link;
+  try {
+    const start = Date.now();
+    b.configure(sw.url, WRONG);
+    a.configure(sw.url, KEY);
+    await until(() => b.keyState === 'refused' && a.status === 'connected', 4000, 'one refused, one connected');
+    await wait(start + 3300 - Date.now());   // b's first refusal has left the window; its hold has not ended
+    sw.key = OTHER;                          // a's key revoked while three of its requests are out
+    await Promise.all([a.pushContext({ v: 1 }), a.fetchContext(), a.checkDesk('ab12cd34')]);
+    assert.equal(a.keyState, 'refused');
+    await wait(5000);
+    assert.ok(b.keyState === 'refused' && sw.counts.upgrades >= 3, 'b did ask again');
+    assert.ok(worstWindow(sw.failureTimes, 3000) <= 4, 'wrong keys in any window: ' + worstWindow(sw.failureTimes, 3000) + ' at ' + sw.failureTimes.map((x) => x - start));
+  } finally { a.stop(); b.stop(); await sw.close(); }
+});
+
+test('a re-ask whose second attempt comes late holds its places until its verdict: never five in the window', async () => {
+  const sw = await fakeStagewatch({ key: KEY });
+  const links = [1, 2, 3].map(() => linkWith({ refusedRetryMs: 300, lockoutMs: 3000 }).link);
+  try {
+    const start = Date.now();
+    for (const l of links) l.configure(sw.url, WRONG);
+    await until(() => links.every((l) => l.keyState === 'refused'), 4000, 'all refused');
+    sw.firstFrameDelayMs = 1200;   // from now on each socket's key read is sent 1.2 s after its upgrade
+    await wait(9000);
+    const times = sw.failureTimes.filter((x) => x >= start + 3500);
+    assert.ok(times.length >= 4, 'they did ask again: ' + times.length);
+    assert.ok(worstWindow(times, 3000) <= 4, 'wrong keys in any window: ' + worstWindow(times, 3000));
+  } finally { for (const l of links) l.stop(); await sw.close(); }
+});
+
+test('other links\' first refusals count: a refused key waits while they fill the window', async () => {
+  const sw = await fakeStagewatch({ key: KEY });
+  const a = linkWith({ refusedRetryMs: 3600, lockoutMs: 3000 }).link;
+  const others = [1, 2].map(() => linkWith({ refusedRetryMs: 3600, lockoutMs: 3000 }).link);
+  try {
+    const start = Date.now();
+    a.configure(sw.url, WRONG);
+    await until(() => a.keyState === 'refused', 4000, 'a refused');
+    await wait(start + 2900 - Date.now());
+    for (const l of others) l.configure(sw.url, WRONG);   // four wrong keys just before a's hold ends
+    await until(() => others.every((l) => l.keyState === 'refused'), 4000, 'both refused');
+    const n = sw.counts.upgrades;
+    await wait(start + 5500 - Date.now());
+    assert.equal(sw.counts.upgrades, n, 'a did not ask again while the window held four');
+    await until(() => sw.counts.upgrades > n, 4000, 'and asked once two of them aged out');
+  } finally { a.stop(); for (const l of others) l.stop(); await sw.close(); }
+});
+
+test('only the certificate\'s fingerprint changed for a refused key: it stays refused and its hold stands', async () => {
+  const sw = await fakeStagewatch({ key: KEY, cert: certOf() });
+  const { link } = linkWith();
+  try {
+    link.configure(sw.url, WRONG);
+    await until(() => link.keyState === 'refused', 4000, 'refused');
+    const n = sw.counts.upgrades;
+    link.configure(sw.url, WRONG, sw.fp);
+    link.configure(sw.url, WRONG, '');
+    await wait(600);
+    assert.deepEqual([sw.counts.upgrades, link.keyState, link.status], [n, 'refused', 'key refused: unknown or revoked API key'], 'no dial with the refused key');
+  } finally { link.stop(); await sw.close(); }
 });

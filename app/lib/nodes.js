@@ -22,6 +22,8 @@
  */
 const dgram = require('dgram');
 const crypto = require('crypto');
+const dns = require('dns');
+const { performance } = require('perf_hooks');
 const os = require('os');
 const WebSocket = require('ws');
 const { ClockSampler, Ring } = require('./resilience');
@@ -43,32 +45,56 @@ const REFUSED_RETRY_MS = 61_000;
 // The desk is asked whether it is one once a minute (when no hello says so), and again 5 s after an answer that said nothing.
 const DESK_CHECK_MS = 60_000;
 const DESK_RECHECK_MS = 5000;
-// Stagewatch counts wrong keys per asking address, 5 in a minute locking it out, whichever link of this machine they
-// came from. Every key a link of this process had refused at a Stagewatch (host:port) is remembered for that minute: a
-// first refusal when it comes; a refused key asked again from when it dials (so two links due at once cannot both see
-// room) and, refused again, from then (so its slot covers both its wrong attempts, the later one included).
-// A refused link asks again only while that Stagewatch has room for its two attempts (the upgrade, then the read or the
-// viewing-code check): at most one other there in the last minute, so never more than four wrong a minute.
+// Stagewatch counts wrong keys per asking address, 5 in a minute locking it out (WebServer.cs Authorize), whichever link
+// of this machine they came from. Every wrong attempt a link of this process made at a Stagewatch is counted where it is
+// known — each 401 to a request that carried the key, a refused upgrade, a viewing-code check — on a monotonic clock (a
+// laptop's clock set forward or back moves no window), against the Stagewatch's resolved address. A refused key is asked
+// again (two attempts: the upgrade, then the read or the viewing-code check) only while at most two wrong ones from here
+// are in that Stagewatch's last minute, so never more than four. A re-ask holds its two places from when it dials (two
+// due at once cannot both see room) until its verdict, when its attempts are counted as they were.
 const LOCKOUT_MS = 60_000;
-const refusalsAt = new Map();   // host:port -> when links of this process were refused there, the last minute only
-function recentRefusals(host, now, windowMs) {
-  const kept = (refusalsAt.get(host) || []).filter((t) => now - t < windowMs);
-  if (kept.length) refusalsAt.set(host, kept); else refusalsAt.delete(host);
+const WRONG_AT_MOST = 4;   // under Stagewatch's 5
+const REASK_COSTS = 2;
+const mono = () => performance.now();
+const wrongAt = new Map();   // Stagewatch (address:port) -> [{t, by?}]: the last minute's wrong attempts from here, and held places
+function recentWrong(where, now, windowMs) {
+  const kept = (wrongAt.get(where) || []).filter((e) => now - e.t < windowMs && e.t <= now + 1);
+  if (kept.length) wrongAt.set(where, kept); else wrongAt.delete(where);
   return kept;
 }
-/** How long a refused link must still wait before it may ask `host` again (0: now). */
-function lockoutRoomIn(host, windowMs = LOCKOUT_MS, now = Date.now()) {
-  const kept = recentRefusals(host, now, windowMs);
-  return kept.length <= 1 ? 0 : kept[kept.length - 2] + windowMs - now + 1;
+/** How long a refused key must still wait before it may be asked at `where` again (0: now; at most the window). */
+function lockoutRoomIn(where, windowMs = LOCKOUT_MS, now = mono()) {
+  const kept = recentWrong(where, now, windowMs).map((e) => e.t).sort((a, b) => a - b);
+  const over = kept.length + REASK_COSTS - WRONG_AT_MOST;   // the oldest that must age out first
+  return over <= 0 ? 0 : Math.min(windowMs + 1, Math.max(1, Math.ceil(kept[over - 1] + windowMs - now) + 1));
 }
-function noteRefusal(host, windowMs = LOCKOUT_MS, now = Date.now()) { refusalsAt.set(host, recentRefusals(host, now, windowMs).concat(now)); return now; }
-/** A refused key asked again was refused again: its slot runs from now. */
-function moveRefusal(host, from, now = Date.now()) {
-  const list = refusalsAt.get(host) || [];
-  const i = list.indexOf(from);
-  if (i >= 0) list.splice(i, 1);   // gone already when the asking outlasted the minute: recorded anew either way
-  list.push(now);
-  refusalsAt.set(host, list);
+/** `n` wrong attempts made at `where` just now. */
+function noteWrong(where, n, windowMs = LOCKOUT_MS, now = mono()) {
+  const list = recentWrong(where, now, windowMs);
+  for (let i = 0; i < n; i++) list.push({ t: now });
+  wrongAt.set(where, list);
+}
+/** A re-ask holds its places (`by` its link) until its verdict: a place left by one that never got one stays counted. */
+function holdPlaces(where, by, windowMs = LOCKOUT_MS, now = mono()) {
+  const list = recentWrong(where, now, windowMs).map((e) => (e.by === by ? { t: e.t } : e));
+  for (let i = 0; i < REASK_COSTS; i++) list.push({ t: now, by });
+  wrongAt.set(where, list);
+}
+/** A link stopped while it held places: they stay counted, as attempts it may have made. */
+function settlePlaces(by) {
+  for (const [where, list] of wrongAt) if (list.some((e) => e.by === by)) wrongAt.set(where, list.map((e) => (e.by === by ? { t: e.t } : e)));
+}
+function releasePlaces(by) {
+  for (const [where, list] of wrongAt) if (list.some((e) => e.by === by)) wrongAt.set(where, list.filter((e) => e.by !== by));
+}
+/**
+ * A Stagewatch as its lockout counts this machine: by the address it is reached at (IPv4 first, as a venue network
+ * is), so two spellings of one Stagewatch — its name and its address — share one budget. The spelling when unresolved.
+ */
+async function whereIs(hostname, port) {
+  const name = hostname.replace(/^\[|\]$/g, '');
+  try { return (await dns.promises.lookup(name, { family: 4 })).address + ':' + port; } catch { /* no IPv4 address */ }
+  try { return (await dns.promises.lookup(name)).address + ':' + port; } catch { return name + ':' + port; }
 }
 /** Stagewatch's words for a refusal, as a status may show them: plain text, short, and never a key. */
 const refusalWords = (w) => (typeof w === 'string' ? w : '').replace(/\p{Cc}/gu, ' ').replace(/swk_\S*/g, 'swk_…').replace(/\s+/g, ' ').trim().slice(0, 120);
@@ -308,7 +334,7 @@ class StagewatchLink {
     this.onKey = onKey || (() => {});
     this.refusedRetryMs = refusedRetryMs;
     this.lockoutMs = lockoutMs;
-    this.recheckAt = 0;               // when this link's slot for asking a refused key again was taken (0: none)
+    this.where = '';                  // the Stagewatch as its lockout counts: its resolved address and port (budget key)
     this.keyEpoch = 0;                // a new key, address or certificate: its verdicts are news again (the audit)
     this.base = ''; this.key = ''; this.fingerprint = '';
     // Whether Stagewatch accepted the key: 'none' (no key: the link only views), 'checking', 'accepted' (its auth message
@@ -348,15 +374,20 @@ class StagewatchLink {
     const k = typeof key === 'string' ? key.trim() : '';
     const f = tlsmod.cleanFingerprint(fingerprint);
     if (b === this.base && k === this.key && f === this.fingerprint) return;
+    // Only the certificate's fingerprint changed for a key Stagewatch refused: the key stays refused and its hold stands
+    // (the fingerprint is used when it is asked again). A new key or address asks at once.
+    const keep = b === this.base && k === this.key && this.keyState === 'refused';
     if (b !== this.base) { this.generation = ++generations; this.lastSeq = null; }
     this.base = b; this.key = k; this.fingerprint = f;
-    this._close(); this._cancelRedial();
+    this._close();
+    if (!keep) this._cancelRedial();
     this.delay = 500;
     this.clock.reset();
     this.context = null; this.departments = [];
     this.endpoint = null;
     this.desk = false; this.deskCheckedAt = 0;
     this.tlsState = { on: false, fp: '', pinned: false, problem: '' };
+    if (keep) { this._set(this._refusedStatus(), null); return; }
     this._resetKey();
     this.waitUntil = 0;
     this.keyEpoch++;
@@ -366,6 +397,8 @@ class StagewatchLink {
   }
 
   _resetKey() { this.keyState = this.key ? 'checking' : 'none'; this.keyWords = ''; this.keyVia = ''; this.keyNode = ''; this.keyAt = 0; this.heldView = null; }
+  /** What a refusal reads: a key's, or a keyless link's view refused (its viewing code). */
+  _refusedStatus() { return (this.key ? 'key refused: ' : 'refused: ') + this.keyWords; }
   /** The status of a socket whose frames are fresh: connected only with an accepted key. */
   _liveStatus() { return this.keyState === 'accepted' ? 'connected' : this.keyState === 'none' ? 'viewing' : 'checking key'; }
   /** The key's verdict as every reader shows it (never the key). */
@@ -375,6 +408,7 @@ class StagewatchLink {
   _accept(via, node) {
     if (!this.key || this.keyState === 'accepted') return;   // no key, nothing authenticated: a keyless link never pins
     this.acceptances++;
+    releasePlaces(this);   // its upgrade was no wrong attempt
     this.keyState = 'accepted'; this.keyVia = via; this.keyNode = typeof node === 'string' ? refusalWords(node).slice(0, 40) : ''; this.keyWords = ''; this.keyAt = Date.now();
     this.delay = 500;
     this._confirmPin();
@@ -385,8 +419,11 @@ class StagewatchLink {
   }
 
   /** Stagewatch refused the key (or a keyless link's view): nothing more is read or sent; tried again after the lockout minute. */
-  _refuse(words) {
-    const was = this.keyState;
+  /**
+   * Stagewatch refused the key (or a keyless link's view). `wrong` counts the attempts it took that Stagewatch has not
+   * yet been counted for (the 401s themselves are counted as they come back; see _call).
+   */
+  _refuse(words, wrong = 0) {
     const w = refusalWords(words) || 'the key or the viewing code';
     const changed = this.keyState !== 'refused' || this.keyWords !== w;
     this.keyState = 'refused'; this.keyWords = w; this.keyVia = ''; this.keyNode = ''; this.keyAt = Date.now();
@@ -394,11 +431,10 @@ class StagewatchLink {
     this._close(); this._probing = null;
     // What a refused key read is not shown or quoted, and the desk is asked again after the next acceptance.
     this.context = null; this.desk = false; this.deskCheckedAt = 0;
-    this._set((this.key ? 'key refused: ' : 'refused: ') + w, null);
+    this._set(this._refusedStatus(), null);
     if (changed) this.onKey(this.keyFacts(), this.keyEpoch);
-    if (this.base && was !== 'refused') noteRefusal(this.host, this.lockoutMs);
-    else if (this.base && this.recheckAt) moveRefusal(this.host, this.recheckAt);   // its slot, taken as it dialled, runs from now
-    this.recheckAt = 0;
+    releasePlaces(this);
+    if (wrong && this.where) noteWrong(this.where, wrong, this.lockoutMs);
     this._retry(this.refusedRetryMs);
   }
 
@@ -413,7 +449,9 @@ class StagewatchLink {
       if (this.ws !== ws) return;   // that socket is gone: its answer decides nothing
       const j = res.body;
       if (res.status === 200 && j && j.v === 1 && j.node) { this._takeContext(j); this._accept('request'); return; }
-      if (res.status === 401 || res.status === 403) { this._refuse(j && j.error); return; }
+      // 401: the key itself (its upgrade was a wrong attempt too; this read was counted as it came back). 403: not a key
+      // Stagewatch counts as wrong (HTTPS required, a scope), still no verdict for this link.
+      if (res.status === 401 || res.status === 403) { this._refuse(j && j.error, res.status === 401 ? 1 : 0); return; }
       // Not a verdict (404 in Stagewatch's first second, 429, 5xx): still checking, asked again while this socket lives.
       // A refused key being asked again keeps its refusal's words until the answer is one.
       if (this.keyState === 'checking') this.keyWords = 'Stagewatch answered ' + res.status;
@@ -434,6 +472,7 @@ class StagewatchLink {
     const u = new URL(this.base);
     const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
     const peer = this.findPeer('main', u.hostname, port);
+    this.where = await whereIs(u.hostname, port);
     // The certificate is pinned under the node's id (from its hello) and under the link's own address: the hello is
     // unauthenticated and absent right after a restart, so once pinned at this address the link is never plain again, and
     // a hello naming another id cannot swap in a pin of its own (Show Bus §10: the pin, not the hello, is the trust).
@@ -473,7 +512,7 @@ class StagewatchLink {
     this.tlsState.problem = ''; this.tlsState.changed = false;
     this._close(); this.endpoint = null; this.delay = 500;
     // A key Stagewatch refused stays refused, and its hold stands: the accepted certificate is used when it asks again.
-    if (this.keyState === 'refused') { this._set('key refused: ' + this.keyWords, null); return true; }
+    if (this.keyState === 'refused') { this._set(this._refusedStatus(), null); return true; }
     this._cancelRedial();
     this._resetKey();
     this.keyEpoch++;
@@ -506,7 +545,9 @@ class StagewatchLink {
     const res = await tlsmod.request(this.endpoint.base + path, { method, headers: this._headers(headers), body, timeoutMs, tls: this.endpoint.tls });
     if (res.status === 429 || (res.status === 503 && res.retryAfter !== null)) this.waitUntil = Math.max(this.waitUntil, Date.now() + holdMs(res.retryAfter));
     // 401 is Stagewatch refusing the key itself (unknown, revoked, the PIN, or this address locked out): never a link.
-    // Only for the key the request carried, accepted then and still: a request from before a new key decides nothing.
+    // Each one is a wrong attempt its lockout counted, however many were on their way. Only for the key the request
+    // carried, accepted then and still, does it refuse: a request from before a new key decides nothing.
+    if (res.status === 401 && this.key) noteWrong(this.where || this.host, 1, this.lockoutMs);
     if (res.status === 401 && this.keyState === 'accepted' && this.acceptances === accepted) this._refuse(res.body && res.body.error);
     return res;
   }
@@ -566,7 +607,8 @@ class StagewatchLink {
       if (this.ws !== ws || !msg || typeof msg !== 'object') return;
       // Stagewatch 2.18 says first whether it accepted the key; only ok === true accepts, anything else is no verdict.
       if (msg.type === 'auth') {
-        if (msg.ok === true) { first = false; this._accept('auth', msg.node); } else if (msg.ok === false) { first = false; this._refuse(msg.words ?? msg.error); }
+        // A refusal on the socket took two attempts Stagewatch counted: the upgrade, then the key's or the viewing code's check.
+        if (msg.ok === true) { first = false; this._accept('auth', msg.node); } else if (msg.ok === false) { first = false; this._refuse(msg.words ?? msg.error, 2); }
         return;
       }
       // A Stagewatch whose first frame (or beat) came without a word on the key (2.16): one authenticated read is the verdict.
@@ -610,9 +652,10 @@ class StagewatchLink {
       this.redial = null;
       if (this.ws || this._opening || this.base !== base) return;
       if (this.keyState === 'refused') {
-        const room = lockoutRoomIn(this.host, this.lockoutMs);
+        const where = this.where || this.host;
+        const room = lockoutRoomIn(where, this.lockoutMs);
         if (room > 0) { this._schedule(room); return; }
-        this.recheckAt = noteRefusal(this.host, this.lockoutMs);   // its slot, taken before it dials
+        holdPlaces(where, this, this.lockoutMs);   // its two places, taken before it dials
       }
       this._open();
     }, ms);
@@ -767,7 +810,7 @@ class StagewatchLink {
     } catch (e) { return { status: 0, retryAfter: null, error: e && e.message ? e.message.slice(0, 80) : '' }; }
   }
 
-  stop() { clearInterval(this.timer); this._cancelRedial(); this.base = ''; this._close(); }
+  stop() { clearInterval(this.timer); this._cancelRedial(); this.base = ''; this._close(); settlePlaces(this); }
 }
 
-module.exports = { REFUSED_RETRY_MS, DESK_CHECK_MS, LOCKOUT_MS, refusalWords, Discovery, StagewatchLink, wsUrl, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };
+module.exports = { REFUSED_RETRY_MS, DESK_CHECK_MS, LOCKOUT_MS, lockoutRoomIn, noteWrong, refusalWords, Discovery, StagewatchLink, wsUrl, normaliseBase, stageView, parseHello, peerStatus, readReceipt, readProposal, readProposalList, addressTag, BUS_PORT, STALE_MS, GONE_MS, MAX_PEERS, MAX_PER_ADDRESS };

@@ -109,10 +109,11 @@ function screenIdOf(target) {
  * answered to result posts first (status 0: the socket cut with no answer); holdAll(ms) answers every route 429 with
  * Retry-After for that long, as its per-key budget does; expire(id) is its five minutes without a result.
  * `answerDeskChecks` and `answerContext` are such queues for GET /api/proposals?from= (whether it keeps a desk) and GET
- * /api/context; onRequest(request) and onResultPost(id) are called as one arrives, before it is answered; `messageDelayMs` holds a send
+ * /api/context; onRequest(request) and onResultPost(id) are called as one arrives, before it is answered; `firstFrameDelayMs`
+ * holds a new socket's first message (and so the link's key read) that long; `messageDelayMs` holds a send
  * that long before its key is judged (a request made under one key, answered after the key changed).
  */
-async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null, answerDeskChecks = [], answerContext = [], messageDelayMs = 0 } = {}) {
+async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null, answerDeskChecks = [], answerContext = [], messageDelayMs = 0, firstFrameDelayMs = 0 } = {}) {
   const http = require('http');
   const https = require('https');
   const { WebSocketServer } = require('ws');
@@ -224,7 +225,8 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
       c.on('close', () => sockets.delete(c));
       c.send(JSON.stringify(last));
     };
-    if (authDelayMs) setTimeout(start, authDelayMs); else start();
+    const delay = authDelayMs + firstFrameDelayMs;
+    if (delay) setTimeout(start, delay); else start();
   });
   await new Promise((resolve) => { srv.listen(0, '127.0.0.1', resolve); });
   const port = srv.address().port;
@@ -244,6 +246,8 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     /** What it answers the next result posts, before its desk reads them: [{status, error, retryAfter}] (0: no answer). */
     get answerResults() { return answerResults; },
     set answerResults(v) { answerResults = v; },
+    /** How long a socket that connects from now on waits for its first message (a slow network: its key read comes late). */
+    set firstFrameDelayMs(ms) { firstFrameDelayMs = ms; },
     /** What it answers the next reads of its context, and the next desk checks, first: [{status, error, retryAfter}]. */
     get answerContext() { return answerContext; },
     set answerContext(v) { answerContext = v; },
