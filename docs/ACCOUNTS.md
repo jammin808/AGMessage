@@ -43,7 +43,12 @@ widen one, or reset a richer one's password (the page offers only what it holds,
 person's other halls are a count — and shows a richer person as "Locked"); nobody changes their own role, rights or
 halls, nor turns themselves off or removes themselves (on one's own row the page offers the name, a new one-time
 password and Sign out everywhere); the last admin who can sign in stays one. A code guest's rights come from where they joined: backstage posts, shares files and sends to Stagewatch; on
-stage posts and shares files; an observer reads. Screens, halls and other show systems need an account.
+stage posts and shares files; an observer reads; a role the join page does not offer is refused ("Choose On stage,
+Backstage or Observer."), never seated as another. A browser signed in to an account is that account in every hall, a
+one-time password not yet changed included: its code join is refused ("You are signed in as Ana: open the room from your
+halls, or sign out to join with a code."), so an account never takes a guest's seat, and the rights that come with it,
+beside its own; the refusal spends nothing of the code lockout. The admin's support view, and the host token's admin
+(who has no account), are not code joins. Screens, halls and other show systems need an account.
 
 **Inside a hall.** Reading is `hall.view`; everything that changes what the others see — a message, a reply, a help
 request, an answer to an action prompt, a pin, a reaction — is `hall.post`, so an observer or a Viewer reads, sees a

@@ -51,6 +51,26 @@ and is dated again when 0.6.0 closes.
   written and the audit entry on disk.
 - Rolling back: 0.5.1 ignores `peaks.json` and the new health keys.
 
+**Joining fails closed, and a page hears only who may speak to it**
+- A join whose role is not one the page offers (`admin`, `7`, `Board`, a list) is refused: "Choose On stage, Backstage
+  or Observer.", and nobody is seated. 0.5.1 seated it as an observer. No role is still an observer (the page's
+  default), `director` (the old name) is still On stage, and an account's role is still its rights', whatever it sends.
+- A browser signed in to an account is refused a code join: "You are signed in as Ana: open the room from your halls, or
+  sign out to join with a code." In 0.5.1 a Viewer or Staff account that had a hall's code could seat itself backstage
+  as a guest, with the stage its account does not hold. An account with a one-time password not yet changed counts as
+  signed in. The refusal is not a guess at a code, so it spends nothing of the code lockout. The admin's support view,
+  and the host token's admin (who has no account), are unaffected. The sign-in page, opened from a code link in a
+  signed-in browser, says the same and offers "Open your halls" or "Sign out", after which the code is there to use. A
+  guest's hall page refused this way opens that code link, keeping the code and an invite's role. A one-time password
+  not yet changed is asked for first, a code link included.
+- One person's pages (their devices, and the admin's support view of them) are kept in step with only what a page
+  applies: the theme, the text size, the On stage panel folded, the split and the document open, each read by its type
+  and sent on as rebuilt. 0.5.1 sent on whatever a page sent, up to 4 KB.
+- The admin's support view resyncs only when the admin page that frames it asks: its parent, from this origin. In 0.5.1
+  any window could ask it, a frame inside it included. The admin page's Resync is sent to this origin only. A source
+  guard holds both: a page's `postMessage` never targets `'*'`, and a `message` listener first checks who sent it.
+- Rolling back: nothing is stored; 0.5.1 joins and relays as it did.
+
 **Fixed**
 - A proposal to the show desk stays with the hall it was asked from. A page that joined another hall before the desk
   answered had the proposal's waiting line, and the desk's later outcome, put in the hall it had moved to.

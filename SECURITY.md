@@ -35,6 +35,10 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
 
 - Identities are issued and signed by the server; accounts' passwords are hashed with scrypt; sessions are random,
   stored only as hashes, `HttpOnly`, `SameSite=Strict` and `Secure` over HTTPS; logins are rate limited and locked out.
+  A browser signed in to an account is refused a code join, so an account never seats itself as a guest with rights
+  its own do not hold; a join's role that the page does not offer is refused.
+- One person's pages relay to each other only the settings a page applies, each read by its type and rebuilt; the
+  admin's support view acts only on what the admin page that frames it sends (its parent, from this origin).
 - Saved keys and tokens are sealed at rest (AES-256-GCM) with a machine key kept outside the app folder.
 - Uploads are allow-listed by type and checked by content; they are served so they cannot run script.
 - Pages carry a strict Content-Security-Policy with no inline script.

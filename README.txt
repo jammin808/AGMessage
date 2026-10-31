@@ -53,6 +53,9 @@ Every day of the event
 - Presenters and guests: open the LAN URL, choose "Join with a code", type
   the hall's code, a name, and where you are (on stage, backstage,
   observer).
+- A browser signed in to an account opens its halls from the halls board,
+  never with a code: a code link opened there says so and offers "Open your
+  halls" or "Sign out". To join as a guest on that device, sign out first.
 - Help: in a hall, the red Help button asks for Sound, Vision, Lighting,
   Stage, Presenter or IT. It stays red on the board until someone presses
   "On my way", and on the board until it is resolved.

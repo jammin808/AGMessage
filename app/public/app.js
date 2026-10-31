@@ -100,7 +100,11 @@ function rejoin() {
   socket.emit('join', { roomCode: ROOM, adminView: ADMIN_VIEW, since: joined ? lastSeq : undefined, ...who }, (res) => {
     if (!res || !res.ok) {
       notify(res?.error || 'Could not join room', true);
-      const to = res && res.signIn ? '/?next=' + encodeURIComponent(location.pathname + location.search) : HOME;
+      // A guest's link refused because this browser is signed in goes to the code link it came from, which offers the
+      // halls or Sign out and keeps the code (and an invite's role) for after.
+      const back = new URLSearchParams({ code: ROOM });
+      if (INVITE) { back.set('role', ROLE); back.set('invite', INVITE); }
+      const to = res && res.signIn ? '/?next=' + encodeURIComponent(location.pathname + location.search) : res && res.signedIn ? '/?' + back.toString() : HOME;
       setTimeout(() => { location.href = to; }, 2500);
       return;
     }
@@ -1662,8 +1666,10 @@ if (ADMIN_VIEW) {
   if (socket && socket.connected) _resyncBurst();
   else socket && socket.on('connect', _resyncBurst);
 
-  // Listen for parent (admin dashboard) postMessage telling us to resync now
+  // The admin page that frames this view asks it to resync now. Only that page is heard: the frame's own parent, from
+  // this origin. A frame inside this page, or a window of another site, is not.
   window.addEventListener('message', (e) => {
+    if (e.source !== window.parent || e.origin !== location.origin) return;
     if (e.data && e.data.type === 'agm:resync' && socket && socket.connected) {
       socket.emit('userState:requestPeers');
       if (window.AGM_DEBUG_SYNC) console.log('[sync] manual resync requested');

@@ -675,6 +675,43 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     assert.equal((await emit(anon, 'join', { roomCode: hall, as: 'account' })).signIn, true, 'no session: sign in first');
   });
 
+  await t.test('a signed-in browser is refused a code join, without spending the code lock; it enters by its account, and the support view and the host token\'s admin are not code joins', async () => {
+    const ctl = await connect(base, admin); sockets.push(ctl);
+    const seated = async () => (await new Promise((resolve) => { ctl.emit('admin:listRooms', resolve); })).rooms.find((r) => r.code === hall).users.map((u) => u.name);
+    // A guest's join first: it clears this address's count of failed joins.
+    const gwen = await connect(base); sockets.push(gwen);
+    assert.ok((await emit(gwen, 'join', { roomCode: hall, name: 'Gwen', role: 'observer' })).ok);
+    // Sam (a tech: no Stagewatch) has the hall's code: a guest's backstage seat would give Sam the stage. Eleven tries, one
+    // more than the lock allows: each is the same refusal, and none is counted as a guess.
+    const s = await connect(base, sam); sockets.push(s);
+    const tries = [];
+    for (let i = 0; i < 11; i++) tries.push(await emit(s, 'join', { roomCode: hall, name: 'Backstage Sam', role: 'research', invite: '' }));
+    const words = 'You are signed in as Sam Tech: open the room from your halls, or sign out to join with a code.';
+    assert.deepEqual(tries, Array(11).fill({ ok: false, error: words, signedIn: true }));
+    assert.ok(!(await seated()).includes('Backstage Sam'), 'not seated');
+    assert.equal((await emit(s, 'message', { type: 'text', text: 'from the guest seat' })).error, 'Not joined');
+    const guess = await connect(base); sockets.push(guess);
+    assert.equal((await emit(guess, 'join', { roomCode: 'ZZZZZZ', name: 'Guess', role: 'observer' })).error, 'Room not found', 'the lock was not reached: the refusals spent none of it');
+    assert.ok((await emit(guess, 'join', { roomCode: hall, name: 'Guess', role: 'observer' })).ok, 'and a guest still joins (the count cleared again)');
+    const own = await emit(s, 'join', { roomCode: hall, as: 'account' });
+    assert.deepEqual([own.ok, own.name, own.role, own.uid], [true, 'Sam Tech', 'research', samLogin.body.account.id], 'the same socket enters by its account');
+    // A one-time password not yet changed is still a signed-in browser.
+    const made = await api(base, 'POST', '/api/users', { username: 'tia', name: 'Tia Temp', role: 'staff', halls: [hall] }, { cookie: admin });
+    const tia = await signIn('tia', made.body.password);
+    const t1 = await connect(base, tia); sockets.push(t1);
+    assert.deepEqual(await emit(t1, 'join', { roomCode: hall, name: 'Tia', role: 'observer' }), { ok: false, error: 'You are signed in as Tia Temp: open the room from your halls, or sign out to join with a code.', signedIn: true });
+    // The admin's support view of a guest is not a code join, from an admin account's browser.
+    const view = await emit(ctl, 'join', { roomCode: hall, name: 'Gwen', role: 'observer', adminView: true });
+    assert.deepEqual([view.ok, view.adminView, view.role], [true, true, 'observer']);
+    // The host token's admin has no account: a browser holding the token's sign-in beside an account's joins with a code.
+    const token = (await api(base, 'POST', '/api/admin/login', { token: TOKEN })).cookie;
+    assert.match(token, /^agm_admin=/);
+    const desk = await connect(base, token + '; ' + admin); sockets.push(desk);
+    const dj = await emit(desk, 'join', { roomCode: hall, name: 'Desk', role: 'research' });
+    assert.deepEqual([dj.ok, dj.role, dj.account], [true, 'research', null]);
+    assert.ok((await seated()).includes('Desk'));
+  });
+
   await t.test('rights changed under a live socket: it is told and closed, and the next connection has the new rights', async () => {
     const s = await connect(base, sam); sockets.push(s);
     assert.ok((await emit(s, 'join', { roomCode: hall, as: 'account' })).ok);

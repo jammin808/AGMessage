@@ -97,6 +97,11 @@ allowed 11 (an append cut back when the disk takes only part of it, the rotation
 `lib/resilience.js` 10 (the temporary file of an atomic write that failed is removed, so it does not keep a full disk
 full) and `server.js` 16 (removing files went asynchronous).
 
+0.6.0 adds the pages' message channels to it: every `postMessage` in a page script under `public/` names this origin as
+its target, never `'*'`, and every `message` listener's first line returns unless both the sending window and its origin
+are the ones expected (the admin's support view hears only the admin page that frames it). A post or a listener written
+in a shape the guard does not read, or an `onmessage` handler, fails it too.
+
 ## 4. Considered and not adopted
 
 - **Type checking (`tsc --checkJs`).** Not measured this release. It would need TypeScript and JSDoc types across the

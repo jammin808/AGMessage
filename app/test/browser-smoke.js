@@ -101,9 +101,10 @@ async function launchEdge() {
       // A window of its own, so its page is always the one in front (never a hidden tab behind another).
       const made = await browser.send('Target.createTarget', { url: 'about:blank', newWindow: true, width: 1400, height: 900 });
       if (!made.result) throw new Error('no new window: ' + (made.error ? made.error.message : 'no answer'));
-      const problems = []; const listeners = new Map(); const expected = [];
+      const problems = []; const listeners = new Map(); const expected = []; const logs = [];
       const { ws, send: call } = await devtools(`ws://127.0.0.1:${port}/devtools/page/${made.result.targetId}`, (m) => {
         if (listeners.has(m.method)) listeners.get(m.method)(m.params);
+        if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'log') logs.push(m.params.args.map((a) => a.value ?? a.description).join(' '));
         if (m.method === 'Runtime.exceptionThrown') problems.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text).split('\n')[0]);
         if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error' && !/favicon/.test(m.params.entry.url || m.params.entry.text) && !expected.some((r) => r.test(m.params.entry.url || ''))) problems.push('log: ' + m.params.entry.text);
         if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') problems.push('console: ' + m.params.args.map((a) => a.value ?? a.description).join(' '));
@@ -119,7 +120,8 @@ async function launchEdge() {
       if (timezone) await send('Emulation.setTimezoneOverride', { timezoneId: timezone });
       await send('Page.navigate', { url });
       return {
-        problems, send,
+        /** `logs`: what the tab's frames wrote with console.log, in order. */
+        problems, send, logs,
         /** A resource this tab is made to fail on purpose: its load error is not a problem. */
         expectFailure: (re) => { expected.push(re); },
         /** The viewport, as a screen of that size would have it. */
@@ -275,6 +277,38 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const healthLine = await admin.until(`(() => { const t = document.getElementById('healthLine').textContent; return /loop delay p95 [\\d.]+ ms \\(max [\\d.]+\\) · busy \\d+ %/.test(t) && /today's peaks: loop delay [\\d.]+ ms, busy \\d+ %, largest hall \\d+ messages/.test(t) && /audit write p99 [\\d.]+ ms/.test(t) && t; })()`, 20000);
     report(!!healthLine, 'the admin\'s health line reads the loop delay, how busy it is and today\'s peaks' + (healthLine ? '' : ': ' + await admin.eval(`document.getElementById('healthLine').textContent`)));
     await admin.shot(path.join(OUT, 'admin.png'));
+
+    // The admin's support view (the person's page, framed in the admin page) resyncs when the admin page that frames it
+    // asks, and only then: a frame inside the view (a real post from it), or a message with another origin (as the browser
+    // delivers one; the view's frame-ancestors keep a real other-origin parent out), does not reach the resync.
+    await admin.eval(`openUserView('${code}', 'Chair', 'board')`);
+    const viewUp = await admin.until(`(() => { const d = document.getElementById('userViewFrame').contentDocument; return !!d && !!d.body && d.body.classList.contains('is-admin-view') && !!d.getElementById('connDot') && d.getElementById('connDot').classList.contains('ok'); })()`);
+    await admin.eval(`(() => { const w = document.getElementById('userViewFrame').contentWindow; w.AGM_DEBUG_SYNC = true; const c = w.document.createElement('iframe'); c.title = 'a frame inside the view'; w.document.body.appendChild(c); })()`);
+    const frames = [];
+    const walk = (n, parent) => { frames.push({ id: n.frame.id, url: n.frame.url, parent }); (n.childFrames || []).forEach((c) => walk(c, n.frame.id)); };
+    walk((await admin.send('Page.getFrameTree')).result.frameTree, null);
+    const viewFrame = frames.find((f) => /[?&]adminView=1/.test(f.url));
+    const childFrame = viewFrame && frames.find((f) => f.parent === viewFrame.id);
+    const resyncs = () => admin.logs.filter((l) => l === '[sync] manual resync requested').length;
+    const world = childFrame ? await admin.send('Page.createIsolatedWorld', { frameId: childFrame.id, worldName: 'smoke-child' }) : {};
+    const posted = world.result ? await admin.send('Runtime.evaluate', { contextId: world.result.executionContextId, expression: `parent.postMessage({ type: 'agm:resync' }, '*'); 'posted'`, returnByValue: true }) : {};
+    await sleep(600);
+    const fromChild = resyncs();
+    await admin.eval(`(() => { const w = document.getElementById('userViewFrame').contentWindow; w.dispatchEvent(new w.MessageEvent('message', { data: { type: 'agm:resync' }, origin: 'http://localhost:${port}', source: window })); })()`);
+    await sleep(300);
+    const fromElsewhere = resyncs();
+    await admin.eval(`document.getElementById('userViewResync').click()`);
+    const resyncEnd = Date.now() + 3000;
+    while (Date.now() < resyncEnd && resyncs() < 1) await sleep(50);
+    const fromAdmin = resyncs();
+    report(!!viewUp && posted.result?.result?.value === 'posted' && fromChild === 0 && fromElsewhere === 0 && fromAdmin === 1, `the support view resyncs for the admin page's Resync and for nothing else (a frame inside it: ${fromChild}, another origin: ${fromElsewhere}, the admin page: ${fromAdmin})`);
+    await sleep(1500);   // Resync's reload of the view lands before it is closed
+    // What Chair's own page sends when asked (the theme, the text size, the split) passes the relay's readers and reaches
+    // the view: a shape the readers refuse would stop the mirroring without a word.
+    const afterResync = admin.logs.slice(admin.logs.indexOf('[sync] manual resync requested'));
+    const mirrored = ['theme', 'zoom', 'split'].filter((k) => afterResync.some((l) => l.startsWith(`[sync] recv ${k} `)));
+    report(mirrored.length === 3, `Chair's own page's theme, text size and split reach the support view after Resync (${mirrored.join(', ')})`);
+    await admin.eval(`document.getElementById('userViewClose').click()`);
 
     // Accounts: the first admin is made on the sign-in page; the halls board and the accounts page render under the CSP.
     const signin = await edge.tab(`${base}/`);
@@ -580,6 +614,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // A page away while its hall loses its Stagewatch: back (it resumes from what it missed), the messages it had drawn
     // offer 🖥 no more.
     const sendsBefore = await research.eval(`[...document.querySelectorAll('.msg[data-type="text"] .stage-btn')].filter((b) => !b.hidden).length`);
+    // The research page stands for a guest's own device, which holds no account's sign-in: the accounts signed in on this
+    // browser since it joined leave the cookie jar before it connects again (a signed-in browser is refused a code join).
+    // The pages already open keep their connections.
+    await signin.send('Network.deleteCookies', { name: 'agm_s', url: base + '/' });
     await research.eval(`socket.disconnect()`);
     const removed = await hallView.eval(`new Promise((r) => socket.emit('hall:configure', { code: ROOM, stagewatchUrl: '' }, (x) => r(!!(x && x.ok))))`);
     await research.eval(`socket.connect()`);
@@ -602,7 +640,35 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     }
     report(JSON.stringify(landings) === JSON.stringify(['/halls.html|', 'clean', '/halls.html|', 'clean', '/app.html|' + code, 'clean']), `signing in follows ?next= only to AGMessage's own pages (${landings.join(', ')})`);
 
-    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall]];
+    // A signed-in browser (Ana, from the last sign-in) enters by its account: a code link offers its halls or Sign out,
+    // not the code; a guest's hall link (an invite's) is refused by the server in the same words, seats nobody and lands
+    // on its code link, the code and the invite kept; signed out, the code link joins as a guest.
+    const codeLink = await edge.tab(`${base}/?code=${code}`);
+    const offered = await codeLink.until(`(() => { const p = document.getElementById('signedInPane'); return !p.hidden && document.getElementById('joinForm').hidden && document.getElementById('tabCode').classList.contains('active') && document.activeElement === document.getElementById('openHalls') && JSON.stringify({ text: document.getElementById('signedInText').textContent, halls: document.getElementById('openHalls').getAttribute('href') }); })()`);
+    report(offered === JSON.stringify({ text: 'You are signed in as Ana Admin: open your halls, or sign out to join with a code.', halls: '/halls.html' }), `a code link in a signed-in browser offers its halls or Sign out, not the code (${offered})`);
+    const asGuest = await edge.tab(`${base}/app.html?code=${code}&name=Imposter&role=research&invite=smoke-invite`);
+    const refusedWith = await asGuest.until(`(() => { const t = document.getElementById('agmToast'); return !!t && t.classList.contains('bad') && !joined && t.textContent; })()`);
+    const imposter = await admin.eval(`new Promise((r) => socket.emit('admin:listRooms', (x) => r(x.rooms.find((h) => h.code === '${code}').users.some((u) => u.name === 'Imposter'))))`);
+    const landed = await asGuest.until(`location.pathname === '/' && !document.getElementById('signedInPane').hidden && document.getElementById('joinForm').hidden && location.search`, 8000);
+    report(refusedWith === 'You are signed in as Ana Admin: open the room from your halls, or sign out to join with a code.' && imposter === false && landed === `?code=${code}&role=research&invite=smoke-invite`, `a guest's hall link in a signed-in browser is refused in the server's words, seats nobody and lands on its code link, which offers the halls or Sign out ("${refusedWith}"; seated: ${imposter}; ${landed})`);
+    await codeLink.eval(`document.getElementById('signOutBtn').click()`);
+    const codeAgain = await codeLink.until(`(() => { const f = document.getElementById('joinForm'); return !!f && !f.hidden && document.getElementById('signedInPane').hidden && document.getElementById('code').value; })()`, 8000);
+    await codeLink.eval(`(() => { document.getElementById('name').value = 'Walk-in'; document.querySelector('input[name="role"][value="observer"]').checked = true; document.getElementById('joinForm').requestSubmit(); })()`);
+    const walkedIn = await codeLink.until(`location.pathname === '/app.html' && typeof joined !== 'undefined' && joined && document.body.dataset.role`, 8000);
+    report(codeAgain === code && walkedIn === 'observer', `signed out, the same code link joins as a guest (${codeAgain}, ${walkedIn})`);
+    // A one-time password not yet changed is a signed-in browser too (the server refuses its code join): a code link opened
+    // with one asks for the new password, alone, before anything else.
+    const postJson = (route, body) => signin.eval(`fetch('${route}', { method: 'POST', headers: { 'content-type': 'application/json' }, body: ${JSON.stringify(JSON.stringify(body))} }).then((r) => r.json())`);
+    const anaAgain = await postJson('/api/auth/login', { username: 'ana', password: 'the green room kettle' });
+    const otto = await postJson('/api/users', { username: 'otto', name: 'Otto Once', role: 'staff', halls: [code] });
+    await postJson('/api/auth/logout', {});
+    const ottoIn = await postJson('/api/auth/login', { username: 'otto', password: otto.password || '' });
+    const otpLink = await edge.tab(`${base}/?code=${code}`);
+    const otpShown = await otpLink.until(`(() => { const shown = [...document.querySelectorAll('.entry-pane')].filter((p) => !p.hidden).map((p) => p.id); return document.querySelector('.entry-tabs').hidden && document.getElementById('changeUser').value === 'otto' && JSON.stringify(shown); })()`);
+    await postJson('/api/auth/logout', {});
+    report(anaAgain.ok === true && ottoIn.mustChange === true && otpShown === JSON.stringify(['changePane']), `a code link opened with a one-time password not yet changed asks for the new password, alone (${anaAgain.ok} ${ottoIn.mustChange} ${otpShown})`);
+
+    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink]];
     // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).
     const hidden = [];
     for (const [name, tab] of tabs) if ((await tab.eval('document.visibilityState')) !== 'visible') hidden.push(name);

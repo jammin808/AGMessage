@@ -60,6 +60,14 @@
       <p class="error" id="changeError" role="alert" hidden></p>
     </form>
 
+    <!-- A code link opened in a signed-in browser: an account enters by its halls, never as a guest (the server refuses). -->
+    <div id="signedInPane" class="entry-pane" role="tabpanel" aria-labelledby="tabCode" hidden>
+      <p class="hint" id="signedInText" role="status"></p>
+      <a class="btn primary big" id="openHalls" href="/halls.html">Open your halls</a>
+      <button class="btn ghost big" id="signOutBtn" type="button">Sign out</button>
+      <p class="error" id="signOutError" role="alert" hidden></p>
+    </div>
+
     <!-- A meeting or hall code: presenters, guests, anyone without an account. -->
     <form id="joinForm" class="entry-pane" role="tabpanel" aria-labelledby="tabCode" autocomplete="off" hidden>
       <label class="field">

@@ -14,7 +14,7 @@
     $('tabCode').classList.toggle('active', which === 'code');
     $('tabSignIn').setAttribute('aria-selected', String(which === 'signIn'));
     $('tabCode').setAttribute('aria-selected', String(which === 'code'));
-    (which === 'signIn' ? $('username') : $('name')).focus();
+    panes[which].querySelector('input, a').focus();
   }
   $('tabSignIn').addEventListener('click', () => show('signIn'));
   $('tabCode').addEventListener('click', () => show('code'));
@@ -25,11 +25,27 @@
     const h = await AGM.api('GET', '/api/health');
     if (h.build) $('buildTag').textContent = 'AGMessage ' + h.build;
     const me = await AGM.api('GET', '/api/auth/me');
-    if (params.get('code')) { show('code'); return; }
     if (me.account && me.account.mustChange) { onlyPane('changePane'); $('changeUser').value = me.account.username; return; }
+    if (params.get('code')) { if (me.account) signedIn(me.account); show('code'); return; }
     if (me.account) { location.replace('/halls.html'); return; }
     if (me.setup) onlyPane('setupPane');
   })();
+
+  /**
+   * A signed-in browser that followed a code link: the code tab says it enters by its account, as the server's refusal
+   * of its code join does, and offers its halls or signing out (after which the code is there to use).
+   */
+  function signedIn(account) {
+    panes.code = $('signedInPane');
+    $('tabCode').setAttribute('aria-controls', 'signedInPane');
+    $('signedInText').textContent = 'You are signed in as ' + (account.name || account.username) + ': open your halls, or sign out to join with a code.';
+  }
+  $('signOutBtn').addEventListener('click', async () => {
+    fail('signOutError', '');
+    const r = await AGM.api('POST', '/api/auth/logout');
+    if (!r.ok) { fail('signOutError', r.error); return; }
+    location.reload();
+  });
 
   /** One pane alone, without the tabs: the first admin's setup, or a one-time password to change. */
   function onlyPane(id) {

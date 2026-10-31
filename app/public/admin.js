@@ -394,10 +394,11 @@ document.getElementById('userViewResync')?.addEventListener('click', () => {
   const frame = document.getElementById('userViewFrame');
   const modal = document.getElementById('userViewModal');
   if (!frame || !modal) return;
-  // Quick path: ask the iframe to re-request peer state
+  // Quick path: ask the iframe to re-request peer state. Only a page of this origin is told: a frame that has gone
+  // elsewhere hears nothing.
   try {
-    frame.contentWindow.postMessage({ type: 'agm:resync' }, '*');
-  } catch (e) { /* cross-origin? unlikely since same-origin */ }
+    frame.contentWindow.postMessage({ type: 'agm:resync' }, location.origin);
+  } catch (e) { /* the frame has no window (closed): the reload below still runs */ }
   // Hard path: reload the iframe with a fresh cache-bust after a moment
   setTimeout(() => {
     const code = modal.dataset.code, name = modal.dataset.name, role = modal.dataset.role;

@@ -77,6 +77,21 @@ const makeMessageId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12)
 const ROLES = ['board', 'research', 'observer'];
 // What may be forwarded into another hall: messages that stand on their own there (allow-list; a new type is refused).
 const FORWARDABLE = new Set(['text', 'file', 'action']);
+// What one person's pages keep in step (their own devices, and the admin's support view of them): each key a page
+// applies, with the reader that takes its value by type and returns the value relayed, or undefined to relay nothing.
+const USER_STATE = {
+  theme: (v) => (v === 'light' || v === 'dark' ? v : undefined),
+  zoom: (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined),
+  stageCollapsed: (v) => (typeof v === 'boolean' ? v : undefined),
+  split: (v) => (v && typeof v === 'object' && typeof v.pct === 'number' && v.pct >= 0 && v.pct <= 100 && typeof v.vertical === 'boolean' ? { pct: v.pct, vertical: v.vertical } : undefined),
+  doc: (v) => (v === null ? null : v && typeof v === 'object' && typeof v.messageId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(v.messageId) ? { messageId: v.messageId } : undefined),
+};
+/** A page's `userState:push`, as it is relayed: `{key, value}` rebuilt from a known key and a value of its type, or null. */
+function userStateOf(payload) {
+  if (!payload || typeof payload !== 'object' || typeof payload.key !== 'string' || !Object.hasOwn(USER_STATE, payload.key)) return null;
+  const value = USER_STATE[payload.key](payload.value);
+  return value === undefined ? null : { key: payload.key, value };
+}
 
 // ---------------------------------------------------------------- settings (AI key, Stagewatch link)
 // Saved through one write lane (tmp -> fsync -> rename, a .bak of the last whole file); keys sealed at rest
@@ -758,6 +773,9 @@ io.on('connection', (socket) => {
   socket.data.adminSid = tokenAdmin ? adminSid : '';
   socket.data.isAdmin = tokenAdmin || !!(socket.data.account && rbac.can(socket.data.account, 'settings.manage') && !web.adminBlocked(hs, socket.data.account));
   socket.data.actor = tokenAdmin ? HOST_ACTOR : socket.data.account ? { t: 'account', id: socket.data.account.id, name: socket.data.account.username } : null;
+  // The account this browser is signed in as (a one-time password not yet changed included), for the words of a code
+  // join it is refused; empty for the host token's admin, who has no account.
+  const signedInAs = acct && !tokenAdmin ? (acct.account.name || acct.account.username) : '';
   const writes = new guard.Bucket(5, 15);      // messages, reactions, pins…
   const chatter = new guard.Bucket(10, 20);    // typing, seen, ui sync
   const aiBucket = new guard.Bucket(0.2, 4);   // one AI request per 5 s, bursts of 4
@@ -785,10 +803,16 @@ io.on('connection', (socket) => {
     const code = guard.str(roomCode).toUpperCase().trim();
     const acct = (args && args.as === 'account') ? socket.data.account : null;
     if (args && args.as === 'account' && !acct) return ack({ ok: false, error: 'Sign in first.', signIn: true });
-    const cleanName = acct ? acct.name : guard.cleanText(name, 40);
-    let cleanRole = role === 'director' ? 'board' : role;
-    cleanRole = ROLES.includes(cleanRole) ? cleanRole : 'observer';
     const isAdminView = !!adminView && socket.data.isAdmin;
+    // A signed-in browser is its account in every hall: a code would seat it as a guest with the code's rights, beside
+    // or above its own. Not code guessing, so the lock is not spent. The admin's support view and the host token's
+    // admin (no account) are not code joins.
+    if (!acct && !isAdminView && signedInAs) return ack({ ok: false, error: 'You are signed in as ' + signedInAs + ': open the room from your halls, or sign out to join with a code.', signedIn: true });
+    // The role is one the page offers, or none (the page's default, observer); 'director' is its old name. Anything
+    // else is refused, never seated as something it did not ask for. An account's role is its rights', not its word.
+    let cleanRole = role === undefined || role === null ? 'observer' : role === 'director' ? 'board' : role;
+    if (!acct && !ROLES.includes(cleanRole)) return ack({ ok: false, error: 'Choose On stage, Backstage or Observer.' });
+    const cleanName = acct ? acct.name : guard.cleanText(name, 40);
     if (!code || !cleanName) return ack({ ok: false, error: 'Missing room code or name' });
     const r = RoomStore.validCode(code) ? store.get(code) : null;
     if (!r) { joinLock.fail(ip); return ack({ ok: false, error: 'Room not found' }); }
@@ -1047,10 +1071,13 @@ io.on('connection', (socket) => {
     if (!room || !me || !chatter.take()) return;
     try { for (const p of await io.in(room.code).fetchSockets()) if (syncPeer(p)) p.emit('userState:request'); } catch { /* ignore */ }
   });
+  // Only what a page applies is relayed, each value read by its type and rebuilt, so nothing else a client adds rides
+  // along to another page; an unknown key or a value of the wrong type reaches nobody.
   socket.on('userState:push', async (payload) => {
-    if (!room || !me || !chatter.take() || !payload || typeof payload !== 'object') return;
-    if (JSON.stringify(payload).length > 4096) return;
-    try { for (const p of await io.in(room.code).fetchSockets()) if (syncPeer(p)) p.emit('userState:push', payload); } catch { /* ignore */ }
+    if (!room || !me || !chatter.take()) return;
+    const state = userStateOf(payload);
+    if (!state) return;
+    try { for (const p of await io.in(room.code).fetchSockets()) if (syncPeer(p)) p.emit('userState:push', state); } catch { /* ignore */ }
   });
 
   // ----- AI (research team and admin): drafts only

@@ -436,6 +436,26 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   assert.ok(!/[?&]pin=/.test(nodesSrc), 'no key in a WebSocket URL (Show Bus §7)');
 });
 
+test('guard rails: a page posts a message only to its own origin, and hears one only after checking who sent it', () => {
+  const pages = fs.readdirSync(path.join(ROOT, 'public')).filter((f) => /\.m?js$/.test(f));
+  let posts = 0, listeners = 0;
+  for (const f of pages) {
+    const src = fs.readFileSync(path.join(ROOT, 'public', f), 'utf8');
+    const read = [...src.matchAll(/\.postMessage\s*\(([^;]*)\)\s*;/g)];
+    assert.equal(read.length, (src.match(/\.postMessage\s*\(/g) || []).length, `public/${f}: every postMessage is one statement the guard reads`);
+    for (const m of read) {
+      posts++;
+      assert.match(m[1], /,\s*location\.origin\s*$/, `public/${f}: postMessage names this origin as its target, never '*' (${m[0]})`);
+    }
+    const heard = (src.match(/addEventListener\(\s*['"]message['"]/g) || []).length;
+    const checked = (src.match(/addEventListener\(\s*['"]message['"]\s*,\s*\(?\s*(\w+)\s*\)?\s*=>\s*\{\s*if \(\1\.source !== [\w.]+ \|\| \1\.origin !== location\.origin\) return;/g) || []).length;
+    assert.equal(checked, heard, `public/${f}: every message listener is an arrow function whose first line returns unless the sending window and its origin are the ones expected`);
+    assert.ok(!/\bonmessage\s*=/.test(src), `public/${f}: no onmessage handler (a listener the guard reads instead)`);
+    listeners += heard;
+  }
+  assert.ok(posts >= 1 && listeners >= 1, 'the guard reads the pages\' posts and listeners (the admin page\'s Resync, the support view\'s listener)');
+});
+
 // ---------------------------------------------------------------- one server per data folder
 test('a second start on the same data folder changes nothing and goes away; every acknowledged message survives', async (t) => {
   const h = require('./helpers');

@@ -177,6 +177,70 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     await emit(adminSock, 'admin:lockRoles', { roomCode: code, on: false });
   });
 
+  await t.test('join fails closed: a role the page does not offer is refused and seats nobody; none is an observer, director is On stage', async () => {
+    const adminSock = await connect(base, cookie); sockets.push(adminSock);
+    const seated = async () => (await new Promise((resolve) => { adminSock.emit('admin:listRooms', resolve); })).rooms.find((r) => r.code === code).users.map((u) => u.name + ':' + u.role);
+    // A guest's join first: it clears this address's count of failed joins, so the refusals below are read against it.
+    const opener = await connect(base); sockets.push(opener);
+    assert.ok((await emit(opener, 'join', { roomCode: code, name: 'Opener', role: 'observer' })).ok);
+    // Eleven, one more than the code lock allows: an unknown role is not a guess at a code.
+    const refused = [];
+    const s = await connect(base); sockets.push(s);
+    for (const role of ['admin', 7, 'Board', '', ['board'], { toString: 1 }, 'admin', 'owner', 'research ', true, 'observers']) {
+      refused.push(await emit(s, 'join', { roomCode: code, name: 'Role ' + refused.length, role }));
+      assert.equal((await emit(s, 'message', { type: 'text', text: 'seated?' })).error, 'Not joined', JSON.stringify(role) + ' seats nobody');
+    }
+    assert.deepEqual(refused, Array(11).fill({ ok: false, error: 'Choose On stage, Backstage or Observer.' }));
+    assert.ok(!(await seated()).some((u) => u.startsWith('Role ')), 'nobody seated under any of them');
+    const none = await connect(base); sockets.push(none);
+    const nj = await emit(none, 'join', { roomCode: code, name: 'No Role' });
+    const nul = await connect(base); sockets.push(nul);
+    const ullj = await emit(nul, 'join', { roomCode: code, name: 'Null Role', role: null });
+    const old = await connect(base); sockets.push(old);
+    const oj = await emit(old, 'join', { roomCode: code, name: 'Old Link', role: 'director' });
+    assert.deepEqual([nj.ok, nj.role, ullj.ok, ullj.role, oj.ok, oj.role], [true, 'observer', true, 'observer', true, 'board'], 'eleven refusals spent nothing of the code lock');
+    assert.deepEqual((await seated()).filter((u) => / Role|Old Link/.test(u)).sort(), ['No Role:observer', 'Null Role:observer', 'Old Link:board']);
+  });
+
+  await t.test('userState:push relays to the person\'s other pages only the keys a page applies, each by its type and rebuilt', async () => {
+    const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+    const one = await connect(base); sockets.push(one);
+    const first = await emit(one, 'join', { roomCode: code, name: 'Kim Two Tabs', role: 'research' });
+    const two = await connect(base); sockets.push(two);
+    assert.ok((await emit(two, 'join', { roomCode: code, name: 'Kim Two Tabs', role: 'research', uid: first.identity })).ok);
+    const other = await connect(base); sockets.push(other);
+    assert.ok((await emit(other, 'join', { roomCode: code, name: 'Not Kim', role: 'research' })).ok);
+    const faults = async () => (await (await fetch(base + '/api/health', { headers: { cookie } })).json()).handlerFaults;
+    const faultsBefore = await faults();
+    assert.equal(typeof faultsBefore, 'number');
+    const heard = []; const otherHeard = [];
+    two.on('userState:push', (p) => heard.push(p));
+    other.on('userState:push', (p) => otherHeard.push(p));
+    const U = { toString: 1 };
+    const sends = [
+      { key: 'theme', value: 'dark' }, { key: 'theme', value: 'red' }, { key: 'theme', value: U },
+      { key: 'zoom', value: 1.3 }, { key: 'zoom', value: '2' }, { key: 'zoom', value: null },
+      { key: 'stageCollapsed', value: true }, { key: 'stageCollapsed', value: 'yes' },
+      { key: 'split', value: { pct: 40, vertical: false, html: '<img src=x>' } }, { key: 'split', value: { pct: '40', vertical: false } },
+      { key: 'split', value: { pct: 400, vertical: false } }, { key: 'split', value: { pct: 40 } },
+      { key: 'doc', value: { messageId: 'abc123def456', url: 'https://evil.example/' } }, { key: 'doc', value: null },
+      { key: 'doc', value: { messageId: 7 } }, { key: 'doc', value: { messageId: '<img src=x>' } },
+      { key: 'script', value: 'x' }, { key: '__proto__', value: { polluted: true } }, { key: 'toString', value: 'x' }, { key: U, value: U },
+      'theme', ['theme', 'dark'], { theme: 'dark' },
+    ];
+    for (const [i, p] of sends.entries()) { one.emit('userState:push', p); if (i % 8 === 7) await wait(1000); }   // under the chatter allowance
+    one.emit('userState:push', { key: 'theme', value: 'light' });   // the last: everything before it has been read
+    const end = Date.now() + 3000;
+    while (Date.now() < end && !heard.some((p) => p.value === 'light')) await wait(50);
+    assert.deepEqual(heard, [
+      { key: 'theme', value: 'dark' }, { key: 'zoom', value: 1.3 }, { key: 'stageCollapsed', value: true },
+      { key: 'split', value: { pct: 40, vertical: false } }, { key: 'doc', value: { messageId: 'abc123def456' } }, { key: 'doc', value: null },
+      { key: 'theme', value: 'light' },
+    ]);
+    assert.deepEqual(otherHeard, [], 'another person in the hall hears none of it');
+    assert.equal((await faults()), faultsBefore, 'each value was read by its type; the guard had nothing to catch');
+  });
+
   await t.test('the admin page closing the hall it is watching gets its answer and stays connected; the hall\'s people are sent home', async () => {
     const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
     const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
