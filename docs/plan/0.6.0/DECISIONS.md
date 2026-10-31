@@ -225,3 +225,19 @@ marked **(to confirm)**.
   is verified (the plan's choice).
 - **43** keep the data on uninstall, with "Remove all AGMessage data from this PC" offered unticked.
 - **44** venue laptops use the portable folder, and the installer is for the owner's own laptops (the plan's choice).
+
+## The last open questions: the owner's answers (2026-10-31)
+
+> "1. S4 · 2. Add it · 3. Yes · 4. Keep these as mim"
+
+1. **"4 – Admin defined" meant S4.** Confirmed: a per-hall admin setting, off by default, lets a locked hall's backstage
+   code guests show web pages. A4 and the design's question 4 keep their defaults. No "(to confirm)" remains.
+2. **The stored admin-token sign-in** → "Add it".
+   - Reading: a unit of its own. Token sign-ins are kept as keyed hashes, with a key derived from the machine key
+     outside the data folder, so someone who can write the data folder cannot plant a sign-in. They still survive a
+     watchdog restart.
+   - The plan extends the same keying to account sessions and account records, which the same writer could otherwise
+     use to mint an admin account. **(the plan's extension: the owner may narrow it to token sign-ins only)**
+3. **The Stagewatch request's items 3–7** → "Yes": they are asked, with items 1 and 2.
+4. **The Board device floor** → "Keep these as mim[imum]": iPadOS 14.5 and Chrome 84 stay the minimum. A Board device
+   below it is not supported (retired or replaced), and the floor is not lowered.

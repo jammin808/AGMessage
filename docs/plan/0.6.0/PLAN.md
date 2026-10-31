@@ -8,10 +8,12 @@
 
 This is the one plan 0.6.0 is built from. It joins the design (`design.md`) and its six addenda, each kept whole as a
 part, behind a Part 0 that says what 0.6.0 is, the release rule, every owner decision and where it lands, the one open
-question, and one build order in which every unit has one number. It was assembled on 2026-10-28 by
+question and its answer, and one build order in which every unit has one number. It was assembled on 2026-10-28 by
 `060/plan-build/build.py` from the files named in §0.3, then read back, corrected by hand, checked twice and
-corrected again (§0.10). Nothing in the repository
-was edited while it was planned. Code citations are to AGMessage at `89104d8` (0.5.1), as in every part.
+corrected again (§0.10). On 2026-10-31 the owner's last answers (§0.4.10) were applied by hand: unit K (#80), the
+sign-ins and accounts keyed to the machine key, joined Part 3 as its last section, 3-K, and the close became #81.
+Nothing in the repository was edited while it was planned. Code citations are to AGMessage at `89104d8` (0.5.1), as
+in every part.
 
 ---
 
@@ -19,7 +21,7 @@ was edited while it was planned. Code citations are to AGMessage at `89104d8` (0
 
 ## 0.1 What 0.6.0 is
 
-AGMessage 0.6.0 is one release, made of the 80 units of §0.6 in that order. There is no 0.5.2 (answer 29).
+AGMessage 0.6.0 is one release, made of the 81 units of §0.6 in that order. There is no 0.5.2 (answer 29).
 
 - **Rooms within halls** (Part 1). A hall is its Main room, as today. Side rooms (Legal, Media) sit beside it, each with
   its own op log, seats, lock, invites and guest code. Rights are checked per room behind a fence (`rbac.canIn`). A
@@ -56,6 +58,10 @@ AGMessage 0.6.0 is one release, made of the 80 units of §0.6 in that order. The
   whatever holds the port is named.
 - **The audit chain** (Part 3). Keyed with HMAC-SHA256, exported signed with Ed25519 and checked offline. It carries on
   across events through archive points, and at one of them the admin may split the older part into a signed archive.
+- **Sign-ins and accounts keyed to the laptop** (Part 3, 3-K). A sign-in or an account written into the data folder is
+  dropped and said, never trusted; a restart keeps the genuine ones; a folder from another machine waits for the token
+  at the laptop, which adopts its accounts. The first admin account is made with the typed token, and the token's
+  sign-in counts only at the laptop.
 - **The Windows install** (Part 6).
   - A per-machine installer. The node is a startup task in session 0 under LocalService, with its data in
     `%ProgramData%\AGMessage` (B-task).
@@ -73,7 +79,7 @@ AGMessage 0.6.0 is one release, made of the 80 units of §0.6 in that order. The
     admin option" and its lock, and B2's "An admin can choose" and B4's "Clearing the message is an admin option".
   - The other changes a reading of 5-§13.4 triggers have no unit of §0.6: the burst of reading 2, the quiet-moment
     compaction of reading 4, the coalesced presence lines of reading 8, and a changed window or text size from readings
-    1 and 9. The close (#80) puts each triggered reading in the release notes, and its change is designed as a 0.6.x
+    1 and 9. The close (#81) puts each triggered reading in the release notes, and its change is designed as a 0.6.x
     unit.
 - **One commit per unit.** The subject is `AGMessage 0.6.0, unit N: <what landed>`, where N is the global number of
   §0.6.
@@ -85,22 +91,24 @@ AGMessage 0.6.0 is one release, made of the 80 units of §0.6 in that order. The
   `app/test/version.test.js:76` fails any commit whose newest CHANGELOG header is not the version `app/package.json:3`
   names (0.5.1 today), so nothing lands before #1. Every later CHANGELOG line goes under 0.6.0's heading.
 - **The papers move with each unit.** Each part's papers section names the lines its units move.
-- **The close (#80) is last.**
+- **The close (#81) is last.**
   - It re-dates the CHANGELOG, sets `runBase`, and re-measures and raises the coverage gate.
   - It asserts that the catalogue's list of required verbs is complete.
   - It reads Part 5 §13.4's readings as they stand, and puts each of Part 6's U7 readings that missed its mark in the
     release notes.
   - It has `docs/DEVICES.md` walked on the owner's devices (Part 4 §5.15.3, Part 5 §15.10, Part 7 §17.7), with no ✕
     left standing. A row the owner has no device for reads "not walked", a fact in the paper and never a pass (5-§11,
-    7-§17.7). A Board device of the owner's below the page floor (5-§15.10) is a ✕: it holds the tag until the floor is
-    lowered for it or the owner retires it from the Board (answer 22).
+    7-§17.7). A Board device of the owner's below the page floor (5-§15.10) is not supported, and the floor is not
+    lowered for it ("Keep these as mim", §0.4.10): it is a ✕ that holds the tag until the owner retires it from the
+    Board or replaces it (answer 22).
 - **The order of authority where the parts disagree:**
   1. the owner's answers (§0.4);
   2. Part 7, the Board addendum (the newest);
   3. Part 6, install;
   4. Part 5, architecture and UX;
   5. Part 4, the stage;
-  6. Part 3, the audit chain;
+  6. Part 3, the audit chain, except its last section, 3-K (unit K, #80, written on 2026-10-31 for the owner's answer
+     2), which governs the lines it amends in Part 3's other sections and in Parts 1, 2, 5 and 6 (§0.8 C16);
   7. Part 2, the start window;
   8. Part 1, the design.
 
@@ -113,7 +121,7 @@ AGMessage 0.6.0 is one release, made of the 80 units of §0.6 in that order. The
 |---|---|---|---|---|
 | 1 | `design.md` | rooms within halls, people's screens, the Board's view (the final design) | 19: units 1, 2, 4-19, 21. Unit 3 is replaced by Part 5's 3a-3c, unit 20 is carried by Part 7's 20a, and unit 22 is the close | 1,398 |
 | 2 | `addendum-startup.md` | the start window and the browser opener (revised for answers 29, 34, 35) | 1: S | 262 |
-| 3 | `addendum-audit-hmac.md` | the audit chain keyed, exported signed, and carried across events (revised for answers 1-4, 29, 34, 35, 38, 45) | 3: H, H2, H3 | 1,503 |
+| 3 | `addendum-audit-hmac.md`, and `unit-keyed-signins.md` as its last section, 3-K | the audit chain keyed, exported signed, and carried across events (revised for answers 1-4, 29, 34, 35, 38, 45); 3-K: the sign-ins and the accounts keyed to the machine key (the owner's answer 2 of 2026-10-31) | 4: H, H2, H3, K | 1,503 + 993 |
 | 4 | `addendum-stage.md` | files to transfer, files on the stage, a researcher's pushes (revision 4) | 13: L, V, 22-31, T (32 is the close) | 2,558 |
 | 5 | `addendum-arch-ux.md` | speed and stability, modules, the experience, right-click menus (revised 2026-10-27) | 19: F, O, R, C, Q, B, D, P, W, E, M, X, 30, 3a, 3b, 3c, 31, 32, 33 (34 is the close) | 2,429 |
 | 6 | `addendum-install.md` | a full Windows install, and upgrading the server (revised for answers 34-45) | 18: U1-U18 | 1,630 |
@@ -129,7 +137,7 @@ AGMessage 0.6.0 is one release, made of the 80 units of §0.6 in that order. The
 - **File names name parts:**
   - `design.md` is Part 1;
   - `addendum-startup.md` is Part 2;
-  - `addendum-audit-hmac.md` is Part 3;
+  - `addendum-audit-hmac.md` is Part 3, and `unit-keyed-signins.md` is its last section, 3-K;
   - `addendum-stage.md` is Part 4;
   - `addendum-arch-ux.md` is Part 5;
   - `addendum-install.md` is Part 6;
@@ -160,8 +168,8 @@ that question, applied as written.
 > settings and structure of a previous event, or start fresh. Keep linking settings. Carry on audit log with an archive
 > point an entry in it. Admin can choose to split the audit log and archive the older part."
 
-Each exception is in its row below. `DECISIONS.md` reads "4 - Admin defined" as the stage reading S4, marked
-"(to confirm: S4, not A4)". The plan applies that reading as written, and §0.5 holds it as the plan's one open question.
+Each exception is in its row below. `DECISIONS.md` read "4 - Admin defined" as the stage reading S4, and the owner
+confirmed it on 2026-10-31 ("1. S4", §0.4.10). §0.5 records the question and its answer.
 
 ### 0.4.2 The owner's asks
 
@@ -190,7 +198,7 @@ question 3. Earlier answers refine some of them, as each row says.
 | 1 | May backstage code guests push to people's screens? | "Defaults"; refined by answer 10 ("Board pages should be more secure and not available to guests in an open hall. Web pages need rights of their own.", confirmed "Right") and by "4 - Admin defined" (S4) | `canPush` for a backstage code guest only in a locked Main room. An open hall's code guest shows nothing. `web` needs `stage.web`, which a code guest holds only while the admin has the hall's `guestWeb` on | 1-§2.6 as 4-§0 amends it; 4-§5.9.2.2; #51, #54, #60 |
 | 2 | Do "every hall" accounts enter every hall's Legal and Media rooms? | "Defaults" | No. A side room is only for those it is given to, and for the admin | 1-§2.1; #39, #43 |
 | 3 | Is "the Board" everyone seated On stage, presenters too? | "Defaults" (4-§12 records it) | Everyone seated On stage, presenters included. A seat of their own is left for later | 4-§5.9.10, 4-§12; 7-§12 |
-| 4 | Is a "blank page" black or white? | "Defaults", under the reading that "4" is S4 (§0.5) | Black | 1-§5.1; #50, #53; §0.5 |
+| 4 | Is a "blank page" black or white? | "Defaults"; the owner's "4" is S4, confirmed (§0.4.10, §0.5) | Black | 1-§5.1; #50, #53 |
 | 5 | Should project managers also switch room codes, renew them, and set who may send into a room? | "Defaults" | The admin's alone. Making and renaming rooms is `halls.manage`'s | 1-§2.4; #40, #41, #46 |
 | 6 | May a pushed web page use forms? | "Defaults" | Scripts but no forms, popups or navigation | 1-§5.6; #54 |
 | 7 | Should AI drafts be available in rooms like Legal? | "Defaults"; S9 ("Defaults") adds the confidential rule | Available, as in every hall. A confidential item's text, name and page never reach the AI | 1-§8, 4-§5.12; #42, #68 |
@@ -207,7 +215,7 @@ question 3. Earlier answers refine some of them, as each row says.
 | 1 (A1) | Who may export? | "Defaults": "A1 admin and the laptop's token only, with others granted" | `audit.export` is admin-only, and the admin may grant it. Through the tunnel only where admins may sign in; HTTPS from another device | 3-H.9.1; #6 |
 | 2 (A2) | Is ◇ "Linked" right for the pre-key entries after Accept? | "Defaults": "A2 ◇ "Linked" after Accept" | ◇, never ✓; a split never changes the mark | 3-H.7, 3-H.8, 3-H.10.4; #5, #7 |
 | 3 (A3) | If the laptop is lost, is a daily export enough? | "Defaults": "A3 an export at the end of each show day" | `README.txt` says to export at the end of each show day, and Admin → Health shows "Last export" | 3-H.13, 3-H.11; #6, #7 |
-| 4 (A4) | Should the first start hold sign-ins until the question is answered? | "Defaults" under the S4 reading ("A4 does not block sign-ins"); see §0.5 | The first start asks and holds nothing | 3-H.6; #5; §0.5 |
+| 4 (A4) | Should the first start hold sign-ins until the question is answered? | "Defaults": "A4 does not block sign-ins"; the owner's "4" is S4, confirmed (§0.4.10) | The first start asks and holds nothing for the log. Unit K's wait, at the first start, for the accounts that can manage AGMessage or reach past their halls is answer 2's of 2026-10-31, not A4's (3-K.5) | 3-H.6; #5 |
 
 ### 0.4.5 The stage: 10-20 (2026-10-26) and the confirmations given later the same day
 
@@ -220,7 +228,7 @@ question 3. Earlier answers refine some of them, as each row says.
 | 14 | Word's page numbers? | "Page numbers would be preferable to have as well." | Pages from Word's own rendered breaks, "≈" otherwise | 4-§5.10.4; #59, #61, #63 |
 | 15 | `'wasm-unsafe-eval'` on the PDF worker's own response? | "Yes" | As asked | 4-§5.10.5; #59 |
 | 16 | The speaker's line: through the operator or at once? A confidential quote there at all? | "options for both. Files, especially confidential, can only be sent to the rooms in use or selected." Confirmed: "Right. But if the speaker screen is part of the room, yes it can, as they would be the people who need to see it." | The path is chosen per send. A confidential file goes only to rooms where it is in use or that the sender selects. Its line goes only to the hall's own Stagewatch, over an encrypted link, with words | 4-§5.9.10, 4-§5.14; #66, #68 |
-| 17 | Ask Stagewatch for 2.20? | "Yes" | A request written to hand over | 4-§5.9.12 (no AGMessage unit) |
+| 17 | Ask Stagewatch for 2.20? | "Yes" | A request written to hand over. AGMessage's own suggestions, items 3-7, are asked with it ("Yes", §0.4.10) | 4-§5.9.12 (no AGMessage unit) |
 | 18 | Should files to transfer accept more types than the stage shows? | "Yes" | `TRANSFER_TYPES`; AGMessage parses none of them | 4-§4.6.7; #62 |
 | 19 | Should the transcript and the minutes record what was shown to the Board? | "Yes". Confirmed: "Right" | Who, the file and page, and a quote's text. A confidential item is recorded with its mark, and its text never goes to the AI. The plan's reading beyond the answer: a confidential entry's text is shown in the transcript only on the laptop, or when the admin ticks Include confidential text | 4-§5.13, 4-§5.14; #67, #68 |
 | 20 | May observers and Viewer accounts download? Should a Board tablet keep no copies? | "No. And no board tablets should not keep copies, nor offer a download feature." With 12's confirmation, above | Observers and Viewers never download. Board tablets keep no copy and offer ⬇ only on a ticked item. What cannot be prevented is said | 4-§4.6.6; #61, #62 |
@@ -234,7 +242,7 @@ question 3. Earlier answers refine some of them, as each row says.
 | S1 | A file shared for download in Main is Look only on a Board tablet. A Board member keeps a file only when it is shown as the document with Download ticked | "Defaults" | 4-§4.6.6; #61, #62 |
 | S2 | Observers and Viewers see a picture shared in the chat as a card, without the picture | "Defaults" | 4-§4.6.6; #62 |
 | S3 | A confidential file is never shown on screens (`/d/`) or as a holding image | "Defaults" | 4-§5.14; #68 |
-| S4 | Should a locked hall's backstage code guests be able to show web pages? | "Admin defined" **(to confirm: S4, not A4)** | A setting per hall, `settings.guestWeb`, off by default. The admin (`theAdmin()`, §0.8 C14) sets it on the Roles & invites panel (`admin:guestWeb`), and it writes a `room.guestWeb` row. The plan's reading beyond the answer: an unlock turns it off, because a lock keeps whoever sits backstage then, code guests who joined by the bare code while the hall was open included (`server.js:1491`, `:292-299`), so a switch kept across an unlock would reach guests the admin never chose: 4-§5.9.2.2, 4-§5.11, 4-§7.7; #54; §0.5 |
+| S4 | Should a locked hall's backstage code guests be able to show web pages? | "Admin defined"; confirmed: "1. S4" (§0.4.10) | A setting per hall, `settings.guestWeb`, off by default. The admin (`theAdmin()`, §0.8 C14) sets it on the Roles & invites panel (`admin:guestWeb`), and it writes a `room.guestWeb` row. The plan's reading beyond the answer: an unlock turns it off, because a lock keeps whoever sits backstage then, code guests who joined by the bare code while the hall was open included (`server.js:1491`, `:292-299`), so a switch kept across an unlock would reach guests the admin never chose: 4-§5.9.2.2, 4-§5.11, 4-§7.7; #54 |
 | S5 | The admin may still seat a code guest On stage, and the seat is kept across a restart | "Defaults" | 4-§5.9.2.1; #60 |
 | S6 | A confidential line may go by either path, only over an encrypted link, with words saying what Stagewatch does with it | "Defaults" | 4-§5.9.10; #66, #68 |
 | S7 | The speaker's screen counts as part of the hall's Main room only | "Defaults" | 4-§5.9.10; #66, #68 |
@@ -270,7 +278,7 @@ question 3. Earlier answers refine some of them, as each row says.
 | # | Asked (5-Owner's answers) | The owner | Applied as | Lands in |
 |---|---|---|---|---|
 | 21 | Should the Board's simple view default to dark? | "Yes." (B6), and the defaults' "**21** dark (B6)." | Dark | 7-§17.2, 5-§15.6; #55 |
-| 22 | Which devices does the Board use? | "Board will use a mixture of devices" | iPads (current and older iPadOS), Android tablets, iOS and Android phones. One matrix (D1-D7), the document floor and a stand-in below it, the page floor and its fallbacks, the device, floor and layout legs, the ES2020 fence, and a walk before the tag, in which a Board device of the owner's below the page floor is a ✕ that holds the tag (§0.2) | 4-§5.15, 5-§15.10, 7-§17.7; #9, #20, #55, #64, #80 |
+| 22 | Which devices does the Board use? | "Board will use a mixture of devices" | iPads (current and older iPadOS), Android tablets, iOS and Android phones. One matrix (D1-D7), the document floor and a stand-in below it, the page floor and its fallbacks, the device, floor and layout legs, the ES2020 fence, and a walk before the tag, in which a Board device of the owner's below the page floor is a ✕ that holds the tag (§0.2). The floor stays at iPadOS and iOS 14.5 and Chrome 84, and a device below it is not supported ("Keep these as mim", §0.4.10) | 4-§5.15, 5-§15.10, 7-§17.7; #9, #20, #55, #64, #81 |
 | 23 | One word for those who write to the Board? | "Defaults": "**23** "Backstage"." | "Backstage" | 5-§15.7; #17 |
 | 24 | The word for putting something on people's pages? | "Defaults": "**24** "Show the Board" / "Show Ana"." | As quoted | 5-§15.7, 5-§16.8; #17, #23 |
 | 25 | Should a help category send at once? | "Defaults": "**25** a help category sends at once." | Two taps | 5-§11 unit E; #18 |
@@ -300,51 +308,46 @@ question 3. Earlier answers refine some of them, as each row says.
 | 44 | Do venue laptops get the installer? | "Defaults": "**44** venue laptops use the portable folder, and the installer is for the owner's own laptops (the plan's choice)." | As quoted | 6-U.0, 6-U.9 |
 | 45 | What does a new event carry over? | "Archive old event data. A new event can continue a previous event, copy the settings and structure of a previous event, or start fresh. Keep linking settings. Carry on audit log with an archive point an entry in it. Admin can choose to split the audit log and archive the older part." | Continue, copy or fresh. The old event is archived and never deleted silently. Links, certificate pins, keys, the laptop's admin and its grants are kept, and so are the confidential holds, which belong to a kept link. The archive point `audit.archive` is written, and the admin (`theAdmin()`, §0.8 C14) may split the log there. The plan's readings beyond the answer: under copy, each hall's `guestWeb` goes with it, guest codes and invites are new, and screen links are new unless "Keep the screens' links" is ticked (unticked), since codes and links are capabilities, not structure; start fresh keeps no account, and the token at the laptop makes the first admin account; "Delete this archive's contents…", typed by the token at the laptop and audited, removes an archive's messages, files and accounts when asked, never on a timer | 6-U15, 3-H.10, 4-§12 (`guestWeb`, `holds`); #7, #76 |
 
-## 0.5 The one open question
+### 0.4.10 The last open questions (2026-10-31)
 
-**"4 - Admin defined".** The owner wrote it in the message of 2026-10-27 (§0.4.1). `DECISIONS.md` reads it as the
-stage reading **S4**, "(to confirm: S4, not A4)". The plan applies that reading as written.
+> "1. S4 · 2. Add it · 3. Yes · 4. Keep these as mim"
 
-- **Applied (S4):** a per-hall `settings.guestWeb`, off by default. While it is on, a locked hall's backstage code
+`DECISIONS.md` ("The last open questions: the owner's answers (2026-10-31)") records each with the reading the plan
+takes; "mim" is read as "minimum".
+
+| # | Asked | The owner | Applied as | Lands in |
+|---|---|---|---|---|
+| 1 | Did "4 - Admin defined" mean S4, A4 or design question 4 (§0.5)? | "S4" | S4 as applied: a per-hall `settings.guestWeb`, off by default, lets a locked hall's backstage code guests show web pages. A4 and design question 4 keep their defaults. No reading is "(to confirm)" any more | 4-§5.9.2.2, 4-§5.11, 4-§7.7; #54 as written; §0.5 |
+| 2 | 3-H.15's offer: a unit of its own that keys the token's stored sign-ins, so that someone who can write the data folder cannot plant one | "Add it" | Unit K. Token sign-ins kept as keyed hashes in files keyed whole, with keys derived from the machine key outside the data folder; a planted one dropped and said; a watchdog restart keeps the genuine ones. **The plan's extension, which the owner may narrow to token sign-ins only (3-K.16):** the same keying for account sessions and account records; a record outside the data folder that tells an older or swapped store from the newest; the accounts that can manage AGMessage or reach past their halls waiting once for the token at the first start; the first admin account made with the typed token; and the token's sign-in honoured only at the laptop | 3-K; #80 |
+| 3 | 4-§5.9.12's items 3-7, suggested to Stagewatch beside the owner's two asks | "Yes" | Asked, with items 1 and 2. AGMessage 0.6.0 still assumes none of them | 4-§5.9.12 (no AGMessage unit) |
+| 4 | Is the page floor, iPadOS and iOS 14.5 and Chrome 84, the Board's minimum, or is it lowered for an older device? | "Keep these as mim" | The floor stays. A Board device below it is not supported: it is retired from the Board or replaced, and until then it is a ✕ in the walk that holds the tag (§0.2) | 5-§15.10, 4-§5.15, 7-§17.7; #20, #64, #81 |
+
+## 0.5 The open question, answered
+
+**"4 - Admin defined" meant S4.** The owner wrote it in the message of 2026-10-27 (§0.4.1); `DECISIONS.md` read it as
+the stage reading **S4**, and the owner confirmed that on 2026-10-31: "1. S4" (§0.4.10). No reading in the plan is
+"(to confirm)" any more.
+
+- **S4, as applied:** a per-hall `settings.guestWeb`, off by default. While it is on, a locked hall's backstage code
   guests show web pages.
   - The admin (`theAdmin()`, §0.8 C14) sets it on the Roles & invites panel with `admin:guestWeb`.
   - It writes a `room.guestWeb` row, and an unlock turns it off.
   - Guests' pages hear of a change at once (`pages:rights {canWeb}`).
-  - It lives in global unit **#54** (Part 1's unit 19, as 4-§11 amends it). See 4-§5.9.2.2, 4-§5.11 and 4-§7.7.
-- **A4 keeps its default:** the first keyed start asks, and holds no sign-in, take or send (3-H.6; #5).
-- **If the owner meant A4:**
-  - S4 takes its default: no code guest shows a web page, and `admin:guestWeb`, its switch, its row and its tests
-    leave #54 (4-§12, "The one open question").
-  - "Admin defined" would make holding sign-ins at the first keyed start an admin's setting. No part designs that, and
-    the plan does not build it unless the owner says so (3-H.15).
-- **A third "4" in the papers:** design question 4, "Is a 'blank page' black or white?" (1-§12). Its default is black.
-  - The questions put to the owner run in one sequence: the design's 1-9, the stage's 10-20, the architecture
-    addendum's 21-33 and the install addendum's 34-45.
-  - On that numbering, "4" is design question 4, and "Admin defined" would make the blank page's colour an admin's
-    setting.
-  - No part designs that. If it is what the owner meant, S4 also takes its default, and the blank page's colour as an
-    admin's setting is designed as a unit of its own.
-- **The question to put to the owner:** "Did '4 - Admin defined' mean S4 (a locked hall's backstage guests showing web
-  pages), A4 (holding sign-ins at the first keyed start until the token holder answers), or design question 4 (the
-  colour of a blank page)?"
-- **When to ask:** before #50 lands, so that the blank page's colour, if that is what was meant, is designed before the
-  store of what people's pages show (#50) and the pushed screen (#53) are built. Of the units of §0.6, the answer
-  changes #54 only.
-  - S4: #54 lands as written.
-  - Otherwise: #54 lands without `admin:guestWeb`, its switch, its row and its tests (4-§12). What "Admin defined" then
-    asks for (holding sign-ins at the first keyed start, or the blank page's colour) has no design in any part. It is
-    designed, and given a unit of its own, before it is built.
+  - It lives in global unit **#54** (Part 1's unit 19, as 4-§11 amends it), which lands as written. See 4-§5.9.2.2,
+    4-§5.11 and 4-§7.7.
+- **A4 keeps its default:** the first keyed start asks, and holds no sign-in, take or send for the log (3-H.6; #5).
+  Unit K's wait, at the first start, for the accounts that can manage AGMessage or reach past their halls is answer
+  2's, not A4's (3-K.5).
+- **Design question 4 keeps its default:** a blank page is black (1-§5.1; #50, #53).
 
-**Awaiting the owner, but not questions of 0.6.0's build** (none holds a unit of §0.6):
+**Nothing awaits the owner.** What waited beside the build was answered on 2026-10-31 (§0.4.10):
 
-- **3-H.15's offer.** A token sign-in written into `admin-sessions.json` holds the whole admin dashboard at the next
-  watchdog restart, since the file is read and trusted at start (`accounts.js:408-418`). Unit H (#5) closes it for
-  Accept and the token's export only. 3-H.15 offers the owner a unit of its own (keyed hashes, or token sign-ins kept in
-  memory). It is not a unit of §0.6; until the owner takes it up, it stays among 3-H.15's findings.
-- **4-§5.9.12's items 3-7**, suggested to Stagewatch for 2.20 and marked "not yet put to the owner". AGMessage 0.6.0
-  assumes none of them. They are put to the owner before the request is handed over.
-- **A fact, not a decision:** which iPadOS the owner's oldest Board iPad runs (D1), and whether any Board device of the
-  owner's is below the page floor (4-Gaps, 5-§15.10). It is recorded before #20 sets the floor.
+- **3-H.15's offer** is taken: "Add it". It is unit K, #80 (3-K), with the plan's extension to account sessions and
+  account records, which the owner may narrow to token sign-ins only (3-K.16).
+- **4-§5.9.12's items 3-7** are asked, with items 1 and 2: "Yes". AGMessage 0.6.0 still assumes none of them.
+- **The Board's device floor** stays: "Keep these as mim". iPadOS and iOS 14.5 and Chrome 84 are the minimum
+  (5-§15.10), a Board device below it is not supported, and the floor is not lowered for one. Which iPadOS the owner's
+  oldest Board iPad runs (D1) is a fact the walk records (#81); it no longer decides the floor.
 
 ## 0.6 The global build order
 
@@ -440,7 +443,8 @@ move" and the unit's own text state them. Every number points to an earlier unit
 | 77 | Part 6 · U18 | an upgrade the laptop's admin or a granted account starts needs no administrator, checked against its release | 73, 74 († U16's immutable releases (#78)) | must |
 | 78 | Part 6 · U16 | the installer's life cycle in CI, and its provenance; immutable releases turned on | 73, 75, 74, 77 | must |
 | 79 | Part 5 · 33 | an acknowledged message is on disk (group commit) | 15 | conditional: reading 3 |
-| 80 | Part 1 · 22 = Part 4 · 32 = Part 5 · 34 | 0.6.0 closes: papers, CHANGELOG dated, `runBase`, coverage gate, catalogue verbs, readings, the `docs/DEVICES.md` walk | every unit before it (#56 and #79 may be deferred) | must, last |
+| 80 | Part 3 · K | the sign-ins and the accounts are keyed to the machine key: written ones dropped and said, genuine ones kept across a restart, a moved folder adopted by the token | 4, 5, 6, 10, 17, 24, 26, 27, 34, 72, 74, 75, 76 | must |
+| 81 | Part 1 · 22 = Part 4 · 32 = Part 5 · 34 | 0.6.0 closes: papers, CHANGELOG dated, `runBase`, coverage gate, catalogue verbs, readings, the `docs/DEVICES.md` walk | every unit before it (#56 and #79 may be deferred) | must, last |
 
 **What a later unit carries** (the parts' "whichever lands second" rules, settled by this order):
 
@@ -465,6 +469,10 @@ move" and the unit's own text state them. Every number points to an earlier unit
 - **#75 (U14)** adds `machine.js import` and #73's import page.
 - **#77 (U18)** adds `machine.js upgrade`, the control task's `upgrade` and `back`, `launch.js`'s `upgrade` and `back`,
   `/UPGRADEBY`, and the Start menu's Upgrade AGMessage… and Go back to build N.
+- **#80 (K)** carries its lines into #76 (U15)'s archive steps, claim and finish, #75 (U14)'s import and `forget-keys`,
+  #72 (U12)'s `keys\stores\`, #27 (U2)'s setup rule (the typed token, both channels), #74 (U17)'s `token` row, #4 (S)'s
+  opener (`/admin` while accounts are held aside), #24 (3b)'s catalogue rows, #17 (W)'s copy deck and #6 (H2)'s "no
+  secret" search (3-K.9, 3-K.10, 3-K.13).
 - Until each of those lands, its verb is refused as unknown and its page, switch or item is not there (6-U.7, "What can
   move").
 
@@ -474,29 +482,29 @@ A unit's local id is the one its part uses. The global number is the one a commi
 
 | Part | Local id → global number |
 |---|---|
-| 1 | 1 → #1 · 2 → #3 · 3 → replaced by #23, #24, #25 (Part 5 units 3a, 3b, 3c) · 4 → #37 · 5 → #39 · 6 → #40 · 7 → #41 · 8 → #42 · 9 → #43 · 10 → #44 · 11 → #45 · 12 → #46 · 13 → #47 · 14 → #48 · 15 → #49 · 16 → #50 · 17 → #51 · 18 → #53 · 19 → #54 · 20 → #55 (carried by Part 7 unit 20a) · 21 → #56 · 22 → #80 (the close) |
+| 1 | 1 → #1 · 2 → #3 · 3 → replaced by #23, #24, #25 (Part 5 units 3a, 3b, 3c) · 4 → #37 · 5 → #39 · 6 → #40 · 7 → #41 · 8 → #42 · 9 → #43 · 10 → #44 · 11 → #45 · 12 → #46 · 13 → #47 · 14 → #48 · 15 → #49 · 16 → #50 · 17 → #51 · 18 → #53 · 19 → #54 · 20 → #55 (carried by Part 7 unit 20a) · 21 → #56 · 22 → #81 (the close) |
 | 2 | S → #4 |
-| 3 | H → #5 · H2 → #6 · H3 → #7 |
-| 4 | 19, amended → #54 · 22 → #58 · 23 → #59 · 24 → #60 · 25 → #61 · 26 → #62 · 27 → #63 · 28 → #65 · 29 → #66 · 30 → #67 · 31 → #68 · 32 → #80 (the close) · L → #8 · T → #64 · V → #9 |
-| 5 | 3a → #23 · 3b → #24 · 3c → #25 · 30 → #38 · 31 → #52 · 32 → #57 · 33 → #79 · 34 → #80 (the close) · B → #14 · C → #12 · D → #15 · E → #18 · F → #10 · M → #20 · O → #11 · P → #16 · Q → #13 · R → #2 · W → #17 · X → #19 |
+| 3 | H → #5 · H2 → #6 · H3 → #7 · K → #80 |
+| 4 | 19, amended → #54 · 22 → #58 · 23 → #59 · 24 → #60 · 25 → #61 · 26 → #62 · 27 → #63 · 28 → #65 · 29 → #66 · 30 → #67 · 31 → #68 · 32 → #81 (the close) · L → #8 · T → #64 · V → #9 |
+| 5 | 3a → #23 · 3b → #24 · 3c → #25 · 30 → #38 · 31 → #52 · 32 → #57 · 33 → #79 · 34 → #81 (the close) · B → #14 · C → #12 · D → #15 · E → #18 · F → #10 · M → #20 · O → #11 · P → #16 · Q → #13 · R → #2 · W → #17 · X → #19 |
 | 6 | U1 → #26 · U2 → #27 · U3 → #28 · U4 → #34 · U5 → #35 · U6 → #29 · U7 → #30 · U8 → #36 · U9 → #31 · U10 → #32 · U11 → #33 · U12 → #72 · U13 → #73 · U14 → #75 · U15 → #76 · U16 → #78 · U17 → #74 · U18 → #77 |
 | 7 | 9 (adds) → adds to #43 · 14 (adds) → adds to #48 · 20a → #55 · 20b → #69 · 20c → #70 · 20d → #71 · G → #21 · G2 → #22 |
 
 **The collisions, and how the global number resolves them:**
 
-- **"Unit 22".** Part 1's close and Part 4's upload checks share it. Part 1's 22 is #80; Part 4's 22 is #58.
+- **"Unit 22".** Part 1's close and Part 4's upload checks share it. Part 1's 22 is #81; Part 4's 22 is #58.
 - **"Units 30, 31, 32".** Part 4 and Part 5 both use them:
-  - Part 4's 30, 31 and 32 are the stage record (#67), the confidential mark (#68) and the close (#80);
+  - Part 4's 30, 31 and 32 are the stage record (#67), the confidential mark (#68) and the close (#81);
   - Part 5's 30, 31 and 32 are the gate (#38), the header (#52) and the bounded first open (#57).
-  - Part 5's 33 (#79) and 34 (the close, #80) are its own.
+  - Part 5's 33 (#79) and 34 (the close, #81) are its own.
 - **"Unit 3".** Part 1's unit 3 is replaced by Part 5's 3a, 3b and 3c (#23, #24, #25), as 5-§0 says. Every "needs 3"
   reads "needs 3a" (#23).
 - **"Unit 20".** Part 1's unit 20 is carried whole by Part 7's 20a (#55), which says "(amends 20)". Part 7's 20b, 20c
   and 20d are #69, #70 and #71.
 - **The close.** It is Part 1's "unit 22", Part 4's "unit 32" and Part 5's "unit 34". Part 7 and Part 6 call it "unit
-  34", and Part 7 says "the splice settles the number". It is **#80**.
+  34", and Part 7 says "the splice settles the number". It is **#81**.
   - Part 4 §0 says every design "unit 22" reads "unit 32"; Part 5 §11 says it reads "unit 34". Neither replacement is
-    applied, because #80 replaces both.
+    applied, because #81 replaces both.
 - **Additions, not units.** Part 7's "unit 9 (adds)" and "unit 14 (adds)" add to #43 and #48. Part 4's "unit 19,
   amended" is #54.
 - **Letters that mean two things:**
@@ -505,11 +513,15 @@ A unit's local id is the one its part uses. The global number is the one a commi
   - **W** is Part 5's words unit (#17). Part 6's draft units W1-W12 are not used (6-U.7).
   - **R1-R13** are Part 6's Windows readings (6-U7). "Readings 0-9" are Part 5's (5-§13.4).
   - **"Kind S"** was refused as a catalogue name (5-Critiques not taken).
+  - **K** is Part 3's unit K (#80, 3-K). "K4" in 3-Findings not taken is a reviewer's label, and Kn, Ka, Ks, Kt and Kr
+    (3-K.2), like Ke and Kh (3-H.2), are keys.
 - **Question numbers:**
   - the design's are 1-9, the stage's 10-20, Part 5's 21-33 and Part 6's 34-45;
   - Part 3 numbers its own A-C and 1-4;
   - the stage's readings are S1-S16, and the Board's questions B1-B6.
-  - §0.5 says why "4" stays open.
+  - §0.5 records what "4" meant: S4, confirmed on 2026-10-31.
+  - The owner's last answers, of 2026-10-31, are numbered 1-4 in their own message (§0.4.10), apart from all of the
+    above.
 
 ## 0.8 Where the parts disagree, and how this plan resolves it
 
@@ -565,7 +577,7 @@ A unit's local id is the one its part uses. The global number is the one a commi
   - Firefox shows its own menu on Shift+right-click without firing `contextmenu`, so no page can cancel it
     (https://developer.mozilla.org/en-US/docs/Web/API/Element/contextmenu_event; R6 notes "Firefox does it anyway").
     4-§4.6.6's "What cannot be prevented" names it.
-- **C8. The close's number** is #80 (§0.7).
+- **C8. The close's number** is #81 (§0.7). It was #80 until unit K took that number on 2026-10-31.
 - **C9. A Part 7 replacement whose target text is gone.**
   - 7-§0.3 replaces 4-§5.9.2.2's "No code guest holds it: `GUEST_CAPS` (`server.js:699`) is unchanged". Part 4's
     revision 4 rewrote that sentence for S4, and it read "A code guest holds it only by the hall's setting …
@@ -612,6 +624,18 @@ A unit's local id is the one its part uses. The global number is the one a commi
   - 5-§16.7's row now reads "no Look and no Download", 5-§16.8's matrix asserts `msg.look` absent for both, and a Viewer
     account's sockets join `ro:<key>` whatever their seat (4-§4.6.6), so a Viewer granted `hall.post`, who sits
     backstage, is withheld the link too (4-§9 row 26).
+- **C16. Part 3's last section, 3-K, amends parts that outrank Part 3, and Part 3's own sections.** It was written on
+  2026-10-31, after Part 7, for the owner's answer 2. It amends 5-§14.2, 5-§14.4, 5-§15.7 and 5-§16.7; 6-U.5.1, U2,
+  U12, U14, U15 and U17 (6-U.7), 6-U.8 and 6-U.9; below Part 3, 1-§1.8, 1-§2.7, 2-S.2 and 2-S.3; and Part 3's own H.1,
+  H.2, H.6, H.8, H.12, H.15 and Findings not taken.
+  - It governs the lines it names (§0.2). Each section's note names it (§0.9), and the rest of each section stands.
+  - Its lines that change what they amend, and say so:
+    - #27's `/api/setup` takes the typed token in both channels, not under `task` only (3-K.7);
+    - #76's Archive this event… is refused while accounts are held aside or the stores are `keyless` or `unread`, and a
+      `.partial` is finished at a start only when the archive's claim names it (3-K.9);
+    - #5's first start and keyless run no longer leave every sign-in going on: at the first start of 0.6.0 the accounts
+      that can manage AGMessage or reach past their halls wait once for the token (3-K.5), and in a keyless run account
+      sign-ins wait while the token signs in (3-K.2). The log's own question still holds nothing (A4, §0.5).
 
 ## 0.9 Amendments between the parts
 
@@ -623,13 +647,13 @@ part's text stands in its place), **Read with** (the owner's answers are registe
 | 1-§0. The decisions on one page | **Amended by** 4-§0, 5-§0 and 7-§0.1, section by section below; Part 0's registers govern. |
 | 1-§0.1 The shape | **Amended by** 4-§0, 5-§0 and 7-§0.1, at each subject's own section below; the units are Part 0 §0.6's. |
 | 1-§0.2 New and changed stores | **Amended by** 4-§5.11 (`pages.json`'s layers, `marks`, `holds`; the stage record's lanes), 7-§0.1 (§1.10: `views`, `pins`, accounts' `clock` and `onStage`), 6-U15 (events archived). |
-| 1-§1.8 Rollback (a 0.6 folder opened by 0.5.1) | **Amended by** 7-§0.1 (§1.8: "Kept and ignored" adds `clock` and `onStage`). |
+| 1-§1.8 Rollback (a 0.6 folder opened by 0.5.1) | **Amended by** 7-§0.1 (§1.8: "Kept and ignored" adds `clock` and `onStage`), 3-H.11 (the fourth "not kept" item: 0.5.1 reads a keyed log as broken, and back on a keyed version its run reads △ until accepted), 3-K.10 (the fifth "not kept" item: going back to 0.5.1 and forward again holds the accounts aside until the token adopts them, and signs everyone out). |
 | 1-§1.10 New and changed stores, with their bounds | **Amended by** 4-§0 and 4-§5.11 (two layers, `marks`, `holds`, `earlier`), 7-§0.1 (§1.10). |
 | 1-§2.1 `lib/rbac.js` (pure) | **Amended by** 7-§0.1 (§2.1: the seat limit, `seatAllows`), 5-§0 (§2.3 and unit 5: `rbac.guestCaps`); 4-§0's stale citation `:799` → `:787` applied in place (Part 0 §0.9). |
 | 1-§2.3 Guests, and who is told a code | **Amended by** 4-§0 (§2.3: On stage only by invite, account or the admin), 5-§0 (`rbac.guestCaps`), 7-§0.1 (§2.3: `GUEST_CAPS.board`, `mayKnowCode` On stage; its replacement applied in place, Part 0 §0.9). |
 | 1-§2.5 Help, the stage, screens and nodes in side rooms | **Amended by** 7-§0.1 (§2.5: `help:respond`'s On stage rule and account branch, unit G2). |
 | 1-§2.6 Who may push to people's pages, and set views | **Amended by** 4-§0 (§2.6: `web` needs `stage.web`, S4; `canShow`), 7-§0.1 (§2.6: the seat limit cuts `canPush`). |
-| 1-§2.7 Audit rows (`lib/audit.js`) | **Amended by** 4-§0 and 4-§5.11 (new rows), 7-§0.1 (§2.7: `person.clock`, `person.onStage`), 6-U.7 (machine and event rows), 3-H.10 (`audit.archive`). |
+| 1-§2.7 Audit rows (`lib/audit.js`) | **Amended by** 4-§0 and 4-§5.11 (new rows), 7-§0.1 (§2.7: `person.clock`, `person.onStage`), 6-U.7 (machine and event rows), 3-H.10 and 3-H.11 (`audit.archive` and the other `audit.*` rows; `display.take`'s audit voice), 3-K.10 (`accounts.*`, `signins.ended`, `stores.record`, `stores.changed`, `event.unclaimed`). |
 | 1-§3.1 Guests (`index.html`, `join.js`) | **Amended by** 4-§0 (§3.1 and §7.1: On stage only from an invite link). |
 | 1-§3.3 `join` (`server.js:707-816`) | **Amended by** 4-§0 (§3.3: `canWeb` with #54, then `canShow`, `over`, `earlier` with #60; `docs`), 5-§0 (§3.3: `forwardable`, windowed `history`), 7-§0.1 (§3.3: `clock`, `pins`, `onStage`, in the order #69, #70 and #71 land; `sends` false On stage). |
 | 1-§3.4 One socket, one room | **Amended by** 5-§0 (§3.4: `rooms:activity` as a `Latest`; no presence line between rooms of one hall). |
@@ -653,62 +677,68 @@ part's text stands in its place), **Read with** (the owner's answers are registe
 | 1-§7.5 The hall page (`app.html`, `app.js`) | **Amended by** 4-§0 (§7.5), 5-§0 (§7.5), 7-§0.1 (§7.5: no To:, ↗ or Send back On stage; the pin doors by seat). |
 | 1-§7.7 Right-click and the buttons, in step (unit 3) | **Replaced by** 5-§16 (5-§0: unit 3 becomes 3a, 3b, 3c, #23-#25); rows added by 4-§7.7 and 7-§17.1. |
 | 1-§8. The Show Bus, the context and the AI's brief | **Amended by** 4-§5.12 and 4-§5.13 (the context, the AI's brief, the minutes), 6-U.7 (the AI's brief reads the current event only). |
-| 1-§9. Tests | **Amended by** 2-S.3, 3-H.12, 4-§9, 5-§9, 6-U.8, 7-§9 (and 7-§0.1 on unit 20's row); 4-§0's stale citation and coverage gate applied in place (Part 0 §0.9). |
-| 1-§10. Papers | **Amended by** 2-S.4, 3-H.13, 4-§10, 5-§10, 6-U.9, 7-§10. |
-| 1-§11. Units, in dependency order | **Amended by** Part 0 §0.6 (the global build order) governs; 2-S.5, 3-H.14, 4-§11, 5-§11, 6-U.7 and 7-§11 add and amend units. |
+| 1-§9. Tests | **Amended by** 2-S.3, 3-H.12, 3-K.13, 4-§9, 5-§9, 6-U.8, 7-§9 (and 7-§0.1 on unit 20's row); 4-§0's stale citation and coverage gate applied in place (Part 0 §0.9). |
+| 1-§10. Papers | **Amended by** 2-S.4, 3-H.13, 3-K.14, 4-§10, 5-§10, 6-U.9, 7-§10. |
+| 1-§11. Units, in dependency order | **Amended by** Part 0 §0.6 (the global build order) governs; 2-S.5, 3-H.14, 3-K.15, 4-§11, 5-§11, 6-U.7 and 7-§11 add and amend units. |
 | 1-§12. Risks, what is left for later, and the owner's questions | **Amended by** 4-§12, 5-§12, 7-§12; 6-U.9 (the risk "Upgrade mid-show" gains U5 and U8) and 6-U.10. |
 | 1-Questions only the owner can answer | **Answered in** Part 0 §0.4.3, and §0.5 for the "4". |
-| 2-S.2 The design | **Amended by** 3-H.6 (the opener's `/admin` line is unit H's, #5); 6-U.10's corrections are already in this text. |
-| 2-S.3 Tests | **Amended by** 3-H.12 (the `opener` row is unit H's); the "On an installed PC" row runs in #78's job (Part 0 §0.6). |
+| 2-S.2 The design | **Amended by** 3-H.6 (the opener's `/admin` line is unit H's, #5), 3-K.6 (it also opens `/admin` while accounts are held aside, #80); 6-U.10's corrections are already in this text. |
+| 2-S.3 Tests | **Amended by** 3-H.12 (the `opener` row is unit H's); 3-K.13 (the opener also gets `/admin` while accounts are held aside, #80); the "On an installed PC" row runs in #78's job (Part 0 §0.6). |
 | 2-S.5 The unit | **Amended by** Part 0 §0.6: unit S is #4, after #1 and before #5 (H) and #36 (U8). |
-| 3-Owner's answers | **Read with** Part 0 §0.4.4 and §0.5 (the "4"); its last bullet now quotes the confirmation of 12 and 20 (§0.8 C5). |
-| 3-H.1 What the chain proves today, and what a key adds | **Amended by** 6-U.9 (this part's line citations of `addendum-install.md` read by section, applied in place, Part 0 §0.9). |
-| 3-H.2 The keys | **Amended by** 6-U.9 (a citation by section, applied in place); 6-U.10 ("one key per machine" installed, already in this text). |
-| 3-H.6 Opening the log | **Amended by** Part 0 §0.6: unit S (#4) lands before unit H (#5), so the "until unit S lands" words here never ship (§0.8 C6). |
-| 3-H.8 Accept, in the log | **Amended by** 6-U.9 (a citation by section, applied in place). |
+| 3-Owner's answers | **Read with** Part 0 §0.4.4, §0.4.10 and §0.5 (the "4", confirmed S4 on 2026-10-31, applied in place); its last bullet now quotes the confirmation of 12 and 20 (§0.8 C5). |
+| 3-H.1 What the chain proves today, and what a key adds | **Amended by** 6-U.9 (this part's line citations of `addendum-install.md` read by section, applied in place, Part 0 §0.9); 3-K (#80 drops what a writer of the data folder adds to the accounts and sign-ins; one sentence applied in place, Part 0 §0.9). |
+| 3-H.2 The keys | **Amended by** 6-U.9 (a citation by section, applied in place); 6-U.10 ("one key per machine" installed, already in this text); 3-K.2 (#80: `derive`'s allow-list gains five labels, and in a keyless run account sign-ins wait while the token signs in, 3-K.5). |
+| 3-H.6 Opening the log | **Amended by** Part 0 §0.6: unit S (#4) lands before unit H (#5), so the "until unit S lands" words here never ship (§0.8 C6); 3-K.6 (the opener's `/admin` also while accounts are held aside); 3-K.5 (at the first start of 0.6.0 the accounts that can manage AGMessage or reach past their halls wait once for the token, answer 2's; the log's question still holds nothing, so "Nothing waits for this" is the log's); Part 0 §0.4.10 (S4 confirmed, applied in place). |
+| 3-H.8 Accept, in the log | **Amended by** 6-U.9 (a citation by section, applied in place); 3-K (#80 keys the stored token sign-ins; Accept keeps the typed token and the lock first, 3-K.16; one sentence applied in place, Part 0 §0.9). |
 | 3-H.10.3 The archive | **Amended by** 6-U.9 ("Delete an archive…" reads "Delete this archive's contents…", applied in place). |
+| 3-H.12 Tests | **Amended by** 3-K.13 (#80: the "no secret" row also searches for 3-K's keys, sign-in hashes and one-time passwords; in the "no key" row the token signs in and account sign-ins wait, 3-K.5). |
 | 3-H.13 Papers | **Amended by** 6-U.9 (applied in place); Part 0 §0.6 ("until unit S lands" never ships); §0.8 C10 (the "eleven rights"). |
 | 3-H.14 The units | **Amended by** Part 0 §0.6: H, H2 and H3 are #5, #6 and #7; #24 (3b) carries their `audit` menu rows. |
-| 3-Findings not taken | **Amended by** 6-U.9 (applied in place). |
-| 4-§0. What this addendum changes in the design above | **Amended by** 5-§0 ("In the stage addendum"), 7-§0.3; its unit numbers are mapped in Part 0 §0.7; its "every unit 22 reads unit 32" is superseded by #80. |
+| 3-H.15 Risks, what is left for later, and the open question | **Amended by** 3-K: the token sign-in found beside it is unit K (#80); Part 0 §0.4.10: the open question is answered S4 (both applied in place, Part 0 §0.9); 3-K.5: at the first keyed start the accounts that can manage AGMessage or reach past their halls also wait once for the token (3-K.16), so "Nothing else waits" and "sign-ins … go on" are the log's. |
+| 3-Findings not taken | **Amended by** 6-U.9 (applied in place); 3-K (Security 1 is unit K, #80, applied in place). |
+| 4-§0. What this addendum changes in the design above | **Amended by** 5-§0 ("In the stage addendum"), 7-§0.3; its unit numbers are mapped in Part 0 §0.7; its "every unit 22 reads unit 32" is superseded by #81; Part 0 §0.4.10 (S4 confirmed, applied in place). |
 | 4-§4.6.3 What changes in today's code | **Amended by** 5-§0 (§4.6.3: the File pane, 📎 in the Message row; the origin line's ⤴, applied in place), 7-§0.3 (§4.6.3: 📺 Shown to you in the simple view; pins for the room or for me; `forward` and `room:send` refused On stage). |
 | 4-§4.6.6 Who may download, and what a Board tablet keeps (owner answers 12 and 20) | **Amended by** 7-§0.3 (§4.6: the no-save measures hold on a Shown to you thumbnail and a Look, on every device row). |
 | 4-§5.9.1 Two layers: the show, and information over it (amends §5.2-§5.5 and §1.10) | **Amended by** 5-§0 (the show layer without `brand`, owner answer 31, applied in place), 7-§0.3 (§5.9.1 and §5.9.10: a Board member's typed line arrives `side`). |
-| 4-§5.9.2.2 The rights: `stage.show` and `stage.web` | **Amended by** 7-§0.3 (§5.9.2.2: unit G narrows `GUEST_CAPS.board`, now said in this section; Part 0 §0.8 C9); Part 0 §0.8 C14 (`admin:guestWeb` behind `theAdmin()`); S4 is §0.5's open question. |
+| 4-§5.9.2.2 The rights: `stage.show` and `stage.web` | **Amended by** 7-§0.3 (§5.9.2.2: unit G narrows `GUEST_CAPS.board`, now said in this section; Part 0 §0.8 C9); Part 0 §0.8 C14 (`admin:guestWeb` behind `theAdmin()`); S4 is confirmed (Part 0 §0.4.10, §0.5). |
 | 4-§5.9.7 Picking and sending | **Amended by** 5-§0 (§5.9.7: `previewActions(pick)` is the catalogue's kind `pick`; R6's Preview exception). |
 | 4-§5.9.10 Targets: the Board, one person On stage, the presenter's Stagewatch screen | **Amended by** 7-§0.3 (§5.9.1 and §5.9.10: May send to people On stage). |
 | 4-§5.9.11 The take on the target's page | **Amended by** 7-§0.3 (§5.9.11: the layer's bar draws the person's secondary object in the simple view). |
+| 4-§5.9.12 A request to Stagewatch for 2.20 (owner answer 17; to hand over) | **Read with** Part 0 §0.4.10 (answer 3: items 3-7 are asked, moved under "Asked" in place). |
 | 4-§5.11 Rights, audit rows, stores and lifetimes | **Amended by** 5-§0 (`brand` leaves the rights table, applied in place). |
 | 4-§5.13 What was shown, in the transcript and the minutes (owner answer 19) | **Amended by** 7-§0.3 (§5.13: a Board member's typed line recorded as any take). |
 | 4-§5.14 The confidential mark (owner answer 16) | **Amended by** 7-§0.3 (§5.14: an On stage seat shares no file, so it never marks one). |
-| 4-§5.15 The Board's devices (owner answer 22) | **Amended by** 5-§0 and 5-§15.10 (unit M's rows, its floor leg's removals), 7-§0.3 and 7-§17.7 (the chat view's rows, the layout leg); who builds the shared legs: Part 0 §0.8 C1. |
+| 4-§5.15 The Board's devices (owner answer 22) | **Amended by** 5-§0 and 5-§15.10 (unit M's rows, its floor leg's removals), 7-§0.3 and 7-§17.7 (the chat view's rows, the layout leg); who builds the shared legs: Part 0 §0.8 C1; Part 0 §0.4.10 (the page floor stays, and a Board device below it is not supported; applied in place in §5.15.3 and 4-Gaps). |
 | 4-§7.7 Right-click and the buttons (adds rows to §7.7's table) | **Amended by** 5-§0 and 5-§16.7 (its rows are the catalogue's kinds), 7-§0.3 (§7.7: no Send to ▸ On stage; 📌 Pin for me; the pin door). |
 | 4-§9. Tests (adds to the table; the rule for each unit is unchanged) | **Amended by** 7-§0.3 (the revision 3 test's words, applied in place). |
 | 4-§11. Units (adds to the list) | **Amended by** Part 0 §0.6 governs the order; 5-§0 ("26 needs 3a", applied in place); Part 0 §0.8 C1 (T after 27, 20a before 25). |
-| 4-The owner's answers (2026-10-27): every question left open | **Read with** Part 0 §0.4.5, §0.4.6 and §0.5. |
+| 4-The owner's answers (2026-10-27): every question left open | **Read with** Part 0 §0.4.5, §0.4.6, §0.4.10 and §0.5. |
 | 5-Owner's answers (2026-10-27) | **Read with** Part 0 §0.4.8. |
 | 5-§0. What this addendum changes in the design, and in the stage addendum | **Amended by** 7-§0.2 ("In the architecture and UX addendum"). |
 | 5-§13.3.4 A send never vanishes and never doubles (unit Q) | **Amended by** 7-§0.2 (§13.3.4: Got it leaves `self`; `pin:mine` is `hold`; `message {also}` is `now`). |
-| 5-§14.2 The shape | **Amended by** 7-§0.2 (§14.2: `admin:setClock` and `admin:setOnStage` in `lib/handlers/takes.js`). |
-| 5-§14.4 The fences | **Amended by** 7-§0.2 (§14.4 (a): `lib/views.js` in the pure set). |
+| 5-§14.2 The shape | **Amended by** 7-§0.2 (§14.2: `admin:setClock` and `admin:setOnStage` in `lib/handlers/takes.js`); 3-K.12 (the layer "Stores, one lane each" gains `lib/keyedstore.js`). |
+| 5-§14.4 The fences | **Amended by** 7-§0.2 (§14.4 (a): `lib/views.js` in the pure set), 3-K.12 (`lib/keyedstore.js` in `modules.test.js`; `storesHead` under (e)). |
 | 5-§15.2 Simple but rich: the rules every surface follows | **Amended by** 7-§0.2 (§15.2 rule 8: answers 48 px, every Board control 44 px or more). |
 | 5-§15.3 The journeys, with clicks before and after | **Amended by** 7-§0.2 (§15.3: the Board's journey rows). |
 | 5-§15.4 Page by page: the element, the change, the unit | **Amended by** 7-§0.2 (§15.4: the simple view's empty state, the Escape order); Part 0 §0.8 C10 (the "eleven rights"). |
 | 5-§15.5 The Board's simple view, for a glance under lights (amends §6) | **Replaced by** 7-§0.2's table, item by item (and 7-§17.2). |
 | 5-§15.6 A small token layer, and one table of marks | **Amended by** 7-§0.2 (§15.6: `--c-on-fault`, `--fs-title`, `--fs-readout`, `--target-answer`, `--c-ask`, `--c-ink-muted`). |
-| 5-§15.7 One word per thing (needed before rooms ship) | **Amended by** 7-§0.2 (§15.7: the copy deck's rows from 7-§17.2), 6-U.9 ("the laptop's admin" beside "admin account"). |
+| 5-§15.7 One word per thing (needed before rooms ship) | **Amended by** 7-§0.2 (§15.7: the copy deck's rows from 7-§17.2), 6-U.9 ("the laptop's admin" beside "admin account"), 3-K.10 ("held aside", "adopt", "save", "the token at the laptop", "as this laptop last saved it", "reaches past its halls"). |
 | 5-§15.9 Accessibility (WCAG 2.2 AA) | **Amended by** 7-§0.2 (§15.9: the readout's roles, the tabs, the composer's label). |
-| 5-§15.10 The Board's devices: a mixture (owner answer 22, unit M) | **Amended by** 7-§0.2 (§15.10: `inset` and the logical properties; the wake-lock and long-press rows) and 7-§17.7; Part 0 §0.8 C1 (#20 makes the floor leg and `docs/DEVICES.md`). |
+| 5-§15.10 The Board's devices: a mixture (owner answer 22, unit M) | **Amended by** 7-§0.2 (§15.10: `inset` and the logical properties; the wake-lock and long-press rows) and 7-§17.7; Part 0 §0.8 C1 (#20 makes the floor leg and `docs/DEVICES.md`); Part 0 §0.4.10 (the floor stays, and a Board device below it is not supported; applied in place). |
 | 5-§16.2 The model: one catalogue, every door | **Amended by** 7-§0.2 (§16.2: the facts `pin` and `pinMine`, `fold`, R8's `clock`, `onStage`, `pins`); 4-§0 and owner answer S14: Shift+right-click on On stage content opens AGMessage's menu (Part 0 §0.8 C7). |
 | 5-§16.3 Order, groups and appearance | **Amended by** 7-§0.2 (§16.3: 📌 Pin ▸, the fold). |
 | 5-§16.4 Disabled, with the reason | **Amended by** 7-§0.2 (§16.4: an observer's Pin for the room, applied in place; For me stays live with ◷). |
 | 5-§16.5 Keyboard, pointer and touch parity | **Amended by** 7-§0.2 (§16.5: P runs the pin door). |
 | 5-§16.6 Confirm in place, and Undo | **Amended by** 7-§0.2 (§16.6: Undo by kind, applied in place; the toasts' words). |
-| 5-§16.7 The catalogue, per object | **Amended by** 7-§0.2 (§16.7: the `msg` row's three swaps applied in place; the `file` row's fold, the menu by seat, the new verbs), 7-§17.1; 3-H.13 (the `audit` row); Part 0 §0.8 C15 (the Observer or Viewer row reads S2). |
+| 5-§16.7 The catalogue, per object | **Amended by** 7-§0.2 (§16.7: the `msg` row's three swaps applied in place; the `file` row's fold, the menu by seat, the new verbs), 7-§17.1; 3-H.13 (the `audit` row); Part 0 §0.8 C15 (the Observer or Viewer row reads S2); 3-K.10 (the `accounts` rows of Admin → Accounts held aside). |
 | 5-§16.8 The in-step fence | **Amended by** 7-§0.2 (§16.8: the matrix, applied in place for observers and Viewers; the fold fence; the new fixtures). |
 | 5-§11. Units (adds to the list) | **Amended by** Part 0 §0.6 governs the order and the cut line; unit 31 cannot slip (Part 0 §0.8 C3). |
 | 6-Owner's answers (2026-10-27) | **Read with** Part 0 §0.4.9. |
-| 6-U.7 Units | **Amended by** Part 0 §0.6 (the global build order; U18 before U16, §0.8 C2); 2-S.2 on U8's busy line (§0.8 C4). |
+| 6-U.5.1 The laptop's admin (answer 38) | **Amended by** 3-K.9 (the `token` right also adopts accounts held aside, #80). |
+| 6-U.7 Units | **Amended by** Part 0 §0.6 (the global build order; U18 before U16, §0.8 C2); 2-S.2 on U8's busy line (§0.8 C4); 3-K.9 (#80: U2's `/api/setup` takes the typed token in both channels; U12's `keys\stores\`; U14 carries `stores\` and verifies that no account is held aside; U15's claim, pin and finish, and Archive this event… refused while accounts are held aside; U17's `token` row). |
+| 6-U.8 Tests | **Amended by** 3-K.13 (U15's row gains the claim, the pin and a `.partial` no claim names). |
+| 6-U.9 Papers | **Amended by** 3-K.14 (`docs/INSTALL.md` names `keys\stores\` and the import's carrying it). |
 | 7-§11. Units (adds to the list) | **Amended by** Part 0 §0.6 governs the order; 20a lands before stage 25 and T after it (Part 0 §0.8 C1); 20b and 20d must land (Part 0 §0.2). |
 
 **The exact replacements applied in place.** Each is stated word for word by the governing part, and each was found
@@ -738,12 +768,28 @@ the stated number of times in the target:
 | R20 | 5-§16.7, the `msg` row (×1) | “`room:send`, `forward` (hold); `pin` (now); `room:withdraw`” | “`room:send`, `forward` (hold); `pin` (now), `pin:mine` (hold); `room:withdraw`” | 7-§0.2 (§16.7) |
 | R21 | 5-§16.8 (×1) | “an observer has no `msg.pin`” | “an observer and a Viewer have no `msg.pin` and have `msg.pinMine`” | 7-§0.2 (§16.8 1) |
 
+**Applied in place on 2026-10-31,** for the owner's last answers (§0.4.10) and unit K's number, each found the stated
+number of times in its target:
+
+- **The close's number:** "[#80: the close]" reads "[#81: the close]" in 1-§11, 4-§11 and 5-§11 (×3), and 4-§0's note
+  reads "superseded by #81".
+- **Answer 1, S4 confirmed:** every "(to confirm: S4, not A4)" is gone, in 3-Owner's answers, 3-H.6, 3-H.15, the
+  head of Part 4, 4-§0 and 4-§12 (×2), and each part's sentence that "the plan's one open question (S4, not A4)" is
+  not its own now says the owner answered it, in Part 2, Part 5 (×2), Part 6 and Part 7.
+- **Answer 2, "Add it":** 3-H.1, 3-H.8, 3-H.15 ("Found beside it") and 3-Findings not taken ("Security 1") each gain one
+  sentence naming unit K (#80, 3-K).
+- **Answer 3, "Yes":** 4-§5.9.12's items 3-7 sit under "Asked", its closing paragraph says so, and 4-§0's revision 3
+  line on the request says they were asked since.
+- **Answer 4, the floor kept:** "until the floor is lowered for it or the owner retires it" reads "until the owner
+  retires it from the Board or replaces it", with "the floor is not lowered", in 4-§5.15.3, 5-§15.10, 5-Risks and
+  7-§17.7 (×4); 4-Gaps' D1 line and 5-§15.10's D1 sentence say the floor no longer waits on it.
+
 **Replacements stated but not applied,** each because it is not a literal swap of the target's words, or because a
 later answer superseded it. The governing text is named, and the section's note points to it.
 
 - **5-§0 → 1-§4.4:** "↩ withdrawn" reads "⊘ Withdrawn from Legal after 40 s". The design's line reads "↩ withdrawn from
   Legal (it was there 40 s)", and swapping the quoted words alone would garble it. 5-§0 governs.
-- **4-§0 and 5-§11 → Part 1:** every "unit 22" (the close) reads "unit 32" or "unit 34". The two conflict, and #80
+- **4-§0 and 5-§11 → Part 1:** every "unit 22" (the close) reads "unit 32" or "unit 34". The two conflict, and #81
   replaces both (§0.7).
 - **4-§0 → 1-§6:** "files (tap to open in the On stage panel)" becomes "files as cards …". 7-§0.1 replaces 1-§6 whole,
   so 7-§17.2 governs.
@@ -766,7 +812,12 @@ Two checks read the assembled plan: one for consistency between the parts, one f
 Each finding was checked against the plan, the code at `89104d8` and, for an outside claim, its source. Those upheld
 were corrected in the part's own file in `060/` (each file copied first to `<name>-pre-final.md`; an older copy of that
 name is kept with its time in the name), and the plan was rebuilt from the files. §0.6's order was checked again: 80
-units, no cycle without the two † edges, and every other edge pointing back.
+units, no cycle without the two † edges, and every other edge pointing back. On 2026-10-31, with unit K added as #80
+and the close made #81, it was checked once more: 81 units, #80's needs all earlier, and the same two † edges. That
+check also read 3-K against unit H and Part 6. It added #6 and #17 to #80's needs, the opener's case to 3-K.13 and the
+token's silent end to 3-K.9's import line (both in 3-K's own file). It gave notes to the sections 3-K amends without
+one (3-H.2, 3-H.12, and 3-H.6's and 3-H.15's first-start words), and 3-H.11's to 1-§1.8 and 1-§2.7. §0.8 C16 now
+names them all.
 
 **Corrected** (the finding, then where):
 
@@ -1044,7 +1095,7 @@ The boot's "Session restored" line (`server.js:2483-2485`) goes into every room,
 
 ### 1-§1.8 Rollback (a 0.6 folder opened by 0.5.1)
 
-> **Amended by** 7-§0.1 (§1.8: "Kept and ignored" adds `clock` and `onStage`).
+> **Amended by** 7-§0.1 (§1.8: "Kept and ignored" adds `clock` and `onStage`), 3-H.11 (the fourth "not kept" item: 0.5.1 reads a keyed log as broken, and back on a keyed version its run reads △ until accepted), 3-K.10 (the fifth "not kept" item: going back to 0.5.1 and forward again holds the accounts aside until the token adopts them, and signs everyone out).
 
 - **Main rooms** load as halls with every message.
 - **Side rooms** are not loaded and are kept on disk (the stem fails `CODE_RE`). Going back to 0.6 brings them back.
@@ -1266,7 +1317,7 @@ The boot's "Session restored" line (`server.js:2483-2485`) goes into every room,
 
 ### 1-§2.7 Audit rows (`lib/audit.js`)
 
-> **Amended by** 4-§0 and 4-§5.11 (new rows), 7-§0.1 (§2.7: `person.clock`, `person.onStage`), 6-U.7 (machine and event rows), 3-H.10 (`audit.archive`).
+> **Amended by** 4-§0 and 4-§5.11 (new rows), 7-§0.1 (§2.7: `person.clock`, `person.onStage`), 6-U.7 (machine and event rows), 3-H.10 and 3-H.11 (`audit.archive` and the other `audit.*` rows; `display.take`'s audit voice), 3-K.10 (`accounts.*`, `signins.ended`, `stores.record`, `stores.changed`, `event.unclaimed`).
 
 No row carries a guest code, a message's text, a file's name, a URL's path or query, or a token. Rooms are named by
 name and key, halls by key (as today).
@@ -1981,7 +2032,7 @@ never `web`.
 
 ## 1-§9. Tests
 
-> **Amended by** 2-S.3, 3-H.12, 4-§9, 5-§9, 6-U.8, 7-§9 (and 7-§0.1 on unit 20's row); 4-§0's stale citation and coverage gate applied in place (Part 0 §0.9).
+> **Amended by** 2-S.3, 3-H.12, 3-K.13, 4-§9, 5-§9, 6-U.8, 7-§9 (and 7-§0.1 on unit 20's row); 4-§0's stale citation and coverage gate applied in place (Part 0 §0.9).
 
 The rule for each unit:
 
@@ -2045,7 +2096,7 @@ The rule for each unit:
 
 ## 1-§10. Papers
 
-> **Amended by** 2-S.4, 3-H.13, 4-§10, 5-§10, 6-U.9, 7-§10.
+> **Amended by** 2-S.4, 3-H.13, 3-K.14, 4-§10, 5-§10, 6-U.9, 7-§10.
 
 Each paper line moves in the unit that changes its subject; unit 22 reads them as one.
 
@@ -2107,7 +2158,7 @@ Each paper line moves in the unit that changes its subject; unit 22 reads them a
 
 ## 1-§11. Units, in dependency order
 
-> **Amended by** Part 0 §0.6 (the global build order) governs; 2-S.5, 3-H.14, 4-§11, 5-§11, 6-U.7 and 7-§11 add and amend units.
+> **Amended by** Part 0 §0.6 (the global build order) governs; 2-S.5, 3-H.14, 3-K.15, 4-§11, 5-§11, 6-U.7 and 7-§11 add and amend units.
 
 - **The commit:** each unit is one commit, `AGMessage 0.6.0, unit N: <what landed>`, with the reasoning in its body.
 - **Before each commit:** `npm run check` is green and the browser smoke has run.
@@ -2198,7 +2249,7 @@ Each paper line moves in the unit that changes its subject; unit 22 reads them a
     - The Accounts page's Chat view, and the admin page's and People panel's View.
 21. **[#56]** **unit 21: unread dots on the room switcher.** `watch:<key>` io rooms, `rooms:activity`, and the join answer's
     `rooms[].seq`. It can be deferred without touching anything else.
-22. **[#80: the close]** **unit 22: 0.6.0 closes.** The papers not yet moved, the CHANGELOG dated, `runBase` set, and the coverage gate
+22. **[#81: the close]** **unit 22: 0.6.0 closes.** The papers not yet moved, the CHANGELOG dated, `runBase` set, and the coverage gate
     re-measured and raised.
 
 **What can move:**
@@ -2333,7 +2384,8 @@ question is quoted as it was asked, then answered, then what the plan does.
   - So the .bat's preflight, its split `:stopped`, the browser opener and the clean copy are the portable folder's
     alone. The port-holder message serves both channels, with words for each. S.2.1 says, part by part, what the
     installed node shows instead and which unit owns it.
-- **Nothing in this addendum is "(to confirm)".** The plan's one open question (S4, not A4) is not this addendum's.
+- **Nothing in this addendum is "(to confirm)".** The plan's one open question (S4, not A4) was not this addendum's; the
+  owner answered it "S4" on 2026-10-31 (Part 0 §0.4.10).
 
 ## 2-S.1 What the window said, and what it means
 
@@ -2367,7 +2419,7 @@ The window showed the banner (`start-agmessage.bat:6-16`), then `The system cann
 
 ## 2-S.2 The design
 
-> **Amended by** 3-H.6 (the opener's `/admin` line is unit H's, #5); 6-U.10's corrections are already in this text.
+> **Amended by** 3-H.6 (the opener's `/admin` line is unit H's, #5), 3-K.6 (it also opens `/admin` while accounts are held aside, #80); 6-U.10's corrections are already in this text.
 
 - **A preflight in the .bat, before anything is opened or started.**
   - **It first reads the install record:** `Version` under `HKLM\SOFTWARE\AGMessage`, the one record the installer
@@ -2464,7 +2516,7 @@ where U3 puts them.
 
 ## 2-S.3 Tests
 
-> **Amended by** 3-H.12 (the `opener` row is unit H's); the "On an installed PC" row runs in #78's job (Part 0 §0.6).
+> **Amended by** 3-H.12 (the `opener` row is unit H's); 3-K.13 (the opener also gets `/admin` while accounts are held aside, #80); the "On an installed PC" row runs in #78's job (Part 0 §0.6).
 
 | Unit | Test | Fails today because |
 |---|---|---|
@@ -2567,7 +2619,7 @@ Found by the audit review (`addendum-audit-hmac.md` H.15) and read in the code. 
 
 # Part 3: Addendum: the audit chain is keyed (HMAC-SHA256), exported signed (Ed25519), and carried across events
 
-*`060/addendum-audit-hmac.md`, 1503 lines, kept whole. Its headings carry the prefix `3-`; its units carry their global number, [#n] (Part 0 §0.3).*
+*`060/addendum-audit-hmac.md`, 1503 lines, kept whole. Its headings carry the prefix `3-`; its units carry their global number, [#n] (Part 0 §0.3). Its last section, 3-K (unit K, #80), is `060/unit-keyed-signins.md`, added on 2026-10-31.*
 
 Requester: the owner's list (2026-10-26), "Switch the audit chain to HMAC"; the owner's answers to this addendum's
 three questions the same day (A–C below); and the owner's answers of 2026-10-27 to every question left open: this
@@ -2614,7 +2666,7 @@ here, and reads H.15 at the splice.
 
 ## 3-Owner's answers
 
-> **Read with** Part 0 §0.4.4 and §0.5 (the "4"); its last bullet now quotes the confirmation of 12 and 20 (§0.8 C5).
+> **Read with** Part 0 §0.4.4, §0.4.10 and §0.5 (the "4", confirmed S4 on 2026-10-31, applied in place); its last bullet now quotes the confirmation of 12 and 20 (§0.8 C5).
 
 ### 3-2026-10-26
 
@@ -2635,7 +2687,7 @@ reach this addendum, each with the owner's words.
 | 1 | Who may export? The plan gives it to the admin role and the token at the laptop, and anyone else by an admin's grant. Should project managers have it by default, and should an export through the tunnel be possible even when admins may sign in there? | "Defaults" | As planned (H.9.1): `audit.export` is admin-only. The admin role and the token at the laptop hold it, and an admin may grant it to another account; the manager preset does not hold it. Through the tunnel it is refused unless admins may sign in there, and from another device it needs HTTPS |
 | 2 | After Accept, the entries from before the log was keyed read ◇ "Linked", never ✓. Is ◇ right for an upgraded laptop? | "Defaults" | ◇ "Linked" after Accept (H.7, H.8), for as long as those entries are in the log or in an archive its check names: a split never changes the mark (H.10.4) |
 | 3 | If the laptop is lost, is a daily export enough? | "Defaults" | Yes. README.txt tells the crew to export at the end of each show day and keep the bundle off the laptop (H.13), and Admin → Health names the newest export the log records (H.11). No entry carries a signature of its own (H.9.2) |
-| 4 | The first start asks and does not wait. Should it instead hold sign-ins until the question is answered? | "Defaults except for: 4 - Admin defined" | "4" is read as the stage addendum's S4 (a locked hall's backstage code guests and web pages), so this question keeps its default: the first start asks and does not hold sign-ins, takes or sends (H.6). **(to confirm: S4, not A4)**: this addendum's one open question (H.15) |
+| 4 | The first start asks and does not wait. Should it instead hold sign-ins until the question is answered? | "Defaults except for: 4 - Admin defined" | "4" is read as the stage addendum's S4 (a locked hall's backstage code guests and web pages), so this question keeps its default: the first start asks and does not hold sign-ins, takes or sends (H.6). The owner confirmed S4 on 2026-10-31 ("1. S4", Part 0 §0.4.10) |
 | 29 | Should the stand-alone units ship together as 0.5.2 before 0.6.0? (`addendum-arch-ux.md` question 29) | "wrap into 0.6.0" | Units H, H2 and H3 ship in 0.6.0; there is no 0.5.2 (H.14) |
 | 34, 35, 38 | Is the installer in 0.6.0? Must the laptop serve with nobody signed in? Which Windows account? (`addendum-install.md` questions 34, 35, 38) | "Installer in 0.6.0" · "Yes" · "Whichever account it is installed on. Could be either an admin account or standard. The admin will be whoever does the install. They can add permissions or handover to another account." | The installed shape, where H.1's claim holds as written, is in 0.6.0: in session 0, with data and keys in `%ProgramData%\AGMessage` (H.1). There the machine key is the node's, whichever Windows account signs in (H.2). The token that Accepts is the one the installing account holds, or whoever it was granted or handed to (H.8) |
 | 45 | What does a new event carry over? (`addendum-install.md` question 45) | "Archive old event data. A new event can continue a previous event, copy the settings and structure of a previous event, or start fresh. Keep linking settings. Carry on audit log with an archive point an entry in it. Admin can choose to split the audit log and archive the older part." | The audit log carries on across events as one chain. Each event archived writes an archive point, `audit.archive`, as the first line of a file. An admin may split the log at an archive point: the older files move into a signed archive in `data\audit-archive\`, the check walks the live log from the point and names the archive, and the archive is checkable on its own and inside every export (H.10, unit H3). This replaces "left for later: `audit.archive`" |
@@ -2646,7 +2698,7 @@ reach this addendum, each with the owner's words.
 
 ## 3-H.1 What the chain proves today, and what a key adds
 
-> **Amended by** 6-U.9 (this part's line citations of `addendum-install.md` read by section, applied in place, Part 0 §0.9).
+> **Amended by** 6-U.9 (this part's line citations of `addendum-install.md` read by section, applied in place, Part 0 §0.9); 3-K (#80 drops what a writer of the data folder adds to the accounts and sign-ins; one sentence applied in place, Part 0 §0.9).
 
 - **Today** each entry carries `h = SHA-256(canonical(e))`, and `canonical` includes `prev` (`audit.js:32-33`), from 64
   zeros (`GENESIS`, `:28`). The check finds an edited, removed or reordered line. While the server runs it also finds the
@@ -2687,7 +2739,8 @@ reach this addendum, each with the owner's words.
   - which person acted, when the actor can write the data folder. They can add an account or a session to
     `accounts.json` or `sessions.json`, which are read as plain JSON (`accounts.js:316-326`), and act through the server
     as anyone; the entries those acts cause are genuine. The token's sign-ins in `admin-sessions.json` are the same
-    (`accounts.js:408-420`), which is why Accept asks for the token itself (H.8);
+    (`accounts.js:408-420`), which is why Accept asks for the token itself (H.8). Unit K (#80, 3-K) drops what such a
+    writer adds to any of the three files; a key holder still can (3-K.11);
   - the earlier entries of a log first seen keyed on this machine. This includes the 0.5.1 entries at the first keyed
     start (answer C), a folder moved in, and a log written before the key was replaced. They are linked but not checked,
     and nothing here vouches that the newest of them are all there. They are △ until accepted;
@@ -2702,7 +2755,7 @@ reach this addendum, each with the owner's words.
 
 ## 3-H.2 The keys
 
-> **Amended by** 6-U.9 (a citation by section, applied in place); 6-U.10 ("one key per machine" installed, already in this text).
+> **Amended by** 6-U.9 (a citation by section, applied in place); 6-U.10 ("one key per machine" installed, already in this text); 3-K.2 (#80: `derive`'s allow-list gains five labels, and in a keyless run account sign-ins wait while the token signs in, 3-K.5).
 
 - **Three keys, derived, never stored:**
   - `secretbox.derive(label)` = `Buffer.from(crypto.hkdfSync('sha256', machineKey(), '', label, 32))`.
@@ -2913,7 +2966,7 @@ They live in `<keyDir>/audit/` (`secretbox.keyDir()`). The folder is injected in
 
 ## 3-H.6 Opening the log
 
-> **Amended by** Part 0 §0.6: unit S (#4) lands before unit H (#5), so the "until unit S lands" words here never ship (§0.8 C6).
+> **Amended by** Part 0 §0.6: unit S (#4) lands before unit H (#5), so the "until unit S lands" words here never ship (§0.8 C6); 3-K.6 (the opener's `/admin` also while accounts are held aside); 3-K.5 (at the first start of 0.6.0 the accounts that can manage AGMessage or reach past their halls wait once for the token, answer 2's; the log's question still holds nothing, so "Nothing waits for this" is the log's); Part 0 §0.4.10 (S4 confirmed, applied in place).
 
 `open()` (`:97-108`) runs after the folder lock and before any entry. It no longer returns early when nothing is torn
 (`:100`).
@@ -2985,7 +3038,7 @@ They live in `<keyDir>/audit/` (`secretbox.keyDir()`). The folder is injected in
     Signed in as an admin account, it shows the question and where to answer it, with no button. The Accounts page reads
     △ and names where to go.
   - Nothing waits for the answer: sign-ins, takes and sends go on. Only the log's mark is △. That is answer 4's
-    default, since its "Admin defined" is read as the stage's S4 **(to confirm: S4, not A4)**, H.15.
+    default, since its "Admin defined" is the stage's S4, which the owner confirmed on 2026-10-31 (Part 0 §0.4.10).
   - **The browser opens on the question.** When `AGM_OPEN` is set (unit S) and `audit.attention()` is not empty after
     `audit.open()`, the opener opens `http://localhost:<PORT>/admin` (`server.js:421` redirects it to `/admin.html`)
     instead of `http://localhost:<PORT>`. This is unit H's line in unit S's opener: at the splice `addendum-startup.md`
@@ -3051,7 +3104,7 @@ They live in `<keyDir>/audit/` (`secretbox.keyDir()`). The folder is injected in
 
 ## 3-H.8 Accept, in the log
 
-> **Amended by** 6-U.9 (a citation by section, applied in place).
+> **Amended by** 6-U.9 (a citation by section, applied in place); 3-K (#80 keys the stored token sign-ins; Accept keeps the typed token and the lock first, 3-K.16; one sentence applied in place, Part 0 §0.9).
 
 - **Who:** the person at the AGMessage laptop who types its token. The owner confirmed that the token alone works for the
   crew (answer B).
@@ -3064,7 +3117,7 @@ They live in `<keyDir>/audit/` (`secretbox.keyDir()`). The folder is injected in
     `:436`), and the watchdog hands every restart the same token (`supervise.js:32`). Someone who can write the data
     folder and reach loopback (a second Windows account on the laptop) can add a sign-in of their own; it loads at the
     next watchdog restart, and `isHostMachine && isValidAdminCookie` holds for them. The token is shown only in the black
-    window.
+    window. Unit K (#80, 3-K) keys the stored sign-ins; Accept still takes the typed token (answer B).
   - Not an account, even an admin's: anyone who can write the data folder can make one (H.1).
   - **Installed (answers 35 and 38),** the token is the file `%ProgramData%\AGMessage\token\admin-token`, outside
     `keys\` (`addendum-install.md` U2). The Windows account that ran the install is the node's admin and may read
@@ -3749,6 +3802,8 @@ it.
 
 ## 3-H.12 Tests
 
+> **Amended by** 3-K.13 (#80: the "no secret" row also searches for 3-K's keys, sign-in hashes and one-time passwords; in the "no key" row the token signs in and account sign-ins wait, 3-K.5).
+
 - **No test can reach the real key folder.** `new AuditLog(file, {keys, records})` refuses to start without both (fail
   closed).
   - Today `accounts.test.js` never sets `AGM_KEY_DIR`; only `helpers.js:22`, `server.test.js:22` and
@@ -3965,6 +4020,8 @@ The archive point and the split (unit H3):
 
 ## 3-H.15 Risks, what is left for later, and the open question
 
+> **Amended by** 3-K: the token sign-in found beside it is unit K (#80); Part 0 §0.4.10: the open question is answered S4 (both applied in place, Part 0 §0.9); 3-K.5: at the first keyed start the accounts that can manage AGMessage or reach past their halls also wait once for the token (3-K.16), so "Nothing else waits" and "sign-ins … go on" are the log's.
+
 - **Risks:**
   - **A lost or replaced machine key** (a rebuilt profile) turns the history before it △ until accepted, and changes
     the signing key. It already loses the sealed Stagewatch and AI keys.
@@ -4007,7 +4064,8 @@ The archive point and the split (unit H3):
   - **A token sign-in written into `admin-sessions.json` holds the whole admin dashboard** at the next watchdog restart,
     not only the audit: the file trusts the data folder (`accounts.js:408-420`). Unit H closes it for Accept and the token
     export only. Keying the stored hashes with a key derived from the machine key, or keeping token sign-ins in memory,
-    would close it for every admin act; it is offered to the owner as a unit of its own.
+    would close it for every admin act; it is offered to the owner as a unit of its own. The owner took it on
+    2026-10-31 ("Add it"): unit K, #80 (3-K).
 - **Left for later:**
   - a head or an export sent off the laptop by itself (to a Stagewatch, or a printer) from time to time. Exports kept
     off the laptop now do this by hand;
@@ -4023,14 +4081,13 @@ The archive point and the split (unit H3):
   - a keyring of older machine keys;
   - pruning the records and the torn fragments.
 - **The owner's questions 1–4 are answered** (Owner's answers, 2026-10-27): each takes the plan's default.
-- **The one open question: "4 - Admin defined" (to confirm: S4, not A4).** The plan reads the owner's "4" as the stage
-  addendum's S4, so this addendum's question 4 keeps its default: the first start asks, and sign-ins, takes and sends go
-  on while the log reads △ (H.6). Had the owner meant this question, "Admin defined" would make holding sign-ins until
-  the question is answered an admin's setting; the plan does not build it unless the owner says so.
+- **The one open question, answered: "4 - Admin defined" meant S4** (the owner, 2026-10-31: "1. S4"; Part 0 §0.4.10).
+  This addendum's question 4 keeps its default: the first start asks, and sign-ins, takes and sends go on while the log
+  reads △ (H.6).
 
 ## 3-Findings not taken
 
-> **Amended by** 6-U.9 (applied in place).
+> **Amended by** 6-U.9 (applied in place); 3-K (Security 1 is unit K, #80, applied in place).
 
 - **Forgery 2 (K4) and the draft's `keyedFrom`:** dropped. H.4's boundary rule, and the rule that the entry at the
   head's `seq` carries this key and checks, cover the same ground. A folder adopted without a head has no first entry to
@@ -4066,7 +4123,8 @@ The archive point and the split (unit H3):
   it can be guarded by a right, because it changes nothing the check reports (H.9.1).
 - **Security 1, keying `admin-sessions.json`'s hashes and tag with a key from the key folder:** not in unit H. Accept takes
   the typed token and the token export only a sign-in made by this run, which closes the attack for the audit; keying
-  every token sign-in protects the whole dashboard and is offered as a unit of its own (H.15).
+  every token sign-in protects the whole dashboard and is offered as a unit of its own (H.15). The owner took it on
+  2026-10-31: unit K, #80 (3-K).
 - **Security 2, printing the key folder only "outside tests":** it is printed whenever `AGM_KEY_DIR` is set. The server
   cannot tell a test from a show, and no test reads the banner's key folder line.
 - **Security 7, the verifier naming any bundled `verify/*` that differs from its own bytes:** taken for the Node verifier.
@@ -4088,6 +4146,1000 @@ The archive point and the split (unit H3):
   file of its own (H.10.1), so a split moves whole files and never rewrites a line on disk.
 - **Answer 45, the archive inside the event's archive folder:** not taken. U15's "Delete this archive's contents…" would then reach
   audit history; `data\audit-archive\` is apart from it (H.10.3).
+
+## 3-K Unit K [#80]: the sign-ins and the accounts are keyed to the machine key
+
+*`060/unit-keyed-signins.md`, kept whole as Part 3's last section (added 2026-10-31). Its headings carry the prefix
+`3-K`; its one unit is local id **K**, global **#80**, and the close is **#81** (Part 0 §0.6). Code citations are to
+AGMessage at `89104d8` (0.5.1), as in every part.*
+
+Requester: the owner's answers of 2026-10-31 to the last open questions, "1. S4 · 2. Add it · 3. Yes · 4. Keep these as
+mim". Answer 2 takes up 3-H.15's offer: "a token sign-in written into `admin-sessions.json` holds the whole admin
+dashboard … keying the stored hashes with a key derived from the machine key … is offered to the owner as a unit of its
+own". Evidence class: the owner's answer, read against `app/lib/accounts.js:98-102,149,155-443` (Accounts, Sessions,
+TokenSessions), `app/lib/guard.js:12-26,55-58,123-135,169-175`, `app/lib/secretbox.js`, `app/lib/resilience.js:70-167`,
+`app/lib/http-accounts.js:36-187,237-249`, `app/lib/rbac.js:29-37,68-71`, `app/server.js:69-72,112-135,407-464,474-502,
+680-689,1590-1600,1794-1800,2480-2508`, `app/supervise.js:32`, `app/public/join.js:27-31`, `app/public/admin-plus.js:33`
+and `app/test/accounts.test.js:210-238`; Part 3 (H.1, H.2, H.5, H.6, H.8, H.12, H.15) for the keys and the records
+outside the data folder; Part 5 §14.2 and §14.4 for the module layers and fences; Part 6 (U.0, U.5.1, U1, U2, U12, U14,
+U15, U17) for the installed shape.
+
+Reviews: one security review of the draft (2026-10-31), traced against `89104d8`: fifteen findings, three of them high
+(an `elsewhere` copy adopted with its own passwords, a folder stripped back to plain read as a first start, and the event
+archive's recovery trusting the data folder). Each was upheld in substance and is fixed in this version; where a finding
+offered a choice, or this version took it in another form, 3-K.17 says so in one line. This version has had no review of
+its own.
+
+Measured (Node 22.22, the review container; scripts in `060/bench-keyed/`, median of 9, three runs each):
+
+- **A file keyed whole** (one HMAC-SHA256 over its bytes, `envelope2.js`):
+  - 5,000 sessions (1.50 MB): a save 11.6–14.4 ms, against 5.8–6.1 ms today; a load (the MAC over the bytes, then the
+    parse) 10.4–10.7 ms, against a parse of 10.3–15.2 ms today. The file grows by 71 bytes for the MAC and about 100 for
+    the save's fields, per file, not per sign-in.
+  - 1,000 accounts (0.50 MB): a save 3.7–4.3 ms, against 2.0–3.1 ms; a load 3.9 ms.
+  - A changed byte, a repeated key (`"role": "staff","role": "admin"`) and an added space each fail the MAC.
+- **The keyed hash of a sign-in id** (HMAC-SHA256): 3.1 ms per 1,000, against 1.3–1.4 ms for today's SHA-256: about
+  3 µs per request that carries a cookie (`envelope.js`).
+- **The keys:** five HKDF labels derived once, 1.2–2.9 ms (`envelope.js`).
+- **Not chosen, measured for the comparison** (`bench.js`): a MAC per record, 4.2–6.6 µs each; 5,000 sessions checked one
+  by one at load, 47–60 ms.
+- **Not measured:** anything on Windows (NTFS, Defender scanning each write); the record outside the data folder's own
+  write; whether a power cut can lose a store's last rename while keeping the later write of its record in another
+  folder (3-K.4's "one save behind" rule rests on reading, not on a measurement); a real 0.5.1 show folder's first
+  start; the set record's per-account digests (3-K.4), about 60 bytes an account and about 3 ms of HMACs per 1,000
+  accounts at each record write (computed from the rate above).
+
+### 3-K.0 The owner's answer (2026-10-31)
+
+> "1. S4 · 2. Add it · 3. Yes · 4. Keep these as mim"
+
+| | Asked | Answered | What this section does |
+|---|---|---|---|
+| 2 | 3-H.15's offer: key the token's stored sign-ins, so that someone who can write the data folder cannot plant one | "Add it" | A unit of its own, K (#80). Token sign-ins are kept as keyed hashes in a file keyed whole, with keys derived from the machine key outside the data folder (3-K.2, 3-K.3). A sign-in written into the data folder is dropped and said, never trusted. A watchdog restart still keeps every genuine one (3-K.8) |
+| 2, extended | — | — | **(the plan's extension: the owner may narrow it to token sign-ins only, 3-K.16)** The same keying for account sessions (`sessions.json`) and the account records (`accounts.json`), since the same writer could otherwise plant an admin's sign-in or mint an admin account (3-K.1). With it, readings beyond the answer, each needed for the extension to hold: a record outside the data folder that tells an older, removed or swapped store from the newest (3-K.4); at the first start of 0.6.0, the accounts that can manage AGMessage or reach past their halls wait once for the token (3-K.5); the first admin account made with the typed token in both channels, not from loopback alone (3-K.7); and the token's sign-in honoured only at the laptop, where it is made (3-K.7) |
+| 1, 3, 4 | — | — | Nothing here: S4 is confirmed (Part 0 §0.4.10, §0.5), the Stagewatch request's items 3–7 are asked (4-§5.9.12), and the Board's device floor stays (5-§15.10) |
+
+### 3-K.1 What a writer of the data folder can do today, store by store
+
+**Who that writer is.** 3-H.1 draws the line: in the portable layout, whoever can write `app\data` can usually change
+`app\lib` too, and then AGMessage says whatever they make it say. Nothing in this unit holds against them there. It holds
+where the data folder can be written by someone who cannot read the key folder:
+
+- **the installed node** (#72): `data\` and `keys\` carry separate access lists. Explorer's "Continue" on a protected
+  folder adds the person to that folder's list for good (6-U15, KB 950934), so `data\` widened by hand is the likely case;
+- **`AGM_DATA_DIR`** on a share or a stick, with the program where only the show account writes;
+- **a folder that travelled**, which is `secretbox.js:3-6`'s own threat ("a defence against the folder travelling"):
+  copied off, edited on another computer, copied back, or carried on to a new laptop. README.txt's Upgrading copies
+  `app\data` between folders (#29);
+- **a copy put back** from a backup.
+
+All three stores are read only at start (`accounts.js:162`, `:321`, `:413`), and each lane writes the in-memory state
+over its file at the next save (`:170`, `:328`, `:420`). So a planted record needs a restart before the store's next
+save. Restarts are frequent: the watchdog restarts the server after a crash, a hang, and today after every wake from sleep
+(6-U.0, until #31).
+
+#### 3-K.1.1 `admin-sessions.json`: the token's sign-ins (`TokenSessions`, `accounts.js:408-443`)
+
+- **What it holds:** `{v: 1, k, sessions: [{h: sha256(sid), created}]}` (`:420`, `:427-428`). The tag `k` is
+  `guard.mac(SECRET, 'admin-token:' + ADMIN_TOKEN, 43)` (`server.js:116`). `SECRET` is `data\secret.key`
+  (`server.js:69`, `guard.js:12-22`), in the same folder. `ADMIN_TOKEN` is the watchdog's, the same for every restart it
+  makes (`supervise.js:32`).
+- **Planting, by reusing the stored tag.**
+  1. The writer reads `k` from the file itself, where it is written in clear (`:420`).
+  2. They add `{h: sha256(S), created: <now>}` for an `S` of their own.
+  3. At the next watchdog restart the constructor loads every record of a file whose `k` equals the tag (`:415-416`).
+     It checks only that each `h` is 64 hex characters and that `created` is less than a day old; a `created` later
+     than now passes, and never expires (`:416`, `:438`).
+  4. `agm_admin=S` then passes `isValidAdminCookie` (`server.js:440`).
+  - They need neither the token nor `secret.key`. The tag in the file is enough.
+- **What it reaches:** the whole admin dashboard, and from anywhere.
+  - The cookie is tied to the host only at its login (`server.js:444`). Its use is not (`:417`, `:440`, `:681`), and
+    `adminBlocked` applies to accounts only (`http-accounts.js:38`). A planted sign-in therefore works from the venue
+    network and through the tunnel.
+  - Every hall as the admin (`socket.data.isAdmin`, `server.js:688`), the settings, the links and keys' use,
+    transcripts (`:474`), health (`:485`), the context (`:494`), and `/api/setup` while no account exists
+    (`http-accounts.js:176`).
+  - #5 keeps it from Accept (the typed token, 3-H.8) and from the token's export (a sign-in made by this run, 3-H.9.1).
+    Nothing else.
+
+#### 3-K.1.2 `sessions.json`: the accounts' sign-ins (`Sessions`, `accounts.js:316-400`)
+
+- **What it holds:** `{v: 1, sessions: [{h: sha256(token), uid, epoch, created, seen, ip, ua}]}` (`:328`, `:346`). A
+  record loads when `h` is 64 hex characters, `uid` is a string, and it is younger than 7 days and 14 idle hours
+  (`:323-325`).
+- **Planting an admin's sign-in:** `{h: sha256(T), uid: <an admin's id, read from accounts.json>, epoch: <its epoch>,
+  created: <now>, seen: <now>}`. After the next restart `agm_s=T` is that admin (`http-accounts.js:56-60`,
+  `accounts.js:361-373`):
+  - from the venue network with every right;
+  - through the tunnel with every non-admin right, and with the admin's rights when admins may sign in there
+    (`http-accounts.js:38`).
+- **Retargeting their own:** a writer who holds a genuine sign-in (a Staff account) changes its `uid` and `epoch` to an
+  admin's. Their own cookie is then that admin.
+- **Reviving:** `created` or `seen` moved forward, even past now, which then never expires (`:324`, `:334`); a
+  signed-out sign-in's record copied back, since a sign-out only deletes it (`:394`).
+
+#### 3-K.1.3 `accounts.json`: the accounts (`Accounts`, `accounts.js:155-304`)
+
+- **What it holds:** every account, with its role and rights, its scrypt hash and its `epoch` (`:213-219`), saved with a
+  one-space indent (`:170`). A record loads when its id is a string, its username matches and its role is known
+  (`:165-166`).
+- **Minting an admin account:**
+  1. The writer adds `{id: 'a…', username: 'it-support', role: 'admin', pw: <a scrypt hash of a password they chose>,
+     epoch: 1, …}`. The hash is in the public form `hashPassword` writes (`:98-102`), made on any computer.
+  2. After a restart they sign in at `/api/auth/login` (`http-accounts.js:90-127`) like anyone, and get a genuine
+     session.
+  3. Every act after that is a genuine audit entry under that name (3-H.1).
+- **Changing an account:**
+  - an admin's `pw`: they take the account, and the owner's own password stops working;
+  - a Staff account's `role`, `grant` (`users.manage`, `settings.manage`), `halls` or `allHalls`;
+  - `disabled: false` on a turned-off account, or `mustChange: false`;
+  - `epoch` set back: with an older `sessions.json` put back too, sign-ins the admin ended come back.
+- **Repeating an account:** a second record with an existing `username` (or `id`). The loader keeps both (`:165-166`),
+  `byUsername` returns the first in the map's order (`:175-178`), and audit rows name the username, so a planted Staff
+  `ben` with the writer's password acts as `ben` in every row.
+- **Removing every account:**
+  - empty `users`, or remove `accounts.json` and its `.bak`. Then `accounts.size === 0`, and `/api/setup` makes a new
+    first admin from loopback alone (`http-accounts.js:175-176`).
+  - 6-U2 (#27) closes that under `task` only. In the portable channel a second Windows account on the laptop reaches
+    loopback.
+- **Putting a save back:**
+  - remove `accounts.json` alone, and `readJsonWithBak` loads its `.bak`, one save back (`resilience.js:103-108`);
+  - or put back any older copy: a removed or turned-off account, an old password, an old role comes back. A former
+    admin who kept a copy is admin again.
+
+#### 3-K.1.4 The same hole without a writer: a store that cannot be read
+
+`readJsonWithBak` swallows every error (`resilience.js:103-108`). A store that a backup tool or an antivirus holds at
+start (EBUSY, EACCES) loads its `.bak`, or nothing.
+
+- With nothing, `accounts.size === 0`: `/api/setup` is open at loopback.
+- The next save writes the short list over the real file (`accounts.js:170`, `writeFileAtomic`).
+- The two sign-in files lose their sign-ins the same way.
+
+6-U1 (#26) gives the keys, `secret.key`, the certificate and the context token the rule that only ENOENT means absent.
+The stores do not have it. This unit gives it to them (3-K.3).
+
+### 3-K.2 The keys
+
+> **Amends** 3-H.2: `secretbox.derive`'s allow-list gains five labels.
+
+- **Five keys, derived by `secretbox.derive(label)` (#5), never stored:**
+
+  | Label | Key | Keys |
+  |---|---|---|
+  | `'agmessage sign-in id v1'` | Kn | the keyed hash of a sign-in's secret: `h = HMAC-SHA256(Kn, kind + '\n' + secret)`, where `kind` is `session` (an account's cookie token) or `token sign-in` (the token's cookie id) |
+  | `'agmessage accounts file v1'` | Ka | `accounts.json` |
+  | `'agmessage sessions file v1'` | Ks | `sessions.json` |
+  | `'agmessage token sign-ins file v1'` | Kt | `admin-sessions.json`, and its token tag `k = HMAC-SHA256(Kt, 'admin token\n' + ADMIN_TOKEN)` |
+  | `'agmessage stores record v1'` | Kr | the records outside the data folder, and each account's security digest in them (3-K.4) |
+
+- **Domain separation, three ways:**
+  - a key per store and per use;
+  - each MAC's input begins with its label;
+  - each file names its store inside the bytes the MAC covers.
+
+  So a sessions file is never a valid accounts file, a token sign-in's hash never resolves as a session, and no MAC of
+  this unit is ever an audit entry's or record's (Ke, Kh, H.2).
+- **The key id** in each file is the audit's kid (3-H.2), injected by server.js. One id then names the machine key in
+  every word a person reads: the banner, the audit's boundaries and these stores' findings.
+- **A key made at this start** (H.2's ENOENT rule): `secretbox` says that this run made it, so a record that fails its
+  MAC under it is said as "the machine key was made new at this start", not as another computer (3-K.5).
+- **`secret.key` stays** (answer 42) and keys only what it keys today: guest identities and invites (`guard.js:61-81`).
+  The token's tag no longer uses it.
+- **No machine key** (3-H.2's keyless run, a portable start only; under `task` it is exit 3, 6-U1):
+  - nothing of this unit is checked or written this run;
+  - each store's file is left byte for byte as it was;
+  - the reader's state is `keyless` (3-K.5).
+
+### 3-K.3 A keyed store file
+
+- **Its form:** the store's JSON, saved as today, with the save's fields first and its MAC last:
+
+  ```
+  {"v":2,"store":"sessions","set":"41aa…","gen":815,"kid":"9c01ab23cd45ef67","at":1761900000000,"sessions":[…],"m":"<64 hex>"}
+  ```
+
+  - `store`: `accounts`, `sessions` or `adminSessions`.
+  - `set`: 32 random hex characters. The folder's stores share one set, chosen at their first keyed save and again when
+    the folder moves (3-K.5).
+  - `gen`: the save's number, one more at each save the lane makes (after a `behind` load, the record's plus one,
+    3-K.4).
+  - `kid`: the key id (3-K.2).
+  - `at`: the save's time.
+  - Then the store's own fields: `users`; `sessions`; or `k` and `sessions`. `accounts.json` keeps its one-space indent
+    (`accounts.js:170`).
+- **Its MAC is over its bytes.**
+  - The file ends with exactly `,"m":"<64 lower-case hex>"}`, in place of the body's last `}`.
+  - `m = HMAC-SHA256(K, label + '\n' + <every byte before ,"m">)`, with the store's key and label.
+  - A save is one `JSON.stringify`, one MAC and one write; a load is one MAC, one constant-time compare
+    (`crypto.timingSafeEqual`), then one parse (measured above).
+  - Bytes, not a re-serialised object: a repeated key, an added space or a reordered field changes the bytes, and so the
+    MAC (measured).
+- **One MAC per file, not one per record.**
+  - A writer can mix genuine records from different saves. An older genuine version of one account (before its
+    demotion), or a sign-in signed out of and copied back, checks by itself.
+  - Only the file as one save pins every record to the others and to its `gen`.
+  - So no record of a file that fails is trusted on its own:
+    - every sign-in in a sessions or token file that fails ends;
+    - every account in an accounts file that fails is held aside for the token (3-K.6).
+  - A MAC per record would also cost 47–60 ms at the start of 5,000 sessions against 10–11 ms (measured).
+- **What a file that checks may still not hold:**
+  - **a repeated `id` or `username`** in an accounts file. AGMessage never writes one (`create` refuses a taken name,
+    `accounts.js:202`), so such a file reads `changed` ✕ whatever its MAC (3-K.5), and the loader never keeps two
+    accounts of one name;
+  - **a sign-in stamped ahead of now:** a record whose `created` or `seen` is more than 5 minutes past now is dropped at
+    load, so a clock stepped back cannot keep a sign-in alive past its day, its 7 days or its 14 idle hours.
+- **The sign-ins are keyed hashes** (the owner's reading):
+  - a session's `h` is `HMAC(Kn, 'session\n' + token)`, and a token sign-in's is `HMAC(Kn, 'token sign-in\n' + sid)`;
+  - the cookie's lookup is that one HMAC, about 3 µs (measured);
+  - so a record holding `sha256` of a secret, 0.5.1's form, never resolves, even inside a file that checked;
+  - the token's tag is keyed with Kt, so the file no longer gives an offline test of a guessed `ADMIN_TOKEN` against
+    `secret.key`.
+- **The read rule** (6-U1's, given to the stores; the same call, `resilience.readText`, 3-K.12):
+  - **Only ENOENT means a file is absent.** Any other error (EBUSY, EACCES) gives the store the state `unread`:
+    - nothing of it loads;
+    - its lane writes nothing this run, so the real file is never overwritten from an empty map;
+    - its reader says so (3-K.5).
+  - **A file that is not JSON** (a torn write the atomic writer did not prevent), **or absent while its `.bak` is
+    there**, is read through its `.bak` under the same rules, as `readJsonWithBak` does today. An absent file whose
+    `.bak` is loaded is said: "accounts.json was missing; its .bak was loaded".
+  - A `.bak` is one save behind by construction, so it passes only under 3-K.4's rule of saves.
+- **The `.bak` keeps only a file that checks.** The keyed lanes pass `writeFileAtomic`'s `worthKeeping`
+  (`resilience.js:70`; `isJson` today, `:85-89`) as the store's own check (the MAC, the store and the set). A file on
+  disk that fails it is not made the `.bak`: it is kept aside as `<name>.changed-<time>.json` and said (one console
+  line, health, the row `stores.changed`), and AGMessage's own save is written over it. So a file planted while the
+  server runs never pushes the genuine one-save-behind copy out of the `.bak`.
+
+### 3-K.4 The record outside the data folder
+
+A keyed file says it is genuine, not that it is the newest. The record says which save is the newest.
+
+- **Where:** `<keyDir>/stores/`, beside the audit's `audit/` (3-H.5): in the portable layout `%LOCALAPPDATA%\AGMessage\
+  stores\`; installed, `%ProgramData%\AGMessage\keys\stores\` (#72, under `keys\`'s list). The folder is injected in
+  tests (3-K.13).
+
+  | File | Holds | Written |
+  |---|---|---|
+  | `set-<set>.json` | `{v: 1, set, path, kid, accounts: {gen, d, prev, floor, n, who}, sessions: {gen, d, prev, floor}, adminSessions: {gen, d, prev, floor}, archived: {<time>: {gen, d}}, archiving, held, at, mac}`. `d` is the first 32 hex characters of the save's `m`; `prev` is the `d` of the save before it; `floor` is the `gen` of the newest save that took a right away or ended a sign-in; `n` is the number of accounts; `who` is each account's security digest (below). `archived` pins the accounts file each event archive took, and `archiving` is `null` or the archive under way, `{time, kind, next, accounts: {gen, d}}` (3-K.9). `held` is `null`, or the copy of accounts held aside until the token has finished with it: `{file, d, at, why, left}`, its `d` the full 64-hex SHA-256 of the copy's bytes | through the lane `storesHead`: after each store's write lands (`WriteLane`'s `onWritten`, 3-K.12), latest wins, 200 ms; at once after the first write of a save that takes a right away or ends a sign-in (below); at once at `open()`, at an adoption and in the event archive's steps (3-K.9); by `flushLanes()`, after the three stores' lanes |
+  | `latest.json` | `{v: 1, set, path, at, mac}`: the set this machine saved last, and where (the stores' own; 3-H.5's `latest.json` is the audit log's, in `audit\`) | after each write of a set record, from `storesHead`'s `onWritten` |
+  | `folder-<id>.json` | `{v: 1, folder, path, set, at, mac}`: the set this data folder holds. `<id>` is `resilience.placeId(DATA_DIR)` (#5, 3-H.5) | at `open()`, when it changes |
+  | `keyed.json` | `{v: 1, since, mac}`: this machine has keyed a folder's stores | once |
+
+- **`mac`** = HMAC(Kr, the JSON of the record's other fields, in the order shown).
+  - A record that fails it is kept aside as `<name>.changed-<time>.json` (through `writeFileAtomic`, after the hold) and
+    is said. It vouches for nothing, and its stores' states say why.
+  - **It still counts as present.** A record that exists, whether it checks, fails or cannot be read, is evidence that
+    this laptop kept one: the first start's rule and the `changed` row of 3-K.5 read it so. Only ENOENT is no record.
+  - Only a key holder can write there, and a key holder can write the stores too (3-K.11). So a changed record is a
+    finding, not a defence.
+- **Each account's security digest** (`who[id]`): the first 32 hex characters of `HMAC(Kr, 'agmessage account v1\n' +
+  JSON.stringify([id, username, role, grant, revoke, halls, allHalls, disabled, mustChange, pw, epoch]))`, made when the
+  set record is written (latest wins). It tells a held copy's account "as this laptop last saved it" from "changed
+  since" or "new to this laptop" (3-K.6). It is keyed, so whoever reads the record cannot make an account to match it.
+  - Only the set record that this path's folder record names is compared. Another folder's saves, whatever their own
+    record says, are never "as this laptop last saved it" here: they are "new to this laptop".
+- **Read once, at `open()`, by the read rule.** Only ENOENT means a record is absent.
+  - A record that cannot be read (EBUSY, EACCES) makes all three stores `unread` (3-K.5): nothing of them loads, and
+    neither they nor that record are written this run, so its evidence is never overwritten. Health names the record.
+  - No record of the files' set at all (ENOENT) is `unrecorded` △: the stores load, checked by MAC but not by save,
+    and the records are written.
+- **The rule of saves**, per store, against its set record:
+  - **`ok`** when the file's `gen` is past the record's (the record lags its store by up to 200 ms, never the other
+    way), or equal to it with the record's `d`.
+  - **`behind` △** when the file is exactly one save behind: its `gen` is the record's minus one, its `d` is the
+    record's `prev`, and its `gen` is at or past `floor`. It is loaded, and said.
+  - **`older` ✕** otherwise: two saves behind or more, below `floor`, or the record's `gen` with another `d`.
+  - After a `behind` load the next save takes the record's `gen` plus one, so no number ever names two saves.
+- **Why one save behind is loaded.** After a power cut, a store's last rename may be lost while the record's later write
+  in another folder survives. Windows cannot fsync a folder, so nothing here orders the two (not measured). Refusing
+  that would hold every account aside after a power cut.
+  - The cost: whoever puts the `.bak` back undoes the store's last save. Three rules narrow it to nothing that matters:
+    - **A save that takes a right away or ends a sign-in is saved twice.** The lane writes it, and once that write lands
+      it writes the same state again as the next save.
+      - The accounts: `create`, `update`, `setPassword`, `signOutEverywhere`, `remove` and an adoption.
+      - The sign-ins: a sign-out (`destroy`).
+      - A sign-in's stamp (`signedIn`, `:303`), a rehash (`upgrade`, `:294-300`) and a touch (`:371`) are saved once.
+      - So the `.bak` of such a change already holds it.
+    - **Its record is saved at once.** After that save's first write lands, `onWritten` asks `storesHead` for the record
+      with `floor` at that save's `gen` and flushes it in the same turn (`flushSync`), not 200 ms later. A copy from
+      before the change is then below `floor`, and reads `older` even when it is one save behind.
+    - Each `behind` writes its row (3-K.10), and the audit log holds the rows of whatever the lost save carried.
+- **The window left:** a crash between a store's rename and its record's, or a record lane that keeps failing
+  (`WriteLane` retries, at most every 30 s, `resilience.js:151`), leaves the record behind its store. A save put back
+  that is not older than the lagging record then reads `ok`. Health names a failing `storesHead`, and 3-K.11 says it.
+
+### 3-K.5 Opening the stores
+
+> **Amends** `server.js:112-116` and the listen callback (`:2480-2508`).
+
+- **The constructors read nothing.**
+  - `new Accounts(file, {keyed})`, `new Sessions(file, accounts, {keyed})` and `new TokenSessions(file, {keyed, token})`
+    refuse to start without `keyed` (fail closed, as 3-H.12's `AuditLog`).
+  - Their maps stay empty until `stores.open()`.
+- **`stores.open()`** runs after the folder hold and after `audit.open()` (its findings are audit rows), before the
+  banner. It is the same synchronous turn as today's listen callback, so no request is served before it.
+  1. **The keys**, in a try. No key: every store is `keyless`.
+  2. **The records:** the folder record at this path, `keyed.json`, `latest.json`, and the set records the files and
+     the folder record name. One that cannot be read makes every store `unread`.
+  3. **Each store's file**, then its `.bak` when the file is absent or not JSON, by the read rule.
+  4. **The decision**, per store, from the table below: the first row that matches. Each finding is written as its row
+     (3-K.10), one console line and a line in health.
+  5. **The writes, the stores first.** A store that changed at `open()` (keyed for the first time, its sign-ins ended,
+     or moved to a new set) is saved at once under the folder's set, with `flushSync()`. Only then are the folder
+     record, `keyed.json`, the set record and `latest.json` saved. A stop between the two leaves keyed stores with no
+     record, which the next start reads as `unrecorded` △ and loads, never a plain file beside `keyed.json`. Not written:
+     a store that is `unread` or `keyless`, accounts held aside, and the sessions while the accounts are not loaded.
+
+| Found | Accounts | The two sign-in files | Words (the console's; health's and the row's carry the same) |
+|---|---|---|---|
+| no machine key | `keyless` △: none loaded, not written; account sign-ins wait | `keyless` △ | "this run has no machine key (EBUSY): account sign-ins wait for a start that has it" |
+| a record outside the data folder cannot be read (any error but ENOENT) | `unread` △: none loaded, not written; account sign-ins wait | `unread` △: none loaded, not written; new sign-ins are kept in memory this run only | "the record of this folder's saves could not be read (EBUSY, set-41aa….json): account sign-ins wait for a start that can read it; nothing was written over it" |
+| the store's file cannot be read (any error but ENOENT) | `unread` △, as above | `unread` △, as above | "accounts.json could not be read (EBUSY): account sign-ins wait for a start that can read it; nothing was written over it" |
+| keyed, this `kid`, and the MAC fails or the tail is not `,"m":"…"}`; or an accounts file that checks and repeats an `id` or a `username` | `changed` ✕: held aside (3-K.6) | `ended`, the file kept aside as `<name>.changed-<time>.json` | "accounts.json was changed after AGMessage saved it (kept aside as accounts.held-….json)" |
+| keyed, a `kid` not this machine's, where this laptop has a record of this folder: a folder record at this path, or a record of the set the file names (one that checks or fails its MAC) | `changed` ✕: held aside | `ended` | "accounts.json names another machine key (3fa2…, its own claim), but this laptop recorded this folder's saves: changed after AGMessage saved it". When the machine key was made at this start (3-K.2): "the machine key was made new at this start; these accounts were saved under the key it replaced (3fa2…, their own claim)" |
+| keyed, a `kid` not this machine's, at a path and of a set this laptop has no record of | `elsewhere` ✕: held aside | `ended` | "saved under another machine key (3fa2…, its own claim): another computer or Windows account, or anyone who could write the folder. This laptop cannot check them" |
+| keyed, this `kid`, and this path's folder record names another set | `other` ✕: held aside | `ended` | "accounts.json belongs to another folder's saves (set 7c3e…; this folder holds 41aa…)" |
+| keyed, this `kid`, no folder record at this path, and the files' set is recorded here but is not the set this laptop saved last (`latest.json`) | `other` ✕: held aside | `ended` | "these accounts are the saves of D:\Shows\Summit\app\data; the folder this laptop ran last is C:\AGMessage-Portable-Windows-0.6.0\app\data" |
+| keyed, this `kid`, no folder record at this path, and the files' set is `latest.set` and passes its record by the rule of saves | a move: loaded, the set forks (below) | loaded | the move's console line (below) |
+| keyed, this `kid`, this folder's set, `ok` by the rule of saves (3-K.4) | `ok`: loaded | `ok`: loaded | — |
+| keyed, exactly one save behind (3-K.4) | `behind` △: loaded, row `accounts.behind` | `behind` △: loaded | "accounts.json is one save behind (save 814; this laptop recorded 815): the last save did not reach the disk, or the save before it was put back" |
+| keyed, `older` by the rule of saves | `older` ✕: held aside | `ended` | "accounts.json is an older save (812; this laptop recorded 815), put back from a copy" |
+| keyed and checks, this `kid`, and no record of its set anywhere (ENOENT) | `unrecorded` △: loaded, records written | `unrecorded` △: loaded | "no record of this folder's saves outside the data folder: an older save cannot be told from the newest this time" |
+| plain (0.5.1's `v: 1`), and nothing says this laptop has keyed: no record in `stores\` of any kind, and no keyed store or `.bak` in the data folder. **The first start of 0.6.0 on this laptop** | `first`: keyed as found, except those that can manage AGMessage or reach past their halls, and every repeated one, which wait for the token (3-K.6); rows `accounts.keyed` and `accounts.held` | `ended`: 0.5.1's sign-ins end, row `signins.ended` | the first start's words, below |
+| plain, otherwise | `plain` ✕: held aside | `ended` | "accounts.json has no key: written by AGMessage 0.5.1 or earlier (a rollback, or a copy of an older folder), or by anyone who could write the folder" |
+| absent, and its `.bak` too, while the set record's `archiving` names an archive under way (3-K.9) | not `missing`: 6-U15's finish runs first (3-K.9) | — | — |
+| absent, and its `.bak` too, and this folder's record names a set | `missing` ✕: none loaded; the first account is made with the token (3-K.7) | `missing`: none | "accounts.json is missing: this folder held 12 accounts at save 815. Put it back and start again, or make the first admin account with the token" |
+| absent, and its `.bak` too, and nothing names a set here | `ok`: none, a first start; the first admin account is made with the token (3-K.7) | `ok`: none | — |
+
+- **A sign-in file is never held aside.** Ending its sign-ins costs each person one sign-in, and is the safe failure.
+  - A token sign-in file under another token ends silently, as today: the tag differs, and the save checks.
+  - A sign-in whose account is not loaded (accounts held aside, `unread` or `keyless`) resolves to nobody.
+- **While the accounts are not loaded, a sessions file that checks is kept, not loaded.**
+  - Its decision stands, but its records are not put in the map: `resolve`, `touch`, `sweep`, `prune` and `create` see an
+    empty map. So neither a request carrying `agm_s` (`touch` drops a record whose account is gone, `accounts.js:370`)
+    nor the once-a-minute sweep (`server.js:1794-1800`, `prune` at `accounts.js:389`) drops them, and the lane takes no
+    save. They stay on disk as they were.
+  - At an adoption, or at the start that loads the accounts, they are put in the map and pruned against the accounts as
+    loaded: one whose account was adopted as it was (its `epoch` unchanged) lives again; a one-time password moves the
+    `epoch` and ends it; one whose account was left out ends.
+- **A move forks the set.**
+  - The files name set S; no folder record names this path; S's record names another path (README.txt's Upgrading,
+    6-U14's import, a new drive letter); and S is the set this machine saved last (`latest.json`).
+  - The files are checked against S's record by the rule of saves. When they pass, this folder takes a new set S2: the
+    three stores are saved under S2 at once, and the folder record and `latest.json` name it. S's record is left as it
+    was, with its own path.
+  - So the old copy, started again, goes on with S, and a store copied from it into the new folder later reads
+    `other`.
+  - **A folder record naming another set is always `other`, and so is a recorded set that is not `latest.set`.** Another
+    folder's genuine saves, put in at a new path before its first start (an older show where the writer was admin, or
+    an old copy that kept running), are never taken silently, and the words name both paths. Upgrading a copy that is
+    not the one this laptop ran last costs one adoption at the laptop (3-K.16).
+  - No row of its own: the audit's `audit.moved` (3-H.5) records the folder's move. The console says "Accounts: this
+    folder was last saved at <path>; its accounts and sign-ins go on here".
+- **The first start of 0.6.0 on this laptop** (each half with its reason):
+  - **Only where nothing says this laptop has keyed.** A record in `stores\` of any kind (one that checks, fails its MAC
+    or cannot be read), or a keyed store or `.bak` in the data folder, makes a plain file `plain` ✕, never `first`. So a
+    keyed folder stripped back to plain, a re-made key whose old records are still there, and a folder that kept one
+    keyed `.bak` are each held aside. A record that cannot be read gives `unread`, as any.
+  - **The accounts are keyed as found (`first`), except those that could do harm**, with the rows `accounts.keyed` and
+    `accounts.held`.
+    - Holding every 0.5.1 account aside until the token adopts it would stop every account sign-in on every upgraded
+      laptop until someone types the token.
+    - But a folder that travels to a laptop that has never keyed (a new laptop, a rebuilt profile) can be stripped to
+      plain in transit, with an admin added or a password changed, and nothing on that laptop can tell.
+    - So two kinds of account wait once for the person at the laptop: those that can manage AGMessage
+      (`rbac.holdsAdminOnly`, `rbac.js:68-71`, which the admin role holds; `audit.export` joins with #6), and those with
+      any other right beyond their halls (one outside `rbac.HALL_SCOPED`, `rbac.js:29`: `halls.manage` and `audit.read`,
+      which the manager role holds). Each is judged as if turned on, as `holdsAdminOnly` is.
+    - They are held aside (3-K.6) without a one-time password by default. One tick each and the typed token open them,
+      on the same page and with the same token as the audit's Accept (3-H.8), which the first start asks for anyway
+      (answer C).
+    - Every repeated account (one `id` or `username` twice) is held aside too, all of its records (3-K.6).
+    - Every other account is keyed as found and signs in at once.
+  - **0.5.1's sign-ins end** (`signins.ended`). Re-keying them is not offered: at this start the server holds no sign-in
+    it made itself, only what it read from a file anyone who could write the folder could have written. Ending them costs
+    each person one sign-in, once, at an upgrade made between shows (README.txt's Upgrading; the busy line, #36). They
+    end even when `ADMIN_TOKEN` is set in the environment and the token is kept (`supervise.js:32` makes a new one only
+    when it is not; under `task` such an environment is exit 3, 6-U2).
+  - The words, after the token block and the audit's question (3-H.6):
+
+    ```
+      Accounts:    12 accounts from AGMessage 0.5.1 are keyed to this laptop from here on, as accounts.json held
+                   them. 3 that can manage AGMessage or reach past their halls wait for you: ana, ben, carl.
+                   Open them at http://localhost:3023/admin → Accounts held aside, with the token above.
+                   Sign-ins from 0.5.1 have ended: each person signs in once more.
+    ```
+
+  - **Only once per machine.** `keyed.json` and every later record make each later plain folder `plain` ✕, held aside
+    for the token.
+    - A 0.5.1 folder copied in after the first upgrade is one case, and a keyed folder stripped back to plain is the
+      other.
+    - This is 3-H.4's `;first`, with one difference: the audit's plain span only reads △, while accounts held aside
+      stop sign-ins. An account is a way in; an audit entry is not.
+- **Words for a hold**, in the console:
+
+  ```
+    Accounts:    held aside: 12 accounts in this folder were saved under another machine key (3fa2…, its own
+                 claim): another computer or Windows account, or anyone who could write the folder. Nobody signs
+                 in with them until they are adopted: http://localhost:3023/admin → Accounts held aside, with the
+                 token above. Sign-ins saved with them have ended.
+  ```
+
+### 3-K.6 Holding accounts aside, and adopting them with the token
+
+This is the recovery for a folder moved to another computer or Windows account, for every other ✕ of 3-K.5, and for the
+accounts that wait at the first start.
+
+- **Two words for an account's reach**, used below:
+  - **can manage AGMessage:** `rbac.holdsAdminOnly(a)` (`rbac.js:68-71`): the admin role, or `users.manage` or
+    `settings.manage` granted (`rbac.ADMIN_ONLY`, `:30`; `audit.export` joins it with #6);
+  - **reaches past its halls:** holds, turned on, any right outside `rbac.HALL_SCOPED` (`rbac.js:29`): those above,
+    `halls.manage` or `audit.read`. The manager role (`:34-37`) does.
+- **While all accounts are held aside** (`older`, `other`, `elsewhere`, `changed`, `plain`), and while they are `unread`
+  or `keyless`:
+  - **Account sign-in is refused, and the page says why.**
+    - `POST /api/auth/login` answers 503 at once, with no hash run: "Accounts are not open on this AGMessage yet. The
+      admin at the AGMessage laptop opens them with its token."
+    - It writes `login.refused` with `(unknown username)` and the reason, never the typed name (`http-accounts.js:22`,
+      `:110`).
+    - The rate limit and lockout are today's.
+  - **`/api/auth/me` gains `held`, at the end:** `null`, or `{state, waiting}`. `setup` is false. The sign-in page
+    (`join.js:31`) shows those words in place of the tabs.
+  - **`/api/setup` is refused:** "Adopt the accounts held aside, or start with none, first (Admin → Accounts held
+    aside)". While they are `unread` or `keyless` there is nothing to adopt: "Accounts could not be read on this start:
+    start AGMessage again".
+  - **`Accounts.create({firstAdmin})` refuses too**, while any account is held aside. It checks only `users.size` today
+    (`accounts.js:201`), so no path makes a first admin beside a hold.
+- **At `first`, only some wait.** The rest sign in. A waiting account's sign-in is refused as an unknown name is
+  (`login.refused`, `(unknown username)`), so the answer names no account; the sign-in page keeps its tabs and adds one
+  line, "Some accounts wait for the admin at the AGMessage laptop"; `/api/setup` is refused; `held` is `{state: 'first',
+  waiting: 3}`.
+- **The rest goes on:** the token at the laptop, code guests, screens, the halls and the audit log. Nothing waits for
+  the token but account sign-ins.
+- **The opener** (#4) opens `/admin` (3-H.6's line, which this unit widens to "or accounts are held aside").
+- **The admin page says it.** `/api/admin/me` and the admin page's settings answer (`server.js:1599`, which
+  `admin-plus.js:33` reads for its "No accounts yet — sign in on the start page to make the first admin") gain `held`,
+  at the end, as `/api/auth/me`'s. While it is set, that line gives the held words and where to go, never "No accounts
+  yet".
+- **Who adopts:** the person at the AGMessage laptop who types its token.
+  - `guard.isHostMachine(req)`, then `guard.safeEqual(token, ADMIN_TOKEN)`, **the typed token first**:
+    - a right token is taken even while `adminLockout` holds (`server.js:441`; `guard.js:123-135`, 5 in 60 s from the
+      first failure). The token is 64 random bits (`supervise.js:32`): at 100,000 guesses a second, trying them all
+      takes about 5.8 million years (computed), so the lock adds nothing against guessing. Checked first, it would only
+      let a writer who also reaches loopback (a second Windows account, a local process) keep the owner out by typing
+      five wrong tokens a minute while nobody can sign in by account;
+    - a wrong token counts toward the lockout and writes `login.token.fail` "a wrong admin token (at adoption)" while
+      the lock does not hold. While it holds, a wrong one is refused 429 and not written again, so a flood writes at most
+      five rows a minute.
+  - **The token sign-in takes the same order** (`/api/admin/login`, `server.js:443-453`), since the panel below is drawn
+    only for a token sign-in: a flood that kept the person at the laptop from signing in with the token would keep them
+    from the panel too. Its wrong tokens are written as today, only while the lock does not hold.
+  - Accept (3-H.8) keeps its own order, the lock first (3-K.16).
+  - The actor is `HOST_ACTOR`.
+  - Typed rather than a token sign-in, as Accept is (answer B), since an adoption also vouches for data this machine
+    cannot check.
+  - Installed, the token is the file the laptop's admin and the accounts given `token` may read (6-U2, 6-U17).
+  - No admin account adopts: none can sign in while accounts are held aside, and whoever wrote the folder could have
+    written one.
+- **Where:** Admin → Accounts held aside, a panel drawn for the token at the laptop (`/api/admin/me`'s `token`, #5).
+  Signed in another way, the admin page shows the words and where to go, with no button.
+- **What the panel shows** (`GET /api/accounts/held`, the token at the laptop only, `Cache-Control: no-store`):
+  - why: the state's words of 3-K.5. Under `elsewhere` also: "This laptop cannot check this copy."
+  - the copy held: its file name and its digest (the SHA-256 of its bytes, 64 hex characters, of which the panel shows
+    the first 16);
+  - one row per account: username, name, role, its rights (`rbac.rightsView`), its halls, turned off, must change,
+    made, last sign-in and password set. Read from the held copy, and never its hash.
+  - each row's mark, from the set record's digests (3-K.4) where one names this folder: "as this laptop last saved it",
+    "changed since" or "new to this laptop"; and "repeated" where its `id` or `username` is in the copy more than once.
+  - at `first`, the accounts keyed as found are listed too, as "open", with no ticks.
+- **The ticks:**
+  - **Adopt.**
+    - Accounts that cannot manage AGMessage start ticked.
+    - Those that can start unticked. Ticking one opens its line, "ben can manage AGMessage. Adopt ben only if this
+      folder has been in your hands since ben was given that.", and a second tick that confirms it.
+    - An account "as this laptop last saved it" starts ticked, with no confirmation: this laptop vouches for it.
+    - **Repeated** accounts: none can be adopted while another record of its `id` or `username` is ticked or already
+      open. The line says "ben is in this copy twice: leave out all but one".
+  - **With a one-time password**, beside each Adopt:
+    - it starts unticked for an account "as this laptop last saved it", and at `first`, where the copy is 0.5.1's own
+      on this laptop's expected upgrade;
+    - otherwise it starts ticked for every account that can manage AGMessage, in every state;
+    - under `elsewhere`, also for every account that reaches past its halls; the others start unticked, the expected
+      move;
+    - under `changed`, `older`, `other` and `plain`, for every account: "Someone may have changed this file. Give each
+      account you adopt a new one-time password."
+    - Unticking one that started ticked opens the line "The password in this copy is the copy's own claim; whoever wrote
+      the folder may know it." and a second tick that confirms it.
+    - It gives the account `temporaryPassword()` (`accounts.js:149`), `mustChange` and a new `epoch`, as an admin's reset
+      does (`http-accounts.js:243-247`).
+  - Then the token field, **Adopt the ticked**, **Start with no accounts…** and **Cancel**.
+- **The request:** `POST /api/accounts/adopt {token, digest, adopt: [{id, reset}], confirm: [ids], keep: [ids]}`, where
+  `digest` is the full 64 hex characters and `keep` names the accounts whose one-time password was unticked and
+  confirmed.
+  - It is refused:
+    - when the digest differs: "the copy held aside changed since you read it: read it again";
+    - for an id not in the copy, or an account that can manage AGMessage without its id in `confirm` (unless it is "as
+      this laptop last saved it");
+    - for a one-time password that started ticked and comes unticked without its id in `keep`;
+    - when the accounts it would open hold one `id` or `username` twice, naming them;
+    - off the host, through the tunnel, or with a wrong token (above).
+  - `adopt: []` is **Start with no accounts**, after its own question: "Start with no accounts? Nobody signs in by
+    account until a first admin account is made with the token." At `first` it is **Leave these out**, and the accounts
+    keyed as found stay open.
+  - In the run that read the copy, an adoption takes the bytes held in memory. A later run (Adopt more…) reads
+    `accounts.held-<time>.json` again and lists it only when its full SHA-256 equals the record's `held.d`.
+- **What it writes:**
+  - the adopted accounts into the live map. The accounts lane saves them under this folder's set, keyed under this
+    machine's key, twice, and the record at once (3-K.4);
+  - the sessions file's kept records put in the map and pruned against the adopted accounts (3-K.5);
+  - the set record's `held` gains `left`, the count left out;
+  - the row `accounts.adopted`: the usernames adopted, those given a one-time password, and how many were left out. Or
+    `accounts.fresh`, for Start with no accounts.
+  - The answer carries `{adopted, passwords: [{username, password}]}`, shown once on the page, over loopback only. No
+    password reaches a row, a record or a log.
+  - The held copy is kept: `accounts.held-<time>.json` (through `writeFileAtomic`, written when the hold began), byte for
+    byte what was read. AGMessage never removes it.
+- **Later:**
+  - while `held.left` is more than 0, the panel offers **Adopt more…** from the same copy, pinned by its digest. A copy
+    changed since reads `changed` and is refused;
+  - **Leave the rest out** (typed token) clears `held`;
+  - the Accounts page tells an admin account "3 accounts were left out on 31 Oct and are kept aside: the token at the
+    laptop may adopt them".
+- **Sign-ins are never adopted.** A sign-in file that failed ended at `open()`; one that checked waits for its account
+  (3-K.5).
+
+### 3-K.7 Sign-ins at the laptop, and the first admin account
+
+Two of the extension's readings beyond the answer. Each closes a way around the keying that 3-K.1 traced.
+
+- **A token sign-in counts only at the laptop, where it is made.**
+  - `isValidAdminCookie` becomes `guard.isHostMachine(req) && tokenSessions.has(…)` (`server.js:440`).
+  - The socket's `tokenAdmin` likewise checks `guard.isHostMachine(hs)` (`:681`).
+  - A genuine cookie is set only on a loopback name at the laptop (`:444`, `:451`), and a browser sends it to no other
+    host. So nothing at the laptop changes.
+  - A cookie copied to another device, or sent through the tunnel, is nobody. This is what 3-H.9.1 already asks of the
+    token's export ("for the token cookie from off the host"), now asked of every use.
+- **The first admin account is made with the typed token, in both channels.**
+  - `/api/setup` (`http-accounts.js:174-187`) takes the token typed into its form, or a token sign-in, and never
+    loopback alone. 6-U2 (#27) asks this under `task` only; it now holds in the portable channel too.
+  - The typed check is the adoption's (3-K.6), the token first, with `login.token.fail` "a wrong admin token (at
+    setup)".
+  - `Accounts.create({firstAdmin})` refuses while any account is held aside (3-K.6).
+  - The setup pane (`join.js:31`) gains the token field: "Type the token from the AGMessage window (installed: Start →
+    AGMessage → Show the admin token)".
+  - Without it, a writer who removes `accounts.json` in a newly copied folder before its first start, at a path no
+    record names, would make the first admin from loopback. A second Windows account at the laptop could also take a
+    genuine first start before the person at it.
+  - The cost: the first start of a new laptop asks for the token once more, beside where it is printed.
+  - 6-U15's start fresh already reads "the token at the laptop makes the first admin account".
+
+### 3-K.8 What a restart keeps
+
+| What happened | Accounts | Account sign-ins | Token sign-ins |
+|---|---|---|---|
+| a watchdog restart (a crash, a hang kill, a wake from sleep before #31): same token, same key | kept | kept | kept (the tag is the token's, and the save checks) |
+| AGMessage started again (the window closed and opened; the installed task's new start): a new token, unless `ADMIN_TOKEN` is set in the environment (portable) | kept | kept | ended, as today |
+| a power cut | kept; one save behind is △ and loaded | kept; one save behind loaded | kept; one save behind loaded |
+| a portable upgrade on this Windows account (README.txt's Upgrading), from the copy this laptop ran last | kept; the set forks | kept | ended (a new token) |
+| the same, from a copy this laptop did not run last | held aside as `other` until the token adopts them | ended | ended |
+| the installed import (#75): the key and `stores\` travel | kept; the set forks | kept | ended |
+| an event archived (#76) | by its kind (3-K.9) | ended (6-U15) | ended (6-U15) |
+| another computer, another Windows account, or a rebuilt profile (portable; installed, a lost key that leaves a sealed value unopened stops the node first, U1's exit 3, #26) | held aside until the token adopts them | ended | ended |
+| the machine key lost and made new, its old records kept | held aside as `changed`, with the words "made new at this start" | ended | ended |
+| the first start of 0.6.0 on this laptop | keyed as found (`accounts.keyed`), but those that can manage AGMessage or reach past their halls wait for the token | ended | ended |
+| `accounts.json` written into, or put back two saves or more, or below a change that took a right away | held aside | wait for their account, unwritten | kept |
+| a sign-in file written into, or put back two saves or more | kept | ended, that file's | ended, that file's |
+
+### 3-K.9 Events, the import and the install
+
+- **#76 (U15), an event archived.** This unit adds to its order, by the one writer:
+  - **refused first** while the stores are `keyless` or `unread`, or accounts are held aside: "Archive this event… waits
+    until the accounts are open (Admin → Accounts held aside)". The archive's pin and its claim could not be written,
+    or would vouch for accounts that are not open.
+  - **step 2:** the three stores' lanes are flushed, and then the record's;
+  - **before step 3, the claim:** the set record gains `archiving: {time, kind, next, accounts: {gen, d}}` and the pin
+    `archived[<time>]: {gen, d}` (the accounts file the archive takes), saved with `storesHead.flushSync()`. When that
+    write fails, the archive is refused with the lane's error, and nothing has moved;
+  - **step 7:**
+    - **continue** opens the archive's `accounts.json` by 3-K.5's rules against its pin, `archived[<time>]` of the
+      archive continued, and not against the live `gen`. A file that is not the one archived (an older copy, another
+      set's, changed) is held aside, as at a start;
+    - **copy** takes the accounts in memory (the current event), or an archive's, opened against its pin;
+    - **fresh** writes an empty accounts file;
+    - under all three, the three stores are saved at once under the folder's set (`flushSync`), the sign-ins empty
+      (6-U15 ends them), so the record names the new event's saves;
+  - **the claim clears** once step 7's saves have landed: `archiving` becomes `null`, saved at once.
+  - **At the next start, an archive under way is the claim, never a pin.** `stores.open()` reads `archiving`:
+    - set, and the live stores absent: an archive under way, not `missing`. 6-U15's finish, which runs before the
+      server serves, then runs step 7 through the opened stores;
+    - set, with no `.partial` and no archive of its time: a stop before step 3. The claim and its pin are cleared,
+      nothing having moved.
+  - **6-U15 finishes a `.partial` only when the claim names it:** `archiving.time` is its time, and its `event.json`'s
+    kind and next equal the claim's.
+    - Any other `.partial` is set aside, renamed `.<time>.unclaimed`, and said (one console line, health, the row
+      `event.unclaimed`). The live stores open by 3-K.5, and nothing is archived or continued.
+    - So a `.partial` written into the data folder ("next: continue" an older archive) cannot bring an older event's
+      accounts back, though that archive's own pin would pass.
+    - In a keyless run no `.partial` is finished or set aside: it waits for a start with the key, and the stores are
+      `keyless`.
+  - **"Delete this archive's contents…"** removes the archive's accounts. Its pin stays, and a continue of that
+    archive then reads `missing`: the first account is made with the token.
+- **#75 (U14), the import.**
+  - `stores\` travels with `machine.key`, `tls.json` and `audit\`, its `latest.json` included, so the installed node's
+    first start is a move from the set this laptop saved last.
+  - Its verify adds: "no account held aside and no account's sign-in ended" at the installed node's first start, which
+    is a move and forks the set (3-K.5). The token's sign-ins end under the node's new token, silently (3-K.8).
+  - `forget-keys` removes `stores\` with the rest of the profile's `%LOCALAPPDATA%\AGMessage`.
+  - A source keyed under another account's key is already refused ("this folder's keys are another Windows account's").
+- **#72 (U12), the machine folder.** `keys\stores\` is made by the server inside `keys\` and takes `keys\`'s list: the
+  server task's SID may modify; SYSTEM and Administrators have full control. No new grant.
+  - This unit stands on that list (3-K.11). 3-H.13's line, that `keys\` is readable and writable only by the account
+    AGMessage runs as, administrators aside, is its line too.
+- **#27 (U2):** `/api/setup` takes the typed token in both channels (3-K.7).
+- **#74 (U17):** the rights table's `token` row (6-U.5.1) reads "the break-glass sign-in, Accept, the token's export,
+  the first admin account, and adopting accounts held aside".
+- **#26 (U1):** nothing is written before the hold. The stores' records are written in `open()`, after it, as the
+  audit's are.
+  - Under `task`, a store or a record that cannot be read is not exit 3, unlike a key. The node serves guests, screens
+    and the token while account sign-ins wait, and `server.log` and "This laptop" (#28) say why.
+  - The watchdog's "stays stopped" would otherwise hold a show down for an antivirus's EBUSY.
+
+### 3-K.10 Rollback, and every reader
+
+- **AGMessage 0.5.1 on keyed files:**
+  - it reads `accounts.json` (`data.users`, `accounts.js:165`) and ignores the save's fields and `m`;
+  - it signs nobody in from the keyed sign-in files: its lookup is `sha256` (`:363`, `:436`), and its tag is not `k`;
+  - it writes plain files at its first save.
+- **Back on 0.6.0:**
+  - accounts are `plain` ✕ and held aside until the token adopts them (3-K.6). Each account 0.5.1 left as this laptop
+    last saved it is listed so, ticked and without a one-time password; one 0.5.1 changed reads "changed since";
+  - the sign-ins end.
+  - This becomes the fifth "not kept" item in the design's §1.8 (after 3-H.11's fourth), the CHANGELOG and README.txt:
+    "going back to 0.5.1 and forward again holds the accounts aside until the token adopts them, and signs everyone out".
+- **Health** (`/api/health`, admin or host, `server.js:485-489`):
+  - `healthFacts()` gains `signins`, at the end:
+    `{accounts: {state, count, held, words}, sessions: {state, kept, ended, words}, adminSessions: {state, kept, ended,
+    words}, record: {state, words}, set, gens}`;
+  - `storesHead` is in `saveLanes()`, so `saves.stores.storesHead` carries its writes, error and failures;
+  - Admin → Health prints each `words` that is not `ok`, and the panel of 3-K.6 for the token.
+- **`/api/admin/me`** keeps #5's `token` and gains `held`, at the end; so does the admin page's settings answer
+  (`server.js:1599`) (3-K.6).
+- **`/api/auth/me`** gains `held`, at the end (3-K.6).
+- **The console** (installed: `server.log` and "This laptop", #28): one line per store that is not `ok`, after the token
+  block and the audit's question, and the first start's line.
+- **The audit rows** (the design's §2.7 gains them). None carries a password, a token, a sign-in's id or hash, a key, or
+  a digest that is not a file's:
+
+  | Action | When | Target | Words |
+  |---|---|---|---|
+  | `accounts.keyed` | the first start keys 0.5.1's accounts | `accounts` | `12 accounts from AGMessage 0.5.1 keyed as accounts.json held them; waiting for the token: ana, ben, carl` (names past 60 characters read "and 3 more") |
+  | `accounts.held` | `open()` holds them aside (all of them, or at `first` those that wait) | `accounts` | the state's words (3-K.5), with the copy's file name |
+  | `accounts.behind` | one save behind | `accounts` | `one save behind (814 of 815)` |
+  | `accounts.adopted` | the token adopts | `accounts` | `adopted 9 (one-time passwords: ana, ben); 3 left out` |
+  | `accounts.fresh` | Start with no accounts, or Leave the rest out | `accounts` | `started with no accounts; 12 kept aside in accounts.held-….json` |
+  | `signins.ended` | `open()` ends a sign-in file's sign-ins | `sessions` or `adminSessions` | `14 sign-ins ended: from AGMessage 0.5.1` / `…: saved under another machine key` / `…: changed after AGMessage saved them` |
+  | `stores.record` | a record outside the data folder that was changed, or could not be read | the record's file name | `changed: kept aside as set-….changed-….json` / `could not be read (EBUSY): the stores were not opened this start` |
+  | `stores.changed` | a store's file on disk failed its check when a save came to keep it as the `.bak` (3-K.3) | the store's file name | `accounts.json was changed while AGMessage ran: kept aside as accounts.changed-….json; AGMessage's own save is written over it` |
+  | `event.unclaimed` | a `.partial` archive folder that no archive under way names was set aside (3-K.9) | the folder's name | `a .partial folder no archive under way names was set aside as .2026-10-31T14-02-00-000Z.unclaimed; nothing was archived or continued` |
+
+  Through `login.refused` (accounts held aside, or waiting) and `login.token.fail` (at adoption, at setup), the existing
+  rows carry the rest.
+- **The pages:**
+  - `join.js` (the held words; the waiting line; the setup pane's token field);
+  - `admin.html` and `admin-plus.js` (Health's lines; the Accounts held aside panel; the held words in place of "No
+    accounts yet");
+  - `users.js` (the left-out line).
+  - No page draws a state by colour alone. Each line carries △ or ✕ beside its words, as 3-H.7's marks do.
+- **The catalogue and right-click** (#24, 5-§16):
+  - the panel's buttons are catalogue rows: `accounts.adopt` ("Adopt the ticked…"), `accounts.fresh` ("Start with no
+    accounts…"), `accounts.more` ("Adopt more…") and `accounts.leave` ("Leave the rest out…");
+    - may: the token at the laptop;
+    - verb: `POST /api/accounts/adopt`;
+  - each listed account's menu is "Adopt · Leave out · With a one-time password", in step with its ticks.
+- **The words** (#17, unit W's copy deck): "held aside", "adopt", "save" (a store's numbered save), "the token at the
+  laptop", "as this laptop last saved it" and "reaches past its halls".
+- **The context, the hello, the AI's brief and the halls board:** nothing. Accounts and sign-ins are not theirs.
+
+### 3-K.11 What it cannot defend
+
+Said in `docs/ACCOUNTS.md`, `SECURITY.md`, `README.txt` and the header of `lib/keyedstore.js`:
+
+- **This Windows account** (portable), and installed **the server task's SID, SYSTEM and Administrators**.
+  - They hold `machine.key`, or can take it (`keys\`'s list, #72). So they derive every key of 3-K.2 and write stores and
+    records that check.
+  - So does anyone holding a copy of `machine.key` taken earlier, and every laptop cloned from one image (3-H.13).
+- **In the portable layout, whoever can write the AGMessage folder** can change the code (3-H.1). The unit holds there
+  only where the data folder is written by someone who cannot read the key folder (3-K.1).
+- **The installed service's access lists.** The unit stands on `keys\`'s list.
+  - `data\` widened (Explorer's "Continue") is what it defends.
+  - `keys\` widened is not defended: whoever is added to it holds the key.
+  - The papers send people to the admin page and the Start menu, never into these folders (6-U15).
+- **A whole machine put back** (keys, records and data from one moment): an older save is then the newest, as the
+  audit's 3-H.1 says of its chain.
+- **One save put back** undoes a store's last save. Every save that takes a right away or ends a sign-in is saved
+  twice and recorded at once, so what it undoes is only a sign-in's stamp, a rehash, a touch or a new sign-in (3-K.4).
+  It is said, and the audit log keeps its rows.
+- **A record that lags:** a crash between a store's rename and its record's, or a record that could not be written,
+  leaves the record behind its store; a save put back that is not older than it reads `ok` (3-K.4). Health names a
+  failing record lane.
+- **The first start trusts what it cannot check, narrowed.** On a laptop that has never keyed, a plain folder's accounts
+  that cannot manage AGMessage and do not reach past their halls are keyed as found (3-K.5). A Staff account added, or
+  a Staff password changed, in a folder stripped to plain before it reaches a new laptop is taken; its reach is its
+  halls. Those that can do more wait for the token.
+- **An `elsewhere` copy cannot be checked.** Its accounts are the copy's own claim. The one-time passwords that start
+  ticked (3-K.6) keep its passwords from opening any account that can manage AGMessage or reaches past its halls; an
+  account the person unticks, or a Staff account adopted without one, is taken as the copy says.
+- **Reading, not writing.** The stores still hold names, usernames, scrypt hashes, addresses and browsers. A reader can
+  guess weak passwords offline at scrypt's cost, as today. Keying gives integrity, not secrecy.
+- **Removing.** Whoever can write the folder can still remove the stores: sign-ins end and accounts are missing (3-K.5).
+  That is integrity without availability; it is said, and the token makes the first account again.
+- **What this unit does not key** (3-K.16):
+  - `secret.key` stays in the data folder (answer 42), so its reader can still mint guest identities and invites
+    (`guard.js:61-81`). That is a guest's reach, bound to one room and role;
+  - `settings.json`: `remoteAdmin` and `requireHttps` (`server.js:1578-1581`), the Stagewatch link (`:1570-1577`), the
+    Patterns and PlayMap links (`:1216-1246`) and the certificate pins (`:145`);
+  - the room files: locks, codes and `guestWeb`;
+  - `pages.json`: On stage seats and views.
+- **A cookie taken from a browser:** unchanged for accounts. A token cookie now counts only at the laptop (3-K.7).
+
+### 3-K.12 Synchronous calls, lanes and modules
+
+- **`lib/keyedstore.js`** (new, a store module in 5-§14.2's layer "Stores, one lane each": it requires `resilience` and
+  Node's `crypto`, never `secretbox`):
+  - a file's seal and its check;
+  - the keyed hash of a sign-in id;
+  - the records outside the data folder, the accounts' digests and `latest.json`;
+  - `open()`'s decisions, the move's fork and the first start's rule;
+  - the held copy;
+  - the archive's claim and pin (3-K.9).
+  - **0 synchronous calls:** every read is `resilience.readText`, every write a `WriteLane` or `writeFileAtomic`.
+  - 5-§14.2's table gains it, and `modules.test.js` (#10, 5-§14.4) holds it.
+- **`lib/resilience.js` stays at 11** (#5's count, with `placeId`'s realpath).
+  - `readText(file)` returns `{text, code}`, `code` being `''` when read. It takes the place of `readJsonWithBak`'s
+    `readFileSync` (`resilience.js:105`), and `readJsonWithBak` is rewritten over it, so the count does not move; the
+    other `readFileSync` is `writeFileAtomic`'s read of the old file (`:87`).
+  - `WriteLane` gains two options: `onWritten()`, called after a write lands and never for a write that failed; and
+    `worthKeeping`, passed through to `writeFileAtomic` with an `onUnkept(old)` called with the text it did not keep
+    (3-K.3).
+- **Unchanged:** `lib/accounts.js` at 0, `lib/secretbox.js` at 3 (its labels are data), `lib/guard.js` at 3 and
+  `server.js` at its count.
+- **The lanes:**
+  - `accounts`, `sessions` and `adminSessions` stay as today (`server.js:130`), writing keyed files;
+  - **`storesHead`** is new: `new WriteLane(<set record>, {delayMs: 200, keepBak: true, mode: 0o600})`, in
+    `saveLanes()` after the three stores, so `flushLanes()` writes the stores first and their record last;
+    `latest.json` is written from its `onWritten`;
+  - 5-§14.4's rule (e), `saves.built` equals the lanes `saveLanes()` names (#10), holds it;
+  - a lane whose store is `unread`, `keyless` or held aside takes no save this run, nor does the sessions lane while
+    the accounts are not loaded (`save()` returns at once, and health says so).
+- **server.js** (the composition root) derives the five keys through `secretbox.derive`. It builds one
+  `KeyedStores({keys, kid, made, records: <keyDir>/stores, dataDir: DATA_DIR})`, passes each store its part, and calls
+  `stores.open()` after `audit.open()`.
+
+### 3-K.13 Tests
+
+- **No test reaches the real key folder.** The stores refuse to start without `keyed` (3-K.5).
+  - Unit tests pass fixture keys (`// secret-scan: fixture`) and a temporary records folder.
+  - Server tests derive from `srv.dataDir + '-keys'`, as 3-H.12's do.
+- **No assertion depends on the 200 ms timer:** every simulated restart calls `flushLanes()` first.
+- **The first admin account takes the token in tests too.** `test/helpers.js` gains `setupAdmin(base, body)`, which
+  posts `/api/setup` with `token: TOKEN` (`helpers.js:12`). The 39 loopback `/api/setup` calls of ten files use it:
+  `accounts.test.js` 9, `halls.test.js` 7, `shownet.test.js` 7, `sessions.test.js` 6, `displays.test.js` 2,
+  `inputs.test.js` 2 (its two setups, `:33` and `:69`), `showbus.test.js` 2, `stagekey.test.js` 2, `deskresults.test.js`
+  1 and `resilience.test.js` 1. The tests that assert a refusal post without it.
+- **The existing tests** at `accounts.test.js:210-238` keep their claims under the fixture: "only a hash on disk", "kept
+  across a restart under the same token", "ended by a new token", "a day at most", "the ended ones go".
+  - `'tag-one'` and `'tag-two'` become two tokens.
+  - "only a hash on disk" also finds neither the sid nor `sha256(sid)` in the file.
+
+| Test | Holds |
+|---|---|
+| a token sign-in planted | a server signs in with the token, then is killed (SIGKILL) and started again with the same `ADMIN_TOKEN` and key folder, after the test has written into `admin-sessions.json`, in turn: a record `{h: sha256(S)}` with the file's own `k` (the 0.5.1 attack); `{h: HMAC(<another key>, …)}`; the whole file re-sealed under a fixture key that is not the machine's. In each case `agm_admin=S` is refused: `/api/admin/me` `ok: false`, a 403 on `/api/admin/transcript/<code>`, and the socket not admin. `signins.adminSessions.state` is `ended` with its words, `signins.ended` is written, and the changed file is kept aside. The genuine sign-in ended too (the file failed whole), and a new token sign-in works |
+| an account's sign-in planted | `{h: sha256(T), uid: <the admin's id>, epoch, created: now, seen: now}` written into `sessions.json`, and a restart: `agm_s=T` is nobody (`/api/auth/me` `account: null`). Likewise a Staff account's own genuine sign-in with its `uid` and `epoch` changed to the admin's, a `seen` moved forward, and a signed-out sign-in copied back: each ends every sign-in of that file, and none is the admin. A keyed record (written with the fixture key, as a key holder could) whose `seen` is 10 minutes past now is dropped at load |
+| an account minted or changed | each written into `accounts.json`, then a restart, in turn: an admin account added with a hash made by `hashPassword`; an admin's `pw` replaced; a Staff account's role raised, and `grant: ['settings.manage']`; `disabled: false`; `mustChange: false`; a second `ben`. Each reads `changed`: login is refused with the held words (503) and the genuine admin's too, `/api/auth/me` and `/api/admin/me` have `held`, the admin page shows the held words and not "No accounts yet", `/api/setup` is refused with or without the token, `Accounts.create({firstAdmin: true})` is refused, `accounts.held-….json` is byte for byte what was read, and `accounts.held` is written. A genuine sign-in of the untouched `sessions.json` resolves to nobody; during the hold one request carries its `agm_s` and one sweep runs (`AGM_SESSION_SWEEP_MS` short), and it is still in the file; adopted as it was in the same run, its account's sign-in works again. The panel lists the added account unticked, with its confirmation, and its one-time password ticked. With `AGM_OPEN` set and nothing for the audit log to ask, the stubbed opener gets `/admin` (2-S.3's opener test, as 3-H.6's line) |
+| relabelled | a keyed `accounts.json` with an admin's `pw` replaced and its `kid` changed to 16 other hex characters, at a path this laptop recorded: `changed` ✕, not `elsewhere`; the same with the folder record removed and the set kept: `changed` ✕. A genuine folder of key folder A at a new path under key folder B: `elsewhere` ✕ with "This laptop cannot check this copy"; adopted with the defaults, each account that can manage AGMessage or reaches past its halls signs in only with its one-time password, its copied password failing, and a Staff account with its own; unticking a ticked one-time password without `keep` is refused |
+| stripped to plain | a keyed folder stripped to plain `v: 1` (its `.bak`s removed) with an admin and a manager added, opened on a fresh key folder: `first`; both wait (held, refused at login as an unknown name, the page's waiting line), the Staff accounts sign in, the console names the waiting ones; one tick each and the typed token open them with no one-time password. A key folder whose `keyed.json` fails its MAC, with a plain folder: `plain` ✕, not `first`. A plain `accounts.json` beside a keyed `.bak` on a fresh key folder: `plain` ✕. A key folder whose `machine.key` is removed (made new at the start) with its old records: `changed` ✕ with the "made new at this start" words |
+| removed | `accounts.json` and its `.bak` removed: `missing`, with the folder's count and save in the words; `/api/setup` from loopback without the token is refused (portable channel), with a wrong token is counted, and with the typed token makes the first admin. `accounts.json` alone removed: its `.bak` is loaded by the rule of saves (`behind`), with "accounts.json was missing; its .bak was loaded" |
+| one save behind, and saved twice | an account made as an admin, then made Staff (`update`), then `accounts.json` replaced by its `.bak`: the account is still not admin (the `.bak` holds the demotion), the state is `behind`, and `accounts.behind` is written. A sign-in's stamp then the `.bak` put back: `behind`, the stamp lost and said. A sign-out, then `sessions.json` replaced by its `.bak`: that sign-in is still ended. A demotion's first write landed and the process killed before its second (a stubbed lane): the record already names it (`floor`), and the save before it put back reads `older` ✕. After a `behind` load the next save's `gen` is the record's plus one |
+| older, other, plain | a copy two saves old put back: `older` ✕, held. `accounts.json` from another folder of this machine (another set): `other` ✕, held. Another folder's genuine newest stores of this machine put at a new path before its first start, while another set is `latest`: `other` ✕, naming both paths. A plain `v: 1` file where `keyed.json` exists: `plain` ✕, held. The sign-in files in each case: `ended` |
+| repeated | a held copy with two `ben` (the admin, and a Staff record with another password): the panel marks both "repeated", an adoption opening both is refused, and one adopted with the other left out works; at `first`, both are held; a keyed file that checks with a repeated `username` (sealed with the fixture key) reads `changed` |
+| the lock | five wrong tokens at the token sign-in, then the right one: signed in, and the panel drawn; five wrong at adoption, then the right one: adopted; the same at setup; a sixth and seventh wrong one while locked are refused 429 and write no row; Accept while locked is refused, as 3-H.8 has it |
+| a restart keeps genuine sign-ins | an account and the token signed in, then a SIGKILL, then a start with the same `ADMIN_TOKEN` and key folder: both cookies work, the socket is admin for each, and the states are `ok`. A start with a new token: the token's sign-in ended (silently, no `signins.ended`), the account's kept. A power cut simulated (the record saved after the store's rename, then the store's rename undone): `behind` △, loaded, no account held |
+| the first start on 0.5.1 files | a 0.5.1 folder seeded (three accounts: an admin and two Staff; `sessions.json` with `sha256` hashes; `admin-sessions.json` with 0.5.1's tag) and a fresh key folder: the Staff accounts load and their passwords sign in, the admin waits; `accounts.json` is now `v: 2`, its MAC checks with the fixture key, and its bytes before the tail parse to the keyed users; `accounts.keyed` names the waiting admin; 0.5.1's cookie is nobody, and `signins.ended` says "from AGMessage 0.5.1"; `keyed.json` exists; the console has the first start's line. A stop between the stores' writes and the records (a stubbed `fs`): the next start reads `unrecorded` △ and loads, never `plain`. A second plain folder then started at another path on that key folder: `plain` ✕, held, not keyed |
+| another machine, and adoption | a folder run under key folder A (accounts made, a sign-in and a token sign-in), stopped, copied to a new path and started under key folder B: `elsewhere` ✕ with A's kid quoted as its claim; the sign-ins ended; login refused with the held words; `/api/setup` refused. Adoption is refused without the token, with a wrong token (counted by `adminLockout`, `login.token.fail` "at adoption"), from off the host (a non-loopback `Host`), through the tunnel (`cf-ray`), with a stale digest, and for an admin-level id without its `confirm`. With the typed token: the adopted accounts sign in; one given a one-time password signs in with it and must change it, and its old password fails; the rest stay out; `accounts.adopted` names the usernames and holds no password (searched by value); the held copy is unchanged; a restart under B keeps them all `ok`. Adopt more… in a later run after the held copy's bytes are changed: refused. **Start with no accounts**, then setup with the token |
+| as this laptop last saved them | a folder whose keyed files are rolled back to plain by 0.5.1's rule and forward again: each account 0.5.1 left as it was reads "as this laptop last saved it", ticked, no one-time password; one whose `pw` was changed reads "changed since", its one-time password ticked |
+| a move on this machine | a folder copied to a new path and started under the same key folder, the old copy being the one this laptop ran last: every account and the account's sign-in are kept; the files carry a new set, and the new path's folder record and `latest.json` name it. The old copy started again loads its own set. The old copy's `accounts.json` then copied into the new folder reads `other` |
+| planted while running | a byte of `accounts.json` changed while the server runs, then a save: the changed file is kept aside as `accounts.changed-….json`, not made the `.bak`; `stores.changed` is written; the `.bak` holds the genuine save before |
+| unread and keyless | a stubbed EBUSY on `accounts.json`: after the run `accounts.json` and its `.bak` are byte for byte unchanged; login is refused with the `unread` words; setup is refused; health says so. A stubbed EBUSY on `machine.key` (3-H.12's keyless run): no store file changes byte for byte, account sign-ins wait with the `keyless` words, the token signs in for this run, and a start with the key loads everything as before. A set record that cannot be read (EBUSY): all three stores `unread`, an older genuine save of that set not loaded, and that record byte for byte unchanged after the run. No set record (ENOENT) beside keyed files: `unrecorded` △, loaded, the records written |
+| at the laptop | a genuine token cookie sent with `cf-ray`, or with a `Host` that is not a loopback name, is not the admin (403 on `/api/admin/transcript/…`, no detail in health, the socket not admin); at `localhost` it is |
+| domain separation | an accounts file sealed with Ks, or a sessions file with Ka, fails; a session's `h` made with the kind `token sign-in` does not resolve; a sessions file renamed `accounts.json` reads `changed` |
+| no secret | the five keys, `ADMIN_TOKEN`, a session token and its `sha256`, a token sign-in's id and its `sha256`, and the one-time passwords an adoption gave appear in no store file, `.bak`, held or changed copy, record outside the data folder, `/api/health`, `/api/auth/me`, `/api/admin/me`, `/api/accounts/held` or audit row (searched by value, hex and base64). 3-H.12's "no secret" row and #6's export search gain them |
+| events and the import (they are in, #75, #76) | an event archived claims and pins its accounts before step 3, and the claim clears after step 7; a continue brings them back `ok` at the next `gen`; the archive's `accounts.json` replaced by an older copy of the same set before the continue reads `older` and is held. Copy: the new event's accounts are keyed and its sign-ins empty. Fresh: an empty accounts file is keyed, and setup takes the token. A `.partial` written into `data\archive\` naming "continue" of an older archive, then a restart: nothing is archived or continued, the live accounts open `ok`, the `.partial` is set aside as `.unclaimed`, and `event.unclaimed` is written. A genuine stop between steps 3 and 7 (a stubbed rename): the next start finishes it. Archive this event… while accounts are held aside, or in a keyless run: refused. The import: `stores\` is in the bundle, the installed node's first start has every store `ok` (a move: the set forks), none `elsewhere`, and `forget-keys` removes `stores\` |
+| rollback | the keyed `accounts.json` read by 0.5.1's rule (`accounts.js:165-166`, copied into the test) yields every account; no cookie resolves in the keyed sign-in files by 0.5.1's `sha256` lookup or its tag; files then written plain, as 0.5.1 writes them (`:170`, `:328`, `:420`), read `plain` ✕ on this build: the accounts held, the sign-ins ended |
+| guard rails | `lib/keyedstore.js` at 0 synchronous calls; `lib/resilience.js` at 11 with `readText`; `lib/accounts.js` at 0; `modules.test.js`'s layers include `lib/keyedstore.js` in Stores; `saves.built` equals `saveLanes()`, `storesHead` included |
+| speed | a seeded 5,000 sessions, 1,000 accounts and 50 token sign-ins: `stores.open()` under 250 ms, the same stall bound as the audit's fence (`accounts.test.js:539-565`, which bounds the event loop's longest wait, `:557`; 3-H.12) (measured 10–11 ms and 4 ms for the two big files); a save of the 5,000 sessions under 50 ms (measured 12–14 ms); a set record with 1,000 accounts' digests written under 50 ms. A sign-in's lookup is one HMAC (3 µs measured), and no fence is added for it |
+| page | the browser smoke: the sign-in page on a held folder shows the held words and no tabs, and on a `first` folder its waiting line with the tabs; the setup pane asks for the token; signed in with the token, Admin → Accounts held aside lists the seed's accounts with the admin-level one unticked, its confirmation line, its one-time password ticked, and the one-time passwords shown once after Adopt; signed in as an admin account, the left-out line on the Accounts page |
+
+### 3-K.14 Papers
+
+- **`docs/ACCOUNTS.md`:**
+  - sessions and the token's sign-ins are keyed hashes in files keyed whole, with keys derived from the machine key
+    outside the data folder;
+  - what a restart keeps (3-K.8);
+  - the first start of 0.6.0 ends sign-ins, keys the accounts, and holds those that can manage AGMessage or reach past
+    their halls until the token opens them;
+  - a folder on another computer or Windows account holds its accounts aside until the token adopts them, and how;
+    which one-time passwords start ticked, and why;
+  - one save behind;
+  - the first admin account is made with the token;
+  - the token's sign-in counts only at the laptop;
+  - what it does not defend (3-K.11).
+- **`SECURITY.md`:**
+  - a writer of the data folder can no longer plant a sign-in, mint or change an account, or put an older one back
+    unseen;
+  - the limits of 3-K.11, the key holders first.
+- **`README.txt`:**
+  - **Upgrading** adds "After the first start of 0.6.0 everyone signs in once more; their accounts are kept. Admin and
+    project manager accounts wait until you open them at Admin → Accounts held aside, with the token from this window";
+    and "Upgrade from the copy you ran last on this laptop";
+  - **Moving AGMessage to another laptop** (new): the accounts wait for the token at Admin → Accounts held aside,
+    sign-ins end, admin and project manager accounts get one-time passwords, and the first admin account is made with
+    the token;
+  - the setup words;
+  - the rollback note (the fifth "not kept" item).
+- **`README.md`:** the feature line's "accounts and sign-ins" reads "accounts and sign-ins keyed to the laptop".
+- **`docs/DESIGN.md`** (medical practice, `:19-28`): a row "Accounts that a copied or edited folder cannot carry", after
+  21 CFR 11.10(d), "limiting system access to authorized individuals"
+  ([Cornell LII](https://www.law.cornell.edu/cfr/text/21/11.10)), naming `lib/keyedstore.js`: keyed files, a record
+  outside the data folder, and adoption by the token at the laptop.
+- **`docs/ANALYSIS.md:94-98`:**
+  - `lib/keyedstore.js` at 0;
+  - `resilience.js`'s `readText`, at the same cap;
+  - the module layer's new row;
+  - the "no secret" search's new values.
+- **`CHANGELOG.md`** (under 0.6.0): the unit, with its evidence class, "the owner's answer of 2026-10-31 ('Add it'),
+  and the plan's extension to account sessions and accounts".
+- **`CLAUDE.md`:**
+  - "where things live" gains `app/lib/keyedstore.js` (the keyed stores and their record outside the data folder);
+  - "Constraints that bite" gains "a store that holds a way in (accounts, sign-ins) is keyed through
+    `lib/keyedstore.js`, and only ENOENT means it is absent".
+- **The design:** §1.8 (the fifth "not kept" item) and §2.7 (3-K.10's rows).
+- **Part 6's papers** (6-U.9): `docs/INSTALL.md` names `keys\stores\` and the import's carrying it.
+
+### 3-K.15 The unit
+
+- **[#80]** **unit K: the sign-ins and the accounts are keyed to the machine key. A sign-in or an account written into the
+  data folder is dropped and said, never trusted; a restart keeps the genuine ones; a folder on another machine waits
+  for the token at the laptop** (the owner's answer of 2026-10-31, "Add it", and the plan's extension).
+  - `lib/secretbox.js`: the five labels in `derive`'s allow-list; whether this run made the key.
+  - `lib/resilience.js`: `readText`; `readJsonWithBak` over it; `WriteLane`'s `onWritten` and `worthKeeping`.
+  - `lib/keyedstore.js` (new): 3-K.3 to 3-K.6, and the archive's claim (3-K.9).
+  - `lib/accounts.js`:
+    - the three stores take `keyed` and fill their maps at `open()`;
+    - the keyed hashes, and sign-ins stamped ahead of now dropped;
+    - the token's tag from Kt;
+    - "saved twice", and the record at once (3-K.4);
+    - the held state, the waiting accounts, and the kept sessions;
+    - `create({firstAdmin})` refused while held;
+    - `adopt()` with one-time passwords.
+  - `lib/http-accounts.js`:
+    - login's held refusal;
+    - `/api/auth/me`'s `held`;
+    - `/api/setup` with the typed token, in both channels, the token first;
+    - `GET /api/accounts/held` and `POST /api/accounts/adopt`, with the typed check passed in from server.js.
+  - `server.js`:
+    - the keys and the records injected;
+    - `stores.open()` after `audit.open()`;
+    - `isValidAdminCookie` and the socket's `tokenAdmin` at the laptop only;
+    - the token sign-in's order, the typed token before the lock;
+    - `saveLanes()` with `storesHead`;
+    - health's `signins`; `/api/admin/me`'s and the settings answer's `held`;
+    - the console's lines;
+    - the opener's `/admin` when accounts are held aside.
+  - The pages: `join.js` and `index.html` (the held words, the waiting line, the setup pane's token field);
+    `admin.html`, `admin-plus.js` (Health's lines, the panel, the held words in place of "No accounts yet"); `users.js`
+    (the left-out line); `styles.css`.
+  - Into earlier units' code, as this order places it last (3-K.9): #76's archive steps, its claim and its finish, #75's
+    import and `forget-keys`, and the catalogue's rows (#24).
+  - The tests of 3-K.13, `test/helpers.js`'s `setupAdmin` with the 39 calls moved onto it, and the papers of 3-K.14.
+- **Needs:** #5 (`derive`, the keyless run, `placeId`, the records' pattern, Accept's typed check, `/api/admin/me`'s
+  `token`); #6 (`audit.export` among the rights that can manage AGMessage; the export's "no secret" search); #4 (the
+  opener); #10 (the module fence and `saves.built`); #17 (W: the copy deck its words join); #24 (the catalogue's rows
+  on the admin page); #26 (U1: nothing written before the hold; only ENOENT is absent); #27 (U2: setup with the token);
+  #34 (U4: `flushLanes`' order); #72 (U12: `keys\`, where `stores\` lives); #74 (U17: who holds the token); #75 (U14:
+  the import carries `stores\`); #76 (U15: the archive's steps, its pins and its finish).
+  - It touches the install units #72, #74, #75 and #76 (and #27), each in a line its text names (3-K.9).
+  - Nothing in 0.6.0 needs it but the close (#81).
+- **In 0.6.0:** must. The owner asked for it by name.
+- **What can move:**
+  - nothing in it waits for the account fields #43, #69 and #71 add, since a file's MAC covers whatever the file holds.
+    It could land right after #5;
+  - the order places it at #80, so its lines into #72, #74, #75 and #76 are written once, into code that exists.
+
+### 3-K.16 Risks, left for later, and what the owner may narrow
+
+- **Risks:**
+  - **Every upgraded laptop signs everyone out once** at its first 0.6.0 start, and its admin and project manager
+    accounts wait for the token once, at the page where the audit's Accept is asked anyway (3-K.5). The papers say so.
+  - **A folder on another computer, another Windows account or a rebuilt profile** has no account sign-in until the token
+    adopts its accounts, and its admin-level accounts start again with one-time passwords. Guests, screens and the
+    token go on.
+  - **Upgrading a copy that is not the one this laptop ran last** reads `other`, a false alarm the token adopts in one
+    step; the words name both folders (3-K.5).
+  - **Two Windows accounts on one portable folder** alternate keys. Each switch holds the accounts aside and ends the
+    sign-ins, as each writes `audit.rekey` (3-H.15). The papers say one account runs the show; installed, the key is the
+    node's.
+  - **A power cut that loses two saves of a store** while keeping the record's later write would read `older`, a false
+    alarm, and the token adopts. Not measured. Saves are 200 ms or more apart and each is fsynced before its rename.
+  - **The first start vouches for 0.5.1's accounts that reach only their halls, as they are.** A change made to them
+    before the upgrade is kept. The others wait for the token, and their row lists them.
+  - **The held copies and the records pile up:** under 1 MB each, never pruned, as 3-H.15's records.
+  - **A store or record that cannot be read at start** leaves account sign-ins waiting until a start that can. Nothing
+    retries without a measured cause.
+- **Left for later:**
+  - keying `settings.json`'s switches, links and pins, the rooms' locks and codes, and `pages.json`'s seats;
+  - `secret.key` out of the data folder. Answer 42 keeps it, and moving it would end every guest identity and invite at
+    each move;
+  - accounts carried to another laptop signed by the source's Ed25519 key (3-H.2), so the target checks them against a
+    fingerprint instead of the token vouching blind. It needs the source laptop to be there;
+  - relaxing #5's `mintedHere` for the token's export, now that a stored token sign-in is keyed. Nothing asked for it,
+    and it would widen a rule two units already test;
+  - **Accept's order** (3-H.8): the review asked that Accept, like the adoption, take a right token while the lock
+    holds, "if the owner agrees". Accept is #5's and keeps the lock first until the owner says so;
+  - pruning the held copies and the records.
+- **What the owner may narrow** (the extension, 3-K.0). Each narrowing says what stays open:
+
+  | Narrowed to | Stays open (3-K.1) |
+  |---|---|
+  | token sign-ins only (the owner's words) | an admin's sign-in planted in `sessions.json`; an account minted, changed, repeated or put back in `accounts.json`; `/api/setup` from loopback when the accounts are removed (portable) |
+  | token sign-ins and account sessions | an account minted, changed, repeated or put back, which signs in by its password; the removal above |
+  | all three, without the record outside the data folder | a store put back to an older save (a demotion or a turned-off account undone), another folder's genuine saves swapped in, and a removal said only as a first start |
+  | all three, the token's sign-in usable off the laptop | a token cookie copied to another device or used through the tunnel |
+  | all three, every 0.5.1 account keyed as found at the first start | a folder arriving at a laptop that has never keyed (a new laptop, a rebuilt profile, a re-made key with no old records) is trusted as found: whoever wrote it can strip it to plain and add an admin. The "another computer" row of 3-K.8 then holds for keyed files only |
+
+### 3-K Alternatives not taken
+
+- **Token sign-ins kept in memory only** (3-H.15's other option): every watchdog restart would sign the laptop out. The
+  owner's reading keeps them across a restart.
+- **A MAC per record:** a writer can mix genuine records from different saves, so a record that checks alone vouches for
+  nothing; and it costs 47–60 ms at start against 10–11 ms (measured).
+- **A MAC over a re-serialised object** (3-H.3's exact round trip): the MAC over the bytes is stricter (a repeated key,
+  an added space) and needs no second `stringify` (measured: 17–25 ms against 12–14 ms a save).
+- **Binding the files to the data folder's path:** a portable upgrade moves the folder (README.txt's Upgrading). The set
+  forks at a move instead, from the set this laptop saved last (3-K.5).
+- **Re-keying 0.5.1's sign-ins at the first start:** the server made none of them. Ending them costs one sign-in each.
+- **Holding every 0.5.1 account aside at the first start:** it would stop account sign-ins on every upgraded laptop
+  until the token is typed. Only those that can manage AGMessage or reach past their halls wait.
+- **Accounts adopted by any token sign-in, without the typed token:** an adoption vouches for data this machine cannot
+  check, as Accept does (answer B).
+- **No "one save behind":** a power cut could then hold every account aside. The `.bak` that rule lets through already
+  holds every change that takes a right away (saved twice, recorded at once).
+- **Exit 3 under `task` for a store that cannot be read** (6-U1's rule for keys): "stays stopped" would hold a show down
+  for an antivirus's EBUSY, while guests, screens and the token can serve.
+- **The lock first at the token sign-in, the adoption and setup**, as at the token sign-in today (`server.js:441`):
+  against a 64-bit token it stops no guess, and it would let a writer who reaches loopback keep the owner out (3-K.6).
+
+### 3-K.17 The review of 2026-10-31: findings not taken, or taken in another form
+
+Every finding was upheld in substance; none was rejected outright. Where this version did less, more or other than a
+finding asked:
+
+- **2, the alternative** (keep "keyed as found" for every 0.5.1 account and say the limit): not taken; it is offered as
+  the owner's narrowing (3-K.16), and the recommended widening (any right beyond the halls) is taken.
+- **5, Accept:** "if the owner agrees" made it the owner's; Accept keeps its order (3-K.16). The token sign-in, which the
+  finding did not name, takes the typed token first too, since the panel is drawn only for it (3-K.6).
+- **5, "wrong ones are counted and written":** counted always, written only while the lock does not hold, so a flood
+  writes at most five rows a minute (3-K.6).
+- **8, "the live loader refuses a repeated username":** taken as `changed` for the whole keyed file, since AGMessage
+  never writes a repeat and one record cannot be refused from a file whose MAC vouches for every record together
+  (3-K.3).
+- **13, the citation:** `admin-plus.js:33` reads the settings answer (`server.js:1599`), not `/api/admin/me`; both gain
+  `held` (3-K.6).
+- **14, "a short digest":** taken as a keyed digest, 32 hex characters, so a reader of the record cannot make an
+  account to match it (3-K.4).
+- **15, "a few minutes":** taken as 5 minutes (3-K.3).
+- **Found while answering them:** the module layers are 5-§14.2's table, not 5-§14.4's (the fences); 3-K.12 cites both.
+  Archive this event… is refused while the stores are `keyless` or `unread` or accounts are held aside, since its claim
+  and pin could not be written (3-K.9).
 
 ---
 
@@ -4126,7 +5178,8 @@ on per hall, off by default, lets a locked hall's backstage code guests show web
 the Board's devices: a matrix of iPads old and new, Android tablets and phones; the floor below which a device cannot
 open a document, which pdf.js's legacy build sets; a stand-in for a document on such a device; and a walk on the owner's
 devices before the tag (unit T). Answer 29 ships units L and V in 0.6.0: there is no 0.5.2. Design question 3 takes the
-design's default. The one question left is whether the owner's "4" meant S4: **(to confirm: S4, not A4)** (§12).
+design's default. The one question left, whether the owner's "4" meant S4, was answered "S4" on 2026-10-31 (§12;
+Part 0 §0.4.10).
 
 The evidence class is the owner's list and answers, the code read at `4483f08` and `89104d8`, Stagewatch's code read at
 `855e8b6`, the vendored files read in `app/public/vendor`, the libraries' own packages and documentation read in the
@@ -4142,7 +5195,7 @@ it is measured.
 
 ## 4-§0. What this addendum changes in the design above
 
-> **Amended by** 5-§0 ("In the stage addendum"), 7-§0.3; its unit numbers are mapped in Part 0 §0.7; its "every unit 22 reads unit 32" is superseded by #80.
+> **Amended by** 5-§0 ("In the stage addendum"), 7-§0.3; its unit numbers are mapped in Part 0 §0.7; its "every unit 22 reads unit 32" is superseded by #81; Part 0 §0.4.10 (S4 confirmed, applied in place).
 
 **The owner's answers, and where each lands:**
 
@@ -4159,7 +5212,7 @@ it is measured.
 | 18 | Files to transfer take more types; AGMessage parses none of them | §4.6.7; unit 26 |
 | 19 | The transcript and the minutes record what was shown to the Board | §5.13, §5.14; units 30, 31 |
 | S1-S16 (2026-10-27) | "Defaults": each reading stands as applied | §12 |
-| S4 | "Admin defined": a setting per hall, off by default, lets a locked hall's backstage code guests show web pages **(to confirm: S4, not A4)** | §5.9.2.2, §5.11, §7.7; unit 19 (amended) |
+| S4 | "Admin defined": a setting per hall, off by default, lets a locked hall's backstage code guests show web pages; confirmed "S4" on 2026-10-31 (Part 0 §0.4.10) | §5.9.2.2, §5.11, §7.7; unit 19 (amended) |
 | 22 | "Board will use a mixture of devices": every stage feature on iPads old and new, Android tablets and phones; the legacy pdf.js build; a device matrix | §5.15; units V, 25 and T, and the walk in 32 |
 | 29 | "wrap into 0.6.0": there is no 0.5.2 | §11; units L and V |
 | Design 3 | "Defaults": the Board is everyone seated On stage, presenters included | §5.9.10, §12 |
@@ -4191,7 +5244,7 @@ it is measured.
   Board tablet that remembered On stage falls back to Observer, and unlocking a hall keeps its On stage seats (§5.9.2.1).
 - **`stage.show` now governs everyone's information pushes**, Tech and Senior included: revoking it stops them (§5.9.2.2).
 - **The request to Stagewatch** keeps the owner's two asks; the other three, and two new ones, are listed as suggested,
-  not yet put to the owner (§5.9.12).
+  not yet put to the owner (§5.9.12). The owner has since asked them too ("Yes", 2026-10-31, Part 0 §0.4.10).
 
 **Revision 4, what changed for the owner** (the answers of 2026-10-27):
 
@@ -4753,7 +5806,7 @@ presenters who join by code need an invite link.
 
 #### 4-§5.9.2.2 The rights: `stage.show` and `stage.web`
 
-> **Amended by** 7-§0.3 (§5.9.2.2: unit G narrows `GUEST_CAPS.board`, now said in this section; Part 0 §0.8 C9); Part 0 §0.8 C14 (`admin:guestWeb` behind `theAdmin()`); S4 is §0.5's open question.
+> **Amended by** 7-§0.3 (§5.9.2.2: unit G narrows `GUEST_CAPS.board`, now said in this section; Part 0 §0.8 C9); Part 0 §0.8 C14 (`admin:guestWeb` behind `theAdmin()`); S4 is confirmed (Part 0 §0.4.10, §0.5).
 
 `canPush(hall)` (§2.6) needs `display.control`, which Staff accounts lack (`lib/rbac.js:49`). Yet a Staff researcher's
 file opens on the Board's panel today, and so does an open hall's backstage guest's. This addendum keeps the account's
@@ -5324,6 +6377,8 @@ minimises) apply, per layer (§5.9.1). What each new kind reports:
 
 ### 4-§5.9.12 A request to Stagewatch for 2.20 (owner answer 17; to hand over)
 
+> **Read with** Part 0 §0.4.10 (answer 3: items 3-7 are asked, moved under "Asked" in place).
+
 > **From AGMessage 0.6.0, for Stagewatch 2.20: what a messenger node needs on the speaker's screens.**
 >
 > **Today** (read at `855e8b6`). A node can put one plain-text line under the
@@ -5337,7 +6392,8 @@ minimises) apply, per layer (§5.9.1). What each new kind reports:
 > (`Placeholders.Render`, `src/Timer.Core/CueLadder.cs:200-217`), and a long line shrinks nothing but the whole screen
 > (`MessageText` at a fixed `FontSize="100"`, `src/Timer.Output/OutputWindow.xaml:82-88`).
 >
-> **Asked** (the owner's two asks, answer 17), in order of need:
+> **Asked**, in order of need: the owner's two asks (answer 17), then the five AGMessage suggested, which the owner
+> asked too ("Yes", 2026-10-31):
 >
 > 1. **Messages a node owns.** A node's message has a slot of its own: it neither replaces the operator's message nor
 >    cancels its acknowledgement; a node clears only what it sent; the operator sees every node's message and can clear
@@ -5349,9 +6405,6 @@ minimises) apply, per layer (§5.9.1). What each new kind reports:
 >    lists the cap `documents` (`app/lib/nodes.js:109`, AGMessage's `docs/NODES.md:8`), which nothing in Stagewatch's
 >    `src/` reads at `855e8b6`. How the bytes travel is Stagewatch's to choose; AGMessage can serve a picture by its
 >    hash to a node key.
->
-> **Also suggested by AGMessage, not yet put to the owner** (each marked so before hand-over; none is assumed):
->
 > 3. **Where a message shows.** Per message, the outputs it reaches: speaker screens only, or every output. AGMessage
 >    sends confidential lines only with the sender told that every output shows them; with this, it could offer
 >    "speaker screens only".
@@ -5369,11 +6422,12 @@ minimises) apply, per layer (§5.9.1). What each new kind reports:
 > test that the public frame and NDI carry neither; a test that a node's message leaves the operator's and its
 > acknowledgement in place.
 
-AGMessage 0.6.0 assumes none of this: it sends one line through today's two paths (§5.9.10). Items 3 to 7 are marked
-"not yet put to the owner" until the owner says otherwise. Revision 2 cited a "Show Bus §12" for window grants, a
-Stagewatch `docs/WHATS_NEXT.md:165-167` and Show Bus `documents` and `media` caps at `docs/SHOWBUS.md:1114-1117`; none
-of them exists on disk (Stagewatch's `WHATS_NEXT.md` is 103 lines at `855e8b6`, and every `SHOWBUS.md`, AGMessage's 228
-lines, Stagewatch's 210 and Patterns' 212, ends at §11), so the request no longer cites them.
+AGMessage 0.6.0 assumes none of this: it sends one line through today's two paths (§5.9.10). Items 3 to 7 were put to
+the owner and are asked with items 1 and 2 ("Yes", 2026-10-31, Part 0 §0.4.10). Revision 2 cited a "Show Bus §12" for
+window grants, a Stagewatch `docs/WHATS_NEXT.md:165-167` and Show Bus `documents` and `media` caps at
+`docs/SHOWBUS.md:1114-1117`; none of them exists on disk (Stagewatch's `WHATS_NEXT.md` is 103 lines at `855e8b6`, and
+every `SHOWBUS.md`, AGMessage's 228 lines, Stagewatch's 210 and Patterns' 212, ends at §11), so the request no longer
+cites them.
 
 ---
 
@@ -5901,7 +6955,7 @@ The owner's answer: "Files, especially confidential, can only be sent to the roo
 
 ## 4-§5.15 The Board's devices (owner answer 22)
 
-> **Amended by** 5-§0 and 5-§15.10 (unit M's rows, its floor leg's removals), 7-§0.3 and 7-§17.7 (the chat view's rows, the layout leg); who builds the shared legs: Part 0 §0.8 C1.
+> **Amended by** 5-§0 and 5-§15.10 (unit M's rows, its floor leg's removals), 7-§0.3 and 7-§17.7 (the chat view's rows, the layout leg); who builds the shared legs: Part 0 §0.8 C1; Part 0 §0.4.10 (the page floor stays, and a Board device below it is not supported; applied in place in §5.15.3 and 4-Gaps).
 
 The owner's answer: "Board will use a mixture of devices." As `DECISIONS.md` reads it: iPads on current and older
 iPadOS, Android tablets, and phones (iOS and Android); every Board feature works on each, with a test matrix and
@@ -6032,9 +7086,9 @@ board addendum's; its rows join the same matrix and the same walk.
   no such device (a fact in the paper, never a pass), and recorded in **`docs/DEVICES.md`** (new): each row's device,
   versions and date, and each feature ✓ or the fallback seen. A ✕ is a defect, fixed before the tag, or a fallback
   that the row and the device's own words then name. The page floor's words (`addendum-arch-ux.md` §15.10) are not
-  such a fallback: a Board device of the owner's below that floor is a ✕ that holds the tag until the floor is lowered
-  for it or the owner retires it from the Board (owner answer 22). The board addendum's rows (the wake lock, a
-  long press, `<dialog>`) join the same paper.
+  such a fallback: a Board device of the owner's below that floor is a ✕ that holds the tag until the owner retires it
+  from the Board or replaces it; the floor is not lowered (owner answer 22; "Keep these as mim", 2026-10-31). The board
+  addendum's rows (the wake lock, a long press, `<dialog>`) join the same paper.
 - **The benches** that named "a Board iPad" run on the rows they now name: D1 and D2 for the image decode limit (unit
   22), D2 and D4 for parse times (units 23 and 27), D2 and D6 for the glance budget (unit 27); and unit T's on a phone
   through the tunnel.
@@ -6399,7 +7453,7 @@ with the words; the Board chip's Web page… shown only with it; `accounts.test.
       "now" line's and the minutes' withholding; `describePage`'s in-use voice.
     - The transcript's confidential words on the laptop or when asked; `file.mark`, `file.download`, the audit words;
       the 🔒 in every reader of §5.14.
-32. **[#80: the close]** **unit 32: 0.6.0 closes.** As the design's unit 22 was: the papers not yet moved, the CHANGELOG dated, `runBase` set,
+32. **[#81: the close]** **unit 32: 0.6.0 closes.** As the design's unit 22 was: the papers not yet moved, the CHANGELOG dated, `runBase` set,
     the coverage gate re-measured and raised; the device matrix walked on the owner's devices and recorded in
     `docs/DEVICES.md` (§5.15.3).
 
@@ -6549,7 +7603,7 @@ with the words; the Board chip's Web page… shown only with it; `accounts.test.
 
 ### 4-The owner's answers (2026-10-27): every question left open
 
-> **Read with** Part 0 §0.4.5, §0.4.6 and §0.5.
+> **Read with** Part 0 §0.4.5, §0.4.6, §0.4.10 and §0.5.
 
 > "Defaults except for: 4 - Admin defined · 22 - Board will use a mixture of devices · 29 - wrap into 0.6.0 · 33 - Yes
 > they can, Unknown quantities. · 34 - Installer in 0.6.0 · 35 - Yes · 38 - Whichever account it is installed on. Could
@@ -6567,7 +7621,7 @@ the stage, they are below too.
 | S1 | A file shared for download in the Main room is not a download on a Board tablet (Look only); a Board member gets a file to keep only when it is shown as the document with Download ticked | "Defaults" | as applied (§4.6.6); Share has no "Let the Board download it" tick |
 | S2 | Observers and Viewer accounts see a picture shared in the chat as a card, without the picture, since the server withholds its link | "Defaults" | as applied (§4.6.6) |
 | S3 | A confidential file is never shown on screens (`/d/`) or as a holding image | "Defaults" | as applied (§5.14) |
-| S4 | No code guest pushes a web page, locked hall or not: should a locked hall's backstage guests be able to? | "Admin defined" **(to confirm: S4, not A4)** | a setting per hall, off by default: while the admin has it on, a locked hall's backstage code guests show web pages; set on the Roles & invites panel, audited, turned off by an unlock (§5.9.2.2, §5.11, §7.7; unit 19 amended) |
+| S4 | No code guest pushes a web page, locked hall or not: should a locked hall's backstage guests be able to? | "Admin defined"; confirmed: "1. S4" (2026-10-31, Part 0 §0.4.10) | a setting per hall, off by default: while the admin has it on, a locked hall's backstage code guests show web pages; set on the Roles & invites panel, audited, turned off by an unlock (§5.9.2.2, §5.11, §7.7; unit 19 amended) |
 | S5 | The admin may still seat a code guest On stage from the People list, and the seat is kept across a restart | "Defaults" | as applied (§5.9.2.1) |
 | S6 | A confidential line may go by either path, only over an encrypted link, with words that say what Stagewatch does with it (every output, its public frame, its triggers, its saved settings) | "Defaults" | as applied (§5.9.10); not held to the operator's path until Stagewatch 2.20 |
 | S7 | The speaker's screen counts as part of the hall's Main room only: a confidential line needs the item in use in Main | "Defaults" | as applied (§5.9.10) |
@@ -6587,13 +7641,12 @@ the stage, they are below too.
 | 45 | What does a new event carry over? (`addendum-install.md`) | "Archive old event data. … Keep linking settings. …" | the stage's stores go into the event's archive (the install addendum's U15); continue and copy carry each hall's `guestWeb` with its lock; `holds` go into the new event, since they belong to a kept link (§5.11, §5.14) |
 | Design 3 | Is "the Board" everyone seated On stage, presenters too, or should board members get a seat of their own? | "Defaults" (every question left open) | the design's: everyone seated On stage, presenters included (§5.9.10); a seat of their own is left for later, as the board addendum has it |
 
-### 4-The one open question
+### 4-The one open question, answered
 
-- **"4 - Admin defined" (to confirm: S4, not A4).** The plan reads the owner's "4" as this addendum's S4, as
-  `DECISIONS.md` and the audit-chain addendum do: a locked hall's backstage code guests may show web pages while
-  the admin has the hall's setting on (§5.9.2.2). The audit-chain addendum's question 4 (A4, whether the first start
-  holds sign-ins) keeps its default there. Had the owner meant A4, S4 takes its default instead: no code guest shows a
-  web page, and `admin:guestWeb`, its switch, its row and its tests leave unit 19.
+- **"4 - Admin defined" meant S4**, as the plan read it: the owner confirmed it on 2026-10-31 ("1. S4", Part 0
+  §0.4.10). A locked hall's backstage code guests may show web pages while the admin has the hall's setting on
+  (§5.9.2.2), and unit 19 (amended, #54) lands as written. The audit-chain addendum's question 4 (A4, whether the first
+  start holds sign-ins) keeps its default there.
 
 ### 4-Gaps (not measured, not verified)
 
@@ -6622,7 +7675,9 @@ the stage, they are below too.
 - Whether iOS Safari takes a form POST's attachment into its downloads, honours `filename*` for a non-Latin name, and
   keeps the page on a 204 (D2, D3 and D6 of the walk).
 - Which iPadOS the owner's oldest iPad runs (D1), whether any of the owner's devices is below Safari 16.4 or Chrome
-  103, and whether Samsung Internet fires `contextmenu` on a long press (D5): the walk.
+  103, and whether Samsung Internet fires `contextmenu` on a long press (D5): the walk. The page floor
+  (`addendum-arch-ux.md` §15.10: iPadOS and iOS 14.5, Chrome 84) stays whatever the walk finds; a Board device below it
+  is not supported (2026-10-31, Part 0 §0.4.10).
 - Stagewatch's receipt words for `message`, and whether it refuses an identical message as changing nothing.
 
 ---
@@ -6843,8 +7898,8 @@ The owner answered every question this addendum asked (21–33, formerly §12's 
     Tunnel "supports up to 200 in-flight requests", and "Additional requests return a `429` response"
     (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/).
     X's ceiling sits below that limit, so a refusal is AGMessage's, in words, and counted.
-- **Nothing in this addendum is "(to confirm)".** The plan's one open question (S4, not A4, from answer 4) is not this
-  addendum's.
+- **Nothing in this addendum is "(to confirm)".** The plan's one open question (S4, not A4, from answer 4) was not this
+  addendum's; the owner answered it "S4" on 2026-10-31 (Part 0 §0.4.10).
 
 ---
 
@@ -7570,7 +8625,7 @@ before doors, at every show with remote phones.
 
 ### 5-§14.2 The shape
 
-> **Amended by** 7-§0.2 (§14.2: `admin:setClock` and `admin:setOnStage` in `lib/handlers/takes.js`).
+> **Amended by** 7-§0.2 (§14.2: `admin:setClock` and `admin:setOnStage` in `lib/handlers/takes.js`); 3-K.12 (the layer "Stores, one lane each" gains `lib/keyedstore.js`).
 
 **server.js stays the composition root.** It builds every store, lane and link, and it alone requires a handler
 module. No container is used and nothing is required by a computed path: `security/detect-non-literal-require` is an
@@ -7721,7 +8776,7 @@ UPD_EVENTS = { responses: 'actionUpdate', pinned: 'pinUpdate', reactions: 'messa
 
 ### 5-§14.4 The fences
 
-> **Amended by** 7-§0.2 (§14.4 (a): `lib/views.js` in the pure set).
+> **Amended by** 7-§0.2 (§14.4 (a): `lib/views.js` in the pure set), 3-K.12 (`lib/keyedstore.js` in `modules.test.js`; `storesHead` under (e)).
 
 Each `require` is read by regex, as `inputs.test.js` reads event names: every relative path, `./` and `../` alike.
 
@@ -8085,7 +9140,7 @@ rules retire as each unit touches its files.
 
 ### 5-§15.7 One word per thing (needed before rooms ship)
 
-> **Amended by** 7-§0.2 (§15.7: the copy deck's rows from 7-§17.2), 6-U.9 ("the laptop's admin" beside "admin account").
+> **Amended by** 7-§0.2 (§15.7: the copy deck's rows from 7-§17.2), 6-U.9 ("the laptop's admin" beside "admin account"), 3-K.10 ("held aside", "adopt", "save", "the token at the laptop", "as this laptop last saved it", "reaches past its halls").
 
 | Thing | The word | Never |
 |---|---|---|
@@ -8228,7 +9283,7 @@ table words and the step words of the stage addendum's §5.9.7 where they say th
 
 ### 5-§15.10 The Board's devices: a mixture (owner answer 22, unit M)
 
-> **Amended by** 7-§0.2 (§15.10: `inset` and the logical properties; the wake-lock and long-press rows) and 7-§17.7; Part 0 §0.8 C1 (#20 makes the floor leg and `docs/DEVICES.md`).
+> **Amended by** 7-§0.2 (§15.10: `inset` and the logical properties; the wake-lock and long-press rows) and 7-§17.7; Part 0 §0.8 C1 (#20 makes the floor leg and `docs/DEVICES.md`); Part 0 §0.4.10 (the floor stays, and a Board device below it is not supported; applied in place).
 
 The owner: "Board will use a mixture of devices". The reading: iPads on current and older iPadOS, Android tablets, and
 phones (iOS and Android); every Board feature works on each, with a test matrix and fallbacks; nothing is tuned to one
@@ -8324,8 +9379,9 @@ used. No user agent is read anywhere: each fallback is chosen by a probe or by w
   - on D6 and D7, the same through the tunnel on mobile data (reading 7's walk).
   - A ✕ is a defect, fixed before the tag, or a fallback that the row then names, as the stage addendum rules. The
     floor's words are not such a fallback: a Board device of the owner's below the floor is a ✕ that holds the tag until
-    the floor is lowered for it or the owner retires it from the Board (owner answer 22). Which iPadOS the owner's
-    oldest Board iPad runs (D1) is recorded before unit M sets the floor.
+    the owner retires it from the Board or replaces it, and the floor is not lowered for it (owner answer 22; "Keep
+    these as mim", 2026-10-31, Part 0 §0.4.10). Which iPadOS the owner's oldest Board iPad runs (D1) is recorded in the
+    walk; it no longer decides the floor.
 - **Refused: Playwright's WebKit in CI.**
   - It would be a new dev dependency.
   - Playwright "doesn't work with the branded version of Safari since it relies on patches", and its WebKit is "derived
@@ -8585,7 +9641,7 @@ data and pure functions of facts, with no DOM and no socket. Each page binds onl
 
 ### 5-§16.7 The catalogue, per object
 
-> **Amended by** 7-§0.2 (§16.7: the `msg` row's three swaps applied in place; the `file` row's fold, the menu by seat, the new verbs), 7-§17.1; 3-H.13 (the `audit` row); Part 0 §0.8 C15 (the Observer or Viewer row reads S2).
+> **Amended by** 7-§0.2 (§16.7: the `msg` row's three swaps applied in place; the `file` row's fold, the menu by seat, the new verbs), 7-§17.1; 3-H.13 (the `audit` row); Part 0 §0.8 C15 (the Observer or Viewer row reads S2); 3-K.10 (the `accounts` rows of Admin → Accounts held aside).
 
 "—" separates groups. Kinds are named by their id prefix. Each row's verbs are server verbs or routes (§16.8). The unit
 is where its rows land; later rows join as their verbs do (§16.10). `may` is the rights column; `fits` and `ready` are
@@ -8980,7 +10036,7 @@ is no 0.5.2: every one ships in 0.6.0 (owner answer 29).
     quote and updates to messages not loaded.
 33. **[#79]** **unit 33 (lands when reading 3 triggers): an acknowledged message is on disk.** Group commit: one async
     `fs.fdatasync` per 20 ms batch, the answers after it; the papers' words then say "on disk".
-34. **[#80: the close]** **unit 34: 0.6.0 closes.** As the design's unit 22 was: the papers not yet moved, the CHANGELOG dated, `runBase`
+34. **[#81: the close]** **unit 34: 0.6.0 closes.** As the design's unit 22 was: the papers not yet moved, the CHANGELOG dated, `runBase`
     set, the coverage gate re-measured and raised, the catalogue's required-verbs list asserted complete, §13.4's table
     read as it stands, and `docs/DEVICES.md` read with §15.10's rows walked or "not walked", and no ✕ left standing.
 
@@ -9072,8 +10128,8 @@ from **30** and closes at **34**. Every "unit 22" in the design and every "unit 
   the places, and one person's wrong codes lock `join` for every phone behind that address for a minute (RFC 6269
   §13.1). The words say "your network", so the person knows it is not their phone.
 - **A device below the page floor is refused with words**, not served half a page. An iPad of the owner's that cannot
-  reach iPadOS 14.5 is a ✕ in the walk, which holds the tag until the floor is lowered for it or the owner retires it
-  from the Board (owner answer 22), and its `docs/DEVICES.md` row says which.
+  reach iPadOS 14.5 is a ✕ in the walk, which holds the tag until the owner retires it from the Board or replaces it;
+  the floor is not lowered (owner answer 22, and 2026-10-31), and its `docs/DEVICES.md` row says which.
 - **The Wake Lock is missing on iPads before iPadOS 18.4** (MDN's data). There the device's own screen setting decides,
   and the sheet says which setting.
 - **Nothing here was measured on the show laptop, through a tunnel or on the Board's devices,** and the VM's 25-page
@@ -9120,7 +10176,7 @@ from **30** and closes at **34**. Every "unit 22" in the design and every "unit 
 
 Every question this section asked (21–33) is answered, and each answer, quoted, with what the plan does, is in **Owner's
 answers (2026-10-27)** at the head of this addendum. Nothing here is "(to confirm)", and no question is left open in this
-addendum. The plan's one open question (S4, not A4) is not this addendum's.
+addendum. The plan's one open question (S4, not A4) was not this addendum's; the owner answered it "S4" on 2026-10-31.
 
 ---
 
@@ -9276,7 +10332,8 @@ it. Each question is quoted as it was asked, then answered, then what the plan d
     messages, files and accounts when asked, never on a timer, and keeps its `event.json`.
 - **Beside them, answer 29** ("wrap into 0.6.0") means there is no 0.5.2. This addendum's 0.5.2 paths are gone (U6, U9,
   "What can move").
-- **Nothing in this addendum is "(to confirm)".** The plan's one open question (S4, not A4) is not this addendum's.
+- **Nothing in this addendum is "(to confirm)".** The plan's one open question (S4, not A4) was not this addendum's; the
+  owner answered it "S4" on 2026-10-31 (Part 0 §0.4.10).
 
 ## 6-U.0 The answer on one page
 
@@ -9732,6 +10789,8 @@ B-task.
 
 ### 6-U.5.1 The laptop's admin (answer 38)
 
+> **Amended by** 3-K.9 (the `token` right also adopts accounts held aside, #80).
+
 - **Who.** The Windows account that starts the installer is the laptop's admin, whether it is a standard account or an
   administrator.
   - The installer records its SID in `HKLM\SOFTWARE\AGMessage` as `Admin`, and its name as `AdminName` for the words.
@@ -9955,7 +11014,7 @@ proxy; the source is `upgrade/out/table.txt` unless named.
 
 ## 6-U.7 Units
 
-> **Amended by** Part 0 §0.6 (the global build order; U18 before U16, §0.8 C2); 2-S.2 on U8's busy line (§0.8 C4).
+> **Amended by** Part 0 §0.6 (the global build order; U18 before U16, §0.8 C2); 2-S.2 on U8's busy line (§0.8 C4); 3-K.9 (#80: U2's `/api/setup` takes the typed token in both channels; U12's `keys\stores\`; U14 carries `stores\` and verifies that no account is held aside; U15's claim, pin and finish, and Archive this event… refused while accounts are held aside; U17's `token` row).
 
 Each is one commit, `AGMessage 0.6.0, unit Un: <what landed>`. Every reader is named in its unit:
 
@@ -10597,6 +11656,8 @@ draft's references to the architecture addendum's draft units read in its final 
 
 ## 6-U.8 Tests
 
+> **Amended by** 3-K.13 (U15's row gains the claim, the pin and a `.partial` no claim names).
+
 | Unit | Test | Fails today because |
 |---|---|---|
 | U1 | **M1 as a test:** a data, uploads or keys path that cannot be made under `AGM_RUNS=task` exits 3 with the folder named, and the watchdog shows 0 restarts. An unknown `AGM_RUNS` (`service`, `session` included) is refused. Relative or inside-app folders are refused before any write | exit 1 at 42 ms; 7 crashes and a give-up; HTTPS silently off |
@@ -10619,6 +11680,8 @@ draft's references to the architecture addendum's draft units read in its final 
 | U18 | (Linux, GitHub's answer stubbed) refused: no network, another repository, `immutable: false`, no asset of that name, a digest that differs, a release not newer, busy without a reason, a named file that is a link; accepted: the staged copy's digest equals the asset's and the release is newer, and the installer stub then runs from `machine\staged\` with `/UPGRADEBY`; a file changed in the inbox after it was staged changes nothing that runs; each outcome is one `machine.upgrade` or `machine.upgrade.refused` event | there is no upgrade without an administrator |
 
 ## 6-U.9 Papers
+
+> **Amended by** 3-K.14 (`docs/INSTALL.md` names `keys\stores\` and the import's carrying it).
 
 - **`docs/INSTALL.md` (new):**
   - the installed shape (B-task), why it was chosen, and what it costs (U.5): the unsaved end at a Windows restart, the
@@ -12518,8 +13581,8 @@ splice). The chat view's rows, beside the stage's and M's:
 - the reading distance and the Text size the Board member chose (reading 9).
 - A ✕ is a defect fixed before the tag, or a fallback that the row then names (stage §5.15.3). A row with no device
   reads "not walked", which is a fact in the paper, never a pass. A Board device of the owner's below the page floor
-  (arch-ux §15.10) is a ✕ that holds the tag until the floor is lowered for it or the owner retires it from the Board
-  (owner answer 22).
+  (arch-ux §15.10) is a ✕ that holds the tag until the owner retires it from the Board or replaces it; the floor is not
+  lowered (owner answer 22; 2026-10-31, Part 0 §0.4.10).
 
 **What it costs:** nothing on the server and nothing on the wire. On the page: one probe (`fullscreen`), one measured
 placeholder, and CSS rules by size. No new verb, no new dependency.
@@ -13037,7 +14100,8 @@ message can appear on the pages of the others seated On stage. That is the switc
 §17.6 has it: a card in their Shown to you, beside their chat, covering nothing. The pin rule was confirmed on
 2026-10-27, and the owner answered its three readings the same day (above), so none of them is left as the plan's
 own. The answers of 2026-10-27 to every question left open settle 21 and 22 here. The plan's one open question after
-them, the reading of answer 4 as the stage addendum's S4 "(to confirm)", is the stage addendum's, not this one's.
+them, the reading of answer 4 as the stage addendum's S4, was the stage addendum's, not this one's; the owner confirmed
+it on 2026-10-31 (Part 0 §0.4.10).
 
 ---
 
