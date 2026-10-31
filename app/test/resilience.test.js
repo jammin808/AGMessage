@@ -484,3 +484,32 @@ test('a second start on the same data folder changes nothing and goes away; ever
     assert.equal(texts.filter((x) => /Session restored/.test(x)).length, 1, 'one restore line, from the real restart: ' + JSON.stringify(texts));
   } finally { await h.stopServer(b.child); }
 });
+
+test('a show day\'s peaks are on disk by the end of the 5 s window they rose in: a hang the watchdog ends loses no earlier window', async (t) => {
+  const h = require('./helpers');
+  const a = await h.startServer();
+  let b = null;
+  t.after(async () => {
+    if (a.child.exitCode === null && a.child.signalCode === null) a.child.kill('SIGKILL');
+    if (b) await h.stopServer(b.child);
+  });
+  // Three sign-ins: three audit appends, each timed as it reaches the disk.
+  for (let i = 0; i < 3; i++) assert.equal((await h.api(a.base, 'POST', '/api/admin/login', { token: h.TOKEN })).status, 200);
+  const health = (await h.api(a.base, 'GET', '/api/health')).body;
+  const today = health.peaks.find((d) => d.day === health.showDay);
+  assert.ok(today && today.auditPutMs.count >= 3, 'the sign-ins are counted: ' + JSON.stringify(today));
+  const appendsOnDisk = () => {
+    const saved = r.readJsonWithBak(path.join(a.dataDir, 'peaks.json'));   // null until it is written
+    const d = saved ? saved.days.find((x) => x.day === today.day) : null;
+    return d ? d.auditPutMs.buckets.reduce((n, k) => n + k, 0) : 0;
+  };
+  // The window's end (5 s at most) and the lane's tenth of a second, with no stop asked: nothing flushes it but the tick.
+  const from = Date.now();
+  assert.ok(await until(() => appendsOnDisk() >= today.auditPutMs.count, 8000), 'on disk within a window: ' + appendsOnDisk() + ' of ' + today.auditPutMs.count + ' after ' + (Date.now() - from) + ' ms');
+  a.child.kill('SIGKILL');   // the watchdog's hang kill: no stop, no flush
+  await new Promise((resolve) => { a.child.once('exit', resolve); });
+  assert.ok(appendsOnDisk() >= today.auditPutMs.count, 'still there after the kill');
+  b = await h.startServer({ AGM_DATA_DIR: a.dataDir });
+  const after = (await h.api(b.base, 'GET', '/api/health')).body.peaks.find((d) => d.day === today.day);
+  assert.ok(after && after.auditPutMs.count >= today.auditPutMs.count, 'the restarted server counts on from them: ' + JSON.stringify(after));
+});

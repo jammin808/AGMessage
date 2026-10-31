@@ -270,6 +270,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await admin.until('document.readyState === "complete"');
     await admin.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
     report(!!(await admin.until(`!document.getElementById('dashboard').hidden && document.body.textContent.includes('${code}') && document.getElementById('aiModel').textContent.includes('claude')`)), 'admin dashboard lists the room and its AI / show-network panels');
+    // Health reads the loop's true delay and how busy it is (from its first 5 s window), and today's peaks: the hall made
+    // and the sign-in's audit row are already in them.
+    const healthLine = await admin.until(`(() => { const t = document.getElementById('healthLine').textContent; return /loop delay p95 [\\d.]+ ms \\(max [\\d.]+\\) · busy \\d+ %/.test(t) && /today's peaks: loop delay [\\d.]+ ms, busy \\d+ %, largest hall \\d+ messages/.test(t) && /audit write p99 [\\d.]+ ms/.test(t) && t; })()`, 20000);
+    report(!!healthLine, 'the admin\'s health line reads the loop delay, how busy it is and today\'s peaks' + (healthLine ? '' : ': ' + await admin.eval(`document.getElementById('healthLine').textContent`)));
     await admin.shot(path.join(OUT, 'admin.png'));
 
     // Accounts: the first admin is made on the sign-in page; the halls board and the accounts page render under the CSP.

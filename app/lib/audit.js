@@ -61,6 +61,7 @@ class AuditLog {
     this.rotations = 0;
     this.opened = false;
     this.checking = null;   // the check running now: a second click shares it
+    this.onPut = null;      // told how long each append that reached the disk took (open, write, fsync, close), in ms: health's peaks
     fs.mkdirSync(path.dirname(file), { recursive: true });
     let buf = readOr(file) || Buffer.alloc(0);
     const whole = buf.lastIndexOf(10) + 1;
@@ -131,7 +132,9 @@ class AuditLog {
   /** Put every pending line on disk in one append, or none of them. */
   _put() {
     if (this.size > ROTATE_BYTES) this._rotate();
+    const t0 = performance.now();
     let fd = null;
+    let took = false;
     try {
       // Written at the file's end through a handle that can also cut it back: Windows does not truncate through a
       // handle opened for appending, so there a short write would stay as a fragment the next entry is glued to.
@@ -145,11 +148,16 @@ class AuditLog {
       this.onDisk = { seq: this.seq, h: this.last };
       fs.fsyncSync(fd);
       this.lastError = null;
+      took = true;
     } catch (err) {
       this.lastError = err.message;
       console.error('  [audit] could not write' + (this.unwritten ? ' (' + this.unwritten + ' kept, written ahead of the next entry)' : '') + ': ' + err.message);
     } finally {
       if (fd !== null) { try { fs.closeSync(fd); } catch { /* the write itself said what went wrong */ } }
+    }
+    if (took && this.onPut) {
+      // The entry is on disk whatever its timing's reader does: a throw there never reaches the action being audited.
+      try { this.onPut(performance.now() - t0); } catch (err) { console.error('  [audit] an append\'s time could not be noted: ' + err.message); }
     }
   }
 

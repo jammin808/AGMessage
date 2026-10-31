@@ -57,6 +57,23 @@
     $('deskLine').classList.toggle('bad', !!t.deskRefusal);
   }
 
+  /**
+   * A show day's peaks in words: "today's peaks: loop delay 3.1 ms, busy 12 %, …". Today is the show day the server names
+   * (`showDay`, by the show laptop's clock, not this browser's); before it has a record, the newest day's are shown,
+   * named by their date.
+   */
+  function peaksWords(days, showDay) {
+    if (!Array.isArray(days) || !days.length) return '';
+    const d = days.find((x) => x && x.day === showDay) || days[days.length - 1];
+    const n = (v) => Number(v || 0).toLocaleString();
+    const w = ['loop delay ' + d.loopMs + ' ms', 'busy ' + Math.round(d.elu * 100) + ' %',
+      'largest hall ' + n(d.hallMessages) + ' messages (' + n(d.hallKb) + ' KB)', n(d.joinBurst) + ' joins in 5 s',
+      n(d.socketsPerAddress) + ' connections from one address', n(d.tunnelSockets) + ' through the tunnel'];
+    if (d.compactMs && (d.compactMs.max || d.compactMs.messages)) w.push('snapshot ' + d.compactMs.max + ' ms (' + n(d.compactMs.messages) + ' messages)');
+    if (d.auditPutMs && d.auditPutMs.count) w.push('audit write p99 ' + d.auditPutMs.p99 + ' ms (max ' + d.auditPutMs.max + ')');
+    return (d.day === showDay ? 'today\'s peaks: ' : 'peaks of ' + d.day + ': ') + w.join(', ');
+  }
+
   function renderHealth(h) {
     if (!h) return;
     const parts = [];
@@ -64,7 +81,9 @@
     if (h.watchdog) parts.push('⚠ the watchdog gave up at ' + new Date(h.watchdog.at).toLocaleTimeString() + ': ' + h.watchdog.reason);
     if (h.lastCrash) parts.push('last crash ' + new Date(h.lastCrash.at).toLocaleString() + ': ' + h.lastCrash.message);
     if (h.rejections) parts.push(h.rejections + ' failed background task(s)');
-    if (h.loopMs && h.loopMs.count) parts.push('server delay p95 ' + h.loopMs.p95 + ' ms (max ' + h.loopMs.max + ')');
+    if (h.loopMs && h.loopMs.count) parts.push('loop delay p95 ' + h.loopMs.p95 + ' ms (max ' + h.loopMs.max + ')' + (h.elu && h.elu.count ? ' · busy ' + Math.round(h.elu.p95 * 100) + ' %' : ''));
+    const peaks = peaksWords(h.peaks, h.showDay);
+    if (peaks) parts.push(peaks);
     if (h.stageRttMs && h.stageRttMs.count) parts.push('send-to-stage ' + h.stageRttMs.p50 + ' ms typical, ' + h.stageRttMs.max + ' worst');
     if (h.clock) parts.push('clock vs Stagewatch ' + (h.clock.offsetMs >= 0 ? '+' : '') + h.clock.offsetMs + ' ms' + (h.clock.apart ? ' — CLOCKS APART' : ''));
     // Each store that could not be saved, by name: what it holds is kept and tried again until it is on disk.

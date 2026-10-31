@@ -47,6 +47,7 @@ const stagelines = require('./lib/stagelines');
 const peerlinks = require('./lib/peerlinks');
 const deskresults = require('./lib/deskresults');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
+const readings = require('./lib/peaks');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD } = require('./lib/version');
@@ -128,12 +129,32 @@ const deskLane = new resilience.WriteLane(DESK_RESULTS_PATH, { delayMs: 100, kee
 const deskResults = deskresults.readRecords(resilience.readJsonWithBak(DESK_RESULTS_PATH), settings.nodeId)
   .map((r) => ({ ...r, attempts: 0, posts: 0, nextAt: 0, lastStatus: 0, gen: 0, fresh: false }));
 let deskLastAnswer = { status: null, at: null };   // the desk's last answer to a result post (health)
+// The peaks a show day reaches (lib/peaks.js), the last 14 days, read back at start. Saved at the end of each 5 s window in
+// which one rose (the health tick), through the lane's usual tenth of a second, latest wins, and at once by a stop or a
+// crash the server catches: a hang the watchdog ends, or a power cut, loses at most the window it fell in. Written only
+// once this copy holds its data folder.
+let serving = false;   // this copy holds its data folder and its port: the desk loop and the peaks' saves wait for it
+const PEAKS_PATH = path.join(DATA_DIR, 'peaks.json');
+const peaksLane = new resilience.WriteLane(PEAKS_PATH, { delayMs: 100, keepBak: true });
+const peaks = new readings.Peaks().load(resilience.readJsonWithBak(PEAKS_PATH));
+/** Ask the lane to save the peaks when one rose since the last save; true when it was asked. */
+function savePeaks() {
+  if (!serving || !peaks.dirty) return false;
+  peaks.dirty = false;
+  peaksLane.save(() => JSON.stringify(peaks.toJSON()));
+  return true;
+}
 /** Every store saved through a write lane, by the name health and the console give it. */
-const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['deskResults', deskLane]];
-/** Write every lane and the audit entries still waiting now (shutdown, a crash); what still cannot be written is named on the console. */
+const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['deskResults', deskLane], ['peaks', peaksLane]];
+/**
+ * Write every lane and the audit entries still waiting now (shutdown, a crash); what still cannot be written is named on
+ * the console. The audit's last appends are timed as they reach the disk, so the peaks are asked for once more after it.
+ */
 function flushLanes() {
+  savePeaks();
   for (const [name, lane] of saveLanes()) if (!lane.flushSync()) console.error('  [save] ' + name + ' could not be written: ' + lane.lastError);
   if (!audit.flush()) console.error('  [audit] ' + audit.unwritten + ' entries could not be written: ' + audit.lastError);
+  if (savePeaks() && !peaksLane.flushSync()) console.error('  [save] peaks could not be written: ' + peaksLane.lastError);
 }
 
 // ---------------------------------------------------------------- encrypted connections (Show Bus 1.2 §10)
@@ -158,10 +179,43 @@ const CRASH_PATH = path.join(DATA_DIR, 'last-crash.json');
 const lastCrash = resilience.readJsonWithBak(CRASH_PATH);
 const watchdogGaveUp = resilience.readJsonWithBak(path.join(DATA_DIR, 'watchdog.json'));
 if (watchdogGaveUp) { try { fs.renameSync(path.join(DATA_DIR, 'watchdog.json'), path.join(DATA_DIR, 'watchdog.seen.json')); } catch { /* shown once anyway */ } }
-const loopDelay = monitorEventLoopDelay({ resolution: 10 });
+// The sampler's timer fires every LOOP_RESOLUTION_MS, so an idle loop reads that much delay: it is taken off each window.
+const LOOP_RESOLUTION_MS = 10;
+const loopDelay = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS });
 loopDelay.enable();
-const loopRing = new resilience.Ring(120);    // p99 event-loop delay per 5 s, the last 10 minutes
-setInterval(() => { loopRing.push(loopDelay.percentile(99) / 1e6); loopDelay.reset(); }, 5000).unref();
+const loopRing = new resilience.Ring(120);       // the loop's true delay (its p99 less the resolution) per 5 s, the last 10 minutes
+const eluRing = new resilience.Ring(120, 3);     // how busy the loop was (its utilisation, 0 to 1) per 5 s, the last 10 minutes
+let eluMark = performance.eventLoopUtilization();
+const joinBurst = new readings.Burst();          // the most people seated in one hall in any 5 s (a doors-open storm)
+// What latest-wins coalescing saves: changes marked, and the frames sent for them (the halls board's tick, the screens' 150 ms).
+const coalesced = { board: { marks: 0, flushes: 0 }, screens: { marks: 0, flushes: 0 } };
+/** Sockets open now: the most from one address, and those through the tunnel (counts only: health names no address). */
+function socketFacts() {
+  const c = readings.countSockets(Array.from(io.sockets.sockets.values(), (s) => s.data));
+  return { maxSocketsPerAddress: c.maxPerAddress, tunnelSockets: c.tunnel };
+}
+/** The hall with the most messages: how many, and its snapshot's size (kept by each compaction, so no file is read). */
+function largestHall() {
+  let big = null;
+  for (const r of store.rooms.values()) if (!big || r.messages.length > big.messages.length) big = r;
+  return { messages: big ? big.messages.length : 0, kb: big && big.snapKb !== null ? big.snapKb : 0 };
+}
+setInterval(() => {
+  const loopMs = readings.loopDelayMs(loopDelay, LOOP_RESOLUTION_MS);
+  loopDelay.reset();
+  const mark = performance.eventLoopUtilization();
+  const elu = performance.eventLoopUtilization(mark, eluMark).utilization;
+  eluMark = mark;
+  loopRing.push(loopMs);
+  eluRing.push(elu);
+  const sockets = socketFacts();
+  const hall = largestHall();
+  peaks.note({
+    loopMs, elu, socketsPerAddress: sockets.maxSocketsPerAddress, tunnelSockets: sockets.tunnelSockets,
+    hallMessages: hall.messages, hallKb: hall.kb, joinBurst: joinBurst.take(performance.now()),
+  }, Date.now());
+  savePeaks();   // this window's rises, and the snapshots and audit appends timed in it
+}, 5000).unref();
 let rejections = 0;
 let handlerFaults = 0;   // socket events refused because their handler threw (guardHandlers)
 function healthFacts() {
@@ -187,6 +241,14 @@ function healthFacts() {
         audit: { error: audit.lastError, unwritten: audit.unwritten },
       },
     },
+    elu: eluRing.stats(),
+    rssMb: Math.round(process.memoryUsage.rss() / 1048576),
+    ...socketFacts(),
+    largestHall: largestHall(),
+    latest: { board: { ...coalesced.board }, screens: { ...coalesced.screens } },
+    // Per show day, the last 14, oldest first: each reading's highest (docs/DESIGN.md, "Measured on the show laptop").
+    peaks: peaks.view(),
+    showDay: readings.dayOf(Date.now()),   // the show day this laptop is in now: its record in `peaks` is today's
   };
 }
 
@@ -200,6 +262,9 @@ function noteEvent(text, link) { recentEvents.push({ at: Date.now(), text, link:
 // Loaded without writing: until this copy holds the data folder and its port (`holdDataFolder`, at the end of this file),
 // another copy may be appending to these same files.
 const store = new RoomStore(ROOMS_DIR);
+// Timed where they run; saved with the window they fall in (the health tick), or at once by a stop or a crash.
+store.onCompact = (ms, messages) => { peaks.compacted(ms, messages, Date.now()); };
+audit.onPut = (ms) => { peaks.auditPut(ms, Date.now()); };
 const restored = store.loadAll((room) => {
   for (const m of room.messages) {
     if (m.from && m.from.role === 'director') m.from.role = 'board';   // legacy role name
@@ -632,6 +697,7 @@ io.use((socket, next) => {
   let b = connBuckets.get(ip);
   if (!b) { b = new guard.Bucket(3, 30); connBuckets.set(ip, b); if (connBuckets.size > 5000) connBuckets.clear(); }
   socket.data.ip = ip;
+  socket.data.viaTunnel = web.throughTunnel({ headers: socket.handshake.headers });
   if (settings.requireHttps && cert && !(socket.request && (isEncrypted(socket.request) || isLoopback(socket.request))))
     return next(new Error('This AGMessage requires HTTPS — open it with https:// (see /tls).'));
   return b.take() ? next() : next(new Error('Too many connections — wait a moment.'));
@@ -690,7 +756,6 @@ io.on('connection', (socket) => {
   socket.data.accountId = socket.data.account ? socket.data.account.id : '';
   socket.data.sessionHash = socket.data.account ? acct.session.h : '';
   socket.data.adminSid = tokenAdmin ? adminSid : '';
-  socket.data.viaTunnel = web.throughTunnel(hs);
   socket.data.isAdmin = tokenAdmin || !!(socket.data.account && rbac.can(socket.data.account, 'settings.manage') && !web.adminBlocked(hs, socket.data.account));
   socket.data.actor = tokenAdmin ? HOST_ACTOR : socket.data.account ? { t: 'account', id: socket.data.account.id, name: socket.data.account.username } : null;
   const writes = new guard.Bucket(5, 15);      // messages, reactions, pins…
@@ -788,6 +853,7 @@ io.on('connection', (socket) => {
       }
       r.users.set(socket.id, me);
       trackJoin(id, code);
+      joinBurst.add(code, performance.now());
     }
 
     if (uploadToken) uploadTokens.delete(uploadToken);
@@ -1765,10 +1831,12 @@ const screensDirty = new Set();
 let screensTimer = null;
 function displaysChanged(code) {
   boardDirty();
+  coalesced.screens.marks++;
   screensDirty.add(code);
   if (screensTimer) return;
   screensTimer = setTimeout(() => {
     screensTimer = null;
+    coalesced.screens.flushes++;
     for (const c of screensDirty) io.to(c).emit('displays:changed', { code: c });
     screensDirty.clear();
   }, 150);
@@ -1787,7 +1855,7 @@ const displaysOf = (code) => displays.ofHall(code).map((d) => { const st = Displ
 // watcher (`shared`); what differs per watcher — which halls, which links, whether it may answer — is added on top.
 const boardSockets = new Set();
 let boardIsDirty = false;
-function boardDirty() { boardIsDirty = true; }
+function boardDirty() { boardIsDirty = true; coalesced.board.marks++; }
 function hallParts(r, shared) {
   let p = shared.get(r.code);
   if (!p) { p = { row: board.hallRow(r, { stage: stagePayload(linkFor(r.code)), displays: displaysOf(r.code) }), help: board.openHelp(r) }; shared.set(r.code, p); }
@@ -1809,6 +1877,7 @@ function boardFor(socket, shared = new Map()) {
 setInterval(() => {
   if (!boardIsDirty) return;
   boardIsDirty = false;
+  coalesced.board.flushes++;
   const shared = new Map();
   for (const s of boardSockets) s.emit('board', boardFor(s, shared));
 }, 300).unref();
@@ -2255,7 +2324,6 @@ function runApproved(p) {
 // AGMessage — run once, whichever desk it came from, and reported until it is taken — then our proposals' states. A link
 // Stagewatch asked to wait (Retry-After) is left alone till then. Nothing runs before this copy holds its data folder.
 let deskBusy = false;
-let serving = false;
 setInterval(async () => {
   if (deskBusy || !serving) return;
   deskBusy = true;
@@ -2527,7 +2595,7 @@ function releaseDataFolder() { if (folderHold) { try { folderHold.close(); } cat
 holdDataFolder(() => front.listen(PORT, HOST, () => {
   // This copy holds the folder and the port: now it writes. Each replayed log is folded into a fresh snapshot (a torn last
   // line cut before anything is appended after it), each hall says it was restored, the audit log is opened, and the show
-  // desk's loop may run (and save what it reports).
+  // desk's loop may run (and save what it reports), as may the peaks' saves (from the next 5 s window).
   serving = true;
   store.compactAll();
   for (const room of store.rooms.values()) {

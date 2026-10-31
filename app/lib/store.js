@@ -30,6 +30,8 @@ class RoomStore {
     fs.mkdirSync(dir, { recursive: true });
     this.rooms = new Map();
     this.lastError = null;   // the last append or snapshot that failed, until every room is on disk again
+    // Told of each snapshot written: (ms it took — the stall a commit waits — the room's message count). Health's peaks.
+    this.onCompact = null;
   }
 
   static validCode(code) { return typeof code === 'string' && CODE_RE.test(code); }
@@ -68,7 +70,7 @@ class RoomStore {
   }
 
   _blank(code, name, createdAt) {
-    return { code, name, createdAt, messages: [], byId: new Map(), seq: 0, ring: [], users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false, ragged: false };
+    return { code, name, createdAt, messages: [], byId: new Map(), seq: 0, ring: [], users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false, ragged: false, snapKb: null };
   }
 
   _replay(room) {
@@ -168,15 +170,20 @@ class RoomStore {
     return room.ring.filter((op) => op.s > since);
   }
 
-  /** Write the snapshot atomically and truncate the log. */
+  /**
+   * Write the snapshot atomically and truncate the log. The snapshot's size is kept as `room.snapKb` (null until the
+   * first one this run), so health reads a hall's size with no file call of its own.
+   */
   compact(code) {
     const room = this.rooms.get(code);
     if (!room) return;
+    const t0 = performance.now();
     const out = { code: room.code, name: room.name || '', createdAt: room.createdAt, seq: room.seq, settings: room.settings, messages: room.messages, savedAt: Date.now() };
     try {
-      writeFileAtomic(this.file(code, '.json'), JSON.stringify(out), { keepBak: true });
+      const bytes = writeFileAtomic(this.file(code, '.json'), JSON.stringify(out), { keepBak: true });
       this._closeLog(room);
       fs.writeFileSync(this.file(code, '.log'), '');
+      room.snapKb = Math.round(bytes / 102.4) / 10;
       room.logCount = 0;
       room.unsaved = false;
       room.ragged = false;
@@ -184,6 +191,11 @@ class RoomStore {
     } catch (e) {
       this.lastError = e.message;   // the log still holds what the snapshot did not
       console.error('  snapshot failed for', code, e.message);
+      return;
+    }
+    if (this.onCompact) {
+      // The snapshot is written whatever its timing's reader does: a throw there never reaches the commit that asked for it.
+      try { this.onCompact(performance.now() - t0, room.messages.length); } catch (e) { console.error('  a snapshot\'s time could not be noted for', code, e.message); }
     }
   }
 

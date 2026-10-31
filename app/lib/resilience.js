@@ -65,7 +65,7 @@ class SupervisorPolicy {
  * file is kept as `.bak` — but only when `worthKeeping(oldText)` says it is whole, so a torn file never
  * replaces a good backup. Every byte reaches the temporary file or the write throws: a disk that fills part-way
  * never has a short file renamed over a whole one. A write that throws removes its temporary file, so it does not
- * keep the disk full.
+ * keep the disk full. Returns the number of bytes written.
  */
 function writeFileAtomic(file, data, { keepBak = false, worthKeeping = isJson, mode } = {}) {
   const dir = path.dirname(file);
@@ -93,6 +93,7 @@ function writeFileAtomic(file, data, { keepBak = false, worthKeeping = isJson, m
     try { fs.unlinkSync(tmp); } catch { /* never made, or already gone */ }
     throw e;
   }
+  return bytes.length;
 }
 
 function isJson(text) {
@@ -164,9 +165,9 @@ class WriteLane {
   }
 }
 
-/** A fixed-size window of numbers: no allocation once full. */
+/** A fixed-size window of numbers: no allocation once full. Its stats keep `digits` decimals (a fraction such as ELU needs 3). */
 class Ring {
-  constructor(size = 120) { this.buf = new Float64Array(size); this.n = 0; this.i = 0; }
+  constructor(size = 120, digits = 1) { this.buf = new Float64Array(size); this.n = 0; this.i = 0; this.f = 10 ** digits; }
   push(v) { if (!Number.isFinite(v)) return; this.buf[this.i] = v; this.i = (this.i + 1) % this.buf.length; if (this.n < this.buf.length) this.n++; }
   get count() { return this.n; }
   last() { return this.n ? this.buf[(this.i - 1 + this.buf.length) % this.buf.length] : null; }
@@ -174,10 +175,10 @@ class Ring {
     if (!this.n) return { count: 0, p50: null, p95: null, max: null };
     const a = Array.from(this.buf.subarray(0, this.n)).sort((x, y) => x - y);
     const at = (q) => a[Math.min(a.length - 1, Math.floor(q * a.length))];
+    const round = (v) => Math.round(v * this.f) / this.f;
     return { count: this.n, p50: round(at(0.5)), p95: round(at(0.95)), max: round(a[a.length - 1]) };
   }
 }
-const round = (v) => Math.round(v * 10) / 10;
 
 /**
  * Clock offset to a peer from ping exchanges (Show Bus §5): offset = ((t2 − t1) + (t3 − t4)) / 2,

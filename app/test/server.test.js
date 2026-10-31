@@ -258,6 +258,68 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(remote.build.startsWith(remote.version + '-dev') || remote.build.startsWith(remote.version + '+'), 'the build names its version and channel: ' + remote.build);
   });
 
+  // No timing is asserted end to end: the first window holds the boot's work, and CI runs under coverage.
+  let peaksBefore = null;
+  await t.test('health reads how busy the server is, its memory, its sockets, the largest hall and a show day\'s peaks', async () => {
+    const health = async () => (await fetch(base + '/api/health')).json();
+    const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
+    const h = await health();
+    assert.deepEqual(Object.keys(h).slice(-8), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay'], 'appended at the end of the detail');
+    assert.deepEqual(Object.keys(h.elu), ['count', 'p50', 'p95', 'max']);
+    assert.ok(Number.isInteger(h.rssMb) && h.rssMb > 0, 'rssMb ' + h.rssMb);
+    assert.ok(h.maxSocketsPerAddress >= 3 && h.maxSocketsPerAddress <= h.clients, 'every page here is on one address: ' + h.maxSocketsPerAddress + ' of ' + h.clients);
+    assert.equal(h.tunnelSockets, 0);
+
+    // A page and a screen through the tunnel are counted, and their address is in no reading.
+    const tunnelHeaders = { 'cf-connecting-ip': '203.0.113.50', 'cf-ray': '8f00aa' };
+    const opened = (s) => new Promise((resolve, reject) => { s.once('connect', () => resolve(s)); s.once('connect_error', reject); });
+    const viaTunnel = await opened(io(base, { transports: ['websocket'], forceNew: true, reconnection: false, extraHeaders: tunnelHeaders }));
+    sockets.push(viaTunnel);
+    const made = await emit(ctl, 'display:create', { code, name: 'Foyer TV' });
+    assert.ok(made.ok, JSON.stringify(made));
+    const screenViaTunnel = io(base, { transports: ['websocket'], forceNew: true, reconnection: false, auth: { display: made.display.path.slice(3) }, extraHeaders: tunnelHeaders });
+    sockets.push(screenViaTunnel);
+    const shown = new Promise((resolve) => { screenViaTunnel.once('display:state', resolve); });
+    await opened(screenViaTunnel);
+    await shown;   // served as a screen, not as a page
+    const counted = await health();
+    assert.equal(counted.tunnelSockets, 2, 'the page and the screen');
+    assert.ok(!JSON.stringify(counted).includes('203.0.113.50'), 'health names no address');
+    viaTunnel.close(); screenViaTunnel.close();
+    assert.ok((await emit(ctl, 'display:remove', { id: made.display.id })).ok);
+    let gone = counted;
+    for (let i = 0; i < 40 && gone.tunnelSockets; i++) { await new Promise((r) => setTimeout(r, 50)); gone = await health(); }
+    assert.equal(gone.tunnelSockets, 0, 'and no longer once they have gone');
+
+    // The largest hall follows its messages: what health reads is what the hall holds.
+    for (const text of ['one', 'two', 'three']) assert.equal((await emit(board, 'message', { type: 'text', text })).ok, true);
+    let read = null;
+    for (let i = 0; i < 20 && !read; i++) {
+      const most = async () => Math.max(...(await ask(ctl, 'admin:listRooms')).rooms.map((r) => r.messageCount));
+      const a = await most(); const big = (await health()).largestHall; const b = await most();
+      if (a === b && big.messages === a) read = big;   // a "left" line landing between the reads asks again
+    }
+    assert.ok(read && read.messages >= h.largestHall.messages + 3, 'largestHall ' + JSON.stringify(read) + ' after ' + JSON.stringify(h.largestHall));
+    assert.ok(typeof read.kb === 'number' && read.kb > 0, 'and its snapshot\'s size, kept when the hall was made');
+
+    // What coalescing saves: the halls board's changes, and the frames sent for them.
+    assert.deepEqual(Object.keys(h.latest), ['board', 'screens']);
+    for (const l of Object.values(h.latest)) assert.ok(Number.isInteger(l.marks) && Number.isInteger(l.flushes) && l.flushes <= l.marks, JSON.stringify(h.latest));
+    assert.ok(h.latest.board.flushes >= 1, 'the board was sent: ' + JSON.stringify(h.latest.board));
+    assert.ok(gone.latest.screens.marks > h.latest.screens.marks, 'a screen made, opened and closed is marked: ' + JSON.stringify(gone.latest.screens));
+
+    // Today's peaks, the show day the server names: the hall made at the start and the sign-in's audit row are in them.
+    assert.match(h.showDay, /^\d{4}-\d{2}-\d{2}$/);
+    const today = h.peaks.find((d) => d.day === h.showDay);
+    assert.ok(today, 'today has its record: ' + JSON.stringify(h.peaks.map((d) => d.day)));
+    assert.deepEqual(Object.keys(today), ['day', 'loopMs', 'elu', 'socketsPerAddress', 'tunnelSockets', 'hallMessages', 'hallKb', 'joinBurst', 'compactMs', 'auditPutMs', 'at']);
+    assert.match(today.day, /^\d{4}-\d{2}-\d{2}$/);
+    assert.deepEqual(Object.keys(today.auditPutMs), ['count', 'p99', 'max']);
+    assert.ok(today.auditPutMs.count >= 1, 'the sign-in\'s audit append is counted: ' + JSON.stringify(today.auditPutMs));
+    assert.deepEqual(Object.keys(today.compactMs), ['max', 'messages']);
+    peaksBefore = today;
+  });
+
   await t.test('saved keys are sealed at rest, never in clear', async () => {
     await emit(ctl, 'admin:settings', { stagewatchUrl: '127.0.0.1:1', stagewatchKey: 'swk_secretvalue123', aiKey: 'sk-ant-secret' });
     await new Promise((r) => setTimeout(r, 400));   // the write lane coalesces for 100 ms
@@ -405,5 +467,19 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(j.history.some((m) => m.text === 'while you were away'));
     assert.ok(!j.history.some((m) => m.text === 'delete me'));
     assert.ok(j.seq > seqAfterHello);
+  });
+
+  await t.test('a show day\'s peaks outlive a restart: on disk in peaks.json, and health counts on from them', async () => {
+    assert.ok(peaksBefore, 'the health test read today\'s peaks');
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dataDir, 'peaks.json'), 'utf8'));
+    const saved = onDisk.days.find((d) => d.day === peaksBefore.day);
+    assert.ok(saved, 'the day is in peaks.json: ' + JSON.stringify(onDisk.days.map((d) => d.day)));
+    assert.ok(saved.auditPutMs.count >= peaksBefore.auditPutMs.count, 'its audit appends kept: ' + saved.auditPutMs.count + ' ≥ ' + peaksBefore.auditPutMs.count);
+    assert.ok(saved.compactMs.messages >= peaksBefore.compactMs.messages && saved.hallMessages >= peaksBefore.hallMessages);
+    const after = (await (await fetch(base + '/api/health')).json()).peaks.find((d) => d.day === peaksBefore.day);
+    assert.ok(after && after.auditPutMs.count >= saved.auditPutMs.count, 'the restarted server counts on from them: ' + JSON.stringify(after && after.auditPutMs));
+    const words = [];
+    JSON.stringify(onDisk, (k, v) => { if (typeof v === 'string') words.push(v); return v; });
+    assert.ok(words.every((w) => /^\d{4}-\d{2}-\d{2}$/.test(w)), 'no hall, no name and no address on disk, only days: ' + words.join(', '));
   });
 });

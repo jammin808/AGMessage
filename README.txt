@@ -215,7 +215,22 @@ Reliability and speed
     heartbeat for 10 s) it is restarted - after 2 s, then 4, 8, 15, 30 s if
     it keeps failing - and everything comes back from the saved log. After 6
     crashes in 10 minutes it stops and the admin page says why. The last crash
-    and the server's own delay are on the admin page (Health).
+    is on the admin page (Health).
+  - The admin page's Health line reads the server's delay ("loop delay p95":
+    how long work waits for the server, its own 10 ms measuring tick taken
+    off) and how busy it is ("busy N %"), then today's peaks: the
+    highest of each reading this show day (the delay, how busy, the most
+    connections from one address and through the tunnel, the largest hall,
+    the most people joining a hall in 5 s, the longest snapshot, the time
+    an audit entry takes to reach the disk). A show day runs from 06:00 to
+    06:00 by this laptop's clock, so an evening that runs past midnight is
+    one day. The peaks of the last 14 show days are kept in
+    app\data\peaks.json, saved every 5 s while they rise and at once when
+    AGMessage stops or crashes, so a restart keeps them; a hang the watchdog
+    ends, or a power cut, can lose the last 5 seconds' readings. After a
+    show or a rehearsal, one look at Health (or /api/health on this laptop)
+    is the reading. They hold numbers and dates, never a hall, a name or an
+    address.
   - Saves are crash-safe (written, flushed to disk, then swapped in, with a
     backup of the last whole copy). Saved keys are encrypted with a key kept
     outside this folder, so a copied folder carries no usable key.

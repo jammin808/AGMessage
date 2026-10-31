@@ -50,3 +50,6 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   tampering, never with a message's text or a file's name (screen takes logged by 0.5.1 and earlier quote a message's
   first words and name the file).
 - Display URLs are capability links: unguessable, revocable, never logged, and only able to show — not to send.
+- Health's detail is for the admin and this laptop only (anyone else reads up or down, the version and the uptime). Its
+  readings and the show day's peaks it keeps in `peaks.json` are numbers and days: the most sockets from one address
+  and through the tunnel are counts, and no reading names an address, a hall or a person.

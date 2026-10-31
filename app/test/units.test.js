@@ -146,6 +146,211 @@ test('store: a log line the disk cut short, or a power cut tore, never swallows 
   assert.deepEqual(d.get('ABC234').messages.map((m) => m.id), ['m1', 'm3', 'm5']);
 });
 
+// ---------------------------------------------------------------- health's readings and a show day's peaks
+const readings = require('../lib/peaks');
+const { AuditLog } = require('../lib/audit');
+
+test('health: the loop\'s delay is its p99 less the sampler\'s own resolution, never below 0', () => {
+  const asked = [];
+  const hist = (ns) => ({ percentile: (q) => { asked.push(q); return ns; } });
+  // An idle Node at resolution 10 reads a p99 of about 10.36 ms: its own timer, not a delay.
+  assert.equal(Math.round(readings.loopDelayMs(hist(10.36e6), 10) * 100) / 100, 0.36);
+  assert.equal(readings.loopDelayMs(hist(62e6), 10), 52, 'a stalled loop reads its stall');
+  assert.equal(readings.loopDelayMs(hist(4e6), 10), 0, 'never below 0');
+  assert.equal(readings.loopDelayMs(hist(0), 10), 0, 'an empty window (no sample yet) reads 0');
+  assert.equal(readings.loopDelayMs(hist(Number.NaN), 10), 0, 'nonsense reads 0, never NaN');
+  assert.deepEqual(asked, [99, 99, 99, 99, 99], 'the p99, every time');
+});
+
+test('health: the most sockets from one address and those through the tunnel are counts, never addresses', () => {
+  const datas = [
+    { ip: '192.168.1.20' }, { ip: '192.168.1.20' }, { ip: '192.168.1.21' },
+    { ip: 'cf:203.0.113.7', viaTunnel: true }, { ip: 'cf:203.0.113.7', viaTunnel: true }, { ip: 'cf:203.0.113.7', viaTunnel: true },
+    { ip: 'cf:198.51.100.4', viaTunnel: true }, null, {}, { ip: '' },
+  ];
+  assert.deepEqual(readings.countSockets(datas), { maxPerAddress: 3, tunnel: 4 });
+  assert.deepEqual(readings.countSockets([]), { maxPerAddress: 0, tunnel: 0 });
+  const ring = new (require('../lib/resilience').Ring)(4, 3);
+  for (const v of [0.0019, 0.012, 0.5004]) ring.push(v);
+  assert.deepEqual(ring.stats(), { count: 3, p50: 0.012, p95: 0.5, max: 0.5 }, 'a fraction (ELU) keeps 3 decimals');
+});
+
+test('peaks: per show day (06:00 to 06:00 by the laptop\'s clock), raised and never lowered, the newest 14 days kept', () => {
+  const at = (d, h = 12) => new Date(2026, 9, d, h, 0, 0).getTime();   // 2026-10-<d>, the laptop's own time
+  const p = new readings.Peaks();
+  assert.equal(p.dirty, false, 'nothing to save yet');
+  assert.equal(p.note({ loopMs: 3.14, elu: 0.1234, socketsPerAddress: 4, tunnelSockets: 1, hallMessages: 1200, hallKb: 340.26, joinBurst: 12 }, at(31, 9)), true);
+  assert.equal(p.dirty, true, 'a rise asks for a save at the window\'s end');
+  p.dirty = false;
+  assert.equal(p.note({ loopMs: 1, elu: 0.05, socketsPerAddress: 2, tunnelSockets: 0, hallMessages: 1100, hallKb: 300, joinBurst: 3 }, at(31, 10)), false, 'nothing rose: the record stands');
+  assert.equal(p.dirty, false, 'and asks for no save');
+  assert.equal(p.note({ loopMs: 7.04, hallMessages: 1250 }, at(31, 11)), true);
+  const today = p.view()[0];
+  assert.deepEqual({ ...today, auditPutMs: undefined }, {
+    day: '2026-10-31', loopMs: 7, elu: 0.123, socketsPerAddress: 4, tunnelSockets: 1, hallMessages: 1250, hallKb: 340.3, joinBurst: 12,
+    compactMs: { max: 0, messages: 0 }, auditPutMs: undefined, at: at(31, 11),
+  });
+  assert.deepEqual(today.auditPutMs, { count: 0, p99: null, max: null });
+  // An evening that runs past midnight is its show day's; 06:00 starts the next, and a reading never touches another day's.
+  p.note({ joinBurst: 50 }, new Date(2026, 10, 1, 0, 0, 1).getTime());
+  p.note({ joinBurst: 60 }, new Date(2026, 10, 1, 5, 59, 59).getTime());
+  p.note({ joinBurst: 7 }, new Date(2026, 10, 1, 6, 0, 0).getTime());
+  assert.deepEqual(p.view().map((d) => [d.day, d.joinBurst]), [['2026-10-31', 60], ['2026-11-01', 7]]);
+  assert.deepEqual([new Date(2026, 11, 1, 3), new Date(2027, 0, 1, 1), new Date(2027, 0, 1, 6)].map((d) => readings.dayOf(d.getTime())),
+    ['2026-11-30', '2026-12-31', '2027-01-01'], 'named by the date the show day starts on, across a month and a year');
+  // Fifteen more days: only the newest 14 stay, oldest first.
+  for (let d = 2; d <= 16; d++) p.note({ hallMessages: d }, new Date(2026, 10, d, 12).getTime());
+  const days = p.view().map((d) => d.day);
+  assert.equal(days.length, 14);
+  assert.deepEqual([days[0], days[13]], ['2026-11-03', '2026-11-16']);
+  // A laptop clock set back a day writes into that day's record, and still keeps 14.
+  p.note({ hallMessages: 999 }, new Date(2026, 10, 10, 12).getTime());
+  assert.equal(p.view().find((d) => d.day === '2026-11-10').hallMessages, 999);
+  assert.equal(p.view().length, 14);
+  assert.equal(new readings.Peaks({ keepDays: 2 }).note({ loopMs: 1 }, at(1)), true);
+});
+
+test('peaks: an audit append counts toward the day\'s p99 and max; a snapshot keeps the day\'s longest with its hall\'s size', () => {
+  const at = new Date(2026, 9, 31, 20).getTime();
+  const p = new readings.Peaks();
+  for (let i = 0; i < 985; i++) p.auditPut(0.3, at);
+  for (let i = 0; i < 14; i++) p.auditPut(1.7, at);
+  p.auditPut(84, at);
+  assert.deepEqual(p.view()[0].auditPutMs, { count: 1000, p99: 2, max: 84 }, 'the 990th of 1,000 is at most 2 ms (its bucket), the max exact');
+  for (let i = 0; i < 600; i++) p.auditPut(0.3, at);
+  assert.equal(p.view()[0].auditPutMs.p99, 0.5, '1,585 of 1,600 under 0.5 ms: the p99 is read from the whole day');
+  p.auditPut(140, at);
+  assert.equal(p.view()[0].auditPutMs.max, 140);
+  const h = new readings.Hist();
+  h.add(0.3); h.add(-1); h.add(Number.NaN); h.add('5');
+  assert.deepEqual(h.view(), { count: 1, p99: 0.3, max: 0.3 }, 'never above the max; nonsense is not counted');
+  h.add(5000);
+  assert.equal(h.quantile(1), 5000, 'past the last bound, the max');
+  assert.ok(readings.BOUNDS.includes(2) && readings.BOUNDS.includes(100), 'reading 3\'s two marks are bounds');
+
+  assert.equal(p.compacted(31.24, 5000, at), true);
+  assert.equal(p.compacted(12, 9000, at), false, 'a shorter one is not the day\'s');
+  assert.equal(p.compacted(31.2, 4000, at), false, 'nor the same stall at a smaller hall');
+  assert.equal(p.compacted(31.2, 6000, at), true, 'the same stall at a larger hall is');
+  assert.deepEqual(p.view()[0].compactMs, { max: 31.2, messages: 6000 });
+  p.dirty = false;
+  assert.equal(p.compacted(0, 0, new Date(2026, 10, 1, 12).getTime()), false, 'nothing to say: no change');
+  assert.equal(p.dirty, false);
+  p.auditPut(0.2, at);
+  assert.equal(p.dirty, true, 'every append timed asks for a save at the window\'s end');
+});
+
+test('peaks: saved with each day\'s buckets, so a restart counts on; what is not a day is left out', () => {
+  const at = new Date(2026, 9, 31, 20).getTime();
+  const p = new readings.Peaks();
+  p.note({ loopMs: 4.2, hallMessages: 300 }, at);
+  p.auditPut(0.4, at); p.auditPut(3.5, at);
+  p.compacted(8.5, 300, at);
+  const saved = JSON.parse(JSON.stringify(p.toJSON()));
+  assert.equal(saved.v, 1);
+  assert.equal(saved.days[0].auditPutMs.buckets.length, readings.BOUNDS.length + 1);
+  const back = new readings.Peaks().load(saved);
+  assert.deepEqual(back.view(), p.view(), 'read back as it was');
+  assert.equal(back.dirty, false, 'and what was read back asks for no save');
+  back.auditPut(0.4, at);
+  assert.equal(back.view()[0].auditPutMs.count, 3, 'and goes on counting');
+  const odd = new readings.Peaks().load({ days: [
+    { day: '2026-10-30', loopMs: 'x', elu: -1, hallMessages: 12.7, compactMs: null, auditPutMs: { count: 5, max: 9, buckets: [1, 2] }, at: 'now' },
+    { day: 'yesterday', loopMs: 99 }, null, 42, { day: '2026-10-30', hallMessages: 3 },
+  ] });
+  assert.deepEqual(odd.view(), [{
+    day: '2026-10-30', loopMs: 0, elu: 0, socketsPerAddress: 0, tunnelSockets: 0, hallMessages: 3, hallKb: 0, joinBurst: 0,
+    compactMs: { max: 0, messages: 0 }, auditPutMs: { count: 0, p99: null, max: null }, at: 0,
+  }], 'a day named twice is its last record; a count the buckets cannot account for is none');
+  assert.deepEqual(new readings.Peaks().load({ days: [{ day: '2026-10-29', auditPutMs: { max: 9, buckets: new Array(readings.BOUNDS.length + 1).fill(0).map((_, i) => (i === 2 ? 1.5 : 0)) } }] }).view()[0].auditPutMs.count, 0, 'a bucket that is not a whole count: none');
+  for (const nothing of [null, undefined, {}, { days: 'x' }]) assert.deepEqual(new readings.Peaks().load(nothing).view(), []);
+  const many = { days: Array.from({ length: 20 }, (_, i) => ({ day: '2026-10-' + String(i + 1).padStart(2, '0'), hallMessages: i })) };
+  assert.deepEqual(new readings.Peaks().load(many).view().map((d) => d.hallMessages), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], 'the newest 14');
+});
+
+test('health\'s timings are taken in place: a snapshot and an audit append that reach the disk, never one that failed', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const store = new RoomStore(dir);
+  const took = [];
+  store.onCompact = (ms, messages) => took.push([typeof ms === 'number' && ms >= 0, messages]);
+  const r = store.create('ABC234', 'Test');
+  assert.equal(typeof r.snapKb, 'number', 'the snapshot\'s size is kept as it is written');
+  for (let i = 0; i < 40; i++) store.commit(r, { o: 'add', m: { id: 'm' + i, type: 'text', text: 'x'.repeat(100), at: i } });
+  const small = r.snapKb;
+  store.compact('ABC234');
+  assert.ok(r.snapKb > small && r.snapKb >= 4, 'it follows the hall\'s size: ' + small + ' → ' + r.snapKb);
+  assert.equal(r.snapKb, Math.round(fs.statSync(path.join(dir, 'ABC234.json')).size / 102.4) / 10, 'in KB, to a tenth');
+  assert.deepEqual(took, [[true, 0], [true, 40]]);
+  const reloaded = new RoomStore(dir);
+  reloaded.loadAll(null, { compact: false });
+  assert.equal(reloaded.get('ABC234').snapKb, null, 'unknown until this run writes a snapshot: no file call is added');
+  fs.renameSync(path.join(dir, 'ABC234.json'), path.join(dir, 'held.json'));
+  fs.mkdirSync(path.join(dir, 'ABC234.json'));   // the snapshot cannot be renamed into place
+  store.compact('ABC234');
+  assert.ok(store.lastError);
+  assert.equal(took.length, 2, 'a snapshot that failed is not timed');
+
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-audit-')), 'audit.jsonl');
+  const log = new AuditLog(file);
+  const puts = [];
+  log.onPut = (ms) => puts.push(typeof ms === 'number' && ms >= 0);
+  log.write({ t: 'system' }, 'boot', '', 'first');
+  fs.renameSync(file, file + '.held'); fs.mkdirSync(file);
+  log.write({ t: 'system' }, 'x', '', 'while the disk would not take it');
+  fs.rmdirSync(file); fs.renameSync(file + '.held', file);
+  log.write({ t: 'system' }, 'x', '', 'third, with the second ahead of it');
+  assert.deepEqual(puts, [true, true], 'two appends reached the disk; the one that failed is not timed');
+});
+
+test('peaks: the most joins one hall took in any 5 s, read whole when a storm crosses the 5 s tick; bounded per hall', () => {
+  const b = new readings.Burst();
+  const t0 = 1_000_000;   // a monotonic clock, in ms
+  for (let i = 0; i < 30; i++) b.add('HALL01', t0 + 3000 + i * 60);   // 30 seated in the 1.8 s before a tick…
+  assert.equal(b.take(t0 + 5000), 30);
+  let last = 0;
+  for (let i = 0; i < 30; i++) last = b.add('HALL01', t0 + 5000 + i * 60);   // …and 30 in the 1.8 s after it
+  assert.equal(last, 60, 'the window that ends now holds both halves');
+  assert.equal(b.take(t0 + 10_000), 60, 'one storm of 60, not two of 30');
+  assert.equal(b.take(t0 + 10_000), 0, 'a take starts the next window\'s reading from nothing');
+  // Joins 6 s apart are never one window's, and another hall's count apart.
+  b.add('HALL01', t0 + 20_000); b.add('HALL02', t0 + 20_000);
+  assert.equal(b.add('HALL01', t0 + 26_000), 1, 'the one 6 s before has left the window');
+  assert.equal(b.take(t0 + 26_000), 1);
+  // Steady joins, one a second, read 5: the window is 5 s, give or take one slot at its far edge.
+  for (let i = 0; i < 20; i++) b.add('HALL03', t0 + 40_000 + i * 1000);
+  assert.equal(b.take(t0 + 60_000), 5);
+  assert.equal(b.keys.size, 1, 'a hall with nothing in the last window is let go');
+  b.take(t0 + 70_000);
+  assert.equal(b.keys.size, 0, 'so the slots kept are bounded by the halls that joined in the last 5 s');
+  const slow = new readings.Burst({ windowMs: 5000, slotMs: 1000 });
+  assert.equal(slow.slots, 5);
+});
+
+test('health\'s timing hooks never reach what they time: a throw there leaves the snapshot and the audit entry on disk', () => {
+  const said = [];
+  const error = console.error;
+  console.error = (...a) => { said.push(a.join(' ')); };
+  try {
+    const store = new RoomStore(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-')));
+    store.onCompact = () => { throw new Error('bookkeeping'); };
+    const r = store.create('ABC234', 'Test');
+    store.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'kept', at: 1 } });
+    store.compact('ABC234');
+    assert.equal(store.lastError, null, 'the snapshot was written');
+    assert.equal(r.logCount, 0, 'and the log cut after it');
+
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-audit-')), 'audit.jsonl');
+    const log = new AuditLog(file);
+    log.onPut = () => { throw new Error('bookkeeping'); };
+    const e = log.write({ t: 'system' }, 'boot', '', 'first');
+    assert.equal(e.seq, 1);
+    assert.equal(log.unwritten, 0, 'the entry is on disk');
+    assert.ok(fs.readFileSync(file, 'utf8').includes('"boot"'));
+  } finally { console.error = error; }
+  assert.ok(said.some((l) => /a snapshot's time could not be noted for ABC234 bookkeeping/.test(l)), said.join('\n'));
+  assert.ok(said.some((l) => /an append's time could not be noted: bookkeeping/.test(l)), said.join('\n'));
+});
+
 test('board: a hall\'s messages are read once per change, whoever watches, and never served stale', () => {
   const board = require('../lib/board');
   const messages = [];

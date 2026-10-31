@@ -25,6 +25,32 @@ and is dated again when 0.6.0 closes.
   characters)" — never the message's words or the file's name. 0.5.1 wrote a message's first 60 characters and the
   file's name; rows already written keep what they say. The console and the halls board still quote and name them.
 
+**Health, and a show day's peaks** (the code and its tests; nothing in it is measured on the show laptop yet)
+- Health reads the loop's true delay: each 5 s window's p99 less the sampler's own 10 ms resolution, which 0.5.1 counted
+  as delay, so an idle server showed about 10 ms it did not have. The reading is lower than before. The admin page's
+  health line reads "loop delay p95 … ms (max …) · busy … %".
+- Appended to `/api/health`'s detail (the admin and this laptop only), at its end: `elu` (how busy the loop was, 0 to 1,
+  per 5 s window over the last 10 minutes), `rssMb`, `maxSocketsPerAddress` and `tunnelSockets` (counts of the sockets
+  open now, never an address), `largestHall {messages, kb}` (the snapshot's size, kept as each snapshot is written, so
+  no file is read for it), `latest` (what the halls board's and the screens' coalescing saves: changes marked, frames
+  sent), `peaks` and `showDay`. A screen's socket is counted as through the tunnel as a page's is.
+- A show day's peaks are kept for the last 14 show days. A show day runs from 06:00 to 06:00 by the laptop's clock and
+  is named by the date it starts, so an evening that runs past midnight is one day's. Each keeps the highest loop delay
+  and busy share of a 5 s window, the most sockets from one address, the most through the tunnel, the largest hall's
+  messages and size, the most people seated in one hall in any 5 s (read at each join, so a storm the 5 s tick falls
+  in is read whole), the longest snapshot write with its hall's message count, and every audit append's time (open,
+  write, fsync, close: what an audited action already waits for) as a count, a p99 and a max. They are saved in
+  `peaks.json` through a write lane of their own, named in health like the others, at the end of each 5 s window in
+  which one rose; a stop, or a crash the server catches, writes them at once, the audit's last appends included. A hang
+  the watchdog ends, or a power cut, can lose that last window's. They are read back at start, so a restart keeps the
+  day, and written only once this copy holds its data folder. They hold numbers and days, never a hall, a name or an
+  address. The admin page reads "today's peaks: …", today being the show day the server names (`showDay`), not the
+  browser's. They are the readings `docs/DESIGN.md`'s new table, "Measured on the show laptop", waits for; each of its
+  rows says "not measured" until a show or a rehearsal fills it.
+- Timing a snapshot or an audit append never reaches what it times: a fault in health's bookkeeping leaves the snapshot
+  written and the audit entry on disk.
+- Rolling back: 0.5.1 ignores `peaks.json` and the new health keys.
+
 **Fixed**
 - A proposal to the show desk stays with the hall it was asked from. A page that joined another hall before the desk
   answered had the proposal's waiting line, and the desk's later outcome, put in the hall it had moved to.
