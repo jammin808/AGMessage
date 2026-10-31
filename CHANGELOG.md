@@ -71,7 +71,62 @@ and is dated again when 0.6.0 closes.
   guard holds both: a page's `postMessage` never targets `'*'`, and a `message` listener first checks who sent it.
 - Rolling back: nothing is stored; 0.5.1 joins and relays as it did.
 
+**Starting a copy says what is wrong, and the browser opens on the copy that serves** (the owner's report from the show
+laptop, 2026-10-26, with the start window's text; the .bat files are first run by cmd in CI's Windows job, and the
+browser opening is not yet seen on a Windows desktop)
+- What the window said: "The system cannot find the path specified.", then "Server stopped.", and the browser opened on
+  a working AGMessage all the same. It was cmd failing to find `node\node.exe` beside the .bat: most likely the .bat
+  was started from inside the zip (Explorer copies out only the file opened), else from a checkout (which has no
+  `node\`), or an antivirus removed it. cmd's "path not found" is code 3, which the .bat read as AGMessage's "cannot
+  start as configured" and called "Server stopped". The browser opened because the .bat opened `http://localhost:3023`
+  after 2 s whether or not this copy started, so whatever already served on 3023 answered: an AGMessage left running
+  from an earlier start, possibly an older build.
+- `start-agmessage.bat` first checks that `node\node.exe`, `app\supervise.js`, `app\server.js` and `app\node_modules`
+  are beside it, and names the one missing with its likely cause: "This copy is missing node\node.exe. Download the
+  portable zip again and Extract All. If it keeps going missing, your antivirus may be removing it.", or, from a folder
+  under `%TEMP%`, "AGMessage was started from inside the zip. Close this window, right-click the zip, choose Extract
+  All, and run start-agmessage.bat from the extracted folder." It then ends with a code of its own (2) and opens
+  nothing.
+- The window says why it ended: code 0 "Server stopped.", code 3 "AGMessage did not start - the reason is above." (the
+  server's or the watchdog's words). Its banner names the folder it starts from, and on a PC where AGMessage is
+  installed (`HKLM\SOFTWARE\AGMessage`'s `Version`, read by `reg.exe`'s absolute path, in the 64-bit view whatever cmd
+  runs it) it says "AGMessage <version> is installed on this PC and starts with Windows. This window starts a separate
+  portable copy." Delayed expansion is gone: a folder whose name held a "!" lost it, and with it the path.
+- The browser opens on this copy, and only once it serves. The .bat asks (`AGM_OPEN=1`) and the server opens
+  `http://localhost:<PORT>` after it listens, through `explorer.exe` by its absolute path under `%SystemRoot%`, with an
+  argument array and no shell: once per start of the window, never on a watchdog restart, never in the installed
+  node's channel (`AGM_RUNS` anything but `portable`), whatever `AGM_OPEN` holds. A failure to open is one console
+  line, and the copy keeps serving.
+- Not yet seen: no test starts `explorer.exe` (each stands in for it and records the call), so the browser coming up in
+  front, started with `windowsHide` as the plan gives it, is the first thing to check on the show laptop's next start of
+  the .bat. If it does not open, `http://localhost:3023` opened by hand is the same page.
+- A port in use names its holder. The copy reads `http://127.0.0.1:<PORT>/api/health` once, within a second, sending no
+  token, and takes only the version, the build and whether it is the installed node (`install.runs`), cleaned of
+  control characters: "AGMessage 0.5.1 (build …) is already running on port 3023. Use its window, or close it and start
+  this copy again.", "The AGMessage installed on this PC (0.6.0, build …) is serving on port 3023. Open it from Start →
+  AGMessage → Open AGMessage, or set PORT to another number to run this copy beside it.", or "Another program is using
+  port 3023. Close it, or set PORT to another number." The installed node (`AGM_RUNS=task`, which no build sets yet)
+  has words of its own: "Another copy of AGMessage, 0.6.0 (build …), holds port 3023. Close its window: AGMessage
+  takes the port back on its next try." or "Another program is using port 3023. AGMessage tries again; AGMessage
+  status names the program's process." The answer only chooses the words. 0.5.1 said "Close the other AGMessage
+  window" whoever held the port. A copy refused at the port first stops its Stagewatch, hall and peer links and its
+  discovery, started before the port was known, so it says nothing more on the show network while it reads the holder,
+  and it stops (code 3) whatever the read does.
+- `docs/INSTALL.md` is begun with what the server and the .bat already do about an installed AGMessage: it opens no
+  browser and has no window, its words for a port in use, and what a portable copy says beside it. The installer's
+  units write the rest; no build installs AGMessage yet.
+- CI runs the shipped bundle: the package job extracts the zip, starts its own `node.exe` and watchdog, and
+  `/api/health` must answer within 30 s with the build the run stamped. Until now CI built the zip and never ran it.
+  The release notes and `README.txt` say Extract All, and the .bat files are run by cmd in the Windows job.
+- Rolling back: nothing is stored; 0.5.1's .bat and server start as they did.
+
 **Fixed**
+- The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
+  there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,
+  `secret.key`, audit log and settings when it was made again, while the window said "The copy has no meeting history,
+  files, keys or settings." Each copy now goes to a new folder named with the time (numbered when two are made in one
+  minute), never into one that exists, and is checked before "Done": anything under its `app\data` or `app\uploads` but
+  the empty folders and `.gitkeep`, and the copy is deleted instead.
 - A proposal to the show desk stays with the hall it was asked from. A page that joined another hall before the desk
   answered had the proposal's waiting line, and the desk's later outcome, put in the hall it had moved to.
 - A new hall's name is cleaned as every typed name is, from the admin page and over HTTP alike: control characters and

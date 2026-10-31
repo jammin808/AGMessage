@@ -20,6 +20,8 @@ left out, and the defects the fences found.*
 | CodeQL `security-extended` | — | Security · codeql | an alert (shown under the repository's Security tab) |
 | Dependency audit | `npm run audit` | Security · audit | a high or critical advisory in a shipped package; a package whose registry signature or provenance does not verify |
 | Dependency review | — | Security · on a pull request | a new dependency with a moderate or worse advisory |
+| The .bat files | `npm test` (`test/startbat.test.js`) | CI · Linux (read as text), Windows (run by cmd) | delayed expansion, a bare program name, the install record read outside the 64-bit view, the preflight after anything started, code 0 and 3 sharing words, a line ending that is not CRLF; on Windows, a missing `node\node.exe` not said or not exit 2, a clean copy made into a folder that exists |
+| The bundle start | — | CI · package | the extracted zip's own Node and watchdog not answering `/api/health` with the stamped build within 30 s |
 | SBOM + SHA256SUMS + build provenance | — | CI · package, release | a release is published only with them |
 
 Locally: `npm run check` runs the analyzers, the secret scan and the tests with the coverage gate.
@@ -75,6 +77,12 @@ The banned calls, each with its reason in the config:
 | `process.env.NODE_TLS_REJECT_UNAUTHORIZED = …` | turning certificate checks off for the whole process is never the fix |
 | `new Function` | eval |
 | `process.exit` in `lib/` | a library never ends the process; `server.js` and `supervise.js` decide, and exit codes carry intent |
+
+Programs are run by their absolute path, never a bare name, which cmd looks for in the current folder first and Node's
+`spawn` on `PATH`: the browser opener spawns `%SystemRoot%\explorer.exe` with an argument array and no shell, inside the
+`child_process` fence (`lib/startup.js`), and runs nothing when `SystemRoot` does not name a folder from its drive; the
+.bat files run `reg.exe`, `timeout.exe`, `robocopy.exe` and `powershell.exe` from `%SystemRoot%\System32`.
+`test/startbat.test.js` holds the .bat files to it, with CRLF and ASCII throughout.
 
 ### 3.3 `agm/no-unescaped-html` (the house rule, `app/eslint-rules/`)
 

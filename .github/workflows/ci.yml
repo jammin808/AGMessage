@@ -1,7 +1,8 @@
 # AGMessage CI. Every push (any branch) and pull request runs the analyzers, the secret scan, every test suite with its
 # coverage gate on Linux (Node 24 LTS, and Node 26 beside it), the tests and the browser smoke on Windows with Edge and on
 # Linux with Chrome, then builds the portable Windows zip, numbered by this run (tools/stamp-build.js): a development
-# build 0.5.0-dev.<run>+<sha> on a branch, a release 0.5.0+<run>.<sha> on the tag v0.5.0. A tag publishes a GitHub
+# build 0.5.0-dev.<run>+<sha> on a branch, a release 0.5.0+<run>.<sha> on the tag v0.5.0. The zip is extracted and started
+# once, and must answer with that build. GitHub hands the artifact as a zip around the zip. A tag publishes a GitHub
 # Release with the zip, its SBOM, SHA256SUMS and a build-provenance attestation, once every job above is green.
 name: CI
 
@@ -141,6 +142,37 @@ jobs:
       - name: Build the portable bundle (tools/build-portable.ps1)
         shell: pwsh
         run: ./tools/build-portable.ps1
+      # The shipped bundle, run as a person runs it after Extract All: the zip extracted to a throwaway folder, its own
+      # node.exe running its own watchdog (no AGM_OPEN: nothing is opened), and /api/health must answer within 30 s with
+      # the build this run stamped. The console goes to a file, shown only if the start fails.
+      - name: Start the bundle (the zip, extracted)
+        shell: pwsh
+        run: |
+          $zip = @(Get-ChildItem dist -Filter *.zip)
+          if ($zip.Count -ne 1) { throw "expected one zip in dist, found $($zip.Count)" }
+          $dest = Join-Path $env:RUNNER_TEMP 'bundle-start'
+          Expand-Archive -Path $zip[0].FullName -DestinationPath $dest -Force
+          $root = (Get-ChildItem $dest -Directory | Select-Object -First 1).FullName
+          $out = Join-Path $env:RUNNER_TEMP 'bundle-start.out.log'
+          $err = Join-Path $env:RUNNER_TEMP 'bundle-start.err.log'
+          $env:PORT = '3123'
+          Remove-Item Env:AGM_OPEN -ErrorAction SilentlyContinue
+          $p = Start-Process -FilePath (Join-Path $root 'node\node.exe') -ArgumentList ('"' + (Join-Path $root 'app\supervise.js') + '"') `
+            -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+          $want = '${{ steps.stamp.outputs.full }}'
+          $build = ''
+          $deadline = (Get-Date).AddSeconds(30)
+          while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
+            try { $build = (Invoke-RestMethod -Uri 'http://127.0.0.1:3123/api/health' -TimeoutSec 2).build; break } catch { Start-Sleep -Milliseconds 500 }
+          }
+          # The watchdog's server is ended with it (the job object it runs its children in); any left is ended by its path.
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$root*" } | Stop-Process -Force
+          if ($build -ne $want) {
+            Get-Content $out, $err -ErrorAction SilentlyContinue
+            throw "the bundle answered build '$build' within 30 s; this run stamped '$want'"
+          }
+          Write-Host "The bundle started and answered as $build"
       # The bill of materials (CycloneDX): every package the bundle ships, at its version — the SOUP list a reviewer reads.
       - name: Software bill of materials
         shell: pwsh
@@ -185,5 +217,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AGMessage ${GITHUB_REF_NAME#v}" \
-            --notes "Build ${{ needs.package.outputs.full }}. The zip's SHA-256 is in SHA256SUMS; its packages are listed in agmessage-sbom.cdx.json." \
+            --notes "Build ${{ needs.package.outputs.full }}. Extract All first (right-click the zip), then run start-agmessage.bat from the extracted folder: run from inside the zip it finds nothing beside it. The zip's SHA-256 is in SHA256SUMS; its packages are listed in agmessage-sbom.cdx.json." \
             --generate-notes dist/*.zip dist/agmessage-sbom.cdx.json dist/SHA256SUMS

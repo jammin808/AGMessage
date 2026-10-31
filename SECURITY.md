@@ -53,6 +53,11 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   desk takes, what kind of thing a display was told to show) are written to a hash-chained audit log that shows
   tampering, never with a message's text or a file's name (screen takes logged by 0.5.1 and earlier quote a message's
   first words and name the file).
+- A copy that cannot take its port reads who holds it once, from loopback, sending no token, and takes only the
+  version, the build and whether it is the installed node, cleaned, to choose its words; nothing is decided on the
+  answer. The browser is opened only by the portable copy, in the person's own session, through `explorer.exe` by its
+  absolute path. The clean copy for giving the bundle away goes to a new folder each time and is deleted if anything of
+  `app\data` or `app\uploads` is in it, so a copy handed on carries no accounts, keys or audit log.
 - Display URLs are capability links: unguessable, revocable, never logged, and only able to show — not to send.
 - Health's detail is for the admin and this laptop only (anyone else reads up or down, the version and the uptime). Its
   readings and the show day's peaks it keeps in `peaks.json` are numbers and days: the most sockets from one address

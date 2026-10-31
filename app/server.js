@@ -48,6 +48,7 @@ const peerlinks = require('./lib/peerlinks');
 const deskresults = require('./lib/deskresults');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
 const readings = require('./lib/peaks');
+const startup = require('./lib/startup');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD } = require('./lib/version');
@@ -2542,11 +2543,15 @@ function shutdown(code = 0) {
   console.log('\n  Saving rooms…');
   store.compactAll();
   flushLanes();
+  leaveShowNetwork();
+  releaseDataFolder();
+  process.exit(code);
+}
+/** Every Stagewatch, hall and peer link stopped, and discovery with them: this copy says nothing more on the show network. */
+function leaveShowNetwork() {
   for (const link of allLinks()) link.stop();
   for (const link of peerLinks.values()) link.stop();
   if (discovery) discovery.stop();
-  releaseDataFolder();
-  process.exit(code);
 }
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
@@ -2579,10 +2584,17 @@ process.on('unhandledRejection', (e) => { rejections++; console.error('  [error]
 // the process, unhandled, and end it before 'disconnect' lets it save.
 if (typeof process.send === 'function') setInterval(() => { if (process.connected) process.send({ t: 'beat' }, () => { /* the watchdog gone: 'disconnect' stops us */ }); }, 1000).unref();
 
+// A port already in use is named by who holds it: its health, read once at loopback with no token, chooses the words (an
+// AGMessage, the one installed on this PC, or another program), and nothing else. Either way this copy stops without
+// serving (code 3, which the watchdog does not restart), whatever the read or its words do. A copy that will never serve
+// first leaves the show network: its links and discovery, started before the port was known, say nothing during the read.
 front.on('error', (e) => {
-  console.error(e.code === 'EADDRINUSE' ? `\n  Port ${PORT} is already in use. Close the other AGMessage window, or set PORT to another number.\n` : '  Server error: ' + e.message);
-  releaseDataFolder();
-  process.exit(resilience.EXIT.CONFIG);   // the watchdog won't restart this one
+  const stop = () => { releaseDataFolder(); process.exit(resilience.EXIT.CONFIG); };
+  try { leaveShowNetwork(); } catch { /* this copy ends either way: nothing of the network may keep it from stopping */ }
+  if (e.code !== 'EADDRINUSE') { console.error('  Server error: ' + e.message); stop(); return; }
+  startup.readPortHolder(PORT).catch(() => null)
+    .then((holder) => { console.error('\n  ' + startup.portHolderWords(holder, { port: PORT, runs: process.env.AGM_RUNS }) + '\n'); })
+    .finally(stop);
 });
 
 // ---------------------------------------------------------------- one server per data folder
@@ -2647,6 +2659,8 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   console.log('  Stagewatch:  ' + (settings.stagewatchUrl || 'not linked (Admin → Show network)'));
   console.log('  Saved rooms: ' + ROOMS_DIR);
   console.log('  Uploads:     ' + UPLOAD_DIR + '\n');
+  // Only now, with this copy serving, may the browser open: the page it opens is this copy's (lib/startup.js).
+  startup.openBrowser(startup.openerPlan(process.env, { restarts: RESTARTS, port: PORT, platform: process.platform }), spawn, (line) => console.log(line));
 }));
 
 module.exports = { app, server, io, store, buildMessage };

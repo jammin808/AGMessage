@@ -40,8 +40,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 
 ## Run it
 
-Download the portable zip from a release (or a CI run's artifacts), unzip, double-click `start-agmessage.bat`, and open
-`http://localhost:3023` on that laptop to make the first admin account. Full instructions: [README.txt](README.txt).
+Download the portable zip from a release (or a CI run's artifacts), Extract All, and double-click `start-agmessage.bat`
+in the extracted folder (run from inside the zip it finds nothing beside it, and says so). The browser opens on
+`http://localhost:3023` once that copy serves, to make the first admin account. A start that cannot run says why in its
+window: a file missing beside the .bat, or who holds the port. Full instructions: [README.txt](README.txt).
 
 ## Versions
 
@@ -68,7 +70,9 @@ npm run audit     # the shipped packages' advisories and registry signatures
 The analyzers are fences: ESLint with the security rules, a banned-call list and a rule that refuses unescaped values
 on their way into a page's HTML ([docs/ANALYSIS.md](docs/ANALYSIS.md)). CI runs them, the tests on Linux (Node 24 and
 26) and Windows, the browser smoke on both, CodeQL and the dependency audit; it builds the stamped zip with its SBOM
-and SHA256SUMS on every push, and a `v*` tag publishes a release with a build-provenance attestation.
+and SHA256SUMS on every push, extracts it and starts the bundle once (its own Node and watchdog must answer
+`/api/health` with the stamped build within 30 s), runs both .bat files under cmd on Windows, and a `v*` tag publishes a
+release with a build-provenance attestation. A CI run's artifact is the zip inside a second zip, which GitHub adds.
 `tools\build-portable.ps1` builds the zip locally.
 
 Meeting data (`app/data`, `app/uploads`) is never committed or packaged. The agent brief for working on this tree is

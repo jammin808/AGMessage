@@ -4,25 +4,30 @@ AGMessage — portable Windows bundle
 What this is
 ------------
 A self-contained copy of AGMessage that runs on any Windows laptop without
-installing Node.js or anything else. Unzip the folder, double-click the
-launcher, and share the URL with your team. Messages, files, help requests
-and screens for every hall of the event; crew sign in with their own
-accounts, presenters and guests join with a hall's code.
+installing Node.js or anything else. Extract the zip (right-click it,
+Extract All), double-click the launcher in the extracted folder, and share
+the URL with your team. Messages, files, help requests and screens for
+every hall of the event; crew sign in with their own accounts, presenters
+and guests join with a hall's code.
 
 The build this copy is (e.g. 0.5.0+17.abc1234) is in the zip's name, the
-black window's first lines, and the admin page.
+black window's first lines, and the admin page. The window's banner also
+names the folder it starts from.
 
 First time on a new laptop
 --------------------------
-1. Unzip this folder somewhere convenient (e.g. C:\Tools\AGMessage).
+1. Extract All first (right-click the zip). Running the .bat from inside
+   the zip does not work: Windows copies out only the file you opened, and
+   nothing it needs is beside it. Extract it somewhere convenient (e.g.
+   C:\Tools\AGMessage).
 
-2. Double-click:
+2. In the extracted folder, double-click:
 
        start-agmessage.bat
 
-   A black window opens and says "AGMessage is starting...". LEAVE IT
-   OPEN — the server runs inside it. Your browser opens at
-   http://localhost:3023.
+   A black window opens and says "AGMessage is starting...", and from
+   which folder. LEAVE IT OPEN — the server runs inside it. Once this
+   copy is serving, your browser opens on it at http://localhost:3023.
 
 3. On this laptop only, the sign-in page asks for the FIRST ADMIN: your
    name, a username and a password (10 characters or more; a few words
@@ -122,14 +127,44 @@ Troubleshooting
   the .bat file. Click "More info" -> "Run anyway". The file is a
   normal batch script — you can open it in Notepad to inspect.
 
-- If the browser opens but shows "This site can't be reached",
-  wait five seconds and refresh. Node takes a moment to boot the
-  first time.
+- The browser opens only once this copy is serving, and only from the
+  window's first start. If it does not open, open http://localhost:3023
+  yourself.
 
-- If port 3023 is already in use, close whatever's using it, or
-  edit start-agmessage.bat and change:
+- "AGMessage was started from inside the zip. Close this window,
+  right-click the zip, choose Extract All, and run start-agmessage.bat
+  from the extracted folder.": do just that. Nothing was started, and
+  no browser opens.
+
+- "This copy is missing node\node.exe. Download the portable zip again
+  and Extract All. If it keeps going missing, your antivirus may be
+  removing it.": the folder is not a whole copy (or the bundled Node was
+  removed). The same is said of app\supervise.js, app\server.js or
+  app\node_modules.
+
+- "AGMessage did not start - the reason is above.": the lines just above
+  it say why (a port in use, a data folder already in use, or the
+  watchdog giving up). "Server stopped." means it was stopped on purpose.
+
+- A port already in use is named by who holds it:
+  - "AGMessage 0.5.1 (build ...) is already running on port 3023. Use its
+    window, or close it and start this copy again.": an AGMessage left
+    running, perhaps an older one. Its version is at
+    http://localhost:3023/api/health.
+  - "The AGMessage installed on this PC (0.6.0, build ...) is serving on
+    port 3023. Open it from Start → AGMessage → Open AGMessage, or set
+    PORT to another number to run this copy beside it."
+  - "Another program is using port 3023. Close it, or set PORT to another
+    number."
+  To run this copy on another port, edit start-agmessage.bat and change
       set PORT=3023
   to another free port (e.g. 4023), then relaunch.
+
+- "AGMessage 0.6.0 is installed on this PC and starts with Windows. This
+  window starts a separate portable copy.": AGMessage is installed here
+  too. The portable copy runs beside it only on a port of its own. A copy
+  missing its files then ends with "To use the installed AGMessage:
+  Start -> AGMessage -> Open AGMessage."
 
 - "AGMessage is already running on this data folder": a second copy of
   this folder was started while the first runs. It stops before it
@@ -296,7 +331,12 @@ Sharing this bundle
 -------------------
 app\data and app\uploads hold real meeting history, accounts, the audit
 log and files. Before giving the bundle to anyone, double-click
-make-shareable-copy.bat: it makes a copy next to this folder without them.
+make-shareable-copy.bat: it makes a copy next to this folder without them,
+in a new folder each time (AGMessage-Portable-Windows-clean-<date>-<time>),
+never into one that is already there. It says "Done" only after checking
+that the copy holds nothing under app\data or app\uploads; otherwise it
+deletes the copy and says so. Give away the copy you just made, not an
+older one you may have started to test.
 
 Tests (for developers): cd app, then: npm run check
 
@@ -304,5 +344,6 @@ From a git clone (developers): the two bundled programs aren't in git. Run
   powershell -ExecutionPolicy Bypass -File tools\fetch-runtime.ps1
 once to download them (pinned versions, checksum-verified), or
 tools\build-portable.ps1 to make the zip. CI (GitHub Actions) runs the
-analyzers, the tests and the browser smoke test, and builds the zip, on
-every push.
+analyzers, the tests and the browser smoke test, builds the zip, and
+starts it once extracted, on every push. A CI run's artifact is a zip
+around the zip: extract both.
