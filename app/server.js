@@ -116,6 +116,8 @@ const sessions = new Sessions(path.join(DATA_DIR, 'sessions.json'), accounts);
 const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json'), guard.mac(SECRET, 'admin-token:' + ADMIN_TOKEN, 43));
 const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'));
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
+/** A count in an audit row's words: "1 file", "4 files". */
+const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
 const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
 // The results of approved show-desk proposals this AGMessage ran that Stagewatch has not taken yet (lib/deskresults.js):
 // read now, written only by the desk loop, which runs once this copy holds the data folder and its port. In memory too:
@@ -310,14 +312,16 @@ function seatsNow(room) {
   }
   return seats;
 }
+/** Whether a room's saved seats are these: the same people, each with the same name and role, in whatever order. */
+function seatsSaved(room, seats) {
+  const keys = Object.keys(seats);
+  return keys.length === Object.keys(room.settings.seats || {}).length && keys.every((uid) => { const s = savedSeat(room, uid); return !!s && s.name === seats[uid].name && s.role === seats[uid].role; });
+}
 /** A locked room's saved seats follow the seats it holds: one numbered change, only when they differ. */
 function syncSeats(room) {
   if (!store.has(room.code) || !room.settings.lockRoles) return;
   const next = seatsNow(room);
-  const was = room.settings.seats || {};
-  const keys = Object.keys(next);
-  const same = keys.length === Object.keys(was).length && keys.every((uid) => { const s = savedSeat(room, uid); return !!s && s.name === next[uid].name && s.role === next[uid].role; });
-  if (!same) apply(room, { o: 'meta', settings: { seats: next } });
+  if (!seatsSaved(room, next)) apply(room, { o: 'meta', settings: { seats: next } });
 }
 // The boot's first seconds are over: a seat saved before the restart that nobody took up goes, as after a drop's grace.
 setTimeout(() => { for (const room of store.rooms.values()) if (Object.keys(room.settings.seats || {}).length) syncSeats(room); }, BOOT_SEAT_MS + 100).unref();
@@ -538,10 +542,12 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
   res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: rbac.can(a, 'users.manage') && !web.adminBlocked(req, a), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req) });
 });
 
+// A hall's name is shown on every page, screen and board, and written in the audit log: it is cleaned as every typed
+// name is (no control, bidi override or isolate character), from the admin page's socket and the HTTP route alike.
 function newRoom(name) {
   let code;
   do { code = makeRoomCode(); } while (store.has(code));
-  return store.create(code, String(name || '').trim().slice(0, 80));
+  return store.create(code, guard.cleanText(name, 80));
 }
 
 // ----- uploads (only from people in a meeting; content must match the name)
@@ -703,6 +709,8 @@ io.on('connection', (socket) => {
     if (me.acct) return rbac.can(socket.data.account, cap, room.code);
     return (GUEST_CAPS[me.role] || []).includes(cap);
   };
+  // Who an audit row names for what this socket does: the admin token, the account, or a code guest by the name they joined with.
+  const actor = () => socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
 
   socket.on('join', (args, ack) => {
     ack = ok(ack);
@@ -1071,6 +1079,9 @@ io.on('connection', (socket) => {
     if (built.error) return ack({ ok: false, error: built.error });
     const parsed = stagelines.parse(built.line);
     if (parsed.error) return ack({ ok: false, error: 'Not a line Stagewatch takes: ' + parsed.error });
+    // The hall and the person who asked are read before the desk answers: this socket may join another hall meanwhile,
+    // and the proposal, its row and its system line stay with the hall it was made from.
+    const from = room, who = actor(), asker = me.name;
     const r = await link.propose({
       from: { t: 'messenger', id: settings.nodeId, name: 'AGMessage' },
       target: { t: 'main' },
@@ -1079,12 +1090,14 @@ io.on('connection', (socket) => {
       risk: 'review',
     });
     if (!r.ok) return ack(r);
+    // One row for each proposal the desk took: who asked, for where, and how long — never the words themselves.
+    audit.write(who, 'stagewatch.propose', from.code, 'asked the operator: a message (' + plural(parsed.text.length, 'character') + ') for ' + built.words + ' — proposal ' + r.proposal.id, socket.data.ip);
     // The desk's id is its own (it numbers from p1 again after a restart): the line and the Stagewatch's address tag
     // travel with it, so a proposal of the same number that is not this one is never taken for it.
     const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, ok: null, words: '', to: built.words, at: Date.now(), sw: link.tag, line: built.line };
-    const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} asked Stagewatch's operator to put this on ${built.words}: “${parsed.text.slice(0, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
-    if (source) apply(room, { o: 'upd', id: source.id, f: { proposal } });
-    trackProposal(link.id, proposal.id, room.code, [sys.id].concat(source ? [source.id] : []), proposal.state, proposal);
+    const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${asker} asked Stagewatch's operator to put this on ${built.words}: “${parsed.text.slice(0, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
+    if (source) apply(from, { o: 'upd', id: source.id, f: { proposal } });
+    trackProposal(link.id, proposal.id, from.code, [sys.id].concat(source ? [source.id] : []), proposal.state, proposal);
     noteEvent('research proposed a stage message to the show desk', link);
     ack({ ok: true, proposal });
   });
@@ -1092,7 +1105,6 @@ io.on('connection', (socket) => {
   // ----- Displays: a hall's screens. Seeing and changing what they show is display.control; making, renaming, moving,
   // replacing the link and removing is display.manage. Both are an account's (or the admin's) rights in that hall.
   const canDisplays = (cap, code) => socket.data.isAdmin || !!(socket.data.account && rbac.can(socket.data.account, cap, code));
-  const actor = () => socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
   socket.on('display:list', ({ code } = {}, ack) => {
     ack = ok(ack);
     const c = guard.str(code).toUpperCase();
@@ -1119,7 +1131,8 @@ io.on('connection', (socket) => {
       displays.take(d.id, c, who.name);
       io.to('display:' + d.id).emit('display:state', displayState(d));
       const holding = displays.hallHolding(d.hall);
-      audit.write(who, 'display.take', d.id, d.name + ' → ' + describeContent(c, holding), socket.data.ip);
+      // In the audit voice: which screen and what kind of thing, never a message's words or a file's name.
+      audit.write(who, 'display.take', d.id, d.name + ' → ' + describeContent(c, holding, { audit: true }), socket.data.ip);
       halls.add(d.hall);
       return { id: d.id, ok: true, seq: d.seq, status: Displays.status(d, holding) };
     });
@@ -1396,6 +1409,13 @@ io.on('connection', (socket) => {
 
   // ----- ADMIN — only with a valid admin cookie
   const admin = (ack) => { if (!socket.data.isAdmin) { ok(ack)({ ok: false, error: 'Not admin' }); return false; } return true; };
+  // Each room control that changes something is one audit row, written before it is acknowledged, and one that changes
+  // nothing writes none: which room (by its code) and what changed, in words that name people and halls — never a
+  // message's text, a file's name or a token.
+  const auditRoom = (action, code, words) => audit.write(socket.data.actor || HOST_ACTOR, action, code, words, socket.data.ip);
+  // The other hall of a link is named by its name alone ("another hall" when it has none, as a forwarded message names
+  // it): its code is the code its guests join with, and a row's words carry no guest code.
+  const hallWords = (code) => { const h = store.get(code); return (h && h.name) || 'another hall'; };
 
   socket.on('admin:listRooms', (ack) => {
     if (!admin(ack)) return;
@@ -1414,6 +1434,7 @@ io.on('connection', (socket) => {
     if (typeof arg === 'function') { ack = arg; arg = {}; }
     if (!admin(ack)) return;
     const r = newRoom(arg && typeof arg.name === 'string' ? arg.name : '');
+    auditRoom('hall.create', r.code, r.name || '(no name)');
     ok(ack)({ ok: true, code: r.code, name: r.name });
   });
   socket.on('admin:resetRoom', ({ roomCode } = {}, ack) => {
@@ -1423,8 +1444,14 @@ io.on('connection', (socket) => {
     const files = fileNamesOf(r.messages);
     apply(r, { o: 'reset' });
     systemMessage(r, '— Session reset by admin: messages and documents cleared —');
-    // Its documents leave the disk too, unless another hall or a screen still shows them.
-    removeUnused(files).then((n) => ok(ack)({ ok: true, removed: n }), () => ok(ack)({ ok: true, removed: 0 }));
+    // Its documents leave the disk too, unless another hall or a screen still shows them. The row counts the files that
+    // left, so it is written once their removal has run, before the answer: a stop while they are being removed keeps
+    // the reset and loses its row — the price of a count that says what happened rather than what was meant to.
+    const done = (n) => {
+      auditRoom('room.reset', r.code, 'messages and documents cleared, ' + plural(n, 'file') + ' removed');
+      ok(ack)({ ok: true, removed: n });
+    };
+    removeUnused(files).then(done, () => done(0));
   });
   socket.on('admin:deleteRoom', async ({ roomCode, purgeFiles } = {}, ack) => {
     if (!admin(ack)) return;
@@ -1459,8 +1486,11 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const r = store.get(roomCode);
     if (!r || !r.byId.has(messageId)) return ok(ack)({ ok: false, error: 'Message not found' });
-    const files = fileNamesOf([r.byId.get(messageId)]);
+    const m = r.byId.get(messageId);
+    const files = fileNamesOf([m]);
     apply(r, { o: 'del', id: messageId });
+    // Whose it was and its kind, never its text or a file's name.
+    auditRoom('message.remove', r.code, m.type === 'system' ? 'a system line' : 'a message by ' + ((m.from && m.from.name) || 'someone') + ' (' + m.type + ')');
     removeUnused(files).then(() => ok(ack)({ ok: true }), () => ok(ack)({ ok: true }));
   });
   socket.on('admin:setRole', ({ roomCode, socketId, role } = {}, ack) => {
@@ -1473,7 +1503,9 @@ io.on('connection', (socket) => {
     // nothing the server checks, and would be undone at the page's next join.
     if (target.acct) return ok(ack)({ ok: false, error: target.name + ' signs in with an account: change their rights on the Accounts page.' });
     const prev = target.role;
-    for (const [sid, seat] of seatsOf(r, target.uid)) {
+    const seats = seatsOf(r, target.uid);
+    const from = Array.from(new Set(seats.map(([, seat]) => seat.role))).filter((x) => x !== role);   // the roles this changes
+    for (const [sid, seat] of seats) {
       seat.role = role;
       const s = io.sockets.sockets.get(sid);
       if (s) s.emit('roleChanged', { role });
@@ -1481,6 +1513,7 @@ io.on('connection', (socket) => {
     emitUsers(r);
     syncSeats(r);
     systemMessage(r, `${target.name} role changed from ${prev} to ${role} by admin`);
+    if (from.length) auditRoom('seat.role', r.code, target.name + ': ' + from.join(', ') + ' → ' + role);
     ok(ack)({ ok: true });
   });
   socket.on('admin:lockRoles', ({ roomCode, on } = {}, ack) => {
@@ -1488,7 +1521,12 @@ io.on('connection', (socket) => {
     const r = store.get(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
     // Locked, the seats taken now are kept (saved, so a restart keeps them too); unlocked, there is nothing to keep.
-    apply(r, { o: 'meta', settings: { lockRoles: !!on, seats: on ? seatsNow(r) : {} } });
+    const seats = on ? seatsNow(r) : {};
+    // A change is the lock switched, or a lock that keeps other seats than it kept (compared as syncSeats compares them,
+    // so seats saved in another order are no change); an unlock is a change only for a locked room.
+    const changed = on ? !r.settings.lockRoles || !seatsSaved(r, seats) : !!r.settings.lockRoles;
+    apply(r, { o: 'meta', settings: { lockRoles: !!on, seats } });
+    if (changed) auditRoom('room.lock', r.code, on ? 'roles locked (' + plural(Object.keys(seats).length, 'seat') + ' kept)' : 'roles unlocked');
     ok(ack)({ ok: true, locked: !!on, invites: on ? invitesFor(r.code) : null });
   });
   socket.on('admin:invites', ({ roomCode } = {}, ack) => {
@@ -1507,12 +1545,15 @@ io.on('connection', (socket) => {
     // A link lets a code guest forward into a hall; an account forwards by its own rights there, so a link would give it
     // nothing it may not already do.
     if (u.acct && !rbac.can(target.data.account, 'hall.post', code)) return ok(ack)({ ok: false, error: u.name + ' signs in with an account that may not post in that hall: give the account that hall on the Accounts page.' });
+    let added = false;
     for (const [sid, seat] of seatsOf(r, u.uid)) {
       seat.linkedRooms = seat.linkedRooms || new Set();
+      if (!seat.linkedRooms.has(code)) added = true;
       seat.linkedRooms.add(code);
       const s = io.sockets.sockets.get(sid);
       if (s) s.emit('linkedRoomsChanged', { added: code });
     }
+    if (added) auditRoom('room.link', r.code, u.name + ' may forward into ' + hallWords(code));
     ok(ack)({ ok: true, linked: Array.from(u.linkedRooms) });
   });
   socket.on('admin:unlinkRoom', ({ socketId, targetRoom } = {}, ack) => {
@@ -1523,11 +1564,15 @@ io.on('connection', (socket) => {
     const r = store.get(target.data.userRoom);
     const u = r && r.users.get(socketId);
     if (!u || !u.linkedRooms) return ok(ack)({ ok: true });
+    let removed = false;
     for (const [sid, seat] of seatsOf(r, u.uid)) {
       if (!seat.linkedRooms || !seat.linkedRooms.delete(code)) continue;
+      removed = true;
       const s = io.sockets.sockets.get(sid);
       if (s) s.emit('linkedRoomsChanged', { removed: code });
     }
+    // Only a link that was there is recorded, so the row names a hall the admin once linked, never a code merely typed.
+    if (removed) auditRoom('room.unlink', r.code, u.name + ' may no longer forward into ' + hallWords(code));
     ok(ack)({ ok: true, linked: Array.from(u.linkedRooms) });
   });
   socket.on('admin:kick', ({ socketId } = {}, ack) => {
@@ -1543,6 +1588,7 @@ io.on('connection', (socket) => {
       p.disconnect(true);
     }
     if (r) syncSeats(r);   // logged out: the seat goes now, not after a restart
+    auditRoom('seat.kick', r ? r.code : '', (u ? u.name : target.data.userName || 'a page in no hall') + ' sent out (' + plural(pages.length, 'page') + ' closed)');
     ok(ack)({ ok: true });
   });
   socket.on('admin:summary', ({ roomCode } = {}, ack) => {
@@ -1558,6 +1604,7 @@ io.on('connection', (socket) => {
     if (!r || !t) return ok(ack)({ ok: false, error: 'Nothing to post' });
     const m = { id: makeMessageId(), at: Date.now(), type: 'text', text: t, pinned: true, priority: false, from: { uid: 'minutes', name: 'Minutes', role: 'observer', ai: true } };
     apply(r, { o: 'add', m });
+    auditRoom('minutes.post', r.code, 'minutes posted (pinned)');
     ok(ack)({ ok: true });
   });
   socket.on('admin:settings', (patch, ack) => {

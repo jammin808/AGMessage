@@ -11,7 +11,8 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   Lighting, Stage, Presenter, IT) stay red until someone is on the way and on the board until resolved.
 - **Accounts and codes.** Crew, project managers and admins sign in as themselves; presenters and guests join with a
   hall's 6-character code. Roles (admin, project manager, senior tech, tech, staff, viewer), halls per person, and
-  single rights an admin can add or remove. A hash-chained **audit log** of every sign-in, change of rights and screen.
+  single rights an admin can add or remove. A hash-chained **audit log** of every sign-in, change of rights, room
+  control and screen take, and every proposal Stagewatch's show desk takes — never a message's text or a file's name.
   [docs/ACCOUNTS.md](docs/ACCOUNTS.md)
 - **Screens.** Every hall's screens — projector PC, lectern monitor, foyer TV — each with its own link to open in any
   browser: holding image, a message (note / soon / urgent), an image or PDF page from the hall, the hall's countdown

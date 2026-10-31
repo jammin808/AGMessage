@@ -25,7 +25,10 @@ In a hall (as an account with `display.control`): **Screens**. Tick the screens,
 Black, or type a message and choose **Show** (tick "Under the countdown" to put it in the countdown's strip). On any
 message, or any image or PDF shared in the hall, **⧉** offers it to the ticked screens (a PDF from its first page).
 A take goes to every ticked screen in one request — all 50 of a hall's screens if they are ticked; a screen it could
-not reach (removed meanwhile, or not yours) is named in the console's note and on its line.
+not reach (removed meanwhile, or not yours) is named in the console's note and on its line. Each screen a take reaches
+is one `display.take` row in the audit log: who, which screen and what kind of thing ("a warning (28 characters)", "a
+PDF at p. 3", "an image", "the countdown with words (8 characters)"), never the message's words or the file's name,
+which the console and the halls board quote and name.
 
 Every take is numbered. The screen renders it and says so, and only then does the console say **✓ on screen**. Until
 then it says **… sending**; **△** and the reason when the screen could not show it (an image that did not load, a PDF

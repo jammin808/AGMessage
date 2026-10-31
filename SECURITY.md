@@ -45,6 +45,8 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
 - A Patterns or PlayMap pairing token is full control of that node: it goes only to a loopback address, or over TLS to
   a certificate that is pinned or that a person confirmed by typing at least 16 characters of its fingerprint from the
   node's own screen; AGMessage never drives a node with it — lines are proposed to the show desk (Show Bus §11).
-- Security-relevant actions (sign-ins, permission changes, what a display was told to show) are written to a
-  hash-chained audit log that shows tampering.
+- Security-relevant actions (sign-ins, permission changes, the admin's room controls, the proposals Stagewatch's show
+  desk takes, what kind of thing a display was told to show) are written to a hash-chained audit log that shows
+  tampering, never with a message's text or a file's name (screen takes logged by 0.5.1 and earlier quote a message's
+  first words and name the file).
 - Display URLs are capability links: unguessable, revocable, never logged, and only able to show — not to send.

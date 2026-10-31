@@ -111,9 +111,10 @@ function screenIdOf(target) {
  * `answerDeskChecks` and `answerContext` are such queues for GET /api/proposals?from= (whether it keeps a desk) and GET
  * /api/context; onRequest(request) and onResultPost(id) are called as one arrives, before it is answered; `firstFrameDelayMs`
  * holds a new socket's first message (and so the link's key read) that long; `messageDelayMs` holds a send
- * that long before its key is judged (a request made under one key, answered after the key changed).
+ * that long before its key is judged (a request made under one key, answered after the key changed); `proposalDelayMs`
+ * holds a new proposal's answer that long (a page that moves on while the desk has not answered).
  */
-async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null, answerDeskChecks = [], answerContext = [], messageDelayMs = 0, firstFrameDelayMs = 0, collectDelayMs = 0, collectRefusal = null, scope = 'node' } = {}) {
+async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId = 77, departments = [], failResults = 0, key = null, auth18 = false, authDelayMs = 0, closeOnRefuse = false, viewCode = false, contextDelayMs = 0, contextFail = 0, cert = null, answerDeskChecks = [], answerContext = [], messageDelayMs = 0, firstFrameDelayMs = 0, collectDelayMs = 0, collectRefusal = null, scope = 'node', proposalDelayMs = 0 } = {}) {
   const http = require('http');
   const https = require('https');
   const { WebSocketServer } = require('ws');
@@ -205,7 +206,9 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     req.on('end', () => {
       requests.push({ at: Date.now(), method: req.method, url: req.url, headers: req.headers, body });
       if (onRequest) onRequest(requests[requests.length - 1]);
-      if (messageDelayMs && req.url.startsWith('/api/message/')) setTimeout(serve, messageDelayMs); else serve();
+      if (messageDelayMs && req.url.startsWith('/api/message/')) setTimeout(serve, messageDelayMs);
+      else if (proposalDelayMs && req.method === 'POST' && req.url === '/api/proposals') setTimeout(serve, proposalDelayMs);
+      else serve();
     });
   };
   const srv = cert ? https.createServer({ cert: tlsmod.toPem(cert.certDer), key: cert.keyPem }, handler) : http.createServer(handler);
@@ -262,6 +265,8 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     /** A collect answered `ms` late (it claims what it lists when it answers), and one refused ({status, error}) or not (null). */
     set collectDelayMs(ms) { collectDelayMs = ms; },
     set collectRefusal(v) { collectRefusal = v; },
+    /** How long the desk takes to answer each new proposal from now on (it takes the proposal when it answers). */
+    set proposalDelayMs(ms) { proposalDelayMs = ms; },
     /** How long a socket that connects from now on waits for its first message (a slow network: its key read comes late). */
     set firstFrameDelayMs(ms) { firstFrameDelayMs = ms; },
     /** What it answers the next reads of its context, and the next desk checks, first: [{status, error, retryAfter}]. */

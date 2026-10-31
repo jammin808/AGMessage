@@ -114,25 +114,33 @@ watchdog restart, which keeps the token, but not a fresh start of AGMessage, whi
 
 ## The audit log
 
-`data/audit.jsonl`: one line per action that matters — sign-ins (and failed ones), the first admin, accounts and
-rights, halls and their Stagewatch, screens (made, renamed, re-linked, removed, and every take: what went on which
-screen, by whom), settings (which ones, never their values), sends to Stagewatch's desk, and commands to Patterns and
-PlayMap. Each line carries the SHA-256 of the line before it, from a fixed first hash: at 20 MB the file is set aside as
-`audit-<time>.jsonl` and the chain goes on in a new one. **Accounts → Audit log → Check the log** reads every file,
-oldest first, as one chain, so an edited, removed or reordered line — the first and the newest included, or an older
-file removed — breaks it, and the check names the file and the line; while the server runs, the newest entry on disk
-must also be the one it wrote last. The check reads in slices beside the show, one at a time (a second click waits for
-the same answer). What a chain without a key cannot show, and the check does not claim: the newest lines (or the
-current file) removed while the server is stopped, or the whole chain written again, by someone who can write the data
-folder.
+`data/audit.jsonl`: one line per action that matters — sign-ins (and failed ones), the first admin, accounts and rights,
+halls and their Stagewatch, the admin's room controls (a hall made from the admin page or over HTTP, its session reset
+with the files that left the disk, a message removed with whose it was and its kind, a guest's role, roles locked or
+unlocked with the seats kept, a guest let forward into another hall or no longer (that hall by its name, never its
+code), a person sent out, the AI's minutes posted: one row for each change, none for a control that changes nothing),
+screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
+(28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), settings (which ones,
+never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and
+the desk's number, never the words), and commands to Patterns and PlayMap. Each line carries the SHA-256 of the line
+before it, from a fixed first hash: at 20 MB the file is set aside as `audit-<time>.jsonl` and the chain goes on in a
+new one. **Accounts → Audit log → Check the log** reads every file, oldest first, as one chain, so an edited, removed or
+reordered line — the first and the newest included, or an older file removed — breaks it, and the check names the file
+and the line; while the server runs, the newest entry on disk must also be the one it wrote last. The check reads in
+slices beside the show, one at a time (a second click waits for the same answer). What a chain without a key cannot
+show, and the check does not claim: the newest lines (or the current file) removed while the server is stopped, or the
+whole chain written again, by someone who can write the data folder.
 
-Each entry is flushed to disk before the action is acknowledged. When the disk will not take it (full, or the file held
-by another program) the action still goes ahead — a full disk must not stop sign-ins or takes during a show — the entry
-stays in the chain in memory, the console and the admin page's health say so, and it is written ahead of the next
-entry (or when the server stops), so what is on disk stays one whole chain. A half-written last line left by a power
-cut is cut at the next start and the cut is recorded as an entry of its own (`audit.repair`). The log never carries a
-password, token, key or screen link: a failed sign-in under a name that is no account is written as
-"(unknown username)", since what was typed may be a password in the wrong box. Project managers and admins read it.
+Each entry is flushed to disk before the action is acknowledged (a session reset's once its files have left the disk, so
+that it counts them: a stop in that moment keeps the reset without its row). When the disk will not take it (full, or
+the file held by another program) the action still goes ahead — a full disk must not stop sign-ins or takes during a
+show — the entry stays in the chain in memory, the console and the admin page's health say so, and it is written ahead
+of the next entry (or when the server stops), so what is on disk stays one whole chain. A half-written last line left by
+a power cut is cut at the next start and the cut is recorded as an entry of its own (`audit.repair`). The log never
+carries a password, token, key or screen link, nor a message's text or a file's name (but for the screen takes 0.5.1 and
+earlier wrote, which quote a message's first 60 characters and name the file): a failed sign-in under a name that is no
+account is written as "(unknown username)", since what was typed may be a password in the wrong box. Project managers
+and admins read it.
 
 ## Where it lives
 

@@ -1,8 +1,8 @@
 'use strict';
 // Displays: what a screen may be told to show, the store (a capability URL looked up by hash, replaced at once), and end
 // to end — a screen opened by its link shows what an operator takes and confirms it; "on screen" only after it did; the
-// link only shows, never sends; rights per hall; the hall's countdown reaches its screens; nothing of the link in the
-// audit log.
+// link only shows, never sends; rights per hall; the hall's countdown reaches its screens; nothing of the link, a
+// message's words or a file's name in the audit log.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -27,6 +27,21 @@ test('displays: content is cleaned, or refused in words', () => {
   assert.ok(cleanContent({ kind: 'iframe', url: 'x' }).error, 'an unknown kind is refused');
   assert.equal(describe({ kind: 'message', tone: 'urgent', text: 'Fire alarm test' }), 'urgent message: “Fire alarm test”');
   assert.equal(describe({ kind: 'countdown', text: '' }), 'the countdown');
+  // The audit voice: what kind of thing went on the screen, a message's length and a PDF's page — never its words or a
+  // file's name.
+  const audit = { audit: true };
+  assert.equal(describe({ kind: 'message', tone: 'info', text: 'Fire alarm test' }, '', audit), 'a message (15 characters)');
+  assert.equal(describe({ kind: 'message', tone: 'urgent', text: 'Fire alarm test' }, '', audit), 'an urgent message (15 characters)');
+  assert.equal(describe({ kind: 'message', tone: 'warn', text: 'X' }, '', audit), 'a warning (1 character)');
+  assert.equal(describe({ kind: 'file', url: '/uploads/1777424589360-onmqm0a3ew2r-deck.pdf', name: 'deck.pdf', page: 3, pdf: true }, '', audit), 'a PDF at p. 3');
+  assert.equal(describe({ kind: 'file', url: IMG, name: 'board-pack.png', page: 1, pdf: false }, '', audit), 'an image');
+  assert.equal(describe({ kind: 'countdown', text: 'Q&A is next' }, '', audit), 'the countdown with words (11 characters)');
+  assert.equal(describe({ kind: 'countdown', text: '' }, '', audit), 'the countdown');
+  assert.equal(describe({ kind: 'holding' }, IMG, audit), 'holding image');
+  assert.equal(describe({ kind: 'holding' }, '', audit), 'holding (black)');
+  assert.equal(describe({ kind: 'clock' }, '', audit), 'the clock');
+  assert.equal(describe({ kind: 'black' }, '', audit), 'black');
+  assert.equal(describe({ kind: 'file', url: '/uploads/1777424589360-onmqm0a3ew2r-deck.pdf', name: 'deck.pdf', page: 3, pdf: true }), 'PDF page 3 of deck.pdf', 'the operator\'s voice names the file');
   // Holding with no image of its own shows the hall's holding image when the hall has one: the words say so.
   assert.equal(describe({ kind: 'holding' }, IMG), 'holding image');
   assert.equal(describe({ kind: 'holding' }), 'holding (black)');
@@ -249,12 +264,14 @@ test('displays end to end: links, takes, confirmations, rights, the countdown, t
     await until(() => again.unknown, 3000, 'the removed link refused');
   });
 
-  await t.test('the audit log says who put what on which screen — and never a link', async () => {
+  await t.test('the audit log says who put what kind of thing on which screen — never its words, nor a link', async () => {
     const a = await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin });
-    const takes = a.body.entries.filter((e) => e.action === 'display.take');
-    assert.ok(takes.some((e) => e.actor.name === 'sam' && /Five minutes/.test(e.words)));
+    const takes = a.body.entries.filter((e) => e.action === 'display.take' && e.actor.name === 'sam').map((e) => e.words);
+    assert.ok(takes.includes('Lectern monitor → a warning (28 characters)'), JSON.stringify(takes));
+    assert.ok(takes.includes('Lectern monitor → the countdown with words (8 characters)'), JSON.stringify(takes));
     for (const action of ['display.rotate', 'display.update', 'display.remove']) assert.ok(a.body.entries.some((e) => e.action === action), action);
     const raw = fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8');
+    for (const words of ['Five minutes', 'wrap up', 'Q&A next']) assert.ok(!raw.includes(words), 'no screen message\'s words in the audit log: ' + words);
     assert.ok(!raw.includes(token), 'no screen link in the audit log');
     assert.ok(!/\/d\/[A-Za-z0-9_-]{43}/.test(raw));
   });
@@ -368,6 +385,8 @@ test('displays end to end, a hall of screens: every browser counts, one take rea
     assert.match(board.words, /— holding image$/);
     const a = await api(base, 'GET', '/api/audit?limit=50', undefined, { cookie: admin });
     assert.ok(a.body.entries.some((e) => e.action === 'display.take' && e.target === id && e.words === 'Green room → holding image'), 'the audit row names the image');
+    assert.ok(a.body.entries.some((e) => e.action === 'display.take' && e.words === 'Projector → an image'), 'a file on a screen is named by its kind');
+    assert.ok(!fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').includes('holding.png'), 'never by its name');
     assert.ok((await emit(ctl, 'display:hallHolding', { code: other, image: '' })).ok);
     assert.equal((await status(other, id)).showing, 'holding (black)');
   });
@@ -403,7 +422,11 @@ test('displays end to end, a hall of screens: every browser counts, one take rea
     assert.equal((await emit(tech, 'display:take', { ids: [], content: { kind: 'black' } })).ok, false, 'at least one screen');
     assert.equal((await emit(tech, 'display:take', { ids: Array.from({ length: 51 }, (_, i) => 'd' + i), content: { kind: 'black' } })).ok, false, 'at most 50');
     const a = await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin });
-    assert.equal(a.body.entries.filter((e) => e.action === 'display.take' && /Evacuate via door B/.test(e.words)).length, 20, 'one audit row per screen');
+    const EVACUATE = 'Evacuate via door B';
+    const urgentRows = a.body.entries.filter((e) => e.action === 'display.take' && e.words.endsWith(' → an urgent message (' + EVACUATE.length + ' characters)'));
+    assert.deepEqual(urgentRows.map((e) => e.target).sort(), ids.slice().sort(), 'one audit row per screen');
+    assert.deepEqual(new Set(urgentRows.map((e) => e.words)), new Set(screens.map((d) => d.name + ' → an urgent message (' + EVACUATE.length + ' characters)')), 'each naming its screen');
+    assert.ok(!fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').includes(EVACUATE), 'never the message\'s words');
   });
 
   await t.test('one take on 20 screens: each operator in the hall re-reads the list a bounded number of times, and the last read is the newest', async () => {

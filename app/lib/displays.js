@@ -57,17 +57,27 @@ function cleanContent(c) {
   }
 }
 
+const characters = (s) => s.length + (s.length === 1 ? ' character' : ' characters');
+
 /**
- * What is on a screen, in a few words for the operator, the board and the audit log (pure). Holding with no image of its
- * own shows the hall's holding image (`hallHolding`) when the hall has one.
+ * What is on a screen, in a few words (pure). Holding with no image of its own shows the hall's holding image
+ * (`hallHolding`) when the hall has one. The operator's and the board's voice quotes a message's first words and names a
+ * file; the audit voice (`{audit: true}`) carries neither — a message's length and a PDF's page only.
  */
-function describe(c, hallHolding = '') {
+function describe(c, hallHolding = '', { audit = false } = {}) {
   if (!c) return 'nothing yet';
   switch (c.kind) {
     case 'holding': return c.image || hallHolding ? 'holding image' : 'holding (black)';
-    case 'message': return (c.tone === 'urgent' ? 'urgent message' : c.tone === 'warn' ? 'warning' : 'message') + ': “' + c.text.slice(0, 60) + '”';
-    case 'file': return (c.pdf ? 'PDF page ' + c.page + ' of ' : 'image ') + (c.name || 'a file');
-    case 'countdown': return 'the countdown' + (c.text ? ' with “' + c.text.slice(0, 40) + '”' : '');
+    case 'message': {
+      if (audit) return (c.tone === 'urgent' ? 'an urgent message' : c.tone === 'warn' ? 'a warning' : 'a message') + ' (' + characters(c.text) + ')';
+      return (c.tone === 'urgent' ? 'urgent message' : c.tone === 'warn' ? 'warning' : 'message') + ': “' + c.text.slice(0, 60) + '”';
+    }
+    case 'file':
+      if (audit) return c.pdf ? 'a PDF at p. ' + c.page : 'an image';
+      return (c.pdf ? 'PDF page ' + c.page + ' of ' : 'image ') + (c.name || 'a file');
+    case 'countdown':
+      if (audit) return 'the countdown' + (c.text ? ' with words (' + characters(c.text) + ')' : '');
+      return 'the countdown' + (c.text ? ' with “' + c.text.slice(0, 40) + '”' : '');
     case 'clock': return 'the clock';
     case 'black': return 'black';
     default: return c.kind;

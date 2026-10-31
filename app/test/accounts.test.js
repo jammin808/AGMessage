@@ -13,7 +13,7 @@ const rbac = require('../lib/rbac');
 const acc = require('../lib/accounts');
 const { AuditLog, hashOf, GENESIS } = require('../lib/audit');
 const guard = require('../lib/guard');
-const { startServer, stopServer, api, connect, emit, once, wait, until, TOKEN } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, once, wait, until, fakeStagewatch, TOKEN } = require('./helpers');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
@@ -569,7 +569,8 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
   const srv = await startServer();
   const { base } = srv;
   const sockets = [];
-  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const stagewatches = [];   // closed once the server that links them has stopped
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await Promise.all(stagewatches.map((sw) => sw.close())); });
   // Every sign-in here comes from one address, whose allowance (5 at once, then one every 2 s) the subtests before it have
   // spent: a sign-in that is not about that limit waits for its next one, as a person would — a few tries at most.
   const signIn = async (username, password) => {
@@ -698,11 +699,139 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     assert.equal((await api(base, 'PATCH', '/api/users/' + anaId, { role: 'staff' }, { cookie: admin })).status, 403);
   });
 
+  await t.test('the admin\'s room controls and the desk\'s proposals each write one row of their own, with no message text; a new hall\'s name is cleaned', async () => {
+    const sw = await fakeStagewatch({ name: 'Hall 5 timer' });
+    stagewatches.push(sw);
+    const ctl = await connect(base, admin); sockets.push(ctl);
+    // A name typed with control, bidi override and isolate characters is stored cleaned, from the admin page's socket and
+    // from the HTTP route alike: the page, the lookup and the audit row all read it so.
+    const made = await emit(ctl, 'admin:createRoom', { name: '\u202eHall\u0007 5\u2066 ' });
+    assert.deepEqual([made.ok, made.name], [true, 'Hall 5'], JSON.stringify(made));
+    const h5 = made.code;
+    const posted = await api(base, 'POST', '/api/rooms', { name: '\u200fHall 6\u0000\u2069' }, { cookie: admin });
+    assert.equal(posted.body.name, 'Hall 6');
+    const h6 = posted.body.code;
+    assert.equal((await api(base, 'GET', '/api/rooms/' + h6)).body.name, 'Hall 6');
+    const listed = await new Promise((resolve) => { ctl.emit('admin:listRooms', resolve); });   // its ack is its only argument
+    assert.equal(listed.rooms.find((r) => r.code === h5).name, 'Hall 5');
+    const nameless = await emit(ctl, 'admin:createRoom', { name: '\u202e\u0007 ' });   // nothing left once cleaned
+    assert.deepEqual([nameless.ok, nameless.name], [true, '']);
+    const hN = nameless.code;
+
+    assert.ok((await emit(ctl, 'hall:configure', { code: h5, stagewatchUrl: sw.url, stagewatchKey: 'swk_hall5_node_key_00001' /* secret-scan: fixture */ })).ok);
+    await until(() => sw.connected, 6000, 'Stagewatch linked');
+    let ivy = await connect(base); sockets.push(ivy);
+    const ij = await emit(ivy, 'join', { roomCode: h5, name: 'Ivy', role: 'board' });
+    assert.ok(ij.ok, JSON.stringify(ij));
+    const kim = await connect(base); sockets.push(kim);
+    const kj = await emit(kim, 'join', { roomCode: h5, name: 'Kim', role: 'research' });
+    assert.ok(kj.ok, JSON.stringify(kj));
+    const upload = async (name) => {
+      const f = new FormData(); f.append('file', new Blob(['notes for the board'], { type: 'text/plain' }), name);
+      const url = (await (await fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': kj.uploadToken }, body: f })).json()).url;
+      const m = await emit(kim, 'message', { type: 'file', url, filename: name });
+      assert.ok(m.ok, JSON.stringify(m));
+      return { url, id: m.id };
+    };
+    const SAID = 'The capex figure is 4.2m';
+    const ASK = 'Wrap up in five, the capex slide is next';
+    const ASK_TOO = 'Capex questions after the break';
+    const MINUTES = 'Minutes: capex agreed at 4.2m';
+    const said = await emit(kim, 'message', { type: 'text', text: SAID });
+    const pack = await upload('board-pack-q3.txt');
+    const kept = await upload('kept-notes.txt');
+    await until(async () => (await emit(kim, 'stage:targets', {})).canPropose, 8000, 'the desk');
+    const asked = await emit(kim, 'stage:propose', { text: ASK, destination: 'speaker' });
+    assert.ok(asked.ok, JSON.stringify(asked));
+
+    // A page that proposes and then joins another hall before the desk answers: the proposal, its row and its line stay
+    // with the hall it was asked from.
+    const lee = await connect(base); sockets.push(lee);
+    const lj = await emit(lee, 'join', { roomCode: h5, name: 'Lee', role: 'research' });
+    assert.ok(lj.ok, JSON.stringify(lj));
+    sw.proposalDelayMs = 500;
+    let answered = false;
+    const asking = emit(lee, 'stage:propose', { text: ASK_TOO, destination: 'speaker' }).then((r) => { answered = true; return r; });
+    const moved = await emit(lee, 'join', { roomCode: h6, name: 'Lee', role: 'research', uid: lj.identity });
+    assert.ok(moved.ok, JSON.stringify(moved));
+    assert.equal(answered, false, 'the page moved while the desk had not answered');
+    const asked2 = await asking;
+    sw.proposalDelayMs = 0;
+    assert.ok(asked2.ok, JSON.stringify(asked2));
+    const lines = async (code) => (await emit(ctl, 'admin:watchRoom', { roomCode: code })).messages.map((m) => m.text || '');
+    assert.ok((await lines(h5)).some((x) => x.startsWith('Lee asked Stagewatch\'s operator')), 'the line is in the hall it was asked from');
+    assert.ok(!(await lines(h6)).some((x) => x.includes('asked Stagewatch\'s operator')), 'and not in the hall the page went to');
+
+    assert.ok((await emit(ctl, 'admin:deleteMessage', { roomCode: h5, messageId: said.id })).ok);
+    assert.ok((await emit(ctl, 'admin:deleteMessage', { roomCode: h5, messageId: pack.id })).ok);
+    assert.ok((await emit(ctl, 'admin:lockRoles', { roomCode: h5, on: true })).ok);
+    // Ivy's page comes back on a new socket and keeps her seat, now after Kim's in the hall's list: locked again, the
+    // same two seats are kept, and nothing changed.
+    const was = ivy.id;
+    ivy.close();
+    await until(async () => !(await new Promise((resolve) => { ctl.emit('admin:listRooms', resolve); })).rooms.find((r) => r.code === h5).users.some((u) => u.socketId === was), 3000, 'Ivy\'s page gone');
+    ivy = await connect(base); sockets.push(ivy);
+    const back = await emit(ivy, 'join', { roomCode: h5, name: 'Ivy', role: 'board', uid: ij.identity });
+    assert.equal(back.role, 'board', JSON.stringify(back));
+    assert.ok((await emit(ctl, 'admin:lockRoles', { roomCode: h5, on: true })).ok, 'locked again with the same seats: nothing changes');
+    assert.ok((await emit(ctl, 'admin:setRole', { roomCode: h5, socketId: kim.id, role: 'observer' })).ok);
+    assert.ok((await emit(ctl, 'admin:setRole', { roomCode: h5, socketId: kim.id, role: 'observer' })).ok, 'a role set again is accepted, and changes nothing');
+    assert.ok((await emit(ctl, 'admin:lockRoles', { roomCode: h5, on: false })).ok);
+    assert.ok((await emit(ctl, 'admin:lockRoles', { roomCode: h5, on: false })).ok, 'unlocked again: nothing changes');
+    assert.ok((await emit(ctl, 'admin:linkRoom', { socketId: kim.id, targetRoom: hall })).ok);
+    assert.ok((await emit(ctl, 'admin:linkRoom', { socketId: kim.id, targetRoom: hall })).ok, 'a link Kim already has: nothing changes');
+    assert.ok((await emit(ctl, 'admin:linkRoom', { socketId: kim.id, targetRoom: hN })).ok);
+    assert.ok((await emit(ctl, 'admin:unlinkRoom', { socketId: kim.id, targetRoom: hall })).ok);
+    assert.ok((await emit(ctl, 'admin:unlinkRoom', { socketId: kim.id, targetRoom: hall })).ok, 'a link no longer there: nothing to undo');
+    assert.ok((await emit(ctl, 'admin:postSummary', { roomCode: h5, text: MINUTES })).ok);
+    assert.equal((await emit(ctl, 'admin:resetRoom', { roomCode: h5 })).removed, 1);
+    const out = once(kim, 'disconnect');
+    assert.ok((await emit(ctl, 'admin:kick', { socketId: kim.id })).ok);
+    await out;
+    // A page in no hall (the join page, before its code) sent out: there is no hall to name.
+    const stray = await connect(base); sockets.push(stray);
+    const strayGone = once(stray, 'disconnect');
+    assert.ok((await emit(ctl, 'admin:kick', { socketId: stray.id })).ok);
+    await strayGone;
+
+    const entries = (await api(base, 'GET', '/api/audit?limit=500', undefined, { cookie: admin })).body.entries.slice().reverse();
+    const ROWS = new Set(['hall.create', 'stagewatch.propose', 'message.remove', 'room.lock', 'seat.role', 'room.link', 'room.unlink', 'minutes.post', 'room.reset', 'seat.kick']);
+    const rows = entries.filter((e) => ROWS.has(e.action) && [h5, h6, hN].includes(e.target));
+    assert.deepEqual(rows.map((e) => [e.action, e.target, e.words]), [
+      ['hall.create', h5, 'Hall 5'],
+      ['hall.create', h6, 'Hall 6'],
+      ['hall.create', hN, '(no name)'],
+      ['stagewatch.propose', h5, 'asked the operator: a message (' + ASK.length + ' characters) for the speaker\'s screen — proposal ' + asked.proposal.id],
+      ['stagewatch.propose', h5, 'asked the operator: a message (' + ASK_TOO.length + ' characters) for the speaker\'s screen — proposal ' + asked2.proposal.id],
+      ['message.remove', h5, 'a message by Kim (text)'],
+      ['message.remove', h5, 'a message by Kim (file)'],
+      ['room.lock', h5, 'roles locked (2 seats kept)'],
+      ['seat.role', h5, 'Kim: research → observer'],
+      ['room.lock', h5, 'roles unlocked'],
+      ['room.link', h5, 'Kim may forward into Hall 3'],
+      ['room.link', h5, 'Kim may forward into another hall'],
+      ['room.unlink', h5, 'Kim may no longer forward into Hall 3'],
+      ['minutes.post', h5, 'minutes posted (pinned)'],
+      ['room.reset', h5, 'messages and documents cleared, 1 file removed'],
+      ['seat.kick', h5, 'Kim sent out (1 page closed)'],
+    ]);
+    const ana = { t: 'account', id: setup.body.account.id, name: 'ana' };
+    assert.deepEqual(rows.filter((e) => e.action !== 'stagewatch.propose').map((e) => e.actor), Array(14).fill(ana), 'the admin is named on every room control');
+    assert.deepEqual(rows.filter((e) => e.action === 'stagewatch.propose').map((e) => e.actor), [{ t: 'code', id: kj.uid, name: 'Kim' }, { t: 'code', id: lj.uid, name: 'Lee' }], 'and each guest who asked the desk');
+    assert.ok(entries.some((e) => e.action === 'seat.kick' && e.target === '' && e.words === 'a page in no hall sent out (1 page closed)' && e.actor.name === 'ana'), 'a page in no hall: no hall named');
+    assert.ok(!rows.some((e) => e.words.includes(hall) || e.words.includes(hN)), 'a linked hall is named by its name, never by the code its guests join with');
+    const raw = fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8');
+    for (const never of [SAID, ASK, ASK_TOO, MINUTES, 'capex', 'Capex', 'board-pack-q3', 'kept-notes', pack.url, kept.url, kj.uploadToken, 'swk_hall5_node_key_00001' /* secret-scan: fixture */, '\u202e', '\u2066']) {
+      assert.ok(!raw.includes(never), 'not in the audit log: ' + JSON.stringify(never));
+    }
+  });
+
   await t.test('the audit log has it all, the chain verifies, and nothing secret is in it', async () => {
-    const a = await api(base, 'GET', '/api/audit?limit=100', undefined, { cookie: admin });
+    const a = await api(base, 'GET', '/api/audit?limit=500', undefined, { cookie: admin });
     assert.equal(a.status, 200);
     const actions = a.body.entries.map((e) => e.action);
-    for (const want of ['setup', 'hall.create', 'user.create', 'login', 'login.fail', 'password.change', 'login.refused', 'user.update']) assert.ok(actions.includes(want), want);
+    for (const want of ['setup', 'hall.create', 'user.create', 'login', 'login.fail', 'password.change', 'login.refused', 'user.update',
+      'stagewatch.propose', 'message.remove', 'room.lock', 'seat.role', 'room.link', 'room.unlink', 'minutes.post', 'room.reset', 'seat.kick']) assert.ok(actions.includes(want), want);
     const v = await api(base, 'GET', '/api/audit/verify', undefined, { cookie: admin });
     assert.equal(v.body.ok, true);
     const raw = fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8');

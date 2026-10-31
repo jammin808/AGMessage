@@ -5,7 +5,33 @@
 Built from `docs/plan/0.6.0/PLAN.md`, one commit per unit in its global build order. This entry grows with each unit
 and is dated again when 0.6.0 closes.
 
+**The audit log**
+- The admin's room controls are audited, one row for each change, written before the admin page is answered: a hall made
+  from the admin page (`hall.create`, as one made over HTTP already was), a hall's session reset (`room.reset`, with how
+  many files left the disk), a message removed (`message.remove`: whose it was and its kind), a guest's role set
+  (`seat.role`), roles locked or unlocked (`room.lock`, with the seats kept), a guest let forward into another hall or
+  no longer (`room.link`, `room.unlink`), a person sent out (`seat.kick`, with the pages closed) and the AI's minutes
+  posted (`minutes.post`). Each row's target is the hall's code (none for a page sent out before it joined a hall), and
+  its words name people and halls, never a message's text, a file's name or a token; the hall a guest may forward into
+  is named by its name ("another hall" when it has none), never by the code its guests join with. A control that
+  changes nothing (a role set to the one already held, roles locked again on the same seats or unlocked again, a link
+  the guest already has, one that is not there taken back) writes no row. In 0.5.1 none of these was recorded.
+- Each proposal Stagewatch's show desk takes from a hall is one `stagewatch.propose` row: who asked (the account, or a
+  code guest by name), for which screen, how many characters and the desk's proposal number, never the words. The
+  papers said these proposals were audited; in 0.5.1 they were not. A proposal the desk refuses writes no row (its
+  refusal's words could repeat the text).
+- A screen take's row (`display.take`) says which screen and what kind of thing went on it — "a warning (28
+  characters)", "an urgent message (19 characters)", "a PDF at p. 3", "an image", "the countdown with words (8
+  characters)" — never the message's words or the file's name. 0.5.1 wrote a message's first 60 characters and the
+  file's name; rows already written keep what they say. The console and the halls board still quote and name them.
+
 **Fixed**
+- A proposal to the show desk stays with the hall it was asked from. A page that joined another hall before the desk
+  answered had the proposal's waiting line, and the desk's later outcome, put in the hall it had moved to.
+- A new hall's name is cleaned as every typed name is, from the admin page and over HTTP alike: control characters and
+  the bidi overrides and isolates that make a name read other than it is are dropped. 0.5.1 only trimmed it and cut it
+  at 80 characters, so such a name reached every page, screen, the halls board and the audit log as typed (renaming a
+  hall already cleaned it).
 - The Stagewatch link never asks Stagewatch again before its Retry-After is over. A timer starts from the event loop's
   cached clock, so the wait could end a millisecond early and the key's verdict was asked for again a moment too soon
   (Stagewatch then said "wait" again). The hold is read again when the timer fires. CI found it on Node 26, where the
