@@ -1,6 +1,6 @@
 {
   "name": "agmessage",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Messaging, displays and show-network links for live events: halls, crews, presenters and their screens.",
   "main": "server.js",
   "private": true,

@@ -446,7 +446,13 @@ class StagewatchLink {
   _probe(ws) {
     if (this._probing === ws || !this.key || this.keyState === 'accepted') return;
     this._probing = ws;
-    const again = (ms) => setTimeout(() => { if (this.ws === ws && this.keyState !== 'accepted') this._probe(ws); }, ms).unref();
+    // A timer starts from the event loop's cached clock, so it can fire a millisecond before the hold ends: the hold is
+    // read again when it fires, and Stagewatch is never asked before its Retry-After is over.
+    const again = (ms) => setTimeout(() => {
+      if (this.ws !== ws || this.keyState === 'accepted') return;
+      if (this.held) { again(this.waitUntil - Date.now()); return; }
+      this._probe(ws);
+    }, ms).unref();
     // The one request that goes before the verdict, and the verdict's own: a read with no side effect.
     this._call('/api/context', { timeoutMs: 3000, verdict: true }).then((res) => {
       if (this._probing === ws) this._probing = null;

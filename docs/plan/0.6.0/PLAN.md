@@ -355,6 +355,9 @@ Every unit of every part appears once. "Needs" lists the global numbers each uni
 move" and the unit's own text state them. Every number points to an earlier unit, except the two marked †.
 
 - Every unit also needs #1, because of the CHANGELOG fence (§0.2). "1" is listed only where nothing else is.
+- **Before #1:** the owner's first commit of 0.6.0 (2026-10-31) opened it: `app/package.json` at 0.6.0 and the
+  CHANGELOG entry, carrying the fix that reads the Retry-After hold again when the verdict probe's timer fires
+  (`lib/nodes.js` `_probe`). #1 finds both open and adds its lines to them; it does not open them again.
 - **In 0.6.0:**
   - **must:** the unit ships in 0.6.0;
   - **may slip:** the parts allow it to move to 0.6.x without touching another unit;

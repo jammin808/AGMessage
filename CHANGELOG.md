@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 — 2026-10-31 — rooms within halls, people's screens and the Board's view (in progress)
+
+Built from `docs/plan/0.6.0/PLAN.md`, one commit per unit in its global build order. This entry grows with each unit
+and is dated again when 0.6.0 closes.
+
+**Fixed**
+- The Stagewatch link never asks Stagewatch again before its Retry-After is over. A timer starts from the event loop's
+  cached clock, so the wait could end a millisecond early and the key's verdict was asked for again a moment too soon
+  (Stagewatch then said "wait" again). The hold is read again when the timer fires. CI found it on Node 26, where the
+  test that holds the 2 s Retry-After measured 1999 ms; with the hold read again it can no longer come short.
+
 ## 0.5.1 — 2026-10-26 — the show desk and the Stagewatch link, as Stagewatch states them
 
 From the cross-app review of the Show Bus (the four items it left for after 0.5.0), each read against Stagewatch's own
