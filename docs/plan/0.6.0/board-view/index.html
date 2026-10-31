@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <!-- interactive-widget: the on-screen keyboard shrinks the layout (Chrome, Android), so the composer stays above it.
+       iPadOS ignores it: there the page sizes .bv to visualViewport.height on resize (§17.2, the keyboard). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <title>Hall 2 — Annual General Meeting · AGMessage</title>
+  <!-- AGMessage's own stylesheet, copied unedited: the tokens (--brand, --bg, --card, --ink, --border …) come from it. -->
+  <link rel="stylesheet" href="../../../../app/public/styles.css" />
+  <link rel="stylesheet" href="board.css" />
+</head>
+<!--
+  A static mock of the Board's chat view (0.6.0, addendum-board: mock revision 5, owner answer 22's mixture of devices;
+  revision 4, the owner's answers to B1-B6 and the review of revision 3). No script: the state is the URL's fragment.
+  Dark is the default (B6) and the clock is the default secondary object (B3).
+    #clock (or no fragment)  #off  #stage  #over  #alone  #sheet  #sends  #cleared  #asleep      dark
+    the same with -light (#clock-light, #off-light, …)                                             light
+  One page at every size: the side column at 900 px wide or more, the tabs below; 22 px text where the smaller side
+  is 600 px or more; the phone's compact composer and header at 600 px wide or less; a short viewport (500 px tall or
+  less) keeps the 🔥 strip to one line. #asleep is the sheet on a device that cannot be kept awake or full screen.
+-->
+<body class="bv" data-view="simple">
+  <div class="bv-states" hidden>
+    <span id="clock"></span><span id="off"></span><span id="stage"></span><span id="over"></span><span id="alone"></span><span id="sheet"></span><span id="sends"></span><span id="cleared"></span><span id="asleep"></span>
+    <span id="clock-light"></span><span id="off-light"></span><span id="stage-light"></span><span id="over-light"></span><span id="alone-light"></span><span id="sheet-light"></span><span id="sends-light"></span><span id="cleared-light"></span><span id="asleep-light"></span>
+  </div>
+
+  <a class="bv-skip" href="#composeInput">Skip to message box</a>
+
+  <header class="bv-head">
+    <h1 class="bv-title">Hall 2 — Annual General Meeting</h1>
+
+    <!-- The secondary object: the clock by default (B3), the countdown or none as chosen. Text, never a button. -->
+    <div class="bv-readout bv-readout--clock">
+      <span class="bv-ro-line"><span class="bv-ro-icon" aria-hidden="true">🕐</span><time class="bv-ro-time" datetime="14:12">14:12</time></span>
+    </div>
+    <div class="bv-readout bv-readout--stage" style="--bv-sw: var(--bv-sw-normal)">
+      <span class="bv-ro-line"><span class="bv-ro-icon" aria-hidden="true">⏱</span><span class="bv-ro-time" role="timer" aria-label="Countdown">4:30 left</span></span>
+      <span class="bv-ro-strip" role="status">Q&amp;A · Wrap up in 2 minutes</span>
+    </div>
+    <div class="bv-readout bv-readout--over" style="--bv-sw: var(--bv-sw-over)">
+      <span class="bv-ro-line"><span class="bv-ro-mark" aria-hidden="true">▲</span><span class="bv-ro-time" role="timer" aria-label="Countdown">0:30 over</span></span>
+      <span class="bv-ro-strip" role="status">Q&amp;A · Please wrap up now</span>
+    </div>
+
+    <button class="bv-btn bv-help" type="button">Help</button>
+    <button class="bv-btn bv-more" type="button" aria-haspopup="dialog" aria-label="More: text size, clock or countdown, theme, leave">⋯</button>
+  </header>
+
+  <div class="bv-tabs" role="group" aria-label="Show">
+    <button class="bv-tab" type="button" aria-pressed="true">Chat</button>
+    <button class="bv-tab" type="button" aria-pressed="false">📺 Shown to you · 1</button>
+  </div>
+
+  <div class="bv-main">
+    <section class="bv-chat" aria-label="Chat">
+
+      <!-- The pinned bar (B1): one line, the person's own pins and the room's, newest first. A tap goes to the message;
+           the next tap to the next pin. Unpin is on the message itself. -->
+      <div class="bv-pins">
+        <button class="bv-pin-bar bv-pin-bar--mine bv-col" type="button" aria-label="Pinned for you: Resolution 3 proxies: 4,212 for, 318 against, 96 withheld. Go to it">
+          <span class="bv-pin-word" aria-hidden="true">📌 For you</span>
+          <span class="bv-pin-text" aria-hidden="true">Resolution 3 proxies: 4,212 for, 318 against, 96 withheld.</span>
+        </button>
+        <!-- #stage: the backstage team has since pinned a message for everyone, so the newest pin, the room's, comes
+             first, read-only, with "1 of 2"; the next tap goes to the person's own pin. -->
+        <button class="bv-pin-bar bv-pin-bar--room bv-col" type="button" aria-label="Pinned for everyone, 1 of 2: Agenda: resolutions 3 to 6, then any other business. Go to it">
+          <span class="bv-pin-word" aria-hidden="true">📌 For everyone</span>
+          <span class="bv-pin-text" aria-hidden="true">Agenda: resolutions 3 to 6, then any other business.</span>
+          <span class="bv-pin-count" aria-hidden="true">1 of 2</span>
+        </button>
+      </div>
+
+      <!-- The 🔥 strip: only while an unanswered priority message is out of view (here: the phone, its message scrolled away). -->
+      <div class="bv-urgent" role="status">
+        <p class="bv-urgent-line"><span class="bv-prio-word">🔥 Priority</span> <b class="bv-from">Tom Okafor</b> <span class="bv-time">14:06</span></p>
+        <p class="bv-urgent-text">The aisle 2 microphone is live. Take the next question from the left aisle.</p>
+        <button class="bv-act bv-act--strong" type="button">👍 Got it</button>
+      </div>
+
+      <div class="bv-scroll">
+        <ol class="bv-feed bv-col" aria-label="Messages">
+
+          <!-- Got it clears (B4), the admin's setting for this person (#cleared): a message they got leaves their feed and
+               one muted line keeps its place, with Show to bring it back. A message pinned for them stays whole. -->
+          <li class="bv-cleared">
+            <span>👍 Got and cleared: Ana Ribeiro 14:02</span>
+            <button class="bv-act" type="button">Show</button>
+          </li>
+          <li class="bv-msg bv-msg--in bv-got bv-msg--tapped">
+            <div class="bv-line">
+              <span class="bv-from">Ana Ribeiro</span><span class="sr-only">, backstage,</span><span class="bv-time">14:02</span>
+              <span class="bv-done">👍 You: got it</span>
+            </div>
+            <p class="bv-body">Good afternoon, Margaret. Tom and I are backstage for the whole meeting. Message us any time.</p>
+            <!-- The second door: a tap on a message brings its own row back, for it alone; here with Pin for me. -->
+            <div class="bv-acts bv-acts--tapped"><button class="bv-act" type="button">↩ Reply</button><button class="bv-act" type="button">📌 Pin for me</button></div>
+          </li>
+
+          <li class="bv-msg bv-msg--own">
+            <div class="bv-line">
+              <span class="bv-from">You</span><span class="bv-time">14:03</span>
+              <span class="bv-status">Seen by Ana</span>
+            </div>
+            <p class="bv-body">Could you confirm the proxy count for resolution 3?</p>
+          </li>
+
+          <li class="bv-msg bv-msg--in bv-got bv-pinned">
+            <div class="bv-line">
+              <span class="bv-from">Tom Okafor</span><span class="sr-only">, backstage,</span><span class="bv-time">14:05</span>
+              <span class="bv-done">👍 You: got it · 📌 Pinned for you</span>
+            </div>
+            <p class="bv-quote">↩ You: Could you confirm the proxy count for resolution 3?</p>
+            <p class="bv-body">Resolution 3 proxies: 4,212 for, 318 against, 96 withheld.</p>
+          </li>
+
+          <li class="bv-cleared">
+            <span>👍 Got and cleared: 🔥 Tom Okafor 14:06</span>
+            <button class="bv-act" type="button">Show</button>
+          </li>
+
+          <li class="bv-msg bv-msg--in bv-msg--prio bv-got-now" data-await="">
+            <div class="bv-line">
+              <span class="bv-prio-word">🔥 Priority</span><span class="bv-from">Tom Okafor</span><span class="sr-only">, backstage,</span><span class="bv-time">14:06</span>
+            </div>
+            <p class="bv-body">The aisle 2 microphone is live. Take the next question from the left aisle.</p>
+            <div class="bv-acts"><button class="bv-act bv-act--strong" type="button">👍 Got it</button><button class="bv-act" type="button">↩ Reply</button></div>
+          </li>
+
+          <li class="bv-new bv-later" role="separator" aria-label="New messages since you last looked">New</li>
+
+          <li class="bv-msg bv-msg--ask bv-later" data-await="">
+            <div class="bv-line">
+              <span class="bv-ask-word">Question</span><span class="bv-from">Ana Ribeiro</span><span class="sr-only">, backstage,</span><span class="bv-time">14:08</span>
+            </div>
+            <p class="bv-body bv-body--ask">A shareholder asks about the 2025 capex figure. Refer them to slide 14 of the board pack?</p>
+            <div class="bv-answers" role="group" aria-label="Answer Ana's question">
+              <button class="bv-answer" type="button">Yes</button>
+              <button class="bv-answer" type="button">No</button>
+              <button class="bv-answer" type="button">Not yet</button>
+            </div>
+            <button class="bv-words" type="button">Answer in words…</button>
+            <form class="bv-words-field" action="#" method="dialog">
+              <label class="sr-only" for="answerWords">Your answer to Ana's question</label>
+              <input id="answerWords" class="bv-input" maxlength="200" autocomplete="off" enterkeyhint="send" placeholder="Your answer…" value="Yes, and offer the printed copy" />
+              <button class="bv-btn bv-send" type="submit">Send answer</button>
+            </form>
+          </li>
+
+          <li class="bv-msg bv-msg--in bv-later" data-await="">
+            <div class="bv-line">
+              <span class="bv-from">Ana Ribeiro</span><span class="sr-only">, backstage,</span><span class="bv-time">14:09</span>
+            </div>
+            <p class="bv-body">Slide 14 is in your side bar if you want a look first.</p>
+          </li>
+
+          <li class="bv-msg bv-msg--in bv-later" data-await="">
+            <div class="bv-line">
+              <span class="bv-from">Tom Okafor</span><span class="sr-only">, backstage,</span><span class="bv-time">14:10</span>
+            </div>
+            <p class="bv-body">Voting on resolution 4 opens after this question.</p>
+            <!-- The one plain response: on the newest waiting message from backstage, answering every waiting plain one. -->
+            <div class="bv-acts"><button class="bv-act" type="button">👍 Got all 2</button><button class="bv-act" type="button">↩ Reply</button></div>
+          </li>
+
+          <!-- Only with an admin's switch on (B2): one's own message that also went to a countdown screen. -->
+          <li class="bv-msg bv-msg--own bv-later bv-sent-also">
+            <div class="bv-line">
+              <span class="bv-from">You</span><span class="bv-time">14:11</span>
+              <span class="bv-status">Seen by Tom · ⏱ On Lectern ✓</span>
+            </div>
+            <p class="bv-body">Two minutes left on this item, please.</p>
+          </li>
+        </ol>
+      </div>
+
+      <form class="bv-compose" action="#" method="dialog">
+        <button class="bv-jump" type="button">↓ 3 new · 1 question</button>
+        <p class="bv-alone bv-col">○ Nobody backstage is online. Use Help if you need someone.</p>
+        <div class="bv-replying bv-col">
+          <span class="bv-replying-text">↩ Replying to <b>Tom Okafor</b>: Voting on resolution 4 opens after this question.</span>
+          <button class="bv-btn bv-cancel" type="button">✕ Cancel</button>
+        </div>
+        <!-- The destination choice: drawn only while the admin has turned on one of this person's switches (B2).
+             Each chip is off after every send; the feed always gets the message. -->
+        <div class="bv-also bv-col">
+          <div class="bv-also-row" role="group" aria-labelledby="alsoLabel" aria-describedby="alsoWhat">
+            <span class="bv-also-label" id="alsoLabel">Also on</span>
+            <button class="bv-chip" type="button" aria-pressed="true">⏱ Lectern</button>
+            <button class="bv-chip" type="button" aria-pressed="false">👥 <span class="bv-wide">Everyone </span>On stage</button>
+          </div>
+          <p class="bv-also-what" id="alsoWhat"><span>Replaces Lectern's countdown line.</span> <span class="bv-also-count">41 / 160</span></p>
+        </div>
+        <div class="bv-compose-row bv-col">
+          <!-- 🔥 Priority (B5): a toggle, off after every send. On a phone the word is for assistive technology only. -->
+          <button class="bv-btn bv-prio-btn bv-prio-off" type="button" aria-pressed="false"><span aria-hidden="true">🔥</span><span class="bv-prio-label">Priority</span></button>
+          <button class="bv-btn bv-prio-btn bv-prio-on" type="button" aria-pressed="true"><span aria-hidden="true">🔥</span><span class="bv-prio-label">Priority</span></button>
+          <label class="sr-only" for="composeInput">Message everyone here…</label>
+          <input id="composeInput" class="bv-input bv-input--empty" maxlength="300" autocomplete="off" enterkeyhint="send" placeholder="Message everyone here…" />
+          <input class="bv-input bv-input--short" aria-label="Message everyone here…" maxlength="300" autocomplete="off" enterkeyhint="send" placeholder="Message everyone…" />
+          <input class="bv-input bv-input--alone" aria-label="Message everyone here…" maxlength="300" autocomplete="off" enterkeyhint="send" placeholder="Message everyone here…" value="The lectern mic keeps cutting out." />
+          <input class="bv-input bv-input--sends" aria-label="Message everyone here…" maxlength="160" autocomplete="off" enterkeyhint="send" placeholder="Message everyone here…" value="Please take one more question, then vote." />
+          <button class="bv-btn bv-send" type="submit">Send</button>
+        </div>
+      </form>
+    </section>
+
+    <aside class="bv-side" aria-labelledby="sideTitle">
+      <h2 class="bv-side-title" id="sideTitle">📺 Shown to you</h2>
+
+      <article class="bv-card">
+        <div class="bv-page" aria-hidden="true">
+          <p class="bv-page-h"></p>
+          <div class="bv-bars"><i style="height:38%"></i><i style="height:55%"></i><i style="height:47%"></i><i style="height:72%"></i><i style="height:90%"></i></div>
+          <p class="bv-page-l"></p><p class="bv-page-l"></p><p class="bv-page-l bv-short"></p>
+        </div>
+        <h3 class="bv-card-title">Board pack 2025.pdf</h3>
+        <p class="bv-card-meta">p. 14 · From Ana · 14:07</p>
+        <button class="bv-act bv-card-look" type="button">👁 Look</button>
+      </article>
+
+      <h3 class="bv-side-sub">Earlier</h3>
+      <ul class="bv-earlier">
+        <li>
+          <span class="bv-earlier-text">❝ Revenue Q3: £4.2m, up 6%<span class="bv-earlier-meta">Tom · 13:52</span></span>
+          <button class="bv-act" type="button">👁 Look</button>
+        </li>
+      </ul>
+    </aside>
+  </div>
+
+  <!-- The ⋯ sheet (kind `sheet`): here with the admin's lock on the clock or countdown, and Leave asked in place. -->
+  <div class="bv-sheet" role="dialog" aria-label="More">
+    <div class="bv-sheet-row">
+      <span class="bv-sheet-label">Text size</span>
+      <span class="bv-stepper"><button class="bv-btn" type="button" aria-label="Smaller text">Aa−</button><span class="bv-stepper-val">100%</span><button class="bv-btn" type="button" aria-label="Larger text">Aa+</button></span>
+    </div>
+    <div class="bv-sheet-row bv-sheet-row--col bv-sheet-row--locked">
+      <!-- Locked: the admin's choice as text, not a control (the device's choice is not offered). -->
+      <p class="bv-sheet-locked"><span class="bv-sheet-label">Clock or countdown:</span> Countdown</p>
+      <p class="bv-sheet-why">Set by the admin for you.</p>
+    </div>
+    <!-- #asleep: not locked, so the device's choice is offered; Time of day until someone chooses (B3). -->
+    <div class="bv-sheet-row bv-sheet-row--col bv-sheet-row--clock">
+      <span class="bv-sheet-label" id="clockLabel">Clock or countdown</span>
+      <span class="bv-seg" role="radiogroup" aria-labelledby="clockLabel">
+        <button class="bv-seg-opt" role="radio" aria-checked="true" type="button">Time of day</button>
+        <button class="bv-seg-opt" role="radio" aria-checked="false" type="button">Countdown</button>
+        <button class="bv-seg-opt" role="radio" aria-checked="false" type="button">Off</button>
+      </span>
+    </div>
+    <div class="bv-sheet-row">
+      <span class="bv-sheet-label" id="themeLabel">Theme</span>
+      <!-- One group drawn per theme (the mock has no script to move aria-checked). Dark is the default (B6). -->
+      <span class="bv-seg bv-seg--dark" role="radiogroup" aria-labelledby="themeLabel">
+        <button class="bv-seg-opt" role="radio" aria-checked="false" type="button">Light</button>
+        <button class="bv-seg-opt" role="radio" aria-checked="true" type="button">Dark</button>
+      </span>
+      <span class="bv-seg bv-seg--light" role="radiogroup" aria-labelledby="themeLabel">
+        <button class="bv-seg-opt" role="radio" aria-checked="true" type="button">Light</button>
+        <button class="bv-seg-opt" role="radio" aria-checked="false" type="button">Dark</button>
+      </span>
+    </div>
+    <button class="bv-sheet-item bv-sheet-full" type="button">⛶ Full screen</button>
+    <!-- #asleep: AGM.awake() could not hold the screen (arch-ux §15.10, unit M); the words name the cause. Here the page
+         came over plain HTTP. There is no Full screen row: this device has no Fullscreen API (an iPhone). -->
+    <p class="bv-sheet-sleep" role="status">This device may sleep: open AGMessage over HTTPS.</p>
+    <div class="bv-ask" role="group" aria-labelledby="leaveAsk">
+      <p class="bv-ask-q" id="leaveAsk"><b>Leave Hall 2?</b> You'll stop getting messages from backstage.</p>
+      <div class="bv-ask-acts">
+        <button class="bv-btn bv-ask-yes" type="button">Leave</button>
+        <button class="bv-btn bv-ask-no" type="button">Stay</button>
+      </div>
+    </div>
+    <p class="bv-sheet-foot">Margaret Lowe · On stage</p>
+  </div>
+</body>
+</html>

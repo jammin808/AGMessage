@@ -1,0 +1,405 @@
+/* The Board's chat view, a static mock (revision 5: owner answer 22, a mixture of devices; revision 4: the owner's answers
+   to B1-B6, and the review of revision 3). Tokens come from AGMessage's
+   styles.css (copied beside this file); the few added here are the ones arch-ux §15.6 names (--c-ink-muted at 4.5:1, an
+   edge at 3:1, the ask colour) and the view's own sizes. Dark is the default (B6); the -light fragments draw light.
+   One bold thing per screen: the filled 👍 Got it of a 🔥 message. Everything else is quiet. */
+
+:root {
+  --bv-muted: #545d6b;          /* 6.16:1 on --bg, 6.66:1 on --card (the product's #6b7280 is 4.47:1 on --bg) */
+  --bv-edge: #737c8c;           /* control edges: 3.89:1 on --bg, 4.21:1 on --card */
+  --bv-ask: #8a3d04;            /* --c-ask: a question's rule and word, 7.06:1; never warn, never on its answers */
+  --bv-warn: #a34a06;           /* --c-warn: ▲ on the countdown, 5.49:1 */
+  --bv-prio: #b91c1c;           /* --c-fault: 🔥 only here and for faults, 5.98:1 */
+  --bv-prio-soft: #fdeeee;
+  --bv-on-action: #ffffff;
+  --bv-on-prio: #ffffff;        /* the words on a pressed 🔥 Priority */
+  --bv-link: var(--brand);      /* --c-action */
+  --bv-page: #ffffff;
+  /* Stagewatch's own colour, drawn as the readout's left edge, never as text (#FFFFFF or none → --border) */
+  --bv-sw-normal: #16a34a;
+  --bv-sw-over: #dc2626;
+
+  /* sizes at zoom 1. Text size (--bv-zoom) scales everything in the chat; the header and the sheet stay fixed. */
+  --bv-zoom: 1;
+  --bv-fs-title: 1rem;          /* 16 px, weight 500, muted: the hall's name, under the readout */
+  --bv-fs-readout: 1.125rem;    /* 18 px: the clock or countdown, the 🔥 and Question words */
+  --bv-target: 44px;
+  --bv-target-answer: 48px;
+  --bv-col: 46rem;
+  --bv-side: 360px;
+}
+
+/* ---------- dark, the simple view's default (B6), from styles.css's html[data-theme="dark"] values. The mock draws
+   light only for a -light fragment; the page itself starts dark until the person chooses Light in the sheet. ---------- */
+html:not(:has(#clock-light:target, #off-light:target, #stage-light:target, #over-light:target, #alone-light:target, #sheet-light:target, #sends-light:target, #cleared-light:target, #asleep-light:target)) {
+  --brand: #5b8dff; --brand-dark: #3a6cdf; --bg: #0f1421; --card: #1a2032; --border: #2c344a; --ink: #e4e7ee;
+  --bv-muted: #a3acbd; --bv-edge: #6f7c9a; --bv-ask: #f0a14a; --bv-warn: #f0a14a;
+  --bv-prio: #fca5a5; --bv-prio-soft: #3a1518; --bv-on-action: #0f1421; --bv-on-prio: #0f1421; --bv-link: #7ea6ff;
+  --bv-page: #e9ebf0; --bv-sw-normal: #34d399; --bv-sw-over: #f87171;
+  color-scheme: dark;
+}
+
+/* ---------- the page ---------- */
+body.bv {
+  height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg); color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+  font-size: 1rem; line-height: 1.4;
+}
+.bv button { font-family: inherit; line-height: 1.2; }
+.bv :focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+.bv-skip { position: absolute; left: 8px; top: -60px; z-index: 50; padding: .6rem 1rem; background: var(--card); border-radius: 8px; }
+.bv-skip:focus { top: 8px; }
+.bv-col { width: 100%; max-width: var(--bv-col); margin-inline: auto; padding-inline: 24px; }
+
+.bv-btn {
+  min-height: var(--bv-target); min-width: var(--bv-target); padding: 0 14px; display: inline-flex; align-items: center;
+  justify-content: center; gap: .35rem; border: 1px solid var(--bv-edge); border-radius: 12px; background: transparent;
+  color: var(--ink); font-size: 1rem; font-weight: 500; cursor: pointer;
+}
+
+/* ---------- the header: the hall's name, the secondary object, Help, ⋯ ---------- */
+.bv-head {
+  display: flex; align-items: center; gap: 12px; min-height: 64px;
+  padding: 8px max(16px, env(safe-area-inset-right)) 8px max(20px, env(safe-area-inset-left));
+  background: var(--card); border-bottom: 1px solid var(--border);
+}
+.bv-title {
+  margin: 0; flex: 1 1 auto; min-width: 0; font-size: var(--bv-fs-title); font-weight: 500; color: var(--bv-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* The readout: under the chat in weight, over the name. Its left edge carries Stagewatch's colour (or the hairline). */
+.bv-readout {
+  display: none; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; max-width: 360px;
+  padding: 2px 16px 2px 14px; border-left: 3px solid var(--bv-sw, var(--border));
+  font-variant-numeric: tabular-nums;
+}
+.bv-ro-line { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.bv-ro-icon { font-size: .95rem; }
+.bv-ro-mark { font-size: .95rem; color: var(--bv-warn); }
+.bv-ro-time { font-size: var(--bv-fs-readout); font-weight: 600; letter-spacing: .01em; }
+.bv-ro-strip { font-size: 1rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bv-help { font-weight: 600; }
+.bv-more { font-size: 1.25rem; padding: 0; width: var(--bv-target); letter-spacing: .05em; }
+
+/* the fragment picks the secondary object: the clock by default (B3), the countdown or none as chosen */
+.bv-readout--clock { display: flex; }
+html:has(#off:target, #off-light:target, #stage:target, #stage-light:target, #over:target, #over-light:target, #sheet:target, #sheet-light:target) .bv-readout--clock { display: none; }
+html:has(#stage:target, #stage-light:target, #sheet:target, #sheet-light:target) .bv-readout--stage,
+html:has(#over:target, #over-light:target) .bv-readout--over { display: flex; }
+
+/* ---------- phone tabs (only below 600 px, and only while Shown to you holds something) ---------- */
+.bv-tabs { display: none; }
+
+/* ---------- the main area: the chat first, Shown to you beside it ---------- */
+.bv-head, .bv-tabs { flex: 0 0 auto; }
+.bv-main { flex: 1 1 auto; display: grid; grid-template-columns: minmax(0, 1fr) var(--bv-side); min-height: 0; }
+.bv-chat {
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  /* Text size scales the whole chat, not the body alone */
+  --bv-fs-body: calc(1.25rem * var(--bv-zoom));       /* 20 px: phones */
+  --bv-fs-name: calc(1rem * var(--bv-zoom));          /* 16 px: names, actions */
+  --bv-fs-meta: calc(.875rem * var(--bv-zoom));       /* 14 px: times, status words */
+  --bv-fs-cue: calc(1.125rem * var(--bv-zoom));       /* 18 px: 🔥 Priority, Question */
+}
+/* 22 px on a tablet, either way up: the smaller side is 600 px or more (owner answer 22). A phone held sideways keeps 20 px */
+@media (min-width: 600px) and (min-height: 600px) { .bv-chat { --bv-fs-body: calc(1.375rem * var(--bv-zoom)); } }
+.bv-chat > .bv-urgent, .bv-chat > .bv-compose { flex: 0 0 auto; }
+
+/* the feed sits at its newest message: a reversed scroller starts at the bottom */
+.bv-scroll { flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column-reverse; min-height: 0; }
+.bv-feed { list-style: none; margin-block: 0; padding-top: 16px; padding-bottom: 12px; }   /* margin-block only: .bv-col centres it, as it does the pinned bar and the composer */
+
+/* A message: no card, no bubble. Backstage is the default author and carries no rule; only 🔥 and a question do. */
+.bv-msg { position: relative; padding: 10px 0 12px 16px; }
+.bv-msg + .bv-msg { margin-top: 2px; }
+.bv-msg::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 14px; width: 4px; border-radius: 2px; background: transparent; }
+.bv-msg--prio::before { background: var(--bv-prio); }
+.bv-msg--ask::before { background: var(--bv-ask); }
+
+.bv-line { display: flex; align-items: baseline; gap: 8px; min-height: 28px; flex-wrap: wrap; }
+.bv-from { font-size: var(--bv-fs-name); font-weight: 600; }
+.bv-time, .bv-status, .bv-done { font-size: var(--bv-fs-meta); color: var(--bv-muted); }
+.bv-time { font-variant-numeric: tabular-nums; }
+.bv-prio-word { font-size: var(--bv-fs-cue); font-weight: 700; color: var(--bv-prio); }
+.bv-ask-word { font-size: var(--bv-fs-cue); font-weight: 700; color: var(--bv-ask); }
+.bv-done, .bv-status { margin-left: auto; }
+
+.bv-body { margin: 2px 0 0; font-size: var(--bv-fs-body); line-height: 1.4; max-width: 36em; overflow-wrap: anywhere; }
+.bv-msg--own .bv-body { color: var(--bv-muted); }
+.bv-body--ask { font-weight: 600; }
+.bv-quote {
+  margin: 2px 0 4px; padding-left: 10px; border-left: 2px solid var(--border); font-size: var(--bv-fs-meta);
+  color: var(--bv-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 36em;
+}
+
+/* The response sits after the words it answers, in reading and in focus order. */
+.bv-acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 0 -10px; }
+.bv-act {
+  position: relative; min-height: 36px; min-width: var(--bv-target); padding: 0 10px; border: 0; border-radius: 18px;
+  background: transparent; color: var(--bv-link); font-size: var(--bv-fs-name, 1rem); font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.bv-act::before { content: ""; position: absolute; inset: -4px 0; }   /* 36 px drawn, 44 px to the finger */
+.bv-act:hover { background: color-mix(in srgb, var(--brand) 10%, transparent); }
+.bv-act--strong { background: var(--brand); color: var(--bv-on-action); padding: 0 16px; }
+.bv-act--strong:hover { background: var(--brand-dark); }
+.bv-acts .bv-act--strong { margin-left: 10px; }
+
+.bv-answers { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.bv-answer {
+  min-height: var(--bv-target-answer); min-width: 96px; padding: 0 18px; border: 2px solid var(--bv-edge); border-radius: 12px;
+  background: var(--card); color: var(--ink); font-size: calc(1.125rem * var(--bv-zoom)); font-weight: 600; cursor: pointer;
+}
+.bv-answer:hover, .bv-answer[aria-pressed="true"] { border-color: var(--bv-link); }
+.bv-words {
+  min-height: var(--bv-target); margin: 4px 0 0 -10px; padding: 0 10px; border: 0; background: none; color: var(--bv-link);
+  font-size: var(--bv-fs-name); font-weight: 600; cursor: pointer; border-radius: 18px;
+}
+.bv-words-field { display: none; flex-wrap: wrap; gap: 8px; margin-top: 10px; max-width: 36em; }
+.bv .bv-words-field .bv-input { flex: 1 1 14em; }   /* a phone puts Send answer under the field, never a cut field */
+html:has(#off:target, #off-light:target) .bv-words { display: none; }
+html:has(#off:target, #off-light:target) .bv-words-field { display: flex; }
+
+.bv-new { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; color: var(--bv-link); font-size: var(--bv-fs-meta); font-weight: 700; }
+.bv-new::after { content: ""; flex: 1; height: 2px; background: var(--brand); opacity: .55; border-radius: 1px; }
+
+/* #over: the person has scrolled up; what came since sits below, named by "↓ 3 new · 1 question" */
+html:has(#over:target, #over-light:target) .bv-later { display: none; }
+
+/* the 🔥 strip: shown only while its message is out of view (the phone shot), so the feed never shows it twice */
+/* Got it follows the words in the page's order; it is drawn at the end of the strip's first line, so the strip spends no
+   row of its own on it. The words keep three lines here; the whole message is one tap away, in the feed. */
+.bv-urgent {
+  display: none; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "line act" "text text";
+  align-items: center; column-gap: 8px; row-gap: 2px; margin: 10px 12px 4px; padding: 8px 10px 10px 14px;
+  background: var(--bv-prio-soft); border-left: 4px solid var(--bv-prio); border-radius: 10px;
+}
+.bv-urgent p { margin: 0; }
+.bv-urgent-line { grid-area: line; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+.bv-urgent-text {
+  grid-area: text; font-size: var(--bv-fs-body); line-height: 1.4;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+}
+.bv-urgent .bv-act--strong { grid-area: act; }
+.bv-urgent + .bv-scroll .bv-feed { padding-top: 8px; }
+
+/* ---------- the composer: the words and Send. No 📎, no question, no ✨, no 🔥 ---------- */
+.bv-compose {
+  position: relative; background: var(--card); border-top: 1px solid var(--border);
+  padding: 12px 0 max(12px, env(safe-area-inset-bottom));
+}
+.bv-compose-row { display: flex; gap: 8px; align-items: center; }
+.bv .bv-input {   /* two classes: styles.css's input:not([type]) would otherwise set its font and padding */
+  flex: 1; min-width: 0; min-height: var(--bv-target-answer); padding: 0 16px; font-size: 1.125rem;
+  border: 1px solid var(--bv-edge); border-radius: 24px; background: var(--bg); color: var(--ink);
+}
+.bv .bv-input::placeholder { color: var(--bv-muted); opacity: 1; }
+.bv-send { min-height: var(--bv-target-answer); padding: 0 22px; border-radius: 24px; background: var(--brand); border-color: var(--brand); color: var(--bv-on-action); font-weight: 600; font-size: 1.0625rem; }
+.bv-replying { display: none; align-items: center; gap: 8px; margin-bottom: 8px; font-size: .875rem; color: var(--bv-muted); }
+.bv-replying-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 10px; border-left: 2px solid var(--brand); }
+.bv-replying-text b { color: var(--ink); }
+.bv-cancel { font-size: .875rem; border-radius: 22px; }
+html:has(#stage:target, #stage-light:target) .bv-replying { display: flex; }
+
+/* nobody backstage for 10 s: one muted line over the composer, cleared when someone joins */
+.bv-alone { display: none; margin: 0 auto 10px; font-size: .9375rem; color: var(--bv-muted); }
+html:has(#alone:target, #alone-light:target) .bv-alone { display: block; }
+
+/* "↓ 3 new · 1 question": over the composer while the person reads further up */
+.bv-jump {
+  display: none; position: absolute; left: 50%; bottom: calc(100% + 12px); transform: translateX(-50%);
+  min-height: var(--bv-target-answer); padding: 0 20px; border: 1px solid var(--bv-edge); border-radius: 24px;
+  background: var(--card); color: var(--bv-link); font-size: 1rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(10, 16, 30, .14);
+}
+html:has(#over:target, #over-light:target) .bv-jump { display: block; }
+
+/* ---------- Shown to you (the side bar): a quiet surface beside the chat ---------- */
+.bv-side { background: var(--bg); border-left: 1px solid var(--border); padding: 16px 18px; overflow-y: auto; min-height: 0; }
+.bv-side-title { margin: 0 0 12px; font-size: 1rem; font-weight: 600; }
+.bv-side-sub { margin: 20px 0 6px; font-size: .875rem; font-weight: 700; color: var(--bv-muted); }
+.bv-card { display: grid; grid-template-columns: 64px 1fr; column-gap: 12px; row-gap: 2px; align-items: start;
+  border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: var(--card); }
+.bv-card > .bv-page { grid-row: 1 / span 3; grid-column: 1; }
+.bv-card > .bv-card-title, .bv-card > .bv-card-meta, .bv-card > .bv-card-look { grid-column: 2; }
+.bv-card-title { margin: 0; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
+.bv-card-meta { margin: 0; font-size: .875rem; color: var(--bv-muted); }
+.bv-card-look { justify-self: start; margin: 6px 0 0 -10px; }
+.bv-page {
+  width: 64px; aspect-ratio: 1 / 1.414; background: var(--bv-page); border: 1px solid var(--border); border-radius: 3px; padding: 6px;
+  display: flex; flex-direction: column; gap: 3px; overflow: hidden;
+}
+.bv-page-h { margin: 0; height: 4px; width: 70%; border-radius: 2px; background: #9aa3b2; }
+.bv-bars { flex: 1; display: flex; align-items: flex-end; gap: 10%; padding: 0 6% 2px; border-bottom: 1px solid #c9ced8; }
+.bv-bars i { flex: 1; background: #8ea2c9; border-radius: 1px 1px 0 0; }
+.bv-page-l { margin: 0; height: 3px; border-radius: 2px; background: #d6dae2; }
+.bv-page-l.bv-short { width: 60%; }
+.bv-earlier { list-style: none; margin: 0; padding: 0; }
+.bv-earlier li { display: flex; align-items: center; gap: 10px; justify-content: space-between; font-size: 1rem; }
+.bv-earlier-text { min-width: 0; }
+.bv-earlier-meta { display: block; font-size: .875rem; color: var(--bv-muted); }
+
+/* ---------- the ⋯ sheet (kind `sheet`) ---------- */
+.bv-sheet {
+  display: none; position: fixed; top: 60px; right: 12px; width: 380px; z-index: 30; padding: 6px 0;
+  max-height: calc(100vh - 72px); max-height: calc(100dvh - 72px); overflow-y: auto;
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(10, 16, 30, .18), 0 2px 6px rgba(10, 16, 30, .08);
+}
+html:has(#sheet:target, #sheet-light:target, #asleep:target, #asleep-light:target) .bv-sheet { display: block; }
+/* #sheet: the admin has locked the choice; #asleep: unlocked, on a device that cannot be kept awake or full screen */
+.bv-sheet .bv-sheet-row--clock, .bv-sheet-sleep { display: none; }
+html:has(#asleep:target, #asleep-light:target) .bv-sheet-row--locked { display: none; }
+html:has(#asleep:target, #asleep-light:target) .bv-sheet .bv-sheet-row--clock { display: flex; }
+html:has(#asleep:target, #asleep-light:target) .bv-sheet-sleep { display: block; }
+html:has(#asleep:target, #asleep-light:target) .bv-sheet-full { display: none; }   /* no Fullscreen API here: no row */
+.bv-sheet-sleep { margin: 0; padding: 10px 16px; border-top: 1px solid var(--border); font-size: .9375rem; }
+.bv-sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 6px 16px; }
+.bv-sheet-row--col { flex-direction: column; align-items: stretch; justify-content: center; gap: 2px; padding-block: 10px; border-block: 1px solid var(--border); }
+.bv-sheet-row--col p { margin: 0; }
+.bv-sheet-label { font-weight: 600; }
+.bv-sheet-why { font-size: .875rem; color: var(--bv-muted); }
+.bv-stepper { display: inline-flex; align-items: center; gap: 8px; }
+.bv-stepper-val { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; color: var(--bv-muted); }
+.bv-seg { display: flex; border: 1px solid var(--bv-edge); border-radius: 12px; overflow: hidden; }
+.bv-seg--light { display: none; }
+html:has(#clock-light:target, #off-light:target, #stage-light:target, #over-light:target, #alone-light:target, #sheet-light:target, #sends-light:target, #cleared-light:target, #asleep-light:target) .bv-seg--dark { display: none; }
+html:has(#clock-light:target, #off-light:target, #stage-light:target, #over-light:target, #alone-light:target, #sheet-light:target, #sends-light:target, #cleared-light:target, #asleep-light:target) .bv-seg--light { display: flex; }
+.bv-seg-opt { flex: 1; min-height: var(--bv-target); padding: 0 14px; border: 0; background: transparent; color: var(--ink); cursor: pointer; font-size: .95rem; }
+.bv-seg-opt + .bv-seg-opt { border-left: 1px solid var(--bv-edge); }
+.bv-seg-opt[aria-checked="true"] { background: var(--brand); color: var(--bv-on-action); font-weight: 600; }
+.bv-sheet-item { display: block; width: 100%; min-height: 56px; padding: 0 16px; text-align: left; border: 0; background: none; color: var(--ink); cursor: pointer; font-size: 1rem; font-weight: 500; }
+/* Leave, asked in place (AGM.ask), 8 px apart from the row above */
+.bv-ask { margin-top: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.bv-ask-q { margin: 0 0 10px; }
+.bv-ask-acts { display: flex; gap: 8px; }
+.bv-ask-yes { font-weight: 600; }   /* red is kept for 🔥, open help and faults (arch-ux §15.6) */
+.bv-sheet-foot { margin: 0; padding: 10px 16px 8px; border-top: 1px solid var(--border); font-size: .875rem; color: var(--bv-muted); }
+
+/* ---------- revision 3: the owner's answers to B1-B6 ---------- */
+
+/* B1, the pinned bar: one line under the header, the person's own pins (and the room's), newest first. The whole bar is
+   one 48 px button that goes to the pinned message; Unpin is on the message. */
+.bv-pins { flex: 0 0 auto; background: var(--card); border-bottom: 1px solid var(--border); }
+.bv-pin-bar {
+  display: flex; align-items: center; gap: 10px; min-height: 48px; border: 0; background: transparent; color: var(--ink);
+  text-align: left; cursor: pointer; font-size: var(--bv-fs-name);
+}
+.bv-pin-word { flex: 0 0 auto; font-size: var(--bv-fs-meta); font-weight: 700; color: var(--bv-link); white-space: nowrap; }
+.bv-pin-text { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.bv-pin-count { flex: 0 0 auto; font-size: var(--bv-fs-meta); color: var(--bv-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* the room's pin (B1: read-only, the backstage team's) shows first only while it is the newest pin: here, #stage */
+.bv-pin-bar--room { display: none; }
+html:has(#stage:target, #stage-light:target) .bv-pin-bar--mine { display: none; }
+html:has(#stage:target, #stage-light:target) .bv-pin-bar--room { display: flex; }
+
+/* B1, the second door: a tap on a message brings its own row back, for it alone, with 📌 Pin for me (#over) */
+.bv-acts--tapped { display: none; }
+html:has(#over:target, #over-light:target) .bv-acts--tapped { display: flex; }
+html:has(#over:target, #over-light:target) .bv-msg--tapped { background: color-mix(in srgb, var(--brand) 9%, transparent); border-radius: 10px; }
+
+/* B4, Got it clears (the admin's setting, off by default): a message the person got leaves their feed, and one muted
+   line keeps its place with Show (a run of them is one line: "Got and cleared: 3 messages"). A message pinned for them
+   stays whole. In #cleared, Ana's 14:02 and the 🔥 message (just got) are cleared; Tom's pinned 14:05 stays. */
+.bv-cleared { display: none; align-items: center; flex-wrap: wrap; gap: 0 8px; min-height: 44px; padding: 0 0 0 16px; font-size: var(--bv-fs-meta); color: var(--bv-muted); }
+.bv-cleared .bv-act { margin-left: -6px; }
+html:has(#cleared:target, #cleared-light:target) .bv-cleared { display: flex; }
+html:has(#cleared:target, #cleared-light:target) .bv-got:not(.bv-pinned),
+html:has(#cleared:target, #cleared-light:target) .bv-got-now { display: none; }
+html:has(#cleared:target, #cleared-light:target) .bv-urgent { display: none; }   /* got: the strip has nothing to hold */
+
+/* B2, one's own message that also went to a countdown screen: shown only with the admin's switch on (#sends) */
+.bv-sent-also { display: none; }
+html:has(#sends:target, #sends-light:target) .bv-sent-also { display: block; }
+
+/* B2, the destination choice: drawn only while the admin has turned on one of this person's switches. Each chip is a
+   toggle, off after every send; pressed reads ✓ and fills, never colour alone. */
+.bv-also { display: none; margin-bottom: 10px; }
+html:has(#sends:target, #sends-light:target) .bv-also { display: block; }
+.bv-also-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bv-also-label { font-size: .875rem; font-weight: 600; color: var(--bv-muted); margin-right: 2px; }
+.bv-chip {
+  min-height: var(--bv-target); padding: 0 14px; border: 1px solid var(--bv-edge); border-radius: 22px; background: transparent;
+  color: var(--ink); font-size: .9375rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.bv-chip[aria-pressed="true"] { background: var(--brand); border-color: var(--brand); color: var(--bv-on-action); }
+.bv-chip[aria-pressed="true"]::before { content: "✓ "; }
+.bv-also-what { display: flex; justify-content: space-between; gap: 12px; margin: 6px 0 0; font-size: .875rem; color: var(--bv-muted); }
+.bv-also-count { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+
+/* B5, 🔥 Priority in the composer: a toggle, off after every send (0.5.1's consumePriority); pressed, it fills in the
+   fault colour, the one place besides 🔥 messages and faults where red is drawn */
+.bv-prio-btn { min-height: var(--bv-target-answer); padding: 0 16px; border-radius: 24px; font-weight: 600; gap: 6px; }
+.bv-prio-on { display: none; background: var(--bv-prio); border-color: var(--bv-prio); color: var(--bv-on-prio); }
+html:has(#alone:target, #alone-light:target) .bv-prio-off { display: none; }
+html:has(#alone:target, #alone-light:target) .bv-prio-on { display: inline-flex; }
+
+/* the composer's field per state (a static mock has no script to type into it) */
+.bv .bv-input--alone, .bv .bv-input--sends { display: none; }
+html:has(#alone:target, #alone-light:target) .bv .bv-input--empty, html:has(#sends:target, #sends-light:target) .bv .bv-input--empty { display: none; }
+html:has(#alone:target, #alone-light:target) .bv .bv-input--alone { display: block; }
+html:has(#sends:target, #sends-light:target) .bv .bv-input--sends { display: block; }
+
+/* ---------- under 900 px wide (a tablet upright, a phone either way up): one column, and Shown to you behind a tab.
+   The side column needs 360 px beside a chat of 540 px or more; below that it squeezed the composer's field to
+   34 px at 640 px wide (revision 4, measured by shoot5.js). ---------- */
+@media (max-width: 899.98px) {
+  :root { --bv-side: 0px; }
+  .bv-tabs { display: flex; background: var(--card); border-bottom: 1px solid var(--border); }
+  .bv-tab { flex: 1; min-height: var(--bv-target); display: flex; align-items: center; justify-content: center; gap: 6px;
+    border: 0; border-bottom: 3px solid transparent; background: none; color: var(--bv-muted); font-size: 1rem; font-weight: 600; cursor: pointer; }
+  .bv-tab[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--brand); }
+  .bv-main { grid-template-columns: minmax(0, 1fr); }
+  .bv-side { display: none; }
+}
+
+/* ---------- a shorter viewport: the 🔥 strip keeps two lines under 700 px tall (a phone in Safari, its bars shown),
+   and one under 500 px (a phone held sideways). The whole message is one tap away, in the feed. ---------- */
+@media (max-height: 700px) { .bv-urgent-text { -webkit-line-clamp: 2; line-clamp: 2; } }
+@media (max-height: 500px) {
+  .bv-urgent-text { -webkit-line-clamp: 1; line-clamp: 1; }
+  .bv-pin-bar { min-height: 44px; }
+}
+
+/* ---------- a phone in portrait: the readout's digits on row 1; row 2 only while Stagewatch has a line ---------- */
+@media (max-width: 600px) {
+  .bv-col { padding-inline: 16px; }
+  .bv-head { flex-wrap: wrap; gap: 8px; min-height: 0; padding: 6px 12px 6px 16px; row-gap: 2px; }
+  .bv-title { flex: 1 1 0; }
+  .bv-readout { display: none; }
+  .bv-readout--clock { display: contents; }
+  html:has(#off:target, #off-light:target, #stage:target, #stage-light:target, #over:target, #over-light:target, #sheet:target, #sheet-light:target) .bv-readout--clock { display: none; }
+  html:has(#stage:target, #stage-light:target, #sheet:target, #sheet-light:target) .bv-readout--stage,
+  html:has(#over:target, #over-light:target) .bv-readout--over { display: contents; }
+  .bv-ro-line { padding: 4px 4px 4px 8px; border-left: 3px solid var(--bv-sw, var(--border)); }
+  .bv-readout--clock .bv-ro-line { border-left-color: var(--border); }
+  .bv-help { order: 2; }
+  .bv-more { order: 3; }
+  .bv-ro-strip { order: 4; flex: 1 0 100%; padding: 4px 0 4px; border-top: 1px solid var(--border); }
+  .bv-urgent { display: grid; }
+  .bv-urgent .bv-time { display: none; }   /* the feed keeps the time; the strip's first line is who, beside Got it */
+  .bv-msg { padding-left: 14px; }
+  .bv-answers .bv-answer { min-width: 0; flex: 1 1 0; padding: 0 8px; }
+  .bv-send { padding: 0 14px; }
+  .bv-compose-row { gap: 6px; }
+  .bv .bv-compose-row .bv-input { padding: 0 12px; font-size: 1rem; }   /* 16 px, the floor that stops iOS zooming on focus: "Message everyone here…" whole beside 🔥 and Send at 390 px */
+  .bv-prio-btn { width: var(--bv-target); min-width: var(--bv-target); padding: 0; }
+  .bv-prio-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .bv-pin-bar { min-height: 44px; }
+  .bv-wide { display: none; }   /* "👥 On stage" on a phone, "👥 Everyone On stage" wider: the visible words are the name */
+  .bv-sheet { top: auto; bottom: 0; left: 0; right: 0; width: auto; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom);
+    max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); }
+}
+
+/* The placeholder: the app measures "Message everyone here…" against the field (canvas measureText in the field's own
+   font, on load and on resize) and draws "Message everyone…" when it does not fit; the label stays the long words. The
+   mock has no script, so below 390 px, where shoot5.js measured the long words cut (196 px in 189 at 375), it shows the
+   short field instead. */
+.bv .bv-input--short { display: none; }
+@media (max-width: 389.98px) {
+  html:not(:has(#alone:target, #alone-light:target, #sends:target, #sends-light:target)) .bv .bv-input--empty { display: none; }
+  html:not(:has(#alone:target, #alone-light:target, #sends:target, #sends-light:target)) .bv .bv-input--short { display: block; }
+}
+
+@media (prefers-reduced-motion: reduce) { .bv * { transition: none !important; animation: none !important; } }
+@media print { .bv-side, .bv-page { display: none !important; } }
