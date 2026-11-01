@@ -152,11 +152,17 @@ const PLACE = /__(CSP|VERSION|STYLE|RULES|PAGE)__/g;
 const escapeHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cspHash = (text) => "'sha256-" + crypto.createHash('sha256').update(text, 'utf8').digest('base64') + "'";
 
+/** Line ends as a browser reads them: an HTML parser turns CR LF and a lone CR into LF before a CSP hash is taken. */
+const lf = (t) => String(t).replace(/\r\n?/g, '\n');
+
 /**
  * verify.html from page.html, page.css, auditrules.js and page.js (strings) and the version it names: each put inline in
  * its one place, the meta Content-Security-Policy carrying their SHA-256, so the page loads nothing and sends nothing.
+ * Every part is read with LF line ends first, so the hashes are of the text the browser checks, whatever the checkout
+ * wrote (a Windows one writes CR LF), and one release makes the same page on every platform.
  */
-function assemblePage({ html, css, rules: rulesText, js, version }) {
+function assemblePage({ html: rawHtml, css: rawCss, rules: rawRules, js: rawJs, version }) {
+  const [html, css, rulesText, js] = [rawHtml, rawCss, rawRules, rawJs].map(lf);
   const found = String(html).match(PLACE) || [];
   if (found.length !== 5 || new Set(found).size !== 5) throw new Error('page.html must hold each of __CSP__, __VERSION__, __STYLE__, __RULES__ and __PAGE__ once');
   for (const [name, text] of [['auditrules.js', rulesText], ['page.js', js]]) if (/<\/script|<!--|<script/i.test(text)) throw new Error(name + ' cannot be put inline: it holds "</script", "<script" or "<!--"');

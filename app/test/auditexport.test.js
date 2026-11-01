@@ -260,8 +260,16 @@ test('determinism: a fixed seed signs a fixed SHA256SUMS to fixed bytes; verify.
   const b64 = (t) => "'sha256-" + crypto.createHash('sha256').update(t, 'utf8').digest('base64') + "'";
   assert.equal(scripts.length, 2);
   assert.equal(csp, "default-src 'none'; script-src " + scripts.map(b64).join(' ') + '; style-src ' + b64(styles[0]) + "; connect-src 'none'; img-src 'none'; form-action 'none'; base-uri 'none'");
-  assert.equal(scripts[0], fs.readFileSync(path.join(VERIFY_DIR, 'auditrules.js'), 'utf8'));
-  assert.equal(scripts[1], fs.readFileSync(path.join(VERIFY_DIR, 'page.js'), 'utf8'));
+  const lf = (t) => t.replace(/\r\n?/g, '\n');   // a Windows checkout writes CR LF; the page carries LF
+  assert.equal(scripts[0], lf(fs.readFileSync(path.join(VERIFY_DIR, 'auditrules.js'), 'utf8')));
+  assert.equal(scripts[1], lf(fs.readFileSync(path.join(VERIFY_DIR, 'page.js'), 'utf8')));
+  assert.ok(!page.includes('\r'), 'no CR in the page: a browser reads CR LF as LF before it checks a hash');
+  // Parts written with CR LF, or a lone CR, make the same page, hashed over what the browser reads.
+  const parts = { html: '__CSP__\n__VERSION__\n<style>__STYLE__</style><script>__RULES__</script><script>__PAGE__</script>', css: 'a {\n}\n', rules: 'x = 1;\ny = 2;\n', js: 'z = 3;\n', version: 'v' };
+  const crlf = Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, k === 'version' ? v : v.replace(/\n/g, '\r\n')]));
+  const lone = Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, k === 'version' ? v : v.replace(/\n/g, '\r')]));
+  assert.equal(verifier.assemblePage(crlf), verifier.assemblePage(parts));
+  assert.equal(verifier.assemblePage(lone), verifier.assemblePage(parts));
   assert.ok(page.includes('This verifier is from AGMessage 0.6.0 (build 7).'));
   assert.ok(page.includes('AGMessage &lt;x&gt;') === false && (await verifier.pageFrom(VERIFY_DIR, '<x>')).includes('AGMessage &lt;x&gt;'), 'the version is escaped');
   assert.throws(() => verifier.assemblePage({ html: '__CSP__ __VERSION__ __STYLE__ __RULES__ __PAGE__', css: '', rules: '', js: 'x = "</script>"', version: 'v' }), /cannot be put inline/);
