@@ -8,6 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { ROOT, filesUnder, handlerFiles, pageScripts } = require('./helpers');
+const ops = require('../lib/ops');
 
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const sourcesOf = (files) => new Map(files.map((f) => [f, read(f)]));
@@ -16,7 +17,7 @@ const serverCode = () => ['server.js', 'supervise.js', ...filesUnder('lib', /\.[
 
 // ---------------------------------------------------------------- (a)-(c) the server's layers
 /** The pure core: functions of what they are given, their clocks default arguments. They require only each other. */
-const PURE = ['lib/board.js', 'lib/context.js', 'lib/deskresults.js', 'lib/rbac.js', 'lib/stagelines.js'];
+const PURE = ['lib/board.js', 'lib/context.js', 'lib/deskresults.js', 'lib/ops.js', 'lib/rbac.js', 'lib/stagelines.js'];
 /** What reaches a disk, a network, the machine or another process: a pure module names none of them. */
 const IO_BUILTINS = ['fs', 'net', 'http', 'https', 'dgram', 'tls', 'os', 'dns', 'child_process', 'ws'];
 /** Only the composition root, server.js, requires these: the HTTP domain and the handler modules. */
@@ -162,14 +163,16 @@ const SERVER_OWN = ['disconnect', 'disconnecting'];
  * expression it has no row for, and on a row whose expression no handler file holds any more.
  */
 const NAMED_BY_EXPRESSION = {
-  "op.m.type === 'system' ? 'system' : 'message'": { names: ['system', 'message'], why: 'apply() sends an added message under its kind: a system line, or a message' },
+  opEvent: { names: [...ops.EVENTS], why: 'apply() sends each change under the event the op table (lib/ops.js) names for it: an added message under its kind, an upd\'s fields under theirs, a removal, a reset, a hall\'s new name' },
 };
 /**
  * A page that names an event by an expression, by `<file>: <call>(<expression>`, with the events it names and why: a
  * carrier that sends what its callers name (their names read at the call sites, so `names` is empty), or listeners made
  * from a table. The fence fails on an expression it has no row for, and on a row whose expression no page holds.
  */
-const PAGE_NAMED_BY_EXPRESSION = {};
+const PAGE_NAMED_BY_EXPRESSION = {
+  'public/app.js: socket.on(event': { names: Object.values(ops.UPD_EVENTS), why: 'the op table\'s listeners, one per row of the hall page\'s table, which (k) holds equal to lib/ops.js\'s' },
+};
 /** A server emit that no page hears, with why. The fence fails on a row a page hears, or that no handler file sends. */
 const UNHEARD = {
   linkedRoomsChanged: 'told to a guest\'s pages when the admin lets them forward into another hall, or takes it back; the hall page asks which halls it may forward into as its forward picker opens (myRooms), and hears this once it keeps that fact live',
@@ -238,22 +241,35 @@ test('(f) the wire\'s words: every page send is a verb, every verb is sent, ever
   const pages = sourcesOf(pageScripts());
   assert.deepEqual(wireProblems(handlers, pages), []);
   const w = wireWords(handlers, pages);
-  assert.ok(w.verbs.size > 50 && w.sends.size > 50 && w.emits.size > 20 && w.hears.size > 20, 'read from the tree: ' + JSON.stringify([w.verbs.size, w.sends.size, w.emits.size, w.hears.size]));
+  // What each side says, its literals with the names its rows give an expression, so the rules are not passed by reading
+  // nothing.
+  const emitted = new Set([...w.emits.keys(), ...[...w.computed.keys()].flatMap((e) => NAMED_BY_EXPRESSION[e].names)]);
+  const heard = new Set([...w.hears.keys(), ...[...w.pageComputed.keys()].flatMap((k) => PAGE_NAMED_BY_EXPRESSION[k].names)]);
+  assert.ok(w.verbs.size > 50 && w.sends.size > 50 && emitted.size > 20 && heard.size > 20, 'read from the tree: ' + JSON.stringify([w.verbs.size, w.sends.size, emitted.size, heard.size]));
   assert.equal(w.sends.get('forward'), 'public/app.js', 'a send in double quotes is read');
   assert.equal(w.sends.get('display:shown'), 'public/display.js', 'the screen\'s page is read');
   assert.ok(!w.verbs.has('typing') && !w.emits.has('typing'), 'no typing: no page sent it or heard it');
+  // The op table's events are sent through one expression and heard through one, each read by its row.
+  assert.equal(w.computed.get('opEvent'), 'server.js', 'apply() sends every change through the op table');
+  assert.ok(w.pageComputed.has('public/app.js: socket.on(event'), 'the hall page hears every upd through its table');
+  const hallPage = pages.get('public/app.js');
+  // Each named once in the hall page, by its table, in whatever quotes: a listener written beside the made ones is a second.
+  const namings = (e) => ["'", '"', '`'].reduce((n, q) => n + hallPage.split(q + e + q).length - 1, 0);
+  for (const e of Object.values(ops.UPD_EVENTS)) assert.ok(!w.emits.has(e) && namings(e) === 1, e + ' is named by the tables alone, the server\'s and the hall page\'s (' + namings(e) + ' in app.js)');
   // The fuzz reads its events from the same files with the same regex as the verbs here.
   const fuzz = read('test/inputs.test.js');
   assert.ok(fuzz.includes('handlerFiles().flatMap') && fuzz.includes(String.raw`matchAll(/socket\.on\('([^']+)'/g)`), 'the fuzz reads handlerFiles() as the fence does');
 });
 
 test('(f) a planted word left open, in either direction, fails it', () => {
+  // An event named by an expression is read through a row of the planted tree's own, as the tree's are through theirs.
   const ternary = "io.to(room.code).emit(op.m.type === 'system' ? 'system' : 'message', op.m);";
+  const named = { "op.m.type === 'system' ? 'system' : 'message'": { names: ['system', 'message'], why: 'an added message under its kind' } };
   const base = {
     handlers: { 'server.js': ["socket.on('join', (a, ack) => {});", "socket.on('disconnect', () => {});", "io.to(code).emit('roomMeta', {});", ternary, "s.emit('linkedRoomsChanged', { added: code });"].join('\n') },
     pages: { 'public/app.js': ["socket.emit('join', {});", "socket.on('roomMeta', f);", "socket.on('message', f);", "socket.on('system', f);", "socket.on('connect', f);", "socket.on('disconnect', f);"].join('\n') },
   };
-  const run = ({ handlers = {}, pages = {} } = {}, opts = {}) => wireProblems(new Map(Object.entries({ ...base.handlers, ...handlers })), new Map(Object.entries({ ...base.pages, ...pages })), opts);
+  const run = ({ handlers = {}, pages = {} } = {}, opts = {}) => wireProblems(new Map(Object.entries({ ...base.handlers, ...handlers })), new Map(Object.entries({ ...base.pages, ...pages })), { named, pageNamed: {}, ...opts });
   const plus = (side, f, line) => ({ [side]: { [f]: (base[side][f] || '') + '\n' + line } });
   assert.deepEqual(run(), [], 'the planted tree passes');
 
@@ -345,4 +361,264 @@ test('(g) no shipped file outside the handler files listens on a socket, so ever
   assert.deepEqual(run({ 'lib/tls.js': base['lib/tls.js'] + " socket.on('verb', h);" }), ['lib/tls.js listens on a socket for data, error, verb, and its row says data, error']);
   assert.deepEqual(run({ 'lib/tls.js': '// no socket' }), ['lib/tls.js listens on no socket now: its row goes']);
   assert.deepEqual(elsewhereProblems(new Map([['server.js', '']]), ['server.js']), ['lib/tls.js is not in the tree: its row goes']);
+});
+
+// ---------------------------------------------------------------- (k) one op table
+const CLOSES = { '(': ')', '[': ']', '{': '}' };
+/** Where the string, or template, that opens at `i` ends (a template's `${…}` read as code); -1 when it never does. */
+function stringEnd(src, i) {
+  const q = src[i];
+  for (let j = i + 1; j < src.length; j++) {
+    if (src[j] === '\\') { j++; continue; }
+    if (src[j] === q) return j;
+    if (q === '`' && src[j] === '$' && src[j + 1] === '{') { const g = groupAt(src, j + 1); if (!g) return -1; j = g.end; continue; }
+    if (q !== '`' && src[j] === '\n') return -1;
+  }
+  return -1;
+}
+/**
+ * The bracketed group that opens at `open` (`{`, `[` or `(`), read as code: strings, templates and comments are passed
+ * over, so a bracket or a comma inside one is not the code's. Its top-level entries, split at its commas, each with the
+ * comments before it passed over (an entry that is only a comment is none), where each starts (`at`), and the index of
+ * its close; null when it never closes, or closes on another bracket.
+ */
+function groupAt(src, open) {
+  const stack = [];
+  const entries = [], at = [];
+  let start = open + 1;
+  const entry = (end) => {
+    const raw = src.slice(start, end), code = afterComments(raw).trimEnd();
+    if (code) { entries.push(code); at.push(start + raw.length - afterComments(raw).length); }
+  };
+  for (let i = open; i < src.length; i++) {
+    const c = src[i];
+    if (c === "'" || c === '"' || c === '`') { i = stringEnd(src, i); if (i < 0) return null; continue; }
+    if (c === '/' && src[i + 1] === '/') { const n = src.indexOf('\n', i); i = n < 0 ? src.length : n; continue; }
+    if (c === '/' && src[i + 1] === '*') { const n = src.indexOf('*/', i + 2); if (n < 0) return null; i = n + 1; continue; }
+    if (Object.hasOwn(CLOSES, c)) stack.push(CLOSES[c]);
+    else if (c === ')' || c === ']' || c === '}') {
+      if (stack.pop() !== c) return null;
+      if (!stack.length) { entry(i); return { entries, at, end: i }; }
+    } else if (c === ',' && stack.length === 1) { entry(i); start = i + 1; }
+  }
+  return null;
+}
+/** Code with the comments before it passed over. */
+function afterComments(code) {
+  let e = code.trimStart();
+  for (;;) {
+    const end = e.startsWith('//') ? e.indexOf('\n') : e.startsWith('/*') ? e.indexOf('*/') + 1 : -2;
+    if (end === -2) return e;
+    e = end < 1 ? '' : e.slice(end + 1).trimStart();
+  }
+}
+/** An object literal's entry: its key and the code of its value (null for a shorthand), or what it is when it has none. */
+function keyOf(entry) {
+  const e = afterComments(entry);
+  if (e.startsWith('...')) return { unread: 'a spread (' + e + ')' };
+  const m = /^(?:(['"])([^'"\\]*)\1|([A-Za-z_$][\w$]*))\s*(:|$)/.exec(e);
+  if (!m) return { unread: 'an entry the fence cannot read (' + e.split('\n')[0] + ')' };
+  return { key: m[2] ?? m[3], value: m[4] === ':' ? e.slice(m[0].length).trim() : null };
+}
+/** The `{` of the object literal around `i`, read back over the brackets between; -1 when `i` is in no object literal. */
+function objectAround(src, i) {
+  let depth = 0;
+  for (let j = i - 1; j >= 0; j--) {
+    const c = src[j];
+    if (c === ')' || c === ']' || c === '}') depth++;
+    else if (c === '(' || c === '[' || c === '{') { if (!depth) return c === '{' ? j : -1; depth--; }
+  }
+  return -1;
+}
+/** A kind written `upd`: an `o` key, bare or quoted, and the kind in any quotes. */
+const UPD_KIND = /(?:\bo|(['"])o\1)\s*:\s*([`'"])upd\2/g;
+/** A call of apply(): not a method's `.apply(`, not a function of that name being declared. */
+const APPLY_CALL = /(?<![\w$.])(?<!\bfunction\s+)apply\s*\(/g;
+/**
+ * What an op literal's entries (each read by keyOf) say: its kind and, for an `upd`, the fields its `f` names, written
+ * out; or why the fence cannot read it: a spread or a computed key in the op (either could carry an `o` or an `f` of
+ * its own) or in its `f`, or a kind or an `f` that is not written out. A key written twice is lint's (no-dupe-keys).
+ */
+function readOp(keys) {
+  const odd = keys.find((k) => !('key' in k));
+  if (odd) return { unread: 'its op holds ' + odd.unread };
+  const o = keys.find((k) => k.key === 'o');
+  const kind = o && o.value ? /^([`'"])(\w+)\1$/.exec(o.value) : null;
+  if (!kind) return { unread: 'its kind is not written out (' + (o ? 'o: ' + (o.value ?? 'o') : 'no o') + ')' };
+  if (kind[2] !== 'upd') return { kind: kind[2] };
+  const f = keys.find((k) => k.key === 'f');
+  const fields = f && f.value && f.value.startsWith('{') ? groupAt(f.value, 0) : null;
+  if (!fields || fields.end !== f.value.length - 1) return { unread: 'its f is not written out (' + (f ? 'f: ' + (f.value ?? 'f') : 'no f') + ')' };
+  const named = fields.entries.map(keyOf);
+  const unread = named.find((k) => !('key' in k));
+  return unread ? { unread: 'its f holds ' + unread.unread } : { kind: 'upd', fields: named.map((k) => k.key) };
+}
+/**
+ * Every op in `src` the fence reads, by its line, each once: the op each `apply(` call passes, and every object literal
+ * whose kind is written `upd`, wherever it is built. An `apply()` with nothing in it passes no op (a mention, or a call
+ * the table refuses); one written out in a comment is read as code. An op it cannot read, or whose kind it cannot read,
+ * is never taken for one in the table.
+ */
+function opLiterals(src) {
+  const found = new Map();
+  const note = (i, read) => { if (!found.has(i)) found.set(i, { line: src.slice(0, i).split('\n').length, ...read }); };
+  for (const m of src.matchAll(APPLY_CALL)) {
+    const call = groupAt(src, m.index + m[0].length - 1);
+    if (call && !call.entries.length) continue;
+    const op = call && call.entries[1];
+    const group = op && op.startsWith('{') ? groupAt(src, call.at[1]) : null;
+    if (group && group.end === call.at[1] + op.length - 1) note(call.at[1], readOp(group.entries.map(keyOf)));
+    else note(m.index, { unread: 'its op is not written out (' + (call ? 'apply(' + call.entries.join(', ').split('\n')[0] + ')' : 'its call does not close') + ')' });
+  }
+  for (const m of src.matchAll(UPD_KIND)) {
+    const open = objectAround(src, m.index);
+    const group = open >= 0 ? groupAt(src, open) : null;
+    if (group) note(open, readOp(group.entries.map(keyOf)));
+    else note(m.index, { unread: 'its op is not an object literal the fence can read' });
+  }
+  return [...found.values()].sort((a, b) => a.line - b.line);
+}
+/** The hall page's op table, read from its source: field → event, and each row it cannot read. */
+function pageTable(src) {
+  const m = /\bconst\s+UPD_EVENTS\s*=\s*\{/.exec(src);
+  const g = m ? groupAt(src, m.index + m[0].length - 1) : null;
+  if (!g) return { rows: new Map(), problems: [m ? 'its op table does not close' : 'it holds no op table (const UPD_EVENTS = {…})'] };
+  const rows = new Map();
+  const problems = [];
+  for (const k of g.entries.map(keyOf)) {
+    const ev = k.value ? /^\[\s*(['"])([^'"]+)\1\s*,/.exec(k.value) : null;
+    if (ev) rows.set(k.key, ev[2]);
+    else problems.push('a row of its op table is not field: [\'event\', draw]: ' + (k.key || k.unread));
+  }
+  return { rows, problems };
+}
+/**
+ * What leaves the op table open: the hall page's table (`page`, [file, source]) not the server's (`table`, field →
+ * event), field by field and event by event; an op in a handler file (file → source) that is not written out, of a kind
+ * the table does not hold (`kinds`), or an `upd` whose fields are not written out or not in the table; a row of the
+ * table no `upd` sends. Sorted.
+ */
+function opTableProblems(handlers, [pageFile, pageSrc], table = ops.UPD_EVENTS, kinds = ops.KINDS) {
+  const problems = [];
+  const read = pageTable(pageSrc);
+  for (const p of read.problems) problems.push(pageFile + ': ' + p);
+  for (const [f, e] of Object.entries(table)) {
+    if (!read.rows.has(f)) problems.push(pageFile + " has no row for '" + f + "', which lib/ops.js sends as '" + e + "'");
+    else if (read.rows.get(f) !== e) problems.push("'" + f + "' is sent as '" + e + "' (lib/ops.js) and heard as '" + read.rows.get(f) + "' (" + pageFile + ')');
+  }
+  for (const f of read.rows.keys()) if (!Object.hasOwn(table, f)) problems.push(pageFile + " has a row for '" + f + "', which lib/ops.js does not send");
+  const sent = new Set();
+  for (const [file, src] of handlers) {
+    for (const u of opLiterals(src)) {
+      if (u.unread) { problems.push(file + ':' + u.line + ': an op the fence cannot read: ' + u.unread); continue; }
+      if (!kinds.includes(u.kind)) { problems.push(file + ':' + u.line + ": an op of kind '" + u.kind + "', which the op table (lib/ops.js) does not hold"); continue; }
+      if (u.kind !== 'upd') continue;
+      if (!u.fields.length) problems.push(file + ':' + u.line + ': an upd of no field');
+      for (const f of u.fields) {
+        if (Object.hasOwn(table, f)) sent.add(f);
+        else problems.push(file + ':' + u.line + ": an upd of '" + f + "', a field outside the op table (lib/ops.js)");
+      }
+    }
+  }
+  for (const f of Object.keys(table)) if (!sent.has(f)) problems.push("the op table's '" + f + "' is a field no upd sends: its row goes");
+  return problems.sort();
+}
+
+test('(k) one op table: the hall page\'s is the server\'s, field by field, and every upd changes only its fields', () => {
+  const handlers = sourcesOf(handlerFiles());
+  const page = ['public/app.js', read('public/app.js')];
+  assert.deepEqual(opTableProblems(handlers, page), []);
+  // What the read sees, so the rule is not passed by reading nothing: the page's six rows, and the op of every apply()
+  // call in server.js, of every kind, each upd's one field (the Stagewatch followers', a spread inside its value) included.
+  assert.deepEqual([...pageTable(page[1]).rows], Object.entries(ops.UPD_EVENTS));
+  const server = handlers.get('server.js');
+  const seen = opLiterals(server);
+  assert.equal(seen.length, [...server.matchAll(/(?<![\w$.])apply\((?!\))/g)].length, 'each call\'s op is read once');
+  assert.ok(seen.length >= 20 && seen.every((u) => u.kind), JSON.stringify(seen));
+  assert.deepEqual([...new Set(seen.map((u) => u.kind))].sort(), [...ops.KINDS].sort(), 'an op of every kind is read');
+  const upds = seen.filter((u) => u.kind === 'upd');
+  assert.ok(upds.length >= 9 && upds.every((u) => u.fields.length === 1), JSON.stringify(upds));
+  assert.deepEqual([...new Set(upds.flatMap((u) => u.fields))].sort(), Object.keys(ops.UPD_EVENTS).sort());
+});
+
+test('(k) apply() is the op table\'s: made once in server.js by lib/ops.js, and its refusal is a log line and nothing more', () => {
+  const handlers = sourcesOf(handlerFiles());
+  const server = handlers.get('server.js');
+  const MADE = 'const apply = ops.applier(';
+  const at = server.indexOf(MADE);
+  assert.ok(at > 0 && server.indexOf(MADE, at + 1) < 0, 'server.js makes apply() once, from the op table');
+  // No other apply() is declared or assigned in a handler file, so every call the fence reads is the table's.
+  for (const [file, src] of handlers) {
+    assert.doesNotMatch(file === 'server.js' ? src.replace(MADE, '') : src, /\bfunction\s+apply\s*\(|\b(?:const|let|var)\s+apply\b|(?<![\w$.])apply\s*=(?!=)/, file + ' makes no apply() of its own');
+  }
+  // What it is given: the store's commit, the hall's send (the wire fence reads its event, opEvent), the board's mark,
+  // and a refusal that only logs the words ops.refusal() gives (a kind and field names, never a value), so the
+  // refusal's own path cannot throw, the Stagewatch followers' included.
+  const given = groupAt(server, at + MADE.length);
+  const wiring = new Map(given.entries.map(keyOf).map((k) => [k.key, k.value]));
+  assert.deepEqual([...wiring.keys()], ['commit', 'send', 'changed', 'refused']);
+  assert.equal(wiring.get('commit'), '(room, op) => store.commit(room, op)');
+  assert.match(wiring.get('refused'), /^\(why\) => console\.error\('[^'\\]*' \+ why\)$/);
+});
+
+test('(k) a planted upd of a field outside the table, and a page table out of step, each fail it', () => {
+  const table = { pinned: 'pinUpdate', stage: 'stageAck' };
+  const base = {
+    handlers: {
+      'server.js': [
+        "apply(room, { o: 'upd', id: messageId, f: { pinned: !!pinned } });",
+        "if (m && m.stage) apply(room, { o: 'upd', id, f: { stage: { ...m.stage, ack, by: t.by } } });",
+      ].join('\n'),
+    },
+    page: "const UPD_EVENTS = {\n  pinned: ['pinUpdate', setMessagePinned],\n  stage: ['stageAck', setStage],\n};",
+  };
+  const run = ({ handlers = {}, page = base.page } = {}) => opTableProblems(new Map(Object.entries({ ...base.handlers, ...handlers })), ['public/app.js', page], table);
+  const plus = (line) => ({ handlers: { 'server.js': base.handlers['server.js'] + '\n' + line } });
+  assert.deepEqual(run(), [], 'the planted tree passes');
+
+  // An upd of a field outside the table: in server.js or a handler module, in either quotes, its `o` anywhere in the op.
+  assert.deepEqual(run(plus("apply(S, { o: 'upd', id: copy, f: { sentTo: { ...copy.sentTo, withdrawn: Date.now() } } });")), ["server.js:3: an upd of 'sentTo', a field outside the op table (lib/ops.js)"]);
+  assert.deepEqual(run({ handlers: { 'lib/handlers/rooms.js': 'apply(r, { id: m.id, f: { pinned: true, sentTo: x }, o: "upd" });' } }), ["lib/handlers/rooms.js:1: an upd of 'sentTo', a field outside the op table (lib/ops.js)"]);
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', id, f: { 'help': h } });")), ["server.js:3: an upd of 'help', a field outside the op table (lib/ops.js)"], 'a quoted key is read');
+  // Its fields are read as code: a bracket, a comma or a field-like word in a string, a template or a comment is none.
+  // eslint-disable-next-line no-template-curly-in-string -- the planted source holds a template's ${…} on purpose
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', id, f: { stage: { ack: '}, help: 1', by: `${a ? '{' : ''}, x` } /* , help: 1 */ } });")), []);
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', id, f: { /* the one field */ pinned: true, // and no other\n } });")), [], 'a comment before a key, or after the last');
+  // An upd whose fields are not written out is never taken for one in the table.
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', id, f: { ...fields } });")), ['server.js:3: an op the fence cannot read: its f holds a spread (...fields)']);
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', id, f: { [field]: v } });")), ['server.js:3: an op the fence cannot read: its f holds an entry the fence cannot read ([field]: v)']);
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', id, f: fields });")), ['server.js:3: an op the fence cannot read: its f is not written out (f: fields)']);
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', id, f });")), ['server.js:3: an op the fence cannot read: its f is not written out (f: f)']);
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', id });")), ['server.js:3: an op the fence cannot read: its f is not written out (no f)']);
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', id, f: { pinned } || x });")), ['server.js:3: an op the fence cannot read: its f is not written out (f: { pinned } || x)']);
+  assert.deepEqual(run(plus("const kind = [o: 'upd'];")), ['server.js:3: an op the fence cannot read: its op is not an object literal the fence can read']);
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', id, f: {} });")), ['server.js:3: an upd of no field']);
+  // However its kind is written: a quoted `o`, a kind in a template's quotes.
+  assert.deepEqual(run(plus(`apply(room, { "o": 'upd', id: messageId, f: { sentTo: 1 } });`)), ["server.js:3: an upd of 'sentTo', a field outside the op table (lib/ops.js)"]);
+  assert.deepEqual(run(plus('apply(room, { o: `upd`, id: messageId, f: { sentTo: 1 } });')), ["server.js:3: an upd of 'sentTo', a field outside the op table (lib/ops.js)"]);
+  // An op given to apply() whose kind, or whose own entries, are not written out is never taken for one in the table: a
+  // kind from a variable, a spread over the op (which may bring an `f` or an `o` of its own), a computed key, an op held
+  // in a variable (and an upd built in one is read where it is built), no op at all.
+  assert.deepEqual(run(plus("const UPD = 'upd'; apply(room, { o: UPD, id: messageId, f: { sentTo: 1 } });")), ['server.js:3: an op the fence cannot read: its kind is not written out (o: UPD)']);
+  assert.deepEqual(run(plus("apply(room, { o: 'upd', f: { pinned: true }, id: messageId, ...{ f: { sentTo: 1 } } });")), ['server.js:3: an op the fence cannot read: its op holds a spread (...{ f: { sentTo: 1 } })']);
+  assert.deepEqual(run(plus("apply(room, { o: 'add', m, ...extra });")), ['server.js:3: an op the fence cannot read: its op holds a spread (...extra)']);
+  assert.deepEqual(run(plus("apply(room, { [key]: 'upd', id, f: { sentTo: 1 } });")), ['server.js:3: an op the fence cannot read: its op holds an entry the fence cannot read ([key]: \'upd\')']);
+  assert.deepEqual(run(plus("apply(room, { id, f: { sentTo: 1 } });")), ['server.js:3: an op the fence cannot read: its kind is not written out (no o)']);
+  assert.deepEqual(run(plus("const op = { o: 'upd', id, f: { sentTo: 1 } };\napply(room, op);")), [
+    "server.js:3: an upd of 'sentTo', a field outside the op table (lib/ops.js)",
+    'server.js:4: an op the fence cannot read: its op is not written out (apply(room, op))',
+  ]);
+  assert.deepEqual(run(plus('apply(room);')), ['server.js:3: an op the fence cannot read: its op is not written out (apply(room))']);
+  assert.deepEqual(run(plus("apply(room, { o: 'rename', name });")), ["server.js:3: an op of kind 'rename', which the op table (lib/ops.js) does not hold"]);
+  // Every other kind the table holds passes, written out; a method's .apply(, and apply() with nothing in it, are not its.
+  assert.deepEqual(run(plus("apply(r, { o: 'add', m }); apply(r, { o: 'del', id }); apply(r, { o: 'reset' }); apply(r, { o: \"meta\", name: n });")), []);
+  assert.deepEqual(run(plus('fn.apply(this, args); Math.max.apply(null, xs); // apply() answers null')), []);
+
+  // The page's table, field by field and event by event, and a row of the table no upd sends.
+  assert.deepEqual(run({ page: base.page.replace("  stage: ['stageAck', setStage],\n", '') }), ["public/app.js has no row for 'stage', which lib/ops.js sends as 'stageAck'"]);
+  assert.deepEqual(run({ page: base.page.replace('};', "  sentTo: ['sentUpdate', setSentTo],\n};") }), ["public/app.js has a row for 'sentTo', which lib/ops.js does not send"]);
+  assert.deepEqual(run({ page: base.page.replace("['stageAck'", "['stageUpdate'") }), ["'stage' is sent as 'stageAck' (lib/ops.js) and heard as 'stageUpdate' (public/app.js)"]);
+  assert.deepEqual(run({ page: base.page.replace("['pinUpdate', setMessagePinned]", 'PIN_ROW') }), ["public/app.js has no row for 'pinned', which lib/ops.js sends as 'pinUpdate'", "public/app.js: a row of its op table is not field: ['event', draw]: pinned"]);
+  assert.deepEqual(run({ page: '// no table' }), ["public/app.js has no row for 'pinned', which lib/ops.js sends as 'pinUpdate'", "public/app.js has no row for 'stage', which lib/ops.js sends as 'stageAck'", 'public/app.js: it holds no op table (const UPD_EVENTS = {…})']);
+  assert.deepEqual(run({ handlers: { 'server.js': base.handlers['server.js'].split('\n')[0] } }), ["the op table's 'stage' is a field no upd sends: its row goes"]);
 });

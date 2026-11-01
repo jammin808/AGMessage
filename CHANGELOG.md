@@ -433,11 +433,11 @@ fence reads it)
 - The same fence closes the wire's words both ways: every event a page sends is a verb a handler file registers, every
   verb is sent by some page, every event the server sends is heard by some page, and every event a page listens for is
   one the server sends (or Socket.IO's own). An event named by an expression fails it unless a row says which names it
-  takes and why; `apply()`'s `message` or `system`, by the added message's kind, is the one row. `linkedRoomsChanged`,
+  takes and why; the op table's events, which `apply()` sends, are the one row (below). `linkedRoomsChanged`,
   which the server sends a guest's pages when the admin lets them forward into another hall and no page hears yet, is
   allowed by a row that says so, and the fence fails on that row once a page hears it or the server stops sending it. A
-  page that names an event by an expression fails it too, unless a row names the events it carries and why (none does
-  today; the outbox and the op table's listeners will each be one).
+  page that names an event by an expression fails it too, unless a row names the events it carries and why (the op
+  table's listeners on the hall page are one, below; the outbox will be another).
 - No verb escapes the fuzz. A verb registered in a form the fuzz does not read fails the fence: `socket.on(` with
   anything but a single-quoted name, and `socket.once`, `addListener`, `prependListener` or `prependOnceListener` for
   any event but Socket.IO's own (`disconnect`, as the AI's draft listens for). A shipped file outside the handler files
@@ -456,6 +456,42 @@ fence reads it)
   lanes' names in `saves.stores` equal, so a store whose lane nothing flushes fails the build, and so does a lane under
   two names, which a count of names alone would let pass beside one left out. Eight are made and eight named.
 - Rolling back: nothing is stored; 0.5.1 takes `typing` again, and no page sends it.
+
+**One op table sends every change's event, on the server and in the page** (the plan's Part 5, unit O; the tree as the
+fence reads it, and the hall page in Chromium)
+- `apply()` sends each change from one table, `app/lib/ops.js`: an added message under its kind (`message` or
+  `system`), each field of a change to a message under its event (`responses` → `actionUpdate`, `pinned` → `pinUpdate`,
+  `reactions` → `messageReact`, `stage` → `stageAck`, `proposal` → `proposalUpdate`, `help` → `helpUpdate`), each
+  carrying `{messageId, <field>, seq}` as before, then a removal, a reset and a hall's new name. The events, their
+  payloads and their order are 0.5.1's.
+- A change the table cannot send is refused before it is committed: a field outside the table, a change of no field or
+  to no message, an added message with no id, an op of another kind. Nothing is numbered, saved, sent or marked, the
+  server says so in one line (`[ops] refused, nothing saved or sent: a change of …, a field outside the op table`, which
+  names the kind and the fields, never a value), and `apply()` answers null; it throws for none of them, so a Stagewatch
+  follower, outside the guarded handlers, cannot end the process with one. In 0.5.1 such a field was numbered, saved and
+  sent under no event, and every page of the hall saw a gap in the numbers and rejoined. No change the server makes today
+  is refused; were one refused, its request is answered as refused (`That change could not be made: nothing was
+  saved.`), never as done, and what follows the change is not done for it (a removed message's files are kept, no audit
+  row is written, no send or proposal is followed on a line that was not saved, and the show desk's notice counts only
+  the meetings it was saved in).
+- The hall page draws a change through one table too, `UPD_EVENTS` in `public/app.js` (field → its event and how it is
+  drawn): the changes a page reads when it comes back (`applyOp`) and the ones it hears live (one listener per row, made
+  from the table, in place of six written by hand) go through the same row. They had drifted: the show desk's answer to a
+  proposal, on a message drawn on the page whose record it no longer held, was drawn by a live page and left as
+  "waiting" by one that came back after it. Both draw it now, as a proposal's own line was already drawn.
+- `test/modules.test.js` fails the build when the two tables are out of step (a field in one and not the other, or one
+  field under two events), when a change to a message in a handler file names a field outside the table or writes its
+  fields so they cannot be read (an `f` that is not an object written out, a spread or a computed key in it), and when a
+  row of the table is a field no change sends. It reads the op of every `apply(` call in the handler files, and every op
+  whose kind is written `upd` wherever it is built, its key or kind in any quotes: an op given to `apply()` that is not
+  written out, whose kind is not (a kind from a variable), that holds a spread or a computed key (either could bring an
+  `f` of its own), or whose kind the table does not hold fails it too, so no change reaches the table unread. It holds
+  `apply()` to the one `server.js` makes from `lib/ops.js`, its refusal a log line and nothing more, and the hall page to
+  naming each of the table's events once, in its table, in whatever quotes. `lib/ops.js` joins the pure core. The wire's words fence reads the
+  server's events from the table (`EVENTS`) and the hall page's listeners from its table, one row on each side in place
+  of the row for `apply()`'s `message` or `system`. The smoke has a page that hears the desk's answer live and one that
+  comes back after it draw it the same way, with one listener for each row.
+- Rolling back: nothing is stored; 0.5.1 sends the same events.
 
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already

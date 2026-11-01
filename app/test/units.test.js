@@ -146,6 +146,114 @@ test('store: a log line the disk cut short, or a power cut tore, never swallows 
   assert.deepEqual(d.get('ABC234').messages.map((m) => m.id), ['m1', 'm3', 'm5']);
 });
 
+// ---------------------------------------------------------------- the op table
+const ops = require('../lib/ops');
+/** apply() on a real store, with what it sends, marks and says recorded, and each step in the order it was taken. */
+function opsRig() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-ops-'));
+  const store = new RoomStore(dir);
+  const room = store.create('ABC234', 'Main hall');
+  const sent = [], marked = [], said = [], steps = [];
+  const apply = ops.applier({
+    commit: (r, op) => { store.commit(r, op); steps.push('commit ' + op.s); },
+    send: (r, event, payload) => { sent.push([r.code, event, payload]); steps.push('send ' + event + ' ' + payload.seq); },
+    changed: (r) => { marked.push(r.code); steps.push('mark ' + r.seq); },
+    refused: (why) => said.push(why),
+  });
+  const logged = () => fs.readFileSync(path.join(dir, 'ABC234.log'), 'utf8');
+  return { dir, store, room, apply, sent, marked, said, steps, logged };
+}
+
+test('op table: apply() given a field outside the table says so, commits nothing, sends nothing and answers null, never a throw', () => {
+  const t = opsRig();
+  const m = t.apply(t.room, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } }).m;
+  const before = { seq: t.room.seq, ring: t.room.ring.length, log: t.logged(), steps: t.steps.length, sent: t.sent.length, marked: t.marked.length };
+  const refused = [
+    { o: 'upd', id: m.id, f: { sentTo: { id: 'x' } } },
+    { o: 'upd', id: m.id, f: { pinned: true, sentTo: { id: 'x' } } },   // one field outside refuses the op whole
+    { o: 'upd', id: m.id, f: {} },
+    { o: 'upd', id: m.id, f: ['pinned'] },
+    { o: 'upd', id: m.id },
+    { o: 'upd', f: { pinned: true } },
+    { o: 'del' },
+    { o: 'add' },
+    { o: 'add', m: { type: 'text' } },
+    { o: 'rename', name: 'x' },
+    { m: { id: 'm2' } },
+    null,
+    'upd',
+  ];
+  for (const op of refused) assert.equal(t.apply(t.room, op), null, JSON.stringify(op));
+  assert.deepEqual({ seq: t.room.seq, ring: t.room.ring.length, log: t.logged(), steps: t.steps.length, sent: t.sent.length, marked: t.marked.length }, before, 'no number taken, nothing committed, on disk, sent or marked');
+  assert.equal(t.room.byId.get(m.id).pinned, undefined, 'the field inside the table was not applied either');
+  assert.deepEqual(t.said, [
+    'a change of sentTo, a field outside the op table',
+    'a change of sentTo, a field outside the op table',
+    'a change of no field',
+    'a change of no field',
+    'a change of no field',
+    'a change to no message',
+    'a change to no message',
+    'an added message with no id',
+    'an added message with no id',
+    'an op of a kind the table does not hold',
+    'an op of a kind the table does not hold',
+    'an op of a kind the table does not hold',
+    'an op of a kind the table does not hold',
+  ]);
+  // The words name a field, never a value; a key the server never writes is cut and cleaned before it is said.
+  assert.equal(ops.refusal({ o: 'upd', id: 'm1', f: { 'a\nb<script>': 1, pinned: 1, ['x'.repeat(60)]: 1, c: 1, d: 1, e: 1, g: 1 } }),
+    'a change of a?b?script?, ' + 'x'.repeat(40) + ', c, d, e and 1 more, a field outside the op table');
+  // Then the next change is numbered on from the last one committed: no page sees a gap.
+  const pinned = t.apply(t.room, { o: 'upd', id: m.id, f: { pinned: true } });
+  assert.equal(pinned.s, before.seq + 1);
+  assert.deepEqual(t.sent.at(-1), ['ABC234', 'pinUpdate', { messageId: m.id, pinned: true, seq: before.seq + 1 }]);
+});
+
+test('op table: each change is committed, then sent under the event the table names, carrying its seq, then marked', () => {
+  const t = opsRig();
+  const add = t.apply(t.room, { o: 'add', m: { id: 'm1', type: 'action', text: 'Ready?', at: 1 } });
+  const sys = t.apply(t.room, { o: 'add', m: { id: 's1', type: 'system', text: 'Ana joined', at: 2 } });
+  assert.equal(add.m.seq, 1, 'an added message carries its seq');
+  const fields = { responses: [{ uid: 'u1', optionIndex: 0 }], pinned: true, reactions: [{ uid: 'u1', emoji: '👍' }], stage: { ack: 'sent' }, proposal: { id: 'p1', state: 'pending' }, help: { state: 'coming' } };
+  // Every field in one op, written in the reverse of the table's order: sent in the table's order, each with the seq.
+  const all = t.apply(t.room, { o: 'upd', id: 'm1', f: Object.fromEntries(Object.entries(fields).reverse()) });
+  t.apply(t.room, { o: 'meta', name: 'Main hall, day 2' });
+  t.apply(t.room, { o: 'meta', settings: { lockRoles: true } });
+  t.apply(t.room, { o: 'del', id: 's1' });
+  t.apply(t.room, { o: 'reset' });
+  assert.deepEqual(t.sent.map(([code, event, payload]) => [code, event, JSON.stringify(payload)]), [
+    ['ABC234', 'message', JSON.stringify(add.m)],
+    ['ABC234', 'system', JSON.stringify(sys.m)],
+    ...Object.entries(ops.UPD_EVENTS).map(([f, e]) => ['ABC234', e, JSON.stringify({ messageId: 'm1', [f]: fields[f], seq: 3 })]),
+    ['ABC234', 'roomMeta', JSON.stringify({ name: 'Main hall, day 2', seq: 4 })],
+    ['ABC234', 'roomMeta', JSON.stringify({ name: 'Main hall, day 2', seq: 5 })],
+    ['ABC234', 'messageDeleted', JSON.stringify({ messageId: 's1', seq: 6 })],
+    ['ABC234', 'roomReset', JSON.stringify({ roomCode: 'ABC234', seq: 7 })],
+  ]);
+  assert.equal(all.s, 3);
+  assert.deepEqual(t.marked, Array(7).fill('ABC234'), 'each change marked once');
+  // Each change committed (its number taken), then sent under each of its events, then marked, before the next begins.
+  assert.deepEqual(t.steps, [
+    'commit 1', 'send message 1', 'mark 1',
+    'commit 2', 'send system 2', 'mark 2',
+    'commit 3', ...Object.values(ops.UPD_EVENTS).map((e) => 'send ' + e + ' 3'), 'mark 3',
+    'commit 4', 'send roomMeta 4', 'mark 4',
+    'commit 5', 'send roomMeta 5', 'mark 5',
+    'commit 6', 'send messageDeleted 6', 'mark 6',
+    'commit 7', 'send roomReset 7', 'mark 7',
+  ]);
+  // Committed before it was sent: on disk, kept for resume, in the hall.
+  assert.deepEqual(t.store.opsSince(t.room, 0).map((op) => op.o), ['add', 'add', 'upd', 'meta', 'meta', 'del', 'reset']);
+  assert.equal(t.logged().trim().split('\n').length, 7);
+  assert.deepEqual(t.room.settings.lockRoles, true);
+  // The events the table names are the events apply() sends, every one of them: the wire fence reads them from EVENTS.
+  assert.deepEqual([...new Set(t.sent.map((x) => x[1]))].sort(), [...ops.EVENTS].sort());
+  assert.deepEqual(Object.keys(ops.UPD_EVENTS), ['responses', 'pinned', 'reactions', 'stage', 'proposal', 'help']);
+  assert.ok(Object.isFrozen(ops.UPD_EVENTS) && Object.isFrozen(ops.EVENTS) && Object.isFrozen(ops.KINDS));
+  assert.deepEqual(ops.eventsOf({ o: 'nothing', s: 1 }, t.room), [], 'a kind the table does not hold sends nothing');
+});
+
 // ---------------------------------------------------------------- health's readings and a show day's peaks
 const readings = require('../lib/peaks');
 const { auditLog } = require('./helpers');

@@ -171,16 +171,24 @@ function bump(seq) {
   if (seq > lastSeq) lastSeq = seq;
   return true;
 }
+// The op table's page half: each field a numbered change (`upd`) carries → the event it arrives under live, and how it
+// is drawn. A resumed page (the ops it missed, applyOp) and a live one (the listeners made from it below) draw a change
+// through the same row, so the two cannot draw it differently. lib/ops.js is the server's half, and
+// test/modules.test.js (k) holds the two equal, field by field and event by event.
+const UPD_EVENTS = {
+  responses: ['actionUpdate', updateActionResponses],
+  pinned: ['pinUpdate', setMessagePinned],
+  reactions: ['messageReact', setReactions],
+  stage: ['stageAck', setStage],
+  proposal: ['proposalUpdate', setProposal],
+  help: ['helpUpdate', setHelp],
+};
+const ownField = (o, f) => Object.prototype.hasOwnProperty.call(o, f);
 function applyOp(op) {
   if (!op) return;
   if (op.o === 'add') { op.m.seq = op.s; addMessage(op.m, { silent: true }); }
-  else if (op.o === 'upd') {
-    if ('responses' in op.f) updateActionResponses(op.id, op.f.responses);
-    if ('pinned' in op.f) setMessagePinned(op.id, op.f.pinned);
-    if ('reactions' in op.f) onReact({ messageId: op.id, reactions: op.f.reactions });
-    if ('stage' in op.f) setStage(op.id, op.f.stage);
-    if ('proposal' in op.f) { const m = findMessage(op.id); if (m) m.proposal = op.f.proposal; const n = messagesById.get(op.id); if (n && m) (m.type === 'system' ? renderProposalLine(n, op.f.proposal) : rerenderMessage(n, m)); }
-    if ('help' in op.f) setHelp(op.id, op.f.help);
+  else if (op.o === 'upd' && op.f) {
+    for (const field of Object.keys(UPD_EVENTS)) if (ownField(op.f, field)) UPD_EVENTS[field][1](op.id, op.f[field]);
   }
   else if (op.o === 'del') removeMessageLocal(op.id);
   else if (op.o === 'reset') onReset();
@@ -192,14 +200,11 @@ socket.on('disconnect', () => connDot.classList.remove('ok'));
 socket.on('message', (msg) => { if (!bump(msg.seq)) return; addMessage(msg); scrollToBottom(); reportSeen(); });
 socket.on('system', (msg) => { if (!bump(msg.seq)) return; addMessage(msg); });
 socket.on('users', renderUsers);
-socket.on('actionUpdate', ({ messageId, responses, seq }) => {
-  if (!bump(seq)) return;
-  updateActionResponses(messageId, responses);
-});
-socket.on('pinUpdate', ({ messageId, pinned, seq }) => {
-  if (!bump(seq)) return;
-  setMessagePinned(messageId, pinned);
-});
+// One listener per row of the op table: a change in order is drawn as a resumed one is; one past a gap rejoins.
+for (const field of Object.keys(UPD_EVENTS)) {
+  const [event, draw] = UPD_EVENTS[field];
+  socket.on(event, (change = {}) => { if (bump(change.seq)) draw(change.messageId, change[field]); });
+}
 socket.on('kicked', ({ reason }) => { notify(reason || 'You were removed from the meeting.', true); setTimeout(() => { location.href = HOME; }, 2500); });
 // An admin changed this account: the server closes the socket; open the hall again with the rights it has now.
 socket.on('account:changed', ({ words } = {}) => { notify(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1500); });
@@ -219,16 +224,16 @@ socket.on('stage', (v) => {
 function refreshProposeButtons() {
   for (const [id, node] of messagesById) { const m = findMessage(id); if (m && m.type !== 'system') rerenderMessage(node, m); }
 }
-// A proposal's state (pending → approved / rejected → done / failed), on the message it came from.
-socket.on('proposalUpdate', ({ messageId, proposal, seq }) => {
-  if (!bump(seq)) return;
+// A proposal's state (pending → approved / rejected → done / failed), on the message it came from, or on its system
+// line. A drawn message whose record is not held is given the line, as a system line is.
+function setProposal(messageId, proposal) {
   const msg = findMessage(messageId);
   if (msg) msg.proposal = proposal;
   const node = messagesById.get(messageId);
   if (!node) return;
   if (msg && msg.type !== 'system') rerenderMessage(node, msg);
   else renderProposalLine(node, proposal);
-});
+}
 function proposalLineText(p) {
   if (!p) return '';
   const by = p.by ? ' by ' + p.by : '';
@@ -268,9 +273,7 @@ function onReset() {
   refreshDocPinnedList();
   if (typeof dismissDoc === 'function') dismissDoc();
 }
-socket.on('messageReact', ({ messageId, reactions, seq }) => { if (bump(seq)) onReact({ messageId, reactions }); });
 // A message sent to the speaker's screen: Stagewatch's receipt, then the speaker's acknowledgement, on that message.
-socket.on('stageAck', ({ messageId, stage, seq }) => { if (bump(seq)) setStage(messageId, stage); });
 function setStage(messageId, stage) {
   const msg = findMessage(messageId);
   if (msg) msg.stage = stage;
@@ -300,7 +303,7 @@ function renderStageLine(host, stage) {
   line.textContent = text;
   line.dataset.ack = (stage && stage.ack) || '';
 }
-function onReact({ messageId, reactions }) {
+function setReactions(messageId, reactions) {
   const msg = findMessage(messageId);
   if (msg) msg.reactions = reactions;
   const node = messagesById.get(messageId);
@@ -644,7 +647,6 @@ function setHelp(messageId, help) {
   const node = messagesById.get(messageId);
   if (node && msg) rerenderMessage(node, msg);
 }
-socket.on('helpUpdate', ({ messageId, help, seq }) => { if (bump(seq)) setHelp(messageId, help); });
 
 function renderFileBody(msg) {
   const wrap = document.createElement('div');

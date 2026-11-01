@@ -852,6 +852,37 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const staffShown = await staffHall.eval(`JSON.stringify({ who: document.getElementById('whoami').textContent, role: document.body.dataset.role, texts: allMessages.some((m) => m.type === 'text'), propose: CAN_PROPOSE, send: CAN_STAGE, buttons: [...document.querySelectorAll('.msg .propose-btn, .msg .stage-btn')].filter((b) => !b.hidden).length })`);
     report(madeSid === 200 && sidIn === 200 && !!staffIn && staffShown === JSON.stringify({ who: 'Sid Staff · Staff', role: 'research', texts: true, propose: false, send: false, buttons: 0 }), `a Staff account is offered neither 📝 nor 🖥 while the hall's Stagewatch keeps a desk and its frames move (${madeSid} ${sidIn} ${staffShown})`);
 
+    // A change is drawn the same way by a page that hears it live and by one that reads it among the changes it missed,
+    // both from the hall page's one op table: here the show desk's answer to a proposal, on a message whose record the
+    // page no longer holds (its line drawn on the message), and on the proposal's own line. The board's page is live
+    // when the desk answers; the research page is away, and resumes.
+    const proposed = JSON.parse(await research.eval(`(async () => {
+      const sent = await new Promise((r) => socket.emit('message', { type: 'text', text: 'Two minutes left, please' }, r));
+      const p = await new Promise((r) => socket.emit('stage:propose', { text: 'Two minutes left, please', destination: 'speaker', messageId: sent.id }, r));
+      return JSON.stringify({ id: sent.id, ok: !!p.ok, pid: (p.proposal && p.proposal.id) || '', error: p.error || '' });
+    })()`));
+    const PROPOSAL_LINE = `(() => { const s = allMessages.find((m) => m.type === 'system' && m.proposal && m.proposal.id === ${codeLiteral(proposed.pid)}); return s ? messagesById.get(s.id) : null; })()`;
+    const pending = `(() => { const m = findMessage(${codeLiteral(proposed.id)}); return !!m && !!m.proposal && m.proposal.state === 'pending' && !!messagesById.get(m.id) && !!${PROPOSAL_LINE}; })()`;
+    const bothPending = !!(await research.until(pending, 8000)) && !!(await board.until(pending, 8000));
+    // Each page lets go of the message's record and keeps the message drawn.
+    const forget = `(() => { const i = allMessages.findIndex((m) => m.id === ${codeLiteral(proposed.id)}); if (i >= 0) allMessages.splice(i, 1); return !findMessage(${codeLiteral(proposed.id)}) && messagesById.has(${codeLiteral(proposed.id)}); })()`;
+    const forgot = (await research.eval(forget)) && (await board.eval(forget));
+    await signin.send('Network.deleteCookies', { name: 'agm_s', url: base + '/' });   // a guest's own device holds no sign-in
+    await research.eval(`socket.disconnect()`);
+    const atDesk = sw.proposals.get(proposed.pid);
+    if (atDesk) Object.assign(atDesk, { state: 'rejected', decided: Date.now(), decidedBy: 'Smoke desk' });
+    // Read once both lines have left "waiting": a page that draws the answer on one of them only never reads as drawn.
+    const DRAWN = `(() => { const line = (n) => { const l = n && n.querySelector('.proposal-line'); return l && l.dataset.state !== 'pending' ? l.dataset.state + ' ' + l.textContent : ''; };
+      const on = line(messagesById.get(${codeLiteral(proposed.id)})), own = line(${PROPOSAL_LINE}); return on && own ? JSON.stringify({ on, own }) : ''; })()`;
+    const live = await board.until(DRAWN, 12000);
+    await research.eval(`socket.connect()`);
+    const resumed = await research.until(`socket.connected && ${DRAWN}`, 12000);
+    // One listener for each row of the table: the generated ones, and no hand-written one beside them.
+    const listeners = await board.eval(`JSON.stringify(Object.keys(UPD_EVENTS).map((f) => socket.listeners(UPD_EVENTS[f][0]).length))`);
+    report(proposed.ok && bothPending && forgot && !!atDesk && live === JSON.stringify({ on: 'rejected ✗ Not approved by Smoke desk', own: 'rejected ✗ Not approved by Smoke desk' }) && resumed === live && listeners === '[1,1,1,1,1,1]',
+      `a live page and a resumed one draw the desk's answer the same way, on a message whose record is gone and on the proposal's line (${JSON.stringify(proposed)}; ${bothPending} ${forgot}; live ${live}; resumed ${resumed}; listeners ${listeners})`);
+    for (const p of [research, board]) await p.eval(`removeMessageLocal(${codeLiteral(proposed.id)})`);
+
     // A page away while its hall loses its Stagewatch: back (it resumes from what it missed), the messages it had drawn
     // offer 🖥 no more.
     const sendsBefore = await research.eval(`[...document.querySelectorAll('.msg[data-type="text"] .stage-btn')].filter((b) => !b.hidden).length`);

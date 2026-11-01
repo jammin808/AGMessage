@@ -48,6 +48,7 @@ const board = require('./lib/board');
 const stagelines = require('./lib/stagelines');
 const peerlinks = require('./lib/peerlinks');
 const deskresults = require('./lib/deskresults');
+const ops = require('./lib/ops');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
 const readings = require('./lib/peaks');
 const startup = require('./lib/startup');
@@ -327,32 +328,25 @@ const restored = store.loadAll((room) => {
 }, { compact: false });
 if (restored) console.log('  Restored', restored, 'room(s) from', ROOMS_DIR);
 
-/** Commit an op and broadcast it under its legacy event name, carrying its seq. */
-function apply(room, op) {
-  store.commit(room, op);
-  const s = op.s;
-  switch (op.o) {
-    case 'add':
-      op.m.seq = s;
-      io.to(room.code).emit(op.m.type === 'system' ? 'system' : 'message', op.m);
-      break;
-    case 'upd':
-      if ('responses' in op.f) io.to(room.code).emit('actionUpdate', { messageId: op.id, responses: op.f.responses, seq: s });
-      if ('pinned' in op.f) io.to(room.code).emit('pinUpdate', { messageId: op.id, pinned: op.f.pinned, seq: s });
-      if ('reactions' in op.f) io.to(room.code).emit('messageReact', { messageId: op.id, reactions: op.f.reactions, seq: s });
-      if ('stage' in op.f) io.to(room.code).emit('stageAck', { messageId: op.id, stage: op.f.stage, seq: s });
-      if ('proposal' in op.f) io.to(room.code).emit('proposalUpdate', { messageId: op.id, proposal: op.f.proposal, seq: s });
-      if ('help' in op.f) io.to(room.code).emit('helpUpdate', { messageId: op.id, help: op.f.help, seq: s });
-      break;
-    case 'del': io.to(room.code).emit('messageDeleted', { messageId: op.id, seq: s }); break;
-    case 'reset': io.to(room.code).emit('roomReset', { roomCode: room.code, seq: s }); break;
-    case 'meta': io.to(room.code).emit('roomMeta', { name: room.name || '', seq: s }); break;
-  }
-  boardDirty();
-  return op;
-}
+/**
+ * Commit an op and send each of its events to the hall, as the op table names them (lib/ops.js), carrying its seq. An op
+ * the table cannot send is refused before it is committed, in one line that names its kind and fields, never a value,
+ * and apply() answers null: it never throws for it, the Stagewatch followers outside the guarded handlers included. A
+ * caller reads that null: a request is answered OP_REFUSED, and nothing that follows the change (a file removed, a row
+ * written, a send followed) is done for a change that was not made.
+ */
+const apply = ops.applier({
+  commit: (room, op) => store.commit(room, op),
+  send: (room, opEvent, payload) => io.to(room.code).emit(opEvent, payload),
+  changed: () => boardDirty(),
+  refused: (why) => console.error('  [ops] refused, nothing saved or sent: ' + why),
+});
+/** A request's answer when apply() refused its change: nothing was saved or sent (the server's log says why). */
+const OP_REFUSED = Object.freeze({ ok: false, error: 'That change could not be made: nothing was saved.' });
+/** A system line in the hall, or null when the op table refused it. */
 function systemMessage(room, text) {
-  return apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text, at: Date.now() } }).m;
+  const op = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text, at: Date.now() } });
+  return op ? op.m : null;
 }
 
 /**
@@ -1009,7 +1003,7 @@ io.on('connection', (socket) => {
         };
       }
     }
-    apply(room, { o: 'add', m: msg });
+    if (!apply(room, { o: 'add', m: msg })) return ok(ack)(OP_REFUSED);
     ok(ack)({ ok: true, id: msg.id, seq: msg.seq });
   });
 
@@ -1022,7 +1016,7 @@ io.on('connection', (socket) => {
     const responses = (msg.responses || []).filter((r) => (r.uid ? r.uid !== me.uid : r.name !== me.name));
     const idx = Number.isInteger(optionIndex) && optionIndex >= 0 && optionIndex < (msg.options || []).length ? optionIndex : -1;
     responses.push({ uid: me.uid, name: me.name, role: me.role, optionIndex: idx, note: typeof note === 'string' ? note.slice(0, 200) : '', at: Date.now() });
-    apply(room, { o: 'upd', id: msg.id, f: { responses } });
+    if (!apply(room, { o: 'upd', id: msg.id, f: { responses } })) return ok(ack)(OP_REFUSED);
     ok(ack)({ ok: true });
   });
 
@@ -1031,7 +1025,7 @@ io.on('connection', (socket) => {
     if (!writes.take()) return limited(ack);
     if (!mayPost(ack)) return;
     if (!room.byId.has(messageId)) return ok(ack)({ ok: false, error: 'Message not found' });
-    apply(room, { o: 'upd', id: messageId, f: { pinned: !!pinned } });
+    if (!apply(room, { o: 'upd', id: messageId, f: { pinned: !!pinned } })) return ok(ack)(OP_REFUSED);
     ok(ack)({ ok: true });
   });
 
@@ -1041,7 +1035,7 @@ io.on('connection', (socket) => {
     if (!msg) return ok(ack)({ ok: false, error: 'Message not found' });
     if (msg.type === 'system') return ok(ack)({ ok: false, error: 'Cannot delete system message' });
     if (!msg.from || !msg.from.uid || msg.from.uid !== me.uid) return ok(ack)({ ok: false, error: 'Only the author can delete this message' });
-    apply(room, { o: 'del', id: messageId });
+    if (!apply(room, { o: 'del', id: messageId })) return ok(ack)(OP_REFUSED);
     removeUnused(fileNamesOf([msg])).catch(() => { /* a file left behind is only space */ });
     ok(ack)({ ok: true });
   });
@@ -1057,7 +1051,7 @@ io.on('connection', (socket) => {
     const i = reactions.findIndex((r) => r.uid === me.uid && r.emoji === emoji);
     if (i >= 0) reactions.splice(i, 1);
     else { if (reactions.length >= 200) return ok(ack)({ ok: false, error: 'Too many reactions' }); reactions.push({ uid: me.uid, name: me.name, emoji, at: Date.now() }); }
-    apply(room, { o: 'upd', id: messageId, f: { reactions } });
+    if (!apply(room, { o: 'upd', id: messageId, f: { reactions } })) return ok(ack)(OP_REFUSED);
     ok(ack)({ ok: true });
   });
 
@@ -1123,7 +1117,7 @@ io.on('connection', (socket) => {
     if (src.type === 'text') fwd.text = src.text;
     else if (src.type === 'file') Object.assign(fwd, { url: src.url, filename: src.filename, mime: src.mime, caption: src.caption || '' });
     else if (src.type === 'action') Object.assign(fwd, { text: src.text, options: src.options, responses: [] });
-    apply(dst, { o: 'add', m: fwd });
+    if (!apply(dst, { o: 'add', m: fwd })) return ok(ack)(OP_REFUSED);
     ok(ack)({ ok: true, id: fwd.id });
   });
 
@@ -1205,9 +1199,11 @@ io.on('connection', (socket) => {
         // message). …with the link it went to, that Stagewatch's address tag and the seq of its frames then, so a restart
         // keeps following it only where it went, and only while that Stagewatch has not restarted since.
         const stage = { ref: r.messageId || 0, receipt: r.stage, ack: r.messageId ? 'sent' : '', by: '', at: Date.now(), link: link.id, sw: link.tag, seq: link.lastSeq ?? 0 };
-        const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${sender} sent to the speaker's screen: “${stagelines.cut(said, 120)}”`, at: Date.now(), stage } }).m;
-        if (source) apply(from, { o: 'upd', id: source.id, f: { stage } });
-        if (r.messageId) trackStageSend(link, r.messageId, from.code, [sys.id].concat(source ? [source.id] : []), { at: stage.at, seq: stage.seq });
+        // Followed on the records that took it: a line or a source the op table refused carries no receipt to follow.
+        const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${sender} sent to the speaker's screen: “${stagelines.cut(said, 120)}”`, at: Date.now(), stage } });
+        const onSource = !!source && !!apply(from, { o: 'upd', id: source.id, f: { stage } });
+        const held = (sys ? [sys.m.id] : []).concat(onSource ? [source.id] : []);
+        if (r.messageId && held.length) trackStageSend(link, r.messageId, from.code, held, { at: stage.at, seq: stage.seq });
       }
       noteEvent('research sent a message to the speaker\'s screen (' + r.stage + ')', link);
     }
@@ -1264,9 +1260,11 @@ io.on('connection', (socket) => {
     const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, ok: null, words: '', to: built.words, at: Date.now(), sw: link.tag, line: built.line };
     // A hall closed while the desk answered keeps nothing of the proposal, as for a send above.
     if (store.get(from.code) === from) {
-      const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${asker} asked Stagewatch's operator to put this on ${built.words}: “${stagelines.cut(parsed.text, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
-      if (source) apply(from, { o: 'upd', id: source.id, f: { proposal } });
-      trackProposal(link.id, proposal.id, from.code, [sys.id].concat(source ? [source.id] : []), proposal.state, proposal);
+      // Followed on the records that took it, as for a send above.
+      const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${asker} asked Stagewatch's operator to put this on ${built.words}: “${stagelines.cut(parsed.text, 120)}” — waiting for the show desk`, at: Date.now(), proposal } });
+      const onSource = !!source && !!apply(from, { o: 'upd', id: source.id, f: { proposal } });
+      const held = (sys ? [sys.m.id] : []).concat(onSource ? [source.id] : []);
+      if (held.length) trackProposal(link.id, proposal.id, from.code, held, proposal.state, proposal);
     }
     noteEvent('research proposed a stage message to the show desk', link);
     ack({ ok: true, proposal });
@@ -1509,7 +1507,7 @@ io.on('connection', (socket) => {
     if (state !== 'coming' && state !== 'resolved') return ack({ ok: false, error: 'Say "on my way" or "resolved".' });
     if (m.help && m.help.state === 'resolved') return ack({ ok: false, error: 'Already resolved' + (m.help.by ? ' by ' + m.help.by : '') + '.' });
     const by = (me && room && room.code === r.code) ? me.name : socket.data.account ? socket.data.account.name : 'Admin';
-    apply(r, { o: 'upd', id: m.id, f: { help: { state, by, at: Date.now() } } });
+    if (!apply(r, { o: 'upd', id: m.id, f: { help: { state, by, at: Date.now() } } })) return ack(OP_REFUSED);
     noteEvent('a help request was ' + (state === 'coming' ? 'answered' : 'resolved'), linkFor(r.code));
     ack({ ok: true });
   });
@@ -1543,8 +1541,7 @@ io.on('connection', (socket) => {
     const changed = [];
     if (typeof name === 'string') {
       const n = guard.cleanText(name, 80);
-      if (n && n !== r.name) {
-        apply(r, { o: 'meta', name: n });
+      if (n && n !== r.name && apply(r, { o: 'meta', name: n })) {
         changed.push('name → ' + n);
         for (const d of displays.ofHall(r.code)) io.to('display:' + d.id).emit('display:state', displayState(d));
       }
@@ -1617,7 +1614,7 @@ io.on('connection', (socket) => {
     const r = store.get(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
     const files = fileNamesOf(r.messages);
-    apply(r, { o: 'reset' });
+    if (!apply(r, { o: 'reset' })) return ok(ack)(OP_REFUSED);
     systemMessage(r, '— Session reset by admin: messages and documents cleared —');
     // Its documents leave the disk too, unless another hall or a screen still shows them. The row counts the files that
     // left, so it is written once their removal has run, before the answer: a stop while they are being removed keeps
@@ -1663,7 +1660,7 @@ io.on('connection', (socket) => {
     if (!r || !r.byId.has(messageId)) return ok(ack)({ ok: false, error: 'Message not found' });
     const m = r.byId.get(messageId);
     const files = fileNamesOf([m]);
-    apply(r, { o: 'del', id: messageId });
+    if (!apply(r, { o: 'del', id: messageId })) return ok(ack)(OP_REFUSED);
     // Whose it was and its kind, never its text or a file's name.
     auditRoom('message.remove', r.code, m.type === 'system' ? 'a system line' : 'a message by ' + ((m.from && m.from.name) || 'someone') + ' (' + m.type + ')');
     removeUnused(files).then(() => ok(ack)({ ok: true }), () => ok(ack)({ ok: true }));
@@ -1700,7 +1697,7 @@ io.on('connection', (socket) => {
     // A change is the lock switched, or a lock that keeps other seats than it kept (compared as syncSeats compares them,
     // so seats saved in another order are no change); an unlock is a change only for a locked room.
     const changed = on ? !r.settings.lockRoles || !seatsSaved(r, seats) : !!r.settings.lockRoles;
-    apply(r, { o: 'meta', settings: { lockRoles: !!on, seats } });
+    if (!apply(r, { o: 'meta', settings: { lockRoles: !!on, seats } })) return ok(ack)(OP_REFUSED);
     if (changed) auditRoom('room.lock', r.code, on ? 'roles locked (' + plural(Object.keys(seats).length, 'seat') + ' kept)' : 'roles unlocked');
     ok(ack)({ ok: true, locked: !!on, invites: on ? invitesFor(r.code) : null });
   });
@@ -1778,7 +1775,7 @@ io.on('connection', (socket) => {
     const t = typeof text === 'string' ? text.trim().slice(0, 4000) : '';
     if (!r || !t) return ok(ack)({ ok: false, error: 'Nothing to post' });
     const m = { id: makeMessageId(), at: Date.now(), type: 'text', text: t, pinned: true, priority: false, from: { uid: 'minutes', name: 'Minutes', role: 'observer', ai: true } };
-    apply(r, { o: 'add', m });
+    if (!apply(r, { o: 'add', m })) return ok(ack)(OP_REFUSED);
     auditRoom('minutes.post', r.code, 'minutes posted (pinned)');
     ok(ack)({ ok: true });
   });
@@ -2429,9 +2426,11 @@ function runApproved(p) {
   if (!text) return { ok: false, words: 'an empty notice' };
   const rooms = Array.from(store.rooms.values());
   if (!rooms.length) return { ok: false, words: 'no meeting is open to show it in' };
-  for (const room of rooms) systemMessage(room, '📣 From the show desk' + (p.decidedBy ? ' (approved by ' + p.decidedBy + ')' : '') + ': ' + text);
+  // The meetings it was shown in are the lines the op table took, never the meetings it was meant for.
+  const shown = rooms.filter((room) => systemMessage(room, '📣 From the show desk' + (p.decidedBy ? ' (approved by ' + p.decidedBy + ')' : '') + ': ' + text)).length;
+  if (!shown) return { ok: false, words: 'the notice could not be saved in any meeting' };
   noteEvent('the show desk posted a notice to the meetings');
-  return { ok: true, words: 'shown in ' + rooms.length + ' meeting' + (rooms.length === 1 ? '' : 's') };
+  return { ok: true, words: 'shown in ' + shown + ' meeting' + (shown === 1 ? '' : 's') };
 }
 
 // Every linked Stagewatch that keeps a desk, one after another (one request at a time to each): what it approved for this

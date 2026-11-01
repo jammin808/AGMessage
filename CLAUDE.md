@@ -83,6 +83,7 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | The server: routes, sockets, rooms, the board tick, links, screens | `app/server.js` |
 | The watchdog | `app/supervise.js` |
 | Rooms, the op log and snapshots, atomic saves | `app/lib/store.js`, `app/lib/resilience.js` |
+| The op table: the event each change is sent under (`apply()`), and the hall page's table that draws a change it missed and one it hears live alike (a new field of a change to a message is a row of both) | `app/lib/ops.js`, `app/public/app.js` (`UPD_EVENTS`) |
 | Identities, rate limits, lockouts, text cleaning | `app/lib/guard.js` |
 | Rights and roles (pure) | `app/lib/rbac.js` |
 | Accounts, password hashing, sessions; their routes | `app/lib/accounts.js`, `app/lib/http-accounts.js` |
@@ -107,7 +108,7 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | The browser libraries the pages load (pdf.js 4.10.38's legacy build, mammoth, SheetJS), byte for byte as published, and their list: each file's package, version, build, licence, copyright, source and SHA-256, its floor, what it bundles and the advisories assessed against each | `app/public/vendor/`, `app/public/vendor/VENDOR.json` (held to the folder by `app/test/vendor.test.js`) |
 | Their licences and notices, shipped at the portable folder's top, with the advisories against their versions and each one's assessment; the SBOM's vendored components, read from the bundle that ships; the vendored libraries' advisory audit | `THIRD-PARTY-NOTICES.md`, `licenses/<package>/`, `tools/vendor-sbom.js`, `tools/vendor-audit.js` |
 | The house lint rule | `app/eslint-rules/no-unescaped-html.js` |
-| The module fence: the server's layers (the pure core, no cycle, one composition root) and the wire's words closed both ways; the one list of the files that register socket verbs, and of the page scripts, that the fences read | `app/test/modules.test.js`, `app/test/helpers.js` (`handlerFiles()`, `pageScripts()`) |
+| The module fence: the server's layers (the pure core, no cycle, one composition root), the wire's words closed both ways and the op table's two halves in step; the one list of the files that register socket verbs, and of the page scripts, that the fences read | `app/test/modules.test.js`, `app/test/helpers.js` (`handlerFiles()`, `pageScripts()`) |
 | The portable build | `tools/fetch-runtime.ps1`, `tools/build-portable.ps1`, `start-agmessage.bat`, `make-shareable-copy.bat` |
 | Papers | `README.md`, `README.txt`, `CHANGELOG.md` (fenced by a test), `SECURITY.md`, `docs/ACCOUNTS.md`, `docs/DISPLAYS.md`, `docs/NODES.md`, `docs/SHOWBUS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `docs/INSTALL.md` (the installed node, as far as it is built) |
 | The 0.6.0 plan: what to build, in which order, and the owner's answers it rests on | `docs/plan/0.6.0/PLAN.md` (Part 0: the decisions register and the global build order, whose numbers the unit commits use), `docs/plan/0.6.0/DECISIONS.md`, `docs/plan/0.6.0/board-view/` (the Board view's mock) |
