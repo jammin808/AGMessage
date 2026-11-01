@@ -15,10 +15,10 @@ const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...fs.readFileSync(pat
   .filter((e) => e !== 'disconnect');
 // Not sent from the admin socket: they start cloudflared or make a new certificate — real work, not an argument check.
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
-const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null };
+const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null };
 // An object whose toString is not a function: String() throws on it, so a handler must never call String() on input.
 const U = { toString: 1 };
-const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U };
+const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U };
 const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode: 5, messageId: {}, content: 'x', text: {} }, UNCONVERTIBLE];
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
@@ -74,17 +74,23 @@ test('client values are read by their type: a value String() cannot convert reac
   const anon = await connect(base); sockets.push(anon);
   const guest = await connect(base); sockets.push(guest);
   assert.ok((await emit(guest, 'join', { roomCode: hall, name: 'Rita', role: 'research' })).ok);
+  // A message of the guest's own, so a reaction's `on` is read: an unknown message is refused before it.
+  const posted = await emit(guest, 'message', { type: 'text', text: 'react to me' });
+  assert.ok(posted.ok, JSON.stringify(posted));
   const cases = [
     [anon, 'join', { roomCode: U }], [anon, 'join', { roomCode: hall, name: U, role: 'research' }],
     [anon, 'display:list', { code: U }], [anon, 'display:take', { id: U }], [anon, 'help:respond', { code: U }],
     [guest, 'message', { type: 'text', text: U }], [guest, 'message', { type: 'file', url: U, caption: U }],
     [guest, 'message', { type: 'action', text: 'Go?', options: [U, 'Yes'] }], [guest, 'forward', { messageId: U, targetRoom: U }],
+    [guest, 'message', { type: 'text', text: 'x', cid: U }], [guest, 'message', { type: 'text', text: 'x', heldMs: U }],
+    [guest, 'react', { messageId: posted.id, emoji: '👍', on: U }], [guest, 'forward', { messageId: U, targetRoom: U, cid: U }],
     [ctl, 'display:take', { id: made.display.id, content: { kind: 'message', text: U } }], [ctl, 'display:create', { code: hall, name: U }],
     [ctl, 'admin:settings', { requireHttps: U, remoteAdmin: U, stagewatchUrl: U }], [ctl, 'nodes:link', { id: U, token: U }],
   ];
   for (const [s, ev, arg] of cases) {
     const r = await send(s, ev, arg);
     assert.notEqual(r, 'silence', ev + ' ' + JSON.stringify(arg) + ' is answered');
+    if (ev === 'react') assert.deepEqual(r, { ok: false, error: 'Say whether to add the reaction or take it away.' }, 'a reaction\'s `on` that is no boolean is read, and refused');
     await new Promise((resolve) => setTimeout(resolve, 250));   // under every per-socket rate limit
   }
   const health = await api(base, 'GET', '/api/health', undefined, { cookie: admin });

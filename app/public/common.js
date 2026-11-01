@@ -1,4 +1,5 @@
-// Shared by the account pages (sign-in, halls, accounts): escaping, JSON calls, toasts, the theme. One global, AGM.
+// Shared by the account pages (sign-in, halls, accounts): escaping, JSON calls, toasts, the theme. One global, AGM, which
+// each shared script extends (never replaces), so no order they load in erases another's part.
 // Every value shown as HTML goes through AGM.esc (the lint fence agm/no-unescaped-html holds the pages to it).
 (function () {
   'use strict';
@@ -68,5 +69,5 @@
     return (neg ? '+' : '') + body;
   }
 
-  window.AGM = { esc, api, toast, theme, ago, clock };
+  Object.assign(window.AGM = window.AGM || {}, { esc, api, toast, theme, ago, clock });
 })();

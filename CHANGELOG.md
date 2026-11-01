@@ -535,6 +535,74 @@ taken yet, and its row in `docs/DESIGN.md` still says "not measured")
   cached across the upgrade reads the batched `seen` frame as one with no `uid` and ignores it, so it draws no new "Seen
   by" until it is reloaded; its people list and board are as before.
 
+**A send never vanishes and never doubles: the outbox** (the plan's Part 5, unit Q; the owner's answer 27, "sent when
+back, marked with how long it waited"; the tree's tests, the outbox in a page's own runtime, and the hall page and the
+halls board in Chromium)
+- What a person writes is held until AGMessage has it. In 0.5.1 a message sent while the Wi-Fi was down went out
+  before the page had joined again, was answered "Not joined", and its text was cleared: lost, and nothing said so. Each
+  page now sends every write through one outbox (`public/outbox.js`, loaded by the hall page, the halls board and the
+  admin page), in the mode of what the person does:
+  - **What a person wrote or answered** (a message of any kind: text, an action prompt, a file, a help request; a
+    forward; an answer to a prompt; an answer to a help request) gets a client id, `cid`, 16 random bytes from the
+    browser's `getRandomValues` (a page on the venue network over plain HTTP has no `randomUUID`). It is held while the
+    page is not connected and joined, sent after the join's answer, one at a time in the order written, and sent again
+    with the same `cid` after a drop until the server answers it. There is no time limit, and the person is not asked
+    first. Its composer keeps its words, held, until the server has it, and empties only then; the message is drawn below
+    the hall's messages as "◷ Sending", or "◷ Waiting — it goes when the connection is back". A refusal keeps the words
+    and says the server's ("△ Not sent: …") with Retry and Edit; an answer to a prompt shows its option marked ◷ until it
+    is taken. Held sends are kept in the tab's own `sessionStorage`, under the hall and the person, so a reload keeps
+    them and sends them with their `cid`, and one the reloaded page already has in its history (it landed before the
+    reload) is matched to it, never sent or offered again; another person's are dropped, never sent as them; being sent
+    out of the hall drops them all, and nothing held is sent then or later in that tab. A file's bytes are held in
+    memory only: after a reload a file not yet uploaded reads "Not sent — choose the file again", and one uploaded goes
+    by its link with its `cid` (and reads so only if the laptop no longer has the upload). A file not yet uploaded is
+    uploaded with the message once the connection is back, and uploaded once more if its upload token was renewed at a
+    join or the laptop no longer has it. Edit on a refused message puts back its 🔥 and the message it replied to with
+    its words.
+  - **What a person does to something** (pin, react, delete, a screen's take and its set-up, the stage, the admin's acts
+    on the admin page and the halls board) is refused at once while the page is not connected — "Not connected —
+    AGMessage is reconnecting." — so it is never sent late, as 0.5.1's pages did; an answer not back in 5 s is "No
+    answer — check the connection.", and the server's own answer, when it comes after that (a line Stagewatch is slow to
+    take, a desk proposal, a hall closed with its files), is shown too, once, so its receipt or its refusal is never
+    lost; after a drop it is sent again, with its `cid`, only where the server answers a repeat (a pin, a reaction set
+    with `on`, a delete), and otherwise the person is told to check it was done. Pins and reactions, which had no answer
+    on the hall page, now say when they were refused.
+- The server says a send once. A message keeps its `cid` (1 to 40 characters of letters, digits, `-` and `_`; any other
+  shape is refused: "That message's id could not be read."), and the room's store indexes it by who sent it: the same
+  `cid` again from that person is answered with what the first one became, `{ok, id, seq}`, and commits nothing, before
+  any rate or right is read, so a send that landed is never answered "Slow down". A forward's copy keeps it in the hall
+  it went to, so a repeat posts nothing there; a forward that is no repeat takes from the sender's rate before its
+  hall's code is looked up, so whether a code names a hall is told no faster than a send goes. A message removed
+  (deleted, or a session reset) leaves a tombstone: the newest 500 per hall are kept, in the snapshot too (`gone`), so
+  after a restart a repeat of a removed send answers `{ok: true, id, seq, gone: true}` ("That message was removed.")
+  and a second delete by its author answers `{ok: true, already: true}`. A message now carries its seq in the log as
+  well as in memory, so one replayed after a restart has it.
+- A message written offline is marked with its wait. A held send carries `heldMs`: of the time since it was written,
+  the page's own count of what it spent not connected and joined, a reload included (at most 24 hours; any other shape
+  is refused: "That message's wait could not be read."), so a send that only queued behind another or behind the rate
+  is not marked; the server keeps it on the message as `held` in whole seconds when it is one or more. Every reader
+  sees "written 14:02 · sent 14:06 (offline)": the hall page under the message, the halls board's help strip (so a
+  five-minute-old "Sound" request reads as one), the admin's view of the hall and the transcript; the AI's brief (its
+  drafts and the minutes) dates the line as written and as sent.
+- Every act that can be asked twice answers a repeat with what it did: `react` takes `on` (true sets the reaction,
+  false takes it away; without it the reaction toggles, as a page cached across the upgrade expects; any other value is
+  refused), and a reaction already as asked answers `already`; the same answer to a help request from the same person
+  answers `already`, never "Already resolved". A file whose upload the laptop no longer has is refused with
+  `reupload` ("That file is no longer on the AGMessage laptop: choose it again."), and "Slow down a little." carries
+  `busy`, which the outbox reads as "send it again shortly" rather than a refusal.
+- `test/outbox.test.js` runs `outbox.js` as a page loads it, with a `crypto` that has `getRandomValues` and no
+  `randomUUID`, and drives each mode with a socket, a clock and a session store of its own; end to end, the same `cid`
+  twice commits once and answers the same, after a restart and after a removal too, each repeatable act answers its
+  repeat, and forwards to codes that name no hall reach "Slow down a little." within the rate's burst. The input fuzz
+  sends `cid`, `on` and `heldMs` in every shape, a reaction's `on` to a message that is there; the wire's words fence
+  reads a page's sends where it calls the outbox, `AGM.outbox.hold('x'`, `now('x'` and `self('x'`. The smoke drops a
+  hall page's socket, sends, and sees it land once; refuses one, keeps it and Retries it; reloads with one held; holds a
+  help request for a minute and reads its words on the item and on the halls board; and sends a person out with one
+  held, which is never sent.
+- Rolling back: 0.5.1 keeps the messages with `cid` and `held`, which it ignores, and drops the snapshot's `gone` at
+  its own next compaction. A 0.5.1 page cached across the upgrade sends no `cid` and toggles reactions as before; a 0.6
+  page talking to a 0.5.1 server sends keys 0.5.1 ignores. Harmless both ways.
+
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,

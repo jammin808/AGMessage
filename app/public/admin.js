@@ -84,6 +84,9 @@ function showDashboard() {
   loginPanel.hidden = true;
   dashboard.hidden = false;
   socket = io();
+  // The admin's acts go through the outbox (outbox.js) as acts on something: refused at once while the page is not
+  // connected, "No answer" when the server says nothing in 5 s, never sent late.
+  AGM.outbox.attach(socket);
   // A sign-out in another tab, a change to this account or admin through the tunnel turned off closes this socket: the
   // page starts again and asks for what it needs. After a restart it reconnects by itself; it starts again only when
   // its sign-in no longer holds (a new admin token), never on a failed check.
@@ -102,6 +105,7 @@ function showDashboard() {
   });
   socket.on('connect', () => {
     document.getElementById('adminStatus').textContent = 'connected';
+    AGM.outbox.ready({ scope: 'admin', who: 'admin' });
   });
   // Live updates while watching a room
   socket.on('message', onLiveMessage);
@@ -132,7 +136,7 @@ function showDashboard() {
       'Connected users stay logged in. This cannot be undone.'
     );
     if (!ok) return;
-    socket.emit('admin:resetRoom', { roomCode: currentRoom.code }, (res) => {
+    AGM.outbox.now('admin:resetRoom', { roomCode: currentRoom.code }, (res) => {
       if (!res?.ok) { alert(res?.error || 'Reset failed'); return; }
       // Refresh our admin view
       currentRoom.messages = [];
@@ -175,7 +179,7 @@ function renderRoomList(rooms) {
 
 function createNewRoom() {
   const name = (prompt('Optional session name (e.g. "Acme AGM 2026"). Leave blank for none:') || '').trim();
-  socket.emit('admin:createRoom', { name }, (res) => {
+  AGM.outbox.now('admin:createRoom', { name }, (res) => {
     if (!res?.ok) return alert(res?.error || 'Could not create room');
     refreshRooms();
     watchRoom(res.code);
@@ -244,7 +248,7 @@ function renderUsers(users) {
     sel.addEventListener('change', () => {
       const sid = sel.dataset.sid;
       const role = sel.value;
-      socket.emit('admin:setRole', { roomCode: currentRoom.code, socketId: sid, role }, (res) => {
+      AGM.outbox.now('admin:setRole', { roomCode: currentRoom.code, socketId: sid, role }, (res) => {
         if (!res?.ok) alert(res?.error || 'Could not change role');
       });
     });
@@ -253,7 +257,7 @@ function renderUsers(users) {
     btn.addEventListener('click', () => {
       const sid = btn.dataset.sid;
       const room = btn.dataset.room;
-      socket.emit('admin:unlinkRoom', { socketId: sid, targetRoom: room }, (res) => {
+      AGM.outbox.now('admin:unlinkRoom', { socketId: sid, targetRoom: room }, (res) => {
         if (!res?.ok) { alert(res?.error || 'Unlink failed'); return; }
         // Refresh the user list to reflect the change
         if (!currentRoom) return;
@@ -283,7 +287,7 @@ function renderUsers(users) {
     btn.addEventListener('click', () => {
       const sid = btn.dataset.sid;
       if (!confirm('Log this user out of the meeting?')) return;
-      socket.emit('admin:kick', { socketId: sid }, (res) => {
+      AGM.outbox.now('admin:kick', { socketId: sid }, (res) => {
         if (!res?.ok) alert(res?.error || 'Could not kick');
       });
     });
@@ -317,13 +321,15 @@ function buildAdminMessage(m) {
     bodyHtml = `<p>🟧 <strong>${escapeHtml(m.text)}</strong></p>` +
            `<p class="muted">Options: ${escapeHtml((m.options || []).join(' · '))}</p>`;
   }
+  // A message its page held before sending it (written offline) says when it was written and when it was sent.
+  const heldHtml = Number.isInteger(m.held) && m.held > 0 ? '<div class="held-line">written ' + escapeHtml(formatTime(m.at - m.held * 1000)) + ' · sent ' + escapeHtml(formatTime(m.at)) + ' (offline)</div>' : '';
   div.innerHTML =
     `<div class="admin-msg-head">${whoHtml} <time>${escapeHtml(formatTime(m.at))}</time>${m.priority ? ' <span class="priority-badge" style="display:inline-block">🔥 HIGH</span>' : ''}</div>` +
-    `<div class="admin-msg-body">${bodyHtml}</div>` +
+    `<div class="admin-msg-body">${bodyHtml}${heldHtml}</div>` +
     `<div class="admin-msg-foot"><button class="btn ghost small del-any">🗑 Delete</button></div>`;
   div.querySelector('.del-any').onclick = () => {
     if (!confirm('Delete this message? This affects everyone in the meeting.')) return;
-    socket.emit('admin:deleteMessage', { roomCode: currentRoom.code, messageId: m.id }, (res) => {
+    AGM.outbox.now('admin:deleteMessage', { roomCode: currentRoom.code, messageId: m.id }, (res) => {
       if (!res?.ok) alert(res?.error || 'Could not delete');
     });
   };
@@ -476,7 +482,7 @@ function showLinkPicker(anchor, sid, name, alreadyLinked) {
         item.innerHTML = '<span class="lp-room-name">' + escapeHtml(r.code) + '</span>';
       }
       item.onclick = () => {
-        socket.emit('admin:linkRoom', { socketId: sid, targetRoom: r.code }, (lres) => {
+        AGM.outbox.now('admin:linkRoom', { socketId: sid, targetRoom: r.code }, (lres) => {
           if (!lres?.ok) { alert(lres?.error || 'Link failed'); return; }
           socket.emit('admin:listRooms', (after) => {
             if (!after?.ok) return;
@@ -560,7 +566,7 @@ function showLinkPicker(anchor, sid, name, alreadyLinked) {
   toggle.addEventListener('change', () => {
     if (toggle.checked) {
       showState('starting');
-      socket.emit('admin:tunnelStart', (res) => {
+      AGM.outbox.now('admin:tunnelStart', undefined, (res) => {
         if (!res || !res.ok) {
           showState('error', { error: (res && res.error) || 'Could not start tunnel' });
           toggle.checked = false;
@@ -570,7 +576,7 @@ function showLinkPicker(anchor, sid, name, alreadyLinked) {
     } else {
       // Optimistic UI: show off immediately, server confirms via status push.
       showState('off');
-      socket.emit('admin:tunnelStop', () => {});
+      AGM.outbox.now('admin:tunnelStop', undefined, (res) => { if (!res || !res.ok) showState('error', { error: (res && res.error) || 'Could not stop the tunnel' }); });
     }
   });
 

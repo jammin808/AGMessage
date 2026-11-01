@@ -50,6 +50,11 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
   health; health's `saves.built` counts the lanes made and `saves.named` the distinct lanes in that list, and a test
   holds them equal); one server per data folder (the folder lock), and nothing is written before the lock and the port
   are held.
+- **A page's write goes through the outbox** (`app/public/outbox.js`): `AGM.outbox.hold('x', …)` for what a person
+  wrote or answered (never anything secret: it is kept in the tab's `sessionStorage`), `AGM.outbox.now('x', …)` for an
+  act on something, never a bare `socket.emit` of a write; a read or a page's own sync may still be a plain emit. A verb
+  that can be asked twice answers a repeat with what it did (the original answer, or ok and `already`), never a refusal
+  for something that succeeded; a new verb in `hold` answers a repeat of its `cid`.
 - **A new frame of state is a `Latest`** (`app/lib/latest.js`): never a timer or a polled flag of its own, and never a
   volatile emit. `test/resilience.test.js` counts the timers each handler file starts, each with its reason, so a tick
   of its own moves that list with its words.
@@ -88,6 +93,7 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | Rooms, the op log and snapshots, atomic saves | `app/lib/store.js`, `app/lib/resilience.js` |
 | State frames, latest wins: the one primitive the halls board, a hall's screens, its people list and its seen receipts go through, each sent at once after a quiet window and at most once per window in a burst, each hall's frame sent apart so one that faults holds back no other | `app/lib/latest.js`, `app/server.js` (`frames`) |
 | The op table: the event each change is sent under (`apply()`), and the hall page's table that draws a change it missed and one it hears live alike (a new field of a change to a message is a row of both) | `app/lib/ops.js`, `app/public/app.js` (`UPD_EVENTS`) |
+| The outbox: every write a page makes, in the mode of what the person does (`hold` what a person wrote or answered, held with its client id until the server answers it, kept in the tab across a reload; `now` an act on something, never sent late; `self`; `local`), and the server's half: a send's client id answered with what it became (`byCid`), the newest 500 removals remembered (`gone`) | `app/public/outbox.js` (its tests: `app/test/outbox.test.js`), `app/lib/store.js` (`sentAs`, `removed`), `app/server.js` (`readSend`) |
 | Identities, rate limits, lockouts, text cleaning | `app/lib/guard.js` |
 | Rights and roles (pure) | `app/lib/rbac.js` |
 | Accounts, password hashing, sessions; their routes | `app/lib/accounts.js`, `app/lib/http-accounts.js` |
@@ -131,4 +137,5 @@ version's heading), `README.md` / `README.txt` where the product changed, `docs/
 account may see; **a screen** — a browser holding a display link; **a take** — what a screen is told to show, numbered;
 **the desk** — Stagewatch's approval queue, where a proposal waits for the operator; **a link** — AGMessage's
 connection to a Stagewatch, Patterns or PlayMap; **a fence** — a test or lint rule that fails the build when an
-invariant breaks; **the air** — what the audience and the speaker see.
+invariant breaks; **the air** — what the audience and the speaker see; **the outbox** — what holds a page's send until
+the server answers it, so it is never lost and never made twice.

@@ -12,9 +12,9 @@
     for (const p of ['invitesPanel', 'minutesPanel', 'closePanel']) $(p).hidden = p !== which;
   }
 
+  /** The settings and health, read; with a patch, changed first (an act: through the outbox, never sent late). */
   function loadSettings(patch) {
-    socket.emit('admin:settings', patch || null, (s) => {
-      if (s && !s.ok && s.error && patch) alert(s.error);   // a key typed now and refused says why
+    const answered = (s) => {
       if (!s || !s.ok) return;
       $('aiModel').textContent = s.model;
       $('aiStatus').textContent = s.aiKeySet ? (s.aiFromEnv ? 'on (key from ANTHROPIC_API_KEY)' : 'on') : 'off — no key';
@@ -36,7 +36,9 @@
       renderHealth(s.health);
       renderAudit(s.health);
       renderPeers(s.peers || []);
-    });
+    };
+    if (patch) AGM.outbox.now('admin:settings', patch, (s) => { if (s && !s.ok && s.error) alert(s.error); answered(s); });
+    else socket.emit('admin:settings', null, answered);
   }
 
   function pretty(fp) { return fp ? fp.replace(/^sha256:/, '').match(/../g).join(':').toUpperCase() : '—'; }
@@ -301,13 +303,13 @@
             const typed = prompt((l.certificateChanged ? l.name + '\'s certificate changed. Only accept it if you know why (a renewal, a reinstall, a new laptop). ' : '')
               + 'Type the first 16 or more characters of the certificate fingerprint ' + l.name + ' shows on its own screen.', '');
             if (typeof typed !== 'string' || !typed.trim()) return;
-            socket.emit('nodes:acceptCertificate', { id: l.id, fingerprint: typed.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not accepted.'); loadNodes(); });
+            AGM.outbox.now('nodes:acceptCertificate', { id: l.id, fingerprint: typed.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not accepted.'); loadNodes(); });
           };
           li.appendChild(acc);
         }
         const b = document.createElement('button');
         b.className = 'btn ghost small'; b.type = 'button'; b.textContent = 'Unlink';
-        b.onclick = () => { if (confirm('Unlink ' + l.name + '? Its token and its certificate pin are forgotten.')) socket.emit('nodes:unlink', { id: l.id }, () => loadNodes()); };
+        b.onclick = () => { if (confirm('Unlink ' + l.name + '? Its token and its certificate pin are forgotten.')) AGM.outbox.now('nodes:unlink', { id: l.id }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not unlinked.'); loadNodes(); }); };
         li.appendChild(b);
         ul.appendChild(li);
       }
@@ -319,7 +321,7 @@
     const hall = prompt('For one hall? Type its code (e.g. K7P2QX), or leave empty for every hall.', '') || '';
     // The token goes to another machine only over HTTPS to a certificate a person confirmed (or one pinned before).
     const fingerprint = prompt('Its certificate: type the first 16 or more characters of the fingerprint ' + (p.name || p.t) + ' shows on its own screen. Leave empty when it runs on this laptop, or its certificate is confirmed already.', '') || '';
-    socket.emit('nodes:link', { id: p.id, token, hall: hall.trim(), fingerprint: fingerprint.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not linked.'); loadNodes(); });
+    AGM.outbox.now('nodes:link', { id: p.id, token, hall: hall.trim(), fingerprint: fingerprint.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not linked.'); loadNodes(); });
   }
 
   function wire() {
@@ -367,11 +369,11 @@
     $('remoteAdmin').onchange = () => loadSettings({ remoteAdmin: $('remoteAdmin').checked });
     $('swAccept').onclick = () => {
       if (!confirm('Accept Stagewatch\'s new certificate? Only do this if you know why it changed (a reinstall, a new certificate made on purpose).')) return;
-      socket.emit('admin:acceptCertificate', () => setTimeout(() => loadSettings(), 800));
+      AGM.outbox.now('admin:acceptCertificate', undefined, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not accepted.'); setTimeout(() => loadSettings(), 800); });
     };
     $('tlsRenew').onclick = () => {
       if (!confirm('Make a new certificate? Every device and app that trusted the old one will need to trust the new one.')) return;
-      socket.emit('admin:renewCertificate', () => loadSettings());
+      AGM.outbox.now('admin:renewCertificate', undefined, (r) => { if (!r || !r.ok) alert((r && r.error) || 'No new certificate.'); loadSettings(); });
     };
     $('aiKeySave').onclick = () => { loadSettings({ aiKey: $('aiKeyInput').value.trim() }); $('aiKeyInput').value = ''; };
     $('swSave').onclick = () => {
@@ -391,7 +393,7 @@
       });
     };
     $('lockRoles').onchange = () => {
-      socket.emit('admin:lockRoles', { roomCode: currentRoom.code, on: $('lockRoles').checked }, (res) => showInvites(res && res.locked));
+      AGM.outbox.now('admin:lockRoles', { roomCode: currentRoom.code, on: $('lockRoles').checked }, (res) => { if (!res || !res.ok) alert((res && res.error) || 'Not changed.'); showInvites(res && res.locked); });
     };
     function showInvites(on) {
       const box = $('inviteLinks');
@@ -431,15 +433,15 @@
     };
     $('postMinutesBtn').onclick = () => {
       if (!lastMinutes || !currentRoom) return;
-      socket.emit('admin:postSummary', { roomCode: currentRoom.code, text: '📝 Minutes so far (AI draft, posted by the admin)\n\n' + lastMinutes }, () => panel(null));
+      AGM.outbox.now('admin:postSummary', { roomCode: currentRoom.code, text: '📝 Minutes so far (AI draft, posted by the admin)\n\n' + lastMinutes }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not posted.'); else panel(null); });
     };
     $('closeMinutesBtn').onclick = () => panel(null);
 
     $('closeRoomBtn').onclick = () => { if (currentRoom) { $('closeCode').textContent = currentRoom.code; panel('closePanel'); } };
     $('cancelCloseBtn').onclick = () => panel(null);
     $('confirmCloseBtn').onclick = () => {
-      socket.emit('admin:deleteRoom', { roomCode: currentRoom.code, purgeFiles: $('purgeFiles').checked }, (res) => {
-        if (!res || !res.ok) return;
+      AGM.outbox.now('admin:deleteRoom', { roomCode: currentRoom.code, purgeFiles: $('purgeFiles').checked }, (res) => {
+        if (!res || !res.ok) { alert((res && res.error) || 'Not closed.'); return; }
         panel(null);
         location.reload();
       });

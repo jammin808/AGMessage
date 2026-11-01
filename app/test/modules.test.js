@@ -172,6 +172,7 @@ const NAMED_BY_EXPRESSION = {
  */
 const PAGE_NAMED_BY_EXPRESSION = {
   'public/app.js: socket.on(event': { names: Object.values(ops.UPD_EVENTS), why: 'the op table\'s listeners, one per row of the hall page\'s table, which (k) holds equal to lib/ops.js\'s' },
+  'public/outbox.js: socket.emit(verb': { names: [], why: 'the outbox sends what its callers name, each read where it is called: AGM.outbox.hold(\'x\', AGM.outbox.now(\'x\', AGM.outbox.self(\'x\'' },
 };
 /** A server emit that no page hears, with why. The fence fails on a row a page hears, or that no handler file sends. */
 const UNHEARD = {
@@ -249,6 +250,9 @@ test('(f) the wire\'s words: every page send is a verb, every verb is sent, ever
   assert.equal(w.sends.get('forward'), 'public/app.js', 'a send in double quotes is read');
   assert.equal(w.sends.get('display:shown'), 'public/display.js', 'the screen\'s page is read');
   assert.ok(!w.verbs.has('typing') && !w.emits.has('typing'), 'no typing: no page sent it or heard it');
+  // The pages' writes are sent through the outbox, read at its callers: every message the hall page sends is held by it.
+  assert.ok(w.pageComputed.has('public/outbox.js: socket.emit(verb'), 'the outbox sends what its callers name');
+  assert.ok(/AGM\.outbox\.hold\('message'/.test(pages.get('public/app.js')) && !/socket\.emit\(\s*['"]message['"]/.test(pages.get('public/app.js')), 'the hall page sends a message only through the outbox');
   // The op table's events are sent through one expression and heard through one, each read by its row.
   assert.equal(w.computed.get('opEvent'), 'server.js', 'apply() sends every change through the op table');
   assert.ok(w.pageComputed.has('public/app.js: socket.on(event'), 'the hall page hears every upd through its table');

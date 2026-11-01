@@ -146,6 +146,88 @@ test('store: a log line the disk cut short, or a power cut tore, never swallows 
   assert.deepEqual(d.get('ABC234').messages.map((m) => m.id), ['m1', 'm3', 'm5']);
 });
 
+test('store: a send is said once — byCid across add, del, reset, a compaction and a reload, and the tombstones', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const r = a.create('ABC234', 'Test');
+  const from = (uid) => ({ uid, name: 'Ana', role: 'research' });
+  a.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1, from: from('u1'), cid: 'c1' } });
+  a.commit(r, { o: 'add', m: { id: 'm2', type: 'text', text: 'two', at: 2, from: from('u1'), cid: 'c2' } });
+  a.commit(r, { o: 'add', m: { id: 'm3', type: 'text', text: 'three', at: 3, from: from('u2') } });
+  assert.deepEqual(a.sentAs(r, 'u1', 'c1'), { id: 'm1', seq: 1 });
+  assert.deepEqual(a.sentAs(r, 'u1', 'c2'), { id: 'm2', seq: 2 });
+  assert.equal(a.sentAs(r, 'u2', 'c1'), null, 'a client id is its sender\'s: another person\'s is not theirs');
+  assert.equal(a.sentAs(r, 'u1', 'nope'), null);
+  for (const bad of [[undefined, 'c1'], ['u1', undefined], ['', 'c1'], ['u1', ''], [{}, 'c1'], ['u1', ['c1']]]) assert.equal(a.sentAs(r, ...bad), null, JSON.stringify(bad));
+  assert.equal(r.byId.get('m1').seq, 1, 'a message carries its seq from its op');
+
+  a.commit(r, { o: 'del', id: 'm1' });
+  assert.deepEqual(a.sentAs(r, 'u1', 'c1'), { id: 'm1', seq: 1, gone: true }, 'a removed send answers gone, with what it was');
+  assert.deepEqual(a.removed(r, 'm1'), { id: 'm1', seq: 1, uid: 'u1', cid: 'c1' });
+  a.commit(r, { o: 'del', id: 'm3' });
+  assert.deepEqual(a.removed(r, 'm3'), { id: 'm3', seq: 3, uid: 'u2' }, 'a message with no client id leaves its id, seq and sender');
+  assert.equal(a.removed(r, 'm2'), null);
+  assert.equal(a.removed(r, 42), null);
+
+  // A reload from the log (no snapshot since) and from a compaction build the same indexes.
+  const b = new RoomStore(dir);
+  b.loadAll(null, { compact: false });
+  const rb = b.get('ABC234');
+  assert.deepEqual([b.sentAs(rb, 'u1', 'c1'), b.sentAs(rb, 'u1', 'c2'), b.removed(rb, 'm3')], [{ id: 'm1', seq: 1, gone: true }, { id: 'm2', seq: 2 }, { id: 'm3', seq: 3, uid: 'u2' }], 'replayed from the log');
+  a.compact('ABC234');
+  const snap = JSON.parse(fs.readFileSync(path.join(dir, 'ABC234.json'), 'utf8'));
+  assert.deepEqual(snap.gone, [{ id: 'm1', seq: 1, uid: 'u1', cid: 'c1' }, { id: 'm3', seq: 3, uid: 'u2' }], 'the snapshot keeps the tombstones as gone');
+  const c = new RoomStore(dir);
+  c.loadAll();
+  const rc = c.get('ABC234');
+  assert.deepEqual([c.sentAs(rc, 'u1', 'c1'), c.sentAs(rc, 'u1', 'c2'), c.removed(rc, 'm3')], [{ id: 'm1', seq: 1, gone: true }, { id: 'm2', seq: 2 }, { id: 'm3', seq: 3, uid: 'u2' }], 'loaded from the snapshot');
+
+  // A reset leaves a tombstone for what people wrote, never for a system line.
+  c.commit(rc, { o: 'add', m: { id: 's1', type: 'system', text: 'Ana joined as research', at: 4 } });
+  c.commit(rc, { o: 'reset' });
+  assert.deepEqual(c.sentAs(rc, 'u1', 'c2'), { id: 'm2', seq: 2, gone: true });
+  assert.equal(c.removed(rc, 's1'), null, 'a system line leaves none');
+  assert.equal(rc.byCid.size, 0);
+  const d = new RoomStore(dir);
+  d.loadAll();
+  assert.deepEqual(d.sentAs(d.get('ABC234'), 'u1', 'c2'), { id: 'm2', seq: 2, gone: true }, 'a reset\'s tombstones survive a restart');
+});
+
+test('store: the newest 500 tombstones are kept, in memory and in the snapshot; a snapshot without them loads with none', () => {
+  const { GONE_KEEP } = require('../lib/store');
+  assert.equal(GONE_KEEP, 500);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const r = a.create('ABC234', 'Test');
+  for (let i = 0; i < 520; i++) a.commit(r, { o: 'add', m: { id: 'm' + i, type: 'text', text: 't' + i, at: i, from: { uid: 'u1', name: 'Ana', role: 'research' }, cid: 'c' + i } });
+  a.commit(r, { o: 'reset' });
+  assert.equal(r.gone.size, 500);
+  assert.equal(r.goneKeys.size, 500);
+  assert.equal(a.sentAs(r, 'u1', 'c19'), null, 'the oldest went, its client id with it');
+  assert.deepEqual(a.sentAs(r, 'u1', 'c20'), { id: 'm20', seq: 21, gone: true });
+  assert.deepEqual(a.sentAs(r, 'u1', 'c519'), { id: 'm519', seq: 520, gone: true });
+  a.commit(r, { o: 'add', m: { id: 'n1', type: 'text', text: 'x', at: 1, from: { uid: 'u1', name: 'Ana', role: 'research' }, cid: 'k1' } });
+  a.commit(r, { o: 'del', id: 'n1' });
+  assert.equal(r.gone.size, 500);
+  assert.equal(a.sentAs(r, 'u1', 'c20'), null, 'a new tombstone pushes out the oldest');
+  a.compact('ABC234');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'ABC234.json'), 'utf8')).gone.length, 500);
+
+  // A 0.5.1 snapshot: no `gone`, messages without client ids. It loads, and a shape no snapshot of ours writes is skipped.
+  const old = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  fs.writeFileSync(path.join(old, 'OLD234.json'), JSON.stringify({ code: 'OLD234', name: 'Then', createdAt: 1, seq: 2, settings: {}, messages: [{ id: 'm1', type: 'text', text: 'hi', at: 1, from: { uid: 'u1' }, seq: 1 }] }));
+  const b = new RoomStore(old);
+  assert.equal(b.loadAll(), 1);
+  const rb = b.get('OLD234');
+  assert.equal(rb.gone.size, 0);
+  assert.equal(rb.byCid.size, 0);
+  assert.equal(rb.messages.length, 1);
+  fs.writeFileSync(path.join(old, 'BAD234.json'), JSON.stringify({ code: 'BAD234', seq: 1, messages: [], gone: [null, 'x', { id: 7 }, { id: '' }, { id: 'ok', seq: 'x', uid: 5, cid: {} }] }));
+  const c = new RoomStore(old);
+  c.loadAll();
+  assert.deepEqual(Array.from(c.get('BAD234').gone.values()), [{ id: 'ok' }]);
+});
+
 // ---------------------------------------------------------------- the op table
 const ops = require('../lib/ops');
 /** apply() on a real store, with what it sends, marks and says recorded, and each step in the order it was taken. */
@@ -727,6 +809,14 @@ test('ai: thread text is compact and labelled', () => {
   assert.match(t, /Chair \(board\): What was capex\?/);
   assert.match(t, /answers: Chair → Yes/);
   assert.ok(!t.includes('joined'));
+  // A message its page held while offline is dated as written and as sent; one sent at once carries its time alone.
+  const at = Date.UTC(2026, 10, 1, 14, 6, 30);
+  const held = ai.threadText([
+    { type: 'help', category: 'Sound', text: 'radio mic 3', help: { state: 'open' }, at, held: 268, from: { name: 'Ana', role: 'research' } },
+    { type: 'text', text: 'Thanks', at, held: 0, from: { name: 'Chair', role: 'board' } },
+  ]).split('\n');
+  assert.equal(held[0], '[14:06, written 14:02 and sent when the connection was back] Ana (research) asked for help (Sound): radio mic 3');
+  assert.equal(held[1], '[14:06] Chair (board): Thanks');
 });
 
 test('Stagewatch link: live frames, stale on silence, send to stage with the key', async () => {

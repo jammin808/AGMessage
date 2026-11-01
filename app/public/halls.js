@@ -145,14 +145,14 @@
     e.preventDefault();
     const patch = { code: setupCode, name: $('setupName').value.trim(), stagewatchUrl: $('setupUrl').value.trim(), stagewatchFingerprint: $('setupFp').value.trim() };
     if ($('setupKey').value.trim()) patch.stagewatchKey = $('setupKey').value.trim();
-    socket.emit('hall:configure', patch, (r) => {
+    AGM.outbox.now('hall:configure', patch, (r) => {
       if (!r || !r.ok) { $('setupError').textContent = (r && r.error) || 'Not saved.'; $('setupError').hidden = false; return; }
       $('setupDialog').close();
       AGM.toast(r.changed.length ? 'Saved: ' + r.changed.join('; ') : 'Nothing changed.');
       load();
     });
   });
-  $('setupAccept').addEventListener('click', () => socket.emit('hall:acceptCertificate', { code: setupCode }, (r) => AGM.toast(r && r.ok ? 'New certificate accepted.' : (r && r.error) || 'Not accepted.', !(r && r.ok))));
+  $('setupAccept').addEventListener('click', () => AGM.outbox.now('hall:acceptCertificate', { code: setupCode }, (r) => AGM.toast(r && r.ok ? 'New certificate accepted.' : (r && r.error) || 'Not accepted.', !(r && r.ok))));
 
   const LIGHT_MARK = { green: '✓', amber: '△', red: '✕', grey: '○' };
   /** A linked Patterns or PlayMap as a chip: its light in a shape and its name; its headline on hover. */
@@ -208,7 +208,7 @@
     if (!desk) { propose.disabled = true; out.textContent = 'Lines to ' + n.name + ' go to the show desk, and ' + (n.hall ? 'its hall\'s' : 'the default') + ' Stagewatch keeps none — nothing can be proposed now.'; }
     form.onsubmit = (e) => {
       e.preventDefault();
-      socket.emit('nodes:command', { id: n.id, line: line.value.trim(), mode: 'propose' }, (r) => {
+      AGM.outbox.now('nodes:command', { id: n.id, line: line.value.trim(), mode: 'propose' }, (r) => {
         out.dataset.ok = r && r.ok ? '1' : '0';
         out.textContent = !r ? 'No answer.' : !r.ok ? '✕ ' + r.error : '▲ Proposed to the show desk (' + r.proposal.id + ', ' + r.risk + ' risk) — a person approves it in Stagewatch.';
       });
@@ -232,23 +232,40 @@
       li.innerHTML =
         '<span class="help-where">' + esc(x.hallName || x.code) + '</span>' +
         '<span class="help-what"><strong>' + esc(x.category) + '</strong> ' + esc(x.text) + '</span>' +
-        '<span class="help-who">' + esc(x.from) + ' · ' + esc(AGM.ago(x.at)) + (x.by ? ' · ' + esc(x.by) + (x.state === 'coming' ? ' is on the way' : '') : '') + '</span>';
+        '<span class="help-who">' + esc(x.from) + ' · ' + esc(AGM.ago(x.at)) + (heldWords(x) ? ' · ' + esc(heldWords(x)) : '') + (x.by ? ' · ' + esc(x.by) + (x.state === 'coming' ? ' is on the way' : '') : '') + '</span>';
       const open = document.createElement('a');
       open.className = 'btn small';
       open.href = hallHref(x.code);
       open.textContent = 'Open hall';
       li.appendChild(open);
       if (x.canRespond) {
-        if (x.state === 'open') li.appendChild(button('On my way', () => respond(x, 'coming')));
-        li.appendChild(button('Resolved', () => respond(x, 'resolved')));
+        const held = heldAnswers.get(x.code + '|' + x.id);
+        if (x.state === 'open') li.appendChild(button((held === 'coming' ? '◷ ' : '') + 'On my way', () => respond(x, 'coming')));
+        li.appendChild(button((held === 'resolved' ? '◷ ' : '') + 'Resolved', () => respond(x, 'resolved')));
       }
       ul.appendChild(li);
     }
   }
   function button(text, onclick) { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn small primary'; b.textContent = text; b.onclick = onclick; return b; }
+  /** "written 14:02 · sent 14:06 (offline)" for a help request its page held before sending it, else ''. */
+  function heldWords(x) {
+    if (!Number.isInteger(x.held) || x.held <= 0) return '';
+    const t = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return 'written ' + t(x.at - x.held * 1000) + ' · sent ' + t(x.at) + ' (offline)';
+  }
+  // An answer to a help request is held by the outbox until the server has it (its button marked ◷ meanwhile).
+  const heldAnswers = new Map();   // '<hall>|<id>' -> the state this person's held answer says
   function respond(x, state) {
     if (!socket) return;
-    socket.emit('help:respond', { code: x.code, messageId: x.id, state }, (r) => { if (!r || !r.ok) AGM.toast((r && r.error) || 'Not sent.', true); });
+    AGM.outbox.hold('help:respond', { code: x.code, messageId: x.id, state });
+  }
+  function drawHeld(item) {
+    if (item.verb !== 'help:respond') return;
+    const k = item.args.code + '|' + item.args.messageId;
+    if (item.state === 'waiting' || item.state === 'sending') heldAnswers.set(k, item.args.state);
+    else heldAnswers.delete(k);
+    if (item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
+    renderHelp();
   }
 
   // ---------------------------------------------------------------- live (the board over the socket)
@@ -256,10 +273,13 @@
   function connect() {
     if (typeof io !== 'function') return;
     socket = io({ transports: ['websocket', 'polling'] });
+    AGM.outbox.attach(socket, { onChange: drawHeld });
     const ls = $('linkState');
     socket.on('connect', () => {
       ls.dataset.ok = '1'; ls.textContent = '● Live';
-      socket.emit('board:watch', {}, (r) => { if (r && r.ok) applyBoard(r.board); else if (r && r.error) AGM.toast(r.error, true); });
+      socket.emit('board:watch', {}, (r) => {
+        if (r && r.ok) { applyBoard(r.board); AGM.outbox.ready({ scope: 'board', who: me ? me.username : '' }); } else if (r && r.error) AGM.toast(r.error, true);
+      });
     });
     socket.on('disconnect', () => { ls.dataset.ok = '0'; ls.textContent = '○ Reconnecting'; });
     socket.on('board', applyBoard);

@@ -25,8 +25,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   [docs/DISPLAYS.md](docs/DISPLAYS.md)
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, images) shared and
   pushed to the on-stage panel or to screens, PDFs on iPads from iPadOS 16.4 (pdf.js's legacy build); pins, replies,
-  reactions, priority, seen receipts. Every change is numbered and written to an append-only log: a phone that drops off
-  the Wi-Fi catches up with just what it missed, and a crash or power cut loses nothing. A watchdog restarts the server
+  reactions, priority, seen receipts. A sent message shows "◷ Sending" until AGMessage has it, and is never posted
+  twice; one written while the connection is down waits on the page, a reload included, and is sent when it is back,
+  marked with its wait ("written 14:02 · sent 14:06 (offline)"). Every change is numbered and written to an append-only
+  log: a phone that drops off the Wi-Fi catches up with just what it missed, and a crash or power cut loses nothing. A watchdog restarts the server
   after a crash or a hang. The admin page's health reads the server's true delay and how busy it is, and keeps the peaks
   of each show day for 14 days, through a restart or a shutdown, so one look after a show says how it ran.
 - **The show network (Show Bus 1.2).** Send to Stagewatch — straight to the speaker's screen, or to the operator to

@@ -875,7 +875,8 @@ io.on('connection', (socket) => {
   const uploadBucket = new guard.Bucket(0.5, 4);   // files from this connection, whichever hall or token
   let uploadToken = null;
   const ok = (ack) => (typeof ack === 'function' ? ack : () => {});
-  const limited = (ack) => { ok(ack)({ ok: false, error: 'Slow down a little.' }); };
+  // `busy` says the refusal is the rate's, not the request's: the outbox keeps a held send and sends it again shortly.
+  const limited = (ack) => { ok(ack)({ ok: false, error: 'Slow down a little.', busy: true }); };
   // What this person may do in the room they are in: an account by its rights in that hall, a code guest by the role
   // they joined with (backstage: post, files, the stage; on stage: post and files; observer: read), the admin everything.
   const GUEST_CAPS = { research: ['hall.view', 'hall.post', 'hall.files', 'stage.send'], board: ['hall.view', 'hall.post', 'hall.files'], observer: ['hall.view'] };
@@ -1019,12 +1020,21 @@ io.on('connection', (socket) => {
     return false;
   };
 
+  // A send is said once: a repeat of a send (its client id, from the same person) is answered with what the first one
+  // became, before any limit or right is read, since it asks for nothing new — never refused for what succeeded.
   socket.on('message', (payload, ack) => {
     if (!need(ack)) return;
+    const sent = readSend(payload, { held: true });
+    if (sent.error) return ok(ack)({ ok: false, error: sent.error });
+    const was = sent.cid ? store.sentAs(room, me.uid, sent.cid) : null;
+    if (was) return ok(ack)(was.gone ? { ok: true, id: was.id, seq: was.seq, gone: true } : { ok: true, id: was.id, seq: was.seq });
     if (!writes.take()) return limited(ack);
     if (!mayPost(ack)) return;
     if (payload && payload.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: 'Your account may not share files here.' });
-    const msg = buildMessage(me, payload);
+    // An upload that is no longer here (a send held past the wait an unposted upload is kept for) is uploaded again by
+    // the page that holds the file, and sent with the same client id.
+    if (payload && payload.type === 'file' && guard.validUploadUrl(payload.url) && !fs.existsSync(path.join(UPLOAD_DIR, payload.url.slice(9)))) return ok(ack)({ ok: false, error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true });
+    const msg = buildMessage(me, payload, sent);
     if (!msg) return ok(ack)({ ok: false, error: 'Invalid message' });
     if (payload.replyTo && typeof payload.replyTo === 'string') {
       const parent = room.byId.get(payload.replyTo);
@@ -1064,6 +1074,9 @@ io.on('connection', (socket) => {
   socket.on('delete', ({ messageId } = {}, ack) => {
     if (!need(ack)) return;
     const msg = room.byId.get(messageId);
+    // Its author asking again for a message already removed is told it is done, never refused for what succeeded.
+    const tomb = msg ? null : store.removed(room, messageId);
+    if (tomb && tomb.uid === me.uid) return ok(ack)({ ok: true, already: true });
     if (!msg) return ok(ack)({ ok: false, error: 'Message not found' });
     if (msg.type === 'system') return ok(ack)({ ok: false, error: 'Cannot delete system message' });
     if (!msg.from || !msg.from.uid || msg.from.uid !== me.uid) return ok(ack)({ ok: false, error: 'Only the author can delete this message' });
@@ -1072,15 +1085,20 @@ io.on('connection', (socket) => {
     ok(ack)({ ok: true });
   });
 
-  socket.on('react', ({ messageId, emoji } = {}, ack) => {
+  // `on` sets the person's reaction (true) or takes it away (false), so a repeat changes nothing and is answered
+  // `already`; without it the reaction is toggled, as a page cached across the upgrade expects.
+  socket.on('react', ({ messageId, emoji, on } = {}, ack) => {
     if (!need(ack)) return;
-    if (!writes.take()) return limited(ack);
     if (!mayPost(ack)) return;
     const msg = room.byId.get(messageId);
     if (!msg) return ok(ack)({ ok: false, error: 'Message not found' });
     if (typeof emoji !== 'string' || !emoji.length || emoji.length > 8 || /[<>&"'\s]/.test(emoji)) return ok(ack)({ ok: false, error: 'Bad emoji' });
+    if (on !== undefined && on !== null && typeof on !== 'boolean') return ok(ack)({ ok: false, error: 'Say whether to add the reaction or take it away.' });
     const reactions = (msg.reactions || []).slice();
     const i = reactions.findIndex((r) => r.uid === me.uid && r.emoji === emoji);
+    const want = typeof on === 'boolean' ? on : i < 0;
+    if (want === i >= 0) return ok(ack)({ ok: true, already: true });
+    if (!writes.take()) return limited(ack);
     if (i >= 0) reactions.splice(i, 1);
     else { if (reactions.length >= 200) return ok(ack)({ ok: false, error: 'Too many reactions' }); reactions.push({ uid: me.uid, name: me.name, emoji, at: Date.now() }); }
     if (!apply(room, { o: 'upd', id: messageId, f: { reactions } })) return ok(ack)(OP_REFUSED);
@@ -1127,10 +1145,18 @@ io.on('connection', (socket) => {
     ok(ack)({ ok: true, rooms: others.map((c) => ({ code: c, name: store.get(c).name || '' })) });
   });
 
-  socket.on('forward', ({ messageId, targetRoom } = {}, ack) => {
+  socket.on('forward', (args, ack) => {
     if (!need(ack)) return;
-    if (!writes.take()) return limited(ack);
+    const { messageId, targetRoom } = args && typeof args === 'object' ? args : {};
+    const sent = readSend(args);
+    if (sent.error) return ok(ack)({ ok: false, error: sent.error });
     const dst = store.get(guard.str(targetRoom).toUpperCase());
+    // The copy carries the send's client id in the hall it went to: a repeat is answered with it and posts nothing. Only
+    // this person's own forward into that hall answers so, so it tells nothing of a code they did not already send to.
+    const was = dst && sent.cid ? store.sentAs(dst, me.uid, sent.cid) : null;
+    if (was) return ok(ack)(was.gone ? { ok: true, id: was.id, gone: true } : { ok: true, id: was.id });
+    // A code is a guest's way in: whether one names a hall is told no faster than the rate lets a send through.
+    if (!writes.take()) return limited(ack);
     if (!dst) return ok(ack)({ ok: false, error: 'Target room not found' });
     const mine = userRooms.get(me.uid) || new Set();
     const linked = me.linkedRooms instanceof Set ? me.linkedRooms : new Set();
@@ -1143,7 +1169,7 @@ io.on('connection', (socket) => {
     if (src.type === 'file' && !there.may('hall.files')) return ok(ack)({ ok: false, error: 'You may not share files in that hall.' });
     const fwd = {
       id: makeMessageId(), type: src.type, at: Date.now(), from: { uid: me.uid, name: me.name, role: there.role, ...(me.acct ? { acct: true } : {}) },
-      pinned: false, priority: !!src.priority,
+      pinned: false, priority: !!src.priority, ...(sent.cid ? { cid: sent.cid } : {}),
       // The hall it came from by its name, never its code: a code lets a guest in, and this hall's people may not open that one.
       forwardedFrom: { roomName: room.name || '', originalAuthor: (src.from && src.from.name) || 'unknown', originalAt: src.at },
     };
@@ -1538,8 +1564,10 @@ io.on('connection', (socket) => {
     const byAccount = socket.data.account && rbac.can(socket.data.account, 'hall.post', r.code);
     if (!(inRoom || byAccount || socket.data.isAdmin)) return ack({ ok: false, error: 'Only people in that hall can answer its help requests.' });
     if (state !== 'coming' && state !== 'resolved') return ack({ ok: false, error: 'Say "on my way" or "resolved".' });
-    if (m.help && m.help.state === 'resolved') return ack({ ok: false, error: 'Already resolved' + (m.help.by ? ' by ' + m.help.by : '') + '.' });
     const by = (me && room && room.code === r.code) ? me.name : socket.data.account ? socket.data.account.name : 'Admin';
+    // The same person saying the same again (a repeat of a held answer) is told it is done, never refused for it.
+    if (m.help && m.help.state === state && m.help.by === by) return ack({ ok: true, already: true });
+    if (m.help && m.help.state === 'resolved') return ack({ ok: false, error: 'Already resolved' + (m.help.by ? ' by ' + m.help.by : '') + '.' });
     if (!apply(r, { o: 'upd', id: m.id, f: { help: { state, by, at: Date.now() } } })) return ack(OP_REFUSED);
     noteEvent('a help request was ' + (state === 'coming' ? 'answered' : 'resolved'), linkFor(r.code));
     ack({ ok: true });
@@ -2056,9 +2084,34 @@ function invitesFor(code) {
   return out;
 }
 
-function buildMessage(user, payload) {
+/** A page's client id for a send: 1-40 characters of the base64url alphabet. It names nothing and grants nothing. */
+const CID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+const HELD_MAX_MS = 86_400_000;
+/**
+ * What a send says of itself, read by type: its client id (`cid`) and, where it is kept (`held`), how long the page held
+ * it before sending (`heldMs`, the page's own count, at most 24 h), as `held` in whole seconds when it is one or more.
+ * Absent or null, each is none (a page cached across the upgrade sends neither); any other shape is refused with words.
+ */
+function readSend(payload, { held = false } = {}) {
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const out = {};
+  if (p.cid !== undefined && p.cid !== null) {
+    if (typeof p.cid !== 'string' || !CID_RE.test(guard.str(p.cid))) return { error: 'That message\'s id could not be read.' };
+    out.cid = p.cid;
+  }
+  if (held && p.heldMs !== undefined && p.heldMs !== null) {
+    if (!Number.isInteger(p.heldMs) || p.heldMs < 0 || p.heldMs > HELD_MAX_MS) return { error: 'That message\'s wait could not be read.' };
+    if (p.heldMs >= 1000) out.held = Math.floor(p.heldMs / 1000);
+  }
+  return out;
+}
+
+function buildMessage(user, payload, sent = {}) {
   if (!payload || typeof payload !== 'object') return null;
-  const base = { id: makeMessageId(), at: Date.now(), from: { uid: user.uid, name: user.name, role: user.role, ...(user.acct ? { acct: true } : {}) }, pinned: false, priority: !!payload.priority };
+  const base = {
+    id: makeMessageId(), at: Date.now(), from: { uid: user.uid, name: user.name, role: user.role, ...(user.acct ? { acct: true } : {}) }, pinned: false, priority: !!payload.priority,
+    ...(sent.cid ? { cid: sent.cid } : {}), ...(sent.held ? { held: sent.held } : {}),
+  };
   if (payload.type === 'text') {
     const text = guard.str(payload.text).trim();
     return text ? { ...base, type: 'text', text: text.slice(0, 4000), ...(payload.aiDraft ? { aiDraft: true } : {}) } : null;
@@ -2066,7 +2119,7 @@ function buildMessage(user, payload) {
   if (payload.type === 'file') {
     if (!guard.validUploadUrl(payload.url)) return null;
     const t = guard.UPLOAD_TYPES[guard.extOf(payload.url)];
-    if (!t || !fs.existsSync(path.join(UPLOAD_DIR, payload.url.slice(9)))) return null;
+    if (!t) return null;   // the message handler has checked that the upload is here
     return {
       ...base, type: 'file', url: payload.url,
       filename: guard.cleanText(payload.filename, 120) || 'file',
@@ -2114,6 +2167,7 @@ function renderTranscriptHtml(room) {
     if (m.priority) extras += '<span class="prio">🔥 HIGH</span>';
     if (m.pinned) extras += '<span class="pin">📌 pinned</span>';
     if (m.aiDraft) extras += '<span class="pin">✨ drafted with AI, sent by a person</span>';
+    if (m.held) extras += '<span class="pin">◷ written ' + esc(fmt(m.at - m.held * 1000)) + ', sent ' + esc(fmt(m.at)) + ' (offline)</span>';
     if (m.forwardedFrom) extras += '<div class="fwd">↗ Forwarded from ' + esc(m.forwardedFrom.roomName || 'another hall') + '</div>';
     const cls = ['msg', 'type-' + m.type, m.priority ? 'priority' : ''].filter(Boolean).join(' ');
     rows.push('<article class="' + cls + '"><header><strong>' + who + '</strong><time>' + esc(fmt(m.at)) + '</time></header>' + extras + '<div class="body">' + content + '</div></article>');

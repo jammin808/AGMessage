@@ -1621,6 +1621,15 @@ html[data-theme="dark"] .admin-tunnel-error .error {
 .stage-line { font-size: .78rem; font-style: normal; margin-top: .25rem; color: var(--muted); }
 .stage-line[data-ack="seen"], .stage-line[data-ack="done"] { color: #16a34a; }
 .sys .stage-line { display: block; text-align: center; }
+/* The outbox: a message held for sending says so on its echo, and a message its page held before sending says when */
+.msg.echo { border-style: dashed; }
+.msg.echo .echo-state { font-size: .78rem; color: var(--muted); }
+.msg.echo[data-state="refused"], .msg.echo[data-state="lost"] { border-color: var(--warn); }
+.msg.echo[data-state="refused"] .echo-state, .msg.echo[data-state="lost"] .echo-state { color: var(--warn); font-weight: 600; }
+.msg.echo .echo-acts { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .3rem; }
+.msg.echo .echo-acts:empty { display: none; }
+.held-line { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
+form[data-held="1"] textarea, form[data-held="1"] input { background: var(--bg); }
 .ai-off-note { font-size: .75rem; color: var(--muted); align-self: center; margin-right: auto; }
 body:not([data-role="research"]) .ai-off-note { display: none; }
 

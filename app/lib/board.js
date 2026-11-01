@@ -38,11 +38,15 @@ function lastMessageScan(room) {
   return null;
 }
 
-/** Help requests not yet resolved, oldest first. */
+/**
+ * Help requests not yet resolved, oldest first. One written while its page was offline carries `held`, the whole seconds
+ * it waited before it was sent, so the board reads it as written then, not as new.
+ */
 function openHelpScan(room) {
   return room.messages.filter((m) => m && m.type === 'help' && m.help && m.help.state !== 'resolved').map((m) => ({
     code: room.code, hallName: room.name || room.code, id: m.id, category: m.category, text: m.text || '',
     from: (m.from && m.from.name) || '', at: m.at, state: m.help.state, by: m.help.by || '',
+    ...(Number.isInteger(m.held) && m.held > 0 ? { held: m.held } : {}),
   }));
 }
 

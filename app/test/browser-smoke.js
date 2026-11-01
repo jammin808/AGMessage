@@ -26,6 +26,8 @@ const TOKEN = 'smokeadmintoken1';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // A value written into code a page evaluates: JSON, with the characters that could end a string or a script escaped.
 const CODE_ESCAPES = { '<': '\\u003C', '>': '\\u003E', '/': '\\u002F', '\\': '\\\\', '\b': '\\b', '\f': '\\f', '\n': '\\n', '\r': '\\r', '\t': '\\t', '\0': '\\0', '\u2028': '\\u2028', '\u2029': '\\u2029' };
+// The words a message held before it was sent carries: "written 14:02 · sent 14:03 (offline)", in the browser's format.
+const HELD_WORDS = /^written ([0-9]{1,2}:[0-9]{2}[ APM]{0,3}) · sent ([0-9]{1,2}:[0-9]{2}[ APM]{0,3}) \(offline\)$/;
 const codeLiteral = (v) => JSON.stringify(v).replace(/[<>\b\f\n\r\t\0\u2028\u2029]/g, (c) => CODE_ESCAPES[c]);
 // The server's own time zone for the smoke: a screen in another zone must still show this one's time of day.
 const SERVER_TZ = 'Europe/London';
@@ -406,6 +408,82 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     })()`);
     report(!!boardDocx && boardDocx.strong === 'Board pack' && boardDocx.text.includes('Item 4: the capex review'),
       `a Word file draws on the Board's panel through mammoth 1.13.0, its bold kept (${JSON.stringify(boardDocx)})`);
+
+    // The outbox, in a hall of its own (a listener seated there hears each message the hall gets): a send while the
+    // socket is down lands once after the reconnect, and its composer empties only after the ok; a refusal keeps the text
+    // and says the server's words with Retry; a reload with a held send lands it once; a help request held for a minute
+    // reads "written … · sent …" (and on the halls board, below); sent out of the hall, nothing held is sent, even back
+    // in the same tab.
+    const obHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Outbox hall' }) })).json()).code;
+    const listener = await connect(base);
+    const heard = [];
+    listener.on('message', (m) => heard.push(m));
+    await emit(listener, 'join', { roomCode: obHall, name: 'Lou', role: 'observer' });
+    const landedOnce = (text) => heard.filter((m) => m.text === text).length;
+    const ob = await edge.tab(`${base}/app.html?code=${obHall}&name=Ola&role=research`);
+    await ob.until('typeof joined !== "undefined" && joined && socket.connected');
+    const HELD_KEYS = `Object.keys(sessionStorage).filter((k) => k.startsWith('agm.outbox|'))`;
+    // The two times in the browser's own format (14:02, or 2:02 PM), a minute apart.
+    await ob.eval(`socket.disconnect()`);
+    await ob.eval(`(() => { textInput.value = 'Held while the Wi-Fi was down'; textPane.requestSubmit(); })()`);
+    const whileDown = await ob.eval(`JSON.stringify({ kept: textInput.value, held: textInput.readOnly, echo: (document.querySelector('.msg.echo .echo-state') || {}).textContent || '', items: AGM.outbox.items().map((i) => i.state), stored: ${HELD_KEYS}.length })`);
+    await sleep(600);
+    const notYet = landedOnce('Held while the Wi-Fi was down');
+    await ob.eval(`socket.connect()`);
+    const backUp = await ob.until(`socket.connected && !document.querySelector('.msg.echo') && textInput.value === '' && !textInput.readOnly && allMessages.filter((m) => m.text === 'Held while the Wi-Fi was down').length === 1 && ${HELD_KEYS}.length === 0`);
+    await sleep(400);
+    report(whileDown === JSON.stringify({ kept: 'Held while the Wi-Fi was down', held: true, echo: '◷ Waiting — it goes when the connection is back', items: ['waiting'], stored: 1 }) && notYet === 0 && !!backUp && landedOnce('Held while the Wi-Fi was down') === 1,
+      `a send while the socket is down is held (its composer keeps it, ◷ Waiting) and lands once after the reconnect, the composer emptied only then (${whileDown}; before ${notYet}; heard ${landedOnce('Held while the Wi-Fi was down')})`);
+
+    // A refusal (the server's words, here answered in the page for the one send): the text stays, Retry sends it.
+    await ob.eval(`(() => { const real = socket.emit; socket.emit = function (ev, ...a) { if (ev !== 'message') return real.call(this, ev, ...a); socket.emit = real; const ack = a[a.length - 1]; setTimeout(() => ack({ ok: false, error: 'Observers can read but not post.' }), 0); return socket; };
+      textInput.value = 'Refused, then sent'; textPane.requestSubmit(); })()`);
+    const refusedEcho = await ob.until(`(() => { const e = document.querySelector('.msg.echo[data-state="refused"]'); return e && JSON.stringify({ words: e.querySelector('.echo-state').textContent, text: e.querySelector('.echo-text').textContent, buttons: [...e.querySelectorAll('.echo-acts button')].map((b) => b.textContent), kept: textInput.value, held: textInput.readOnly }); })()`);
+    await ob.eval(`document.querySelector('.msg.echo[data-state="refused"] .echo-acts button').click()`);
+    const retried = await ob.until(`!document.querySelector('.msg.echo') && textInput.value === '' && allMessages.filter((m) => m.text === 'Refused, then sent').length === 1`);
+    await sleep(300);
+    report(refusedEcho === JSON.stringify({ words: '△ Not sent: Observers can read but not post.', text: 'Refused, then sent', buttons: ['Retry', 'Edit'], kept: 'Refused, then sent', held: false }) && !!retried && landedOnce('Refused, then sent') === 1,
+      `a refused send keeps its text and says the server's words with Retry and Edit; Retry sends it, once (${refusedEcho}; heard ${landedOnce('Refused, then sent')})`);
+
+    // A reload with a send held: it comes back from the tab and lands once.
+    await ob.eval(`socket.disconnect()`);
+    await ob.eval(`(() => { textInput.value = 'Held across a reload'; textPane.requestSubmit(); })()`);
+    const storedForReload = await ob.eval(`${HELD_KEYS}.map((k) => JSON.parse(sessionStorage.getItem(k)).map((i) => i.args.text).join()).join()`);
+    await ob.eval(`location.reload()`);
+    await sleep(500);
+    const afterReload = await ob.until(`typeof joined !== 'undefined' && joined && allMessages.filter((m) => m.text === 'Held across a reload').length === 1 && !document.querySelector('.msg.echo') && ${HELD_KEYS}.length === 0`);
+    await sleep(500);
+    report(storedForReload === 'Held across a reload' && !!afterReload && landedOnce('Held across a reload') === 1, `a reload with a send held: it comes back from the tab and lands once (stored "${storedForReload}"; heard ${landedOnce('Held across a reload')})`);
+
+    // A help request written offline and sent a minute later reads as written then: on the item, for every reader.
+    await ob.eval(`(() => { const real = performance.now.bind(performance); window.__shift = 0; performance.now = () => real() + window.__shift; })()`);
+    await ob.eval(`socket.disconnect()`);
+    await ob.eval(`(() => { document.getElementById('helpBtn').click(); document.querySelector('#helpCats input[value="Sound"]').checked = true; document.getElementById('helpText').value = 'mic 4 crackles';
+      document.getElementById('helpForm').requestSubmit(document.querySelector('#helpForm button[value="send"]')); window.__shift = 61000; })()`);
+    const helpWaiting = await ob.eval(`JSON.stringify({ closed: !document.getElementById('helpDialog').open, echo: (document.querySelector('.msg.echo[data-type="help"] .echo-text') || {}).textContent || '' })`);
+    await ob.eval(`socket.connect()`);
+    const heldLine = await ob.until(`(() => { const m = allMessages.find((x) => x.type === 'help' && x.text === 'mic 4 crackles'); const n = m && messagesById.get(m.id); const l = n && n.querySelector('.held-line'); return l && m.held >= 61 && m.held < 70 && l.textContent; })()`);
+    const lou = heard.find((m) => m.text === 'mic 4 crackles');
+    report(helpWaiting === JSON.stringify({ closed: true, echo: 'Help — Sound: mic 4 crackles' }) && HELD_WORDS.test(heldLine || '') && HELD_WORDS.exec(heldLine)[1] !== HELD_WORDS.exec(heldLine)[2] && !!lou && lou.held >= 61,
+      `a help request held for a minute reads "written … · sent … (offline)" on its item, and every reader has its wait (${helpWaiting}; "${heldLine}"; ${lou ? lou.held : 'unheard'} s)`);
+
+    // Sent out of the hall with a send out and unanswered: nothing held is sent, and back in this tab nothing comes back.
+    await ob.eval(`(() => { const real = socket.emit; socket.emit = function (ev, ...a) { if (ev !== 'message') return real.call(this, ev, ...a); socket.emit = real; return socket; };
+      textInput.value = 'Never sent: sent out first'; textPane.requestSubmit(); })()`);
+    const outThen = await ob.eval(`${HELD_KEYS}.length + '|' + AGM.outbox.items().map((i) => i.state).join()`);
+    const obAdmin = await connect(base, cookie);
+    const kicked = await emit(obAdmin, 'admin:kick', { socketId: await ob.eval('socket.id') });
+    obAdmin.close();
+    const leftHall = await ob.until(`location.pathname === '/'`, 8000);
+    const keptAfterKick = await ob.eval(`${HELD_KEYS}.length`);
+    await ob.send('Page.navigate', { url: `${base}/app.html?code=${obHall}&name=Ola&role=research` });
+    await ob.until('typeof joined !== "undefined" && joined && socket.connected');
+    await sleep(1500);
+    const sentAfter = await ob.eval(`allMessages.filter((m) => m.text === 'Never sent: sent out first').length`);
+    report(outThen === '1|sending' && kicked && kicked.ok && !!leftHall && keptAfterKick === 0 && sentAfter === 0 && landedOnce('Never sent: sent out first') === 0,
+      `sent out of the hall with a send held, nothing is sent and the tab keeps none of it, even back in the hall (${outThen}; kept ${keptAfterKick}; sent ${sentAfter})`);
+    listener.close();
+    ob.close();
     await sleep(800);
     await research.shot(path.join(OUT, 'research.png'));
     await board.shot(path.join(OUT, 'board.png'));
@@ -563,6 +641,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(!!(await signin.until(`!document.getElementById('setupPane').hidden`)), 'sign-in page offers the first admin when there are no accounts');
     await signin.eval(`(() => { document.getElementById('setupName').value = 'Ana Admin'; document.getElementById('setupUser').value = 'ana'; document.getElementById('setupPass').value = 'the green room kettle'; document.getElementById('setupPane').requestSubmit(); })()`);
     report(!!(await signin.until(`location.pathname === '/halls.html' && document.querySelectorAll('.hall-row').length >= 1 && document.getElementById('linkState').dataset.ok === '1'`)), 'the first admin lands on the halls board, live, with the hall listed');
+    const boardHeld = await signin.until(`(() => { const li = [...document.querySelectorAll('#helpList .help-item')].find((x) => x.textContent.includes('mic 4 crackles')); return li && li.querySelector('.help-who').textContent; })()`);
+    report(HELD_WORDS.test(String(boardHeld || '').split(' · ').slice(-2).join(' · ')), `a help request held for a minute reads "written … · sent …" on the halls board too (${boardHeld})`);
     await sleep(600);
     await signin.shot(path.join(OUT, 'halls.png'));
     const users = await edge.tab(`${base}/users.html`);

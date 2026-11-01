@@ -62,6 +62,16 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   cannot read. `typing`, which took a word from anyone who may post and sent it on to the whole hall, and which no page
   sent or heard, is gone. Every verb, in `server.js` or a handler module, is sent every argument shape a client can,
   and the same test fails on a verb registered anywhere else or in a form that read does not see.
+- A send's client id (`cid`, 16 random bytes from the browser's `getRandomValues`) is not a credential and names
+  nothing: it only lets the server answer a repeat of a person's own send with what that send became, keyed by the
+  identity the server issued, so one person's id is never another's. A message held for sending (written while the page
+  was offline, or not yet answered) sits in that tab's `sessionStorage`, under the hall and the person, until it is sent,
+  never beyond the tab; another person's held messages are dropped at the join, never sent as them, and being sent out
+  of a hall drops them all. A file's bytes waiting are held in memory only (the link of one already uploaded is kept
+  with its message). Nothing an act on something carries (a pin, a take, a setting, a node's token) is ever stored by
+  the page. A repeat is answered before the rate only for a send of that person's own: a forward, which names the hall
+  it goes to by its code, takes from the sender's rate before the code is looked up, so whether a code names a hall is
+  told no faster than a send goes.
 - Saved keys and tokens are sealed at rest (AES-256-GCM) with a machine key kept outside the app folder.
 - Uploads are allow-listed by type and checked by content; they are served so they cannot run script.
 - Pages carry a strict Content-Security-Policy with no inline script.

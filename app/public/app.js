@@ -88,6 +88,11 @@ if (ROLE === 'research') document.getElementById('researchCompose').hidden = fal
 // ---------------- Socket ----------------
 const socket = io({ transports: ['websocket', 'polling'] });
 const connDot = document.getElementById('connDot');
+// Every write goes through the outbox (outbox.js): what a person wrote is held until the server answers it, and drawn
+// here meanwhile (drawHeld, below).
+AGM.outbox.attach(socket, { onChange: (item) => drawHeld(item) });
+/** An act's answer: nothing to say when it is done, the server's words (or the outbox's) when it is not. */
+const saidIfNot = (fallback) => (r) => { if (!r || !r.ok) notify((r && r.error) || fallback, true); };
 
 socket.on('connect', () => {
   connDot.classList.add('ok');
@@ -152,6 +157,9 @@ function rejoin() {
     renderUsers(res.users || []);
     refreshSeenLines();
     reportSeen();
+    // Joined, with what it missed drawn (so a held send that landed meanwhile is already matched): what this person
+    // holds for this hall is sent now, a reload's included, and a reload's send already among the drawn is done.
+    AGM.outbox.ready({ scope: 'hall|' + ROOM, who: MY_UID, has: (cid) => allMessages.some((m) => m.cid === cid && !!m.from && m.from.uid === MY_UID) });
   });
 }
 
@@ -205,7 +213,8 @@ for (const field of Object.keys(UPD_EVENTS)) {
   const [event, draw] = UPD_EVENTS[field];
   socket.on(event, (change = {}) => { if (bump(change.seq)) draw(change.messageId, change[field]); });
 }
-socket.on('kicked', ({ reason }) => { notify(reason || 'You were removed from the meeting.', true); setTimeout(() => { location.href = HOME; }, 2500); });
+// Sent out of the hall: nothing this page holds is sent, now or when the person comes back in this tab.
+socket.on('kicked', ({ reason }) => { AGM.outbox.clear(); notify(reason || 'You were removed from the meeting.', true); setTimeout(() => { location.href = HOME; }, 2500); });
 // An admin changed this account: the server closes the socket; open the hall again with the rights it has now.
 socket.on('account:changed', ({ words } = {}) => { notify(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1500); });
 socket.on('roleChanged', ({ role }) => { notify('The admin changed your role to ' + roleLabel(role) + ' — reloading…'); setTimeout(() => { const q = new URLSearchParams(location.search); q.set('role', role); location.search = q.toString(); }, 1500); });
@@ -270,10 +279,11 @@ socket.on('seen', (frame) => {
 socket.on('roomReset', ({ seq } = {}) => { if (bump(seq)) onReset(); });
 socket.on('roomMeta', ({ name, seq } = {}) => { if (bump(seq)) setRoomTitle(name); });
 function onReset() {
-  // Admin cleared the room. Wipe local state but stay joined.
+  // Admin cleared the room. Wipe local state but stay joined; what this page holds for sending is still drawn.
   feed.innerHTML = '';
   messagesById.clear();
   allMessages.length = 0;
+  for (const node of echoes.values()) feed.appendChild(node);
   refreshPinned();
   refreshDocPinnedList();
   if (typeof dismissDoc === 'function') dismissDoc();
@@ -385,6 +395,7 @@ function renderHistory(history) {
   feed.innerHTML = '';
   messagesById.clear();
   allMessages.length = 0;
+  for (const node of echoes.values()) feed.appendChild(node);
   for (const m of history) addMessage(m, { silent: true });
   refreshPinned();
   refreshDocPinnedList();
@@ -392,6 +403,8 @@ function renderHistory(history) {
 }
 
 function addMessage(msg, { silent = false } = {}) {
+  // One of this person's held sends, now the server's message: its echo goes, and the outbox lets go of it.
+  if (msg && typeof msg.cid === 'string' && msg.from && MY_UID && msg.from.uid === MY_UID) AGM.outbox.landed(msg.cid);
   if (!msg || messagesById.has(msg.id)) {
     if (msg && messagesById.has(msg.id)) {
       const el = messagesById.get(msg.id);
@@ -401,8 +414,11 @@ function addMessage(msg, { silent = false } = {}) {
     }
     return;
   }
-  // Comings and goings fold into one quiet line instead of burying the conversation.
-  const prev = feed.lastElementChild;
+  // Comings and goings fold into one quiet line instead of burying the conversation. What this page holds for sending
+  // stays below everything the hall has.
+  const oldest = echoes.size ? echoes.values().next().value : null;
+  const firstEcho = oldest && oldest.parentNode === feed ? oldest : null;
+  const prev = firstEcho ? firstEcho.previousElementSibling : feed.lastElementChild;
   if (msg.type === 'system' && PRESENCE.test(msg.text || '') && prev && prev.classList.contains('presence')) {
     const parts = (prev.dataset.parts ? prev.dataset.parts.split('\u0001') : [prev.textContent]).concat(msg.text).slice(-6);
     prev.dataset.parts = parts.join('\u0001');
@@ -412,7 +428,7 @@ function addMessage(msg, { silent = false } = {}) {
     return;
   }
   const el = renderMessage(msg);
-  feed.appendChild(el);
+  feed.insertBefore(el, firstEcho);
   messagesById.set(msg.id, el);
   allMessages.push(msg);
   if (!silent && msg.type !== 'system') flash(el);
@@ -476,7 +492,7 @@ function rerenderMessage(node, msg) {
     stageBtn.hidden = !canStage;
     stageBtn.onclick = canStage ? () => {
       stageBtn.disabled = true;
-      socket.emit('stage:send', { messageId: msg.id }, (res) => {
+      AGM.outbox.now('stage:send', { messageId: msg.id }, (res) => {
         stageBtn.disabled = false;
         notify(res && res.ok
           ? (res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.')
@@ -533,6 +549,12 @@ function rerenderMessage(node, msg) {
   }
   if (msg.stage) renderStageLine(node, msg.stage);
   if (msg.proposal) renderProposalLine(node, msg.proposal);
+  if (heldWords(msg)) {
+    const held = document.createElement('div');
+    held.className = 'held-line';
+    held.textContent = heldWords(msg);
+    body.appendChild(held);
+  }
 
   // Reactions row + add-reaction button. We render after body so it sits beneath the content.
   let rx = node.querySelector('.reactions');
@@ -575,7 +597,7 @@ function rerenderMessage(node, msg) {
 
   pinBtn.onclick = () => {
     const pinned = !(node.dataset.pinned === '1');
-    socket.emit('pin', { messageId: msg.id, pinned });
+    AGM.outbox.now('pin', { messageId: msg.id, pinned }, saidIfNot('Not pinned.'));
   };
 
   // Forward button — opens a small picker of the other halls this person may post in (a help request stays in its hall)
@@ -602,15 +624,191 @@ function rerenderMessage(node, msg) {
       delBtn.hidden = false;
       delBtn.onclick = () => {
         if (confirm('Delete this message? This cannot be undone.')) {
-          socket.emit('delete', { messageId: msg.id }, (res) => {
-            if (res && !res.ok) alert(res.error || 'Could not delete');
-          });
+          AGM.outbox.now('delete', { messageId: msg.id }, saidIfNot('Could not delete'));
         }
       };
     } else {
       delBtn.hidden = true;
     }
   }
+}
+
+// ---------------- What this page holds for sending: the outbox's echoes ----------------
+// A message held by the outbox is drawn below the hall's messages, saying what is true of it: ◷ Sending, ◷ Waiting while
+// the connection is down, △ Not sent with the server's words (Retry, Edit). The composer that wrote it keeps its words,
+// held, until the server has it, and empties only then. An answer held is its option marked ◷.
+const echoes = new Map();        // cid -> the echo of a held message, in the feed
+const heldAnswers = new Map();   // 'answer|<id>' or 'help|<id>' -> {cid, option}: what this person's held answer chose
+const composerCids = {};         // a composer -> the cid of the message it wrote and holds until the server takes it
+const COMPOSER_FORMS = { director: () => dForm, text: () => textPane, action: () => actionPane, file: () => filePane };
+const SENDING = new Set(['waiting', 'sending']);
+
+/** "written 14:02 · sent 14:06 (offline)" for a message its page held before sending it, else ''. */
+function heldWords(msg) {
+  if (!Number.isInteger(msg.held) || msg.held <= 0) return '';
+  return 'written ' + formatTime(msg.at - msg.held * 1000) + ' · sent ' + formatTime(msg.at) + ' (offline)';
+}
+
+function drawHeld(item) {
+  if (item.verb === 'message') drawEcho(item);
+  else if (item.verb === 'actionResponse' || item.verb === 'help:respond') drawHeldAnswer(item);
+  else if (item.verb === 'forward') drawHeldForward(item);
+}
+
+/** What a held message says, in one line. */
+function echoText(a) {
+  if (a.type === 'help') return 'Help — ' + (a.category || 'Other') + (a.text ? ': ' + a.text : '');
+  if (a.type === 'action') return '❓ ' + (a.text || '');
+  if (a.type === 'file') return '📄 ' + (a.filename || 'a file') + (a.caption ? ' — ' + a.caption : '');
+  return a.text || '';
+}
+function echoState(item) {
+  if (item.state === 'refused') return '△ Not sent: ' + item.words;
+  if (item.state === 'lost') return '△ ' + item.words;
+  return !AGM.outbox.online ? '◷ Waiting — it goes when the connection is back' : '◷ Sending';
+}
+
+function drawEcho(item) {
+  let node = echoes.get(item.cid);
+  if (!SENDING.has(item.state) && item.state !== 'refused' && item.state !== 'lost') {
+    if (node) node.remove();
+    echoes.delete(item.cid);
+    if (item.state === 'gone') notify('That message was removed.');
+    if (item.state === 'done' && item.args.type === 'help') notify('Help request sent — it stays up until someone marks it resolved.');
+  } else {
+    if (!node) {
+      node = document.createElement('article');
+      node.className = 'msg mine echo';
+      node.dataset.cid = item.cid;
+      node.dataset.type = item.args.type || 'text';
+      const head = document.createElement('header');
+      const from = document.createElement('span');
+      from.className = 'from';
+      from.textContent = NAME || 'You';
+      const st = document.createElement('span');
+      st.className = 'echo-state';
+      st.setAttribute('role', 'status');
+      head.append(from, st);
+      const body = document.createElement('div');
+      body.className = 'body';
+      const p = document.createElement('p');
+      p.className = 'echo-text';
+      body.appendChild(p);
+      const acts = document.createElement('div');
+      acts.className = 'echo-acts';
+      node.append(head, body, acts);
+      echoes.set(item.cid, node);
+      feed.appendChild(node);
+      scrollToBottom();
+    }
+    node.dataset.state = item.state;
+    node.querySelector('.echo-text').textContent = echoText(item.args);
+    node.querySelector('.echo-state').textContent = echoState(item);
+    const acts = node.querySelector('.echo-acts');
+    acts.textContent = '';
+    const act = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small'; b.textContent = label; b.onclick = fn; acts.appendChild(b); };
+    if (item.state === 'refused') { act('Retry', () => AGM.outbox.retry(item.cid)); act('Edit', () => editHeld(item)); }
+    if (item.state === 'lost') { act('Choose again', () => editHeld(item)); act('Remove', () => AGM.outbox.drop(item.cid)); }
+  }
+  composerFollows(item);
+}
+
+/** The composer that wrote a held message: held while it is sent, emptied once the server has it, free again otherwise. */
+function composerFollows(item) {
+  const c = item.tag && item.tag.composer;
+  if (!c || !COMPOSER_FORMS[c] || item.restored) return;
+  if (SENDING.has(item.state)) { composerCids[c] = item.cid; lockComposer(c, true); return; }
+  if (composerCids[c] !== item.cid) return;
+  if (item.state === 'done' || item.state === 'gone') clearComposer(c, item);
+  if (item.state !== 'refused') delete composerCids[c];
+  lockComposer(c, false);
+}
+function composerHeld(c) {
+  const cid = composerCids[c];
+  const it = cid ? AGM.outbox.items().find((i) => i.cid === cid) : null;
+  return !!it && SENDING.has(it.state);
+}
+/** Hold what a composer says: a refused message it still holds is replaced by what it says now. */
+function holdMessage(c, args, opts) {
+  if (composerCids[c]) AGM.outbox.drop(composerCids[c]);
+  AGM.outbox.hold('message', args, { ...(opts || {}), tag: { composer: c } });
+}
+function lockComposer(c, on) {
+  const form = COMPOSER_FORMS[c]();
+  if (!form) return;
+  form.dataset.held = on ? '1' : '';
+  form.setAttribute('aria-busy', on ? 'true' : 'false');
+  for (const f of form.querySelectorAll('input, textarea')) f.readOnly = on;
+  for (const b of form.querySelectorAll('button')) b.disabled = on;
+  if (!on && c === 'file') sendFileBtn.disabled = !pendingFile;
+}
+function clearComposer(c, item) {
+  const a = item.args;
+  if (c === 'director' && dInput.value.trim() === a.text) dInput.value = '';
+  if (c === 'text' && textInput.value.trim() === a.text) { textInput.value = ''; aiDrafted = false; setAiHint(''); }
+  if (c === 'action' && actionText.value.trim() === a.text) { actionText.value = ''; currentOptions = ['Yes', 'No']; renderOptionChips(); }
+  if (c === 'file' && pendingFile && pendingFile.file === item.file) {
+    pendingFile = null;
+    filePreview.hidden = true;
+    filePreview.innerHTML = '';
+    fileCaption.value = '';
+    fileInput.value = '';
+  }
+}
+/**
+ * Edit (or Choose again): the held message is let go and its words are in its composer to change and send, with what
+ * it carried beside them (its 🔥, the message it replied to), which the send took from the composer.
+ */
+function editHeld(item) {
+  const a = item.args;
+  const c = item.tag && item.tag.composer;
+  const kept = c && composerCids[c] === item.cid;
+  AGM.outbox.drop(item.cid);
+  if (c) setPriority({ director: dirPriBtn, text: textPriBtn, action: actionPriBtn, file: filePriBtn }[c], !!a.priority);
+  if (typeof a.replyTo === 'string' && a.replyTo) {
+    const parent = findMessage(a.replyTo);
+    replyState = { id: a.replyTo, name: parent ? (parent.from && parent.from.name) || 'system' : 'an earlier message', snippet: parent ? parent.text || parent.filename || '' : '' };
+    renderReplyChip();
+  }
+  const tab = (name) => { const t = document.querySelector('.compose-tabs .tab[data-tab="' + name + '"]'); if (t && !t.classList.contains('active')) t.click(); };
+  if (a.type === 'help') {
+    const r = document.querySelector('#helpCats input[value="' + CSS.escape(a.category || 'Other') + '"]');
+    if (r) r.checked = true;
+    document.getElementById('helpText').value = a.text || '';
+    document.getElementById('helpDialog').showModal();
+    return;
+  }
+  if (a.type === 'action') { tab('action'); if (!kept) { actionText.value = a.text || ''; currentOptions = Array.isArray(a.options) ? a.options.slice(0, 6) : ['Yes', 'No']; renderOptionChips(); } actionText.focus(); return; }
+  if (a.type === 'file') { tab('file'); if (!kept) fileCaption.value = a.caption || ''; notify('Choose the file again to send it.'); return; }
+  const field = c === 'director' || document.getElementById('researchCompose').hidden ? dInput : textInput;
+  if (c !== 'director') tab('text');
+  if (field && !kept) field.value = a.text || '';
+  if (field) field.focus();
+}
+
+function drawHeldAnswer(item) {
+  const a = item.args;
+  const key = (item.verb === 'actionResponse' ? 'answer|' : 'help|') + a.messageId;
+  const mine = heldAnswers.get(key);
+  if (SENDING.has(item.state)) heldAnswers.set(key, { cid: item.cid, option: item.verb === 'actionResponse' ? a.optionIndex : a.state });
+  else if (mine && mine.cid === item.cid) heldAnswers.delete(key);
+  if (item.state === 'refused') { notify(item.words, true); AGM.outbox.drop(item.cid); }
+  const m = findMessage(a.messageId);
+  const node = messagesById.get(a.messageId);
+  if (m && node) rerenderMessage(node, m);
+  if (m && m.pinned) refreshPinned();
+}
+
+function drawHeldForward(item) {
+  const to = (item.tag && item.tag.forward) || 'the other hall';
+  if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) notify('◷ Held — it is forwarded to ' + to + ' when the connection is back.');
+  else if (item.state === 'done' || item.state === 'gone') flashStatus('Forwarded to ' + to);
+  else if (item.state === 'refused') { notify(item.words, true); AGM.outbox.drop(item.cid); }
+}
+
+/** An answer to a prompt, held until the server has it: the option chosen, or -1 and a note in words. */
+function answerPrompt(messageId, optionIndex, note) {
+  AGM.outbox.hold('actionResponse', note === undefined ? { messageId, optionIndex } : { messageId, optionIndex, note });
 }
 
 // ---------------- Help requests: the category and the words; who is on the way, then who resolved it ----------------
@@ -637,7 +835,9 @@ function renderHelpBody(msg) {
     const act = (label, state) => {
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'btn small' + (state === 'coming' ? ' primary' : ''); b.textContent = label;
-      b.onclick = () => socket.emit('help:respond', { code: ROOM, messageId: msg.id, state }, (r) => { if (!r || !r.ok) notify((r && r.error) || 'Not sent.', true); });
+      const held = heldAnswers.get('help|' + msg.id);
+      if (held && held.option === state) { b.textContent = '◷ ' + label; b.dataset.state = 'sending'; }
+      b.onclick = () => AGM.outbox.hold('help:respond', { code: ROOM, messageId: msg.id, state });
       row.appendChild(b);
     };
     if (h.state === 'open') act('On my way', 'coming');
@@ -701,10 +901,10 @@ function renderActionBody(msg) {
     b.className = 'btn action-btn';
     b.dataset.idx = String(i);
     b.textContent = opt;
+    const held = heldAnswers.get('answer|' + msg.id);
+    if (held && held.option === i) { b.textContent = '◷ ' + opt; b.dataset.state = 'sending'; }
     b.disabled = readOnly();
-    b.onclick = () => {
-      socket.emit('actionResponse', { messageId: msg.id, optionIndex: i });
-    };
+    b.onclick = () => answerPrompt(msg.id, i);
     btnRow.appendChild(b);
   });
   // Both board and research can free-text reply to an action prompt.
@@ -716,13 +916,7 @@ function renderActionBody(msg) {
     other.textContent = 'Reply with text';
     other.onclick = () => {
       const note = prompt('Quick reply to research team:');
-      if (note && note.trim()) {
-        socket.emit('actionResponse', {
-          messageId: msg.id,
-          optionIndex: -1,
-          note: note.trim(),
-        });
-      }
+      if (note && note.trim()) answerPrompt(msg.id, -1, note.trim());
     };
     btnRow.appendChild(other);
   }
@@ -816,23 +1010,17 @@ function refreshPinned() {
     clone.classList.add('pinned-copy');
     clone.classList.remove('flash');
     const pb = clone.querySelector('.pin-btn');
-    if (pb) pb.onclick = () => socket.emit('pin', { messageId: m.id, pinned: false });
+    if (pb) pb.onclick = () => AGM.outbox.now('pin', { messageId: m.id, pinned: false }, saidIfNot('Not unpinned.'));
     const db = clone.querySelector('.del-btn');
     if (db) db.remove();
     clone.querySelectorAll('.action-btn').forEach((b) => {
       const idx = parseInt(b.dataset.idx, 10);
-      b.onclick = () => socket.emit('actionResponse', { messageId: m.id, optionIndex: idx });
+      b.onclick = () => answerPrompt(m.id, idx);
     });
     clone.querySelectorAll('.reply-text-btn').forEach((b) => {
       b.onclick = () => {
         const note = prompt('Quick reply to research team:');
-        if (note && note.trim()) {
-          socket.emit('actionResponse', {
-            messageId: m.id,
-            optionIndex: -1,
-            note: note.trim(),
-          });
-        }
+        if (note && note.trim()) answerPrompt(m.id, -1, note.trim());
       };
     });
     // Forward (↗), React (😊), and Reply (↩) buttons — re-bind
@@ -1204,7 +1392,7 @@ function refreshDocPinnedList() {
     unpin.textContent = '×';
     unpin.onclick = (e) => {
       e.stopPropagation();
-      socket.emit('pin', { messageId: m.id, pinned: false });
+      AGM.outbox.now('pin', { messageId: m.id, pinned: false }, saidIfNot('Not unpinned.'));
     };
     li.appendChild(open);
     li.appendChild(unpin);
@@ -1217,7 +1405,7 @@ function refreshDocPinnedList() {
 pinDocBtn?.addEventListener('click', () => {
   if (!currentDocMsgId) return;
   const isPinned = pinDocBtn.dataset.pinned === '1';
-  socket.emit('pin', { messageId: currentDocMsgId, pinned: !isPinned });
+  AGM.outbox.now('pin', { messageId: currentDocMsgId, pinned: !isPinned }, saidIfNot(isPinned ? 'Not unpinned.' : 'Not pinned.'));
 });
 dismissDocBtn?.addEventListener('click', dismissDoc);
 
@@ -1375,20 +1563,20 @@ function wirePriority(btnId) {
   if (!btn) return null;
   btn.addEventListener('click', () => {
     const on = btn.dataset.priority === '1';
-    btn.dataset.priority = on ? '0' : '1';
-    btn.classList.toggle('on', !on);
-    btn.title = btn.dataset.priority === '1'
-      ? 'High priority is ON — click to disable'
-      : 'Mark as high priority';
+    setPriority(btn, !on);
   });
   return btn;
+}
+function setPriority(btn, on) {
+  if (!btn) return;
+  btn.dataset.priority = on ? '1' : '0';
+  btn.classList.toggle('on', on);
+  btn.title = on ? 'High priority is ON — click to disable' : 'Mark as high priority';
 }
 function consumePriority(btn) {
   if (!btn) return false;
   const v = btn.dataset.priority === '1';
-  btn.dataset.priority = '0';
-  btn.classList.remove('on');
-  btn.title = 'Mark as high priority';
+  setPriority(btn, false);
   return v;
 }
 const dirPriBtn = wirePriority('dirPriorityBtn');
@@ -1402,8 +1590,8 @@ const dInput = document.getElementById('directorInput');
 dForm?.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = dInput.value.trim();
-  if (!text) return;
-  socket.emit('message', { type: 'text', text, priority: consumePriority(dirPriBtn), replyTo: consumeReplyTo() }, () => { dInput.value = ''; });
+  if (!text || composerHeld('director')) return;
+  holdMessage('director', { type: 'text', text, priority: consumePriority(dirPriBtn), replyTo: consumeReplyTo() });
 });
 
 // ---------------- Compose: research tabs ----------------
@@ -1422,13 +1610,8 @@ const textInput = document.getElementById('textInput');
 textPane?.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = textInput.value.trim();
-  if (!text) return;
-  socket.emit('message', { type: 'text', text, priority: consumePriority(textPriBtn), replyTo: consumeReplyTo(), aiDraft: aiDrafted }, () => {
-    textInput.value = '';
-    aiDrafted = false;
-    setAiHint('');
-    textInput.focus();
-  });
+  if (!text || composerHeld('text')) return;
+  holdMessage('text', { type: 'text', text, priority: consumePriority(textPriBtn), replyTo: consumeReplyTo(), aiDraft: aiDrafted });
 });
 
 // ---------------- AI: drafts for the research team (a person always edits and sends) ----------------
@@ -1523,14 +1706,8 @@ document.getElementById('aiOptionsBtn')?.addEventListener('click', () => {
 actionPane?.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = actionText.value.trim();
-  if (!text) return;
-  socket.emit('message', { type: 'action', text, options: currentOptions, priority: consumePriority(actionPriBtn), replyTo: consumeReplyTo() }, (res) => {
-    if (res?.ok) {
-      actionText.value = '';
-      currentOptions = ['Yes', 'No'];
-      renderOptionChips();
-    }
-  });
+  if (!text || composerHeld('action')) return;
+  holdMessage('action', { type: 'action', text, options: currentOptions.slice(), priority: consumePriority(actionPriBtn), replyTo: consumeReplyTo() });
 });
 
 const filePane = document.getElementById('filePane');
@@ -1555,30 +1732,45 @@ dropzone?.addEventListener('drop', (e) => {
   handleFiles(e.dataTransfer.files);
 });
 
+/**
+ * A file to this hall's uploads, with the upload token of the page's newest join: `{url, filename, mime}`, or why not —
+ * `{status, error}` when the server refused it, `{network: true}` when it never reached AGMessage.
+ */
+async function uploadFile(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  let res;
+  try { res = await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-AGM-Upload': UPLOAD_TOKEN } }); } catch { return { network: true, error: 'Can\'t reach AGMessage — the file goes when the connection is back.' }; }
+  let body = null;
+  try { body = await res.json(); } catch { /* not JSON: the status words stand */ }
+  if (!res.ok || !body || typeof body.url !== 'string') return { status: res.status, error: (body && body.error) || 'Upload failed.' };
+  return body;
+}
+
 async function handleFiles(files) {
   if (!files || !files.length) return;
   const file = files[0];
-  const fd = new FormData();
-  fd.append('file', file);
   filePreview.hidden = false;
   filePreview.textContent = `Uploading ${file.name}…`;
-  try {
-    const res = await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-AGM-Upload': UPLOAD_TOKEN } });
-    if (!res.ok) { let why = 'Upload failed.'; try { why = (await res.json()).error || why; } catch { /* not JSON: the status words stand */ } throw new Error(why); }
-    const data = await res.json();
-    pendingFile = data;
-    renderFilePreview();
-    sendFileBtn.disabled = false;
-  } catch (e) {
-    filePreview.textContent = e && e.message ? e.message : 'Upload failed.';
+  const up = await uploadFile(file);
+  if (up.url) {
+    pendingFile = { ...up, file };
+  } else if (up.network) {
+    // Not uploaded yet: the outbox uploads it with the message, once the connection is back.
+    pendingFile = { url: '', filename: file.name, mime: file.type || '', file, waiting: true };
+  } else {
+    filePreview.textContent = up.error;
     sendFileBtn.disabled = true;
+    return;
   }
+  renderFilePreview();
+  sendFileBtn.disabled = false;
 }
 
 function renderFilePreview() {
   if (!pendingFile) return;
   filePreview.innerHTML = '';
-  if (pendingFile.mime.startsWith('image/')) {
+  if (pendingFile.url && pendingFile.mime.startsWith('image/')) {
     const img = document.createElement('img');
     img.src = pendingFile.url;
     img.alt = pendingFile.filename;
@@ -1586,7 +1778,7 @@ function renderFilePreview() {
     filePreview.appendChild(img);
   } else {
     const p = document.createElement('p');
-    p.textContent = `📄 ${pendingFile.filename}`;
+    p.textContent = `📄 ${pendingFile.filename}` + (pendingFile.waiting ? ' — not uploaded yet: it goes with the message when the connection is back' : '');
     filePreview.appendChild(p);
   }
   const rm = document.createElement('button');
@@ -1605,9 +1797,9 @@ function renderFilePreview() {
 
 filePane?.addEventListener('submit', (e) => {
   e.preventDefault();
-  if (!pendingFile) return;
+  if (!pendingFile || composerHeld('file')) return;
   const caption = fileCaption.value.trim();
-  socket.emit('message', {
+  holdMessage('file', {
     type: 'file',
     url: pendingFile.url,
     filename: pendingFile.filename,
@@ -1615,16 +1807,7 @@ filePane?.addEventListener('submit', (e) => {
     caption,
     priority: consumePriority(filePriBtn),
     replyTo: consumeReplyTo(),
-  }, (res) => {
-    if (res?.ok) {
-      pendingFile = null;
-      filePreview.hidden = true;
-      filePreview.innerHTML = '';
-      fileCaption.value = '';
-      fileInput.value = '';
-      sendFileBtn.disabled = true;
-    }
-  });
+  }, { file: pendingFile.file, upload: uploadFile });
 });
 
 // ---------------- Helpers ----------------
@@ -1719,10 +1902,7 @@ function showForwardMenu(anchor, otherRooms, messageId) {
       item.innerHTML = "<span class=\"fwd-room-code primary\">" + escapeHtml(code) + "</span>";
     }
     item.onclick = () => {
-      socket.emit("forward", { messageId, targetRoom: code }, (res) => {
-        if (!res || !res.ok) alert((res && res.error) || "Forward failed");
-        else flashStatus("Forwarded to " + (name ? (name + " (" + code + ")") : code));
-      });
+      AGM.outbox.hold('forward', { messageId, targetRoom: code }, { tag: { forward: name ? name + ' (' + code + ')' : code } });
       menu.remove();
     };
     menu.appendChild(item);
@@ -1863,7 +2043,7 @@ function renderReactions(node, reactions) {
     pill.title = data.names.join(', ');
     pill.innerHTML = '<span>' + escapeHtml(emoji) + '</span> <small>' + escapeHtml(String(data.n)) + '</small>';
     pill.disabled = readOnly();
-    pill.onclick = () => socket.emit('react', { messageId: id, emoji });
+    pill.onclick = () => AGM.outbox.now('react', { messageId: id, emoji, on: !data.mine }, saidIfNot('Not changed.'));
     rx.appendChild(pill);
   }
   rx.hidden = false;
@@ -1882,7 +2062,9 @@ function showReactionPicker(anchor, messageId) {
     b.textContent = e;
     b.title = 'React with ' + e;
     b.onclick = () => {
-      socket.emit('react', { messageId, emoji: e });
+      const m = findMessage(messageId);
+      const mine = !!m && (m.reactions || []).some((r) => r.uid === MY_UID && r.emoji === e);
+      AGM.outbox.now('react', { messageId, emoji: e, on: !mine }, saidIfNot('Not changed.'));
       menu.remove();
     };
     menu.appendChild(b);
@@ -1963,11 +2145,9 @@ function consumeReplyTo() {
     if (e.submitter && e.submitter.value === 'cancel') return;
     e.preventDefault();
     const category = (box.querySelector('input:checked') || {}).value || 'Other';
-    socket.emit('message', { type: 'help', category, text: document.getElementById('helpText').value.trim() }, (r) => {
-      if (!r || !r.ok) { notify((r && r.error) || 'Not sent.', true); return; }
-      dlg.close();
-      notify('Help request sent — it stays up until someone marks it resolved.');
-    });
+    AGM.outbox.hold('message', { type: 'help', category, text: document.getElementById('helpText').value.trim() });
+    dlg.close();
+    if (!AGM.outbox.online) notify('Help request held — it goes as soon as the connection is back.');
   });
 })();
 
@@ -2017,14 +2197,14 @@ const Screens = (function () {
       head.append(pick, name, st);
       if (refused.has(d.id)) { const no = document.createElement('span'); no.className = 'screen-refused'; no.textContent = '✕ the last take did not reach it: ' + refused.get(d.id); head.append(no); }
       const acts = document.createElement('div'); acts.className = 'screen-acts';
-      acts.appendChild(btn('Identify', () => socket.emit('display:identify', { id: d.id }, (r) => notify(r && r.ok ? (r.screens ? 'Showing its name on ' + (r.screens > 1 ? 'its ' + r.screens + ' screens' : 'the screen') + ' for 6 seconds.' : 'No screen has this link open.') : (r && r.error) || 'Not sent.', !(r && r.ok)))));
+      acts.appendChild(btn('Identify', () => AGM.outbox.now('display:identify', { id: d.id }, (r) => notify(r && r.ok ? (r.screens ? 'Showing its name on ' + (r.screens > 1 ? 'its ' + r.screens + ' screens' : 'the screen') + ' for 6 seconds.' : 'No screen has this link open.') : (r && r.error) || 'Not sent.', !(r && r.ok)))));
       if (manage) {
         acts.appendChild(btn('Copy link', () => copy(location.origin + d.path)));
         const open = document.createElement('a'); open.className = 'btn ghost small'; open.href = d.path; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open';
         acts.appendChild(open);
-        acts.appendChild(btn('Rename', () => { const n = prompt('Name this screen', d.name); if (n) socket.emit('display:update', { id: d.id, name: n }, done('Renamed.')); }));
-        acts.appendChild(btn('New link', () => { if (confirm('Give ' + d.name + ' a new link? The old one stops at once, on every screen that has it.')) socket.emit('display:rotate', { id: d.id }, (r) => { if (r && r.ok) { copy(location.origin + r.path); notify('New link copied — open it on the screen.'); } else notify((r && r.error) || 'Not changed.', true); }); }));
-        acts.appendChild(btn('Remove', () => { if (confirm('Remove ' + d.name + '? Its link stops working.')) socket.emit('display:remove', { id: d.id }, done('Removed.')); }));
+        acts.appendChild(btn('Rename', () => { const n = prompt('Name this screen', d.name); if (n) AGM.outbox.now('display:update', { id: d.id, name: n }, done('Renamed.')); }));
+        acts.appendChild(btn('New link', () => { if (confirm('Give ' + d.name + ' a new link? The old one stops at once, on every screen that has it.')) AGM.outbox.now('display:rotate', { id: d.id }, (r) => { if (r && r.ok) { copy(location.origin + r.path); notify('New link copied — open it on the screen.'); } else notify((r && r.error) || 'Not changed.', true); }); }));
+        acts.appendChild(btn('Remove', () => { if (confirm('Remove ' + d.name + '? Its link stops working.')) AGM.outbox.now('display:remove', { id: d.id }, done('Removed.')); }));
       }
       li.append(head, what, acts);
       ul.appendChild(li);
@@ -2056,7 +2236,7 @@ const Screens = (function () {
     const ids = list.filter((d) => ticked.has(d.id)).map((d) => d.id);
     if (!ids.length) { notify('Tick at least one screen.', true); return; }
     const names = new Map(list.map((d) => [d.id, d.name]));   // as ticked, though the list may be re-read meanwhile
-    socket.emit('display:take', { ids, content }, (r) => {
+    AGM.outbox.now('display:take', { ids, content }, (r) => {
       const results = r && Array.isArray(r.results) ? r.results : [];
       if (!results.length) { notify((r && r.error) || 'Not sent.', true); return; }
       refused.clear();
@@ -2112,7 +2292,7 @@ const Screens = (function () {
   $('addScreenBtn').addEventListener('click', () => {
     const name = $('newScreenName').value.trim();
     if (!name) { notify('Name the screen first.', true); return; }
-    socket.emit('display:create', { code: ROOM, name }, (r) => {
+    AGM.outbox.now('display:create', { code: ROOM, name }, (r) => {
       if (!r || !r.ok) { notify((r && r.error) || 'Not added.', true); return; }
       $('newScreenName').value = '';
       ticked.add(r.display.id);
@@ -2123,7 +2303,7 @@ const Screens = (function () {
   $('holdingPick').addEventListener('change', () => { holdingChoice = $('holdingPick').value === holding ? null : $('holdingPick').value; });
   $('holdingSave').addEventListener('click', () => {
     const image = $('holdingPick').value;
-    socket.emit('display:hallHolding', { code: ROOM, image }, (r) => { if (r && r.ok) { holding = image; holdingChoice = null; } done('Holding image saved.')(r); });
+    AGM.outbox.now('display:hallHolding', { code: ROOM, image }, (r) => { if (r && r.ok) { holding = image; holdingChoice = null; } done('Holding image saved.')(r); });
   });
   socket.on('displays:changed', ({ code } = {}) => { if (code === ROOM && CAN_SCREENS) load(); });
   return { load, offer };
@@ -2172,7 +2352,7 @@ const ToStagewatch = (function () {
   const fail = (text) => { $('swError').textContent = text; $('swError').hidden = false; };
   $('swDest').addEventListener('change', sync);
   $('swNow').addEventListener('click', () => {
-    socket.emit('stage:send', { text: $('swText').value.trim(), urgency: $('swUrg').value, messageId: source && source.text === $('swText').value.trim() ? source.id : undefined }, (res) => {
+    AGM.outbox.now('stage:send', { text: $('swText').value.trim(), urgency: $('swUrg').value, messageId: source && source.text === $('swText').value.trim() ? source.id : undefined }, (res) => {
       if (!res || !res.ok) return fail((res && res.error) || 'Not sent.');
       dlg.close();
       notify(res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.');
@@ -2182,7 +2362,7 @@ const ToStagewatch = (function () {
     if (e.submitter && e.submitter.value === 'cancel') return;
     e.preventDefault();
     const text = $('swText').value.trim();
-    socket.emit('stage:propose', { text, destination: $('swDest').value, urgency: $('swUrg').value, messageId: source && source.text === text ? source.id : undefined }, (res) => {
+    AGM.outbox.now('stage:propose', { text, destination: $('swDest').value, urgency: $('swUrg').value, messageId: source && source.text === text ? source.id : undefined }, (res) => {
       if (!res || !res.ok) return fail((res && res.error) || 'Not sent.');
       dlg.close();
       notify('Asked — the show caller approves it in Stagewatch; its state shows on the message.');

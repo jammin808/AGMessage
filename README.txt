@@ -291,6 +291,18 @@ Troubleshooting
   touches anything; use the window that is already open. (A second copy
   on another port needs a folder of its own.)
 
+- "◷ Waiting — it goes when the connection is back" on a message: the page
+  is not connected. Leave it: it is sent by itself when the connection is
+  back. "△ Not sent: ..." says why AGMessage refused it: Retry sends it
+  again, Edit puts it back to change. "Not sent — choose the file again":
+  the page was reloaded before the file was uploaded (or the laptop no
+  longer has it); choose the file again.
+  "Not connected — AGMessage is reconnecting." on a pin, a reaction, a
+  screen's take or an admin's act: it was not sent; do it again once the
+  page is back. "No answer — check the connection.": AGMessage did not
+  answer in 5 seconds; its answer is shown if it comes later. Check
+  whether it was done before doing it again.
+
 - "The AGMessage laptop is short of disk space, so files are paused":
   the disk is nearly full (under 1 GB free), so new files are refused
   before they could fill it; messages, screens and everything else carry
@@ -373,6 +385,13 @@ Security
 Reliability and speed
   - Every change has a sequence number. A phone that drops off the Wi-Fi for a
     moment gets only what it missed when it reconnects, not the whole history.
+  - A message you send shows "◷ Sending" until AGMessage has it, and its box
+    keeps your words until then. Written while the connection is down, it
+    waits on the page ("◷ Waiting — it goes when the connection is back"),
+    also if the page is reloaded, and is sent when the connection is back,
+    however long that takes; everyone then sees "written 14:02 · sent 14:06
+    (offline)" on it, the halls board's help requests included. A message is
+    never posted twice, even when it is sent again after a drop.
   - Quick drop-and-rejoin no longer spams "left / joined"; comings and goings
     fold into one quiet line.
   - A watchdog runs the server: if it crashes or stops responding (no

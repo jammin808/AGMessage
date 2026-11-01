@@ -23,11 +23,15 @@ function getClient(apiKey) {
   return client;
 }
 
-/** Recent thread as compact lines for the model. */
+/**
+ * Recent thread as compact lines for the model. A message its page held before sending it (`held`, whole seconds) is
+ * dated as written and as sent, so a request written at 14:02 and sent at 14:06 is not read as asked at 14:06.
+ */
 function threadText(messages, max = 60) {
+  const hhmm = (ms) => new Date(ms).toISOString().slice(11, 16);
   return messages.filter((m) => m && m.type !== 'system').slice(-max).map((m) => {
     const who = m.from ? `${m.from.name} (${m.from.role})` : 'system';
-    const t = new Date(m.at).toISOString().slice(11, 16);
+    const t = hhmm(m.at) + (Number.isInteger(m.held) && m.held > 0 ? `, written ${hhmm(m.at - m.held * 1000)} and sent when the connection was back` : '');
     if (m.type === 'text') return `[${t}] ${who}: ${m.text}`;
     if (m.type === 'file') return `[${t}] ${who} shared file "${m.filename}"${m.caption ? ': ' + m.caption : ''}`;
     if (m.type === 'action') {
