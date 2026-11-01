@@ -14,6 +14,7 @@
 
   function loadSettings(patch) {
     socket.emit('admin:settings', patch || null, (s) => {
+      if (s && !s.ok && s.error && patch) alert(s.error);   // a key typed now and refused says why
       if (!s || !s.ok) return;
       $('aiModel').textContent = s.model;
       $('aiStatus').textContent = s.aiKeySet ? (s.aiFromEnv ? 'on (key from ANTHROPIC_API_KEY)' : 'on') : 'off — no key';
@@ -33,6 +34,7 @@
       $('acctCount').textContent = s.accounts ? s.accounts + ' account' + (s.accounts === 1 ? '' : 's') : 'No accounts yet — sign in on the start page to make the first admin';
       $('buildLine').textContent = s.build ? 'This is AGMessage ' + s.build + '.' : '';
       renderHealth(s.health);
+      renderAudit(s.health);
       renderPeers(s.peers || []);
     });
   }
@@ -100,6 +102,82 @@
     }
     if (h.tls && h.tls.link && h.tls.link.changed) parts.push('⚠ CERTIFICATE CHANGED — Stagewatch\'s certificate is not the one pinned; the link is refused until you accept it');
     $('healthLine').textContent = parts.join(' · ');
+  }
+
+  // ---------------------------------------------------------------- the audit log on Health
+  // Whether this page is the laptop's own token, signed in by this run: only it is offered Accept, which takes the token
+  // typed again. Anyone else the admin page admits is told where to accept.
+  let tokenHere = false;
+  let lastHealth = null;
+  fetch('/api/admin/me').then((r) => r.json()).then((me) => { tokenHere = !!(me && me.token); if (lastHealth) renderAudit(lastHealth); }).catch(() => { /* no Accept offered */ });
+  const SHAPE = { intact: '✓', linked: '◇', unvouched: '△', broken: '✕' };
+  const RANK = { intact: 0, linked: 1, unvouched: 2, broken: 3 };
+  /** The first keyed start's question about the older entries, asked of the person at the laptop. */
+  const question = (f) => f.words.replace(/, and nothing vouches for them until they are accepted$/, '') + '; anyone who could write this folder could have rewritten them. If this log has been in your hands, accept them.';
+  function renderAudit(h) {
+    const a = h && h.saves && h.saves.stores && h.saves.stores.audit;
+    if (!a) return;
+    lastHealth = h;
+    const list = Array.isArray(a.attention) ? a.attention : [];
+    let mark = 'intact';
+    for (const f of list) if (RANK[f.mark] > RANK[mark]) mark = f.mark;
+    $('auditLine').dataset.mark = mark;
+    $('auditLine').textContent = 'Audit log: ' + SHAPE[mark] + ' ' + (a.keyless ? 'not keyed this run' : 'keyed (key ' + a.kid + ')') + (list.length ? ' · ' + list.length + ' to see to' : ' · nothing to accept') + (a.headLag > 1 ? ' · head ' + a.headLag + ' entries behind' : '');
+    const ul = $('auditFindings');
+    ul.textContent = '';
+    for (const f of list) {
+      const li = document.createElement('li');
+      li.dataset.mark = SHAPE[f.mark] ? f.mark : 'broken';
+      li.textContent = (SHAPE[f.mark] || '✕') + ' ' + (f.first ? question(f) : f.words);
+      ul.appendChild(li);
+    }
+    // A check broken at a line is never accepted, and nothing else is while it stands.
+    const acceptable = list.some((f) => f.id && f.id !== 'more') && !list.some((f) => f.kind === 'broken');
+    $('auditAcceptRow').hidden = !(acceptable && tokenHere);
+    $('auditWhere').hidden = !(acceptable && !tokenHere);
+  }
+  let shown = null;   // the check the dialog was drawn from: its digest goes with the Accept
+  async function openAccept() {
+    $('acceptError').hidden = true;
+    $('acceptToken').value = '';
+    const ul = $('acceptList');
+    ul.textContent = 'Checking the whole log…';
+    $('acceptDialog').showModal();
+    const r = await fetch('/api/audit/verify').then((x) => x.json()).catch(() => null);
+    ul.textContent = '';
+    if (!r || !Array.isArray(r.findings)) { ul.textContent = 'The log could not be checked: ' + ((r && r.error) || 'no answer'); return; }
+    if (r.why) { ul.textContent = '✕ ' + r.words + ' — a broken entry cannot be accepted.'; return; }
+    shown = r;
+    let used = 0;   // characters of the accept's target the ticked ids take (it holds 80)
+    for (const f of r.findings) {
+      const li = document.createElement('li');
+      li.dataset.mark = SHAPE[f.mark] ? f.mark : 'broken';
+      if (f.held) { li.textContent = (SHAPE[f.mark] || '✕') + ' ' + f.words + ' — not on disk yet; it can be accepted once it is'; ul.appendChild(li); continue; }
+      const label = document.createElement('label'); label.className = 'check';
+      const box = document.createElement('input'); box.type = 'checkbox'; box.dataset.id = f.id;
+      const shape = document.createElement('span'); shape.textContent = SHAPE[f.mark] || '✕';
+      const words = document.createElement('span'); words.textContent = f.first ? question(f) : f.words;
+      label.append(box, shape, words);
+      li.appendChild(label);
+      // △ starts ticked while the target has room; ✕ starts unticked, and ticking it asks for its own confirmation.
+      if (f.mark !== 'broken' && used + f.id.length + 1 <= 81) { box.checked = true; used += f.id.length + 1; }
+      if (f.mark === 'broken') {
+        const line = document.createElement('label'); line.className = 'check confirm-line'; line.hidden = true;
+        const sure = document.createElement('input'); sure.type = 'checkbox'; sure.dataset.confirm = f.id;
+        const say = document.createElement('span'); say.textContent = 'Accept that ' + f.words + '? From now on it reads ◇, and what it names cannot be brought back.';
+        line.append(sure, say);
+        li.appendChild(line);
+        box.addEventListener('change', () => { line.hidden = !box.checked; if (!box.checked) sure.checked = false; });
+      }
+      box.addEventListener('change', () => {
+        const ids = [...ul.querySelectorAll('input[data-id]:checked')].map((x) => x.dataset.id);
+        if (ids.join(',').length > 80) { box.checked = false; box.dispatchEvent(new Event('change')); $('acceptMore').hidden = false; }
+      });
+      ul.appendChild(li);
+    }
+    $('acceptMore').hidden = r.findings.filter((f) => !f.held).map((f) => f.id).join(',').length <= 80;
+    if (!r.findings.length) ul.textContent = 'Nothing is open: ' + r.words;
+    $('acceptToken').focus();
   }
 
   function renderPeers(peers) {
@@ -182,6 +260,21 @@
     if (socket.connected) loadSettings();
 
     setInterval(() => { if (socket.connected) loadSettings(); }, 5000);   // health, clock and peers stay current
+    $('auditAcceptBtn').onclick = () => { openAccept(); };
+    $('acceptCancel').onclick = () => { $('acceptDialog').close(); };
+    $('acceptForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const ul = $('acceptList');
+      const ids = [...ul.querySelectorAll('input[data-id]:checked')].map((x) => x.dataset.id);
+      const confirm = [...ul.querySelectorAll('input[data-confirm]:checked')].map((x) => x.dataset.confirm);
+      const err = $('acceptError');
+      if (!shown || !ids.length) { err.textContent = 'Tick what to accept.'; err.hidden = false; return; }
+      const r = await fetch('/api/audit/accept', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: $('acceptToken').value.trim(), digest: shown.digest, ids, confirm }) }).then((x) => x.json()).catch(() => ({ ok: false, error: 'No answer from the server.' }));
+      if (!r.ok) { err.textContent = r.error || 'Not accepted.'; err.hidden = false; return; }
+      $('acceptDialog').close();
+      $('auditLine').textContent = r.head === 'saved' ? 'Accepted: written in the log (entry ' + r.entry + ').' : (r.words || 'Not accepted yet.');
+      setTimeout(() => loadSettings(), 300);
+    });
     $('ctxCopy').onclick = () => { const t = $('ctxToken').textContent; if (navigator.clipboard && t && t !== '—') navigator.clipboard.writeText(t); };
     $('ctxNew').onclick = () => loadSettings({ newContextToken: true });
     $('requireHttps').onchange = () => loadSettings({ requireHttps: $('requireHttps').checked });

@@ -410,6 +410,8 @@ class TokenSessions {
     this.tag = String(tag);
     this.lane = new WriteLane(file, { delayMs: 100, keepBak: true, mode: 0o600 });
     this.map = new Map();   // sha256(sid) -> {h, created}
+    // The sign-ins this run made, by their hash: one read from the file never counts as made here, whoever wrote it.
+    this.minted = new Set();
     const data = readJsonWithBak(file);
     const now = Date.now();
     if (data && data.k === this.tag && Array.isArray(data.sessions)) {
@@ -426,9 +428,13 @@ class TokenSessions {
     const sid = crypto.randomBytes(24).toString('hex');
     const h = sha256(sid);
     this.map.set(h, { h, created: now });
+    this.minted.add(h);
     this.save();
     return sid;
   }
+
+  /** Whether a cookie's id is a sign-in that still holds and that this run made (not one read back at start). */
+  mintedHere(sid, now = Date.now()) { return this.has(sid, now) && this.minted.has(sha256(sid)); }
 
   /** Whether a cookie's id is a sign-in that still holds. */
   has(sid, now = Date.now()) {
@@ -439,7 +445,7 @@ class TokenSessions {
     return true;
   }
 
-  destroy(sid) { if (typeof sid === 'string' && this.map.delete(sha256(sid))) this.save(); }
+  destroy(sid) { if (typeof sid === 'string' && this.map.delete(sha256(sid))) { this.minted.delete(sha256(sid)); this.save(); } }
 }
 
 module.exports = {

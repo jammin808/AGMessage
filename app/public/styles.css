@@ -1734,10 +1734,23 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .acct-table th { text-align: left; font-size: .8rem; color: var(--muted); font-weight: 600; padding: .4rem .6rem; border-bottom: 1px solid var(--border); }
 .acct-table td { padding: .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
 .acct-table tr.off td { opacity: .55; }
-.chain-state[data-ok="1"] { color: var(--ok); font-weight: 600; }
-.chain-state[data-ok="0"] { color: var(--danger); font-weight: 600; }
+/* The audit log's four marks: ✓ checked under this key, ◇ linked and accepted, △ not vouched for, ✕ did not check. The
+   shape is always drawn beside the colour, so no state is told by colour alone. */
+[data-mark="intact"] { --mark: var(--ok); }
+[data-mark="linked"] { --mark: var(--ink); }
+[data-mark="unvouched"] { --mark: var(--warn); }
+[data-mark="broken"] { --mark: var(--danger); }
+.chain-state[data-mark], .audit-line[data-mark] { color: var(--mark, inherit); font-weight: 600; }
+.audit-mark { color: var(--mark); font-weight: 700; text-align: center; }
+.audit-findings { list-style: none; margin: .2rem 0 .4rem; padding: 0; font-size: .88rem; }
+.audit-findings li { color: var(--mark, inherit); margin: .15rem 0; }
+.accept-list { list-style: none; margin: .4rem 0 .8rem; padding: 0; max-height: 50vh; overflow-y: auto; }
+.accept-list li { padding: .45rem 0; border-bottom: 1px solid var(--border); }
+.accept-list li[data-mark] > .check > span:first-of-type { color: var(--mark); font-weight: 700; }
+.accept-list .confirm-line { margin: .3rem 0 0 1.6rem; }
 .audit-list { list-style: none; margin: .6rem 0 0; padding: 0; font-size: .88rem; }
-.audit-row { display: grid; grid-template-columns: 11rem 8rem 13rem 1fr; gap: .3rem .8rem; padding: .45rem 0; border-bottom: 1px solid var(--border); }
+.audit-row { display: grid; grid-template-columns: 1.4rem 11rem 8rem 13rem 1fr; gap: .3rem .8rem; padding: .45rem 0; border-bottom: 1px solid var(--border); }
+.audit-row .audit-bad { grid-column: 2 / -1; color: var(--danger); }
 .audit-row time { color: var(--muted); font-variant-numeric: tabular-nums; }
 .audit-row[data-action="login"] .audit-action { color: var(--muted); }
 .audit-row[data-action="user"] .audit-action, .audit-row[data-action="settings"] .audit-action { color: var(--warn); font-weight: 600; }

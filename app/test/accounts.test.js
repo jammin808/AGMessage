@@ -1,6 +1,6 @@
 'use strict';
 // Accounts, rights and the audit trail: the permission model (pure), password hashing and policy, sessions, the
-// hash chain, and the whole of it end to end — first admin, sign-in, managing accounts, joining a hall as an account,
+// chain with a key, and the whole of it end to end — first admin, sign-in, managing accounts, joining a hall as an account,
 // rights changed under a live socket, the origin check, and the audit log that records it all.
 const test = require('node:test');
 const assert = require('node:assert');
@@ -11,9 +11,8 @@ const os = require('os');
 const path = require('path');
 const rbac = require('../lib/rbac');
 const acc = require('../lib/accounts');
-const { AuditLog, hashOf, GENESIS } = require('../lib/audit');
 const guard = require('../lib/guard');
-const { startServer, stopServer, api, connect, emit, once, wait, until, fakeStagewatch, TOKEN } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, once, wait, until, fakeStagewatch, TOKEN, FIXTURE_KEY, auditLog, serverAudit, chainOf, keyedChainOf, acceptAll, brief } = require('./helpers');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
@@ -219,6 +218,10 @@ test('token sessions: only a hash on disk, kept across a restart under the same 
   a.flush();
   assert.ok(!fs.readFileSync(file, 'utf8').includes(sid), 'the cookie itself is never stored');
   assert.ok(new acc.TokenSessions(file, 'tag-one').has(sid), 'a restart with the same token keeps it');
+  // Made here: only the sign-ins this run made, never one read back from the file (whoever wrote it there).
+  assert.ok(a.mintedHere(sid), 'this run made it');
+  assert.ok(!new acc.TokenSessions(file, 'tag-one').mintedHere(sid), 'read back at a restart: not made by that run');
+  assert.ok(!a.mintedHere(gone) && !a.mintedHere('') && !a.mintedHere(undefined), 'signed out, or no sign-in');
   assert.ok(!new acc.TokenSessions(file, 'tag-two').has(sid), 'a new token ends it');
   assert.ok(!a.has(sid, Date.now() + acc.TOKEN_SESSION_MS), 'a day at most');
   assert.ok(!a.has(sid) && !a.has('') && !a.has(undefined));
@@ -339,41 +342,44 @@ test('limits: a flood of new addresses never hands back an allowance used up, no
 });
 
 // ---------------------------------------------------------------- the audit chain
-test('audit: hash-chained; an edited, removed or reordered line is found; no secret fields', async () => {
+test('audit: chained with a key; an edited, removed or reordered line is found; no secret fields', async () => {
   const dir = tmp('agm-audit-');
   const file = path.join(dir, 'audit.jsonl');
-  const log = new AuditLog(file);
+  const log = auditLog(file);
   for (let i = 0; i < 5; i++) log.write({ t: 'account', id: 'a1', name: 'sam' }, 'display.take', 'D1', 'message ' + i, '10.0.0.' + i);
-  assert.deepEqual(await log.verify(), { ok: true, entries: 5 });
-  const reopened = new AuditLog(file);
+  assert.deepEqual(brief(await log.verify()), { ok: true, mark: 'intact', entries: 5 });
+  log.flush();
+  const reopened = auditLog(file);
   reopened.write({ t: 'system' }, 'boot', '', 'restarted');
-  assert.deepEqual(await reopened.verify(), { ok: true, entries: 6 }, 'the chain goes on across a restart');
+  assert.deepEqual(brief(await reopened.verify()), { ok: true, mark: 'intact', entries: 6 }, 'the chain goes on across a restart');
   assert.equal(reopened.latest(2)[0].action, 'boot', 'newest first');
+  reopened.flush();
 
   const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
   const edited = lines.slice(); edited[2] = edited[2].replace('message 2', 'message X');
   fs.writeFileSync(file, edited.join('\n') + '\n');
-  assert.match((await new AuditLog(file).verify()).why, /changed after it was written/);
+  assert.match((await auditLog(file).verify()).why, /changed after it was written/);
   fs.writeFileSync(file, lines.filter((_, i) => i !== 3).join('\n') + '\n');
-  assert.equal((await new AuditLog(file).verify()).ok, false, 'a removed line breaks the chain');
+  assert.equal((await auditLog(file).verify()).mark, 'broken', 'a removed line breaks the chain');
   const swapped = lines.slice(); [swapped[1], swapped[2]] = [swapped[2], swapped[1]];
   fs.writeFileSync(file, swapped.join('\n') + '\n');
-  assert.equal((await new AuditLog(file).verify()).ok, false, 'reordered lines break it');
-  const e = new AuditLog(path.join(dir, 'b.jsonl')).write({ t: 'account', id: 'a1', name: 'sam', password: 'x' }, 'login', 'sam', 'ok', '', { token: 'y' });
+  assert.equal((await auditLog(file).verify()).mark, 'broken', 'reordered lines break it');
+  const e = auditLog(path.join(dir, 'b.jsonl')).write({ t: 'account', id: 'a1', name: 'sam', password: 'x' }, 'login', 'sam', 'ok', '', { token: 'y' });
   assert.deepEqual(Object.keys(e.actor).sort(), ['id', 'name', 't'], 'only the listed fields are kept');
 });
 
 const fiveEntries = () => {
   const file = path.join(tmp('agm-audit-'), 'audit.jsonl');
-  const log = new AuditLog(file);
+  const log = auditLog(file);
   for (let i = 0; i < 5; i++) log.write({ t: 'account', id: 'a1', name: 'sam' }, 'login', 'sam', 'entry ' + i);
+  log.flush();
   return { file, log, lines: fs.readFileSync(file, 'utf8').trim().split('\n') };
 };
 
 test('audit: the first line, the last line and the whole file are part of the chain', async () => {
   const a = fiveEntries();
   fs.writeFileSync(a.file, a.lines.slice(1).join('\n') + '\n');
-  const first = await new AuditLog(a.file).verify();
+  const first = await auditLog(a.file).verify();
   assert.equal(first.ok, false, 'the oldest line removed: ' + JSON.stringify(first));
   assert.equal(first.brokenAt, 1);
   assert.match(first.why, /entry 1 is missing/);
@@ -395,31 +401,25 @@ test('audit: the first line, the last line and the whole file are part of the ch
   assert.match(after.why, /entries 1 to 5 are missing/);
 });
 
-/** A whole chain of `n` entries from the genesis hash, as the log writes them (fast: no file per entry). */
-function chainOf(n, words = (i) => 'Lectern screen ' + (i % 4) + ' \u2192 message \u201cFive minutes left\u201d', at = 1_700_000_000_000) {
-  let prev = GENESIS;
-  const out = [];
-  for (let i = 1; i <= n; i++) {
-    const e = { seq: i, at: at + i, actor: { t: 'account', id: 'a1', name: 'sam' }, action: 'display.take', target: 'dlectern1', words: words(i), ip: '10.0.0.9', prev };
-    e.h = hashOf(e);
-    prev = e.h;
-    out.push(JSON.stringify(e));
-  }
-  return out.join('\n') + '\n';
-}
-
 test('audit: a rotated log is checked with the current one as one chain', async () => {
   const dir = tmp('agm-audit-');
   const file = path.join(dir, 'audit.jsonl');
   const text = chainOf(36_000, (i) => 'take ' + i + ' ' + 'x'.repeat(300));   // just over 20 MB
   assert.ok(text.length > 20 * 1024 * 1024);
   fs.writeFileSync(file, text);
-  const log = new AuditLog(file);
+  const log = auditLog(file);
   log.write({ t: 'system' }, 'boot', '', 'the first entry of the next file');
   const rotated = fs.readdirSync(dir).filter((f) => /^audit-.+\.jsonl$/.test(f));
   assert.equal(rotated.length, 1, 'rotated at 20 MB');
-  assert.deepEqual(await log.verify(), { ok: true, entries: 36_001 }, 'both files, one chain');
-  assert.deepEqual(await new AuditLog(file).verify(), { ok: true, entries: 36_001 }, 'and after a restart');
+  // The 0.5.1 entries read △ until accepted; the log opens with `audit.keyed`, so 36,000 + the boundary + the boot.
+  const both = await log.verify();
+  assert.deepEqual(brief(both), { ok: false, mark: 'unvouched', entries: 36_002 }, 'both files, one chain');
+  assert.deepEqual(both.findings.map((f) => [f.id, f.kind]), [['s1-36000', 'plain']]);
+  log.flush();
+  assert.deepEqual(brief(await auditLog(file).verify()), { ok: false, mark: 'unvouched', entries: 36_002 }, 'and after a restart');
+  assert.equal((await acceptAll(log)).ok, true);
+  assert.deepEqual(brief(await log.verify()), { ok: false, mark: 'linked', entries: 36_003 }, 'accepted: ◇, never ✓');
+  log.flush();
 
   const old = path.join(dir, rotated[0]);
   const lines = fs.readFileSync(old, 'utf8').split('\n');
@@ -439,7 +439,7 @@ test('audit: a rotated log is checked with the current one as one chain', async 
 test('audit: one failed write is kept and written with the next, so the chain on disk stays whole', async () => {
   const dir = tmp('agm-audit-');
   const file = path.join(dir, 'audit.jsonl');
-  const log = new AuditLog(file);
+  const log = auditLog(file);
   log.write({ t: 'system' }, 'boot', '', 'first');
   fs.renameSync(file, file + '.held');
   fs.mkdirSync(file);   // the next open fails, as a full disk or a held file does
@@ -449,17 +449,17 @@ test('audit: one failed write is kept and written with the next, so the chain on
   fs.rmdirSync(file);
   fs.renameSync(file + '.held', file);
   const waiting = await log.verify();
-  assert.deepEqual(waiting, { ok: true, entries: 1, unwritten: 1 }, 'what is on disk is whole, and one entry waits');
+  assert.deepEqual(brief(waiting), { ok: true, mark: 'intact', entries: 1, unwritten: 1 }, 'what is on disk is whole, and one entry waits');
   log.write({ t: 'system' }, 'x', '', 'third');
   log.write({ t: 'system' }, 'x', '', 'fourth');
   assert.equal(log.unwritten, 0);
   assert.equal(log.lastError, null);
-  assert.deepEqual(await log.verify(), { ok: true, entries: 4 });
+  assert.deepEqual(brief(await log.verify()), { ok: true, mark: 'intact', entries: 4 });
   assert.ok(fs.readFileSync(file, 'utf8').includes('second, while the disk would not take it'), 'the entry that failed is on disk now');
 });
 
 test('audit: an entry still waiting when the server stops is put on disk by the stop, not lost with it', async (t) => {
-  const log = new AuditLog(path.join(tmp('agm-audit-'), 'audit.jsonl'));
+  const log = auditLog(path.join(tmp('agm-audit-'), 'audit.jsonl'));
   log.write({ t: 'system' }, 'boot', '', 'first');
   fs.renameSync(log.file, log.file + '.held'); fs.mkdirSync(log.file);
   log.write({ t: 'account', id: 'a1', name: 'sam' }, 'login', 'sam', 'second, while the disk would not take it');
@@ -467,7 +467,7 @@ test('audit: an entry still waiting when the server stops is put on disk by the 
   fs.rmdirSync(log.file); fs.renameSync(log.file + '.held', log.file);
   assert.equal(log.flush(), true);
   assert.equal(log.unwritten, 0);
-  assert.deepEqual(await log.verify(), { ok: true, entries: 2 });
+  assert.deepEqual(brief(await log.verify()), { ok: true, mark: 'intact', entries: 2 });
 
   // End to end: the disk refuses one audited action; it is back by the time the server stops (SIGTERM).
   const srv = await startServer();
@@ -483,13 +483,13 @@ test('audit: an entry still waiting when the server stops is put on disk by the 
   await stopServer(srv.child); up = false;
   const actions = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).action);
   assert.deepEqual(actions, ['login.token', 'login.token'], 'the second sign-in is on disk after the stop');
-  assert.deepEqual(await new AuditLog(file).verify(), { ok: true, entries: actions.length });
+  assert.deepEqual(brief(await serverAudit(srv.dataDir).verify()), { ok: true, mark: 'intact', entries: actions.length }, 'checked under the server\'s own key and records');
 });
 
 test('audit: a write the disk takes only part of is cut back, on Windows too, and the chain on disk stays whole', async () => {
   const dir = tmp('agm-audit-');
   const file = path.join(dir, 'audit.jsonl');
-  const log = new AuditLog(file);
+  const log = auditLog(file);
   log.write({ t: 'system' }, 'boot', '', 'first');
   const before = fs.readFileSync(file, 'utf8');
   // As on Windows: a handle opened for appending writes only at the end and cannot cut the file back.
@@ -517,52 +517,65 @@ test('audit: a write the disk takes only part of is cut back, on Windows too, an
   } finally { Object.assign(fs, { openSync, writeSync, ftruncateSync }); }
   assert.equal(log.unwritten, 0);
   assert.deepEqual(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).words), ['first', 'second, while the disk was full', 'third']);
-  assert.deepEqual(await log.verify(), { ok: true, entries: 3 });
+  assert.deepEqual(brief(await log.verify()), { ok: true, mark: 'intact', entries: 3 });
 });
 
 for (const [what, tail] of [['a half-written last line', '{"seq":4,"at":17'], ['a NUL-filled tail (NTFS after a power cut)', Buffer.alloc(180)]]) {
   test('audit: ' + what + ' is cut at the next start, the cut is an entry, and the chain goes on whole', async () => {
     const dir = tmp('agm-audit-');
     const file = path.join(dir, 'audit.jsonl');
-    const log = new AuditLog(file);
+    const log = auditLog(file);
     for (let i = 0; i < 3; i++) log.write({ t: 'system' }, 'x', '', 'message ' + i);
+    log.flush();
     fs.appendFileSync(file, tail);
-    const again = new AuditLog(file);
+    const again = auditLog(file);
     again.write({ t: 'account', id: 'a1', name: 'ana' }, 'login', 'ana', 'signed in after the restart');
     const entries = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
     assert.deepEqual(entries.map((e) => e.action), ['x', 'x', 'x', 'audit.repair', 'login'], 'every line whole, the repair before the sign-in');
-    assert.match(entries[3].words, /half-written last line \(\d+ bytes\)/);
-    assert.deepEqual(await again.verify(), { ok: true, entries: 5 });
+    assert.match(entries[3].words, /half-written last line \(\d+ bytes\) was cut after an unclean stop, kept aside as audit-torn-/);
+    assert.deepEqual(brief(await again.verify()), { ok: true, mark: 'intact', entries: 5 });
+    const aside = fs.readdirSync(dir).filter((f) => /^audit-torn-.+\.bin$/.test(f));
+    assert.equal(aside.length, 1, 'the cut bytes are kept aside');
+    assert.deepEqual(fs.readFileSync(path.join(dir, aside[0])), Buffer.from(tail), 'byte for byte');
   });
 }
 
-test('audit: checking a full-size log keeps the event loop turning, one check at a time, and still finds an edited line', async () => {
-  const dir = tmp('agm-audit-');
-  const file = path.join(dir, 'audit.jsonl');
-  const n = 56_000;
-  fs.writeFileSync(file, chainOf(n));   // about 20 MB, just under the rotation size
-  const log = new AuditLog(file);
-  let turns = 0;
-  let done = false;
-  let worst = 0;
-  let lastTick = performance.now();
-  const spin = () => { if (done) return; const now = performance.now(); worst = Math.max(worst, now - lastTick); lastTick = now; turns++; setImmediate(spin); };
-  setImmediate(spin);
-  const check = log.verify();
-  assert.strictEqual(log.verify(), check, 'a second click shares the running check');
-  const r = await check;
-  done = true;
-  assert.deepEqual(r, { ok: true, entries: n });
-  assert.ok(turns >= 40, 'the loop turned ' + turns + ' times during the check');
-  assert.ok(worst < 250, 'the longest the loop waited: ' + Math.round(worst) + ' ms');
+// Two seeds: the 0.5.1 chain, which reads △ with its one plain finding until accepted, and a chain keyed under this
+// machine's key, whose every entry is MAC-checked and which reads ✓.
+for (const seed of ['plain', 'keyed']) {
+  test('audit: checking a full-size ' + seed + ' log keeps the event loop turning, one check at a time, and still finds an edited line', async () => {
+    const dir = tmp('agm-audit-');
+    const file = path.join(dir, 'audit.jsonl');
+    const n = 56_000;
+    if (seed === 'plain') fs.writeFileSync(file, chainOf(n));   // about 20 MB, just under the rotation size
+    else keyedChainOf(n, { file });
+    const log = auditLog(file);
+    log.open();   // the server's start, before anyone can ask for a check
+    let turns = 0;
+    let done = false;
+    let worst = 0;
+    let lastTick = performance.now();
+    const spin = () => { if (done) return; const now = performance.now(); worst = Math.max(worst, now - lastTick); lastTick = now; turns++; setImmediate(spin); };
+    setImmediate(spin);
+    const check = log.verify();
+    assert.strictEqual(log.verify(), check, 'a second click shares the running check');
+    const r = await check;
+    done = true;
+    if (seed === 'plain') {
+      assert.deepEqual(brief(r), { ok: false, mark: 'unvouched', entries: n + 1 }, 'the seed and its `audit.keyed`');
+      assert.deepEqual(r.findings.map((f) => [f.id, f.kind, f.first]), [['s1-' + n, 'plain', true]]);
+    } else assert.deepEqual(brief(r), { ok: true, mark: 'intact', entries: n });
+    assert.ok(turns >= 40, 'the loop turned ' + turns + ' times during the check');
+    assert.ok(worst < 250, 'the longest the loop waited: ' + Math.round(worst) + ' ms');
 
-  const lines = fs.readFileSync(file, 'utf8').split('\n');
-  lines[100] = lines[100].replace('Lectern', 'Foyer');
-  fs.writeFileSync(file, lines.join('\n'));
-  const edited = await log.verify();
-  assert.deepEqual([edited.ok, edited.brokenAt], [false, 101]);
-  assert.match(edited.why, /changed after it was written/);
-});
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    lines[100] = lines[100].replace('Lectern', 'Foyer');
+    fs.writeFileSync(file, lines.join('\n'));
+    const edited = await log.verify();
+    assert.deepEqual([edited.ok, edited.mark, edited.brokenAt], [false, 'broken', 101]);
+    assert.match(edited.why, /changed after it was written/);
+  });
+}
 
 // ---------------------------------------------------------------- end to end
 test('accounts end to end: first admin, sign-in, rights, joining a hall, revocation, origin, audit', async (t) => {
@@ -1073,10 +1086,17 @@ test('a change to accounts.json that cannot be written is retried until it lands
   assert.match(login.body.error, /don't match/, 'in the words a wrong password gets: a refusal never says the password was right');
 });
 
-test('six quick clicks on Check the log share one check and do not hold up anyone else', async (t) => {
+for (const seed of ['plain', 'keyed']) test('six quick clicks on Check the log of a full-size ' + seed + ' log share one check and do not hold up anyone else', async (t) => {
   const dataDir = tmp('agm-e2e-');
   const n = 56_000;
-  fs.writeFileSync(path.join(dataDir, 'audit.jsonl'), chainOf(n));
+  if (seed === 'plain') fs.writeFileSync(path.join(dataDir, 'audit.jsonl'), chainOf(n));
+  else {
+    // The server's own key and records, as a laptop that wrote this log keeps them.
+    const keyDir = dataDir + '-keys';
+    fs.mkdirSync(keyDir, { recursive: true });
+    fs.writeFileSync(path.join(keyDir, 'machine.key'), FIXTURE_KEY.toString('base64'));
+    keyedChainOf(n, { file: path.join(dataDir, 'audit.jsonl'), records: path.join(keyDir, 'audit') });
+  }
   const srv = await startServer({ AGM_DATA_DIR: dataDir });
   t.after(async () => { await stopServer(srv.child); });
   const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
@@ -1094,7 +1114,8 @@ test('six quick clicks on Check the log share one check and do not hold up anyon
   await probe;
   for (const c of checks) {
     assert.equal(c.status, 200);
-    assert.equal(c.body.ok, true, JSON.stringify(c.body));
+    assert.equal(c.body.mark, seed === 'plain' ? 'unvouched' : 'intact', JSON.stringify(c.body).slice(0, 400));
+    assert.equal(c.body.ok, seed === 'keyed');
     assert.ok(c.body.entries > n, 'the seeded chain and the server\'s own entries: ' + c.body.entries);
   }
   assert.ok(worst < 300, 'a page asking meanwhile waited at most ' + Math.round(worst) + ' ms');

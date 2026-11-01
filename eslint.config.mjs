@@ -71,10 +71,22 @@ export default [
     },
   },
 
-  // The server, its libraries and the tools: strict mode, and a promise's executor returns nothing.
+  // The server, its libraries, the verifier and the tools: strict mode, and a promise's executor returns nothing.
   {
-    files: ['app/server.js', 'app/supervise.js', 'app/lib/**/*.js', 'app/eslint-rules/**/*.js', 'tools/**/*.js'],
+    files: ['app/server.js', 'app/supervise.js', 'app/lib/**/*.js', 'app/verify/**/*.js', 'app/eslint-rules/**/*.js', 'tools/**/*.js'],
     rules: { strict: ['error', 'global'], 'no-promise-executor-return': 'error' },
+  },
+  // The audit log's key-free rules run on the laptop and in a checker on another computer, so they are pure: every Node
+  // global the block above gives is turned off here (so `require`, `process` or `Buffer` is an undefined name), no browser
+  // global is given, and `module` is there only to be exported where there is one.
+  {
+    files: ['app/verify/auditrules.js'],
+    languageOptions: { sourceType: 'script', globals: { ...Object.fromEntries(Object.keys(globals.node).map((name) => [name, 'off'])), module: 'writable' } },
+    rules: {
+      'no-restricted-syntax': ['error', ...bannedSyntax,
+        { selector: "MemberExpression[object.name='module'][property.name!='exports']", message: 'auditrules.js is pure: `module` is there only to export it' },
+        { selector: 'ImportExpression', message: 'auditrules.js is pure: it loads nothing' }],
+    },
   },
   // A library never ends the process: the server decides, and its exit codes carry intent (lib/resilience.js EXIT).
   {

@@ -148,7 +148,7 @@ test('store: a log line the disk cut short, or a power cut tore, never swallows 
 
 // ---------------------------------------------------------------- health's readings and a show day's peaks
 const readings = require('../lib/peaks');
-const { AuditLog } = require('../lib/audit');
+const { auditLog } = require('./helpers');
 
 test('health: the loop\'s delay is its p99 less the sampler\'s own resolution, never below 0', () => {
   const asked = [];
@@ -291,7 +291,7 @@ test('health\'s timings are taken in place: a snapshot and an audit append that 
   assert.equal(took.length, 2, 'a snapshot that failed is not timed');
 
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-audit-')), 'audit.jsonl');
-  const log = new AuditLog(file);
+  const log = auditLog(file);
   const puts = [];
   log.onPut = (ms) => puts.push(typeof ms === 'number' && ms >= 0);
   log.write({ t: 'system' }, 'boot', '', 'first');
@@ -340,7 +340,7 @@ test('health\'s timing hooks never reach what they time: a throw there leaves th
     assert.equal(r.logCount, 0, 'and the log cut after it');
 
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-audit-')), 'audit.jsonl');
-    const log = new AuditLog(file);
+    const log = auditLog(file);
     log.onPut = () => { throw new Error('bookkeeping'); };
     const e = log.write({ t: 'system' }, 'boot', '', 'first');
     assert.equal(e.seq, 1);

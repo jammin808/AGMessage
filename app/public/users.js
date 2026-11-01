@@ -1,7 +1,7 @@
 // Accounts and the audit log. An admin (or anyone given users.manage) adds people with a role, their halls and any
 // exception to the role's rights; a new person gets a one-time password shown once. Someone who is not an admin is
-// offered only the rights and halls they hold themselves (the server's `giveable`). The audit log reads newest first
-// and checks its own chain on demand.
+// offered only the rights and halls they hold themselves (the server's `giveable`). The audit log reads newest first,
+// each row with its mark, and checks its own chain on demand; a mark is always a shape beside its colour.
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
@@ -203,6 +203,14 @@
   $('newUserBtn').addEventListener('click', () => openEditor(null));
 
   // ---------------------------------------------------------------- the audit log
+  // The four marks, each a shape and words, never a colour alone.
+  const MARKS = {
+    intact: { shape: '✓', words: 'checked under this laptop\'s key' },
+    linked: { shape: '◇', words: 'linked, and accepted on the AGMessage laptop' },
+    unvouched: { shape: '△', words: 'not vouched for yet: accept it on the AGMessage laptop (Admin → Health)' },
+    broken: { shape: '✕', words: 'did not check' },
+  };
+  const markHtml = (m) => { const k = MARKS[m] ? m : 'broken'; return '<span class="audit-mark" data-mark="' + esc(k) + '" title="' + esc(MARKS[k].words) + '"><span aria-hidden="true">' + esc(MARKS[k].shape) + '</span><span class="sr-only">' + esc(MARKS[k].words) + '</span></span>'; };
   async function loadAudit() {
     const r = await AGM.api('GET', '/api/audit?limit=300');
     if (!r.ok) { AGM.toast(r.error, true); return; }
@@ -211,8 +219,16 @@
     for (const e of r.entries) {
       const li = document.createElement('li');
       li.className = 'audit-row';
+      li.dataset.mark = MARKS[e.mark] ? e.mark : 'broken';
+      // A line that is not a whole entry is said as one, never drawn as an entry.
+      if (!e.actor) {
+        li.dataset.action = 'bad';
+        li.innerHTML = markHtml('broken') + '<span class="audit-words audit-bad">✕ ' + esc(e.words || 'a line that is not a whole entry') + '</span>';
+        ol.appendChild(li);
+        continue;
+      }
       li.dataset.action = e.action.split('.')[0];
-      li.innerHTML =
+      li.innerHTML = markHtml(e.mark) +
         '<time datetime="' + esc(new Date(e.at).toISOString()) + '">' + esc(new Date(e.at).toLocaleString()) + '</time>' +
         '<span class="audit-actor">' + esc(e.actor.name || e.actor.t) + '</span>' +
         '<span class="audit-action">' + esc(e.action) + (e.target ? ' <em>' + esc(e.target) + '</em>' : '') + '</span>' +
@@ -220,21 +236,21 @@
       ol.appendChild(li);
     }
   }
-  // One check at a time: the button rests while the server reads the chain (every file of it), and only an answer that
-  // says intact reads as intact.
+  // One check at a time: the button rests while the server reads the chain (every file of it). The answer's mark is drawn
+  // with its shape; an answer with no mark this page knows reads "Not checked", never ✓.
   $('verifyBtn').addEventListener('click', async () => {
     const btn = $('verifyBtn');
     const el = $('chainState');
     btn.disabled = true;
-    el.dataset.ok = '';
+    el.dataset.mark = '';
     el.textContent = 'Checking the whole log…';
     try {
       const r = await AGM.api('GET', '/api/audit/verify');
-      const intact = r.ok === true && !r.why && Number.isInteger(r.entries);
-      el.dataset.ok = intact ? '1' : '0';
-      if (r.why) el.textContent = '✕ Broken' + (r.brokenAt ? ' at line ' + r.brokenAt : '') + (r.file && r.file !== 'audit.jsonl' ? ' of ' + r.file : '') + ': ' + r.why;
-      else if (!intact) el.textContent = '✕ Not checked: ' + (r.error || 'no answer from the server');
-      else el.textContent = '✓ Intact — ' + r.entries + ' entries' + (r.unwritten ? ' · ⚠ ' + r.unwritten + ' newer not yet on disk (the disk would not take them; they are tried again with the next entry)' : '');
+      const mark = r && MARKS[r.mark] && typeof r.words === 'string' ? r.mark : '';
+      el.dataset.mark = mark || 'broken';
+      if (!mark) el.textContent = '✕ Not checked: ' + ((r && r.error) || 'no answer from the server');
+      else el.textContent = MARKS[mark].shape + ' ' + r.words + (r.unwritten ? ' · △ ' + r.unwritten + ' newer not yet on disk (the disk would not take them; they are tried again with the next entry)' : '');
+      if (mark) await loadAudit();   // the rows' marks, as this check found the spans now
     } finally { btn.disabled = false; }
   });
 

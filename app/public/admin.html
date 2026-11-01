@@ -140,6 +140,12 @@
           <p class="hint" id="buildLine"></p>
           <h3>🩺 Health</h3>
           <p id="healthLine" class="hint">—</p>
+          <div id="auditHealth" class="audit-health">
+            <p id="auditLine" class="hint audit-line" data-mark="">Audit log: —</p>
+            <ul id="auditFindings" class="audit-findings"></ul>
+            <p id="auditWhere" class="hint" hidden>Accept this on the AGMessage laptop: sign in there with its token (Admin login in the black window).</p>
+            <p id="auditAcceptRow" class="row" hidden><button id="auditAcceptBtn" class="btn small" type="button">Accept…</button></p>
+          </div>
           <p class="hint">Other show systems (Patterns' Eye, Stagewatch's assistant) read this AGMessage's status — counts and action-prompt questions only, never messages or documents — with this read-only token:
             <code id="ctxToken">—</code> <button id="ctxCopy" class="btn ghost small" type="button">📋 Copy</button> <button id="ctxNew" class="btn ghost small" type="button">New token</button></p>
         </section>
@@ -220,6 +226,21 @@
     </div>
   </div>
 
+  <!-- What the audit log found, accepted at this laptop with its token, typed here: each finding ticked on its own. -->
+  <dialog id="acceptDialog" class="agm-dialog wide" aria-labelledby="acceptTitle">
+    <form id="acceptForm" method="dialog">
+      <h2 id="acceptTitle">Accept what the audit log found</h2>
+      <p class="hint">What you accept is written in the log as accepted on this laptop, with what it was. △ entries read ◇ afterwards, never ✓; ✕ findings are accepted only with their own confirmation, and what they name cannot be brought back.</p>
+      <ul id="acceptList" class="accept-list"></ul>
+      <p id="acceptMore" class="hint" hidden>Accept these first, then accept again for the rest.</p>
+      <label class="field"><span>The token from the black window</span><input id="acceptToken" autocomplete="off" spellcheck="false" autocapitalize="none" /></label>
+      <p id="acceptError" class="error" role="alert" hidden></p>
+      <div class="row end">
+        <button id="acceptCancel" class="btn ghost" type="button">Cancel</button>
+        <button id="acceptGo" class="btn primary" type="submit">Accept the ticked</button>
+      </div>
+    </form>
+  </dialog>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/admin.js"></script>
   <script src="/admin-plus.js"></script>

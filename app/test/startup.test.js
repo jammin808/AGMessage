@@ -27,6 +27,10 @@ test('opener: only the .bat\'s first start of a portable copy opens, through exp
   assert.deepEqual(startup.openerPlan({ ...asked, AGM_RUNS: 'portable' }, facts), open, 'the portable channel named');
   assert.deepEqual(startup.openerPlan({ ...asked, AGM_RUNS: '' }, facts), open, 'an empty channel is no channel (cmd cannot set one)');
   assert.equal(startup.openerPlan({ ...asked, SystemRoot: 'D:\\WIN' }, { ...facts, port: 4023 }).file, 'D:\\WIN\\explorer.exe');
+  // The audit log asks the person at this laptop: the admin page, where Health asks it. No other page is opened.
+  const admin = startup.openerPlan(asked, { ...facts, path: '/admin' });
+  assert.deepEqual([admin.args, admin.url], [['http://localhost:3023/admin'], 'http://localhost:3023/admin']);
+  assert.deepEqual(startup.openerPlan(asked, { ...facts, path: '/../users.html' }).args, ['http://localhost:3023'], 'any other path opens the start page');
 
   // Not asked, a restart, or another channel: nothing opens, and nothing is said.
   for (const [env, f, why] of [
@@ -114,6 +118,32 @@ test('opener: the server opens http://localhost:<PORT> once, after it serves; ne
     assert.deepEqual(c.read(), [], why + ' opens nothing');
     assert.ok(!/Browser:/.test(c.srv.out()), why + ' says nothing of a browser');
   }
+});
+
+test('opener: a log the person at this laptop must answer opens the admin page; an intact one, the start page', async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  fs.writeFileSync(path.join(dataDir, 'audit.jsonl'), h.chainOf(3));   // 0.5.1's entries: △ until accepted at the laptop
+  const cases = await Promise.all([serverWithOpener({ AGM_OPEN: '1', AGM_DATA_DIR: dataDir }), serverWithOpener({ AGM_OPEN: '1' })]);
+  t.after(() => Promise.all(cases.map((c) => h.stopServer(c.srv.child))));
+  const [seeded, intact] = cases;
+  for (const c of cases) assert.ok(await until(() => c.read().length > 0), 'the opener ran:\n' + c.srv.out());
+  assert.deepEqual(seeded.read().map((x) => x.args), [[`http://localhost:${seeded.srv.port}/admin`]]);
+  assert.deepEqual(intact.read().map((x) => x.args), [[`http://localhost:${intact.srv.port}`]]);
+
+  // A keyed entry changed while the copy was stopped: open() reads only the tail, so the check at start finds it, and the
+  // browser opens on the admin page once that check has answered.
+  const first = await h.startServer();
+  await h.api(first.base, 'POST', '/api/admin/login', { token: h.TOKEN });
+  await h.api(first.base, 'POST', '/api/admin/login', { token: h.TOKEN });
+  await h.stopServer(first.child);
+  const file = path.join(first.dataDir, 'audit.jsonl');
+  const kept = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+  fs.writeFileSync(file, [kept[0].replace('"words":"', '"words":"changed: '), ...kept.slice(1)].join('\n') + '\n');
+  const changed = await serverWithOpener({ AGM_OPEN: '1', AGM_DATA_DIR: first.dataDir });
+  t.after(() => h.stopServer(changed.srv.child));
+  assert.ok(await until(() => changed.read().length > 0), 'the opener ran:\n' + changed.srv.out());
+  assert.deepEqual(changed.read().map((x) => x.args), [[`http://localhost:${changed.srv.port}/admin`]]);
+  assert.ok(await until(() => /Audit log: {3}✕ Broken at line 1 of audit\.jsonl: entry 1 was changed after it was written/.test(changed.srv.out())), changed.srv.out());
 });
 
 // ---------------------------------------------------------------- the port's holder

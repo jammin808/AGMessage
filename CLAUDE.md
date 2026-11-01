@@ -81,7 +81,8 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | Identities, rate limits, lockouts, text cleaning | `app/lib/guard.js` |
 | Rights and roles (pure) | `app/lib/rbac.js` |
 | Accounts, password hashing, sessions; their routes | `app/lib/accounts.js`, `app/lib/http-accounts.js` |
-| The audit log (hash chain) | `app/lib/audit.js` |
+| The audit log (chained with a key; its records beside the machine key, outside the data folder; the check and Accept) | `app/lib/audit.js` |
+| The audit log's rules that need no key (whole lines, links, runs and boundaries), shared with a checker on another computer | `app/verify/auditrules.js` |
 | The halls board and help requests | `app/lib/board.js` |
 | Screens (display URLs) | `app/lib/displays.js`, `app/public/display.*` |
 | Stagewatch links, peers, hello | `app/lib/nodes.js` |
@@ -89,13 +90,15 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | Patterns and PlayMap links | `app/lib/peerlinks.js` |
 | The context other show systems read | `app/lib/context.js` |
 | HTTPS and certificate pins | `app/lib/tls.js` |
-| Sealed secrets | `app/lib/secretbox.js` |
+| The machine key (never replaced), sealed secrets, the keys derived from it | `app/lib/secretbox.js` |
+| Health's readings and a show day's peaks | `app/lib/peaks.js` |
+| What a start opens and says: the browser opener, the port's holder | `app/lib/startup.js` |
 | AI drafts | `app/lib/ai.js` |
 | The version | `app/lib/version.js`, `tools/stamp-build.js`, `app/package.json` (`version`, `agmessage.runBase`) |
 | The pages | `app/public/` (`index` sign-in and codes, `halls` the board, `users` accounts and audit, `app` a hall, `admin`, `display`) |
 | The house lint rule | `app/eslint-rules/no-unescaped-html.js` |
 | The portable build | `tools/fetch-runtime.ps1`, `tools/build-portable.ps1`, `start-agmessage.bat`, `make-shareable-copy.bat` |
-| Papers | `README.md`, `README.txt`, `CHANGELOG.md` (fenced by a test), `SECURITY.md`, `docs/ACCOUNTS.md`, `docs/DISPLAYS.md`, `docs/NODES.md`, `docs/SHOWBUS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md` |
+| Papers | `README.md`, `README.txt`, `CHANGELOG.md` (fenced by a test), `SECURITY.md`, `docs/ACCOUNTS.md`, `docs/DISPLAYS.md`, `docs/NODES.md`, `docs/SHOWBUS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `docs/INSTALL.md` (the installed node, as far as it is built) |
 | The 0.6.0 plan: what to build, in which order, and the owner's answers it rests on | `docs/plan/0.6.0/PLAN.md` (Part 0: the decisions register and the global build order, whose numbers the unit commits use), `docs/plan/0.6.0/DECISIONS.md`, `docs/plan/0.6.0/board-view/` (the Board view's mock) |
 
 ## How a change closes

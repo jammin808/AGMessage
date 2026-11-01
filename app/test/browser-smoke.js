@@ -15,7 +15,7 @@ const zlib = require('zlib');
 const os = require('os');
 const path = require('path');
 const net = require('net');
-const { fakeStagewatch, fakeNode } = require('./helpers');
+const { fakeStagewatch, fakeNode, chainOf } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = process.env.AGM_SMOKE_OUT || path.join(ROOT, '..', 'artifacts', 'smoke');
@@ -54,6 +54,14 @@ async function startServer(port, dataDir) {
   if (!out.includes('is running')) throw new Error('server did not start:\n' + out);
   return child;
 }
+
+/** Stop a server as the watchdog does (asked over IPC, so it saves first), and wait until it has gone. */
+const stopServer = (child) => new Promise((resolve) => {
+  if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
+  child.once('exit', resolve);
+  try { child.send({ t: 'stop' }); } catch { child.kill(); }
+  setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, 5000).unref();
+});
 
 // A DevTools call that has had no answer by then is a failure with its name, never a run that hangs.
 const CDP_MS = 60_000;
@@ -238,6 +246,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
   const edge = await launchEdge();
   let sw = null;
   let patterns = null;
+  let server2 = null;
+  let dataDir2 = null;
   try {
     const login = await fetch(base + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
     const cookie = login.headers.get('set-cookie').split(';')[0];
@@ -276,6 +286,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // and the sign-in's audit row are already in them.
     const healthLine = await admin.until(`(() => { const t = document.getElementById('healthLine').textContent; return /loop delay p95 [\\d.]+ ms \\(max [\\d.]+\\) · busy \\d+ %/.test(t) && /today's peaks: loop delay [\\d.]+ ms, busy \\d+ %, largest hall \\d+ messages/.test(t) && /audit write p99 [\\d.]+ ms/.test(t) && t; })()`, 20000);
     report(!!healthLine, 'the admin\'s health line reads the loop delay, how busy it is and today\'s peaks' + (healthLine ? '' : ': ' + await admin.eval(`document.getElementById('healthLine').textContent`)));
+    const auditLine = await admin.until(`(() => { const l = document.getElementById('auditLine'); return l.dataset.mark === 'intact' && /^Audit log: ✓ keyed \\(key [0-9a-f]{16}\\) · nothing to accept$/.test(l.textContent) && document.getElementById('auditAcceptRow').hidden && document.getElementById('auditWhere').hidden && l.textContent; })()`);
+    report(!!auditLine, `Health's audit line names the key and that nothing waits to be accepted (${auditLine})`);
     await admin.shot(path.join(OUT, 'admin.png'));
 
     // The admin's support view (the person's page, framed in the admin page) resyncs when the admin page that frames it
@@ -321,7 +333,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(!!(await users.until(`document.querySelectorAll('#userRows tr').length === 1`)), 'the accounts page lists the admin');
     await users.eval(`document.getElementById('tabAudit').click()`);
     await users.eval(`document.getElementById('verifyBtn').click()`);
-    report(!!(await users.until(`document.getElementById('chainState').dataset.ok === '1' && /^✓ Intact — \\d+ entries$/.test(document.getElementById('chainState').textContent) && !document.getElementById('verifyBtn').disabled`)), 'Check the log reads the whole chain and says it is intact');
+    report(!!(await users.until(`document.getElementById('chainState').dataset.mark === 'intact' && /^✓ Intact — \\d+ entries, all keyed on this machine$/.test(document.getElementById('chainState').textContent) && !document.getElementById('verifyBtn').disabled`)), 'Check the log reads the whole chain and says it is intact: ✓');
+    const rowMarks = await users.eval(`[...document.querySelectorAll('#auditList .audit-row')].map((li) => li.querySelector('.audit-mark').dataset.mark + ':' + li.querySelector('.audit-mark [aria-hidden]').textContent)`);
+    report(Array.isArray(rowMarks) && rowMarks.length > 0 && rowMarks.every((m) => m === 'intact:✓'), `each row of the audit log draws its mark with its shape (${(rowMarks || []).slice(0, 3).join(', ')}…)`);
     await users.eval(`document.getElementById('tabPeople').click()`);
     await users.eval(`document.getElementById('newUserBtn').click()`);
     await users.until(`document.getElementById('userDialog').open`);
@@ -668,7 +682,65 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await postJson('/api/auth/logout', {});
     report(anaAgain.ok === true && ottoIn.mustChange === true && otpShown === JSON.stringify(['changePane']), `a code link opened with a one-time password not yet changed asks for the new password, alone (${anaAgain.ok} ${ottoIn.mustChange} ${otpShown})`);
 
-    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink]];
+    // The audit log's four marks and Accept, on a second AGMessage whose log came from 0.5.1 (△) and lost its newest entry
+    // while it was stopped (✕): an admin account is told where to accept; the token at the laptop accepts, a ✕ only with
+    // its own confirmation, and the log reads △, then ◇.
+    dataDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-audit-'));
+    fs.writeFileSync(path.join(dataDir2, 'audit.jsonl'), chainOf(5));
+    const port2 = await freePort();
+    const base2 = `http://127.0.0.1:${port2}`;
+    server2 = await startServer(port2, dataDir2);
+    await fetch(base2 + '/api/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', name: 'Ana Admin', password: 'the green room kettle' }) });
+    await stopServer(server2);
+    const kept2 = fs.readFileSync(path.join(dataDir2, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean);
+    fs.writeFileSync(path.join(dataDir2, 'audit.jsonl'), kept2.slice(0, -1).join('\n') + '\n');
+    server2 = await startServer(port2, dataDir2);
+    const audit2 = await edge.tab(`${base2}/`);
+    await audit2.until('document.readyState === "complete"');
+    await audit2.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', password: 'the green room kettle' }) }).then(() => { location.href = '/users.html#audit'; })`);
+    const check2 = async () => {
+      await audit2.until(`location.pathname === '/users.html' && !document.getElementById('auditPane').hidden && !document.getElementById('verifyBtn').disabled`);
+      await audit2.eval(`(() => { document.getElementById('chainState').dataset.mark = ''; document.getElementById('verifyBtn').click(); })()`);
+      return audit2.until(`(() => { const c = document.getElementById('chainState'); return c.dataset.mark && !document.getElementById('verifyBtn').disabled && c.dataset.mark + '|' + c.textContent; })()`);
+    };
+    const cut2 = await check2();
+    report(/^broken\|✕ entry 7 is missing: this machine recorded entry 7; the log ended at entry 6/.test(cut2 || ''), `a log cut while it was stopped reads ✕, with what is missing (${cut2})`);
+    const rows2 = await audit2.eval(`[...document.querySelectorAll('#auditList .audit-row')].map((li) => li.querySelector('.audit-mark [aria-hidden]').textContent).join('')`);
+    report(rows2 === '✓✓✓△△△△△', `the rows read ✓ under this key (the sign-in, the cut, the boundary) and △ for the 0.5.1 entries (${rows2})`);
+    const admin2 = await edge.tab(`${base2}/admin.html`);
+    const where2 = await admin2.until(`(() => { const w = document.getElementById('auditWhere'); return !document.getElementById('dashboard').hidden && !w.hidden && document.getElementById('auditAcceptRow').hidden && document.getElementById('auditLine').dataset.mark === 'broken' && w.textContent; })()`, 20000);
+    report(where2 === 'Accept this on the AGMessage laptop: sign in there with its token (Admin login in the black window).', `an admin account is told where to accept, and offered no Accept button (${where2})`);
+    await admin2.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
+    const button2 = await admin2.until(`!document.getElementById('dashboard').hidden && !document.getElementById('auditAcceptRow').hidden && document.getElementById('auditWhere').hidden`, 20000);
+    await admin2.eval(`document.getElementById('auditAcceptBtn').click()`);
+    const ticks = await admin2.until(`(() => { const boxes = [...document.querySelectorAll('#acceptList input[data-id]')]; return document.getElementById('acceptDialog').open && boxes.length === 2 && boxes.map((b) => b.dataset.id + '=' + b.checked).join(' '); })()`);
+    report(!!button2 && ticks === 's1-5=true e7=false', `the token at the laptop is offered Accept, and in its dialog a △ starts ticked and a ✕ unticked (${ticks})`);
+    await admin2.shot(path.join(OUT, 'audit-accept.png'));
+    // The cut alone, confirmed: △ is what is left.
+    await admin2.eval(`(() => { const [plain, cut] = document.querySelectorAll('#acceptList input[data-id]'); plain.checked = false; plain.dispatchEvent(new Event('change')); cut.checked = true; cut.dispatchEvent(new Event('change')); document.querySelector('#acceptList input[data-confirm]').checked = true; document.getElementById('acceptToken').value = '${TOKEN}'; document.getElementById('acceptForm').requestSubmit(); })()`);
+    await admin2.until(`!document.getElementById('acceptDialog').open`);
+    const left2 = await check2();
+    report(/^unvouched\|△ Not vouched for — entries 1–5 have plain hashes, as AGMessage 0\.5\.1 and earlier wrote them/.test(left2 || ''), `the cut accepted with its confirmation, the 0.5.1 entries read △ (${(left2 || '').slice(0, 120)})`);
+    await admin2.until(`!document.getElementById('auditAcceptRow').hidden`);
+    await admin2.eval(`document.getElementById('auditAcceptBtn').click()`);
+    await admin2.until(`document.getElementById('acceptDialog').open && document.querySelectorAll('#acceptList input[data-id]:checked').length === 1`);
+    await admin2.eval(`(() => { document.getElementById('acceptToken').value = '${TOKEN}'; document.getElementById('acceptForm').requestSubmit(); })()`);
+    await admin2.until(`!document.getElementById('acceptDialog').open`);
+    const linked2 = await check2();
+    report(/^linked\|◇ Linked — entries 1–5 have plain hashes \(as AGMessage 0\.5\.1 and earlier wrote them\), accepted on the AGMessage laptop on /.test(linked2 || ''), `accepted at the laptop, the log reads ◇, never ✓ (${(linked2 || '').slice(0, 120)})`);
+    await audit2.shot(path.join(OUT, 'audit-marks.png'));
+    // An entry changed while it was stopped: the check at start finds it, and Health reads ✕ with its line and offers
+    // nothing to accept.
+    await stopServer(server2);
+    const kept3 = fs.readFileSync(path.join(dataDir2, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean);
+    kept3[1] = kept3[1].replace('Lectern screen 2', 'Lectern screen 9');
+    fs.writeFileSync(path.join(dataDir2, 'audit.jsonl'), kept3.join('\n') + '\n');
+    server2 = await startServer(port2, dataDir2);
+    await admin2.eval(`location.reload()`);
+    const broken2 = await admin2.until(`(() => { const l = document.getElementById('auditLine'); const f = document.querySelector('#auditFindings li'); return !document.getElementById('dashboard').hidden && l.dataset.mark === 'broken' && f && f.dataset.mark === 'broken' && document.getElementById('auditAcceptRow').hidden && document.getElementById('auditWhere').hidden && l.textContent + ' | ' + f.textContent; })()`, 20000);
+    report(/^Audit log: ✕ keyed \(key [0-9a-f]{16}\) · 1 to see to \| ✕ Broken at line 2 of audit\.jsonl: entry 2 was changed after it was written$/.test(broken2 || ''), `a line changed while it was stopped reads ✕ on Health, with nothing to accept (${broken2})`);
+
+    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2]];
     // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).
     const hidden = [];
     for (const [name, tab] of tabs) if ((await tab.eval('document.visibilityState')) !== 'visible') hidden.push(name);
@@ -684,7 +756,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     if (patterns) await patterns.close();
     edge.close();
     try { server.send({ t: 'stop' }); } catch { server.kill(); }   // as the watchdog stops it: saved first
-    setTimeout(() => { try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* ignore */ } }, 1000);
+    if (server2) await stopServer(server2);
+    setTimeout(() => { for (const d of [dataDir, dataDir2]) if (d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } } }, 1000);
   }
   console.log(failures === 0 ? `ALL OK (screenshots in ${OUT})` : `${failures} FAILED`);
   setTimeout(() => process.exit(failures ? 1 : 0), 1500);

@@ -6,7 +6,9 @@
  *   WriteLane        : one writer for a file; bursts coalesce (latest wins); a failed write is retried until it lands
  *   Ring             : a fixed-size window of numbers with percentiles (latency, loop delay)
  *   ClockSampler     : NTP-style offset to a peer, from the exchange with the smallest round trip of the last 8
+ *   placeId          : one id for one place on disk, however its path is spelled
  */
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -113,14 +115,16 @@ function readJsonWithBak(file) {
  * content is written) and writes never overlap or land out of order. A write that fails (a file another program holds,
  * a full disk) keeps its content and is tried again on its own, sooner at first, then every 30 s at most, until it
  * lands; `lastError` says why it has not. `flushSync()` writes what is pending at once (shutdown) and returns false
- * when it still cannot.
+ * when it still cannot. A lane that keeps a set of small files together (`files: true`) is given [[file, text], …] by
+ * `produce`, and writes each atomically, in that order.
  */
 class WriteLane {
-  constructor(file, { delayMs = 200, keepBak = true, mode } = {}) {
-    this.file = file; this.delayMs = delayMs; this.keepBak = keepBak; this.mode = mode;
+  constructor(file, { delayMs = 200, keepBak = true, mode, files = false } = {}) {
+    this.file = file; this.delayMs = delayMs; this.keepBak = keepBak; this.mode = mode; this.files = files;
     this.pending = null;      // () => string, the latest content
     this.timer = null;
     this.writes = 0; this.coalesced = 0; this.lastError = null; this.failures = 0;
+    this.onSaved = null;      // told after each write that landed
   }
 
   save(produce) {
@@ -138,10 +142,13 @@ class WriteLane {
     this.pending = null;
     if (!produce) return;
     try {
-      writeFileAtomic(this.file, produce(), { keepBak: this.keepBak, mode: this.mode });
+      const content = produce();
+      if (this.files) for (const [file, text] of content) writeFileAtomic(file, text, { keepBak: this.keepBak, mode: this.mode });
+      else writeFileAtomic(this.file, content, { keepBak: this.keepBak, mode: this.mode });
       this.writes++;
       this.lastError = null;
       this.failures = 0;
+      if (this.onSaved) this.onSaved();
     } catch (e) {
       this.lastError = e.message;
       this.failures++;
@@ -203,4 +210,19 @@ class ClockSampler {
   reset() { this.samples = []; }
 }
 
-module.exports = { EXIT, SupervisorPolicy, writeFileAtomic, readJsonWithBak, isJson, WriteLane, Ring, ClockSampler };
+/**
+ * One id for one place on disk: 16 hex characters of the SHA-256 of the folder's real path (joined with `name` when one
+ * is given), lower-cased on Windows. A junction, a `subst` drive, a short name or a symbolic link to the folder give the
+ * same id; a folder whose real path cannot be read is taken by its path as given, and that is said once.
+ */
+function placeId(dir, name) {
+  let real;
+  try { real = fs.realpathSync.native(dir); } catch (e) {
+    real = path.resolve(dir);
+    console.warn('  [folder] ' + real + ' is taken by its path as given: its real path could not be read (' + (e.code || e.message) + ')');
+  }
+  const p = name ? path.join(real, name) : real;
+  return crypto.createHash('sha256').update(process.platform === 'win32' ? p.toLowerCase() : p).digest('hex').slice(0, 16);
+}
+
+module.exports = { EXIT, SupervisorPolicy, writeFileAtomic, readJsonWithBak, isJson, WriteLane, Ring, ClockSampler, placeId };

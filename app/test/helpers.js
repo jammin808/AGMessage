@@ -341,4 +341,76 @@ async function until(fn, ms = 6000, what = 'the condition') {
   throw new Error('timed out waiting for ' + what);
 }
 
-module.exports = { stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode };
+// ---------------------------------------------------------------- the audit log, in-process
+// No test reaches a real key folder: a log is given a fixed machine key and a records folder beside its own data folder.
+const audit = require('../lib/audit');
+const secretbox = require('../lib/secretbox');
+const { placeId } = require('../lib/resilience');
+const FIXTURE_KEY = Buffer.from('a5c3'.repeat(16), 'hex');   // secret-scan: fixture — a machine key no laptop holds
+const OTHER_KEY = Buffer.from('3c5a'.repeat(16), 'hex');     // secret-scan: fixture — another machine's
+const HOST = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
+/** The log's keys from a machine key (the fixture's by default), as secretbox derives them. */
+const auditKeys = (key = FIXTURE_KEY) => audit.keysFrom((label) => secretbox.deriveFrom(key, label));
+/** The records folder a test log keeps, beside its data folder: <data>-keys/audit, as the server's AGM_KEY_DIR has it. */
+const recordsOf = (file) => path.join(path.dirname(file) + '-keys', 'audit');
+/** An audit log for a test: the fixture key (or `key`), its records beside its folder (or `records`). */
+const auditLog = (file, { key = FIXTURE_KEY, records = recordsOf(file), ...o } = {}) => new audit.AuditLog(file, { keys: auditKeys(key), records, ...o });
+/** The machine key a test server made (its AGM_KEY_DIR is the data folder + '-keys'). */
+const serverKey = (dataDir) => Buffer.from(fs.readFileSync(path.join(dataDir + '-keys', 'machine.key'), 'utf8').trim(), 'base64');
+/** A server's log opened in this process, under the server's own key and records. */
+const serverAudit = (dataDir) => auditLog(path.join(dataDir, 'audit.jsonl'), { key: serverKey(dataDir), records: path.join(dataDir + '-keys', 'audit') });
+
+const SAM = Object.freeze({ t: 'account', id: 'a1', name: 'sam' });
+const SEED_WORDS = (i) => 'Lectern screen ' + (i % 4) + ' \u2192 message \u201cFive minutes left\u201d';
+/** A whole chain of `n` entries from the genesis hash with plain hashes, as AGMessage 0.5.1 and earlier wrote them. */
+function chainOf(n, words = SEED_WORDS, at = 1_700_000_000_000) {
+  let prev = audit.GENESIS;
+  const out = [];
+  for (let i = 1; i <= n; i++) {
+    const e = { seq: i, at: at + i, actor: { ...SAM }, action: 'display.take', target: 'dlectern1', words: words(i), ip: '10.0.0.9', prev };
+    e.h = audit.hashOf(e);
+    prev = e.h;
+    out.push(JSON.stringify(e));
+  }
+  return out.join('\n') + '\n';
+}
+/**
+ * A keyed chain of `n` entries under `key`, written at `file`, with the records a laptop under that key keeps for it (its
+ * head, the log written last, the folder record, keyed.json), as if this machine had written it all: it opens intact.
+ */
+function keyedChainOf(n, { file, key = FIXTURE_KEY, records = recordsOf(file), words = SEED_WORDS, at = 1_700_000_000_000, l = 'c0ffee'.padEnd(32, '0') }) {
+  const k = auditKeys(key)();
+  const kid = audit.kidOf(k.entry);
+  let prev = audit.GENESIS;
+  const out = [];
+  for (let i = 1; i <= n; i++) {
+    const e = { seq: i, at: at + i, actor: { ...SAM }, action: 'display.take', target: 'dlectern1', words: words(i), ip: '10.0.0.9', prev, l, k: kid };
+    e.h = audit.macOf(e, k.entry);
+    prev = e.h;
+    out.push(JSON.stringify(e));
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, out.join('\n') + '\n');
+  fs.mkdirSync(records, { recursive: true });
+  const p = path.resolve(file);
+  const id = placeId(path.dirname(file), path.basename(file));
+  const now = at + n;
+  fs.writeFileSync(path.join(records, 'head-' + l + '.json'), audit.sealRecord({ v: 1, log: l, path: p, kid, seq: n, h: prev, run: 1, held: [], at: now }, k.head));
+  fs.writeFileSync(path.join(records, 'latest.json'), audit.sealRecord({ v: 1, log: l, path: p, seq: n, at: now }, k.head));
+  fs.writeFileSync(path.join(records, 'folder-' + id + '.json'), audit.sealRecord({ v: 1, folder: id, path: p, log: l, at: now }, k.head));
+  fs.writeFileSync(path.join(records, 'keyed.json'), audit.sealRecord({ v: 1, since: at, log: l }, k.head));
+  return { l, kid, last: prev };
+}
+/** Accept every open finding as the typed token would (✕ ones confirmed): the accepted state, ◇. */
+async function acceptAll(log) {
+  const c = await log.verify();
+  const ids = c.findings.filter((f) => !f.held).map((f) => f.id);
+  return log.accept({ digest: c.digest, ids, confirm: ids }, HOST, '127.0.0.1');
+}
+/** A check's answer, in brief: what a test of its meaning compares. */
+const brief = (v) => ({ ok: v.ok, mark: v.mark, entries: v.entries, ...(v.unwritten ? { unwritten: v.unwritten } : {}) });
+
+module.exports = {
+  stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
+  FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, acceptAll, brief,
+};

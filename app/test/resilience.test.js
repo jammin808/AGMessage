@@ -411,24 +411,26 @@ test('Stagewatch link: header key, receipts with the message id, clock offset, c
 
 // ---------------------------------------------------------------- guard rails on the source
 test('guard rails: no eval, no key in a URL, and synchronous file calls only where they were judged safe', () => {
-  const files = ['server.js', 'supervise.js', ...fs.readdirSync(path.join(ROOT, 'lib')).map((f) => 'lib/' + f), ...['app.js', 'admin.js', 'admin-plus.js', 'join.js'].map((f) => 'public/' + f)];
+  const files = ['server.js', 'supervise.js', ...fs.readdirSync(path.join(ROOT, 'lib')).map((f) => 'lib/' + f), ...fs.readdirSync(path.join(ROOT, 'verify')).map((f) => 'verify/' + f), ...['app.js', 'admin.js', 'admin-plus.js', 'join.js'].map((f) => 'public/' + f)];
+  assert.ok(files.includes('verify/auditrules.js'), 'the audit log\'s key-free rules are read too');
   // Synchronous fs calls block every meeting on the server while they run. These are allowed — each with its reason —
   // and the count may not grow without someone deciding it here.
   const allowed = {
     'server.js': { max: 16, why: 'startup (dirs, settings, crash record), the crash handler, upload sniffing (4 KB), tunnel log tail (and, through its lane, the show desk results a tick collects, flushed once before they are reported)' },
     'supervise.js': { max: 3, why: 'the watchdog process: its own log and marker, never on a request' },
     'lib/store.js': { max: 10, why: 'durability: an acknowledged message is appended to disk before the ack; snapshots every 500 ops' },
-    'lib/resilience.js': { max: 10, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full' },
-    'lib/secretbox.js': { max: 3, why: 'the machine key, read once' },
+    'lib/resilience.js': { max: 11, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full; a folder\'s real path, read once per place at start (placeId)' },
+    'lib/secretbox.js': { max: 3, why: 'the machine key, read once, or made once and published whole' },
     'lib/guard.js': { max: 3, why: 'the server secret, read once at startup' },
     'lib/tls.js': { max: 4, why: 'the certificate, read (or made) once at startup and when the admin renews it' },
     'lib/version.js': { max: 8, why: 'the version and its stamp (or the checkout\'s commit), read once at startup' },
-    'lib/audit.js': { max: 11, why: 'the audit trail: an entry is on disk (fsync) before the action is acknowledged, a short write cut back, the file rotated at 20 MB; read once at startup; verify reads asynchronously in slices' },
+    'lib/audit.js': { max: 11, why: 'the audit trail: an entry is on disk (fsync) before the action is acknowledged, a short write cut back, the file rotated at 20 MB; read once at startup, and the records outside the data folder, read once at open; verify reads asynchronously in slices' },
   };
   for (const f of files) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     assert.ok(!/\beval\s*\(|new Function\s*\(/.test(src), f + ': no eval / new Function');
-    const sync = (src.match(/\bfs\.\w+Sync\s*\(/g) || []).length;
+    // `fs.realpathSync.native(` is a synchronous call too.
+    const sync = (src.match(/\bfs\.\w+Sync(?:\.native)?\s*\(/g) || []).length;
     const rule = allowed[f] || { max: 0 };
     assert.ok(sync <= rule.max, `${f}: ${sync} synchronous fs calls (allowed ${rule.max}${rule.why ? ': ' + rule.why : ''})`);
   }
@@ -479,7 +481,11 @@ test('a second start on the same data folder changes nothing and goes away; ever
   assert.ok((await h.emit(guest, 'message', { type: 'text', text: 'before the second start' })).ok);
   const roomFiles = () => ['.json', '.log'].map((ext) => fs.readFileSync(path.join(a.dataDir, 'rooms', code + ext), 'utf8'));
   const auditFile = () => fs.readFileSync(path.join(a.dataDir, 'audit.jsonl'), 'utf8');
-  const before = { rooms: roomFiles(), audit: auditFile() };
+  // The audit log's records, outside the data folder: a second start reads none of them and writes none.
+  const recordsDir = path.join(a.dataDir + '-keys', 'audit');
+  const records = () => Object.fromEntries(fs.readdirSync(recordsDir).sort().map((f) => [f, fs.readFileSync(path.join(recordsDir, f), 'utf8')]));
+  await new Promise((resolve) => { setTimeout(resolve, 400); });   // the head's lane has saved what the running server wrote
+  const before = { rooms: roomFiles(), audit: auditFile(), records: records() };
 
   const samePort = await second({ PORT: String(a.port), AGM_DATA_DIR: a.dataDir });
   assert.equal(samePort.code, 3, 'the port is taken: "cannot run as configured", which the watchdog does not restart:\n' + samePort.out);
@@ -488,6 +494,7 @@ test('a second start on the same data folder changes nothing and goes away; ever
   assert.match(otherPort.out, /already running on this data folder/);
   assert.deepEqual(roomFiles(), before.rooms, 'the running server\'s room files are untouched');
   assert.equal(auditFile(), before.audit, 'and so is its audit log');
+  assert.deepEqual(records(), before.records, 'and the records beside its key');
 
   assert.ok((await h.emit(guest, 'message', { type: 'text', text: 'after the second start' })).ok, 'acknowledged by the running server');
   guest.close(); guest = null;

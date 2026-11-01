@@ -39,7 +39,7 @@ const secretbox = require('./lib/secretbox');
 const { buildContext, hallBrief } = require('./lib/context');
 const tlsmod = require('./lib/tls');
 const { Accounts, Sessions, TokenSessions } = require('./lib/accounts');
-const { AuditLog } = require('./lib/audit');
+const { AuditLog, keysFrom } = require('./lib/audit');
 const rbac = require('./lib/rbac');
 const { mountAccounts } = require('./lib/http-accounts');
 const board = require('./lib/board');
@@ -104,9 +104,10 @@ function loadSettings() {
 }
 const settings = loadSettings();
 function saveSettings() { settingsLane.save(() => JSON.stringify(settings, null, 2)); }
-// One-time migration from 0.2: keys stored in clear become sealed ones.
+// One-time migration from 0.2: keys stored in clear become sealed ones, in a run that has its machine key (a run without
+// one leaves them as they are for the next).
 for (const [plain, sealed] of [['aiKey', 'aiKeySealed'], ['stagewatchKey', 'stagewatchKeySealed']]) {
-  if (typeof settings[plain] === 'string') {
+  if (typeof settings[plain] === 'string' && secretbox.hasKey()) {
     if (settings[plain]) settings[sealed] = secretbox.seal(settings[plain]);
     delete settings[plain];
     saveSettings();
@@ -116,22 +117,31 @@ for (const [plain, sealed] of [['aiKey', 'aiKeySealed'], ['stagewatchKey', 'stag
 if (!/^[0-9a-f]{8}$/.test(settings.nodeId || '')) { settings.nodeId = crypto.randomBytes(4).toString('hex'); saveSettings(); }
 const aiKey = () => process.env.ANTHROPIC_API_KEY || secretbox.open(settings.aiKeySealed) || '';
 const stagewatchKey = () => secretbox.open(settings.stagewatchKeySealed) || '';
-// A read-only token other nodes use for GET /api/context (shown on the admin page).
+// A read-only token other nodes use for GET /api/context (shown on the admin page). A run without its machine key keeps
+// a new one in memory for this run, and leaves the sealed one for the next.
+let contextTokenThisRun = '';
 function contextToken() {
   let t = secretbox.open(settings.contextTokenSealed);
-  if (!t) { t = 'agn_' + crypto.randomBytes(18).toString('base64url'); settings.contextTokenSealed = secretbox.seal(t); saveSettings(); }
+  if (t) return t;
+  t = contextTokenThisRun || 'agn_' + crypto.randomBytes(18).toString('base64url');
+  if (!secretbox.hasKey()) return (contextTokenThisRun = t);
+  settings.contextTokenSealed = secretbox.seal(t);
+  saveSettings();
   return t;
 }
+/** Why a key or token typed now cannot be saved: this run has no machine key to seal it with. '' when it can. */
+const unsealable = () => { const p = secretbox.keyProblem(); return p ? 'Not saved: this run has no machine key (' + p.code + '), so nothing can be sealed. ' + p.words.charAt(0).toUpperCase() + p.words.slice(1) + '.' : ''; };
 
 // ---------------------------------------------------------------- accounts, sessions, the audit log
 // Individual logins beside the meeting codes (lib/accounts.js, lib/rbac.js); every action that matters is in the
-// hash-chained audit log (lib/audit.js). The host laptop's admin token stays as the way in before any account exists.
+// audit log, chained with a key derived from this machine's key (lib/audit.js), its records kept beside that key, outside
+// the data folder. The host laptop's admin token stays as the way in before any account exists.
 const accounts = new Accounts(path.join(DATA_DIR, 'accounts.json'));
 const sessions = new Sessions(path.join(DATA_DIR, 'sessions.json'), accounts);
 // The admin token's sign-ins survive a watchdog restart (the supervisor hands every restart the same token) and end
 // when AGMessage starts again with a new one: they are kept under a keyed hash of the token.
 const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json'), guard.mac(SECRET, 'admin-token:' + ADMIN_TOKEN, 43));
-const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'));
+const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'), { keys: keysFrom(secretbox.derive), records: path.join(secretbox.keyDir(), 'audit'), version: VERSION });
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
 /** A count in an audit row's words: "1 file", "4 files". */
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
@@ -161,16 +171,16 @@ function savePeaks() {
   return true;
 }
 /** Every store saved through a write lane, by the name health and the console give it. */
-const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['deskResults', deskLane], ['peaks', peaksLane]];
+const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['deskResults', deskLane], ['peaks', peaksLane], ['auditHead', audit.headLane]];
 /**
- * Write every lane and the audit entries still waiting now (shutdown, a crash); what still cannot be written is named on
- * the console. The audit's last appends are timed as they reach the disk, so the peaks are asked for once more after it.
+ * Write the audit entries still waiting and the head that covers them first, then every lane, now (shutdown, a crash);
+ * what still cannot be written is named on the console. The audit's last appends are timed as they reach the disk, so the
+ * peaks are asked for after it.
  */
 function flushLanes() {
+  if (!audit.flush()) console.error('  [audit] ' + audit.unwritten + ' entries could not be written: ' + audit.lastError);
   savePeaks();
   for (const [name, lane] of saveLanes()) if (!lane.flushSync()) console.error('  [save] ' + name + ' could not be written: ' + lane.lastError);
-  if (!audit.flush()) console.error('  [audit] ' + audit.unwritten + ' entries could not be written: ' + audit.lastError);
-  if (savePeaks() && !peaksLane.flushSync()) console.error('  [save] peaks could not be written: ' + peaksLane.lastError);
 }
 
 // ---------------------------------------------------------------- encrypted connections (Show Bus 1.2 §10)
@@ -254,7 +264,7 @@ function healthFacts() {
       stores: {
         ...Object.fromEntries(saveLanes().map(([name, l]) => [name, { writes: l.writes, error: l.lastError, failures: l.failures }])),
         rooms: { error: store.lastError, unsaved: store.unsaved().length },
-        audit: { error: audit.lastError, unwritten: audit.unwritten },
+        audit: { error: audit.lastError, unwritten: audit.unwritten, ...audit.facts() },
       },
     },
     elu: eluRing.stats(),
@@ -546,7 +556,29 @@ app.post('/api/admin/logout', (req, res) => {
   res.setHeader('Set-Cookie', 'agm_admin=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
   res.json({ ok: true });
 });
-app.get('/api/admin/me', (req, res) => res.json({ ok: isAdminReq(req), local: guard.isHostMachine(req), accounts: accounts.size }));
+// `token`: this request is the laptop's token, signed in by this run (a sign-in read back from the file never counts).
+app.get('/api/admin/me', (req, res) => res.json({ ok: isAdminReq(req), local: guard.isHostMachine(req), accounts: accounts.size, token: guard.isHostMachine(req) && tokenSessions.mintedHere(readCookie(req, 'agm_admin')) }));
+
+// Accept what the audit log found (lib/audit.js accept): the laptop's token, typed into the dialog at the laptop, and never
+// a sign-in, which is a record in the data folder anyone who can write it could add. A wrong token counts toward the
+// token sign-in's own lockout and is written down.
+app.post('/api/audit/accept', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!guard.isHostMachine(req)) return res.status(403).json({ ok: false, error: 'Accept on the AGMessage laptop itself, with its token.' });
+  if (adminLockout.locked('host')) return res.status(429).json({ ok: false, error: 'Too many wrong tokens — wait a minute.' });
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const t = typeof b.token === 'string' ? b.token.toLowerCase().trim() : '';
+  if (!t || !guard.safeEqual(t, ADMIN_TOKEN)) {
+    adminLockout.fail('host');
+    audit.write(HOST_ACTOR, 'login.token.fail', 'host', 'a wrong admin token (at Accept)', guard.clientIp(req));
+    return res.status(401).json({ ok: false, error: 'That is not the token in the black window.' });
+  }
+  adminLockout.ok('host');
+  const list = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 40).map((x) => x.slice(0, 24)) : []);
+  const r = await audit.accept({ digest: typeof b.digest === 'string' ? b.digest.slice(0, 32) : '', ids: list(b.ids), confirm: list(b.confirm) }, HOST_ACTOR, guard.clientIp(req));
+  const { status, ...answer } = r;
+  return res.status(status || 200).json(answer);
+});
 
 // A display's page: the same page for every token, valid or not (the socket decides), so the URL itself says nothing.
 // No caching, no referrer (pageHeaders), no indexing: the token is a capability.
@@ -1252,6 +1284,8 @@ io.on('connection', (socket) => {
     const c = guard.str(code).toUpperCase();
     if (!store.has(c) || !canDisplays('display.manage', c)) return ack({ ok: false, error: 'Your account may not add screens to this hall.' });
     if (displays.ofHall(c).length >= 50) return ack({ ok: false, error: 'A hall has at most 50 screens.' });
+    // A screen's link is kept sealed so it can be copied again: a run without its machine key refuses it, with why.
+    if (unsealable()) return ack({ ok: false, error: unsealable() });
     const r = displays.create(c, name, actor().name);
     audit.write(actor(), 'display.create', r.display.id, r.display.name + ' in ' + c, socket.data.ip);
     displaysChanged(c);
@@ -1273,6 +1307,7 @@ io.on('connection', (socket) => {
     ack = ok(ack);
     const d = displays.get(guard.str(id));
     if (!d || !canDisplays('display.manage', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
+    if (unsealable()) return ack({ ok: false, error: unsealable() });   // the old link keeps working: nothing was replaced
     const p = displays.rotate(d.id);
     revokeDisplaySockets(d.id, 'This screen\'s link was replaced. Open the new link to show it again.');
     audit.write(actor(), 'display.rotate', d.id, d.name + ': new link, the old one stopped', socket.data.ip);
@@ -1319,6 +1354,7 @@ io.on('connection', (socket) => {
     ack = ok(ack);
     if (!socket.data.isAdmin) return ack({ ok: false, error: 'Linking another show system is the admin\'s.' });
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(guard.str(id))) return ack({ ok: false, error: 'A node id is the one its hello announces.' });
+    if (typeof token === 'string' && token.trim() && unsealable()) return ack({ ok: false, error: unsealable() });
     const peer = discovery ? discovery.peers.get(guard.str(id)) : null;
     const cfg = settings.peerLinks && settings.peerLinks[guard.str(id)];
     // Heard on the bus, linked before, or typed (a venue network that blocks broadcast): its kind and its address.
@@ -1459,6 +1495,7 @@ io.on('connection', (socket) => {
     // The page sends the name and the address together: a save refused for its address applies nothing, the name neither.
     const url = typeof stagewatchUrl === 'string' && stagewatchUrl.trim() ? nodes.normaliseBase(stagewatchUrl) : '';
     if (typeof stagewatchUrl === 'string' && stagewatchUrl.trim() && !url) return ack({ ok: false, error: 'That is not a Stagewatch address: type its IP or name, with the port if it is not 9924.' });
+    if (url && typeof stagewatchKey === 'string' && stagewatchKey.trim() && unsealable()) return ack({ ok: false, error: unsealable() });
     const changed = [];
     if (typeof name === 'string') {
       const n = guard.cleanText(name, 80);
@@ -1704,6 +1741,8 @@ io.on('connection', (socket) => {
   socket.on('admin:settings', (patch, ack) => {
     if (typeof patch === 'function') { ack = patch; patch = null; }
     if (!admin(ack)) return;
+    // A key typed while this run has no machine key is refused, with the reason, before anything is taken.
+    if (patch && typeof patch === 'object' && (typeof patch.aiKey === 'string' || typeof patch.stagewatchKey === 'string') && unsealable()) return ok(ack)({ ok: false, error: unsealable() });
     if (patch && typeof patch === 'object') {
       // Each setting is taken only in its own type; the audit row names exactly what was taken (a secret as sealed).
       const taken = [];
@@ -1724,7 +1763,10 @@ io.on('connection', (socket) => {
         // Turned off: an account that is admin through the tunnel stops being one now, not at its next connection.
         if (was && !settings.remoteAdmin) endSockets((s) => !!(s.data.viaTunnel && s.data.account && s.data.isAdmin), 'remoteAdmin', 'Admin rights through the tunnel were turned off — reconnecting with the rights this connection has.');
       }
-      if (patch.newContextToken === true) { delete settings.contextTokenSealed; taken.push('newContextToken (sealed)'); }
+      // A new context token: the old one stops answering now. A run without its machine key replaces the one it keeps in
+      // memory, the token in use this run, and leaves the sealed one, which it cannot read, for the next.
+      if (patch.newContextToken === true && secretbox.hasKey()) { delete settings.contextTokenSealed; taken.push('newContextToken (sealed)'); }
+      else if (patch.newContextToken === true) { contextTokenThisRun = ''; taken.push('newContextToken (this run only: no machine key to seal it)'); }
       if (taken.length) audit.write(socket.data.actor, 'settings', taken.map((t) => t.split(' ')[0]).join(','), 'changed ' + taken.join(', '), socket.data.ip);
       saveSettings();
       stageLink.configure(settings.stagewatchUrl, stagewatchKey(), settings.stagewatchFingerprint || '');
@@ -2602,34 +2644,66 @@ front.on('error', (e) => {
 // The folder is held by a local socket named after it — a named pipe on Windows, gone with the process; a Unix socket
 // elsewhere, a leftover of a killed process known by nobody answering it — and a second copy that finds it held stops
 // (code 3, which the watchdog does not restart) before it has written anything.
-let folderHold = null;
+// It is held under two names when they differ: 0.5.1's (the folder's path as given), so a 0.5.1 copy and this one refuse
+// each other, and the folder's own (resilience.placeId, its real path), so two paths to one folder are one folder.
+const folderHolds = [];
 function holdDataFolder(then) {
-  const id = crypto.createHash('sha256').update(process.platform === 'win32' ? path.resolve(DATA_DIR).toLowerCase() : path.resolve(DATA_DIR)).digest('hex').slice(0, 16);
-  const where = process.platform === 'win32' ? '\\\\.\\pipe\\agmessage-' + id : path.join(os.tmpdir(), 'agmessage-' + id + '.sock');
-  let started = false;
-  const go = () => { if (!started) { started = true; then(); } };
+  const legacy = crypto.createHash('sha256').update(process.platform === 'win32' ? path.resolve(DATA_DIR).toLowerCase() : path.resolve(DATA_DIR)).digest('hex').slice(0, 16);
+  const own = resilience.placeId(DATA_DIR);
+  const ids = own === legacy ? [legacy] : [legacy, own];
   const refuse = () => {
     console.error('\n  AGMessage is already running on this data folder (' + DATA_DIR + '). Use that window, or give this copy a folder of its own.\n');
     process.exit(resilience.EXIT.CONFIG);
   };
-  const unchecked = (e) => { console.warn('  [folder] could not hold the data folder (' + (e.code || e.message) + '): a second copy on it is not refused'); folderHold = null; go(); };
-  const hold = net.createServer((c) => { c.on('error', () => { /* a second copy that asked and went: nothing to answer */ }); c.end(); });
-  hold.unref();
-  folderHold = hold;
-  hold.once('error', (e) => {
-    if (e.code !== 'EADDRINUSE') return unchecked(e);
-    if (process.platform === 'win32') return refuse();
-    const probe = net.connect(where);
-    probe.once('connect', () => { probe.destroy(); refuse(); });
-    probe.once('error', () => {
-      hold.once('error', unchecked);
-      fs.unlink(where, () => { hold.listen(where, go); });
+  const holdOne = (i) => {
+    if (i >= ids.length) { then(); return; }
+    const where = process.platform === 'win32' ? '\\\\.\\pipe\\agmessage-' + ids[i] : path.join(os.tmpdir(), 'agmessage-' + ids[i] + '.sock');
+    let done = false;
+    const next = () => { if (!done) { done = true; holdOne(i + 1); } };
+    const unchecked = (e) => { console.warn('  [folder] could not hold the data folder (' + (e.code || e.message) + '): a second copy on it is not refused'); next(); };
+    const hold = net.createServer((c) => { c.on('error', () => { /* a second copy that asked and went: nothing to answer */ }); c.end(); });
+    hold.unref();
+    hold.once('error', (e) => {
+      if (e.code !== 'EADDRINUSE') return unchecked(e);
+      if (process.platform === 'win32') return refuse();
+      const probe = net.connect(where);
+      probe.once('connect', () => { probe.destroy(); refuse(); });
+      probe.once('error', () => {
+        hold.once('error', unchecked);
+        fs.unlink(where, () => { hold.listen(where, () => { folderHolds.push(hold); next(); }); });
+      });
     });
-  });
-  hold.listen(where, go);
+    hold.listen(where, () => { folderHolds.push(hold); next(); });
+  };
+  holdOne(0);
+}
+/**
+ * The black window's lines for what the audit log needs of the person at this laptop that `said` has not said yet, each
+ * said once: the first keyed start's question about the older entries, or one line for each other finding or condition.
+ */
+function auditAttentionLines(said) {
+  const lines = [];
+  for (const a of audit.facts().attention) {
+    const key = a.id || a.kind + ':' + a.words;
+    if (said.has(key)) continue;
+    said.add(key);
+    if (a.kind === 'plain' && a.first) {
+      lines.push('  Audit log:   ' + a.words.replace(/, and nothing vouches for them until they are accepted$/, '') + '; anyone who');
+      lines.push('               could write this folder could have rewritten them. If this log has been in your hands,');
+      lines.push('               accept them: http://localhost:' + PORT + '/admin → Health → Accept, and type the token above.');
+      lines.push('               Until then the log reads △. Nothing waits for this.');
+    } else lines.push('  Audit log:   ' + (a.mark === 'broken' ? '✕ ' : '△ ') + a.words);
+  }
+  return lines;
+}
+/** The audit log's lines under the token that answers them: its key id, the key folder when AGM_KEY_DIR chose it, then what open() found. */
+function auditBanner(said) {
+  const lines = ['  Audit log:   ' + (audit.keyless ? 'not keyed this run (' + audit.keyless.code + ')' : 'keyed (key ' + audit.kid + ')') + ' · Admin → Health'];
+  if (process.env.AGM_KEY_DIR) lines.push('  Key folder:  ' + secretbox.keyDir() + ' (set by AGM_KEY_DIR, not the default)');
+  return [...lines, ...auditAttentionLines(said)];
 }
 /** Let go of the data folder (a clean stop): the next start finds it free at once. */
-function releaseDataFolder() { if (folderHold) { try { folderHold.close(); } catch { /* the process is ending: the OS frees it */ } folderHold = null; } }
+function releaseDataFolder() { for (const hold of folderHolds.splice(0)) { try { hold.close(); } catch { /* the process is ending: the OS frees it */ } } }
 
 holdDataFolder(() => front.listen(PORT, HOST, () => {
   // This copy holds the folder and the port: now it writes. Each replayed log is folded into a fresh snapshot (a torn last
@@ -2641,6 +2715,9 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
     store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— Session restored (' + room.messages.length + ' messages preserved) —', at: Date.now() } });
   }
   audit.open();
+  // The whole log is checked once, beside the show, so health, the rows' marks and the black window read what the log
+  // holds from the start: findings an earlier start left open, and a chain broken at a line, included.
+  const checkedAtStart = audit.verify().then(() => true, (e) => { console.error('  [audit] the check at start did not finish: ' + (e && e.message ? e.message : e)); return false; });
   const addresses = [];
   for (const list of Object.values(os.networkInterfaces())) for (const n of list || []) if (n.family === 'IPv4' && !n.internal) addresses.push(n.address);
   console.log('\n  AGMessage ' + BUILD.full + ' is running');
@@ -2654,13 +2731,21 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   console.log('    URL:   http://localhost:' + PORT + '/admin');
   console.log('    Token: ' + ADMIN_TOKEN);
   console.log('  ============================================');
+  const said = new Set();
+  for (const line of auditBanner(said)) console.log(line);
   console.log('  AI drafts:   ' + (aiKey() ? 'on (' + ai.MODEL + ')' : 'off — add a key in Admin → AI (messaging and the show network work without it)'));
   if (RESTARTS) console.log('  Restarted by the watchdog (' + RESTARTS + 'x)' + (lastCrash ? ' — last crash: ' + String(lastCrash.message || '').slice(0, 120) : ''));
   console.log('  Stagewatch:  ' + (settings.stagewatchUrl || 'not linked (Admin → Show network)'));
   console.log('  Saved rooms: ' + ROOMS_DIR);
   console.log('  Uploads:     ' + UPLOAD_DIR + '\n');
-  // Only now, with this copy serving, may the browser open: the page it opens is this copy's (lib/startup.js).
-  startup.openBrowser(startup.openerPlan(process.env, { restarts: RESTARTS, port: PORT, platform: process.platform }), spawn, (line) => console.log(line));
+  // What the check at start found that the banner has not said is said once it answers. Only then, with this copy
+  // serving, may the browser open: the page it opens is this copy's (lib/startup.js), and a log that needs the person at
+  // this laptop opens it on the admin page, where Health asks it.
+  checkedAtStart.then(() => {
+    const more = auditAttentionLines(said);
+    if (more.length) console.log(more.join('\n') + '\n');
+    startup.openBrowser(startup.openerPlan(process.env, { restarts: RESTARTS, port: PORT, platform: process.platform, path: audit.attention().length ? '/admin' : '' }), spawn, (line) => console.log(line));
+  });
 }));
 
 module.exports = { app, server, io, store, buildMessage };

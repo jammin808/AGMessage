@@ -26,6 +26,8 @@ Write-Host "==> Staging $name ($full, $channel)"
 Copy-Item app\server.js, app\supervise.js, app\package.json, app\package-lock.json, app\README.md "$stage\app"
 if (Test-Path app\build.json) { Copy-Item app\build.json "$stage\app" }
 Copy-Item app\lib "$stage\app\lib" -Recurse
+# The audit log's key-free rules, which lib\audit.js requires (and an export ships to the checker).
+Copy-Item app\verify "$stage\app\verify" -Recurse
 Copy-Item app\public "$stage\app\public" -Recurse
 New-Item -ItemType Directory -Force "$stage\app\data\rooms", "$stage\app\uploads" | Out-Null
 New-Item -ItemType File -Force "$stage\app\uploads\.gitkeep" | Out-Null

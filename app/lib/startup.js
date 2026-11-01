@@ -3,7 +3,8 @@
  * What a start of the server opens and says for the person at this laptop (tested in test/startup.test.js):
  *
  *   openerPlan, openBrowser        the portable copy opens http://localhost:<PORT> on the person's own screen once it
- *                                  serves, so the page that opens is this copy's and never whatever else answers there
+ *                                  serves, so the page that opens is this copy's and never whatever else answers there;
+ *                                  /admin when the audit log needs the person at this laptop
  *   readPortHolder, portHolderWords  a port already in use says who holds it, read once from the holder's own health at
  *                                  loopback with no token; the answer only chooses the words, nothing is decided on it
  */
@@ -22,9 +23,10 @@ const DRIVE_PATH = /^[A-Za-z]:\\/;
  *    included, runs where nothing it opens is ever seen (Windows' session 0), so it never opens, whatever AGM_OPEN holds.
  *  - Windows only, through explorer.exe by its absolute path under %SystemRoot%: a bare name is looked for in the current
  *    folder and on PATH first. Without a SystemRoot that names a folder from its drive, nothing is run and the line says so.
+ *  - `path` is '' (the start page) or '/admin' (the audit log asks the person at this laptop): only those two.
  */
-function openerPlan(env, { restarts, port, platform }) {
-  const url = 'http://localhost:' + port;
+function openerPlan(env, { restarts, port, platform, path: page = '' }) {
+  const url = 'http://localhost:' + port + (page === '/admin' ? '/admin' : '');
   if (env.AGM_OPEN !== '1' || restarts > 0) return { open: false, say: '' };
   if (env.AGM_RUNS && env.AGM_RUNS !== 'portable') return { open: false, say: '' };
   if (platform !== 'win32') return { open: false, say: '  Browser: it opens by itself on Windows only. Open ' + url };

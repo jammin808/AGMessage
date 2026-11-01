@@ -50,9 +50,18 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   a certificate that is pinned or that a person confirmed by typing at least 16 characters of its fingerprint from the
   node's own screen; AGMessage never drives a node with it — lines are proposed to the show desk (Show Bus §11).
 - Security-relevant actions (sign-ins, permission changes, the admin's room controls, the proposals Stagewatch's show
-  desk takes, what kind of thing a display was told to show) are written to a hash-chained audit log that shows
-  tampering, never with a message's text or a file's name (screen takes logged by 0.5.1 and earlier quote a message's
-  first words and name the file).
+  desk takes, what kind of thing a display was told to show) are written to an audit log chained with a key (HMAC-SHA256
+  under a key derived from the machine key) that shows tampering, never with a message's text or a file's name (screen
+  takes logged by 0.5.1 and earlier quote a message's first words and name the file). Its records (the newest entry on
+  disk, the log written last and where) are kept beside the machine key, outside the data folder, so entries removed or a
+  whole log replaced while AGMessage is stopped are found at the next start. Entries this laptop cannot check (0.5.1's,
+  another key's) read △ until the person at the laptop accepts them by typing the admin token into the dialog: never a
+  sign-in, which is a record in the data folder anyone who can write it could add.
+- What the keyed log cannot show: anything done by someone who can change AGMessage's code, its Node or its start
+  script, or holds this machine's key. In the portable layout `app\data` sits beside `app\lib` and the start script under
+  the same rights, so whoever can write the data folder can usually change the code too; keep the folder where only the
+  show's Windows account can write it, never on a USB stick or a shared folder. A machine key that cannot be read is never
+  replaced: that run is keyless, seals nothing and says so.
 - A copy that cannot take its port reads who holds it once, from loopback, sending no token, and takes only the
   version, the build and whether it is the installed node, cleaned, to choose its words; nothing is decided on the
   answer. The browser is opened only by the portable copy, in the person's own session, through `explorer.exe` by its

@@ -272,14 +272,18 @@ function mountAccounts(app, o) {
 
   // ---------------------------------------------------------------- the audit log (audit.read)
 
+  // Each row carries its mark at the end: ✓ checked under this key, ◇ or △ inside a span (by that span's state now),
+  // ✕ a row that failed its check or a line that is not a whole entry.
   app.get('/api/audit', signedIn('audit.read'), (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json({ ok: true, entries: audit.latest(Number(req.query.limit) || 200) });
   });
-  // The check reads every file of the chain off the event loop, in slices; clicks while one runs share it.
-  app.get('/api/audit/verify', signedIn('audit.read'), async (req, res) => {
+  // The check reads every file of the chain off the event loop, in slices; clicks while one runs share it. The laptop's
+  // token at the laptop checks too (Admin → Health, before its Accept). `ok` is the check's: true only for ✓.
+  const auditReader = (req, res, next) => (guard.isHostMachine(req) && o.isTokenAdmin(req) ? next() : signedIn('audit.read')(req, res, next));
+  app.get('/api/audit/verify', auditReader, async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ ok: true, ...(await audit.verify()) });
+    res.json(await audit.verify());
   });
 
   return { who, signedIn, actorOf, throughTunnel, adminBlocked, COOKIE };

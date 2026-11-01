@@ -127,22 +127,98 @@ code), a person sent out, the AI's minutes posted: one row for each change, none
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and
-the desk's number, never the words), and commands to Patterns and PlayMap. Each line carries the SHA-256 of the line
-before it, from a fixed first hash: at 20 MB the file is set aside as `audit-<time>.jsonl` and the chain goes on in a
-new one. **Accounts → Audit log → Check the log** reads every file, oldest first, as one chain, so an edited, removed or
-reordered line — the first and the newest included, or an older file removed — breaks it, and the check names the file
-and the line; while the server runs, the newest entry on disk must also be the one it wrote last. The check reads in
-slices beside the show, one at a time (a second click waits for the same answer). What a chain without a key cannot
-show, and the check does not claim: the newest lines (or the current file) removed while the server is stopped, or the
-whole chain written again, by someone who can write the data folder.
+the desk's number, never the words), and commands to Patterns and PlayMap.
+
+**Chained with a key.** Each line carries the hash of the line before it, from a fixed first hash, and its own
+HMAC-SHA256 under a key derived from this machine's key (`machine.key`, outside the data folder: `lib/secretbox.js`).
+Each keyed line also names its log (`l`, a random id given when the log is first keyed) and the key (`k`, an id that is
+not part of the key). An edited, removed, reordered or relabelled line, or one written by someone without the key, does
+not check. At 20 MB the file is set aside as `audit-<time>.jsonl` and the chain goes on in a new one. The rules that need
+no key (what a whole line is, the links, the runs and boundaries below) are one file, `app/verify/auditrules.js`, which
+a checker on another computer can run as the laptop does.
+
+**Its records live outside the data folder**, beside the key (`<key folder>\audit\`, MACed under a second derived key):
+the head (the newest entry on disk, once its fsync returned), the log this laptop wrote last and where, which log each
+file path last held, and whether this laptop has keyed a log before. They are read once, when the log is opened, and
+compared with it: entries removed while AGMessage was stopped (`audit.cut`: "entries 1201 to 1630 are missing: this
+machine recorded entry 1630; the log ended at entry 1200"), a log that forked, a whole log removed or another put in its
+place (also across a move to a new folder), a head changed, missing or under a key this laptop no longer holds, and a
+record that could not be read (a backup tool holding it) are each written as an entry of their own (`audit.cut`,
+`audit.head`), a line in the black window and in health, and a finding of every check until accepted. The entry this
+laptop recorded last, found with the hash it recorded but under another key id, is a changed entry: ✕ at every check
+from then on, never a span and never accepted. A record that could not be read is never written over that run (while the
+head cannot be read, its lane stays off for the run). The records are written only once the log holds an entry on disk
+that carries its id, so a start that wrote nothing leaves the records of the log before it as they were. A log moved to a
+new folder (a portable upgrade) is followed by its id, and `audit.moved` says where it was. A half-written last line
+left by a power cut is kept aside as `audit-torn-<time>.bin` before it is cut.
+
+**Runs.** The key changes only at a boundary entry under the new key that names the run before it: `audit.keyed` (the
+plain entries of AGMessage 0.5.1 and earlier, from entry 1), `audit.rekey` (entries under a key this laptop does not
+hold: another computer or Windows account, or a run without its key), `audit.unkeyed` (plain entries after keyed ones:
+0.5.1 again, or anyone who could write the folder) and `audit.keyless` (a run whose machine key could not be read: it is
+keyed with a key of its own and marked in the key folder, so the next run says "written here while this machine had no
+machine key"). The entries not under this laptop's key are a span, and what this laptop says of them comes from what it
+holds, never from what the entries claim.
+
+**The four marks.** **Accounts → Audit log → Check the log** reads every file, oldest first, as one chain and answers
+with one mark, each drawn with its shape:
+
+- **✓ Intact**: every entry keyed on this laptop, checked.
+- **◇ Linked**: entries not under this laptop's key, accepted on the laptop; the rest intact. Never ✓.
+- **△ Not vouched for**: a span not yet accepted (the first start's 0.5.1 entries included), a head under another key or
+  that could not be read, a run without the machine key, or the head's save failing.
+- **✕ Broken**: a line that is not a whole entry, a broken link or MAC (named by its file and line), or an open finding
+  of entries missing, a fork, another log, a changed or missing head.
+
+Each row of the list carries its mark too, set when the log is opened (its MAC checked) and as each check finds the
+spans; a line that is not a whole entry is listed as one, never as an entry. A page that reads only the check's `ok` sees
+no ✓ for ◇ or △: `ok` is true only for ✓. The whole log is checked once at each start: what that check finds that the
+start did not (a finding an earlier start left open, a line changed while AGMessage was stopped) is said in the black
+window once it answers, and a check broken at a line is what health and Admin → Health read, ✕ with its line and nothing
+to accept, until a whole check replaces it.
+
+**The first start of 0.6.0 asks.** On a log from AGMessage 0.5.1 or earlier, its entries have plain hashes, and anyone who
+could write the folder could have rewritten them. The black window asks, under the token that answers it, and Admin →
+Health asks the person at the laptop; the browser opens on the admin page. The log reads △ until accepted. Nothing waits
+for the answer: sign-ins, takes and sends go on.
+
+**Accept is the laptop's token, typed.** Admin → Health, signed in with the token on the AGMessage laptop, shows each
+open finding with its own tick: △ ones ticked, ✕ ones unticked, each ✕ accepted only with a second tick that says what
+accepting it means (entries accepted as missing cannot be brought back). Accept the ticked takes the token typed again,
+because a token sign-in is a record in the data folder that anyone who can write it could add. A wrong token counts
+toward the token sign-in's lockout and is written down (`login.token.fail`). An admin account sees the findings and
+where to accept them, with no button. The acceptance is an entry of its own (`audit.accept`, its target the findings'
+ids), and takes effect once that entry is on disk.
+
+**What it still cannot show**, and the check does not claim:
+
+- anything done by someone who can change AGMessage's code, its Node or its start script, controls this Windows account,
+  or administers this machine. In the portable layout that is anyone who can write the AGMessage folder, which holds
+  `app\data`: they can run code that holds the key, and then AGMessage says whatever they make it say;
+- a whole machine restored from one image, with the key, the records and the data all from one moment;
+- which person acted, when the actor can write the data folder (they can add an account or a sign-in and act through the
+  server; the entries that causes are genuine);
+- the earlier entries of a log first seen keyed here (a 0.5.1 log, a folder moved in, a log written before the key was
+  replaced): linked, not checked, △ until accepted;
+- the newest entries removed after a crash, in the 200 ms between their fsync and the head's save (longer while a head
+  save fails, which health names).
+
+Two Windows accounts running one portable folder each have their own key, so each switch writes `audit.rekey` and each
+needs Accept: one account runs the show. Laptops cloned from one image share one key. A rebuilt Windows profile or a new
+laptop turns the earlier entries △ until accepted, and anyone holding a copy of `machine.key` can write entries that
+check.
+
+Going back to 0.5.1: it reads a keyed log as "✕ Broken at line 812: entry 812 was changed after it was written" and
+writes on with plain hashes; back on 0.6.0, those entries are a span (`audit.unkeyed`), △ until accepted.
 
 Each entry is flushed to disk before the action is acknowledged (a session reset's once its files have left the disk, so
 that it counts them: a stop in that moment keeps the reset without its row). When the disk will not take it (full, or
 the file held by another program) the action still goes ahead — a full disk must not stop sign-ins or takes during a
 show — the entry stays in the chain in memory, the console and the admin page's health say so, and it is written ahead
-of the next entry (or when the server stops), so what is on disk stays one whole chain. A half-written last line left by
-a power cut is cut at the next start and the cut is recorded as an entry of its own (`audit.repair`). The log never
-carries a password, token, key or screen link, nor a message's text or a file's name (but for the screen takes 0.5.1 and
+of the next entry (or when the server stops), so what is on disk stays one whole chain; a stop puts the waiting entries
+on disk first, then the head that covers them, then every other store. A half-written last line left by a power cut is
+kept aside, cut at the next start, and the cut is recorded as an entry of its own (`audit.repair`). The log and its
+records never carry a password, token, key or screen link, nor a message's text or a file's name (but for the screen takes 0.5.1 and
 earlier wrote, which quote a message's first 60 characters and name the file): a failed sign-in under a name that is no
 account is written as "(unknown username)", since what was typed may be a password in the wrong box. Project managers
 and admins read it.
@@ -150,5 +226,7 @@ and admins read it.
 ## Where it lives
 
 `app/lib/rbac.js` (the rights, pure), `app/lib/accounts.js` (accounts, hashing, sessions), `app/lib/http-accounts.js`
-(the routes), `app/lib/audit.js` (the chain). Tests: `app/test/accounts.test.js` (rights, accounts, hashing, sessions) and
-`app/test/sessions.test.js` (signing in, the tunnel, the pages a session has open, restarts).
+(the routes), `app/lib/audit.js` (the chain, its records, the check and Accept), `app/verify/auditrules.js` (the rules
+that need no key), `app/lib/secretbox.js` (the machine key and the keys derived from it). Tests:
+`app/test/accounts.test.js` (rights, accounts, hashing, sessions), `app/test/sessions.test.js` (signing in, the tunnel,
+the pages a session has open, restarts) and `app/test/audit.test.js` (the keyed chain, its records, Accept).

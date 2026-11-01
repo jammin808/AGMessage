@@ -67,6 +67,41 @@ Every day of the event
 - When the event is over, close the black window (or press Ctrl+C in it).
   Halls, history and accounts are kept for next time.
 
+The audit log, and where to keep this folder
+--------------------------------------------
+Halls -> Accounts -> Audit log lists every sign-in, change of rights, room
+control and screen take, newest first. Each entry is chained to the one
+before it with this laptop's key (machine.key, kept outside this folder),
+so a line that was changed, removed, or written without the key shows.
+"Check the log" answers with one mark, and each row carries its own:
+
+    ✓ Intact           every entry keyed on this laptop, checked
+    ◇ Linked           entries it cannot check, accepted on this laptop
+    △ Not vouched for  entries it cannot check, not accepted yet
+    ✕ Broken           a line changed or missing, or entries cut
+
+- The first start of a version that keys the audit log (0.6.0, after
+  0.5.1) asks you to accept the older entries at Admin -> Health: type the
+  token from this window. The browser opens there. Until then the log
+  reads △, and each start asks again; nothing else waits.
+- Accept is done only on this laptop, signed in with its token (Admin
+  login), and you type the token again in the dialog. Each finding has its
+  own tick; a ✕ asks for a second tick, because what it names (entries
+  missing, say) cannot be brought back. An admin account is told where to
+  accept, and has no button.
+- The machine key also keys the audit log. A rebuilt Windows profile or a
+  new laptop turns the earlier entries △ until accepted, and anyone holding
+  a copy of machine.key can write entries that check. Run the show from one
+  Windows account: two accounts taking turns on one folder each need an
+  Accept at every switch.
+- Keep this folder where only the show's Windows account can write it: not
+  a USB stick, not a shared folder. Whoever can write it can change
+  AGMessage itself, and then the log says whatever they make it say. A
+  "Key folder:" line in the black window means someone set AGM_KEY_DIR.
+- Going back to 0.5.1: its check reads a keyed log as "Broken at line N:
+  entry N was changed after it was written", and it writes on. Back on
+  0.6.0, the entries it wrote read △ until accepted.
+
 Screens (projector PC, lectern monitor, foyer TV)
 -------------------------------------------------
 In a hall, Screens -> Add screen. The screen's link is copied: open it in

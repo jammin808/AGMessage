@@ -15,7 +15,7 @@ left out, and the defects the fences found.*
 | Secret scan | `node tools/scan-secrets.js` | CI · analyze | a key, token or private key in a tracked file |
 | Version | `node tools/stamp-build.js --print` / `--check-tag` | CI · analyze | a release tag that names another version |
 | Unit, end-to-end, watchdog, TLS, version, lint-rule tests | `npm test` | CI · Linux (Node 24, 26), Windows | any failure |
-| Coverage gate | `npm run coverage` | CI · Linux (Node 24) | lines < 95 %, branches < 84 %, functions < 91 % of `server.js`, `supervise.js`, `lib/` |
+| Coverage gate | `npm run coverage` | CI · Linux (Node 24) | lines < 95 %, branches < 84 %, functions < 91 % of `server.js`, `supervise.js`, `lib/`, `verify/` |
 | Browser smoke | `npm run smoke` | CI · Linux (Chrome), Windows (Edge) | a page that does not join, render, or that logs a script error or a CSP violation |
 | CodeQL `security-extended` | — | Security · codeql | an alert (shown under the repository's Security tab) |
 | Dependency audit | `npm run audit` | Security · audit | a high or critical advisory in a shipped package; a package whose registry signature or provenance does not verify |
@@ -104,6 +104,17 @@ with its reason (`lib/version.js` joins the list: the version and its stamp, rea
 allowed 11 (an append cut back when the disk takes only part of it, the rotation; its check now reads asynchronously),
 `lib/resilience.js` 10 (the temporary file of an atomic write that failed is removed, so it does not keep a full disk
 full) and `server.js` 16 (removing files went asynchronous).
+
+0.6.0 keys the audit log and keeps its records outside the data folder, at no new synchronous call in `lib/audit.js`
+(still 11: the records are read once, at open, through the same read, and written through a lane and the atomic
+writer) or in `lib/secretbox.js` (still 3: the machine key read once, or made once in a whole temporary file and
+published by a hard link that never replaces one, then the temporary file removed). `lib/resilience.js` goes to 11 for
+`placeId`'s one real-path read per place at start, and the guard's pattern now counts `fs.realpathSync.native(`, which
+it did not see. `verify/` joins the files read, at 0: the audit log's key-free rules (`verify/auditrules.js`) are pure,
+and their own ESLint block turns off every Node global the shared block gives (so `require`, `process`, `Buffer` or
+`console` there is an undefined name), gives no browser global, and refuses any use of `module` but `module.exports` and
+any `import()`: a probe that reads a file there fails the lint.
+`verify/` is under the coverage gate with `server.js`, `supervise.js` and `lib/`.
 
 0.6.0 adds the pages' message channels to it: every `postMessage` in a page script under `public/` names this origin as
 its target, never `'*'`, and every `message` listener's first line returns unless both the sending window and its origin

@@ -120,6 +120,83 @@ browser opening is not yet seen on a Windows desktop)
   The release notes and `README.txt` say Extract All, and the .bat files are run by cmd in the Windows job.
 - Rolling back: nothing is stored; 0.5.1's .bat and server start as they did.
 
+**The audit log is keyed** (the owner's list, 2026-10-26: "Switch the audit chain to HMAC"; the owner's answers B, "Yes",
+Accept belongs to the laptop's token, and C, "First start should ask", with questions 2 and 4 at their defaults)
+- Each entry is chained to the one before it as before, and carries its own HMAC-SHA256 under a key derived from this
+  laptop's machine key (HKDF, one label per use), with the log's id (`l`) and the key's id (`k`, which is not part of
+  the key). 0.5.1's SHA-256 needed no secret, so anyone who could write the data folder could write the whole chain
+  again and it checked; now an entry written, rewritten or relabelled without the key does not. A line is an entry only
+  when it is exactly what it parses to, with exactly its fields in their order: a repeated key, an extra field or a
+  reordered or upper-cased one is "not a whole entry". The rules that need no key are one file,
+  `app/verify/auditrules.js`, which a checker on another computer will run as the laptop does.
+- The key changes only at a boundary entry that names the run before it: `audit.keyed` (0.5.1's plain entries, from
+  entry 1), `audit.rekey` (another computer or Windows account's key, or a run without this laptop's key),
+  `audit.unkeyed` (plain entries after keyed ones: 0.5.1 again, or anyone who could write the folder) and
+  `audit.keyless`. Entries not under this laptop's key are a span, said in this laptop's own words, never in the
+  words the entries carry.
+- Its records live outside the data folder, beside the machine key (`<key folder>\audit\`, MACed under a second derived
+  key): the newest entry on disk (counted once its fsync returned, so the head never claims what a power cut can take),
+  the log this laptop wrote last and where, which log each file path last held, and whether this laptop has keyed a log.
+  Read once at each start and compared with the log, they find what 0.5.1's chain could not: entries removed while
+  AGMessage was stopped ("entries 1201 to 1630 are missing: this machine recorded entry 1630; the log ended at entry
+  1200"), a fork, the whole log removed or another put in its place (also across a move to a new folder), and a head
+  changed, missing or under another key. Each is an entry of its own (`audit.cut`, `audit.head`), a line in the black
+  window and in health (`saves.stores.audit.attention`), and a finding of every check until it is accepted. The entry
+  this laptop recorded last, found with the hash it recorded but under another key id (the newest entries relabelled,
+  or cut and padded to look like another computer's), is a changed entry: ✕ at every check from then on, never a span
+  and never accepted. A record that cannot be read (a backup tool holding the head, `keyed.json` or the keyless marker)
+  leaves that start △ and is never written over; while the head cannot be read, its lane stays off for the run. The
+  records are written once the log holds an entry on disk that carries its id: a copy started and stopped before anyone
+  signed in records nothing, so its next start, or a 0.5.1 log copied in after it, is not read as a log removed. A log moved to a new folder
+  (a portable upgrade) is followed by its id, and `audit.moved` says where it was. A half-written last line is kept aside
+  (`audit-torn-<time>.bin`) before it is cut. The head's lane (`auditHead`) is named in health with the other stores,
+  and a stop puts the waiting entries on disk first, then the head that covers them, then every other store (0.5.1
+  saved the stores first, and its last entries were in no head).
+- The check answers with one of four marks, each a shape beside its colour: ✓ Intact, ◇ Linked (entries this laptop
+  cannot check, accepted on it: never ✓), △ Not vouched for, ✕ Broken. Each row of Accounts → Audit log carries its
+  mark too; a line that is not whole is listed as one. `ok` is true only for ✓, and every other answer carries its
+  words as `error`, so a page cached from 0.5.1 shows "Not checked" rather than ✓. The whole log is checked once at
+  each start, beside the show, so health and the rows read what the log holds from the first minute. What that check
+  finds that the start itself did not (a finding an earlier start left open, a line changed while AGMessage was
+  stopped) is said in the black window once it answers, and the browser opens only then, on the admin page when
+  anything needs the person at the laptop. A check broken at a line is what health, the black window and Admin → Health
+  read (✕, with its line, and nothing offered to accept) until a whole check replaces it.
+- The first start of 0.6.0 on a 0.5.1 log asks, under the token in the black window: "entries 1–811 have plain hashes,
+  as AGMessage 0.5.1 and earlier wrote them; anyone who could write this folder could have rewritten them. If this log
+  has been in your hands, accept them … Until then the log reads △. Nothing waits for this." The browser opens on the
+  admin page, where Health asks the same. The words name the running version and say "0.5.1 and earlier", never where
+  the entries came from.
+- Accept is the laptop's token, typed into the dialog on Admin → Health at the laptop (`POST /api/audit/accept`): never a
+  sign-in, which is a record in the data folder anyone who can write it could add, and never an account. Each open
+  finding has its own tick, △ ticked and ✕ unticked, a ✕ accepted only with a second tick that says what accepting it
+  means. The request carries the digest of the check it was shown, refused when the log changed since. A wrong token
+  counts toward the token sign-in's lockout and writes `login.token.fail` "a wrong admin token (at Accept)". The
+  acceptance is an entry (`audit.accept`, the ids as its target) and takes effect once it is on disk; until then the
+  answer says "not accepted yet". An admin account sees the findings and "Accept this on the AGMessage laptop", with no
+  button. `/api/admin/me` gains `token` at its end: true only for a token sign-in made by this run at this laptop. The
+  token at the laptop may run the check (`/api/audit/verify`).
+- The machine key is never replaced. 0.5.1 made a new one on any read error and wrote over the old, which lost the
+  sealed Stagewatch and AI keys. A missing key is made in a whole temporary file and published by a hard link that
+  never replaces one (two first starts at once keep one key). A key that cannot be read (EBUSY, EACCES), one that is not
+  a key, or a key folder that cannot hold a link ("the key folder … cannot publish the machine key (EPERM): it needs an
+  NTFS drive") makes a keyless run: it starts and signs in, opens its log with `audit.keyless` under a key of its own,
+  marks the run in the key folder so the next start says "written here while this machine had no machine key", seals
+  nothing (a key or token typed is refused with the reason, and so are a new screen and a screen's new link, whose links
+  are kept sealed; the context token lives in memory for the run, and New token replaces that one and says it lasts this
+  run only), and says so in the black window and health. The key that will sign exports is derived each time it signs,
+  never kept.
+- The data folder is held under two names when they differ: 0.5.1's (its path as given), so 0.5.1 and this version on
+  one folder refuse each other, and the folder's own, from its real path, so two paths to one folder (a link, a
+  junction, a `subst` drive) are one folder.
+- What it still cannot show is said in `docs/ACCOUNTS.md`, `SECURITY.md`, `README.txt` and the header of `audit.js`:
+  above all, anything done by someone who can change AGMessage's code or holds the machine key, which in the portable
+  layout is anyone who can write the AGMessage folder. `README.txt` says where to keep the folder, and what a "Key
+  folder:" line in the black window means.
+- Not yet: the signed export, checked on another computer (unit 6), and the log carried across events (unit 7).
+- Rolling back: 0.5.1 reads a keyed log as "✕ Broken at line 812: entry 812 was changed after it was written" (its
+  first keyed entry's number) and writes on with plain hashes; it ignores the records. Back on 0.6.0, the entries it
+  wrote are a span (`audit.unkeyed`), △ until accepted.
+
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,
