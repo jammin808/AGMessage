@@ -23,6 +23,7 @@ left out, and the defects the fences found.*
 | The .bat files | `npm test` (`test/startbat.test.js`) | CI · Linux (read as text), Windows (run by cmd) | delayed expansion, a bare program name, the install record read outside the 64-bit view, the preflight after anything started, code 0 and 3 sharing words, a line ending that is not CRLF; on Windows, a missing `node\node.exe` not said or not exit 2, a clean copy made into a folder that exists |
 | The module fence | `npm test` (`test/modules.test.js`; health's lane counts in `test/server.test.js`) | CI · Linux (Node 24, 26), Windows | a breach of the server's layers (a pure module that requires anything but the pure core, names an I/O built-in, reads `process.` or imports at run time; a require of `server.js`; a cycle; a require of the HTTP domain or a handler module from anywhere but `server.js`; a require of a file that is not there); a wire's word left open (a page send no handler file registers, a verb no page sends, an event no page hears or a listener for one never sent, each exception a row with its reason); a verb registered where or how the fuzz does not read it; the op table out of step (the hall page's against `lib/ops.js`'s, a change to a message of a field outside it, or an op given to `apply()` written so it cannot be read); a write lane made that `saveLanes()` does not name once (§3.5) |
 | The stylesheet's tokens | `npm test` (`test/resilience.test.js`) | CI · Linux (Node 24, 26), Windows | a second `:root` or dark token block; more hex colours outside the two than the count (292, only going down); an opacity between 0 and 1 anywhere in `styles.css`, as a number, a percentage or a filter's `opacity()`, or one written so the guard cannot read it (`var()`, `calc()`) (§3.4) |
+| The page floor (Safari 14.1, Chrome 84; `docs/DEVICES.md`) | `npm run lint`, `npm test` (`test/lint-rules.test.js`, `test/resilience.test.js`, `test/pagefloor.test.js`) | CI · analyze, Linux (Node 24, 26), Windows | a bare `requestIdleCallback` or `cancelIdleCallback`, a `requestSubmit()` not behind its probe, or a read of the user agent however it is reached (`window.navigator.userAgent`, `userAgentData`, a computed key, a destructuring), in a page script; a syntax newer than ES5 in `theme-init.js`; a `.showModal(` outside `common.js`'s `AGM.openDialog` beyond the counted sites; a feature of `styles.css` above the floor without its fallback; a page with people that does not load `theme-init.js` first, a screen's page that does, or a script of a page with people that does not stop below the floor before it first asks the server anything or opens a socket (but the four named that only define at load); below the floor, a form that is sent |
 | The bundle start | — | CI · package | the extracted zip's own Node and watchdog not answering `/api/health` with the stamped build within 30 s |
 | The vendored libraries | `npm test` (`test/vendor.test.js`) | CI · Linux, Windows | a file in `app/public/vendor` not in `VENDOR.json`, a listed file missing, bytes that are not its SHA-256, an entry with no licence, notice or copyright, a licence not on the allowed list (Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, MIT AND Zlib, MIT OR GPL-3.0-or-later taken as MIT), a `licenses/` folder whose text is not the licence named or lacks the copyright, a folder no entry claims, a listed file no page loads or a page loading one not listed, a `THIRD-PARTY-NOTICES.md` table that is not the list or that leaves out an advisory, an advisory with no assessment or an assessment that applies without saying what bounds it, a version inside jszip's bundle without where it was read, pako not 1.0.5 by its code, a BSD-3-Clause text filed as BSD-2-Clause, a paper that says which browsers draw a PDF without the floor, the portable build, the SBOM step, `npm run audit` or the Security workflow without them; pdf.js not 4.10.38's legacy build, or not defining `Promise.withResolvers` where it is missing |
 | SBOM + SHA256SUMS + build provenance | `node tools/vendor-sbom.js <sbom> --tree <bundle>` adds the vendored files, read from the bundle as the zip extracts it, to npm's SBOM, with each advisory's analysis | CI · package, release | a release is published only with them; a shipped vendored file whose bytes are not the ones `VENDOR.json` records, or a bundle without the checkout's `VENDOR.json`, `THIRD-PARTY-NOTICES.md` and every licence folder an entry names, stops the SBOM's step |
@@ -196,6 +197,32 @@ for it are not. The smoke holds what the stylesheet draws, on the hall page at 3
 seat, in both themes: computed contrast for the icon buttons (and their size, 24 px or more) and the presence lines, the
 On stage tag's light colours in light mode, Help at rest neutral and outlined (no red in its fill, words or edge, its
 words at 4.5:1 and its edge at 3:1), 🔥 Priority on the fault red only while pressed, and no fade on any of them.
+
+The guard holds the page floor too (the plan's fence (q); `docs/DEVICES.md`): Safari 14.1 (iOS and iPadOS 14.5) and
+Chrome 84, below which a page says so in words and does nothing else. A page reaches a feature newer than the floor
+through a helper in `common.js` that probes for it, never bare, so `.showModal(` appears only in `AGM.openDialog`, behind
+its probe; the hall page's three dialogs are a counted list with the unit that moves them (3c), and a moved one lowers
+it. The stylesheet is read for each feature above the floor, a declaration a browser cannot read being dropped (the one
+before it then holds) and a selector list it cannot read whole being dropped whole: a `dvh`, `svh` or `lvh` value (and
+their kin) follows the same property with a value in `vh`; `:focus-visible` and `:has(` never share a selector list
+with a selector the floor reads; `color-mix(`, `light-dark(` and `text-wrap` follow a plain declaration of the same
+property or sit inside `@supports`, where a rule inside `@container` must sit too; an `inset` follows `top`, `right`,
+`bottom` and `left`, and a logical property (`margin-inline`, `padding-block` and the rest, which Chrome 84 to 86 drop)
+its physical sides; and no rule is nested. A new feature above the floor joins that list with its fallback, by an edit to
+the test that says which browsers drop it. A planted sheet holds the read to each rule, and 0.5.1's sheet fails it eight
+times. ESLint is the lint's half, beside it: `no-restricted-globals` refuses a bare `requestIdleCallback` and
+`cancelIdleCallback` on a page ("use AGM.idle: Safari has none"; `window.requestIdleCallback` behind a probe is a member
+and passes), `no-restricted-syntax` refuses a `requestSubmit()` call (Safari 16), which a page makes only behind its
+probe on a line that says so, and any read of the user agent however it is reached (`navigator.userAgent`,
+`window.navigator.userAgent`, `userAgentData`, a computed key, a destructuring), and `theme-init.js`, which says the
+floor's words, is parsed as ES5 so it parses below the floor. `test/lint-rules.test.js` lints planted sources
+through the config itself, so a change to the config cannot drop a rule unseen. `test/pagefloor.test.js` runs
+`theme-init.js` and `common.js` as a page runs them (the floor's mark, words and held forms; `AGM.awake`'s causes;
+`AGM.idle`'s timer and slice), and holds every page with people to load `theme-init.js` first, a screen's page to load
+none, and every script of theirs to stop below the floor before it first asks the server anything or opens a socket,
+but the four that only define at load, each named with its reason. The smoke takes the features away in Chromium: at the floor
+(no `showModal()`, popover API, Wake Lock, `requestIdleCallback` or `requestSubmit()`), with no `<dialog>` at all, and
+below it (no `WeakRef`, every fetch, request, WebSocket and beacon counted: none).
 
 Beside it, `test/reconnect.test.js` fences the pages' sockets: every page script that opens one (`io(`) opens it at the
 reconnection's pace, `AGM.reconnect.OPTIONS`, and attaches each socket it opens to `AGM.reconnect`, and every page that

@@ -132,7 +132,7 @@
       if (mine === opened) go.hidden = true;
       if (typeof done === 'function') done(words);
     };
-    dlg.showModal();
+    AGM.openDialog(dlg);
   }
 
   window.AGMAuditExport = { open };

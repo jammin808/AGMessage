@@ -32,6 +32,7 @@ let socket = null;
 let allRooms = [];
 
 (async function init() {
+  if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): its words, and nothing asked
   // First, check if we're already logged in (cookie set) and on the host
   const me = await fetch('/api/admin/me').then((r) => r.json()).catch(() => ({}));
   // An admin account works from any device on the venue network; the host's token only on the host laptop.
@@ -81,6 +82,7 @@ document.getElementById('logoutBtn')?.addEventListener('click', async () => {
 
 // ---------------- Dashboard ----------------
 function showDashboard() {
+  if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): no socket
   loginPanel.hidden = true;
   dashboard.hidden = false;
   // Back by itself (reconnect.js): a refusal is tried again at the server's pace, its wait said in the strip.

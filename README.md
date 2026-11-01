@@ -49,6 +49,12 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   Trying again in 34 s. On the venue's Wi-Fi there is room.") and comes back by itself; the venue's Wi-Fi never waits for
   the tunnel. The admin page counts the places, the networks and the day's refusals, and checks the link from the laptop
   before the show ("Checked 14:02 · round trip 85 ms (max 140 ms)").
+- **Devices.** The Board's mixture — iPads, Android tablets and phones — from iPadOS and iOS 14.5 and Chrome 84 (PDFs
+  from iPadOS 16.4 and Chrome 103). An older browser is told so in one line and opens nothing, so it never joins a hall
+  half working. A newer feature a device lacks has a fallback chosen by what the browser has, never by what it calls
+  itself: a dialog opens where the browser has no `showModal()`, and each of the stylesheet's newer rules follows one
+  every device from the floor reads. [docs/DEVICES.md](docs/DEVICES.md) holds the matrix of devices, each fallback, and
+  the walk on the owner's devices before the release.
 - **The show network (Show Bus 1.2).** Send to Stagewatch — straight to the speaker's screen, or to the operator to
   approve and pass on to the confidence monitor, a moderator, backstage or interpreter screen, a department, or keep.
   A line reads as it was typed: cut on a whole character where Stagewatch cuts, its braces as parentheses so Stagewatch

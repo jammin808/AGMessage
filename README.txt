@@ -390,6 +390,14 @@ Troubleshooting
   before they could fill it; messages, screens and everything else carry
   on. Free some space and files work again at once.
 
+- "This browser is too old for AGMessage. Update this device (iPadOS or
+  iOS 14.5, or Chrome 84, or later), or use another.": the device's
+  browser is older than AGMessage's pages need, so the page shows only
+  this and never joins the hall. Update the device (an iPad or iPhone:
+  Settings -> General -> Software Update; Android: update Chrome), or
+  give that person another device. A Board device that says this is not
+  supported: retire it from the Board or replace it.
+
 - A PDF does not draw on an iPad, or on a screen's browser: PDFs need
   Safari 16.4 or later (iPadOS and iOS 16.4), Chrome 103 or later, or a
   current Firefox. On an older device, share the page as a picture (an

@@ -581,6 +581,152 @@ test('guard rails: the stylesheet draws with its tokens: hex colours only in the
     'an opacity between 0 and 1 is found wherever and however it is written (a number, a percentage, a filter\'s opacity(), or a value it cannot read); 0, 1, 100%, a transition of opacity and a property named for it are not');
 });
 
+// ---------------------------------------------------------------- the page floor (Safari 14.1, Chrome 84; docs/DEVICES.md)
+/** `.showModal(` calls in a source: a dialog opened past AGM.openDialog, which a browser below Safari 15.4 cannot open. */
+const showModalCalls = (src) => (src.match(/\.showModal\s*\(/g) || []).length;
+test('guard rails: a dialog opens through AGM.openDialog, which still opens it where showModal() is missing; the sites not yet moved are counted, each with its reason', () => {
+  // common.js's one call is the helper's own. Each other page script holds none, but for the sites a later unit moves,
+  // counted here with the unit that moves them: a new bare call fails, and a moved one lowers its count.
+  const NOT_YET = {
+    'public/app.js': { count: 3, why: 'the hall page\'s Help, Screens & pages and Stagewatch dialogs: the hall page loads common.js from unit 3c, which moves these three onto AGM.openDialog (the plan\'s §0.6)' },
+  };
+  const counted = {};
+  for (const f of pageScripts()) {
+    const n = showModalCalls(fs.readFileSync(path.join(ROOT, f), 'utf8'));
+    if (n) counted[f] = n;
+  }
+  const allowed = { 'public/common.js': 1, ...Object.fromEntries(Object.entries(NOT_YET).map(([f, x]) => [f, x.count])) };
+  assert.deepEqual(counted, allowed, 'showModal() only in common.js\'s AGM.openDialog, and the counted sites not yet moved (' + Object.entries(NOT_YET).map(([f, x]) => f + ': ' + x.why).join('; ') + ')');
+  const common = fs.readFileSync(path.join(ROOT, 'public', 'common.js'), 'utf8');
+  assert.match(common, /function openDialog\(dlg\) \{\s*if \(!dlg\) return;\s*if \(typeof dlg\.showModal === 'function'\) \{ dlg\.showModal\(\); return; \}/, 'common.js calls showModal() only behind its probe, in AGM.openDialog');
+  // The read sees a call however it is spaced, and nothing that only names it.
+  assert.equal(showModalCalls('d.showModal(); $("x").showModal (); typeof d.showModal === "function"; d.showModalLater(); // showModal'), 2);
+});
+
+/** A stylesheet's style rules, comments taken out: each with its selector, its declarations in order, the at-rules it sits in, and whether it holds a rule of its own (nesting). */
+function cssRules(src) {
+  const text = src.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [];
+  const open = [];   // the blocks open around the reader: {prelude, nested}
+  let buf = '';
+  for (const ch of text) {
+    if (ch === '{') {
+      const inner = open[open.length - 1];
+      if (inner && !inner.prelude.startsWith('@') && !/^(?:from|to|[\d.]+%)/.test(inner.prelude)) inner.nested = true;
+      open.push({ prelude: buf.trim(), nested: false });
+      buf = '';
+    } else if (ch === '}') {
+      const block = open.pop();
+      if (block && (!block.prelude.startsWith('@') || buf.includes(':'))) {
+        const decls = buf.split(';').map((d) => d.trim()).filter((d) => d.includes(':'))
+          .map((d) => ({ prop: d.slice(0, d.indexOf(':')).trim().toLowerCase(), value: d.slice(d.indexOf(':') + 1).trim() }));
+        rules.push({ selector: block.prelude, decls, within: open.map((b) => b.prelude).filter((p) => p.startsWith('@')), nested: block.nested });
+      }
+      buf = '';
+    } else buf += ch;
+  }
+  return rules;
+}
+/** The parts of a selector list, split at its own commas (not those inside a :has() or :not()). */
+function selectorParts(list) {
+  const parts = []; let depth = 0; let cur = '';
+  for (const ch of list) {
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; } else cur += ch;
+  }
+  parts.push(cur.trim());
+  return parts;
+}
+// Each feature of the stylesheet above the page floor, with its fallback. A new one joins this list with its fallback, by
+// an edit here that says which browsers drop it.
+const NEW_VIEWPORT = /\d[dsl]v(?:h|w|i|b|min|max)\b/;   // dvh, svh, lvh and their kin: Safari 15.4, Chrome 108
+const NEW_VALUES = /\b(?:color-mix|light-dark)\(/;      // color-mix(): Safari 16.2, Chrome 111; light-dark(): Safari 17.5, Chrome 123
+const NEW_SELECTORS = [':focus-visible', ':has('];      // Safari 15.4; Chrome 86 and 105
+const NEW_PROPS = ['text-wrap'];                        // Safari 17.4, Chrome 114: a plain declaration of it first, or @supports
+// inset and the logical properties: Safari 14.1 but Chrome 87, so Chrome 84 to 86 drop them; each follows its physical sides.
+const PHYSICAL = {
+  inset: [['top'], ['right'], ['bottom'], ['left']],
+  'inset-inline': [['left'], ['right']], 'inset-block': [['top'], ['bottom']],
+  'margin-inline': [['margin-left', 'margin'], ['margin-right', 'margin']], 'margin-block': [['margin-top', 'margin'], ['margin-bottom', 'margin']],
+  'padding-inline': [['padding-left', 'padding'], ['padding-right', 'padding']], 'padding-block': [['padding-top', 'padding'], ['padding-bottom', 'padding']],
+  'border-inline': [['border-left', 'border'], ['border-right', 'border']], 'border-block': [['border-top', 'border'], ['border-bottom', 'border']],
+};
+/** What a stylesheet asks of a browser above the page floor without a fallback a browser at the floor reads: one line each. */
+function floorFaults(src) {
+  const faults = [];
+  for (const { selector, decls, within, nested } of cssRules(src)) {
+    const supported = within.some((w) => w.startsWith('@supports'));
+    if (nested) faults.push(`${selector}: a nested rule (Safari 16.5, Chrome 112)`);
+    if (within.some((w) => w.startsWith('@container')) && !supported) faults.push(`${selector}: inside @container (Safari 16, Chrome 105) and not inside @supports`);
+    const parts = selectorParts(selector);
+    for (const feature of NEW_SELECTORS) {
+      const has = parts.filter((p) => p.includes(feature)).length;
+      if (has && has < parts.length) faults.push(`${selector}: ${feature} shares its selector list with a selector the floor reads`);
+    }
+    decls.forEach(({ prop, value }, i) => {
+      const before = decls.slice(0, i);
+      const plainBefore = (test) => before.some((d) => d.prop === prop && !test(d.value));
+      if (NEW_VIEWPORT.test(value) && !plainBefore((v) => NEW_VIEWPORT.test(v))) faults.push(`${selector}: ${prop}: ${value} has no ${prop} in vh before it`);
+      if (NEW_VALUES.test(value) && !supported && !plainBefore((v) => NEW_VALUES.test(v))) faults.push(`${selector}: ${prop}: ${value} has no plain ${prop} before it`);
+      if (NEW_PROPS.includes(prop) && !supported && !plainBefore(() => false)) faults.push(`${selector}: ${prop} has no plain ${prop} before it and is not inside @supports`);
+      if (PHYSICAL[prop]) {
+        const missing = PHYSICAL[prop].filter((names) => !before.some((d) => names.includes(d.prop))).map((names) => names[0]);
+        if (missing.length) faults.push(`${selector}: ${prop} without ${missing.join(', ')} before it`);
+      }
+    });
+  }
+  return faults;
+}
+test('guard rails: the stylesheet holds on every browser from the page floor: each newer feature follows its fallback, and a newer selector stands in a rule of its own', () => {
+  // A browser drops a declaration it cannot read (the one before it then holds) and a whole rule whose selector list holds
+  // a selector it cannot read (https://developer.mozilla.org/en-US/docs/Web/CSS/Selector_list).
+  const css = fs.readFileSync(path.join(ROOT, 'public', 'styles.css'), 'utf8');
+  assert.deepEqual(floorFaults(css), [], 'styles.css: every feature above the page floor follows its fallback (docs/DEVICES.md)');
+  const read = cssRules(css);
+  assert.ok(read.length > 500 && read.some((r) => r.within.some((w) => w.startsWith('@media'))), `the reader reads the whole sheet, its @media rules too (${read.length} rules)`);
+  // The read finds each fault the floor would meet, and passes each fallback.
+  const planted = [
+    '.a { height: 100dvh; }',
+    '.b { height: 100vh; height: 100dvh; }',
+    '.c { max-height: min(calc(100dvh - 2rem), 52rem); }',
+    '.d, .e:focus-visible { outline: 0; }',
+    '.f:focus-visible, .g:focus-visible { outline: 0; }',
+    'input:focus { outline: 0; } button:focus-visible { outline: 0; }',
+    '.h:has(input:checked), .i { color: red; }',
+    '.j:has(a, b) { color: red; }',
+    '.k { background: color-mix(in srgb, red 5%, blue); }',
+    '.l { background: var(--card); background: color-mix(in srgb, red 5%, blue); }',
+    '.m { color: light-dark(#000, #fff); }',
+    '@supports (color: color-mix(in srgb, red, blue)) { .n { color: color-mix(in srgb, red, blue); } }',
+    '.o { text-wrap: balance; }',
+    '@container (min-width: 20rem) { .p { color: red; } }',
+    '.q { position: fixed; inset: 0; }',
+    '.r { top: 0; right: 0; bottom: 0; left: 0; inset: 0; }',
+    '.s { margin-inline: auto; }',
+    '.t { margin: 0 auto; margin-inline: auto; padding-left: 1px; padding-inline: 1px; }',
+    '.u { box-shadow: inset 0 0 0 1px red; padding: env(safe-area-inset-left); }',
+    '.v { color: red; .w { color: blue; } }',
+    '@media (max-width: 30rem) { .x { height: 100svh; } }',
+    '@keyframes k { from { top: 0; } 50% { top: 1px; } to { top: 2px; } }',
+  ].join('\n');
+  assert.deepEqual(floorFaults(planted), [
+    '.a: height: 100dvh has no height in vh before it',
+    '.c: max-height: min(calc(100dvh - 2rem), 52rem) has no max-height in vh before it',
+    '.d, .e:focus-visible: :focus-visible shares its selector list with a selector the floor reads',
+    '.h:has(input:checked), .i: :has( shares its selector list with a selector the floor reads',
+    '.k: background: color-mix(in srgb, red 5%, blue) has no plain background before it',
+    '.m: color: light-dark(#000, #fff) has no plain color before it',
+    '.o: text-wrap has no plain text-wrap before it and is not inside @supports',
+    '.p: inside @container (Safari 16, Chrome 105) and not inside @supports',
+    '.q: inset without top, right, bottom, left before it',
+    '.s: margin-inline without margin-left, margin-right before it',
+    '.t: padding-inline without padding-right before it',
+    '.v: a nested rule (Safari 16.5, Chrome 112)',
+    '.x: height: 100svh has no height in vh before it',
+  ], 'each newer feature without its fallback is found, and each with it (or inside @supports) passes');
+});
+
 test('guard rails: a page posts a message only to its own origin, and hears one only after checking who sent it', () => {
   let posts = 0, listeners = 0;
   for (const f of pageScripts()) {

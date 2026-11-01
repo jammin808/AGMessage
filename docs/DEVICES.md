@@ -1,0 +1,130 @@
+# The Board's devices
+
+The owner's answer 22: "Board will use a mixture of devices". Read as: iPads on current and older iPadOS, Android
+tablets, and phones (iOS and Android); every Board feature works on each, with a test matrix and fallbacks, and nothing
+is tuned to one device. And on 2026-10-31, of the page floor below: "Keep these as mim" — the floor stays, and a Board
+device below it is not supported.
+
+This paper is the one matrix, the one floor of the pages and the one walk. It holds the hall page's, its menus', its
+dialogs' and its stylesheet's part (the plan's Part 5 §15.10). The stage's rows (the document floor, a document's
+stand-in below it, the no-save measures) join it with the stage's devices unit, and the Board's chat view's rows (the
+sheet's Full screen and wake-lock rows, the layout by size) with the chat view's unit; neither makes a second matrix or a
+second walk.
+
+Every browser version here is MDN's compatibility data (https://github.com/mdn/browser-compat-data), named by its path
+there. No page reads the user agent: each fallback is chosen by a probe or by what failed, so a device nobody listed
+draws by what it is.
+
+## 1. The matrix
+
+| Row | Device | Browser | Why it is a row | Walked |
+|---|---|---|---|---|
+| D1 | an iPad on an iPadOS before 16.4, the oldest the owner's devices run | Safari | below the document floor (Safari 16.4); at or above the page floor (iPadOS 14.5) unless the owner's oldest iPad is older, which this row then says | not walked |
+| D2 | an iPad on iPadOS 16.4 to 16.7 | Safari | the oldest that opens documents | not walked |
+| D3 | an iPad on the current iPadOS | Safari | the newest WebKit | not walked |
+| D4 | an Android tablet | Chrome, current | a long press fires `contextmenu` | not walked |
+| D5 | an Android tablet | Samsung Internet, current | a second Blink browser, with menus and downloads of its own | not walked |
+| D6 | an iPhone on the current iOS | Safari | a phone's width | not walked |
+| D7 | an Android phone | Chrome, current | a phone's width and a long press | not walked |
+| CI | the smoke's Chrome (Linux) and Edge (Windows) | — | every push (§4) | every push |
+
+- A walked row records the device's model, its OS and browser versions and the date: "current" is whatever the device ran
+  that day, written down. Which iPadOS the owner's oldest Board iPad runs (D1) is recorded here; it no longer decides the
+  floor.
+- A row the owner has no device for reads "not walked", which is a fact in this paper, never a pass.
+- A ✕ is a defect, fixed before 0.6.0 is tagged, or a fallback that the row and the device's own words then name. The
+  page floor's words are not such a fallback: a Board device of the owner's below the floor is a ✕ that holds the tag
+  until the owner retires it from the Board or replaces it, and the floor is not lowered for it.
+
+## 2. The page floor: Safari 14.1 (iOS and iPadOS 14.5) and Chrome 84
+
+- **Why there.** The layout uses flex `gap` (`css.properties.gap`, its flex context: Safari 14.1, Chrome 84), and the
+  pages' scripts parse as ES2020, whose newest syntax Safari parses from 14 (`javascript.builtins.BigInt`).
+- **The probe.** `app/public/theme-init.js` is the first script of every page with people (the sign-in page, the halls
+  board, the Accounts page, the admin page, the hall page; a test holds each to it). It tests `typeof window.WeakRef ===
+  'function'`: `WeakRef` arrived in the same versions as flex `gap` (`javascript.builtins.WeakRef`: Safari 14.1, Chrome
+  84, Firefox 79).
+- **Below the floor the page says so in words instead of half working.** `theme-init.js` sets `data-floor="old"` before
+  the page paints; the stylesheet hides everything else, and the page shows one line: "This browser is too old for
+  AGMessage. Update this device (iPadOS or iOS 14.5, or Chrome 84, or later), or use another." Every page script stops
+  before it opens a socket or asks the server anything (a test holds each, and names the four that only define at load),
+  so a guest's page never joins a hall and the hall never hears of it. The hall page's own script ends by throwing (a
+  classic script's top level has no return); its one console error says so.
+- **No form is sent below the floor.** `theme-init.js` holds every submit at the window before the browser or a page's
+  handler acts on it, so a form whose script stopped (the sign-in form, whose method is the page's own address) never
+  puts a password in a URL, whether or not the stylesheet that hides it arrived.
+- **The words reach the browser that needs them.** `theme-init.js` keeps to ES5, under a lint block of its own in which
+  a newer syntax is a parse error.
+- **Screens are untouched.** A screen's page (`/d/…`) loads no `theme-init.js`, and an audience-facing screen never
+  shows the words.
+
+## 3. Each feature above the floor, and its fallback
+
+Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built.
+
+| Feature | From (MDN) | Where | The fallback | Today |
+|---|---|---|---|---|
+| `<dialog>` and `showModal()` | `api.HTMLDialogElement`: Safari 15.4, Chrome 37 | every dialog | `AGM.openDialog(dlg)` (`app/public/common.js`): `showModal()` where it exists. Elsewhere the dialog gets its `open` attribute and is fixed in the viewport, centred as a browser centres a modal dialog (its four sides at 0, auto margins, `height: fit-content`; no transform, so a menu fixed inside it is placed by the viewport as in the top layer), above a backdrop element in `::backdrop`'s colour; the focus goes to its first control, stays inside it and goes back to the opener when it closes; Escape closes it; the rest of the page is `aria-hidden` while it is open. A browser with no `<dialog>` at all is given the dialog's `close()`, `open` and `returnValue`, its `method="dialog"` forms' closing (which would otherwise send the form to the page's address) and the submit event's `submitter` (which came with it) | the halls board's four dialogs, the Accounts page's two and its Export…, and the admin page's Accept and Split open through it; their Cancel is a plain button, so Enter in a field saves. The hall page's three (Help, Screens & pages, the Stagewatch dialog) still call `showModal()` until the unit that moves the hall page onto `common.js` (3c): until then, below Safari 15.4 they do not open |
+| Screen Wake Lock | `api.WakeLock`: Safari 16.4 (iOS and iPadOS 16.4 in a Safari tab, from the Home Screen from 18.4), Chrome 84, Samsung Internet 14.0; only in a secure context (HTTPS) | the Board's simple view; screens keep their own (`display.js`) | `AGM.awake(say)`: the lock where it exists, asked again each time the page is shown. Where it cannot be had, `say` hears the cause and its words: not a secure context, "This device may sleep: open AGMessage over HTTPS."; no Wake Lock in this browser, "This device may sleep: set its screen to stay on in its own settings (Auto-Lock or Screen timeout)."; refused with `NotAllowedError` (the platform could not take it, for example on low battery), or taken back while the page is shown, "This device would not stay awake (its battery may be low): plug it in." | the helper; the simple view's sheet draws its words with the chat view's unit (20a) |
+| A form's `requestSubmit()` | `api.HTMLFormElement.requestSubmit`: Safari 16, Chrome 76 | Return in the hall page's composer | behind its probe; where it is missing, the form's own submit button is clicked, which submits it the same way. A bare call fails the lint | in `app.js` |
+| `requestIdleCallback` | `api.Window.requestIdleCallback`: no Safari | a first open's older messages (unit 32) | `AGM.idle(fn)`: `requestIdleCallback` where it exists, else a timer at once; either way each chunk's deadline gives at most 8 ms by `performance.now()`. A bare call fails the lint | the helper |
+| Popover | `api.HTMLElement.showPopover`: Safari 17, Chrome 114 | the Help chip's ask; the menus (3a) | the ask is fixed at the menus' layer where the popover API is missing; a menu is never popover-only | the ask |
+| A long press | `api.Element.contextmenu_event`: iOS fires none on a long press; Chrome on Android and Samsung Internet do | menus (3a) | ⋯ is the touch door on every device; where a long press fires `contextmenu` the same menu opens in the full view; the simple view opens none; AGMessage runs no timer of its own | with the menus (3a) |
+| `dvh` | `css.types.length.dvh`: Safari 15.4, Chrome 108 | the hall page's height, the dialogs' and Screens & pages' height | the same property in `vh` first | in `styles.css` |
+| `:focus-visible` | `css.selectors.focus-visible`: Safari 15.4, Chrome 86 | the buttons' focus ring | in a rule of its own: a browser that does not know it drops the whole rule, so the fields' `:focus` ring stands apart and holds | in `styles.css` |
+| `:has()` | `css.selectors.has`: Safari 15.4, Chrome 105 | the chosen seat on the sign-in page | a highlight only: the seat's radio stays visible | in `styles.css` |
+| `color-mix()` | `css.types.color.color-mix`: Safari 16.2, Chrome 111 | the halls board's help strip | a plain colour first: the card's colour behind the strip (its red border and heading stay), the border token between its rows | in `styles.css` |
+| `inset` and the logical properties | `css.properties.inset`, `margin-inline` and the rest: Safari 14.1, Chrome 87, so Chrome 84 to 86 drop them | the Shown to you panel's rail, the support view's backdrop, the Help chip's ask | `top`, `right`, `bottom` and `left` (or the physical sides) first | in `styles.css` |
+| `light-dark()`, `@container`, `text-wrap` | Safari 17.5, 16, 17.4; Chrome 123, 105, 114 | not used | a plain declaration of the same property first, or inside `@supports` | held by the fence |
+| pdf.js | its legacy build's targets: Safari 16.4, Chrome 103 (the document floor) | the panel and screens | the stage's stand-in below the document floor, with the stage's devices unit | the legacy build |
+| Marks and emoji | each device's own fonts | every mark | every mark carries its word, so a glyph a device lacks never takes the meaning away; the walk checks each draws | with the marks' table (unit 31) |
+
+## 4. What every push proves (Chromium)
+
+- **The lint** (`eslint.config.mjs`): a bare `requestIdleCallback` or `cancelIdleCallback` in a page script, a
+  `requestSubmit()` call not behind its probe, and any read of the user agent however it is reached
+  (`window.navigator.userAgent`, `userAgentData`, a computed key, a destructuring) fail; `theme-init.js` parses as ES5. `test/lint-rules.test.js` holds the config to each.
+- **`test/resilience.test.js`:** `.showModal(` appears only in `common.js` (`AGM.openDialog`, behind its probe), but for
+  the hall page's three, counted with the unit that moves them. `styles.css` is read for each feature above the floor:
+  a `dvh`, `svh` or `lvh` value follows the same property in `vh`; `:focus-visible` and `:has(` never share a selector
+  list with a selector the floor reads; `color-mix(`, `light-dark(` and `text-wrap` follow a plain declaration of the
+  same property or sit inside `@supports`, as a rule inside `@container` must; an `inset` follows `top`, `right`,
+  `bottom` and `left`, and a logical property its physical sides; and no rule is nested. A planted sheet holds the read
+  to each. A new feature above the floor joins that list with its fallback.
+- **`test/pagefloor.test.js`:** `theme-init.js`, run as a page runs it, marks the page, says the words and holds every
+  submit below the floor (storage blocked or not) and does nothing else above it; `AGM.awake`'s cause and words for each case, the lock asked
+  again when the page is shown and let go by `stop()`; `AGM.idle`'s timer and its 8 ms slice; every page with people
+  loads `theme-init.js` first and a screen's page none; every script of theirs stops below the floor before it first asks
+  the server anything or opens a socket, but the four named that only define at load.
+- **The smoke's floor leg:** without `showModal()`, the popover API, the Wake Lock, `requestIdleCallback` and
+  `requestSubmit()`, the halls board's New hall opens through `AGM.openDialog`'s own, fixed in view above its backdrop
+  with the focus in it and the page hidden from a screen reader; Escape closes it and gives the focus back; Enter in its
+  name makes the hall and closes it; `AGM.idle` runs on its timer; `AGM.awake` says the settings words; no script error.
+  The hall page in that hall sends by Return, taken once, with no script error. With no `<dialog>` at all beside that,
+  the Accounts page's Add a person opens, its Cancel closes it on the page and saves nothing, Escape closes it, Enter in
+  a field submits through Save with Save as its submitter, and Export… opens and closes.
+- **The smoke's leg below the floor:** without `WeakRef`, the sign-in page, the halls board, the Accounts page, the admin
+  page and the hall page each show the floor's words and nothing else and ask nothing (no fetch, request, WebSocket or
+  beacon); health's `clients` does not move, the hall never hears of the guest, and the sign-in form, sent, goes
+  nowhere.
+- **Not in CI:** Safari, Samsung Internet and WebView. Playwright's WebKit is refused: it would be a new dev dependency,
+  and it is not the older iPadOS Safari this answer is about. The legs take features away in Chromium; the walk runs
+  the real browsers. The device legs (a phone's and a tablet's viewport with touch), the floor leg's Help and menu steps,
+  the sheet's words and a first open's older messages through `AGM.idle` come with the units that build what they test
+  (3a, 3c, 20a, 32).
+
+## 5. The walk (before 0.6.0 is tagged)
+
+On every row, each feature ✓, its fallback named, or ✕:
+
+| Feature | D1 | D2 | D3 | D4 | D5 | D6 | D7 |
+|---|---|---|---|---|---|---|---|
+| The device: model, OS and browser versions, the date | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| The screen kept on for 10 minutes untouched, or the words naming why not | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Help opened, sent and closed | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| ⋯ and a long press on a message in the full view; on a take in the simple view nothing opens and nothing saves | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A dialog's buttons reached with the on-screen keyboard up | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Every mark drawn | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Back by itself after the device slept | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| A send written offline lands once | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| The same through the internet link on mobile data | — | — | — | — | — | not walked | not walked |

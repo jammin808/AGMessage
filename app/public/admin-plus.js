@@ -3,6 +3,7 @@
 /* global socket, currentRoom */
 (function () {
   'use strict';
+  if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): nothing asked, nothing polled
   const $ = (id) => document.getElementById(id);
   let wired = false;
   let lastMinutes = '';
@@ -196,7 +197,7 @@
     const ul = $('splitList');
     ul.textContent = 'Reading the archive points…';
     $('splitFinishRow').hidden = true;
-    $('splitDialog').showModal();
+    AGM.openDialog($('splitDialog'));
     const r = await fetch('/api/audit/split').then((x) => x.json()).catch(() => null);
     ul.textContent = '';
     if (!r || !r.ok) { ul.textContent = (r && r.error) || 'No answer from the server.'; return; }
@@ -232,7 +233,7 @@
     $('acceptToken').value = '';
     const ul = $('acceptList');
     ul.textContent = 'Checking the whole log…';
-    $('acceptDialog').showModal();
+    AGM.openDialog($('acceptDialog'));
     const r = await fetch('/api/audit/verify').then((x) => x.json()).catch(() => null);
     ul.textContent = '';
     if (!r || !Array.isArray(r.findings)) { ul.textContent = 'The log could not be checked: ' + ((r && r.error) || 'no answer'); return; }

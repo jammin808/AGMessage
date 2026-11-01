@@ -4,9 +4,13 @@
 // each row with its mark, and checks its own chain on demand; a mark is always a shape beside its colour.
 (function () {
   'use strict';
+  if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): its words, and nothing else
   const $ = (id) => document.getElementById(id);
   const esc = AGM.esc;
   AGM.theme();
+  // A dialog's Cancel is a plain button, never its form's default, so Enter in a field saves: Cancel closes its dialog,
+  // its returnValue 'cancel', and nothing is sent.
+  for (const b of document.querySelectorAll('dialog button[value="cancel"]')) b.addEventListener('click', () => b.closest('dialog').close('cancel'));
 
   let data = null;          // {users, roles, caps, halls, giveable}
   let editing = null;       // the account being edited, or null for a new one
@@ -113,7 +117,7 @@
     $('disableBtn').hidden = self;
     $('removeBtn').hidden = self;
     if (u) $('disableBtn').textContent = u.disabled ? 'Turn on' : 'Turn off';
-    $('userDialog').showModal();
+    AGM.openDialog($('userDialog'));
   }
 
   function renderCaps(u) {
@@ -161,7 +165,6 @@
   }
 
   $('userForm').addEventListener('submit', async (e) => {
-    if (e.submitter && e.submitter.value === 'cancel') return;
     e.preventDefault();
     if (saving) return;
     saving = true; $('userSave').disabled = true;
@@ -197,7 +200,7 @@
   function showSecret(who, pw) {
     $('secretWho').textContent = who;
     $('secretValue').textContent = pw;
-    $('secretDialog').showModal();
+    AGM.openDialog($('secretDialog'));
   }
   $('copySecret').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText($('secretValue').textContent); AGM.toast('Copied.'); } catch { AGM.toast('Copy it by hand — this browser blocks the clipboard here.', true); }

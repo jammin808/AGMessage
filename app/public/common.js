@@ -69,5 +69,187 @@
     return (neg ? '+' : '') + body;
   }
 
-  Object.assign(window.AGM = window.AGM || {}, { esc, api, toast, theme, ago, clock });
+  // ---------------------------------------------------------------- the page floor's helpers
+  // A page reaches a feature newer than its floor (Safari 14.1, Chrome 84; theme-init.js) through one of these, chosen by a
+  // probe, never by the user agent, and each does the same on every device that lacks it.
+
+  // A dialog, modal: showModal() where the browser has it (Safari 15.4, Chrome 37). Elsewhere the dialog is opened as the
+  // page's own: its `open` attribute set, fixed in the viewport (`.agm-dialog-open`) above a backdrop element in
+  // ::backdrop's colour, the focus on its first control and kept inside it, Escape closing it (after a `cancel` event a
+  // listener may refuse), the rest of the page hidden from assistive technology, and the focus given back to the opener
+  // when it closes, however it closes. A browser with no <dialog> at all (below Safari 15.4) is given the dialog's
+  // close(), `open` and `returnValue`, its `method="dialog"` forms' closing (which would otherwise submit to the page's
+  // address) and their submit event's `submitter` (which came with it), so each page's dialog code runs one way on every
+  // device.
+  const FOCUSABLE = 'button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])';
+  const shown = [];            // the dialogs open here, the newest last: {dlg, opener, backdrop}
+  const adopted = new WeakSet();
+  let hiddenHere = [];         // what this file marked aria-hidden for the newest open dialog
+
+  /** Only the newest open dialog (and its ancestors) is left to assistive technology; what was hidden before is let be. */
+  function hideAllBut(dlg) {
+    for (const el of hiddenHere) el.removeAttribute('aria-hidden');
+    hiddenHere = [];
+    for (let n = dlg; n && n !== document.body && n.parentElement; n = n.parentElement) {
+      for (const sib of n.parentElement.children) {
+        if (sib === n || sib.hasAttribute('aria-hidden')) continue;
+        sib.setAttribute('aria-hidden', 'true');
+        hiddenHere.push(sib);
+      }
+    }
+  }
+  function focusFirst(dlg) {
+    const able = (el) => !el.disabled && !el.hidden && el.getClientRects().length > 0;
+    const all = [...dlg.querySelectorAll('[autofocus], ' + FOCUSABLE)];
+    const first = all.find((el) => el.hasAttribute('autofocus') && able(el)) || all.find(able);
+    if (first) { first.focus(); return; }
+    if (!dlg.hasAttribute('tabindex')) dlg.setAttribute('tabindex', '-1');
+    dlg.focus();
+  }
+  /** A dialog opened here has closed (by close(), its form, Escape): its backdrop goes and the focus goes back. */
+  function closedHere(dlg) {
+    const at = shown.findIndex((s) => s.dlg === dlg);
+    if (at < 0) return;
+    const [was] = shown.splice(at, 1);
+    was.backdrop.remove();
+    dlg.classList.remove('agm-dialog-open');
+    hideAllBut(shown.length ? shown[shown.length - 1].dlg : null);
+    if (at === shown.length && was.opener && was.opener.isConnected && typeof was.opener.focus === 'function') was.opener.focus();
+  }
+  /** Once per dialog opened here: its close() ends what this file began, and a browser without <dialog> gets its parts. */
+  function adopt(dlg) {
+    if (adopted.has(dlg)) return;
+    adopted.add(dlg);
+    const own = typeof dlg.close === 'function' ? dlg.close.bind(dlg) : null;   // the browser's, where it has <dialog>
+    dlg.close = (value) => {
+      if (!dlg.hasAttribute('open')) return;
+      if (own) own(value);
+      else {
+        if (value !== undefined) dlg.returnValue = String(value);
+        dlg.removeAttribute('open');
+        dlg.dispatchEvent(new Event('close'));
+      }
+      closedHere(dlg);
+    };
+    dlg.addEventListener('close', () => closedHere(dlg));   // closed by the browser itself: a form's method="dialog"
+    if (own) return;
+    if (!('returnValue' in dlg)) dlg.returnValue = '';
+    if (!('open' in dlg)) Object.defineProperty(dlg, 'open', { configurable: true, get: () => dlg.hasAttribute('open') });
+    let pressed = null;   // the submit button last pressed in it (a click, or Enter's click on the default button)
+    dlg.addEventListener('click', (e) => {
+      const b = e.target && e.target.closest ? e.target.closest('button, input[type="submit"], input[type="image"]') : null;
+      if (b && b.form && (b.type === 'submit' || b.type === 'image')) pressed = b;
+    }, true);
+    dlg.addEventListener('submit', (e) => {
+      if (!('submitter' in e)) Object.defineProperty(e, 'submitter', { value: pressed && pressed.form === e.target ? pressed : null });
+      pressed = null;
+    }, true);
+    dlg.addEventListener('submit', (e) => {
+      const form = e.target;
+      if (e.defaultPrevented || !form || String(form.getAttribute('method') || '').toLowerCase() !== 'dialog') return;
+      e.preventDefault();
+      dlg.close(e.submitter && e.submitter.value !== undefined ? e.submitter.value : '');
+    });
+  }
+  let keysHeard = false;
+  function hearKeys() {
+    if (keysHeard) return;
+    keysHeard = true;
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || !shown.length) return;
+      const { dlg } = shown[shown.length - 1];
+      e.preventDefault();
+      if (dlg.dispatchEvent(new Event('cancel', { cancelable: true }))) dlg.close();
+    });
+    document.addEventListener('focusin', (e) => {
+      if (!shown.length) return;
+      const { dlg } = shown[shown.length - 1];
+      if (!dlg.contains(e.target)) focusFirst(dlg);
+    });
+  }
+  function openDialog(dlg) {
+    if (!dlg) return;
+    if (typeof dlg.showModal === 'function') { dlg.showModal(); return; }
+    if (dlg.hasAttribute('open')) return;
+    adopt(dlg);
+    hearKeys();
+    const opener = document.activeElement;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'agm-backdrop';
+    dlg.parentNode.insertBefore(backdrop, dlg);
+    dlg.classList.add('agm-dialog-open');
+    dlg.setAttribute('open', '');
+    shown.push({ dlg, opener, backdrop });
+    hideAllBut(dlg);
+    focusFirst(dlg);
+  }
+
+  // The screen kept on (the Screen Wake Lock: Safari 16.4, Chrome 84, and only over HTTPS), asked when called and again each
+  // time the page is shown (the browser lets the lock go while the page is hidden). `say(state)` hears each outcome:
+  // {held: true}, or {held: false, why, words}, where `why` is the cause and `words` what a person does about it. A lock
+  // the device takes back while the page is shown is the device's own saving, said as `battery`. Returns stop().
+  const AWAKE_WORDS = Object.freeze({
+    https: 'This device may sleep: open AGMessage over HTTPS.',
+    settings: 'This device may sleep: set its screen to stay on in its own settings (Auto-Lock or Screen timeout).',
+    battery: 'This device would not stay awake (its battery may be low): plug it in.',
+  });
+  function awake(say) {
+    const tell = typeof say === 'function' ? say : () => {};
+    const fail = (why) => tell({ held: false, why, words: AWAKE_WORDS[why] });
+    let lock = null;
+    let asking = false;
+    let stopped = false;
+    async function ask() {
+      if (stopped || asking || lock || document.visibilityState !== 'visible') return;
+      if (!window.isSecureContext) { fail('https'); return; }
+      const wl = navigator.wakeLock;
+      if (!wl || typeof wl.request !== 'function') { fail('settings'); return; }
+      asking = true;
+      let got = null;
+      try {
+        got = await wl.request('screen');
+      } catch (e) {
+        fail(e && e.name === 'NotAllowedError' ? 'battery' : 'settings');
+        return;
+      } finally { asking = false; }
+      if (stopped) { got.release().catch(() => { /* already let go */ }); return; }
+      lock = got;
+      got.addEventListener('release', () => {
+        if (lock !== got) return;
+        lock = null;
+        if (!stopped && document.visibilityState === 'visible') fail('battery');
+      });
+      tell({ held: true });
+    }
+    const onShown = () => { ask(); };
+    document.addEventListener('visibilitychange', onShown);
+    ask();
+    return function stop() {
+      stopped = true;
+      document.removeEventListener('visibilitychange', onShown);
+      if (lock) { const l = lock; lock = null; l.release().catch(() => { /* already let go */ }); }
+    };
+  }
+
+  // Work when the page is idle: requestIdleCallback where it exists (Safari has none), else a timer at once. Either way
+  // `fn(deadline)`'s timeRemaining() gives at most IDLE_SLICE_MS from the moment `fn` starts, by performance.now(), so a
+  // chunk of work that stops when it reaches 0 stops after 8 ms on every device alike. Returns cancel().
+  const IDLE_SLICE_MS = 8;
+  function idle(fn) {
+    const run = (given) => {
+      const start = performance.now();
+      fn({
+        didTimeout: !!(given && given.didTimeout),
+        timeRemaining: () => Math.max(0, Math.min(given ? given.timeRemaining() : IDLE_SLICE_MS, start + IDLE_SLICE_MS - performance.now())),
+      });
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(run);
+      return () => window.cancelIdleCallback(id);
+    }
+    const t = setTimeout(() => run(null), 0);
+    return () => clearTimeout(t);
+  }
+
+  Object.assign(window.AGM = window.AGM || {}, { esc, api, toast, theme, ago, clock, openDialog, awake, idle });
 })();

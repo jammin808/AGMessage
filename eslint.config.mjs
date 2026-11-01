@@ -26,6 +26,21 @@ const bannedSyntax = [
   { selector: "NewExpression[callee.name='Function']", message: 'new Function is eval' },
 ];
 
+// The page floor's half in the lint: what Safari lacks is reached only through its helper or behind its probe, and no page
+// reads the user agent, however it reaches it (`navigator.userAgent`, `window.navigator.userAgent`, `userAgentData`, a
+// computed key or a destructuring).
+const UA = '/^userAgent(Data)?$/';
+const pageFloor = {
+  'no-restricted-globals': ['error',
+    { name: 'requestIdleCallback', message: 'use AGM.idle: Safari has none' },
+    { name: 'cancelIdleCallback', message: 'use AGM.idle: Safari has none' }],
+  'no-restricted-syntax': ['error', ...bannedSyntax,
+    { selector: `:matches(MemberExpression[property.name=${UA}], MemberExpression[property.value=${UA}], ObjectPattern > Property[key.name=${UA}], ObjectPattern > Property[key.value=${UA}])`,
+      message: 'no page reads the user agent: a fallback is chosen by a probe or by what failed' },
+    { selector: "CallExpression[callee.property.name='requestSubmit']",
+      message: 'requestSubmit() is Safari 16, above the page floor: call it behind its probe, with the form\'s submit button clicked where it is missing' }],
+};
+
 export default [
   { ignores: ['app/public/vendor/**', '**/node_modules/**', 'app/uploads/**', 'app/data/**', '**/coverage/**', 'dist/**', 'node/**', 'bin/**', 'artifacts/**'] },
   { linterOptions: { reportUnusedDisableDirectives: 'error', reportUnusedInlineConfigs: 'error' } },
@@ -101,13 +116,19 @@ export default [
     rules: { 'no-restricted-properties': ['error', ...bannedProperties, { object: 'process', property: 'exit', message: 'a library never ends the process: return or throw, and let server.js or supervise.js decide' }] },
   },
 
-  // The pages: browser globals, one script scope per page, and HTML only from escaped parts.
+  // The pages: browser globals, one script scope per page, and HTML only from escaped parts. Every page holds the page
+  // floor (Safari 14.1, Chrome 84; docs/DEVICES.md): a feature newer than it is reached through its helper, which probes
+  // for it (`window.requestIdleCallback` behind AGM.idle is a member, not the bare global), and no page reads the user
+  // agent, so a fallback is chosen by what the browser has, never by what it calls itself.
   {
     files: ['app/public/**/*.js'],
     languageOptions: { sourceType: 'script', globals: { ...globals.browser, io: 'readonly', pdfjsLib: 'readonly', mammoth: 'readonly', XLSX: 'readonly', AGM: 'writable' } },
-    rules: { 'agm/no-unescaped-html': 'error' },
+    rules: { 'agm/no-unescaped-html': 'error', ...pageFloor },
   },
-  { files: ['app/public/**/*.mjs'], languageOptions: { sourceType: 'module', globals: { ...globals.browser } }, rules: { 'agm/no-unescaped-html': 'error' } },
+  { files: ['app/public/**/*.mjs'], languageOptions: { sourceType: 'module', globals: { ...globals.browser } }, rules: { 'agm/no-unescaped-html': 'error', ...pageFloor } },
+  // The first script of every page with people says the floor's words below it, so it parses there: ES5 only (a newer
+  // syntax is a parse error), `var` with it.
+  { files: ['app/public/theme-init.js'], languageOptions: { ecmaVersion: 5 }, rules: { 'no-var': 'off', 'prefer-const': 'off' } },
 
   // The tests: the same fences (they run on the show laptop's runtime too), with the test runner's globals.
   { files: ['app/test/**/*.js'], languageOptions: { globals: { ...globals.node } } },

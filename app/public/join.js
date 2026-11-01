@@ -2,6 +2,7 @@
 // one-time password is changed here before anything else.
 (function () {
   'use strict';
+  if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): its words, and nothing else
   const $ = (id) => document.getElementById(id);
   const params = new URLSearchParams(location.search);
   AGM.theme();

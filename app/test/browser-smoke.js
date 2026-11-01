@@ -353,6 +353,30 @@ const SCREEN_PROBE = `(() => {
 // A browser older than Safari and iPadOS 17.4 (or Chrome 119, Firefox 121) has no Promise.withResolvers, which pdf.js
 // calls in its page module and in its worker: it is taken away before the page's own scripts run and before each
 // worker's, as such a device has it, and what each began with is kept (and answered, for a worker's record).
+// The page floor's legs (docs/DEVICES.md). FLOOR: a browser at or above the floor (Safari 14.1, Chrome 84) without what
+// came after it — showModal(), the popover API, the Wake Lock, requestIdleCallback, a form's requestSubmit() — as Safari
+// before 15.4 is. NO_DIALOG, beside it: no <dialog> at all (its close(), open and returnValue gone) and no submit event's
+// submitter, which came with it. BELOW: a browser below the floor, without WeakRef, which came with it; every way a page
+// asks the server or opens a socket is counted in `__asked`, from before the page's own scripts run.
+const FLOOR = `(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLElement.prototype.showPopover; delete Navigator.prototype.wakeLock; delete window.requestIdleCallback; delete window.cancelIdleCallback; delete HTMLFormElement.prototype.requestSubmit; })();`;
+const NO_DIALOG = `(() => { for (const k of ['close', 'open', 'returnValue', 'show']) delete HTMLDialogElement.prototype[k]; delete SubmitEvent.prototype.submitter; })();`;
+const BELOW = `(() => { delete window.WeakRef; const asked = window.__asked = [];
+  const f = window.fetch; window.fetch = function (u) { asked.push('fetch ' + String(u && u.url || u)); return f.apply(this, arguments); };
+  const o = XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (m, u) { asked.push('xhr ' + u); return o.apply(this, arguments); };
+  const W = window.WebSocket; window.WebSocket = function (u, p) { asked.push('ws ' + u); return new W(u, p); };
+  const b = navigator.sendBeacon; navigator.sendBeacon = function (u) { asked.push('beacon ' + u); return b.apply(this, arguments); }; })();`;
+const FLOOR_WORDS = 'This browser is too old for AGMessage. Update this device (iPadOS or iOS 14.5, or Chrome 84, or later), or use another.';
+/** A dialog opened through AGM.openDialog's own: open, fixed in view above its backdrop, the focus in it (its id), the rest of the page hidden from a screen reader. */
+const FALLBACK_OPEN = (id) => `(() => { const d = document.getElementById('${id}'); const b = d.previousElementSibling; const r = d.getBoundingClientRect();
+  return d.hasAttribute('open') && JSON.stringify({ fixed: getComputedStyle(d).position === 'fixed', inView: r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth,
+    backdrop: !!b && b.className === 'agm-backdrop' && document.elementFromPoint(4, 4) === b, focused: d.contains(document.activeElement) ? document.activeElement.id : '',
+    rest: [...document.body.children].filter((e) => e !== d).every((e) => e.getAttribute('aria-hidden') === 'true') && !d.hasAttribute('aria-hidden') }); })()`;
+/** The same dialog closed: no backdrop left, nothing of the page left hidden, and where the focus went back to. */
+const FALLBACK_CLOSED = (id) => `(() => { const d = document.getElementById('${id}');
+  return !d.hasAttribute('open') && JSON.stringify({ backdrops: document.querySelectorAll('.agm-backdrop').length, hidden: [...document.body.children].filter((e) => e.hasAttribute('aria-hidden')).length, focused: document.activeElement.id }); })()`;
+const FALLBACK_SHOWN = JSON.stringify({ fixed: true, inView: true, backdrop: true, focused: '', rest: true });
+const shownWith = (focused) => FALLBACK_SHOWN.replace('"focused":""', '"focused":' + JSON.stringify(focused));
+const closedTo = (focused) => JSON.stringify({ backdrops: 0, hidden: 0, focused });
 const NO_RESOLVERS = `(() => { delete Promise.withResolvers; globalThis.__resolversAtStart = typeof Promise.withResolvers; return globalThis.__resolversAtStart; })();`;
 /**
  * pdf.js's worker on a tab opened with NO_RESOLVERS as its workerInit: each one running, what it began with and has now,
@@ -1148,6 +1172,120 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await users.eval(`document.getElementById('userSave').click()`);
     const selfSaved = await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — nothing changed.' && !document.getElementById('userDialog').open`, 5000);
     report(selfForm === JSON.stringify({ name: true, role: true, every: true, halls: true, rights: true, off: true, remove: true }) && !!selfSaved, `one's own row: a Save is taken; role, halls, rights, Turn off and Remove are not offered (${selfForm}${selfSaved ? '' : '; ' + (await users.eval(`document.getElementById('userError').textContent`))})`);
+    // The page floor (docs/DEVICES.md). At it, without showModal(), the popover API, the Wake Lock and requestIdleCallback
+    // (as Safari before 15.4 is): the halls board's New hall opens through AGM.openDialog's own, fixed in view above its
+    // backdrop with the focus in it and the rest of the page hidden from a screen reader; Escape closes it and gives the
+    // focus back to New hall; opened again, Enter in its name makes the hall (Save is the form's default button, never
+    // Cancel) and it closes the same way. AGM.idle runs on its timer, and AGM.awake says why the screen may sleep. No
+    // script error.
+    const floor = await edge.tab(`${base}/halls.html`, { init: FLOOR });
+    await floor.until(`document.querySelectorAll('.hall-row').length > 0 && document.getElementById('linkState').dataset.ok === '1' && !document.getElementById('newHallBtn').hidden`);
+    const floorHas = await floor.eval(`JSON.stringify({ floor: document.documentElement.dataset.floor || '', showModal: typeof HTMLDialogElement.prototype.showModal, popover: typeof HTMLElement.prototype.showPopover, wakeLock: 'wakeLock' in navigator, idle: typeof window.requestIdleCallback, requestSubmit: typeof HTMLFormElement.prototype.requestSubmit })`);
+    const openNewHall = `(() => { const b = document.getElementById('newHallBtn'); b.focus(); b.click(); })()`;
+    await floor.eval(openNewHall);
+    const floorOpened = await floor.until(FALLBACK_OPEN('hallDialog'), 3000);
+    await key(floor, 'Escape', 27);
+    const floorEscaped = await floor.until(FALLBACK_CLOSED('hallDialog'), 3000);
+    await floor.eval(openNewHall);
+    const floorAgain = await floor.until(FALLBACK_OPEN('hallDialog'), 3000);
+    await floor.eval(`(() => { const i = document.getElementById('hallName'); i.value = 'Floor hall'; i.focus(); })()`);
+    await key(floor, 'Enter', 13, '\r');
+    const floorMade = await floor.until(`[...document.querySelectorAll('.hall-row')].some((r) => r.textContent.includes('Floor hall')) && ${FALLBACK_CLOSED('hallDialog')}`, 5000);
+    report(floorHas === JSON.stringify({ floor: '', showModal: 'undefined', popover: 'undefined', wakeLock: false, idle: 'undefined', requestSubmit: 'undefined' }) && floorOpened === shownWith('hallName') && floorEscaped === closedTo('newHallBtn') && floorAgain === shownWith('hallName') && floorMade === closedTo('newHallBtn'),
+      `at the floor, without showModal(): New hall opens through AGM.openDialog's own (${floorOpened}), Escape closes it with the focus back (${floorEscaped}), and Enter in its name makes the hall and closes it (${floorMade})`);
+    const floorIdle = await floor.eval(`new Promise((r) => { const t0 = performance.now(); AGM.idle((d) => r(JSON.stringify({ slice: d.timeRemaining() <= 8, soon: performance.now() - t0 < 1000 }))); })`);
+    const floorAwake = await floor.eval(`new Promise((r) => { AGM.awake((s) => r(JSON.stringify(s))); })`);
+    report(floorIdle === JSON.stringify({ slice: true, soon: true }) && floorAwake === JSON.stringify({ held: false, why: 'settings', words: 'This device may sleep: set its screen to stay on in its own settings (Auto-Lock or Screen timeout).' }),
+      `at the floor, AGM.idle runs on its timer within its 8 ms slice (${floorIdle}) and AGM.awake says why the screen may sleep (${floorAwake})`);
+    report(floor.problems.length === 0, `the halls board at the floor: no script errors or CSP violations${floor.problems.length ? ' — ' + floor.problems.slice(0, 3).join(' | ') : ''}`);
+    // The hall page at the floor, in the hall just made: Return in the composer sends without requestSubmit() (Safari
+    // 16), the message taken by the server once, and no script error on the way.
+    const floorHall = await floor.eval(`([...document.querySelectorAll('.hall-row')].find((r) => r.textContent.includes('Floor hall')) || {}).dataset.code`);
+    const floorPad = await edge.tab(`${base}/app.html?code=${floorHall}&name=Floorpad&role=research`, { init: FLOOR });
+    const padJoined = await floorPad.until(`typeof joined !== "undefined" && joined && typeof HTMLFormElement.prototype.requestSubmit === 'undefined'`);
+    await floorPad.eval(`(() => { textInput.value = 'Sent at the floor by Return'; textInput.focus(); })()`);
+    await key(floorPad, 'Enter', 13, '\r');
+    const padSent = await floorPad.until(`!document.querySelector('.msg.echo') && textInput.value === '' && allMessages.filter((m) => m.text === 'Sent at the floor by Return').length === 1`, 5000);
+    report(!!padJoined && !!padSent && floorPad.problems.length === 0,
+      `the hall page at the floor: Return in the composer sends without requestSubmit(), taken once, and no script error${floorPad.problems.length ? ' — ' + floorPad.problems.slice(0, 3).join(' | ') : ''}`);
+    floorPad.close();
+    // With no <dialog> at all beside it (below Safari 15.4): the Accounts page's Add a person opens the same way, its Cancel
+    // closes it without leaving the page and saves nothing; Escape closes it; Enter in a field submits through Save, the
+    // dialog's own submit carrying it as its submitter (a form of method "dialog" would otherwise be sent to the page's
+    // address); the audit log's Export… opens and its Cancel closes it.
+    const noDialog = await edge.tab(`${base}/users.html`, { init: FLOOR + NO_DIALOG });
+    await noDialog.until(`document.querySelectorAll('#userRows tr').length >= 1`);
+    const noDialogHas = await noDialog.eval(`(() => { window.__stayed = 1; return JSON.stringify({ close: typeof HTMLDialogElement.prototype.close, submitter: 'submitter' in SubmitEvent.prototype, rows: document.querySelectorAll('#userRows tr').length }); })()`);
+    const openAdd = `(() => { const b = document.getElementById('newUserBtn'); b.focus(); b.click(); })()`;
+    await noDialog.eval(openAdd);
+    const addOpened = await noDialog.until(FALLBACK_OPEN('userDialog'), 3000);
+    const addOwn = await noDialog.eval(`(() => { const d = document.getElementById('userDialog'); return JSON.stringify({ open: d.open, close: Object.prototype.hasOwnProperty.call(d, 'close') }); })()`);
+    await noDialog.eval(`(() => { document.getElementById('uName').value = 'Floor Fay'; document.getElementById('uUser').value = 'fay'; document.querySelector('#userForm button[value="cancel"]').click(); })()`);
+    const addCancelled = await noDialog.until(FALLBACK_CLOSED('userDialog'), 3000);
+    const addStayed = await noDialog.eval(`JSON.stringify({ stayed: window.__stayed === 1 && location.search === '', returned: document.getElementById('userDialog').returnValue, open: document.getElementById('userDialog').open })`);
+    await noDialog.eval(openAdd);
+    await noDialog.until(FALLBACK_OPEN('userDialog'), 3000);
+    await key(noDialog, 'Escape', 27);
+    const addEscaped = await noDialog.until(FALLBACK_CLOSED('userDialog'), 3000);
+    // Enter in a field submits through the form's default button, Save (Cancel is a plain button), and the submit event
+    // carries it as its submitter, which this browser does not give: heard on the dialog and stopped there, so nothing is
+    // saved; Cancel then closes it.
+    await noDialog.eval(openAdd);
+    await noDialog.until(FALLBACK_OPEN('userDialog'), 3000);
+    await noDialog.eval(`(() => { const d = document.getElementById('userDialog'); window.__submitter = '';
+      d.addEventListener('submit', (e) => { window.__submitter = e.submitter ? e.submitter.value : 'none'; e.preventDefault(); e.stopPropagation(); }, { capture: true, once: true });
+      document.getElementById('uName').value = 'Floor Fay'; document.getElementById('uUser').value = 'fay'; document.getElementById('uName').focus(); })()`);
+    await key(noDialog, 'Enter', 13, '\r');
+    const enterSubmitter = await noDialog.until(`window.__submitter`, 3000);
+    await noDialog.eval(`document.querySelector('#userForm button[value="cancel"]').click()`);
+    const enterClosed = await noDialog.until(FALLBACK_CLOSED('userDialog'), 3000);
+    await noDialog.eval(`document.getElementById('tabAudit').click()`);
+    await noDialog.until(`!document.getElementById('exportBtn').hidden`);
+    await noDialog.eval(`(() => { const b = document.getElementById('exportBtn'); b.focus(); b.click(); })()`);
+    const exportOpened = await noDialog.until(`document.getElementById('exportDialog') && ${FALLBACK_OPEN('exportDialog')}`, 3000);
+    await noDialog.eval(`document.getElementById('exportCancel').click()`);
+    const exportClosed = await noDialog.until(FALLBACK_CLOSED('exportDialog'), 3000);
+    const noneMade = await noDialog.eval(`AGM.api('GET', '/api/users').then((r) => !r.users.some((u) => u.username === 'fay'))`);
+    report(noDialogHas === JSON.stringify({ close: 'undefined', submitter: false, rows: JSON.parse(noDialogHas).rows }) && addOpened === shownWith('uName') && addOwn === JSON.stringify({ open: true, close: true })
+      && addCancelled === closedTo('newUserBtn') && addStayed === JSON.stringify({ stayed: true, returned: 'cancel', open: false }) && noneMade === true && addEscaped === closedTo('newUserBtn')
+      && enterSubmitter === 'save' && enterClosed === closedTo('newUserBtn')
+      && exportOpened === shownWith('exportCancel') && exportClosed === closedTo('exportBtn'),
+      `with no <dialog> at all: Add a person opens (${addOpened}), its Cancel closes it on the page and saves nothing (${addStayed}), Escape closes it (${addEscaped}), Enter in a field submits through Save with its submitter (${enterSubmitter}; ${enterClosed}), and Export… opens and closes (${exportOpened}; ${exportClosed})`);
+    report(noDialog.problems.length === 0, `the Accounts page with no <dialog>: no script errors or CSP violations${noDialog.problems.length ? ' — ' + noDialog.problems.slice(0, 3).join(' | ') : ''}`);
+    // Below the floor (no WeakRef: before Safari 14.1 and Chrome 84), every page with people says so in one line and shows
+    // nothing else, and none asks the server anything or opens a socket: nothing is fetched, health's clients does not
+    // move, and the hall never hears of the guest. The sign-in form, sent by its script's own way, goes nowhere: no
+    // password ever rides in the page's address, whether or not the stylesheet hid the form. The
+    // hall page ends its own script there on purpose (a classic script's top level has no return): its one exception says
+    // so; every other page is quiet.
+    const clientsNow = async () => (await (await fetch(base + '/api/health', { headers: { cookie } })).json()).clients;
+    const clientsBefore = await clientsNow();
+    const below = {};
+    for (const [name, url] of [['the sign-in page', '/'], ['the halls board', '/halls.html'], ['the Accounts page', '/users.html'], ['the admin page', '/admin.html'], ['the hall page', `/app.html?code=${code}&name=Oldpad&role=research`]]) {
+      below[name] = await edge.tab(base + url, { init: BELOW });
+    }
+    const BELOW_READ = `(() => { const shown = [...document.body.children].filter((e) => getComputedStyle(e).display !== 'none'); return document.readyState === 'complete' && document.documentElement.dataset.floor === 'old' && shown.length > 0 && JSON.stringify(shown.map((e) => e.className + ': ' + e.textContent)); })()`;
+    const belowRead = {};
+    for (const [name, tab] of Object.entries(below)) belowRead[name] = await tab.until(BELOW_READ);
+    await below['the sign-in page'].eval(`(() => { document.getElementById('username').value = 'ana'; document.getElementById('password').value = 'never-in-a-url'; document.getElementById('signInPane').requestSubmit(); })()`);
+    await sleep(1500);
+    const clientsAfter = await clientsNow();
+    const heardOld = await research.eval(`document.getElementById('peopleList').textContent.includes('Oldpad')`);
+    const belowAsked = {};
+    for (const [name, tab] of Object.entries(below)) belowAsked[name] = await tab.eval(`JSON.stringify(window.__asked)`);
+    const signInStayed = await below['the sign-in page'].eval(`JSON.stringify({ search: location.search, floor: document.documentElement.dataset.floor })`);
+    report(Object.values(belowRead).every((r) => r === JSON.stringify(['agm-floor: ' + FLOOR_WORDS])) && Object.values(belowAsked).every((a) => a === '[]') && clientsAfter === clientsBefore && heardOld === false
+      && signInStayed === JSON.stringify({ search: '', floor: 'old' }),
+      `below the floor every page with people shows the floor's words and nothing else, asks nothing and opens no socket, and its sign-in form goes nowhere (asked ${JSON.stringify(belowAsked)}; clients ${clientsBefore} → ${clientsAfter}; sign-in ${signInStayed}; ${JSON.stringify(belowRead)})`);
+    const belowProblems = Object.entries(below).map(([name, tab]) => [name, tab.problems]);
+    report(belowProblems.every(([name, p]) => (name === 'the hall page' ? p.length === 1 && /below AGMessage's page floor/.test(p[0]) : p.length === 0)),
+      `below the floor: the hall page's script ends on its one exception, and no other page has a script error${belowProblems.some(([, p]) => p.length) ? ' — ' + JSON.stringify(belowProblems.filter(([, p]) => p.length)) : ''}`);
+    for (const tab of Object.values(below)) tab.close();
+    const floorCloser = await connect(base, cookie);
+    report(!!floorHall && !!(await emit(floorCloser, 'admin:deleteRoom', { roomCode: floorHall, purgeFiles: false })).ok, 'the hall made at the floor goes again');
+    floorCloser.close();
+    floor.close();
+    noDialog.close();
     const hallView = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
     report(!!(await hallView.until(`typeof joined !== "undefined" && joined && document.getElementById('whoami').textContent.startsWith('Ana Admin')`)), 'an account opens its hall with its own name');
     await readOldWords('the hall page opened by an account, Backstage', hallView);

@@ -4,9 +4,13 @@
 // paint and its fallback.
 (function () {
   'use strict';
+  if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): its words, and nothing else
   const $ = (id) => document.getElementById(id);
   const esc = AGM.esc;
   AGM.theme();
+  // A dialog's Cancel is a plain button, never its form's default, so Enter in a field saves: Cancel closes its dialog,
+  // its returnValue 'cancel', and nothing is sent.
+  for (const b of document.querySelectorAll('dialog button[value="cancel"]')) b.addEventListener('click', () => b.closest('dialog').close('cancel'));
 
   let me = null;
   let halls = [];          // from /api/halls: code, name, can{…}
@@ -137,11 +141,10 @@
       }
       $('setupHeardWrap').hidden = !r.stagewatches.length;
       $('setupError').hidden = true;
-      $('setupDialog').showModal();
+      AGM.openDialog($('setupDialog'));
     });
   }
   $('setupForm').addEventListener('submit', (e) => {
-    if (e.submitter && e.submitter.value === 'cancel') return;
     e.preventDefault();
     const patch = { code: setupCode, name: $('setupName').value.trim(), stagewatchUrl: $('setupUrl').value.trim(), stagewatchFingerprint: $('setupFp').value.trim() };
     if ($('setupKey').value.trim()) patch.stagewatchKey = $('setupKey').value.trim();
@@ -169,7 +172,7 @@
       box.textContent = '';
       if (!r.linked.length) { const p = document.createElement('p'); p.className = 'empty-note'; p.textContent = 'No Patterns or PlayMap is linked yet — the admin links them on the admin page.'; box.appendChild(p); }
       for (const n of r.linked) box.appendChild(nodeCard(n, n.desk));   // Propose only where its own hall keeps a show desk
-      $('networkDialog').showModal();
+      AGM.openDialog($('networkDialog'));
     });
   }
   /** A node's items that need attention, as list rows built from escaped parts. */
@@ -305,18 +308,16 @@
 
   // ---------------------------------------------------------------- account actions
   $('signOutBtn').addEventListener('click', async () => { await AGM.api('POST', '/api/auth/logout'); location.replace('/'); });
-  $('passwordBtn').addEventListener('click', () => { $('pwError').hidden = true; $('passwordForm').reset(); $('passwordDialog').showModal(); });
+  $('passwordBtn').addEventListener('click', () => { $('pwError').hidden = true; $('passwordForm').reset(); AGM.openDialog($('passwordDialog')); });
   $('passwordForm').addEventListener('submit', async (e) => {
-    if (e.submitter && e.submitter.value === 'cancel') return;
     e.preventDefault();
     const r = await AGM.api('POST', '/api/auth/password', { current: $('pwCurrent').value, next: $('pwNext').value });
     if (!r.ok) { $('pwError').textContent = r.error; $('pwError').hidden = false; return; }
     $('passwordDialog').close();
     AGM.toast('Password saved. Your other devices are signed out.');
   });
-  $('newHallBtn').addEventListener('click', () => { $('hallForm').reset(); $('hallDialog').showModal(); });
+  $('newHallBtn').addEventListener('click', () => { $('hallForm').reset(); AGM.openDialog($('hallDialog')); });
   $('hallForm').addEventListener('submit', async (e) => {
-    if (e.submitter && e.submitter.value === 'cancel') return;
     e.preventDefault();
     const r = await AGM.api('POST', '/api/rooms', { name: $('hallName').value.trim() });
     if (!r.code) { AGM.toast(r.error || 'Not created.', true); return; }

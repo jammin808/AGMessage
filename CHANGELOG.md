@@ -999,7 +999,85 @@ with remote phones)
 - Rolling back: nothing is stored but the peaks' new keys, which 0.5.1 ignores with the file. A 0.5.1 page cached
   across the upgrade and refused at connect shows nothing and does not retry, as before, until it is reloaded.
 
+**The pages hold on the Board's mixture of devices: a floor, said in words below it, and a fallback for each newer
+feature above it** (the plan's Part 5, unit M; the owner's answers 22, "Board will use a mixture of devices", and 4 of
+2026-10-31, "Keep these as mim"; browser versions from MDN's compatibility data; walked in Chromium with the features
+taken away, not yet on the owner's devices: every row of `docs/DEVICES.md`'s walk reads "not walked")
+- The page floor is Safari 14.1 (iOS and iPadOS 14.5) and Chrome 84, read by a probe in `theme-init.js`, the first
+  script of every page with people: `WeakRef`, which arrived in those versions with the flex `gap` the layout needs.
+  Below it the page says "This browser is too old for AGMessage. Update this device (iPadOS or iOS 14.5, or Chrome 84,
+  or later), or use another." and shows nothing else, and no page script opens a socket or asks the server anything, so
+  a guest's page never joins the hall it was opened on (the hall page's script ends by throwing at its first line; its
+  one console error says why; the admin page asks nothing and polls nothing). No form is sent there either:
+  `theme-init.js` holds every submit at the window, so a sign-in form whose script stopped never goes to the page's own
+  address with its password in it, whether or not the stylesheet that hides it arrived. 0.5.1 read no floor: a browser
+  below it drew what it could and failed where it could not. `theme-init.js` keeps to ES5, held there by a lint block of
+  its own. A screen's page reads no floor and never shows the words. No page reads the user agent.
+- Dialogs open where the browser has no `showModal()` (Safari before 15.4). `AGM.openDialog` (`common.js`) calls it
+  where it exists; elsewhere it opens the dialog as the page's own: fixed in the viewport and centred as a browser
+  centres a modal dialog (no transform, so a menu fixed inside it is placed by the viewport), above a backdrop in the
+  backdrop's colour, the focus on its first control and kept there, Escape closing it, the rest of the page hidden from
+  a screen reader while it is open, and the focus back on what opened it when it closes, however it closes. A browser
+  with no `<dialog>` at all is also given the dialog's `close()`, `open` and `returnValue`, its forms' `method="dialog"`
+  closing, which it would otherwise answer by sending the form to the page's address (a Cancel reloaded the page), and
+  the submit event's `submitter`, without which a page cannot tell which button sent its form. A closed dialog draws nothing there:
+  0.5.1 drew every one in place on the page. The halls board's four dialogs, the Accounts page's two and the audit log's
+  Export…, and the admin page's Accept and Split open through it; the admin page now loads `common.js`. The hall page's
+  three (Help, Screens & pages, the Stagewatch dialog) move when the hall page loads `common.js` (the plan's unit 3c):
+  until then they need `showModal()`.
+- Return in the hall page's composer sends on every device from the floor. It called `requestSubmit()`, which Safari has
+  only from 16, so on iPadOS and iOS 14.5 to 15 Return did nothing (and threw); where it is missing, Send's own click
+  submits the form the same way.
+- `AGM.awake` and `AGM.idle` (`common.js`) are the helpers the Board's view and a first open's older messages will use.
+  The first keeps the screen on where the Wake Lock is, asked again each time the page is shown, and where it is not
+  says why: "This device may sleep: open AGMessage over HTTPS.", "This device may sleep: set its screen to stay on in
+  its own settings (Auto-Lock or Screen timeout).", or, refused by the device or taken back while the page is shown,
+  "This device would not stay awake (its battery may be low): plug it in.". The second runs work through
+  `requestIdleCallback` where it is (Safari has none) or a timer, each chunk held to 8 ms. Nothing draws the wake
+  lock's words yet: the Board's simple view's sheet will.
+- The stylesheet's newer rules each follow one every browser from the floor reads: the hall page's height in `vh`
+  before `dvh` (below Safari 15.4 and Chrome 108 the page took its content's height and scrolled whole, the composer
+  with it); the fields' `:focus` ring in a rule of its own beside the buttons' `:focus-visible`, in both themes (a
+  browser that did not know `:focus-visible` dropped the fields' ring with it); the halls board's help strip on the
+  card's colour, and its rows' border on the border token, before `color-mix()` (below Safari 16.2 and Chrome 111 the
+  strip lost its fill and its rows their lines); and `top`, `right`, `bottom` and `left` before `inset` on the Shown to
+  you panel's rail, the support view's backdrop and the Help chip's ask (Chrome 84 to 86 drop `inset`: the rail's
+  button had no size there).
+- The fences. ESLint refuses a bare `requestIdleCallback` or `cancelIdleCallback` on a page ("use AGM.idle: Safari has
+  none"), a `requestSubmit()` not behind its probe, and any read of the user agent however it is reached
+  (`window.navigator.userAgent`, `userAgentData`, a computed key, a destructuring), and parses `theme-init.js` as ES5; `test/lint-rules.test.js` holds the
+  config to each. `test/resilience.test.js`: `.showModal(` only in `common.js`, behind its probe, and the hall page's
+  three counted with the unit that moves them; `styles.css` read for each feature above the floor (`dvh` and its kin
+  after the same property in `vh`, `:focus-visible` and `:has(` never sharing a selector list with a selector the floor
+  reads, `color-mix(`, `light-dark(` and `text-wrap` after a plain declaration of the same property or inside
+  `@supports`, `@container` only inside `@supports`, `inset` after its four sides and a logical property after its
+  physical ones, no nested rule), with a planted sheet; 0.5.1's sheet fails it eight times. `test/pagefloor.test.js`
+  runs `theme-init.js` and `common.js` as a page runs them: the floor's mark and words (storage blocked or not) and
+  nothing above it, every submit held below it; `AGM.awake`'s cause and words for each case, the lock asked again when
+  the page is shown, a lock taken back said, `stop()` letting it go; `AGM.idle`'s timer and slice; and it holds every
+  page with people to load `theme-init.js` first, a screen's page to load none, and every script of theirs to stop below
+  the floor before it first asks the server anything or opens a socket (the four that only define at load named, each
+  with its reason). The smoke: at the floor (no `showModal()`, popover API, Wake Lock, `requestIdleCallback` or
+  `requestSubmit()`), the halls board's New hall opens through the fallback, fixed in view above its backdrop with the
+  focus in it and the page hidden from a screen reader, Escape closes it with the focus back on New hall, and Enter in
+  its name makes the hall and closes it; `AGM.idle` runs on its timer and `AGM.awake` says the settings words; the hall
+  page in that hall sends by Return, taken once, with no script error; with no `<dialog>` at all beside that, the
+  Accounts page's Add a person opens, its Cancel closes it on the page and saves nothing, Escape closes it, Enter in a
+  field submits through Save with Save as its submitter, and Export… opens and closes; below the floor (no `WeakRef`)
+  the sign-in page, the halls board, the Accounts page, the admin page and the hall page each show the words and
+  nothing else, ask nothing (no fetch, request, WebSocket or beacon) while health's `clients` holds and the hall never
+  hears of the guest, and the sign-in form, sent, goes nowhere. No script error but the hall page's own one below the
+  floor.
+- `docs/DEVICES.md` (new): the device matrix (D1 to D7 and CI), the page floor, each feature above it with its fallback
+  and where it stands, what CI proves, and the walk on the owner's devices before the tag, every row "not walked" so
+  far. A Board device below the floor is not supported: it is a ✕ in the walk until the owner retires it from the
+  Board or replaces it, and the floor is not lowered for it.
+- Rolling back: nothing is stored; 0.5.1's pages come back as they were.
+
 **Fixed**
+- Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
+  person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and
+  Entered was thrown away. Cancel is now a plain button that closes its dialog, and Save is the form's default.
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,
   `secret.key`, audit log and settings when it was made again, while the window said "The copy has no meeting history,

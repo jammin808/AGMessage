@@ -1,5 +1,9 @@
 // AGMessage client.
 
+// Below the page floor (theme-init.js) the hall page shows the floor's words and nothing else: this script ends here,
+// before it draws anything or opens a socket. A classic script's top level has no return, so it ends by throwing.
+if (document.documentElement.dataset.floor === 'old') throw new Error('This browser is below AGMessage\'s page floor: the hall page does not run here.');
+
 const qs = new URLSearchParams(location.search);
 const ROOM = (qs.get('code') || '').toUpperCase();
 // A signed-in account opens a hall with ?code=…&as=account (its name and rights come from the server); anyone else
@@ -1733,7 +1737,11 @@ document.getElementById('aiDraftBtn')?.addEventListener('click', () => {
 textInput?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    textPane.requestSubmit();
+    // requestSubmit() is newer than the page floor (Safari 16): where it is missing, Send's own click submits the form
+    // the same way, so Enter sends on every device.
+    // eslint-disable-next-line no-restricted-syntax -- behind its probe, with Send's click where the browser has none
+    if (typeof textPane.requestSubmit === 'function') textPane.requestSubmit();
+    else textPane.querySelector('button[type="submit"]').click();
   }
 });
 
