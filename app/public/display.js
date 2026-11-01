@@ -221,7 +221,10 @@
   let lostTimer = null;
   // This page's own key on the link: after a blip its new connection is the same screen, not a second one.
   const screenKey = window.crypto && crypto.getRandomValues ? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('') : '';
-  const socket = io({ transports: ['websocket', 'polling'], auth: { display: token, screen: screenKey } });
+  // Back by itself (reconnect.js), in silence: a screen the audience sees never says "Busy". It keeps its last take and
+  // its stale-clock rule meanwhile; only a refusal for good (HTTPS required) is said.
+  const socket = io({ transports: ['websocket', 'polling'], auth: { display: token, screen: screenKey }, ...AGM.reconnect.OPTIONS });
+  AGM.reconnect.attach(socket, { onChange: (st) => { if (st.refused) notice(st.refused); } });
   socket.on('connect', () => {
     linkUp = true;
     clearTimeout(lostTimer);
@@ -250,7 +253,6 @@
     socket.idTimer = setTimeout(() => { $('identify').hidden = true; }, (seconds || 6) * 1000);
   });
   socket.on('display:unknown', ({ words } = {}) => { state = null; show('black'); notice(words || 'This screen link is not in use.'); });
-  socket.on('connect_error', (e) => { if (/HTTPS/.test(String(e && e.message))) notice(e.message); });
 
   // ---------------------------------------------------------------- a screen left on all day
   window.addEventListener('resize', () => { if (state && renderedSeq) render(); });

@@ -51,6 +51,32 @@ test('token bucket and lockout', () => {
   l.fail('x', 0); assert.ok(!l.locked('x', 1)); l.fail('x', 2); assert.ok(l.locked('x', 3)); assert.ok(!l.locked('x', 2000));
 });
 
+test('token bucket: waitMs is the time until it holds the tokens asked, taking none, never sooner than take() would give them', () => {
+  // The connection bucket: 3 a second, bursts of 30.
+  const b = new guard.Bucket(3, 30, 0);
+  assert.equal(b.waitMs(1, 0), 0, 'full: nothing to wait for');
+  assert.equal(b.waitMs(30, 0), 0);
+  for (let i = 0; i < 30; i++) assert.ok(b.take(1, 0));
+  assert.equal(b.take(1, 0), false, 'drained');
+  assert.equal(b.waitMs(1, 0), 334, 'one token at 3 a second: a third of a second, in whole ms rounded up');
+  assert.equal(b.waitMs(2, 0), 667);
+  assert.equal(b.waitMs(1, 200), 134, 'counted from now');
+  const held = b.tokens;
+  assert.equal(b.waitMs(1, 200), 134, 'asking twice gives the same wait');
+  assert.equal(b.tokens, held, 'and asking takes nothing');
+  assert.equal(b.take(1, 333), false, 'not a millisecond before');
+  assert.equal(b.take(1, 334), true, 'and there at the wait it named');
+  assert.equal(b.waitMs(31, 334), Infinity, 'more than the burst is never held');
+  assert.equal(new guard.Bucket(0, 5, 0).waitMs(6, 0), Infinity);
+  const still = new guard.Bucket(0, 5, 0);
+  for (let i = 0; i < 5; i++) still.take(1, 0);
+  assert.equal(still.waitMs(1, 0), Infinity, 'a bucket that never fills never holds one');
+  const one = new guard.Bucket(1, 3, 1000);
+  one.take(3, 1000);
+  assert.equal(one.waitMs(1, 1000), 1000);
+  assert.equal(one.waitMs(1, 2500), 0, 'refilled meanwhile');
+});
+
 test('host-only check: from loopback, to a loopback name, and nothing that came through a proxy or tunnel', () => {
   const req = (addr, headers = { host: 'localhost:3023' }) => ({ socket: { remoteAddress: addr }, headers });
   assert.ok(guard.isHostMachine(req('127.0.0.1')));

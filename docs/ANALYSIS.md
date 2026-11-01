@@ -174,6 +174,16 @@ and a `Latest` are not. A frame is sent through `sendEach`, each hall (and each 
 while it is built is refused and counted in health's `handlerFaults`, as `guardHandlers` counts a handler's throw, and
 the others still go (`test/units.test.js` holds `sendEach`).
 
+Beside it, `test/reconnect.test.js` fences the pages' sockets: every page script that opens one (`io(`) opens it at the
+reconnection's pace, `AGM.reconnect.OPTIONS`, and attaches each socket it opens to `AGM.reconnect`, and every page that
+loads it loads `reconnect.js` first. The four that do are named (the hall page, the halls board, the admin page and the
+screen), so a fifth page with a socket, or one that drops out, fails it; `reconnect.js` opens none of its own. A page
+left out would stay dead after a refusal. The watchdog's first restart after 0.5 s is held by a test only the
+test-windows job runs (on Windows a killed process's port and named pipe are the system's to free): a server bound as
+the show laptop's is (every address) with a page connected from the machine's network address, killed 20 times in a
+row, each start 0.5 s later finding both free. It is skipped elsewhere with that reason, as the `.bat` files' tests
+are; the step is set back to 2 s if it fails there, and no release is built before that job is green.
+
 ### 3.5 The module fence (`test/modules.test.js`)
 
 The server's layers and the wire's words, read from the source by regex as the input fuzz reads event names: every

@@ -41,7 +41,7 @@ echo.
 
 REM Node runs from this folder's own runtime. PORT can be overridden.
 REM The watchdog (app\supervise.js) runs the server and restarts it if it crashes or stops responding
-REM (heartbeat), backing off 2-30 s; rooms, history and everyone's place come back from the saved log.
+REM (heartbeat), backing off 0.5-30 s; rooms, history and everyone's place come back from the saved log.
 REM It gives up after 6 crashes in 10 minutes and says why on the admin page. Ctrl+C stops it for good.
 REM AGM_OPEN asks the server to open the browser once it serves, so the page that opens is this copy's and never whatever
 REM else answers on the port. Only this window's first run asks: a run after the loop below restarts it opens nothing.

@@ -19,6 +19,7 @@ const net = require('net');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit } = require('./helpers');
+const { io: ioClient } = require('socket.io-client');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = process.env.AGM_SMOKE_OUT || path.join(ROOT, '..', 'artifacts', 'smoke');
@@ -335,6 +336,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
   let dataDir2 = null;
   let server3 = null;
   let dataDir3 = null;
+  let server4 = null;
+  let dataDir4 = null;
   try {
     const login = await fetch(base + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
     const cookie = login.headers.get('set-cookie').split(';')[0];
@@ -1137,6 +1140,60 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(/^intact\|✓ Intact — entries 1–8 in the archive audit-c0ffee00-1-8, split off on \d+ \w{3}: signed by this laptop's key, every file what its SHA256SUMS says; 8 entries keyed here checked$/.test(archiveCheck || ''), `the archive is checked on its own (${archiveCheck})`);
     await users3.shot(path.join(OUT, 'audit-archive.png'));
 
+    // Pages come back by themselves, on a fourth AGMessage of their own (its connections drained, then stopped and
+    // started again): a page refused at connect says the wait and comes back without a reload; a drop says
+    // "Reconnecting…" after 2 s and the dot's words after 5 s, both gone at the join's answer; a page shown again while
+    // its backoff waits comes back at once; and the restart announces nobody.
+    {
+      dataDir4 = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-back-'));
+      const port4 = await freePort();
+      const base4 = `http://127.0.0.1:${port4}`;
+      server4 = await startServer(port4, dataDir4);
+      const login4 = await fetch(base4 + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
+      const hall4 = (await (await fetch(base4 + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie: login4.headers.get('set-cookie').split(';')[0] }, body: JSON.stringify({ name: 'Back hall' }) })).json()).code;
+      const rae = await edge.tab(`${base4}/app.html?code=${hall4}&name=Rae&role=research`);
+      await rae.until('typeof connection !== "undefined" && connection.state().back');
+      const CONN = `JSON.stringify({ strip: document.getElementById('connStrip').hidden ? '' : document.getElementById('connStrip').textContent, dot: (document.getElementById('connDot').classList.contains('ok') ? '● ' : '○ ') + document.getElementById('connDot').getAttribute('aria-label'), words: document.getElementById('connWords').hidden ? '' : document.getElementById('connWords').textContent })`;
+      // Refused: this address's connections drained from here (3 a second, bursts of 30) while the page connects again.
+      const drains = [];
+      const draining = { on: true };   // until the page says it was refused
+      const drain = (async () => { while (draining.on) { drains.push(ioClient(base4, { transports: ['websocket'], forceNew: true, reconnection: false })); await sleep(20); } })();
+      await sleep(300);
+      await rae.eval(`(() => { window.__sameLoad = 1; socket.io.engine.close(); })()`);
+      const busy = await rae.until(`(() => { const s = document.getElementById('connStrip'); return !s.hidden && /^Busy — trying again in [1-4] s\\.$/.test(s.textContent) && s.textContent; })()`, 10000);
+      draining.on = false;
+      await drain;
+      const busyBack = await rae.until(`connection.state().back && window.__sameLoad === 1 && ${CONN}`, 15000);
+      drains.forEach((d) => d.close());
+      report(!!busy && busyBack === JSON.stringify({ strip: '', dot: '● Connected', words: '' }), `a page refused at connect says "${busy}" and comes back by itself at that wait, without a reload (${busyBack})`);
+      // Dropped: the server stops. The page's backoff is made long, so only being shown again can bring it back soon.
+      await rae.eval(`(() => { socket.io.reconnectionDelay(30000); socket.io.reconnectionDelayMax(30000); socket.once('disconnect', () => { window.__downAt = performance.now(); }); })()`);
+      await stopServer(server4);
+      server4 = null;
+      await rae.until('!socket.connected && window.__downAt > 0', 5000);
+      const twoS = await rae.until(`performance.now() - window.__downAt > 2300 && ${CONN}`, 5000);
+      const fiveS = await rae.until(`performance.now() - window.__downAt > 5300 && ${CONN}`, 8000);
+      server4 = await startServer(port4, dataDir4);
+      await sleep(500);
+      const stillWaiting = await rae.eval(`!socket.connected`);
+      await rae.eval(`(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); })()`);
+      const hiddenStays = await rae.eval(`!socket.connected`);
+      await rae.eval(`(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' }); window.__shownAt = performance.now(); document.dispatchEvent(new Event('visibilitychange')); })()`);
+      const shownBack = await rae.until(`connection.state().back && JSON.stringify({ ms: Math.round(performance.now() - window.__shownAt), conn: ${CONN} })`, 10000);
+      const down = JSON.stringify({ strip: 'Reconnecting… what you write waits here until we\'re back.', dot: '○ Offline · reconnecting', words: '' });
+      const downDot = JSON.stringify({ strip: 'Reconnecting… what you write waits here until we\'re back.', dot: '○ Offline · reconnecting', words: 'Offline · reconnecting' });
+      report(twoS === down && fiveS === downDot, `a drop says "Reconnecting…" after 2 s and the dot's words after 5 s (${twoS}; ${fiveS})`);
+      const shown = shownBack ? JSON.parse(shownBack) : null;
+      report(stillWaiting && hiddenStays && !!shown && shown.ms < 3000 && shown.conn === JSON.stringify({ strip: '', dot: '● Connected', words: '' }),
+        `a page shown again while its backoff waits (15 s or more) comes back at once, and the join's answer clears the strip and the dot's words (${shownBack})`);
+      const announced = await rae.eval(`JSON.stringify(allMessages.filter((m) => m.type === 'system' && /joined as/.test(m.text)).map((m) => m.text).concat(allMessages.filter((m) => m.type === 'system' && /Session restored/.test(m.text)).length))`);
+      report(announced === JSON.stringify(['Rae joined as research', 1]), `the restart announces nobody: the page is announced once, at its first join, and the restart's own line says what happened (${announced})`);
+      await rae.shot(path.join(OUT, 'back-by-itself.png'));
+      const backProblems = rae.problems.filter((p) => !/WebSocket connection to|ERR_CONNECTION_REFUSED|net::ERR_/.test(p));
+      report(backProblems.length === 0, `a page that came back: no script errors or CSP violations, the stopped server's refused connections aside${backProblems.length ? ' — ' + backProblems.slice(0, 3).join(' | ') : ''}`);
+      rae.close();
+    }
+
     const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3]];
     // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).
     const hidden = [];
@@ -1155,7 +1212,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     try { server.send({ t: 'stop' }); } catch { server.kill(); }   // as the watchdog stops it: saved first
     if (server2) await stopServer(server2);
     if (server3) await stopServer(server3);
-    setTimeout(() => { for (const d of [dataDir, dataDir2, dataDir3]) if (d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } } }, 1000);
+    if (server4) await stopServer(server4);
+    setTimeout(() => { for (const d of [dataDir, dataDir2, dataDir3, dataDir4]) if (d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } } }, 1000);
   }
   console.log(failures === 0 ? `ALL OK (screenshots in ${OUT})` : `${failures} FAILED`);
   setTimeout(() => process.exit(failures ? 1 : 0), 1500);

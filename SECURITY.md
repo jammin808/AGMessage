@@ -55,6 +55,10 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   stored only as hashes, `HttpOnly`, `SameSite=Strict` and `Secure` over HTTPS; logins are rate limited and locked out.
   A browser signed in to an account is refused a code join, so an account never seats itself as a guest with rights
   its own do not hold; a join's role that the page does not offer is refused.
+- A connection refused for its rate says when to try again (`retryMs`, read from that address's own bucket, with a
+  random spread) and nothing else: no address and no count; the page waits it out. A page that comes back in a
+  restart's first 30 s naming a change its hall holds is not announced again: that is the "joined" words only, and its
+  seat, role and rights are decided as at any join, and the people list shows it.
 - One person's pages relay to each other only the settings a page applies, each read by its type and rebuilt; the
   admin's support view acts only on what the admin page that frames it sends (its parent, from this origin).
 - The server listens only for the verbs its pages send, and sends only events a page hears: a test fails the build on

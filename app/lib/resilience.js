@@ -29,7 +29,10 @@ class SupervisorPolicy {
    * @param {number} [o.stableMs] a run at least this long resets the backoff
    */
   constructor(o = {}) {
-    this.backoff = o.backoffSec || [2, 4, 8, 15, 30];
+    // The first restart waits 0.5 s: by then a killed server's port and folder lock are free again, which the Windows job
+    // shows 20 kills in a row (test/resilience.test.js). A port still held would end the start with code 3, and that
+    // stops the watchdog for good, so that test is this step's gate.
+    this.backoff = o.backoffSec || [0.5, 4, 8, 15, 30];
     this.maxCrashes = o.maxCrashes ?? 6;
     this.windowMs = o.windowMs ?? 10 * 60_000;
     this.stableMs = o.stableMs ?? 5 * 60_000;

@@ -272,7 +272,9 @@
   let socket = null;
   function connect() {
     if (typeof io !== 'function') return;
-    socket = io({ transports: ['websocket', 'polling'] });
+    // Back by itself (reconnect.js): a refusal is tried again at the server's pace, its wait said in the strip.
+    socket = io({ transports: ['websocket', 'polling'], ...AGM.reconnect.OPTIONS });
+    AGM.reconnect.attach(socket, { strip: $('connStrip') });
     AGM.outbox.attach(socket, { onChange: drawHeld });
     const ls = $('linkState');
     socket.on('connect', () => {

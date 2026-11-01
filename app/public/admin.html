@@ -43,6 +43,7 @@
         <button id="logoutBtn" class="btn ghost small">Logout</button>
       </div>
     </header>
+    <p class="conn-strip" id="connStrip" role="status" hidden></p>
 
     <div class="admin-body">
       <aside class="admin-sidebar">
@@ -262,6 +263,7 @@
   </dialog>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/outbox.js"></script>
+  <script src="/reconnect.js"></script>
   <script src="/admin.js"></script>
   <script src="/audit-export.js"></script>
   <script src="/admin-plus.js"></script>

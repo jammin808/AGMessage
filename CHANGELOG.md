@@ -603,6 +603,60 @@ halls board in Chromium)
   its own next compaction. A 0.5.1 page cached across the upgrade sends no `cid` and toggles reactions as before; a 0.6
   page talking to a 0.5.1 server sends keys 0.5.1 ignores. Harmless both ways.
 
+**Pages come back by themselves after a refusal, a drop or a restart, and a restart announces nobody** (the plan's
+Part 5, unit B; the tree's tests, `reconnect.js` in a page's own runtime, and the hall page in Chromium. The watchdog's
+0.5 s first step rests on a test only the Windows job runs, whose first run is this change's; nothing here is seen on
+the show laptop yet)
+- A refused connection is tried again, at the pace the server gives. The connection rate per address (3 a second,
+  bursts of 30) refused with "Too many connections — wait a moment." and nothing more, and no page tried again: a page
+  refused at a busy moment stayed dead until someone reloaded it. The refusal now carries `retryMs`: the time until the
+  address's bucket holds its next token (`guard.Bucket.waitMs`), at least 1 s, plus up to 2 s more chosen at random, so
+  the pages behind one address do not all come back in the same instant. The hall page, the halls board and the admin
+  page say "Busy — trying again in 3 s." (the real seconds, rounded up) in a strip under their header and try again
+  then, never sooner, without a reload; a screen (`/d/`) tries again in silence and keeps its picture meanwhile. The
+  refusal for HTTPS required carries `retry: false`: it is never tried again, and the hall page, the halls board and the
+  admin page now give its words as the screen already did.
+- Back sooner after a drop: every page's socket tries again from 0.5 s, doubling to 2 s at most (Socket.IO's own 1 s to
+  5 s before), each ±50 %. A page that is not connected when it is shown again (a phone woken, a tab brought to the
+  front) or when the browser is back online starts afresh at once, instead of waiting out its backoff; a refusal's wait
+  still holds then.
+- Saying so: on the hall page, 2 s after a drop a strip reads "Reconnecting… what you write waits here until we're
+  back.", and 5 s after it the dot in the header gains the words "Offline · reconnecting"; both go at the join's answer,
+  and a page back within 2 s says nothing. The dot has a name for a screen reader, from what is true: "Connecting"
+  while the page is connected and its join's answer is out, "Connected" at the answer, "Offline · reconnecting" while
+  it is not connected and tries again, "Offline" once it is not brought back (in 0.5.1 it was colour only). A page the
+  server sent out, or that closed its own socket, is not brought back and says nothing of reconnecting. One script does all of this, `public/reconnect.js` (`AGM.reconnect`),
+  loaded by the four pages that open a socket, and a test holds each of them to its pace and to it.
+- A restart announces nobody. In the restart's first 30 s (`AGM_BOOT_SEAT_MS`, as for the seats it keeps), a page that
+  comes back naming a change the hall holds (its `since`, from 0 to the hall's newest) is a page coming back: no "Ana
+  joined as research" line is written. 0.5.1 wrote one per page, each a broadcast to the hall and a line in its
+  history, though the restart's own line ("Session restored") already says what happened. A newcomer, a page naming a
+  change the hall never made, and a page back after the 30 s are announced as before. Only the words: no right reads it.
+- The watchdog's first restart after a crash or a hang waits 0.5 s, not 2 s, if the Windows test passed (then 4, 8, 15
+  and 30 s as before; six crashes in ten minutes still give up). A start that found the port or the folder still held
+  would end with code 3, which stops the watchdog for good, so the step is gated by a test the Windows job runs: a
+  server bound as the show laptop's is (every address) with a page connected from the machine's network address is
+  killed 20 times in a row, and each start 0.5 s after must find both free and say it is running. The step lands with
+  its gate, whose first run is this change's own Windows job, and no release is built until that job is green
+  (`package` needs `test-windows`). Run by hand on Linux it passed 20 of 20 (there it is skipped, as the `.bat` tests
+  are); if the Windows job does not pass 20 of 20, the step goes back to 2 s.
+- `test/reconnect.test.js` runs `reconnect.js` as a page loads it, with a socket and a clock of its own: a refusal's
+  wait kept and said, never tried sooner; a refusal for good said and never tried; the strip at 2 s and the dot at 5 s,
+  counted from the drop and gone at the answer; the dot's name in each state, "Connecting" while the join is out; shown again or online, a page not connected starts afresh, unless the
+  server's wait holds; a page sent away left alone. End to end: 40 connections at once from one address, the refused
+  ones each carrying a `retryMs` from 1 s to 3 s and a third, not all the same, and one of them let in once it waited;
+  HTTPS required, a plain connection from this machine's network address carries `retry: false`. A fence holds every
+  page that opens a socket to the pace and to `AGM.reconnect`, its page loading `reconnect.js` first.
+  `test/resilience.test.js`: a 3-page hall restarted writes no "joined" line while a newcomer, a page naming a change
+  the hall never made and one back after the window are announced; and the 20 kills (Windows). `test/units.test.js`:
+  `Bucket.waitMs`. The smoke drains a fourth AGMessage's connections while a hall page connects, sees "Busy — trying
+  again in N s." and the page back without a reload; stops that AGMessage and reads the strip at 2 s and the dot's words
+  at 5 s; starts it again and shows the page, whose backoff was made to wait 15 s or more, which comes back at once;
+  and finds the page announced once in all.
+- Rolling back: nothing is stored. 0.5.1 refuses with no `retryMs`, announces every page after a restart and waits 2 s
+  before its first restart; a 0.6 page it refuses tries again after 3 s. A 0.5.1 page cached across the upgrade
+  ignores `retryMs` and stays as it was.
+
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,

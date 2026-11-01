@@ -55,6 +55,9 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
   act on something, never a bare `socket.emit` of a write; a read or a page's own sync may still be a plain emit. A verb
   that can be asked twice answers a repeat with what it did (the original answer, or ok and `already`), never a refusal
   for something that succeeded; a new verb in `hold` answers a repeat of its `cid`.
+- **A page that opens a socket** opens it with `AGM.reconnect.OPTIONS` and attaches it (`AGM.reconnect.attach`), its
+  HTML loading `app/public/reconnect.js` first, so it comes back by itself; a refusal at connect carries `retryMs`, or
+  `retry: false` when no wait lifts it. `test/reconnect.test.js` names the pages that do.
 - **A new frame of state is a `Latest`** (`app/lib/latest.js`): never a timer or a polled flag of its own, and never a
   volatile emit. `test/resilience.test.js` counts the timers each handler file starts, each with its reason, so a tick
   of its own moves that list with its words.
@@ -94,6 +97,7 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | State frames, latest wins: the one primitive the halls board, a hall's screens, its people list and its seen receipts go through, each sent at once after a quiet window and at most once per window in a burst, each hall's frame sent apart so one that faults holds back no other | `app/lib/latest.js`, `app/server.js` (`frames`) |
 | The op table: the event each change is sent under (`apply()`), and the hall page's table that draws a change it missed and one it hears live alike (a new field of a change to a message is a row of both) | `app/lib/ops.js`, `app/public/app.js` (`UPD_EVENTS`) |
 | The outbox: every write a page makes, in the mode of what the person does (`hold` what a person wrote or answered, held with its client id until the server answers it, kept in the tab across a reload; `now` an act on something, never sent late; `self`; `local`), and the server's half: a send's client id answered with what it became (`byCid`), the newest 500 removals remembered (`gone`) | `app/public/outbox.js` (its tests: `app/test/outbox.test.js`), `app/lib/store.js` (`sentAs`, `removed`), `app/server.js` (`readSend`) |
+| Pages back by themselves: every page's socket at one reconnection pace, a refusal tried again at the wait the server names (`retryMs`) and said, a page shown again or back online started afresh, the strip and the dot's words while it is down; the server's half: the refusal's wait (`Bucket.waitMs`), and a page back in the restart's first seconds not announced | `app/public/reconnect.js` (`AGM.reconnect`; its tests and fence: `app/test/reconnect.test.js`), `app/server.js` (the connection's refusal, `join`) |
 | Identities, rate limits, lockouts, text cleaning | `app/lib/guard.js` |
 | Rights and roles (pure) | `app/lib/rbac.js` |
 | Accounts, password hashing, sessions; their routes | `app/lib/accounts.js`, `app/lib/http-accounts.js` |

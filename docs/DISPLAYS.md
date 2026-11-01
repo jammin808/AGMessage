@@ -39,8 +39,11 @@ has one, which is what the screen shows.
 Several browsers can hold one link (a projector and its backup, a manager's laptop after **Open**). Each says for itself
 what it showed: the console says **✓ on all 2 screens** only when every one did, **… sending — on 1 of 2 screens** until
 then, and **△ could not show it on 1 of 2 screens** as long as any one could not. A screen whose network blips comes back
-as the same screen, not a second one; a browser that vanished without closing counts until AGMessage notices (within
-about 18 seconds).
+as the same screen, not a second one, by itself: from half a second after a drop, at once when its browser is shown
+again or back online, and after AGMessage refused it at a busy moment, at the wait AGMessage named. It never says
+"Busy" to the audience: it keeps its picture meanwhile, and its countdown dims as any stale one does. Only a refusal no
+wait lifts (Require HTTPS, from a plain address) is said on it. A browser that vanished without closing counts until
+AGMessage notices (within about 18 seconds).
 
 A screen keeps one PDF open and draws each page off screen before it swaps it in: stepping through a deck never blanks
 the slide, and a rename or a reconnect leaves the picture alone. A slide the browser had to clear (its graphics reset)

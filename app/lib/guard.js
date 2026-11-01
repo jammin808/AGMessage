@@ -92,6 +92,13 @@ class Bucket {
     this.tokens -= n;
     return true;
   }
+  /** The ms until it holds `n` tokens, taking none: 0 when it holds them at `now`, Infinity when it never can (more than its burst). */
+  waitMs(n = 1, now = Date.now()) {
+    const short = n - this.level(now);
+    if (short <= 0) return 0;
+    if (n > this.burst || !(this.rate > 0)) return Infinity;
+    return Math.ceil((short / this.rate) * 1000);
+  }
 }
 
 /**

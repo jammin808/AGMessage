@@ -83,7 +83,9 @@ document.getElementById('logoutBtn')?.addEventListener('click', async () => {
 function showDashboard() {
   loginPanel.hidden = true;
   dashboard.hidden = false;
-  socket = io();
+  // Back by itself (reconnect.js): a refusal is tried again at the server's pace, its wait said in the strip.
+  socket = io({ ...AGM.reconnect.OPTIONS });
+  AGM.reconnect.attach(socket, { strip: document.getElementById('connStrip') });
   // The admin's acts go through the outbox (outbox.js) as acts on something: refused at once while the page is not
   // connected, "No answer" when the server says nothing in 5 s, never sent late.
   AGM.outbox.attach(socket);

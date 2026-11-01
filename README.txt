@@ -303,6 +303,19 @@ Troubleshooting
   answer in 5 seconds; its answer is shown if it comes later. Check
   whether it was done before doing it again.
 
+- "Reconnecting… what you write waits here until we're back." at the top
+  of a hall's messages (and "Offline · reconnecting" beside the dot after
+  5 seconds): the page lost its connection to AGMessage - the Wi-Fi, or
+  the laptop restarting. Leave it open: it comes back by itself, at once
+  when the phone or tablet is woken or the Wi-Fi is back, and what was
+  written meanwhile is sent then. Nobody in the hall is told it joined
+  again.
+  "Busy — trying again in 3 s." at the top of a page: AGMessage is taking
+  many connections from the same network at once (a room filling up). Leave
+  it: the page connects by itself after those seconds, without a reload.
+  "This AGMessage requires HTTPS — open it with https:// (see /tls).":
+  the admin turned on Require HTTPS; open the same address with https://.
+
 - "The AGMessage laptop is short of disk space, so files are paused":
   the disk is nearly full (under 1 GB free), so new files are refused
   before they could fill it; messages, screens and everything else carry
@@ -327,7 +340,8 @@ Troubleshooting
   Each room is saved as a JSON file. If the laptop crashes or you close the
   terminal by mistake, just relaunch start-agmessage.bat — every active room
   comes back with its full history, pinned messages, action prompts, and
-  document references. Participants rejoin by reopening the page.
+  document references. Pages left open come back by themselves once it
+  runs again, and nobody is announced again.
 
 - Changes are written as they happen to a small log beside each room
   (app\data\rooms\<CODE>.log) and folded into the .json snapshot regularly,
@@ -395,10 +409,16 @@ Reliability and speed
   - Quick drop-and-rejoin no longer spams "left / joined"; comings and goings
     fold into one quiet line.
   - A watchdog runs the server: if it crashes or stops responding (no
-    heartbeat for 10 s) it is restarted - after 2 s, then 4, 8, 15, 30 s if
-    it keeps failing - and everything comes back from the saved log. After 6
-    crashes in 10 minutes it stops and the admin page says why. The last crash
-    is on the admin page (Health).
+    heartbeat for 10 s) it is restarted - after half a second, then 4, 8,
+    15, 30 s if it keeps failing - and everything comes back from the saved
+    log. After 6 crashes in 10 minutes it stops and the admin page says why.
+    The last crash is on the admin page (Health).
+  - Open pages come back by themselves: after a drop (from half a second,
+    and at once when a phone is woken or the Wi-Fi is back), after a restart
+    (nobody is announced again: the hall reads "Session restored"), and
+    after AGMessage refused them at a busy moment, at the pace it gives
+    ("Busy — trying again in 3 s."). A page down for 2 seconds says
+    "Reconnecting…".
   - The admin page's Health line reads the server's delay ("loop delay p95":
     how long work waits for the server, its own 10 ms measuring tick taken
     off) and how busy it is ("busy N %"), then today's peaks: the

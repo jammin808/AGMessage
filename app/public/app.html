@@ -14,7 +14,8 @@
     </div>
     <div class="app-meta">
       <span id="whoami"></span>
-      <span class="dot" id="connDot" title="connection"></span>
+      <span class="dot" id="connDot" role="img" aria-label="Connecting" title="Connecting"></span>
+      <span class="conn-words" id="connWords" hidden>Offline · reconnecting</span>
       <span class="zoom-controls" role="group" aria-label="Message text size">
         <button id="zoomOutBtn" class="btn ghost small" title="Smaller text" type="button">A−</button>
         <button id="zoomResetBtn" class="btn ghost small" title="Reset text size" type="button">A</button>
@@ -33,6 +34,7 @@
 
   <div class="main-row">
     <section class="left-col" id="leftCol">
+      <p class="conn-strip" id="connStrip" role="status" hidden></p>
       <aside class="people-panel" id="peoplePanel" hidden>
         <h3>In this meeting</h3>
         <ul id="peopleList"></ul>
@@ -236,6 +238,7 @@
   <script src="/vendor/mammoth.browser.min.js" defer></script>
   <script src="/vendor/xlsx.full.min.js" defer></script>
   <script src="/outbox.js" defer></script>
+  <script src="/reconnect.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

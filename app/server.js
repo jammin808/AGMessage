@@ -799,8 +799,13 @@ const io = new Server(server, {
   perMessageDeflate: false,
 });
 
-// Connection rate per address (tunnels included).
+// Connection rate per address (tunnels included). A refusal tells the page when to try again, `retryMs`, and the page does,
+// by itself (public/reconnect.js): never before the bucket holds its next token, never under 1 s, and spread over 2 s
+// more, so the pages behind one address do not all come back in the same instant. A refusal that waiting cannot lift
+// says `retry: false`, and the page gives its words instead.
 const connBuckets = new Map();
+const refusal = (words, data) => Object.assign(new Error(words), { data });
+const retryMs = (bucket, now) => Math.max(bucket.waitMs(1, now), 1000) + crypto.randomInt(0, 2000);
 io.use((socket, next) => {
   const ip = guard.clientIp({ socket: socket.conn, headers: socket.handshake.headers, conn: socket.conn });
   let b = connBuckets.get(ip);
@@ -808,8 +813,9 @@ io.use((socket, next) => {
   socket.data.ip = ip;
   socket.data.viaTunnel = web.throughTunnel({ headers: socket.handshake.headers });
   if (settings.requireHttps && cert && !(socket.request && (isEncrypted(socket.request) || isLoopback(socket.request))))
-    return next(new Error('This AGMessage requires HTTPS — open it with https:// (see /tls).'));
-  return b.take() ? next() : next(new Error('Too many connections — wait a moment.'));
+    return next(refusal('This AGMessage requires HTTPS — open it with https:// (see /tls).', { retry: false }));
+  const now = Date.now();
+  return b.take(1, now) ? next() : next(refusal('Too many connections — wait a moment.', { retryMs: retryMs(b, now) }));
 });
 
 const joinLock = new guard.Lockout(10, 60_000);
@@ -958,7 +964,9 @@ io.on('connection', (socket) => {
     socket.data.userRoom = code;
     socket.join(code);
 
-    let returning = stillSeated;
+    // A page back after the restart this process booted from names the last change it holds, and this hall has it: the
+    // restart line already says what happened, so it is not announced again. Presence words only: no right reads it.
+    let returning = stillSeated || (Date.now() - BOOT_AT < BOOT_SEAT_MS && Number.isInteger(since) && since >= 0 && since <= r.seq);
     if (!isAdminView) {
       const k = code + '|' + id;
       if (pendingLeaves.has(k)) { clearTimeout(pendingLeaves.get(k).timer); pendingLeaves.delete(k); returning = true; }

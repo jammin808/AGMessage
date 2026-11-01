@@ -1632,6 +1632,11 @@ html[data-theme="dark"] .admin-tunnel-error .error {
 form[data-held="1"] textarea, form[data-held="1"] input { background: var(--bg); }
 .ai-off-note { font-size: .75rem; color: var(--muted); align-self: center; margin-right: auto; }
 body:not([data-role="research"]) .ai-off-note { display: none; }
+/* A page's connection in words (reconnect.js): a refusal's wait, a drop of 2 s or more, a refusal for good; no motion */
+.conn-strip { margin: 0; padding: .45rem 1rem; background: var(--accent-soft); color: var(--ink); border-left: 4px solid var(--warn); border-bottom: 1px solid var(--border); font-size: .9rem; font-weight: 500; }
+.conn-strip[hidden] { display: none; }
+.conn-words { font-size: .8rem; color: var(--ink); white-space: nowrap; }
+.conn-words[hidden] { display: none; }
 
 /* 0.4: proposals to the show desk, and the /tls page */
 .propose-btn{background:none;border:0;cursor:pointer;font-size:.95rem;opacity:.7}

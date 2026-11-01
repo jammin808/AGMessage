@@ -4,7 +4,7 @@
  *
  *  - The server sends a heartbeat over IPC from its event loop every second. A crash, or a hang (no beat for
  *    AGM_HANG_MS, default 10 s; the first beat may take AGM_STARTUP_MS, default 30 s), restarts it.
- *  - Waits between crash restarts: 2, 4, 8, 15, 30 s; a run of 5 minutes resets them. More than 6 crashes in
+ *  - Waits between crash restarts: 0.5, 4, 8, 15, 30 s; a run of 5 minutes resets them. More than 6 crashes in
  *    10 minutes: it gives up, writes data/watchdog.json and a line to data/watchdog.log, and the next start shows
  *    that on the admin page.
  *  - Exit codes carry intent (lib/resilience.js EXIT): 0 stopped, 3 can't start as configured, 82 restart now.

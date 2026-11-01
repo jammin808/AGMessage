@@ -19,7 +19,7 @@ const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 async function until(fn, ms = 8000) { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await wait(50); } return false; }
 
 // ---------------------------------------------------------------- the watchdog's rules
-test('watchdog policy: backoff, reset after a good run, give up, intent in exit codes', () => {
+test('watchdog policy: the first restart after 0.5 s, then backoff, reset after a good run, give up, intent in exit codes', () => {
   const p = new r.SupervisorPolicy();
   p.started(0);
   assert.deepEqual(p.exited(0, 1000), { action: 'stop', delayMs: 0, reason: 'stopped' });
@@ -28,7 +28,7 @@ test('watchdog policy: backoff, reset after a good run, give up, intent in exit 
   const delays = [];
   let t = 1000;
   for (let i = 0; i < 6; i++) { p.started(t); t += 1000; delays.push(p.exited(70, t).delayMs); }
-  assert.deepEqual(delays, [2000, 4000, 8000, 15000, 30000, 30000]);
+  assert.deepEqual(delays, [500, 4000, 8000, 15000, 30000, 30000], 'the first step 0.5 s, the rest as before');
   p.started(t); t += 1000;
   const g = p.exited(70, t);
   assert.equal(g.action, 'giveup', 'more than 6 crashes in 10 minutes');
@@ -37,7 +37,7 @@ test('watchdog policy: backoff, reset after a good run, give up, intent in exit 
   const q = new r.SupervisorPolicy();
   q.started(0); q.exited(70, 1000); q.started(1000); q.exited(70, 2000);
   q.started(2000);
-  assert.equal(q.exited(70, 2000 + 6 * 60_000).delayMs, 2000, 'a run of 5 minutes or more starts the ladder again');
+  assert.equal(q.exited(70, 2000 + 6 * 60_000).delayMs, 500, 'a run of 5 minutes or more starts the ladder again, at its first step');
   assert.match(q.exited(0, 0, true).reason, /not responding/, 'a hang is a crash whatever the code');
 });
 
@@ -141,6 +141,40 @@ test('a server whose watchdog has gone saves what is waiting and leaves, so no o
   assert.equal(code, 0, 'it stopped as asked to stop');
   const saved = JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'sessions.json'), 'utf8'));
   assert.equal(saved.sessions.length, 1, 'the sign-in made a moment before (its lane writes after 500 ms) is on disk');
+});
+
+// The watchdog's first step is gated here. On Windows a killed server's port and its folder lock (a named pipe) are
+// released by the system, and a start that found either still held would end with code 3, which stops the watchdog for
+// good: so a server killed with a page connected, as a hang is killed, and started again after the first step must find
+// both free and say it is running, 20 times in a row. It binds as the show laptop's does (every address, 0.0.0.0) and
+// its page connects from the machine's network address, as a venue phone does, so the connection the kill leaves on the
+// port is one the real bind meets. Elsewhere the lock is a socket file a killed server leaves behind, which the next
+// start probes and takes over at once.
+const KILLS = 20;
+test('the watchdog\'s first step: killed 20 times with a page connected, the server started again after it finds the port and the folder free and runs each time', { skip: process.platform === 'win32' ? false : 'Windows releases what a killed process held: the test-windows job runs this, the first step\'s gate' }, async (t) => {
+  const h = require('./helpers');
+  const lan = require('../lib/tls').lanAddresses()[0];
+  assert.ok(lan, 'this test needs a network address that is not loopback (every CI runner and show laptop has one)');
+  const step = new r.SupervisorPolicy().exited(70, 1).delayMs;   // what the watchdog waits after a first crash
+  assert.equal(step, 500);
+  let srv = await h.startServer({ HOST: '0.0.0.0' });
+  const { port, dataDir } = srv;
+  t.after(async () => { if (srv.child.exitCode === null && srv.child.signalCode === null) await h.stopServer(srv.child); });
+  const back = [];
+  for (let i = 0; i < KILLS; i++) {
+    const page = await h.connect('http://' + lan + ':' + port);   // a venue page holds a connection on the port at the kill
+    const gone = new Promise((resolve) => { srv.child.once('exit', resolve); });
+    srv.child.kill('SIGKILL');
+    await gone;
+    page.close();
+    await wait(step);
+    const from = Date.now();
+    srv = await h.startServer({ HOST: '0.0.0.0', PORT: String(port), AGM_DATA_DIR: dataDir });   // throws with its window's words if it stops
+    back.push(Date.now() - from);
+    assert.match(srv.out(), /AGMessage \S+ is running/, 'start ' + (i + 1) + ' of ' + KILLS);
+    assert.equal(srv.port, port, 'on the same port');
+  }
+  assert.equal(back.length, KILLS, 'every start after a kill ran: ' + back.join(', ') + ' ms');
 });
 
 // ---------------------------------------------------------------- safe saves
@@ -516,6 +550,63 @@ test('guard rails: a page posts a message only to its own origin, and hears one 
     listeners += heard;
   }
   assert.ok(posts >= 1 && listeners >= 1, 'the guard reads the pages\' posts and listeners (the admin page\'s Resync, the support view\'s listener)');
+});
+
+// ---------------------------------------------------------------- a restart announces nobody
+test('a restart announces nobody: a 3-page hall back after a restart writes no "joined" line, and a newcomer, a page from elsewhere or a late one still is', async (t) => {
+  const h = require('./helpers');
+  let srv = await h.startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await h.stopServer(srv.child); });
+  const admin = (await h.api(srv.base, 'POST', '/api/admin/login', { token: h.TOKEN })).cookie;
+  const code = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
+  const join = async (base, args) => { const s = await h.connect(base); sockets.push(s); return { s, res: await h.emit(s, 'join', { roomCode: code, ...args }) }; };
+  /** A page as the hall page keeps itself: who it is, and the newest change it holds (its join's seq, then each it hears). */
+  async function page(name, role) {
+    const p = { name, role, seq: 0 };
+    const { s, res } = await join(srv.base, { name, role });
+    assert.ok(res.ok, name + ' joined');
+    p.uid = res.identity;
+    p.seq = res.seq;
+    for (const ev of ['message', 'system']) s.on(ev, (m) => { if (Number.isInteger(m.seq) && m.seq > p.seq) p.seq = m.seq; });
+    return p;
+  }
+  const pages = [await page('Ana', 'research'), await page('Ben', 'board'), await page('Cy', 'observer')];
+  await h.until(() => pages[0].seq >= 3, 3000, 'Ana has heard the others join');   // each join is a numbered line
+  const joinedLines = (history) => history.filter((m) => m.type === 'system' && / joined as /.test(m.text)).map((m) => m.text);
+  /** The lines after the newest restart's own line ("— Session restored (…) —"), which says what happened. */
+  const afterRestore = (history) => history.slice(history.map((m) => m.type === 'system' && /Session restored/.test(m.text)).lastIndexOf(true) + 1);
+
+  sockets.splice(0).forEach((s) => s.close());   // the restart drops every page at once
+  srv = await h.restartServer(srv);
+  const heard = [];
+  const watcher = await join(srv.base, { name: 'Wes', role: 'observer' });   // a newcomer in the boot window, with no since
+  watcher.s.on('system', (m) => heard.push(m.text));
+  for (const p of pages) {
+    const { res } = await join(srv.base, { name: p.name, role: p.role, uid: p.uid, since: p.seq });
+    assert.deepEqual([res.ok, res.role, res.uid], [true, p.role, p.uid.split('.')[0]], p.name + ' comes back as itself');
+  }
+  // A page that names a change this hall never made, or no number at all, is no page coming back.
+  const beyond = await join(srv.base, { name: 'Eve', role: 'observer', since: watcher.res.seq + 100 });
+  const minus = await join(srv.base, { name: 'Fay', role: 'observer', since: -1 });
+  assert.ok(beyond.res.ok && minus.res.ok);
+  const reader = await join(srv.base, { name: 'Gus', role: 'observer' });
+  const history = afterRestore(reader.res.history);
+  assert.deepEqual(joinedLines(history), ['Wes joined as observer', 'Eve joined as observer', 'Fay joined as observer'],
+    'after the restart line only those who were not back from it are announced: ' + JSON.stringify(history.map((m) => m.text)));
+  await h.until(() => heard.includes('Gus joined as observer'), 3000, 'the newcomer\'s line reached the hall');
+  assert.ok(!heard.some((x) => /^(Ana|Ben|Cy) joined/.test(x)), 'no page in the hall was told the three came back: ' + JSON.stringify(heard));
+  const people = reader.res.users.map((u) => u.name).sort();
+  assert.deepEqual(people.filter((n) => ['Ana', 'Ben', 'Cy'].includes(n)), ['Ana', 'Ben', 'Cy'], 'the people list has them all the same');
+
+  // Past the boot's first seconds a page that comes back is announced as any join is: the restart line is long past.
+  sockets.splice(0).forEach((s) => s.close());
+  srv = await h.restartServer(srv, { AGM_BOOT_SEAT_MS: '1000' });
+  await h.wait(1100);
+  const late = await join(srv.base, { name: 'Ana', role: 'research', uid: pages[0].uid, since: pages[0].seq });
+  assert.ok(late.res.ok);
+  const lateReader = await join(srv.base, { name: 'Hal', role: 'observer' });
+  assert.deepEqual(joinedLines(afterRestore(lateReader.res.history)), ['Ana joined as research'], 'announced after the window');
 });
 
 // ---------------------------------------------------------------- one server per data folder

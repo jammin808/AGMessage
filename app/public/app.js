@@ -86,18 +86,28 @@ if (ROLE === 'board') document.getElementById('directorCompose').hidden = false;
 if (ROLE === 'research') document.getElementById('researchCompose').hidden = false;
 
 // ---------------- Socket ----------------
-const socket = io({ transports: ['websocket', 'polling'] });
+// The socket comes back by itself (reconnect.js): after a refusal at the server's pace, after a drop, and at once when the
+// page is shown again or the browser is back online. The page is back once its join is answered: the strip says
+// "Reconnecting…" after 2 s without it, the dot's words after 5 s, and both go at the answer.
+const socket = io({ transports: ['websocket', 'polling'], ...AGM.reconnect.OPTIONS });
 const connDot = document.getElementById('connDot');
+const connWords = document.getElementById('connWords');
+const connection = AGM.reconnect.attach(socket, { join: true, down: true, strip: document.getElementById('connStrip'), onChange: drawConnection });
+/** The dot: its colour, its name for a screen reader (what is true now), and its words once the page has been down 5 s. */
+function drawConnection(st) {
+  const name = AGM.reconnect.dotName(st);
+  connDot.classList.toggle('ok', st.back);
+  connDot.setAttribute('aria-label', name);
+  connDot.title = name;
+  connWords.hidden = !st.dot;
+}
 // Every write goes through the outbox (outbox.js): what a person wrote is held until the server answers it, and drawn
 // here meanwhile (drawHeld, below).
 AGM.outbox.attach(socket, { onChange: (item) => drawHeld(item) });
 /** An act's answer: nothing to say when it is done, the server's words (or the outbox's) when it is not. */
 const saidIfNot = (fallback) => (r) => { if (!r || !r.ok) notify((r && r.error) || fallback, true); };
 
-socket.on('connect', () => {
-  connDot.classList.add('ok');
-  rejoin();
-});
+socket.on('connect', rejoin);
 
 /** Join (or rejoin after a drop): the server sends only what we missed when it still has it. */
 function rejoin() {
@@ -154,6 +164,7 @@ function rejoin() {
     }
     lastSeq = Math.max(lastSeq, res.seq || 0);
     joined = true;
+    connection.joined();
     renderUsers(res.users || []);
     refreshSeenLines();
     reportSeen();
@@ -204,7 +215,6 @@ function applyOp(op) {
   if (op.s > lastSeq) lastSeq = op.s;
 }
 
-socket.on('disconnect', () => connDot.classList.remove('ok'));
 socket.on('message', (msg) => { if (!bump(msg.seq)) return; addMessage(msg); scrollToBottom(); reportSeen(); });
 socket.on('system', (msg) => { if (!bump(msg.seq)) return; addMessage(msg); });
 socket.on('users', renderUsers);
