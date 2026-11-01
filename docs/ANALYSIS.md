@@ -167,9 +167,11 @@ stylesheet are not. No cap moved.
 
 The guard counts timers too, the plan's fence (o): every `setTimeout(` and `setInterval(` that a handler file
 (`handlerFiles()`: `server.js` and each module in `lib/handlers/`) starts, bare or as a member, a space before its
-bracket or not, each with its reason in a list the count must equal. `server.js` starts 13 (health's 5 s tick, the
-boot's seats, the uploads' sweep, a drop's grace, three let-go-after-telling timers, the sign-in sweep, the show desk's
-loop, the Stagewatch contexts, the tunnel's log and its 30 s, the watchdog's heartbeat). A frame of state is never one
+bracket or not, each with its reason in a list the count must equal. `server.js` starts 14 (health's 5 s tick, the
+boot's seats, the uploads' sweep, a tunnel socket's wait to join a room, a drop's grace, three let-go-after-telling
+timers, the sign-in sweep, the show desk's loop, the Stagewatch contexts, the tunnel's log and its 30 s, which also
+checks a link whose cloudflared never said it was registered, the watchdog's heartbeat). The internet link's check
+starts none: each of its tries carries its own deadline (`AbortSignal.timeout`). A frame of state is never one
 of them: it is a `Latest` (`lib/latest.js`), whose timers are its own, and the halls board, the screens console, the
 people list and the seen receipts are the four, each named in `server.js` and in health's `latest` (the guard reads the
 names). A new tick of a handler file's own moves the list, with its words; one taken away moves it too. A planted source

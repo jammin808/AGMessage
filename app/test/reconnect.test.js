@@ -124,6 +124,35 @@ test('reconnect: a refused page tries again at the wait the server named, never 
   assert.equal(t.c.pending(), 0, 'and no timer is left');
 });
 
+test('reconnect: a refusal that says what it refused is said in the server\'s words, which name its wait, until the page is back', () => {
+  const FULL = 'AGMessage\'s internet link is full (150 phones). Trying again in 34 s. On the venue\'s Wi-Fi there is room.';
+  const t = rig({ join: true, down: true });
+  t.s.refused(FULL, { retryMs: 33_400, why: 'full' });
+  assert.deepEqual([t.last().busy, t.last().why, t.last().words, t.strip.textContent, t.strip.hidden], [34, 'full', FULL, FULL, false]);
+  t.c.advance(2000);
+  assert.equal(t.strip.textContent, FULL, 'the server\'s words stand over "Reconnecting…" while its wait runs');
+  t.c.advance(31_399);
+  assert.deepEqual(t.s.calls, [], 'not a millisecond before its wait');
+  t.c.advance(1);
+  assert.deepEqual(t.s.calls, ['connect']);
+  const SHARE = 'Many phones from your network are already connected through the internet (75). Trying again in 31 s.';
+  t.s.refused(SHARE, { retryMs: 30_100, why: 'share' });
+  assert.deepEqual([t.last().why, t.strip.textContent], ['share', SHARE], 'refused again: the new words');
+  t.c.advance(30_100);
+  t.s.up(); t.conn.joined();
+  assert.deepEqual([t.last().back, t.last().why, t.last().words, t.strip.hidden], [true, '', '', true], 'back: nothing said');
+  // Without `why` (an older server), the page's own words; words cut at 300 characters, as text.
+  const old = rig();
+  old.s.refused('Too many connections — wait a moment.', { retryMs: 2000 });
+  assert.deepEqual([old.last().why, old.strip.textContent], ['', BUSY(2)]);
+  const long = rig();
+  long.s.refused('y'.repeat(400), { retryMs: 2000, why: 'rate' });
+  assert.equal(long.strip.textContent, 'y'.repeat(300));
+  const odd = rig();
+  odd.s.refused('Busy.', { retryMs: 2000, why: { toString: 1 } });
+  assert.deepEqual([odd.last().why, odd.strip.textContent], ['', BUSY(2)], 'a `why` that is not a word is not one');
+});
+
 test('reconnect: a refusal that waiting cannot lift is said in the server\'s words and never tried again', () => {
   const t = rig({ join: true, down: true });
   t.s.refused('This AGMessage requires HTTPS — open it with https:// (see /tls).', { retry: false });
@@ -300,13 +329,16 @@ test('a refused connection says when to try again: within [1 s, 3 s + the bucket
   assert.ok(refused.length >= 5 && tries.length - refused.length >= 30, (tries.length - refused.length) + ' let in, ' + refused.length + ' refused');
   const oneToken = Math.ceil(1000 / 3);   // the most a drained bucket waits for its next token
   for (const { s, err } of refused) {
-    assert.equal(err.message, 'Too many connections — wait a moment.');
-    assert.deepEqual(Object.keys(err.data), ['retryMs']);
     const ms = err.data.retryMs;
+    assert.deepEqual(err.data, { retryMs: ms, why: 'rate' }, 'what it refused: the rate');
+    assert.equal(err.message, 'Busy — trying again in ' + Math.ceil(ms / 1000) + ' s.', 'on the venue, the words the page says, naming the wait');
     assert.ok(Number.isInteger(ms) && ms >= 1000 && ms < 3000 + oneToken, 'retryMs ' + ms);
     assert.equal(s.active, false, 'refused: the client does not try again by itself (the page does, reconnect.js)');
   }
   assert.ok(new Set(refused.map((x) => x.err.data.retryMs)).size > 1, 'spread: not every page behind one address comes back in the same instant');
+  // Counted where health reads it, in the venue's lane: never the tunnel's.
+  const h = await (await fetch(srv.base + '/api/health')).json();
+  assert.deepEqual([h.refused.venue.rate, h.tunnel.refused.rate, h.tunnel.places], [refused.length, 0, 0]);
   // Waited as named, the same socket is let in: the bucket holds a token by then.
   const first = refused[0];
   await wait(first.err.data.retryMs);

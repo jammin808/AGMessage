@@ -70,16 +70,38 @@
     if (!Array.isArray(days) || !days.length) return '';
     const d = days.find((x) => x && x.day === showDay) || days[days.length - 1];
     const n = (v) => Number(v || 0).toLocaleString();
+    const per = d.socketsPerAddress && typeof d.socketsPerAddress === 'object' ? d.socketsPerAddress : {};
     const w = ['loop delay ' + d.loopMs + ' ms', 'busy ' + Math.round(d.elu * 100) + ' %',
       'largest hall ' + n(d.hallMessages) + ' messages (' + n(d.hallKb) + ' KB)', n(d.joinBurst) + ' joins in 5 s',
-      n(d.socketsPerAddress) + ' connections from one address', n(d.tunnelSockets) + ' through the tunnel'];
+      n(per.venue) + ' connections from one address', n(d.tunnelSockets) + ' through the tunnel (' + n(per.tunnel) + ' from one network)',
+      'refused through the tunnel: ' + refusedWords(d.tunnelRefused)];
     if (d.compactMs && (d.compactMs.max || d.compactMs.messages)) w.push('snapshot ' + d.compactMs.max + ' ms (' + n(d.compactMs.messages) + ' messages)');
     if (d.auditPutMs && d.auditPutMs.count) w.push('audit write p99 ' + d.auditPutMs.p99 + ' ms (max ' + d.auditPutMs.max + ')');
     return (d.day === showDay ? 'today\'s peaks: ' : 'peaks of ' + d.day + ': ') + w.join(', ');
   }
 
+  /**
+   * What the tunnel refused, by kind ({full, share, rate, wrongCode, idle}), in the order and the words its card gives
+   * them: "4 full, 1 one network's share", or "none".
+   */
+  function refusedWords(r) {
+    const by = r && typeof r === 'object' ? r : {};
+    const n = (v) => Number(v || 0).toLocaleString();
+    const said = [['full', 'full'], ['share', 'one network\'s share'], ['rate', 'too fast from one network'], ['wrongCode', 'wrong codes'], ['idle', 'never joined']]
+      .filter(([k]) => by[k]).map(([k, w]) => n(by[k]) + ' ' + w);
+    return said.length ? said.join(', ') : 'none';
+  }
+  /** The internet link's places and today's refusals: "Internet link: 37 of 150 places · 12 networks · refused today: 4 full". */
+  function tunnelWords(t) {
+    if (!t || typeof t !== 'object') return '';
+    const n = (v) => Number(v || 0).toLocaleString();
+    return 'Internet link: ' + n(t.places) + ' of ' + n(t.max) + ' places · ' + n(t.networks) + ' network' + (t.networks === 1 ? '' : 's') +
+      ' · refused today: ' + refusedWords(t.refused);
+  }
+
   function renderHealth(h) {
     if (!h) return;
+    $('tunnelPlaces').textContent = tunnelWords(h.tunnel);
     const parts = [];
     parts.push(h.restarts ? 'restarted by the watchdog ' + h.restarts + '×' : 'running since start');
     if (h.watchdog) parts.push('⚠ the watchdog gave up at ' + new Date(h.watchdog.at).toLocaleTimeString() + ': ' + h.watchdog.reason);

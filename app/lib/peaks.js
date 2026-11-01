@@ -7,10 +7,14 @@
  * start, so a restart or a crash loses none of the day they are for, and a hang or a power cut at most that window.
  *
  *   loopDelayMs  : the loop's true delay from a delay histogram: its p99 less the sampler's own resolution, never below 0
- *   countSockets : the most sockets one address holds, and how many came through the tunnel (counts, never an address)
+ *   countSockets : the most sockets one address (one network through the tunnel) holds, per lane, and how many came
+ *                  through the tunnel (counts, never an address)
  *   Burst        : the most arrivals one key (a hall) took in any 5 s, read at each arrival, not cut at a window's edge
  *   Hist         : durations in fixed buckets; its p99 is the bucket bound it falls under (never above the max), its max exact
- *   Peaks        : one record per show day (06:00 to 06:00), the newest 14; a reading only ever raises its day's value
+ *   Peaks        : one record per show day (06:00 to 06:00), the newest 14; a reading only ever raises its day's value,
+ *                  and the day's refusals through the tunnel, by what was refused, only ever add up
+ *   Refusals     : today's refusals, by lane and by what was refused, and one log line a minute at most while refusing
+ *   linkCheck    : the internet link's check, from the round trips of its tries
  */
 
 /**
@@ -22,18 +26,21 @@ function loopDelayMs(h, resolutionMs) {
   return Number.isFinite(p99) ? Math.max(0, p99 - resolutionMs) : 0;
 }
 
-/** The most sockets one address holds, and the sockets through the tunnel, from the open sockets' `data`. */
+/**
+ * From the open sockets' `data` ({key, lane}: the key its bounds count by, and 'venue' or 'tunnel'): the most one key
+ * holds in each lane — an address on the venue, a network through the tunnel — and the sockets through the tunnel.
+ */
 function countSockets(datas) {
-  const per = new Map();
+  const per = { venue: new Map(), tunnel: new Map() };
   let tunnel = 0;
   for (const d of datas) {
-    if (!d) continue;
-    if (d.viaTunnel) tunnel++;
-    if (typeof d.ip === 'string' && d.ip) per.set(d.ip, (per.get(d.ip) || 0) + 1);
+    if (!d || typeof d.key !== 'string' || !d.key) continue;
+    const lane = d.lane === 'tunnel' ? 'tunnel' : 'venue';
+    if (lane === 'tunnel') tunnel++;
+    per[lane].set(d.key, (per[lane].get(d.key) || 0) + 1);
   }
-  let most = 0;
-  for (const n of per.values()) if (n > most) most = n;
-  return { maxPerAddress: most, tunnel };
+  const most = (m) => { let n = 0; for (const v of m.values()) if (v > n) n = v; return n; };
+  return { maxPerAddress: { venue: most(per.venue), tunnel: most(per.tunnel) }, tunnel };
 }
 
 /**
@@ -124,8 +131,29 @@ const dayOf = (at) => {
   if (d.getHours() < DAY_TURNS_AT_HOUR) d.setDate(d.getDate() - 1);
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 };
-// The readings a window raises, and the digits each keeps.
-const WINDOW = { loopMs: 1, elu: 3, socketsPerAddress: 0, tunnelSockets: 0, hallMessages: 0, hallKb: 1, joinBurst: 0 };
+// The readings a window raises, and the digits each keeps; `socketsPerAddress` is kept per lane.
+const WINDOW = { loopMs: 1, elu: 3, tunnelSockets: 0, hallMessages: 0, hallKb: 1, joinBurst: 0 };
+const LANES = ['venue', 'tunnel'];
+// What each lane counts as refused: at connect, the rate (3 a second, bursts of 30, per network), one network's share of
+// the tunnel's places and the places all taken; after it, a tunnel socket let go for not joining in time (`idle`), and a
+// join through the tunnel answered with the wrong-code lock (`wrongCode`). The first three are the link's capacity
+// (reading 7 reads them); the last two are a probe or a stuck page and a guesser, counted beside them.
+const REFUSED = { tunnel: ['rate', 'share', 'full', 'idle', 'wrongCode'], venue: ['rate'] };
+const zero = (keys) => Object.fromEntries(keys.map((k) => [k, 0]));
+/** Saved refusals by kind: each of `keys` a whole count, anything else none. */
+const perKind = (v, keys) => {
+  const o = v && typeof v === 'object' ? v : {};
+  return Object.fromEntries(keys.map((k) => [k, Math.floor(num(o[k]))]));
+};
+/**
+ * A saved `socketsPerAddress`: per lane, each a whole count. A plain number (a build that counted every address in one)
+ * is read as the venue's, the lane its reading (reading 2) is about.
+ */
+const perLane = (v) => {
+  if (typeof v === 'number') return { venue: Math.floor(num(v)), tunnel: 0 };
+  const o = v && typeof v === 'object' ? v : {};
+  return { venue: Math.floor(num(o.venue)), tunnel: Math.floor(num(o.tunnel)) };
+};
 
 class Peaks {
   constructor({ keepDays = 14 } = {}) {
@@ -141,6 +169,8 @@ class Peaks {
       if (!d || typeof d.day !== 'string' || !DAY_RE.test(d.day)) continue;
       const rec = this._blank(d.day);
       for (const k of Object.keys(WINDOW)) rec[k] = round(num(d[k]), WINDOW[k]);
+      rec.socketsPerAddress = perLane(d.socketsPerAddress);
+      rec.tunnelRefused = perKind(d.tunnelRefused, REFUSED.tunnel);
       const c = d.compactMs || {};
       rec.compactMs = { max: round(num(c.max), 1), messages: Math.floor(num(c.messages)) };
       rec.auditPutMs = Hist.from(d.auditPutMs);
@@ -152,7 +182,7 @@ class Peaks {
   }
 
   _blank(day) {
-    return { day, loopMs: 0, elu: 0, socketsPerAddress: 0, tunnelSockets: 0, hallMessages: 0, hallKb: 0, joinBurst: 0, compactMs: { max: 0, messages: 0 }, auditPutMs: new Hist(), at: 0 };
+    return { day, loopMs: 0, elu: 0, socketsPerAddress: { venue: 0, tunnel: 0 }, tunnelSockets: 0, tunnelRefused: zero(REFUSED.tunnel), hallMessages: 0, hallKb: 0, joinBurst: 0, compactMs: { max: 0, messages: 0 }, auditPutMs: new Hist(), at: 0 };
   }
 
   /** The record of the day `at` falls on, made when it is the first reading of that day; only the newest days are kept. */
@@ -170,7 +200,7 @@ class Peaks {
   // Each reading below returns whether its day's record changed, and marks the peaks dirty when it did (the server saves
   // them at the window's end); `at` is when the record last changed.
 
-  /** One window's readings ({loopMs, elu, …}); each raises its day's value, never lowers it. */
+  /** One window's readings ({loopMs, elu, socketsPerAddress: {venue, tunnel}, …}); each raises its day's value, never lowers it. */
   note(readings, at) {
     const rec = this._day(at);
     let rose = false;
@@ -178,8 +208,33 @@ class Peaks {
       const v = round(num(readings[k]), WINDOW[k]);
       if (v > rec[k]) { rec[k] = v; rose = true; }
     }
+    const lanes = readings.socketsPerAddress && typeof readings.socketsPerAddress === 'object' ? readings.socketsPerAddress : {};
+    for (const lane of LANES) {
+      const v = Math.floor(num(lanes[lane]));
+      if (v > rec.socketsPerAddress[lane]) { rec.socketsPerAddress[lane] = v; rose = true; }
+    }
     if (rose) { rec.at = at; this.dirty = true; }
     return rose;
+  }
+
+  /**
+   * One refusal through the tunnel, of a kind it counts (REFUSED.tunnel), added to its day's count of that kind, so a
+   * restart carries on from it; anything else changes nothing.
+   */
+  tunnelRefused(why, at) {
+    if (!REFUSED.tunnel.includes(why)) return false;
+    const rec = this._day(at);
+    rec.tunnelRefused[why]++;
+    rec.at = at;
+    this.dirty = true;
+    return true;
+  }
+
+  /** The refusals through the tunnel on the show day `at` falls in, by kind (none when it has no record); no record is made. */
+  refusedOn(at) {
+    const day = dayOf(at);
+    const rec = this.days.find((d) => d.day === day);
+    return rec ? { ...rec.tunnelRefused } : zero(REFUSED.tunnel);
   }
 
   /** A snapshot written: how long it took, and how many messages its hall held. The day keeps its longest. */
@@ -204,10 +259,87 @@ class Peaks {
   }
 
   /** What health shows: the days, oldest first, the audit writes as {count, p99, max}. */
-  view() { return this.days.map((d) => ({ ...d, compactMs: { ...d.compactMs }, auditPutMs: d.auditPutMs.view() })); }
+  view() { return this.days.map((d) => ({ ...d, socketsPerAddress: { ...d.socketsPerAddress }, tunnelRefused: { ...d.tunnelRefused }, compactMs: { ...d.compactMs }, auditPutMs: d.auditPutMs.view() })); }
 
   /** What peaks.json keeps: the days with each histogram's buckets, so the day goes on counting after a restart. */
-  toJSON() { return { v: 1, days: this.days.map((d) => ({ ...d, compactMs: { ...d.compactMs }, auditPutMs: d.auditPutMs.toJSON() })) }; }
+  toJSON() { return { v: 1, days: this.days.map((d) => ({ ...d, socketsPerAddress: { ...d.socketsPerAddress }, tunnelRefused: { ...d.tunnelRefused }, compactMs: { ...d.compactMs }, auditPutMs: d.auditPutMs.toJSON() })) }; }
 }
 
-module.exports = { loopDelayMs, countSockets, Burst, Hist, Peaks, dayOf, BOUNDS };
+// The log's words for each, in the order its line gives them.
+const SAID = { full: 'full', share: "one network's share", rate: 'too fast from one network', wrongCode: 'wrong codes', idle: 'never joined' };
+
+/**
+ * Refusals, counted for health: today's (the show day's, from 06:00), by lane and by what was refused, and the tunnel's
+ * not yet said in the log, for one line a minute at most while it refuses (the server asks at each 5 s window). The
+ * tunnel's carry on from the day's peaks at a start (`carry`), so a restart mid-show keeps them; the venue's count from
+ * the start. Counts only: never an address, a hall or a name.
+ */
+class Refusals {
+  constructor({ logEveryMs = 60_000 } = {}) {
+    this.logEveryMs = logEveryMs;
+    this.day = '';
+    this.counts = { tunnel: zero(REFUSED.tunnel), venue: zero(REFUSED.venue) };
+    this.unsaid = zero(REFUSED.tunnel);
+    this.saidAt = -Infinity;
+  }
+
+  /** Today's counts start afresh when the show day turns. */
+  _today(at) {
+    const day = dayOf(at);
+    if (day === this.day) return;
+    this.day = day;
+    this.counts = { tunnel: zero(REFUSED.tunnel), venue: zero(REFUSED.venue) };
+  }
+
+  /** Today's refusals through the tunnel carry on from `tunnel` (the day's peaks, by kind: `Peaks.refusedOn(at)`). */
+  carry(tunnel, at) {
+    this._today(at);
+    this.counts.tunnel = perKind(tunnel, REFUSED.tunnel);
+  }
+
+  /** One refusal; whether it is a kind its lane counts (anything else is counted nowhere, never as a new key). */
+  note(lane, why, at) {
+    if (!Object.hasOwn(REFUSED, lane) || !REFUSED[lane].includes(why)) return false;
+    this._today(at);
+    this.counts[lane][why]++;
+    if (lane === 'tunnel') this.unsaid[why]++;
+    return true;
+  }
+
+  /** Today's counts: {tunnel: {rate, share, full, idle, wrongCode}, venue: {rate}}. */
+  view(at) {
+    this._today(at);
+    return { tunnel: { ...this.counts.tunnel }, venue: { ...this.counts.venue } };
+  }
+
+  /**
+   * The log's line for the tunnel's refusals not yet said ("[tunnel] refused 12 in the last minute: 10 full, 2 one
+   * network's share"), or null: none since the last line, or that line is not a minute old.
+   */
+  logLine(at) {
+    const total = Object.values(this.unsaid).reduce((a, b) => a + b, 0);
+    if (!total || at - this.saidAt < this.logEveryMs) return null;
+    const parts = Object.keys(SAID).filter((k) => this.unsaid[k]).map((k) => this.unsaid[k] + ' ' + SAID[k]);
+    this.unsaid = zero(REFUSED.tunnel);
+    this.saidAt = at;
+    return '[tunnel] refused ' + total + ' in the last minute: ' + parts.join(', ');
+  }
+}
+
+/**
+ * The internet link's check from its tries, each the ms its answer took or null for a try that had none: `ok` when every
+ * try answered; the middle and the longest round trip in whole ms (null with no answer); and its words.
+ */
+function linkCheck(tries, at) {
+  const list = Array.isArray(tries) ? tries : [];
+  const ms = list.filter((t) => typeof t === 'number' && Number.isFinite(t) && t >= 0).sort((a, b) => a - b);
+  const ok = list.length > 0 && ms.length === list.length;
+  const p50Ms = ms.length ? Math.round(ms[Math.ceil(ms.length / 2) - 1]) : null;
+  const maxMs = ms.length ? Math.round(ms[ms.length - 1]) : null;
+  const words = ok ? 'round trip ' + p50Ms + ' ms (max ' + maxMs + ' ms)'
+    : ms.length ? 'The internet link answered ' + ms.length + ' of ' + list.length + ' tries: remote phones may not join.'
+      : 'The internet link did not answer: remote phones cannot join.';
+  return { at, ok, p50Ms, maxMs, words };
+}
+
+module.exports = { loopDelayMs, countSockets, Burst, Hist, Peaks, Refusals, REFUSED, linkCheck, dayOf, BOUNDS };

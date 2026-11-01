@@ -123,6 +123,9 @@ function showDashboard() {
   // Another admin tab closed the hall this one is watching: show what is left.
   socket.on('roomClosed', ({ code } = {}) => { if (currentRoom && currentRoom.code === code) location.reload(); else refreshRooms(); });
   socket.on('pinUpdate', () => { /* same */ });
+  // The tunnel's card hears this socket: its status pushed, and asked at each connection (which also checks the link
+  // when its newest check is over a minute old).
+  wireTunnel();
 
   document.getElementById('newSessionBtn').addEventListener('click', createNewRoom);
   document.getElementById('exportBtn')?.addEventListener('click', () => {
@@ -523,10 +526,23 @@ function showLinkPicker(anchor, sid, name, alreadyLinked) {
 // server-side. The server captures the trycloudflare.com URL from the
 // child's stdout/stderr and pushes it to admin sockets via tunnel:status.
 // Status states: off | starting (running but no URL yet) | on | error.
+// The internet link's block says its places and today's refusals (admin-plus.js, from health) and its newest check from
+// this laptop ("Checked 14:02 · round trip 85 ms (max 140 ms)"); Check again asks for another, at most once a minute, and
+// says why it cannot when it cannot.
 
-(function initTunnelControl() {
+/** The tunnel's card on the dashboard's socket: what the server pushes, and the status asked at each connection. */
+function wireTunnel() {
+  socket.on('tunnel:status', (s) => tunnelCard.apply(s));
+  const ask = () => { socket.emit('admin:tunnelStatus', (res) => { if (res && res.ok) tunnelCard.apply(res); }); };
+  socket.on('connect', ask);
+  if (socket.connected) ask();
+}
+
+const tunnelCard = (function initTunnelControl() {
   const toggle = document.getElementById('tunnelToggle');
-  if (!toggle) return; // legacy admin.html without the section
+  const CHECK_EVERY_MS = 60_000;   // the server checks the link again only this long after its newest check
+  let last = null;                 // the newest status the server gave
+  let refusedWhy = '';             // a Check again the server could not answer, in its words, until the next status
 
   function showState(name, payload) {
     const states = ['off', 'starting', 'on', 'error'];
@@ -550,7 +566,37 @@ function showLinkPicker(anchor, sid, name, alreadyLinked) {
     }
   }
 
+  const hhmm = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // Written only when its words change, so the status line is not announced again at every redraw.
+  const put = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+  /**
+   * The check's line and Check again, from the newest status: what was found, and why it cannot be asked when it cannot
+   * (or why the last ask was not answered, until the next status).
+   */
+  function drawCheck() {
+    const line = document.getElementById('tunnelCheckLine');
+    const btn = document.getElementById('tunnelCheckBtn');
+    const why = document.getElementById('tunnelCheckWhy');
+    if (!line || !btn || !why) return;
+    const s = last || {};
+    const check = s.check && typeof s.check === 'object' ? s.check : null;
+    const up = !!(s.running && s.url);
+    put(line, !up ? '' : check ? (check.ok ? 'Checked ' + hhmm(check.at) + ' · ' + check.words : '△ ' + check.words) : s.checking ? '' : 'Not checked yet.');
+    line.classList.toggle('bad', !!(up && check && !check.ok));
+    const ago = check ? Math.max(0, Math.round((Date.now() - check.at) / 1000)) : Infinity;
+    const reason = !s.running ? 'The internet link is off.'
+      : !s.url ? 'Waiting for Cloudflare to give the address.'
+        : s.checking ? 'Checking the internet link…'
+          : ago * 1000 <= CHECK_EVERY_MS ? 'Checked ' + ago + ' s ago.' : '';
+    btn.disabled = !!reason;
+    put(why, refusedWhy || reason);
+  }
+
   function applyStatus(s) {
+    last = s || null;
+    refusedWhy = '';
+    drawCheck();
+    if (!toggle) return;
     if (!s) { showState('off'); toggle.checked = false; return; }
     if (s.error) { showState('error', s); toggle.checked = false; return; }
     if (s.running && s.url) { showState('on', s); toggle.checked = true; return; }
@@ -559,14 +605,21 @@ function showLinkPicker(anchor, sid, name, alreadyLinked) {
     toggle.checked = false;
   }
 
-  // Listen for live status pushes from the server.
-  if (typeof socket !== 'undefined' && socket) {
-    socket.on('tunnel:status', (s) => applyStatus(s));
-    // Initial fetch on dashboard show.
-    socket.emit('admin:tunnelStatus', (res) => {
-      if (res && res.ok) applyStatus(res);
+  // "Checked 20 s ago." counts on, and Check again comes back once the minute is over.
+  setInterval(() => { if (last && last.check) drawCheck(); }, 1000);
+  const checkBtn = document.getElementById('tunnelCheckBtn');
+  if (checkBtn) {
+    checkBtn.addEventListener('click', () => {
+      checkBtn.disabled = true;
+      AGM.outbox.now('admin:tunnelStatus', undefined, (res) => {
+        if (res && res.ok) { applyStatus(res); return; }
+        refusedWhy = (res && res.error) || 'The internet link could not be checked.';
+        drawCheck();
+      });
     });
   }
+
+  if (!toggle) return { apply: applyStatus }; // legacy admin.html without the section
 
   toggle.addEventListener('change', () => {
     if (toggle.checked) {
@@ -607,4 +660,5 @@ function showLinkPicker(anchor, sid, name, alreadyLinked) {
       }
     });
   }
+  return { apply: applyStatus };
 })();

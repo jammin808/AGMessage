@@ -384,11 +384,15 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const health = async () => (await fetch(base + '/api/health')).json();
     const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
     const h = await health();
-    assert.deepEqual(Object.keys(h).slice(-8), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay'], 'appended at the end of the detail');
+    assert.deepEqual(Object.keys(h).slice(-10), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused'], 'appended at the end of the detail');
     assert.deepEqual(Object.keys(h.elu), ['count', 'p50', 'p95', 'max']);
     assert.ok(Number.isInteger(h.rssMb) && h.rssMb > 0, 'rssMb ' + h.rssMb);
-    assert.ok(h.maxSocketsPerAddress >= 3 && h.maxSocketsPerAddress <= h.clients, 'every page here is on one address: ' + h.maxSocketsPerAddress + ' of ' + h.clients);
-    assert.equal(h.tunnelSockets, 0);
+    assert.deepEqual(Object.keys(h.maxSocketsPerAddress), ['venue', 'tunnel'], 'per lane');
+    assert.ok(h.maxSocketsPerAddress.venue >= 3 && h.maxSocketsPerAddress.venue <= h.clients, 'every page here is on one address: ' + h.maxSocketsPerAddress.venue + ' of ' + h.clients);
+    assert.deepEqual([h.tunnelSockets, h.maxSocketsPerAddress.tunnel], [0, 0]);
+    // The tunnel's places (150, half for one network) and today's refusals, by lane: counts only.
+    assert.deepEqual(h.tunnel, { places: 0, max: 150, share: 75, networks: 0, refused: { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 } });
+    assert.deepEqual(h.refused, { venue: { rate: 0 } });
 
     // A page and a screen through the tunnel are counted, and their address is in no reading.
     const tunnelHeaders = { 'cf-connecting-ip': '203.0.113.50', 'cf-ray': '8f00aa' };
@@ -404,6 +408,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     await shown;   // served as a screen, not as a page
     const counted = await health();
     assert.equal(counted.tunnelSockets, 2, 'the page and the screen');
+    assert.deepEqual([counted.tunnel.places, counted.tunnel.networks, counted.maxSocketsPerAddress.tunnel], [2, 1, 2], 'each takes a place, from one network');
     assert.ok(!JSON.stringify(counted).includes('203.0.113.50'), 'health names no address');
     viaTunnel.close(); screenViaTunnel.close();
     assert.ok((await emit(ctl, 'display:remove', { id: made.display.id })).ok);
@@ -432,7 +437,8 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.match(h.showDay, /^\d{4}-\d{2}-\d{2}$/);
     const today = h.peaks.find((d) => d.day === h.showDay);
     assert.ok(today, 'today has its record: ' + JSON.stringify(h.peaks.map((d) => d.day)));
-    assert.deepEqual(Object.keys(today), ['day', 'loopMs', 'elu', 'socketsPerAddress', 'tunnelSockets', 'hallMessages', 'hallKb', 'joinBurst', 'compactMs', 'auditPutMs', 'at']);
+    assert.deepEqual(Object.keys(today), ['day', 'loopMs', 'elu', 'socketsPerAddress', 'tunnelSockets', 'tunnelRefused', 'hallMessages', 'hallKb', 'joinBurst', 'compactMs', 'auditPutMs', 'at']);
+    assert.deepEqual(Object.keys(today.socketsPerAddress), ['venue', 'tunnel']);
     assert.match(today.day, /^\d{4}-\d{2}-\d{2}$/);
     assert.deepEqual(Object.keys(today.auditPutMs), ['count', 'p99', 'max']);
     assert.ok(today.auditPutMs.count >= 1, 'the sign-in\'s audit append is counted: ' + JSON.stringify(today.auditPutMs));

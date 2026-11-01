@@ -65,6 +65,16 @@ const envNumber = (name, dflt) => { const v = Number(process.env[name]); return 
 const UPLOAD_MIN_FREE = envNumber('AGM_UPLOAD_MIN_FREE', 1024 ** 3);
 // A file uploaded but not posted within this long is removed (the page posts it when its sender presses Send).
 const UPLOAD_ORPHAN_MS = envNumber('AGM_UPLOAD_ORPHAN_MS', 60 * 60_000);
+// The tunnel's places: at most this many sockets through it at once, half of them at most from one network. The cause is
+// Cloudflare's 200 in-flight requests per Quick Tunnel, past which it answers 429 and AGMessage never hears of it: on the
+// cautious reading that an open page holds one for as long as it lives (not measured: reading 0's tunnel row says), 150
+// keeps 50 for page loads, files and uploads (docs/DESIGN.md, "The internet link"). A tunnel socket that within
+// TUNNEL_JOIN_MS has neither joined a room nor carries an account, the admin's token or a screen's token gives its place
+// back.
+const TUNNEL_MAX = envNumber('AGM_TUNNEL_MAX', 150);
+const TUNNEL_JOIN_MS = envNumber('AGM_TUNNEL_JOIN_MS', 20_000);
+// How long Cloudflare has to give the tunnel's address after cloudflared starts.
+const TUNNEL_URL_MS = envNumber('AGM_TUNNEL_URL_MS', 30_000);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = process.env.AGM_DATA_DIR || path.join(__dirname, 'data');
 const ROOMS_DIR = path.join(DATA_DIR, 'rooms');
@@ -233,6 +243,10 @@ const loopRing = new resilience.Ring(120);       // the loop's true delay (its p
 const eluRing = new resilience.Ring(120, 3);     // how busy the loop was (its utilisation, 0 to 1) per 5 s, the last 10 minutes
 let eluMark = performance.eventLoopUtilization();
 const joinBurst = new readings.Burst();          // the most people seated in one hall in any 5 s (a doors-open storm)
+const tunnelPlaces = new guard.Places(TUNNEL_MAX);   // the sockets through the tunnel, by network (the connection's gate)
+const refusals = new readings.Refusals();        // today's refusals by lane, and the tunnel's log line
+const bootAt = Date.now();
+refusals.carry(peaks.refusedOn(bootAt), bootAt);   // the tunnel's, today's so far: a restart mid-show keeps them
 // State frames, latest wins (lib/latest.js): each says its subject changed, and is sent with the newest state, once per
 // window at most; a lone change goes at once. Built before anything can mark them; each flush reads the state it sends
 // when it runs, and skips a hall that has gone. A frame only reads the state, so one that faults while it is built is
@@ -256,10 +270,18 @@ const frames = {
 function eachHall(frame, halls, send) {
   sendEach(halls, ([code, value]) => { const r = store.get(code); if (r) send(r, value); }, (e) => frameRefused(frame, e));
 }
-/** Sockets open now: the most from one address, and those through the tunnel (counts only: health names no address). */
+/**
+ * Sockets open now: per lane, the most from one address (on the venue) or one network (through the tunnel), and those
+ * through the tunnel, the sockets its places count (counts only: health names no address).
+ */
 function socketFacts() {
   const c = readings.countSockets(Array.from(io.sockets.sockets.values(), (s) => s.data));
   return { maxSocketsPerAddress: c.maxPerAddress, tunnelSockets: c.tunnel };
+}
+/** The tunnel's places now, and today's refusals (counts only: `networks` is how many networks hold a place, never which). */
+function tunnelFacts(now = Date.now()) {
+  const refused = refusals.view(now);
+  return { tunnel: { places: tunnelPlaces.taken, max: tunnelPlaces.max, share: tunnelPlaces.share, networks: tunnelPlaces.networks, refused: refused.tunnel }, refused: { venue: refused.venue } };
 }
 /** The hall with the most messages: how many, and its snapshot's size (kept by each compaction, so no file is read). */
 function largestHall() {
@@ -277,11 +299,14 @@ setInterval(() => {
   eluRing.push(elu);
   const sockets = socketFacts();
   const hall = largestHall();
+  const now = Date.now();
   peaks.note({
     loopMs, elu, socketsPerAddress: sockets.maxSocketsPerAddress, tunnelSockets: sockets.tunnelSockets,
     hallMessages: hall.messages, hallKb: hall.kb, joinBurst: joinBurst.take(performance.now()),
-  }, Date.now());
-  savePeaks();   // this window's rises, and the snapshots and audit appends timed in it
+  }, now);
+  savePeaks();   // this window's rises, the tunnel's refusals, and the snapshots and audit appends timed in it
+  const refusedLine = refusals.logLine(now);   // one line a minute at most while the tunnel refuses
+  if (refusedLine) console.log('  ' + refusedLine);
 }, 5000).unref();
 let rejections = 0;
 let handlerFaults = 0;   // socket events refused because their handler threw (guardHandlers), and state frames that could not be built
@@ -336,6 +361,8 @@ function healthFacts() {
     // Per show day, the last 14, oldest first: each reading's highest (docs/DESIGN.md, "Measured on the show laptop").
     peaks: peaks.view(),
     showDay: readings.dayOf(Date.now()),   // the show day this laptop is in now: its record in `peaks` is today's
+    // The tunnel's places and today's refusals through it, and the venue's: counts only, never an address.
+    ...tunnelFacts(),
   };
 }
 
@@ -474,14 +501,11 @@ function syncSeats(room) {
 setTimeout(() => { for (const room of store.rooms.values()) if (Object.keys(room.settings.seats || {}).length) syncSeats(room); }, BOOT_SEAT_MS + 100).unref();
 
 // Upload tokens, issued at join: an upload must come from someone in a room. The rate is the connection's and the
-// address's, not the token's, so joining again or opening more sockets refills nothing.
-const uploadTokens = new Map();    // token -> {room, uid, bucket (the connection's), ip}
-const uploadBuckets = new Map();   // address -> its upload bucket
-function addressUploads(ip) {
-  let b = uploadBuckets.get(ip);
-  if (!b) { b = new guard.Bucket(0.5, 8); uploadBuckets.set(ip, b); if (uploadBuckets.size > 5000) uploadBuckets.clear(); }
-  return b;
-}
+// network's (`guard.limitKey`: an address on the venue, a /64 for an IPv6 phone through the tunnel), not the token's, so
+// joining again, opening more sockets or taking the next address refills nothing. The network buckets are never reset:
+// past 5,000 the fullest go first, so a flood of new addresses hands no drained one its burst back.
+const uploadTokens = new Map();    // token -> {room, uid, bucket (the connection's), key (its network)}
+const uploadBuckets = new guard.Buckets(0.5, 8, 5000);
 // Files uploaded in this run and not yet past their wait: one nobody posted by then is removed.
 const freshUploads = new Map();    // file name -> uploaded at
 
@@ -669,25 +693,25 @@ app.get('/api/health', (req, res) => {
 
 // Context (Show Bus §6): what another node's AI, or Patterns' Eye, needs to understand this one. Read-only token or admin.
 function bearer(req) { const h = String(req.headers.authorization || ''); return h.startsWith('Bearer ') ? h.slice(7).trim() : ''; }
+// Wrong context tokens: 10 a minute per network (`guard.limitKey`), so a phone's next address is still under the same lock.
 const contextLock = new guard.Lockout(10, 60_000);
 app.get('/api/context', (req, res) => {
-  const ip = guard.clientIp(req);
-  if (contextLock.locked(ip)) return res.status(429).json({ ok: false, error: 'Too many wrong tokens — wait a minute.' });
+  const network = guard.limitKey(guard.clientIp(req));
+  if (contextLock.locked(network)) return res.status(429).json({ ok: false, error: 'Too many wrong tokens — wait a minute.' });
   const t = bearer(req);
   const allowed = isAdminReq(req) || (t && guard.safeEqual(t, contextToken()));
-  if (!allowed) { if (t) contextLock.fail(ip); return res.status(401).json({ ok: false, error: 'A context token is needed (AGMessage admin → Show network).' }); }
+  if (!allowed) { if (t) contextLock.fail(network); return res.status(401).json({ ok: false, error: 'A context token is needed (AGMessage admin → Show network).' }); }
   res.setHeader('Cache-Control', 'no-store');
   res.json(currentContext());
 });
 
-// Room lookups: rate limited and locked out after guessing.
+// Room lookups: rate limited and locked out after guessing, per network (`guard.limitKey`). The buckets are never reset:
+// past 5,000 networks the fullest go first, so a flood of new addresses hands no drained one its burst back.
 const lookupLock = new guard.Lockout(12, 60_000);
-const lookupBuckets = new Map();
-function lookupAllowed(ip) {
-  if (lookupLock.locked(ip)) return false;
-  let b = lookupBuckets.get(ip);
-  if (!b) { b = new guard.Bucket(2, 10); lookupBuckets.set(ip, b); if (lookupBuckets.size > 5000) lookupBuckets.clear(); }
-  return b.take();
+const lookupBuckets = new guard.Buckets(2, 10, 5000);
+function lookupAllowed(key) {
+  if (lookupLock.locked(key)) return false;
+  return lookupBuckets.take(key);
 }
 
 app.post('/api/rooms', (req, res) => {
@@ -698,11 +722,11 @@ app.post('/api/rooms', (req, res) => {
   res.json({ code: room.code, name: room.name });
 });
 app.get('/api/rooms/:code', (req, res) => {
-  const ip = guard.clientIp(req);
-  if (!lookupAllowed(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute.' });
+  const key = guard.limitKey(guard.clientIp(req));
+  if (!lookupAllowed(key)) return res.status(429).json({ error: 'Too many attempts — wait a minute.' });
   const code = String(req.params.code || '').toUpperCase();
   const room = RoomStore.validCode(code) ? store.get(code) : null;
-  if (!room) lookupLock.fail(ip);
+  if (!room) lookupLock.fail(key);
   res.json({ code, exists: !!room, name: room ? room.name || '' : '', locked: !!(room && room.settings.lockRoles) });
 });
 
@@ -742,7 +766,7 @@ let statfsWarned = false;
 app.post('/api/upload', async (req, res, next) => {
   const t = uploadTokens.get(String(req.headers['x-agm-upload'] || ''));
   if (!t) return res.status(403).json({ error: 'Join a room to share files.' });
-  if (!t.bucket.take() || !addressUploads(t.ip).take()) return res.status(429).json({ error: 'Slow down — one file at a time.' });
+  if (!t.bucket.take() || !uploadBuckets.take(t.key)) return res.status(429).json({ error: 'Slow down — one file at a time.' });
   // Before anything is written: a disk short of space keeps it for the messages, the logs and the saves.
   try {
     const st = await fs.promises.statfs(UPLOAD_DIR);
@@ -802,25 +826,59 @@ const io = new Server(server, {
   perMessageDeflate: false,
 });
 
-// Connection rate per address (tunnels included). A refusal tells the page when to try again, `retryMs`, and the page does,
-// by itself (public/reconnect.js): never before the bucket holds its next token, never under 1 s, and spread over 2 s
-// more, so the pages behind one address do not all come back in the same instant. A refusal that waiting cannot lift
+// Connections, per network (`guard.limitKey`: an address on the venue, a /64 for an IPv6 phone through the tunnel): 3 a
+// second, bursts of 30, in buckets never reset (past 5,000 networks the fullest go first). Through the tunnel each socket
+// then takes one of its places (`tunnelPlaces`), one network half of them at most; a venue socket takes none and is never
+// refused for the tunnel. Every refusal says what it refused, to the page (`why`, and its words, which name the wait),
+// in health and in the log, and when to try again, `retryMs`, which the page does by itself (public/reconnect.js): the
+// rate's never before the bucket holds its next token, never under 1 s, and spread over 2 s more, so the pages behind
+// one network do not all come back in the same instant; a place's in 30 to 40 s. A refusal that waiting cannot lift
 // says `retry: false`, and the page gives its words instead.
-const connBuckets = new Map();
+const connBuckets = new guard.Buckets(3, 30, 5000);
 const refusal = (words, data) => Object.assign(new Error(words), { data });
-const retryMs = (bucket, now) => Math.max(bucket.waitMs(1, now), 1000) + crypto.randomInt(0, 2000);
+const inSeconds = (ms) => Math.ceil(ms / 1000) + ' s.';
+const CONNECT_REFUSED = {
+  rate: (lane, ms) => (lane === 'tunnel' ? 'Busy — many phones are connecting from your network. Trying again in ' : 'Busy — trying again in ') + inSeconds(ms),
+  share: (_lane, ms) => 'Many phones from your network are already connected through the internet (' + tunnelPlaces.share + '). Trying again in ' + inSeconds(ms),
+  full: (_lane, ms) => 'AGMessage\'s internet link is full (' + tunnelPlaces.max + ' phones). Trying again in ' + inSeconds(ms) + ' On the venue\'s Wi-Fi there is room.',
+};
+/** A refusal counted where health and the log read it; one through the tunnel is the day's `peaks.tunnelRefused` too, by kind. */
+function noteRefused(lane, why, now = Date.now()) {
+  if (refusals.note(lane, why, now) && lane === 'tunnel') peaks.tunnelRefused(why, now);
+}
 io.use((socket, next) => {
   const ip = guard.clientIp({ socket: socket.conn, headers: socket.handshake.headers, conn: socket.conn });
-  let b = connBuckets.get(ip);
-  if (!b) { b = new guard.Bucket(3, 30); connBuckets.set(ip, b); if (connBuckets.size > 5000) connBuckets.clear(); }
-  socket.data.ip = ip;
+  const key = guard.limitKey(ip);
+  const lane = guard.laneOf(ip);
+  Object.assign(socket.data, { ip, key, lane });
   socket.data.viaTunnel = web.throughTunnel({ headers: socket.handshake.headers });
   if (settings.requireHttps && cert && !(socket.request && (isEncrypted(socket.request) || isLoopback(socket.request))))
     return next(refusal('This AGMessage requires HTTPS — open it with https:// (see /tls).', { retry: false }));
   const now = Date.now();
-  return b.take(1, now) ? next() : next(refusal('Too many connections — wait a moment.', { retryMs: retryMs(b, now) }));
+  if (!connBuckets.take(key, now)) {
+    const ms = Math.max(connBuckets.waitMs(key, 1, now), 1000) + crypto.randomInt(0, 2000);
+    noteRefused(lane, 'rate', now);
+    return next(refusal(CONNECT_REFUSED.rate(lane, ms), { retryMs: ms, why: 'rate' }));
+  }
+  // A connection already gone is never seated, so it takes no place.
+  if (lane !== 'tunnel' || socket.conn.readyState !== 'open') return next();
+  const why = tunnelPlaces.take(key);
+  if (why) {
+    const ms = 30_000 + crypto.randomInt(0, 10_000);
+    noteRefused(lane, why, now);
+    return next(refusal(CONNECT_REFUSED[why](lane, ms), { retryMs: ms, why }));
+  }
+  // The place is given back once, when the socket goes: its disconnect, or its connection's close for a socket closed
+  // before it was seated (which has no disconnect).
+  let held = true;
+  const giveBack = () => { if (held) { held = false; tunnelPlaces.drop(key); } };
+  socket.once('disconnect', giveBack);
+  socket.conn.once('close', giveBack);
+  return next();
 });
 
+// Wrong codes at join: 10 a minute per network. Through the tunnel one network is often many phones (a carrier's shared
+// address), so its words say it is the network's, not the phone's.
 const joinLock = new guard.Lockout(10, 60_000);
 let aiRunning = 0;
 const AI_MAX_CONCURRENT = 3;
@@ -878,6 +936,19 @@ io.on('connection', (socket) => {
   // The account this browser is signed in as (a one-time password not yet changed included), for the words of a code
   // join it is refused; empty for the host token's admin, who has no account.
   const signedInAs = acct && !tokenAdmin ? (acct.account.name || acct.account.username) : '';
+  // A place through the tunnel is for a page in a room: a socket that carries no account and not the admin's token (a
+  // screen's returned above) and has not joined a room within TUNNEL_JOIN_MS is let go, and counted. A hall page joins as
+  // it connects; one that never does is a probe or a stuck page, and a page that connects again is counted afresh.
+  let joinWait = null;
+  if (socket.data.lane === 'tunnel' && !tokenAdmin && !socket.data.account) {
+    joinWait = setTimeout(() => {
+      joinWait = null;
+      if (room || !socket.connected) return;
+      noteRefused('tunnel', 'idle');
+      socket.disconnect(true);
+    }, TUNNEL_JOIN_MS);
+    joinWait.unref();
+  }
   const writes = new guard.Bucket(5, 15);      // messages, reactions, pins…
   const chatter = new guard.Bucket(10, 20);    // seen, ui sync, a screen identified, help answered
   const aiBucket = new guard.Bucket(0.2, 4);   // one AI request per 5 s, bursts of 4
@@ -901,8 +972,12 @@ io.on('connection', (socket) => {
   socket.on('join', (args, ack) => {
     ack = ok(ack);
     const { roomCode, name, role, adminView, uid, since, invite } = args || {};
-    const ip = socket.data.ip;
-    if (joinLock.locked(ip)) return ack({ ok: false, error: 'Too many attempts — wait a minute.' });
+    const network = socket.data.key;   // the lock counts per network (guard.limitKey)
+    if (joinLock.locked(network)) {
+      if (socket.data.lane !== 'tunnel') return ack({ ok: false, error: 'Too many attempts — wait a minute.' });
+      noteRefused('tunnel', 'wrongCode');
+      return ack({ ok: false, error: 'Too many wrong codes from your network — wait a minute.' });
+    }
     const code = guard.str(roomCode).toUpperCase().trim();
     const acct = (args && args.as === 'account') ? socket.data.account : null;
     if (args && args.as === 'account' && !acct) return ack({ ok: false, error: 'Sign in first.', signIn: true });
@@ -918,7 +993,7 @@ io.on('connection', (socket) => {
     const cleanName = acct ? acct.name : guard.cleanText(name, 40);
     if (!code || !cleanName) return ack({ ok: false, error: 'Missing room code or name' });
     const r = RoomStore.validCode(code) ? store.get(code) : null;
-    if (!r) { joinLock.fail(ip); return ack({ ok: false, error: 'Room not found' }); }
+    if (!r) { joinLock.fail(network); return ack({ ok: false, error: 'Room not found' }); }
 
     // The same page joining again on its own socket (it saw a gap in the room's numbers and is catching up) is still
     // seated: it keeps its role and the admin's links, nobody is told it joined, and a lock ticked since does not unseat it.
@@ -943,7 +1018,7 @@ io.on('connection', (socket) => {
       }
       // A code guest cannot take the name of someone with an account: staff are who they say they are.
       if (!isAdminView && accounts.list().some((a) => a.name.toLowerCase() === cleanName.toLowerCase())) {
-        joinLock.fail(ip);
+        joinLock.fail(network);
         return ack({ ok: false, error: 'That name belongs to an AGMessage account: sign in, or pick another name.' });
       }
     }
@@ -955,9 +1030,10 @@ io.on('connection', (socket) => {
         }
       }
     }
-    joinLock.ok(ip);
+    joinLock.ok(network);
 
     const stillSeated = seated(id);
+    if (joinWait) { clearTimeout(joinWait); joinWait = null; }   // in a room: its place through the tunnel is kept
     if (room && room !== r) leaveRoom(true);
     if (!stillSeated) me = { uid: id, name: cleanName, role: cleanRole, joinedAt: Date.now(), ...(acct ? { acct: acct.username } : {}) };
     room = r;
@@ -989,7 +1065,7 @@ io.on('connection', (socket) => {
     uploadToken = null;
     if (allowed('hall.files')) {
       uploadToken = crypto.randomBytes(18).toString('base64url');
-      uploadTokens.set(uploadToken, { room: code, uid: id, bucket: uploadBucket, ip: socket.data.ip });
+      uploadTokens.set(uploadToken, { room: code, uid: id, bucket: uploadBucket, key: socket.data.key });
     }
 
     // Resume: just what they missed, when we still have it; otherwise the whole history.
@@ -1921,7 +1997,13 @@ io.on('connection', (socket) => {
   });
   socket.on('admin:tunnelStart', (ack) => { if (admin(ack)) ok(ack)(startTunnel()); });
   socket.on('admin:tunnelStop', (ack) => { if (admin(ack)) { stopTunnel(); ok(ack)({ ok: true }); } });
-  socket.on('admin:tunnelStatus', (ack) => { if (admin(ack)) ok(ack)({ ok: true, running: !!tunnelProc, url: tunnelUrl, error: tunnelError }); });
+  // Answered at once with the newest check; a check of the link starts too when the link is up and the newest check is
+  // over a minute old (or there is none), and its result comes on `tunnel:status`.
+  socket.on('admin:tunnelStatus', (ack) => {
+    if (!admin(ack)) return;
+    if (tunnelUrl && tunnelUp && !tunnelChecking && (!tunnelCheck || Date.now() - tunnelCheck.at > TUNNEL_CHECK_EVERY_MS)) startCheck();
+    ok(ack)({ ok: true, ...tunnelStatus() });
+  });
 
   function leaveRoom(now, holdSeat = false) {
     if (!room || !me || socket.data.adminView) return;
@@ -1949,6 +2031,7 @@ io.on('connection', (socket) => {
   }
 
   socket.on('disconnect', (reason) => {
+    if (joinWait) { clearTimeout(joinWait); joinWait = null; }
     boardSockets.delete(socket);
     if (uploadToken) uploadTokens.delete(uploadToken);
     // A page that dropped keeps its seat for the grace; one the server sent away (a logout, a closed hall) does not.
@@ -2632,12 +2715,65 @@ setInterval(() => {
 
 // ---------------------------------------------------------------- Cloudflare tunnel (admin-only)
 let tunnelProc = null, tunnelUrl = null, tunnelError = null, cfLogfile = null, cfLogPoll = null;
+let tunnelUp = false;          // the address is taken as reachable: cloudflared said its connection is registered, or the wait for it ran out
+let tunnelCheck = null;        // the newest check of the link: {at, ok, p50Ms, maxMs, words}
+let tunnelChecking = false;    // one check at a time
 const TRYCF_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
+// Cloudflare's banner gives the address before it is reachable ("it may take some time to be reachable"); this line is
+// cloudflared's own word that a connection to Cloudflare stands. A cloudflared that words it otherwise is checked once
+// TUNNEL_URL_MS has passed with the address known, so the check never rests on that wording alone.
+const TUNNEL_UP_RE = /Registered tunnel connection/;
+// The link's check: its own address's /api/health, this many times, one at a time, each with this deadline; asked again
+// by an admin page only this long after the newest check.
+const TUNNEL_CHECK_TRIES = 5;
+const TUNNEL_CHECK_DEADLINE_MS = 5000;
+const TUNNEL_CHECK_EVERY_MS = 60_000;
 
+/** What an admin page is told of the tunnel: whether a check of the link is under way, and the newest one's facts. */
+const tunnelStatus = () => ({ running: !!tunnelProc, url: tunnelUrl, error: tunnelError, checking: tunnelChecking, check: tunnelCheck });
 function broadcastTunnelStatus() {
-  const payload = { running: !!tunnelProc, url: tunnelUrl, error: tunnelError };
+  const payload = tunnelStatus();
   for (const [, s] of io.sockets.sockets) if (s.data && s.data.isAdmin) s.emit('tunnel:status', payload);
 }
+/** One try of the link: the ms its answer took, or null when none came within the deadline or it was not this copy's. */
+async function linkTry(url) {
+  const t0 = performance.now();
+  try {
+    const r = await fetch(url + '/api/health', { signal: AbortSignal.timeout(TUNNEL_CHECK_DEADLINE_MS), headers: { 'cache-control': 'no-store' } });
+    const body = await r.json();
+    return r.ok && body && body.ok === true && body.build === BUILD.full ? performance.now() - t0 : null;
+  } catch { return null; }   // no answer, a cut one or not JSON: a try the link did not answer
+}
+/**
+ * The internet link, checked from this laptop: its own address's `/api/health` asked TUNNEL_CHECK_TRIES times, one at a
+ * time, out to Cloudflare and back through cloudflared, each try with a deadline of its own (`AbortSignal.timeout`, so
+ * the server starts no timer). It measures the laptop's side of the link, never a phone's (reading 7's walk is that).
+ * A check is of one tunnel (its cloudflared and its address): one whose tunnel went or was started again meanwhile finds
+ * nothing. Every check's end goes to every admin page on `tunnel:status`, with what it found when it found something, so
+ * no page is left on "Checking…"; and a tunnel that came up while another's check ran, whose own check was turned away
+ * then, is checked as that one ends.
+ */
+async function checkTunnel() {
+  const proc = tunnelProc;
+  const url = tunnelUrl;
+  if (!proc || !url || tunnelChecking) return false;
+  const same = () => tunnelProc === proc && tunnelUrl === url;
+  tunnelChecking = true;
+  broadcastTunnelStatus();
+  const tries = [];
+  try {
+    for (let i = 0; i < TUNNEL_CHECK_TRIES; i++) {
+      tries.push(await linkTry(url));
+      if (!same()) break;   // the tunnel went or another came: the rest would ask a link that is not this one
+    }
+  } finally { tunnelChecking = false; }
+  const found = same();
+  if (found) tunnelCheck = readings.linkCheck(tries, Date.now());
+  broadcastTunnelStatus();
+  if (!found && tunnelUrl && tunnelUp && !tunnelCheck) startCheck();
+  return found;
+}
+const startCheck = () => { checkTunnel().catch((e) => console.error('  [tunnel] the link\'s check failed: ' + (e && e.message))); };
 function resolveCloudflaredBin() {
   const fname = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
   const bundled = path.join(__dirname, '..', 'bin', fname);
@@ -2646,7 +2782,7 @@ function resolveCloudflaredBin() {
 }
 function startTunnel() {
   if (tunnelProc) return { ok: true, running: true, url: tunnelUrl };
-  tunnelError = null; tunnelUrl = null;
+  tunnelError = null; tunnelUrl = null; tunnelUp = false; tunnelCheck = null;
   let proc;
   try {
     // In AGMessage's own data folder (one server per folder), not a guessable name in the shared temp folder.
@@ -2660,15 +2796,18 @@ function startTunnel() {
   }
   tunnelProc = proc;
   let buf = '';
+  // Read until the address is known and reachable: the link is checked once both are, the address first.
   const sniff = (chunk) => {
+    if (tunnelProc !== proc) return;
     buf = (buf + chunk.toString()).slice(-32768);
     if (!tunnelUrl) { const m = buf.match(TRYCF_RE); if (m) { tunnelUrl = m[0]; console.log('  [tunnel] ' + tunnelUrl); broadcastTunnelStatus(); } }
+    if (tunnelUrl && !tunnelUp && TUNNEL_UP_RE.test(buf)) { tunnelUp = true; startCheck(); }
   };
   if (proc.stdout) proc.stdout.on('data', sniff);
   if (proc.stderr) proc.stderr.on('data', sniff);
   let logFileSize = 0;
   cfLogPoll = setInterval(() => {
-    if (!cfLogfile || tunnelUrl) return;
+    if (!cfLogfile || (tunnelUrl && tunnelUp)) return;
     // One open handle, then its own size: what is read is the file that was opened (no check-then-open race).
     let fd = null;
     try {
@@ -2682,22 +2821,25 @@ function startTunnel() {
       }
     } catch { /* not written yet: cloudflared makes it as it starts */ } finally { if (fd !== null) { try { fs.closeSync(fd); } catch { /* closed */ } } }
   }, 500);
+  // Cloudflare's time to give the address; given it, and cloudflared's registered line not read by then, the link is
+  // taken as up and checked (which also ends the reading of its log).
   setTimeout(() => {
-    if (tunnelProc === proc && !tunnelUrl) {
-      tunnelError = 'Cloudflare did not return a URL within 30 seconds. Check the laptop has internet access.';
+    if (tunnelProc !== proc) return;
+    if (!tunnelUrl) {
+      tunnelError = 'Cloudflare did not return a URL within ' + plural(Math.round(TUNNEL_URL_MS / 1000), 'second') + '. Check the laptop has internet access.';
       broadcastTunnelStatus();
-    }
-  }, 30000);
+    } else if (!tunnelUp) { tunnelUp = true; startCheck(); }
+  }, TUNNEL_URL_MS);
   proc.on('error', (err) => {
     tunnelError = err && err.code === 'ENOENT' ? 'cloudflared not found — re-extract the bundle (bin/cloudflared.exe).' : 'cloudflared error: ' + (err && err.message);
-    if (tunnelProc === proc) { tunnelProc = null; tunnelUrl = null; }
+    if (tunnelProc === proc) { tunnelProc = null; tunnelUrl = null; tunnelUp = false; }
     broadcastTunnelStatus();
   });
   proc.on('exit', (code, signal) => {
     if (cfLogPoll) { clearInterval(cfLogPoll); cfLogPoll = null; }
     if (cfLogfile) { try { fs.unlinkSync(cfLogfile); } catch { /* ignore */ } cfLogfile = null; }
     if (tunnelProc === proc) {
-      tunnelProc = null; tunnelUrl = null;
+      tunnelProc = null; tunnelUrl = null; tunnelUp = false;
       if (code !== 0 && code !== null && !tunnelError) tunnelError = 'cloudflared exited (code ' + code + (signal ? ', signal ' + signal : '') + ').';
       broadcastTunnelStatus();
     }

@@ -77,6 +77,67 @@ test('token bucket: waitMs is the time until it holds the tokens asked, taking n
   assert.equal(one.waitMs(1, 2500), 0, 'refilled meanwhile');
 });
 
+test('limitKey: through the tunnel an IPv6 address counts as its /64, in every form it is written; an IPv4 address and every venue address are kept whole', () => {
+  // One phone's addresses, as Cloudflare may hand them on: full, compressed, upper case, another host in the same /64.
+  const phone = ['cf:2001:db8:1:2::a', 'cf:2001:0db8:0001:0002:0000:0000:0000:000a', 'cf:2001:DB8:1:2::B', 'cf:2001:db8:1:2:ffff:ffff:ffff:ffff', 'cf:2001:db8:1:2:a:b:1.2.3.4', 'cf:2001:db8:1:2::c%eth0'];
+  assert.deepEqual([...new Set(phone.map(guard.limitKey))], ['cf6:2001:db8:1:2::/64']);
+  assert.equal(guard.limitKey('cf:2001:db8:1:3::a'), 'cf6:2001:db8:1:3::/64', 'the next /64 is another network');
+  assert.equal(guard.limitKey('cf:2001:db8::1'), 'cf6:2001:db8:0:0::/64');
+  assert.equal(guard.limitKey('cf:::'), 'cf6:0:0:0:0::/64');
+  // Kept whole: a tunnel IPv4 address (an IPv4-mapped one as the IPv4 it is), a venue IPv4 and a venue IPv6 address.
+  assert.equal(guard.limitKey('cf:203.0.113.7'), 'cf:203.0.113.7');
+  assert.equal(guard.limitKey('cf:::ffff:203.0.113.7'), 'cf:203.0.113.7', 'not every mapped address as one /64 of zeros');
+  assert.equal(guard.limitKey('192.168.1.20'), '192.168.1.20');
+  assert.equal(guard.limitKey('2001:db8:1:2::a'), '2001:db8:1:2::a', 'a venue\'s IPv6 LAN is one /64 for every device on it');
+  assert.equal(guard.limitKey('::ffff:127.0.0.1'), '::ffff:127.0.0.1');
+  // What is not an address is its own key, never another's; nothing is no key.
+  for (const odd of ['cf:not-an-address', 'cf:2001:db8::1::2', 'cf:12345::', 'cf:']) assert.equal(guard.limitKey(odd), odd);
+  for (const none of [undefined, null, 42, {}]) assert.equal(guard.limitKey(none), '');
+  assert.deepEqual(['cf:2001:db8::1', 'cf:203.0.113.7', '192.168.1.20', '', null].map(guard.laneOf), ['tunnel', 'tunnel', 'venue', 'venue', 'venue']);
+});
+
+test('Buckets: past its cap a drained key stays drained (the fullest go first), and waitMs is per key', () => {
+  // The connection buckets: 3 a second, bursts of 30, 5,000 networks.
+  const T = 5_000_000;
+  const conn = new guard.Buckets(3, 30, 5000);
+  for (let i = 0; i < 30; i++) assert.ok(conn.take('cf6:2001:db8:1:2::/64', T));
+  assert.equal(conn.take('cf6:2001:db8:1:2::/64', T), false, 'the 31st of a burst');
+  assert.equal(conn.waitMs('cf6:2001:db8:1:2::/64', 1, T), 334, 'its own wait: one token at 3 a second');
+  assert.equal(conn.waitMs('cf:198.51.100.9', 1, T), 0, 'a network it has not seen is full');
+  assert.equal(conn.waitMs('cf:198.51.100.9', 31, T), Infinity);
+  // 5,001 other networks, all inside the same millisecond: the cap holds, and the drained network is not handed its burst.
+  for (let i = 0; i < 5001; i++) conn.take('cf:10.' + (i >> 16) + '.' + ((i >> 8) & 255) + '.' + (i & 255), T);
+  assert.ok(conn.map.size <= 5000, 'bounded: ' + conn.map.size);
+  assert.ok(conn.map.has('cf6:2001:db8:1:2::/64'), 'the drained network is kept: the fullest went first');
+  assert.equal(conn.take('cf6:2001:db8:1:2::/64', T), false, 'still drained');
+  assert.equal(conn.waitMs('cf6:2001:db8:1:2::/64', 1, T), 334, 'and still waits for its own next token');
+  assert.equal(conn.take('cf6:2001:db8:1:2::/64', T + 334), true, 'which comes at that wait');
+});
+
+test('Places: the tunnel\'s places, half at most for one network, every place counted and freed', () => {
+  const p = new guard.Places(4);
+  assert.deepEqual([p.max, p.share, p.taken, p.networks], [4, 2, 0, 0]);
+  assert.equal(p.take('a'), null);
+  assert.equal(p.take('a'), null);
+  assert.equal(p.take('a'), 'share', 'two from one network, then its share');
+  assert.deepEqual([p.taken, p.networks], [2, 1], 'a refusal takes nothing');
+  assert.equal(p.take('b'), null);
+  assert.equal(p.take('c'), null);
+  assert.equal(p.take('d'), 'full', 'four from three networks: full');
+  assert.equal(p.take('a'), 'share', 'a network at its share hears its own bound first');
+  assert.equal(p.drop('b'), true);
+  assert.equal(p.take('d'), null, 'a drop frees one place, which the next takes');
+  assert.equal(p.drop('nobody'), false, 'a network with no place frees none');
+  assert.deepEqual([p.taken, p.networks], [4, 3]);
+  const four = new guard.Places(4);
+  for (const k of ['w', 'x', 'y', 'z']) assert.equal(four.take(k), null);
+  assert.equal(four.take('v'), 'full', 'four from four networks, then full');
+  for (const k of ['w', 'x', 'y', 'z']) four.drop(k);
+  assert.deepEqual([four.taken, four.networks], [0, 0], 'every place given back');
+  assert.deepEqual([new guard.Places(150).share, new guard.Places(5).share, new guard.Places(1).share], [75, 2, 1], 'half, rounded down, and never none');
+  assert.equal(new guard.Places(0).take('a'), 'full', 'no places: every tunnel socket is refused, for the tunnel being full');
+});
+
 test('host-only check: from loopback, to a loopback name, and nothing that came through a proxy or tunnel', () => {
   const req = (addr, headers = { host: 'localhost:3023' }) => ({ socket: { remoteAddress: addr }, headers });
   assert.ok(guard.isHostMachine(req('127.0.0.1')));
@@ -741,14 +802,17 @@ test('health: the loop\'s delay is its p99 less the sampler\'s own resolution, n
   assert.deepEqual(asked, [99, 99, 99, 99, 99], 'the p99, every time');
 });
 
-test('health: the most sockets from one address and those through the tunnel are counts, never addresses', () => {
+test('health: the most sockets from one address (one network through the tunnel), per lane, and those through the tunnel are counts, never addresses', () => {
+  const at = (ip) => ({ ip, key: guard.limitKey(ip), lane: guard.laneOf(ip) });
   const datas = [
-    { ip: '192.168.1.20' }, { ip: '192.168.1.20' }, { ip: '192.168.1.21' },
-    { ip: 'cf:203.0.113.7', viaTunnel: true }, { ip: 'cf:203.0.113.7', viaTunnel: true }, { ip: 'cf:203.0.113.7', viaTunnel: true },
-    { ip: 'cf:198.51.100.4', viaTunnel: true }, null, {}, { ip: '' },
+    at('192.168.1.20'), at('192.168.1.20'), at('192.168.1.21'),
+    at('cf:203.0.113.7'), at('cf:203.0.113.7'), at('cf:198.51.100.4'),
+    // One phone's /64, three addresses: one network.
+    at('cf:2001:db8:1:2::a'), at('cf:2001:db8:1:2::b'), at('cf:2001:db8:1:2::c'), at('cf:2001:db8:1:3::a'),
+    null, {}, { ip: '', key: '' },
   ];
-  assert.deepEqual(readings.countSockets(datas), { maxPerAddress: 3, tunnel: 4 });
-  assert.deepEqual(readings.countSockets([]), { maxPerAddress: 0, tunnel: 0 });
+  assert.deepEqual(readings.countSockets(datas), { maxPerAddress: { venue: 2, tunnel: 3 }, tunnel: 7 });
+  assert.deepEqual(readings.countSockets([]), { maxPerAddress: { venue: 0, tunnel: 0 }, tunnel: 0 });
   const ring = new (require('../lib/resilience').Ring)(4, 3);
   for (const v of [0.0019, 0.012, 0.5004]) ring.push(v);
   assert.deepEqual(ring.stats(), { count: 3, p50: 0.012, p95: 0.5, max: 0.5 }, 'a fraction (ELU) keeps 3 decimals');
@@ -758,17 +822,30 @@ test('peaks: per show day (06:00 to 06:00 by the laptop\'s clock), raised and ne
   const at = (d, h = 12) => new Date(2026, 9, d, h, 0, 0).getTime();   // 2026-10-<d>, the laptop's own time
   const p = new readings.Peaks();
   assert.equal(p.dirty, false, 'nothing to save yet');
-  assert.equal(p.note({ loopMs: 3.14, elu: 0.1234, socketsPerAddress: 4, tunnelSockets: 1, hallMessages: 1200, hallKb: 340.26, joinBurst: 12 }, at(31, 9)), true);
+  assert.equal(p.note({ loopMs: 3.14, elu: 0.1234, socketsPerAddress: { venue: 4, tunnel: 2 }, tunnelSockets: 1, hallMessages: 1200, hallKb: 340.26, joinBurst: 12 }, at(31, 9)), true);
   assert.equal(p.dirty, true, 'a rise asks for a save at the window\'s end');
   p.dirty = false;
-  assert.equal(p.note({ loopMs: 1, elu: 0.05, socketsPerAddress: 2, tunnelSockets: 0, hallMessages: 1100, hallKb: 300, joinBurst: 3 }, at(31, 10)), false, 'nothing rose: the record stands');
+  assert.equal(p.note({ loopMs: 1, elu: 0.05, socketsPerAddress: { venue: 2, tunnel: 1 }, tunnelSockets: 0, hallMessages: 1100, hallKb: 300, joinBurst: 3 }, at(31, 10)), false, 'nothing rose: the record stands');
   assert.equal(p.dirty, false, 'and asks for no save');
   assert.equal(p.note({ loopMs: 7.04, hallMessages: 1250 }, at(31, 11)), true);
+  assert.equal(p.note({ socketsPerAddress: { tunnel: 3 } }, at(31, 11)), true, 'one lane rises without the other');
+  assert.deepEqual(p.refusedOn(at(31, 11)), { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, 'none refused yet');
+  p.dirty = false;
+  for (const why of ['full', 'full', 'share', 'idle']) assert.equal(p.tunnelRefused(why, at(31, 11)), true, 'each refusal through the tunnel is added to its kind');
+  assert.equal(p.dirty, true);
+  assert.equal(p.tunnelRefused('toString', at(31, 11)), false, 'a kind it does not count changes nothing');
+  assert.equal(p.tunnelRefused(1, at(31, 11)), false);
   const today = p.view()[0];
   assert.deepEqual({ ...today, auditPutMs: undefined }, {
-    day: '2026-10-31', loopMs: 7, elu: 0.123, socketsPerAddress: 4, tunnelSockets: 1, hallMessages: 1250, hallKb: 340.3, joinBurst: 12,
+    day: '2026-10-31', loopMs: 7, elu: 0.123, socketsPerAddress: { venue: 4, tunnel: 3 }, tunnelSockets: 1, tunnelRefused: { rate: 0, share: 1, full: 2, idle: 1, wrongCode: 0 }, hallMessages: 1250, hallKb: 340.3, joinBurst: 12,
     compactMs: { max: 0, messages: 0 }, auditPutMs: undefined, at: at(31, 11),
   });
+  assert.deepEqual(p.refusedOn(at(31, 23)), today.tunnelRefused, 'the show day\'s refusals, read');
+  assert.deepEqual(p.refusedOn(at(30, 12)), { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, 'a day with no record: none, and none made');
+  assert.equal(p.view().length, 1);
+  today.socketsPerAddress.venue = 99;
+  today.tunnelRefused.full = 99;
+  assert.deepEqual([p.view()[0].socketsPerAddress.venue, p.view()[0].tunnelRefused.full, p.refusedOn(at(31, 11)).full], [4, 2, 2], 'the view and the reading are copies');
   assert.deepEqual(today.auditPutMs, { count: 0, p99: null, max: null });
   // An evening that runs past midnight is its show day's; 06:00 starts the next, and a reading never touches another day's.
   p.note({ joinBurst: 50 }, new Date(2026, 10, 1, 0, 0, 1).getTime());
@@ -838,9 +915,18 @@ test('peaks: saved with each day\'s buckets, so a restart counts on; what is not
     { day: 'yesterday', loopMs: 99 }, null, 42, { day: '2026-10-30', hallMessages: 3 },
   ] });
   assert.deepEqual(odd.view(), [{
-    day: '2026-10-30', loopMs: 0, elu: 0, socketsPerAddress: 0, tunnelSockets: 0, hallMessages: 3, hallKb: 0, joinBurst: 0,
+    day: '2026-10-30', loopMs: 0, elu: 0, socketsPerAddress: { venue: 0, tunnel: 0 }, tunnelSockets: 0, tunnelRefused: { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, hallMessages: 3, hallKb: 0, joinBurst: 0,
     compactMs: { max: 0, messages: 0 }, auditPutMs: { count: 0, p99: null, max: null }, at: 0,
   }], 'a day named twice is its last record; a count the buckets cannot account for is none');
+  // Per lane, by type: a build that counted every address in one number is read as the venue's; anything else is none.
+  const lanes = (v) => new readings.Peaks().load({ days: [{ day: '2026-10-29', socketsPerAddress: v, tunnelRefused: 4.7 }] }).view()[0];
+  assert.deepEqual(lanes(12).socketsPerAddress, { venue: 12, tunnel: 0 });
+  assert.deepEqual(lanes({ venue: 5, tunnel: 7 }).socketsPerAddress, { venue: 5, tunnel: 7 });
+  assert.deepEqual(lanes({ venue: 'x', tunnel: -2 }).socketsPerAddress, { venue: 0, tunnel: 0 });
+  assert.deepEqual(lanes(null).socketsPerAddress, { venue: 0, tunnel: 0 });
+  assert.deepEqual(lanes(0).tunnelRefused, { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, 'refusals not kept by kind: none');
+  const kinds = (v) => new readings.Peaks().load({ days: [{ day: '2026-10-29', tunnelRefused: v }] }).view()[0].tunnelRefused;
+  assert.deepEqual(kinds({ full: 4.7, share: 2, rate: -1, idle: 'x', wrongCode: 1, toString: 9 }), { rate: 0, share: 2, full: 4, idle: 0, wrongCode: 1 }, 'by kind, each a whole count; nothing else');
   assert.deepEqual(new readings.Peaks().load({ days: [{ day: '2026-10-29', auditPutMs: { max: 9, buckets: new Array(readings.BOUNDS.length + 1).fill(0).map((_, i) => (i === 2 ? 1.5 : 0)) } }] }).view()[0].auditPutMs.count, 0, 'a bucket that is not a whole count: none');
   for (const nothing of [null, undefined, {}, { days: 'x' }]) assert.deepEqual(new readings.Peaks().load(nothing).view(), []);
   const many = { days: Array.from({ length: 20 }, (_, i) => ({ day: '2026-10-' + String(i + 1).padStart(2, '0'), hallMessages: i })) };
@@ -1110,4 +1196,50 @@ test('C21: a Stagewatch gone silent is dropped at 12 s quiet and redialled at on
     assert.equal(dials, 2, 'redialled');
     assert.ok(link.linked && Date.now() - t0 < 4000, 'connected again within seconds: ' + (Date.now() - t0) + ' ms');
   } finally { link.stop(); for (const c of wss.clients) c.terminate(); wss.close(); srv.close(); }
+});
+
+test('Refusals: today\'s by lane and by what was refused, starting afresh at 06:00; one log line a minute at most while refusing', () => {
+  const at = (h, m = 0, s = 0, d = 31) => new Date(2026, 9, d, h, m, s).getTime();
+  const r = new readings.Refusals();
+  assert.deepEqual(r.view(at(20)), { tunnel: { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, venue: { rate: 0 } });
+  assert.equal(r.logLine(at(20)), null, 'nothing refused: no line');
+  for (let i = 0; i < 10; i++) assert.equal(r.note('tunnel', 'full', at(20)), true);
+  r.note('tunnel', 'share', at(20)); r.note('tunnel', 'share', at(20));
+  r.note('venue', 'rate', at(20));
+  // Only the kinds each lane counts: never a new key, never another lane.
+  assert.equal(r.note('venue', 'full', at(20)), false);
+  assert.equal(r.note('tunnel', 'toString', at(20)), false);
+  assert.equal(r.note('__proto__', 'rate', at(20)), false);
+  assert.deepEqual(r.view(at(20)), { tunnel: { rate: 0, share: 2, full: 10, idle: 0, wrongCode: 0 }, venue: { rate: 1 } });
+  assert.equal(r.logLine(at(20)), '[tunnel] refused 12 in the last minute: 10 full, 2 one network\'s share', 'the venue\'s refusals are not the tunnel\'s line');
+  r.note('tunnel', 'rate', at(20, 0, 30)); r.note('tunnel', 'idle', at(20, 0, 30)); r.note('tunnel', 'wrongCode', at(20, 0, 30));
+  assert.equal(r.logLine(at(20, 0, 59)), null, 'not a minute since the last line');
+  assert.equal(r.logLine(at(20, 1, 0)), '[tunnel] refused 3 in the last minute: 1 too fast from one network, 1 wrong codes, 1 never joined');
+  assert.equal(r.logLine(at(20, 5)), null, 'said: nothing more until the next refusal');
+  r.note('tunnel', 'full', at(20, 5));
+  assert.equal(r.logLine(at(20, 5)), '[tunnel] refused 1 in the last minute: 1 full', 'the first after a quiet spell is said at once');
+  assert.deepEqual(r.view(at(23, 59)).tunnel, { rate: 1, share: 2, full: 11, idle: 1, wrongCode: 1 }, 'today\'s, past midnight too');
+  assert.deepEqual(r.view(at(5, 59, 59, 32)).tunnel.full, 11, 'the show day runs to 06:00');
+  assert.deepEqual(r.view(at(6, 0, 0, 32)), { tunnel: { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, venue: { rate: 0 } }, 'a new show day starts afresh');
+  assert.deepEqual(readings.REFUSED, { tunnel: ['rate', 'share', 'full', 'idle', 'wrongCode'], venue: ['rate'] });
+  // At a start, the tunnel's carry on from the day's peaks (by kind, whole counts only); the venue's count from the start.
+  const carried = new readings.Refusals();
+  carried.carry({ full: 3, share: 1.5, idle: -2, rate: 'x', wrongCode: 1, extra: 7 }, at(21));
+  assert.deepEqual(carried.view(at(21)), { tunnel: { rate: 0, share: 1, full: 3, idle: 0, wrongCode: 1 }, venue: { rate: 0 } });
+  carried.note('tunnel', 'full', at(21));
+  assert.equal(carried.view(at(21)).tunnel.full, 4, 'counted on');
+  assert.equal(carried.logLine(at(21)), '[tunnel] refused 1 in the last minute: 1 full', 'the log says only what came after the start');
+  assert.deepEqual(carried.view(at(6, 0, 0, 32)).tunnel.full, 0, 'and a new show day starts afresh');
+  const fresh = new readings.Refusals();
+  fresh.carry(null, at(21));
+  assert.deepEqual(fresh.view(at(21)).tunnel, { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, 'nothing carried: none');
+});
+
+test('linkCheck: every try answered is ok, with the middle and the longest round trip; a try without an answer says so', () => {
+  assert.deepEqual(readings.linkCheck([85.2, 140.4, 60, 90, 70], 1000), { at: 1000, ok: true, p50Ms: 85, maxMs: 140, words: 'round trip 85 ms (max 140 ms)' });
+  assert.deepEqual(readings.linkCheck([null, 120, null, 80, 100], 2000), { at: 2000, ok: false, p50Ms: 100, maxMs: 120, words: 'The internet link answered 3 of 5 tries: remote phones may not join.' });
+  assert.deepEqual(readings.linkCheck([null, null, null, null, null], 3000), { at: 3000, ok: false, p50Ms: null, maxMs: null, words: 'The internet link did not answer: remote phones cannot join.' });
+  assert.equal(readings.linkCheck([], 4000).ok, false, 'no try is no check');
+  assert.equal(readings.linkCheck(null, 4000).ok, false);
+  assert.equal(readings.linkCheck([10, -1, Number.NaN, '5'], 5000).words, 'The internet link answered 1 of 4 tries: remote phones may not join.', 'only a time is an answer');
 });

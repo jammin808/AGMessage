@@ -6,6 +6,7 @@
  */
 const crypto = require('crypto');
 const fs = require('fs');
+const net = require('net');
 const path = require('path');
 
 // ---------- the server secret (kept beside the data so identities survive restarts) ----------
@@ -102,8 +103,9 @@ class Bucket {
 }
 
 /**
- * A token bucket per key (an address), `cap` keys at most. Past that the fullest buckets go first — a full bucket is the
- * same as a new one — so a flood of new keys never hands back the allowance of a key that has used its own.
+ * A token bucket per key (an address, or a network: `limitKey`), `cap` keys at most. Past that the fullest buckets go
+ * first — a full bucket is the same as a new one — so a flood of new keys never hands back the allowance of a key that
+ * has used its own.
  */
 class Buckets {
   constructor(rate, burst, cap = 5000) { this.rate = rate; this.burst = burst; this.cap = cap; this.map = new Map(); }
@@ -115,6 +117,10 @@ class Buckets {
       this.map.set(key, b);
     }
     return b.take(1, now);
+  }
+  /** The ms until `key`'s bucket holds `n` tokens, taking none (Bucket.waitMs); a key it holds no bucket for is full. */
+  waitMs(key, n = 1, now = Date.now()) {
+    return (this.map.get(key) || new Bucket(this.rate, this.burst, now)).waitMs(n, now);
   }
   trim(now) {
     const fullest = Array.from(this.map).sort((x, y) => y[1].level(now) - x[1].level(now));
@@ -150,6 +156,74 @@ class Lockout {
     for (const [k] of fewest.slice(0, this.map.size - keep)) this.map.delete(k);
   }
 }
+
+/**
+ * A bounded set of places that keys share (the tunnel's sockets, keyed by network): `max` in all, and `share` at most for
+ * one key, so one network never takes every place. `take(key)` answers null (a place taken), 'share' (that key holds its
+ * share) or 'full' (every place is taken), the key's own bound first; `drop(key)` frees one of the key's places. Counts
+ * only: `taken`, and `networks`, the keys holding a place.
+ */
+class Places {
+  constructor(max, share = Math.max(1, Math.floor(max / 2))) { this.max = max; this.share = share; this.taken = 0; this.by = new Map(); }
+  take(key) {
+    const held = this.by.get(key) || 0;
+    if (held >= this.share) return 'share';
+    if (this.taken >= this.max) return 'full';
+    this.by.set(key, held + 1);
+    this.taken++;
+    return null;
+  }
+  drop(key) {
+    const held = this.by.get(key) || 0;
+    if (!held) return false;
+    if (held === 1) this.by.delete(key);
+    else this.by.set(key, held - 1);
+    this.taken--;
+    return true;
+  }
+  get networks() { return this.by.size; }
+}
+
+/**
+ * An IPv6 address as its eight 16-bit groups (its zone, after `%`, left out; a dotted IPv4 tail read as the last two),
+ * or null when it is not one.
+ */
+function ipv6Groups(text) {
+  const a = String(text).split('%')[0].toLowerCase();
+  if (!net.isIPv6(a)) return null;
+  let head = a;
+  let v4 = null;
+  if (a.includes('.')) {
+    const c = a.lastIndexOf(':');
+    v4 = a.slice(c + 1).split('.').map(Number);
+    head = a.slice(0, c + 1) + '0:0';
+  }
+  const [l, r] = head.split('::');
+  const left = l ? l.split(':') : [];
+  const right = r === undefined || r === '' ? [] : r.split(':');
+  const fill = r === undefined ? 0 : 8 - left.length - right.length;
+  const groups = [...left, ...new Array(fill).fill('0'), ...right].map((g) => parseInt(g, 16));
+  if (v4) { groups[6] = v4[0] * 256 + v4[1]; groups[7] = v4[2] * 256 + v4[3]; }
+  return groups.length === 8 && groups.every((g) => g >= 0 && g <= 0xffff) ? groups : null;
+}
+
+/**
+ * The key every per-address bound counts by: a network. Through the tunnel (`cf:`, from `clientIp`) an IPv6 address is
+ * cut to its /64 (`cf6:2001:db8:1:2::/64`): a mobile network gives each phone a /64 of its own and the phone changes its
+ * address within it (RFC 6459 §5.2, RFC 8981), so by the whole address one phone would step out of every bound. A tunnel
+ * IPv4 address (an IPv4-mapped IPv6 one read as the IPv4 it is) and every venue address are kept whole: a venue's IPv6
+ * LAN is one /64 for every device on it. What is kept is the key only; the full address stays where it was.
+ */
+function limitKey(ip) {
+  const s = typeof ip === 'string' ? ip : '';
+  if (!s.startsWith('cf:')) return s;
+  const g = ipv6Groups(s.slice(3));
+  if (!g) return s;
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return 'cf:' + [g[6] >> 8, g[6] & 255, g[7] >> 8, g[7] & 255].join('.');
+  return 'cf6:' + g.slice(0, 4).map((x) => x.toString(16)).join(':') + '::/64';
+}
+/** Which way a caller came: 'tunnel' when `clientIp` read Cloudflare's address for it (`cf:`), else 'venue'. */
+const laneOf = (ip) => (typeof ip === 'string' && ip.startsWith('cf:') ? 'tunnel' : 'venue');
 
 /** The caller's address, honouring Cloudflare's header only when the request came through the local tunnel. */
 function clientIp(req) {
@@ -246,6 +320,6 @@ function validUploadUrl(url) {
 
 module.exports = {
   loadSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
-  Bucket, Buckets, Lockout, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, str,
+  Bucket, Buckets, Places, Lockout, limitKey, laneOf, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, str,
   UPLOAD_TYPES, uploadType, validUploadUrl, extOf,
 };

@@ -132,3 +132,16 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
 - Health's detail is for the admin and this laptop only (anyone else reads up or down, the version and the uptime). Its
   readings and the show day's peaks it keeps in `peaks.json` are numbers and days: the most sockets from one address
   and through the tunnel are counts, and no reading names an address, a hall or a person.
+- Through the tunnel, a bound counts a network: an IPv6 address by its /64 (a mobile network gives each phone one, and
+  the phone changes its address within it), an IPv4 address whole, so the many phones behind one carrier's address share
+  one allowance and one wrong-code lock, which says "your network". A venue address is counted whole. That holds for
+  the connections, the room lookups and their lock, the uploads, the wrong codes at join and the wrong context tokens;
+  the sign-in's own allowance and lock per address keep the full address, because through the tunnel its lock per name
+  holds for the whole tunnel. The connection, room-lookup and upload buckets hold 5,000 networks at most and are never
+  reset: the fullest go first, so a flood of new addresses gives no drained network its burst back. The tunnel has 150 places, one network half of them at most, and a
+  tunnel socket that has not joined a room within 20 s (and carries no account, admin token or screen link) is let go.
+  Refusals are counted per show day in health, by kind, and logged at most once a minute; they are no person's act, so
+  they write no audit row, and health and the log name no address (`networks` is a count). Cloudflare's address is
+  read only from a connection that came from this laptop's loopback, as before, so a page on the venue cannot pass for a
+  tunnel network; a program on the laptop itself could, and could take the tunnel's places, as it could already do
+  anything a page can.

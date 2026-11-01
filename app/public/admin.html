@@ -191,6 +191,14 @@
               <p class="error" id="tunnelErrorMsg">—</p>
             </div>
 
+            <!-- The internet link: its places and today's refusals (from health), and its check from this laptop. -->
+            <div class="admin-tunnel-state" id="tunnelLink">
+              <p class="hint" id="tunnelPlaces"></p>
+              <p id="tunnelCheckLine" role="status"></p>
+              <p class="row"><button id="tunnelCheckBtn" class="btn ghost small" type="button" disabled>Check again</button>
+                <span class="hint" id="tunnelCheckWhy">The internet link is off.</span></p>
+            </div>
+
             <details class="admin-tunnel-instructions">
               <summary>How a remote user joins via Cloudflare</summary>
               <ol>

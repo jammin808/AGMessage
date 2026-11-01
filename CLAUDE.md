@@ -56,8 +56,15 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
   that can be asked twice answers a repeat with what it did (the original answer, or ok and `already`), never a refusal
   for something that succeeded; a new verb in `hold` answers a repeat of its `cid`.
 - **A page that opens a socket** opens it with `AGM.reconnect.OPTIONS` and attaches it (`AGM.reconnect.attach`), its
-  HTML loading `app/public/reconnect.js` first, so it comes back by itself; a refusal at connect carries `retryMs`, or
-  `retry: false` when no wait lifts it. `test/reconnect.test.js` names the pages that do.
+  HTML loading `app/public/reconnect.js` first, so it comes back by itself; a refusal at connect carries `retryMs` and
+  what it refused (`why`, with words that name the wait), or `retry: false` when no wait lifts it.
+  `test/reconnect.test.js` names the pages that do.
+- **A per-address bound keys on `guard.limitKey`** (a network: a tunnel IPv6 address by its /64, every other address
+  whole), in a `guard.Buckets` or a `guard.Lockout`, both bounded and never cleared whole; the full address stays in
+  `socket.data.ip` and the audit rows. The one exception is the sign-in's own bounds per address (`lib/http-accounts.js`),
+  which keep the full address: through the tunnel its lockout per name holds for the whole tunnel. The tunnel's places (`guard.Places`) bound
+  what is open through it; a refusal is counted in health (`tunnel.refused`, `refused.venue`) and the day's peaks,
+  never audited.
 - **A new frame of state is a `Latest`** (`app/lib/latest.js`): never a timer or a polled flag of its own, and never a
   volatile emit. `test/resilience.test.js` counts the timers each handler file starts, each with its reason, so a tick
   of its own moves that list with its words.
@@ -105,7 +112,8 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | The op table: the event each change is sent under (`apply()`), and the hall page's table that draws a change it missed and one it hears live alike (a new field of a change to a message is a row of both) | `app/lib/ops.js`, `app/public/app.js` (`UPD_EVENTS`) |
 | The outbox: every write a page makes, in the mode of what the person does (`hold` what a person wrote or answered, held with its client id until the server answers it, kept in the tab across a reload; `now` an act on something, never sent late; `self`; `local`), and the server's half: a send's client id answered with what it became (`byCid`), the newest 500 removals remembered (`gone`) | `app/public/outbox.js` (its tests: `app/test/outbox.test.js`), `app/lib/store.js` (`sentAs`, `removed`), `app/server.js` (`readSend`) |
 | Pages back by themselves: every page's socket at one reconnection pace, a refusal tried again at the wait the server names (`retryMs`) and said, a page shown again or back online started afresh, the strip and the dot's words while it is down; the server's half: the refusal's wait (`Bucket.waitMs`), and a page back in the restart's first seconds not announced | `app/public/reconnect.js` (`AGM.reconnect`; its tests and fence: `app/test/reconnect.test.js`), `app/server.js` (the connection's refusal, `join`) |
-| Identities, rate limits, lockouts, text cleaning | `app/lib/guard.js` |
+| Identities, rate limits, lockouts, text cleaning; the key a per-address bound counts by (`limitKey`) and the tunnel's places (`Places`) | `app/lib/guard.js` |
+| Remote phones through the tunnel: the connection's gate (per network, the places, the join's wait, the refusals' words), the link's check from the laptop, health's `tunnel`; their tests, with cloudflared and its address stood in for | `app/server.js` (the connection's gate, `checkTunnel`), `app/lib/peaks.js` (`Refusals`, `linkCheck`), `app/test/tunnel.test.js`, `app/test/tunnel-preload.js` |
 | Rights and roles (pure) | `app/lib/rbac.js` |
 | Accounts, password hashing, sessions; their routes | `app/lib/accounts.js`, `app/lib/http-accounts.js` |
 | The audit log (chained with a key; its records beside the machine key, outside the data folder; the check and Accept) | `app/lib/audit.js` |

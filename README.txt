@@ -271,6 +271,25 @@ separate install needed.
      to the remote person with their hall's code or their account.
   4. Toggle off when the event ends to take the tunnel down.
 
+The internet link has 150 places: at most 150 phones, tablets, pages and
+screens through it at once, and half of them at most from one network (a
+mobile operator often puts many phones behind one address). A page that
+has not joined a room within 20 seconds gives its place back. The venue's
+Wi-Fi never waits for the tunnel. The card reads, for example, "Internet
+link: 37 of 150 places · 12 networks · refused today: 4 full, 1 one
+network's share".
+
+Before doors, with the tunnel on:
+  - Read the card's check: "Checked 14:02 · round trip 85 ms (max 140 ms)"
+    is the laptop's side of the link. "△ The internet link did not
+    answer: remote phones cannot join." means remote people cannot join
+    now: check the laptop's internet. Check again asks for another (once a
+    minute at most; until then it says "Checked 20 s ago.").
+  - Walk it once: one phone on mobile data, its Wi-Fi off, opens the
+    largest hall through the link. Write down how long it takes to show
+    the newest message. Over 5 seconds, or a check over 1 second, is a slow
+    link: tell the remote people before doors.
+
 Accounts with admin rights cannot sign in through the tunnel unless an
 admin allows it (Admin -> Accounts and access). The bundle ships
 cloudflared.exe in bin\. If you'd rather run cloudflared yourself (e.g. a
@@ -349,6 +368,20 @@ Troubleshooting
   "Busy — trying again in 3 s." at the top of a page: AGMessage is taking
   many connections from the same network at once (a room filling up). Leave
   it: the page connects by itself after those seconds, without a reload.
+  Through the internet link (the tunnel), a remote phone may read:
+    "Busy — many phones are connecting from your network. Trying again in
+    3 s." - the same, for its mobile network: leave it.
+    "Many phones from your network are already connected through the
+    internet (75). Trying again in 31 s." - its network holds half the
+    link's places; it comes in when one of them leaves.
+    "AGMessage's internet link is full (150 phones). Trying again in 34 s.
+    On the venue's Wi-Fi there is room." - every place is taken; on the
+    venue's Wi-Fi it joins at once.
+    "Too many wrong codes from your network — wait a minute." - someone on
+    the same mobile network typed wrong codes; wait a minute and type the
+    code again.
+  Each page tries again by itself; the admin page counts every refusal of
+  the day on the tunnel's card.
   "This AGMessage requires HTTPS — open it with https:// (see /tls).":
   the admin turned on Require HTTPS; open the same address with https://.
 
@@ -439,6 +472,11 @@ Security
     observer.
   - Guessing codes, wrong admin tokens and message floods are
     rate-limited and locked out. Admin login never works through the tunnel.
+  - Through the tunnel the limits count a network, an IPv6 phone by its
+    network (its /64), so changing address steps out of none of them
+    (sign-in's own allowance counts the full address, but its lock
+    through the tunnel is per name, which no address change lifts); a
+    flood of new addresses never gives anyone their allowance back.
 
 Reliability and speed
   - Every change has a sequence number. A phone that drops off the Wi-Fi for a
@@ -467,7 +505,8 @@ Reliability and speed
     how long work waits for the server, its own 10 ms measuring tick taken
     off) and how busy it is ("busy N %"), then today's peaks: the
     highest of each reading this show day (the delay, how busy, the most
-    connections from one address and through the tunnel, the largest hall,
+    connections from one address and through the tunnel (and from one
+    network through it), the refusals through it, the largest hall,
     the most people joining a hall in 5 s, the longest snapshot, the time
     an audit entry takes to reach the disk). A show day runs from 06:00 to
     06:00 by this laptop's clock, so an evening that runs past midnight is

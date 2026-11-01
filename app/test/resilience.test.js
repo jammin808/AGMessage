@@ -505,6 +505,7 @@ test('guard rails: the timers the handler files start are counted, each with its
       'health: the loop\'s delay, how busy it is, the sockets and the day\'s peaks, every 5 s',
       'the boot\'s saved seats let go once its first seconds are over, once',
       'uploads nobody posted removed once past their wait',
+      'a tunnel socket that has not joined a room within its wait let go, one per such socket',
       'a page that dropped is announced as gone only once the Wi-Fi grace is over, one per page',
       'a screen link not in use: told, then let go a moment later',
       'a screen whose link went: told, then let go a moment later',
@@ -512,8 +513,8 @@ test('guard rails: the timers the handler files start are counted, each with its
       'expired sign-ins swept',
       'the show desk: what it approved run and reported, one request at a time, every 3 s',
       'each linked Stagewatch\'s context, posted on change and at least every 5 s, looked at each second',
-      'cloudflared\'s log read for the tunnel\'s address until it has one',
-      'the tunnel given 30 s to name its address',
+      'cloudflared\'s log read for the tunnel\'s address, and its registered connection, until it has both (the wait below at most, once it has the address)',
+      'the tunnel given 30 s to name its address, and its link checked then when cloudflared never said its connection is registered',
       'the watchdog\'s heartbeat, from the event loop, each second',
     ],
   };

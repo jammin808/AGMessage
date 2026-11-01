@@ -16,6 +16,7 @@ const zlib = require('zlib');
 const os = require('os');
 const path = require('path');
 const net = require('net');
+const http = require('http');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit } = require('./helpers');
@@ -95,9 +96,9 @@ function browserPath() {
 }
 const freePort = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 
-async function startServer(port, dataDir) {
+async function startServer(port, dataDir, env = {}) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '', TZ: SERVER_TZ },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '', TZ: SERVER_TZ, ...env },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   if (child.channel) child.channel.unref();
@@ -169,9 +170,9 @@ async function launchEdge() {
      * A tab on `url`: `init` runs before the page's own scripts, `workerInit` before each worker's (the worker held at
      * its start until it has run; `workers` lists each worker still running, with what `workerInit` answered there),
      * `metrics` {width, height} is its viewport (`phone: true` makes it a phone's: a mobile viewport at 2× with a touch
-     * screen), `timezone` its zone.
+     * screen), `timezone` its zone, `headers` HTTP headers every request it makes carries (its WebSocket's included).
      */
-    async tab(url, { init, workerInit, metrics, timezone } = {}) {
+    async tab(url, { init, workerInit, metrics, timezone, headers } = {}) {
       // A window of its own, so its page is always the one in front (never a hidden tab behind another).
       const made = await browser.send('Target.createTarget', { url: 'about:blank', newWindow: true, width: 1400, height: 900 });
       if (!made.result) throw new Error('no new window: ' + (made.error ? made.error.message : 'no answer'));
@@ -209,6 +210,7 @@ async function launchEdge() {
       if (metrics) await send('Emulation.setDeviceMetricsOverride', { width: metrics.width, height: metrics.height, deviceScaleFactor: metrics.phone ? 2 : 1, mobile: !!metrics.phone });
       if (metrics && metrics.phone) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
       if (timezone) await send('Emulation.setTimezoneOverride', { timezoneId: timezone });
+      if (headers) { await send('Network.enable'); await send('Network.setExtraHTTPHeaders', { headers }); }
       await send('Page.navigate', { url });
       return {
         /** `logs`: what the tab's frames wrote with console.log, in order. */
@@ -462,6 +464,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
   let dataDir3 = null;
   let server4 = null;
   let dataDir4 = null;
+  let server5 = null;
+  let dataDir5 = null;
+  let link5 = null;
   try {
     const login = await fetch(base + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
     const cookie = login.headers.get('set-cookie').split(';')[0];
@@ -1724,6 +1729,74 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       rae.close();
     }
 
+    // Remote phones through the tunnel, on a fifth AGMessage of its own with two places through it: a hall page that
+    // comes as cloudflared brings it (Cloudflare's headers on every request, its WebSocket's included) finds both taken,
+    // says the server's words in its strip, and comes back by itself once a place frees, at the wait the server named
+    // (30 to 40 s), without a reload. Then its admin page's tunnel card: the places and today's refusals, and the tunnel
+    // turned on, its cloudflared and the link stood in for (test/tunnel-preload.js, and a local server that hands each
+    // request on as cloudflared does), its link checked from the laptop and Check again held for the minute.
+    {
+      dataDir5 = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-tunnel-'));
+      const port5 = await freePort();
+      const base5 = `http://127.0.0.1:${port5}`;
+      const cloudflare = (ip) => ({ 'cf-connecting-ip': ip, 'cf-ray': 'smoke-' + ip.replace(/[^0-9a-f]/g, '') });
+      const linkAsked = [];
+      link5 = http.createServer((req, res) => {
+        linkAsked.push(req.url);
+        fetch(base5 + req.url, { headers: cloudflare('203.0.113.200') }).then(async (r) => { res.writeHead(r.status, { 'content-type': 'application/json' }); res.end(await r.text()); })
+          .catch(() => { res.writeHead(502); res.end(); });
+      });
+      await new Promise((resolve) => { link5.listen(0, '127.0.0.1', resolve); });
+      const preload = '--require "' + path.join(__dirname, 'tunnel-preload.js').split(path.sep).join('/') + '"';
+      server5 = await startServer(port5, dataDir5, {
+        AGM_TUNNEL_MAX: '2', AGM_TUNNEL_JOIN_MS: '600000',
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '), AGM_TEST_TUNNEL: 'http://127.0.0.1:' + link5.address().port,
+      });
+      const login5 = await fetch(base5 + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
+      const hall5 = (await (await fetch(base5 + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie: login5.headers.get('set-cookie').split(';')[0] }, body: JSON.stringify({ name: 'Remote hall' }) })).json()).code;
+      const taken = [];
+      for (const ip of ['203.0.113.11', '203.0.113.12']) {
+        taken.push(await new Promise((resolve, reject) => {
+          const s = ioClient(base5, { transports: ['websocket'], forceNew: true, reconnection: false, extraHeaders: cloudflare(ip) });
+          s.once('connect', () => resolve(s));
+          s.once('connect_error', reject);
+        }));
+      }
+      const tia = await edge.tab(`${base5}/app.html?code=${hall5}&name=Tia&role=research`, { headers: cloudflare('2001:db8:77:1::5') });
+      const STRIP = `JSON.stringify({ strip: document.getElementById('connStrip').hidden ? '' : document.getElementById('connStrip').textContent, dot: (document.getElementById('connDot').classList.contains('ok') ? '● ' : '○ ') + document.getElementById('connDot').getAttribute('aria-label') })`;
+      const full = await tia.until(`(() => { const s = document.getElementById('connStrip'); return !s.hidden && connection.state().why === 'full' && s.textContent; })()`, 15000);
+      const fullAt = Date.now();
+      const fullWords = /^AGMessage's internet link is full \(2 phones\)\. Trying again in (3\d|40) s\. On the venue's Wi-Fi there is room\.$/.test(full || '');
+      const counted = await (await fetch(base5 + '/api/health')).json();
+      await tia.shot(path.join(OUT, 'tunnel-full.png'));   // the refusal's words in the strip
+      taken[0].close();   // a place frees
+      const back = await tia.until(`connection.state().back && ${STRIP}`, 45000);
+      const waited = Date.now() - fullAt;
+      const seated = await tia.eval(`JSON.stringify({ hall: ROOM, joined: allMessages.some((m) => m.type === 'system' && m.text === 'Tia joined Backstage') })`);
+      const after = await (await fetch(base5 + '/api/health')).json();
+      report(fullWords && counted.tunnel.refused.full >= 1 && back === JSON.stringify({ strip: '', dot: '● Connected' }) && waited >= 20000 && seated === JSON.stringify({ hall: hall5, joined: true }) && after.tunnel.places === 2,
+        `a hall page through the tunnel, its places taken, says "${full}" and comes back by itself once one frees, ${Math.round(waited / 1000)} s later, without a reload (${back}; ${seated}; refused ${counted.tunnel.refused.full}, then ${after.tunnel.places} of ${after.tunnel.max} places)`);
+      report(tia.problems.length === 0, `a page refused through the tunnel: no script errors or CSP violations${tia.problems.length ? ' — ' + tia.problems.slice(0, 3).join(' | ') : ''}`);
+
+      const card = await edge.tab(`${base5}/admin.html`);
+      await card.until('document.readyState === "complete"');
+      await card.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
+      const places = await card.until(`(() => { const t = document.getElementById('tunnelPlaces').textContent; return /^Internet link: 2 of 2 places · 2 networks · refused today: \\d+ full$/.test(t) && t; })()`, 15000);
+      const offWhy = await card.until(`!document.getElementById('dashboard').hidden && document.getElementById('tunnelCheckBtn').disabled + ' ' + document.getElementById('tunnelCheckWhy').textContent`);
+      await card.eval(`document.getElementById('tunnelToggle').click()`);
+      const checked = await card.until(`(() => { const line = document.getElementById('tunnelCheckLine').textContent; const why = document.getElementById('tunnelCheckWhy').textContent;
+        return /^Checked \\d{1,2}:\\d\\d(\\s?[AP]M)? · round trip \\d+ ms \\(max \\d+ ms\\)$/.test(line) && /^Checked \\d+ s ago\\.$/.test(why) && document.getElementById('tunnelCheckBtn').disabled
+          && /^https:\\/\\/agm-test-link-\\d+\\.trycloudflare\\.com$/.test(document.getElementById('tunnelUrl').textContent) && line + ' | ' + why; })()`, 20000);
+      report(!!places && offWhy === 'true The internet link is off.' && !!checked && linkAsked.length === 5,
+        `the admin page's tunnel card reads "${places}" ("${offWhy}"), and with the tunnel turned on its link is checked from the laptop: "${checked}" (${linkAsked.length} tries)`);
+      await card.eval(`document.getElementById('tunnelLink').scrollIntoView({ block: 'center' })`);
+      await card.shot(path.join(OUT, 'tunnel-card.png'));
+      report(card.problems.length === 0, `the admin page's tunnel card: no script errors or CSP violations${card.problems.length ? ' — ' + card.problems.slice(0, 3).join(' | ') : ''}`);
+      card.close();
+      tia.close();
+      taken.forEach((s) => s.close());
+    }
+
     // Oli's page, untouched since "First new" arrived 30 s or more ago and every message since: its New divider is
     // still above "First new", the one divider, with no fill on it.
     await sleep(Math.max(0, firstNew + 30_000 - Date.now()));
@@ -1757,7 +1830,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     if (server2) await stopServer(server2);
     if (server3) await stopServer(server3);
     if (server4) await stopServer(server4);
-    setTimeout(() => { for (const d of [dataDir, dataDir2, dataDir3, dataDir4]) if (d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } } }, 1000);
+    if (server5) await stopServer(server5);
+    if (link5) link5.close();
+    setTimeout(() => { for (const d of [dataDir, dataDir2, dataDir3, dataDir4, dataDir5]) if (d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } } }, 1000);
   }
   console.log(failures === 0 ? `ALL OK (screenshots in ${OUT})` : `${failures} FAILED`);
   setTimeout(() => process.exit(failures ? 1 : 0), 1500);

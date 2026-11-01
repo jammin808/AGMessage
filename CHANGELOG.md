@@ -901,6 +901,104 @@ screen; not yet walked on a phone or an iPad: that is `docs/DEVICES.md`'s, befor
   page sent out with the chip's ask open closes it with the hall.
 - Rolling back: nothing is stored; 0.5.1's dialog and its red Help come back as they were.
 
+**Remote phones through the tunnel: bounded per network and in all, and every refusal says what it refused** (the plan's
+Part 5, unit X; the owner's answer 33, "Yes they can, Unknown quantities"; the tunnel's limits from Cloudflare's own pages,
+mobile addressing from the IETF's RFCs; the tree's tests, the bounds made small, and the hall page in Chromium with
+Cloudflare's headers. No number is measured: reading 0's tunnel row (whether an open WebSocket counts against a Quick
+Tunnel's 200 in-flight requests) has not been taken, and reading 7, the link before doors, waits for the first show
+with remote phones)
+- Every per-address bound counts a network (`guard.limitKey`). Through the tunnel an IPv6 address counts as its /64: a
+  mobile network gives each phone a /64 of its own and the phone changes its address within it (RFC 6459 §5.2, RFC
+  8981), so by the whole address one phone stepped out of every bound. A tunnel IPv4 address and every venue address are
+  kept whole (a venue's IPv6 LAN is one /64 for every device on it). The connections (3 a second, bursts of 30), the
+  room lookups (2 a second, bursts of 10) and their lockout, the uploads (0.5 a second, bursts of 8, beside each
+  connection's own), the wrong-code lock at `join` and the wrong context tokens at `/api/context` count by it. One kind
+  keeps the full address, as the plan says: the sign-in's own bounds per address, because through the tunnel its lockout
+  per name already holds for the whole tunnel, so a phone's next address is a new allowance but never a way past that
+  lock. The audit
+  rows keep the full address, and health names none, as before.
+- The buckets are never reset. The connection, lookup and upload buckets were cleared whole once they held 5,000
+  addresses, so 5,000 new addresses (cheap through the tunnel) handed every drained one its burst back. They are
+  `guard.Buckets` now, 5,000 networks at most, the fullest going first, so a flood of new networks leaves a drained one
+  drained.
+- The tunnel has 150 places (`AGM_TUNNEL_MAX`): at most 150 sockets through it at once, the hall pages, halls boards,
+  admin pages and screens that come through it, one network half of them at most (75). Their cause is Cloudflare's 200
+  in-flight requests per Quick Tunnel, past which Cloudflare answers 429 and AGMessage never hears of it: on the
+  cautious reading that an open page holds one for as long as it lives, until reading 0's tunnel row says, 150 keeps 50
+  for page loads, files and uploads. The share is for the places, a
+  resource one network could otherwise fill at 3 connections a second, and still seats 75 phones behind one carrier's
+  address. The venue never waits for the tunnel: its sockets take no place, and none is refused because the tunnel is
+  full.
+- A place is for a page in a room. A tunnel socket that within 20 s (`AGM_TUNNEL_JOIN_MS`) has neither joined a room nor
+  carries an account, the admin's token or a screen's link is let go and counted: a hall page joins as it connects, so
+  one that has not is a probe or a stuck page, and connected again it is counted afresh.
+- Every refusal says what it refused. At connect the page is told `{retryMs, why}` with words that name the wait, and
+  the hall page, the halls board and the admin page show the server's words in their strip and try again by themselves
+  then: "Busy — many phones are connecting from your network. Trying again in 3 s." (`rate`; on the venue "Busy —
+  trying again in 3 s.", where 0.5.1 said "Too many connections — wait a moment."), "Many phones from your network are
+  already connected through the internet (75). Trying again in 31 s." (`share`, a wait of 30 to 40 s) and "AGMessage's
+  internet link is full (150 phones). Trying again in 34 s. On the venue's Wi-Fi there is room." (`full`, 30 to 40 s).
+  A screen still tries again in silence. Through the tunnel the wrong-code lock says "Too many wrong codes from your
+  network — wait a minute.", so a phone behind a carrier's shared address knows it is the network's; on the venue its
+  words are as they were.
+- Counted, never named. Health appends `tunnel: {places, max, share, networks, refused: {rate, share, full, idle,
+  wrongCode}}` (the refusals are the show day's, from 06:00; `networks` is how many hold a place, never which) and
+  `refused: {venue: {rate}}`. The plan also names the tunnel's count `refused.tunnel.full` once, in a test's line; its
+  definition (`tunnel.refused`) is the one built, and `refused` holds the venue's only. `tunnelSockets` counts the
+  sockets the places count (Cloudflare's address read from loopback), `maxSocketsPerAddress` is kept per lane (`{venue,
+  tunnel}`, the tunnel's per network), and a show day's peaks keep `socketsPerAddress` per lane and `tunnelRefused`, the
+  day's refusals through the tunnel by kind (`{rate, share, full, idle, wrongCode}`), added up across a restart; at a
+  start health's tunnel counts carry on from them, so the card's "refused today" survives a watchdog restart mid-show
+  (the venue's count is from the start). Reading 7's "any refusal" reads `rate`, `share` and `full`, the link's
+  capacity; `idle` (a probe or a stuck page) and `wrongCode` (a guesser) are counted beside them. A `socketsPerAddress`
+  saved by an earlier 0.6.0 build is read as the venue's. The log says at most one line a minute while the tunnel
+  refuses: "[tunnel] refused 12 in the last minute: 10 full, 2 one network's share". There is no audit row: a refusal is
+  no person's act.
+- The admin page's tunnel card reads "Internet link: 37 of 150 places · 12 networks · refused today: 4 full, 1 one
+  network's share", and the link's check. The card now hears the tunnel's status at all: it listened before the admin
+  page's socket existed, so the address never appeared on it without a reload.
+- The internet link is checked from the laptop: once cloudflared says its connection to Cloudflare is registered (its
+  banner gives the address before "it may take some time to be reachable", so a check at the address alone would find
+  a link not yet up; a cloudflared that words that line otherwise is checked when its 30 s wait for the address is over,
+  so the check never rests on that wording, and the reading of its log ends then too), the server asks its own address's
+  `/api/health` five times, one at a time, each within 5 s, out to Cloudflare and back through cloudflared, and counts an
+  answer only when it is this copy's build. A check is of one tunnel: one stopped or started again meanwhile finds
+  nothing, every check's end is said on `tunnel:status` (so no card is left on "Checking…"), and a tunnel that came up
+  while another's check ran is checked as that one ends. The card reads "Checked 14:02 · round trip 85 ms (max 140 ms)", or "△ The
+  internet link did not answer: remote phones cannot join." ("answered 3 of 5 tries: remote phones may not join." when
+  some did). **Check again** asks for another (`admin:tunnelStatus`, as the page already asked on load; no verb is
+  added), answered at once with the newest check while the new one comes on `tunnel:status`, whose payload appends
+  `checking` and `check: {at, ok, p50Ms, maxMs, words}`; within a minute of the last check, or before the link is up,
+  it starts none, and the button says "Checked 20 s ago.", and with the tunnel off "The internet link is off."; an ask
+  the server could not answer keeps its words until the next status. It measures the laptop's side of the link, never a
+  phone's: reading 7's walk (one phone on mobile data opening the largest hall) is that.
+- `test/units.test.js`: `limitKey` cuts the full, compressed, upper-case and dotted forms of one tunnel IPv6 address to
+  one /64, keeps a tunnel IPv4 address (an IPv4-mapped one as its IPv4), a venue IPv4 and a venue IPv6 address whole, and
+  what is not an address is its own key; `Buckets` past its cap keeps a drained network drained and its own `waitMs`;
+  `Places` at a max of 4 (two from one network then its share, four then full, a drop freeing one); the refusals by lane
+  and by day and the log's line at most once a minute; the link's check from its tries; the sockets and peaks per lane.
+  `test/tunnel.test.js`, end to end with 4 places and a 300 ms wait for a join: the fifth tunnel page refused in the
+  full words with `why: 'full'` and a wait of 30 to 40 s while a venue page connects; a third page from one /64 refused
+  for its share while the next /64 connects; a freed place taken; a page that never joins let go and counted (again
+  when it connects again) while one that joined, one with an account and the admin's stay; eleven wrong codes through
+  the tunnel answered in the network's words, a neighbour on that network held too, and the venue still joining; a
+  burst from one network refused for the rate in the tunnel's words, and 5,001 other networks leaving it drained (the
+  old reset passes 28 of 30 there); wrong context tokens from ten addresses of one /64 locking that network and not the
+  next; the day's refusals carried across a restart; with cloudflared (an address of its own per start, as Quick Tunnels
+  have) and the link stood in for by a preload and a local server, the check's facts on `tunnel:status`, no second check
+  within a minute, a link that does not answer said so, a tunnel stopped and started during a slow check checked as that
+  one ends with "under way" never the last word (the old code left it so), and a cloudflared that never says it is
+  registered checked at its wait's end and not before. `test/uploads.test.js`: three addresses of one /64 through the
+  tunnel share one network's eight uploads (the old keying let them have twelve), and the next /64 has its own.
+  `test/reconnect.test.js`: the server's words with `why` shown and their wait kept, a page's own words without it; the
+  venue's rate refusal carries `why: 'rate'` and is counted in the venue's lane. The timer count gains the join's wait,
+  one per tunnel socket. The smoke: a hall page through the tunnel, its two places taken, shows the full words in its
+  strip and comes back by itself once a place frees, without a reload; then that AGMessage's admin page reads the
+  card's places and today's refusals, turns the tunnel on (cloudflared and the link stood in for) and shows the link's
+  check with Check again held for the minute.
+- Rolling back: nothing is stored but the peaks' new keys, which 0.5.1 ignores with the file. A 0.5.1 page cached
+  across the upgrade and refused at connect shows nothing and does not retry, as before, until it is reloaded.
+
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,

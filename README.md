@@ -42,6 +42,13 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   after a refusal at a busy moment, at the pace the server gives ("Busy — trying again in 3 s."). The admin page's
   health reads the server's true delay and how busy it is, and keeps the peaks of each show day for 14 days, through a
   restart or a shutdown, so one look after a show says how it ran.
+- **Remote phones.** Through the built-in Cloudflare tunnel, up to 150 at once — a Quick Tunnel's 200 in-flight
+  requests, less room for page loads and files — and half of them at most from one network (an IPv6 phone counted by
+  its /64, so a phone that changes its address is still one network). A page that has not joined a room within 20 s
+  gives its place back. A phone refused is told what and for how long ("AGMessage's internet link is full (150 phones).
+  Trying again in 34 s. On the venue's Wi-Fi there is room.") and comes back by itself; the venue's Wi-Fi never waits for
+  the tunnel. The admin page counts the places, the networks and the day's refusals, and checks the link from the laptop
+  before the show ("Checked 14:02 · round trip 85 ms (max 140 ms)").
 - **The show network (Show Bus 1.2).** Send to Stagewatch — straight to the speaker's screen, or to the operator to
   approve and pass on to the confidence monitor, a moderator, backstage or interpreter screen, a department, or keep.
   A line reads as it was typed: cut on a whole character where Stagewatch cuts, its braces as parentheses so Stagewatch

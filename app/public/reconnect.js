@@ -2,8 +2,10 @@
 // here, so it comes back without a reload after:
 //
 //   a refusal  the server refused the connection and said when to try again (`retryMs`: never before its bucket holds
-//              the next token, spread so one address's pages do not come back together). The page tries then, never
-//              sooner, and says "Busy — trying again in 3 s." meanwhile. A refusal that says `retry: false` (HTTPS is
+//              the next token, spread so one network's pages do not come back together; 30 to 40 s for a place through
+//              the tunnel). The page tries then, never sooner, and says so meanwhile: in the server's own words when the
+//              refusal says what it refused (`why`: the rate, one network's share of the tunnel, the tunnel full), which
+//              name the wait, else "Busy — trying again in 3 s.". A refusal that says `retry: false` (HTTPS is
 //              required here) is not tried again: its words are given instead.
 //   a drop     Socket.IO tries again from 0.5 s, doubling to 2 s at most, each ±50 % (OPTIONS).
 //   a sleep, or a change of network
@@ -44,6 +46,12 @@
   }
   /** A refusal for good, in the server's words (as text, 300 characters at most). */
   const refusalWords = (err) => (err && typeof err.message === 'string' && err.message ? err.message : WORDS.refused).slice(0, 300);
+  /** What a refusal to wait out refused, and its words (as text, 300 characters at most), when it says; else nothing. */
+  function saidWhy(err) {
+    const d = err && err.data;
+    if (!d || typeof d.why !== 'string' || !d.why || typeof err.message !== 'string' || !err.message) return { why: '', told: '' };
+    return { why: d.why.slice(0, 40), told: err.message.slice(0, 300) };
+  }
   /**
    * The dot's name for a screen reader (and its title), from what is true of a state: back, connected and waiting for
    * the join's answer, not brought back (sent away, closed, refused for good), or not connected and trying again.
@@ -60,17 +68,18 @@
        * Bring `socket` back by itself. `opts`: `join` (the page is back only once it calls joined(), at its join's answer),
        * `down` (its strip says "Reconnecting…" after DOWN_MS), `strip` (an element the words are drawn in: its
        * textContent and hidden), `onChange(state)` (each change: back, connected, busy (the seconds said), refused, down,
-       * dot, stopped and the strip's words). Returns {joined(), state()}.
+       * dot, stopped, the strip's words, and why a refusal being waited out was made, when it said). Returns {joined(),
+       * state()}.
        */
       attach(socket, opts) {
         const o = opts || {};
-        const st = { back: false, busy: 0, refused: '', down: false, dot: false, stopped: false };
+        const st = { back: false, busy: 0, refused: '', down: false, dot: false, stopped: false, why: '', told: '' };
         let downTimer = null;
         let dotTimer = null;
         let busyTimer = null;
         let busyUntil = 0;
-        const words = () => st.refused || (st.busy ? WORDS.busy(st.busy) : '') || (st.down && o.down ? WORDS.down : '');
-        const state = () => ({ back: st.back, connected: socket.connected === true, busy: st.busy, refused: st.refused, down: st.down, dot: st.dot, stopped: st.stopped, words: words() });
+        const words = () => st.refused || (st.busy ? st.told || WORDS.busy(st.busy) : '') || (st.down && o.down ? WORDS.down : '');
+        const state = () => ({ back: st.back, connected: socket.connected === true, busy: st.busy, refused: st.refused, down: st.down, dot: st.dot, stopped: st.stopped, words: words(), why: st.why });
         function tell() {
           const v = state();
           if (o.strip) { o.strip.textContent = v.words; o.strip.hidden = !v.words; }
@@ -91,7 +100,7 @@
         function unbusy() {
           env.clearTimeout(busyTimer);
           busyTimer = null;
-          st.busy = 0;
+          Object.assign(st, { busy: 0, why: '', told: '' });
         }
         function back() {
           disarm();
@@ -134,9 +143,11 @@
             tell();
             return;
           }
-          // Refused by the server: tried again at the wait it named, which the words say in whole seconds, rounded up.
+          // Refused by the server: tried again at the wait it named, which the words say in whole seconds, rounded up (the
+          // server's own words, when it says what it refused, name the same wait).
           const ms = retryIn(err);
           st.busy = Math.ceil(ms / 1000);
+          Object.assign(st, saidWhy(err));
           busyUntil = env.now() + ms;
           busyTimer = env.setTimeout(() => { busyTimer = null; socket.connect(); }, ms);
           arm();

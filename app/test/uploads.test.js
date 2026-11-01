@@ -1,13 +1,15 @@
 'use strict';
-// Uploads are bounded: the rate per connection and per address (a re-join or more sockets refill nothing), a floor of
-// free disk space below which files pause before anything is written (so the room logs, the audit log and the saves
-// always have room), files nobody posted removed after a while, and files a reset or a deletion cleared removed from
-// the disk — unless another hall or a screen still shows them.
+// Uploads are bounded: the rate per connection and per network (an address on the venue, a /64 for an IPv6 phone through
+// the tunnel: a re-join, more sockets or the next address refill nothing), a floor of free disk space below which files
+// pause before anything is written (so the room logs, the audit log and the saves always have room), files nobody posted
+// removed after a while, and files a reset or a deletion cleared removed from the disk — unless another hall or a
+// screen still shows them.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { io } = require('socket.io-client');
 const { startServer, stopServer, api, connect, emit, until, TOKEN } = require('./helpers');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
@@ -50,6 +52,32 @@ test('a re-join does not refill the upload rate, and several sockets from one ad
   const accepted = statuses.filter((x) => x === 200).length;
   assert.ok(accepted <= 8, 'one address shares one upload rate, not four each: ' + statuses.join(' '));
   assert.ok(statuses.includes(429));
+});
+
+test('through the tunnel the sockets of one IPv6 network share one upload rate, whichever addresses of its /64 they come from; another network has its own', async (t) => {
+  const { srv, hall } = await hallServer(t);
+  const code = await hall('Remote hall');
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  /** A phone through the tunnel at `address`, seated in the hall: its upload token. */
+  const phone = (address, name) => new Promise((resolve, reject) => {
+    const s = io(srv.base, { transports: ['websocket'], forceNew: true, reconnection: false, extraHeaders: { 'cf-connecting-ip': address, 'cf-ray': '8f00aa' + sockets.length } });
+    sockets.push(s);
+    s.once('connect_error', reject);
+    s.once('connect', () => { emit(s, 'join', { roomCode: code, name, role: 'research' }).then((j) => (j.ok ? resolve(j.uploadToken) : reject(new Error(JSON.stringify(j))))); });
+  });
+  // Three addresses of one /64, each its own connection with its own four: together the network's eight, not twelve.
+  const one = [await phone('2001:db8:4:4::a', 'Ana'), await phone('2001:db8:4:4::b', 'Ben'), await phone('2001:db8:4:4:1:2:3:4', 'Cy')];
+  const began = Date.now();
+  const statuses = [];
+  for (const tok of one) for (let k = 0; k < 4; k++) statuses.push((await upload(srv.base, tok)).status);
+  const earned = Math.floor(((Date.now() - began) / 1000) * 0.5);
+  const accepted = statuses.filter((x) => x === 200).length;
+  assert.ok(accepted >= 8 && accepted <= 8 + earned, 'one network shares one upload rate: ' + statuses.join(' '));
+  assert.equal(statuses.filter((x) => x === 429).length, 12 - accepted, 'the rest: slow down');
+  // The next /64 is another network, with its own rate.
+  const other = await phone('2001:db8:4:5::a', 'Dee');
+  assert.equal((await upload(srv.base, other)).status, 200);
 });
 
 test('below the free-space floor files pause before anything is written', async (t) => {
