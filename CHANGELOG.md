@@ -446,6 +446,13 @@ pdf.js's worker, as older iPads lack it, and no iPad was walked)
   cached clock, so the wait could end a millisecond early and the key's verdict was asked for again a moment too soon
   (Stagewatch then said "wait" again). The hold is read again when the timer fires. CI found it on Node 26, where the
   test that holds the 2 s Retry-After measured 1999 ms; with the hold read again it can no longer come short.
+- The end-to-end tests no longer fail now and then when two test files' servers are given one port. `npm test` runs
+  the files in parallel, and the port a test's server was chosen was let go before the server bound it, so another
+  file's server could take it first; `npm run check` once failed on Linux with "AGMessage 0.6.0 (build …) is already
+  running on port …", and a rerun passed. A test's server that says its port is held now starts again on a fresh one,
+  5 ports in all; a test that names its port is never moved, and a server that stops for any other reason fails at
+  once instead of after 15 s. `test/helpers.test.js` holds it with ports held on purpose (`docs/ANALYSIS.md` §1).
+  Nothing the product does changed.
 
 ## 0.5.1 — 2026-10-26 — the show desk and the Stagewatch link, as Stagewatch states them
 

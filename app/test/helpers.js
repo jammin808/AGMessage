@@ -11,30 +11,68 @@ const { io } = require('socket.io-client');
 const ROOT = path.join(__dirname, '..');
 const TOKEN = 'testadmintoken01';
 
+/** A port nothing listens on at this moment: the system's choice, let go before it is returned, so it can be taken again. */
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
+/** How many ports startServer tries when each one it chose is held by the time its server binds it. */
+const START_TRIES = 5;
+// What server.js says when its port is held, whoever holds it (lib/startup.js portHolderWords), and the port it names:
+// "… is already running on port N", "… is serving on port N", "… holds port N", "Another program is using port N".
+const PORT_HELD = /(?:is already running on|is serving on|holds|is using) port (\d+)\b/g;
+const saysPortHeld = (out, port) => [...out.matchAll(PORT_HELD)].some((m) => Number(m[1]) === port);
+
 /**
- * Start a server; resolves {child, base, port, dataDir, out()} once it says it is running and has printed its banner,
- * whose last line is its uploads folder: a test that reads the black window reads the whole banner, never a part of it.
+ * One server on `port`: resolves {srv} once it serves (as startServer resolves), or {out, held} once it has gone
+ * without serving, every line it wrote read (`held`: it said `port` is held), or after 15 s without serving (then it is
+ * ended, and `held` is false).
  */
-async function startServer(env = {}) {
-  const dataDir = env.AGM_DATA_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
-  const port = env.PORT ? Number(env.PORT) : await freePort();
+function launch(port, dataDir, env) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
     env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', AGM_UPLOAD_DIR: dataDir + '-uploads', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   if (child.channel) child.channel.unref();   // the channel carries the stop; it keeps no test run alive
   let out = '';
-  child.stdout.on('data', (d) => { out += d; });
-  child.stderr.on('data', (d) => { out += d; });
-  for (let i = 0; i < 150; i++) {
-    if (out.includes('is running') && out.includes('\n  Uploads:')) return { child, port, base: `http://127.0.0.1:${port}`, dataDir, out: () => out };
-    await wait(100);
+  return new Promise((resolve) => {
+    let done = false;
+    let timer = null;
+    const finish = (r) => { if (!done) { done = true; clearTimeout(timer); resolve(r); } };
+    const read = (d) => {
+      out += d;
+      if (out.includes('is running') && out.includes('\n  Uploads:')) finish({ srv: { child, port, base: `http://127.0.0.1:${port}`, dataDir, out: () => out } });
+    };
+    child.stdout.on('data', read);
+    child.stderr.on('data', read);
+    // 'close' comes after the exit and the last of its output: a server that stops by itself has said why by then.
+    child.once('close', () => finish({ out, held: saysPortHeld(out, port) }));
+    timer = setTimeout(() => { child.kill(); finish({ out, held: false }); }, 15000);
+  });
+}
+
+/**
+ * Start a server; resolves {child, base, port, dataDir, out()} once it says it is running and has printed its banner,
+ * whose last line is its uploads folder: a test that reads the black window reads the whole banner, never a part of it.
+ *
+ * The test files run in parallel, and a port freePort() chose is free only when it is chosen: another file's server or
+ * connection can take it before this server binds it. A server that says its port is held has stopped before writing
+ * anything (it holds the folder and the port first), so it is started again on the same data folder and a fresh port,
+ * START_TRIES ports in all. Only for that: a server that stops for any other reason, or does not serve within 15 s,
+ * fails the start with its own words. A port the test names (env.PORT, as restartServer does) is never moved: it is
+ * tried once. `pickPort` chooses each port (freePort; this helper's own test hands it ports it holds).
+ */
+async function startServer(env = {}, { pickPort = freePort } = {}) {
+  const dataDir = env.AGM_DATA_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  const named = env.PORT ? Number(env.PORT) : null;
+  const held = [];
+  for (;;) {
+    const port = named ?? await pickPort();
+    const r = await launch(port, dataDir, env);
+    if (r.srv) return r.srv;
+    if (named !== null || !r.held) throw new Error('server did not start:\n' + r.out);
+    held.push(port);
+    if (held.length >= START_TRIES) throw new Error(`server did not start: each of ${START_TRIES} ports was held by the time it bound it (${held.join(', ')}):\n` + r.out);
   }
-  child.kill();
-  throw new Error('server did not start:\n' + out);
 }
 /**
  * Stop a server as the watchdog does: asked over IPC, so it saves first on every platform (on Windows a signal sent to a
@@ -492,7 +530,7 @@ function unzipTo(buf, dir) {
 }
 
 module.exports = {
-  stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
+  stagewatchQuery, ROOT, TOKEN, freePort, START_TRIES, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
   FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, acceptAll, brief,
   readZip, unzipTo, SEED_WORDS,
 };

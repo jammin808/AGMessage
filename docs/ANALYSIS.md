@@ -27,6 +27,18 @@ left out, and the defects the fences found.*
 
 Locally: `npm run check` runs the analyzers, the secret scan and the tests with the coverage gate.
 
+`npm test` runs the test files in parallel, and the end-to-end ones each start real servers through `test/helpers.js`
+`startServer()`, on a throwaway data folder and a port `freePort()` chose. That port is free only when it is chosen
+(the system's choice, let go before the server binds it), so another file's server or connection can take it in
+between: once, on Linux, a test failed with "AGMessage 0.6.0 (build …) is already running on port …". A server that
+says its port is held (`lib/startup.js` `portHolderWords`, whoever holds it) has stopped before writing anything, so the
+helper starts it again on the same data folder and a fresh port, 5 ports in all, and only for that reason: a server
+that stops for any other, or does not serve within 15 s, fails the test with its own words as soon as it has gone. A
+port a test names (`PORT`, as `restartServer()` does) is tried once and never moved. `test/helpers.test.js` holds it
+with ports held on purpose, so every run is the same: a port held by another program and one held by a running
+AGMessage, then a fresh one that serves; a port held on every try, refused after 5; a named port refused once with the
+holder's words; a held data folder refused at once, on one port.
+
 ## 2. The baseline, counted
 
 Every count is a distinct finding (file, line, rule) from one run over `app/` and `tools/` (the vendored pdf.js,
