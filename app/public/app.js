@@ -472,7 +472,7 @@ function rerenderMessage(node, msg) {
         stageBtn.disabled = false;
         notify(res && res.ok
           ? (res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.')
-          : (res && res.error) || 'Could not send to the stage.', !(res && res.ok));
+          : (res && res.error) || 'Could not send to the speaker\'s screen.', !(res && res.ok));
       });
     } : null;
   }
@@ -2140,7 +2140,9 @@ const ToStagewatch = (function () {
   }
   function open(msg) {
     source = msg;
-    $('swText').value = msg ? (msg.text || '').slice(0, 500) : '';
+    // At most 500 UTF-16 units (the box's maxlength, and Stagewatch's cut), never half an emoji.
+    const said = msg ? msg.text || '' : '';
+    $('swText').value = said.slice(0, said.length > 500 && /[\uD800-\uDBFF]/.test(said.charAt(499)) ? 499 : 500);
     $('swError').hidden = true;
     socket.emit('stage:targets', {}, (r) => {
       if (!r || !r.ok) { notify((r && r.error) || 'Stagewatch is not linked to this hall.', true); return; }

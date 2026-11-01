@@ -128,7 +128,9 @@ code), a person sent out, the AI's minutes posted: one row for each change, none
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and
-the desk's number, never the words), and commands to Patterns and PlayMap.
+the desk's number, never the words), every line Stagewatch takes for the speaker's screen sent straight to it
+(`stagewatch.send`: who sent it and how many characters, never the words; an emoji counts as one character in both),
+and commands to Patterns and PlayMap.
 
 **Chained with a key.** Each line carries the hash of the line before it, from a fixed first hash, and its own
 HMAC-SHA256 under a key derived from this machine's key (`machine.key`, outside the data folder: `lib/secretbox.js`).

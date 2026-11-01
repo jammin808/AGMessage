@@ -18,6 +18,11 @@
  * the text becomes a single one; line breaks become spaces. Its parser takes `message <text> [urgency] [flash] [ack]` with
  * the flash in third place: an "ack" there is refused ("flash must be off|slow|fast") — the `off` before `ack` is what
  * makes the line run. `parse()` below is that grammar, kept as the oracle the tests hold every line to.
+ *
+ * Stagewatch counts and cuts in UTF-16 units (C# strings): every limit here is in those units, and a cut is made at the
+ * last code-point boundary within it, so no line carries half an emoji; a lone surrogate becomes U+FFFD, so every line
+ * can be put in a URL. Stagewatch reads `{…}` in a message as its own placeholder ({TIME}, {REMAINING}…, filled in on
+ * every frame): the words a line carries have `(` and `)` for `{` and `}`, so the speaker reads what was typed.
  */
 
 const ROLES = ['moderator', 'backstage', 'interpreter'];
@@ -26,13 +31,48 @@ const MESSAGE_MAX = 500;   // Stagewatch cuts a message at 500
 const SIGNAL_MAX = 200;    // …and a signal's body at 200
 const NOTE_MAX = 300;      // …and a note at 300
 const LINE_MAX = 400;      // Stagewatch's show desk keeps 400 characters of a proposed line (ProposalDesk.MaxLine)
+const DEPT_MAX = 32;       // …and a signal's target at 32 (SignalBoard.NormaliseTarget)
 // Stagewatch's own targets (SignalBoard.NormaliseTarget): a cue to one of these is not a department.
 const SW_ROLES = new Set(['speaker', 'moderator', 'backstage', 'chair', 'interpreter', '*']);
 
 const quote = (t) => '"' + String(t).replace(/"/g, '\'') + '"';
+const isHigh = (c) => c >= 0xd800 && c <= 0xdbff;
+const isLow = (c) => c >= 0xdc00 && c <= 0xdfff;
+/** At most `max` UTF-16 units of `s`, cut at the last code-point boundary within them, every surrogate paired. */
+function cut(s, max) {
+  let end = Math.min(s.length, Math.max(0, max));
+  if (end < s.length && end > 0 && isHigh(s.charCodeAt(end - 1)) && isLow(s.charCodeAt(end))) end--;
+  return s.slice(0, end).toWellFormed();
+}
 // Whitespace as one space, and no other control character: Stagewatch drops those from a line it keeps (ProposalDesk's
 // Str), so the line AGMessage proposes is the line the desk holds, word for word.
-const clean = (t, max) => String(t || '').replace(/[\r\n\t\v\f]+/g, ' ').replace(/\p{Cc}/gu, '').replace(/\s+/g, ' ').trim().slice(0, max);
+const clean = (t, max) => cut(String(t || '').replace(/[\r\n\t\v\f]+/g, ' ').replace(/\p{Cc}/gu, '').replace(/\s+/g, ' ').trim(), max);
+/** The words a line carries: cleaned and cut, with `(` `)` for `{` `}` (one unit each, so the cut stands). */
+const words = (t, max) => clean(t, max).replace(/\{/g, '(').replace(/\}/g, ')');
+
+// char.ToUpperInvariant: one UTF-16 unit for one, by Unicode's simple mapping. A letter whose capital is two letters
+// (ß, ŉ, ﬁ) stays as it is; a Greek small letter with ypogegrammeni takes its one-letter capital (ᾳ → ᾼ, ᾀ → ᾈ); a
+// surrogate is left alone.
+const YPO = Object.freeze({ 0x1fb3: 0x1fbc, 0x1fc3: 0x1fcc, 0x1ff3: 0x1ffc });
+function upperUnit(c) {
+  const n = c.charCodeAt(0);
+  if (n >= 0x1f80 && n <= 0x1faf && (n & 0xf) < 8) return String.fromCharCode(n + 8);
+  if (Object.hasOwn(YPO, n)) return String.fromCharCode(YPO[n]);
+  const u = c.toUpperCase();
+  return u.length === 1 ? u : c;
+}
+/**
+ * A department named as Stagewatch names a signal's target (SignalBoard.NormaliseTarget): no control characters (the desk
+ * drops them from a line it keeps), trimmed, cut at 32 UTF-16 units on a code point, trimmed again (Stagewatch trims what
+ * it is sent) and its first unit capitalised, its spaces otherwise as given — so the line names the department Stagewatch
+ * keeps, and what AGMessage says it went to is what Stagewatch shows.
+ */
+function department(t) {
+  const name = cut(String(t || '').replace(/\p{Cc}/gu, '').trim(), DEPT_MAX).trimEnd();
+  return name ? upperUnit(name[0]) + name.slice(1) : '';
+}
+/** Stagewatch's own role targets are no department, by the name Stagewatch would make of the label. */
+const isRole = (name) => SW_ROLES.has(name.toLowerCase());
 
 /** Where a message can go, for a Stagewatch whose context lists these departments (pure). */
 function destinations(departments = []) {
@@ -54,10 +94,16 @@ function destinations(departments = []) {
  */
 function departmentsOf(context) {
   const items = context && Array.isArray(context.items) ? context.items : [];
-  const names = items.filter((i) => i && typeof i.label === 'string' && !SW_ROLES.has(i.label.trim().toLowerCase())
+  const names = items.filter((i) => i && typeof i.label === 'string'
     && (i.kind === 'department' || (i.kind === 'cue' && typeof i.id === 'string' && i.id.startsWith('cue:'))))
-    .map((i) => clean(i.label, 40)).filter(Boolean);
+    .map((i) => department(i.label)).filter((name) => name && !isRole(name));
   return Array.from(new Set(names));
+}
+
+/** Stagewatch's urgency for the word given: info / warn / crit (absent is info), or '' for any other word, never defaulted. */
+function urgencyOf(urgency) {
+  if (urgency === undefined || urgency === null || urgency === '') return 'info';
+  return typeof urgency === 'string' && Object.hasOwn(URGENCY, urgency) ? URGENCY[urgency] : '';
 }
 
 /**
@@ -66,35 +112,35 @@ function departmentsOf(context) {
  * the 400 characters the desk keeps, so none loses its urgency or its "Got it" when it is stored.
  */
 function lineFor(destination, text, urgency = 'info') {
-  const u = urgency === undefined || urgency === null || urgency === '' ? 'info'
-    : typeof urgency === 'string' && Object.hasOwn(URGENCY, urgency) ? URGENCY[urgency] : '';
+  const u = urgencyOf(urgency);
   if (!u) return { error: 'Unknown urgency.' };
   const built = build(String(destination || 'speaker'), text, u);
   if (built.line && built.line.length > LINE_MAX) {
+    // The room left is counted as Stagewatch counts it, in UTF-16 units: a character beyond them (an emoji) takes two.
     const room = LINE_MAX - (built.line.length - built.text.length);
-    return { error: 'Asked of the show desk, this is at most ' + room + ' characters (Stagewatch keeps ' + LINE_MAX + ' of a line) — shorten it' + (destination === 'speaker' || !destination ? ', or use Send now' : '') + '.' };
+    return { error: 'Asked of the show desk, this is at most ' + room + ' characters (' + (/[\uD800-\uDBFF]/.test(built.text) ? 'an emoji counts two; ' : '') + 'Stagewatch keeps ' + LINE_MAX + ' of a line) — shorten it' + (destination === 'speaker' || !destination ? ', or use Send now' : '') + '.' };
   }
   return built.line ? { line: built.line, words: built.words } : built;
 }
 function build(dest, text, u) {
   if (dest === 'speaker') {
-    const t = clean(text, MESSAGE_MAX);
+    const t = words(text, MESSAGE_MAX);
     if (!t) return { error: 'Nothing to send.' };
     return { line: 'message ' + quote(t) + ' ' + u + ' off ack', words: 'the speaker\'s screen', text: t };
   }
   if (ROLES.includes(dest)) {
-    const t = clean(text, SIGNAL_MAX);
+    const t = words(text, SIGNAL_MAX);
     if (!t) return { error: 'Nothing to send.' };
     return { line: 'signal message ' + dest + ' ' + quote(t), words: 'the ' + dest + ' screen', text: t };
   }
   if (dest.startsWith('dept:')) {
-    const name = clean(dest.slice(5), 40);
-    const t = clean(text, SIGNAL_MAX);
-    if (!name || !t) return { error: 'Choose a department and type the message.' };
+    const name = department(dest.slice(5));
+    const t = words(text, SIGNAL_MAX);
+    if (!name || isRole(name) || !t) return { error: 'Choose a department and type the message.' };
     return { line: 'signal message ' + quote(name) + ' ' + quote(t), words: name, text: t };
   }
   if (dest === 'operator') {
-    const t = clean(text, NOTE_MAX);
+    const t = words(text, NOTE_MAX);
     if (!t) return { error: 'Nothing to send.' };
     return { line: 'note ' + quote(t), words: 'the operator', text: t };
   }
@@ -139,4 +185,4 @@ function parse(line) {
   }
 }
 
-module.exports = { destinations, departmentsOf, lineFor, tokenize, parse, ROLES, LINE_MAX };
+module.exports = { destinations, departmentsOf, lineFor, urgencyOf, tokenize, parse, clean, words, cut, department, ROLES, LINE_MAX, MESSAGE_MAX };

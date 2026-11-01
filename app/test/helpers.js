@@ -270,6 +270,8 @@ async function fakeStagewatch({ name = 'Fake Stagewatch', desk = true, messageId
     set collectRefusal(v) { collectRefusal = v; },
     /** How long the desk takes to answer each new proposal from now on (it takes the proposal when it answers). */
     set proposalDelayMs(ms) { proposalDelayMs = ms; },
+    /** How long each send to the speaker's screen waits from now on before it is judged and answered. */
+    set messageDelayMs(ms) { messageDelayMs = ms; },
     /** How long a socket that connects from now on waits for its first message (a slow network: its key read comes late). */
     set firstFrameDelayMs(ms) { firstFrameDelayMs = ms; },
     /** What it answers the next reads of its context, and the next desk checks, first: [{status, error, retryAfter}]. */

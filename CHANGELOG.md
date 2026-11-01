@@ -328,6 +328,35 @@ an entry in it. Admin can choose to split the audit log and archive the older pa
   before entry 2004" and writes on in the live log, never touching `audit-archive`; back on 0.6.0 its entries are a span
   (`audit.unkeyed`), △ until accepted, and the archive is named as before.
 
+**A line for the speaker's screen reads as it was typed, names a department as Stagewatch does, and is audited**
+- Every line sent or proposed to Stagewatch is cut where Stagewatch cuts it, in UTF-16 units as it counts them (a
+  message 500, a role screen's or a department's message 200, a note for the operator 300), at the last whole character
+  within the limit, so no line ends in half an emoji; a lone surrogate (half an emoji pasted on its own) is sent as
+  U+FFFD. A line asked of the show desk is still held whole within the desk's 400 or refused with the room left
+  ("at most 377 characters", and "an emoji counts two" when it holds one), never cut. Send now drops control characters
+  as a proposal does.
+- `{` and `}` reach Stagewatch as `(` and `)` in the words of every line, sent or proposed: Stagewatch reads `{TIME}`,
+  `{REMAINING}`, `{NEXT}` and the like in a message as its own placeholders and fills them in on every frame, so "back
+  at {time}" would have reached the speaker as the clock. A department's name is Stagewatch's own and is kept as it is.
+- A department is named as Stagewatch names a signal's target: cut at 32 UTF-16 units on a whole character, trimmed, and
+  its first letter capitalised as `char.ToUpperInvariant` does (one letter for one: "ßound" stays), its spaces as
+  Stagewatch gave them and its control characters dropped, as the desk drops them. 0.5.1 kept 40 characters, made a run
+  of spaces one (another target to Stagewatch) and left the rest to Stagewatch, which cuts and capitalises a target
+  itself (and can cut an emoji in half): the destination offered, the line the desk kept, the hall's line and the
+  audit row named the department otherwise than Stagewatch shows it. A label Stagewatch would make one of its own role
+  targets ("speaker" with a control character in it) is no department, as a role's own label is not.
+- The words for Stagewatch's speaker screen are "the speaker's screen": the refusal for a seat without the right ("The
+  speaker's screen is for the backstage team."), the hall's line ("Kim sent to the speaker's screen: “…”", quoting what
+  reached it, braces as parentheses, cut at 120 on a whole character, as a proposal's line now is too) and the recent
+  event in AGMessage's context ("research sent a message to the speaker's screen (applied)"; 0.5.1 said "the stage
+  screen"; a reader matching those words reads the new ones).
+- Each line Stagewatch takes for the speaker's screen is one `stagewatch.send` audit row, target the hall's code: who
+  sent it (the account, or a code guest by name) and "a line (27 characters) on the speaker's screen, sent now", never
+  the words. A send Stagewatch does not take writes no row. In 0.5.1 these sends were not recorded. Characters are
+  counted as a person counts them, an emoji as one, in this row and in a desk proposal's `stagewatch.propose` row, which
+  counted UTF-16 units.
+- Rolling back: nothing stored changes shape; 0.5.1 reads the new rows and lines as they are.
+
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,
@@ -337,6 +366,17 @@ an entry in it. Admin can choose to split the audit log and archive the older pa
   the empty folders and `.gitkeep`, and the copy is deleted instead.
 - A proposal to the show desk stays with the hall it was asked from. A page that joined another hall before the desk
   answered had the proposal's waiting line, and the desk's later outcome, put in the hall it had moved to.
+- A line sent to the speaker's screen stays with the hall it was sent from, likewise: its line in the hall, its row and
+  the acknowledgement it follows. A page that joined another hall before Stagewatch answered had them put in the hall it
+  had moved to.
+- A line for the speaker's screen whose 500th UTF-16 unit was the first half of an emoji, or that held half an emoji
+  anywhere, was never sent: making its address threw outside the send's own error handling, and the page read "That
+  request could not be handled." It is now cut before the emoji and sent, and the address is made inside that handling.
+- Send now refuses an urgency Stagewatch does not have ("Unknown urgency."), as a proposal does; 0.5.1 sent the line as
+  info. Stagewatch's other words for one (`urgent`, `warning`) are taken for theirs, as a proposal takes them.
+- A hall closed while Stagewatch answered a send, or its desk a proposal, keeps nothing of it. The line was written into
+  the closed hall's folder again, a stray log holding its words after the hall and its files had gone. Each is still
+  its audit row: it reached Stagewatch.
 - A new hall's name is cleaned as every typed name is, from the admin page and over HTTP alike: control characters and
   the bidi overrides and isolates that make a name read other than it is are dropped. 0.5.1 only trimmed it and cut it
   at 80 characters, so such a name reached every page, screen, the halls board and the audit log as typed (renaming a

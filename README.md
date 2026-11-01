@@ -31,6 +31,8 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   restart or a shutdown, so one look after a show says how it ran.
 - **The show network (Show Bus 1.2).** Send to Stagewatch — straight to the speaker's screen, or to the operator to
   approve and pass on to the confidence monitor, a moderator, backstage or interpreter screen, a department, or keep.
+  A line reads as it was typed: cut on a whole character where Stagewatch cuts, its braces as parentheses so Stagewatch
+  never fills them in as its own placeholders, a department named as Stagewatch names it, and each send audited.
   A Stagewatch link is connected, and its certificate pinned, only once Stagewatch accepts AGMessage's key; a refused
   key says so on every page and never locks the laptop out. Patterns and PlayMap linked: their state on the board, and
   the verbs they list proposed to the show desk. Their pairing token goes only to this laptop or over HTTPS to a

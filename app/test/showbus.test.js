@@ -243,6 +243,50 @@ test('stagelines: every line means the same after the show desk keeps 400 charac
   ] }), ['Lighting', 'Sound']);
 });
 
+test('stagelines: each line is cut on a code point within Stagewatch\'s UTF-16 limit, its braces are parentheses, a department is named as Stagewatch names it', () => {
+  // Stagewatch's limits are UTF-16 units (C# strings): a message 500, a signal's body 200, a note 300, a target 32.
+  const textOf = (dest, t, u) => sl.parse(sl.lineFor(dest, t, u).line).text;
+  for (const [dest, max] of [['speaker', 500], ['moderator', 200], ['backstage', 200], ['interpreter', 200], ['dept:Sound', 200], ['operator', 300]]) {
+    const b = sl.lineFor(dest, 'a'.repeat(max - 1) + '😀' + 'b', 'info');
+    if (dest === 'speaker') { assert.match(b.error, /at most 377 characters/, 'a long message asked of the desk is refused, never cut'); continue; }
+    assert.equal(b.error, undefined, dest);
+    assert.equal(textOf(dest, 'a'.repeat(max - 1) + '😀' + 'b'), 'a'.repeat(max - 1), dest + ': no half emoji');
+    assert.equal(textOf(dest, 'a'.repeat(max - 2) + '😀' + 'b'), 'a'.repeat(max - 2) + '😀', dest + ': a whole emoji kept');
+    assert.equal(Array.from(textOf(dest, '😀'.repeat(max))).length, max / 2, dest + ': emoji only, half as many');
+    assert.equal(textOf(dest, 'x\uD800y\uDC00'), 'x\uFFFDy\uFFFD', dest + ': a lone surrogate is U+FFFD');
+    assert.equal(textOf(dest, 'Back at {time}, {REMAINING} left'), 'Back at (time), (REMAINING) left', dest + ': braces as parentheses');
+  }
+  assert.equal(sl.words('a'.repeat(499) + '😀', sl.MESSAGE_MAX), 'a'.repeat(499));
+  assert.equal(sl.words('{NEXT}', 500), '(NEXT)');
+  // The whole proposed line within the desk's 400: whole as asked, or refused with the room left, never cut by the desk.
+  const fits = sl.lineFor('speaker', 'x'.repeat(375) + '😀', 'crit');
+  assert.deepEqual([fits.line.length, sl.parse(fits.line.slice(0, 400)).text], [400, 'x'.repeat(375) + '😀']);
+  // The room left is in Stagewatch's units: a line with an emoji says it counts two.
+  assert.equal(sl.lineFor('speaker', 'x'.repeat(376) + '😀', 'crit').error, 'Asked of the show desk, this is at most 377 characters (an emoji counts two; Stagewatch keeps 400 of a line) — shorten it, or use Send now.');
+  assert.equal(sl.lineFor('speaker', 'x'.repeat(378), 'crit').error, 'Asked of the show desk, this is at most 377 characters (Stagewatch keeps 400 of a line) — shorten it, or use Send now.');
+  // A department as SignalBoard.NormaliseTarget makes it: cut at 32 on a code point, trimmed, its first unit capitalised.
+  const lighting = 'front of house lighting crew east';
+  assert.equal(lighting.length, 33);
+  assert.deepEqual(sl.lineFor('dept:' + lighting, 'Go'), { line: 'signal message "Front of house lighting crew eas" "Go"', words: 'Front of house lighting crew eas' });
+  assert.deepEqual(sl.departmentsOf({ items: [{ kind: 'department', label: lighting }, { kind: 'department', label: 'sound' }, { kind: 'cue', id: 'cue:sound', label: 'Sound' }] }), ['Front of house lighting crew eas', 'Sound']);
+  for (const [raw, named] of [['x'.repeat(31) + '😀', 'X' + 'x'.repeat(30)], ['x'.repeat(30) + '😀', 'X' + 'x'.repeat(29) + '😀'], ['lighting desk ' + 'and more words', 'Lighting desk and more words'],
+    ['a'.repeat(31) + ' b', 'A' + 'a'.repeat(30)], ['ßound', 'ßound'], ['ﬁre', 'ﬁre'], ['ᾳ', 'ᾼ'], ['ᾀ', 'ᾈ'], ['ᾈ', 'ᾈ'], ['éclairage', 'Éclairage'], ['𐐨', '𐐨'], ['ǆ', 'Ǆ'], ['  pyro  ', 'Pyro'], ['\u0007', '']]) {
+    assert.equal(sl.department(raw), named, JSON.stringify(raw));
+  }
+  assert.equal(sl.lineFor('dept:{Sound}', '{x}').line, 'signal message "{Sound}" "(x)"', 'a department keeps Stagewatch\'s own name; the words carry no braces');
+  // Its spaces as Stagewatch gave them (a target is matched as it is), its control characters dropped as the desk drops
+  // them; and a label that Stagewatch would make one of its own role targets is no department.
+  for (const [raw, named] of [['Sound  team', 'Sound  team'], ['sound\u00a0desk', 'Sound\u00a0desk'], ['Sound\tteam', 'Soundteam'], ['\u0007 pyro crew\n', 'Pyro crew']]) {
+    assert.equal(sl.department(raw), named, JSON.stringify(raw));
+  }
+  assert.deepEqual(sl.lineFor('dept:Sound  team', 'Go'), { line: 'signal message "Sound  team" "Go"', words: 'Sound  team' });
+  assert.deepEqual(sl.departmentsOf({ items: [
+    { kind: 'department', label: 'speaker\u0007' }, { kind: 'department', label: ' Moderator ' }, { kind: 'cue', id: 'cue:chair', label: '\u0000chair' },
+    { kind: 'department', label: 'Sound  team' }, { kind: 'department', label: 'Sound team' },
+  ] }), ['Sound  team', 'Sound team']);
+  for (const role of ['speaker\u0007', ' Moderator ', 'CHAIR', '*']) assert.equal(sl.lineFor('dept:' + role, 'hi').error, 'Choose a department and type the message.', JSON.stringify(role));
+});
+
 test('peerlinks: a line is rated as the node rates it; a verb\'s secret never written down (C22, C44)', () => {
   // C22: PlayMap's catalogue raises some lines above their row (riskWhen, highFor) and a line that carries a line takes its risk.
   const c = [
@@ -431,6 +475,59 @@ test('show bus end to end: destinations through the desk; Patterns and PlayMap l
     assert.match(long.error, /at most 377 characters/);
     assert.equal(sw.proposals.size, before, 'nothing reached the desk');
     assert.ok(Array.from(sw.proposals.values()).every((p) => sl.parse(p.line).error === undefined && p.line.length <= 400));
+  });
+
+  await t.test('a line keeps its braces as parentheses and is cut on a code point, sent or proposed; a department is named as Stagewatch names it', async () => {
+    const crew = await connect(base, sam); sockets.push(crew);
+    assert.ok((await emit(crew, 'join', { roomCode: hall, as: 'account' })).ok);
+    // A context that names a department longer than Stagewatch's 32, in lower case.
+    const lighting = 'front of house lighting crew east';
+    sw.items = sw.items.concat([{ id: 'cue:foh', kind: 'department', label: lighting, light: 'amber', state: 'standing by' }]);
+    const foh = 'Front of house lighting crew eas';
+    let targets = [];
+    await until(async () => { targets = (await emit(crew, 'stage:targets', {})).targets; return targets.some((x) => x.id === 'dept:' + foh); }, 8000, 'the department offered by its Stagewatch name');
+    assert.deepEqual(targets.filter((x) => /^dept:Front/i.test(x.id)).map((x) => [x.id, x.label]), [['dept:' + foh, foh + ' (department)']]);
+    const before = sw.proposals.size;
+    const asks = [
+      ['speaker', '{time} left', 'message "(time) left" info off ack'],
+      ['moderator', 'Back at {time}', 'signal message moderator "Back at (time)"'],
+      ['dept:' + foh, 'Go on {cue}', 'signal message "' + foh + '" "Go on (cue)"'],
+      ['operator', 'Note {x}', 'note "Note (x)"'],
+      ['backstage', 'y'.repeat(199) + '😀', 'signal message backstage "' + 'y'.repeat(199) + '"'],
+      ['operator', 'n'.repeat(299) + '😀', 'note "' + 'n'.repeat(299) + '"'],
+      ['speaker', 'x'.repeat(375) + '😀', 'message "' + 'x'.repeat(375) + '😀" info off ack'],
+    ];
+    for (const [destination, text] of asks) assert.ok((await emit(crew, 'stage:propose', { text, destination })).ok, destination);
+    const lines = Array.from(sw.proposals.values()).slice(before).map((p) => p.line);
+    assert.deepEqual(lines, asks.map((a) => a[2]), 'the desk holds each line whole, as proposed');
+    assert.ok(lines.every((l) => l.length <= 400 && l.isWellFormed() && sl.parse(l).error === undefined));
+    const over = await answer(crew, 'stage:propose', { text: 'x'.repeat(376) + '😀', destination: 'speaker' });
+    assert.match(over.error, /at most 377 characters/, 'one unit over the desk\'s 400 is refused, never cut');
+    assert.equal(sw.proposals.size, before + asks.length);
+    const sent = await emit(crew, 'stage:send', { text: 'Wrap up by {FINISH_BY} 😀' });
+    assert.deepEqual([sent.ok, sent.stage], [true, 'applied'], JSON.stringify(sent));
+    const path = sw.requests.filter((q) => q.url.startsWith('/api/message/')).at(-1).url.slice('/api/message/'.length).split('/').map(decodeURIComponent);
+    assert.deepEqual(path, ['Wrap up by (FINISH_BY) 😀', 'info', 'off', 'ack']);
+    const said = (await emit(ctl, 'admin:watchRoom', { roomCode: hall })).messages.filter((m) => m.type === 'system' && m.stage).map((m) => m.text);
+    assert.match(said.at(-1), /^Sam Tech sent to the speaker's screen: “Wrap up by \(FINISH_BY\) 😀”$/, 'the hall reads what the speaker\'s screen shows');
+    // The hall's line quotes 120 units of what was sent or proposed, cut on a code point: never half an emoji. (A page of
+    // its own: the first has spent its burst of writes.)
+    const desk = await connect(base, sam); sockets.push(desk);
+    assert.ok((await emit(desk, 'join', { roomCode: hall, as: 'account' })).ok);
+    const long = 'a'.repeat(119) + '😀' + 'tail';
+    assert.ok((await emit(desk, 'stage:send', { text: long })).ok);
+    assert.ok((await emit(desk, 'stage:propose', { text: long, destination: 'speaker' })).ok);
+    const quoted = (await emit(ctl, 'admin:watchRoom', { roomCode: hall })).messages.map((m) => m.text || '').filter((x) => x.includes('a'.repeat(119)));
+    assert.deepEqual(quoted, ['Sam Tech sent to the speaker\'s screen: “' + 'a'.repeat(119) + '”', 'Sam Tech asked Stagewatch\'s operator to put this on the speaker\'s screen: “' + 'a'.repeat(119) + '” — waiting for the show desk']);
+    assert.ok(quoted.every((x) => x.isWellFormed()));
+    // An urgency Stagewatch does not have is refused, never sent as info.
+    const sends = sw.requests.filter((q) => q.url.startsWith('/api/message/')).length;
+    for (const urgency of ['nonsense', 'constructor', 'INFO', 3]) {
+      assert.deepEqual(await emit(desk, 'stage:send', { text: 'Wrap up', urgency }), { ok: false, stage: 'not sent', error: 'Unknown urgency.' }, String(urgency));
+    }
+    assert.equal(sw.requests.filter((q) => q.url.startsWith('/api/message/')).length, sends, 'nothing sent for an urgency Stagewatch does not have');
+    assert.ok((await emit(desk, 'stage:send', { text: 'Wrap up', urgency: 'urgent' })).ok);
+    assert.equal(sw.requests.filter((q) => q.url.startsWith('/api/message/')).at(-1).url, '/api/message/Wrap%20up/crit/off/ack', 'Stagewatch\'s own word for it');
   });
 
   await t.test('only what the desk says is approved for this AGMessage is run: a listed proposal in a state it cannot read, or for another node, is not', async () => {
@@ -699,8 +796,8 @@ test('show network rights: a one-hall driver sees only its halls and nodes, a no
     assert.ok((await emit(bea, 'help:respond', { messageId: help.id, state: 'resolved' })).ok);
     assert.ok((await emit(bea, 'stage:send', { text: 'Wrap up' })).ok);
     const posted = (sw) => sw.requests.filter((r) => r.url === '/api/peers/context').map((r) => JSON.parse(r.body));
-    const hallEvents = (ctx) => ctx.recent.map((r) => r.text).filter((x) => /help request|stage screen|stage message/.test(x));
-    const want = ['a help request was resolved', 'research sent a message to the stage screen (applied)'];
+    const hallEvents = (ctx) => ctx.recent.map((r) => r.text).filter((x) => /help request|speaker's screen|stage message/.test(x));
+    const want = ['a help request was resolved', 'research sent a message to the speaker\'s screen (applied)'];
     await until(() => posted(swB).length && JSON.stringify(hallEvents(posted(swB).at(-1))) === JSON.stringify(want), 8000, 'hall B\'s Stagewatch posted its hall\'s events');
     await wait(1300);   // one more push round for every link
     assert.ok(posted(swA).length > 0, 'hall A\'s Stagewatch is posted its context');

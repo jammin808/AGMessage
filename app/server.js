@@ -1180,22 +1180,33 @@ io.on('connection', (socket) => {
   socket.on('stage:send', async (args = {}, ack) => {
     ack = ok(ack);
     if (!need(ack)) return;
-    if (!allowed('stage.send')) return ack({ ok: false, error: 'Sending to the stage is for the backstage team.' });
+    if (!allowed('stage.send')) return ack({ ok: false, error: 'The speaker\'s screen is for the backstage team.' });
     if (!writes.take()) return limited(ack);
     let text = typeof args.text === 'string' ? args.text : '';
     const source = typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
     if (!text && source) text = source.text || '';
-    const link = linkFor(room.code);
+    // The hall and the person who sent are read before Stagewatch answers: this socket may join another hall meanwhile,
+    // and the send's line, its row and the acknowledgement it follows stay with the hall it was sent from.
+    const from = room, who = actor(), sender = me.name;
+    const link = linkFor(from.code);
     const r = await link.sendToStage(text, { urgency: args.urgency, ack: args.ack !== false });
     if (r.ok) {
-      // The receipt, and later the speaker's acknowledgement, live on the record of the send (and on the source message).
-      // …with the link it went to, that Stagewatch's address tag and the seq of its frames then, so a restart keeps
-      // following it only where it went, and only while that Stagewatch has not restarted since.
-      const stage = { ref: r.messageId || 0, receipt: r.stage, ack: r.messageId ? 'sent' : '', by: '', at: Date.now(), link: link.id, sw: link.tag, seq: link.lastSeq ?? 0 };
-      const sys = apply(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${me.name} sent to the stage screen: “${text.replace(/\s+/g, ' ').slice(0, 120)}”`, at: Date.now(), stage } }).m;
-      if (source) apply(room, { o: 'upd', id: source.id, f: { stage } });
-      if (r.messageId) trackStageSend(link, r.messageId, room.code, [sys.id].concat(source ? [source.id] : []), { at: stage.at, seq: stage.seq });
-      noteEvent('research sent a message to the stage screen (' + r.stage + ')', link);
+      // What reached the speaker's screen: the line's words as sendToStage built them (cut on a code point, braces as
+      // parentheses). The row says how many characters, never the words.
+      const said = stagelines.words(text, stagelines.MESSAGE_MAX);
+      audit.write(who, 'stagewatch.send', from.code, 'a line (' + plural(Array.from(said).length, 'character') + ') on the speaker\'s screen, sent now', socket.data.ip);
+      // A hall closed while Stagewatch answered keeps nothing of the send: no line is written into a room that is no
+      // longer kept (its files are gone), nor into another hall made since under the same code.
+      if (store.get(from.code) === from) {
+        // The receipt, and later the speaker's acknowledgement, live on the record of the send (and on the source
+        // message). …with the link it went to, that Stagewatch's address tag and the seq of its frames then, so a restart
+        // keeps following it only where it went, and only while that Stagewatch has not restarted since.
+        const stage = { ref: r.messageId || 0, receipt: r.stage, ack: r.messageId ? 'sent' : '', by: '', at: Date.now(), link: link.id, sw: link.tag, seq: link.lastSeq ?? 0 };
+        const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${sender} sent to the speaker's screen: “${stagelines.cut(said, 120)}”`, at: Date.now(), stage } }).m;
+        if (source) apply(from, { o: 'upd', id: source.id, f: { stage } });
+        if (r.messageId) trackStageSend(link, r.messageId, from.code, [sys.id].concat(source ? [source.id] : []), { at: stage.at, seq: stage.seq });
+      }
+      noteEvent('research sent a message to the speaker\'s screen (' + r.stage + ')', link);
     }
     ack(r);
   });
@@ -1242,14 +1253,18 @@ io.on('connection', (socket) => {
       risk: 'review',
     });
     if (!r.ok) return ack(r);
-    // One row for each proposal the desk took: who asked, for where, and how long — never the words themselves.
-    audit.write(who, 'stagewatch.propose', from.code, 'asked the operator: a message (' + plural(parsed.text.length, 'character') + ') for ' + built.words + ' — proposal ' + r.proposal.id, socket.data.ip);
+    // One row for each proposal the desk took: who asked, for where, and how long (in characters, an emoji one) — never
+    // the words themselves.
+    audit.write(who, 'stagewatch.propose', from.code, 'asked the operator: a message (' + plural(Array.from(parsed.text).length, 'character') + ') for ' + built.words + ' — proposal ' + r.proposal.id, socket.data.ip);
     // The desk's id is its own (it numbers from p1 again after a restart): the line and the Stagewatch's address tag
     // travel with it, so a proposal of the same number that is not this one is never taken for it.
     const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, ok: null, words: '', to: built.words, at: Date.now(), sw: link.tag, line: built.line };
-    const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${asker} asked Stagewatch's operator to put this on ${built.words}: “${parsed.text.slice(0, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
-    if (source) apply(from, { o: 'upd', id: source.id, f: { proposal } });
-    trackProposal(link.id, proposal.id, from.code, [sys.id].concat(source ? [source.id] : []), proposal.state, proposal);
+    // A hall closed while the desk answered keeps nothing of the proposal, as for a send above.
+    if (store.get(from.code) === from) {
+      const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${asker} asked Stagewatch's operator to put this on ${built.words}: “${stagelines.cut(parsed.text, 120)}” — waiting for the show desk`, at: Date.now(), proposal } }).m;
+      if (source) apply(from, { o: 'upd', id: source.id, f: { proposal } });
+      trackProposal(link.id, proposal.id, from.code, [sys.id].concat(source ? [source.id] : []), proposal.state, proposal);
+    }
     noteEvent('research proposed a stage message to the show desk', link);
     ack({ ok: true, proposal });
   });

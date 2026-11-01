@@ -749,7 +749,7 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     assert.equal((await api(base, 'PATCH', '/api/users/' + anaId, { role: 'staff' }, { cookie: admin })).status, 403);
   });
 
-  await t.test('the admin\'s room controls and the desk\'s proposals each write one row of their own, with no message text; a new hall\'s name is cleaned', async () => {
+  await t.test('the admin\'s room controls, the desk\'s proposals and the lines sent to the speaker\'s screen each write one row of their own, with no message text; a new hall\'s name is cleaned', async () => {
     const sw = await fakeStagewatch({ name: 'Hall 5 timer' });
     stagewatches.push(sw);
     const ctl = await connect(base, admin); sockets.push(ctl);
@@ -785,7 +785,7 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     };
     const SAID = 'The capex figure is 4.2m';
     const ASK = 'Wrap up in five, the capex slide is next';
-    const ASK_TOO = 'Capex questions after the break';
+    const ASK_TOO = 'Capex questions after the break 🙂';   // an emoji: counted as one character, as a person counts it
     const MINUTES = 'Minutes: capex agreed at 4.2m';
     const said = await emit(kim, 'message', { type: 'text', text: SAID });
     const pack = await upload('board-pack-q3.txt');
@@ -793,6 +793,30 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     await until(async () => (await emit(kim, 'stage:targets', {})).canPropose, 8000, 'the desk');
     const asked = await emit(kim, 'stage:propose', { text: ASK, destination: 'speaker' });
     assert.ok(asked.ok, JSON.stringify(asked));
+    // A line sent straight to the speaker's screen: one row, its characters counted as a person counts them (an emoji
+    // is one), never its words.
+    const SENT = 'Two minutes, it is {time} 😀';
+    const sent = await emit(kim, 'stage:send', { text: SENT });
+    assert.deepEqual([sent.ok, sent.stage], [true, 'applied'], JSON.stringify(sent));
+    // A seat On stage holds no stage.send: refused in the speaker's screen's words, nothing reaches Stagewatch, no row.
+    const toScreen = () => sw.requests.filter((q) => q.url.startsWith('/api/message/')).length;
+    const screenBefore = toScreen();
+    assert.deepEqual(await emit(ivy, 'stage:send', { text: 'From the Board' }), { ok: false, error: 'The speaker\'s screen is for the backstage team.' });
+    assert.equal(toScreen(), screenBefore, 'nothing sent from the Board');
+    // A page that sends and then joins another hall before Stagewatch answers: the line and the row stay with the hall
+    // it was sent from.
+    const mo = await connect(base); sockets.push(mo);
+    const mj = await emit(mo, 'join', { roomCode: h5, name: 'Mo', role: 'research' });
+    assert.ok(mj.ok, JSON.stringify(mj));
+    const SENT_TOO = 'Mic 4 is live';
+    sw.messageDelayMs = 500;
+    let delivered = false;
+    const sending = emit(mo, 'stage:send', { text: SENT_TOO }).then((r) => { delivered = true; return r; });
+    assert.ok((await emit(mo, 'join', { roomCode: h6, name: 'Mo', role: 'research', uid: mj.identity })).ok);
+    assert.equal(delivered, false, 'the page moved while Stagewatch had not answered');
+    const sent2 = await sending;
+    sw.messageDelayMs = 0;
+    assert.ok(sent2.ok, JSON.stringify(sent2));
 
     // A page that proposes and then joins another hall before the desk answers: the proposal, its row and its line stay
     // with the hall it was asked from.
@@ -811,6 +835,8 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     const lines = async (code) => (await emit(ctl, 'admin:watchRoom', { roomCode: code })).messages.map((m) => m.text || '');
     assert.ok((await lines(h5)).some((x) => x.startsWith('Lee asked Stagewatch\'s operator')), 'the line is in the hall it was asked from');
     assert.ok(!(await lines(h6)).some((x) => x.includes('asked Stagewatch\'s operator')), 'and not in the hall the page went to');
+    assert.deepEqual((await lines(h5)).filter((x) => x.includes('sent to the speaker\'s screen')), ['Kim sent to the speaker\'s screen: “Two minutes, it is (time) 😀”', 'Mo sent to the speaker\'s screen: “' + SENT_TOO + '”'], 'each send\'s line in the hall it was sent from');
+    assert.ok(!(await lines(h6)).some((x) => x.includes('sent to the speaker\'s screen')), 'and none in the hall Mo went to');
 
     assert.ok((await emit(ctl, 'admin:deleteMessage', { roomCode: h5, messageId: said.id })).ok);
     assert.ok((await emit(ctl, 'admin:deleteMessage', { roomCode: h5, messageId: pack.id })).ok);
@@ -845,14 +871,16 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     await strayGone;
 
     const entries = (await api(base, 'GET', '/api/audit?limit=500', undefined, { cookie: admin })).body.entries.slice().reverse();
-    const ROWS = new Set(['hall.create', 'stagewatch.propose', 'message.remove', 'room.lock', 'seat.role', 'room.link', 'room.unlink', 'minutes.post', 'room.reset', 'seat.kick']);
+    const ROWS = new Set(['hall.create', 'stagewatch.propose', 'stagewatch.send', 'message.remove', 'room.lock', 'seat.role', 'room.link', 'room.unlink', 'minutes.post', 'room.reset', 'seat.kick']);
     const rows = entries.filter((e) => ROWS.has(e.action) && [h5, h6, hN].includes(e.target));
     assert.deepEqual(rows.map((e) => [e.action, e.target, e.words]), [
       ['hall.create', h5, 'Hall 5'],
       ['hall.create', h6, 'Hall 6'],
       ['hall.create', hN, '(no name)'],
       ['stagewatch.propose', h5, 'asked the operator: a message (' + ASK.length + ' characters) for the speaker\'s screen — proposal ' + asked.proposal.id],
-      ['stagewatch.propose', h5, 'asked the operator: a message (' + ASK_TOO.length + ' characters) for the speaker\'s screen — proposal ' + asked2.proposal.id],
+      ['stagewatch.send', h5, 'a line (27 characters) on the speaker\'s screen, sent now'],
+      ['stagewatch.send', h5, 'a line (' + SENT_TOO.length + ' characters) on the speaker\'s screen, sent now'],
+      ['stagewatch.propose', h5, 'asked the operator: a message (' + Array.from(ASK_TOO).length + ' characters) for the speaker\'s screen — proposal ' + asked2.proposal.id],
       ['message.remove', h5, 'a message by Kim (text)'],
       ['message.remove', h5, 'a message by Kim (file)'],
       ['room.lock', h5, 'roles locked (2 seats kept)'],
@@ -866,14 +894,45 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
       ['seat.kick', h5, 'Kim sent out (1 page closed)'],
     ]);
     const ana = { t: 'account', id: setup.body.account.id, name: 'ana' };
-    assert.deepEqual(rows.filter((e) => e.action !== 'stagewatch.propose').map((e) => e.actor), Array(14).fill(ana), 'the admin is named on every room control');
+    assert.deepEqual(rows.filter((e) => !e.action.startsWith('stagewatch.')).map((e) => e.actor), Array(14).fill(ana), 'the admin is named on every room control');
     assert.deepEqual(rows.filter((e) => e.action === 'stagewatch.propose').map((e) => e.actor), [{ t: 'code', id: kj.uid, name: 'Kim' }, { t: 'code', id: lj.uid, name: 'Lee' }], 'and each guest who asked the desk');
+    assert.deepEqual(rows.filter((e) => e.action === 'stagewatch.send').map((e) => e.actor), [{ t: 'code', id: kj.uid, name: 'Kim' }, { t: 'code', id: mj.uid, name: 'Mo' }], 'and each guest who sent a line');
     assert.ok(entries.some((e) => e.action === 'seat.kick' && e.target === '' && e.words === 'a page in no hall sent out (1 page closed)' && e.actor.name === 'ana'), 'a page in no hall: no hall named');
     assert.ok(!rows.some((e) => e.words.includes(hall) || e.words.includes(hN)), 'a linked hall is named by its name, never by the code its guests join with');
     const raw = fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8');
-    for (const never of [SAID, ASK, ASK_TOO, MINUTES, 'capex', 'Capex', 'board-pack-q3', 'kept-notes', pack.url, kept.url, kj.uploadToken, 'swk_hall5_node_key_00001' /* secret-scan: fixture */, '\u202e', '\u2066']) {
+    for (const never of [SAID, ASK, ASK_TOO, MINUTES, SENT, SENT_TOO, 'Two minutes', '(time)', 'Mic 4', 'capex', 'Capex', 'board-pack-q3', 'kept-notes', pack.url, kept.url, kj.uploadToken, 'swk_hall5_node_key_00001' /* secret-scan: fixture */, '\u202e', '\u2066']) {
       assert.ok(!raw.includes(never), 'not in the audit log: ' + JSON.stringify(never));
     }
+  });
+
+  await t.test('a hall closed while Stagewatch answers a send, or its desk a proposal, keeps nothing of either; each is still its row', async () => {
+    const sw = await fakeStagewatch({ name: 'Hall 7 timer' });
+    stagewatches.push(sw);
+    const ctl = await connect(base, admin); sockets.push(ctl);
+    const h7 = (await emit(ctl, 'admin:createRoom', { name: 'Hall 7' })).code;
+    assert.ok((await emit(ctl, 'hall:configure', { code: h7, stagewatchUrl: sw.url, stagewatchKey: 'swk_hall7_node_key_00001' /* secret-scan: fixture */ })).ok);
+    await until(() => sw.connected, 6000, 'Stagewatch linked');
+    const pia = await connect(base); sockets.push(pia);
+    assert.ok((await emit(pia, 'join', { roomCode: h7, name: 'Pia', role: 'research' })).ok);
+    await until(async () => (await emit(pia, 'stage:targets', {})).canPropose, 8000, 'the desk');
+    const rooms = path.join(srv.dataDir, 'rooms');
+    const files = () => fs.readdirSync(rooms).filter((f) => f.startsWith(h7));
+    assert.ok(files().length > 0, 'an open hall has its files');
+    sw.messageDelayMs = 800;
+    sw.proposalDelayMs = 800;
+    // Neither answer reaches the page: the hall's pages are sent home when it closes.
+    emit(pia, 'stage:send', { text: 'Closing words' });
+    emit(pia, 'stage:propose', { text: 'Closing question', destination: 'speaker' });
+    await until(() => sw.requests.some((q) => q.url.startsWith('/api/message/')) && sw.requests.some((q) => q.method === 'POST' && q.url === '/api/proposals'), 3000, 'both on their way');
+    assert.ok((await emit(ctl, 'admin:deleteRoom', { roomCode: h7 })).ok);
+    assert.deepEqual(files(), [], 'closed: its files are gone');
+    const rowsOf = async () => (await api(base, 'GET', '/api/audit?limit=500', undefined, { cookie: admin })).body.entries
+      .filter((e) => e.target === h7 && e.action.startsWith('stagewatch.')).map((e) => e.action).sort();
+    await until(async () => (await rowsOf()).length === 2, 6000, 'both answered');
+    sw.messageDelayMs = 0;
+    sw.proposalDelayMs = 0;
+    assert.deepEqual(await rowsOf(), ['stagewatch.propose', 'stagewatch.send'], 'each reached Stagewatch, and is its row');
+    assert.deepEqual(files(), [], 'and no line of either was written back into the closed hall\'s folder');
   });
 
   await t.test('the audit log has it all, the chain verifies, and nothing secret is in it', async () => {
@@ -881,7 +940,7 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
     assert.equal(a.status, 200);
     const actions = a.body.entries.map((e) => e.action);
     for (const want of ['setup', 'hall.create', 'user.create', 'login', 'login.fail', 'password.change', 'login.refused', 'user.update',
-      'stagewatch.propose', 'message.remove', 'room.lock', 'seat.role', 'room.link', 'room.unlink', 'minutes.post', 'room.reset', 'seat.kick']) assert.ok(actions.includes(want), want);
+      'stagewatch.propose', 'stagewatch.send', 'message.remove', 'room.lock', 'seat.role', 'room.link', 'room.unlink', 'minutes.post', 'room.reset', 'seat.kick']) assert.ok(actions.includes(want), want);
     const v = await api(base, 'GET', '/api/audit/verify', undefined, { cookie: admin });
     assert.equal(v.body.ok, true);
     const raw = fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8');

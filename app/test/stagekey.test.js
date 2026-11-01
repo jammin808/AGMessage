@@ -626,3 +626,35 @@ test('whether Stagewatch keeps a desk: a 429 says nothing of a desk known before
     assert.ok(Date.now() - link.deskCheckedAt < 1000, 'a 403 is asked again only after a whole interval');
   } finally { link.stop(); await sw.close(); }
 });
+
+test('a line for the speaker\'s screen is cut on a code point within 500 UTF-16 units, well formed, with its braces as parentheses', async () => {
+  const sw = await fakeStagewatch({ key: KEY });
+  const { link } = linkWith();
+  // What Stagewatch reads of a send: its path's segments, each unescaped (WebServer.HandleApiCommandAsync).
+  const sent = () => sw.requests.filter((q) => q.url.startsWith('/api/message/')).at(-1).url.slice('/api/message/'.length).split('/').map(decodeURIComponent);
+  try {
+    link.configure(sw.url, KEY);
+    await until(() => link.status === 'connected', 4000, 'connected');
+    const half = await link.sendToStage('a'.repeat(499) + '😀', { urgency: 'warn' });
+    assert.deepEqual([half.ok, half.stage], [true, 'applied'], 'sent, no URIError: ' + JSON.stringify(half));
+    assert.deepEqual(sent(), ['a'.repeat(499), 'warn', 'off', 'ack'], 'at most 500 units and no half emoji');
+    assert.ok((await link.sendToStage('😀'.repeat(300))).ok);
+    assert.deepEqual([Array.from(sent()[0]).length, sent()[0].length, sent()[0].isWellFormed()], [250, 500, true], '300 emoji send 250');
+    assert.ok((await link.sendToStage('Back in \uD800 five')).ok, 'a lone surrogate is sent');
+    assert.equal(sent()[0], 'Back in � five', 'and arrives as U+FFFD');
+    assert.ok((await link.sendToStage('Wrap up by {FINISH_BY}, it is {time}')).ok);
+    assert.equal(sent()[0], 'Wrap up by (FINISH_BY), it is (time)', 'braces reach Stagewatch as parentheses, never as its placeholders');
+    assert.ok((await link.sendToStage('Two\u0007 minutes\u0000')).ok);
+    assert.equal(sent()[0], 'Two minutes', 'no control character');
+    const none = await link.sendToStage(' \u0007 ');
+    assert.deepEqual([none.ok, none.stage, none.error], [false, 'not sent', 'Nothing to send.']);
+    // Stagewatch's urgencies only: an unknown word is refused, never sent as info.
+    for (const urgency of ['nonsense', 'constructor', 'INFO', 3, {}]) {
+      const r = await link.sendToStage('Two minutes', { urgency });
+      assert.deepEqual([r.ok, r.stage, r.error], [false, 'not sent', 'Unknown urgency.'], String(urgency));
+    }
+    assert.equal(sw.requests.filter((q) => q.url.startsWith('/api/message/')).length, 5, 'nothing sent for nothing, nor for an unknown urgency');
+    assert.ok((await link.sendToStage('Two minutes', { urgency: null })).ok);
+    assert.equal(sent()[1], 'info', 'no urgency is info');
+  } finally { link.stop(); await sw.close(); }
+});

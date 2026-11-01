@@ -334,7 +334,7 @@ test('context: lights and headline from facts; no message text, names, room name
     node: { id: 'abcd1234', name: 'AGMessage' }, rooms,
     stage: { status: 'connected', view: { text: '5 MIN', title: 'Keynote' }, clock: { offsetMs: 2600, rttMs: 4, apart: true }, context: { node: { id: 'sw1' }, headline: 'Keynote · 5:00 left', light: 'green' } },
     peers: [{ t: 'main', id: 'sw1', name: 'Hall A', status: 'live', age: 1 }, { t: 'patterns', id: 'pt1', name: 'FOH', status: 'stale', age: 8 }],
-    aiOn: false, tunnel: false, recent: [{ at: 1, text: 'research sent a message to the stage screen (applied)' }],
+    aiOn: false, tunnel: false, recent: [{ at: 1, text: 'research sent a message to the speaker\'s screen (applied)' }],
   });
   assert.equal(ctx.v, 1);
   assert.equal(ctx.light, 'amber', 'a prompt waiting and clocks apart');

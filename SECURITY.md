@@ -50,13 +50,14 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   a certificate that is pinned or that a person confirmed by typing at least 16 characters of its fingerprint from the
   node's own screen; AGMessage never drives a node with it — lines are proposed to the show desk (Show Bus §11).
 - Security-relevant actions (sign-ins, permission changes, the admin's room controls, the proposals Stagewatch's show
-  desk takes, what kind of thing a display was told to show) are written to an audit log chained with a key (HMAC-SHA256
-  under a key derived from the machine key) that shows tampering, never with a message's text or a file's name (screen
-  takes logged by 0.5.1 and earlier quote a message's first words and name the file). Its records (the newest entry on
-  disk, the log written last and where) are kept beside the machine key, outside the data folder, so entries removed or a
-  whole log replaced while AGMessage is stopped are found at the next start. Entries this laptop cannot check (0.5.1's,
-  another key's) read △ until the person at the laptop accepts them by typing the admin token into the dialog: never a
-  sign-in, which is a record in the data folder anyone who can write it could add.
+  desk takes, the lines sent straight to the speaker's screen, what kind of thing a display was told to show) are
+  written to an audit log chained with a key (HMAC-SHA256 under a key derived from the machine key) that shows
+  tampering, never with a message's text or a file's name (screen takes logged by 0.5.1 and earlier quote a message's
+  first words and name the file). Its records (the newest entry on disk, the log written last and where) are kept
+  beside the machine key, outside the data folder, so entries removed or a whole log replaced while AGMessage is
+  stopped are found at the next start. Entries this laptop cannot check (0.5.1's, another key's) read △ until the
+  person at the laptop accepts them by typing the admin token into the dialog: never a sign-in, which is a record in
+  the data folder anyone who can write it could add.
 - The audit log is exported signed, to be checked on another computer: the files byte for byte, the laptop's own check
   of them, `SHA256SUMS` and its Ed25519 signature. The signing key is derived from the machine key when an export signs
   and is never stored; its fingerprint is printed in the black window and on Admin → Health, and an auditor checks an

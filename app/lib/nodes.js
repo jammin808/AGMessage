@@ -28,7 +28,7 @@ const os = require('os');
 const WebSocket = require('ws');
 const { ClockSampler, Ring } = require('./resilience');
 const tlsmod = require('./tls');
-const { departmentsOf } = require('./stagelines');
+const { departmentsOf, words: lineWords, urgencyOf, MESSAGE_MAX } = require('./stagelines');
 const { holdMs } = require('./deskresults');
 
 const BUS_PORT = 9928;
@@ -698,20 +698,25 @@ class StagewatchLink {
   /** Clock offset to Stagewatch ({offsetMs, rttMs, apart}) or null before the first pong with times. */
   clockInfo() { return this.clock.best(); }
 
-  /** Put a message on the speaker's confidence monitor. Returns Stagewatch's receipt, or why it wasn't sent. */
+  /**
+   * Put a message on the speaker's confidence monitor. Returns Stagewatch's receipt, or why it wasn't sent. The words are
+   * a line's (lib/stagelines.js): at most 500 UTF-16 units cut on a code point, well formed, braces as parentheses; the
+   * urgency is Stagewatch's (absent is info), and any other word is refused, never sent as info.
+   */
   async sendToStage(text, { urgency = 'info', ack = true } = {}) {
     if (!this.base) return { ok: false, stage: 'not sent', error: 'Link Stagewatch first (Admin → Show network).' };
     if (!this.key) return { ok: false, stage: 'not sent', error: 'Stagewatch needs a node key for this (Stagewatch → Settings → Remote → API keys, scope "node").' };
     const held = this.keyHeld();
     if (held) return { ok: false, stage: 'not sent', error: held };
     if (this.status !== 'connected') return { ok: false, stage: 'not sent', error: 'The Stagewatch link is ' + this.status + ' — not sent (nothing is queued; send again when it is connected).' };
-    const t = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+    const t = lineWords(text, MESSAGE_MAX);
     if (!t) return { ok: false, stage: 'not sent', error: 'Nothing to send.' };
-    const u = ['info', 'warn', 'crit'].includes(urgency) ? urgency : 'info';
-    const path = '/api/message/' + [t, u, 'off'].concat(ack ? ['ack'] : []).map(encodeURIComponent).join('/');
+    const u = urgencyOf(urgency);
+    if (!u) return { ok: false, stage: 'not sent', error: 'Unknown urgency.' };
     const id = requestId();
     const t0 = Date.now();
     try {
+      const path = '/api/message/' + [t, u, 'off'].concat(ack ? ['ack'] : []).map(encodeURIComponent).join('/');
       const res = await this._call(path, { method: 'POST', headers: { 'X-Request-Id': id } });
       this.rtt.push(Date.now() - t0);
       return readReceipt(res.status, res.body, id);

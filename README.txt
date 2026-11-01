@@ -426,6 +426,16 @@ Show network (Stagewatch, Patterns, presenter PCs) - Show Bus 1.2
     speaker's screen instead - the show caller approves it in Stagewatch, and
     the message shows waiting / approved / done. The show desk can also send
     an approved notice ("Break in 5 minutes") to every open meeting.
+  - A line for Stagewatch is counted as Stagewatch counts it (an emoji counts
+    two) and cut where Stagewatch cuts it, never in half an emoji: 500
+    characters sent straight to the speaker's screen, 200 for a role screen or
+    a department, 300 for the operator. Asked of the show caller, a line for
+    the speaker's screen is at most 377 (Stagewatch's desk keeps 400 of a line,
+    with its urgency and its "Got it"): a longer one is refused with how much
+    fits, never cut - shorten it, or use Send now. Braces { } reach
+    Stagewatch as ( ): Stagewatch would read {TIME} or {REMAINING} as its own
+    placeholders. Every line sent straight to the speaker's screen is in the
+    audit log (who sent it and how long, never the words).
   - All of this works on the venue network with no internet. Only AI drafts
     and the Cloudflare tunnel need the internet.
 
