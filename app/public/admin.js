@@ -133,9 +133,8 @@ function showDashboard() {
   document.getElementById('resetRoomBtn').addEventListener('click', () => {
     if (!currentRoom) return;
     const ok = confirm(
-      'Reset session ' + currentRoom.code + '?\n\n' +
-      'This will clear all messages and documents from the chat. ' +
-      'Connected users stay logged in. This cannot be undone.'
+      'Clear every message in ' + (roomNameForCode(currentRoom.code) || currentRoom.code) + '?\n\n' +
+      'Files used nowhere else go too. Everyone stays in the hall. This cannot be undone.'
     );
     if (!ok) return;
     AGM.outbox.now('admin:resetRoom', { roomCode: currentRoom.code }, (res) => {
@@ -180,7 +179,7 @@ function renderRoomList(rooms) {
 }
 
 function createNewRoom() {
-  const name = (prompt('Optional session name (e.g. "Acme AGM 2026"). Leave blank for none:') || '').trim();
+  const name = (prompt('Hall name (for example Hall 2). Leave blank for none:') || '').trim();
   AGM.outbox.now('admin:createRoom', { name }, (res) => {
     if (!res?.ok) return alert(res?.error || 'Could not create room');
     refreshRooms();
@@ -231,7 +230,7 @@ function renderUsers(users) {
     }).join("");
     // A code guest's role is set here; an account's follows its rights, which are set on the Accounts page.
     const roleCellHtml = u.account
-      ? `<span class="role-fixed">${escapeHtml(u.role)}</span> <small class="muted">account · <a href="/users.html" target="_blank" rel="noopener">rights on the Accounts page</a></small>`
+      ? `<span class="role-fixed">${escapeHtml(seatWord(u.role))}</span> <small class="muted">account · <a href="/users.html" target="_blank" rel="noopener">rights on the Accounts page</a></small>`
       : `<select data-sid="${sidHtml}" class="role-select">${roleOptionsHtml(u.role)}</select>`;
     tr.innerHTML =
       `<td><strong>${escapeHtml(u.name)}</strong></td>` +
@@ -251,7 +250,7 @@ function renderUsers(users) {
       const sid = sel.dataset.sid;
       const role = sel.value;
       AGM.outbox.now('admin:setRole', { roomCode: currentRoom.code, socketId: sid, role }, (res) => {
-        if (!res?.ok) alert(res?.error || 'Could not change role');
+        if (!res?.ok) alert(res?.error || 'Could not change the seat');
       });
     });
   });
@@ -288,7 +287,7 @@ function renderUsers(users) {
   tb.querySelectorAll('.kick').forEach((btn) => {
     btn.addEventListener('click', () => {
       const sid = btn.dataset.sid;
-      if (!confirm('Log this user out of the meeting?')) return;
+      if (!confirm('Log this person out of the hall? Every page they have open here closes.')) return;
       AGM.outbox.now('admin:kick', { socketId: sid }, (res) => {
         if (!res?.ok) alert(res?.error || 'Could not kick');
       });
@@ -314,7 +313,7 @@ function buildAdminMessage(m) {
   }
   if (m.priority) div.classList.add('priority');
   const whoHtml = m.from
-    ? `<strong>${escapeHtml(m.from.name)}</strong> <span class="role-tag" data-role="${escapeHtml(m.from.role)}">${escapeHtml(m.from.role)}</span>`
+    ? `<strong>${escapeHtml(m.from.name)}</strong> <span class="role-tag" data-role="${escapeHtml(m.from.role)}">${escapeHtml(seatWord(m.from.role))}</span>`
     : '—';
   let bodyHtml = '';
   if (m.type === 'text') bodyHtml = `<p>${escapeHtml(m.text)}</p>`;
@@ -330,7 +329,7 @@ function buildAdminMessage(m) {
     `<div class="admin-msg-body">${bodyHtml}${heldHtml}</div>` +
     `<div class="admin-msg-foot"><button class="btn ghost small del-any">🗑 Delete</button></div>`;
   div.querySelector('.del-any').onclick = () => {
-    if (!confirm('Delete this message? This affects everyone in the meeting.')) return;
+    if (!confirm('Delete this message for everyone in this hall?')) return;
     AGM.outbox.now('admin:deleteMessage', { roomCode: currentRoom.code, messageId: m.id }, (res) => {
       if (!res?.ok) alert(res?.error || 'Could not delete');
     });
@@ -371,7 +370,11 @@ function escapeHtml(s) {
 }
 /** The role picker's options, the person's own selected. */
 function roleOptionsHtml(current) {
-  return ['board', 'research', 'observer'].map((r) => '<option value="' + r + '"' + (r === current ? ' selected' : '') + '>' + r + '</option>').join('');
+  return ['board', 'research', 'observer'].map((r) => '<option value="' + r + '"' + (r === current ? ' selected' : '') + '>' + escapeHtml(seatWord(r)) + '</option>').join('');
+}
+/** A seat in the words every page uses for it; the role word stays the value the server reads. */
+function seatWord(role) {
+  return role === 'board' || role === 'director' ? 'On stage' : role === 'research' ? 'Backstage' : role === 'observer' ? 'Observer' : role;
 }
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

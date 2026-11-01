@@ -31,7 +31,7 @@ if not defined MISSING if not exist "%~dp0app\server.js" set "MISSING=app\server
 if not defined MISSING if not exist "%~dp0app\node_modules\" set "MISSING=app\node_modules"
 if defined MISSING goto missing
 
-echo   Keep this window open while the meeting runs.
+echo   Keep this window open while the show runs.
 echo   Press Ctrl+C to stop the server when you're done.
 echo.
 echo   Your browser opens on this copy once it is serving.

@@ -114,13 +114,17 @@ function rejoin() {
   const who = AS_ACCOUNT ? { as: 'account' } : { name: NAME, role: ROLE, uid: IDENTITY, invite: INVITE };
   socket.emit('join', { roomCode: ROOM, adminView: ADMIN_VIEW, since: joined ? lastSeq : undefined, ...who }, (res) => {
     if (!res || !res.ok) {
-      notify(res?.error || 'Could not join room', true);
-      // A guest's link refused because this browser is signed in goes to the code link it came from, which offers the
-      // halls or Sign out and keeps the code (and an invite's role) for after.
+      // Signing in is the way into this hall: the sign-in page opens, and brings the person back here after.
+      if (res && res.signIn) {
+        notify(res.error || 'Sign in first.', true);
+        setTimeout(() => { location.href = '/?next=' + encodeURIComponent(location.pathname + location.search); }, 2500);
+        return;
+      }
+      // A guest's link refused because this browser is signed in goes back to the code link it came from, which offers
+      // the halls or Sign out and keeps the code (and an invite's role) for after.
       const back = new URLSearchParams({ code: ROOM });
       if (INVITE) { back.set('role', ROLE); back.set('invite', INVITE); }
-      const to = res && res.signIn ? '/?next=' + encodeURIComponent(location.pathname + location.search) : res && res.signedIn ? '/?' + back.toString() : HOME;
-      setTimeout(() => { location.href = to; }, 2500);
+      outOfHall((res && res.error) || 'This code doesn\'t open a room now. Check it with whoever gave it to you.', res && res.signedIn ? '/?' + back.toString() : HOME);
       return;
     }
     // An account's role in a hall is the server's, from its rights; the page is built for the URL's at load, so a URL
@@ -179,12 +183,13 @@ function rejoin() {
   });
 }
 
-/** The hall's name in the header (a rename arrives as a numbered change, like everything else), and in the name of
- * Send, which says where a message goes (its word "Send" first, the word a person sees on it). */
+/** The room as the header names it (a hall's Main room by the hall's name; a rename arrives as a numbered change, like
+ * everything else): the header, the code chip's title, and the name of Send, which says where a message goes (its word
+ * "Send" first, the word a person sees on it). */
 function setRoomTitle(name) {
   if (!name) return;
   const chip = document.getElementById('roomChip');
-  if (chip) chip.title = 'Meeting: ' + name + ' (' + ROOM + ')';
+  if (chip) chip.title = name;
   const titleStrong = document.querySelector('.app-title strong');
   if (titleStrong) titleStrong.textContent = name;
   document.querySelectorAll('.send-btn').forEach((b) => b.setAttribute('aria-label', 'Send to ' + name));
@@ -231,10 +236,28 @@ for (const field of Object.keys(UPD_EVENTS)) {
   socket.on(event, (change = {}) => { if (bump(change.seq)) draw(change.messageId, change[field]); });
 }
 // Sent out of the hall: nothing this page holds is sent, now or when the person comes back in this tab.
-socket.on('kicked', ({ reason }) => { AGM.outbox.clear(); notify(reason || 'You were removed from the meeting.', true); setTimeout(() => { location.href = HOME; }, 2500); });
+socket.on('kicked', ({ reason }) => { AGM.outbox.clear(); outOfHall(reason || 'An admin sent you out.', HOME); });
+/**
+ * Out of the hall (sent out, the hall closed, or the join refused): the server's words in place of the hall, and the way
+ * back, until the person takes it; nothing leaves by itself, so the words are read. The socket is let go: it does not
+ * come back by itself (reconnect.js), and a page out of its hall neither joins again nor offers anything to write or
+ * send: its dialogs and menus close, and the hall's own buttons go with the hall.
+ */
+function outOfHall(words, to) {
+  document.getElementById('outWords').textContent = words;
+  const back = document.getElementById('outBack');
+  back.href = to;
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+  document.querySelectorAll(MENUS_ON_FEED).forEach((m) => m.remove());
+  for (const id of ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn']) document.getElementById(id).hidden = true;
+  document.querySelector('.main-row').hidden = true;
+  document.getElementById('outOfHall').hidden = false;
+  if (socket.connected) socket.disconnect();
+  back.focus();
+}
 // An admin changed this account: the server closes the socket; open the hall again with the rights it has now.
 socket.on('account:changed', ({ words } = {}) => { notify(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1500); });
-socket.on('roleChanged', ({ role }) => { notify('The admin changed your role to ' + roleLabel(role) + ' — reloading…'); setTimeout(() => { const q = new URLSearchParams(location.search); q.set('role', role); location.search = q.toString(); }, 1500); });
+socket.on('roleChanged', ({ role }) => { notify('The admin changed your seat to ' + roleLabel(role) + ' — reloading…'); setTimeout(() => { const q = new URLSearchParams(location.search); q.set('role', role); location.search = q.toString(); }, 1500); });
 const stageKey = (v) => (v ? v.status || '' : 'off') + '|' + !!(v && v.desk);
 socket.on('stage', (v) => {
   renderStage(v);
@@ -375,7 +398,7 @@ function refreshSeenLines() {
   }
 }
 
-// ---------------- Stage (Stagewatch): the live timer, for everyone in the meeting ----------------
+// ---------------- Stage (Stagewatch): the live timer, for everyone in the hall ----------------
 function renderStage(v) {
   const chip = document.getElementById('stageChip');
   if (!chip) return;
@@ -476,7 +499,9 @@ function removeMessageLocal(id) {
   if (currentDocMsgId === id) dismissDoc();
 }
 
-const PRESENCE = /^(.+) (joined as \w+|left)$/;
+// A presence line: "Ana joined Backstage", "Ben joined On stage", "Wes joined as an observer", "Ana left"; an older line in a
+// hall's history ("Ana joined as research") is one too.
+const PRESENCE = /^(.+) (joined (?:On stage|Backstage|as an observer|as \w+)|left)$/;
 function renderMessage(msg) {
   if (msg.type === 'system') {
     const div = document.createElement('div');
@@ -944,7 +969,7 @@ function renderActionBody(msg) {
     other.className = 'btn ghost small reply-text-btn';
     other.textContent = 'Reply with text';
     other.onclick = () => {
-      const note = prompt('Quick reply to research team:');
+      const note = prompt('Quick reply to the backstage team:');
       if (note && note.trim()) answerPrompt(msg.id, -1, note.trim());
     };
     btnRow.appendChild(other);
@@ -1056,7 +1081,7 @@ function refreshPinned() {
     });
     clone.querySelectorAll('.reply-text-btn').forEach((b) => {
       b.onclick = () => {
-        const note = prompt('Quick reply to research team:');
+        const note = prompt('Quick reply to the backstage team:');
         if (note && note.trim()) answerPrompt(m.id, -1, note.trim());
       };
     });
@@ -1390,7 +1415,7 @@ function dismissDoc() {
   docPanel.classList.remove('priority');
   docDisplay.innerHTML =
     `<div class="empty-state"><p>No document on stage.</p>` +
-    `<p class="hint">When the research team pushes a file, it appears here automatically.</p></div>`;
+    `<p class="hint">When the backstage team shares a file, it appears here automatically.</p></div>`;
   docCaptionEl.hidden = true;
   docCaptionEl.textContent = '';
   docTitleEl.textContent = '';
@@ -1652,7 +1677,7 @@ textPane?.addEventListener('submit', (e) => {
   holdMessage('text', { type: 'text', text, priority: consumePriority(textPriBtn), replyTo: consumeReplyTo(), aiDraft: aiDrafted });
 });
 
-// ---------------- AI: drafts for the research team (a person always edits and sends) ----------------
+// ---------------- AI: drafts for the backstage team (a person always edits and sends) ----------------
 let aiDrafted = false;
 function setAiHint(text, bad) {
   let h = document.getElementById('aiHint');

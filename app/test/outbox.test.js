@@ -257,7 +257,7 @@ test('outbox hold: a file is held in memory only, uploaded with the message, and
   const t = rig({ store });
   t.join();
   const uploads = [];
-  const answers = [{ network: true }, { status: 403, error: 'Join a meeting to share files.' }, { url: '/uploads/1-aaaaaaaaaaaa-a.pdf', mime: 'application/pdf' }, { url: '/uploads/2-bbbbbbbbbbbb-a.pdf', mime: 'application/pdf' }];
+  const answers = [{ network: true }, { status: 403, error: 'Join a room to share files.' }, { url: '/uploads/1-aaaaaaaaaaaa-a.pdf', mime: 'application/pdf' }, { url: '/uploads/2-bbbbbbbbbbbb-a.pdf', mime: 'application/pdf' }];
   const file = { name: 'a.pdf' };
   const a = t.ob.hold('message', { type: 'file', url: '', filename: 'a.pdf', caption: 'the deck' }, { file, upload: (f) => { uploads.push(f); return answers.shift(); } });
   const settle = () => new Promise((r) => setImmediate(r));

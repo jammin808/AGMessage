@@ -983,6 +983,44 @@ test('ai: thread text is compact and labelled', () => {
   assert.equal(held[1], '[14:06] Chair (board): Thanks');
 });
 
+test('ai: what each prompt asks the model says the Board and the backstage team, the words a draft the Board reads uses', async (t) => {
+  const http = require('http');
+  const bodies = [];
+  const answer = { draft: 'ok', gaps: [], confidence: 'low', options: ['Yes', 'No'], headline: 'h', decisions: [], open: [], actions: [] };
+  const model = http.createServer((req, res) => {
+    let b = '';
+    req.on('data', (d) => { b += d; });
+    req.on('end', () => {
+      bodies.push(JSON.parse(b));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: 'x', stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(answer) }], usage: { input_tokens: 1, output_tokens: 1 } }));
+    });
+  });
+  await new Promise((resolve) => { model.listen(0, '127.0.0.1', resolve); });
+  const was = process.env.ANTHROPIC_BASE_URL;
+  process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:' + model.address().port;   // read when the client for this key is made
+  t.after(() => { if (was === undefined) delete process.env.ANTHROPIC_BASE_URL; else process.env.ANTHROPIC_BASE_URL = was; model.close(); });
+  const key = 'a-key-for-the-words-test';
+  const messages = [{ type: 'text', text: 'What was capex?', at: 0, from: { name: 'Chair', role: 'board' } }, { type: 'text', text: 'Checking', at: 0, from: { name: 'Ana', role: 'research' } }];
+  assert.equal((await ai.draftReply(key, { messages, instruction: 'keep it short' })).draft, 'ok');
+  assert.deepEqual((await ai.suggestOptions(key, { prompt: 'Refer to slide 14?', messages })).options, ['Yes', 'No']);
+  assert.equal((await ai.summarise(key, { messages, roomName: 'Hall 2' })).headline, 'h');
+  const [draft, options, minutes] = bodies.map((b) => ({ system: b.system, user: b.messages.map((m) => m.content).join('\n') }));
+  assert.equal(bodies.length, 3);
+  for (const asked of [draft, options, minutes]) {
+    assert.doesNotMatch(asked.system + '\n' + asked.user, /director|research team|meeting:/i, 'one word per thing: ' + asked.system);
+    assert.match(asked.system, /\(board\) marks a Board member on stage, \(research\) the backstage team and \(observer\) someone who only reads\.$/, 'the role words the lines carry, read');
+  }
+  assert.match(draft.system, /^You support the backstage team at a company's AGM or board meeting\. A Board member on stage\n/);
+  assert.match(draft.system, /Draft the reply the backstage team will send to the Board:/);
+  assert.match(draft.user, /^Answer the latest question from the Board\.$/m);
+  assert.match(draft.user, /^Backstage team note: keep it short$/m);
+  assert.match(options.system, /^You write tap-to-answer options for a Board member on stage\./);
+  assert.match(options.user, /\nThe backstage team is asking the Board: Refer to slide 14\?\nSuggest 2 to 4 short tap-to-answer options \(max 4 words each\) a Board member on stage can choose\.$/);
+  assert.match(minutes.system, /between the Board on stage and the backstage team\./);
+  assert.match(minutes.user, /^Hall: Hall 2\n/);
+});
+
 test('Stagewatch link: live frames, stale on silence, send to stage with the key', async () => {
   const http = require('http');
   const { WebSocketServer } = require('ws');

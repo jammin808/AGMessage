@@ -13,11 +13,11 @@
  */
 
 const CAPS = Object.freeze({
-  'hall.view': 'See a hall: its messages, files, countdown and displays',
+  'hall.view': 'See a hall: its messages, files, countdown and screens',
   'hall.post': 'Send messages, replies, action prompts and help requests',
   'hall.files': 'Share files and push them to a hall',
-  'display.control': 'Change what a hall\'s displays show',
-  'display.manage': 'Create, rename, move and revoke displays',
+  'display.control': 'Change what a hall\'s screens show',
+  'display.manage': 'Create, rename, move and revoke screens',
   'stage.send': 'Send to Stagewatch: the speaker\'s screen, or to the operator to pass on',
   'nodes.control': 'Propose commands to Patterns and PlayMap (to the show desk)',
   'halls.manage': 'Create halls and set them up (Stagewatch link, holding image, codes)',
@@ -37,17 +37,17 @@ const ROLES = Object.freeze({
   manager: {
     label: 'Project manager', allHalls: true,
     caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'display.manage', 'stage.send', 'nodes.control', 'halls.manage', 'audit.read'],
-    words: 'Every hall: messages, files, displays, Stagewatch, show network; sets halls up',
+    words: 'Every hall: messages, files, screens, Stagewatch, show network; sets halls up',
   },
   senior: {
     label: 'Senior tech', allHalls: true,
     caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'stage.send', 'nodes.control'],
-    words: 'Every hall: messages, files, displays, Stagewatch, show network',
+    words: 'Every hall: messages, files, screens, Stagewatch, show network',
   },
   tech: {
     label: 'Tech', allHalls: false,
     caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'stage.send'],
-    words: 'Their halls: messages, files, displays, Stagewatch',
+    words: 'Their halls: messages, files, screens, Stagewatch',
   },
   staff: { label: 'Staff', allHalls: false, caps: ['hall.view', 'hall.post', 'hall.files'], words: 'Their halls: messages and files' },
   viewer: { label: 'Viewer', allHalls: false, caps: ['hall.view'], words: 'Their halls: read only' },

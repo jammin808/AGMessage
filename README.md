@@ -97,5 +97,5 @@ The libraries the pages use (pdf.js, mammoth, SheetJS and what each bundles) are
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), their texts in `licenses/`, and file by file, with each file's
 source and SHA-256, in `app/public/vendor/VENDOR.json`, which a test holds the folder to.
 
-Meeting data (`app/data`, `app/uploads`) is never committed or packaged. The agent brief for working on this tree is
+Event data (`app/data`, `app/uploads`) is never committed or packaged. The agent brief for working on this tree is
 [CLAUDE.md](CLAUDE.md).

@@ -1,6 +1,6 @@
 <#
   Builds the portable Windows bundle: dist\AGMessage-Portable-Windows-<version>.zip
-  The zip never contains meeting history, uploads, keys or settings: app\data and app\uploads start empty.
+  The zip never contains hall history, uploads, keys or settings: app\data and app\uploads start empty.
 
     powershell -File tools\build-portable.ps1
 #>
@@ -46,7 +46,7 @@ $code = $LASTEXITCODE
 Pop-Location
 if ($code -ne 0) { throw 'npm ci failed' }
 
-# Never ship meeting data, whatever the working copy holds.
+# Never ship hall data, whatever the working copy holds.
 foreach ($p in 'app\data\rooms\*.json', 'app\data\rooms\*.log', 'app\data\*.key', 'app\data\settings.json') {
   if (Get-ChildItem (Join-Path $stage $p) -ErrorAction SilentlyContinue) { throw "Refusing to package: $p is present" }
 }

@@ -76,6 +76,33 @@ Every day of the event
 - When the event is over, close the black window (or press Ctrl+C in it).
   Halls, history and accounts are kept for next time.
 
+The words AGMessage uses
+------------------------
+One word for each thing, on every page:
+
+  hall       A space at the venue (Hall 2, the Foyer) with its room. Never
+             "meeting" or "session".
+  room       Where a hall's people write to each other, named as the hall
+             is: "Hall 2".
+  code       The 6 characters a guest types to join a room; on the admin
+             page, the guest code.
+  seat       Where a person sits: On stage, Backstage or Observer (the join
+             page asks where you are).
+  the Board  Everyone seated On stage: presenters and board members.
+  backstage  The Backstage seat's people, the backstage team, who write to
+             the Board.
+  screens    The browsers on walls and lecterns that hold a screen's link
+             (/d/...): a projector PC, a lectern monitor, a foyer TV.
+  the speaker's screen
+             Stagewatch's confidence monitor.
+  Send       puts a message into the room; Show on puts something on
+             screens.
+
+What AGMessage tells Stagewatch still counts the halls as "meetings" (its
+status, and the show desk's answers), as Stagewatch reads them. A hall's
+history keeps the words it was written in: a line from before 0.6.0, such
+as "Session restored", stays as it was.
+
 The audit log, and where to keep this folder
 --------------------------------------------
 Halls -> Accounts -> Audit log lists every sign-in, change of rights, room
@@ -393,7 +420,7 @@ Under the bonnet
 Earlier (0.2 - 0.4)
 -------------------
 Security
-  - Only people in a meeting can upload, and only PDF, images, Word, Excel,
+  - Only people in a room can upload, and only PDF, images, Word, Excel,
     PowerPoint, CSV and text — checked by content, not just by name. Files
     are served so they can never run script inside AGMessage.
   - Pages carry a strict Content-Security-Policy. pdf.js runs with eval
@@ -402,9 +429,10 @@ Security
     denial-of-service CVEs).
   - Identities are issued and signed by the server: nobody can pose as
     someone else or delete their messages.
-  - Optional role lock: Admin -> Roles & invites. Board and research seats
-    then need the invite link for that role; anyone else joins as an observer.
-  - Guessing meeting codes, wrong admin tokens and message floods are
+  - Optional lock: Admin -> Roles & invites. On stage and Backstage seats
+    then need the invite link for that seat; anyone else joins as an
+    observer.
+  - Guessing codes, wrong admin tokens and message floods are
     rate-limited and locked out. Admin login never works through the tunnel.
 
 Reliability and speed
@@ -426,7 +454,7 @@ Reliability and speed
     The last crash is on the admin page (Health).
   - Open pages come back by themselves: after a drop (from half a second,
     and at once when a phone is woken or the Wi-Fi is back), after a restart
-    (nobody is announced again: the hall reads "Session restored"), and
+    (nobody is announced again: the hall reads "AGMessage restarted"), and
     after AGMessage refused them at a busy moment, at the pace it gives
     ("Busy — trying again in 3 s."). A page down for 2 seconds says
     "Reconnecting…".
@@ -448,12 +476,12 @@ Reliability and speed
   - Saves are crash-safe (written, flushed to disk, then swapped in, with a
     backup of the last whole copy). Saved keys are encrypted with a key kept
     outside this folder, so a copied folder carries no usable key.
-  - "Seen by" under your own messages: research knows the board has read it
+  - "Seen by" under your own messages: backstage knows the Board has read it
     (at once, or within a second when many read at the same moment).
 
 AI (optional; Admin -> AI drafts, or set ANTHROPIC_API_KEY)
-  - Research: "Draft answer" writes a reply to the board's latest question (or
-    the one you're replying to) from the thread and the document on stage.
+  - Backstage: "Draft answer" writes a reply to the Board's latest question
+    (or the one you're replying to) from the thread and the document on stage.
     It lands in your box to check and edit; nothing is sent until you press
     Send, and the transcript marks it "drafted with AI, sent by a person".
   - Action prompts: "Suggest" proposes tap-to-answer buttons.
@@ -470,8 +498,8 @@ AI (optional; Admin -> AI drafts, or set ANTHROPIC_API_KEY)
 Show network (Stagewatch, Patterns, presenter PCs) - Show Bus 1.2
   - Admin -> Show network: link Stagewatch (address + a "node" API key made
     in Stagewatch -> Settings -> Remote -> API keys). Everyone then sees the
-    live stage timer in the header, and the research team can press the screen
-    button on a message to put it on the speaker's confidence monitor. The
+    live stage timer in the header, and the backstage team can press the
+    screen button on a message to put it on the speaker's screen. The
     message then shows whether it is on screen and when the speaker has seen
     or acknowledged it.
   - The link says "connected" only once Stagewatch accepted the key. Until
@@ -488,11 +516,11 @@ Show network (Stagewatch, Patterns, presenter PCs) - Show Bus 1.2
   - Other show systems can read this AGMessage's status (counts and the
     action-prompt questions only - never messages, names or documents) with the
     read-only token on the admin page.
-  - Show desk: when Stagewatch keeps the show's approval queue, the research
+  - Show desk: when Stagewatch keeps the show's approval queue, the backstage
     team can press the notepad button on a message to PROPOSE it for the
     speaker's screen instead - the show caller approves it in Stagewatch, and
     the message shows waiting / approved / done. The show desk can also send
-    an approved notice ("Break in 5 minutes") to every open meeting.
+    an approved notice ("Break in 5 minutes") to every open hall.
   - A line for Stagewatch is counted as Stagewatch counts it (an emoji counts
     two) and cut where Stagewatch cuts it, never in half an emoji: 500
     characters sent straight to the speaker's screen, 200 for a role screen or
@@ -521,7 +549,7 @@ Encrypted connections (HTTPS)
 
 Sharing this bundle
 -------------------
-app\data and app\uploads hold real meeting history, accounts, the audit
+app\data and app\uploads hold the halls' real history, accounts, the audit
 log and files. Before giving the bundle to anyone, double-click
 make-shareable-copy.bat: it makes a copy next to this folder without them,
 in a new folder each time (AGMessage-Portable-Windows-clean-<date>-<time>),

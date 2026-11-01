@@ -4,7 +4,7 @@ AGMessage has two ways in, and both are first-class:
 
 - **An account** — a username and a password — for the people who work the venue: crew in the operating rooms,
   project managers, senior techs, admins. They see their halls on the halls board and open any of them as themselves.
-- **A code** — a hall's or meeting's 6-character code — for presenters, board members and guests. They pick a name
+- **A code** — a room's 6-character guest code — for presenters, board members and guests. They pick a name
   and where they are (on stage, backstage, observer), exactly as before 0.5.
 
 ## Roles
@@ -92,7 +92,7 @@ watchdog restart, which keeps the token, but not a fresh start of AGMessage, whi
 ## Passwords and sessions
 
 - scrypt with N = 2^15, r = 8, p = 3 (32 MiB, about a quarter of a second on a show laptop), two at a time so a burst of
-  sign-ins never stalls a meeting; raised later without anyone noticing (an older hash is redone at the next sign-in).
+  sign-ins never stalls a hall; raised later without anyone noticing (an older hash is redone at the next sign-in).
   A sign-in through the tunnel uses one of the two at most, so sign-ins on the venue network always have the other; each
   side waits in a short queue of its own, a sign-in past it is told "Sign-in is busy — try again in a moment", and one
   whose page has given up is dropped without being checked.
@@ -121,7 +121,7 @@ watchdog restart, which keeps the token, but not a fresh start of AGMessage, whi
 ## The audit log
 
 `data/audit.jsonl`: one line per action that matters — sign-ins (and failed ones), the first admin, accounts and rights,
-halls and their Stagewatch, the admin's room controls (a hall made from the admin page or over HTTP, its session reset
+halls and their Stagewatch, the admin's room controls (a hall made from the admin page or over HTTP, its messages cleared
 with the files that left the disk, a message removed with whose it was and its kind, a guest's role, roles locked or
 unlocked with the seats kept, a guest let forward into another hall or no longer (that hall by its name, never its
 code), a person sent out, the AI's minutes posted: one row for each change, none for a control that changes nothing),
@@ -351,8 +351,8 @@ Going back to 0.5.1: it reads a keyed log as "✕ Broken at line 812: entry 812 
 writes on with plain hashes; back on 0.6.0, those entries are a span (`audit.unkeyed`), △ until accepted. 0.5.1 has no
 export; a bundle already made stays checkable with the release's verifier.
 
-Each entry is flushed to disk before the action is acknowledged (a session reset's once its files have left the disk, so
-that it counts them: a stop in that moment keeps the reset without its row). When the disk will not take it (full, or
+Each entry is flushed to disk before the action is acknowledged (Clear messages' once its files have left the disk, so
+that it counts them: a stop in that moment keeps the clear without its row). When the disk will not take it (full, or
 the file held by another program) the action still goes ahead — a full disk must not stop sign-ins or takes during a
 show — the entry stays in the chain in memory, the console and the admin page's health say so, and it is written ahead
 of the next entry (or when the server stops), so what is on disk stays one whole chain; a stop puts the waiting entries

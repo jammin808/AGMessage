@@ -1,4 +1,4 @@
-// The way in: sign in with an account, or join a hall or meeting with its code. The first admin is made here too, and a
+// The way in: sign in with an account, or join a room with its code. The first admin is made here too, and a
 // one-time password is changed here before anything else.
 (function () {
   'use strict';
@@ -127,7 +127,7 @@
     if (code.length !== 6) return fail('error', 'The code has 6 characters.');
     const data = await AGM.api('GET', '/api/rooms/' + encodeURIComponent(code));
     if (data.status === 429) return fail('error', 'Too many attempts — wait a minute.');
-    if (!data.exists) return fail('error', 'No hall or meeting has that code. Check it with whoever gave it to you.');
+    if (!data.exists) return fail('error', 'No room has that code. Check it with whoever gave it to you.');
     if (data.locked && role !== 'observer' && !invite) return fail('error', 'This one uses invite links for on-stage and backstage seats. Use the link you were sent, or join as an observer.');
     try { localStorage.setItem('agm.name', name); localStorage.setItem('agm.role', role); } catch { /* storage blocked: not remembered */ }
     const qs = new URLSearchParams({ code, name, role });

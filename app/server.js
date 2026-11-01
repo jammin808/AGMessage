@@ -1,19 +1,19 @@
 /**
- * AGMessage — inter-team messaging for AGMs and board meetings: directors on stage, research backstage.
+ * AGMessage — inter-team messaging for AGMs and board meetings: the Board on stage, the backstage team behind it.
  *
  * One Node.js process:
  *   - Serves the web client (join page, chat app, admin) from /public with a strict CSP
  *   - Real-time chat over Socket.io. Every change is an operation with a per-room sequence number:
  *     appended to an on-disk log, broadcast with its seq, and replayable — a client that drops off
  *     for a moment resumes with just what it missed (see lib/store.js)
- *   - Uploads: allow-listed types, checked by content, only from people in a meeting, served so a
+ *   - Uploads: allow-listed types, checked by content, only from people in a room, served so a
  *     file can never run script in the app
  *   - Identities are issued and signed by the server; roles can be locked to invite links
  *   - Claude drafts (research replies, minutes, action-prompt options) — always a draft for a person
  *   - A node of the show network: live Stagewatch timer for the board, "send to stage" to the
  *     confidence monitor, discovery of Stagewatch and Patterns (see lib/nodes.js)
  *
- * Roles: "board" (on stage), "research" (backstage), "observer" (read-only).
+ * Seats (their role words): "board" (On stage), "research" (Backstage), "observer" (Observer, read-only).
  * Listens on 0.0.0.0 for the venue network; remote access via the built-in Cloudflare tunnel.
  */
 'use strict';
@@ -80,6 +80,9 @@ const ADMIN_TOKEN = (process.env.ADMIN_TOKEN || crypto.randomBytes(8).toString('
 const makeRoomCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 const makeMessageId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
 const ROLES = ['board', 'research', 'observer'];
+// The seats in the lines the server writes into a hall, in the words every page shows for them.
+const SEAT = Object.freeze({ board: 'On stage', research: 'Backstage', observer: 'Observer' });
+const JOINED = Object.freeze({ board: 'joined On stage', research: 'joined Backstage', observer: 'joined as an observer' });
 // What may be forwarded into another hall: messages that stand on their own there (allow-list; a new type is refused).
 const FORWARDABLE = new Set(['text', 'file', 'action']);
 // What one person's pages keep in step (their own devices, and the admin's support view of them): each key a page
@@ -137,7 +140,7 @@ function contextToken() {
 const unsealable = () => { const p = secretbox.keyProblem(); return p ? 'Not saved: this run has no machine key (' + p.code + '), so nothing can be sealed. ' + p.words.charAt(0).toUpperCase() + p.words.slice(1) + '.' : ''; };
 
 // ---------------------------------------------------------------- accounts, sessions, the audit log
-// Individual logins beside the meeting codes (lib/accounts.js, lib/rbac.js); every action that matters is in the
+// Individual logins beside the guest codes (lib/accounts.js, lib/rbac.js); every action that matters is in the
 // audit log, chained with a key derived from this machine's key (lib/audit.js), its records kept beside that key, outside
 // the data folder. The host laptop's admin token stays as the way in before any account exists.
 const accounts = new Accounts(path.join(DATA_DIR, 'accounts.json'));
@@ -470,7 +473,7 @@ function syncSeats(room) {
 // The boot's first seconds are over: a seat saved before the restart that nobody took up goes, as after a drop's grace.
 setTimeout(() => { for (const room of store.rooms.values()) if (Object.keys(room.settings.seats || {}).length) syncSeats(room); }, BOOT_SEAT_MS + 100).unref();
 
-// Upload tokens, issued at join: an upload must come from someone in a meeting. The rate is the connection's and the
+// Upload tokens, issued at join: an upload must come from someone in a room. The rate is the connection's and the
 // address's, not the token's, so joining again or opening more sockets refills nothing.
 const uploadTokens = new Map();    // token -> {room, uid, bucket (the connection's), ip}
 const uploadBuckets = new Map();   // address -> its upload bucket
@@ -722,7 +725,7 @@ function newRoom(name) {
   return store.create(code, guard.cleanText(name, 80));
 }
 
-// ----- uploads (only from people in a meeting; content must match the name)
+// ----- uploads (only from people in a room; content must match the name)
 const upload = multer({
   storage: multer.diskStorage({
     destination: UPLOAD_DIR,
@@ -738,7 +741,7 @@ const upload = multer({
 let statfsWarned = false;
 app.post('/api/upload', async (req, res, next) => {
   const t = uploadTokens.get(String(req.headers['x-agm-upload'] || ''));
-  if (!t) return res.status(403).json({ error: 'Join a meeting to share files.' });
+  if (!t) return res.status(403).json({ error: 'Join a room to share files.' });
   if (!t.bucket.take() || !addressUploads(t.ip).take()) return res.status(429).json({ error: 'Slow down — one file at a time.' });
   // Before anything is written: a disk short of space keeps it for the messages, the logs and the saves.
   try {
@@ -859,7 +862,7 @@ io.on('connection', (socket) => {
   let room = null;
   let me = null;   // {uid, name, role}
   // Who this is: the host's admin token, a signed-in account (both from the handshake's cookies), or nobody yet — a
-  // meeting code at 'join'. Rights are read once here, with the session they came from: a change to the account
+  // guest code at 'join'. Rights are read once here, with the session they came from: a change to the account
   // (accountChanged), the session ending (sign-out, expiry: endSockets, sweepSessions) or admin through the tunnel turned
   // off ends this socket, and the next connection is judged afresh.
   const hs = { headers: socket.handshake.headers, socket: socket.request && socket.request.socket };
@@ -936,7 +939,7 @@ io.on('connection', (socket) => {
       if (seated(id)) cleanRole = me.role;
       else if (r.settings.lockRoles && cleanRole !== 'observer' && !socket.data.isAdmin && !guard.checkInvite(SECRET, code, cleanRole, invite) && !holdsSeat(r, id, cleanName, cleanRole)) {
         cleanRole = 'observer';
-        note = 'This meeting needs an invite link for that role — you joined as an observer.';
+        note = 'This room needs an invite link for that seat — you joined as an observer.';
       }
       // A code guest cannot take the name of someone with an account: staff are who they say they are.
       if (!isAdminView && accounts.list().some((a) => a.name.toLowerCase() === cleanName.toLowerCase())) {
@@ -948,7 +951,7 @@ io.on('connection', (socket) => {
     if (!isAdminView) {
       for (const u of r.users.values()) {
         if (u.name.toLowerCase() === cleanName.toLowerCase() && u.uid !== id && !acct) {
-          return ack({ ok: false, error: 'That name is already in use in this meeting. Please pick a different display name.' });
+          return ack({ ok: false, error: 'That name is already in use in this room. Please pick a different display name.' });
         }
       }
     }
@@ -1005,7 +1008,7 @@ io.on('connection', (socket) => {
 
     if (!isAdminView) {
       if (!acct) syncSeats(r);
-      if (!returning) systemMessage(r, `${cleanName} joined as ${cleanRole}`);
+      if (!returning) systemMessage(r, `${cleanName} ${JOINED[cleanRole]}`);
       emitUsers(r);
       boardDirty();
     } else {
@@ -1203,7 +1206,7 @@ io.on('connection', (socket) => {
     try { for (const p of await io.in(room.code).fetchSockets()) if (syncPeer(p)) p.emit('userState:push', state); } catch { /* ignore */ }
   });
 
-  // ----- AI (research team and admin): drafts only
+  // ----- AI (the backstage team and the admin): drafts only
   async function runAi(ack, fn) {
     ack = ok(ack);
     if (!aiKey()) return ack({ ok: false, error: 'AI is off — the admin can add an Anthropic API key in the dashboard.' });
@@ -1221,7 +1224,7 @@ io.on('connection', (socket) => {
 
   socket.on('ai:draft', (args = {}, ack) => {
     if (!need(ack)) return;
-    if (!canDraft()) return ok(ack)({ ok: false, error: 'Drafting is for the research team.' });
+    if (!canDraft()) return ok(ack)({ ok: false, error: 'Drafting is for the backstage team.' });
     const docText = typeof args.docText === 'string' ? args.docText.slice(0, 60_000) : '';
     runAi(ack, (signal) => ai.draftReply(aiKey(), {
       show: briefFor(room.code),
@@ -1234,7 +1237,7 @@ io.on('connection', (socket) => {
 
   socket.on('ai:options', (args = {}, ack) => {
     if (!need(ack)) return;
-    if (!canDraft()) return ok(ack)({ ok: false, error: 'For the research team.' });
+    if (!canDraft()) return ok(ack)({ ok: false, error: 'For the backstage team.' });
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim().slice(0, 1000) : '';
     if (!prompt) return ok(ack)({ ok: false, error: 'Type the question first.' });
     runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, messages: room.messages, show: briefFor(room.code) }, signal));
@@ -1684,7 +1687,7 @@ io.on('connection', (socket) => {
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
     const files = fileNamesOf(r.messages);
     if (!apply(r, { o: 'reset' })) return ok(ack)(OP_REFUSED);
-    systemMessage(r, '— Session reset by admin: messages and documents cleared —');
+    systemMessage(r, '— Messages cleared by the admin —');
     // Its documents leave the disk too, unless another hall or a screen still shows them. The row counts the files that
     // left, so it is written once their removal has run, before the answer: a stop while they are being removed keeps
     // the reset and loses its row — the price of a count that says what happened rather than what was meant to.
@@ -1708,7 +1711,7 @@ io.on('connection', (socket) => {
       w.data.watching = null;
       if (w !== socket) w.emit('roomClosed', { code: r.code });
     }
-    io.to(r.code).emit('kicked', { reason: 'This meeting was closed by the admin.' });
+    io.to(r.code).emit('kicked', { reason: 'This hall was closed by the admin.' });
     io.in(r.code).disconnectSockets(true);
     store.remove(r.code);
     if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
@@ -1753,7 +1756,7 @@ io.on('connection', (socket) => {
     }
     emitUsers(r);
     syncSeats(r);
-    systemMessage(r, `${target.name} role changed from ${prev} to ${role} by admin`);
+    systemMessage(r, `The admin moved ${target.name} from ${SEAT[prev]} to ${SEAT[role]}.`);
     if (from.length) auditRoom('seat.role', r.code, target.name + ': ' + from.join(', ') + ' → ' + role);
     ok(ack)({ ok: true });
   });
@@ -1824,8 +1827,10 @@ io.on('connection', (socket) => {
     const r = store.get(target.data.userRoom);
     const u = r && r.users.get(socketId);
     const pages = u ? seatsOf(r, u.uid).map(([sid]) => io.sockets.sockets.get(sid)).filter(Boolean) : [target];
+    // The page sent out says who sent it out, and of where: the room as its page names it (Main by its hall's name).
+    const reason = 'An admin sent you out' + (r ? ' of ' + (r.name || 'this hall') : '') + '.';
     for (const p of pages) {
-      p.emit('kicked', { reason: 'Removed by admin' });
+      p.emit('kicked', { reason });
       p.disconnect(true);
     }
     if (r) syncSeats(r);   // logged out: the seat goes now, not after a restart
@@ -2180,7 +2185,7 @@ function renderTranscriptHtml(room) {
     const cls = ['msg', 'type-' + m.type, m.priority ? 'priority' : ''].filter(Boolean).join(' ');
     rows.push('<article class="' + cls + '"><header><strong>' + who + '</strong><time>' + esc(fmt(m.at)) + '</time></header>' + extras + '<div class="body">' + content + '</div></article>');
   }
-  const title = room.name ? room.name + ' — Transcript' : 'AGMessage Transcript';
+  const title = room.name ? room.name + ' — transcript' : 'AGMessage transcript';
   return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>' +
     'body{font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;max-width:820px;margin:2rem auto;padding:0 1rem;color:#15202b}' +
     'h1{margin:.2rem 0}.meta{color:#6b7280;margin:.25rem 0 1.6rem}' +
@@ -2194,7 +2199,7 @@ function renderTranscriptHtml(room) {
     '.rx{font-size:.9rem;color:#374151;margin-top:.15rem}.prio{display:inline-block;background:#dc2626;color:#fff;padding:0 .35rem;border-radius:999px;font-size:.7rem;font-weight:700;margin-right:.3rem}' +
     '.pin{font-size:.8rem;color:#7a4d00;margin-right:.3rem}.fwd{font-size:.85rem;color:#6b7280;font-style:italic}' +
     '.sys{color:#6b7280;font-style:italic;text-align:center;margin:.25rem 0;font-size:.85rem}@media print{body{max-width:100%}.msg{break-inside:avoid;border-color:#aaa}}' +
-    '</style></head><body><h1>' + esc(room.name || 'AGMessage Session') + '</h1>' +
+    '</style></head><body><h1>' + esc(room.name || 'AGMessage transcript') + '</h1>' +
     '<p class="meta">Code <strong>' + esc(room.code) + '</strong> · Started ' + esc(fmt(room.createdAt)) + ' · ' + room.messages.length + ' entries · Generated ' + esc(fmt(Date.now())) + '</p>' +
     rows.join('\n') + '<p class="meta" style="margin-top:2rem">— end of transcript —</p></body></html>';
 }
@@ -2840,12 +2845,12 @@ function releaseDataFolder() { for (const hold of folderHolds.splice(0)) { try {
 
 holdDataFolder(() => front.listen(PORT, HOST, () => {
   // This copy holds the folder and the port: now it writes. Each replayed log is folded into a fresh snapshot (a torn last
-  // line cut before anything is appended after it), each hall says it was restored, the audit log is opened, and the show
+  // line cut before anything is appended after it), each hall says AGMessage restarted, the audit log is opened, and the show
   // desk's loop may run (and save what it reports), as may the peaks' saves (from the next 5 s window).
   serving = true;
   store.compactAll();
   for (const room of store.rooms.values()) {
-    store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— Session restored (' + room.messages.length + ' messages preserved) —', at: Date.now() } });
+    store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— AGMessage restarted · ' + plural(room.messages.length, 'message') + ' kept —', at: Date.now() } });
   }
   audit.open();
   // The whole log is checked once, beside the show, so health, the rows' marks and the black window read what the log

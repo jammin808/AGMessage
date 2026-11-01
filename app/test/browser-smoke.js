@@ -30,6 +30,54 @@ const CODE_ESCAPES = { '<': '\\u003C', '>': '\\u003E', '/': '\\u002F', '\\': '\\
 // The words a message held before it was sent carries: "written 14:02 · sent 14:03 (offline)", in the browser's format.
 const HELD_WORDS = /^written ([0-9]{1,2}:[0-9]{2}[ APM]{0,3}) · sent ([0-9]{1,2}:[0-9]{2}[ APM]{0,3}) \(offline\)$/;
 const codeLiteral = (v) => JSON.stringify(v).replace(/[<>\b\f\n\r\t\0\u2028\u2029]/g, (c) => CODE_ESCAPES[c]);
+// The word check (one word per thing: hall, room, code, seat, the Board, screens): what a page says in its own words —
+// every text it draws or keeps ready to draw (hidden panes, closed dialogs, the rows and buttons its script builds, its
+// templates), its title, and each title, placeholder, label, alt and button value — read for "session", "meeting",
+// "director" and "research" (the Backstage seat's old word, and "research team"). Never what people wrote or named, or
+// what happened, or what another show system said, which stay as written: a message's words and its sender, the feeds'
+// own lines (an old "Session restored" among them), a document on stage and its name, the people's names in a list or a
+// row, help requests' words, the audit log's rows, halls' and rooms' names, and Stagewatch's context and the show network.
+// A message's body is its sender's: only the buttons and the line the page adds to it are read. `doc` is the page read
+// (a frame's document for the admin's support view).
+const CHROME_OLD_WORDS = (doc = 'document') => `((doc) => {
+  const OLD = /\\b(?:sessions?|meetings?|directors?|research)\\b/i;
+  const SKIP = ['script', 'style', '#feed .sys', '#adminFeed .sys', '#docDisplay > :not(.empty-state)', '.hall-last', '.rx-pill',
+    '#helpList .help-what', '#auditList .audit-words', '.admin-msg-body > p', '#swContext', '#networkList', '#stageTitle'].join(', ');
+  const NAMES = ['.msg .from', '.admin-msg-head > strong', '#whoami', '#who', '#usersTbody td:first-child', '.lc-name', '.lc-code',
+    '#userRows td:first-child', '#userRows td:nth-child(3)', '#auditList .audit-actor', '#auditList .audit-action', '#helpList .help-where',
+    '#helpList .help-who', '.hall-name', '.room-name', '#watchedRoomName', '#docTitle', '#docCaption', '#docPinnedList .name'].join(', ');
+  const NAMED_LINE = '#peopleList li';   // a person's line: the seat's tag is the page's, the name beside it the person's
+  const BODY = '.msg .body';
+  const BODY_CHROME = 'button:not(.action-btn), .held-line, .action-responses > small';
+  const ATTRS = ['title', 'placeholder', 'aria-label', 'alt'];
+  const pageSays = (el) => { const b = el.closest(BODY); if (!b) return true; const c = el.closest(BODY_CHROME); return !!c && b.contains(c); };
+  const found = [];
+  const read = (root) => {
+    const walk = doc.createTreeWalker(root, 1 | 4, { acceptNode: (n) => (n.nodeType === 1 && n.matches(SKIP) ? 2 : 1) });
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (n.nodeType === 3) {
+        const p = n.parentElement;
+        if (p && (p.closest(NAMES) || p.matches(NAMED_LINE) || !pageSays(p))) continue;
+        if (OLD.test(n.data)) found.push(n.data.trim());
+        continue;
+      }
+      if (pageSays(n)) {
+        for (const a of ATTRS) { const v = n.getAttribute(a); if (v && OLD.test(v)) found.push(a + '=' + v); }
+        if (n.matches('input[type="button"], input[type="submit"], input[type="reset"]') && OLD.test(n.value)) found.push('value=' + n.value);
+      }
+      if (n.localName === 'template') read(n.content);
+    }
+  };
+  if (OLD.test(doc.title)) found.push('title=' + doc.title);
+  read(doc.body);
+  return found;
+})(${doc})`;
+// A hall page out of its hall (sent out, or its join refused): the words in place of the hall, the way back, the socket,
+// and what it still offers of the hall (its header's buttons, an open dialog): nothing.
+const OUT_OF_HALL = `(() => { const box = document.getElementById('outOfHall'); const back = document.getElementById('outBack');
+  const offered = ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn'].filter((id) => !document.getElementById(id).hidden).concat([...document.querySelectorAll('dialog[open]')].map((d) => d.id));
+  return !box.hidden && JSON.stringify({ words: document.getElementById('outWords').textContent, back: back.textContent, to: back.getAttribute('href'),
+    hall: document.querySelector('.main-row').hidden, offered, focused: document.activeElement === back, connected: socket.connected }); })()`;
 // The server's own time zone for the smoke: a screen in another zone must still show this one's time of day.
 const SERVER_TZ = 'Europe/London';
 const KEY = 'swk_smoke_node_key_00001';   // secret-scan: fixture — a fake node key for the fake Stagewatch
@@ -438,6 +486,30 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // Board: joins, sees the message and the document on stage, on a browser with no Promise.withResolvers.
     const board = await edge.tab(`${base}/app.html?code=${code}&name=Chair&role=board`, { init: NO_RESOLVERS, workerInit: NO_RESOLVERS });
     report(!!(await board.until('typeof joined !== "undefined" && joined && allMessages.some(m => m.text === "Capex is on slide 14")')), 'board view joins and sees the research message');
+    // The word check reads what is hidden, what is in an attribute and a button the page put in a message, and nothing
+    // people wrote or named, nor the history: a page given an old word in a closed dialog, in a title, in a message's own
+    // button, in the feed's line of what happened, in a message's words and its sender's name, and in a person's name in
+    // the people list is found to say the first three, and none of the rest.
+    const planted = await research.eval(`(() => {
+      const hid = document.createElement('p'); hid.textContent = 'Reset session';
+      const tip = document.createElement('span'); tip.title = 'Meeting code';
+      const line = document.createElement('div'); line.className = 'sys'; line.textContent = '— Session restored (3 messages preserved) —';
+      const msg = document.getElementById('msgTpl').content.firstElementChild.cloneNode(true);
+      msg.querySelector('.from').textContent = 'Session Sam';
+      const words = document.createElement('p'); words.textContent = 'the directors meet at three';
+      const own = document.createElement('button'); own.className = 'btn ghost small reply-text-btn'; own.textContent = 'Reply to the directors';
+      msg.querySelector('.body').append(words, own);
+      const person = document.createElement('li'); const tag = document.createElement('span'); tag.className = 'role-tag'; tag.textContent = 'Backstage';
+      person.append(tag, ' Meeting Mo');
+      document.getElementById('helpDialog').append(hid, tip); document.getElementById('feed').append(line, msg); document.getElementById('peopleList').append(person);
+      try { return JSON.stringify(${CHROME_OLD_WORDS()}.sort()); } finally { [hid, tip, line, msg, person].forEach((n) => n.remove()); }
+    })()`);
+    report(planted === JSON.stringify(['Reply to the directors', 'Reset session', 'title=Meeting code']),
+      `the word check finds an old word in a closed dialog, a title and a message's own button, and none in the history, a message's words, its sender or a person's name (${planted})`);
+    const oldWords = {};   // each page read → what its chrome still says in an old word (none, when it passes)
+    const readOldWords = async (page, tab, doc) => { oldWords[page] = await tab.eval(CHROME_OLD_WORDS(doc)); };
+    await readOldWords('the hall page, Backstage', research);
+    await readOldWords('the hall page, On stage', board);
     // Someone else's receipt (a page in another browser: these tabs share one identity) reaches the sender's page in
     // the hall's batch of the receipts that moved, and is drawn under the message.
     const reader = await connect(base);
@@ -548,9 +620,16 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await ob.eval(`(() => { const real = socket.emit; socket.emit = function (ev, ...a) { if (ev !== 'message') return real.call(this, ev, ...a); socket.emit = real; return socket; };
       textInput.value = 'Never sent: sent out first'; textPane.requestSubmit(); })()`);
     const outThen = await ob.eval(`${HELD_KEYS}.length + '|' + AGM.outbox.items().map((i) => i.state).join()`);
+    await ob.eval(`document.getElementById('helpBtn').click()`);   // sent out while asking for help: the dialog goes too
+    const askingThen = await ob.eval(`document.getElementById('helpDialog').open`);
     const obAdmin = await connect(base, cookie);
     const kicked = await emit(obAdmin, 'admin:kick', { socketId: await ob.eval('socket.id') });
     obAdmin.close();
+    const sentOut = await ob.until(OUT_OF_HALL, 2000);
+    await ob.shot(path.join(OUT, 'sent-out.png'));
+    await sleep(3000);   // longer than the page ever waited before leaving by itself: it waits for the person
+    const stayedOut = await ob.eval(`location.pathname + '|' + !document.getElementById('outOfHall').hidden`);
+    await ob.eval(`document.getElementById('outBack').click()`);
     const leftHall = await ob.until(`location.pathname === '/'`, 8000);
     const keptAfterKick = await ob.eval(`${HELD_KEYS}.length`);
     await ob.send('Page.navigate', { url: `${base}/app.html?code=${obHall}&name=Ola&role=research` });
@@ -559,6 +638,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const sentAfter = await ob.eval(`allMessages.filter((m) => m.text === 'Never sent: sent out first').length`);
     report(outThen === '1|sending' && kicked && kicked.ok && !!leftHall && keptAfterKick === 0 && sentAfter === 0 && landedOnce('Never sent: sent out first') === 0,
       `sent out of the hall with a send held, nothing is sent and the tab keeps none of it, even back in the hall (${outThen}; kept ${keptAfterKick}; sent ${sentAfter})`);
+    report(askingThen === true && sentOut === JSON.stringify({ words: 'An admin sent you out of Outbox hall.', back: 'Back to sign-in', to: '/', hall: true, offered: [], focused: true, connected: false }) && stayedOut === '/app.html|true',
+      `the page sent out says who sent it out and of where, in the server's words in place of the hall and its open help dialog, with Back to sign-in, and does not leave by itself (${sentOut}; after 3 s: ${stayedOut})`);
     listener.close();
     ob.close();
     await sleep(800);
@@ -587,6 +668,14 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       phones[seat] = await edge.tab(`${base}/app.html?code=${phoneHall}&name=${name}&role=${seat}`, { init: INK, metrics: PHONE });
       await phones[seat].until(`typeof joined !== "undefined" && joined && allMessages.some((m) => m.priority)`);
     }
+    for (const [seat, tab] of Object.entries(phones)) await readOldWords('the hall page on a phone, ' + { board: 'On stage', research: 'Backstage', observer: 'Observer' }[seat], tab);
+    const hallDeck = JSON.parse(await phones.board.eval(`JSON.stringify({ chip: document.getElementById('roomChip').title, people: document.querySelector('#peoplePanel h3').textContent,
+      placeholder: document.getElementById('directorInput').placeholder, label: document.getElementById('directorInput').getAttribute('aria-label') })`));
+    const backDeck = JSON.parse(await phones.research.eval(`JSON.stringify({ ask: document.querySelector('#actionPane .field > span').textContent,
+      files: document.querySelector('#filePane .dropzone .hint').textContent, panel: document.querySelector('#docDisplay .empty-state .hint').textContent })`));
+    report(JSON.stringify(hallDeck) === JSON.stringify({ chip: 'Phone hall', people: 'In this room', placeholder: 'Message everyone here…', label: 'Message everyone here…' })
+      && JSON.stringify(backDeck) === JSON.stringify({ ask: 'Question for the Board', files: 'Max 25 MB. Files show on the Board\'s On stage panel.', panel: 'When the backstage team shares a file, it appears here automatically.' }),
+      `the hall page says room, the Board and the backstage team: the code's title names the room, "In this room", "Message everyone here…", "Question for the Board" (${JSON.stringify({ hallDeck, backDeck })})`);
     // Nobody touches Oli's page from here to the end of the smoke: no tap, no key, no wheel.
     await post(pat, { type: 'text', text: 'First new' });
     const firstNew = Date.now();
@@ -837,6 +926,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // delivers one; the view's frame-ancestors keep a real other-origin parent out), does not reach the resync.
     await admin.eval(`openUserView('${code}', 'Chair', 'board')`);
     const viewUp = await admin.until(`(() => { const d = document.getElementById('userViewFrame').contentDocument; return !!d && !!d.body && d.body.classList.contains('is-admin-view') && !!d.getElementById('connDot') && d.getElementById('connDot').classList.contains('ok'); })()`);
+    await readOldWords('the admin\'s support view of an On stage page', admin, `document.getElementById('userViewFrame').contentDocument`);
     await admin.eval(`(() => { const w = document.getElementById('userViewFrame').contentWindow; w.AGM_DEBUG_SYNC = true; const c = w.document.createElement('iframe'); c.title = 'a frame inside the view'; w.document.body.appendChild(c); })()`);
     const frames = [];
     const walk = (n, parent) => { frames.push({ id: n.frame.id, url: n.frame.url, parent }); (n.childFrames || []).forEach((c) => walk(c, n.frame.id)); };
@@ -867,14 +957,47 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // Accounts: the first admin is made on the sign-in page; the halls board and the accounts page render under the CSP.
     const signin = await edge.tab(`${base}/`);
     report(!!(await signin.until(`!document.getElementById('setupPane').hidden`)), 'sign-in page offers the first admin when there are no accounts');
+    await readOldWords('the sign-in and join page', signin);
+    // A code no room has: the join form's words, from the lookup's answer (given here, so no miss is counted against this
+    // address's code lock, which later legs join through).
+    const joinDeck = await signin.eval(`(async () => {
+      const real = AGM.api;
+      AGM.api = async (method, url, ...rest) => (url.startsWith('/api/rooms/') ? { status: 200, exists: false } : real(method, url, ...rest));
+      try {
+        document.getElementById('name').value = 'Wes'; document.getElementById('code').value = 'ZZZ234';
+        document.getElementById('joinForm').requestSubmit();
+        for (let i = 0; i < 40 && !document.getElementById('error').textContent; i++) await new Promise((r) => { setTimeout(r, 25); });
+        return JSON.stringify({ hint: document.getElementById('codeHint').textContent, refused: document.getElementById('error').textContent });
+      } finally { AGM.api = real; document.getElementById('name').value = ''; document.getElementById('code').value = ''; }
+    })()`);
+    report(joinDeck === JSON.stringify({ hint: 'The 6-character code for your room.', refused: 'No room has that code. Check it with whoever gave it to you.' }), `the join form asks for the code of a room, and says so when no room has it (${joinDeck})`);
     await signin.eval(`(() => { document.getElementById('setupName').value = 'Ana Admin'; document.getElementById('setupUser').value = 'ana'; document.getElementById('setupPass').value = 'the green room kettle'; document.getElementById('setupPane').requestSubmit(); })()`);
     report(!!(await signin.until(`location.pathname === '/halls.html' && document.querySelectorAll('.hall-row').length >= 1 && document.getElementById('linkState').dataset.ok === '1'`)), 'the first admin lands on the halls board, live, with the hall listed');
     const boardHeld = await signin.until(`(() => { const li = [...document.querySelectorAll('#helpList .help-item')].find((x) => x.textContent.includes('mic 4 crackles')); return li && li.querySelector('.help-who').textContent; })()`);
     report(HELD_WORDS.test(String(boardHeld || '').split(' · ').slice(-2).join(' · ')), `a help request held for a minute reads "written … · sent …" on the halls board too (${boardHeld})`);
+    // Beside the outbox's hall and its one request, a hall with two: each count agrees with its number. That hall goes
+    // again once the board is read.
+    const twoAsks = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Two asks' }) })).json()).code;
+    const asker = await connect(base);
+    const askerIn = await emit(asker, 'join', { roomCode: twoAsks, name: 'Hana', role: 'research' });
+    const twoSent = [];
+    for (const text of ['mic 7 is dead', 'no water at the lectern']) twoSent.push((await emit(asker, 'message', { type: 'help', category: 'Sound', text })).ok);
+    const COUNTS = `[document.querySelector('.hall-row[data-code="${obHall}"] .help-count'), document.querySelector('.hall-row[data-code="${twoAsks}"] .help-count')].map((c) => c && c.textContent)`;
+    const helpCounts = (await signin.until(`(() => { const [one, two] = ${COUNTS}; return one && /^■ 2 /.test(two || '') && JSON.stringify([one, two]); })()`)) || (await signin.eval(`JSON.stringify(${COUNTS})`));
+    report(askerIn.ok && twoSent.join() === 'true,true' && helpCounts === JSON.stringify(['■ 1 needs help', '■ 2 need help']), `the halls board counts help in words that agree: "1 needs help", "2 need help" (${helpCounts})`);
+    await readOldWords('the halls board', signin);
+    asker.close();
+    const closer = await connect(base, cookie);
+    const twoGone = await emit(closer, 'admin:deleteRoom', { roomCode: twoAsks, purgeFiles: false });
+    closer.close();
+    report(!!(twoGone && twoGone.ok && (await signin.until(`!document.querySelector('.hall-row[data-code="${twoAsks}"]')`))), 'the hall made for the count goes again');
     await sleep(600);
     await signin.shot(path.join(OUT, 'halls.png'));
     const users = await edge.tab(`${base}/users.html`);
     report(!!(await users.until(`document.querySelectorAll('#userRows tr').length === 1`)), 'the accounts page lists the admin');
+    await readOldWords('the Accounts page', users);
+    const rightsWords = await users.eval(`(async () => { const r = await AGM.api('GET', '/api/users'); return JSON.stringify([r.caps['display.control'], r.roles.find((x) => x.id === 'tech').words]); })()`);
+    report(rightsWords === JSON.stringify(['Change what a hall\'s screens show', 'Their halls: messages, files, screens, Stagewatch']), `the Accounts page's rights and roles say "screens" (${rightsWords})`);
     await users.eval(`document.getElementById('tabAudit').click()`);
     await users.eval(`document.getElementById('verifyBtn').click()`);
     report(!!(await users.until(`document.getElementById('chainState').dataset.mark === 'intact' && /^✓ Intact — \\d+ entries, all keyed on this machine$/.test(document.getElementById('chainState').textContent) && !document.getElementById('verifyBtn').disabled`)), 'Check the log reads the whole chain and says it is intact: ✓');
@@ -904,6 +1027,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(selfForm === JSON.stringify({ name: true, role: true, every: true, halls: true, rights: true, off: true, remove: true }) && !!selfSaved, `one's own row: a Save is taken; role, halls, rights, Turn off and Remove are not offered (${selfForm}${selfSaved ? '' : '; ' + (await users.eval(`document.getElementById('userError').textContent`))})`);
     const hallView = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
     report(!!(await hallView.until(`typeof joined !== "undefined" && joined && document.getElementById('whoami').textContent.startsWith('Ana Admin')`)), 'an account opens its hall with its own name');
+    await readOldWords('the hall page opened by an account, Backstage', hallView);
 
     // Screens: the account adds one from the hall's Screens console; its link opens a display page that shows a message
     // (fitted to the screen) and the countdown, and confirms each — the console then reads ✓ on screen.
@@ -911,6 +1035,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const made = await hallView.eval(`new Promise((r) => socket.emit('display:create', { code: ROOM, name: 'Lectern monitor' }, r))`);
     const screen = await edge.tab(`${base}${made.display.path}`);
     report(!!(await screen.until(`document.body.dataset.kind === 'holding' && document.getElementById('idleName').textContent.includes('Lectern monitor')`)), 'a display link opens a holding screen named for the crew');
+    await readOldWords('a screen', screen);
     await hallView.eval(`new Promise((r) => socket.emit('display:take', { id: '${made.display.id}', content: { kind: 'message', text: 'Five minutes — please wrap up', tone: 'warn' } }, r))`);
     report(!!(await screen.until(`document.body.dataset.kind === 'message' && document.getElementById('messageText').textContent.includes('please wrap up') && parseFloat(document.getElementById('messageText').style.fontSize) > 40`)), 'the screen shows the message, fitted large');
     await sleep(400);
@@ -1118,6 +1243,59 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // composer, pin, reaction or answer offered. A help request offers no forward.
     await admin.eval(`watchRoom('${code}')`);
     report(!!(await admin.until(`Array.from(document.querySelectorAll('#usersTbody tr')).some((tr) => tr.textContent.includes('Ana Admin') && !tr.querySelector('.role-select') && tr.querySelector('.role-fixed')) && !!document.querySelector('#usersTbody .role-select')`)), 'the admin\'s room list: an account\'s role is its rights (no select), a code guest\'s has one');
+    // The admin page in the copy deck's words, watching a hall; then every page read says no old word in its chrome.
+    const adminDeck = JSON.parse(await admin.eval(`JSON.stringify({
+      tagline: document.querySelector('#loginPanel .tagline').textContent, newHall: document.getElementById('newSessionBtn').textContent,
+      halls: document.querySelector('.admin-sidebar h3').textContent, none: document.getElementById('noRooms').textContent,
+      code: document.querySelector('#roomHeader span.muted').textContent, clear: document.getElementById('resetRoomBtn').textContent,
+      close: document.getElementById('closeRoomBtn').textContent, closing: document.querySelector('#closePanel p strong').firstChild.textContent,
+      people: document.querySelector('#usersSection h3').textContent, forward: document.querySelectorAll('.admin-users th')[2].textContent,
+      local: document.querySelector('#tunnelOffState p').textContent.trim().split('\\n')[0], empty: [...document.querySelectorAll('#adminEmpty p')].map((p) => p.textContent) })`));
+    report(JSON.stringify(adminDeck) === JSON.stringify({
+      tagline: 'Halls, rooms and people, for the admin.', newHall: 'New hall', halls: 'Halls', none: 'No halls yet. Choose New hall to make one.', code: 'Code',
+      clear: 'Clear messages…', close: 'Close hall…', closing: 'Close hall ', people: 'People in this room', forward: 'May forward to',
+      local: 'AGMessage is reachable only on the venue\'s network now.',
+      empty: ['Choose a hall on the left, or New hall.', 'Each room has a 6-character guest code: share it with the people who join without an account.'],
+    }), `the admin page says hall, room and code: New hall, Halls, Code, Clear messages…, Close hall…, People in this room, May forward to (${JSON.stringify(adminDeck)})`);
+    // A seat has one name on the admin page too: the people's seats, an account's, the live feed's tags and the lock.
+    const adminSeats = await admin.until(`(() => {
+      const tags = [...new Set([...document.querySelectorAll('#adminFeed .role-tag')].map((t) => t.textContent))].sort();
+      const select = document.querySelector('#usersTbody .role-select');
+      return tags.length > 0 && select && JSON.stringify({ choices: [...select.options].map((o) => o.value + '=' + o.textContent), account: document.querySelector('#usersTbody .role-fixed').textContent,
+        tags: tags.every((t) => ['On stage', 'Backstage', 'Observer'].includes(t)) ? 'seats' : tags,
+        lock: document.querySelector('#invitesPanel label').textContent.trim(), lockTitle: document.getElementById('invitesBtn').title });
+    })()`);
+    report(adminSeats === JSON.stringify({ choices: ['board=On stage', 'research=Backstage', 'observer=Observer'], account: 'Backstage', tags: 'seats',
+      lock: 'On stage and Backstage seats need an invite link (anyone else joins as an observer)', lockTitle: 'Lock the On stage and Backstage seats to invite links' }),
+      `the admin page names each seat as every page does: On stage, Backstage, Observer (${adminSeats})`);
+    // The show desk's line, drawn as the admin page draws it when Stagewatch keeps a desk: its next reading of the settings
+    // is answered as though one did.
+    const deskSays = await admin.eval(`new Promise((done) => {
+      const real = socket.emit;
+      socket.emit = function (ev, patch, ack) {
+        if (ev !== 'admin:settings' || typeof ack !== 'function') return real.apply(this, arguments);
+        socket.emit = real;
+        return real.call(this, ev, patch, (s) => { if (s && s.tls) Object.assign(s.tls, { desk: true, deskRefusal: '' }); ack(s); done(document.getElementById('deskLine').textContent); });
+      };
+    })`);
+    report(deskSays === 'Show desk: Stagewatch keeps the shared approval queue — the backstage team can propose stage messages (📝), and approved "notice" proposals for this AGMessage are shown in every room.',
+      `the show desk's line says the backstage team and every room (${deskSays})`);
+    // The word check on a row and a feed the admin page's script builds: a button in a person's row is read, the person's
+    // name, the feed's line of what happened and a message's words and sender are not.
+    const adminPlanted = await admin.eval(`(() => {
+      const tr = document.createElement('tr'); const name = document.createElement('td'); const who = document.createElement('strong'); who.textContent = 'Session Sid'; name.append(who);
+      const acts = document.createElement('td'); const end = document.createElement('button'); end.className = 'btn ghost small'; end.textContent = 'End session'; acts.append(end);
+      tr.append(name, document.createElement('td'), document.createElement('td'), acts);
+      const line = document.createElement('div'); line.className = 'admin-msg sys'; line.textContent = '— Session reset by admin: messages and documents cleared —';
+      const msg = document.createElement('div'); msg.className = 'admin-msg';
+      const head = document.createElement('div'); head.className = 'admin-msg-head'; const from = document.createElement('strong'); from.textContent = 'Director Dee'; head.append(from);
+      const body = document.createElement('div'); body.className = 'admin-msg-body'; const said = document.createElement('p'); said.textContent = 'the meeting starts at three'; body.append(said);
+      msg.append(head, body);
+      document.getElementById('usersTbody').append(tr); document.getElementById('adminFeed').append(line, msg);
+      try { return JSON.stringify(${CHROME_OLD_WORDS()}); } finally { [tr, line, msg].forEach((n) => n.remove()); }
+    })()`);
+    report(adminPlanted === JSON.stringify(['End session']), `the word check reads a button in a row the admin page builds, and no name, history or message there (${adminPlanted})`);
+    await readOldWords('the admin page, watching a hall', admin);
     await admin.shot(path.join(OUT, 'admin-room.png'));
     await research.eval(`Promise.all([new Promise((r) => socket.emit('message', { type: 'help', category: 'Sound', text: 'radio mic 3 dead' }, r)), new Promise((r) => socket.emit('message', { type: 'action', text: 'Ready for Q&A?', options: ['Yes', 'No'] }, r))])`);
     report(!!(await research.until(`(() => { const h = document.querySelector('.msg[data-type="help"] .fwd-btn'); const t = Array.from(document.querySelectorAll('.msg[data-type="text"] .fwd-btn')); return h && h.hidden && t.length && t.every((b) => !b.hidden); })()`)), 'a help request offers no forward; a message does');
@@ -1159,6 +1337,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       });
     })()`);
     report(shown === JSON.stringify({ composer: false, stage: false, pin: false, react: false, answer: false, replyText: false }), `the Viewer is offered nothing the server refuses (${shown})`);
+    await readOldWords('the hall page opened by a Viewer account, Observer', viewerHall);
+    const pagesRead = Object.keys(oldWords);
+    report(pagesRead.length === 13 && pagesRead.every((p) => Array.isArray(oldWords[p]) && oldWords[p].length === 0),
+      `no "session", "meeting", "director" or "research" in any page's chrome (${pagesRead.length} pages: ${pagesRead.map((p) => p + ': ' + (Array.isArray(oldWords[p]) ? (oldWords[p].length ? oldWords[p].join(' | ') : 'none') : 'not read')).join('; ')})`);
     await viewerHall.shot(path.join(OUT, 'hall-viewer.png'));
     // A stage send the server no longer follows (its Stagewatch restarted, or the hall moved) reads so, never "waiting".
     const lostLine = await research.eval(`stageLineText({ ack: 'lost', receipt: 'applied' })`);
@@ -1242,10 +1424,15 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const offered = await codeLink.until(`(() => { const p = document.getElementById('signedInPane'); return !p.hidden && document.getElementById('joinForm').hidden && document.getElementById('tabCode').classList.contains('active') && document.activeElement === document.getElementById('openHalls') && JSON.stringify({ text: document.getElementById('signedInText').textContent, halls: document.getElementById('openHalls').getAttribute('href') }); })()`);
     report(offered === JSON.stringify({ text: 'You are signed in as Ana Admin: open your halls, or sign out to join with a code.', halls: '/halls.html' }), `a code link in a signed-in browser offers its halls or Sign out, not the code (${offered})`);
     const asGuest = await edge.tab(`${base}/app.html?code=${code}&name=Imposter&role=research&invite=smoke-invite`);
-    const refusedWith = await asGuest.until(`(() => { const t = document.getElementById('agmToast'); return !!t && t.classList.contains('bad') && !joined && t.textContent; })()`);
+    const refusedWith = await asGuest.until(`!joined && ${OUT_OF_HALL}`);
     const imposter = await admin.eval(`new Promise((r) => socket.emit('admin:listRooms', (x) => r(x.rooms.find((h) => h.code === '${code}').users.some((u) => u.name === 'Imposter'))))`);
+    await sleep(3000);
+    const stayedRefused = await asGuest.eval(`location.pathname + '|' + !document.getElementById('outOfHall').hidden`);
+    await asGuest.eval(`document.getElementById('outBack').click()`);
     const landed = await asGuest.until(`location.pathname === '/' && !document.getElementById('signedInPane').hidden && document.getElementById('joinForm').hidden && location.search`, 8000);
-    report(refusedWith === 'You are signed in as Ana Admin: open the room from your halls, or sign out to join with a code.' && imposter === false && landed === `?code=${code}&role=research&invite=smoke-invite`, `a guest's hall link in a signed-in browser is refused in the server's words, seats nobody and lands on its code link, which offers the halls or Sign out ("${refusedWith}"; seated: ${imposter}; ${landed})`);
+    report(refusedWith === JSON.stringify({ words: 'You are signed in as Ana Admin: open the room from your halls, or sign out to join with a code.', back: 'Back to sign-in', to: `/?code=${code}&role=research&invite=smoke-invite`, hall: true, offered: [], focused: true, connected: false })
+      && stayedRefused === '/app.html|true' && imposter === false && landed === `?code=${code}&role=research&invite=smoke-invite`,
+      `a guest's hall link in a signed-in browser is refused in the server's words in place, seats nobody, stays until Back to sign-in, and lands on its code link, which offers the halls or Sign out (${refusedWith}; after 3 s: ${stayedRefused}; seated: ${imposter}; ${landed})`);
     await codeLink.eval(`document.getElementById('signOutBtn').click()`);
     const codeAgain = await codeLink.until(`(() => { const f = document.getElementById('joinForm'); return !!f && !f.hidden && document.getElementById('signedInPane').hidden && document.getElementById('code').value; })()`, 8000);
     await codeLink.eval(`(() => { document.getElementById('name').value = 'Walk-in'; document.querySelector('input[name="role"][value="observer"]').checked = true; document.getElementById('joinForm').requestSubmit(); })()`);
@@ -1411,8 +1598,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const shown = shownBack ? JSON.parse(shownBack) : null;
       report(stillWaiting && hiddenStays && !!shown && shown.ms < 3000 && shown.conn === JSON.stringify({ strip: '', dot: '● Connected', words: '' }),
         `a page shown again while its backoff waits (15 s or more) comes back at once, and the join's answer clears the strip and the dot's words (${shownBack})`);
-      const announced = await rae.eval(`JSON.stringify(allMessages.filter((m) => m.type === 'system' && /joined as/.test(m.text)).map((m) => m.text).concat(allMessages.filter((m) => m.type === 'system' && /Session restored/.test(m.text)).length))`);
-      report(announced === JSON.stringify(['Rae joined as research', 1]), `the restart announces nobody: the page is announced once, at its first join, and the restart's own line says what happened (${announced})`);
+      const announced = await rae.eval(`JSON.stringify(allMessages.filter((m) => m.type === 'system' && / joined /.test(m.text)).map((m) => m.text).concat(allMessages.filter((m) => m.type === 'system' && /^— AGMessage restarted · \\d+ messages? kept —$/.test(m.text)).length))`);
+      report(announced === JSON.stringify(['Rae joined Backstage', 1]), `the restart announces nobody: the page is announced once, at its first join, and the restart's own line says what happened (${announced})`);
       await rae.shot(path.join(OUT, 'back-by-itself.png'));
       const backProblems = rae.problems.filter((p) => !/WebSocket connection to|ERR_CONNECTION_REFUSED|net::ERR_/.test(p));
       report(backProblems.length === 0, `a page that came back: no script errors or CSP violations, the stopped server's refused connections aside${backProblems.length ? ' — ' + backProblems.slice(0, 3).join(' | ') : ''}`);

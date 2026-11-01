@@ -1,5 +1,5 @@
 @echo off
-REM Makes a copy of this AGMessage bundle that is safe to give away: no meeting history (app\data), no shared files
+REM Makes a copy of this AGMessage bundle that is safe to give away: no hall history (app\data), no shared files
 REM (app\uploads), no saved keys or settings.
 REM Each copy is a new folder beside this one, named with the time (and numbered when a copy was made in the same minute):
 REM a folder that already exists is never copied into, so nothing left in an earlier copy (one that was started to test
@@ -46,7 +46,7 @@ type nul > "%DEST%\app\uploads\.gitkeep"
 set "DIRTY="
 for %%d in (data uploads) do for /f "delims=" %%f in ('dir /s /b /a-d "%DEST%\app\%%d" 2^>nul') do if /i not "%%~nxf"==".gitkeep" set "DIRTY=1"
 if defined DIRTY goto dirty
-echo   Done. The copy has no meeting history, files, keys or settings.
+echo   Done. The copy has no hall history, files, keys or settings.
 echo.
 pause
 exit /b 0

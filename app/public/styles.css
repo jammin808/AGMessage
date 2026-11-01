@@ -1620,6 +1620,10 @@ form[data-held="1"] textarea, form[data-held="1"] input { background: var(--bg);
 .conn-strip[hidden] { display: none; }
 .conn-words { font-size: .8rem; color: var(--ink); white-space: nowrap; }
 .conn-words[hidden] { display: none; }
+/* Out of the hall (sent out, the hall closed, a join refused): the server's words where the hall was, and the way back */
+.out-of-hall { align-self: start; width: min(36rem, calc(100% - 2 * var(--sp-4))); margin: var(--sp-8) auto; padding: var(--sp-6); background: var(--card); color: var(--ink); border: 1px solid var(--border); border-left: 4px solid var(--warn); border-radius: var(--radius); }
+.out-of-hall p { margin: 0 0 var(--sp-4); font-size: var(--fs-lg); overflow-wrap: break-word; }
+.out-of-hall .btn { min-height: var(--target-touch); }
 
 /* 0.4: proposals to the show desk, and the /tls page */
 .proposal-line[data-state="done"]{color:#16a34a}

@@ -4,7 +4,7 @@
  *
  *  - Discovery: one channel, the hello on UDP 9928. AGMessage says {"t":"messenger"} every 2 s and listens to every
  *    kind (Stagewatch "main", Slides "agent", "patterns", "playmap", other messengers). A peer is live while hellos come,
- *    stale after 6 s, gone after 12 s. The hello says what a node is, never what the meeting is doing. Anyone can send
+ *    stale after 6 s, gone after 12 s. The hello says what a node is, never what a hall is doing. Anyone can send
  *    one, so the table is bounded (MAX_PEERS, MAX_PER_ADDRESS) and its change is told at most every CHANGE_MS.
  *  - Stagewatch link: a WebSocket for the live timer (key in the Authorization header on the upgrade — never in the
  *    URL), a ping every 2 s that also measures the clock offset, stale after 6 s of silence and redialled after 12 s

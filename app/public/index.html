@@ -68,7 +68,7 @@
       <p class="error" id="signOutError" role="alert" hidden></p>
     </div>
 
-    <!-- A meeting or hall code: presenters, guests, anyone without an account. -->
+    <!-- A room's code: presenters, guests, anyone without an account. -->
     <form id="joinForm" class="entry-pane" role="tabpanel" aria-labelledby="tabCode" autocomplete="off" hidden>
       <label class="field">
         <span>Your name</span>
@@ -77,7 +77,7 @@
 
       <fieldset class="field role-fieldset">
         <legend>Where you are</legend>
-        <div class="role-grid" role="radiogroup" aria-label="Role">
+        <div class="role-grid" role="radiogroup" aria-label="Where you are">
           <label class="role-option">
             <input type="radio" name="role" value="board" />
             <span class="role-label">
@@ -89,7 +89,7 @@
             <input type="radio" name="role" value="research" checked />
             <span class="role-label">
               <strong>Backstage</strong>
-              <small>Crew or research team — messages, files, action prompts</small>
+              <small>Crew or the backstage team — messages, files, action prompts</small>
             </span>
           </label>
           <label class="role-option">
@@ -106,7 +106,7 @@
         <span>Code</span>
         <input id="code" name="code" maxlength="6" placeholder="e.g. K7P2QX"
                autocapitalize="characters" spellcheck="false" />
-        <small class="hint" id="codeHint">The 6-character code for your hall or meeting.</small>
+        <small class="hint" id="codeHint">The 6-character code for your room.</small>
       </label>
 
       <button class="btn primary big" type="submit">Join</button>

@@ -15,7 +15,7 @@
     <div class="brand">
       <div class="brand-mark" style="background:#dc2626">⚙</div>
       <h1>AGMessage Admin</h1>
-      <p class="tagline">Host-only session control.</p>
+      <p class="tagline">Halls, rooms and people, for the admin.</p>
     </div>
     <p class="hint" id="loginNotice">
       Enter the admin token printed in the server terminal.
@@ -39,7 +39,7 @@
         <span id="adminStatus" class="muted" style="font-size:.85rem">connected</span>
       </div>
       <div class="app-meta">
-        <button id="newSessionBtn" class="btn primary small">+ Start new session</button>
+        <button id="newSessionBtn" class="btn primary small">New hall</button>
         <button id="logoutBtn" class="btn ghost small">Logout</button>
       </div>
     </header>
@@ -47,16 +47,16 @@
 
     <div class="admin-body">
       <aside class="admin-sidebar">
-        <h3>Active rooms</h3>
+        <h3>Halls</h3>
         <ul id="roomList" class="room-list"></ul>
-        <p id="noRooms" class="hint">No active sessions yet — click "+ Start new session".</p>
+        <p id="noRooms" class="hint">No halls yet. Choose New hall to make one.</p>
       </aside>
 
       <main class="admin-main">
         <section class="admin-room-header" id="roomHeader" hidden>
           <div>
             <div id="watchedRoomName" class="watched-room-name muted" hidden></div>
-            <span class="muted" style="font-size:.8rem; letter-spacing:.06em">SESSION CODE</span>
+            <span class="muted" style="font-size:.8rem; letter-spacing:.06em">Code</span>
             <h2 class="room-code-big" id="watchedRoomCode">—</h2>
           </div>
           <div class="admin-room-stats">
@@ -64,15 +64,15 @@
             <div><strong id="msgCount">0</strong><br><small>messages</small></div>
           </div>
           <button id="exportBtn" class="btn ghost small" type="button" title="Open transcript in a new tab">Export transcript</button>
-          <button id="resetRoomBtn" class="btn ghost small admin-reset-btn" type="button">Reset session</button>
+          <button id="resetRoomBtn" class="btn ghost small admin-reset-btn" type="button">Clear messages…</button>
           <button id="minutesBtn" class="btn ghost small ai-btn" type="button" title="Claude lists decisions, open questions and action items so far. You read it first; post it to the room only if you want.">✨ Minutes</button>
-          <button id="invitesBtn" class="btn ghost small" type="button" title="Lock the board and research roles to invite links">🔒 Roles &amp; invites</button>
-          <button id="closeRoomBtn" class="btn ghost small admin-reset-btn" type="button" title="Close this meeting: everyone leaves, its saved history is deleted">Close meeting…</button>
+          <button id="invitesBtn" class="btn ghost small" type="button" title="Lock the On stage and Backstage seats to invite links">🔒 Roles &amp; invites</button>
+          <button id="closeRoomBtn" class="btn ghost small admin-reset-btn" type="button" title="Close this hall: everyone leaves, its saved history is deleted">Close hall…</button>
         </section>
 
         <section class="admin-tools" id="roomTools" hidden>
           <div id="invitesPanel" hidden>
-            <label class="admin-inline"><input type="checkbox" id="lockRoles" /> Board and research seats need an invite link (anyone else joins as an observer)</label>
+            <label class="admin-inline"><input type="checkbox" id="lockRoles" /> On stage and Backstage seats need an invite link (anyone else joins as an observer)</label>
             <div id="inviteLinks" class="invite-links"></div>
           </div>
           <div id="minutesPanel" hidden>
@@ -80,18 +80,18 @@
             <div class="row end"><button id="postMinutesBtn" class="btn primary small" type="button">Post to the room (pinned)</button><button id="closeMinutesBtn" class="btn ghost small" type="button">Close</button></div>
           </div>
           <div id="closePanel" hidden>
-            <p><strong>Close meeting <span id="closeCode"></span>?</strong> Everyone is disconnected and the saved history is deleted. Export the transcript first if you need it.</p>
-            <label class="admin-inline"><input type="checkbox" id="purgeFiles" checked /> Also delete the files shared only in this meeting</label>
+            <p><strong>Close hall <span id="closeCode"></span>?</strong> Everyone is disconnected and the saved history is deleted. Export the transcript first if you need it.</p>
+            <label class="admin-inline"><input type="checkbox" id="purgeFiles" checked /> Also delete the files shared only in this hall</label>
             <div class="row end"><button id="confirmCloseBtn" class="btn primary small admin-reset-btn" type="button">Close and delete</button><button id="cancelCloseBtn" class="btn ghost small" type="button">Cancel</button></div>
           </div>
         </section>
 
         <section class="admin-users-section" id="usersSection" hidden>
-          <h3>Users in this session</h3>
+          <h3>People in this room</h3>
           <table class="admin-users">
             <thead>
               <tr>
-                <th>Name</th><th>Role</th><th>Linked rooms</th><th>Actions</th>
+                <th>Name</th><th>Role</th><th>May forward to</th><th>Actions</th>
               </tr>
             </thead>
             <tbody id="usersTbody"></tbody>
@@ -105,14 +105,14 @@
 
         <section class="admin-network-section" id="networkSection">
           <h3>✨ AI drafts</h3>
-          <p class="hint">Claude drafts answers for the research team, buttons for action prompts and the minutes — always a draft a person edits and sends. Uses model <code id="aiModel">—</code>.</p>
+          <p class="hint">Claude drafts answers for the backstage team, buttons for action prompts and the minutes — always a draft a person edits and sends. Uses model <code id="aiModel">—</code>.</p>
           <div class="row">
             <input id="aiKeyInput" type="password" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off" size="40" />
             <button id="aiKeySave" class="btn small" type="button">Save key</button>
             <span id="aiStatus" class="muted"></span>
           </div>
           <h3>📡 Show network</h3>
-          <p class="hint">Link Stagewatch: everyone sees the live stage timer, and the research team can put an answer on the speaker's confidence monitor (🖥 on a message) and see when the speaker acknowledges it. Make a <em>node</em> API key in Stagewatch → Settings → Remote → API keys (read, stage messages and this app's status — nothing more). The key is stored encrypted and sent in a header, never in an address. All of this works on the venue network with no internet.</p>
+          <p class="hint">Link Stagewatch: everyone sees the live stage timer, and the backstage team can put an answer on the speaker's screen (🖥 on a message) and see when the speaker acknowledges it. Make a <em>node</em> API key in Stagewatch → Settings → Remote → API keys (read, stage messages and this app's status — nothing more). The key is stored encrypted and sent in a header, never in an address. All of this works on the venue network with no internet.</p>
           <div class="row">
             <input id="swUrl" placeholder="Stagewatch address (e.g. 192.168.1.20)" size="28" />
             <input id="swKey" type="password" placeholder="Stagewatch node key (swk_…)" autocomplete="off" size="28" />
@@ -169,7 +169,7 @@
 
           <div class="admin-tunnel-body">
             <div class="admin-tunnel-state admin-tunnel-off" id="tunnelOffState">
-              <p>The meeting is currently reachable only on the venue's local network.
+              <p>AGMessage is reachable only on the venue's network now.
                  Toggle this on to spawn a Cloudflare tunnel so remote users can join from anywhere.</p>
             </div>
 
@@ -184,7 +184,7 @@
                 <button id="tunnelCopyBtn" class="btn ghost small" type="button">📋 Copy</button>
               </div>
               <p class="hint">The URL stays live until you toggle this off (or stop the server).
-                 Anyone with the URL <em>and</em> the 6-character room code can join.</p>
+                 Anyone with the URL <em>and</em> a room's guest code can join.</p>
             </div>
 
             <div class="admin-tunnel-state admin-tunnel-error" id="tunnelErrorState" hidden>
@@ -200,9 +200,9 @@
                     <a href="https://github.com/cloudflare/cloudflared/releases" target="_blank" rel="noopener">github.com/cloudflare/cloudflared</a>.)</li>
                 <li>Toggle <strong>Remote access</strong> above to ON. The server spawns
                     <code>cloudflared tunnel --url http://localhost:&lt;port&gt;</code> for you and watches its output for the public URL.</li>
-                <li>Once the URL appears, click <strong>📋 Copy</strong> and share it with each remote user, along with the meeting's 6-character room code.</li>
-                <li>The remote user opens the URL in any browser, enters the room code, their name and role, and joins as they would on the local network.</li>
-                <li>When the meeting is over, toggle this off to take the tunnel down.</li>
+                <li>Once the URL appears, click <strong>📋 Copy</strong> and share it with each remote user, along with the room's guest code.</li>
+                <li>The remote user opens the URL in any browser, enters the code, their name and their seat, and joins as they would on the venue's network.</li>
+                <li>When the show is over, toggle this off to take the tunnel down.</li>
               </ol>
               <p class="hint">If you'd rather run cloudflared manually (e.g. with a named tunnel and a stable subdomain),
                  you can leave this toggle off and start your own — the server doesn't depend on it.</p>
@@ -211,8 +211,8 @@
         </section>
 
         <section id="adminEmpty" class="admin-empty">
-          <p>Select a room from the sidebar — or click <strong>+ Start new session</strong> to create one.</p>
-          <p class="hint">Once a session is created, share the 6-character code with your team to join.</p>
+          <p>Choose a hall on the left, or <strong>New hall</strong>.</p>
+          <p class="hint">Each room has a 6-character guest code: share it with the people who join without an account.</p>
         </section>
       </main>
     </div>

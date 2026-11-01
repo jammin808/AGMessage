@@ -61,7 +61,7 @@ and is dated again when 0.6.0 closes.
   signed in. The refusal is not a guess at a code, so it spends nothing of the code lockout. The admin's support view,
   and the host token's admin (who has no account), are unaffected. The sign-in page, opened from a code link in a
   signed-in browser, says the same and offers "Open your halls" or "Sign out", after which the code is there to use. A
-  guest's hall page refused this way opens that code link, keeping the code and an invite's role. A one-time password
+  guest's hall page refused this way leads back to that code link, keeping the code and an invite's role. A one-time password
   not yet changed is asked for first, a code link included.
 - One person's pages (their devices, and the admin's support view of them) are kept in step with only what a page
   applies: the theme, the text size, the On stage panel folded, the split and the document open, each read by its type
@@ -764,6 +764,95 @@ the layout in Chromium at 390 × 844 with a touch screen, by the smoke. Not yet 
   its layout read a few times in all; and the observer's page, which nothing touches, still has its divider above the
   first new message 30 s and every message later.
 - Rolling back: nothing is stored; 0.5.1's stylesheet and hall page come back as they were.
+
+**One word per thing: hall, room, code, seat, the Board, screens** (the plan's Part 5, unit W, its copy deck and
+glossary, and the row it shares with unit 2: a failed join and being sent out; the owner's answers 23, "Backstage", 24,
+"Show the Board" / "Show Ana", and 30, keep "meetings" in the words Stagewatch reads. Read in Chromium by the smoke, on
+the 13 pages named below)
+- The admin page said "room", "session" and "meeting" for one thing, a hall. It now reads: "Halls, rooms and people, for
+  the admin." under its sign-in; **New hall** for "+ Start new session"; **Halls** for "Active rooms", and "No halls
+  yet. Choose New hall to make one."; **Code** for "SESSION CODE"; **Clear messages…** for "Reset session"; **Close
+  hall…**, "Close hall …?" and "the files shared only in this hall" for the meeting's; **People in this room** for
+  "Users in this session"; **May forward to** for "Linked rooms"; "Choose a hall on the left, or New hall." and "Each
+  room has a 6-character guest code: share it with the people who join without an account." when no hall is open; and,
+  for the tunnel, "AGMessage is reachable only on the venue's network now.", a room's guest code and "When the show is
+  over". The show desk's line says the backstage team proposes and notices are shown in every room. Its native dialogs
+  (which the menus' unit replaces) say the same words: "Clear every message in Hall 2?", "Hall name (for example Hall
+  2)", "Log this person out of the hall?", "Delete this message for everyone in this hall?".
+- A seat has one name, On stage, Backstage or Observer, wherever a page shows it. The presence line reads "Ana joined
+  Backstage", "Ben joined On stage", "Wes joined as an observer" (0.5.1: "Ana joined as research"), and a seat the admin
+  changes "The admin moved Kim from Backstage to Observer." (0.5.1: "Kim role changed from research to observer by
+  admin"); lines already in a hall's history keep their words, and the presence lines among them still fold with the
+  rest. The audit log's row keeps its own words ("Kim: research → observer"). The admin page's people list offers the
+  seats by those names (the values it sends are unchanged), names an account's seat so, and its live feed tags each
+  message so (0.5.1 drew "research" in all three). Roles & invites reads "On stage and Backstage seats need an invite
+  link", its title "Lock the On stage and Backstage seats to invite links", its links **On stage link** and **Backstage
+  link** (for "Board link" and "Research link"), and an open hall "anyone with the code can join in any seat". A page
+  moved by the admin reads "The admin changed your seat to Backstage". The join page's choice of seat is named "Where
+  you are" for a screen reader, as its heading reads (it was "Role").
+- The hall page: the code's title is "Guest code", and once the page has joined, the room as its header names it ("Hall
+  2"), not "Meeting: Hall 2 (CODE)"; **In this room** for "In this meeting"; **Question for the Board** for "Question /
+  suggestion for the directors"; the Board's message field asks "Message everyone here…" (the board addendum's words for
+  it, which say who reads it), as its placeholder and its label. The join page asks for "The 6-character code for your
+  room." and a code no room has reads "No room has that code. Check it with whoever gave it to you."; the halls board
+  counts "1 needs help" and "2 need help".
+- A page sent out of its hall (logged out by an admin, or the hall closed), or one whose join is refused, shows the
+  server's words where the hall was, with **Back to sign-in** (**All halls** on a page opened by an account), and stays
+  until the person takes it: 0.5.1 put the words in a toast and left by itself after 2.5 s, before a phone's reader had
+  finished them. The page lets its connection go and does not come back by itself, and offers nothing of the hall: an
+  open dialog or menu closes, and Help, Screens and People go with the hall. A refusal with no words reads "This code
+  doesn't open a room now. Check it with whoever gave it to you." A guest's hall link refused because the browser is
+  signed in (above) leads back to its code link the same way. A hall that asks for a sign-in still opens the sign-in
+  page.
+- What the server says: "Join a room to share files.", "This room needs an invite link for that seat — you joined as an
+  observer.", "That name is already in use in this room. …", "— Messages cleared by the admin —" (for "— Session reset
+  by admin: messages and documents cleared —"), "This hall was closed by the admin.", and a person logged out reads "An
+  admin sent you out of Hall 2." ("of this hall" for a hall with no name; "Removed by admin" before). A transcript of a
+  hall with no name is headed "AGMessage transcript", not "AGMessage Session". The restart's own line in each hall reads
+  "— AGMessage restarted · 412 messages kept —", not "— Session restored (412 messages preserved) —"; lines already
+  written keep their words. The start window reads "Keep this window open while the show runs.", and a clean copy "has
+  no hall history, files, keys or settings."
+- "research team" leaves every page: the backstage team, in the admin page's AI and Stagewatch lines, the join page's
+  Backstage seat ("Crew or the backstage team"), the On stage panel's empty state, the prompt for a reply in words and
+  the server's refusal of a draft ("Drafting is for the backstage team."). The admin page calls Stagewatch's confidence
+  monitor the speaker's screen, as every other page does.
+- The rights and the roles say **screens** for "displays" (`hall.view`, `display.control`, `display.manage`, and the
+  project manager's, senior tech's and tech's words), on the Accounts page, and the audit log's line names a screen.
+- The AI's prompts say "a Board member on stage" and "the backstage team" for "a director" and "the research team", and
+  name the summary's hall as a hall: they shape the drafts the Board reads. Each prompt says how the conversation's
+  lines name a writer's seat ("(research) the backstage team"), so a draft does not take the old word from them.
+- Unchanged, as the owner answered: the words Stagewatch reads. The context still counts "meetings" ("1 meeting · 2
+  people", "no meeting open", a notice "to everyone in every open meeting"), and a notice the show desk runs is still
+  "shown in 1 meeting". The pinned self-change words of the Accounts page are unchanged too.
+- Left to the units that build what they name: the admin page's other "room" for a hall goes when rooms nest inside
+  halls there (#44), its Role column becomes **Seat** with the menus (3b, #24), the join page asks **Your seat** with
+  its code-first form (#41), "Reply with text" becomes **Answer in words…** (#55), "Forward to another room" becomes
+  **Send to…** (#48), and the stage's own empty states and file hint come with the stage (#62). Their words, and the
+  ones this release has not built yet (the Member seat, Chat view, a room beside Main named "Hall 2 › Legal", 📺 Show
+  the Board, the laptop's admin, accounts held aside), join `README.txt`'s glossary with them.
+- `test/browser-smoke.js` reads 13 pages for an old word ("session", "meeting", "director", or "research" alone or in
+  "research team"): the hall page On stage and Backstage on a laptop, and On stage, Backstage and Observer on a phone;
+  the hall page opened by an account (Backstage) and by a Viewer account (Observer); the admin's support view of an On
+  stage page; the sign-in and join page; the halls board; the Accounts page; a screen; and the admin page watching a
+  hall. It reads each page whole — hidden panes, closed dialogs, the message template, the rows, buttons and selects its
+  script builds, titles, placeholders, labels — and leaves out only what people wrote or named, what happened and what
+  another show system said: a message's words and its sender (a message's own buttons are read), the feeds' lines,
+  people's names in a list or a row, help requests' words, the audit log's rows, halls' and rooms' names, a document on
+  stage, Stagewatch's context and the show network. A word planted in a closed dialog, a title, a message's button and a
+  button in the admin's people row is found; one in the feed's history, a message's words, a sender's name, a person's
+  name in the people list or a row, and the admin feed's lines is not. It finds none, and the copy deck's words where
+  the plan puts them: the admin page's, its seats and its show desk line, the hall page's, the join form's, the halls
+  board's two counts (a hall with one request beside one with two), the rights' words, and a page sent out or refused,
+  in place, its open help dialog closed and nothing of the hall offered, still there 3 s later and gone only by its
+  button. `test/server.test.js` holds the server's words end to end (the closed hall's moved on purpose, with the name
+  taken, a file refused, the locked room's note, each seat's presence line, Clear messages, a person logged out of a
+  named hall and of one with none, the transcript's title, and the restart's line counting the messages its hall kept);
+  `test/resilience.test.js` reads the new restart and presence lines, and `test/halls.test.js` the presence and
+  seat-change lines (each moved on purpose); `test/accounts.test.js` holds the rights' and roles' words;
+  `test/units.test.js` reads what each AI prompt sends a stand-in model.
+- Rolling back: nothing stored changes shape. 0.5.1 shows the lines 0.6.0 wrote into a hall's history ("AGMessage
+  restarted", "Messages cleared by the admin", "Ana joined Backstage", "The admin moved Kim …") as they were written,
+  and writes its own again; its pages draw a presence line of 0.6.0's as an ordinary line, unfolded.
 
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already

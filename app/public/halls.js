@@ -96,7 +96,7 @@
       '<div class="hall-meta">' +
         (canManageHalls ? '<button type="button" class="btn ghost small hall-setup" data-code="' + esc(h.code) + '">Set up</button>' : '') +
         '<span title="People in the hall now">' + esc(String(l.people ?? h.people)) + ' in</span>' +
-        (helpOpen ? '<span class="help-count" title="Open help requests">■ ' + esc(String(helpOpen)) + ' need help</span>' : '') +
+        (helpOpen ? '<span class="help-count" title="Open help requests">■ ' + esc(String(helpOpen)) + (helpOpen === 1 ? ' needs help' : ' need help') + '</span>' : '') +
         displaysHtml + nodesHtml(l.nodes) +
       '</div>';
     return li;

@@ -1,12 +1,12 @@
 'use strict';
 /**
- * Accounts and sessions: individual logins beside the meeting codes.
+ * Accounts and sessions: individual logins beside the guest codes.
  *
  * Passwords
  *   - scrypt (node:crypto, no dependency) at N=2^15, r=8, p=3: one of OWASP's equivalent settings for scrypt, 32 MiB and
  *     about a quarter of a second per hash on a show laptop. Stored as "scrypt$15$8$3$<salt>$<hash>", so the cost can be
  *     raised later: a login with an older setting is rehashed. Hashing runs on libuv's pool, two at a time at most, so a
- *     burst of logins never stalls the meetings. A sign-in through the tunnel uses one of the two at most, so the other is
+ *     burst of logins never stalls the halls. A sign-in through the tunnel uses one of the two at most, so the other is
  *     kept for the venue network; each side waits in a short queue of its own, a sign-in past it is told "busy" at once,
  *     and one whose request has gone is dropped unhashed.
  *   - An unknown username costs the same work as a known one, so timing does not say which names exist.

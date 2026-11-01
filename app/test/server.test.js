@@ -86,10 +86,10 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(jb.uploadToken && jr.uploadToken);
   });
 
-  await t.test('names are unique per meeting (case-insensitive)', async () => {
+  await t.test('names are unique per room (case-insensitive)', async () => {
     const other = await connect(base); sockets.push(other);
     const r = await emit(other, 'join', { roomCode: code, name: 'chair', role: 'board' });
-    assert.equal(r.ok, false);
+    assert.deepEqual(r, { ok: false, error: 'That name is already in use in this room. Please pick a different display name.' });
   });
 
   let seqAfterHello;
@@ -119,7 +119,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
   await t.test('uploads: token required, content checked, served safely', async () => {
     const form = (name, bytes, type) => { const f = new FormData(); f.append('file', new Blob([bytes], { type }), name); return f; };
     const noToken = await fetch(base + '/api/upload', { method: 'POST', body: form('a.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]), 'image/png') });
-    assert.equal(noToken.status, 403);
+    assert.deepEqual([noToken.status, await noToken.json()], [403, { error: 'Join a room to share files.' }]);
     const h = { 'X-AGM-Upload': jr.uploadToken };
     const html = await fetch(base + '/api/upload', { method: 'POST', headers: h, body: form('x.html', '<script>alert(1)</script>', 'text/html') });
     assert.equal(html.status, 400, 'html refused');
@@ -166,7 +166,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(lock.ok && lock.invites.board.includes('invite='));
     const a = await connect(base); sockets.push(a);
     const noInvite = await emit(a, 'join', { roomCode: code, name: 'Gate', role: 'board' });
-    assert.equal(noInvite.role, 'observer');
+    assert.deepEqual([noInvite.ok, noInvite.role, noInvite.note], [true, 'observer', 'This room needs an invite link for that seat — you joined as an observer.']);
     const b = await connect(base); sockets.push(b);
     const inv = new URL(base + lock.invites.board).searchParams.get('invite');
     const withInvite = await emit(b, 'join', { roomCode: code, name: 'Director 2', role: 'board', invite: inv });
@@ -260,12 +260,56 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const answer = await Promise.race([emit(page, 'admin:deleteRoom', { roomCode: made.code, purgeFiles: false }), wait(3000).then(() => 'no answer')]);
     assert.deepEqual({ answer, connected: page.connected }, { answer: { ok: true, purged: 0 }, connected: true });
     assert.deepEqual(await otherTold, { code: made.code }, 'the other admin tab is told, not cut off');
-    assert.equal((await memberKicked).reason, 'This meeting was closed by the admin.');
+    assert.equal((await memberKicked).reason, 'This hall was closed by the admin.');
     assert.equal(await memberGone, 'io server disconnect');
     const rooms = await ask(page, 'admin:listRooms');
     assert.ok(rooms.ok && !rooms.rooms.some((r) => r.code === made.code));
     assert.ok((await ask(other, 'admin:listRooms')).ok && other.connected);
     assert.deepEqual(kicked, [], 'no admin page was sent home');
+  });
+
+  await t.test('the server says what happened in one word per thing: a seat as pages name it, Clear messages, Log out and the transcript naming the hall', async () => {
+    const adminSock = await connect(base, cookie); sockets.push(adminSock);
+    const named = await emit(adminSock, 'admin:createRoom', { name: 'Hall 2' });
+    const plain = await emit(adminSock, 'admin:createRoom', { name: '' });
+    const seat = async (hall, name) => {
+      const s = await connect(base); sockets.push(s);
+      const j = await emit(s, 'join', { roomCode: hall, name, role: 'research' });
+      assert.ok(j.ok, name);
+      return s;
+    };
+    const kim = await seat(named.code, 'Kim');
+    const lou = await seat(plain.code, 'Lou');
+    // Each join is said in the seat's words, the ones every page shows for it.
+    for (const [name, role] of [['Bea', 'board'], ['Obi', 'observer']]) {
+      const s = await connect(base); sockets.push(s);
+      assert.ok((await emit(s, 'join', { roomCode: named.code, name, role })).ok, name);
+    }
+    const said = await connect(base); sockets.push(said);
+    const joins = (await emit(said, 'join', { roomCode: named.code, name: 'Sal', role: 'observer' })).history.filter((m) => m.type === 'system').map((m) => m.text);
+    assert.deepEqual(joins, ['Kim joined Backstage', 'Bea joined On stage', 'Obi joined as an observer']);
+    assert.ok((await emit(kim, 'message', { type: 'text', text: 'before the clear' })).ok);
+    const cleared = new Promise((resolve) => { kim.on('system', (m) => { if (/cleared/.test(m.text)) resolve(m.text); }); });
+    assert.deepEqual(await emit(adminSock, 'admin:resetRoom', { roomCode: named.code }), { ok: true, removed: 0 });
+    assert.equal(await cleared, '— Messages cleared by the admin —');
+    const reader = await connect(base); sockets.push(reader);
+    const history = (await emit(reader, 'join', { roomCode: named.code, name: 'Reader', role: 'observer' })).history;
+    assert.deepEqual(history.map((m) => [m.type, m.text]).slice(0, 1), [['system', '— Messages cleared by the admin —']], 'the hall\'s history starts again at the line');
+    // Logged out: each page hears who sent it out and of where (the room by the name its page shows), then is closed.
+    for (const [page, hall, words] of [[kim, named.code, 'An admin sent you out of Hall 2.'], [lou, plain.code, 'An admin sent you out of this hall.']]) {
+      const told = new Promise((resolve) => { page.once('kicked', resolve); });
+      const gone = new Promise((resolve) => { page.once('disconnect', resolve); });
+      const list = await new Promise((resolve) => { adminSock.emit('admin:listRooms', resolve); });
+      const sid = list.rooms.find((r) => r.code === hall).users.find((u) => u.name === (page === kim ? 'Kim' : 'Lou')).socketId;
+      assert.deepEqual(await emit(adminSock, 'admin:kick', { socketId: sid }), { ok: true });
+      assert.deepEqual([await told, await gone], [{ reason: words }, 'io server disconnect']);
+    }
+    const transcript = async (hall) => (await fetch(base + '/api/admin/transcript/' + hall, { headers: { cookie } })).text();
+    const title = (html) => [/<title>([^<]*)<\/title>/.exec(html)[1], /<h1>([^<]*)<\/h1>/.exec(html)[1]];
+    assert.deepEqual(title(await transcript(plain.code)), ['AGMessage transcript', 'AGMessage transcript']);
+    assert.deepEqual(title(await transcript(named.code)), ['Hall 2 — transcript', 'Hall 2']);
+    // The two halls go again: the show desk's notice below counts the halls that are open.
+    for (const hall of [named.code, plain.code]) assert.ok((await emit(adminSock, 'admin:deleteRoom', { roomCode: hall, purgeFiles: false })).ok, hall);
   });
 
   await t.test('AI and stage refuse politely when not configured', async () => {
@@ -539,6 +583,10 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const j = await emit(s, 'join', { roomCode: code, name: 'Chair', role: 'board', uid: jb.identity });
     assert.ok(j.ok);
     assert.equal(j.uid, jb.uid, 'same person after restart');
+    // The restart's own line, after every message the hall kept, counts them.
+    const at = j.history.findIndex((m) => m.type === 'system' && /restarted/.test(m.text));
+    assert.ok(at > 0, JSON.stringify(j.history.map((m) => m.text)));
+    assert.equal(j.history[at].text, '— AGMessage restarted · ' + at + ' messages kept —');
     assert.ok(j.history.some((m) => m.text === 'Capex is on slide 14'));
     assert.ok(j.history.some((m) => m.text === 'while you were away'));
     assert.ok(!j.history.some((m) => m.text === 'delete me'));

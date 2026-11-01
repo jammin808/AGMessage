@@ -678,8 +678,8 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     assert.ok((await emit(ctl, 'admin:setRole', { roomCode: hallE, socketId: kimRow.socketId, role: 'observer' })).ok);
     assert.equal((await told).role, 'observer');
     assert.equal((await emit(kim.s, 'message', { type: 'text', text: 'hi' })).ok, false, 'the guest\'s change took effect');
-    await until(() => lines.some(([, m]) => /Kim role changed from research to observer/.test(m.text)), 3000, 'the guest\'s change recorded');
-    assert.ok(!lines.some(([, m]) => /Ted Tech role changed/.test(m.text)), 'the refused one is not');
+    await until(() => lines.some(([, m]) => m.text === 'The admin moved Kim from Backstage to Observer.'), 3000, 'the guest\'s change recorded, in the seats\' words');
+    assert.ok(!lines.some(([, m]) => /moved Ted Tech/.test(m.text)), 'the refused one is not');
   });
 
   await t.test('the room list shows a person once, and what the admin does to that row reaches every page they have open there', async () => {
@@ -814,7 +814,7 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     assert.deepEqual(await people(), { api: 2, board: 2 });
     await wait(8600);   // past the 8 s grace before "left"
     const said = lines.filter(([, x]) => /^Ted Tech /.test(x.text)).map(([, x]) => x.text);
-    assert.deepEqual(said, ['Ted Tech joined as research'], 'one joined line, no left line');
+    assert.deepEqual(said, ['Ted Tech joined Backstage'], 'one joined line, no left line');
     // The laptop moves to another hall: now he has gone from this one, said at once.
     assert.ok((await emit(laptopG.s, 'join', { roomCode: hallB, as: 'account' })).ok);
     await until(() => lines.some(([, x]) => x.text === 'Ted Tech left'), 3000, 'Ted Tech left');

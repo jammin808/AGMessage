@@ -620,9 +620,9 @@ test('a restart announces nobody: a 3-page hall back after a restart writes no "
   }
   const pages = [await page('Ana', 'research'), await page('Ben', 'board'), await page('Cy', 'observer')];
   await h.until(() => pages[0].seq >= 3, 3000, 'Ana has heard the others join');   // each join is a numbered line
-  const joinedLines = (history) => history.filter((m) => m.type === 'system' && / joined as /.test(m.text)).map((m) => m.text);
-  /** The lines after the newest restart's own line ("— Session restored (…) —"), which says what happened. */
-  const afterRestore = (history) => history.slice(history.map((m) => m.type === 'system' && /Session restored/.test(m.text)).lastIndexOf(true) + 1);
+  const joinedLines = (history) => history.filter((m) => m.type === 'system' && / joined /.test(m.text)).map((m) => m.text);
+  /** The lines after the newest restart's own line ("— AGMessage restarted · 7 messages kept —"), which says what happened. */
+  const afterRestore = (history) => history.slice(history.map((m) => m.type === 'system' && /^— AGMessage restarted · \d+ messages? kept —$/.test(m.text)).lastIndexOf(true) + 1);
 
   sockets.splice(0).forEach((s) => s.close());   // the restart drops every page at once
   srv = await h.restartServer(srv);
@@ -639,9 +639,9 @@ test('a restart announces nobody: a 3-page hall back after a restart writes no "
   assert.ok(beyond.res.ok && minus.res.ok);
   const reader = await join(srv.base, { name: 'Gus', role: 'observer' });
   const history = afterRestore(reader.res.history);
-  assert.deepEqual(joinedLines(history), ['Wes joined as observer', 'Eve joined as observer', 'Fay joined as observer'],
+  assert.deepEqual(joinedLines(history), ['Wes joined as an observer', 'Eve joined as an observer', 'Fay joined as an observer'],
     'after the restart line only those who were not back from it are announced: ' + JSON.stringify(history.map((m) => m.text)));
-  await h.until(() => heard.includes('Gus joined as observer'), 3000, 'the newcomer\'s line reached the hall');
+  await h.until(() => heard.includes('Gus joined as an observer'), 3000, 'the newcomer\'s line reached the hall');
   assert.ok(!heard.some((x) => /^(Ana|Ben|Cy) joined/.test(x)), 'no page in the hall was told the three came back: ' + JSON.stringify(heard));
   const people = reader.res.users.map((u) => u.name).sort();
   assert.deepEqual(people.filter((n) => ['Ana', 'Ben', 'Cy'].includes(n)), ['Ana', 'Ben', 'Cy'], 'the people list has them all the same');
@@ -653,7 +653,7 @@ test('a restart announces nobody: a 3-page hall back after a restart writes no "
   const late = await join(srv.base, { name: 'Ana', role: 'research', uid: pages[0].uid, since: pages[0].seq });
   assert.ok(late.res.ok);
   const lateReader = await join(srv.base, { name: 'Hal', role: 'observer' });
-  assert.deepEqual(joinedLines(afterRestore(lateReader.res.history)), ['Ana joined as research'], 'announced after the window');
+  assert.deepEqual(joinedLines(afterRestore(lateReader.res.history)), ['Ana joined Backstage'], 'announced after the window');
 });
 
 // ---------------------------------------------------------------- one server per data folder
@@ -706,7 +706,7 @@ test('a second start on the same data folder changes nothing and goes away; ever
     v.close();
     const texts = j.history.map((m) => m.text);
     assert.ok(texts.includes('before the second start') && texts.includes('after the second start'), JSON.stringify(texts));
-    assert.equal(texts.filter((x) => /Session restored/.test(x)).length, 1, 'one restore line, from the real restart: ' + JSON.stringify(texts));
+    assert.equal(texts.filter((x) => /^— AGMessage restarted · \d+ messages? kept —$/.test(x)).length, 1, 'one restart line, from the real restart: ' + JSON.stringify(texts));
   } finally { await h.stopServer(b.child); }
 });
 

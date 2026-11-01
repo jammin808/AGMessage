@@ -27,16 +27,22 @@
       <button id="screensBtn" class="btn small" type="button" title="What this hall's screens show" hidden>Screens</button>
       <button id="peopleBtn" class="btn ghost small" title="Who's here">People</button>
       <a href="/" class="btn ghost small">Leave</a>
-      <span class="room-chip room-chip-tiny" id="roomChip" title="Meeting code">—</span>
+      <span class="room-chip room-chip-tiny" id="roomChip" title="Guest code">—</span>
       <span class="stage-chip" id="stageChip" hidden title="Live from Stagewatch"><b id="stageTime">--:--</b> <span id="stageTitle"></span></span>
     </div>
   </header>
+
+  <!-- Out of the hall: the server's words and the way back, in place of the hall (app.js, outOfHall). -->
+  <section class="out-of-hall" id="outOfHall" role="alert" hidden>
+    <p id="outWords"></p>
+    <a href="/" class="btn primary" id="outBack">Back to sign-in</a>
+  </section>
 
   <div class="main-row">
     <section class="left-col" id="leftCol">
       <p class="conn-strip" id="connStrip" role="status" hidden></p>
       <aside class="people-panel" id="peoplePanel" hidden>
-        <h3>In this meeting</h3>
+        <h3>In this room</h3>
         <ul id="peopleList"></ul>
       </aside>
 
@@ -52,7 +58,7 @@
 
       <section class="compose director-compose" id="directorCompose" hidden>
         <form id="directorForm">
-          <input id="directorInput" maxlength="300" placeholder="Quick note back to the research team…" />
+          <input id="directorInput" maxlength="300" placeholder="Message everyone here…" aria-label="Message everyone here…" />
           <button type="button" class="btn ghost priority-btn" id="dirPriorityBtn" data-priority="0" aria-pressed="false" title="Mark as high priority">🔥</button>
           <button class="btn primary send-btn" type="submit" aria-label="Send"><span class="send-icon" aria-hidden="true">➤</span><span class="send-word">Send</span></button>
         </form>
@@ -76,7 +82,7 @@
 
         <form class="pane hidden" id="actionPane" data-pane="action">
           <label class="field">
-            <span>Question / suggestion for the directors</span>
+            <span>Question for the Board</span>
             <textarea id="actionText" rows="2"
               placeholder="e.g. 'Shareholder asked about 2025 capex. Suggest referring to slide 14?'"></textarea>
           </label>
@@ -100,7 +106,7 @@
           <div class="dropzone" id="dropzone">
             <input type="file" id="fileInput" hidden accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.docx,.xlsx,.xls,.pptx,.csv,.txt,.md" />
             <p><strong>Drop a file here</strong> or <button type="button" class="link" id="pickFileBtn">choose</button>.</p>
-            <p class="hint">Max 25 MB. Files render directly on the directors' panel.</p>
+            <p class="hint">Max 25 MB. Files show on the Board's On stage panel.</p>
           </div>
           <div id="filePreview" hidden></div>
           <label class="field">
@@ -130,7 +136,7 @@
       <div class="doc-display" id="docDisplay">
         <div class="empty-state">
           <p>No document on stage yet.</p>
-          <p class="hint">When the research team pushes a file, it appears here automatically.</p>
+          <p class="hint">When the backstage team shares a file, it appears here automatically.</p>
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-// Admin 0.2: AI minutes, role invites, closing a meeting, the AI key and the show network.
+// Admin 0.2: AI minutes, role invites, closing a hall, the AI key and the show network.
 // Shares admin.js's globals (socket, currentRoom, escapeHtml) — loaded after it.
 /* global socket, currentRoom */
 (function () {
@@ -57,7 +57,7 @@
       : 'Link to Stagewatch: encrypted ✓ — certificate ' + pretty(l.fp).slice(0, 23) + '… ' + (l.pinned ? '(pinned)' : '(pinned once Stagewatch accepts the key)');
     $('swTls').classList.toggle('bad', !!l.problem);
     $('deskLine').textContent = t.deskRefusal ? '⚠ Show desk: Stagewatch refuses to hand this AGMessage what it approves (' + t.deskRefusal + ') — proposals are off until it takes this AGMessage\'s collect; give AGMessage a node key of its own.'
-      : t.desk ? 'Show desk: Stagewatch keeps the shared approval queue — the research team can propose stage messages (📝), and approved "notice" proposals for this AGMessage are shown in every meeting.' : '';
+      : t.desk ? 'Show desk: Stagewatch keeps the shared approval queue — the backstage team can propose stage messages (📝), and approved "notice" proposals for this AGMessage are shown in every room.' : '';
     $('deskLine').classList.toggle('bad', !!t.deskRefusal);
   }
 
@@ -398,14 +398,14 @@
     function showInvites(on) {
       const box = $('inviteLinks');
       box.textContent = '';
-      if (!on) { box.textContent = 'Open: anyone with the code can join in any role.'; return; }
+      if (!on) { box.textContent = 'Open: anyone with the code can join in any seat.'; return; }
       socket.emit('admin:invites', { roomCode: currentRoom.code }, (res) => {
         if (!res || !res.ok) return;
         for (const role of ['board', 'research']) {
           const url = location.origin + res.invites[role];
           const row = document.createElement('div');
           row.className = 'invite-row';
-          const lab = document.createElement('strong'); lab.textContent = role === 'board' ? 'Board link' : 'Research link';
+          const lab = document.createElement('strong'); lab.textContent = role === 'board' ? 'On stage link' : 'Backstage link';
           const code = document.createElement('code'); code.textContent = url;
           const copy = document.createElement('button'); copy.className = 'btn ghost small'; copy.type = 'button'; copy.textContent = '📋 Copy';
           copy.onclick = () => navigator.clipboard && navigator.clipboard.writeText(url).then(() => { copy.textContent = '✓ Copied'; setTimeout(() => { copy.textContent = '📋 Copy'; }, 1500); });
