@@ -412,7 +412,8 @@ test('the verifier\'s paths: a SHA256SUMS naming ../x, /etc/passwd, C:\\x or \\\
     const r = await verifier.check(d, { fingerprint: FP, fsp });
     assert.equal(r.code, 3, bad);
     assert.match(r.why, /^SHA256SUMS names (a path|not a file an export holds)/, bad + ': ' + r.why);
-    const real = fs.realpathSync(d);
+    // The native real path, as fs.promises.realpath gives it: on Windows it spells a short (8.3) folder name out.
+    const real = fs.realpathSync.native(d);
     assert.deepEqual(seen.filter((p) => p !== path.resolve(d) && p !== real), [path.join(real, 'SHA256SUMS'), path.join(real, 'SHA256SUMS'), path.join(real, 'SHA256SUMS')], bad + ': only SHA256SUMS was looked at (its lstat, its real path, its bytes)');
     assert.equal((await verify([d, '--fingerprint', FP])).code, 3, bad);
   }

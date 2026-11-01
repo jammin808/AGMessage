@@ -19,6 +19,15 @@ const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
  * whose last line is its uploads folder: a test that reads the black window reads the whole banner, never a part of it.
  */
 async function startServer(env = {}) {
+  // A port freePort() found can be taken by another test file before the server listens on it: a server that stops
+  // because its port is in use is started again on another, at most four times. A port the test named is never changed.
+  for (let attempt = 1; ; attempt++) {
+    try { return await startOnce(env); } catch (e) {
+      if (env.PORT || attempt >= 5 || !(e && e.portTaken)) throw e;
+    }
+  }
+}
+async function startOnce(env) {
   const dataDir = env.AGM_DATA_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
   const port = env.PORT ? Number(env.PORT) : await freePort();
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
@@ -31,11 +40,16 @@ async function startServer(env = {}) {
   child.stderr.on('data', (d) => { out += d; });
   for (let i = 0; i < 150; i++) {
     if (out.includes('is running') && out.includes('\n  Uploads:')) return { child, port, base: `http://127.0.0.1:${port}`, dataDir, out: () => out };
+    if (child.exitCode !== null && PORT_TAKEN.test(out)) break;   // stopped at once: its port was taken meanwhile
     await wait(100);
   }
   child.kill();
-  throw new Error('server did not start:\n' + out);
+  const e = new Error('server did not start:\n' + out);
+  e.portTaken = child.exitCode !== null && PORT_TAKEN.test(out);
+  throw e;
 }
+/** The words a server says when its port is held by something else (lib/startup.js and 0.5's own). */
+const PORT_TAKEN = /already in use|is using port|already running on port/i;
 /**
  * Stop a server as the watchdog does: asked over IPC, so it saves first on every platform (on Windows a signal sent to a
  * child ends it at once, unsaved). One that has not gone in 3 s is ended.
