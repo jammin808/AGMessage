@@ -1,7 +1,9 @@
 # AGMessage — the server
 
 This folder is the server and its pages: `server.js` (run by the watchdog `supervise.js`), `lib/` (one concern per
-file), `public/` (plain scripts, no build step) and `test/`. Node.js 24 LTS.
+file), `public/` (plain scripts, no build step), `verify/` (the audit log's rules that need no key, and the verifier an
+export carries to another computer: `node verify/verify-audit.js <folder> --fingerprint <key>`, or its page) and
+`test/`. Node.js 24 LTS.
 
 ```
 npm ci

@@ -116,6 +116,19 @@ and their own ESLint block turns off every Node global the shared block gives (s
 any `import()`: a probe that reads a file there fails the lint.
 `verify/` is under the coverage gate with `server.js`, `supervise.js` and `lib/`.
 
+The audit log's export adds `lib/auditexport.js` and `lib/zip.js`, and the verifier `verify/verify-audit.js`, each at 0
+synchronous calls (the guard names them, so a file that drops out of its list fails it): the export reads, digests and
+streams on the thread pool and in slices, and the verifier on another computer reads through `fs.promises` only. The
+browser verifier's script, `verify/page.js`, has its own ESLint block: browser globals only (every Node global off, as
+for the rules), one function scope, and `agm/no-unescaped-html`; it writes with `textContent` alone. It is put inline in
+`verify.html` beside `auditrules.js`, under a meta Content-Security-Policy that carries their SHA-256 and allows nothing
+else (`connect-src 'none'`): a test holds the hashes to the inline script and style, and holds the page to the same bytes
+for the same release. A test also runs `page.js` in Node against a stand-in document, so the page's five states are held
+beside the Node verifier's exit codes (a break the laptop named, a file changed after the export, an earlier export that
+does not check), not by the smoke alone. The verifier's path rule (`auditrules.js`, `pathProblem`) is the rules' too: a test gives it `../x`,
+`/etc/passwd`, `C:\x` and `\\host\share\f` through a recording `fs` and finds nothing opened but `SHA256SUMS`. The
+release's `SHA256SUMS` and attestation take in the verifier's own zip, as they take every `dist\*.zip`.
+
 0.6.0 adds the pages' message channels to it: every `postMessage` in a page script under `public/` names this origin as
 its target, never `'*'`, and every `message` listener's first line returns unless both the sending window and its origin
 are the ones expected (the admin's support view hears only the admin page that frames it). A post or a listener written

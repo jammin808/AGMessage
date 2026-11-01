@@ -34,10 +34,11 @@ halls (or "every hall, including new ones"). The rights, as the server checks th
 | `users.manage` | create accounts and set roles, halls and rights |
 | `settings.manage` | app settings: AI key, HTTPS, the tunnel, the show network |
 | `audit.read` | read the audit log |
+| `audit.export` | export the whole audit log, signed, to check on another computer (with `audit.read`); admin-only, so an account holding it signs in through the tunnel only when admins may |
 
 Rules that keep rights from growing by themselves: deny by default; only an admin makes an admin or hands out
-`users.manage` or `settings.manage`, and only an admin changes, resets, signs out, turns back on or removes an account
-that holds one of them (the Accounts page shows such a person as "Admin only" to anyone else); an account that is not an
+`users.manage`, `settings.manage` or `audit.export`, and only an admin changes, resets, signs out, turns back on or
+removes an account that holds one of them (the Accounts page shows such a person as "Admin only" to anyone else); an account that is not an
 admin manages only accounts within its own rights and halls, and hands out only those — it cannot make a richer account,
 widen one, or reset a richer one's password (the page offers only what it holds, names only the halls it holds — a
 person's other halls are a count — and shows a richer person as "Locked"); nobody changes their own role, rights or
@@ -111,7 +112,7 @@ watchdog restart, which keeps the token, but not a fresh start of AGMessage, whi
   closes its open pages, which reconnect with the rights it has now. The Accounts page counts only the sessions that
   still sign in.
 - Every state-changing request must come from AGMessage's own pages (the `Origin` check).
-- Through the Cloudflare tunnel, accounts with admin rights (`users.manage` or `settings.manage`) cannot sign in, nor use
+- Through the Cloudflare tunnel, accounts with admin rights (`users.manage`, `settings.manage` or `audit.export`) cannot sign in, nor use
   those rights on a session they already have, unless the admin turns on "Let accounts with admin rights sign in through
   the Cloudflare tunnel" (Admin → Accounts and access); turning it off ends admin rights on every page open through the
   tunnel at once. Such a sign-in is answered as a wrong password is, so the tunnel never tells a stranger that a password
@@ -190,6 +191,69 @@ toward the token sign-in's lockout and is written down (`login.token.fail`). An 
 where to accept them, with no button. The acceptance is an entry of its own (`audit.accept`, its target the findings'
 ids), and takes effect once that entry is on disk.
 
+**The export, checked on another computer.** Export… on Admin → Health and Accounts → Audit log makes one zip as it
+streams (`POST /api/audit/export`), and AGMessage keeps no copy. It holds every file of the log byte for byte, up to and
+including the export's own entry; `manifest.json` (the log's id, the key id, the range, the head, and the laptop's own
+check run through those very bytes: its mark, words and findings); `SHA256SUMS` over every file; `SHA256SUMS.sig`, an
+Ed25519 signature by this laptop's signing key; `signing-key.pem`; a README; and the verifier (`verify/`). The signing
+key is derived from the machine key when an export signs and is never stored, so it changes only when the machine key
+does. Its fingerprint (SHA-256 of the public key, 64 hex characters in 16 groups) is printed in full in the black window
+("Signing key:"), on Admin → Health with Copy, and under Accounts → Audit log: copy it into the show's paperwork. The
+export is an audit row of its own: `audit.export` first, on disk before any file is listed, then `audit.export.sent`
+with the zip's SHA-256 once the last byte was handed to the system, or `audit.export.fail` with why. One export runs at a
+time; a run without the machine key is refused (nothing can be signed), and writes nothing. Admin → Health names the
+last export ("Last export: entries 1–1702, sent whole at 18:40 on 26 Oct (Ana). Export at the end of each show day."),
+read again from the log at each start. Export at the end of each show day and keep the bundle off the laptop: if the
+laptop is lost, the exports kept elsewhere are what can still be checked.
+
+- **Who:** an account holding `audit.export` and `audit.read` (the admin role; others only by an admin's grant), and
+  the laptop's token at the laptop, its sign-in made by this run (a sign-in from before a watchdog restart is refused).
+  From another device only over HTTPS: the bundle holds the names and addresses of the whole log. Through the tunnel
+  only when admins may sign in there. Never a code guest, a screen, a node or the context token. An account may export
+  though only the token may Accept: an export changes nothing the check reports, it carries it.
+- **What it holds:** names, addresses and what each did; screen takes written before 0.6.0 can also hold a message's
+  first words and a file's name, which this version's rows never write. The dialog says so. Cancel (or Escape) while
+  the export is made stops it: the request is aborted, the log writes `audit.export.fail` if the bundle was not yet
+  sent whole, and nothing is handed to the browser to save.
+- **Checking it:** take the verifier from the release the manifest names (`agmessage-audit-verifier-<version>.zip`,
+  its SHA-256 in the release's `SHA256SUMS`), not the copy in the bundle, which came from the laptop under check (run
+  from the bundle, it says so; run from the release, it names any bundled verifier file that differs).
+  `node verify-audit.js <the extracted folder> --fingerprint <64 hex>`, or `verify.html` in a browser (one file that
+  loads nothing and sends nothing; Chrome or Edge 137, Firefox 129, Safari 17 or newer). In order: only the bundle's
+  fixed paths are read (a path holding `..`, a backslash, a drive letter or a NUL, a link, or a file not listed ends the
+  check before anything else is read); the key's fingerprint against the one you give; the signature over
+  `SHA256SUMS`; every file's digest, the log's included, before any entry is read; the entries (whole lines, links,
+  the plain hashes, the runs, and the last entry the export's own). Exit 0: signed by the expected key and whole, and
+  the laptop said ✓; 1: ◇ or △; 2: ✕, the log was broken when it was exported, which is also the answer when every file
+  matches its signed digest, the last entry is the export's own, and the entries break at or after the line the
+  laptop's own signed check named (as an archive's failure its verdict names is code 2); 3: a step failed, the entries
+  break where the laptop's verdict does not say, or the key is another's, and nothing in the bundle is vouched for; 4:
+  whole and signed consistently, but no key was given to compare with, so not shown to be the laptop's. `--list` prints
+  the entries; `--earlier <folder>` compares with an export kept off the laptop: every entry it held must be in the
+  later one byte for byte, and an earlier export whose entries break holds none to compare with (exit 3). A file the
+  bundle does not list ends the check (exit 3): check it before browsing the folder, since some desktops add their own
+  (macOS Finder writes `.DS_Store`), or extract the zip again. By hand, in the folder:
+  `openssl pkey -pubin -in signing-key.pem -outform DER | sha256sum` (compare with your record),
+  `openssl pkeyutl -verify -pubin -inkey signing-key.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig`,
+  `sha256sum -c SHA256SUMS`.
+
+| An auditor can conclude | Because |
+|---|---|
+| Every file in `log/` is byte for byte what this laptop's AGMessage exported at `made`, and nothing was added, removed or changed since | the signature over `SHA256SUMS`, and the digests |
+| The laptop's own keyed check, run for this export through its own entry, said `<mark>` with these findings | the manifest is a signed file |
+| Each line is a whole entry, `seq` runs without a gap, each links to the one before, the plain-hash entries' hashes hold, and keys change only at named boundaries | checked by the verifier, with no key |
+| Who exported, and when by the laptop's clock | the last entry, and the manifest |
+| With an earlier export kept elsewhere: the entries it held were not rewritten since, even by the key's holder | the compare |
+
+| An auditor cannot conclude | Because |
+|---|---|
+| That each keyed entry's MAC is right | the key never leaves the laptop; this rests on the laptop's signed verdict |
+| Anything about someone who can change AGMessage's code or start script on the laptop, controls its Windows account, or holds a copy of `machine.key` | they can write entries that check and sign an export of them. The signature proves "this key", not "this person", nor that the words are true |
+| When an entry was really written | `at` and `made` are the laptop's clock |
+| That the log is complete after the export, or that nothing was removed while AGMessage was stopped | only the laptop's records see that, and they are reported in the verdict |
+| That the fingerprint is this laptop's | only the auditor's own record of it shows that: the banner or Admin → Health read in person, the show's paperwork, or an earlier export kept off the laptop |
+| That entries keyed elsewhere, or the plain-hash entries, are genuine | they are linked, not checked; the verdict names who accepted them and when |
+
 **What it still cannot show**, and the check does not claim:
 
 - anything done by someone who can change AGMessage's code, its Node or its start script, controls this Windows account,
@@ -204,12 +268,13 @@ ids), and takes effect once that entry is on disk.
   save fails, which health names).
 
 Two Windows accounts running one portable folder each have their own key, so each switch writes `audit.rekey` and each
-needs Accept: one account runs the show. Laptops cloned from one image share one key. A rebuilt Windows profile or a new
-laptop turns the earlier entries △ until accepted, and anyone holding a copy of `machine.key` can write entries that
-check.
+needs Accept: one account runs the show. Laptops cloned from one image share one key, and so one signing key. A rebuilt
+Windows profile or a new laptop turns the earlier entries △ until accepted and changes the signing key, and anyone
+holding a copy of `machine.key` can write entries that check and sign exports of them.
 
 Going back to 0.5.1: it reads a keyed log as "✕ Broken at line 812: entry 812 was changed after it was written" and
-writes on with plain hashes; back on 0.6.0, those entries are a span (`audit.unkeyed`), △ until accepted.
+writes on with plain hashes; back on 0.6.0, those entries are a span (`audit.unkeyed`), △ until accepted. 0.5.1 has no
+export; a bundle already made stays checkable with the release's verifier.
 
 Each entry is flushed to disk before the action is acknowledged (a session reset's once its files have left the disk, so
 that it counts them: a stop in that moment keeps the reset without its row). When the disk will not take it (full, or
@@ -226,7 +291,10 @@ and admins read it.
 ## Where it lives
 
 `app/lib/rbac.js` (the rights, pure), `app/lib/accounts.js` (accounts, hashing, sessions), `app/lib/http-accounts.js`
-(the routes), `app/lib/audit.js` (the chain, its records, the check and Accept), `app/verify/auditrules.js` (the rules
-that need no key), `app/lib/secretbox.js` (the machine key and the keys derived from it). Tests:
+(the routes), `app/lib/audit.js` (the chain, its records, the check and Accept), `app/lib/auditexport.js` (the export)
+and `app/lib/zip.js` (the zip it streams), `app/verify/` (the rules that need no key, `auditrules.js`; the Node
+verifier, `verify-audit.js`; the browser verifier's page, `page.html`, `page.js`, `page.css`), `app/public/audit-export.js`
+(the export's dialog), `app/lib/secretbox.js` (the machine key and the keys derived from it). Tests:
 `app/test/accounts.test.js` (rights, accounts, hashing, sessions), `app/test/sessions.test.js` (signing in, the tunnel,
-the pages a session has open, restarts) and `app/test/audit.test.js` (the keyed chain, its records, Accept).
+the pages a session has open, restarts), `app/test/audit.test.js` (the keyed chain, its records, Accept) and
+`app/test/auditexport.test.js` (the export, the verifier, who may export).

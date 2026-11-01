@@ -410,7 +410,51 @@ async function acceptAll(log) {
 /** A check's answer, in brief: what a test of its meaning compares. */
 const brief = (v) => ({ ok: v.ok, mark: v.mark, entries: v.entries, ...(v.unwritten ? { unwritten: v.unwritten } : {}) });
 
+/**
+ * A zip's members, read the way a test can trust: from its end record and central directory, each member's own local
+ * header, inflated and held to its CRC-32 and size. Returns [{name, data}] in the directory's order; throws on anything off.
+ */
+function readZip(buf) {
+  const zlib = require('zlib');
+  const end = buf.length - 22;
+  if (end < 0 || buf.readUInt32LE(end) !== 0x06054b50) throw new Error('no end-of-central-directory record at the end');
+  const count = buf.readUInt16LE(end + 10);
+  let at = buf.readUInt32LE(end + 16);
+  if (at + buf.readUInt32LE(end + 12) !== end) throw new Error('the central directory does not end where the end record says');
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    if (buf.readUInt32LE(at) !== 0x02014b50) throw new Error('central directory entry ' + i + ' has no signature');
+    const crc = buf.readUInt32LE(at + 16);
+    const csize = buf.readUInt32LE(at + 20);
+    const size = buf.readUInt32LE(at + 24);
+    const nameLen = buf.readUInt16LE(at + 28);
+    const extra = buf.readUInt16LE(at + 30);
+    const comment = buf.readUInt16LE(at + 32);
+    const local = buf.readUInt32LE(at + 42);
+    const name = buf.toString('utf8', at + 46, at + 46 + nameLen);
+    if (buf.readUInt32LE(local) !== 0x04034b50 || buf.toString('utf8', local + 30, local + 30 + buf.readUInt16LE(local + 26)) !== name) throw new Error(name + ': its local header does not match');
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const data = buf.readUInt16LE(local + 8) === 8 ? zlib.inflateRawSync(buf.subarray(start, start + csize)) : buf.subarray(start, start + csize);
+    if (data.length !== size || zlib.crc32(data) !== crc) throw new Error(name + ': its size or CRC-32 does not match');
+    out.push({ name, data });
+    at += 46 + nameLen + extra + comment;
+  }
+  return out;
+}
+/** A zip's members written under `dir`; returns the one folder they unpack to. */
+function unzipTo(buf, dir) {
+  let top = '';
+  for (const m of readZip(buf)) {
+    const file = path.join(dir, ...m.name.split('/'));
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, m.data);
+    top = path.join(dir, m.name.split('/')[0]);
+  }
+  return top;
+}
+
 module.exports = {
   stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
   FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, acceptAll, brief,
+  readZip, unzipTo, SEED_WORDS,
 };

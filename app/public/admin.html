@@ -145,6 +145,9 @@
             <ul id="auditFindings" class="audit-findings"></ul>
             <p id="auditWhere" class="hint" hidden>Accept this on the AGMessage laptop: sign in there with its token (Admin login in the black window).</p>
             <p id="auditAcceptRow" class="row" hidden><button id="auditAcceptBtn" class="btn small" type="button">Accept…</button></p>
+            <p id="auditSignKey" class="hint" hidden>Audit log signing key: <code id="signKeyText">—</code> <button id="signKeyCopy" class="btn ghost small" type="button">📋 Copy</button></p>
+            <p id="auditLastExport" class="hint"></p>
+            <p id="auditExportRow" class="row" hidden><button id="auditExportBtn" class="btn small" type="button">Export…</button></p>
           </div>
           <p class="hint">Other show systems (Patterns' Eye, Stagewatch's assistant) read this AGMessage's status — counts and action-prompt questions only, never messages or documents — with this read-only token:
             <code id="ctxToken">—</code> <button id="ctxCopy" class="btn ghost small" type="button">📋 Copy</button> <button id="ctxNew" class="btn ghost small" type="button">New token</button></p>
@@ -243,6 +246,7 @@
   </dialog>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/admin.js"></script>
+  <script src="/audit-export.js"></script>
   <script src="/admin-plus.js"></script>
 </body>
 </html>

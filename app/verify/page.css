@@ -1,0 +1,22 @@
+:root { color-scheme: light dark; --ok: #136f35; --warn: #8a5a00; --bad: #b3261e; --muted: #5f6368; }
+@media (prefers-color-scheme: dark) { :root { --ok: #7fd49a; --warn: #f2c26b; --bad: #ff8a80; --muted: #b0b4ba; } }
+body { font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; }
+main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 1.5em; margin: 0 0 8px; }
+h2 { font-size: 1.15em; margin: 24px 0 8px; }
+.version, .hint { color: var(--muted); }
+.steps li { margin: 12px 0; }
+.steps label { display: block; margin-bottom: 4px; }
+#fp { width: 100%; max-width: 46em; font: 14px ui-monospace, Consolas, monospace; padding: 6px; }
+.state { font-size: 1.15em; font-weight: 600; padding: 12px; border: 2px solid currentColor; border-radius: 6px; }
+.state[data-code="0"] { color: var(--ok); }
+.state[data-code="1"], .state[data-code="4"] { color: var(--warn); }
+.state[data-code="2"], .state[data-code="3"] { color: var(--bad); }
+.said, .findings { padding-left: 1.2em; }
+.said li, .findings li { margin: 4px 0; overflow-wrap: anywhere; }
+body.dropping main { outline: 3px dashed var(--muted); outline-offset: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; vertical-align: top; padding: 3px 6px; border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); }
+td { overflow-wrap: anywhere; }
+.pager { margin: 8px 0; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

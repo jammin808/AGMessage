@@ -14,6 +14,11 @@
  *   - The key changes only at a boundary entry under the new key whose target names the run before it,
  *     `<plain or kid>:<its first entry>`. The one change with no boundary is a change to plain, since 0.5.1 cannot write
  *     one; that plain run must end at an `audit.unkeyed` that names it.
+ *   - An export's bundle holds its fixed paths and nothing else (H.9.5): a path holding `..`, `\`, a drive letter, a NUL
+ *     or a leading `/`, or one off the set, is refused before anything is opened, so a crafted bundle never makes a
+ *     checker read elsewhere. Its `SHA256SUMS` lists every file of it but itself and its signature, in `sha256sum`'s form.
+ *
+ * Loaded by Node (`require`), and by the browser verifier as a classic script, where it is `AGMAuditRules`.
  */
 const GENESIS = '0'.repeat(64);
 const LEGACY_KEYS = ['seq', 'at', 'actor', 'action', 'target', 'words', 'ip', 'prev', 'h'];
@@ -92,5 +97,126 @@ class Runs {
   }
 }
 
-const api = { GENESIS, LEGACY_KEYS, KEYED_KEYS, BOUNDARIES, wholeEntry, canonical, canonical2, missing, kindOf, refOf, parseRef, Runs };
+/**
+ * A chain walked entry by entry, as a checker without the key walks it (H.9.5): seq from 1 with no gap, each `prev` the
+ * `h` before it, the runs and their boundaries, and the spans of entries not under `kid` (the exporting laptop's key),
+ * with the accepts and the findings the laptop wrote under it. The caller holds each line to `wholeEntry` and each legacy
+ * entry to its SHA-256 first; a keyed entry's MAC is the laptop's alone to check.
+ */
+class Chain {
+  constructor(kid) {
+    this.kid = kid;
+    this.prev = { seq: 0, h: GENESIS };
+    this.runs = new Runs();
+    this.spans = [];        // [{from, to, runs: [{kind, from, to}]}]
+    this.span = null;
+    this.accepts = new Map();   // finding id -> {seq, at} of the accept that names it
+    this.findings = [];     // the laptop's own cut and head entries: [{id, kind, words}]
+    this.count = 0;
+  }
+  /** '' when the entry keeps the chain's rules, or why it breaks them. */
+  next(e) {
+    if (e.seq !== this.prev.seq + 1) return e.seq > this.prev.seq + 1 ? missing(this.prev.seq + 1, e.seq - 1) + ' before entry ' + e.seq : 'entry ' + e.seq + ' is out of order';
+    if (e.prev !== this.prev.h) return 'entry ' + e.seq + ' does not follow the one before it';
+    const why = this.runs.next(e);
+    if (why) return why;
+    if (e.k === this.kid) {
+      if (this.span) { this.spans.push(this.span); this.span = null; }
+      if (e.action === 'audit.accept') for (const id of e.target.split(',')) if (id) this.accepts.set(id, { seq: e.seq, at: e.at });
+      if (e.action === 'audit.cut' || e.action === 'audit.head') this.findings.push({ id: 'e' + e.seq, kind: e.target, words: e.words });
+    } else {
+      if (!this.span) this.span = { from: e.seq, to: e.seq, runs: [] };
+      this.span.to = e.seq;
+      const kind = kindOf(e);
+      const r = this.span.runs[this.span.runs.length - 1];
+      if (r && r.kind === kind) r.to = e.seq; else this.span.runs.push({ kind, from: e.seq, to: e.seq });
+    }
+    this.prev = e;
+    this.count++;
+    return '';
+  }
+  /** '' when the walk may end here, or why not: a span with no boundary under the exporting key after it. */
+  end() {
+    const s = this.span;
+    return s ? (s.from === s.to ? 'entry ' + s.from + ' follows' : 'entries ' + s.from + '–' + s.to + ' follow') + ' entry ' + (s.from - 1) + ' with no boundary under the exporting key after it' : '';
+  }
+}
+
+// ---------------------------------------------------------------- an export's bundle (H.9.3, H.9.5)
+// The current file, and a rotated one named by the time it was set aside.
+const LOG_CURRENT = 'log/audit.jsonl';
+const LOG_ROTATED = /^log\/audit-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.jsonl$/;
+/** The bundle's fixed paths, beside its `log/` files. */
+const FIXED_PATHS = Object.freeze(['manifest.json', 'SHA256SUMS', 'SHA256SUMS.sig', 'signing-key.pem', 'README.txt', 'verify/verify-audit.js', 'verify/auditrules.js', 'verify/verify.html']);
+const SUMS_LINE = /^([0-9a-f]{64}) {2}([^\n]{1,200})$/;
+const MARKS = Object.freeze(['intact', 'linked', 'unvouched', 'broken']);
+const MAX_LINE = 65536;   // a line longer than this is no entry AGMessage writes: the check fails there
+
+/** Whether `p` is one of an export's log files: its current file, or a rotated one. */
+const isLogPath = (p) => p === LOG_CURRENT || LOG_ROTATED.test(p);
+/** '' when `p` is a path an export holds, or why not. Nothing is opened before every path has been read so. */
+function pathProblem(p) {
+  if (typeof p !== 'string' || !p) return 'an empty path';
+  if (p.indexOf('\u0000') >= 0) return 'a path holding a NUL';
+  if (p.indexOf('\\') >= 0) return 'a path holding a backslash: ' + p;
+  if (p.charAt(0) === '/') return 'a path from the root: ' + p;
+  if (/^[A-Za-z]:/.test(p)) return 'a path on a drive: ' + p;
+  if (p.indexOf('..') >= 0) return 'a path holding "..": ' + p;
+  if (!isLogPath(p) && FIXED_PATHS.indexOf(p) < 0) return 'not a file an export holds: ' + p;
+  return '';
+}
+
+/** `SHA256SUMS`'s lines: {list: [{digest, path}]} or {why}. Each path is held to `pathProblem`; none twice; never itself or its signature. */
+function parseSums(text) {
+  if (typeof text !== 'string' || !text.length || text.charAt(text.length - 1) !== '\n') return { why: 'SHA256SUMS does not end with a line end' };
+  const list = [];
+  const seen = {};
+  const lines = text.slice(0, -1).split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = SUMS_LINE.exec(lines[i]);
+    if (!m) return { why: 'line ' + (i + 1) + ' of SHA256SUMS is not "<sha256>  <path>"' };
+    const why = pathProblem(m[2]);
+    if (why) return { why: 'SHA256SUMS names ' + why };
+    if (m[2] === 'SHA256SUMS' || m[2] === 'SHA256SUMS.sig') return { why: 'SHA256SUMS lists ' + m[2] };
+    if (Object.prototype.hasOwnProperty.call(seen, m[2])) return { why: 'SHA256SUMS lists ' + m[2] + ' twice' };
+    seen[m[2]] = true;
+    list.push({ digest: m[1], path: m[2] });
+  }
+  return { list };
+}
+
+const isInt = (n) => Number.isSafeInteger(n) && n >= 0;
+const isStr = (v) => typeof v === 'string';
+/** '' when `m` is an export's manifest in its shape (H.9.3), or why not. What it says is checked against the bundle after. */
+function manifestProblem(m) {
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return 'manifest.json is not an object';
+  if (m.kind !== 'agmessage audit export' || m.v !== 1) return 'manifest.json is not an AGMessage audit export\'s (kind, v)';
+  if (!isInt(m.made)) return 'manifest.json has no time it was made';
+  const by = m.by;
+  if (!by || typeof by !== 'object' || !sameKeys(by, ACTOR_KEYS) || !ACTOR_KEYS.every((x) => isStr(by[x]))) return 'manifest.json does not say who exported';
+  const n = m.node;
+  if (!n || typeof n !== 'object' || !['id', 'name', 'version', 'build'].every((x) => isStr(n[x]))) return 'manifest.json does not name its AGMessage';
+  if (!HEX32.test(String(m.log)) || !HEX16.test(String(m.kid))) return 'manifest.json does not name its log and key id';
+  const sk = m.signingKey;
+  if (!sk || sk.alg !== 'Ed25519' || !HEX64.test(String(sk.fingerprint))) return 'manifest.json does not name an Ed25519 signing key';
+  const en = m.entries;
+  if (!en || !isInt(en.from) || !isInt(en.to) || en.from < 1 || en.to < en.from) return 'manifest.json does not give its range of entries';
+  if (!m.head || !isInt(m.head.seq) || !HEX64.test(String(m.head.h))) return 'manifest.json does not name the chain\'s head';
+  const c = m.check;
+  if (!c || MARKS.indexOf(c.mark) < 0 || !isStr(c.words) || !Array.isArray(c.findings)) return 'manifest.json does not carry the laptop\'s check';
+  if (!Array.isArray(m.files) || !m.files.length) return 'manifest.json lists no log file';
+  for (const f of m.files) {
+    if (!f || !isLogPath(String(f.path)) || !isInt(f.bytes) || !isInt(f.first) || !isInt(f.last)) return 'manifest.json lists a log file it does not describe';
+  }
+  return '';
+}
+
+/** The verifier's exit code for a bundle that is whole and signed by the expected key, from the laptop's own mark (H.9.5). */
+const codeFor = (mark) => (mark === 'intact' ? 0 : mark === 'broken' ? 2 : 1);
+
+const api = {
+  GENESIS, LEGACY_KEYS, KEYED_KEYS, BOUNDARIES, wholeEntry, canonical, canonical2, missing, kindOf, refOf, parseRef, Runs, Chain,
+  FIXED_PATHS, MARKS, MAX_LINE, pathProblem, isLogPath, parseSums, manifestProblem, codeFor,
+};
 if (typeof module === 'object' && module.exports) module.exports = api;
+else globalThis.AGMAuditRules = api;

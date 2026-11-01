@@ -40,6 +40,7 @@ const { buildContext, hallBrief } = require('./lib/context');
 const tlsmod = require('./lib/tls');
 const { Accounts, Sessions, TokenSessions } = require('./lib/accounts');
 const { AuditLog, keysFrom } = require('./lib/audit');
+const { Exporter } = require('./lib/auditexport');
 const rbac = require('./lib/rbac');
 const { mountAccounts } = require('./lib/http-accounts');
 const board = require('./lib/board');
@@ -143,6 +144,14 @@ const sessions = new Sessions(path.join(DATA_DIR, 'sessions.json'), accounts);
 const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json'), guard.mac(SECRET, 'admin-token:' + ADMIN_TOKEN, 43));
 const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'), { keys: keysFrom(secretbox.derive), records: path.join(secretbox.keyDir(), 'audit'), version: VERSION });
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
+// The fingerprint of the key this machine signs its exports with (lib/secretbox.js), '' in a run without the machine key.
+// Only the fingerprint is kept: the key itself is derived again when an export signs, and dropped after.
+const AUDIT_SIGN_KEY = (() => { try { return secretbox.signingKey().fingerprint; } catch { return ''; } })();
+// The signed export (lib/auditexport.js): one at a time, made as it streams, its verifier taken from app/verify.
+const auditExporter = new Exporter({
+  audit, signingKey: () => secretbox.signingKey(), verifyDir: path.join(__dirname, 'verify'), version: BUILD.full,
+  node: () => ({ id: settings.nodeId, name: 'AGMessage ' + os.hostname(), version: VERSION, build: BUILD.full }),
+});
 /** A count in an audit row's words: "1 file", "4 files". */
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
 const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
@@ -244,6 +253,14 @@ setInterval(() => {
 }, 5000).unref();
 let rejections = 0;
 let handlerFaults = 0;   // socket events refused because their handler threw (guardHandlers)
+/**
+ * Health's facts about the audit log, in the order its readers take them (H.11): the log's own, the signing key's
+ * fingerprint, then the newest export sent whole. Fields the archive adds go between the key and the last export.
+ */
+function auditFacts() {
+  const { lastExport, ...facts } = audit.facts();
+  return { error: audit.lastError, unwritten: audit.unwritten, ...facts, signKey: AUDIT_SIGN_KEY, lastExport };
+}
 function healthFacts() {
   return {
     restarts: RESTARTS,
@@ -264,7 +281,7 @@ function healthFacts() {
       stores: {
         ...Object.fromEntries(saveLanes().map(([name, l]) => [name, { writes: l.writes, error: l.lastError, failures: l.failures }])),
         rooms: { error: store.lastError, unsaved: store.unsaved().length },
-        audit: { error: audit.lastError, unwritten: audit.unwritten, ...audit.facts() },
+        audit: auditFacts(),
       },
     },
     elu: eluRing.stats(),
@@ -503,6 +520,9 @@ app.use(express.json({ limit: '256kb' }));
 const web = mountAccounts(app, {
   accounts, sessions, audit, settings, isEncrypted, isLoopback,
   isTokenAdmin: (req) => isValidAdminCookie(req),
+  // The export: the token's sign-in made by this run, who the token is in the log, the signing key, and HTTPS's state.
+  tokenHere: (req) => tokenSessions.mintedHere(readCookie(req, 'agm_admin')), hostActor: HOST_ACTOR,
+  exporter: auditExporter, signKey: () => AUDIT_SIGN_KEY, httpsOn: () => !!cert, port: PORT,
   hallNames: () => Array.from(store.rooms.values()).map((r) => ({ code: r.code, name: r.name || '' })),
   onAccountChanged: (id, what) => accountChanged(id, what),
   onSessionEnded: (h) => endSockets((s) => s.data.sessionHash === h, 'signout', SIGNED_OUT),
@@ -2696,9 +2716,13 @@ function auditAttentionLines(said) {
   }
   return lines;
 }
-/** The audit log's lines under the token that answers them: its key id, the key folder when AGM_KEY_DIR chose it, then what open() found. */
+/**
+ * The audit log's lines under the token that answers them: its key id, the signing key in full (the crew copies it into
+ * the show's paperwork and compares it at each start), the key folder when AGM_KEY_DIR chose it, then what open() found.
+ */
 function auditBanner(said) {
   const lines = ['  Audit log:   ' + (audit.keyless ? 'not keyed this run (' + audit.keyless.code + ')' : 'keyed (key ' + audit.kid + ')') + ' · Admin → Health'];
+  lines.push('  Signing key: ' + (AUDIT_SIGN_KEY ? AUDIT_SIGN_KEY.match(/.{4}/g).join(' ') : 'none this run (no machine key): an export cannot be signed'));
   if (process.env.AGM_KEY_DIR) lines.push('  Key folder:  ' + secretbox.keyDir() + ' (set by AGM_KEY_DIR, not the default)');
   return [...lines, ...auditAttentionLines(said)];
 }

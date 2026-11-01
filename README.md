@@ -15,7 +15,8 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   chained with a key, of every sign-in, change of rights, room control and screen take, and every proposal Stagewatch's
   show desk takes — never a message's text or a file's name. Its records live outside the data folder, so a cut or a log
   replaced while AGMessage is stopped is found; what this laptop cannot check reads △ until accepted at the laptop with
-  its token.
+  its token. It is **exported signed** (Ed25519, by a key derived from the laptop's) and checked on another computer
+  with a verifier that runs offline, in Node or one browser page.
   [docs/ACCOUNTS.md](docs/ACCOUNTS.md)
 - **Screens.** Every hall's screens — projector PC, lectern monitor, foyer TV — each with its own link to open in any
   browser: holding image, a message (note / soon / urgent), an image or PDF page from the hall, the hall's countdown

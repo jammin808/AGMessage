@@ -25,6 +25,8 @@
  *     run △ and is not written over. The entry the head names, found with its hash under another key id, is a changed
  *     entry: ✕ at every check, never a span and never accepted.
  *   - A check broken at a line is what health reads until a whole check replaces it.
+ *   - An export's check (`checkThrough`, lib/auditexport.js) reads the bytes the export holds open, up to its own entry,
+ *     and changes nothing this run reads; the newest export sent whole under this key is health's "Last export".
  *   - The head covers only what is durable: an entry counts as on disk once its fsync returned.
  *
  * Written synchronously and flushed: an entry is on disk (fsync) before the action is acknowledged. When the disk will
@@ -171,6 +173,11 @@ function spanWords(runs, { first, keyless, linked = false }) {
 }
 /** The entry this machine recorded last, found with its hash under another key id: changed, and never accepted. */
 const relabelWords = (f) => 'entry ' + f.seq + ' was changed after it was written: it carries the hash this machine recorded for its entry ' + f.seq + ', under key id ' + short(f.k || 'plain') + ' (their own claim), not this machine\'s key';
+/** What Health's "Last export" says of an `audit.export.sent` entry: when, by whom, and its range (its target, `1-1702`). */
+function exportOf(e) {
+  const m = /^([1-9][0-9]{0,15})-([1-9][0-9]{0,15})$/.exec(e.target);
+  return { at: e.at, by: e.actor.name || e.actor.t, from: m ? Number(m[1]) : 0, to: m ? Number(m[2]) : 0 };
+}
 /** A span's kind: plain from entry 1, unkeyed (plain after keyed), keyless (this machine without its key), or another key. */
 function spanKind(runs, keyless) {
   if (runs.every((r) => r.kind === 'plain')) return runs[0].from === 1 ? 'plain' : 'unkeyed';
@@ -200,6 +207,7 @@ class AuditLog {
     this.pending = '';      // whole lines chained but not yet on disk, written ahead of the next entry
     this.unwritten = 0;     // entries in `pending`
     this.lastError = null;  // why the last write did not reach the disk, until one does
+    this.lastCode = '';     // its error code (ENOSPC, EBUSY), for words that name it
     this.rotations = 0;
     this.opened = false;
     this.checking = null;   // the check running now: a second click shares it
@@ -229,6 +237,8 @@ class AuditLog {
     this.accepted = new Map();   // finding id -> when an accept on disk took it
     this.waitingAccepts = [];    // accepts not on disk yet: [{seq, ids, at}]
     this.lastCheck = null;  // the newest check's open findings, for health
+    this.lastExport = null; // the newest export sent whole, under this key, on disk: {at, by, from, to} (Health's "Last export")
+    this.exportWaiting = null; // an `audit.export.sent` not on disk yet: it becomes "Last export" once its fsync returned
     this.headLane = new WriteLane(path.join(records, 'head.json'), { delayMs: 200, keepBak: false, mode: 0o600, files: true });
     this.headLane.onSaved = () => {
       const p = this.producing;
@@ -363,6 +373,20 @@ class AuditLog {
     return null;
   }
 
+  /**
+   * The newest export sent whole that the newest file holds (H.6 step 2): a whole `audit.export.sent` under this key whose
+   * MAC checks, read backward by line. Anything else that says so is not one.
+   */
+  _lastExportIn(buf) {
+    if (!buf || this.keyless) return null;
+    for (const [text] of linesBack(buf)) {
+      if (text.indexOf('"action":"audit.export.sent"') < 0) continue;
+      const e = rules.wholeEntry(text);
+      if (e && e.action === 'audit.export.sent' && e.k === this.kid && sameMac(e.h, macOf(e, this.Ke))) return exportOf(e);
+    }
+    return null;
+  }
+
   /** Take the log for writing (the first write does this): the keys, the tail, the records, and what they disagree on. */
   open() {
     if (this.opened) return;
@@ -388,6 +412,7 @@ class AuditLog {
     const keyless = this._readKeyless();
     if (this.keyless) this._openKeyless(keyless);
     else this._openKeyed(keyless);
+    this.lastExport = this._lastExportIn(this.buf) || this.lastExport;
     this.buf = null;
     if (repair) this.write(SYSTEM, 'audit.repair', '', repair);
     if (this.moved) this.write(SYSTEM, 'audit.moved', '', 'this log was last written at ' + path.dirname(this.moved));
@@ -585,13 +610,18 @@ class AuditLog {
   }
 
   /**
-   * An entry reached the disk: accepts waiting for it take effect, and the head is asked for (latest wins, 200 ms). The
-   * first entry on disk that carries a new log's id has its records written at once.
+   * An entry reached the disk: accepts waiting for it take effect, an export sent whole becomes "Last export", and the
+   * head is asked for (latest wins, 200 ms). The first entry on disk that carries a new log's id has its records written
+   * at once.
    */
   _durable() {
     for (const a of this.waitingAccepts.splice(0)) {
       if (a.seq <= this.onDisk.seq) for (const id of a.ids) this.accepted.set(id, a.at);
       else this.waitingAccepts.push(a);
+    }
+    if (this.exportWaiting && this.exportWaiting.seq <= this.onDisk.seq) {
+      this.lastExport = exportOf(this.exportWaiting);
+      this.exportWaiting = null;
     }
     if (!this.opened) return;
     const first = !this.lOnDisk && this.onDisk.seq >= this.lFrom;
@@ -620,6 +650,7 @@ class AuditLog {
     this.unwritten++;
     this.recent.push({ e, mark: 'intact' });
     if (this.recent.length > RECENT) this.recent.shift();
+    if (e.action === 'audit.export.sent') this.exportWaiting = e;
     this._put();
     return e;
   }
@@ -644,9 +675,11 @@ class AuditLog {
       fs.fsyncSync(fd);
       this.onDisk = upTo;
       this.lastError = null;
+      this.lastCode = '';
       took = true;
     } catch (err) {
       this.lastError = err.message;
+      this.lastCode = err.code || 'EIO';
       console.error('  [audit] could not write' + (this.unwritten ? ' (' + this.unwritten + ' kept, written ahead of the next entry)' : '') + ': ' + err.message);
     } finally {
       if (fd !== null) { try { fs.closeSync(fd); } catch { /* the write itself said what went wrong */ } }
@@ -719,8 +752,12 @@ class AuditLog {
       kid: this.kid, headLag: this.keyless || this.headOff ? 0 : this._lag(this.onDisk.seq, this.saved),
       attention: this.attention().map((f) => ({ ...(f.id ? { id: f.id } : {}), kind: f.kind, mark: f.mark, words: f.words, ...(f.first ? { first: true } : {}) })),
       keyless: !!this.keyless,
+      lastExport: this.lastExport ? { ...this.lastExport } : null,
     };
   }
+
+  /** The files of the chain as they stand now: the rotated ones, oldest first, then the current one. */
+  files() { return [...this.rotated(), this.file]; }
 
   /**
    * Check the whole chain, rotated files included (H.7). It reads the files off the event loop and checks them in
@@ -734,15 +771,37 @@ class AuditLog {
     return this.checking;
   }
 
-  async _verify() {
+  /**
+   * The check an export runs on its own bytes (H.9.4): `source` yields {name, buf} for each file of the chain, oldest
+   * first, the last one cut just after `stop`, the export's own entry, which is where the chain must end. A check
+   * already running began before that entry, so it is waited for, not shared. It never re-runs, and what it finds
+   * changes nothing this run reads (health, the rows' marks): it is the export's.
+   */
+  async checkThrough(source, stop) {
+    this.open();
+    if (this.checking) await this.checking.catch(() => null);
+    return this._verify({ source, expect: { seq: stop.seq, h: stop.h }, publish: false });
+  }
+
+  /** The chain's files, read off the event loop one at a time: {name, buf}, or {name, code} for one that cannot be read. */
+  async * _read(files) {
+    for (const f of files) {
+      try { yield { name: path.basename(f), buf: await fs.promises.readFile(f) }; } catch (err) {
+        if (f !== this.file || err.code !== 'ENOENT') yield { name: path.basename(f), code: err.code || 'EIO' };
+        else yield { name: path.basename(f), buf: Buffer.alloc(0) };
+      }
+    }
+  }
+
+  async _verify({ source = null, expect: until = null, publish = true } = {}) {
     const rotations = this.rotations;
-    const expect = { ...this.onDisk };
+    const expect = until || { ...this.onDisk };
     const saved = this.saved ? { ...this.saved } : null;
     const held = this._held();
     const conditions = this.conditions();
     const own = this.kid;
     const anchor = this.anchor;
-    const files = [...this.rotated(), this.file];
+    const files = source || this._read(this.files());
     let prev = { seq: 0, h: GENESIS };
     let entries = 0;
     let lineCount = 0;
@@ -753,15 +812,14 @@ class AuditLog {
     const found = [];  // findings from this key's own cut and head entries
     const accepted = new Map();
     let atHead = null;
-    const answer = (fields) => this._answer({ fields, entries, spans, found, accepted, held, conditions, expect, saved });
-    for (const f of files) {
-      let buf;
-      try { buf = await fs.promises.readFile(f); } catch (err) {
-        if (f !== this.file || err.code !== 'ENOENT') return answer({ file: path.basename(f), brokenAt: 0, why: 'the file could not be read: ' + err.code });
-        buf = Buffer.alloc(0);
-      }
+    const answer = (fields) => this._answer({ fields, entries, spans, found, accepted, held, conditions, expect, saved, publish });
+    let last = path.basename(this.file);
+    for await (const f of files) {
+      if (f.code) return answer({ file: f.name, brokenAt: 0, why: 'the file could not be read: ' + f.code });
+      const buf = f.buf;
+      last = f.name;
       lineCount = 0;
-      const at = (n, why) => answer({ file: path.basename(f), brokenAt: n, why });
+      const at = (n, why) => answer({ file: f.name, brokenAt: n, why });
       for (const [text, n] of wholeLines(buf)) {
         lineCount = n;
         if (++checked % SLICE === 0) await turn();
@@ -794,8 +852,9 @@ class AuditLog {
         entries++;
       }
     }
-    if (this.rotations !== rotations) return this._verify();   // a rotation moved the files under the check: read them again
-    const tail = { file: path.basename(this.file), brokenAt: lineCount + 1 };
+    // A rotation moved the files under a routine check: read them again. An export's check reads its own handles.
+    if (!source && this.rotations !== rotations) return this._verify();
+    const tail = { file: last, brokenAt: lineCount + 1 };
     if (span) return answer({ ...tail, why: range(span.from, prev.seq, 'follows', 'follow') + ' entry ' + (span.from - 1) + ' with no boundary under this key after it: added behind the running server\'s back' });
     if (prev.seq < expect.seq) return answer({ ...tail, why: (prev.seq ? 'after entry ' + prev.seq + ', ' : '') + missing(prev.seq + 1, expect.seq) + ' (the newest written)' });
     if (prev.seq === expect.seq && prev.h !== expect.h) return answer({ ...tail, why: 'the newest entry is not the one this server wrote last' });
@@ -804,7 +863,7 @@ class AuditLog {
   }
 
   /** A check's answer from what its walk found (H.7): the open findings, the mark by precedence, the words, the digest. */
-  _answer({ fields, entries, spans, found, accepted, held, conditions, expect, saved }) {
+  _answer({ fields, entries, spans, found, accepted, held, conditions, expect, saved, publish = true }) {
     const keyless = this.keylessRuns;
     const spanFindings = spans.map((s) => {
       const kind = spanKind(s.runs, keyless);
@@ -821,12 +880,13 @@ class AuditLog {
     const digest = sha256(JSON.stringify(open.map((f) => [f.id, f.words]))).slice(0, 16);
     const head = { seq: saved ? saved.seq : 0, lag: this._lag(expect.seq, saved), ...(conditions.some((c) => c.kind === 'head') ? { error: conditions.find((c) => c.kind === 'head').words } : {}) };
     const extra = this.unwritten ? { unwritten: this.unwritten } : {};
-    if (fields.done) {
+    // An export's own check (publish false) is the export's: this run reads what the routine check found.
+    if (publish && fields.done) {
       // The walk is whole: what it found is what the rows' marks and health read from now on.
       this.spans = spans.map((s) => ({ id: 's' + s.from + '-' + s.to, from: s.from, to: s.to }));
       for (const [id, at] of accepted) this.accepted.set(id, at);   // an accept is never taken back: it only adds
       this.lastCheck = open;
-    } else {
+    } else if (publish) {
       // Broken at a line: health, the console and the opener read ✕ until a whole check replaces it.
       this.lastCheck = [{ kind: 'broken', mark: 'broken', words: 'Broken at line ' + fields.brokenAt + ' of ' + fields.file + ': ' + fields.why }, ...open];
     }

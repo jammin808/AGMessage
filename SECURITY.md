@@ -57,6 +57,17 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   whole log replaced while AGMessage is stopped are found at the next start. Entries this laptop cannot check (0.5.1's,
   another key's) read △ until the person at the laptop accepts them by typing the admin token into the dialog: never a
   sign-in, which is a record in the data folder anyone who can write it could add.
+- The audit log is exported signed, to be checked on another computer: the files byte for byte, the laptop's own check
+  of them, `SHA256SUMS` and its Ed25519 signature. The signing key is derived from the machine key when an export signs
+  and is never stored; its fingerprint is printed in the black window and on Admin → Health, and an auditor checks an
+  export against their own record of it, never against the export (anyone can sign a bundle with a key of their own).
+  Whoever holds `machine.key` can sign exports. Exporting is the right `audit.export`, admin-only (an account holding it
+  signs in through the tunnel only when admins may), or the token at the laptop signed in by this run; from another
+  device only over HTTPS. The export is an audit row, keeps no copy on the server, and carries personal data (names,
+  addresses, what each did), which the dialog says. The verifier treats the bundle as untrusted input: only its fixed
+  paths are read, a path that leaves the folder, a link or a file not listed ends the check before it is read, and its
+  words are printed with control characters escaped; the browser verifier is one page whose policy lets it load nothing
+  and send nothing.
 - What the keyed log cannot show: anything done by someone who can change AGMessage's code, its Node or its start
   script, or holds this machine's key. In the portable layout `app\data` sits beside `app\lib` and the start script under
   the same rights, so whoever can write the data folder can usually change the code too; keep the folder where only the

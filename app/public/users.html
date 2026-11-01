@@ -42,9 +42,11 @@
         <div class="board-tools">
           <span class="chain-state" id="chainState"></span>
           <button class="btn small" id="verifyBtn" type="button">Check the log</button>
+          <button class="btn small" id="exportBtn" type="button" hidden>Export…</button>
         </div>
       </div>
       <p class="hint">Every sign-in, change of rights, hall, display and send to another show system, newest first. Each entry is chained to the one before it with this laptop's key, so an edited, removed or reordered line, or one written without the key, shows here: ✓ checked under this laptop's key · ◇ linked, and accepted on the AGMessage laptop · △ not vouched for yet (accept it on the AGMessage laptop, Admin → Health) · ✕ did not check.</p>
+      <p class="hint" id="auditKey"></p>
       <ol class="audit-list" id="auditList"></ol>
     </section>
   </main>
@@ -90,6 +92,7 @@
   </dialog>
 
   <script src="/common.js"></script>
+  <script src="/audit-export.js"></script>
   <script src="/users.js"></script>
 </body>
 </html>

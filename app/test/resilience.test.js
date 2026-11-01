@@ -413,6 +413,8 @@ test('Stagewatch link: header key, receipts with the message id, clock offset, c
 test('guard rails: no eval, no key in a URL, and synchronous file calls only where they were judged safe', () => {
   const files = ['server.js', 'supervise.js', ...fs.readdirSync(path.join(ROOT, 'lib')).map((f) => 'lib/' + f), ...fs.readdirSync(path.join(ROOT, 'verify')).map((f) => 'verify/' + f), ...['app.js', 'admin.js', 'admin-plus.js', 'join.js'].map((f) => 'public/' + f)];
   assert.ok(files.includes('verify/auditrules.js'), 'the audit log\'s key-free rules are read too');
+  // The export and its verifier run beside the show or on another computer, all asynchronous: none may hold the loop.
+  for (const f of ['lib/auditexport.js', 'lib/zip.js', 'verify/verify-audit.js', 'verify/page.js']) assert.ok(files.includes(f), f + ' is read, at 0 synchronous calls');
   // Synchronous fs calls block every meeting on the server while they run. These are allowed — each with its reason —
   // and the count may not grow without someone deciding it here.
   const allowed = {

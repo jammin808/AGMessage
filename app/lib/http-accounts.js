@@ -1,6 +1,7 @@
 'use strict';
 /**
- * The accounts' HTTP side: signing in and out, the first admin, changing a password, managing accounts, the audit log.
+ * The accounts' HTTP side: signing in and out, the first admin, changing a password, managing accounts, the audit log
+ * and its signed export.
  *
  * Every state change is a JSON POST/PATCH/DELETE from the same origin (the Origin header, when a browser sends one, must
  * name this host — a page elsewhere cannot drive it) carrying the SameSite=Strict session cookie. Each answer is
@@ -8,8 +9,8 @@
  * log with who, from where, and what — never a password or a token.
  *
  * Through the Cloudflare tunnel (a request that came in over loopback with Cloudflare's headers) an account with admin
- * rights (users.manage, settings.manage) may not sign in, nor use those rights on a session it has, unless the admin
- * turned on "Admin sign-in through the tunnel"; everyone else may. A refused sign-in gets the same answer as a wrong
+ * rights (users.manage, settings.manage, audit.export) may not sign in, nor use those rights on a session it has, unless
+ * the admin turned on "Admin sign-in through the tunnel"; everyone else may. A refused sign-in gets the same answer as a wrong
  * password, so it never tells a stranger that a password was right.
  */
 const { Accounts, passwordProblem, temporaryPassword, NO_MATCH } = require('./accounts');
@@ -274,9 +275,12 @@ function mountAccounts(app, o) {
 
   // Each row carries its mark at the end: ✓ checked under this key, ◇ or △ inside a span (by that span's state now),
   // ✕ a row that failed its check or a line that is not a whole entry.
+  // `key`, at the end: the log's key id and the signing key's fingerprint, which an export is checked against; both ''
+  // in a run with no machine key, whose key id names a key made for that run alone.
   app.get('/api/audit', signedIn('audit.read'), (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ ok: true, entries: audit.latest(Number(req.query.limit) || 200) });
+    const entries = audit.latest(Number(req.query.limit) || 200);
+    res.json({ ok: true, entries, key: { kid: audit.keyless ? '' : audit.kid, fingerprint: o.signKey() } });
   });
   // The check reads every file of the chain off the event loop, in slices; clicks while one runs share it. The laptop's
   // token at the laptop checks too (Admin → Health, before its Accept). `ok` is the check's: true only for ✓.
@@ -285,6 +289,33 @@ function mountAccounts(app, o) {
     res.setHeader('Cache-Control', 'no-store');
     res.json(await audit.verify());
   });
+
+  // ---------------------------------------------------------------- the signed export (audit.export, with audit.read)
+  // Who may export (H.9.1): the laptop's token at the laptop, signed in by this run (a sign-in read back from the file
+  // after a restart never counts), or an account holding audit.export (admin-only: kept off the tunnel unless admins may
+  // sign in there) and audit.read, since an export reads every entry. From another device only over HTTPS: the bundle
+  // holds the names and addresses of the whole log. Never a code guest, a screen, a node or the context token.
+  const httpsWords = (req) => {
+    if (!o.httpsOn()) return 'Export at the AGMessage laptop: HTTPS is off on this AGMessage, and from another device an export goes only over HTTPS.';
+    const host = String(req.headers.host || '').replace(/[^A-Za-z0-9.:[\]-]/g, '').slice(0, 80);
+    const name = host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : host.split(':')[0];
+    const where = throughTunnel(req) ? 'https://' + name : 'https://' + name + ':' + o.port;
+    return 'Export over HTTPS: open ' + where + ' (trust this AGMessage\'s certificate once: /tls).';
+  };
+  const exporter = (req, res, next) => {
+    if (guard.isHostMachine(req) && o.isTokenAdmin(req)) {
+      if (!o.tokenHere(req)) return res.status(403).json({ ok: false, error: 'Sign in again with the token (Admin login): a sign-in from before the restart cannot export.' });
+      req.agmExport = o.hostActor;
+      return next();
+    }
+    return signedIn('audit.export')(req, res, () => {
+      if (!rbac.can(req.agm.account, 'audit.read')) return res.status(403).json({ ok: false, error: 'An export reads every entry: your account needs audit.read as well as audit.export.' });
+      if (!guard.isHostMachine(req) && !browserHttps(req)) return res.status(403).json({ ok: false, error: httpsWords(req) });
+      req.agmExport = actorOf(req.agm);
+      return next();
+    });
+  };
+  app.post('/api/audit/export', exporter, (req, res) => o.exporter.run(res, req.agmExport, guard.clientIp(req)));
 
   return { who, signedIn, actorOf, throughTunnel, adminBlocked, COOKIE };
 }

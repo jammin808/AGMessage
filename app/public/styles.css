@@ -1740,7 +1740,8 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 [data-mark="linked"] { --mark: var(--ink); }
 [data-mark="unvouched"] { --mark: var(--warn); }
 [data-mark="broken"] { --mark: var(--danger); }
-.chain-state[data-mark], .audit-line[data-mark] { color: var(--mark, inherit); font-weight: 600; }
+.chain-state[data-mark], .audit-line[data-mark], .export-state[data-mark] { color: var(--mark, inherit); font-weight: 600; }
+.export-words { line-height: 1.45; }
 .audit-mark { color: var(--mark); font-weight: 700; text-align: center; }
 .audit-findings { list-style: none; margin: .2rem 0 .4rem; padding: 0; font-size: .88rem; }
 .audit-findings li { color: var(--mark, inherit); margin: .15rem 0; }

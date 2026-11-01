@@ -8,8 +8,8 @@
  *
  * Hall-scoped capabilities need access to that hall as well; global ones (managing halls, accounts, settings, reading
  * the audit log) do not. Three rules keep the rights from escalating: only an admin may make an admin or hand out
- * users.manage or settings.manage; an account that is not an admin manages only accounts within its own rights and halls,
- * and hands out only those; and nobody changes their own role or rights.
+ * users.manage, settings.manage or audit.export; an account that is not an admin manages only accounts within its own
+ * rights and halls, and hands out only those; and nobody changes their own role or rights.
  */
 
 const CAPS = Object.freeze({
@@ -24,10 +24,13 @@ const CAPS = Object.freeze({
   'users.manage': 'Create accounts and set their roles, halls and rights',
   'settings.manage': 'App settings: AI key, HTTPS, the tunnel, the show network',
   'audit.read': 'Read the audit log',
+  'audit.export': 'Export the whole audit log, signed, to check on another computer (an account with it signs in through the tunnel only when admins may)',
 });
 
 const HALL_SCOPED = new Set(['hall.view', 'hall.post', 'hall.files', 'display.control', 'display.manage', 'stage.send', 'nodes.control']);
-const ADMIN_ONLY = new Set(['users.manage', 'settings.manage']);
+// The rights only an admin hands out. An account holding one is admin-level: changed only by an admin, and kept off the
+// tunnel unless admins may sign in there. audit.export is one: an export carries every entry off the laptop.
+const ADMIN_ONLY = new Set(['users.manage', 'settings.manage', 'audit.export']);
 
 const ROLES = Object.freeze({
   admin: { label: 'Admin', allHalls: true, caps: Object.keys(CAPS), words: 'Everything, every hall: accounts, rights and settings' },
@@ -64,7 +67,7 @@ function effective(account) {
   return { caps, allHalls, halls: new Set(Array.isArray(account.halls) ? account.halls : []) };
 }
 
-/** Whether the account, enabled, would hold a right only an admin may hand out (users.manage, settings.manage). */
+/** Whether the account, enabled, would hold a right only an admin may hand out (users.manage, settings.manage, audit.export). */
 function holdsAdminOnly(account) {
   if (!account) return false;
   const caps = effective({ ...account, disabled: false }).caps;
@@ -96,10 +99,10 @@ function mayChange(actor, target, change, { activeAdmins = 1 } = {}) {
   }
   if ('role' in change && !isRole(change.role)) return 'Unknown role.';
   if ((change.role === 'admin' || (target && target.role === 'admin')) && !actorIsAdmin) return 'Only an admin may make or change an admin.';
-  // An account that may manage accounts or settings is changed (reset, signed out, removed, re-enabled) by an admin
-  // only: otherwise one holder of users.manage could take over another's settings.manage. Read with the account
-  // enabled, so a disabled holder is not re-enabled by a non-admin either. Changing one's own name is not this.
-  if (target && target.id !== actor.id && !actorIsAdmin && holdsAdminOnly(target)) return 'Only an admin may change an account that manages accounts or settings.';
+  // An account that may manage accounts or settings, or export the audit log, is changed (reset, signed out, removed,
+  // re-enabled) by an admin only: otherwise one holder of users.manage could take over another's settings.manage. Read
+  // with the account enabled, so a disabled holder is not re-enabled by a non-admin either. Changing one's own name is not this.
+  if (target && target.id !== actor.id && !actorIsAdmin && holdsAdminOnly(target)) return 'Only an admin may change an account that manages accounts or settings, or exports the audit log.';
   for (const c of [].concat(change.grant || [])) {
     if (!isCap(c)) return 'Unknown right: ' + String(c).slice(0, 40);
     if (ADMIN_ONLY.has(c) && !actorIsAdmin) return 'Only an admin may grant ' + c + '.';
@@ -148,7 +151,7 @@ function afterChange(target, change) {
 /**
  * What `actor` may hand out on the Accounts page, so it offers no more than mayChange allows: {admin, caps, allHalls,
  * halls} (halls empty when allHalls). An admin gives everything; anyone else the rights and halls it holds, never
- * users.manage or settings.manage.
+ * users.manage, settings.manage or audit.export.
  */
 function giveable(actor) {
   const e = effective(actor);

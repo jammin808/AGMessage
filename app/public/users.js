@@ -34,6 +34,8 @@
     $('who').textContent = me.account.name + ' · ' + me.account.rights.roleLabel;
     const canUsers = me.account.rights.caps.includes('users.manage');
     const canAudit = me.account.rights.caps.includes('audit.read');
+    // Export reads every entry, so it is offered with both rights, as the server asks.
+    $('exportBtn').hidden = !(canAudit && me.account.rights.caps.includes('audit.export'));
     $('tabPeople').hidden = !canUsers;
     if (!canUsers && canAudit) tab('audit');
     if (!canUsers) return;
@@ -211,9 +213,14 @@
     broken: { shape: '✕', words: 'did not check' },
   };
   const markHtml = (m) => { const k = MARKS[m] ? m : 'broken'; return '<span class="audit-mark" data-mark="' + esc(k) + '" title="' + esc(MARKS[k].words) + '"><span aria-hidden="true">' + esc(MARKS[k].shape) + '</span><span class="sr-only">' + esc(MARKS[k].words) + '</span></span>'; };
+  let signKey = '';   // the signing key's fingerprint, which an export is checked against
   async function loadAudit() {
     const r = await AGM.api('GET', '/api/audit?limit=300');
     if (!r.ok) { AGM.toast(r.error, true); return; }
+    signKey = r.key && typeof r.key.fingerprint === 'string' ? r.key.fingerprint : '';
+    const kid = r.key && typeof r.key.kid === 'string' ? r.key.kid : '';
+    $('auditKey').textContent = !r.key ? '' : (kid ? 'Keyed with key ' + kid + '. ' : 'Not keyed this run: it has no machine key. ')
+      + (signKey ? 'Exports are signed with the key ' + signKey.match(/.{4}/g).join(' ') + ': whoever checks one compares it with their own record of this key (the show\'s paperwork), never with the export.' : 'No export can be signed this run.');
     const ol = $('auditList');
     ol.textContent = '';
     for (const e of r.entries) {
@@ -253,6 +260,8 @@
       if (mark) await loadAudit();   // the rows' marks, as this check found the spans now
     } finally { btn.disabled = false; }
   });
+
+  $('exportBtn').addEventListener('click', () => { window.AGMAuditExport.open({ fingerprint: signKey, done: () => { loadAudit(); } }); });
 
   load().then(() => { if (location.hash === '#audit') tab('audit'); });
 })();

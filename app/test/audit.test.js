@@ -317,7 +317,7 @@ test('no key: a link the key folder refuses, a key that cannot be read and a sho
       await failing('readFileSync', code, at(keyFile), () => {
         assert.equal(secretbox.hasKey(), false);
         assert.equal(secretbox.keyProblem().code, code);
-        assert.equal(secretbox.open('enc1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'), '');
+        assert.equal(secretbox.open('enc1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'), '');   // secret-scan: fixture — zeros in a sealed value's shape, sealed by no key
       });
       assert.deepEqual(fs.readFileSync(keyFile), before, code + ': its bytes are unchanged');
       assert.deepEqual(fs.readdirSync(k), ['machine.key']);
@@ -977,13 +977,23 @@ test('end to end: a run with no machine key still starts and signs in, opens wit
   t.after(async () => { await h.stopServer(srv.child); });
   assert.match(srv.out(), /Audit log: {3}not keyed this run \(EISDIR\)/);
   assert.match(srv.out(), /Audit log: {3}△ this run has no machine key \(EISDIR\)/);
+  assert.match(srv.out(), /^ {2}Signing key: none this run \(no machine key\): an export cannot be signed$/m);
   const tok = (await h.api(srv.base, 'POST', '/api/admin/login', { token: h.TOKEN })).cookie;
   assert.ok(tok, 'the token signs in');
+  // No export can be signed: refused with the reason, and no row written.
+  const exp = await h.api(srv.base, 'POST', '/api/audit/export', {}, { cookie: tok });
+  assert.deepEqual([exp.status, exp.body.error], [503, 'not exported: this run has no machine key (EISDIR), so an export cannot be signed']);
   const es = entries(path.join(dataDir, 'audit.jsonl'));
-  assert.deepEqual([es[0].action, es[1].action], ['audit.keyless', 'login.token']);
+  assert.deepEqual(es.map((e) => e.action), ['audit.keyless', 'login.token']);
   const marker = fs.readdirSync(path.join(keyDir, 'audit')).filter((f) => f.startsWith('keyless-'));
   assert.deepEqual(marker, ['keyless-' + es[0].l + '.json']);
-  const attention = (await h.api(srv.base, 'GET', '/api/health')).body.saves.stores.audit.attention;
+  const auditFacts = (await h.api(srv.base, 'GET', '/api/health')).body.saves.stores.audit;
+  assert.deepEqual([auditFacts.signKey, auditFacts.lastExport], ['', null]);
+  // The audit list names no key: this run's key id is of a key made for it alone, which nothing after it can check.
+  const admin = (await h.api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const list = await h.api(srv.base, 'GET', '/api/audit', undefined, { cookie: admin });
+  assert.deepEqual([list.status, list.body.key], [200, { kid: '', fingerprint: '' }]);
+  const attention = auditFacts.attention;
   assert.deepEqual(attention.map((f) => [f.kind, f.mark]), [['keyless', 'unvouched']]);
   assert.match(attention[0].words, /the machine key at .+ could not be read \(EISDIR\)/);
   const socket = await h.connect(srv.base, tok);
@@ -1037,7 +1047,7 @@ test('end to end: a later start says again what is still open, and a line change
   assert.deepEqual((await health()).map((f) => [f.id, f.kind, f.mark]), [[undefined, 'broken', 'broken']]);
 });
 
-test('end to end: no secret in any audit file, record, health, the rows, /api/admin/me or a check, in hex or base64', async (t) => {
+test('end to end: no secret in any audit file, record, health, the rows, /api/admin/me, a check, an export\'s header or any member of it, in hex or base64', async (t) => {
   const srv = await h.startServer();
   t.after(async () => { await h.stopServer(srv.child); });
   const base = srv.base;
@@ -1071,8 +1081,21 @@ test('end to end: no secret in any audit file, record, health, the rows, /api/ad
   for (const [what, url, cookie] of [['health', '/api/health', tok], ['rows', '/api/audit?limit=500', admin], ['me', '/api/admin/me', tok], ['check', '/api/audit/verify', admin]]) {
     texts.push([what, JSON.stringify((await h.api(base, 'GET', url, undefined, { cookie })).body)]);
   }
+  // An export, by the token and by the admin account: its header and every member, uncompressed.
+  const sent = () => entries(path.join(srv.dataDir, 'audit.jsonl')).filter((e) => e.action === 'audit.export.sent').length;
+  for (const cookie of [tok, admin]) {
+    const before = sent();
+    const r = await fetch(base + '/api/audit/export', { method: 'POST', headers: { cookie } });
+    assert.equal(r.status, 200);
+    texts.push(['X-AGM-Export', r.headers.get('x-agm-export')]);
+    for (const m of h.readZip(Buffer.from(await r.arrayBuffer()))) texts.push(['export ' + m.name, m.data.toString('latin1'), m.data]);
+    await h.until(() => sent() > before, 5000, 'the export\'s own end in the log, which frees its slot');
+  }
   assert.ok(texts.some(([w]) => w.startsWith('records/head-')), 'the records were read');
+  assert.ok(texts.some(([w]) => w.endsWith('/SHA256SUMS.sig')), 'the exports were read');
   for (const [name, value] of Object.entries(secrets)) {
     for (const form of forms(value)) for (const [where, text] of texts) assert.ok(!text.includes(form), name + ' is not in ' + where);
+    // The raw bytes too (a member such as the signature is binary).
+    for (const [where, , bytes] of texts) if (bytes && value.length >= 12) assert.ok(!bytes.includes(value), name + ' is not in ' + where + ' as bytes');
   }
 });

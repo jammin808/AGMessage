@@ -82,7 +82,9 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | Rights and roles (pure) | `app/lib/rbac.js` |
 | Accounts, password hashing, sessions; their routes | `app/lib/accounts.js`, `app/lib/http-accounts.js` |
 | The audit log (chained with a key; its records beside the machine key, outside the data folder; the check and Accept) | `app/lib/audit.js` |
-| The audit log's rules that need no key (whole lines, links, runs and boundaries), shared with a checker on another computer | `app/verify/auditrules.js` |
+| The audit log's rules that need no key (whole lines, links, runs and boundaries, an export's paths, `SHA256SUMS` and manifest), shared with a checker on another computer | `app/verify/auditrules.js` |
+| The audit log's signed export, the zip it streams, and its dialog on the pages | `app/lib/auditexport.js`, `app/lib/zip.js`, `app/public/audit-export.js` |
+| The verifier on another computer: Node (`verify-audit.js`, which also assembles the page) and the browser page (`page.html`, `page.js`, `page.css`) | `app/verify/` |
 | The halls board and help requests | `app/lib/board.js` |
 | Screens (display URLs) | `app/lib/displays.js`, `app/public/display.*` |
 | Stagewatch links, peers, hello | `app/lib/nodes.js` |

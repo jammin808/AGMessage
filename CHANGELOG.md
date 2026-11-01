@@ -192,10 +192,66 @@ Accept belongs to the laptop's token, and C, "First start should ask", with ques
   above all, anything done by someone who can change AGMessage's code or holds the machine key, which in the portable
   layout is anyone who can write the AGMessage folder. `README.txt` says where to keep the folder, and what a "Key
   folder:" line in the black window means.
-- Not yet: the signed export, checked on another computer (unit 6), and the log carried across events (unit 7).
+- Not yet: the log carried across events (unit 7).
 - Rolling back: 0.5.1 reads a keyed log as "✕ Broken at line 812: entry 812 was changed after it was written" (its
   first keyed entry's number) and writes on with plain hashes; it ignores the records. Back on 0.6.0, the entries it
   wrote are a span (`audit.unkeyed`), △ until accepted.
+
+**The audit log is exported, signed, and checked on another computer** (the owner's answer A, 2026-10-26: "The log must
+be exportable"; answers 1 and 3 of 2026-10-27 at their defaults: the admin and the laptop's token export, others by an
+admin's grant, and an export at the end of each show day)
+- Export… (Accounts → Audit log, and Admin → Health) makes one zip as it streams, `POST /api/audit/export`, and keeps no
+  copy: every file of the log byte for byte, up to and including the export's own entry; `manifest.json` (the log, the
+  key id, the range, the head, and the laptop's own check run through those bytes, its mark, words and findings);
+  `SHA256SUMS` over every file; its Ed25519 signature by this laptop's signing key, derived from the machine key when it
+  signs and never stored; the public key; a README that says how to check it and what it proves and does not; and the
+  verifier. Each entry keeps its HMAC: the MACs are checked on the laptop, and the export carries that check, signed.
+- Its own entry first: `audit.export` (the range and the key's short form) is on disk before any file is listed, then
+  `audit.export.sent` with the zip's SHA-256 once the last byte was handed to the system ("sent", never "received"), or
+  `audit.export.fail` with why (the browser went away, a file changed while it was exported, the disk would not take
+  the entry). What is sent is what was checked: the files are listed once and opened, the check reads through those
+  handles, and each file's SHA-256 is taken again as it streams. A rotation between the listing and the opens lists
+  and opens them again (at most three times), and the export ends at the file its own entry was rotated into. One
+  export at a time ("an export is being made for Ana since 14:02: try again when it ends"). Cancel (or Escape) while it
+  is made stops it: the request is aborted, the log says it was not sent whole, and nothing is saved. A run without the
+  machine key, or a copy with no verifier to ship, is refused with the reason and writes nothing.
+- Who: the right `audit.export`, admin-only: the admin role holds it, the manager preset does not, only an admin grants
+  it, and an account holding it is changed only by an admin and signs in through the tunnel only when admins may (its
+  words say so). The account needs `audit.read` too. The laptop's token at the laptop exports, its sign-in made by this
+  run ("Sign in again with the token (Admin login): a sign-in from before the restart cannot export."). From another
+  device only over HTTPS ("Export over HTTPS: open https://<address>:3023 (trust this AGMessage's certificate once:
+  /tls)."); never a code guest, a screen, a node or the context token.
+- The signing key's fingerprint is printed in full in the black window ("Signing key: fe97 b845 …", 16 groups), on Admin
+  → Health with Copy, and under Accounts → Audit log; the crew copies it into the show's paperwork. An auditor checks an
+  export against that record, never against the export. Health also says "Last export: entries 1–1702, sent whole at
+  18:40 on 26 Oct (Ana). Export at the end of each show day." once that row is on disk, read again from the log at each
+  start, or "No export in the log's newest file". Appended to `/api/health`'s `saves.stores.audit`: `signKey`, then
+  `lastExport` (the archive's fields will go between them); to `/api/audit`: `key {kid, fingerprint}`, both `''` in a
+  run with no machine key ("Not keyed this run" under Accounts → Audit log, as on Health).
+- The verifier runs offline, from the release (`agmessage-audit-verifier-<version>.zip`, published, hashed and attested
+  with the bundle): `node verify-audit.js <the extracted folder> --fingerprint <64 hex>` on the Node a bundle carries or
+  any from 22, or `verify.html` in a browser (Chrome or Edge 137, Firefox 129, Safari 17 or newer), one file that loads
+  nothing and sends nothing. Exit 0 signed by the expected key and whole, and the laptop said ✓; 1 ◇ or △; 2 ✕ (also
+  when every file matches its signed digest and the entries break where the laptop's own signed check said they do,
+  as an archive's failure its verdict names does); 3 a step failed, a file was changed, removed or added since, or
+  another key; 4 no key given to compare with. Every listed file, the log's included, is checked against its digest
+  before any entry is walked. The bundle is untrusted input: only its fixed paths are read, a path holding `..`, a
+  backslash, a drive letter or a NUL ends the check before anything else is opened, a link or a file not listed is
+  named and never read, and a bundle's words are printed with control characters escaped. `--earlier`
+  compares with an export kept off the laptop: every entry it held must be in the later one byte for byte, which holds
+  even against whoever holds the machine key; an earlier export whose entries break is refused as one that does not
+  check. By hand, OpenSSL and `sha256sum -c` check the signature and the files. A file the bundle does not list ends
+  the check (exit 3), so the README says to check it before browsing the folder (macOS Finder writes `.DS_Store`).
+- Older entries hold what they held: screen takes written before 0.6.0 can carry a message's first words and a file's
+  name, and an export carries them. The dialog says so; this version's rows never write them (unit 1).
+- CI: the package job exports the bundle's own audit log with the token, extracts it with Expand-Archive and checks it
+  with the release's verifier on the bundle's `node.exe` (exit 0); the Linux tests check a bundle with `unzip -tq`,
+  OpenSSL and `sha256sum -c`, word for word as its README gives them; the browser smoke saves an export through
+  Chrome's own download, checks its bytes against the zip the log names, and opens `verify.html` from disk.
+- Not yet: the archive point and the split, and archives in an export (unit 7); "Export the log…" in the audit list's
+  right-click menu (unit 24).
+- Rolling back: 0.5.1 has no export and ignores the new rows; a bundle already made stays checkable with the release's
+  verifier.
 
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already

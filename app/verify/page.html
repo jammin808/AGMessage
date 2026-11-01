@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>AGMessage — check an audit export</title>
+<style>__STYLE__</style>
+</head>
+<body>
+<main>
+  <h1>Check an AGMessage audit export</h1>
+  <p class="version">This verifier is from AGMessage __VERSION__. It loads nothing and sends nothing: the export stays on this computer. Take it from the AGMessage release the export names, and check its digest against that release's SHA256SUMS.</p>
+  <ol class="steps">
+    <li>
+      <label for="fp">The laptop's signing key, from your own record: the show's paperwork, or Admin → Health read in person at the laptop. Never take it from the export.</label>
+      <input id="fp" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="fe97 b845 a378 6ffd … (64 characters)">
+    </li>
+    <li>
+      <label for="folder">The export, extracted (right-click the zip, Extract All), as one folder:</label>
+      <input id="folder" type="file" webkitdirectory multiple>
+      <span class="hint">or drop the folder on this page.</span>
+    </li>
+    <li>
+      <label for="earlier">Optional: an earlier export of the same log that you kept off the laptop, to compare with:</label>
+      <input id="earlier" type="file" webkitdirectory multiple>
+    </li>
+  </ol>
+  <p id="state" class="state" data-code="" role="status" aria-live="polite">Choose the extracted folder.</p>
+  <ul id="said" class="said"></ul>
+  <section id="verdict" class="verdict" hidden>
+    <h2 id="verdictHead">The laptop's own check</h2>
+    <p id="verdictWords"></p>
+    <ul id="findings" class="findings"></ul>
+  </section>
+  <section id="entriesBox" hidden>
+    <h2>The entries</h2>
+    <p class="hint">Times are the laptop's clock, in UTC. △ an entry the laptop could not vouch for and nobody accepted; ◇ one accepted on the laptop.</p>
+    <div class="pager"><button id="prev" type="button">← Newer</button> <span id="pageNo"></span> <button id="next" type="button">Older →</button></div>
+    <table>
+      <thead><tr><th scope="col">#</th><th scope="col">When (UTC)</th><th scope="col"><span class="sr">Mark</span></th><th scope="col">Who</th><th scope="col">What</th><th scope="col">On</th><th scope="col">Words</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+  <p class="hint">Not checked here: the keyed entries' own MACs. The laptop's key never leaves it; the laptop's check, signed into the export, vouches for them. A browser cannot tell a link from a file, so the Node verifier (verify-audit.js) is the stricter of the two.</p>
+</main>
+<script>__RULES__</script>
+<script>__PAGE__</script>
+</body>
+</html>

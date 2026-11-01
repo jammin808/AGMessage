@@ -88,6 +88,13 @@ export default [
         { selector: 'ImportExpression', message: 'auditrules.js is pure: it loads nothing' }],
     },
   },
+  // The browser verifier's script, put inline in verify.html beside auditrules.js: a page opened from disk, so browser
+  // globals only (no Node global), one function scope, and HTML only from escaped parts, as the pages'.
+  {
+    files: ['app/verify/page.js'],
+    languageOptions: { sourceType: 'script', globals: { ...Object.fromEntries(Object.keys(globals.node).map((name) => [name, 'off'])), ...globals.browser } },
+    rules: { strict: ['error', 'function'], 'agm/no-unescaped-html': 'error' },
+  },
   // A library never ends the process: the server decides, and its exit codes carry intent (lib/resilience.js EXIT).
   {
     files: ['app/lib/**/*.js'],

@@ -89,18 +89,71 @@ so a line that was changed, removed, or written without the key shows.
   own tick; a ✕ asks for a second tick, because what it names (entries
   missing, say) cannot be brought back. An admin account is told where to
   accept, and has no button.
-- The machine key also keys the audit log. A rebuilt Windows profile or a
-  new laptop turns the earlier entries △ until accepted, and anyone holding
-  a copy of machine.key can write entries that check. Run the show from one
-  Windows account: two accounts taking turns on one folder each need an
-  Accept at every switch.
+- The machine key also keys the audit log and signs its exports. A rebuilt
+  Windows profile or a new laptop turns the earlier entries △ until
+  accepted and changes the signing key, and anyone holding a copy of
+  machine.key can write entries that check and sign exports of them. Run the
+  show from one Windows account: two accounts taking turns on one folder
+  each need an Accept at every switch.
 - Keep this folder where only the show's Windows account can write it: not
   a USB stick, not a shared folder. Whoever can write it can change
-  AGMessage itself, and then the log says whatever they make it say. A
-  "Key folder:" line in the black window means someone set AGM_KEY_DIR.
+  AGMessage itself, and then the log says whatever they make it say. At
+  each start, compare the "Signing key:" line in the black window with the
+  show's paperwork. A "Key folder:" line there means someone set
+  AGM_KEY_DIR.
 - Going back to 0.5.1: its check reads a keyed log as "Broken at line N:
   entry N was changed after it was written", and it writes on. Back on
-  0.6.0, the entries it wrote read △ until accepted.
+  0.6.0, the entries it wrote read △ until accepted. 0.5.1 has no export;
+  one already made stays checkable with the release's verifier.
+
+Checking the audit log on another computer
+------------------------------------------
+Export at the end of each show day, and keep the export off the laptop.
+If the laptop is lost, the exports you kept are what is left to check.
+
+- Copy the "Signing key:" line from the black window (all 64 characters,
+  also on Admin -> Health with Copy) into the show's paperwork. Whoever
+  checks an export compares it with that record: never with the export,
+  which anyone could sign with a key of their own.
+- Export: Admin -> Health -> Export..., or Halls -> Accounts -> Audit log
+  -> Export... (an admin, or an account given "Export the whole audit log";
+  the token at this laptop too). From another device it works only over
+  https:// (see Encrypted connections). Health then names the last
+  export.
+- The export holds every entry: names, addresses and what each person did.
+  Entries from before 0.6.0 can also hold the first words of messages shown
+  on screens and the names of files shown there. Give it only to whoever
+  checks it. Made at this laptop, it is saved in this laptop's Downloads
+  folder: move it off, then delete it here.
+- To check it, take the verifier from the AGMessage release the export
+  names (agmessage-audit-verifier-<version>.zip on the release page; check
+  its SHA-256 against that release's SHA256SUMS), not the copy inside the
+  export, which came from the laptop under check. Extract both, then:
+      node verify-audit.js <the export's folder> --fingerprint <your record>
+  or open verify.html in Chrome or Edge, type the key and choose the
+  export's folder. 0: signed by that key, whole, and the laptop said ✓.
+  1: the same, and the laptop said ◇ or △ (read its findings). 2: the same,
+  and the laptop said ✕ (also when every file is what was signed and the
+  entries break where the laptop's own check said they do). 3: nothing in
+  it is vouched for. 4: no key given.
+  --earlier <an older export's folder> checks that every entry the older
+  one held is still in the newer one, byte for byte.
+  Check it before browsing the export's folder: a file the export does
+  not list ends the check (3), and some desktops add their own (a Mac's
+  Finder writes .DS_Store). Remove it, or extract the zip again.
+- Cancel while the export is made stops it: nothing is saved.
+- By hand, in the export's folder (OpenSSL 3; the first line is the
+  compare, and a mismatch ends the check):
+      openssl pkey -pubin -in signing-key.pem -outform DER | sha256sum
+      openssl pkeyutl -verify -pubin -inkey signing-key.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig
+      sha256sum -c SHA256SUMS
+  On Windows, certutil -hashfile <file> SHA256 gives the digests; the
+  signature needs OpenSSL or the verifier.
+- What it proves: the files are what this laptop exported, signed by its
+  key; what this laptop's own check said of them; and that every line is
+  whole and linked. Not who really acted, nor when (the times are the
+  laptop's clock), nor anything about someone who could change AGMessage on
+  the laptop or holds its machine.key.
 
 Screens (projector PC, lectern monitor, foyer TV)
 -------------------------------------------------

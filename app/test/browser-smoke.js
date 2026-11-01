@@ -15,7 +15,9 @@ const zlib = require('zlib');
 const os = require('os');
 const path = require('path');
 const net = require('net');
-const { fakeStagewatch, fakeNode, chainOf } = require('./helpers');
+const crypto = require('crypto');
+const { pathToFileURL } = require('url');
+const { fakeStagewatch, fakeNode, chainOf, unzipTo } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = process.env.AGM_SMOKE_OUT || path.join(ROOT, '..', 'artifacts', 'smoke');
@@ -101,9 +103,13 @@ async function launchEdge() {
   let version = null;
   for (let i = 0; i < 60 && !version; i++) { try { version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); } catch { await sleep(250); } }
   if (!version) throw new Error('the browser opened no DevTools port');
-  const browser = await devtools(version.webSocketDebuggerUrl);
+  const browserHeard = [];
+  const browser = await devtools(version.webSocketDebuggerUrl, (m) => { for (const f of browserHeard) f(m); });
   return {
     proc, port, prof,
+    /** The browser's own DevTools session (downloads), and what it hears. */
+    browserSend: (method, params) => browser.send(method, params),
+    onBrowser: (fn) => { browserHeard.push(fn); },
     /** A tab on `url`: `init` runs before the page's own scripts, `metrics` {width, height} is its viewport, `timezone` its zone. */
     async tab(url, { init, metrics, timezone } = {}) {
       // A window of its own, so its page is always the one in front (never a hidden tab behind another).
@@ -134,6 +140,14 @@ async function launchEdge() {
         expectFailure: (re) => { expected.push(re); },
         /** The viewport, as a screen of that size would have it. */
         resize: (width, height) => send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }),
+        /** Hear one DevTools event of this tab (one listener per event). */
+        on: (method, fn) => { listeners.set(method, fn); },
+        /** Choose a folder in a file input (`webkitdirectory`), as a person picking it does. */
+        async chooseFolder(selector, dir) {
+          const doc = await send('DOM.getDocument');
+          const q = await send('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector });
+          return send('DOM.setFileInputFiles', { nodeId: q.result.nodeId, files: [dir] });
+        },
         /** Hold every request whose URL matches `pattern` for `ms`, then let it through (a slow venue network) or fail it. */
         async hold(pattern, ms, fail = false) {
           listeners.set('Fetch.requestPaused', (p) => { setTimeout(() => { send(fail ? 'Fetch.failRequest' : 'Fetch.continueRequest', { requestId: p.requestId, ...(fail ? { errorReason: 'ConnectionReset' } : {}) }); }, ms); });
@@ -288,6 +302,109 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(!!healthLine, 'the admin\'s health line reads the loop delay, how busy it is and today\'s peaks' + (healthLine ? '' : ': ' + await admin.eval(`document.getElementById('healthLine').textContent`)));
     const auditLine = await admin.until(`(() => { const l = document.getElementById('auditLine'); return l.dataset.mark === 'intact' && /^Audit log: ✓ keyed \\(key [0-9a-f]{16}\\) · nothing to accept$/.test(l.textContent) && document.getElementById('auditAcceptRow').hidden && document.getElementById('auditWhere').hidden && l.textContent; })()`);
     report(!!auditLine, `Health's audit line names the key and that nothing waits to be accepted (${auditLine})`);
+    // The signed export, from Health, by the token at the laptop: the signing key in full, no export yet, the dialog's
+    // words, the zip the browser saves (its bytes the zip the log names), and its link let go 40 s after, not at once.
+    const signKey = (await (await fetch(base + '/api/health', { headers: { cookie } })).json()).saves.stores.audit.signKey;
+    const grouped = (fp) => String(fp).match(/.{4}/g).join(' ');
+    const keyShown = await admin.until(`(() => { const k = document.getElementById('auditSignKey'); return !k.hidden && !document.getElementById('auditExportRow').hidden && document.getElementById('signKeyText').textContent + '|' + document.getElementById('auditLastExport').textContent; })()`);
+    report(keyShown === grouped(signKey) + '|No export in the log\'s newest file: export at the end of each show day.', `Health shows the signing key in full, no export yet, and Export… to the token (${keyShown})`);
+    const dlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-dl-'));
+    const downloads = new Map();
+    edge.onBrowser((m) => {
+      if (m.method === 'Browser.downloadWillBegin') downloads.set(m.params.guid, { name: m.params.suggestedFilename, state: '' });
+      if (m.method === 'Browser.downloadProgress' && downloads.has(m.params.guid)) downloads.get(m.params.guid).state = m.params.state;
+    });
+    await edge.browserSend('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: dlDir, eventsEnabled: true });
+    await admin.eval(`(() => { window.__revoked = 0; window.__timers = []; const r = URL.revokeObjectURL.bind(URL); URL.revokeObjectURL = (u) => { window.__revoked++; r(u); }; const st = window.setTimeout.bind(window); window.setTimeout = (fn, ms, ...a) => { window.__timers.push(ms); return st(fn, ms, ...a); }; })()`);
+    const openExport = async () => {
+      await admin.eval(`document.getElementById('auditExportBtn').click()`);
+      return admin.until(`(() => { const d = document.getElementById('exportDialog'); return d && d.open && !document.getElementById('exportGo').hidden && !document.getElementById('exportGo').disabled && document.getElementById('exportWords').textContent; })()`);
+    };
+    const exportWords = await openExport();
+    report(exportWords === 'Export the audit log to check on another computer. It holds every entry, the archived ones too — names, addresses and what each did. Older entries can also hold the first words of messages shown on screens and the names of files shown there, including files later marked confidential. Give it only to whoever checks it. It is signed with this AGMessage\'s key ' + grouped(signKey.slice(0, 16)) + ' …: whoever checks it needs that key from you or the show\'s paperwork, not from the file.', `the export dialog says what it holds and whose key signs it (${(exportWords || '').slice(0, 80)}…)`);
+    await admin.eval(`document.getElementById('exportGo').click()`);
+    const exportDone = await admin.until(`(() => { const s = document.getElementById('exportState'); return /^✓ Exported/.test(s.textContent) && s.dataset.mark + '|' + s.textContent; })()`, 20000);
+    let savedExport = null;
+    for (const end = Date.now() + 15000; Date.now() < end && !savedExport; await sleep(100)) savedExport = [...downloads].find(([, d]) => d.state === 'completed');
+    const savedBytes = savedExport ? fs.readFileSync(path.join(dlDir, savedExport[0])) : Buffer.alloc(0);
+    const sentRow = fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.action === 'audit.export.sent').pop();
+    const savedSha = crypto.createHash('sha256').update(savedBytes).digest('hex');
+    report(!!savedExport && !!sentRow && savedSha === sentRow.words.slice(-64) && /^agmessage-audit-[0-9a-f]{8}-\d{8}-\d{4}\.zip$/.test(savedExport[1].name), `the browser saved the export whole: its bytes are the zip the log names (${savedExport ? savedExport[1].name : 'no download'}, ${savedSha.slice(0, 12)}…)`);
+    report(/^intact\|✓ Exported entries 1–\d+, signed with [0-9a-f ]{19} …: it arrived whole \(\d+ KB\) and was handed to your browser to save — check your downloads\. The log read ✓ Intact when it was made\. It is saved on this laptop: move it off, then delete it here\.$/.test(exportDone || '') && exportDone.includes(grouped(signKey.slice(0, 16)) + ' …'), `the dialog says it arrived whole and where it is (${exportDone})`);
+    const revoke = await admin.eval(`JSON.stringify({ revoked: window.__revoked, timers: window.__timers.filter((ms) => ms === 40000).length })`);
+    report(revoke === '{"revoked":0,"timers":1}', `the saved file's link is let go 40 s after the click, not at once (${revoke})`);
+    const lastExport = await admin.until(`(() => { const t = document.getElementById('auditLastExport').textContent; return /^Last export: entries 1–\\d+, sent whole at \\d\\d:\\d\\d on \\d+ \\w{3} \\(AGMessage laptop\\)\\. Export at the end of each show day\\.$/.test(t) && t; })()`, 15000);
+    report(!!lastExport, `Health names the last export (${lastExport})`);
+    await admin.shot(path.join(OUT, 'audit-export.png'));
+    await admin.eval(`document.getElementById('exportDialog').close()`);
+    // "Not exported": a refusal (the server's 409, its words said), and a stream cut short (no end record: nothing saved).
+    const savedBefore = downloads.size;
+    let fake = 'refuse';
+    let held = null;   // the export's answer held back while Cancel is pressed
+    admin.on('Fetch.requestPaused', async (p) => {
+      if (fake === 'hold') { held = p.requestId; return; }
+      if (fake === 'refuse') {
+        await admin.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 409, responseHeaders: [{ name: 'content-type', value: 'application/json' }], body: Buffer.from(JSON.stringify({ ok: false, error: 'an export is being made for Ana since 14:02: try again when it ends' })).toString('base64') });
+        return;
+      }
+      const b = await admin.send('Fetch.getResponseBody', { requestId: p.requestId });
+      const full = Buffer.from(b.result.body, b.result.base64Encoded ? 'base64' : 'utf8');
+      const headers = (p.responseHeaders || []).filter((x) => !/^(content-length|transfer-encoding)$/i.test(x.name));
+      await admin.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: headers, body: full.subarray(0, full.length - 40).toString('base64') });
+    });
+    admin.expectFailure(/\/api\/audit\/export$/);   // the refusal's 409 and the cut stream are this step's own
+    await admin.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/audit/export', requestStage: 'Request' }] });
+    await openExport();
+    await admin.eval(`document.getElementById('exportGo').click()`);
+    const refusedWords = await admin.until(`(() => { const s = document.getElementById('exportState'); return /^✕/.test(s.textContent) && s.textContent; })()`);
+    report(refusedWords === '✕ Not exported: an export is being made for Ana since 14:02: try again when it ends', `a refused export says "Not exported" with the server's words (${refusedWords})`);
+    await admin.eval(`document.getElementById('exportDialog').close()`);
+    fake = 'cut';
+    await admin.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/audit/export', requestStage: 'Response' }] });
+    await openExport();
+    await admin.eval(`document.getElementById('exportGo').click()`);
+    const cutWords = await admin.until(`(() => { const s = document.getElementById('exportState'); return /^✕/.test(s.textContent) && s.textContent; })()`, 15000);
+    await sleep(500);
+    report(cutWords === '✕ Not exported: the export stopped before it was whole (it ended without its last part). Do not use a file it left.' && downloads.size === savedBefore, `a stream without its end record is said as cut short, and nothing is saved (${cutWords}; ${downloads.size - savedBefore} saved)`);
+    await admin.eval(`document.getElementById('exportDialog').close()`);
+    // Cancel while the export is made: the dialog closes, the request is aborted, and nothing is handed to the browser.
+    fake = 'hold';
+    held = null;
+    await openExport();
+    await admin.eval(`document.getElementById('exportGo').click()`);
+    const isHeld = () => held !== null;   // set by the paused-request handler above
+    for (let i = 0; i < 200 && !isHeld(); i++) await sleep(50);
+    await admin.eval(`document.getElementById('exportCancel').click()`);
+    const cancelled = await admin.until(`(() => { const s = document.getElementById('exportState'); return !document.getElementById('exportDialog').open && /^✕/.test(s.textContent) && s.textContent; })()`);
+    if (held) await admin.send('Fetch.continueRequest', { requestId: held });   // too late: the page let it go
+    await sleep(500);
+    report(!!held && cancelled === '✕ Not exported: cancelled before it was whole. Nothing was handed to your browser to save.' && downloads.size === savedBefore, `Cancel while the export is made stops it, and nothing is saved (${cancelled}; ${downloads.size - savedBefore} saved)`);
+    await admin.send('Fetch.disable');
+    await admin.eval(`document.getElementById('exportDialog').close()`);
+    // The browser verifier, opened from disk: "not compared" until the key is typed, then ✓; the entries drawn; nothing
+    // asked of the network; one byte changed reads "nothing in the bundle is vouched for".
+    const bundleDir = savedExport ? unzipTo(savedBytes, fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-bundle-'))) : os.tmpdir();
+    const checker = await edge.tab(pathToFileURL(path.join(bundleDir, 'verify', 'verify.html')).href);
+    await checker.until('document.readyState === "complete"');
+    const asked = [];
+    checker.on('Network.requestWillBeSent', (p) => asked.push(p.request.url));
+    await checker.send('Network.enable');
+    await checker.chooseFolder('#folder', bundleDir);
+    const notCompared = await checker.until(`document.getElementById('state').dataset.code === '4' && document.getElementById('state').textContent`);
+    await checker.eval(`(() => { const i = document.getElementById('fp'); i.value = ${JSON.stringify(grouped(signKey))}; i.dispatchEvent(new Event('input')); })()`);
+    const pageOk = await checker.until(`document.getElementById('state').dataset.code === '0' && document.getElementById('state').textContent`, 20000);
+    const seeded = await checker.eval(`[...document.querySelectorAll('#rows tr')].some((tr) => tr.textContent.includes('signed in with the host laptop\\'s admin token'))`);
+    report(/not compared with a record of the laptop's key/.test(notCompared || '') && pageOk === '✓ Signed by the key you expected and whole; the laptop said ✓.' && seeded === true, `the browser verifier reads "not compared" without the key and ✓ with it, and draws the entries (${pageOk})`);
+    await checker.shot(path.join(OUT, 'audit-verifier.png'));
+    const changedDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-changed-')), path.basename(bundleDir));
+    fs.cpSync(bundleDir, changedDir, { recursive: true });
+    const logBytes = fs.readFileSync(path.join(changedDir, 'log', 'audit.jsonl'));
+    logBytes[20] ^= 1;
+    fs.writeFileSync(path.join(changedDir, 'log', 'audit.jsonl'), logBytes);
+    await checker.chooseFolder('#folder', changedDir);
+    const pageBad = await checker.until(`document.getElementById('state').dataset.code === '3' && document.getElementById('state').textContent`, 20000);
+    report(pageBad === '✕ Nothing in the bundle is vouched for: log/audit.jsonl is not what was signed: its SHA-256 differs from SHA256SUMS' && !(await checker.eval(`document.getElementById('entriesBox').hidden === false`)), `one byte changed: the page vouches for nothing and draws no entry (${pageBad})`);
+    report(asked.length === 0, `the browser verifier asked the network for nothing (${asked.length} requests${asked.length ? ': ' + asked.slice(0, 2).join(', ') : ''})`);
     await admin.shot(path.join(OUT, 'admin.png'));
 
     // The admin's support view (the person's page, framed in the admin page) resyncs when the admin page that frames it
@@ -334,6 +451,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await users.eval(`document.getElementById('tabAudit').click()`);
     await users.eval(`document.getElementById('verifyBtn').click()`);
     report(!!(await users.until(`document.getElementById('chainState').dataset.mark === 'intact' && /^✓ Intact — \\d+ entries, all keyed on this machine$/.test(document.getElementById('chainState').textContent) && !document.getElementById('verifyBtn').disabled`)), 'Check the log reads the whole chain and says it is intact: ✓');
+    const usersKey = await users.until(`!document.getElementById('exportBtn').hidden && document.getElementById('auditKey').textContent`);
+    report(usersKey === 'Keyed with key ' + /^[0-9a-f]{16}/.exec(auditLine.split('key ')[1])[0] + '. Exports are signed with the key ' + grouped(signKey) + ': whoever checks one compares it with their own record of this key (the show\'s paperwork), never with the export.', `the audit log offers Export… to an admin and names the signing key (${usersKey})`);
     const rowMarks = await users.eval(`[...document.querySelectorAll('#auditList .audit-row')].map((li) => li.querySelector('.audit-mark').dataset.mark + ':' + li.querySelector('.audit-mark [aria-hidden]').textContent)`);
     report(Array.isArray(rowMarks) && rowMarks.length > 0 && rowMarks.every((m) => m === 'intact:✓'), `each row of the audit log draws its mark with its shape (${(rowMarks || []).slice(0, 3).join(', ')}…)`);
     await users.eval(`document.getElementById('tabPeople').click()`);
@@ -739,8 +858,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await admin2.eval(`location.reload()`);
     const broken2 = await admin2.until(`(() => { const l = document.getElementById('auditLine'); const f = document.querySelector('#auditFindings li'); return !document.getElementById('dashboard').hidden && l.dataset.mark === 'broken' && f && f.dataset.mark === 'broken' && document.getElementById('auditAcceptRow').hidden && document.getElementById('auditWhere').hidden && l.textContent + ' | ' + f.textContent; })()`, 20000);
     report(/^Audit log: ✕ keyed \(key [0-9a-f]{16}\) · 1 to see to \| ✕ Broken at line 2 of audit\.jsonl: entry 2 was changed after it was written$/.test(broken2 || ''), `a line changed while it was stopped reads ✕ on Health, with nothing to accept (${broken2})`);
+    // A project manager reads the audit log (audit.read) and is offered no Export (audit.export is the admin's).
+    await audit2.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', password: 'the green room kettle' }) }).then(() => fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'mia', name: 'Mia Manager', role: 'manager', password: 'running order on the wall' }) })).then(() => fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'mia', password: 'running order on the wall' }) })).then(() => { location.href = '/users.html'; })`);
+    const miaAudit = await audit2.until(`location.pathname === '/users.html' && /Mia Manager/.test(document.getElementById('who').textContent) && !document.getElementById('auditPane').hidden && document.querySelectorAll('#auditList .audit-row').length > 0 && String(document.getElementById('exportBtn').hidden)`, 20000);
+    report(miaAudit === 'true', `a project manager reads the audit log and is offered no Export (Export hidden: ${miaAudit})`);
 
-    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2]];
+    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker]];
     // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).
     const hidden = [];
     for (const [name, tab] of tabs) if ((await tab.eval('document.visibilityState')) !== 'visible') hidden.push(name);

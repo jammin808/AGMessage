@@ -108,8 +108,22 @@
   // Whether this page is the laptop's own token, signed in by this run: only it is offered Accept, which takes the token
   // typed again. Anyone else the admin page admits is told where to accept.
   let tokenHere = false;
+  let canExport = false;   // an account holding audit.export (with audit.read): Export, never Accept
   let lastHealth = null;
   fetch('/api/admin/me').then((r) => r.json()).then((me) => { tokenHere = !!(me && me.token); if (lastHealth) renderAudit(lastHealth); }).catch(() => { /* no Accept offered */ });
+  fetch('/api/auth/me').then((r) => r.json()).then((me) => {
+    const caps = me && me.account && me.account.rights ? me.account.rights.caps : [];
+    canExport = caps.includes('audit.export') && caps.includes('audit.read');
+    if (lastHealth) renderAudit(lastHealth);
+  }).catch(() => { /* no Export offered to an account */ });
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  /** "18:40 on 26 Oct", by this laptop's clock. */
+  const at = (t) => { const d = new Date(t); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ' on ' + d.getDate() + ' ' + MONTHS[d.getMonth()]; };
+  /** Health's "Last export": the newest export sent whole that the log's newest file holds (answer 3: one each show day). */
+  const lastExportWords = (x) => (x && x.to
+    ? 'Last export: entries ' + x.from + '–' + x.to + ', sent whole at ' + at(x.at) + ' (' + x.by + '). Export at the end of each show day.'
+    : 'No export in the log\'s newest file: export at the end of each show day.');
   const SHAPE = { intact: '✓', linked: '◇', unvouched: '△', broken: '✕' };
   const RANK = { intact: 0, linked: 1, unvouched: 2, broken: 3 };
   /** The first keyed start's question about the older entries, asked of the person at the laptop. */
@@ -135,6 +149,11 @@
     const acceptable = list.some((f) => f.id && f.id !== 'more') && !list.some((f) => f.kind === 'broken');
     $('auditAcceptRow').hidden = !(acceptable && tokenHere);
     $('auditWhere').hidden = !(acceptable && !tokenHere);
+    // The signing key in full, which the crew copies into the show's paperwork; Export for the token or an account with the right.
+    $('auditSignKey').hidden = !a.signKey;
+    $('signKeyText').textContent = a.signKey ? a.signKey.match(/.{4}/g).join(' ') : '—';
+    $('auditLastExport').textContent = a.keyless ? 'No export this run: it has no machine key to sign one with.' : lastExportWords(a.lastExport);
+    $('auditExportRow').hidden = !(a.signKey && (tokenHere || canExport));
   }
   let shown = null;   // the check the dialog was drawn from: its digest goes with the Accept
   async function openAccept() {
@@ -276,6 +295,11 @@
       setTimeout(() => loadSettings(), 300);
     });
     $('ctxCopy').onclick = () => { const t = $('ctxToken').textContent; if (navigator.clipboard && t && t !== '—') navigator.clipboard.writeText(t); };
+    $('signKeyCopy').onclick = () => { const t = $('signKeyText').textContent; if (navigator.clipboard && t && t !== '—') navigator.clipboard.writeText(t); };
+    $('auditExportBtn').onclick = () => {
+      const fp = lastHealth && lastHealth.saves.stores.audit.signKey;
+      window.AGMAuditExport.open({ fingerprint: fp, done: () => { setTimeout(() => loadSettings(), 300); } });
+    };
     $('ctxNew').onclick = () => loadSettings({ newContextToken: true });
     $('requireHttps').onchange = () => loadSettings({ requireHttps: $('requireHttps').checked });
     $('remoteAdmin').onchange = () => loadSettings({ remoteAdmin: $('remoteAdmin').checked });

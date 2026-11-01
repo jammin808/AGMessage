@@ -144,35 +144,63 @@ jobs:
         run: ./tools/build-portable.ps1
       # The shipped bundle, run as a person runs it after Extract All: the zip extracted to a throwaway folder, its own
       # node.exe running its own watchdog (no AGM_OPEN: nothing is opened), and /api/health must answer within 30 s with
-      # the build this run stamped. The console goes to a file, shown only if the start fails.
-      - name: Start the bundle (the zip, extracted)
+      # the build this run stamped. Then its audit log is exported by the token at the laptop, extracted with
+      # Expand-Archive, and checked by the release's verifier (agmessage-audit-verifier-*.zip) on the bundle's node.exe
+      # against the signing key health names: exit 0. The console goes to a file, shown only if a step fails.
+      - name: Start the bundle (the zip, extracted), and check an export of its audit log
         shell: pwsh
         run: |
-          $zip = @(Get-ChildItem dist -Filter *.zip)
-          if ($zip.Count -ne 1) { throw "expected one zip in dist, found $($zip.Count)" }
+          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-Windows-*.zip')
+          if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
           $dest = Join-Path $env:RUNNER_TEMP 'bundle-start'
           Expand-Archive -Path $zip[0].FullName -DestinationPath $dest -Force
           $root = (Get-ChildItem $dest -Directory | Select-Object -First 1).FullName
           $out = Join-Path $env:RUNNER_TEMP 'bundle-start.out.log'
           $err = Join-Path $env:RUNNER_TEMP 'bundle-start.err.log'
           $env:PORT = '3123'
+          $env:ADMIN_TOKEN = [guid]::NewGuid().ToString('N').Substring(0, 16)
           Remove-Item Env:AGM_OPEN -ErrorAction SilentlyContinue
           $p = Start-Process -FilePath (Join-Path $root 'node\node.exe') -ArgumentList ('"' + (Join-Path $root 'app\supervise.js') + '"') `
             -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
           $want = '${{ steps.stamp.outputs.full }}'
           $build = ''
-          $deadline = (Get-Date).AddSeconds(30)
-          while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
-            try { $build = (Invoke-RestMethod -Uri 'http://127.0.0.1:3123/api/health' -TimeoutSec 2).build; break } catch { Start-Sleep -Milliseconds 500 }
+          $checked = $null
+          try {
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
+              try { $build = (Invoke-RestMethod -Uri 'http://127.0.0.1:3123/api/health' -TimeoutSec 2).build; break } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if ($build -eq $want) {
+              Invoke-WebRequest -Uri 'http://127.0.0.1:3123/api/admin/login' -Method Post -ContentType 'application/json' -Body (@{ token = $env:ADMIN_TOKEN } | ConvertTo-Json) -SessionVariable agm -UseBasicParsing | Out-Null
+              $fp = (Invoke-RestMethod -Uri 'http://127.0.0.1:3123/api/health' -WebSession $agm).saves.stores.audit.signKey
+              $exportZip = Join-Path $env:RUNNER_TEMP 'audit-export.zip'
+              Invoke-WebRequest -Uri 'http://127.0.0.1:3123/api/audit/export' -Method Post -WebSession $agm -OutFile $exportZip -UseBasicParsing
+              $exportDir = Join-Path $env:RUNNER_TEMP 'audit-export'
+              Expand-Archive -Path $exportZip -DestinationPath $exportDir -Force
+              $bundle = (Get-ChildItem $exportDir -Directory | Select-Object -First 1).FullName
+              $verifierZip = @(Get-ChildItem dist -Filter 'agmessage-audit-verifier-*.zip')
+              if ($verifierZip.Count -ne 1) { throw "expected one verifier zip in dist, found $($verifierZip.Count)" }
+              $verifierDir = Join-Path $env:RUNNER_TEMP 'audit-verifier'
+              Expand-Archive -Path $verifierZip[0].FullName -DestinationPath $verifierDir -Force
+              $verifyJs = (Get-ChildItem $verifierDir -Recurse -Filter 'verify-audit.js' | Select-Object -First 1).FullName
+              & (Join-Path $root 'node\node.exe') $verifyJs $bundle --fingerprint $fp
+              $checked = $LASTEXITCODE
+            }
+          } finally {
+            # The watchdog's server is ended with it (the job object it runs its children in); any left is ended by its path.
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+            Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$root*" } | Stop-Process -Force
           }
-          # The watchdog's server is ended with it (the job object it runs its children in); any left is ended by its path.
-          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-          Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$root*" } | Stop-Process -Force
           if ($build -ne $want) {
             Get-Content $out, $err -ErrorAction SilentlyContinue
             throw "the bundle answered build '$build' within 30 s; this run stamped '$want'"
           }
           Write-Host "The bundle started and answered as $build"
+          if ($checked -ne 0) {
+            Get-Content $out, $err -ErrorAction SilentlyContinue
+            throw "the release's verifier exited $checked on the bundle's audit export (0: signed by the key health names, whole, intact)"
+          }
+          Write-Host 'The bundle exported its audit log, and the release verifier checked it: exit 0'
       # The bill of materials (CycloneDX): every package the bundle ships, at its version — the SOUP list a reviewer reads.
       - name: Software bill of materials
         shell: pwsh
@@ -217,5 +245,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AGMessage ${GITHUB_REF_NAME#v}" \
-            --notes "Build ${{ needs.package.outputs.full }}. Extract All first (right-click the zip), then run start-agmessage.bat from the extracted folder: run from inside the zip it finds nothing beside it. The zip's SHA-256 is in SHA256SUMS; its packages are listed in agmessage-sbom.cdx.json." \
+            --notes "Build ${{ needs.package.outputs.full }}. Extract All first (right-click the zip), then run start-agmessage.bat from the extracted folder: run from inside the zip it finds nothing beside it. The zip's SHA-256 is in SHA256SUMS; its packages are listed in agmessage-sbom.cdx.json. The audit log's verifier is agmessage-audit-verifier-${GITHUB_REF_NAME#v}.zip: take it from here to check an export on another computer, its SHA-256 in SHA256SUMS." \
             --generate-notes dist/*.zip dist/agmessage-sbom.cdx.json dist/SHA256SUMS

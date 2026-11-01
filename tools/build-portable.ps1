@@ -26,7 +26,8 @@ Write-Host "==> Staging $name ($full, $channel)"
 Copy-Item app\server.js, app\supervise.js, app\package.json, app\package-lock.json, app\README.md "$stage\app"
 if (Test-Path app\build.json) { Copy-Item app\build.json "$stage\app" }
 Copy-Item app\lib "$stage\app\lib" -Recurse
-# The audit log's key-free rules, which lib\audit.js requires (and an export ships to the checker).
+# The audit log's key-free rules, which lib\audit.js requires, and the verifier an export ships to the checker: without
+# it the export refuses, saying so, rather than send a bundle with no verifier.
 Copy-Item app\verify "$stage\app\verify" -Recurse
 Copy-Item app\public "$stage\app\public" -Recurse
 New-Item -ItemType Directory -Force "$stage\app\data\rooms", "$stage\app\uploads" | Out-Null
@@ -51,3 +52,18 @@ $zip = Join-Path $root "dist\$name.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $stage -DestinationPath $zip
 Write-Host "==> Done: $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB)" -ForegroundColor Green
+
+# The audit log's verifier, for whoever checks an export on another computer: the Node verifier, the rules that need no
+# key, and the browser verifier as one page, assembled by verify-audit.js for this build (the same bytes an export of
+# this build carries). The release publishes it beside the bundle, in its SHA256SUMS and its attestation.
+$verifier = Join-Path $root "dist\agmessage-audit-verifier-$label"
+if (Test-Path $verifier) { Remove-Item $verifier -Recurse -Force }
+New-Item -ItemType Directory -Force $verifier | Out-Null
+Copy-Item app\verify\verify-audit.js, app\verify\auditrules.js $verifier
+& (Join-Path $root 'node\node.exe') (Join-Path $root 'app\verify\verify-audit.js') --write-page (Join-Path $verifier 'verify.html') --version $full
+if ($LASTEXITCODE -ne 0) { throw 'Could not assemble the browser verifier (verify-audit.js --write-page)' }
+$verifierZip = "$verifier.zip"
+if (Test-Path $verifierZip) { Remove-Item $verifierZip -Force }
+Compress-Archive -Path $verifier -DestinationPath $verifierZip
+Remove-Item $verifier -Recurse -Force
+Write-Host "==> Done: $verifierZip" -ForegroundColor Green
