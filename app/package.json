@@ -11,7 +11,7 @@
     "coverage": "node --test --experimental-test-coverage --test-coverage-include=server.js --test-coverage-include=supervise.js --test-coverage-include=\"lib/**\" --test-coverage-include=\"verify/**\" --test-coverage-lines=95 --test-coverage-branches=84 --test-coverage-functions=91 \"test/*.test.js\"",
     "lint": "cd .. && eslint .",
     "secrets": "node ../tools/scan-secrets.js",
-    "audit": "npm audit --omit=dev --audit-level=high && npm audit signatures",
+    "audit": "npm audit --omit=dev --audit-level=high && npm audit signatures && node ../tools/vendor-audit.js",
     "check": "npm run lint && npm run secrets && npm run coverage",
     "smoke": "node test/browser-smoke.js",
     "version:print": "node ../tools/stamp-build.js --print"

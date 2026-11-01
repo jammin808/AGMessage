@@ -53,6 +53,10 @@ jobs:
       # Every installed package's registry signature and provenance attestation, so a tampered tarball fails here.
       - name: npm audit signatures
         run: npm audit signatures
+      # The browser libraries vendored in app/public/vendor, and those bundled inside them, which npm audit cannot see:
+      # the registry's advisories against each version VENDOR.json lists; a high or critical one it does not assess fails.
+      - name: Vendored libraries' advisories (tools/vendor-audit.js)
+        run: node ../tools/vendor-audit.js
 
   dependency-review:
     name: Dependency review

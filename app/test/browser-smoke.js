@@ -2,9 +2,10 @@
 /**
  * Browser smoke test: a real server (throwaway data folder) and headless Microsoft Edge driven over the DevTools
  * protocol. Loads the research and board views and the admin dashboard, checks each joins and renders with no script
- * error or CSP violation, renders a PDF through pdf.js, drives a hall's screens (files taken over a slow network, a deck
- * stepped through, the countdown's strip on an upright tablet, the clock in another time zone, the Screens console),
- * and saves screenshots.
+ * error or CSP violation, renders a PDF through pdf.js and a Word file through mammoth on the Board's panel in a browser
+ * without Promise.withResolvers in the page or in pdf.js's worker (as an older iPad), drives a hall's screens (files
+ * taken over a slow network, a deck stepped through on such a browser, the countdown's strip on an upright tablet, the
+ * clock in another time zone, the Screens console), and saves screenshots.
  *
  *   npm run smoke            (screenshots in ../artifacts/smoke; set AGM_SMOKE_OUT to change)
  * Exit code 0 when everything passed. Needs Edge, Chrome or Chromium (set AGM_BROWSER to its path if it's elsewhere).
@@ -67,7 +68,10 @@ const stopServer = (child) => new Promise((resolve) => {
 
 // A DevTools call that has had no answer by then is a failure with its name, never a run that hangs.
 const CDP_MS = 60_000;
-/** One DevTools connection: send(method, params) answers the reply, or {error} when none came within CDP_MS. */
+/**
+ * One DevTools connection: send(method, params, sessionId) answers the reply, or {error} when none came within CDP_MS.
+ * A sessionId addresses a target attached to this one (a page's worker), whose events carry it too.
+ */
 async function devtools(url, onEvent = () => {}) {
   const ws = new WebSocket(url);
   await new Promise((r, j) => { ws.addEventListener('open', r); ws.addEventListener('error', () => j(new Error('no DevTools connection at ' + url))); });
@@ -77,11 +81,11 @@ async function devtools(url, onEvent = () => {}) {
     if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
     if (m.method) onEvent(m);
   });
-  const send = (method, params = {}) => new Promise((r) => {
+  const send = (method, params = {}, sessionId) => new Promise((r) => {
     const i = ++id;
     const timer = setTimeout(() => { pending.delete(i); r({ error: { message: method + ' had no answer in ' + CDP_MS / 1000 + ' s' } }); }, CDP_MS);
     pending.set(i, (m) => { clearTimeout(timer); r(m); });
-    ws.send(JSON.stringify({ id: i, method, params }));
+    ws.send(JSON.stringify(sessionId ? { id: i, method, params, sessionId } : { id: i, method, params }));
   });
   return { ws, send };
 }
@@ -110,32 +114,54 @@ async function launchEdge() {
     /** The browser's own DevTools session (downloads), and what it hears. */
     browserSend: (method, params) => browser.send(method, params),
     onBrowser: (fn) => { browserHeard.push(fn); },
-    /** A tab on `url`: `init` runs before the page's own scripts, `metrics` {width, height} is its viewport, `timezone` its zone. */
-    async tab(url, { init, metrics, timezone } = {}) {
+    /**
+     * A tab on `url`: `init` runs before the page's own scripts, `workerInit` before each worker's (the worker held at
+     * its start until it has run; `workers` lists each worker still running, with what `workerInit` answered there),
+     * `metrics` {width, height} is its viewport, `timezone` its zone.
+     */
+    async tab(url, { init, workerInit, metrics, timezone } = {}) {
       // A window of its own, so its page is always the one in front (never a hidden tab behind another).
       const made = await browser.send('Target.createTarget', { url: 'about:blank', newWindow: true, width: 1400, height: 900 });
       if (!made.result) throw new Error('no new window: ' + (made.error ? made.error.message : 'no answer'));
-      const problems = []; const listeners = new Map(); const expected = []; const logs = [];
+      const problems = []; const listeners = new Map(); const expected = []; const logs = []; const workers = [];
       const { ws, send: call } = await devtools(`ws://127.0.0.1:${port}/devtools/page/${made.result.targetId}`, (m) => {
+        if (m.method === 'Target.attachedToTarget') { startAttached(m.params); return; }
+        if (m.method === 'Target.detachedFromTarget') { const i = workers.findIndex((w) => w.sessionId === m.params.sessionId); if (i >= 0) workers.splice(i, 1); return; }
+        if (m.sessionId) return;   // a worker's own events: what the smoke reads there, it asks for
         if (listeners.has(m.method)) listeners.get(m.method)(m.params);
         if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'log') logs.push(m.params.args.map((a) => a.value ?? a.description).join(' '));
         if (m.method === 'Runtime.exceptionThrown') problems.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text).split('\n')[0]);
         if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error' && !/favicon/.test(m.params.entry.url || m.params.entry.text) && !expected.some((r) => r.test(m.params.entry.url || ''))) problems.push('log: ' + m.params.entry.text);
         if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') problems.push('console: ' + m.params.args.map((a) => a.value ?? a.description).join(' '));
       });
-      const send = async (method, params) => {
-        const m = await call(method, params);
+      const send = async (method, params, sessionId) => {
+        const m = await call(method, params, sessionId);
         if (m.error && / had no answer in /.test(m.error.message)) problems.push('DevTools: ' + m.error.message);
         return m;
       };
+      // A worker attached while held at its start: `workerInit` runs in it first, then it starts. Whatever happens, it
+      // is let go, so a worker is never left waiting.
+      async function startAttached({ sessionId, targetInfo }) {
+        try {
+          if (targetInfo.type === 'worker') {
+            const r = await send('Runtime.evaluate', { expression: workerInit, returnByValue: true }, sessionId);
+            workers.push({ sessionId, url: targetInfo.url, start: r.result?.result?.value ?? null });
+          }
+        } finally {
+          await send('Runtime.runIfWaitingForDebugger', {}, sessionId);
+        }
+      }
       await send('Runtime.enable'); await send('Log.enable'); await send('Page.enable');
       if (init) await send('Page.addScriptToEvaluateOnNewDocument', { source: init });
+      if (workerInit) await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
       if (metrics) await send('Emulation.setDeviceMetricsOverride', { width: metrics.width, height: metrics.height, deviceScaleFactor: 1, mobile: false });
       if (timezone) await send('Emulation.setTimezoneOverride', { timezoneId: timezone });
       await send('Page.navigate', { url });
       return {
         /** `logs`: what the tab's frames wrote with console.log, in order. */
-        problems, send, logs,
+        problems, send, logs, workers,
+        /** An expression's value in one of `workers`. */
+        workerEval: async (sessionId, expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, sessionId)).result?.result?.value,
         /** A resource this tab is made to fail on purpose: its load error is not a problem. */
         expectFailure: (re) => { expected.push(re); },
         /** The viewport, as a screen of that size would have it. */
@@ -187,6 +213,32 @@ function tinyPdf() {
   pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offsets.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('');
   pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(pdf, 'latin1');
+}
+
+/**
+ * A Word file of two paragraphs, the first a bold run, each part stored (not deflated) in its zip: what mammoth needs
+ * and no more ([Content_Types].xml, the package's relationships, the document).
+ */
+function tinyDocx() {
+  const parts = {
+    '[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+    '_rels/.rels': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+    'word/document.xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Board pack</w:t></w:r></w:p><w:p><w:r><w:t>Item 4: the capex review</w:t></w:r></w:p></w:body></w:document>',
+  };
+  const local = []; const central = []; let offset = 0;
+  for (const [name, text] of Object.entries(parts)) {
+    const data = Buffer.from(text, 'utf8'); const n = Buffer.from(name, 'utf8'); const crc = zlib.crc32(data);
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0); head.writeUInt16LE(20, 4); head.writeUInt32LE(crc, 14); head.writeUInt32LE(data.length, 18); head.writeUInt32LE(data.length, 22); head.writeUInt16LE(n.length, 26);
+    const dir = Buffer.alloc(46);
+    dir.writeUInt32LE(0x02014b50, 0); dir.writeUInt16LE(20, 4); dir.writeUInt16LE(20, 6); dir.writeUInt32LE(crc, 16); dir.writeUInt32LE(data.length, 20); dir.writeUInt32LE(data.length, 24); dir.writeUInt16LE(n.length, 28); dir.writeUInt32LE(offset, 42);
+    local.push(head, n, data); central.push(dir, n);
+    offset += head.length + n.length + data.length;
+  }
+  const cd = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length / 2, 8); end.writeUInt16LE(central.length / 2, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, cd, end]);
 }
 
 /** A PDF whose pages are each one colour (an rgb string, "0 0 1" for blue) filling the page, with a line of text. */
@@ -243,6 +295,23 @@ const SCREEN_PROBE = `(() => {
     },
   });
 })();`;
+// A browser older than Safari and iPadOS 17.4 (or Chrome 119, Firefox 121) has no Promise.withResolvers, which pdf.js
+// calls in its page module and in its worker: it is taken away before the page's own scripts run and before each
+// worker's, as such a device has it, and what each began with is kept (and answered, for a worker's record).
+const NO_RESOLVERS = `(() => { delete Promise.withResolvers; globalThis.__resolversAtStart = typeof Promise.withResolvers; return globalThis.__resolversAtStart; })();`;
+/**
+ * pdf.js's worker on a tab opened with NO_RESOLVERS as its workerInit: each one running, what it began with and has now,
+ * and whether pdf.js fell back to running the worker's code in the page itself (its "fake worker"), which would not be
+ * the worker file at work.
+ */
+async function pdfWorkers(tab) {
+  const live = tab.workers.filter((w) => /\/vendor\/pdf\.worker\.min\.mjs$/.test(w.url));
+  const now = [];
+  for (const w of live) now.push(await tab.workerEval(w.sessionId, '[typeof Promise.withResolvers, typeof globalThis.pdfjsWorker].join(" ")'));
+  const inPage = await tab.eval('typeof globalThis.pdfjsWorker');
+  return { count: live.length, start: live.map((w) => w.start), now, inPage,
+    ok: live.length > 0 && live.every((w) => w.start === 'undefined') && now.every((x) => x === 'function object') && inPage === 'undefined' };
+}
 // What the file layer shows: which of the image and the canvas are visible, the canvas's size and its top-centre colour.
 const FILE_SEEN = `(() => { const c = document.getElementById('fileCanvas'); const p = c.width ? c.getContext('2d').getImageData(c.width >> 1, 4, 1, 1).data : [0, 0, 0, 0];
   return { kind: document.body.dataset.kind, img: !document.getElementById('fileImg').hidden, canvas: !c.hidden, w: c.width, h: c.height, rgb: [p[0], p[1], p[2]] }; })()`;
@@ -286,9 +355,42 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(typeof pages === 'string' && pages.startsWith('1|') && pages.includes('Capex'), `pdf.js renders an uploaded PDF and reads its text (${pages})`);
     await research.eval(`new Promise((r) => socket.emit('message', { type: 'text', text: 'Capex is on slide 14' }, r))`);
 
-    // Board: joins, sees the message and the document on stage.
-    const board = await edge.tab(`${base}/app.html?code=${code}&name=Chair&role=board`);
+    // Board: joins, sees the message and the document on stage, on a browser with no Promise.withResolvers.
+    const board = await edge.tab(`${base}/app.html?code=${code}&name=Chair&role=board`, { init: NO_RESOLVERS, workerInit: NO_RESOLVERS });
     report(!!(await board.until('typeof joined !== "undefined" && joined && allMessages.some(m => m.text === "Capex is on slide 14")')), 'board view joins and sees the research message');
+    // The panel draws the PDF through pdf.js's legacy build, which defines what the browser lacks; then a Word file.
+    const boardPdf = await board.until(`(() => {
+      if (!window.__openedPdf) { window.__openedPdf = 1; openDocInPanel(allMessages.find((m) => m.filename === 'capex.pdf')); }
+      const err = document.querySelector('#docDisplay .error');
+      if (err) return { error: err.textContent };
+      const c = document.querySelector('#docDisplay canvas.pdf-page');
+      if (!c || c.classList.contains('pdf-page-pending')) return null;
+      const p = c.getContext('2d').getImageData(c.width >> 1, c.height >> 1, 1, 1).data;
+      return { atStart: window.__resolversAtStart, now: typeof Promise.withResolvers, w: c.width, alpha: p[3] };
+    })()`);
+    const boardWorker = await pdfWorkers(board);
+    report(!!boardPdf && !boardPdf.error && boardPdf.atStart === 'undefined' && boardPdf.now === 'function' && boardPdf.w > 0 && boardPdf.alpha === 255 && boardWorker.ok,
+      `the Board's panel draws a PDF on a browser with no Promise.withResolvers in the page or in pdf.js's worker (as an iPad before 17.4), which the legacy build's module and its worker each define (${JSON.stringify({ ...boardPdf, worker: boardWorker })})`);
+    const docxB64 = tinyDocx().toString('base64');
+    await research.eval(`(async () => {
+      const bytes = Uint8Array.from(atob('${docxB64}'), c => c.charCodeAt(0));
+      const mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      const fd = new FormData(); fd.append('file', new Blob([bytes], { type: mime }), 'board-pack.docx');
+      const up = await (await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-AGM-Upload': UPLOAD_TOKEN } })).json();
+      await new Promise((r) => socket.emit('message', { type: 'file', url: up.url, filename: 'board-pack.docx', mime }, r));
+    })()`);
+    const boardDocx = await board.until(`(() => {
+      const m = allMessages.find((x) => x.filename === 'board-pack.docx');
+      if (!m) return null;
+      if (window.__openedDocx !== m.id) { window.__openedDocx = m.id; openDocInPanel(m); }
+      const h = document.querySelector('#docDisplay .doc-html');
+      if (!h) return null;
+      if (h.querySelector('.error')) return { error: h.textContent };
+      const b = h.querySelector('strong');
+      return b ? { strong: b.textContent, text: h.textContent } : null;
+    })()`);
+    report(!!boardDocx && boardDocx.strong === 'Board pack' && boardDocx.text.includes('Item 4: the capex review'),
+      `a Word file draws on the Board's panel through mammoth 1.13.0, its bold kept (${JSON.stringify(boardDocx)})`);
     await sleep(800);
     await research.shot(path.join(OUT, 'research.png'));
     await board.shot(path.join(OUT, 'board.png'));
@@ -574,7 +676,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const sponsor = await upload('sponsor.png', 'image/png', colourPng(64, 36, [0, 0, 255]));
     const projMade = await hallView.eval(`new Promise((r) => socket.emit('display:create', { code: ROOM, name: 'Projector' }, r))`);
     const projId = projMade.display.id;
-    const proj = await edge.tab(`${base}${projMade.display.path}`, { init: SCREEN_PROBE, metrics: { width: 1280, height: 720 } });
+    const proj = await edge.tab(`${base}${projMade.display.path}`, { init: NO_RESOLVERS + SCREEN_PROBE, workerInit: NO_RESOLVERS, metrics: { width: 1280, height: 720 } });
     await proj.until(`document.body.dataset.kind === 'holding'`);
     const projStatus = () => hallView.eval(`new Promise((r) => socket.emit('display:list', { code: ROOM }, (x) => r(x.displays.find((d) => d.id === '${projId}'))))`);
     const shownAt = async (seq, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { const s = await projStatus(); if (s && s.state === 'shown' && s.seq === seq) return s; await sleep(200); } return null; };
@@ -609,6 +711,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     seen = await proj.eval(FILE_SEEN);
     st = await projStatus();
     report(stepped && probe.workers <= 1, `a screen stepping through a deck keeps one pdf.js worker (${probe.workers} running)`);
+    const projResolvers = await proj.eval(`[window.__resolversAtStart, typeof Promise.withResolvers]`);
+    const projWorker = await pdfWorkers(proj);
+    report(stepped && projResolvers[0] === 'undefined' && projResolvers[1] === 'function' && projWorker.ok,
+      `a screen with no Promise.withResolvers in the page or in pdf.js's worker (as an iPad before 17.4) draws every page of the deck through pdf.js's legacy build, which defines it in each (page began ${projResolvers[0]}, now ${projResolvers[1]}; worker ${JSON.stringify(projWorker)})`);
     report(probe.blank === 0 && probe.resized === atSix.resized && st.state === 'shown' && seen.canvas && seen.w > seen.h && seen.rgb[2] > 200,
       `the slide on air is never blanked to be redrawn, and a rename leaves it alone (${probe.blank} blank frames; ${probe.resized - atSix.resized} redraws on rename; console ${st.mark} ${st.words})`);
     // A canvas whose GPU context the browser lost comes back blank: the slide is drawn again, and a rename after it is
@@ -851,13 +957,16 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(/^linked\|◇ Linked — entries 1–5 have plain hashes \(as AGMessage 0\.5\.1 and earlier wrote them\), accepted on the AGMessage laptop on /.test(linked2 || ''), `accepted at the laptop, the log reads ◇, never ✓ (${(linked2 || '').slice(0, 120)})`);
     await audit2.shot(path.join(OUT, 'audit-marks.png'));
     // An entry changed while it was stopped: the check at start finds it, and Health reads ✕ with its line and offers
-    // nothing to accept.
+    // nothing to accept. Health's page is taken off the server while it is stopped, as nobody's would be, so a reconnect
+    // that lands while it is down is not read as the page's error.
+    await admin2.send('Page.navigate', { url: 'about:blank' });
+    await admin2.until(`location.href === 'about:blank'`);
     await stopServer(server2);
     const kept3 = fs.readFileSync(path.join(dataDir2, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean);
     kept3[1] = kept3[1].replace('Lectern screen 2', 'Lectern screen 9');
     fs.writeFileSync(path.join(dataDir2, 'audit.jsonl'), kept3.join('\n') + '\n');
     server2 = await startServer(port2, dataDir2);
-    await admin2.eval(`location.reload()`);
+    await admin2.send('Page.navigate', { url: `${base2}/admin.html` });
     const broken2 = await admin2.until(`(() => { const l = document.getElementById('auditLine'); const f = document.querySelector('#auditFindings li'); return !document.getElementById('dashboard').hidden && l.dataset.mark === 'broken' && f && f.dataset.mark === 'broken' && document.getElementById('auditAcceptRow').hidden && document.getElementById('auditWhere').hidden && l.textContent + ' | ' + f.textContent; })()`, 20000);
     report(/^Audit log: ✕ keyed \(key [0-9a-f]{16}\) · 1 to see to \| ✕ Broken at line 2 of audit\.jsonl: entry 2 was changed after it was written$/.test(broken2 || ''), `a line changed while it was stopped reads ✕ on Health, with nothing to accept (${broken2})`);
     // A project manager reads the audit log (audit.read) and is offered no Export (audit.export is the admin's).

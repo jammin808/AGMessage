@@ -1,0 +1,157 @@
+{
+  "about": "Every file in app/public/vendor, as it was published: its package, version, build, licence, the notice its licence asks to keep (a folder under licenses/ at the repository's root, shipped beside THIRD-PARTY-NOTICES.md), where it came from and its SHA-256, with the libraries bundled inside it and, on each library, the advisories published against its version, each assessed (\"assessments\": whether it applies here, why, and what bounds it). A version a bundle does not name is said where it was read (\"versionFrom\"). app/test/vendor.test.js holds the folder to this list, tools/vendor-sbom.js adds it to the release's SBOM, and tools/vendor-audit.js asks npm's registry for the advisories against each version and fails on a high or critical one not assessed here. A source's integrity is its package's SHA-512, as npm gives it (for SheetJS's own download, taken of the file it serves).",
+  "files": {
+    "pdf.min.mjs": {
+      "package": "pdfjs-dist",
+      "version": "4.10.38",
+      "purl": "pkg:npm/pdfjs-dist@4.10.38",
+      "build": "legacy",
+      "runs": "page",
+      "licence": "Apache-2.0",
+      "copyright": "Copyright 2024 Mozilla Foundation",
+      "notice": "licenses/pdfjs-dist",
+      "source": {
+        "url": "https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-4.10.38.tgz",
+        "integrity": "sha512-/Y3fcFrXEAsMjJXeL9J8+ZG9U01LbuWaYypvDW2ycW1jL269L3js3DVBjDJ0Up9Np1uqDXsDrRihHANhZOlwdQ==",
+        "path": "package/legacy/build/pdf.min.mjs"
+      },
+      "sha256": "44ec6f011027ee77791386b66c14876a5fc29e20bf0433c07c6726fff7212b72",
+      "floor": {
+        "chrome": "103",
+        "firefox": "ESR",
+        "safari": "16.4",
+        "from": "https://github.com/mozilla/pdf.js/blob/v4.10.38/gulpfile.mjs#L81-L90"
+      },
+      "bundles": [
+        { "package": "core-js", "version": "3.39.0", "purl": "pkg:npm/core-js@3.39.0", "licence": "MIT", "copyright": "Copyright (c) 2014-2024 Denis Pushkarev", "notice": "licenses/core-js" }
+      ]
+    },
+    "pdf.worker.min.mjs": {
+      "package": "pdfjs-dist",
+      "version": "4.10.38",
+      "purl": "pkg:npm/pdfjs-dist@4.10.38",
+      "build": "legacy",
+      "runs": "worker",
+      "licence": "Apache-2.0",
+      "copyright": "Copyright 2024 Mozilla Foundation",
+      "notice": "licenses/pdfjs-dist",
+      "source": {
+        "url": "https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-4.10.38.tgz",
+        "integrity": "sha512-/Y3fcFrXEAsMjJXeL9J8+ZG9U01LbuWaYypvDW2ycW1jL269L3js3DVBjDJ0Up9Np1uqDXsDrRihHANhZOlwdQ==",
+        "path": "package/legacy/build/pdf.worker.min.mjs"
+      },
+      "sha256": "bd88805178a26c729db8c0107a5b630cb900ec070f4d8c7529a3e45530afd41d",
+      "floor": {
+        "chrome": "103",
+        "firefox": "ESR",
+        "safari": "16.4",
+        "from": "https://github.com/mozilla/pdf.js/blob/v4.10.38/gulpfile.mjs#L81-L90"
+      },
+      "bundles": [
+        { "package": "core-js", "version": "3.39.0", "purl": "pkg:npm/core-js@3.39.0", "licence": "MIT", "copyright": "Copyright (c) 2014-2024 Denis Pushkarev", "notice": "licenses/core-js" },
+        { "package": "OpenJPEG", "version": null, "unversioned": "compiled to WebAssembly by pdf.js.openjpeg at the revision pdf.js 4.10.38's build pinned; the decoder records no version", "licence": "BSD-2-Clause", "copyright": "Copyright (c) 2002-2014, Universite catholique de Louvain (UCL), Belgium", "notice": "licenses/openjpeg" }
+      ]
+    },
+    "mammoth.browser.min.js": {
+      "package": "mammoth",
+      "version": "1.13.0",
+      "purl": "pkg:npm/mammoth@1.13.0",
+      "build": "browser",
+      "runs": "page",
+      "licence": "BSD-2-Clause",
+      "copyright": "Copyright (c) 2013, Michael Williamson",
+      "notice": "licenses/mammoth",
+      "source": {
+        "url": "https://registry.npmjs.org/mammoth/-/mammoth-1.13.0.tgz",
+        "integrity": "sha512-2cawcYFcP7ISfXbBcL9lmVgTNWo88v/52ND1gnywHtVT/pX0//puPnf0iMPV9ZgmuvNOE+zkIhDgZ9M2c2dDDg==",
+        "path": "package/mammoth.browser.min.js"
+      },
+      "sha256": "92914a3708cfdf1e62cb553d1856a7fedab21da83d8ee82845de2f897b368cab",
+      "bundles": [
+        { "package": "@xmldom/xmldom", "version": "0.8.6", "purl": "pkg:npm/%40xmldom/xmldom@0.8.6", "licence": "MIT", "copyright": "Copyright 2019 - present Christopher J. Brody and other contributors", "notice": "licenses/xmldom",
+          "advisories": [
+            { "id": "GHSA-8344-3jmq-59r6", "severity": "high", "assessed": "xmldom-parse" },
+            { "id": "GHSA-x4fp-j954-r2f4", "severity": "high", "assessed": "xmldom-parse" },
+            { "id": "GHSA-965w-775f-mr7g", "severity": "high", "assessed": "xmldom-parse" },
+            { "id": "GHSA-93r5-fhx6-vmg9", "severity": "high", "assessed": "xmldom-parse" },
+            { "id": "GHSA-6h8r-xr42-gp59", "severity": "moderate", "assessed": "xmldom-well-formed" },
+            { "id": "GHSA-wh4c-j3r5-mjhp", "severity": "high", "assessed": "xmldom-serialize" },
+            { "id": "GHSA-2v35-w6hq-6mfw", "severity": "high", "assessed": "xmldom-serialize" },
+            { "id": "GHSA-f6ww-3ggp-fr8h", "severity": "high", "assessed": "xmldom-serialize" },
+            { "id": "GHSA-x6wf-f3px-wcqx", "severity": "high", "assessed": "xmldom-serialize" },
+            { "id": "GHSA-j759-j44w-7fr8", "severity": "high", "assessed": "xmldom-serialize" },
+            { "id": "GHSA-w2rr-34g9-rvrj", "severity": "high", "assessed": "xmldom-serialize" },
+            { "id": "GHSA-4w3w-2rp5-g8jm", "severity": "high", "assessed": "xmldom-serialize" },
+            { "id": "GHSA-c7q8-3ch8-vqpv", "severity": "high", "assessed": "xmldom-serialize" },
+            { "id": "GHSA-27p8-2357-5qqv", "severity": "high", "assessed": "xmldom-serialize" },
+            { "id": "GHSA-6gmq-8vp8-gcm6", "severity": "moderate", "assessed": "xmldom-serialize" }
+          ] },
+        { "package": "base64-js", "version": "1.5.1", "purl": "pkg:npm/base64-js@1.5.1", "licence": "MIT", "copyright": "Copyright (c) 2014 Jameson Little", "notice": "licenses/base64-js" },
+        { "package": "buffer", "version": "4.9.1", "purl": "pkg:npm/buffer@4.9.1", "licence": "MIT", "copyright": "Copyright (c) Feross Aboukhadijeh, and other contributors.", "notice": "licenses/buffer" },
+        { "package": "dingbat-to-unicode", "version": "1.0.2", "purl": "pkg:npm/dingbat-to-unicode@1.0.2", "licence": "BSD-2-Clause", "copyright": "Copyright (c) 2021, Michael Williamson", "notice": "licenses/dingbat-to-unicode" },
+        { "package": "ieee754", "version": "1.1.8", "purl": "pkg:npm/ieee754@1.1.8", "licence": "BSD-3-Clause", "copyright": "Copyright (c) 2008, Fair Oaks Labs, Inc.", "notice": "licenses/ieee754" },
+        { "package": "isarray", "version": "1.0.0", "purl": "pkg:npm/isarray@1.0.0", "licence": "MIT", "copyright": "Copyright (c) 2013 Julian Gruber", "notice": "licenses/isarray" },
+        { "package": "jszip", "version": "3.7.1", "purl": "pkg:npm/jszip@3.7.1", "licence": "MIT OR GPL-3.0-or-later", "taken": "MIT", "copyright": "Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso", "notice": "licenses/jszip",
+          "advisories": [
+            { "id": "GHSA-36fh-84j7-cv5h", "severity": "moderate", "assessed": "jszip-path" }
+          ] },
+        { "package": "pako", "version": "1.0.5", "purl": "pkg:npm/pako@1.0.5", "via": "jszip", "versionFrom": "jszip's package-lock.json at its tag v3.7.1; and its utils.assign tests hasOwnProperty on the object itself, as only pako 1.0.5 and earlier do", "licence": "MIT AND Zlib", "copyright": "Copyright (C) 2014-2017 by Vitaly Puzrin and Andrei Tuputcyn", "notice": "licenses/pako" },
+        { "package": "lie", "version": "3.3.0", "purl": "pkg:npm/lie@3.3.0", "via": "jszip", "versionFrom": "jszip's package-lock.json at its tag v3.7.1", "licence": "MIT", "copyright": "Copyright (c) 2014-2018 Calvin Metcalf, Jordan Harband", "notice": "licenses/lie" },
+        { "package": "immediate", "version": "3.0.6", "purl": "pkg:npm/immediate@3.0.6", "via": "jszip", "versionFrom": "jszip's package-lock.json at its tag v3.7.1", "licence": "MIT", "copyright": "Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, Domenic Denicola, Brian Cavalier", "notice": "licenses/immediate" },
+        { "package": "set-immediate-shim", "version": "1.0.1", "purl": "pkg:npm/set-immediate-shim@1.0.1", "via": "jszip", "versionFrom": "jszip's package-lock.json at its tag v3.7.1", "licence": "MIT", "copyright": "Copyright (c) Sindre Sorhus", "notice": "licenses/set-immediate-shim" },
+        { "package": "lop", "version": "0.4.2", "purl": "pkg:npm/lop@0.4.2", "licence": "BSD-2-Clause", "copyright": "Copyright (c) 2013, Michael Williamson", "notice": "licenses/lop" },
+        { "package": "option", "version": "0.2.4", "purl": "pkg:npm/option@0.2.4", "licence": "BSD-2-Clause", "copyright": "Copyright (c) 2013, Michael Williamson", "notice": "licenses/option" },
+        { "package": "process", "version": "0.11.9", "purl": "pkg:npm/process@0.11.9", "licence": "MIT", "copyright": "Copyright (c) 2013 Roman Shtylman", "notice": "licenses/process" },
+        { "package": "underscore", "version": "1.13.1", "purl": "pkg:npm/underscore@1.13.1", "licence": "MIT", "copyright": "Copyright (c) 2009-2021 Jeremy Ashkenas, Julian Gonggrijp, and DocumentCloud and Investigative Reporters & Editors", "notice": "licenses/underscore",
+          "advisories": [
+            { "id": "GHSA-qpx9-hpmf-5gmw", "severity": "high", "assessed": "underscore-recursion" }
+          ] },
+        { "package": "xmlbuilder", "version": "10.0.0", "purl": "pkg:npm/xmlbuilder@10.0.0", "licence": "MIT", "copyright": "Copyright (c) 2013 Ozgur Ozcitak", "notice": "licenses/xmlbuilder" }
+      ]
+    },
+    "xlsx.full.min.js": {
+      "package": "xlsx",
+      "version": "0.20.3",
+      "build": "full",
+      "runs": "page",
+      "licence": "Apache-2.0",
+      "copyright": "Copyright (C) 2012-present   SheetJS LLC",
+      "notice": "licenses/xlsx",
+      "source": {
+        "url": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+        "integrity": "sha512-oLDq3jw7AcLqKWH2AhCpVTZl8mf6X2YReP+Neh0SJUzV/BdZYjth94tG5toiMB1PPrYtxOCfaoUCkvtuH+3AJA==",
+        "path": "package/dist/xlsx.full.min.js"
+      },
+      "sha256": "cc015130aa8521e7f088f88898eba949ccdcbfb38df0bd129b44b7273c3a6f41",
+      "bundles": [
+        { "package": "codepage", "version": "1.15.0", "licence": "Apache-2.0", "copyright": "Copyright (C) 2012-present   SheetJS LLC", "notice": "licenses/xlsx" },
+        { "package": "crc-32", "version": "1.2.0", "licence": "Apache-2.0", "copyright": "Copyright (C) 2012-present   SheetJS LLC", "notice": "licenses/xlsx" },
+        { "package": "cfb", "version": "1.2.2", "licence": "Apache-2.0", "copyright": "Copyright (C) 2012-present   SheetJS LLC", "notice": "licenses/xlsx" }
+      ]
+    }
+  },
+  "assessments": {
+    "xmldom-parse": {
+      "applies": true,
+      "why": "mammoth parses every part of a Word file with xmldom's DOMParser, so a crafted .docx keeps the page that draws it busy for a long time, or short of memory, until that page is reloaded: the panel of whoever opens it, and every Board panel in the hall, where a file sent into the hall opens itself. The server and the other pages are not affected.",
+      "mitigation": "Today only the upload cap (25 MB a file) and who may send into a hall bound it. In 0.6.0's plan (docs/plan/0.6.0/PLAN.md) unit 23 moves mammoth into a worker the page ends at a deadline, and unit 26 ends a file opening itself on the Board's panel. No mammoth release bundles a fixed xmldom (0.8.15 or later): 1.13.0, the newest, was built with 0.8.6."
+    },
+    "xmldom-well-formed": {
+      "applies": true,
+      "why": "mammoth's parse reads such a part instead of refusing it, so the Word file is drawn as it was read.",
+      "mitigation": "None is needed today: nothing AGMessage decides rests on a Word file's part being well-formed."
+    },
+    "xmldom-serialize": {
+      "applies": false,
+      "why": "mammoth uses xmldom only to parse (DOMParser.parseFromString, in its lib/xml/xmldom.js). It never serializes a DOM with XMLSerializer, never builds one with createElement, setAttribute, createProcessingInstruction or createDocumentType, and writes what XML it writes with xmlbuilder; AGMessage never calls xmldom itself."
+    },
+    "jszip-path": {
+      "applies": false,
+      "why": "The traversal needs a program that writes a zip's entries to disk under their own names. mammoth opens the Word file in memory and reads its parts by the names its relationships give; nothing is written anywhere."
+    },
+    "underscore-recursion": {
+      "applies": false,
+      "why": "mammoth calls _.flatten only on lists its own readers build, each level flattened as it is read, so the depth _.flatten recurses to is fixed by mammoth's code, never by the document's nesting; and _.isEqual only on a style map's attributes against an element's, both flat. AGMessage passes no style map."
+    }
+  }
+}

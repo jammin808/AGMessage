@@ -14,6 +14,11 @@ The build this copy is (e.g. 0.5.0+17.abc1234) is in the zip's name, the
 black window's first lines, and the admin page. The window's banner also
 names the folder it starts from.
 
+THIRD-PARTY-NOTICES.md and the licenses folder beside this file name the
+libraries AGMessage's pages use (pdf.js, mammoth, SheetJS and what they
+bundle), each with its licence. Keep them with the folder when you pass
+it on.
+
 First time on a new laptop
 --------------------------
 1. Extract All first (right-click the zip). Running the .bat from inside
@@ -291,6 +296,11 @@ Troubleshooting
   before they could fill it; messages, screens and everything else carry
   on. Free some space and files work again at once.
 
+- A PDF does not draw on an iPad, or on a screen's browser: PDFs need
+  Safari 16.4 or later (iPadOS and iOS 16.4), Chrome 103 or later, or a
+  current Firefox. On an older device, share the page as a picture (an
+  image) instead.
+
 - Forgot a password: an admin sets a new one-time password on the
   Accounts page. Lost the only admin
   password: on this laptop, the admin token printed in the black window
@@ -349,9 +359,10 @@ Security
   - Only people in a meeting can upload, and only PDF, images, Word, Excel,
     PowerPoint, CSV and text — checked by content, not just by name. Files
     are served so they can never run script inside AGMessage.
-  - Pages carry a strict Content-Security-Policy. pdf.js is 4.10.38 (fixes
-    CVE-2024-4367) with eval switched off; SheetJS 0.20.3; mammoth 1.11.0;
-    multer 2 (fixes the 1.x denial-of-service CVEs).
+  - Pages carry a strict Content-Security-Policy. pdf.js runs with eval
+    switched off; the libraries the pages use, their versions and
+    licences: see THIRD-PARTY-NOTICES.md. multer 2 (fixes the 1.x
+    denial-of-service CVEs).
   - Identities are issued and signed by the server: nobody can pose as
     someone else or delete their messages.
   - Optional role lock: Admin -> Roles & invites. Board and research seats

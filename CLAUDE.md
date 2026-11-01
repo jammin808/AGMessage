@@ -62,14 +62,14 @@ npm run check        # ESLint fences, the secret scan, every test under the cove
 npm test             # the tests alone; end-to-end tests start a real server on a throwaway data folder
 node --test test/displays.test.js                     # one file
 AGM_BROWSER=<chrome or edge> npm run smoke            # the browser smoke (every page, sign-in, a hall, a screen)
-npm run audit        # shipped packages' advisories and registry signatures
+npm run audit        # shipped packages' advisories and registry signatures; the vendored libraries' (tools/vendor-audit.js)
 node ../tools/stamp-build.js --print                  # the version this checkout would carry
 ```
 
 CI (`.github/workflows/ci.yml`): `analyze` (lint, secret scan, version), `test-linux` (Node 24 and 26, coverage,
 Chrome smoke), `test-windows` (tests, Edge smoke), `package` (the stamped portable zip, CycloneDX SBOM, SHA256SUMS) and,
 on a `v*` tag that names `app/package.json`'s version, `release` with a build-provenance attestation.
-`.github/workflows/security.yml`: CodeQL `security-extended`, the dependency audit, dependency review on pull requests.
+`.github/workflows/security.yml`: CodeQL `security-extended`, the dependency audit (npm's packages and the vendored libraries), dependency review on pull requests.
 
 ## Where things live
 
@@ -99,6 +99,8 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | AI drafts | `app/lib/ai.js` |
 | The version | `app/lib/version.js`, `tools/stamp-build.js`, `app/package.json` (`version`, `agmessage.runBase`) |
 | The pages | `app/public/` (`index` sign-in and codes, `halls` the board, `users` accounts and audit, `app` a hall, `admin`, `display`) |
+| The browser libraries the pages load (pdf.js 4.10.38's legacy build, mammoth, SheetJS), byte for byte as published, and their list: each file's package, version, build, licence, copyright, source and SHA-256, its floor, what it bundles and the advisories assessed against each | `app/public/vendor/`, `app/public/vendor/VENDOR.json` (held to the folder by `app/test/vendor.test.js`) |
+| Their licences and notices, shipped at the portable folder's top, with the advisories against their versions and each one's assessment; the SBOM's vendored components, read from the bundle that ships; the vendored libraries' advisory audit | `THIRD-PARTY-NOTICES.md`, `licenses/<package>/`, `tools/vendor-sbom.js`, `tools/vendor-audit.js` |
 | The house lint rule | `app/eslint-rules/no-unescaped-html.js` |
 | The portable build | `tools/fetch-runtime.ps1`, `tools/build-portable.ps1`, `start-agmessage.bat`, `make-shareable-copy.bat` |
 | Papers | `README.md`, `README.txt`, `CHANGELOG.md` (fenced by a test), `SECURITY.md`, `docs/ACCOUNTS.md`, `docs/DISPLAYS.md`, `docs/NODES.md`, `docs/SHOWBUS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `docs/INSTALL.md` (the installed node, as far as it is built) |

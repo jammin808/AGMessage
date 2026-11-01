@@ -24,7 +24,24 @@ problem ships as a patch release, with credit if you want it.
 fences; a rule that refuses unescaped values on their way into a page's HTML; an in-tree secret scan; CodeQL
 (`security-extended`); `npm audit` with registry signatures and provenance; dependency review on pull requests; the
 tests, the coverage gate and the browser smoke on Linux and Windows. A release carries its SBOM (CycloneDX),
-`SHA256SUMS` and a build-provenance attestation (`gh attestation verify <zip> --repo <owner>/AGMessage`).
+`SHA256SUMS` and a build-provenance attestation (`gh attestation verify <zip> --repo <owner>/AGMessage`). The SBOM lists
+npm's packages and the browser libraries vendored in `app/public/vendor`, each of those with its file's SHA-256 and the
+libraries bundled in it, read from the bundle as the zip extracts it. Each vendored file is its package's file byte for
+byte, listed in `app/public/vendor/VENDOR.json` with where it came from, its package's digest and its SHA-256; a test
+fails the build on a file not listed, bytes that differ, a file no page loads, or a licence that is not one of those
+allowed, and the SBOM's job stops on a shipped file whose bytes are not the ones listed, or a bundle without the list,
+the notices and every licence text. Their licences ship in `THIRD-PARTY-NOTICES.md` and `licenses/`.
+
+`npm audit` cannot see the vendored libraries, which are in no lockfile. `tools/vendor-audit.js` (part of `npm run
+audit`, and a step of the Security workflow's weekly run) asks npm's registry for the advisories against every version
+`VENDOR.json` lists, the libraries bundled inside each file included, and fails on a high or critical one `VENDOR.json`
+does not assess. Each assessment says whether the advisory applies here, why, and what bounds it, and the SBOM carries
+it as that vulnerability's analysis. The one that applies today: the XML parser inside mammoth (xmldom 0.8.6, which
+mammoth 1.13.0, its newest release, still bundles) can be kept busy for a long time, or run short of memory, by a
+crafted Word file, which holds the page that draws it (the panel of whoever opens it, and the Board's panels, where a
+file sent into the hall opens itself) until it is reloaded; the server and other pages are not affected. Until 0.6.0's
+readers run mammoth in a worker with a deadline, the upload cap and who may send into a hall are what bound it.
+`THIRD-PARTY-NOTICES.md` lists each advisory and its assessment.
 
 ## Recommended repository settings
 

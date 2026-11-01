@@ -357,6 +357,67 @@ an entry in it. Admin can choose to split the audit log and archive the older pa
   counted UTF-16 units.
 - Rolling back: nothing stored changes shape; 0.5.1 reads the new rows and lines as they are.
 
+**The libraries the pages use: each listed with its licence, and the stale or fragile ones gone** (the owner's answers 22,
+"Board will use a mixture of devices", and 29, "wrap into 0.6.0"; the libraries' own packages, read and hashed; npm's
+registry's advisories, read on 2026-11-01; the browser smoke takes `Promise.withResolvers` away in the page and in
+pdf.js's worker, as older iPads lack it, and no iPad was walked)
+- PDFs draw on older iPads. pdf.js is 4.10.38's legacy build, on the hall's panel and on the screens, in place of the
+  same version's modern build, which calls `Promise.withResolvers` with nothing in its place where it is missing: Safari
+  and iPadOS have it only from 17.4 (Chrome from 119, Firefox from 121), so an iPad before iPadOS 17.4 drew no PDF, on
+  the panel or as a screen. The legacy build's module and its worker each define it where it is missing and are
+  compiled for Chrome 103, Firefox ESR and Safari 16.4, its build's own targets: from iPadOS 16.4 an iPad draws them, and
+  before 16.4 it still draws none. That floor is recorded with the files. They are larger: the module 398 KB and the
+  worker 1.42 MB, from 353 KB and 1.38 MB.
+- pdf.js 3.11.174's worker (`vendor/pdf.worker.min.js`) is gone. Nothing loaded it, yet every bundle shipped it, from a
+  release before CVE-2024-4367's fix.
+- mammoth 1.13.0, from 1.11.0, reads Word files in the page: since 1.12.2 a crafted document's styles cannot pollute
+  object prototypes (which could turn on its `externalFileAccess`), and since 1.12.3 an unterminated string in one no
+  longer makes mammoth's own reader backtrack for long. 1.13.0 uses the browser's own promises (the file is 405 KB, from
+  636 KB), reads the text inside `w:customXml` elements, which 1.11.0 left out, and handles paragraphs and runs moved
+  under tracked changes. The XML parser it bundles is not fixed by it: see the advisories below.
+- Every file in `app/public/vendor` is listed in `app/public/vendor/VENDOR.json`: its package, version, build, where it
+  runs, licence and copyright, its package's address and digest, the path inside it, the file's SHA-256, and the 21
+  libraries bundled inside the four files (core-js in both pdf.js files, OpenJPEG in its worker for JPEG 2000 images;
+  jszip, pako, xmldom and thirteen more in mammoth; SheetJS's own codepage, CRC-32 and CFB). The four that come inside
+  jszip's own bundle, which names no versions, are the versions jszip's lockfile pins at its tag, and pako's is held to
+  its code (1.0.5). `THIRD-PARTY-NOTICES.md` says the same in words, and each licence's text, with the copyright notice
+  it asks to be kept, is in `licenses/<package>/`. The portable folder carries both at its top. 0.5.1 shipped none of
+  these libraries' licences.
+- The advisories against the bundled libraries are listed and assessed, since `npm audit` cannot see them. mammoth
+  1.13.0, its newest release, still bundles xmldom 0.8.6, underscore 1.13.1 and jszip 3.7.1, which carry 17 published
+  advisories between them. `VENDOR.json` records each with whether it applies here and why, `THIRD-PARTY-NOTICES.md` and
+  `SECURITY.md` say so, and the release's SBOM carries each as an analysed vulnerability. Twelve do not apply: mammoth
+  never serializes or builds an XML DOM, never writes a zip's entries anywhere, and flattens only lists of its own.
+  Four of xmldom's apply: a crafted Word file can keep the page that draws it busy for a long time, or short of memory,
+  until it is reloaded (the panel of whoever opens it, and the Board's panels, where a file sent into the hall opens
+  itself); the server and other pages are not affected, and until 0.6.0's readers run mammoth in a worker with a
+  deadline, the upload cap and who may send into a hall are what bound it. A fifth applies harmlessly: a part that is
+  not well-formed is read instead of refused.
+- `tools/vendor-audit.js`, part of `npm run audit` and a step of the Security workflow's weekly run, asks npm's
+  registry for the advisories against every version `VENDOR.json` lists, the bundled libraries included, and fails on a
+  high or critical one that is not assessed, or is assessed at another severity than the registry now gives it, and on
+  a registry that does not answer.
+- `test/vendor.test.js` fails the build on a vendored file that is not listed, a listed file that is missing, bytes that
+  are not the listed SHA-256, an entry with no licence, notice or copyright, a licence a vendored library may not carry,
+  a licence folder whose text is not the licence named (a BSD-3-Clause text filed as BSD-2-Clause included) or lacks the
+  copyright, a file no page loads (as the 3.11.174 worker was), a notices table that is not the list, an advisory with
+  no assessment, a bundled version its code does not bear out, and a paper that says which browsers draw a PDF without
+  the floor. It also opens a PDF through both pdf.js files in a Node with no `Promise.withResolvers`.
+- The browser smoke runs the Board's panel and a projector screen as an iPad before 17.4 would: `Promise.withResolvers`
+  is taken away before the page's scripts and before pdf.js's worker starts, and each must have it again once a PDF is
+  drawn, through the worker file itself, not pdf.js's fallback in the page. A Word file built in the smoke draws on the
+  Board's panel, its bold kept.
+- The release's SBOM (`agmessage-sbom.cdx.json`) lists the vendored files beside npm's packages, each with its SHA-256,
+  its package's digest, the libraries bundled in it and the analysis of each advisory against them
+  (`tools/vendor-sbom.js`). It reads them from the bundle as the zip extracts it, and the job stops on a shipped file
+  that is not the one `VENDOR.json` records, or a bundle without the list, `THIRD-PARTY-NOTICES.md` and every licence
+  text as the checkout has them. 0.5.1's SBOM listed npm's packages only.
+- A Windows checkout, where the bundle is built, keeps the vendored files as their packages published them: git no
+  longer turns their line endings into CRLF there.
+- Not yet: the portable folder does not carry the licence texts of the Node.js runtime and cloudflared it ships;
+  `THIRD-PARTY-NOTICES.md` says where they are.
+- Rolling back: nothing stored changes; 0.5.1's bundle carries its own libraries.
+
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,

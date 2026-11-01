@@ -24,11 +24,11 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   with a message under it (the speaker's comfort monitor), the clock, or black. Each screen confirms what it showed.
   [docs/DISPLAYS.md](docs/DISPLAYS.md)
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, images) shared and
-  pushed to the on-stage panel or to screens; pins, replies, reactions, priority, seen receipts. Every change is
-  numbered and written to an append-only log: a phone that drops off the Wi-Fi catches up with just what it missed,
-  and a crash or power cut loses nothing. A watchdog restarts the server after a crash or a hang. The admin page's
-  health reads the server's true delay and how busy it is, and keeps the peaks of each show day for 14 days, through a
-  restart or a shutdown, so one look after a show says how it ran.
+  pushed to the on-stage panel or to screens, PDFs on iPads from iPadOS 16.4 (pdf.js's legacy build); pins, replies,
+  reactions, priority, seen receipts. Every change is numbered and written to an append-only log: a phone that drops off
+  the Wi-Fi catches up with just what it missed, and a crash or power cut loses nothing. A watchdog restarts the server
+  after a crash or a hang. The admin page's health reads the server's true delay and how busy it is, and keeps the peaks
+  of each show day for 14 days, through a restart or a shutdown, so one look after a show says how it ran.
 - **The show network (Show Bus 1.2).** Send to Stagewatch — straight to the speaker's screen, or to the operator to
   approve and pass on to the confidence monitor, a moderator, backstage or interpreter screen, a department, or keep.
   A line reads as it was typed: cut on a whole character where Stagewatch cuts, its braces as parentheses so Stagewatch
@@ -70,16 +70,21 @@ npm ci
 npm run check     # the analyzers, the secret scan, every test with the coverage gate
 npm test          # the tests alone (a real server on a throwaway data folder for the end-to-end ones)
 npm run smoke     # the browser smoke: Edge, Chrome or Chromium (AGM_BROWSER=<path>)
-npm run audit     # the shipped packages' advisories and registry signatures
+npm run audit     # the shipped packages' advisories and registry signatures, and the vendored libraries' advisories
 ```
 
-The analyzers are fences: ESLint with the security rules, a banned-call list and a rule that refuses unescaped values
-on their way into a page's HTML ([docs/ANALYSIS.md](docs/ANALYSIS.md)). CI runs them, the tests on Linux (Node 24 and
-26) and Windows, the browser smoke on both, CodeQL and the dependency audit; it builds the stamped zip with its SBOM
-and SHA256SUMS on every push, extracts it and starts the bundle once (its own Node and watchdog must answer
-`/api/health` with the stamped build within 30 s), runs both .bat files under cmd on Windows, and a `v*` tag publishes a
-release with a build-provenance attestation. A CI run's artifact is the zip inside a second zip, which GitHub adds.
-`tools\build-portable.ps1` builds the zip locally.
+The analyzers are fences: ESLint with the security rules, a banned-call list and a rule that refuses unescaped values on
+their way into a page's HTML ([docs/ANALYSIS.md](docs/ANALYSIS.md)). CI runs them, the tests on Linux (Node 24 and 26)
+and Windows, the browser smoke on both, CodeQL and the dependency audit; it builds the stamped zip with its SBOM (npm's
+packages and the browser libraries vendored in `app/public/vendor`, each with its SHA-256) and SHA256SUMS on every push,
+extracts it and starts the bundle once (its own Node and watchdog must answer `/api/health` with the stamped build
+within 30 s), runs both .bat files under cmd on Windows, and a `v*` tag publishes a release with a build-provenance
+attestation. A CI run's artifact is the zip inside a second zip, which GitHub adds. `tools\build-portable.ps1` builds
+the zip locally.
+
+The libraries the pages use (pdf.js, mammoth, SheetJS and what each bundles) are listed with their licences in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), their texts in `licenses/`, and file by file, with each file's
+source and SHA-256, in `app/public/vendor/VENDOR.json`, which a test holds the folder to.
 
 Meeting data (`app/data`, `app/uploads`) is never committed or packaged. The agent brief for working on this tree is
 [CLAUDE.md](CLAUDE.md).

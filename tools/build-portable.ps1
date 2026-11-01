@@ -35,6 +35,9 @@ New-Item -ItemType File -Force "$stage\app\uploads\.gitkeep" | Out-Null
 Copy-Item node "$stage\node" -Recurse
 Copy-Item bin "$stage\bin" -Recurse
 Copy-Item README.txt, start-agmessage.bat, make-shareable-copy.bat $stage
+# The licences of the browser libraries in app\public\vendor (listed in its VENDOR.json), with the notices they ask to keep.
+Copy-Item THIRD-PARTY-NOTICES.md $stage
+Copy-Item licenses "$stage\licenses" -Recurse
 
 Write-Host '==> Installing production dependencies'
 Push-Location "$stage\app"

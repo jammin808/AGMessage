@@ -202,10 +202,18 @@ jobs:
           }
           Write-Host 'The bundle exported its audit log, and the release verifier checked it: exit 0'
       # The bill of materials (CycloneDX): every package the bundle ships, at its version — the SOUP list a reviewer reads.
+      # npm's packages, then the browser libraries vendored in app/public/vendor (VENDOR.json), read from the bundle as
+      # the zip extracts it, each with its file's SHA-256, the libraries bundled in it and the analysis of each advisory
+      # against them. A shipped vendored file whose bytes are not the ones its entry records, or a bundle without the
+      # list, THIRD-PARTY-NOTICES.md and every licence folder as this checkout has them, stops here.
       - name: Software bill of materials
         shell: pwsh
         run: |
           npm sbom --sbom-format cyclonedx --omit dev --package-lock-only --prefix app | Out-File -Encoding utf8 dist/agmessage-sbom.cdx.json
+          if ($LASTEXITCODE -ne 0) { throw 'npm sbom failed' }
+          $shipped = (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'bundle-start') -Directory | Select-Object -First 1).FullName
+          node tools/vendor-sbom.js dist/agmessage-sbom.cdx.json --tree $shipped
+          if ($LASTEXITCODE -ne 0) { throw 'the bundle''s vendored libraries could not be added to the SBOM (tools/vendor-sbom.js)' }
           # The list is taken before SHA256SUMS is written, so the file being written is never one being hashed.
           $files = @(Get-ChildItem dist -File | Where-Object { $_.Name -ne 'SHA256SUMS' })
           $lines = foreach ($f in $files) { '{0}  {1}' -f (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower(), $f.Name }
