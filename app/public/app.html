@@ -23,7 +23,8 @@
       </span>
       <button id="stageToggleBtn" class="btn ghost small director-only" title="Collapse / expand the On stage panel" type="button" hidden>📺</button>
       <button id="themeBtn" class="btn ghost small" title="Toggle dark mode">🌙</button>
-      <button id="helpBtn" class="btn small help-btn" type="button" title="Ask the crew and the project managers for help" hidden>Help</button>
+      <button id="helpBtn" class="btn small help-btn" type="button" aria-haspopup="dialog" title="Ask this room and the hall's crew for help" hidden>Help</button>
+      <span class="sr-only" id="helpStatus" role="status"></span>
       <button id="screensBtn" class="btn small" type="button" title="What this hall's screens show" hidden>Screens</button>
       <button id="peopleBtn" class="btn ghost small" title="Who's here">People</button>
       <a href="/" class="btn ghost small">Leave</a>
@@ -154,16 +155,16 @@
     </aside>
   </div>
 
-  <dialog id="helpDialog" class="agm-dialog">
+  <!-- Help in two taps: Help, then what it is about. The heading takes the focus, so a phone's keyboard does not cover the
+       categories; the words come first and are optional; a category sends at once, and none is chosen for the person. -->
+  <dialog id="helpDialog" class="agm-dialog help-dialog" aria-labelledby="helpTitle">
     <form id="helpForm" method="dialog">
-      <h2>Ask for help</h2>
-      <p class="hint">Everyone in this hall sees it, and so do the project managers on their board, until someone marks it resolved.</p>
-      <fieldset class="field">
-        <legend>What with</legend>
-        <div class="help-cats" id="helpCats" role="radiogroup" aria-label="What with"></div>
-      </fieldset>
-      <label class="field"><span>What's wrong <small class="muted">(optional)</small></span><input id="helpText" maxlength="300" autocomplete="off" placeholder="e.g. Radio mic 3 has no signal" /></label>
-      <div class="row end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="send">Send help request</button></div>
+      <h2 id="helpTitle" tabindex="-1" autofocus>Ask for help</h2>
+      <p class="hint">Everyone in this room and the hall's crew see it until it's resolved.</p>
+      <label class="field"><span>What's wrong? <small class="muted">optional</small></span><input id="helpText" maxlength="300" autocomplete="off" enterkeyhint="done" placeholder="e.g. Radio mic 3 has no signal" /></label>
+      <p class="help-cats-label" id="helpCatsLabel">Choose what it's about: it sends at once.</p>
+      <div class="help-cats" id="helpCats" role="group" aria-labelledby="helpCatsLabel"></div>
+      <div class="row end"><button class="btn ghost" value="cancel" formnovalidate>Close</button></div>
     </form>
   </dialog>
 

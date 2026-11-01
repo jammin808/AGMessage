@@ -453,6 +453,8 @@ move" and the unit's own text state them. Every number points to an earlier unit
 
 - **#19 (X)** carries its refusal words into #14 (B)'s strip (5-§11).
 - **#25 (3c)** moves `app.js`'s three `showModal()` calls onto #20 (M)'s `AGM.openDialog` (5-§11).
+- **#25 (3c)** moves #18 (E)'s Help chip ask, which `app.js` draws itself until `AGM.ask` exists (`HelpChip`), onto
+  `AGM.ask`, keeping its words, its three answers and Keep it open's focus (7-§17.2, 5-§16.6).
 - **#42 (unit 8)** carries #18 (E)'s help chip into side rooms (5-§11).
 - **#24 (3b)** draws the `audit` menu rows that #5, #6 and #7 add "if unit 3b is in": Check the log, Export the log…,
   Split the log here… (3-H.14, 5-§16.7).

@@ -1772,9 +1772,15 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
 /* Help requests in a hall: a card that cannot be missed until it is resolved; shape and words carry the state */
-/* Help is red in both themes: the button's surface is a token, so no theme's rule for .btn outranks it */
-.help-btn { background: var(--c-fault); border-color: var(--c-fault); color: var(--c-on-fault); font-weight: 700; }
-.help-btn:hover { filter: brightness(1.08); }
+/* Help is neutral and outlined at rest, so red means something. While this person's request is open the button is its
+   status chip, a mark and words in the role's colour: ■ asked in the fault red (open help), ▶ someone on the way in
+   info, ✓ resolved in ok. Its surface, ink and border are tokens, so no theme's rule for .btn outranks them */
+.help-btn { border-color: var(--c-ink-muted); color: var(--c-ink); font-weight: 700; word-break: break-word; overflow-wrap: anywhere; }
+.help-btn[data-state="open"] { background: var(--c-fault); border-color: var(--c-fault); color: var(--c-on-fault); }
+.help-btn[data-state="coming"] { border-color: var(--c-info); color: var(--c-info); }
+.help-btn[data-state="resolved"] { border-color: var(--c-ok); color: var(--c-ok); }
+.app-meta .help-btn[data-state]:hover { border-color: currentColor; }
+.help-btn[data-state="open"]:hover { filter: brightness(1.08); }
 .msg.is-help { border-left: 6px solid var(--danger); }
 .msg.is-help[data-help="coming"] { border-left-color: var(--accent); }
 .msg.is-help[data-help="resolved"] { border-left-color: var(--success); }
@@ -1784,10 +1790,23 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .help-line[data-state="coming"] { color: var(--accent); }
 .help-line[data-state="resolved"] { color: var(--success); }
 .help-actions { display: flex; gap: .4rem; margin-top: .45rem; flex-wrap: wrap; }
-.help-cats { display: flex; flex-wrap: wrap; gap: .4rem; }
-.help-cat { display: inline-flex; align-items: center; gap: .35rem; padding: .4rem .7rem; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; font-size: .92rem; }
-.help-cat:has(input:checked) { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); font-weight: 600; }
-.help-cat input { margin: 0; }
+/* The help dialog: the words first, then one large button per category, each sending at once; none is chosen */
+.help-cats-label { margin: var(--sp-3) 0 var(--sp-2); font-weight: 600; font-size: var(--fs-sm); }
+.help-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.help-cat { min-height: var(--target-touch); font-size: var(--fs-md); font-weight: 600; text-align: center; }
+/* The Help chip's ask: in place under the chip, not a menu and not modal; its buttons are verbs, and the safe one,
+   Keep it open, has the focus when it opens. It follows the chip in the header, so Tab runs from the chip through it
+   and on; where the popover API is, it is a manual popover in the top layer (the inset and margin here replace the
+   popover's own centring), and elsewhere it is fixed at the menu's layer inside the sticky header, so it draws over the
+   feed and the composer beneath it. Its size and ink are its own, not the header's */
+.chip-ask { position: fixed; inset: auto; margin: 0; z-index: var(--z-menu); width: min(20rem, calc(100vw - 1rem)); padding: var(--sp-3);
+  border: 1px solid var(--c-border); border-radius: var(--radius-md); background: var(--c-surface-raised); color: var(--c-ink);
+  font-size: var(--fs-md); text-align: left; box-shadow: var(--shadow); }
+.chip-ask-title { margin: 0 0 var(--sp-1); font-weight: 700; }
+.chip-ask-words { margin: 0 0 var(--sp-2); color: var(--c-ink); font-size: var(--fs-sm); word-break: break-word; overflow-wrap: anywhere; }
+.chip-ask-then { margin: 0 0 var(--sp-3); color: var(--c-ink-muted); font-size: var(--fs-sm); }
+.chip-ask-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.chip-ask-acts .btn { min-height: var(--target-touch); flex: 1 1 auto; }
 
 /* Screens: an operator's view of the hall's displays — tick, then take; each line says what its screen confirmed */
 .screens-dialog { max-height: min(92vh, 52rem); max-height: min(calc(100dvh - 2rem), 52rem); }

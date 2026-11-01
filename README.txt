@@ -66,9 +66,14 @@ Every day of the event
 - A browser signed in to an account opens its halls from the halls board,
   never with a code: a code link opened there says so and offers "Open your
   halls" or "Sign out". To join as a guest on that device, sign out first.
-- Help: in a hall, the red Help button asks for Sound, Vision, Lighting,
-  Stage, Presenter or IT. It stays red on the board until someone presses
-  "On my way", and on the board until it is resolved.
+- Help: in a hall, tap Help, then what it is about (Sound, Vision,
+  Lighting, Stage, Presenter, IT / network or Something else): that tap
+  sends it. Type a few words first if you like; Enter moves to the
+  categories and sends nothing. Help then says what happened: "Help
+  asked", "Ana is on the way", then "Resolved" for 30 seconds. Tap it to
+  say "It's sorted" or "Cancel request" ("Keep it open" changes nothing).
+  A request stays red on the board until someone presses "On my way", and
+  on the board until it is resolved.
 - New messages: a hall page you have scrolled up stays where you left it;
   "↓ 3 new" at the bottom says how many came and takes you there. A "New"
   line sits above the first message that came since you last touched the

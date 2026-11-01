@@ -7,8 +7,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 
 - **Halls.** Each hall has its own message room and, if it has one, its own Stagewatch: its countdown in the header,
   sends to its speaker's screen. The **halls board** shows every hall an account may see — countdown, who is in, the
-  last message, open help requests, its screens and its Patterns / PlayMap — live. **Help requests** (Sound, Vision,
-  Lighting, Stage, Presenter, IT) stay red until someone is on the way and on the board until resolved.
+  last message, open help requests, its screens and its Patterns / PlayMap — live. **Help requests** go in two taps
+  (Help, then Sound, Vision, Lighting, Stage, Presenter, IT / network or Something else) and stay red until someone is
+  on the way and on the board until resolved. The asker's Help button says what happened ("■ Help asked", "▶ Ana is on
+  the way", "✓ Resolved"), and a tap on it marks the request sorted or cancels it.
 - **Accounts and codes.** Crew, project managers and admins sign in as themselves (a signed-in browser opens its halls,
   never a guest's seat); presenters and guests join with a hall's 6-character code. Roles (admin, project manager,
   senior tech, tech, staff, viewer), halls per person, and single rights an admin can add or remove. An **audit log**

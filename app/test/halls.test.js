@@ -16,7 +16,7 @@ const tlsmod = require('../lib/tls');
 const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
 const { io } = require('socket.io-client');
-const { startServer, stopServer, api, connect, emit, answer, wait, until, fakeStagewatch, freePort } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, freePort } = require('./helpers');
 
 // Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
 const KEY_A = 'swk_hallA_node_key_0001';   // secret-scan: fixture
@@ -178,6 +178,48 @@ test('halls end to end: two Stagewatches, the board, help', async (t) => {
     await cleared;
     const tr = await fetch(base + '/api/admin/transcript/' + hallA, { headers: { cookie: admin } });
     assert.match(await tr.text(), /Help — Sound:<\/strong> Radio mic 3 has no signal[\s\S]*resolved — Alex/);
+  });
+
+  await t.test('the Help chip\'s two acts are the asker\'s own: an On stage seat cancels one request and marks another sorted; the hall hears each, and each leaves the board', async () => {
+    const pm = await connect(base, pat); sockets.push(pm);
+    await emit(pm, 'board:watch', {});
+    const next = (pred) => new Promise((resolve) => { const on = (b) => { if (pred(b)) { pm.off('board', on); resolve(b); } }; pm.on('board', on); });
+    const bea = await connect(base); sockets.push(bea);
+    assert.ok((await emit(bea, 'join', { roomCode: hallA, name: 'Bea', role: 'board' })).ok);
+    const mine = (b, id) => b.help.filter((h) => h.id === id).map((h) => [h.category, h.text, h.state, h.from]);
+
+    // "Something else" is sent as 'Other'; Cancel request is the author's own delete.
+    const askedOne = next((b) => b.help.some((h) => h.text === 'no water at the lectern'));
+    const one = await emit(bea, 'message', { type: 'help', category: 'Other', text: 'no water at the lectern' });
+    assert.ok(one.ok);
+    assert.deepEqual(mine(await askedOne, one.id), [['Other', 'no water at the lectern', 'open', 'Bea']]);
+    const deleted = once(crewA, 'messageDeleted');
+    const goneOne = next((b) => !b.help.some((h) => h.id === one.id));
+    assert.equal((await emit(bea, 'delete', { messageId: one.id })).ok, true);
+    assert.equal((await deleted).messageId, one.id, 'the hall hears the request go');
+    assert.equal((await goneOne).halls.find((h) => h.code === hallA).help, 0, 'and it leaves the board');
+
+    // It's sorted is the author's own Resolved, whoever was on the way. The hall's updates are kept from before the On my
+    // way, so the one read is the resolution itself, however the two are delivered on the hall's socket.
+    const askedTwo = next((b) => b.help.some((h) => h.text === 'my lectern mic is dead'));
+    const two = await emit(bea, 'message', { type: 'help', category: 'Sound', text: 'my lectern mic is dead' });
+    assert.ok(two.ok);
+    await askedTwo;
+    const updates = [];
+    const heardUpdate = (x) => updates.push(x);
+    crewA.on('helpUpdate', heardUpdate);
+    try {
+      assert.ok((await emit(pm, 'help:respond', { code: hallA, messageId: two.id, state: 'coming' })).ok);
+      const goneTwo = next((b) => !b.help.some((h) => h.id === two.id));
+      assert.ok((await emit(bea, 'help:respond', { messageId: two.id, state: 'resolved' })).ok);
+      await until(() => updates.some((x) => x.messageId === two.id && x.help.state === 'resolved'), 4000, 'the hall to hear the request resolved');
+      assert.deepEqual(updates.filter((x) => x.messageId === two.id).map((x) => [x.help.state, x.help.by]), [['coming', 'Pat PM'], ['resolved', 'Bea']],
+        'the hall hears On my way, then the asker\'s own Resolved');
+      assert.equal((await goneTwo).halls.find((h) => h.code === hallA).help, 0);
+    } finally {
+      crewA.off('helpUpdate', heardUpdate);
+    }
+    bea.close();
   });
 
   await t.test('one board tick for every watcher: each gets only the halls it may see, and may answer only where it may post', async () => {

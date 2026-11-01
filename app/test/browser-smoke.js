@@ -75,7 +75,7 @@ const CHROME_OLD_WORDS = (doc = 'document') => `((doc) => {
 // A hall page out of its hall (sent out, or its join refused): the words in place of the hall, the way back, the socket,
 // and what it still offers of the hall (its header's buttons, an open dialog): nothing.
 const OUT_OF_HALL = `(() => { const box = document.getElementById('outOfHall'); const back = document.getElementById('outBack');
-  const offered = ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn'].filter((id) => !document.getElementById(id).hidden).concat([...document.querySelectorAll('dialog[open]')].map((d) => d.id));
+  const offered = ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn'].filter((id) => !document.getElementById(id).hidden).concat([...document.querySelectorAll('dialog[open], #helpAsk')].map((d) => d.id));
   return !box.hidden && JSON.stringify({ words: document.getElementById('outWords').textContent, back: back.textContent, to: back.getAttribute('href'),
     hall: document.querySelector('.main-row').hidden, offered, focused: document.activeElement === back, connected: socket.connected }); })()`;
 // The server's own time zone for the smoke: a screen in another zone must still show this one's time of day.
@@ -380,10 +380,11 @@ const INK = `(() => {
   const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
   const opacity = (el) => { let o = 1; for (let n = el; n; n = n.parentElement) o *= Number(getComputedStyle(n).opacity); return o; };
   window.__ink = (el) => { const bg = under(el); return { ratio: ratio(over(rgba(getComputedStyle(el).color), bg), bg), opacity: opacity(el), bgLum: lum(bg) }; };
+  window.__edge = (el) => { const bg = under(el.parentElement); return ratio(over(rgba(getComputedStyle(el).borderTopColor), bg), bg); };
 })();`;
 // The hall page on a phone, read: whether it fits the screen (no sideways scroll, nothing zoomed out); its message icon
-// buttons (and their size), presence lines and On stage tags, at their lowest contrast and opacity; Help's colour and
-// words; Send; the header's controls under a finger; and the composer's 🔥 Priority, unpressed and pressed (its
+// buttons (and their size), presence lines and On stage tags, at their lowest contrast and opacity; Help at rest, its
+// fill, words and edge; Send; the header's controls under a finger; and the composer's 🔥 Priority, unpressed and pressed (its
 // transition held, so each state is read as drawn, then put back as it was).
 const PHONE_READ = `(() => {
   const de = document.documentElement;
@@ -408,7 +409,8 @@ const PHONE_READ = `(() => {
     priority = { off, on, back };
   }
   return { fits: de.scrollWidth <= de.clientWidth && de.clientWidth === 390 && innerWidth === 390, width: de.scrollWidth + '/' + de.clientWidth + '/' + innerWidth,
-    icons, presence, tags, help: vis(help) ? { red: getComputedStyle(help).backgroundColor === red, ratio: __ink(help).ratio } : null,
+    icons, presence, tags, help: vis(help) ? { red: [getComputedStyle(help).backgroundColor, getComputedStyle(help).color, getComputedStyle(help).borderTopColor].includes(red), ratio: __ink(help).ratio,
+      edge: parseFloat(getComputedStyle(help).borderTopWidth) >= 1 ? __edge(help) : 0, state: help.dataset.state || '' } : null,
     send, coarse: matchMedia('(pointer: coarse)').matches, header: header.length ? Math.min(...header) : 0, priority };
 })()`;
 // Every dialog of the hall page opened in turn (Help through its button where the seat has it): each of its buttons,
@@ -594,6 +596,26 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(refusedEcho === JSON.stringify({ words: '△ Not sent: Observers can read but not post.', text: 'Refused, then sent', buttons: ['Retry', 'Edit'], kept: 'Refused, then sent', held: false }) && !!retried && landedOnce('Refused, then sent') === 1,
       `a refused send keeps its text and says the server's words with Retry and Edit; Retry sends it, once (${refusedEcho}; heard ${landedOnce('Refused, then sent')})`);
 
+    // A help request refused: Edit brings its words back to the help dialog, its heading focused and no category chosen,
+    // and one tap on a category sends it, once, with that category; the chip's Cancel request then takes it away.
+    await ob.eval(`(() => { const real = socket.emit; socket.emit = function (ev, ...a) { if (ev !== 'message') return real.call(this, ev, ...a); socket.emit = real; const ack = a[a.length - 1]; setTimeout(() => ack({ ok: false, error: 'Too many help requests at once.' }), 0); return socket; };
+      document.getElementById('helpBtn').click(); document.getElementById('helpText').value = 'Refused help, then sent'; document.querySelector('#helpCats button[data-cat="Vision"]').click(); })()`);
+    const refusedHelp = await ob.until(`(() => { const e = document.querySelector('.msg.echo[data-type="help"][data-state="refused"]'); return e && JSON.stringify({ words: e.querySelector('.echo-state').textContent, buttons: [...e.querySelectorAll('.echo-acts button')].map((b) => b.textContent), chip: document.getElementById('helpBtn').textContent }); })()`);
+    await ob.eval(`[...document.querySelectorAll('.msg.echo[data-type="help"][data-state="refused"] .echo-acts button')].find((b) => b.textContent === 'Edit').click()`);
+    const editedHelp = await ob.until(`document.getElementById('helpDialog').open && JSON.stringify({ words: document.getElementById('helpText').value, focused: document.activeElement.id,
+      chosen: document.querySelectorAll('#helpCats [aria-pressed="true"], #helpCats .chosen, #helpCats :checked').length, echo: !!document.querySelector('.msg.echo'), held: AGM.outbox.items().length })`);
+    await ob.eval(`document.querySelector('#helpCats button[data-cat="Lighting"]').click()`);
+    const editSent = await ob.until(`!document.getElementById('helpDialog').open && !document.querySelector('.msg.echo') && allMessages.filter((m) => m.type === 'help' && m.text === 'Refused help, then sent').length === 1 && document.getElementById('helpBtn').dataset.state === 'open'`);
+    await sleep(300);
+    const heardEdited = heard.filter((m) => m.type === 'help' && m.text === 'Refused help, then sent').map((m) => m.category);
+    await ob.eval(`document.getElementById('helpBtn').click()`);
+    await ob.until(`!!document.getElementById('helpAsk')`);
+    await ob.eval(`[...document.querySelectorAll('#helpAsk button')].find((b) => b.textContent === 'Cancel request').click()`);
+    const editCancelled = await ob.until(`!document.getElementById('helpAsk') && !allMessages.some((m) => m.type === 'help') && document.getElementById('helpBtn').textContent === 'Help'`);
+    report(refusedHelp === JSON.stringify({ words: '△ Not sent: Too many help requests at once.', buttons: ['Retry', 'Edit'], chip: 'Help' }) &&
+      editedHelp === JSON.stringify({ words: 'Refused help, then sent', focused: 'helpTitle', chosen: 0, echo: false, held: 0 }) && !!editSent && JSON.stringify(heardEdited) === '["Lighting"]' && !!editCancelled,
+      `a refused help request: Help stays Help while it is not sent; Edit brings its words back to the dialog, heading focused and no category chosen, and one tap sends it, once, as that category; Cancel request on the chip then takes it away (${refusedHelp}; ${editedHelp}; heard ${JSON.stringify(heardEdited)})`);
+
     // A reload with a send held: it comes back from the tab and lands once.
     await ob.eval(`socket.disconnect()`);
     await ob.eval(`(() => { textInput.value = 'Held across a reload'; textPane.requestSubmit(); })()`);
@@ -607,8 +629,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // A help request written offline and sent a minute later reads as written then: on the item, for every reader.
     await ob.eval(`(() => { const real = performance.now.bind(performance); window.__shift = 0; performance.now = () => real() + window.__shift; })()`);
     await ob.eval(`socket.disconnect()`);
-    await ob.eval(`(() => { document.getElementById('helpBtn').click(); document.querySelector('#helpCats input[value="Sound"]').checked = true; document.getElementById('helpText').value = 'mic 4 crackles';
-      document.getElementById('helpForm').requestSubmit(document.querySelector('#helpForm button[value="send"]')); window.__shift = 61000; })()`);
+    await ob.eval(`(() => { document.getElementById('helpBtn').click(); document.getElementById('helpText').value = 'mic 4 crackles';
+      document.querySelector('#helpCats button[data-cat="Sound"]').click(); window.__shift = 61000; })()`);
     const helpWaiting = await ob.eval(`JSON.stringify({ closed: !document.getElementById('helpDialog').open, echo: (document.querySelector('.msg.echo[data-type="help"] .echo-text') || {}).textContent || '' })`);
     await ob.eval(`socket.connect()`);
     const heldLine = await ob.until(`(() => { const m = allMessages.find((x) => x.type === 'help' && x.text === 'mic 4 crackles'); const n = m && messagesById.get(m.id); const l = n && n.querySelector('.held-line'); return l && m.held >= 61 && m.held < 70 && l.textContent; })()`);
@@ -620,8 +642,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await ob.eval(`(() => { const real = socket.emit; socket.emit = function (ev, ...a) { if (ev !== 'message') return real.call(this, ev, ...a); socket.emit = real; return socket; };
       textInput.value = 'Never sent: sent out first'; textPane.requestSubmit(); })()`);
     const outThen = await ob.eval(`${HELD_KEYS}.length + '|' + AGM.outbox.items().map((i) => i.state).join()`);
-    await ob.eval(`document.getElementById('helpBtn').click()`);   // sent out while asking for help: the dialog goes too
-    const askingThen = await ob.eval(`document.getElementById('helpDialog').open`);
+    // Sent out while asking about help: Ola's request is open, so Help is its chip, and a tap on it opens its ask.
+    await ob.eval(`document.getElementById('helpBtn').click()`);
+    const askingThen = await ob.eval(`JSON.stringify({ ask: !!document.getElementById('helpAsk'), chip: document.getElementById('helpBtn').textContent })`);
     const obAdmin = await connect(base, cookie);
     const kicked = await emit(obAdmin, 'admin:kick', { socketId: await ob.eval('socket.id') });
     obAdmin.close();
@@ -638,8 +661,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const sentAfter = await ob.eval(`allMessages.filter((m) => m.text === 'Never sent: sent out first').length`);
     report(outThen === '1|sending' && kicked && kicked.ok && !!leftHall && keptAfterKick === 0 && sentAfter === 0 && landedOnce('Never sent: sent out first') === 0,
       `sent out of the hall with a send held, nothing is sent and the tab keeps none of it, even back in the hall (${outThen}; kept ${keptAfterKick}; sent ${sentAfter})`);
-    report(askingThen === true && sentOut === JSON.stringify({ words: 'An admin sent you out of Outbox hall.', back: 'Back to sign-in', to: '/', hall: true, offered: [], focused: true, connected: false }) && stayedOut === '/app.html|true',
-      `the page sent out says who sent it out and of where, in the server's words in place of the hall and its open help dialog, with Back to sign-in, and does not leave by itself (${sentOut}; after 3 s: ${stayedOut})`);
+    report(askingThen === JSON.stringify({ ask: true, chip: '■ Help asked' }) && sentOut === JSON.stringify({ words: 'An admin sent you out of Outbox hall.', back: 'Back to sign-in', to: '/', hall: true, offered: [], focused: true, connected: false }) && stayedOut === '/app.html|true',
+      `the page sent out says who sent it out and of where, in the server's words in place of the hall and the Help chip's ask open on it, with Back to sign-in, and does not leave by itself (${askingThen}; ${sentOut}; after 3 s: ${stayedOut})`);
     listener.close();
     ob.close();
     await sleep(800);
@@ -649,7 +672,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // The hall page fits a phone (390 × 844, a touch screen), for each seat: as wide as the screen and no wider, every
     // button of every dialog on the screen where a tap reaches it, Send a 44 px button named by its label, the header's
     // controls 44 px under a finger. In both themes: the icon buttons at 3:1 or more and the presence lines at 4.5:1,
-    // neither faded by opacity; the On stage tag light in light mode; Help red in dark. A new message is marked, never
+    // neither faded by opacity; the On stage tag light in light mode; Help at rest neutral and outlined, no red in its
+    // fill, words or edge, its words at 4.5:1 or more and its edge at 3:1 or more. A new message is marked, never
     // flashed: on a page nobody touches the New divider stays above the first new message (read again 30 s later,
     // below); scrolled up by 10 messages with a wheel, a new one leaves the view where it was and "↓ 1 new" says so.
     const phoneHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Phone hall' }) })).json()).code;
@@ -706,10 +730,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const priorityOk = (t) => (writes ? !!t.priority && !t.priority.off.red && t.priority.off.pressed !== 'true' && t.priority.on.red && t.priority.on.pressed === 'true' && t.priority.on.ratio >= 4.5 &&
         !t.priority.back.red && t.priority.back.pressed === 'false' : t.priority === null);
       const inkOk = (t, dark) => t.icons.n > 0 && t.icons.ratio >= 3 && t.icons.opacity === 1 && t.icons.size >= 24 && t.presence.n > 0 && t.presence.ratio >= 4.5 && t.presence.opacity === 1 &&
-        t.tags.n > 0 && t.tags.ratio >= 4.5 && (dark ? t.tags.bgLum[1] < 0.2 : t.tags.bgLum[0] > 0.6) && (writes ? !!t.help && t.help.red && t.help.ratio >= 4.5 : t.help === null) && priorityOk(t);
-      const short = (t) => ({ icons: [t.icons.n, +t.icons.ratio.toFixed(2), t.icons.opacity, +t.icons.size.toFixed(1)], presence: [t.presence.n, +t.presence.ratio.toFixed(2), t.presence.opacity], tag: [+t.tags.ratio.toFixed(2), t.tags.bgLum.map((x) => +x.toFixed(2))], help: t.help && [t.help.red, +t.help.ratio.toFixed(2)], priority: t.priority });
+        t.tags.n > 0 && t.tags.ratio >= 4.5 && (dark ? t.tags.bgLum[1] < 0.2 : t.tags.bgLum[0] > 0.6) && (writes ? !!t.help && t.help.state === '' && !t.help.red && t.help.ratio >= 4.5 && t.help.edge >= 3 : t.help === null) && priorityOk(t);
+      const short = (t) => ({ icons: [t.icons.n, +t.icons.ratio.toFixed(2), t.icons.opacity, +t.icons.size.toFixed(1)], presence: [t.presence.n, +t.presence.ratio.toFixed(2), t.presence.opacity], tag: [+t.tags.ratio.toFixed(2), t.tags.bgLum.map((x) => +x.toFixed(2))], help: t.help && [t.help.red, +t.help.ratio.toFixed(2), +t.help.edge.toFixed(2)], priority: t.priority });
       report(inkOk(light, false) && inkOk(dark, true),
-        `${seat} on a phone, in both themes: icon buttons 24 px or more at 3:1 or more and presence lines 4.5:1 or more, none faded; the On stage tag light in light mode and dark in dark; Help on the fault red in both; 🔥 Priority on the fault red, pressed, only while pressed (${JSON.stringify({ light: short(light), dark: short(dark) })})`);
+        `${seat} on a phone, in both themes: icon buttons 24 px or more at 3:1 or more and presence lines 4.5:1 or more, none faded; the On stage tag light in light mode and dark in dark; Help at rest neutral and outlined, no red in its fill, words or edge, its words at 4.5:1 or more and its edge at 3:1 or more; 🔥 Priority on the fault red, pressed, only while pressed (${JSON.stringify({ light: short(light), dark: short(dark) })})`);
       if (seat === 'research') {
         // AI drafts are off on this server (no key): ✨ is there, not usable, and says why; pressed, it says why where a
         // finger can read it, and asks the server for nothing.
@@ -778,6 +802,100 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(Object.values(legs).every(({ h, before, after }) => h > 0 && !!before && before.dividerAbove && !before.end && !before.below && !!after && Math.abs(after.top - before.top) <= 1 &&
       after.below === '↓ 1 new' && !!after.mark && after.mark.divider && after.mark.plain),
       `with the divider above the view, a new message moves it down to itself and what the reader sees stays where it was, with scroll anchoring and without it (as Safari before 27) (${JSON.stringify(legs)})`);
+    // Help in two taps, on a phone (Bea, On stage), each a tap at the control's centre: Help opens the dialog with its
+    // heading focused and no category chosen; Enter in the words sends nothing and moves to the categories; Sound sends
+    // at once. The button is then the request's chip: "■ Help asked", "▶ Pat is on the way" after Pat's On my way
+    // (another page's); a tap asks in place, Keep it open focused; Cancel request deletes it. "Something else" arrives as
+    // 'Other'; Escape keeps it open; It's sorted resolves it as Bea's, and "✓ Resolved" goes 30 s later (read at the end).
+    const tapAt = async (tab, selector) => {
+      const at = await tab.eval(`(() => { const e = document.querySelector(${codeLiteral(selector)}); if (!e || !e.getClientRects().length) return null; e.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        const r = e.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; return e.contains(document.elementFromPoint(x, y)) ? { x, y } : null; })()`);
+      if (!at) return false;
+      await tab.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y }] });
+      await tab.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      return true;
+    };
+    const key = async (tab, k, code, text) => {
+      await tab.send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, ...(text ? { text, unmodifiedText: text } : {}) });
+      await tab.send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
+    };
+    const waitFor = async (fn, ms) => { for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) if (fn()) return true; return fn(); };
+    const patHeard = [];
+    for (const ev of ['message', 'messageDeleted', 'helpUpdate']) pat.on(ev, (x) => patHeard.push([ev, x]));
+    const heardHelp = () => patHeard.filter(([ev, x]) => ev === 'message' && x.type === 'help');
+    // What Bea's page itself sends for a help request, read on its socket before the server reads it (the server keeps
+    // any category it does not know as 'Other', so only the page's own payload shows the word the page chose).
+    await bea.eval(`(() => { window.__sentHelp = []; const real = socket.emit; socket.emit = function (ev, ...a) {
+      if (ev === 'message' && a[0] && a[0].type === 'help') window.__sentHelp.push({ category: a[0].category, text: a[0].text }); return real.call(this, ev, ...a); }; })()`);
+    const sentHelp = () => bea.eval(`JSON.stringify(window.__sentHelp)`);
+    const fault = await bea.eval(`(() => { const i = document.createElement('i'); i.style.color = 'var(--c-fault)'; document.body.appendChild(i); const c = getComputedStyle(i).color; i.remove(); return c; })()`);
+    // The chip as drawn: read once its colours have settled (a button's background eases over 0.12 s).
+    const SETTLED = `!document.getElementById('helpBtn').getAnimations().length`;
+    const CHIP = `(() => { const b = document.getElementById('helpBtn'); return { words: b.textContent, state: b.dataset.state || '', red: getComputedStyle(b).backgroundColor === ${codeLiteral(fault)}, said: document.getElementById('helpStatus').textContent }; })()`;
+    const opened = await tapAt(bea, '#helpBtn') && await bea.until(`document.getElementById('helpDialog').open && document.activeElement && document.activeElement.id === 'helpTitle'`, 3000);
+    const dialogAt = await bea.eval(`JSON.stringify({ focused: document.activeElement.id, cats: [...document.querySelectorAll('#helpCats button')].map((b) => b.textContent),
+      chosen: document.querySelectorAll('#helpCats [aria-pressed="true"], #helpCats .chosen, #helpCats :checked').length, hint: document.getElementById('helpText').enterKeyHint })`);
+    await bea.eval(`document.getElementById('helpText').focus()`);
+    await bea.send('Input.insertText', { text: 'Lectern mic 4 is dead' });
+    await key(bea, 'Enter', 13, '\r');
+    await sleep(600);
+    const afterEnter = await bea.eval(`JSON.stringify({ open: document.getElementById('helpDialog').open, focused: document.activeElement && document.activeElement.dataset.cat, words: document.getElementById('helpText').value })`);
+    const sentByEnter = heardHelp().length;
+    const tappedSound = await tapAt(bea, '#helpCats button[data-cat="Sound"]');
+    await waitFor(() => heardHelp().length === 1, 5000);
+    const helpAsked = heardHelp()[0] ? heardHelp()[0][1] : null;
+    const sentFirst = await sentHelp();
+    const askedChip = await bea.until(`(() => { const c = ${CHIP}; return c.state === 'open' && !document.getElementById('helpDialog').open && ${SETTLED} && JSON.stringify(c); })()`, 5000);
+    report(!!opened && dialogAt === JSON.stringify({ focused: 'helpTitle', cats: ['Sound', 'Vision', 'Lighting', 'Stage', 'Presenter', 'IT / network', 'Something else'], chosen: 0, hint: 'done' }) &&
+      afterEnter === JSON.stringify({ open: true, focused: 'Sound', words: 'Lectern mic 4 is dead' }) && sentByEnter === 0 && tappedSound && !!helpAsked && helpAsked.category === 'Sound' && helpAsked.text === 'Lectern mic 4 is dead' &&
+      sentFirst === JSON.stringify([{ category: 'Sound', text: 'Lectern mic 4 is dead' }]) && askedChip === JSON.stringify({ words: '■ Help asked', state: 'open', red: true, said: 'Your help request: Help asked' }),
+      `help in two taps on a phone: Help opens the dialog with its heading focused and no category chosen; Enter in the words sends nothing and moves to the categories; a tap on Sound sends Sound at once, once, and Help reads "■ Help asked" on the fault red (${dialogAt}; ${afterEnter}; sent by Enter ${sentByEnter}; the page sent ${sentFirst}; ${askedChip})`);
+    const coming = await emit(pat, 'help:respond', { messageId: helpAsked && helpAsked.id, state: 'coming' });
+    const comingChip = await bea.until(`(() => { const c = ${CHIP}; return c.state === 'coming' && ${SETTLED} && JSON.stringify(c); })()`, 5000);
+    const askOpen = await tapAt(bea, '#helpBtn') && await bea.until(`!!document.getElementById('helpAsk')`, 3000);
+    const askRead = await bea.eval(`(() => { const a = document.getElementById('helpAsk'); const vis = (b) => { const r = b.getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight && b.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) && r.height >= 44; };
+      return JSON.stringify({ role: a.getAttribute('role'), modal: a.getAttribute('aria-modal'), title: document.getElementById(a.getAttribute('aria-labelledby')).textContent, words: a.querySelector('.chip-ask-words').textContent, then: a.querySelector('.chip-ask-then').textContent,
+        described: (a.getAttribute('aria-describedby') || '').split(' ').map((id) => (document.getElementById(id) || {}).className).join(), inHeader: a.previousElementSibling === document.getElementById('helpBtn'),
+        buttons: [...a.querySelectorAll('button')].map((b) => b.textContent), reached: [...a.querySelectorAll('button')].every(vis), focused: document.activeElement.textContent, expanded: document.getElementById('helpBtn').getAttribute('aria-expanded') }); })()`);
+    const cancelTapped = await bea.eval(`(() => { const b = [...document.querySelectorAll('#helpAsk button')].find((x) => x.textContent === 'Cancel request'); b.id = '__cancel'; return true; })()`) && await tapAt(bea, '#__cancel');
+    await waitFor(() => patHeard.some(([ev, x]) => ev === 'messageDeleted' && helpAsked && x.messageId === helpAsked.id), 5000);
+    const cancelChip = await bea.until(`(() => { const c = ${CHIP}; return c.state === '' && !document.getElementById('helpAsk') && !allMessages.some((m) => m.type === 'help') && ${SETTLED} && JSON.stringify(c); })()`, 5000);
+    report(!!coming && coming.ok && comingChip === JSON.stringify({ words: '▶ Pat is on the way', state: 'coming', red: false, said: 'Your help request: Pat is on the way' }) && askOpen &&
+      askRead === JSON.stringify({ role: 'dialog', modal: 'false', title: 'Your help request', words: 'Sound: Lectern mic 4 is dead · ▶ Pat is on the way',
+        then: 'It\'s sorted marks it resolved for everyone. Cancel request takes it away from everyone. Neither can be undone.', described: 'chip-ask-words,chip-ask-then', inHeader: true, buttons: ['It\'s sorted', 'Cancel request', 'Keep it open'], reached: true, focused: 'Keep it open', expanded: 'true' }) &&
+      cancelTapped && patHeard.some(([ev, x]) => ev === 'messageDeleted' && x.messageId === helpAsked.id) && cancelChip === JSON.stringify({ words: 'Help', state: '', red: false, said: '' }),
+      `the asker sees what happened: "▶ Pat is on the way" after Pat's On my way; a tap on the chip asks in place, right after the chip, naming the request and what each answer does for everyone (It's sorted, Cancel request, Keep it open, the last focused, every one on the screen and 44 px), and Cancel request deletes the request for the hall and puts Help back (${comingChip}; ${askRead}; ${cancelChip})`);
+    // Something else, with no words: the page sends 'Other'. Then Escape keeps it open, so does Tab out of the ask (to the
+    // header's next control), and It's sorted resolves it as Bea's.
+    await tapAt(bea, '#helpBtn');
+    await bea.until(`document.getElementById('helpDialog').open`, 3000);
+    await tapAt(bea, '#helpCats button[data-cat="Other"]');
+    await waitFor(() => heardHelp().length === 2, 5000);
+    const other = heardHelp()[1] ? heardHelp()[1][1] : null;
+    const sentBoth = await sentHelp();
+    await bea.until(`(${CHIP}).state === 'open'`, 5000);
+    await tapAt(bea, '#helpBtn');
+    await bea.until(`!!document.getElementById('helpAsk')`, 3000);
+    await key(bea, 'Escape', 27);
+    const escaped = await bea.eval(`JSON.stringify({ ask: !!document.getElementById('helpAsk'), focused: document.activeElement.id, state: document.getElementById('helpBtn').dataset.state || '' })`);
+    await tapAt(bea, '#helpBtn');
+    const tabFrom = await bea.until(`!!document.getElementById('helpAsk') && document.activeElement.textContent`, 3000);
+    await key(bea, 'Tab', 9);
+    const tabbedOut = await bea.eval(`(() => { const help = document.getElementById('helpBtn'); const all = [...document.querySelectorAll('.app-meta button, .app-meta a[href]')].filter((x) => x.getClientRects().length);
+      const next = all[all.indexOf(help) + 1]; return JSON.stringify({ ask: !!document.getElementById('helpAsk'), next: !!next && document.activeElement === next, state: help.dataset.state || '' }); })()`);
+    await tapAt(bea, '#helpBtn');
+    await bea.until(`!!document.getElementById('helpAsk')`, 3000);
+    await bea.eval(`[...document.querySelectorAll('#helpAsk button')].find((x) => x.textContent === "It's sorted").id = '__sorted'`);
+    await tapAt(bea, '#__sorted');
+    await waitFor(() => patHeard.some(([ev, x]) => ev === 'helpUpdate' && other && x.messageId === other.id && x.help.state === 'resolved'), 5000);
+    const sortedBy = (patHeard.find(([ev, x]) => ev === 'helpUpdate' && other && x.messageId === other.id && x.help.state === 'resolved') || [])[1];
+    const resolvedChip = await bea.until(`(() => { const c = ${CHIP}; return c.state === 'resolved' && ${SETTLED} && JSON.stringify(c); })()`, 5000);
+    const helpResolvedAt = Date.now();
+    report(sentBoth === JSON.stringify([{ category: 'Sound', text: 'Lectern mic 4 is dead' }, { category: 'Other', text: '' }]) && !!other && other.category === 'Other' && other.text === '' &&
+      escaped === JSON.stringify({ ask: false, focused: 'helpBtn', state: 'open' }) && tabFrom === 'Keep it open' && tabbedOut === JSON.stringify({ ask: false, next: true, state: 'open' }) && heardHelp().length === 2 &&
+      !!sortedBy && sortedBy.help.by === 'Bea' && resolvedChip === JSON.stringify({ words: '✓ Resolved', state: 'resolved', red: false, said: 'Your help request: Resolved' }),
+      `"Something else" is sent by the page as 'Other' and arrives so; Escape closes the chip's ask and keeps the request open, and so does Tab from Keep it open, to the header's next control; It's sorted resolves it as Bea's, and Help reads "✓ Resolved" (the page sent ${sentBoth}; ${escaped}; ${tabbedOut}; ${resolvedChip})`);
+
     // A page back from a drop draws what it missed in one pass: Rob's page is away while 25 messages are sent, and on its
     // return draws all 25 with the feed's layout read a few times in all (where the reader was, once; the end, once; the
     // page's own scroll as the connection's strip goes) and the feed moved to the end once after them, never once per
@@ -1613,6 +1731,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const since = await phones.observer.eval(`allMessages.slice(allMessages.findIndex((m) => m.text === 'First new') + 1).filter((m) => m.type !== 'system').length`);
     report(Date.now() - firstNew >= 30_000 && !!stillNew && stillNew.divider && stillNew.plain && since >= 5,
       `an untouched page keeps its New divider above the first new message after ${Math.round((Date.now() - firstNew) / 1000)} s and ${since} messages more, and nothing fades (${JSON.stringify(stillNew)})`);
+
+    // Bea's "✓ Resolved", 30 s after It's sorted: Help again, neutral.
+    await sleep(Math.max(0, helpResolvedAt + 30_500 - Date.now()));
+    const restedChip = await bea.eval(CHIP);
+    report(Date.now() - helpResolvedAt >= 30_000 && JSON.stringify(restedChip) === JSON.stringify({ words: 'Help', state: '', red: false, said: '' }),
+      `"✓ Resolved" goes after 30 s: ${Math.round((Date.now() - helpResolvedAt) / 1000)} s after It's sorted, Help reads Help again (${JSON.stringify(restedChip)})`);
 
     const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3], ['a phone as On stage', phones.board], ['a phone backstage', phones.research], ['a phone as an observer', phones.observer]];
     // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).

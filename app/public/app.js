@@ -249,6 +249,7 @@ function outOfHall(words, to) {
   back.href = to;
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   document.querySelectorAll(MENUS_ON_FEED).forEach((m) => m.remove());
+  HelpChip.close(false);
   for (const id of ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn']) document.getElementById(id).hidden = true;
   document.querySelector('.main-row').hidden = true;
   document.getElementById('outOfHall').hidden = false;
@@ -327,6 +328,7 @@ function onReset() {
   for (const node of echoes.values()) feed.appendChild(node);
   refreshPinned();
   refreshDocPinnedList();
+  HelpChip.draw();
   if (typeof dismissDoc === 'function') dismissDoc();
 }
 // A message sent to the speaker's screen: Stagewatch's receipt, then the speaker's acknowledgement, on that message.
@@ -442,6 +444,7 @@ function renderHistory(history) {
   for (const m of history) addMessage(m, { silent: true });
   refreshPinned();
   refreshDocPinnedList();
+  HelpChip.draw();
   scrollToBottom();
 }
 
@@ -459,6 +462,7 @@ function addMessage(msg, { silent = false, arrived = false } = {}) {
       rerenderMessage(el, msg);
       const idx = allMessages.findIndex((m) => m.id === msg.id);
       if (idx >= 0) allMessages[idx] = msg;
+      if (msg.type === 'help') HelpChip.draw();
     }
     return;
   }
@@ -481,6 +485,7 @@ function addMessage(msg, { silent = false, arrived = false } = {}) {
   feed.insertBefore(el, firstEcho);
   messagesById.set(msg.id, el);
   allMessages.push(msg);
+  if (msg.type === 'help' && isMine(msg)) HelpChip.draw();
   if (arrived) keepPlace(el, msg, follow);
   if (msg.pinned) refreshPinned();
   if (!silent && msg.type === 'file' && HAS_STAGE) openDocInPanel(msg, { fromPush: true });
@@ -497,6 +502,7 @@ function removeMessageLocal(id) {
   refreshPinned();
   refreshDocPinnedList();
   if (currentDocMsgId === id) dismissDoc();
+  HelpChip.draw();
 }
 
 // A presence line: "Ana joined Backstage", "Ben joined On stage", "Wes joined as an observer", "Ana left"; an older line in a
@@ -825,13 +831,8 @@ function editHeld(item) {
     renderReplyChip();
   }
   const tab = (name) => { const t = document.querySelector('.compose-tabs .tab[data-tab="' + name + '"]'); if (t && !t.classList.contains('active')) t.click(); };
-  if (a.type === 'help') {
-    const r = document.querySelector('#helpCats input[value="' + CSS.escape(a.category || 'Other') + '"]');
-    if (r) r.checked = true;
-    document.getElementById('helpText').value = a.text || '';
-    document.getElementById('helpDialog').showModal();
-    return;
-  }
+  // A help request: its words back in the dialog, where a category's tap sends it again (none is chosen for the person).
+  if (a.type === 'help') { openHelpDialog(a.text || ''); return; }
   if (a.type === 'action') { tab('action'); if (!kept) { actionText.value = a.text || ''; currentOptions = Array.isArray(a.options) ? a.options.slice(0, 6) : ['Yes', 'No']; renderOptionChips(); } actionText.focus(); return; }
   if (a.type === 'file') { tab('file'); if (!kept) fileCaption.value = a.caption || ''; notify('Choose the file again to send it.'); return; }
   const field = c === 'director' || document.getElementById('researchCompose').hidden ? dInput : textInput;
@@ -902,9 +903,11 @@ function renderHelpBody(msg) {
 }
 function setHelp(messageId, help) {
   const msg = findMessage(messageId);
+  const was = msg && msg.help ? msg.help.state : 'open';
   if (msg) msg.help = help;
   const node = messagesById.get(messageId);
   if (node && msg) rerenderMessage(node, msg);
+  if (msg) HelpChip.changed(msg, was);
 }
 
 function renderFileBody(msg) {
@@ -2295,29 +2298,205 @@ function consumeReplyTo() {
   return r;
 }
 
-// ---------------- Ask for help: a category and a few words, to the hall and to the project managers' board ----------------
+// ---------------- Help in two taps, and the asker sees what happened ----------------
+// Help, then what it is about: a category sends at once, to the room and to the hall's crew on the halls board, with the
+// optional words typed before it; none is chosen for the person. The heading takes the focus when the dialog opens, so a
+// phone's keyboard does not rise over the categories, and Enter in the words moves the focus to them and sends nothing.
+// The dialog's one submit button is Close, so a form submitted by any other path closes it and sends nothing either.
+// "Something else" is sent as 'Other', the category lib/board.js keeps.
+const HELP_CATS = [['Sound', 'Sound'], ['Vision', 'Vision'], ['Lighting', 'Lighting'], ['Stage', 'Stage'], ['Presenter', 'Presenter'], ['IT / network', 'IT / network'], ['Other', 'Something else']];
+const helpDialog = document.getElementById('helpDialog');
+const helpText = document.getElementById('helpText');
+/** The help dialog, open with these words (a request held and refused comes back with its own), the heading focused. */
+function openHelpDialog(words) {
+  helpText.value = words || '';
+  helpDialog.showModal();
+  document.getElementById('helpTitle').focus();
+}
 (function () {
-  const CATS = ['Sound', 'Vision', 'Lighting', 'Stage', 'Presenter', 'IT / network', 'Other'];
-  const dlg = document.getElementById('helpDialog');
   const box = document.getElementById('helpCats');
-  for (const [i, c] of CATS.entries()) {
-    const l = document.createElement('label');
-    l.className = 'help-cat';
-    const r = document.createElement('input');
-    r.type = 'radio'; r.name = 'helpCat'; r.value = c; r.checked = i === 0;
-    l.appendChild(r);
-    l.appendChild(document.createTextNode(c));
-    box.appendChild(l);
+  for (const [category, label] of HELP_CATS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn help-cat';
+    b.dataset.cat = category;
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      AGM.outbox.hold('message', { type: 'help', category, text: helpText.value.trim() });
+      helpDialog.close();
+      if (!AGM.outbox.online) notify('Help request held — it goes as soon as the connection is back.');
+    });
+    box.appendChild(b);
   }
-  document.getElementById('helpBtn').addEventListener('click', () => { document.getElementById('helpText').value = ''; dlg.showModal(); });
-  document.getElementById('helpForm').addEventListener('submit', (e) => {
-    if (e.submitter && e.submitter.value === 'cancel') return;
+  helpText.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return;
     e.preventDefault();
-    const category = (box.querySelector('input:checked') || {}).value || 'Other';
-    AGM.outbox.hold('message', { type: 'help', category, text: document.getElementById('helpText').value.trim() });
-    dlg.close();
-    if (!AGM.outbox.online) notify('Help request held — it goes as soon as the connection is back.');
+    box.querySelector('button').focus();
   });
+})();
+
+/**
+ * The Help button says what happened to this person's own request. At rest it is neutral and asks. While their newest
+ * request is open it is that request's status chip: "■ Help asked", then "▶ Ana is on the way", read from the request
+ * as the hall's record of it changes here (helpUpdate), so the chip says what the hall says, never what was only sent;
+ * a request seen resolved here reads "✓ Resolved" for 30 s, and an open one of theirs outranks it. A tap on the chip asks
+ * in place, not as a menu, naming the request and what each answer does for everyone: It's sorted (the author's own
+ * Resolved), Cancel request (the author's own delete) or Keep it open, the safe choice, where the focus starts; Escape,
+ * a tap outside it and the focus moved to another control are Keep it open. The ask goes when its request is resolved
+ * or removed, and with the hall.
+ */
+const HelpChip = (function () {
+  const btn = document.getElementById('helpBtn');
+  const status = document.getElementById('helpStatus');
+  const RESOLVED_MS = 30000;
+  const AT_REST = btn.title;
+  let resolved = null;   // this person's request seen resolved on this page: {id, timer}
+  let ask = null;        // the open ask: {box, id, words}
+  let drawn = '';
+
+  /** This person's newest help request that is not resolved, or null. */
+  function openRequest() {
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+      const m = allMessages[i];
+      if (m.type === 'help' && isMine(m) && !(m.help && m.help.state === 'resolved')) return m;
+    }
+    return null;
+  }
+  /** [state, mark, words] for the chip: '' at rest. */
+  function chipOf(m) {
+    if (m && m.help && m.help.state === 'coming') return ['coming', '▶', (m.help.by || 'Someone') + ' is on the way'];
+    if (m) return ['open', '■', 'Help asked'];
+    if (resolved) return ['resolved', '✓', 'Resolved'];
+    return ['', '', 'Help'];
+  }
+  function draw() {
+    if (resolved && !findMessage(resolved.id)) forgetResolved();
+    const m = openRequest();
+    const [state, mark, words] = chipOf(m);
+    const key = state + '|' + words;
+    if (key !== drawn) {
+      drawn = key;
+      btn.textContent = '';
+      if (mark) {
+        const span = document.createElement('span');
+        span.setAttribute('aria-hidden', 'true');
+        span.textContent = mark + ' ';
+        btn.appendChild(span);
+      }
+      btn.appendChild(document.createTextNode(words));
+      if (state) btn.dataset.state = state; else delete btn.dataset.state;
+      // Said once to a screen reader as it changes: the chip is a button, not a live region.
+      status.textContent = state ? 'Your help request: ' + words : '';
+    }
+    btn.title = m ? 'Your help request (' + m.category + '): mark it sorted, or cancel it' : AT_REST;
+    if (m) btn.setAttribute('aria-expanded', ask ? 'true' : 'false'); else btn.removeAttribute('aria-expanded');
+    // Its request resolved or gone while the person was in the ask: the focus goes back to the chip, never to the page.
+    if (ask && (!m || m.id !== ask.id)) close(ask.box.contains(document.activeElement));
+    else if (ask) askWords(m);
+  }
+  function forgetResolved() {
+    if (resolved) clearTimeout(resolved.timer);
+    resolved = null;
+  }
+  /** A help request's state changed on this page; `was` is the state it had. */
+  function changed(m, was) {
+    if (isMine(m) && m.help && m.help.state === 'resolved' && was !== 'resolved') {
+      forgetResolved();
+      resolved = { id: m.id, timer: setTimeout(() => { resolved = null; draw(); }, RESOLVED_MS) };
+    }
+    draw();
+  }
+  /** The ask names its request and where it stands, then what each answer does to it for everyone. */
+  function askWords(m) {
+    const h = m.help || { state: 'open' };
+    ask.words.textContent = m.category + (m.text ? ': ' + m.text : '') + ' · ' +
+      (h.state === 'coming' ? '▶ ' + (h.by || 'Someone') + ' is on the way' : '■ ' + HELP_WORDS.open);
+  }
+  const ASK_THEN = 'It\'s sorted marks it resolved for everyone. Cancel request takes it away from everyone. Neither can be undone.';
+  function place(box) {
+    const r = btn.getBoundingClientRect();
+    const w = box.offsetWidth;
+    box.style.top = Math.round(r.bottom + 6) + 'px';
+    box.style.left = Math.round(Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))) + 'px';
+  }
+  function open(m) {
+    const box = document.createElement('div');
+    box.id = 'helpAsk';
+    box.className = 'chip-ask';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'false');
+    box.setAttribute('aria-labelledby', 'helpAskTitle');
+    const title = document.createElement('p');
+    title.id = 'helpAskTitle';
+    title.className = 'chip-ask-title';
+    title.textContent = 'Your help request';
+    const words = document.createElement('p');
+    words.id = 'helpAskWords';
+    words.className = 'chip-ask-words';
+    const then = document.createElement('p');
+    then.id = 'helpAskThen';
+    then.className = 'chip-ask-then';
+    then.textContent = ASK_THEN;
+    box.setAttribute('aria-describedby', 'helpAskWords helpAskThen');
+    const acts = document.createElement('div');
+    acts.className = 'chip-ask-acts';
+    const act = (label, fn) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn';
+      b.textContent = label;
+      b.addEventListener('click', fn);
+      acts.appendChild(b);
+      return b;
+    };
+    act('It\'s sorted', () => { close(true); AGM.outbox.hold('help:respond', { code: ROOM, messageId: m.id, state: 'resolved' }); });
+    act('Cancel request', () => { close(true); AGM.outbox.now('delete', { messageId: m.id }, saidIfNot('Could not cancel the request.')); });
+    const keep = act('Keep it open', () => close(true));
+    box.append(title, words, then, acts);
+    box.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      close(true);
+    });
+    box.addEventListener('focusout', leaves);
+    ask = { box, id: m.id, words };
+    askWords(m);
+    // Right after the chip, so Tab runs from the chip into the ask and on to the header's next control, which closes it.
+    // In the top layer where the popover API is, above every panel of the page; elsewhere fixed in the header's layer.
+    const top = typeof box.showPopover === 'function';
+    if (top) box.setAttribute('popover', 'manual');
+    btn.after(box);
+    if (top) box.showPopover();
+    place(box);
+    btn.setAttribute('aria-expanded', 'true');
+    btn.setAttribute('aria-controls', 'helpAsk');
+    keep.focus();
+  }
+  /** Focus gone from the chip and its ask to another control of the page: the ask closes, and the request stays. */
+  function leaves(e) {
+    const to = e.relatedTarget;
+    if (ask && to && !ask.box.contains(to) && !btn.contains(to)) close(false);
+  }
+  /** The ask closes; `focusBack`: the focus returns to the chip (an answer, Escape), not where a tap outside went. */
+  function close(focusBack) {
+    if (!ask) return;
+    const { box } = ask;
+    ask = null;
+    box.remove();
+    btn.removeAttribute('aria-controls');
+    if (btn.hasAttribute('aria-expanded')) btn.setAttribute('aria-expanded', 'false');
+    if (focusBack && !btn.hidden) btn.focus();
+  }
+  btn.addEventListener('click', () => {
+    const m = openRequest();
+    if (!m) { openHelpDialog(''); return; }
+    if (ask) close(true); else open(m);
+  });
+  btn.addEventListener('focusout', leaves);
+  document.addEventListener('pointerdown', (e) => { if (ask && !ask.box.contains(e.target) && !btn.contains(e.target)) close(false); }, true);
+  window.addEventListener('resize', () => { if (ask) place(ask.box); });
+  return { draw, changed, close };
 })();
 
 // ---------------- Screens: what this hall's displays show (accounts with display.control) ----------------

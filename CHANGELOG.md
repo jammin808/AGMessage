@@ -741,28 +741,29 @@ the layout in Chromium at 390 × 844 with a touch screen, by the smoke. Not yet 
   resolved help request, one someone is on the way to on the halls board, a turned-off account's row, a linked hall's
   code beside its name, a stale countdown in the hall's chip and on the halls board (which keeps Stagewatch's colour
   only while it is live), and an option an observer cannot press (a dashed edge, its words at full ink).
-- The three faults the walk found are gone: the On stage tag drew its dark colours in light mode (the dark rule's
-  second selector was not scoped to dark); Help lost its red in dark mode (the dark theme's rule for every button
-  outranked it), and so did a danger button; and muted words were made with opacity. The same unscoped list put the
-  Board's own rules (`display: flex`, half the width, opacity .55 among them) on the whole page of a link that says
-  `role=director`, the Board's old name, until its join was answered; each is scoped to what it styles.
+- The three faults the walk found are gone: the On stage tag drew its dark colours in light mode (the dark rule's second
+  selector was not scoped to dark); Help lost its red in dark mode (the dark theme's rule for every button outranked it;
+  Help is red now only while a request is open, below), and so did a danger button; and muted words were made with
+  opacity. The same unscoped list put the Board's own rules (`display: flex`, half the width, opacity .55 among them) on
+  the whole page of a link that says `role=director`, the Board's old name, until its join was answered; each is scoped
+  to what it styles.
 - `test/resilience.test.js`: the stylesheet's token blocks, one `:root` and one dark, and its hex colours outside them
   counted, 292 now (327 before), a count that only goes down; no opacity between 0 and 1 anywhere in it, however it is
   written (a number, a percentage, a filter's `opacity()`), and none the guard cannot read as a number (a `var()`, a
   `calc()`); a planted sheet holds both reads to their rules. The smoke opens a hall of its own on a 390 × 844 phone
-  with a touch screen as On stage, backstage and an observer, and finds each page as wide as the screen, every button
-  of each of the hall page's three dialogs on the screen and reached by a tap at its centre, Send a 44 px button named
+  with a touch screen as On stage, backstage and an observer, and finds each page as wide as the screen, every button of
+  each of the hall page's three dialogs on the screen and reached by a tap at its centre, Send a 44 px button named
   "Send to Phone hall", the header's controls 44 px; in both themes the icon buttons 24 px or more at 3:1 or more and
-  the presence lines at 4.5:1 or more, neither faded, the On stage tag light in light mode and dark in dark, Help on
-  the fault red, and 🔥 Priority on it only while pressed (and saying so); backstage, with no AI key, ✨ marked not
-  usable with its reason, which a press shows under the composer while nothing is sent. A new message has the divider
-  above it and is drawn as an older one is, unfilled and still; scrolled up by 10 messages with the mouse wheel, a new
-  one leaves what the reader sees where it was, "↓ 1 new" appears, 44 px tall, then "↓ 2 new", and the button takes
-  the feed to its end, where the next message is followed; with the divider above the view, the next message moves it
-  and what the reader sees stays within a pixel of where it was, with scroll anchoring and without it (as Safari before
-  27 draws); a page away while 25 messages are sent draws them on its return with the feed moved to the end once and
-  its layout read a few times in all; and the observer's page, which nothing touches, still has its divider above the
-  first new message 30 s and every message later.
+  the presence lines at 4.5:1 or more, neither faded, the On stage tag light in light mode and dark in dark, Help on the
+  fault red (from unit E, below, only while a request is open), and 🔥 Priority on it only while pressed (and saying so);
+  backstage, with no AI key, ✨ marked not usable with its reason, which a press shows under the composer while nothing
+  is sent. A new message has the divider above it and is drawn as an older one is, unfilled and still; scrolled up by 10
+  messages with the mouse wheel, a new one leaves what the reader sees where it was, "↓ 1 new" appears, 44 px tall, then
+  "↓ 2 new", and the button takes the feed to its end, where the next message is followed; with the divider above the
+  view, the next message moves it and what the reader sees stays within a pixel of where it was, with scroll anchoring
+  and without it (as Safari before 27 draws); a page away while 25 messages are sent draws them on its return with the
+  feed moved to the end once and its layout read a few times in all; and the observer's page, which nothing touches,
+  still has its divider above the first new message 30 s and every message later.
 - Rolling back: nothing is stored; 0.5.1's stylesheet and hall page come back as they were.
 
 **One word per thing: hall, room, code, seat, the Board, screens** (the plan's Part 5, unit W, its copy deck and
@@ -843,16 +844,62 @@ the 13 pages named below)
   name in the people list or a row, and the admin feed's lines is not. It finds none, and the copy deck's words where
   the plan puts them: the admin page's, its seats and its show desk line, the hall page's, the join form's, the halls
   board's two counts (a hall with one request beside one with two), the rights' words, and a page sent out or refused,
-  in place, its open help dialog closed and nothing of the hall offered, still there 3 s later and gone only by its
-  button. `test/server.test.js` holds the server's words end to end (the closed hall's moved on purpose, with the name
-  taken, a file refused, the locked room's note, each seat's presence line, Clear messages, a person logged out of a
-  named hall and of one with none, the transcript's title, and the restart's line counting the messages its hall kept);
-  `test/resilience.test.js` reads the new restart and presence lines, and `test/halls.test.js` the presence and
-  seat-change lines (each moved on purpose); `test/accounts.test.js` holds the rights' and roles' words;
-  `test/units.test.js` reads what each AI prompt sends a stand-in model.
+  in place, its open help dialog (from unit E, the Help chip's ask) closed and nothing of the hall offered, still there
+  3 s later and gone only by its button. `test/server.test.js` holds the server's words end to end (the closed hall's
+  moved on purpose, with the name taken, a file refused, the locked room's note, each seat's presence line, Clear
+  messages, a person logged out of a named hall and of one with none, the transcript's title, and the restart's line
+  counting the messages its hall kept); `test/resilience.test.js` reads the new restart and presence lines, and
+  `test/halls.test.js` the presence and seat-change lines (each moved on purpose); `test/accounts.test.js` holds the
+  rights' and roles' words; `test/units.test.js` reads what each AI prompt sends a stand-in model.
 - Rolling back: nothing stored changes shape. 0.5.1 shows the lines 0.6.0 wrote into a hall's history ("AGMessage
   restarted", "Messages cleared by the admin", "Ana joined Backstage", "The admin moved Kim …") as they were written,
   and writes its own again; its pages draw a presence line of 0.6.0's as an ordinary line, unfolded.
+
+**Help in two taps, and the asker sees what happened** (the plan's Part 5, unit E, with the board addendum's Help chip;
+the owner's answer 25, "a help category sends at once". Read in Chromium by the smoke on a 390 × 844 phone with a touch
+screen; not yet walked on a phone or an iPad: that is `docs/DEVICES.md`'s, before the tag)
+- Help is two taps: Help, then what it is about. Each category is one large button (Sound, Vision, Lighting, Stage,
+  Presenter, IT / network, Something else) that sends at once, and none is chosen for the person. 0.5.1 preselected
+  Sound, then asked for the category, the words and Send, which on a phone sat off the screen's edge. "Something else"
+  is sent as `Other`, the category the halls board, the transcript and the AI's brief already know. The words come first
+  and are optional ("What's wrong? optional"). The heading takes the focus when the dialog opens, so a phone's keyboard
+  does not rise over the categories, and Enter in the words moves to the categories and sends nothing (in 0.5.1 it sent
+  the preselected Sound); the dialog's one other button is Close. It says who sees a request: "Everyone in this room and
+  the hall's crew see it until it's resolved." A request refused comes back in the dialog by its Edit, with its words
+  and no category chosen, and a category's tap sends it again.
+- Help is neutral and outlined at rest, so red means something: 🔥, open help and a fault. While the person's request is
+  open the button is its status chip: "■ Help asked" on the fault red, "▶ Ana is on the way" in the info colour once
+  someone says so, and "✓ Resolved" in the ok colour for 30 s after it is resolved, then Help again. The chip reads the
+  request as the hall's record of it changes (the `helpUpdate` the feed draws), never what was only sent, and a screen
+  reader is told each change ("Your help request: Ana is on the way"). A tap on the chip asks in place, not as a menu,
+  naming the request and what each answer does for everyone ("It's sorted marks it resolved for everyone. Cancel request
+  takes it away from everyone. Neither can be undone."): **It's sorted** (the asker marks it resolved), **Cancel
+  request** (the asker's own delete) or **Keep it open**, where the focus starts; Escape, a tap outside it and Tab on to
+  the header's next control close the ask and keep the request. The ask follows the chip in the header, so Tab runs from
+  the chip through it, and draws in the top layer where the browser has popovers (fixed in the header's layer, over the
+  feed and the composer, where it has not). It goes when its request is resolved or removed, and with the hall when the
+  page is sent out. The ask is the hall page's own: the shared in-place ask (`AGM.ask`) arrives with the action
+  catalogue, and unit 3c moves it there.
+- Nothing changes on the server or the wire: a request is still `message {type: 'help'}`, It's sorted is `help:respond
+  {state: 'resolved'}` and Cancel request is `delete`, each as the server already took them from the request's author.
+- `test/halls.test.js` holds the chip's two acts as the asker's own, end to end: an On stage seat's request, sent as
+  `Other`, cancelled by its author (the hall hears `messageDeleted` and the halls board drops it), and another, with a
+  project manager on the way, marked resolved by its author (the hall hears On my way, then the asker's own resolved,
+  however the two are delivered on its socket, and the board drops it). The smoke, on a 390 × 844 phone with a touch
+  screen as On stage, each step a tap at the control's centre: Help opens the dialog with its heading focused, the seven
+  categories, none chosen, and `enterkeyhint="done"`; Enter in the words sends nothing and moves to Sound; a tap on
+  Sound sends at once with the words; Help reads "■ Help asked" on the fault red, then "▶ Pat is on the way" after
+  another page's On my way; a tap on the chip opens the ask right after it (`role=dialog`, not modal, described by the
+  request's words and the answers' consequence, its three buttons on the screen and 44 px, Keep it open focused); Cancel
+  request deletes the request for the hall and puts Help back; "Something else" is sent by the page as `Other` (read on
+  its own socket, before the server, which keeps a category it does not know as `Other`, reads it) and arrives so;
+  Escape closes the ask and keeps the request, and so does Tab from Keep it open, which lands on the header's next
+  control; It's sorted resolves it as the asker's, Help reads "✓ Resolved", and Help again 30 s later. On a laptop seat,
+  a help request refused leaves Help as it was, and Edit brings its words back to the dialog, heading focused and no
+  category chosen, where one tap sends it once as that category. In both themes, On stage and Backstage, Help at rest
+  has no red in its fill, words or edge, its words at 4.5:1 or more and its edge at 3:1 or more (computed colours). A
+  page sent out with the chip's ask open closes it with the hall.
+- Rolling back: nothing is stored; 0.5.1's dialog and its red Help come back as they were.
 
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
