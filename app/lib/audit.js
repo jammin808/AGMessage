@@ -28,6 +28,13 @@
  *   - An export's check (`checkThrough`, lib/auditexport.js) reads the bytes the export holds open, up to its own entry,
  *     and changes nothing this run reads; the newest export sent whole under this key is health's "Last export".
  *   - The head covers only what is durable: an entry counts as on disk once its fsync returned.
+ *   - The log carries on across events (H.10). An archive point (`audit.archive`, `point()`) is the first line of a file
+ *     of its own and names the run it stands in, so a split there (lib/auditarchive.js) moves whole files and never
+ *     rewrites a line. After a split the walk begins at that point, which a keyed `audit.split` must name, and names every
+ *     archive back to entry 1 (each pinned by the split that made it, and each naming the one before it): one gone or
+ *     changed is a finding, a split stopped part way is a condition (its files are walked first), and the mark is the
+ *     worst of the live log's and each archive's, so a split never makes the log read better than it did.
+ *   - Two rotated files never share a name: each is named by the later of now and 1 ms after the newest rotated file.
  *
  * Written synchronously and flushed: an entry is on disk (fsync) before the action is acknowledged. When the disk will
  * not take it (full, or the file held by another program) the entry stays chained in memory, the console and health say
@@ -57,6 +64,10 @@ const RECENT = 500;        // rows kept for the list
 const HELD_MAX = 16;       // findings a head carries while their entries are not on disk, then one `more`
 const TORN_ENTRY = 4096;   // a fragment longer than this held more than one half-written line
 const ROTATED_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
+/** The folder beside the log that holds its archives (H.10.3), and a split's folder while it is made aside. */
+const ARCHIVES = 'audit-archive';
+const PARTIAL = /^\.(audit-[0-9a-f]{8}-[1-9][0-9]{0,9}-[1-9][0-9]{0,9})\.partial$/;
+const ARCHIVE_IN_WORDS = /audit-[0-9a-f]{8}-[1-9][0-9]{0,9}-[1-9][0-9]{0,9}/g;
 const HEX16 = /^[0-9a-f]{16}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 /** The labels of the log's two keys (lib/secretbox.js derives only allow-listed ones). */
@@ -67,7 +78,7 @@ const RANK = Object.freeze({ intact: 0, linked: 1, unvouched: 2, broken: 3 });
 /** What each kind of finding `open()` writes reads until accepted: ✕ is accepted only with its own confirmation. */
 const FINDING = Object.freeze({
   cut: 'broken', fork: 'broken', another: 'broken', last: 'broken', nohead: 'broken', changed: 'broken', lost: 'broken',
-  otherkey: 'unvouched', unread: 'unvouched', record: 'unvouched',
+  otherkey: 'unvouched', unread: 'unvouched', record: 'unvouched', archive: 'broken',
 });
 const CUTS = new Set(['cut', 'fork', 'another', 'last']);
 // The records' fields, in the order their MAC is taken over.
@@ -100,6 +111,14 @@ const readOr = (f) => { try { return { buf: fs.readFileSync(f), code: '' }; } ca
 const turn = () => new Promise((resolve) => { setImmediate(resolve); });
 const missing = rules.missing;
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
+/** A rotated file's name for its time, and the time a rotated file's name gives (0 when it gives none). */
+const rotatedName = (stem, t) => stem + '-' + new Date(t).toISOString().replace(/[:.]/g, '-') + '.jsonl';
+const timeOfRotated = (file) => {
+  const m = /-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.jsonl$/.exec(path.basename(String(file)));
+  return m ? Date.parse(m[1] + 'T' + m[2] + ':' + m[3] + ':' + m[4] + '.' + m[5] + 'Z') || 0 : 0;
+};
+/** "1,204": a count of bytes as a person reads it. */
+const count = (n) => Number(n).toLocaleString('en-US');
 const pad = (n) => String(n).padStart(2, '0');
 /** "14:02 on 25 Oct", by this laptop's clock. */
 const when = (at) => { const d = new Date(at); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ' on ' + d.getDate() + ' ' + MONTHS[d.getMonth()]; };
@@ -171,6 +190,12 @@ function spanWords(runs, { first, keyless, linked = false }) {
     return range(r.from, r.to, 'carries', 'carry') + ' key id ' + short(r.kind) + ' (their own claim), a key this machine does not hold: keyed on another computer or Windows account, or written by anyone who could write the folder; this machine cannot check them';
   }).join('; ');
 }
+/**
+ * A split stopped part way, in words: its point, how many files are still to move (or, every file moved, that its folder
+ * still has the name it was made aside under), and why when this run knows.
+ */
+const unfinishedWords = (u, code) => 'the split at entry ' + u.seq + ' is not finished: '
+  + (u.left ? (u.left === 1 ? '1 file' : u.left + ' files') + ' still to move' : 'every file is moved, and its folder is not renamed yet') + (code ? ' (' + code + ')' : '');
 /** The entry this machine recorded last, found with its hash under another key id: changed, and never accepted. */
 const relabelWords = (f) => 'entry ' + f.seq + ' was changed after it was written: it carries the hash this machine recorded for its entry ' + f.seq + ', under key id ' + short(f.k || 'plain') + ' (their own claim), not this machine\'s key';
 /** What Health's "Last export" says of an `audit.export.sent` entry: when, by whom, and its range (its target, `1-1702`). */
@@ -239,6 +264,20 @@ class AuditLog {
     this.lastCheck = null;  // the newest check's open findings, for health
     this.lastExport = null; // the newest export sent whole, under this key, on disk: {at, by, from, to} (Health's "Last export")
     this.exportWaiting = null; // an `audit.export.sent` not on disk yet: it becomes "Last export" once its fsync returned
+    this.archiveDir = path.join(path.dirname(file), ARCHIVES);   // the archives a split makes (H.10.3)
+    this.rotatedAt = null;  // the newest rotated file's time, read once when a rotation first needs it
+    this.backCut = false;   // the newest backward read stopped at an older file it could not read
+    this.splitting = null;  // a split being made now: a check asked meanwhile waits for it
+    this.splitCode = '';    // why the last split's files did not all move (EBUSY), for its condition's words
+    this.from = 1;          // the newest whole check's first entry: 1, or the archive point after the newest split
+    this.archives = [];     // the archives it named, oldest first (H.10.4)
+    this.unreached = [];    // this log's archive folders the chain of archives does not reach
+    this.points = [];       // the archive points in the live log
+    this.splitsSeen = [];   // the keyed splits the newest whole check walked
+    this.unfinished = null; // a split stopped part way: {seq (its point), split, name, left}
+    this.whole = false;     // the newest published check walked the log to its end: only then may a split's leftovers be removed
+    this.pins = null;       // archive name -> the SHA-256 of its SHA256SUMS that the chain pins it by, from the newest published check
+    this.leftAside = [];    // split folders the newest finish left as they are (`.<name>.partial`), with why
     this.headLane = new WriteLane(path.join(records, 'head.json'), { delayMs: 200, keepBak: false, mode: 0o600, files: true });
     this.headLane.onSaved = () => {
       const p = this.producing;
@@ -297,12 +336,14 @@ class AuditLog {
 
   /** The log's entries newest first, as facts read from each line's ends: the newest file, then each older one. */
   * _back() {
-    for (const [text] of linesBack(this.buf || Buffer.alloc(0))) { const f = factsOf(text); if (f) yield f; }
+    this.backCut = false;
+    for (const [text] of linesBack(this.buf || Buffer.alloc(0))) { const f = factsOf(text); if (f) { f.text = text; yield f; } }
     const files = this.rotated();
     for (let i = (this.loadedFrom === this.file ? files.length : files.indexOf(this.loadedFrom)) - 1; i >= 0; i--) {
       const r = readOr(files[i]);
-      if (!r.buf) return;   // an older file that cannot be read: what lies before it is the check's to say
-      for (const [text] of linesBack(r.buf)) { const f = factsOf(text); if (f) yield f; }
+      // An older file that cannot be read: what lies before it is the check's to say, and where a run began is not known.
+      if (!r.buf) { this.backCut = true; return; }
+      for (const [text] of linesBack(r.buf)) { const f = factsOf(text); if (f) { f.text = text; yield f; } }
     }
   }
 
@@ -315,7 +356,9 @@ class AuditLog {
     const t = { newest: null, run: null, keyed: null, own: false, spanRuns: [], atHead: null };
     let runOpen = true;
     let spanOpen = true;
+    let oldest = null;
     for (const f of this._back()) {
+      oldest = f;
       const kind = f.k || 'plain';
       if (!t.newest) { t.newest = f; t.run = { kind, first: f.seq }; spanOpen = f.k !== this.kid; }
       else if (runOpen) { if (kind === t.run.kind) t.run.first = f.seq; else runOpen = false; }
@@ -331,6 +374,14 @@ class AuditLog {
         if (runOpen && t.run.kind === this.kid && f.k === this.kid && f.h === head.h && Number.isSafeInteger(head.run)) { t.run.first = head.run; runOpen = false; }
       }
       if (!runOpen && (runOnly || (t.keyed && !spanOpen && (!head || f.seq <= head.seq)))) break;
+    }
+    if (runOpen && t.run) {
+      // The run reaches the oldest entry this file set holds. After a split that is an archive point, which names where the
+      // run began (H.10.1); an older file that could not be read leaves it unknown ('?').
+      const first = oldest && oldest.seq > 1 ? rules.wholeEntry(oldest.text) : null;
+      const named = first ? rules.beginsAt(first) : null;
+      if (this.backCut) t.run.first = '?';
+      else if (named && named.kind === t.run.kind) t.run.first = named.first;
     }
     return t;
   }
@@ -701,17 +752,50 @@ class AuditLog {
     return !this.pending;
   }
 
-  /** Rename the full file aside; the chain goes on in a new one. A rename that fails leaves it growing, and is tried again. */
+  /**
+   * Rename the full file aside; the chain goes on in a new one. A rename that fails leaves it growing, and is tried again.
+   * The name's time is the later of now and 1 ms after the newest rotated file's, so a forced rotation (an archive point)
+   * that follows a size rotation within one millisecond never renames onto it: a rename replaces what it lands on.
+   * True when the file was set aside.
+   */
   _rotate() {
+    if (this.rotatedAt === null) this.rotatedAt = timeOfRotated(this.rotated().pop() || '');
+    const t = Math.max(Date.now(), this.rotatedAt + 1);
     try {
-      fs.renameSync(this.file, path.join(path.dirname(this.file), this.stem + '-' + new Date().toISOString().replace(/[:.]/g, '-') + '.jsonl'));
+      fs.renameSync(this.file, path.join(path.dirname(this.file), rotatedName(this.stem, t)));
+      this.rotatedAt = t;
       this.size = 0;
       this.rotations++;
+      return true;
     } catch (err) {
       if (err.code === 'ENOENT') this.size = 0;
       else console.error('  [audit] could not rotate (written on in ' + path.basename(this.file) + '): ' + err.message);
+      return false;
     }
   }
+
+  /** The run the newest entry stands in, as a boundary names it: `<kid>:<first entry>`, or `<kid>:?` when not known. */
+  runRef() { return this.kid + ':' + (Number.isSafeInteger(this.runFirst) ? this.runFirst : '?'); }
+
+  /**
+   * An archive point (H.10.1): an event's data was archived, and the log carries on. What waits is put on disk first, then
+   * the current file is set aside when it holds anything, so the point is the first line of a file of its own and a split
+   * there moves whole files. While entries still wait (the disk refused them) it is written where it falls, and no split
+   * is made at it. `name` is the event archive's folder; the target adds the run (`<name>;<kid>:<first entry>`).
+   */
+  point(actor, name, words = '', ip = '') {
+    this.open();
+    if (this.pending || this.onDisk.seq !== this.seq) this._put();
+    if (!this.pending && this.size > 0) this._rotate();
+    const run = this.runRef();
+    return this.write(actor, 'audit.archive', str(name, 79 - run.length) + ';' + run, words, ip);
+  }
+
+  /** Whether an entry under this machine's key carries its MAC (compared in constant time); false under any other key. */
+  macHolds(e) { return !this.keyless && e.k === this.kid && sameMac(e.h, macOf(e, this.Ke)); }
+
+  /** An archive's name for a range of this log: audit-<its id's first 8 hex>-<from>-<to>. */
+  archiveName(from, to) { return 'audit-' + this.l.slice(0, 8) + '-' + from + '-' + to; }
 
   /** A span row's mark now: ◇ once its span is accepted, △ until then. */
   _spanMark(seq) {
@@ -733,6 +817,8 @@ class AuditLog {
     if (this.keyless) out.push({ kind: 'keyless', mark: 'unvouched', words: 'this run has no machine key (' + this.keyless.code + '): its entries are linked, and cannot be checked after a restart — ' + this.keyless.words });
     if (this.headOff) out.push({ kind: 'head', mark: 'unvouched', words: 'entries from here on are not vouched for: the head record could not be read (' + this.headOff + ')' });
     else if (this.headLane.lastError) out.push({ kind: 'head', mark: 'unvouched', words: 'entries after ' + (this.saved ? this.saved.seq : 0) + ' are not vouched for: the head record could not be saved (' + this.headLane.lastError + ')' });
+    if (this.unfinished) out.push({ kind: 'split', mark: 'unvouched', words: unfinishedWords(this.unfinished, this.splitCode) });
+    for (const x of this.leftAside) out.push({ kind: 'split', mark: 'unvouched', words: 'a split\'s folder (' + x.name + ') is left as it is: ' + x.why });
     return out;
   }
 
@@ -752,6 +838,8 @@ class AuditLog {
       kid: this.kid, headLag: this.keyless || this.headOff ? 0 : this._lag(this.onDisk.seq, this.saved),
       attention: this.attention().map((f) => ({ ...(f.id ? { id: f.id } : {}), kind: f.kind, mark: f.mark, words: f.words, ...(f.first ? { first: true } : {}) })),
       keyless: !!this.keyless,
+      from: this.from,
+      archives: this.archives.length,
       lastExport: this.lastExport ? { ...this.lastExport } : null,
     };
   }
@@ -767,7 +855,9 @@ class AuditLog {
    */
   verify() {
     this.open();
-    if (!this.checking) this.checking = this._verify().finally(() => { this.checking = null; });
+    // A split moves the files a check reads: one asked while a split is made waits for it, then reads what it left.
+    // (A split's promise only resolves: its slot is released whatever the split did.)
+    if (!this.checking) this.checking = (this.splitting ? this.splitting.then(() => this._verify()) : this._verify()).finally(() => { this.checking = null; });
     return this.checking;
   }
 
@@ -777,10 +867,18 @@ class AuditLog {
    * already running began before that entry, so it is waited for, not shared. It never re-runs, and what it finds
    * changes nothing this run reads (health, the rows' marks): it is the export's.
    */
-  async checkThrough(source, stop) {
+  async checkThrough(source, stop, { archives = null, walk = null } = {}) {
     this.open();
     if (this.checking) await this.checking.catch(() => null);
-    return this._verify({ source, expect: { seq: stop.seq, h: stop.h }, publish: false });
+    return this._verify({ source, expect: { seq: stop.seq, h: stop.h }, publish: false, archives, walk });
+  }
+
+  /**
+   * The check a split runs on its own handles (lib/auditarchive.js): as an export's, but it neither waits for a check that
+   * waits for it, nor reads past `stop`. What it found is the split's (`walk`), not this run's.
+   */
+  checkForSplit(source, stop, walk) {
+    return this._verify({ source, expect: { seq: stop.seq, h: stop.h }, publish: false, walk });
   }
 
   /** The chain's files, read off the event loop one at a time: {name, buf}, or {name, code} for one that cannot be read. */
@@ -793,15 +891,18 @@ class AuditLog {
     }
   }
 
-  async _verify({ source = null, expect: until = null, publish = true } = {}) {
+  async _verify({ source = null, expect: until = null, publish = true, archives = null, walk = null } = {}) {
     const rotations = this.rotations;
     const expect = until || { ...this.onDisk };
     const saved = this.saved ? { ...this.saved } : null;
     const held = this._held();
-    const conditions = this.conditions();
+    // A split stopped part way is a condition this walk finds again, never one carried from the walk before.
+    const conditions = this.conditions().filter((c) => c.kind !== 'split');
     const own = this.kid;
     const anchor = this.anchor;
-    const files = source || this._read(this.files());
+    // A split stopped part way left its moved files aside: they come first, then the live files, as one chain (H.10.2).
+    const partials = source ? [] : await this._partials();
+    const files = source || this._read([...partials.flatMap((p) => p.logs), ...this.files()]);
     let prev = { seq: 0, h: GENESIS };
     let entries = 0;
     let lineCount = 0;
@@ -811,8 +912,20 @@ class AuditLog {
     let span = null;   // the stretch not under this key being walked: {from, runs: [{kind, from, to}]}
     const found = [];  // findings from this key's own cut and head entries
     const accepted = new Map();
+    const acceptsAt = new Map();   // finding id -> {seq, at} of the accept on disk that names it
+    const points = [];   // this key's archive points: {seq, at, name, run, first (the first line of its file), file, words}
+    const splits = [];   // keyed splits: {seq, at, k, point, digest, words, actor}
+    let from = 0;
+    let fromKey = '';
+    let firstFile = '';
+    let firstPrev = GENESIS;
     let atHead = null;
-    const answer = (fields) => this._answer({ fields, entries, spans, found, accepted, held, conditions, expect, saved, publish });
+    const answer = async (fields, look = null) => {
+      // Broken at a line after a split, the archives it names are still looked at: an export of it carries them.
+      if (!fields.done && !look && from > 1) look = await this._look({ splits, from, fromKey, reader: archives || this._reader(), partials });
+      if (walk) Object.assign(walk, { points, splits, accepts: acceptsAt, from: from || 1, firstPrev, last: prev.seq, look, broken: !fields.done });
+      return this._answer({ fields, entries, spans, found, accepted, held, conditions, expect, saved, publish, from: from || 1, last: prev.seq, look, points, splits, walk });
+    };
     let last = path.basename(this.file);
     for await (const f of files) {
       if (f.code) return answer({ file: f.name, brokenAt: 0, why: 'the file could not be read: ' + f.code });
@@ -825,6 +938,14 @@ class AuditLog {
         if (++checked % SLICE === 0) await turn();
         const e = rules.wholeEntry(text);
         if (!e) return at(n, 'line ' + n + ' is not a whole entry');
+        if (!entries && e.seq !== 1) {
+          // A chain that begins after entry 1 begins at an archive point naming a run of its own key (H.4, H.10.4).
+          const run = rules.beginsAt(e);
+          if (!run) return at(n, missing(1, e.seq - 1) + ' before entry ' + e.seq);
+          prev = { seq: e.seq - 1, h: e.prev };
+          runs.run = { kind: run.kind, first: run.first };
+        }
+        if (!entries) { from = e.seq; fromKey = e.k; firstFile = f.name; firstPrev = e.prev; }
         if (e.seq !== prev.seq + 1) return at(n, e.seq > prev.seq + 1 ? missing(prev.seq + 1, e.seq - 1) + ' before entry ' + e.seq : 'entry ' + e.seq + ' is out of order');
         if (e.prev !== prev.h) return at(n, 'entry ' + e.seq + ' does not follow the one before it');
         if (e.k === own ? !sameMac(e.h, macOf(e, this.Ke)) : !e.k && hashOf(e) !== e.h) return at(n, 'entry ' + e.seq + ' was changed after it was written');
@@ -840,36 +961,195 @@ class AuditLog {
             span = null;
           }
           if ((e.action === 'audit.cut' || e.action === 'audit.head') && Object.prototype.hasOwnProperty.call(FINDING, e.target)) found.push({ id: 'e' + e.seq, kind: e.target, words: e.words });
-          if (e.action === 'audit.accept') for (const id of e.target.split(',')) if (id) accepted.set(id, e.at);
+          if (e.action === 'audit.accept') for (const id of e.target.split(',')) if (id) { accepted.set(id, e.at); acceptsAt.set(id, { seq: e.seq, at: e.at }); }
+          if (e.action === 'audit.archive') {
+            const p = rules.pointRun(e.target);
+            points.push({ seq: e.seq, at: e.at, h: e.h, name: p ? p.name : '', run: p ? p.run : null, first: n === 1, file: f.name, words: e.words });
+          }
         } else {
           const kind = e.k || 'plain';
           if (!span) span = { from: e.seq, runs: [] };
           const r = span.runs[span.runs.length - 1];
           if (r && r.kind === kind) r.to = e.seq; else span.runs.push({ kind, from: e.seq, to: e.seq });
         }
+        // A split is structure under any key, as a boundary is: keyed, it pins the archive it made (H.10.4).
+        const sp = e.k && e.action === 'audit.split' ? rules.splitOf(e.target) : null;
+        if (sp) splits.push({ seq: e.seq, at: e.at, k: e.k, point: sp.point, digest: sp.digest, words: e.words, actor: e.actor });
         if (saved && e.seq === saved.seq) atHead = e;
         prev = e;
         entries++;
       }
     }
     // A rotation moved the files under a routine check: read them again. An export's check reads its own handles.
-    if (!source && this.rotations !== rotations) return this._verify();
+    if (!source && this.rotations !== rotations) return this._verify({ publish, archives, walk });
     const tail = { file: last, brokenAt: lineCount + 1 };
     if (span) return answer({ ...tail, why: range(span.from, prev.seq, 'follows', 'follow') + ' entry ' + (span.from - 1) + ' with no boundary under this key after it: added behind the running server\'s back' });
     if (prev.seq < expect.seq) return answer({ ...tail, why: (prev.seq ? 'after entry ' + prev.seq + ', ' : '') + missing(prev.seq + 1, expect.seq) + ' (the newest written)' });
     if (prev.seq === expect.seq && prev.h !== expect.h) return answer({ ...tail, why: 'the newest entry is not the one this server wrote last' });
     if (saved && saved.seq > 0 && saved.seq <= prev.seq && !(atHead && atHead.k === own && atHead.h === saved.h)) return answer({ ...tail, why: 'entry ' + saved.seq + ', the newest this machine recorded, is not under its key with the hash it recorded' });
-    return answer({ done: true });
+    // After a split the walk begins at its archive point, which a keyed split under the point's own key must name: files
+    // removed by hand, or a split forged in plain, leave the first entries missing (H.10.4).
+    if (from > 1 && !splits.some((x) => x.point === from && x.k === fromKey)) return answer({ file: firstFile, brokenAt: 1, why: missing(1, from - 1) + ': no split names entry ' + from });
+    const look = await this._look({ splits, from: from || 1, fromKey, reader: archives || this._reader(), partials });
+    return answer({ done: true }, look);
+  }
+
+  /** The folders a split left part way, this log's (H.10.2): {name, dir, logs: [the log files moved into it, oldest first]}. */
+  async _partials() {
+    let names;
+    try { names = await fs.promises.readdir(this.archiveDir); } catch { return []; }   // no archive folder: no split was ever made aside
+    const out = [];
+    for (const n of names.sort()) {
+      const m = PARTIAL.exec(n);
+      if (!m || !m[1].startsWith('audit-' + this.l.slice(0, 8) + '-')) continue;
+      const dir = path.join(this.archiveDir, n);
+      let logs = [];
+      try { logs = (await fs.promises.readdir(path.join(dir, 'log'))).filter((f) => rules.isArchiveLog('log/' + f)).sort().map((f) => path.join(dir, 'log', f)); } catch { /* nothing moved into it yet */ }
+      out.push({ name: m[1], dir, logs });
+    }
+    return out;
+  }
+
+  /** How the routine check looks at the archives: two small reads and a size per file (`full` false: no file is hashed). */
+  _reader() {
+    const dir = this.archiveDir;
+    const at = (name, rel) => path.join(dir, name, ...rel.split('/'));
+    return {
+      full: false,
+      async list() {
+        try { return { names: (await fs.promises.readdir(dir, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name), code: '' }; } catch (e) {
+          return { names: [], code: e.code === 'ENOENT' ? '' : e.code || 'EIO' };
+        }
+      },
+      async read(name, rel) { try { return { buf: await fs.promises.readFile(at(name, rel)), code: '' }; } catch (e) { return { buf: null, code: e.code || 'EIO' }; } },
+      async size(name, rel) { try { const st = await fs.promises.lstat(at(name, rel)); return st.isFile() ? st.size : null; } catch { return null; } },
+    };
+  }
+
+  /**
+   * The archives the walk names (H.10.4): from the split that names the live log's first entry (or, with the walk from
+   * entry 1, the newest split it met), then each archive's `previous`, back to entry 1. Each is looked at, not re-read:
+   * its SHA256SUMS against the split's pin, its archive.json, and each listed log file's size; with `reader.full` (an
+   * export's), every file's SHA-256 against its SHA256SUMS too. Also: a split stopped part way (a condition), the keyed
+   * splits that name no archive on the chain (findings), and this log's archive folders the chain does not reach.
+   */
+  async _look({ splits, from, fromKey = '', reader, partials }) {
+    const out = { archives: [], findings: [], unfinished: null, unreached: [], unread: '' };
+    if (!splits.length && !partials.length) {
+      if (reader.full) return out;
+      // No split names an archive: any folder of this log's there is out of reach (moved back, or another copy's).
+      const listed = await reader.list();
+      out.unreached = listed.names.filter((n) => { const r = rules.archiveRange(n); return r && r.l8 === this.l.slice(0, 8); }).sort();
+      return out;
+    }
+    const listed = await reader.list();
+    if (listed.code) out.unread = listed.code;
+    const l8 = this.l.slice(0, 8);
+    const mine = listed.names.filter((n) => { const r = rules.archiveRange(n); return r && r.l8 === l8; });
+    // A split stopped part way, pinned by its keyed split: its files are walked above, and it is finished at the next
+    // start or by "Finish the split" (lib/auditarchive.js).
+    let pending = null;
+    for (const p of partials) {
+      const sums = await reader.read('.' + p.name + '.partial', 'SHA256SUMS');
+      const digest = sums && sums.buf ? crypto.createHash('sha256').update(sums.buf).digest('hex') : '';
+      const s = digest ? splits.find((x) => x.digest === digest) : null;
+      if (!s) continue;
+      let listedFiles = [];
+      try { listedFiles = JSON.parse((await reader.read('.' + p.name + '.partial', 'archive.json')).buf.toString('utf8')).files.map((f) => f.path); } catch { /* what moved is still walked: only the count is unknown */ }
+      const moved = new Set(p.logs.map((f) => 'log/' + path.basename(f)));
+      pending = s;
+      out.unfinished = { seq: s.point, split: s.seq, name: p.name, left: listedFiles.filter((f) => !moved.has(f)).length };
+    }
+    const done = splits.filter((x) => x !== pending);
+    // The split that names the live log's first entry under that entry's own key (one under another key lies in a span, and
+    // pins nothing); with the walk from entry 1 (files moved back), the newest split.
+    let start = null;
+    for (const x of done) if (from > 1 ? x.point === from && x.k === fromKey : !start || x.point > start.point) start = x;
+    let cur = start ? { name: this._nameOf(start, mine), digest: start.digest, split: start.seq, to: start.point - 1, at: start.at } : null;
+    const seen = new Set();
+    while (cur && !seen.has(cur.name)) {
+      seen.add(cur.name);
+      const one = await this._lookOne(reader, cur, mine.includes(cur.name), listed.code);
+      out.archives.push(one.item);
+      if (one.finding) out.findings.push(one.finding);
+      cur = one.previous;
+    }
+    out.archives.reverse();   // oldest first
+    for (const x of done) {
+      if (!out.archives.some((a) => a.split === x.seq)) out.findings.push({ id: 'a' + x.seq, kind: 'archive', words: 'the split at entry ' + x.point + ' (entry ' + x.seq + ') names an archive that is not on the chain of archives back to entry 1' });
+    }
+    out.unreached = mine.filter((n) => !seen.has(n)).sort();
+    return out;
+  }
+
+  /** The archive a split made, by its name in the split's own (keyed) words, or the one folder that ends where it should. */
+  _nameOf(s, mine) {
+    const want = (n) => { const r = rules.archiveRange(n); return r && r.l8 === this.l.slice(0, 8) && r.to === s.point - 1; };
+    const said = (String(s.words).match(ARCHIVE_IN_WORDS) || []).find(want);
+    if (said) return said;
+    const there = mine.filter(want);
+    return there.length === 1 ? there[0] : this.archiveName('?', s.point - 1);
+  }
+
+  /** One archive looked at, as `_look` says: {item, finding?, previous ({name, digest, split, to, at}, or null)}. */
+  async _lookOne(reader, cur, there, unread) {
+    const r = rules.archiveRange(cur.name);
+    const span = r ? range(r.from, cur.to, '', '').trim() : 'entries up to ' + cur.to;
+    const item = { name: cur.name, from: r ? r.from : 0, to: cur.to, split: cur.split, mark: 'broken', words: '', digest: cur.digest };
+    const changed = (why) => {
+      const words = 'the archive of ' + span + ' is not what was split off: ' + why;
+      return { item: { ...item, words, finding: 'a' + cur.split }, finding: { id: 'a' + cur.split, kind: 'archive', words }, previous: null };
+    };
+    if (unread) return { item: { ...item, mark: 'unvouched', words: 'the archive of ' + span + ' (' + cur.name + ') could not be looked at: the archive folder could not be read (' + unread + ')' }, previous: null };
+    if (!there) {
+      const words = 'the archive of ' + span + ' (' + cur.name + ') is not where the split put it: moved off this laptop, or removed';
+      return { item: { ...item, words, finding: 'a' + cur.split }, finding: { id: 'a' + cur.split, kind: 'archive', words }, previous: null };
+    }
+    const sums = await reader.read(cur.name, 'SHA256SUMS');
+    if (!sums.buf) return changed('SHA256SUMS is missing (' + sums.code + ')');
+    if (crypto.createHash('sha256').update(sums.buf).digest('hex') !== cur.digest) return changed('its SHA256SUMS is not the one the split pinned');
+    const listedSums = rules.parseSums(sums.buf.toString('utf8'), 'archive');
+    if (listedSums.why) return changed(listedSums.why);
+    // archive.json is one of the two small reads: held to its line in the pinned SHA256SUMS, so a change to it is seen.
+    const json = await reader.read(cur.name, 'archive.json');
+    if (!json.buf) return changed('archive.json is missing (' + json.code + ')');
+    const jsonLine = listedSums.list.find((x) => x.path === 'archive.json');
+    if (!jsonLine || crypto.createHash('sha256').update(json.buf).digest('hex') !== jsonLine.digest) return changed('archive.json is not what its SHA256SUMS says');
+    let a;
+    try { a = JSON.parse(json.buf.toString('utf8')); } catch { return changed('archive.json is not JSON'); }
+    const shape = rules.archiveProblem(a);
+    if (shape) return changed(shape);
+    if (a.log !== this.l || a.entries.to !== cur.to || (r && a.entries.from !== r.from)) return changed('archive.json names ' + range(a.entries.from, a.entries.to, '', '').trim() + ' of log ' + a.log.slice(0, 8) + '…');
+    for (const f of a.files) {
+      const size = await reader.size(cur.name, f.path);
+      if (size === null) return changed(f.path + ' is missing');
+      if (size !== f.bytes) return changed(f.path + ' is ' + count(Math.abs(f.bytes - size)) + ' bytes ' + (size < f.bytes ? 'shorter' : 'longer'));
+    }
+    if (reader.full) {
+      for (const x of listedSums.list) {
+        const got = await reader.read(cur.name, x.path);
+        if (!got.buf) return changed(x.path + ' is missing');
+        if (crypto.createHash('sha256').update(got.buf).digest('hex') !== x.digest) return changed(x.path + ' is not what its SHA256SUMS says');
+      }
+    }
+    const held = a.check.findings.map((f) => { const m = /^s([0-9]+)-([0-9]+)$/.exec(f.id); return (m ? range(Number(m[1]), Number(m[2]), '', '').trim() : f.words) + ' accepted on ' + day(f.accept.at); });
+    const words = range(a.entries.from, a.entries.to, '', '').trim() + ': archive ' + cur.name + ', split off on ' + day(cur.at || a.made) + (a.check.mark === 'linked' ? ' (◇: holds ' + held.join(', ') + ')' : '');
+    const previous = a.previous ? { name: a.previous.name, digest: a.previous.digest, split: a.previous.split, to: a.entries.from - 1, at: 0 } : null;
+    return { item: { ...item, from: a.entries.from, mark: a.check.mark, words, held: held.join(', '), digest: cur.digest }, previous };
   }
 
   /** A check's answer from what its walk found (H.7): the open findings, the mark by precedence, the words, the digest. */
-  _answer({ fields, entries, spans, found, accepted, held, conditions, expect, saved, publish = true }) {
+  _answer({ fields, entries, spans, found, accepted, held, conditions: cond, expect, saved, publish = true, from = 1, last = 0, look = null, points = [], splits = [], walk = null }) {
     const keyless = this.keylessRuns;
+    // What the archives add (H.10.4): their findings, a split stopped part way, a folder that could not be read.
+    const conditions = [...cond];
+    if (look && look.unfinished) conditions.push({ kind: 'split', mark: 'unvouched', words: unfinishedWords(look.unfinished, this.splitCode) });
+    if (look && look.unread) conditions.push({ kind: 'archives', mark: 'unvouched', words: 'the archive folder could not be read (' + look.unread + '): the archives the log names were not looked at' });
     const spanFindings = spans.map((s) => {
       const kind = spanKind(s.runs, keyless);
       return { id: 's' + s.from + '-' + s.to, kind, from: s.from, to: s.to, words: spanWords(s.runs, { first: s.first, keyless }), linked: spanWords(s.runs, { first: s.first, keyless, linked: true }), ...(kind === 'plain' ? { first: s.first } : {}) };
     });
-    const all = [...spanFindings.map(({ linked, ...f }) => ({ ...f, mark: 'unvouched', linked })), ...found.map((f) => ({ ...f, mark: FINDING[f.kind], ...(FINDING[f.kind] === 'broken' ? { confirm: true } : {}) }))];
+    const all = [...spanFindings.map(({ linked, ...f }) => ({ ...f, mark: 'unvouched', linked })), ...[...found, ...(look ? look.findings : [])].map((f) => ({ ...f, mark: FINDING[f.kind], ...(FINDING[f.kind] === 'broken' ? { confirm: true } : {}) }))];
     const onDisk = new Set(all.map((f) => f.id));
     const open = all.filter((f) => !accepted.has(f.id)).map(({ linked, ...f }) => f);
     for (const h of held) {
@@ -877,15 +1157,32 @@ class AuditLog {
       else if (!onDisk.has(h.id)) open.push({ ...h, held: true });
     }
     const took = all.filter((f) => accepted.has(f.id));
+    // What the split's own check hands it: each finding closed, in the words a ◇ answer names it by.
+    if (walk) walk.took = took.map((f) => ({ id: f.id, kind: f.kind, from: f.from, to: f.to, words: f.linked || f.words }));
+    // An archive with a finding reads ✕ until it is accepted, ◇ after; one looked at whole carries the mark it was split
+    // off with, so a split never makes the log read better than it did.
+    const archives = (look ? look.archives : []).map(({ held: h, digest: d, ...a }) => (a.finding ? { ...a, mark: accepted.has(a.finding) ? 'linked' : 'broken', held: h } : { ...a, held: h }));
     const digest = sha256(JSON.stringify(open.map((f) => [f.id, f.words]))).slice(0, 16);
     const head = { seq: saved ? saved.seq : 0, lag: this._lag(expect.seq, saved), ...(conditions.some((c) => c.kind === 'head') ? { error: conditions.find((c) => c.kind === 'head').words } : {}) };
     const extra = this.unwritten ? { unwritten: this.unwritten } : {};
-    // An export's own check (publish false) is the export's: this run reads what the routine check found.
+    // An export's own check (publish false) is the export's: this run reads what the routine check found. Whole or broken
+    // at a line, the archives it looked at give their pins, by which an archive's own Check knows it (lib/auditarchive.js).
+    if (publish) {
+      this.whole = !!fields.done;
+      this.pins = new Map((look ? look.archives : []).map((a) => [a.name, a.digest]));
+    }
     if (publish && fields.done) {
       // The walk is whole: what it found is what the rows' marks and health read from now on.
       this.spans = spans.map((s) => ({ id: 's' + s.from + '-' + s.to, from: s.from, to: s.to }));
       for (const [id, at] of accepted) this.accepted.set(id, at);   // an accept is never taken back: it only adds
       this.lastCheck = open;
+      this.from = from;
+      this.archives = archives.map(({ held: h, ...a }) => a);
+      this.unreached = look ? look.unreached : [];
+      this.points = points;
+      this.splitsSeen = splits;
+      this.unfinished = look ? look.unfinished : null;
+      if (!this.unfinished) this.splitCode = '';
     } else if (publish) {
       // Broken at a line: health, the console and the opener read ✕ until a whole check replaces it.
       this.lastCheck = [{ kind: 'broken', mark: 'broken', words: 'Broken at line ' + fields.brokenAt + ' of ' + fields.file + ': ' + fields.why }, ...open];
@@ -895,6 +1192,8 @@ class AuditLog {
     const worst = (m) => { if (RANK[m] > RANK[mark]) mark = m; };
     for (const f of open) worst(f.mark);
     for (const c of conditions) worst(c.mark);
+    for (const a of archives) if (!a.finding) worst(a.mark);
+    const span = (a, b) => (a === b ? 'entry ' + a : 'entries ' + a + '–' + b);
     if (!fields.done) {
       mark = 'broken';
       words = 'Broken at line ' + fields.brokenAt + ' of ' + fields.file + ': ' + fields.why;
@@ -904,13 +1203,23 @@ class AuditLog {
     } else if (mark === 'unvouched') {
       const u = open.filter((f) => f.mark === 'unvouched');
       words = 'Not vouched for — ' + [...u.map((f) => f.words), ...conditions.map((c) => c.words)].join('; ') + (u.length ? ': accept them on the AGMessage laptop (Admin → Health)' : '');
-    } else if (took.length) {
+    } else if (took.length || mark === 'linked') {
       mark = 'linked';
-      words = 'Linked — ' + took.map((f) => (f.linked || f.words) + ', accepted on the AGMessage laptop on ' + day(accepted.get(f.id))).join('; ') + '; the rest of the ' + entries + ' entries, keyed here, are intact';
-    } else words = 'Intact — ' + entries + ' entries, all keyed on this machine';
+      const live = took.filter((f) => !/^a[0-9]/.test(f.id)).map((f) => (f.linked || f.words) + ', accepted on the AGMessage laptop on ' + day(accepted.get(f.id)));
+      if (!archives.length) words = 'Linked — ' + live.join('; ') + '; the rest of the ' + entries + ' entries, keyed here, are intact';
+      else {
+        const held = archives.map((a) => (a.finding ? a.words + ', accepted on the AGMessage laptop on ' + day(accepted.get(a.finding))
+          : span(a.from, a.to) + ' are in the archive ' + a.name + (a.mark === 'linked' ? ', which holds ' + a.held : ', intact')));
+        words = 'Linked — ' + (live.length ? live.join('; ') + '; the rest of ' : '') + span(from, last) + ', keyed here, are intact; ' + held.join('; ');
+      }
+    } else if (archives.length) words = 'Intact — ' + span(from, last) + ', keyed on this machine; ' + span(archives[0].from, archives[archives.length - 1].to) + ' in ' + archives.length + ' archive' + (archives.length === 1 ? '' : 's') + ', intact';
+    else words = 'Intact — ' + entries + ' entries, all keyed on this machine';
     const out = { ok: mark === 'intact', mark, words, entries, findings: open, digest, head, ...extra };
     if (!fields.done) Object.assign(out, { file: fields.file, brokenAt: fields.brokenAt, why: fields.why });
     if (mark !== 'intact') out.error = words;
+    // At the end (H.10.4): the first entry walked, and every archive the walk names.
+    out.from = from;
+    out.archives = archives.map(({ held: h, ...a }) => a);
     return out;
   }
 

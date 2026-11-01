@@ -104,7 +104,34 @@ so a line that was changed, removed, or written without the key shows.
 - Going back to 0.5.1: its check reads a keyed log as "Broken at line N:
   entry N was changed after it was written", and it writes on. Back on
   0.6.0, the entries it wrote read △ until accepted. 0.5.1 has no export;
-  one already made stays checkable with the release's verifier.
+  one already made stays checkable with the release's verifier. After a
+  split (below), 0.5.1 reads "Broken at line 1 of audit-<time>.jsonl:
+  entries 1 to 2003 are missing before entry 2004", since it knows no
+  archive; it never touches app\data\audit-archive.
+
+The audit log across events
+---------------------------
+The audit log carries on from one event to the next. Archiving an event
+leaves an archive point in it, as the first line of a file of its own.
+- An admin (the token at this laptop, or an admin account) may split the
+  log at a point: Admin -> Health -> Split the audit log..., choose the
+  point, type the word split. The entries before it move, whole files,
+  into a signed archive in app\data\audit-archive\. Nothing is deleted.
+  The check then starts at the point, names the archive, and reads no
+  better than before: an archive of accepted entries stays ◇.
+- A split is refused while anything before the point is open or broken
+  (accept it first at Admin -> Health), and while an export is being made.
+- Leave app\data\audit-archive where it is. An archive moved or removed,
+  or one whose files were changed, reads ✕ until it is accepted with the
+  token, and its entries can no longer be checked on this laptop.
+- Halls -> Accounts -> Audit log lists each archive with its own Check.
+  Every export carries the archives. An archive is checked on its own
+  with the same verifier and the same three commands, in its folder:
+      node verify-audit.js <the archive's folder> --fingerprint <your record>
+- If AGMessage stops part way through a split (a backup tool holding a
+  file, say), the log reads △ "not finished" until the next start, which
+  finishes it; Finish the split on the same dialog does it too. An
+  export is refused until the split is finished.
 
 Checking the audit log on another computer
 ------------------------------------------

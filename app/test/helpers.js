@@ -14,7 +14,10 @@ const TOKEN = 'testadmintoken01';
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
-/** Start a server; resolves {child, base, port, dataDir, out()} once it says it is running. */
+/**
+ * Start a server; resolves {child, base, port, dataDir, out()} once it says it is running and has printed its banner,
+ * whose last line is its uploads folder: a test that reads the black window reads the whole banner, never a part of it.
+ */
 async function startServer(env = {}) {
   const dataDir = env.AGM_DATA_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
   const port = env.PORT ? Number(env.PORT) : await freePort();
@@ -27,7 +30,7 @@ async function startServer(env = {}) {
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
   for (let i = 0; i < 150; i++) {
-    if (out.includes('is running')) return { child, port, base: `http://127.0.0.1:${port}`, dataDir, out: () => out };
+    if (out.includes('is running') && out.includes('\n  Uploads:')) return { child, port, base: `http://127.0.0.1:${port}`, dataDir, out: () => out };
     await wait(100);
   }
   child.kill();
@@ -401,6 +404,39 @@ function keyedChainOf(n, { file, key = FIXTURE_KEY, records = recordsOf(file), w
   fs.writeFileSync(path.join(records, 'keyed.json'), audit.sealRecord({ v: 1, since: at, log: l }, k.head));
   return { l, kid, last: prev };
 }
+/**
+ * A keyed chain of `n` entries under `key`, as keyedChainOf writes one, in which each seq in `points` is an archive point
+ * (`audit.archive`, H.10.1) that opens a file of its own: the files before it are rotated files named by time, and the
+ * last is `file`. Its records are a laptop's under that key, its head's run beginning at entry 1. Returns {l, kid, last, files}.
+ */
+function keyedLogWithPoints(n, { file, points = [], key = FIXTURE_KEY, records = recordsOf(file), words = SEED_WORDS, at = 1_700_000_000_000, l = 'c0ffee'.padEnd(32, '0') }) {
+  const k = auditKeys(key)();
+  const kid = audit.kidOf(k.entry);
+  let prev = audit.GENESIS;
+  const parts = [[]];
+  for (let i = 1; i <= n; i++) {
+    const point = points.includes(i);
+    if (point && parts[parts.length - 1].length) parts.push([]);
+    const e = point
+      ? { seq: i, at: at + i, actor: { ...HOST }, action: 'audit.archive', target: '2026-10-27T14-02-00-' + String(i % 1000).padStart(3, '0') + 'Z;' + kid + ':1', words: 'the event “Rehearsal ' + i + '” was archived; links kept. The audit log carries on, and can be split here (Admin → Health).', ip: '127.0.0.1', prev, l, k: kid }
+      : { seq: i, at: at + i, actor: { ...SAM }, action: 'display.take', target: 'dlectern1', words: words(i), ip: '10.0.0.9', prev, l, k: kid };
+    e.h = audit.macOf(e, k.entry);
+    prev = e.h;
+    parts[parts.length - 1].push(JSON.stringify(e));
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const files = parts.map((_, i) => (i === parts.length - 1 ? file : path.join(path.dirname(file), 'audit-' + new Date(at + i * 1000).toISOString().replace(/[:.]/g, '-') + '.jsonl')));
+  parts.forEach((part, i) => fs.writeFileSync(files[i], part.join('\n') + '\n'));
+  fs.mkdirSync(records, { recursive: true });
+  const p = path.resolve(file);
+  const id = placeId(path.dirname(file), path.basename(file));
+  const now = at + n;
+  fs.writeFileSync(path.join(records, 'head-' + l + '.json'), audit.sealRecord({ v: 1, log: l, path: p, kid, seq: n, h: prev, run: 1, held: [], at: now }, k.head));
+  fs.writeFileSync(path.join(records, 'latest.json'), audit.sealRecord({ v: 1, log: l, path: p, seq: n, at: now }, k.head));
+  fs.writeFileSync(path.join(records, 'folder-' + id + '.json'), audit.sealRecord({ v: 1, folder: id, path: p, log: l, at: now }, k.head));
+  fs.writeFileSync(path.join(records, 'keyed.json'), audit.sealRecord({ v: 1, since: at, log: l }, k.head));
+  return { l, kid, last: prev, files };
+}
 /** Accept every open finding as the typed token would (✕ ones confirmed): the accepted state, ◇. */
 async function acceptAll(log) {
   const c = await log.verify();
@@ -455,6 +491,6 @@ function unzipTo(buf, dir) {
 
 module.exports = {
   stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
-  FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, acceptAll, brief,
+  FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, acceptAll, brief,
   readZip, unzipTo, SEED_WORDS,
 };

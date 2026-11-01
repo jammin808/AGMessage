@@ -17,7 +17,7 @@ const path = require('path');
 const net = require('net');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
-const { fakeStagewatch, fakeNode, chainOf, unzipTo } = require('./helpers');
+const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = process.env.AGM_SMOKE_OUT || path.join(ROOT, '..', 'artifacts', 'smoke');
@@ -262,6 +262,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
   let patterns = null;
   let server2 = null;
   let dataDir2 = null;
+  let server3 = null;
+  let dataDir3 = null;
   try {
     const login = await fetch(base + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
     const cookie = login.headers.get('set-cookie').split(';')[0];
@@ -863,7 +865,44 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const miaAudit = await audit2.until(`location.pathname === '/users.html' && /Mia Manager/.test(document.getElementById('who').textContent) && !document.getElementById('auditPane').hidden && document.querySelectorAll('#auditList .audit-row').length > 0 && String(document.getElementById('exportBtn').hidden)`, 20000);
     report(miaAudit === 'true', `a project manager reads the audit log and is offered no Export (Export hidden: ${miaAudit})`);
 
-    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker]];
+    // The audit log carried across events, on a third AGMessage whose log holds an event's archive point at entry 9: the
+    // token at the laptop splits it from Health (the point listed, the word typed), Health then names where the check
+    // begins, and Accounts → Audit log draws the archive with its mark and checks it on its own.
+    dataDir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-split-'));
+    fs.mkdirSync(dataDir3 + '-keys', { recursive: true });
+    fs.writeFileSync(path.join(dataDir3 + '-keys', 'machine.key'), FIXTURE_KEY.toString('base64'));   // the tests' fixed machine key: the seeded log is this copy's own
+    keyedLogWithPoints(12, { file: path.join(dataDir3, 'audit.jsonl'), records: path.join(dataDir3 + '-keys', 'audit'), points: [9] });
+    const port3 = await freePort();
+    const base3 = `http://127.0.0.1:${port3}`;
+    server3 = await startServer(port3, dataDir3);
+    await fetch(base3 + '/api/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', name: 'Ana Admin', password: 'the green room kettle' }) });
+    const admin3 = await edge.tab(`${base3}/admin.html`);
+    await admin3.until('document.readyState === "complete"');
+    await admin3.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
+    await admin3.until(`!document.getElementById('dashboard').hidden && !document.getElementById('auditSplitRow').hidden`, 20000);
+    await admin3.eval(`document.getElementById('auditSplitBtn').click()`);
+    const pointRow = await admin3.until(`(() => { const r = document.querySelector('#splitList input[type=radio]'); return document.getElementById('splitDialog').open && r && !r.disabled && r.value + '|' + document.querySelector('#splitList li').textContent; })()`);
+    report(/^9\|Entry 9 · “Rehearsal 9”, archived \d\d:\d\d on \d+ \w{3}: entries 1–8 move into a signed archive$/.test(pointRow || ''), `Health lists the archive point a split may be made at (${pointRow})`);
+    await admin3.eval(`(() => { const r = document.querySelector('#splitList input[type=radio]'); r.checked = true; r.dispatchEvent(new Event('change')); document.getElementById('splitForm').requestSubmit(); })()`);
+    const noWord = await admin3.until(`document.getElementById('splitState').dataset.mark === 'broken' && document.getElementById('splitState').textContent`);
+    await admin3.eval(`(() => { document.getElementById('splitWord').value = 'split'; document.getElementById('splitForm').requestSubmit(); })()`);
+    const splitSaid = await admin3.until(`(() => { const s = document.getElementById('splitState'); return s.dataset.mark === 'intact' && s.textContent; })()`, 20000);
+    report(noWord === 'Type the word split to split there.' && splitSaid === '✓ Split: entries 1–8 are in the archive audit-c0ffee00-1-8 (1 file, signed). The check starts at entry 9.', `the split waits for the typed word, then moves entries 1–8 into a signed archive (${splitSaid})`);
+    await admin3.shot(path.join(OUT, 'audit-split.png'));
+    await admin3.eval(`document.getElementById('splitDialog').close()`);
+    const fromLine = await admin3.until(`(() => { const t = document.getElementById('auditLine').textContent; return / · from entry 9, 1 archive · /.test(t) && t; })()`, 20000);
+    report(/^Audit log: ✓ keyed \(key [0-9a-f]{16}\) · from entry 9, 1 archive · nothing to accept$/.test(fromLine || ''), `Health names where the check begins after the split (${fromLine})`);
+    const users3 = await edge.tab(`${base3}/`);
+    await users3.until('document.readyState === "complete"');
+    await users3.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', password: 'the green room kettle' }) }).then(() => { location.href = '/users.html#audit'; })`);
+    const archiveLine = await users3.until(`(() => { const li = document.querySelector('#auditArchives .audit-archive'); return location.pathname === '/users.html' && li && !document.getElementById('auditArchives').hidden && li.dataset.mark + '|' + li.querySelector('.audit-mark').textContent + '|' + li.querySelector('.archive-words').textContent; })()`, 20000);
+    report(/^intact\|✓\|Entries 1–8: archive audit-c0ffee00-1-8, split off on \d+ \w{3}$/.test(archiveLine || ''), `Accounts → Audit log draws the archive with its mark (${archiveLine})`);
+    await users3.eval(`document.querySelector('#auditArchives .audit-archive button').click()`);
+    const archiveCheck = await users3.until(`(() => { const s = document.querySelector('#auditArchives .archive-check'); return s && s.dataset.mark && s.dataset.mark + '|' + s.textContent; })()`, 20000);
+    report(/^intact\|✓ Intact — entries 1–8 in the archive audit-c0ffee00-1-8, split off on \d+ \w{3}: signed by this laptop's key, every file what its SHA256SUMS says; 8 entries keyed here checked$/.test(archiveCheck || ''), `the archive is checked on its own (${archiveCheck})`);
+    await users3.shot(path.join(OUT, 'audit-archive.png'));
+
+    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3]];
     // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).
     const hidden = [];
     for (const [name, tab] of tabs) if ((await tab.eval('document.visibilityState')) !== 'visible') hidden.push(name);
@@ -880,7 +919,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     edge.close();
     try { server.send({ t: 'stop' }); } catch { server.kill(); }   // as the watchdog stops it: saved first
     if (server2) await stopServer(server2);
-    setTimeout(() => { for (const d of [dataDir, dataDir2]) if (d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } } }, 1000);
+    if (server3) await stopServer(server3);
+    setTimeout(() => { for (const d of [dataDir, dataDir2, dataDir3]) if (d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } } }, 1000);
   }
   console.log(failures === 0 ? `ALL OK (screenshots in ${OUT})` : `${failures} FAILED`);
   setTimeout(() => process.exit(failures ? 1 : 0), 1500);

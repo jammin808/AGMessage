@@ -1,7 +1,7 @@
 'use strict';
 /**
- * The accounts' HTTP side: signing in and out, the first admin, changing a password, managing accounts, the audit log
- * and its signed export.
+ * The accounts' HTTP side: signing in and out, the first admin, changing a password, managing accounts, the audit log,
+ * its signed export, and its split into a signed archive at an archive point.
  *
  * Every state change is a JSON POST/PATCH/DELETE from the same origin (the Origin header, when a browser sends one, must
  * name this host — a page elsewhere cannot drive it) carrying the SameSite=Strict session cookie. Each answer is
@@ -276,18 +276,55 @@ function mountAccounts(app, o) {
   // Each row carries its mark at the end: ✓ checked under this key, ◇ or △ inside a span (by that span's state now),
   // ✕ a row that failed its check or a line that is not a whole entry.
   // `key`, at the end: the log's key id and the signing key's fingerprint, which an export is checked against; both ''
-  // in a run with no machine key, whose key id names a key made for that run alone.
+  // in a run with no machine key, whose key id names a key made for that run alone. Then `archives`, every archive the
+  // newest whole check named (H.10.4), and `unreached`, this log's archive folders that chain does not reach.
   app.get('/api/audit', signedIn('audit.read'), (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const entries = audit.latest(Number(req.query.limit) || 200);
-    res.json({ ok: true, entries, key: { kid: audit.keyless ? '' : audit.kid, fingerprint: o.signKey() } });
+    res.json({ ok: true, entries, key: { kid: audit.keyless ? '' : audit.kid, fingerprint: o.signKey() }, archives: audit.archives.map((a) => ({ ...a })), unreached: audit.unreached.slice() });
   });
   // The check reads every file of the chain off the event loop, in slices; clicks while one runs share it. The laptop's
-  // token at the laptop checks too (Admin → Health, before its Accept). `ok` is the check's: true only for ✓.
+  // token at the laptop checks too (Admin → Health, before its Accept). `ok` is the check's: true only for ✓. With
+  // `?archive=<name>`, that archive is checked alone (H.10.3): its signature, its files, its entries and their MACs, and
+  // what pins it (the split's pin, this laptop's signing key); Checks of one archive asked together share one walk.
   const auditReader = (req, res, next) => (guard.isHostMachine(req) && o.isTokenAdmin(req) ? next() : signedIn('audit.read')(req, res, next));
   app.get('/api/audit/verify', auditReader, async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.json(await audit.verify());
+    if (req.query.archive === undefined) return res.json(await audit.verify());
+    const r = await o.archiver.checkArchive(typeof req.query.archive === 'string' ? req.query.archive.slice(0, 40) : '');
+    const { status, ...answer } = r;
+    return res.status(status || 200).json(answer);
+  });
+
+  // ---------------------------------------------------------------- the split (the admin, H.10.2)
+  /**
+   * "The admin" over HTTP (H.10.2, the Board addendum's §17.6): whom the admin page admits (`isAdminReq`, its tunnel rule
+   * included), and then the laptop's token or an account whose role is admin. A manager an admin granted settings.manage
+   * passes the admin page, and is refused here.
+   */
+  const theAdminReq = (req) => {
+    if (!o.isAdminReq(req)) return false;
+    if (o.isTokenAdmin(req)) return true;
+    const w = who(req);
+    return !!(w && w.account.role === 'admin');
+  };
+  const NOT_ADMIN = 'Only an admin may split the audit log.';
+  /** Who the split's rows name: the laptop's token, or the admin's account. */
+  const adminActor = (req) => (o.isTokenAdmin(req) ? o.hostActor : actorOf(who(req)));
+  // The archive points a split may be made at, newest first, each with what it would move or why not; a split not finished.
+  app.get('/api/audit/split', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!theAdminReq(req)) return res.status(403).json({ ok: false, error: NOT_ADMIN });
+    return res.json(await o.archiver.points());
+  });
+  // Split at the archive point `seq` (a POST from this origin, as the export): at a split not finished, finish it.
+  app.post('/api/audit/split', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!theAdminReq(req)) return res.status(403).json({ ok: false, error: NOT_ADMIN });
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    const r = await o.archiver.split(Number.isSafeInteger(b.seq) ? b.seq : 0, adminActor(req), guard.clientIp(req));
+    const { status, ...answer } = r;
+    return res.status(status || 200).json(answer);
   });
 
   // ---------------------------------------------------------------- the signed export (audit.export, with audit.read)
@@ -317,7 +354,7 @@ function mountAccounts(app, o) {
   };
   app.post('/api/audit/export', exporter, (req, res) => o.exporter.run(res, req.agmExport, guard.clientIp(req)));
 
-  return { who, signedIn, actorOf, throughTunnel, adminBlocked, COOKIE };
+  return { who, signedIn, actorOf, throughTunnel, adminBlocked, theAdminReq, COOKIE };
 }
 
 function pick(o, keys) { const out = {}; for (const k of keys) if (Object.prototype.hasOwnProperty.call(o, k)) out[k] = o[k]; return out; }

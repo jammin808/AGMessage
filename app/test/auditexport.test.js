@@ -849,6 +849,15 @@ function asDevice(base, method, url, { cookie = '', headers = {}, ca = null } = 
 const tunnel = { 'cf-connecting-ip': '203.0.113.9', 'cf-ray': 'x', 'cf-visitor': '{"scheme":"https"}' };
 /** Every file under a folder, with its size, as names a test compares. */
 const listing = (dir) => fs.readdirSync(dir, { recursive: true }).map((f) => String(f)).filter((f) => fs.statSync(path.join(dir, f)).isFile()).sort();
+/**
+ * A folder's files, listed at a moment no store is saving into it: the atomic writer's `<file>.<pid>.tmp` is there only
+ * while a save is under way (a sign-in's sessions, say), and is never a file the folder keeps.
+ */
+async function settled(dir) {
+  let seen = null;
+  await h.until(() => { const l = listing(dir); if (l.some((f) => /\.\d+\.tmp$/.test(f))) return false; seen = l; return true; }, 5000, 'a moment no store saves into ' + dir);
+  return seen;
+}
 
 test('end to end: who may export — the token at the laptop and an admin at the laptop or over HTTPS; never a manager, an account without audit.read, a code guest, plain HTTP from another device, the token off the laptop or from before a restart, nor the right through the tunnel', async (t) => {
   const dataDir = tmp('agm-e2e-');
@@ -896,7 +905,7 @@ test('end to end: who may export — the token at the laptop and an admin at the
   const sentRows = () => rows().filter((e) => e.action === 'audit.export.sent').length;
   const ended = async (n) => { await h.until(() => sentRows() >= n, 5000, 'export ' + n + '\'s own end in the log'); };
   const keyDir = dataDir + '-keys';
-  const before = [listing(dataDir), listing(keyDir)];
+  const before = [await settled(dataDir), await settled(keyDir)];
   const viaToken = await h.api(base, 'POST', '/api/audit/export', {}, { cookie: tok });
   await ended(1);
   assert.equal(viaToken.status, 200);
@@ -905,7 +914,7 @@ test('end to end: who may export — the token at the laptop and an admin at the
   const tokenRow = rows().filter((e) => e.action === 'audit.export').pop();
   assert.deepEqual(tokenRow.actor, { t: 'admin', id: 'host', name: 'AGMessage laptop' });
   // No copy is kept: the same files in the data folder and the key folder, the log's own lines aside.
-  assert.deepEqual([listing(dataDir), listing(keyDir)], before);
+  assert.deepEqual([await settled(dataDir), await settled(keyDir)], before);
   const viaAdmin = await h.api(base, 'POST', '/api/audit/export', {}, { cookie: ana });
   assert.equal(viaAdmin.status, 200);
   await ended(2);

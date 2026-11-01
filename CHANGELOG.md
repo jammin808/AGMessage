@@ -192,7 +192,6 @@ Accept belongs to the laptop's token, and C, "First start should ask", with ques
   above all, anything done by someone who can change AGMessage's code or holds the machine key, which in the portable
   layout is anyone who can write the AGMessage folder. `README.txt` says where to keep the folder, and what a "Key
   folder:" line in the black window means.
-- Not yet: the log carried across events (unit 7).
 - Rolling back: 0.5.1 reads a keyed log as "✕ Broken at line 812: entry 812 was changed after it was written" (its
   first keyed entry's number) and writes on with plain hashes; it ignores the records. Back on 0.6.0, the entries it
   wrote are a span (`audit.unkeyed`), △ until accepted.
@@ -248,10 +247,86 @@ admin's grant, and an export at the end of each show day)
   with the release's verifier on the bundle's `node.exe` (exit 0); the Linux tests check a bundle with `unzip -tq`,
   OpenSSL and `sha256sum -c`, word for word as its README gives them; the browser smoke saves an export through
   Chrome's own download, checks its bytes against the zip the log names, and opens `verify.html` from disk.
-- Not yet: the archive point and the split, and archives in an export (unit 7); "Export the log…" in the audit list's
-  right-click menu (unit 24).
+- Not yet: "Export the log…" in the audit list's right-click menu (unit 24).
 - Rolling back: 0.5.1 has no export and ignores the new rows; a bundle already made stays checkable with the release's
   verifier.
+
+**The audit log carries on across events** (the owner's answer 45, 2026-10-27: "Carry on audit log with an archive point
+an entry in it. Admin can choose to split the audit log and archive the older part."; answer 29, "wrap into 0.6.0")
+- The log stays one chain from event to event. An archive point, `audit.archive`, is the first line of a file of its own:
+  what waits is put on disk first, then the current file is set aside. Its target names the event archive's folder and
+  the run it stands in (`2026-10-27T14-02-00-000Z;9c01ab23cd45ef67:812`, from the head's `run` across a restart, or
+  `…:?` when this start could not know it). While the disk refuses entries the point is written where it falls, and no
+  split is made at it. Two rotated files never share a name: each is named by the later of now and 1 ms after the newest
+  rotated file, since a rename replaces what it lands on. Archiving an event, which writes the point, comes with the
+  installed node's events (unit 76); until then nothing in AGMessage writes one, and the split is there for when it does.
+- The admin may split the log at a point: Admin → Health → **Split the audit log…** lists the points, newest first, each
+  with its event and what a split there would move or why not; choose one, type the word "split". "The admin" is the
+  laptop's token or an account whose role is admin (`theAdminReq`), through the tunnel only when admins may sign in
+  there: never a manager, even one an admin granted `settings.manage`, never Staff or a code guest ("Only an admin may
+  split the audit log."). `GET` and `POST /api/audit/split {seq}`; `/api/admin/me` gains `admin` at its end. In order:
+  the check through the files' handles; the archive made aside, `app\data\audit-archive\.<name>.partial\`, with
+  `archive.json`, `signing-key.pem`, `SHA256SUMS` over them and the files to move, and its Ed25519 signature;
+  `audit.split`, pinning the archive by the SHA-256 of its `SHA256SUMS`, on disk before anything moves; the files before
+  the point renamed in, oldest first (one volume, no byte copied); the folder renamed `audit-<log id>-<from>-<to>`; the
+  head saved at once. "✓ Split: entries 1–2003 are in the archive audit-7c3e91d2-1-2003 (3 files, signed). The check
+  starts at entry 2004." Nothing is deleted, and AGMessage has no act that removes an archive.
+- Refused before anything is written, with its words: a run without the machine key (503); an export streaming or a
+  split running (409, who and since when); an entry that is no archive point under this laptop's key in the live log,
+  or its first entry; a point not the first line of its file, or that says `:?`; anything open before the point ("Accept
+  them first") or broken; a head that could not be read or saved; entries waiting for the disk ("Not split: 1 entry
+  waits for the disk (ENOSPC): split once the log has written it.", 503); an archive of that name already there. An
+  export or a check asked while a split runs waits for it.
+- An entry once chained is never withdrawn: when the disk refuses the split's own entry, the folder made aside is kept
+  and the answer is "The split waits … nothing has moved" (△ on the dialog, never "Not split"). The entry is written
+  ahead of the next one, and then pins a split not finished, which Finish the split or the next start completes; it
+  never reads as an archive gone. Should it never reach the disk, no split pins the folder and the next start removes it.
+- After a split the check starts at the point and names every archive back to entry 1 (each pinned by its split, each
+  naming the one before it): a keyed `audit.split` under the point's own key must name the live log's first entry, or
+  "entries 1 to 2003 are missing: no split names entry 2004" (✕, as files removed by hand always read). Each archive is looked at, not read
+  again: its `SHA256SUMS` against the pin, its `archive.json` against its line there, each file's size. One gone reads ✕
+  "not where the split put it", one changed ✕ "not what was split off"; each is a finding (`a<the split's entry>`)
+  accepted with the token and its own confirmation, ◇ after. A split never changes the mark: it is the worst of the
+  live log's and each archive's recorded one, so an accepted 0.5.1 range stays ◇ archived. The answer gains `from` and
+  `archives` at its end; health's `saves.stores.audit` gains `from` and `archives` (a count) before `lastExport`;
+  `/api/audit` gains `archives` and `unreached` (folders the chain no longer reaches) at its end; the black window says
+  "Audit log: keyed (key …) · from entry 2004, 1 archive · Admin → Health" once the check at start answers (a line of
+  its own after the banner, whose first audit line is printed before any file is read), and Health's audit line "· from
+  entry 2004, 1 archive".
+- A stop part way is read whole: a `.partial` folder a keyed split pins is walked first, then the live files, and reads
+  △ "the split at entry 2010 is not finished: 1 file still to move (EBUSY)" (or, every file moved, "its folder is not
+  renamed yet"), a condition; an export is refused until it is finished ("finish it first (Admin → Health)"), so a
+  bundle never holds a half-moved split. The next start finishes it (`audit.split.finished`), as does Finish the split
+  on the same dialog. One no split pins, which holds no log file, is removed at the next start (`audit.split.fail`,
+  "nothing was moved"); one holding a log file no split pins is left as it is, and said in the window and on Health.
+  Whether a split pins a folder is read only from a check that walked the log to its end: after one that broke, every
+  such folder is left as it is, and said, never removed.
+- Accounts → Audit log lists each archive with its mark and its own Check (`GET /api/audit/verify?archive=<name>`): its
+  signature by its own key, its files against its `SHA256SUMS`, its entries from the one its first follows, each entry
+  under this laptop's key by MAC, then what pins it (its `SHA256SUMS` the one the split pinned, and under this laptop's
+  key id this laptop's signing key: otherwise ✕, as the routine check reads it), and the point after it here. One the
+  chain no longer reaches reads ◇ at best under this laptop's key, △ under another. Two Checks of one archive asked
+  together share one walk, which turns the event loop every 1,000 entries (a 49,999-entry archive, checked while a page
+  asks, holds it at most 300 ms, a test). A byte changed in place is found there and by every export, which hash each
+  archive file in full; the routine check sees a file's size, not its bytes.
+- The Accept dialog for an archive gone or changed says what goes with it: "Entries 1–811 are in an older archive this
+  one named: Accounts then lists it as not reached from the live log, with its own Check."
+- Every export carries the archives byte for byte (`archive/<name>/…`, each file in the bundle's `SHA256SUMS` too), and
+  `manifest.json` lists them (`archives`, at its end, each with its pin and whether it is in the bundle); the export's row
+  says "entries 1–3630 (1–2003 from 1 archive)". The verifier reads the archives first, then `log/`, as one chain from
+  entry 1: each archive's own signature (another key is named, not failed), files, pin and the archive before it; one the
+  laptop's verdict names as changed is exit 2, any other failure 3. An archive accepted as gone is listed with its pin,
+  and the bundle then begins at the point after it (exit 1, "entries 1–2003 are not in this bundle"). `--earlier` finds an
+  earlier export's entries in the later one's archives. An archive's folder is checked alone by the same verifier (Node
+  or the page): 0 or 1 by its verdict at the split, 3, or 4; the README's three commands work in it. The Node verifier and
+  the page now run one folder check, in `app/verify/auditrules.js`, each handing it only their own way to read, hash and
+  check a signature.
+- The audit list wraps a long target (a split's is 75 characters) instead of running it into the words beside it.
+- Not yet: the split tick in Archive this event… (unit 76), and "Split the log here…" in the audit list's right-click menu
+  (unit 24).
+- Rolling back: after a split 0.5.1 reads "✕ Broken at line 1 of audit-<time>.jsonl: entries 1 to 2003 are missing
+  before entry 2004" and writes on in the live log, never touching `audit-archive`; back on 0.6.0 its entries are a span
+  (`audit.unkeyed`), △ until accepted, and the archive is named as before.
 
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already

@@ -221,6 +221,7 @@
     const kid = r.key && typeof r.key.kid === 'string' ? r.key.kid : '';
     $('auditKey').textContent = !r.key ? '' : (kid ? 'Keyed with key ' + kid + '. ' : 'Not keyed this run: it has no machine key. ')
       + (signKey ? 'Exports are signed with the key ' + signKey.match(/.{4}/g).join(' ') + ': whoever checks one compares it with their own record of this key (the show\'s paperwork), never with the export.' : 'No export can be signed this run.');
+    renderArchives(Array.isArray(r.archives) ? r.archives : [], Array.isArray(r.unreached) ? r.unreached : []);
     const ol = $('auditList');
     ol.textContent = '';
     for (const e of r.entries) {
@@ -243,6 +244,52 @@
       ol.appendChild(li);
     }
   }
+  // ---------------------------------------------------------------- the archives
+  // Each archive the check names, oldest first, with its mark and its own Check: the archive alone, its signature, its
+  // files and its entries (H.10.3). A folder of this log's that the chain no longer reaches is listed as one, with its Check.
+  const words1 = (t) => String(t).charAt(0).toUpperCase() + String(t).slice(1);
+  function archiveRow(name, mark, text) {
+    const li = document.createElement('li');
+    li.className = 'audit-archive';
+    li.dataset.archive = name;
+    li.dataset.mark = mark;
+    const shape = document.createElement('span');
+    shape.className = 'audit-mark';
+    shape.setAttribute('aria-hidden', 'true');
+    shape.textContent = mark ? MARKS[mark].shape : '○';
+    const what = document.createElement('span');
+    what.className = 'archive-words';
+    what.textContent = text;
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'btn ghost small'; btn.textContent = 'Check';
+    const said = document.createElement('span');
+    said.className = 'archive-check';
+    said.setAttribute('role', 'status');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      said.dataset.mark = '';
+      said.textContent = 'Checking the archive…';
+      try {
+        const a = await AGM.api('GET', '/api/audit/verify?archive=' + encodeURIComponent(name));
+        const m = a && MARKS[a.mark] && typeof a.words === 'string' ? a.mark : '';
+        said.dataset.mark = m || 'broken';
+        said.textContent = m ? MARKS[m].shape + ' ' + a.words : '✕ Not checked: ' + ((a && a.error) || 'no answer from the server');
+      } finally { btn.disabled = false; }
+    });
+    li.append(shape, what, btn, said);
+    return li;
+  }
+  function renderArchives(list, unreached) {
+    const ul = $('auditArchives');
+    ul.textContent = '';
+    for (const a of list) {
+      const k = MARKS[a.mark] ? a.mark : 'broken';
+      ul.appendChild(archiveRow(a.name, k, words1(a.words)));
+    }
+    for (const name of unreached) ul.appendChild(archiveRow(name, '', 'Archive ' + name + ' · not reached from the live log: the archive that named it is gone'));
+    ul.hidden = !list.length && !unreached.length;
+  }
+
   // One check at a time: the button rests while the server reads the chain (every file of it). The answer's mark is drawn
   // with its shape; an answer with no mark this page knows reads "Not checked", never ✓.
   $('verifyBtn').addEventListener('click', async () => {

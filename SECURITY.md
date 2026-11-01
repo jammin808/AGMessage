@@ -68,6 +68,18 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   paths are read, a path that leaves the folder, a link or a file not listed ends the check before it is read, and its
   words are printed with control characters escaped; the browser verifier is one page whose policy lets it load nothing
   and send nothing.
+- The audit log carries on across events as one chain. The admin (the token, or an account whose role is admin; never a
+  manager granted `settings.manage`) may split it at an archive point: the older files move, never copied and never
+  deleted, into a signed archive in `app\data\audit-archive\`, pinned by the SHA-256 of its `SHA256SUMS` in a keyed entry
+  written before anything moves. A split is refused while anything before the point is open or broken, so it can never
+  make the log read better than it did, and the check's mark is the worst of the live log's and each archive's. An archive
+  moved off the laptop or changed (a file cut, removed or resized, `archive.json` or `SHA256SUMS` changed) reads ✕ until
+  the token accepts it; a byte changed in place is found by the archive's own Check and by every export, which hash each
+  file in full. That Check reads no better than what pins the archive: its `SHA256SUMS` must be the one the split
+  pinned, and an archive under this laptop's key id must be signed by this laptop's key (one re-signed by anyone else
+  reads ✕); one the live log no longer reaches reads ◇ at best. An entry once chained is never withdrawn, so a split
+  whose own entry the disk refused keeps its folder and waits, and a folder left by a split is never removed on a check
+  that did not walk the log to its end. Whoever holds `machine.key` can sign archives as they can exports.
 - What the keyed log cannot show: anything done by someone who can change AGMessage's code, its Node or its start
   script, or holds this machine's key. In the portable layout `app\data` sits beside `app\lib` and the start script under
   the same rights, so whoever can write the data folder can usually change the code too; keep the folder where only the

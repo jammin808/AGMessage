@@ -41,6 +41,7 @@ const tlsmod = require('./lib/tls');
 const { Accounts, Sessions, TokenSessions } = require('./lib/accounts');
 const { AuditLog, keysFrom } = require('./lib/audit');
 const { Exporter } = require('./lib/auditexport');
+const { Archiver } = require('./lib/auditarchive');
 const rbac = require('./lib/rbac');
 const { mountAccounts } = require('./lib/http-accounts');
 const board = require('./lib/board');
@@ -148,10 +149,11 @@ const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage lapt
 // Only the fingerprint is kept: the key itself is derived again when an export signs, and dropped after.
 const AUDIT_SIGN_KEY = (() => { try { return secretbox.signingKey().fingerprint; } catch { return ''; } })();
 // The signed export (lib/auditexport.js): one at a time, made as it streams, its verifier taken from app/verify.
-const auditExporter = new Exporter({
-  audit, signingKey: () => secretbox.signingKey(), verifyDir: path.join(__dirname, 'verify'), version: BUILD.full,
-  node: () => ({ id: settings.nodeId, name: 'AGMessage ' + os.hostname(), version: VERSION, build: BUILD.full }),
-});
+const auditNode = () => ({ id: settings.nodeId, name: 'AGMessage ' + os.hostname(), version: VERSION, build: BUILD.full });
+const auditExporter = new Exporter({ audit, signingKey: () => secretbox.signingKey(), verifyDir: path.join(__dirname, 'verify'), version: BUILD.full, node: auditNode });
+// The split at an archive point (lib/auditarchive.js): never beside an export, and an export waits for it.
+const auditArchiver = new Archiver({ audit, signingKey: () => secretbox.signingKey(), node: auditNode, exporter: auditExporter });
+auditExporter.archiver = auditArchiver;
 /** A count in an audit row's words: "1 file", "4 files". */
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
 const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
@@ -255,11 +257,12 @@ let rejections = 0;
 let handlerFaults = 0;   // socket events refused because their handler threw (guardHandlers)
 /**
  * Health's facts about the audit log, in the order its readers take them (H.11): the log's own, the signing key's
- * fingerprint, then the newest export sent whole. Fields the archive adds go between the key and the last export.
+ * fingerprint, then where the newest whole check began (1, or the archive point after the newest split), how many
+ * archives it named, and the newest export sent whole.
  */
 function auditFacts() {
-  const { lastExport, ...facts } = audit.facts();
-  return { error: audit.lastError, unwritten: audit.unwritten, ...facts, signKey: AUDIT_SIGN_KEY, lastExport };
+  const { from, archives, lastExport, ...facts } = audit.facts();
+  return { error: audit.lastError, unwritten: audit.unwritten, ...facts, signKey: AUDIT_SIGN_KEY, from, archives, lastExport };
 }
 function healthFacts() {
   return {
@@ -523,6 +526,8 @@ const web = mountAccounts(app, {
   // The export: the token's sign-in made by this run, who the token is in the log, the signing key, and HTTPS's state.
   tokenHere: (req) => tokenSessions.mintedHere(readCookie(req, 'agm_admin')), hostActor: HOST_ACTOR,
   exporter: auditExporter, signKey: () => AUDIT_SIGN_KEY, httpsOn: () => !!cert, port: PORT,
+  // The split: its archiver, and the admin page's gate, which "the admin" narrows (theAdminReq).
+  archiver: auditArchiver, isAdminReq: (req) => isAdminReq(req),
   hallNames: () => Array.from(store.rooms.values()).map((r) => ({ code: r.code, name: r.name || '' })),
   onAccountChanged: (id, what) => accountChanged(id, what),
   onSessionEnded: (h) => endSockets((s) => s.data.sessionHash === h, 'signout', SIGNED_OUT),
@@ -577,7 +582,8 @@ app.post('/api/admin/logout', (req, res) => {
   res.json({ ok: true });
 });
 // `token`: this request is the laptop's token, signed in by this run (a sign-in read back from the file never counts).
-app.get('/api/admin/me', (req, res) => res.json({ ok: isAdminReq(req), local: guard.isHostMachine(req), accounts: accounts.size, token: guard.isHostMachine(req) && tokenSessions.mintedHere(readCookie(req, 'agm_admin')) }));
+// `admin`, at the end: this request is "the admin" (the token, or an account whose role is admin), who may split the log.
+app.get('/api/admin/me', (req, res) => res.json({ ok: isAdminReq(req), local: guard.isHostMachine(req), accounts: accounts.size, token: guard.isHostMachine(req) && tokenSessions.mintedHere(readCookie(req, 'agm_admin')), admin: web.theAdminReq(req) }));
 
 // Accept what the audit log found (lib/audit.js accept): the laptop's token, typed into the dialog at the laptop, and never
 // a sign-in, which is a record in the data folder anyone who can write it could add. A wrong token counts toward the
@@ -2740,8 +2746,12 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   }
   audit.open();
   // The whole log is checked once, beside the show, so health, the rows' marks and the black window read what the log
-  // holds from the start: findings an earlier start left open, and a chain broken at a line, included.
-  const checkedAtStart = audit.verify().then(() => true, (e) => { console.error('  [audit] the check at start did not finish: ' + (e && e.message ? e.message : e)); return false; });
+  // holds from the start: findings an earlier start left open, and a chain broken at a line, included. Then a split a stop
+  // left part way is finished (or its leftovers, which no split pins, removed), which checks the log again.
+  const checkedAtStart = audit.verify()
+    .then(() => auditArchiver.finish({ t: 'system', id: '', name: '' }, '', { atStart: true }))
+    .then((r) => { if (r && r.ok && r.words && !/^No split/.test(r.words)) console.log('  Audit log:   ' + r.words); return true; },
+      (e) => { console.error('  [audit] the check at start did not finish: ' + (e && e.message ? e.message : e)); return false; });
   const addresses = [];
   for (const list of Object.values(os.networkInterfaces())) for (const n of list || []) if (n.family === 'IPv4' && !n.internal) addresses.push(n.address);
   console.log('\n  AGMessage ' + BUILD.full + ' is running');
@@ -2766,6 +2776,8 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   // serving, may the browser open: the page it opens is this copy's (lib/startup.js), and a log that needs the person at
   // this laptop opens it on the admin page, where Health asks it.
   checkedAtStart.then(() => {
+    // After a split the check begins at its archive point and names each archive (H.11's banner line, said once known).
+    if (audit.from > 1) console.log('  Audit log:   keyed (key ' + audit.kid + ') · from entry ' + audit.from + ', ' + audit.archives.length + ' archive' + (audit.archives.length === 1 ? '' : 's') + ' · Admin → Health');
     const more = auditAttentionLines(said);
     if (more.length) console.log(more.join('\n') + '\n');
     startup.openBrowser(startup.openerPlan(process.env, { restarts: RESTARTS, port: PORT, platform: process.platform, path: audit.attention().length ? '/admin' : '' }), spawn, (line) => console.log(line));

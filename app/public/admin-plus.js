@@ -109,8 +109,9 @@
   // typed again. Anyone else the admin page admits is told where to accept.
   let tokenHere = false;
   let canExport = false;   // an account holding audit.export (with audit.read): Export, never Accept
+  let theAdmin = false;    // the laptop's token, or an account whose role is admin: Split the audit log…
   let lastHealth = null;
-  fetch('/api/admin/me').then((r) => r.json()).then((me) => { tokenHere = !!(me && me.token); if (lastHealth) renderAudit(lastHealth); }).catch(() => { /* no Accept offered */ });
+  fetch('/api/admin/me').then((r) => r.json()).then((me) => { tokenHere = !!(me && me.token); theAdmin = !!(me && me.admin); if (lastHealth) renderAudit(lastHealth); }).catch(() => { /* no Accept or Split offered */ });
   fetch('/api/auth/me').then((r) => r.json()).then((me) => {
     const caps = me && me.account && me.account.rights ? me.account.rights.caps : [];
     canExport = caps.includes('audit.export') && caps.includes('audit.read');
@@ -136,7 +137,9 @@
     let mark = 'intact';
     for (const f of list) if (RANK[f.mark] > RANK[mark]) mark = f.mark;
     $('auditLine').dataset.mark = mark;
-    $('auditLine').textContent = 'Audit log: ' + SHAPE[mark] + ' ' + (a.keyless ? 'not keyed this run' : 'keyed (key ' + a.kid + ')') + (list.length ? ' · ' + list.length + ' to see to' : ' · nothing to accept') + (a.headLag > 1 ? ' · head ' + a.headLag + ' entries behind' : '');
+    // After a split the check starts at its archive point, and names each archive (H.11).
+    const from = a.from > 1 ? ' · from entry ' + a.from + ', ' + a.archives + ' archive' + (a.archives === 1 ? '' : 's') : '';
+    $('auditLine').textContent = 'Audit log: ' + SHAPE[mark] + ' ' + (a.keyless ? 'not keyed this run' : 'keyed (key ' + a.kid + ')') + from + (list.length ? ' · ' + list.length + ' to see to' : ' · nothing to accept') + (a.headLag > 1 ? ' · head ' + a.headLag + ' entries behind' : '');
     const ul = $('auditFindings');
     ul.textContent = '';
     for (const f of list) {
@@ -154,6 +157,50 @@
     $('signKeyText').textContent = a.signKey ? a.signKey.match(/.{4}/g).join(' ') : '—';
     $('auditLastExport').textContent = a.keyless ? 'No export this run: it has no machine key to sign one with.' : lastExportWords(a.lastExport);
     $('auditExportRow').hidden = !(a.signKey && (tokenHere || canExport));
+    $('auditSplitRow').hidden = !(theAdmin && !a.keyless);
+  }
+
+  // ---------------------------------------------------------------- the split (the admin)
+  // The archive points in the live log, newest first, each with what a split there would move or why it would not; a
+  // split a stop left part way is offered as Finish the split. The word typed is the confirmation.
+  let splitAt = 0;
+  const say = (mark, text) => { $('splitState').dataset.mark = mark; $('splitState').textContent = text; };
+  async function openSplit() {
+    say('', '');
+    $('splitWord').value = '';
+    splitAt = 0;
+    const ul = $('splitList');
+    ul.textContent = 'Reading the archive points…';
+    $('splitFinishRow').hidden = true;
+    $('splitDialog').showModal();
+    const r = await fetch('/api/audit/split').then((x) => x.json()).catch(() => null);
+    ul.textContent = '';
+    if (!r || !r.ok) { ul.textContent = (r && r.error) || 'No answer from the server.'; return; }
+    if (r.unfinished) {
+      $('splitFinishRow').hidden = false;
+      $('splitFinish').textContent = 'Finish the split at entry ' + r.unfinished.seq;
+    }
+    for (const p of r.points) {
+      const li = document.createElement('li');
+      const label = document.createElement('label'); label.className = 'check';
+      const box = document.createElement('input'); box.type = 'radio'; box.name = 'splitPoint'; box.value = String(p.seq); box.disabled = !!p.why;
+      const words = document.createElement('span');
+      words.textContent = 'Entry ' + p.seq + (p.event ? ' · “' + p.event + '”' : ' · ' + p.name) + ', archived ' + at(p.at) + ': entries ' + p.from + '–' + p.to + ' move into a signed archive';
+      label.append(box, words);
+      li.appendChild(label);
+      if (p.why) { const why = document.createElement('span'); why.className = 'why'; why.textContent = p.why; li.appendChild(why); }
+      box.addEventListener('change', () => { if (box.checked) splitAt = p.seq; });
+      ul.appendChild(li);
+    }
+    if (!r.points.length) ul.textContent = 'No archive point in the live log yet: archiving an event writes one.';
+  }
+  async function postSplit(seq) {
+    say('', 'Splitting… the files before the point are moved into the archive and signed.');
+    const r = await fetch('/api/audit/split', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seq }) }).then((x) => x.json()).catch(() => ({ ok: false, error: 'No answer from the server.' }));
+    // A split that waits (a file held, or its entry not on disk yet) is △ with its words, never ✓ and never "Not split".
+    if (!r.ok && !r.waits) { say('broken', '✕ ' + (r.error || 'Not split.')); return; }
+    say(r.waits ? 'unvouched' : 'intact', r.waits ? '△ ' + (r.words || r.error) : r.words);
+    setTimeout(() => loadSettings(), 300);
   }
   let shown = null;   // the check the dialog was drawn from: its digest goes with the Accept
   async function openAccept() {
@@ -183,7 +230,13 @@
       if (f.mark === 'broken') {
         const line = document.createElement('label'); line.className = 'check confirm-line'; line.hidden = true;
         const sure = document.createElement('input'); sure.type = 'checkbox'; sure.dataset.confirm = f.id;
-        const say = document.createElement('span'); say.textContent = 'Accept that ' + f.words + '? From now on it reads ◇, and what it names cannot be brought back.';
+        // An archive no longer here, or not what was split off (H.10.5): its entries cannot be checked on this laptop again,
+        // and the older archives it named (by its range, which begins after entry 1) are out of reach with it.
+        const arc = f.kind === 'archive' && Array.isArray(r.archives) ? r.archives.find((a) => a.finding === f.id) : null;
+        const older = arc && arc.from > 1 ? ' Entries 1–' + (arc.from - 1) + ' are in an older archive this one named: Accounts then lists it as not reached from the live log, with its own Check.' : '';
+        const say = document.createElement('span'); say.textContent = f.kind === 'archive'
+          ? 'Accept that ' + f.words + '? From now on it reads ◇ here, and its entries cannot be checked on this laptop again. Keep it, or an export that holds it, where it went.' + older
+          : 'Accept that ' + f.words + '? From now on it reads ◇, and what it names cannot be brought back.';
         line.append(sure, say);
         li.appendChild(line);
         box.addEventListener('change', () => { line.hidden = !box.checked; if (!box.checked) sure.checked = false; });
@@ -296,6 +349,15 @@
     });
     $('ctxCopy').onclick = () => { const t = $('ctxToken').textContent; if (navigator.clipboard && t && t !== '—') navigator.clipboard.writeText(t); };
     $('signKeyCopy').onclick = () => { const t = $('signKeyText').textContent; if (navigator.clipboard && t && t !== '—') navigator.clipboard.writeText(t); };
+    $('auditSplitBtn').onclick = () => { openSplit(); };
+    $('splitCancel').onclick = () => { $('splitDialog').close(); };
+    $('splitFinish').onclick = () => { const t = /entry (\d+)$/.exec($('splitFinish').textContent); if (t) postSplit(Number(t[1])); };
+    $('splitForm').addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      if (!splitAt) { say('broken', 'Choose the archive point to split at.'); return; }
+      if ($('splitWord').value.trim().toLowerCase() !== 'split') { say('broken', 'Type the word split to split there.'); return; }
+      postSplit(splitAt);
+    });
     $('auditExportBtn').onclick = () => {
       const fp = lastHealth && lastHealth.saves.stores.audit.signKey;
       window.AGMAuditExport.open({ fingerprint: fp, done: () => { setTimeout(() => loadSettings(), 300); } });

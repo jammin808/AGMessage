@@ -129,6 +129,23 @@ does not check), not by the smoke alone. The verifier's path rule (`auditrules.j
 `/etc/passwd`, `C:\x` and `\\host\share\f` through a recording `fs` and finds nothing opened but `SHA256SUMS`. The
 release's `SHA256SUMS` and attestation take in the verifier's own zip, as they take every `dist\*.zip`.
 
+The audit log carried across events adds `lib/auditarchive.js` (the split, its finish at a start, an archive's own
+check) at 0 synchronous calls, and the guard names it: it checks, reads, renames and removes through `fs.promises`, and
+writes the four small files of a split through the atomic writer, once per split. `lib/audit.js` stays at 11: the
+archive point's forced rotation is the rotation it already had, the walk's look at each archive (two small reads and a
+size per file) and a split stopped part way are read asynchronously, and the rotated name's time rule keeps the newest
+rotated file's time in memory, read once through the listing it already made. The folder check itself (`verifyFolder`)
+moved into `verify/auditrules.js`, still pure: the Node verifier and the page each hand it only their way to read a
+file, hash it and check a signature, so an export, an archive inside it and an archive alone are checked one way in
+both, and the page's test (`page.js` run against a stand-in document) holds the archive's states beside the Node
+verifier's codes. The path rule gains an archive's own set (`archive.json`, `signing-key.pem`, `SHA256SUMS`,
+`SHA256SUMS.sig`, rotated `log/` files), under `archive/<name>/` in a bundle, the name held to
+`audit-<8 hex>-<from>-<to>`: a test gives it `archive/../x`, a name off the pattern and a file off the set, and a link
+in an archive's `log/`. The speed fence beside the split's (a page asking `/api/auth/me` waits at most 300 ms while the
+56,000-entry seed is split at entry 50,000) holds an archive's own Check of the 49,999 entries split off to the same
+bound: the folder check takes a turn of the event loop every 1,000 lines when the reader hands it one (`io.turn`, which
+the Node verifier gives and the page needs not), and the MAC walk every 1,000 entries.
+
 0.6.0 adds the pages' message channels to it: every `postMessage` in a page script under `public/` names this origin as
 its target, never `'*'`, and every `message` listener's first line returns unless both the sending window and its origin
 are the ones expected (the admin's support view hears only the admin page that frames it). A post or a listener written

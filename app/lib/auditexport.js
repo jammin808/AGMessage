@@ -1,9 +1,10 @@
 'use strict';
 /**
  * The audit log exported, signed, to check on another computer (H.9). One zip, made as it streams and kept by nobody:
- * every file of the chain byte for byte up to and including the export's own entry, a manifest that carries the laptop's
- * own check of those bytes, SHA256SUMS over every file, its Ed25519 signature by this machine's signing key (derived from
- * the machine key when it signs, dropped after), the public key, a README, and the verifier (Node, and one page).
+ * every archive the check names that is on the laptop, every file of it byte for byte (H.10.7); every file of the live
+ * chain byte for byte up to and including the export's own entry; a manifest that carries the laptop's own check of those
+ * bytes; SHA256SUMS over every file; its Ed25519 signature by this machine's signing key (derived from the machine key
+ * when it signs, dropped after); the public key; a README; and the verifier (Node, and one page).
  *
  * Invariants:
  *   - Its own entry first. `audit.export` is written and on disk before any file is listed, so the bundle holds it and
@@ -12,8 +13,12 @@
  *   - What is sent is what was checked. The files are listed once and opened; nothing after reads a path. The check runs
  *     through those handles and gives each file's length and SHA-256; each is taken again as it streams, and a file that
  *     differs ends the export, which is then never a whole zip.
- *   - One at a time: a second export while one runs is refused with who holds it and since when. Refusals before the
- *     row (no machine key, no verifier to ship, one running) write nothing.
+ *   - One at a time: a second export while one runs is refused with who holds it and since when, and one asked while a
+ *     split is made waits for it. Refusals before the row (no machine key, no verifier to ship, one running, a split not
+ *     finished) write nothing.
+ *   - The whole log, archives included: each archive's files are opened with the live ones, hashed in full and compared
+ *     with its own SHA256SUMS by the check, and carried as they are; one that is not what was split off is the verdict's
+ *     finding. An archive accepted as gone is listed with its pin, and the bundle then begins after it.
  *   - No synchronous file call, no temporary file, no copy kept. The handles are closed whatever happens.
  */
 const crypto = require('crypto');
@@ -21,6 +26,7 @@ const fs = require('fs');
 const path = require('path');
 const { ZipStream, fits } = require('./zip');
 const verifier = require('../verify/verify-audit');
+const rules = require('../verify/auditrules');
 
 const CHUNK = 64 * 1024;
 const SLICE = 1024 * 1024;   // bytes digested between turns of the event loop
@@ -79,8 +85,9 @@ function readme(version) {
     '======================',
     '',
     'This folder is the whole audit log of one AGMessage laptop, as it stood when it was exported, signed with that',
-    'laptop\'s signing key. It holds names, addresses and what each person did; older entries can also hold the first words',
-    'of messages shown on screens and the names of files shown there. Give it only to whoever checks it.',
+    'laptop\'s signing key: its live files in log/, and each archive split off at an event in archive/<name>/. It holds',
+    'names, addresses and what each person did; older entries can also hold the first words of messages shown on screens',
+    'and the names of files shown there. Give it only to whoever checks it.',
     '',
     'How to check it',
     '---------------',
@@ -102,11 +109,15 @@ function readme(version) {
     '     openssl pkey -pubin -in signing-key.pem -outform DER | sha256sum        # 1. compare with YOUR record of the key',
     '     openssl pkeyutl -verify -pubin -inkey signing-key.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig',
     '     sha256sum -c SHA256SUMS',
+    '   The same three commands, run inside archive/<name>/ (or an archive\'s own folder), check an archive by hand.',
     '',
     'What it proves, once the key matches your record and the signature and the files check',
     '--------------------------------------------------------------------------------------',
-    '- Every file in log/ is byte for byte what this laptop\'s AGMessage exported when the manifest says, and nothing was',
-    '  added, removed or changed since (the signature over SHA256SUMS, and the digests).',
+    '- Every file in log/ and archive/ is byte for byte what this laptop\'s AGMessage exported when the manifest says, and',
+    '  nothing was added, removed or changed since (the signature over SHA256SUMS, and the digests).',
+    '- Each archive is what the laptop split off, with the laptop\'s verdict on it at the split, and the chain runs whole',
+    '  from entry 1 across the archives into log/ (each archive\'s own signature and pin, the keyed split entry that names',
+    '  it, and the walk).',
     '- The laptop\'s own keyed check, run for this export through its own entry, said what manifest.json\'s "check" says,',
     '  with those findings (the manifest is a signed file).',
     '- Each line is a whole entry, the entries run without a gap, each links to the one before, the plain-hash entries\'',
@@ -126,6 +137,8 @@ function readme(version) {
     '- That the key is this laptop\'s: only your own record of it shows that.',
     '- That entries keyed elsewhere, or the plain-hash entries, are genuine: they are linked, not checked; the verdict',
     '  names who accepted them and when.',
+    '- Anything about the entries of an archive the manifest lists as not present: only its pin is here, with who accepted',
+    '  it as gone and when.',
     '',
     'Made by AGMessage ' + version + '.',
     '',
@@ -138,14 +151,17 @@ class Exporter {
    *   called (throws when this run has none); `node()`: {id, name, version, build}; `verifyDir`: the folder of the
    *   verifier's files (app/verify); `version`: the page's words.
    */
-  constructor({ audit, signingKey, node, verifyDir, version }) {
+  constructor({ audit, signingKey, node, verifyDir, version, archiver = null }) {
     this.audit = audit;
+    this.archiver = archiver;   // the split's slot (lib/auditarchive.js): an export waits for a split being made
     this.signingKey = signingKey;
     this.node = node;
     this.verifyDir = verifyDir;
     this.version = version;
     this.slot = null;      // the export running now: {by, since}
     this.handles = [];     // its open files, closed whatever happens
+    this.archived = [];    // the archives' open files: {name, rel, fh}, closed with them
+    this.archiveDigests = new Map();   // name/rel -> the SHA-256 the check took of it
     this.kit = null;       // the verifier's files, read once: [[path, Buffer]]
   }
 
@@ -162,8 +178,47 @@ class Exporter {
   }
 
   async _closeAll() {
-    const all = this.handles.splice(0);
+    const all = [...this.handles.splice(0), ...this.archived.splice(0)];
     await Promise.all(all.map((h) => h.fh.close().catch(() => null)));   // a handle that will not close is gone with its file
+  }
+
+  /**
+   * Every file of each of this log's archives, opened once (H.9.4 step 3): the files its SHA256SUMS lists, then SHA256SUMS
+   * and its signature. An archive's files are never renamed but by a split, which an export waits for, so they need no
+   * retry; one missing is carried as missing, and the check says so.
+   */
+  async _openArchives() {
+    const dir = this.audit.archiveDir;
+    let names;
+    try { names = (await fs.promises.readdir(dir, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name); } catch { return; }   // no archive folder: nothing was split off
+    for (const name of names.sort()) {
+      const r = rules.archiveRange(name);
+      if (!r || r.l8 !== this.audit.l.slice(0, 8)) continue;
+      const open = async (rel) => { try { this.archived.push({ name, rel, fh: await fs.promises.open(path.join(dir, name, ...rel.split('/')), 'r') }); } catch { /* not there: the check says what is missing */ } };
+      await open('SHA256SUMS');
+      const sums = this.archived.find((h) => h.name === name && h.rel === 'SHA256SUMS');
+      const listed = sums ? rules.parseSums((await readAll(sums.fh)).toString('utf8'), 'archive') : { list: [] };
+      for (const x of listed.list || []) await open(x.path);
+      await open('SHA256SUMS.sig');
+    }
+  }
+
+  /** How the export's check looks at the archives: through the handles above, every file hashed in full. */
+  _archiveReader() {
+    const find = (name, rel) => this.archived.find((h) => h.name === name && h.rel === rel);
+    const digests = this.archiveDigests;
+    return {
+      full: true,
+      list: async () => ({ names: Array.from(new Set(this.archived.map((h) => h.name))), code: '' }),
+      async read(name, rel) {
+        const h = find(name, rel);
+        if (!h) return { buf: null, code: 'ENOENT' };
+        const buf = await readAll(h.fh);
+        digests.set(name + '/' + rel, crypto.createHash('sha256').update(buf).digest('hex'));
+        return { buf, code: '' };
+      },
+      async size(name, rel) { const h = find(name, rel); return h ? (await h.fh.stat()).size : null; },
+    };
   }
 
   /**
@@ -213,8 +268,12 @@ class Exporter {
     const audit = this.audit;
     audit.open();   // the boundary a first write would add comes first, so the row's range is the log's as it stands
     if (audit.keyless) return res.status(503).json({ ok: false, error: 'not exported: this run has no machine key (' + audit.keyless.code + '), so an export cannot be signed' });
+    // A split moves the files an export reads: one asked while a split is made waits for it (H.9.4).
+    if (this.archiver) await this.archiver.idle();
     if (this.slot) return res.status(409).json({ ok: false, error: 'an export is being made for ' + this.slot.by + ' since ' + hhmm(this.slot.since) + ': try again when it ends' });
+    if (audit.unfinished) return res.status(409).json({ ok: false, error: 'not exported: the split at entry ' + audit.unfinished.seq + ' is not finished: finish it first (Admin → Health)' });
     this.slot = { by: actor.name || actor.t, since: Date.now() };
+    this.archiveDigests.clear();
     let row = null;
     let ended = false;
     /** The export's end, said once: `audit.export.sent` or `audit.export.fail`, then the handles closed and the slot freed. */
@@ -241,7 +300,10 @@ class Exporter {
       const fp = key.fingerprint;
       const to = audit.seq + 1;
       const what = range(1, to);
-      row = audit.write(actor, 'audit.export', '1-' + to + ';' + fp.slice(0, 16), 'export started, for checking on another computer: ' + what + ', the whole log, this entry its last; signed with key ' + grouped(fp.slice(0, 16)), ip);
+      // The archives the newest check named that are on the laptop, which the bundle carries (H.10.7).
+      const held = audit.archives.filter((a) => !a.finding);
+      const fromArchives = held.length ? ' (' + range(held[0].from, held[held.length - 1].to).replace('entries ', '') + ' from ' + held.length + ' archive' + (held.length === 1 ? '' : 's') + ')' : '';
+      row = audit.write(actor, 'audit.export', '1-' + to + ';' + fp.slice(0, 16), 'export started, for checking on another computer: ' + what + fromArchives + ', the whole log, this entry its last; signed with key ' + grouped(fp.slice(0, 16)), ip);
       const since = audit.rotations;   // a rotation the write made is before the entry: the entry is in the file after it
       if (audit.onDisk.seq < row.seq) {
         await end(false, 'the export of ' + what + ' was not made: the log would not take its own entry (' + (audit.lastCode || 'EIO') + ')');
@@ -255,6 +317,7 @@ class Exporter {
       // them, each file's length and digest with it.
       const rowText = Buffer.from(JSON.stringify(row) + '\n');
       try { await this._open(rowText, since); } catch (e) { return fail(409, e.message); }
+      await this._openArchives();
       const files = [];
       const load = async (i) => {
         const h = this.handles[i];
@@ -271,13 +334,29 @@ class Exporter {
       const handles = this.handles;
       async function* source() { for (let i = 0; i < handles.length; i++) yield { name: handles[i].name, buf: await load(i) }; }
       let check;
+      const walk = {};
       try {
-        check = await audit.checkThrough(source(), { seq: row.seq, h: row.h });
+        check = await audit.checkThrough(source(), { seq: row.seq, h: row.h }, { archives: this._archiveReader(), walk });
         // A check that broke early read only some files: the rest are taken now, for their lengths and digests.
         for (let i = 0; i < handles.length; i++) if (!files[i]) await load(i);
       } catch (e) { return fail(500, 'the log could not be read (' + (e.code || e.message) + ')'); }
-      const total = files.reduce((n, f) => n + f.bytes, 0) + kit.reduce((n, [, b]) => n + b.length, 0);
-      if (!fits(total, files.length + kit.length + 5)) return fail(413, 'the log is over 4 GB, and an export writes no Zip64');
+      // The archives the check named, oldest first; those on the laptop are carried, every file of each as it is.
+      const named = walk.look ? walk.look.archives : [];
+      const carried = [];
+      for (const a of named) {
+        const own = this.archived.filter((h) => h.name === a.name);
+        if (!own.length) continue;
+        for (const h of own) if (!this.archiveDigests.has(a.name + '/' + h.rel)) this.archiveDigests.set(a.name + '/' + h.rel, crypto.createHash('sha256').update(await readAll(h.fh)).digest('hex'));
+        const order = (h) => (rules.isArchiveLog(h.rel) ? 0 : ['archive.json', 'signing-key.pem', 'SHA256SUMS', 'SHA256SUMS.sig'].indexOf(h.rel) + 1);
+        carried.push({ a, files: own.slice().sort((x, y) => order(x) - order(y) || (x.rel < y.rel ? -1 : 1)) });
+      }
+      const gone = named.filter((a) => !carried.some((c) => c.a.name === a.name));
+      const newestGone = gone.length ? gone[gone.length - 1] : null;
+      const sizeOf = async (h) => (await h.fh.stat()).size;
+      let archivedBytes = 0;
+      for (const c of carried) for (const h of c.files) archivedBytes += await sizeOf(h);
+      const total = files.reduce((n, f) => n + f.bytes, 0) + archivedBytes + kit.reduce((n, [, b]) => n + b.length, 0);
+      if (!fits(total, files.length + carried.reduce((n, c) => n + c.files.length, 0) + kit.length + 5)) return fail(413, 'the log is over 4 GB, and an export writes no Zip64');
 
       // 5. The headers say the verdict before the body.
       const name = bundleName(this.node().id, row.at);
@@ -287,8 +366,21 @@ class Exporter {
       res.setHeader('X-AGM-Export', 'entries=1-' + row.seq + '; mark=' + check.mark + '; key=' + fp.slice(0, 16));
       res.on('close', () => { if (!res.writableFinished) end(false, 'the export of ' + what + ' was not sent whole: the browser went away'); });
       const zip = new ZipStream(res, { at: row.at });
+      const archivedFiles = [];
       try {
-        // 6. Each file from its handle, its digest taken again as it passes.
+        // 6. Each archive's files from their handles, then each live file from its handle, each digest taken again as it
+        // passes.
+        for (const c of carried) {
+          for (const h of c.files) {
+            const p = 'archive/' + c.a.name + '/' + h.rel;
+            const d = crypto.createHash('sha256');
+            const n = await sizeOf(h);
+            await zip.add(name + '/' + p, n ? h.fh.createReadStream({ start: 0, end: n - 1, autoClose: false, highWaterMark: CHUNK }) : [], { onChunk: (b) => d.update(b) });
+            const sum = d.digest('hex');
+            if (sum !== this.archiveDigests.get(c.a.name + '/' + h.rel)) throw new Error('a file changed while it was exported (' + p + ')');
+            archivedFiles.push({ path: p, sha256: sum });
+          }
+        }
         for (let i = 0; i < files.length; i++) {
           const f = files[i];
           const h = crypto.createHash('sha256');
@@ -304,9 +396,11 @@ class Exporter {
           kind: 'agmessage audit export', v: 1, made: row.at, by: { ...row.actor },
           node: { id: node.id, name: node.name, version: node.version, build: node.build },
           log: row.l, kid: row.k, signingKey: { alg: 'Ed25519', fingerprint: fp },
-          entries: { from: 1, to: row.seq }, head: { seq: row.seq, h: row.h }, check: answer,
+          entries: { from: newestGone ? newestGone.to + 1 : 1, to: row.seq }, head: { seq: row.seq, h: row.h }, check: answer,
           files: files.map((f) => ({ path: f.path, bytes: f.bytes, first: f.first, last: f.last })),
         };
+        // Every archive the check named, oldest first, with the pin the split that made it gave it (H.10.7).
+        if (named.length) manifest.archives = named.map((a) => ({ name: a.name, entries: { from: a.from, to: a.to }, split: a.split, digest: a.digest, present: carried.some((c) => c.a.name === a.name) }));
         const rest = [
           ['manifest.json', Buffer.from(JSON.stringify(manifest, null, 2) + '\n')],
           ['signing-key.pem', Buffer.from(key.publicKey.export({ type: 'spki', format: 'pem' }))],
@@ -314,7 +408,7 @@ class Exporter {
           ...kit,
         ];
         const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
-        const sums = Buffer.from([...files.map((f) => f.sha256 + '  ' + f.path), ...rest.map(([p, b]) => sha(b) + '  ' + p)].join('\n') + '\n');
+        const sums = Buffer.from([...archivedFiles.map((f) => f.sha256 + '  ' + f.path), ...files.map((f) => f.sha256 + '  ' + f.path), ...rest.map(([p, b]) => sha(b) + '  ' + p)].join('\n') + '\n');
         // The private key was derived for this export and goes with it: nothing keeps it.
         const sig = crypto.sign(null, sums, key.privateKey);
         const [mf, pem, rd, ...verify] = rest;

@@ -148,6 +148,7 @@
             <p id="auditSignKey" class="hint" hidden>Audit log signing key: <code id="signKeyText">—</code> <button id="signKeyCopy" class="btn ghost small" type="button">📋 Copy</button></p>
             <p id="auditLastExport" class="hint"></p>
             <p id="auditExportRow" class="row" hidden><button id="auditExportBtn" class="btn small" type="button">Export…</button></p>
+            <p id="auditSplitRow" class="row" hidden><button id="auditSplitBtn" class="btn small" type="button">Split the audit log…</button></p>
           </div>
           <p class="hint">Other show systems (Patterns' Eye, Stagewatch's assistant) read this AGMessage's status — counts and action-prompt questions only, never messages or documents — with this read-only token:
             <code id="ctxToken">—</code> <button id="ctxCopy" class="btn ghost small" type="button">📋 Copy</button> <button id="ctxNew" class="btn ghost small" type="button">New token</button></p>
@@ -241,6 +242,21 @@
       <div class="row end">
         <button id="acceptCancel" class="btn ghost" type="button">Cancel</button>
         <button id="acceptGo" class="btn primary" type="submit">Accept the ticked</button>
+      </div>
+    </form>
+  </dialog>
+  <!-- The admin's split of the audit log at an archive point: what moves and where, the word typed, then Split. -->
+  <dialog id="splitDialog" class="agm-dialog wide" aria-labelledby="splitTitle">
+    <form id="splitForm" method="dialog">
+      <h2 id="splitTitle">Split the audit log</h2>
+      <p class="hint">Each event archived leaves an archive point in the audit log. Splitting at one moves the entries before it, whole files, into a signed archive in this laptop's data folder (audit-archive). Nothing is deleted: the check then starts at the point and names the archive, the archive is checked on its own, and every export still carries it. Leave the archive where it is: one moved or removed reads ✕ until it is accepted with the token.</p>
+      <ul id="splitList" class="split-list"></ul>
+      <p id="splitFinishRow" class="row" hidden><button id="splitFinish" class="btn small" type="button">Finish the split</button></p>
+      <label class="field"><span>Type the word <strong>split</strong> to split there</span><input id="splitWord" autocomplete="off" spellcheck="false" autocapitalize="none" /></label>
+      <p id="splitState" class="export-state" role="status" aria-live="polite"></p>
+      <div class="row end">
+        <button id="splitCancel" class="btn ghost" type="button">Cancel</button>
+        <button id="splitGo" class="btn primary" type="submit">Split</button>
       </div>
     </form>
   </dialog>
