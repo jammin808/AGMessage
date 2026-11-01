@@ -322,6 +322,18 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(remote.build.startsWith(remote.version + '-dev') || remote.build.startsWith(remote.version + '+'), 'the build names its version and channel: ' + remote.build);
   });
 
+  await t.test('every write lane the server made is one a stop or a crash flushes, by the object: the lanes made, the distinct lanes named and their names agree', async () => {
+    const { saves } = await (await fetch(base + '/api/health')).json();
+    assert.deepEqual(Object.keys(saves).slice(-2), ['built', 'named'], 'appended at the end of the saves');
+    // A lane's row is {writes, error, failures}; the rooms' op log and the audit log are not lanes and say other things.
+    const lanes = Object.keys(saves.stores).filter((name) => ['writes', 'error', 'failures'].every((k) => k in saves.stores[name]));
+    for (const name of ['accounts', 'screens', 'auditHead', 'peaks']) assert.ok(lanes.includes(name), 'a lane made in lib/ or server.js is named: ' + name + ' in ' + lanes.join(', '));
+    // Each name a lane of its own (a lane under two names, or a name given twice, makes these differ), and every lane
+    // made among them: the named lanes are lanes this process made, so as many named as made is every one.
+    assert.equal(saves.named, lanes.length, saves.named + ' distinct lanes named, under ' + lanes.length + ' names: ' + lanes.join(', '));
+    assert.equal(saves.built, saves.named, saves.built + ' lanes made, ' + saves.named + ' named: ' + lanes.join(', '));
+  });
+
   // No timing is asserted end to end: the first window holds the boot's work, and CI runs under coverage.
   let peaksBefore = null;
   await t.test('health reads how busy the server is, its memory, its sockets, the largest hall and a show day\'s peaks', async () => {

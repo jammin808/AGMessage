@@ -181,7 +181,11 @@ function savePeaks() {
   peaksLane.save(() => JSON.stringify(peaks.toJSON()));
   return true;
 }
-/** Every store saved through a write lane, by the name health and the console give it. */
+/**
+ * Every store saved through a write lane, by the name health and the console give it. Every lane made in any file is
+ * here, once, so a stop or a crash flushes them all: health's `saves.built` counts the lanes made and `saves.named` the
+ * distinct lanes here, and a test holds both to this list.
+ */
 const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['deskResults', deskLane], ['peaks', peaksLane], ['auditHead', audit.headLane]];
 /**
  * Write the audit entries still waiting and the head that covers them first, then every lane, now (shutdown, a crash);
@@ -286,6 +290,10 @@ function healthFacts() {
         rooms: { error: store.lastError, unsaved: store.unsaved().length },
         audit: auditFacts(),
       },
+      // Every write lane this process made, in any file, then the distinct lanes `saveLanes()` names: the two are equal,
+      // and each lane has one name, or a lane is never flushed at a stop or a crash.
+      built: resilience.WriteLane.built,
+      named: new Set(saveLanes().map(([, l]) => l).filter((l) => l instanceof resilience.WriteLane)).size,
     },
     elu: eluRing.stats(),
     rssMb: Math.round(process.memoryUsage.rss() / 1048576),
@@ -836,7 +844,7 @@ io.on('connection', (socket) => {
   // join it is refused; empty for the host token's admin, who has no account.
   const signedInAs = acct && !tokenAdmin ? (acct.account.name || acct.account.username) : '';
   const writes = new guard.Bucket(5, 15);      // messages, reactions, pins…
-  const chatter = new guard.Bucket(10, 20);    // typing, seen, ui sync
+  const chatter = new guard.Bucket(10, 20);    // seen, ui sync, a screen identified, help answered
   const aiBucket = new guard.Bucket(0.2, 4);   // one AI request per 5 s, bursts of 4
   const uploadBucket = new guard.Bucket(0.5, 4);   // files from this connection, whichever hall or token
   let uploadToken = null;
@@ -1051,11 +1059,6 @@ io.on('connection', (socket) => {
     else { if (reactions.length >= 200) return ok(ack)({ ok: false, error: 'Too many reactions' }); reactions.push({ uid: me.uid, name: me.name, emoji, at: Date.now() }); }
     apply(room, { o: 'upd', id: messageId, f: { reactions } });
     ok(ack)({ ok: true });
-  });
-
-  socket.on('typing', ({ isTyping } = {}) => {
-    if (!room || !me || !allowed('hall.post') || !chatter.take()) return;
-    socket.to(room.code).emit('typing', { name: me.name, role: me.role, isTyping: !!isTyping });
   });
 
   // Seen receipts: the board knows research saw it, research knows the board read the answer.

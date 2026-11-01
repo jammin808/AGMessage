@@ -21,16 +21,17 @@ problem ships as a patch release, with credit if you want it.
 ## What is checked on every change
 
 `docs/ANALYSIS.md` has the detail. In short: ESLint with the security rules and the house's banned calls as build
-fences; a rule that refuses unescaped values on their way into a page's HTML; an in-tree secret scan; CodeQL
-(`security-extended`); `npm audit` with registry signatures and provenance; dependency review on pull requests; the
-tests, the coverage gate and the browser smoke on Linux and Windows. A release carries its SBOM (CycloneDX),
-`SHA256SUMS` and a build-provenance attestation (`gh attestation verify <zip> --repo <owner>/AGMessage`). The SBOM lists
-npm's packages and the browser libraries vendored in `app/public/vendor`, each of those with its file's SHA-256 and the
-libraries bundled in it, read from the bundle as the zip extracts it. Each vendored file is its package's file byte for
-byte, listed in `app/public/vendor/VENDOR.json` with where it came from, its package's digest and its SHA-256; a test
-fails the build on a file not listed, bytes that differ, a file no page loads, or a licence that is not one of those
-allowed, and the SBOM's job stops on a shipped file whose bytes are not the ones listed, or a bundle without the list,
-the notices and every licence text. Their licences ship in `THIRD-PARTY-NOTICES.md` and `licenses/`.
+fences; a rule that refuses unescaped values on their way into a page's HTML; a module fence that holds the server's
+layers and closes the wire's words both ways; an in-tree secret scan; CodeQL (`security-extended`); `npm audit` with
+registry signatures and provenance; dependency review on pull requests; the tests, the coverage gate and the browser
+smoke on Linux and Windows. A release carries its SBOM (CycloneDX), `SHA256SUMS` and a build-provenance attestation
+(`gh attestation verify <zip> --repo <owner>/AGMessage`). The SBOM lists npm's packages and the browser libraries
+vendored in `app/public/vendor`, each of those with its file's SHA-256 and the libraries bundled in it, read from the
+bundle as the zip extracts it. Each vendored file is its package's file byte for byte, listed in
+`app/public/vendor/VENDOR.json` with where it came from, its package's digest and its SHA-256; a test fails the build on
+a file not listed, bytes that differ, a file no page loads, or a licence that is not one of those allowed, and the
+SBOM's job stops on a shipped file whose bytes are not the ones listed, or a bundle without the list, the notices and
+every licence text. Their licences ship in `THIRD-PARTY-NOTICES.md` and `licenses/`.
 
 `npm audit` cannot see the vendored libraries, which are in no lockfile. `tools/vendor-audit.js` (part of `npm run
 audit`, and a step of the Security workflow's weekly run) asks npm's registry for the advisories against every version
@@ -56,6 +57,11 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   its own do not hold; a join's role that the page does not offer is refused.
 - One person's pages relay to each other only the settings a page applies, each read by its type and rebuilt; the
   admin's support view acts only on what the admin page that frames it sends (its parent, from this origin).
+- The server listens only for the verbs its pages send, and sends only events a page hears: a test fails the build on
+  a verb no page sends, an event no page hears (each exception named with its reason) and an event named in a way it
+  cannot read. `typing`, which took a word from anyone who may post and sent it on to the whole hall, and which no page
+  sent or heard, is gone. Every verb, in `server.js` or a handler module, is sent every argument shape a client can,
+  and the same test fails on a verb registered anywhere else or in a form that read does not see.
 - Saved keys and tokens are sealed at rest (AES-256-GCM) with a machine key kept outside the app folder.
 - Uploads are allow-listed by type and checked by content; they are served so they cannot run script.
 - Pages carry a strict Content-Security-Policy with no inline script.

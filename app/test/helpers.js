@@ -346,6 +346,37 @@ async function until(fn, ms = 6000, what = 'the condition') {
   throw new Error('timed out waiting for ' + what);
 }
 
+// ---------------------------------------------------------------- the files the source fences read
+/**
+ * Every file under `dir` (relative to `root`), in every folder below it but those named in `skip`, whose name matches
+ * `re`: relative to `root` with '/' between folders, sorted. A folder that is not there holds nothing.
+ */
+function filesUnder(dir, re, { root = ROOT, skip = [] } = {}) {
+  const top = path.join(root, dir);
+  if (!fs.existsSync(top)) return [];
+  const out = [];
+  const walk = (rel) => {
+    for (const e of fs.readdirSync(path.join(top, rel), { withFileTypes: true })) {
+      const name = rel ? rel + '/' + e.name : e.name;
+      if (e.isDirectory()) { if (!skip.includes(name)) walk(name); } else if (e.isFile() && re.test(e.name)) out.push(dir + '/' + name);
+    }
+  };
+  walk('');
+  return out.sort();
+}
+/**
+ * The files that register socket verbs: server.js, the composition root, then each handler module in lib/handlers/.
+ * The input fuzz, the module fence and the counts over handlers read this one list, so a verb registered in any of
+ * them is held to each.
+ */
+function handlerFiles(root = ROOT) {
+  const dir = path.join(root, 'lib', 'handlers');
+  const modules = fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.js')).map((e) => 'lib/handlers/' + e.name).sort() : [];
+  return ['server.js', ...modules];
+}
+/** Every script a page loads that AGMessage writes: each `.js` and `.mjs` under public/, the vendored libraries left out. */
+const pageScripts = (root = ROOT) => filesUnder('public', /\.m?js$/, { root, skip: ['vendor'] });
+
 // ---------------------------------------------------------------- the audit log, in-process
 // No test reaches a real key folder: a log is given a fixed machine key and a records folder beside its own data folder.
 const audit = require('../lib/audit');
@@ -493,6 +524,7 @@ function unzipTo(buf, dir) {
 
 module.exports = {
   stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
+  filesUnder, handlerFiles, pageScripts,
   FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, acceptAll, brief,
   readZip, unzipTo, SEED_WORDS,
 };

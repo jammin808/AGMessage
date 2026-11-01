@@ -21,6 +21,7 @@ left out, and the defects the fences found.*
 | Dependency audit | `npm run audit` (`npm audit`, then `tools/vendor-audit.js`) | Security · audit (and weekly) | a high or critical advisory in a shipped package; a package whose registry signature or provenance does not verify; a high or critical advisory against a version `app/public/vendor/VENDOR.json` lists (a vendored file's package or a library bundled in it) that `VENDOR.json` does not assess, or assesses at another severity, or a registry that does not answer |
 | Dependency review | — | Security · on a pull request | a new dependency with a moderate or worse advisory |
 | The .bat files | `npm test` (`test/startbat.test.js`) | CI · Linux (read as text), Windows (run by cmd) | delayed expansion, a bare program name, the install record read outside the 64-bit view, the preflight after anything started, code 0 and 3 sharing words, a line ending that is not CRLF; on Windows, a missing `node\node.exe` not said or not exit 2, a clean copy made into a folder that exists |
+| The module fence | `npm test` (`test/modules.test.js`; health's lane counts in `test/server.test.js`) | CI · Linux (Node 24, 26), Windows | a breach of the server's layers (a pure module that requires anything but the pure core, names an I/O built-in, reads `process.` or imports at run time; a require of `server.js`; a cycle; a require of the HTTP domain or a handler module from anywhere but `server.js`; a require of a file that is not there); a wire's word left open (a page send no handler file registers, a verb no page sends, an event no page hears or a listener for one never sent, each exception a row with its reason); a verb registered where or how the fuzz does not read it; a write lane made that `saveLanes()` does not name once (§3.5) |
 | The bundle start | — | CI · package | the extracted zip's own Node and watchdog not answering `/api/health` with the stamped build within 30 s |
 | The vendored libraries | `npm test` (`test/vendor.test.js`) | CI · Linux, Windows | a file in `app/public/vendor` not in `VENDOR.json`, a listed file missing, bytes that are not its SHA-256, an entry with no licence, notice or copyright, a licence not on the allowed list (Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, MIT AND Zlib, MIT OR GPL-3.0-or-later taken as MIT), a `licenses/` folder whose text is not the licence named or lacks the copyright, a folder no entry claims, a listed file no page loads or a page loading one not listed, a `THIRD-PARTY-NOTICES.md` table that is not the list or that leaves out an advisory, an advisory with no assessment or an assessment that applies without saying what bounds it, a version inside jszip's bundle without where it was read, pako not 1.0.5 by its code, a BSD-3-Clause text filed as BSD-2-Clause, a paper that says which browsers draw a PDF without the floor, the portable build, the SBOM step, `npm run audit` or the Security workflow without them; pdf.js not 4.10.38's legacy build, or not defining `Promise.withResolvers` where it is missing |
 | SBOM + SHA256SUMS + build provenance | `node tools/vendor-sbom.js <sbom> --tree <bundle>` adds the vendored files, read from the bundle as the zip extracts it, to npm's SBOM, with each advisory's analysis | CI · package, release | a release is published only with them; a shipped vendored file whose bytes are not the ones `VENDOR.json` records, or a bundle without the checkout's `VENDOR.json`, `THIRD-PARTY-NOTICES.md` and every licence folder an entry names, stops the SBOM's step |
@@ -152,6 +153,50 @@ its target, never `'*'`, and every `message` listener's first line returns unles
 are the ones expected (the admin's support view hears only the admin page that frames it). A post or a listener written
 in a shape the guard does not read, or an `onmessage` handler, fails it too.
 
+The guard reads folders, not a hand list: `lib/` and `verify/` in every folder below them, and every page script
+(`pageScripts()` in `test/helpers.js`: each `.js` and `.mjs` under `public/`, `vendor/` left out, whose files are their
+packages' bytes and are held by `test/vendor.test.js`). The hand list read four of the ten page scripts:
+`audit-export.js`, `common.js`, `display.js`, `halls.js`, `theme-init.js` and `users.js` join, each at 0 synchronous
+calls and none with an `eval`, and the guard names them, so one that drops out of the read fails it. A planted folder
+holds the read to its rule: a module in a folder below `lib/` and a page's `.mjs` are read, a vendored file and a
+stylesheet are not. No cap moved.
+
+### 3.5 The module fence (`test/modules.test.js`)
+
+The server's layers and the wire's words, read from the source by regex as the input fuzz reads event names: every
+`require('…')` with a literal path, `./` and `../` alike, resolved as Node resolves it here (the path, then `.js`,
+then its folder's package `main`, so `require('..')` from `test/` is `server.js`, then its folder's `index.js`). A
+relative require that resolves to no file fails, from a test too, so a path the resolver reads wrong cannot pass as
+nothing. Each rule is a function of the sources it is given, so the tree is held to it and a planted breach of each kind
+is shown failing it. dependency-cruiser and the ESLint import and boundaries plugins would
+each be a new dev dependency (audit, signatures, SBOM) for rules a node:test reads from `require()` calls.
+
+| Rule | Holds | Fails on |
+|---|---|---|
+| (a) the pure set | `lib/board.js`, `context.js`, `deskresults.js`, `rbac.js` and `stagelines.js`, the pure core, require only each other | a require of anything else, an I/O built-in named (`fs`, `net`, `http`, `https`, `dgram`, `tls`, `os`, `dns`, `child_process`, `ws`), `process.` read, an `import()`, a file the set names that is not there |
+| (b) no cycle | among `server.js`, `supervise.js`, `lib/` and `verify/`, no file requires another that leads back to it; no file, a test included, requires `server.js`, by its name or as app/ | each cycle, named once from its first file |
+| (c) one root | only `server.js` requires `lib/http-accounts.js` and the handler modules in `lib/handlers/` (a test may, to test one) | any other shipped file that does; a relative require of a file that is not there |
+| (f) the wire's words, closed both ways | every event a page sends (`socket.emit('x'`, the outbox's `AGM.outbox.hold`, `now` and `self('x'`, and `verb: 'x'` in `public/catalog.js`) is a verb a handler file registers; every verb is sent by some page; every event a handler file sends is heard by some page (`socket.on` or `once`); every event a page hears is one a handler file sends, or Socket.IO's own (`connect`, `connect_error`, `disconnect`) | each word left open, by file; an event named by an expression, on either side, unless a row names what it takes (on the server, `apply()`'s `message` or `system`, by the added message's kind, is the one; on the pages there is none yet, and a carrier such as the outbox, whose callers name its verbs, or listeners made from a table, will each be a row of its file and expression); a verb registered in a form the fuzz does not read: `socket.on(` with anything but a single-quoted name, or `socket.once`, `addListener`, `prependListener` or `prependOnceListener` for any event but Socket.IO's own (`disconnect`, `disconnecting`); an allow-list row whose reason has gone |
+| (g) one file list | `handlerFiles()` in `test/helpers.js`: `server.js`, then each module in `lib/handlers/`, sorted. The fuzz reads its events from it with its own regex, and so does (f). No other shipped file (`supervise.js`, `lib/` in every folder below it, a folder below `lib/handlers/` included, `verify/`) listens on a socket, so no verb is registered where neither reads it | a file of another kind or a folder below read as a handler module (a planted folder); a listener on a socket in any other shipped file, unless a row names its events and why: `lib/tls.js`, the shared port's own TCP socket (its first byte and a reset by its peer), is the one, and fails once its listeners change or go |
+
+The allow-list of (f) has one row of events no page hears: `linkedRoomsChanged`, sent to a guest's pages when the admin
+lets them forward into another hall or takes it back, which the hall page does not hear yet (it asks which halls it may
+forward into as its forward picker opens). The row fails the fence once a page hears it, or once the server stops
+sending it. On the tree before 0.6.0 the fence failed on two words, both `typing`'s: a verb no page sent, and an event
+no page heard. `typing` was removed (the owner's answer 26 wants no typing indicator), which lowered the fuzz's count of
+events by one, to 55.
+
+The read is by regex over a socket named `socket`, as the fuzz's is: a socket under another name, a listener added
+through a computed property or a `require()` with a computed path (an ESLint error, `security/detect-non-literal-require`)
+are not read, and the handler files' own shape (a literal `socket.on('verb', …)`, plan 5-§14.2) is what keeps them read.
+
+`server.test.js` holds a sixth rule, (e) one lane each, end to end after boot, by the object: `WriteLane` counts every
+lane the process makes, in any file, and health appends the count as `saves.built`, then `saves.named`, the distinct
+write lanes `saveLanes()` names, the lanes a stop or a crash flushes. The test holds `named` to the lanes' names in
+`saves.stores` (a lane under two names, or a name given twice, makes them differ) and `built` to `named`: every lane
+named is one this process made, so as many named as made is every lane made. A store whose lane is not in `saveLanes()`
+fails the build, beside another named twice or not.
+
 ## 4. Considered and not adopted
 
 - **Type checking (`tsc --checkJs`).** Not measured this release. It would need TypeScript and JSDoc types across the
@@ -246,7 +291,7 @@ The fences the review added, beside the tests for each finding:
 
 | Fence | Holds |
 |---|---|
-| `test/inputs.test.js` | every event `server.js` listens to (read from its source, so a new handler is held too) is sent every argument shape — null, numbers, strings, lists, an object `String()` cannot convert — from a socket with no sign-in, a crew account, the admin and a screen; the server answers and stays up, and the handler guard has nothing to catch |
+| `test/inputs.test.js` | every event a handler file listens to (`handlerFiles()`: `server.js` and each module in `lib/handlers/`, read from their source, so a new handler is held too) is sent every argument shape — null, numbers, strings, lists, an object `String()` cannot convert — from a socket with no sign-in, a crew account, the admin and a screen; the server answers and stays up, and the handler guard has nothing to catch |
 | `test/sessions.test.js` | sign-in refusals say nothing more than a wrong password does; a stranger's guesses cannot lock the laptop or the venue out; a session's end reaches its open pages; a page in use keeps its session, under a moved clock |
 | `test/uploads.test.js` | uploads stop before the disk fills; files nobody posted are removed; a reset or a deletion removes its own files and no one else's |
 | `test/shownet.test.js` | the discovery table is bounded; Stagewatch's numbers never cross a restart or a relink; a node's changed certificate is accepted only by typing the start of its fingerprint, and the page is never told it |

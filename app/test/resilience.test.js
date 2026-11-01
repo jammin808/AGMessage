@@ -13,6 +13,7 @@ const nodes = require('../lib/nodes');
 const { buildContext, showBrief } = require('../lib/context');
 
 const ROOT = path.join(__dirname, '..');
+const { filesUnder, pageScripts } = require('./helpers');
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 async function until(fn, ms = 8000) { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await wait(50); } return false; }
@@ -165,6 +166,14 @@ test('atomic writes keep a backup only of a whole file; the lane coalesces and f
   lane.save(() => '{"i":21}');
   assert.ok(lane.flushSync(), 'shutdown writes what is pending at once');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'lane.json'), 'utf8')), { i: 21 });
+});
+
+test('every write lane made is counted, a lane of several files too, and one that never writes', () => {
+  const dir = tmp('agm-built-');
+  const before = r.WriteLane.built;
+  const lanes = [new r.WriteLane(path.join(dir, 'a.json')), new r.WriteLane(path.join(dir, 'set'), { files: true })];
+  assert.equal(r.WriteLane.built, before + 2, 'two lanes made, two counted');
+  assert.deepEqual(lanes.map((l) => l.writes), [0, 0], 'counted when made, not when they write');
 });
 
 test('a lane whose write fails keeps the content, says so, retries on its own and lands it', async () => {
@@ -411,8 +420,19 @@ test('Stagewatch link: header key, receipts with the message id, clock offset, c
 
 // ---------------------------------------------------------------- guard rails on the source
 test('guard rails: no eval, no key in a URL, and synchronous file calls only where they were judged safe', () => {
-  const files = ['server.js', 'supervise.js', ...fs.readdirSync(path.join(ROOT, 'lib')).map((f) => 'lib/' + f), ...fs.readdirSync(path.join(ROOT, 'verify')).map((f) => 'verify/' + f), ...['app.js', 'admin.js', 'admin-plus.js', 'join.js'].map((f) => 'public/' + f)];
+  // Read by folder, so a file added anywhere in them is held too: lib/ and verify/ in every folder below them, and every
+  // page script (the vendored libraries are their packages' bytes, held by test/vendor.test.js).
+  const files = ['server.js', 'supervise.js', ...filesUnder('lib', /\.[cm]?js$/), ...filesUnder('verify', /./), ...pageScripts()];
   assert.ok(files.includes('verify/auditrules.js'), 'the audit log\'s key-free rules are read too');
+  for (const f of ['public/common.js', 'public/display.js', 'public/halls.js', 'public/theme-init.js', 'public/users.js', 'public/audit-export.js']) assert.ok(files.includes(f), 'every page script is read: ' + f);
+  assert.ok(!files.some((f) => f.startsWith('public/vendor/')), 'and no vendored library');
+  const planted = tmp('agm-rail-');
+  try {
+    fs.mkdirSync(path.join(planted, 'lib', 'handlers'), { recursive: true });
+    fs.mkdirSync(path.join(planted, 'public', 'vendor'), { recursive: true });
+    for (const f of ['lib/handlers/rooms.js', 'public/menus.js', 'public/pagelayer.mjs', 'public/vendor/lib.min.js', 'public/styles.css']) fs.writeFileSync(path.join(planted, f), '');
+    assert.deepEqual([...filesUnder('lib', /\.[cm]?js$/, { root: planted }), ...pageScripts(planted)], ['lib/handlers/rooms.js', 'public/menus.js', 'public/pagelayer.mjs'], 'a file in a folder below lib/ and a page module are read; a vendored one and a stylesheet are not');
+  } finally { fs.rmSync(planted, { recursive: true, force: true }); }
   // The export, the split and the verifier run beside the show or on another computer, all asynchronous: none may hold
   // the loop. (The split's four small files go through writeFileAtomic, once per split.)
   for (const f of ['lib/auditexport.js', 'lib/auditarchive.js', 'lib/zip.js', 'verify/verify-audit.js', 'verify/page.js']) assert.ok(files.includes(f), f + ' is read, at 0 synchronous calls');
@@ -442,20 +462,19 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
 });
 
 test('guard rails: a page posts a message only to its own origin, and hears one only after checking who sent it', () => {
-  const pages = fs.readdirSync(path.join(ROOT, 'public')).filter((f) => /\.m?js$/.test(f));
   let posts = 0, listeners = 0;
-  for (const f of pages) {
-    const src = fs.readFileSync(path.join(ROOT, 'public', f), 'utf8');
+  for (const f of pageScripts()) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     const read = [...src.matchAll(/\.postMessage\s*\(([^;]*)\)\s*;/g)];
-    assert.equal(read.length, (src.match(/\.postMessage\s*\(/g) || []).length, `public/${f}: every postMessage is one statement the guard reads`);
+    assert.equal(read.length, (src.match(/\.postMessage\s*\(/g) || []).length, `${f}: every postMessage is one statement the guard reads`);
     for (const m of read) {
       posts++;
-      assert.match(m[1], /,\s*location\.origin\s*$/, `public/${f}: postMessage names this origin as its target, never '*' (${m[0]})`);
+      assert.match(m[1], /,\s*location\.origin\s*$/, `${f}: postMessage names this origin as its target, never '*' (${m[0]})`);
     }
     const heard = (src.match(/addEventListener\(\s*['"]message['"]/g) || []).length;
     const checked = (src.match(/addEventListener\(\s*['"]message['"]\s*,\s*\(?\s*(\w+)\s*\)?\s*=>\s*\{\s*if \(\1\.source !== [\w.]+ \|\| \1\.origin !== location\.origin\) return;/g) || []).length;
-    assert.equal(checked, heard, `public/${f}: every message listener is an arrow function whose first line returns unless the sending window and its origin are the ones expected`);
-    assert.ok(!/\bonmessage\s*=/.test(src), `public/${f}: no onmessage handler (a listener the guard reads instead)`);
+    assert.equal(checked, heard, `${f}: every message listener is an arrow function whose first line returns unless the sending window and its origin are the ones expected`);
+    assert.ok(!/\bonmessage\s*=/.test(src), `${f}: no onmessage handler (a listener the guard reads instead)`);
     listeners += heard;
   }
   assert.ok(posts >= 1 && listeners >= 1, 'the guard reads the pages\' posts and listeners (the admin page\'s Resync, the support view\'s listener)');

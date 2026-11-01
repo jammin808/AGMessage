@@ -36,15 +36,20 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
 ## Constraints that bite
 
 - **The fences** (`docs/ANALYSIS.md`, `eslint.config.mjs`, `app/eslint-rules/`, `tools/scan-secrets.js`,
-  `test/resilience.test.js`) apply to tests too: no empty catch without its reason, no unused bindings, no
-  `Math.random` (use `node:crypto`), no shell (`spawn` with an argument array), no `rejectUnauthorized: false` outside
-  the pin probe, no `process.exit` in `lib/`, no value into `innerHTML` that is not a literal, escaped, a count or a
-  name ending in `Html`. Synchronous file calls per file are capped by a test. A silenced rule says why on its line.
+  `test/resilience.test.js`, `test/modules.test.js`) apply to tests too: no empty catch without its reason, no unused
+  bindings, no `Math.random` (use `node:crypto`), no shell (`spawn` with an argument array), no
+  `rejectUnauthorized: false` outside the pin probe, no `process.exit` in `lib/`, no value into `innerHTML` that is not
+  a literal, escaped, a count or a name ending in `Html`. Synchronous file calls per file are capped by a test. A
+  silenced rule says why on its line.
 - **Client input** reaches a socket handler through `guardHandlers` (a throw refuses that request, never the process)
   and is read by type: `guard.str`, never `String()` on a client value. `test/inputs.test.js` reads the event names
-  from `server.js` and sends each every shape, so a new handler is held to it.
+  from `handlerFiles()` (`server.js` and each module in `lib/handlers/`) and sends each every shape, so a new handler is
+  held to it; `test/modules.test.js` holds every verb to a page that sends it and every event to a page that hears it,
+  and fails on a socket listener in any other shipped file or in a form the fuzz does not read.
 - **Every store** on disk goes through a `WriteLane` that is in `saveLanes()` (flushed at stop and crash, named in
-  health); one server per data folder (the folder lock), and nothing is written before the lock and the port are held.
+  health; health's `saves.built` counts the lanes made and `saves.named` the distinct lanes in that list, and a test
+  holds them equal); one server per data folder (the folder lock), and nothing is written before the lock and the port
+  are held.
 - **Test fixtures that look like keys** carry `// secret-scan: fixture` on their line.
 - **The audit log** gets a row for every security-relevant action, never a secret, token or screen link.
 - **The coverage gate** (`npm run coverage`) is raised as tests are added, never lowered to make a build green.
@@ -102,6 +107,7 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | The browser libraries the pages load (pdf.js 4.10.38's legacy build, mammoth, SheetJS), byte for byte as published, and their list: each file's package, version, build, licence, copyright, source and SHA-256, its floor, what it bundles and the advisories assessed against each | `app/public/vendor/`, `app/public/vendor/VENDOR.json` (held to the folder by `app/test/vendor.test.js`) |
 | Their licences and notices, shipped at the portable folder's top, with the advisories against their versions and each one's assessment; the SBOM's vendored components, read from the bundle that ships; the vendored libraries' advisory audit | `THIRD-PARTY-NOTICES.md`, `licenses/<package>/`, `tools/vendor-sbom.js`, `tools/vendor-audit.js` |
 | The house lint rule | `app/eslint-rules/no-unescaped-html.js` |
+| The module fence: the server's layers (the pure core, no cycle, one composition root) and the wire's words closed both ways; the one list of the files that register socket verbs, and of the page scripts, that the fences read | `app/test/modules.test.js`, `app/test/helpers.js` (`handlerFiles()`, `pageScripts()`) |
 | The portable build | `tools/fetch-runtime.ps1`, `tools/build-portable.ps1`, `start-agmessage.bat`, `make-shareable-copy.bat` |
 | Papers | `README.md`, `README.txt`, `CHANGELOG.md` (fenced by a test), `SECURITY.md`, `docs/ACCOUNTS.md`, `docs/DISPLAYS.md`, `docs/NODES.md`, `docs/SHOWBUS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `docs/INSTALL.md` (the installed node, as far as it is built) |
 | The 0.6.0 plan: what to build, in which order, and the owner's answers it rests on | `docs/plan/0.6.0/PLAN.md` (Part 0: the decisions register and the global build order, whose numbers the unit commits use), `docs/plan/0.6.0/DECISIONS.md`, `docs/plan/0.6.0/board-view/` (the Board view's mock) |

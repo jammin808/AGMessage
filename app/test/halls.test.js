@@ -629,13 +629,13 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     assert.equal((await emit(page, 'ai:draft', { question: 'What was capex?' })).ok, false);
   });
 
-  await t.test('read-only people (an observer guest, a Viewer account) cannot pin, react, answer a prompt or type', async () => {
+  await t.test('read-only people (an observer guest, a Viewer account) cannot pin, react or answer a prompt', async () => {
     const crew = await guest(hallD, 'Rae Research', 'research');
     const prompt = await emit(crew.s, 'message', { type: 'action', text: 'Ready for Q&A?', options: ['Yes', 'No'] });
     const note = await emit(crew.s, 'message', { type: 'text', text: 'Agenda item 4' });
     assert.ok(prompt.ok && note.ok);
     assert.ok((await emit(crew.s, 'pin', { messageId: note.id, pinned: true })).ok, 'crew may pin');
-    const seen = heard(crew.s, 'pinUpdate', 'messageReact', 'actionUpdate', 'typing');
+    const seen = heard(crew.s, 'pinUpdate', 'messageReact', 'actionUpdate');
     const gallery = await guest(hallD, 'Gallery guest', 'observer');
     const viewer = await asAccount(vic, hallD);
     assert.deepEqual([gallery.j.role, viewer.j.role], ['observer', 'observer']);
@@ -645,7 +645,6 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
       results[who + ' react'] = (await emit(s, 'react', { messageId: note.id, emoji: '👍' })).ok;
       results[who + ' answer'] = (await emit(s, 'actionResponse', { messageId: prompt.id, optionIndex: 1 })).ok;
       results[who + ' reply with text'] = (await emit(s, 'actionResponse', { messageId: prompt.id, optionIndex: -1, note: 'from the gallery' })).ok;
-      s.emit('typing', { isTyping: true });
     }
     await wait(300);
     assert.deepEqual(Object.values(results), Array(8).fill(false), JSON.stringify(results));

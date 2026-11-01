@@ -117,15 +117,25 @@ function readJsonWithBak(file) {
  * lands; `lastError` says why it has not. `flushSync()` writes what is pending at once (shutdown) and returns false
  * when it still cannot. A lane that keeps a set of small files together (`files: true`) is given [[file, text], …] by
  * `produce`, and writes each atomically, in that order.
+ *
+ * `WriteLane.built` counts every lane this process has made, wherever it was made: health carries it beside the
+ * distinct lanes the server flushes at a stop or a crash, and a test holds the two equal, so no store has a lane
+ * nothing flushes.
  */
 class WriteLane {
+  static #built = 0;
+
   constructor(file, { delayMs = 200, keepBak = true, mode, files = false } = {}) {
     this.file = file; this.delayMs = delayMs; this.keepBak = keepBak; this.mode = mode; this.files = files;
     this.pending = null;      // () => string, the latest content
     this.timer = null;
     this.writes = 0; this.coalesced = 0; this.lastError = null; this.failures = 0;
     this.onSaved = null;      // told after each write that landed
+    WriteLane.#built++;
   }
+
+  /** How many lanes this process has made, in any file. */
+  static get built() { return WriteLane.#built; }
 
   save(produce) {
     if (this.pending) this.coalesced++;

@@ -418,6 +418,45 @@ pdf.js's worker, as older iPads lack it, and no iPad was walked)
   `THIRD-PARTY-NOTICES.md` says where they are.
 - Rolling back: nothing stored changes; 0.5.1's bundle carries its own libraries.
 
+**A module fence, and the unused `typing` verb gone** (the owner's answer 26, "no typing indicator"; the tree as the
+fence reads it)
+- `typing` is gone. The server took it from anyone in a hall who may post and sent it on to everyone else there, and no
+  page sent it or listened for it: a rebroadcast nothing used. Sent now, it reaches nobody. The input fuzz sends one
+  event fewer, 55: the one time its count falls; from here it only grows.
+- `test/modules.test.js` fails the build on a breach of the server's layers, read from every `require()` in
+  `server.js`, `supervise.js`, `lib/`, `verify/` and the tests: a module of the pure core (`lib/board.js`, `context.js`,
+  `deskresults.js`, `rbac.js`, `stagelines.js`) that requires anything but another of them, names an I/O built-in,
+  reads `process.` or imports at run time; a file that requires `server.js`, a test included, and `require('..')` from a
+  test with it (Node takes app/ to its package's `main`, `server.js`); a cycle among the server's files; a file other
+  than `server.js` that requires `lib/http-accounts.js` or a handler module in `lib/handlers/`; a relative require of a
+  file that is not there.
+- The same fence closes the wire's words both ways: every event a page sends is a verb a handler file registers, every
+  verb is sent by some page, every event the server sends is heard by some page, and every event a page listens for is
+  one the server sends (or Socket.IO's own). An event named by an expression fails it unless a row says which names it
+  takes and why; `apply()`'s `message` or `system`, by the added message's kind, is the one row. `linkedRoomsChanged`,
+  which the server sends a guest's pages when the admin lets them forward into another hall and no page hears yet, is
+  allowed by a row that says so, and the fence fails on that row once a page hears it or the server stops sending it. A
+  page that names an event by an expression fails it too, unless a row names the events it carries and why (none does
+  today; the outbox and the op table's listeners will each be one).
+- No verb escapes the fuzz. A verb registered in a form the fuzz does not read fails the fence: `socket.on(` with
+  anything but a single-quoted name, and `socket.once`, `addListener`, `prependListener` or `prependOnceListener` for
+  any event but Socket.IO's own (`disconnect`, as the AI's draft listens for). A shipped file outside the handler files
+  that listens on a socket fails it, a module in a folder below `lib/handlers/` included; `lib/tls.js`'s shared port,
+  which listens on its own TCP socket for the first byte and a reset, is the one row, held to those two events.
+- The fuzz and the fence read the verbs from one list of files, `handlerFiles()` in `test/helpers.js`: `server.js`,
+  then each module in `lib/handlers/`. A verb registered in a handler module is sent every argument shape, from every
+  kind of socket, as one in `server.js` is.
+- The source guard rail of `test/resilience.test.js` (no `eval`, no key in a URL, the synchronous file calls per file
+  capped) reads `lib/` and `verify/` in every folder below them and every page script, in place of a hand list that
+  left six of the ten page scripts out (`audit-export.js`, `common.js`, `display.js`, `halls.js`, `theme-init.js`,
+  `users.js`). Each is read at 0 synchronous calls, and no cap moves. The vendored libraries are their packages' bytes,
+  which `test/vendor.test.js` holds, and are not read.
+- Health's `saves` ends with `built`, how many write lanes this run of the server made in any file, and `named`, how
+  many distinct lanes `saveLanes()` names, the lanes a stop or a crash flushes. A test holds `built`, `named` and the
+  lanes' names in `saves.stores` equal, so a store whose lane nothing flushes fails the build, and so does a lane under
+  two names, which a count of names alone would let pass beside one left out. Eight are made and eight named.
+- Rolling back: nothing is stored; 0.5.1 takes `typing` again, and no page sends it.
+
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,

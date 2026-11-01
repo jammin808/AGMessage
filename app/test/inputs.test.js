@@ -1,16 +1,17 @@
 'use strict';
 // What a client sends can refuse its own request but never stop the event: every socket event the server listens to
-// (read from server.js, so a new handler is held to this too) is sent every argument shape a client can — null, a
-// number, a string, a list, an empty object, an object of nulls — from a socket that never signed in, from a crew
-// account in its hall, from the admin, and display:shown from a screen. The server stays up and answers.
+// (read from every handler file, `handlerFiles()`, so a new handler is held to this too) is sent every argument shape
+// a client can — null, a number, a string, a list, an empty object, an object of nulls — from a socket that never
+// signed in, from a crew account in its hall, from the admin, and display:shown from a screen. The server stays up and
+// answers.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const { io } = require('socket.io-client');
-const { startServer, stopServer, api, connect, emit } = require('./helpers');
+const { ROOT, startServer, stopServer, api, connect, emit, handlerFiles } = require('./helpers');
 
-const EVENTS = [...new Set([...fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8').matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1]))]
+const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1])))]
   .filter((e) => e !== 'disconnect');
 // Not sent from the admin socket: they start cloudflared or make a new certificate — real work, not an argument check.
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
@@ -28,7 +29,7 @@ test('every socket event survives every argument shape, from every kind of socke
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
-  assert.ok(EVENTS.length > 50, 'the events were read from server.js: ' + EVENTS.length);
+  assert.ok(EVENTS.length > 50, 'the events were read from the handler files: ' + EVENTS.length);
 
   const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
