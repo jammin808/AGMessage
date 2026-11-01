@@ -120,7 +120,8 @@ async function launchEdge() {
     /**
      * A tab on `url`: `init` runs before the page's own scripts, `workerInit` before each worker's (the worker held at
      * its start until it has run; `workers` lists each worker still running, with what `workerInit` answered there),
-     * `metrics` {width, height} is its viewport, `timezone` its zone.
+     * `metrics` {width, height} is its viewport (`phone: true` makes it a phone's: a mobile viewport at 2× with a touch
+     * screen), `timezone` its zone.
      */
     async tab(url, { init, workerInit, metrics, timezone } = {}) {
       // A window of its own, so its page is always the one in front (never a hidden tab behind another).
@@ -157,7 +158,8 @@ async function launchEdge() {
       await send('Runtime.enable'); await send('Log.enable'); await send('Page.enable');
       if (init) await send('Page.addScriptToEvaluateOnNewDocument', { source: init });
       if (workerInit) await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
-      if (metrics) await send('Emulation.setDeviceMetricsOverride', { width: metrics.width, height: metrics.height, deviceScaleFactor: 1, mobile: false });
+      if (metrics) await send('Emulation.setDeviceMetricsOverride', { width: metrics.width, height: metrics.height, deviceScaleFactor: metrics.phone ? 2 : 1, mobile: !!metrics.phone });
+      if (metrics && metrics.phone) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
       if (timezone) await send('Emulation.setTimezoneOverride', { timezoneId: timezone });
       await send('Page.navigate', { url });
       return {
@@ -318,6 +320,78 @@ async function pdfWorkers(tab) {
 // What the file layer shows: which of the image and the canvas are visible, the canvas's size and its top-centre colour.
 const FILE_SEEN = `(() => { const c = document.getElementById('fileCanvas'); const p = c.width ? c.getContext('2d').getImageData(c.width >> 1, 4, 1, 1).data : [0, 0, 0, 0];
   return { kind: document.body.dataset.kind, img: !document.getElementById('fileImg').hidden, canvas: !c.hidden, w: c.width, h: c.height, rgb: [p[0], p[1], p[2]] }; })()`;
+// A phone, as the hall page must fit it: 390 × 844 CSS pixels, at 2×, with a touch screen.
+const PHONE = { width: 390, height: 844, phone: true };
+// What a page draws, read from its computed styles: a colour's contrast with what is under it (the backgrounds it sits
+// on, blended down to the page), as WCAG counts it, and how faded it is (its opacity times each parent's).
+const INK = `(() => {
+  const rgba = (s) => { const p = (s.match(/[\\d.]+/g) || []).map(Number); const k = s.startsWith('color(') ? 255 : 1; return { r: (p[0] || 0) * k, g: (p[1] || 0) * k, b: (p[2] || 0) * k, a: p.length > 3 ? p[3] : 1 }; };
+  const over = (t, u) => ({ r: t.r * t.a + u.r * (1 - t.a), g: t.g * t.a + u.g * (1 - t.a), b: t.b * t.a + u.b * (1 - t.a), a: 1 });
+  const under = (el) => { const layers = []; for (let n = el; n; n = n.parentElement) { const c = rgba(getComputedStyle(n).backgroundColor); if (c.a > 0) { layers.push(c); if (c.a >= 1) break; } } return layers.reverse().reduce((u, t) => over(t, u), { r: 255, g: 255, b: 255, a: 1 }); };
+  const lum = (c) => [c.r, c.g, c.b].map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0);
+  const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  const opacity = (el) => { let o = 1; for (let n = el; n; n = n.parentElement) o *= Number(getComputedStyle(n).opacity); return o; };
+  window.__ink = (el) => { const bg = under(el); return { ratio: ratio(over(rgba(getComputedStyle(el).color), bg), bg), opacity: opacity(el), bgLum: lum(bg) }; };
+})();`;
+// The hall page on a phone, read: whether it fits the screen (no sideways scroll, nothing zoomed out); its message icon
+// buttons (and their size), presence lines and On stage tags, at their lowest contrast and opacity; Help's colour and
+// words; Send; the header's controls under a finger; and the composer's 🔥 Priority, unpressed and pressed (its
+// transition held, so each state is read as drawn, then put back as it was).
+const PHONE_READ = `(() => {
+  const de = document.documentElement;
+  const vis = (e) => e.getClientRects().length > 0;
+  const low = (xs) => ({ n: xs.length, ratio: xs.length ? Math.min(...xs.map((x) => x.ratio)) : 0, opacity: xs.length ? Math.min(...xs.map((x) => x.opacity)) : 0, bgLum: xs.length ? [Math.min(...xs.map((x) => x.bgLum)), Math.max(...xs.map((x) => x.bgLum))] : [],
+    size: xs.length ? Math.min(...xs.map((x) => x.size === undefined ? Infinity : x.size)) : 0 });
+  const icons = low([...document.querySelectorAll('#feed .msg header button')].filter(vis).map((b) => { const r = b.getBoundingClientRect(); return { ...__ink(b), size: Math.min(r.width, r.height) }; }));
+  const presence = low([...document.querySelectorAll('#feed .sys.presence')].filter(vis).map((p) => __ink(p)));
+  const tags = low([...document.querySelectorAll('#feed .role-tag[data-role="board"]')].filter(vis).map((t) => __ink(t)));
+  const fault = document.createElement('i'); fault.style.color = 'var(--c-fault)'; document.body.appendChild(fault);
+  const red = getComputedStyle(fault).color; fault.remove();
+  const help = document.getElementById('helpBtn');
+  const send = [...document.querySelectorAll('.send-btn')].filter(vis).map((b) => { const r = b.getBoundingClientRect(); return { w: r.width, h: r.height, label: b.getAttribute('aria-label'), word: getComputedStyle(b.querySelector('.send-word')).display, mark: getComputedStyle(b.querySelector('.send-icon')).display }; });
+  const header = [...document.querySelectorAll('.app-meta .btn')].filter(vis).map((b) => b.getBoundingClientRect().height);
+  const pri = [...document.querySelectorAll('.compose .priority-btn')].find(vis);
+  let priority = null;
+  if (pri) {
+    pri.style.transition = 'none';
+    const state = () => ({ red: getComputedStyle(pri).backgroundColor === red, ratio: +__ink(pri).ratio.toFixed(2), pressed: pri.getAttribute('aria-pressed') });
+    const off = state(); pri.click(); const on = state(); pri.click(); const back = state();
+    pri.style.transition = '';
+    priority = { off, on, back };
+  }
+  return { fits: de.scrollWidth <= de.clientWidth && de.clientWidth === 390 && innerWidth === 390, width: de.scrollWidth + '/' + de.clientWidth + '/' + innerWidth,
+    icons, presence, tags, help: vis(help) ? { red: getComputedStyle(help).backgroundColor === red, ratio: __ink(help).ratio } : null,
+    send, coarse: matchMedia('(pointer: coarse)').matches, header: header.length ? Math.min(...header) : 0, priority };
+})()`;
+// Every dialog of the hall page opened in turn (Help through its button where the seat has it): each of its buttons,
+// brought into view inside the dialog, lies on the phone's screen and is what a tap at its centre reaches.
+const DIALOGS_REACHED = `(async () => {
+  const out = [];
+  for (const d of document.querySelectorAll('dialog.agm-dialog')) {
+    const help = d.id === 'helpDialog' && !document.getElementById('helpBtn').hidden;
+    if (help) document.getElementById('helpBtn').click(); else d.showModal();
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const buttons = [...d.querySelectorAll('button')].filter((b) => b.getClientRects().length > 0);
+    const missed = [];
+    for (const b of buttons) {
+      b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const q = b.getBoundingClientRect();
+      const on = q.left >= 0 && q.top >= 0 && q.right <= 390 && q.bottom <= 844 && b.contains(document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2));
+      if (!on) missed.push((b.textContent.trim() || b.id).slice(0, 24));
+    }
+    out.push({ id: d.id, via: help ? 'Help' : 'showModal', buttons: buttons.length, missed });
+    d.close();
+  }
+  return out;
+})()`;
+/** A message on a page: drawn plain (no fill, nothing animated, the background of an older message), and whether the one New divider sits above it. */
+const NEW_MARK = (text) => `(() => {
+  const m = allMessages.find((x) => x.text === ${codeLiteral(text)}); const n = m && messagesById.get(m.id);
+  if (!n) return null;
+  const older = [...feed.querySelectorAll(':scope > .msg[data-type="text"]')].find((x) => x !== n && !x.classList.contains('mine') && !x.classList.contains('priority'));
+  const dividers = [...feed.querySelectorAll('.new-divider')];
+  return { divider: dividers.length === 1 && dividers[0].nextElementSibling === n, dividers: dividers.length, plain: !n.classList.contains('flash') && n.getAnimations({ subtree: true }).length === 0 && getComputedStyle(n).backgroundColor === getComputedStyle(older).backgroundColor };
+})()`;
 // An old TV browser: it knows no time zone but its own, and throws on any other (as some do on a zone they lack).
 const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
   const F = function (locales, o) { if (o && o.timeZone) throw new RangeError('Invalid time zone specified: ' + o.timeZone); return new D(locales, o); };
@@ -490,6 +564,157 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await sleep(800);
     await research.shot(path.join(OUT, 'research.png'));
     await board.shot(path.join(OUT, 'board.png'));
+
+    // The hall page fits a phone (390 × 844, a touch screen), for each seat: as wide as the screen and no wider, every
+    // button of every dialog on the screen where a tap reaches it, Send a 44 px button named by its label, the header's
+    // controls 44 px under a finger. In both themes: the icon buttons at 3:1 or more and the presence lines at 4.5:1,
+    // neither faded by opacity; the On stage tag light in light mode; Help red in dark. A new message is marked, never
+    // flashed: on a page nobody touches the New divider stays above the first new message (read again 30 s later,
+    // below); scrolled up by 10 messages with a wheel, a new one leaves the view where it was and "↓ 1 new" says so.
+    const phoneHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Phone hall' }) })).json()).code;
+    const pat = await connect(base);
+    const ben = await connect(base);
+    await emit(pat, 'join', { roomCode: phoneHall, name: 'Pat', role: 'research' });
+    await emit(ben, 'join', { roomCode: phoneHall, name: 'Ben', role: 'board' });
+    // Sent at the pace a socket may write (its burst spent, a "busy" answer is tried again a moment later).
+    const post = async (s, args) => { for (let i = 0; i < 60; i++) { const r = await emit(s, 'message', args); if (r && r.ok) return r; await sleep(250); } return null; };
+    await post(ben, { type: 'text', text: 'From the stage: is slide 14 the one?' });
+    for (let i = 1; i <= 30; i++) await post(pat, { type: 'text', text: 'Backstage note ' + i + (i % 6 === 0 ? ': Aktiengesellschaftsrechtsänderungsgesetzbestimmungen' : '') });
+    await post(pat, { type: 'action', text: 'Refer them to slide 14?', options: ['Yes', 'No', 'Defer'] });
+    await post(pat, { type: 'text', text: 'Mic 2 is off', priority: true });
+    const phones = {};
+    for (const [seat, name] of [['board', 'Bea'], ['research', 'Rob'], ['observer', 'Oli']]) {
+      phones[seat] = await edge.tab(`${base}/app.html?code=${phoneHall}&name=${name}&role=${seat}`, { init: INK, metrics: PHONE });
+      await phones[seat].until(`typeof joined !== "undefined" && joined && allMessages.some((m) => m.priority)`);
+    }
+    // Nobody touches Oli's page from here to the end of the smoke: no tap, no key, no wheel.
+    await post(pat, { type: 'text', text: 'First new' });
+    const firstNew = Date.now();
+    const untouched = await phones.observer.until(NEW_MARK('First new'));
+    const boardFirst = await phones.board.until(NEW_MARK('First new'));
+    report(!!untouched && untouched.divider && untouched.plain && !!boardFirst && boardFirst.divider && boardFirst.plain,
+      `a new message is marked by the New divider above it, and drawn as every other message: no fill, nothing animated (${JSON.stringify({ untouched, boardFirst })})`);
+    for (const [seat, tab] of Object.entries(phones)) {
+      const seen = {};
+      for (const theme of ['light', 'dark']) {
+        await tab.eval(`applyTheme(${codeLiteral(theme)})`);
+        // Read once the theme's colours have settled: a button's background eases over 0.12 s.
+        await tab.until(`document.getAnimations().every((a) => !(a instanceof CSSTransition) || a.playState !== 'running')`, 3000);
+        seen[theme] = await tab.eval(PHONE_READ);
+      }
+      await tab.shot(path.join(OUT, `phone-${seat}-dark.png`));
+      await tab.eval(`applyTheme('light')`);
+      await tab.until(`document.getAnimations().every((a) => !(a instanceof CSSTransition) || a.playState !== 'running')`, 3000);
+      await tab.shot(path.join(OUT, `phone-${seat}.png`));
+      const dialogs = await tab.eval(DIALOGS_REACHED);
+      const { light, dark } = seen;
+      const writes = seat !== 'observer';
+      const sendOk = writes ? light.send.length === 1 && light.send[0].w >= 44 && light.send[0].h >= 44 && light.send[0].label === 'Send to Phone hall' && light.send[0].word === 'none' && light.send[0].mark !== 'none' : light.send.length === 0;
+      report(light.fits && dark.fits && Array.isArray(dialogs) && dialogs.length === 3 && dialogs.every((d) => d.buttons > 0 && d.missed.length === 0) && (dialogs[0].via === 'Help') === writes &&
+        sendOk && light.coarse && light.header >= 44,
+        `the hall page fits a 390 px phone as ${seat}: no wider than the screen (${light.width}), every dialog's buttons on the screen and reached by a tap, Send a 44 px button named for where it sends, the header's controls 44 px under a finger (${JSON.stringify({ dialogs, send: light.send, header: light.header })})`);
+      // 🔥 Priority pressed is filled with the fault red and says it is pressed; unpressed it is neither; each click turns it.
+      const priorityOk = (t) => (writes ? !!t.priority && !t.priority.off.red && t.priority.off.pressed !== 'true' && t.priority.on.red && t.priority.on.pressed === 'true' && t.priority.on.ratio >= 4.5 &&
+        !t.priority.back.red && t.priority.back.pressed === 'false' : t.priority === null);
+      const inkOk = (t, dark) => t.icons.n > 0 && t.icons.ratio >= 3 && t.icons.opacity === 1 && t.icons.size >= 24 && t.presence.n > 0 && t.presence.ratio >= 4.5 && t.presence.opacity === 1 &&
+        t.tags.n > 0 && t.tags.ratio >= 4.5 && (dark ? t.tags.bgLum[1] < 0.2 : t.tags.bgLum[0] > 0.6) && (writes ? !!t.help && t.help.red && t.help.ratio >= 4.5 : t.help === null) && priorityOk(t);
+      const short = (t) => ({ icons: [t.icons.n, +t.icons.ratio.toFixed(2), t.icons.opacity, +t.icons.size.toFixed(1)], presence: [t.presence.n, +t.presence.ratio.toFixed(2), t.presence.opacity], tag: [+t.tags.ratio.toFixed(2), t.tags.bgLum.map((x) => +x.toFixed(2))], help: t.help && [t.help.red, +t.help.ratio.toFixed(2)], priority: t.priority });
+      report(inkOk(light, false) && inkOk(dark, true),
+        `${seat} on a phone, in both themes: icon buttons 24 px or more at 3:1 or more and presence lines 4.5:1 or more, none faded; the On stage tag light in light mode and dark in dark; Help on the fault red in both; 🔥 Priority on the fault red, pressed, only while pressed (${JSON.stringify({ light: short(light), dark: short(dark) })})`);
+      if (seat === 'research') {
+        // AI drafts are off on this server (no key): ✨ is there, not usable, and says why; pressed, it says why where a
+        // finger can read it, and asks the server for nothing.
+        const ai = await tab.eval(`(async () => {
+          const b = document.getElementById('aiDraftBtn'); const sent = []; const emit = socket.emit;
+          socket.emit = function (ev, ...rest) { sent.push(ev); return emit.call(this, ev, ...rest); };
+          const was = { shown: b.getClientRects().length > 0, disabled: b.getAttribute('aria-disabled'), title: b.title };
+          b.click(); await new Promise((r) => setTimeout(r, 300)); socket.emit = emit;
+          const h = document.getElementById('aiHint');
+          return { ...was, hint: h && !h.hidden && h.getClientRects().length > 0 ? h.textContent : '', ratio: h ? +__ink(h).ratio.toFixed(2) : 0, sent: sent.filter((e) => e.startsWith('ai:')) };
+        })()`);
+        report(!!ai && ai.shown && ai.disabled === 'true' && /Anthropic key/.test(ai.title) && ai.hint === ai.title && ai.ratio >= 4.5 && ai.sent.length === 0,
+          `with AI drafts off, backstage on a phone sees ✨ Draft answer marked not usable with the reason as its title; pressed, the reason shows under the composer at 4.5:1 or more and nothing is asked of the server (${JSON.stringify(ai)})`);
+      }
+    }
+    // Bea scrolls up by 10 messages with a wheel (a scroll of her own): a new message leaves what she reads where it was,
+    // "↓ 1 new" says it came, and the divider moves above it (she touched the page since it was placed); a second keeps
+    // the divider and counts 2; "↓ 2 new" takes her to the end, and the next message is followed there.
+    const bea = phones.board;
+    const tenUp = await bea.eval(`(() => { const n = [...feed.querySelectorAll(':scope > .msg')].slice(-10); const f = feed.getBoundingClientRect();
+      return { dy: n.reduce((a, x) => a + x.getBoundingClientRect().height, 0) + 10 * parseFloat(getComputedStyle(feed).rowGap), x: f.left + f.width / 2, y: f.top + f.height / 2 }; })()`);
+    await bea.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: tenUp.x, y: tenUp.y, deltaX: 0, deltaY: -tenUp.dy });
+    const VIEW = `(() => { const f = feed.getBoundingClientRect(); const m = window.__read || (window.__read = [...feed.querySelectorAll(':scope > .msg')].find((x) => x.getBoundingClientRect().top >= f.top));
+      return { top: Math.round(m.getBoundingClientRect().top * 10) / 10, end: feed.scrollHeight - feed.scrollTop - feed.clientHeight < 2, below: newBelow.hidden ? '' : newBelow.textContent, tall: newBelow.getBoundingClientRect().height }; })()`;
+    const scrolled = await bea.until(`!place.atEnd && ${VIEW}`);
+    await post(pat, { type: 'text', text: 'While scrolled up' });
+    const upOne = await bea.until(`(() => { const v = ${VIEW}; return v.below ? { ...v, mark: ${NEW_MARK('While scrolled up')} } : null; })()`);
+    await post(pat, { type: 'text', text: 'Still scrolled up' });
+    const upTwo = await bea.until(`(() => { const v = ${VIEW}; return v.below === '↓ 2 new' ? { ...v, mark: ${NEW_MARK('While scrolled up')} } : null; })()`);
+    await bea.eval(`newBelow.click()`);
+    const atEnd = await bea.until(`(() => { const v = ${VIEW}; return v.end && !v.below && v; })()`);
+    await post(pat, { type: 'text', text: 'At the end' });
+    const followed = await bea.until(`allMessages.some((m) => m.text === 'At the end') && (() => { const v = ${VIEW}; return v.end && !v.below && v; })()`);
+    report(!!scrolled && !scrolled.end && !scrolled.below && !!upOne && upOne.top === scrolled.top && !upOne.end && upOne.below === '↓ 1 new' && upOne.tall >= 44 && upOne.mark.divider && upOne.mark.plain &&
+      !!upTwo && upTwo.top === scrolled.top && upTwo.mark.divider && !!atEnd && !!followed,
+      `scrolled up by 10 messages, a new message does not move the view and "↓ 1 new" appears, 44 px tall, the divider above it; a second reads "↓ 2 new"; the button goes to the end, where the next is followed (${JSON.stringify({ scrolled, upOne, upTwo: upTwo && upTwo.below, atEnd: !!atEnd, followed: !!followed })})`);
+    // The divider above the view: messages followed at the end carry it up out of Bea's sight; she scrolls up a little
+    // with the wheel, the divider still above what she reads, and the next message moves it down to itself. What she
+    // reads stays where it was, as a browser without scroll anchoring draws it (Safari before 27: overflow-anchor none)
+    // and as one with it does, where the page's own correction must come to nothing.
+    const DIVIDER_ABOVE = `(() => { const d = place.divider; const f = feed.getBoundingClientRect(); const m = [...feed.querySelectorAll(':scope > .msg')].slice(-3);
+      const h = m.reduce((a, x) => a + x.getBoundingClientRect().height, 0) / m.length; return !!d && d.isConnected && f.top - d.getBoundingClientRect().bottom > 2 * h ? h : 0; })()`;
+    const STILL = async (expr) => { let last = null; for (let i = 0; i < 40; i++) { const v = await bea.eval(expr); if (last && JSON.stringify(v) === JSON.stringify(last)) return v; last = v; await sleep(150); } return null; };
+    const legs = {};
+    for (const anchoring of ['none', 'auto']) {
+      await bea.eval(`feed.style.overflowAnchor = ${codeLiteral(anchoring)}; scrollToBottom(); window.__read = null; true`);
+      let h = 0;
+      for (let i = 1; i <= 15 && !h; i++) {
+        const text = `Followed (anchoring ${anchoring}) ${i}`;
+        await post(pat, { type: 'text', text });
+        await bea.until(`allMessages.some((m) => m.text === ${codeLiteral(text)}) && (() => { const v = ${VIEW}; return v.end && !v.below; })()`);
+        h = await bea.eval(DIVIDER_ABOVE);
+      }
+      const fd = await bea.eval(`(() => { const f = feed.getBoundingClientRect(); return { x: f.left + f.width / 2, y: f.top + f.height / 2 }; })()`);
+      await bea.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: fd.x, y: fd.y, deltaX: 0, deltaY: -Math.round(h) });
+      await bea.until('!place.atEnd');
+      await bea.eval('window.__read = null; true');
+      const before = await STILL(`(() => { const v = ${VIEW}; return { ...v, dividerAbove: place.divider.getBoundingClientRect().bottom < feed.getBoundingClientRect().top }; })()`);
+      const text = `Moved the divider (anchoring ${anchoring})`;
+      await post(pat, { type: 'text', text });
+      await bea.until(`allMessages.some((m) => m.text === ${codeLiteral(text)})`);
+      const after = await STILL(`(() => { const v = ${VIEW}; return { ...v, mark: ${NEW_MARK(text)} }; })()`);
+      legs[anchoring] = { h: Math.round(h), before, after };
+    }
+    await bea.eval(`feed.style.overflowAnchor = ''; true`);
+    report(Object.values(legs).every(({ h, before, after }) => h > 0 && !!before && before.dividerAbove && !before.end && !before.below && !!after && Math.abs(after.top - before.top) <= 1 &&
+      after.below === '↓ 1 new' && !!after.mark && after.mark.divider && after.mark.plain),
+      `with the divider above the view, a new message moves it down to itself and what the reader sees stays where it was, with scroll anchoring and without it (as Safari before 27) (${JSON.stringify(legs)})`);
+    // A page back from a drop draws what it missed in one pass: Rob's page is away while 25 messages are sent, and on its
+    // return draws all 25 with the feed's layout read a few times in all (where the reader was, once; the end, once; the
+    // page's own scroll as the connection's strip goes) and the feed moved to the end once after them, never once per
+    // message (a phone back on the Wi-Fi in a busy hall would stall on each).
+    const rob = phones.research;
+    await rob.eval(`(() => {
+      scrollToBottom();
+      const n = window.__layout = { reads: 0, toEnd: 0 };
+      const sh = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollHeight');
+      Object.defineProperty(feed, 'scrollHeight', { configurable: true, get() { n.reads++; return sh.get.call(this); } });
+      const cs = window.__cs = window.getComputedStyle;
+      window.getComputedStyle = function (el, ...rest) { if (el === feed) n.reads++; return cs.call(this, el, ...rest); };
+      const stb = window.__stb = window.scrollToBottom;
+      window.scrollToBottom = function () { n.toEnd++; return stb.apply(this, arguments); };
+      socket.disconnect();
+      return true;
+    })()`);
+    for (let i = 1; i <= 25; i++) await post(pat, { type: 'text', text: 'Missed ' + i });
+    await rob.eval(`window.__layout.reads = 0; window.__layout.toEnd = 0; socket.connect(); true`);
+    const caughtUp = await rob.until(`allMessages.some((m) => m.text === 'Missed 25') && (() => { const n = { ...window.__layout }; const v = ${VIEW};
+      return { drawn: allMessages.filter((m) => /^Missed \\d+$/.test(m.text || '')).length, ...n, end: v.end }; })()`);
+    await rob.eval(`delete feed.scrollHeight; window.getComputedStyle = window.__cs; window.scrollToBottom = window.__stb; true`);
+    report(!!caughtUp && caughtUp.drawn === 25 && caughtUp.reads <= 4 && caughtUp.toEnd === 1 && caughtUp.end,
+      `a page back from a drop draws the 25 messages it missed with the feed's layout read a few times in all and the feed moved to the end once (${JSON.stringify(caughtUp)})`);
+    pat.close();
+    ben.close();
 
     // Admin dashboard: logs in on this machine and lists the room.
     const admin = await edge.tab(`${base}/admin.html`);
@@ -1194,7 +1419,15 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       rae.close();
     }
 
-    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3]];
+    // Oli's page, untouched since "First new" arrived 30 s or more ago and every message since: its New divider is
+    // still above "First new", the one divider, with no fill on it.
+    await sleep(Math.max(0, firstNew + 30_000 - Date.now()));
+    const stillNew = await phones.observer.eval(NEW_MARK('First new'));
+    const since = await phones.observer.eval(`allMessages.slice(allMessages.findIndex((m) => m.text === 'First new') + 1).filter((m) => m.type !== 'system').length`);
+    report(Date.now() - firstNew >= 30_000 && !!stillNew && stillNew.divider && stillNew.plain && since >= 5,
+      `an untouched page keeps its New divider above the first new message after ${Math.round((Date.now() - firstNew) / 1000)} s and ${since} messages more, and nothing fades (${JSON.stringify(stillNew)})`);
+
+    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3], ['a phone as On stage', phones.board], ['a phone backstage', phones.research], ['a phone as an observer', phones.observer]];
     // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).
     const hidden = [];
     for (const [name, tab] of tabs) if ((await tab.eval('document.visibilityState')) !== 'visible') hidden.push(name);

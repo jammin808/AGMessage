@@ -69,6 +69,10 @@ Every day of the event
 - Help: in a hall, the red Help button asks for Sound, Vision, Lighting,
   Stage, Presenter or IT. It stays red on the board until someone presses
   "On my way", and on the board until it is resolved.
+- New messages: a hall page you have scrolled up stays where you left it;
+  "↓ 3 new" at the bottom says how many came and takes you there. A "New"
+  line sits above the first message that came since you last touched the
+  page. Nothing flashes. The hall page fits a phone held upright.
 - When the event is over, close the black window (or press Ctrl+C in it).
   Halls, history and accounts are kept for next time.
 
@@ -457,6 +461,11 @@ AI (optional; Admin -> AI drafts, or set ANTHROPIC_API_KEY)
     it first and post it to the room only if you want.
   - What's sent to Anthropic: the conversation, and the text of the document
     you have open when you ask for a draft.
+  - Without a key, "Draft answer" and "Suggest" are drawn with a dashed
+    edge: pressed, they say why ("AI drafts are off: they need an Anthropic
+    key (admin) and the internet") and send nothing. Without the internet no
+    draft can be made either. Messages, action prompts, documents, the stage
+    link and the show network work without both.
 
 Show network (Stagewatch, Patterns, presenter PCs) - Show Bus 1.2
   - Admin -> Show network: link Stagewatch (address + a "node" API key made

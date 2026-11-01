@@ -1,28 +1,50 @@
-/* ---------- Reset & tokens ---------- */
+/* ---------- Reset ---------- */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  color: #15202b;
-  background: #f5f6f8;
+  color: var(--ink);
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
 }
+
+/* ---------- Tokens ----------
+   The sizes, spaces, targets, layers and colours the pages draw with are named here, once, and every colour once more
+   for dark (html[data-theme="dark"], below). A colour is a token: test/resilience.test.js counts the hex colours still
+   written outside these two blocks, a count that only goes down as each rule moves onto the tokens and drops its own
+   dark rule. */
 :root {
-  --brand: #2b57d1;
-  --brand-dark: #1c3f9e;
-  --bg: #f5f6f8;
-  --card: #ffffff;
-  --border: #e2e6ec;
-  --ink: #15202b;
-  --muted: #6b7280;
-  --accent: #d97706;
-  --accent-soft: #fff4e0;
-  --success: #16a34a;
-  --danger: #dc2626;
-  --director: #7c3aed;
-  --research: #0ea5e9;
-  --observer: #6b7280;
-  --radius: 10px;
+  /* type: one scale of about 1.2, in rem, so the browser's text size and --zoom-msg still work */
+  --fs-xs: .75rem; --fs-sm: .875rem; --fs-md: 1rem;   /* 16 px: body and inputs (no iOS zoom on focus) */
+  --fs-lg: 1.25rem;   /* the Board's message body */   --fs-xl: 1.5rem;   /* the Board's prompt and countdown */
+  --fs-2xl: 2rem;     /* the take layer */             --fs-stage: clamp(2.5rem, 7vw, 6rem);   /* a clock or countdown take */
+  --fs-title: 1rem;   /* the hall's name on the Board */  --fs-readout: 1.125rem;   /* the clock or countdown beside it */
+  /* space, on a 4 px base */
+  --sp-1: .25rem; --sp-2: .5rem; --sp-3: .75rem; --sp-4: 1rem; --sp-6: 1.5rem; --sp-8: 2rem;
+  /* targets: every control at least --target-min (WCAG 2.5.8); the header, the composer and a coarse pointer
+     --target-touch; an answer on the Board --target-answer */
+  --target-min: 24px; --target-touch: 44px; --target-answer: 48px;
+  --radius-sm: 6px; --radius-md: 10px; --radius-pill: 999px;
+  /* layers: a menu and an ask open over the take layer, so they sit above it and the dialogs */
+  --z-header: 10; --z-panel: 20; --z-layer: 300; --z-dialog: 500; --z-menu: 700; --z-toast: 9999;
+  /* colour roles. A role is drawn with its mark and its word, never alone; ink is 4.5:1 or more and a mark 3:1 or
+     more on every surface it sits on, in both themes, and nothing is made muted with opacity */
+  --c-surface: #f5f6f8; --c-surface-raised: #ffffff;   /* the page; what sits on it: a message, a button, a field */
+  --c-ink: #15202b; --c-ink-muted: #545d6b; --c-border: #e2e6ec;
+  --c-action: #2b57d1; --c-on-action: #ffffff;
+  --c-ok: #15803d; --c-warn: #b45309; --c-info: #1c3f9e; --c-off: var(--c-ink-muted);
+  --c-fault: #b91c1c;   /* red only here: 🔥, open help, a fault */   --c-on-fault: #ffffff;
+  --c-ask: #8a3d04;     /* a question's rule and word, apart from warn (△ could not) */
+  --c-seat-board: #7c3aed; --c-seat-backstage: #0369a1; --c-seat-observer: #545d6b;
+  --c-other-room: #0f766e;   /* the ↘ From and ↗ Sent edges */
+  /* the names the components read: each a role above, or a colour of its own */
+  --brand: var(--c-action); --brand-dark: #1c3f9e; --bg: var(--c-surface); --card: #ffffff; --border: var(--c-border);
+  --ink: var(--c-ink); --muted: var(--c-ink-muted); --accent: #d97706; --accent-soft: #fff4e0;
+  --success: var(--c-ok); --danger: var(--c-fault); --ok: var(--c-ok); --warn: var(--c-warn);
+  --director: var(--c-seat-board); --research: #0ea5e9; --observer: var(--c-seat-observer);
+  --stage: #0d1526; --stage-ink: #e8edf7; --stage-dim: #8c98b1;
+  --mine-ink: #4863c0; --mine-name: #1c3f9e;   /* one's own message's header and name */
+  --radius: var(--radius-md);
   --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.04);
 }
 
@@ -33,13 +55,13 @@ a { color: var(--brand); }
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   padding: .55rem .9rem; border-radius: var(--radius);
-  border: 1px solid var(--border); background: #fff; color: var(--ink);
+  border: 1px solid var(--c-border); background: var(--c-surface-raised); color: var(--c-ink);
   cursor: pointer; text-decoration: none; font-weight: 500;
   transition: background .12s, border-color .12s, transform .05s;
 }
 .btn:hover { border-color: #c7cdd7; }
 .btn:active { transform: translateY(1px); }
-.btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.btn.primary { background: var(--c-action); border-color: var(--c-action); color: var(--c-on-action); }
 .btn.primary:hover { background: var(--brand-dark); }
 .btn.ghost { background: transparent; }
 .btn.small { padding: .35rem .6rem; font-size: .9rem; }
@@ -111,11 +133,13 @@ input:focus, textarea:focus, button:focus-visible {
   height: 100dvh;
   background: var(--bg);
 }
+/* The hall page's rows wrap at every width: the header, the composer and a message's header take another line rather
+   than make the page wider than the screen (WCAG 1.4.10: a 390 px phone scrolls only up and down) */
 .app-header {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
   gap: .5rem; padding: .65rem 1rem;
   background: #fff; border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; z-index: 10;
+  position: sticky; top: 0; z-index: var(--z-header);
 }
 .app-title { display: flex; align-items: center; gap: .6rem; }
 .app-title strong { font-size: 1rem; }
@@ -124,7 +148,7 @@ input:focus, textarea:focus, button:focus-visible {
   padding: .15rem .55rem; border-radius: 999px; font-weight: 600;
   letter-spacing: 1px; font-size: .8rem;
 }
-.app-meta { display: flex; align-items: center; gap: .5rem; font-size: .9rem; color: var(--muted); }
+.app-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .5rem; min-width: 0; font-size: .9rem; color: var(--muted); }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: #cbd2de; transition: background .2s; }
 .dot.ok { background: var(--success); }
 
@@ -169,12 +193,12 @@ body:not([data-role="director"]) .left-col { flex: 1 1 100%; }
   padding: .75rem 1rem;
   flex: 0 0 auto;
 }
-.compose .row { display: flex; gap: .5rem; align-items: center; margin-top: .4rem; }
+.compose .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-top: .4rem; }
 .compose .row.end { justify-content: flex-end; }
 
 /* Right column: doc panel — full-height, 50% width for directors */
 .doc-panel { display: none; }
-body[data-role="director"], body[data-role="board"] .doc-panel,
+body[data-role="director"] .doc-panel, body[data-role="board"] .doc-panel,
 body[data-role="research"] .doc-panel {
   display: flex; flex-direction: column;
   flex: 0 0 50%;
@@ -261,9 +285,9 @@ body[data-role="research"] .doc-panel {
 .unpin:hover { color: var(--danger); border-color: var(--danger); }
 
 /* Director: clickable file in feed re-frames it on the stage panel */
-body[data-role="director"], body[data-role="board"] .file.clickable,
+body[data-role="director"] .file.clickable, body[data-role="board"] .file.clickable,
 body[data-role="research"] .file.clickable { cursor: zoom-in; }
-body[data-role="director"], body[data-role="board"] .file.clickable:hover,
+body[data-role="director"] .file.clickable:hover, body[data-role="board"] .file.clickable:hover,
 body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 
 /* Inline document renderers */
@@ -317,7 +341,7 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 @media (max-width: 800px) {
   .main-row { flex-direction: column; }
   .left-col { flex: 1 1 auto; }
-  body[data-role="director"], body[data-role="board"] .doc-panel,
+  body[data-role="director"] .doc-panel, body[data-role="board"] .doc-panel,
   body[data-role="research"] .doc-panel {
     /* Stacked layout default: 50/50 split, but never let the panel eat
        more than 75% so the chat keeps at least 25% (matching the
@@ -333,37 +357,47 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 
 /* Individual message */
 .msg {
-  background: var(--card); border: 1px solid var(--border);
+  background: var(--c-surface-raised); border: 1px solid var(--c-border); color: var(--c-ink);
   border-radius: var(--radius); padding: .7rem .85rem;
   box-shadow: 0 1px 1px rgba(0,0,0,.02);
   max-width: 760px;
   font-size: calc(1rem * var(--zoom-msg, 1));
 }
-.msg header { display: flex; align-items: center; gap: .5rem; color: var(--muted); margin-bottom: .25rem; }
-.msg .from { font-weight: 600; color: var(--ink); }
+/* The header wraps: its name, seat, time and acts take a second line rather than widen the page on a phone */
+.msg header { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .5rem; color: var(--muted); margin-bottom: .25rem; }
+.msg .from { font-weight: 600; color: var(--ink); word-break: break-word; overflow-wrap: anywhere; }
 .role-tag {
   font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
   padding: .1rem .4rem; border-radius: 999px;
   background: #eef2fb; color: var(--brand-dark);
 }
-.role-tag[data-role="director"], .role-tag[data-role="board"] { background: #ede9fe; color: var(--director); }
-.role-tag[data-role="research"] { background: #e0f2fe; color: #0369a1; }
-.role-tag[data-role="observer"] { background: #f1f5f9; color: var(--observer); }
+.role-tag[data-role="director"], .role-tag[data-role="board"] { background: #ede9fe; color: var(--c-seat-board); }
+.role-tag[data-role="research"] { background: #e0f2fe; color: var(--c-seat-backstage); }
+.role-tag[data-role="observer"] { background: #f1f5f9; color: var(--c-seat-observer); }
 .msg time { margin-left: auto; font-variant-numeric: tabular-nums; }
-.msg .pin-btn { background: none; border: none; cursor: pointer; padding: 0 .25rem; opacity: .35; font-size: 1rem; }
-.msg .pin-btn:hover { opacity: .9; }
-.msg.pinned .pin-btn { opacity: 1; }
+/* A message's icon buttons: muted ink, 3:1 or more on every message in both themes, never faded with opacity, and at
+   least --target-min. Pinned, the pin says so with a ring, not by being brighter. */
+.msg .pin-btn, .msg .del-btn, .msg .fwd-btn, .msg .reply-btn, .msg .react-btn, .msg .stage-btn, .msg .propose-btn, .msg .screen-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: var(--target-min); min-height: var(--target-min); padding: 0 var(--sp-1);
+  background: none; border: 0; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 1rem; line-height: 1; color: var(--c-ink-muted);
+}
+.msg .pin-btn:hover, .msg .fwd-btn:hover, .msg .reply-btn:hover, .msg .react-btn:hover, .msg .stage-btn:hover,
+.msg .propose-btn:hover, .msg .screen-btn:hover { color: var(--c-action); background: var(--c-surface); }
+.msg .del-btn:hover { color: var(--c-fault); background: var(--c-surface); }
+.msg.pinned .pin-btn { box-shadow: inset 0 0 0 1.5px var(--c-action); }
 /* Pinned action prompts are hoisted to the pinned strip — hide the original
    in the feed so it isn't shown twice. The pinned-strip clone lives in
    #pinnedList (outside .feed) so it stays visible. Unpinning flips
    data-pinned back to "0" and the original reappears in place. */
 .feed .msg[data-type="action"][data-pinned="1"] { display: none; }
-.msg .body p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg .body p { margin: 0; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
 
 /* File body in feed */
 .file img { max-width: 100%; max-height: 420px; border-radius: 8px; border: 1px solid var(--border); background: #fafbfc; }
 .file .caption { margin-top: .35rem; color: var(--muted); font-style: italic; }
-.file-link { display: inline-block; padding: .4rem .6rem; background: #f1f5ff; border-radius: 8px; }
+.file-link { display: inline-block; max-width: 100%; padding: .4rem .6rem; background: #f1f5ff; border-radius: 8px; word-break: break-word; overflow-wrap: anywhere; }
 
 /* Action prompt */
 .msg.is-action { border-color: #fbcf8a; background: #fffaf0; }
@@ -396,44 +430,29 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 /* System message */
 .sys { align-self: center; color: var(--muted); font-size: .85rem; font-style: italic; padding: .15rem .5rem; }
 
-/* Flash on new message — bright burst then 30s fade back to normal */
-.flash {
-  animation: flashIn 30s ease-out;
-  position: relative;
+/* A message is new by its place, never by a fill that fades: the New divider sits above the first message that arrived
+   since the person last touched the page, and "↓ n new" says how many came below a feed they had scrolled up. Neither
+   moves, so reduced motion has nothing to stop. */
+.feed-wrap { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.new-divider { display: flex; align-items: center; gap: var(--sp-2); color: var(--c-action); font-size: var(--fs-xs); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.new-divider::before, .new-divider::after { content: ''; flex: 1 1 auto; border-top: 2px solid var(--c-action); }
+.new-below {
+  position: absolute; left: 50%; bottom: var(--sp-3); transform: translateX(-50%); z-index: var(--z-panel);
+  min-height: var(--target-touch); min-width: var(--target-touch); padding: 0 var(--sp-4);
+  border-radius: var(--radius-pill); border: 1px solid var(--c-action);
+  background: var(--c-action); color: var(--c-on-action); font: inherit; font-weight: 600; cursor: pointer;
+  box-shadow: var(--shadow);
 }
-.flash::after {
-  content: '';
-  position: absolute; inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, .55);
-  animation: flashGlow 30s ease-out forwards;
-}
-@keyframes flashIn {
-  0%   { background-color: #fff5b8; }
-  3%   { background-color: #fff5b8; }
-  100% { background-color: transparent; }
-}
-@keyframes flashGlow {
-  0%   { opacity: 1; }
-  3%   { opacity: 1; }
-  100% { opacity: 0; }
-}
-html[data-theme="dark"] @keyframes flashIn { /* placeholder; values override below */ }
-html[data-theme="dark"] .flash { animation-name: flashInDark; }
-@keyframes flashInDark {
-  0%   { background-color: #4a3a10; }
-  3%   { background-color: #4a3a10; }
-  100% { background-color: transparent; }
-}
+/* The original a reply quotes, when the quote is followed to it: ringed for a moment, nothing filled or animated */
+.msg.found { outline: 3px solid var(--c-action); outline-offset: 2px; }
 
 /* ---------- Compose internals ---------- */
 .director-compose form { display: flex; gap: .5rem; }
-.director-compose input { flex: 1; }
+.director-compose input { flex: 1 1 auto; min-width: 0; }
 .director-compose .btn.primary { padding: .7rem 1.1rem; font-size: 1rem; }
 
 .compose-tabs {
-  display: flex; gap: .25rem; border-bottom: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; gap: .25rem; border-bottom: 1px solid var(--border);
   margin: -.75rem -1rem .6rem;
   padding: .4rem 1rem 0;
 }
@@ -468,24 +487,23 @@ html[data-theme="dark"] .flash { animation-name: flashInDark; }
 /* Director overrides: every font-size is calc()'d against the same
    --zoom-msg variable that .feed uses, so the A+/A− buttons reliably
    scale chat text in director view. */
-body[data-role="director"], body[data-role="board"] .feed { padding: .9rem; gap: .75rem; }
-body[data-role="director"], body[data-role="board"] .msg {
+body[data-role="director"] .feed, body[data-role="board"] .feed { padding: .9rem; gap: .75rem; }
+body[data-role="director"] .msg, body[data-role="board"] .msg {
   font-size: calc(1.05rem * var(--zoom-msg, 1));
   padding: .9rem 1.05rem;
 }
-body[data-role="director"], body[data-role="board"] .msg.is-action { box-shadow: 0 2px 10px rgba(217,119,6,.18); }
-body[data-role="director"], body[data-role="board"] .action-text {
+body[data-role="director"] .msg.is-action, body[data-role="board"] .msg.is-action { box-shadow: 0 2px 10px rgba(217,119,6,.18); }
+body[data-role="director"] .action-text, body[data-role="board"] .action-text {
   font-size: calc(1.18rem * var(--zoom-msg, 1));
   line-height: 1.35;
 }
-body[data-role="director"], body[data-role="board"] .action-btn {
+body[data-role="director"] .action-btn, body[data-role="board"] .action-btn {
   font-size: calc(1rem * var(--zoom-msg, 1));
   padding: .8rem 1.3rem;
 }
-body[data-role="director"], body[data-role="board"] .pinned-strip { background: #fff7e6; }
-body[data-role="director"], body[data-role="board"] .pin-btn {
+body[data-role="director"] .pinned-strip, body[data-role="board"] .pinned-strip { background: #fff7e6; }
+body[data-role="director"] .msg .pin-btn, body[data-role="board"] .msg .pin-btn {
   font-size: calc(1.15rem * var(--zoom-msg, 1));
-  opacity: .55;
 }
 /* Message headers (name + role tag + time) scale too, in BOTH roles */
 .msg header { font-size: calc(.85rem * var(--zoom-msg, 1)); }
@@ -495,6 +513,21 @@ body[data-role="director"], body[data-role="board"] .pin-btn {
   .app-meta .btn { padding: .3rem .55rem; }
   .feed { padding: .7rem; }
   .compose { padding: .6rem .7rem; }
+  .compose-tabs { margin: -.6rem -.7rem .6rem; padding: .4rem .7rem 0; }   /* to the composer's own edge, never past it */
+}
+
+/* Send: its word on a wide screen; below 540 px a 44 px button with its mark, named by its aria-label, so the text box
+   keeps the row */
+.send-btn .send-icon { display: none; }
+@media (max-width: 540px) {
+  .send-btn { min-width: var(--target-touch); min-height: var(--target-touch); padding: 0 var(--sp-3); }
+  .director-compose .send-btn.btn.primary { padding: 0 var(--sp-3); }
+  .send-btn .send-icon { display: inline; font-size: var(--fs-lg); line-height: 1; }
+  .send-btn .send-word { display: none; }
+}
+/* A coarse pointer (a finger): the header's controls and the composer's buttons are --target-touch */
+@media (pointer: coarse) {
+  .app-meta .btn, .app-meta a.btn, .compose .btn { min-height: var(--target-touch); min-width: var(--target-touch); }
 }
 
 /* Smaller room chip when shown on the right side of the header */
@@ -511,15 +544,9 @@ body[data-role="director"], body[data-role="board"] .pin-btn {
   background: #eaf2ff;
   border-color: #c7d8ff;
 }
-.msg.mine header { color: #4863c0; }
-.msg.mine .from { color: #1c3f9e; }
+.msg.mine header { color: var(--mine-ink); }
+.msg.mine .from { color: var(--mine-name); }   /* a priority message's name (below) is red over it, in both themes */
 
-/* Delete button for own messages */
-.msg .del-btn {
-  background: none; border: none; cursor: pointer;
-  padding: 0 .25rem; opacity: .35; font-size: 1rem;
-}
-.msg .del-btn:hover { opacity: 1; color: var(--danger); }
 
 /* Splitter between message column and stage panel */
 .split-resizer {
@@ -536,11 +563,11 @@ body[data-role="director"], body[data-role="board"] .pin-btn {
   left: -3px; right: -3px; top: 0; bottom: 0;
 }
 .split-resizer:hover { background: var(--brand); }
-body[data-role="director"], body[data-role="board"] .split-resizer,
+body[data-role="director"] .split-resizer, body[data-role="board"] .split-resizer,
 body[data-role="research"] .split-resizer { display: block; }
 
 @media (max-width: 800px) {
-  body[data-role="director"], body[data-role="board"] .split-resizer { display: none; }
+  body[data-role="director"] .split-resizer, body[data-role="board"] .split-resizer { display: none; }
 }
 
 /* ====================================================================
@@ -563,28 +590,21 @@ body[data-role="research"] .split-resizer { display: block; }
 }
 .theme-toggle:hover { border-color: var(--brand); }
 
+/* The dark theme: the tokens' colours, once (the sizes, spaces and layers are the same in both) */
 html[data-theme="dark"] {
-  --brand: #5b8dff;
-  --brand-dark: #3a6cdf;
-  --bg: #0f1421;
-  --card: #1a2032;
-  --border: #2c344a;
-  --ink: #e4e7ee;
-  --muted: #9aa3b5;
-  --accent: #f0a14a;
-  --accent-soft: #2a2010;
-  --success: #34d399;
-  --danger: #f87171;
-  --director: #a78bfa;
-  --research: #38bdf8;
-  --observer: #94a3b8;
+  --c-surface: #0f1421; --c-surface-raised: #1f2840;
+  --c-ink: #e4e7ee; --c-ink-muted: #9aa3b5; --c-border: #2c344a;
+  --c-action: #5b8dff; --c-on-action: #0f1421;
+  --c-ok: #34d399; --c-warn: #f0a14a; --c-info: #b8c8ff;
+  --c-fault: #fca5a5; --c-on-fault: #0f1421;
+  --c-ask: #f0a14a;
+  --c-seat-board: #a78bfa; --c-seat-backstage: #7dd3fc; --c-seat-observer: #94a3b8;
+  --c-other-room: #5eead4;
+  --brand-dark: #3a6cdf; --card: #1a2032; --accent: #f0a14a; --accent-soft: #2a2010; --research: #38bdf8;
+  --stage: #070c18;
+  --mine-ink: #b8c8ff; --mine-name: #b8c8ff;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.3);
   color-scheme: dark;
-}
-
-html[data-theme="dark"] body {
-  background: var(--bg);
-  color: var(--ink);
 }
 
 /* Join page in dark mode */
@@ -632,7 +652,7 @@ html[data-theme="dark"] .doc-display .empty-state { color: var(--muted); }
 
 html[data-theme="dark"] .room-chip { background: #1f2942; color: #b8c8ff; }
 html[data-theme="dark"] .role-tag { background: #2a3450; color: #c8d3ff; }
-html[data-theme="dark"] .role-tag[data-role="director"], .role-tag[data-role="board"] { background: #2e2655; color: #c4b5fd; }
+html[data-theme="dark"] .role-tag[data-role="director"], html[data-theme="dark"] .role-tag[data-role="board"] { background: #2e2655; color: #c4b5fd; }
 html[data-theme="dark"] .role-tag[data-role="research"] { background: #1a3142; color: #7dd3fc; }
 html[data-theme="dark"] .role-tag[data-role="observer"] { background: #232b40; color: #cbd5e1; }
 
@@ -641,19 +661,10 @@ html[data-theme="dark"] .pinned-strip { background: #2a2010; border-color: #3a2e
 html[data-theme="dark"] .pinned-strip h4 { color: #f0a14a; }
 
 /* Messages in feed */
-html[data-theme="dark"] .msg {
-  background: #1f2840;
-  border-color: var(--border);
-  color: var(--ink);
-}
-html[data-theme="dark"] .msg header { color: var(--muted); }
-html[data-theme="dark"] .msg .from { color: var(--ink); }
 html[data-theme="dark"] .msg.mine {
   background: #243054;
   border-color: #3554a0;
 }
-html[data-theme="dark"] .msg.mine header,
-html[data-theme="dark"] .msg.mine .from { color: #b8c8ff; }
 html[data-theme="dark"] .msg.is-action { background: #2a2415; border-color: #5a4520; }
 html[data-theme="dark"] .msg.is-action.answered { background: #112a1f; border-color: #1d6b41; }
 
@@ -666,20 +677,9 @@ html[data-theme="dark"] .action-btn {
 }
 html[data-theme="dark"] .action-btn:hover { background: var(--accent); color: #0f1421; }
 
-/* Generic buttons */
-html[data-theme="dark"] .btn {
-  background: #1f2840;
-  border-color: var(--border);
-  color: var(--ink);
-}
+/* Generic buttons: their surface, ink and border are the tokens'; only the hover is the dark theme's own */
 html[data-theme="dark"] .btn:hover { border-color: #4a5675; }
-html[data-theme="dark"] .btn.primary {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: #0f1421;
-}
 html[data-theme="dark"] .btn.primary:hover { background: var(--brand-dark); color: #fff; }
-html[data-theme="dark"] .btn.ghost { background: transparent; }
 
 /* Compose tabs / dropzone / chips */
 html[data-theme="dark"] .compose-tabs .tab { color: var(--muted); }
@@ -732,24 +732,26 @@ html[data-theme="dark"] button:focus-visible {
    ==================================================================== */
 
 /* Compose-side toggle button */
+/* Its colours are the tokens', in both themes, so no theme's rule outranks the pressed state: pressed, it is filled with
+   the fault red (and aria-pressed says so); unpressed, it is outlined */
 .priority-btn {
-  border: 1px solid var(--border);
-  background: #fff; color: var(--danger);
+  border: 1px solid var(--c-border);
+  background: transparent; color: var(--c-fault);
   font-weight: 600;
 }
-.priority-btn:hover { border-color: var(--danger); }
+.priority-btn:hover { border-color: var(--c-fault); }
 .priority-btn.on {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
+  background: var(--c-fault);
+  border-color: var(--c-fault);
+  color: var(--c-on-fault);
   box-shadow: 0 0 0 2px rgba(220,38,38,.2);
 }
 
-/* Badge inside the message header — only visible on .priority messages */
+/* Badge inside the message header — only visible on .priority messages; its words on the fault red at 4.5:1 or more */
 .priority-badge {
   display: none;
-  background: var(--danger); color: #fff;
-  font-size: .68rem; font-weight: 800;
+  background: var(--c-fault); color: var(--c-on-fault);
+  font-size: var(--fs-xs); font-weight: 800;
   padding: .1rem .45rem; border-radius: 999px;
   letter-spacing: .06em;
   animation: priority-pulse 1.6s ease-in-out infinite;
@@ -767,7 +769,7 @@ html[data-theme="dark"] button:focus-visible {
   background: #fff0f0;
   box-shadow: 0 2px 16px rgba(220,38,38,.25);
 }
-.msg.priority .from { color: #b91c1c; }
+.msg.priority .from { color: var(--c-fault); }
 .msg.priority.mine { background: #ffe4e4; border-color: var(--danger); }
 
 /* Pulse on the badge so directors can't miss it */
@@ -789,19 +791,12 @@ html[data-theme="dark"] button:focus-visible {
 .doc-panel.priority .doc-panel-header strong::before { content: '🔥 '; }
 
 /* ---- Dark mode for priority ---- */
-html[data-theme="dark"] .priority-btn {
-  background: #1f2840; color: #fca5a5; border-color: var(--border);
-}
-html[data-theme="dark"] .priority-btn:hover { border-color: var(--danger); }
-html[data-theme="dark"] .priority-btn.on {
-  background: var(--danger); color: #0f1421; border-color: var(--danger);
-}
+html[data-theme="dark"] .priority-btn:hover { border-color: var(--c-fault); }   /* over the dark theme's hover for every button */
 html[data-theme="dark"] .msg.priority {
   background: #2a1414; border-color: var(--danger);
   box-shadow: 0 2px 14px rgba(248,113,113,.25);
 }
 html[data-theme="dark"] .msg.priority.is-action { background: #2c1010; }
-html[data-theme="dark"] .msg.priority .from { color: #fca5a5; }
 html[data-theme="dark"] .msg.priority.mine { background: #3a1c1c; }
 html[data-theme="dark"] .doc-panel.priority .doc-panel-header {
   background: linear-gradient(180deg, #2a1414, var(--card));
@@ -975,18 +970,18 @@ html[data-theme="dark"] .room-code-big { color: #b8c8ff; }
 
 /* The header-side stage toggle (📺) is only useful for directors */
 .director-only { display: none; }
-body[data-role="director"], body[data-role="board"] .director-only,
+body[data-role="director"] .director-only, body[data-role="board"] .director-only,
 body[data-role="research"] .director-only { display: inline-flex; }
 
 /* Mobile / narrow: stack vertically, splitter is a horizontal bar */
 @media (max-width: 800px) {
-  body[data-role="director"], body[data-role="board"] .split-resizer,
+  body[data-role="director"] .split-resizer, body[data-role="board"] .split-resizer,
   body[data-role="research"] .split-resizer {
     display: block;
     width: 100%; height: 8px; flex: 0 0 8px;
     cursor: row-resize;
   }
-  body[data-role="director"], body[data-role="board"] .doc-panel,
+  body[data-role="director"] .doc-panel, body[data-role="board"] .doc-panel,
   body[data-role="research"] .doc-panel {
     /* Same cap in this duplicate rule block */
     flex: 0 0 50%;
@@ -996,7 +991,7 @@ body[data-role="research"] .director-only { display: inline-flex; }
     box-shadow: 0 -2px 8px rgba(0,0,0,.04);
   }
   /* When collapsed in mobile, the panel becomes a thin horizontal bar */
-  body[data-role="director"], body[data-role="board"] .doc-panel.collapsed,
+  body[data-role="director"] .doc-panel.collapsed, body[data-role="board"] .doc-panel.collapsed,
   body[data-role="research"] .doc-panel.collapsed {
     flex: 0 0 36px !important;
     width: 100%; max-width: 100%; height: 36px;
@@ -1023,11 +1018,6 @@ html[data-theme="dark"] .doc-collapse-btn:hover { color: var(--ink); border-colo
 /* ====================================================================
    FORWARD-TO-ANOTHER-ROOM
    ==================================================================== */
-.msg .fwd-btn {
-  background: none; border: none; cursor: pointer;
-  padding: 0 .25rem; opacity: .35; font-size: 1rem;
-}
-.msg .fwd-btn:hover { opacity: 1; color: var(--brand); }
 
 .fwd-menu {
   background: var(--card);
@@ -1090,24 +1080,22 @@ body[data-role="observer"] .msg .react-btn,
 body[data-role="observer"] .msg .reply-btn,
 body[data-role="observer"] .unpin,
 body[data-role="observer"] #pinDocBtn { display: none !important; }
-.action-btn:disabled, .rx-pill:disabled { cursor: default; opacity: .7; }
+/* Not to be pressed: a dashed edge says so, and its words keep their full ink */
+.action-btn:disabled, .rx-pill:disabled { cursor: default; border-style: dashed; }
 .action-btn:disabled:hover { background: #fff; color: #7a4d00; }
 .rx-pill:disabled:hover { border-color: var(--border); }
 html[data-theme="dark"] .action-btn:disabled:hover { background: #2a2415; color: #f5d8a0; }
 
-/* Admin "Reset session" button — clearly destructive */
+/* Admin "Reset session" button — clearly destructive: outlined in the fault red, filled with it under the pointer, in
+   both themes from the tokens (a primary button that carries the class, the close's confirm, stays primary) */
 .admin-reset-btn {
   align-self: flex-start;
-  background: #fff;
-  color: var(--danger);
-  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--c-fault);
+  border: 1px solid var(--c-fault);
   font-weight: 600;
 }
-.admin-reset-btn:hover { background: var(--danger); color: #fff; }
-html[data-theme="dark"] .admin-reset-btn {
-  background: transparent; color: #fca5a5; border-color: var(--danger);
-}
-html[data-theme="dark"] .admin-reset-btn:hover { background: var(--danger); color: #0f1421; }
+.admin-reset-btn:hover { background: var(--c-fault); color: var(--c-on-fault); }
 
 
 /* Dark-mode response pill variants */
@@ -1192,12 +1180,6 @@ html[data-theme="dark"] .reply-quote { background: #1f2942; color: #b8c8ff; }
 }
 html[data-theme="dark"] .reply-chip { background: #1f2942; border-color: #2c3450; color: #b8c8ff; }
 
-/* Reply / react buttons in message header */
-.msg .reply-btn, .msg .react-btn {
-  background: none; border: none; cursor: pointer;
-  padding: 0 .25rem; opacity: .35; font-size: .95rem;
-}
-.msg .reply-btn:hover, .msg .react-btn:hover { opacity: 1; color: var(--brand); }
 
 /* Mention pill in rendered text */
 .mention {
@@ -1273,11 +1255,14 @@ html[data-theme="dark"] .linked-chip .unlink-room { color: #f5d8a0; }
    winning when the user is on a different tab. */
 .research-compose #textPane:not(.hidden) {
   display: flex;
+  flex-wrap: wrap;
   gap: .5rem;
   align-items: flex-end;
 }
+/* The text box takes the row; the buttons sit at its end, and below it when the row is too narrow for both */
 .research-compose #textPane:not(.hidden) > textarea {
-  flex: 1 1 auto;
+  flex: 1 1 10rem;
+  min-width: 0;
   min-height: 38px;
   resize: vertical;
 }
@@ -1465,7 +1450,6 @@ html[data-theme="dark"] .link-picker-item:hover .lp-room-name { color: #b8c8ff; 
 .linked-chip .lc-code {
   font-weight: 600;
   font-size: .72rem;
-  opacity: .7;
   margin-left: .3rem;
   letter-spacing: 1px;
 }
@@ -1592,15 +1576,16 @@ html[data-theme="dark"] .admin-tunnel-error .error {
 
 
 /* ---- 0.2: stage chip, seen receipts, AI drafts, toasts ---- */
-.stage-chip{display:inline-flex;align-items:center;gap:.4rem;padding:.15rem .55rem;border-radius:999px;background:#0b1220;color:#e2e8f0;font-size:.85rem;max-width:22rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage-chip{display:inline-flex;align-items:center;gap:.4rem;padding:.15rem .55rem;border-radius:999px;background:#0b1220;color:#e2e8f0;font-size:.85rem;max-width:min(22rem,100%);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stage-chip b{font-variant-numeric:tabular-nums;font-size:1rem}
-.stage-chip.stale{opacity:.55;outline:1px dashed #f59e0b}
-.seen-line{font-size:.75rem;color:#6b7280;margin-top:.15rem;text-align:right}
-.ai-hint{font-size:.8rem;color:#4338ca;margin:.3rem 0 0}
-.ai-hint.bad{color:#b91c1c}
+.stage-chip.stale{color:var(--stage-dim);outline:1px dashed #f59e0b}   /* the last time known, in the dim ink, never faded */
+.seen-line{font-size:.75rem;color:var(--c-ink-muted);margin-top:.15rem;text-align:right}
+.ai-hint{flex:1 1 100%;font-size:.8rem;color:var(--c-info);margin:.3rem 0 0}   /* its own line under the composer; 4.5:1 or more in both themes */
+.ai-hint.bad{color:var(--c-fault)}
 .ai-btn{border-color:#818cf8}
-.stage-btn{background:none;border:0;cursor:pointer;font-size:.95rem;opacity:.7}
-.stage-btn:hover{opacity:1}
+/* AI off: the button stays, with the reason as its title and, when pressed, in the line under the composer; a dashed
+   edge and muted words say it cannot be used now, never a fade */
+.ai-btn[aria-disabled="true"]{border-style:dashed;border-color:var(--c-ink-muted);color:var(--c-ink-muted);cursor:default}
 .agm-toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%) translateY(150%);background:#111827;color:#f9fafb;padding:.6rem 1rem;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);z-index:9999;transition:transform .2s ease;max-width:90vw;font-size:.95rem}
 .agm-toast.show{transform:translateX(-50%) translateY(0)}
 .agm-toast.bad{background:#7f1d1d}
@@ -1614,7 +1599,7 @@ html[data-theme="dark"] .admin-tunnel-error .error {
 .admin-network-section .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.3rem 0 .8rem}
 .peer-list{list-style:none;padding:0;margin:.2rem 0 1rem;font-size:.9rem}
 .peer-list li{display:flex;gap:.6rem;align-items:center;margin:.2rem 0}
-.sys.presence{font-size:.72rem;opacity:.6;margin:.05rem 0}
+.sys.presence{font-size:var(--fs-xs);margin:.05rem 0}   /* quieter by its size, never by opacity: muted ink, 4.5:1 */
 .admin-network-section input{width:auto;flex:1 1 220px;max-width:420px}
 
 /* Show Bus 1.1: a stage message's receipt and the speaker's acknowledgement, on the message that was sent */
@@ -1630,8 +1615,6 @@ html[data-theme="dark"] .admin-tunnel-error .error {
 .msg.echo .echo-acts:empty { display: none; }
 .held-line { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
 form[data-held="1"] textarea, form[data-held="1"] input { background: var(--bg); }
-.ai-off-note { font-size: .75rem; color: var(--muted); align-self: center; margin-right: auto; }
-body:not([data-role="research"]) .ai-off-note { display: none; }
 /* A page's connection in words (reconnect.js): a refusal's wait, a drop of 2 s or more, a refusal for good; no motion */
 .conn-strip { margin: 0; padding: .45rem 1rem; background: var(--accent-soft); color: var(--ink); border-left: 4px solid var(--warn); border-bottom: 1px solid var(--border); font-size: .9rem; font-weight: 500; }
 .conn-strip[hidden] { display: none; }
@@ -1639,18 +1622,14 @@ body:not([data-role="research"]) .ai-off-note { display: none; }
 .conn-words[hidden] { display: none; }
 
 /* 0.4: proposals to the show desk, and the /tls page */
-.propose-btn{background:none;border:0;cursor:pointer;font-size:.95rem;opacity:.7}
-.propose-btn:hover{opacity:1}
 .proposal-line[data-state="done"]{color:#16a34a}
 .proposal-line[data-state="rejected"],.proposal-line[data-state="failed"],.proposal-line[data-state="undelivered"]{color:#dc2626}
-.btn.danger{background:#dc2626;color:#fff;border-color:#dc2626}
+.btn.danger{background:var(--c-fault);color:var(--c-on-fault);border-color:var(--c-fault)}
 .tls-page main.tls{max-width:44rem;margin:2rem auto;padding:0 1rem;line-height:1.5}
 .tls-page .fp code{font-size:.85rem;word-break:break-all}
 .tls-page li{margin:.35rem 0}
 
 /* ===================== 0.5: the way in, the account area, the halls board ===================== */
-:root { --stage: #0d1526; --stage-ink: #e8edf7; --stage-dim: #8c98b1; --warn: #b45309; --ok: #15803d; }
-html[data-theme="dark"] { --stage: #070c18; --warn: #f0a14a; --ok: #34d399; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 :focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
 .muted { color: var(--muted); }
@@ -1698,14 +1677,14 @@ html[data-theme="dark"] input, html[data-theme="dark"] textarea { background: va
 .hall-row[data-state="over"] .hall-clock { box-shadow: inset 4px 0 0 #ef4444; }
 .hall-row[data-state="stale"] .hall-time, .hall-row[data-state="none"] .hall-time,
 .hall-row[data-state="checking"] .hall-time, .hall-row[data-state="refused"] .hall-time, .hall-row[data-state="refusedView"] .hall-time,
-.hall-row[data-state="certificate"] .hall-time { opacity: .45; }
+.hall-row[data-state="certificate"] .hall-time { color: var(--stage-dim); }
 .hall-row[data-state="stale"] .hall-clock, .hall-row[data-state="checking"] .hall-clock { outline: 1px dashed #f59e0b; }
 .hall-row[data-state="refused"] .hall-clock, .hall-row[data-state="refusedView"] .hall-clock,
 .hall-row[data-state="certificate"] .hall-clock { box-shadow: inset 4px 0 0 #ef4444; }
 .hall-last { font-size: .92rem; line-height: 1.35; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .hall-last time { color: var(--muted); font-size: .8rem; margin-left: .25rem; }
 .hall-meta { display: flex; flex-wrap: wrap; gap: .35rem; justify-content: flex-end; font-size: .82rem; color: var(--muted); }
-.help-count { color: #fff; background: var(--danger); padding: .1rem .5rem; border-radius: 999px; font-weight: 700; }
+.help-count { color: var(--c-on-fault); background: var(--c-fault); padding: .1rem .5rem; border-radius: 999px; font-weight: 700; }
 .disp-chip { border: 1px solid var(--border); border-radius: 999px; padding: .05rem .5rem; color: var(--ink); background: var(--card); }
 .disp-chip[data-ok="shown"] { border-color: var(--ok); }
 .disp-chip[data-ok="offline"], .disp-chip[data-ok="error"] { border-color: var(--danger); }
@@ -1722,13 +1701,17 @@ html[data-theme="dark"] input, html[data-theme="dark"] textarea { background: va
 .help-strip ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
 .help-item { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; padding: .45rem 0; border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); }
 .help-item:first-child { border-top: 0; }
-.help-item[data-state="coming"] { opacity: .8; }
+.help-item[data-state="coming"] { color: var(--c-ink-muted); }
 .help-where { font-weight: 700; min-width: 6rem; }
 .help-what { flex: 1 1 16rem; }
 .help-who { font-size: .82rem; color: var(--muted); }
 
 /* Dialogs */
-.agm-dialog { border: 1px solid var(--border); border-radius: 14px; padding: 1.2rem 1.3rem; width: min(30rem, calc(100vw - 2rem)); background: var(--card); color: var(--ink); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+/* A dialog is held inside the screen: never wider or taller than it, its content scrolling inside it, so every button
+   of it can be reached on a phone */
+.agm-dialog { border: 1px solid var(--border); border-radius: 14px; padding: 1.2rem 1.3rem; width: min(30rem, calc(100vw - 2rem)); max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem); overflow-y: auto; overscroll-behavior: contain;
+  background: var(--card); color: var(--ink); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
 .agm-dialog.wide { width: min(46rem, calc(100vw - 2rem)); }
 .agm-dialog::backdrop { background: rgba(8, 12, 24, .55); }
 .agm-dialog h2 { margin: 0 0 .8rem; font-size: 1.2rem; }
@@ -1747,7 +1730,7 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .acct-table { width: 100%; border-collapse: collapse; font-size: .93rem; }
 .acct-table th { text-align: left; font-size: .8rem; color: var(--muted); font-weight: 600; padding: .4rem .6rem; border-bottom: 1px solid var(--border); }
 .acct-table td { padding: .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-.acct-table tr.off td { opacity: .55; }
+.acct-table tr.off td { color: var(--c-ink-muted); }
 /* The audit log's four marks: ✓ checked under this key, ◇ linked and accepted, △ not vouched for, ✕ did not check. The
    shape is always drawn beside the colour, so no state is told by colour alone. */
 [data-mark="intact"] { --mark: var(--ok); }
@@ -1767,7 +1750,7 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .audit-row { display: grid; grid-template-columns: 1.4rem 11rem 8rem 13rem 1fr; gap: .3rem .8rem; padding: .45rem 0; border-bottom: 1px solid var(--border); }
 .audit-row .audit-bad { grid-column: 2 / -1; color: var(--danger); }
 .audit-row time { color: var(--muted); font-variant-numeric: tabular-nums; }
-.audit-row .audit-action, .audit-row .audit-words { min-width: 0; overflow-wrap: anywhere; }   /* a split's target is 75 characters with no break */
+.audit-row .audit-action, .audit-row .audit-words { min-width: 0; word-break: break-word; overflow-wrap: anywhere; }   /* a split's target is 75 characters with no break */
 .audit-row[data-action="login"] .audit-action { color: var(--muted); }
 .audit-row[data-action="user"] .audit-action, .audit-row[data-action="settings"] .audit-action { color: var(--warn); font-weight: 600; }
 @media (max-width: 760px) { .audit-row { grid-template-columns: 1fr; } }
@@ -1785,11 +1768,12 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
 /* Help requests in a hall: a card that cannot be missed until it is resolved; shape and words carry the state */
-.help-btn { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 700; }
+/* Help is red in both themes: the button's surface is a token, so no theme's rule for .btn outranks it */
+.help-btn { background: var(--c-fault); border-color: var(--c-fault); color: var(--c-on-fault); font-weight: 700; }
 .help-btn:hover { filter: brightness(1.08); }
 .msg.is-help { border-left: 6px solid var(--danger); }
 .msg.is-help[data-help="coming"] { border-left-color: var(--accent); }
-.msg.is-help[data-help="resolved"] { border-left-color: var(--success); opacity: .85; }
+.msg.is-help[data-help="resolved"] { border-left-color: var(--success); }
 .help-body .help-head { margin: 0 0 .35rem; font-size: calc(1.05rem * var(--zoom-msg, 1)); }
 .help-line { font-size: .88rem; font-weight: 600; }
 .help-line[data-state="open"] { color: var(--danger); }
@@ -1802,9 +1786,7 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .help-cat input { margin: 0; }
 
 /* Screens: an operator's view of the hall's displays — tick, then take; each line says what its screen confirmed */
-.screen-btn { background: none; border: 0; cursor: pointer; font-size: 1rem; opacity: .7; }
-.screen-btn:hover { opacity: 1; }
-.screens-dialog { max-height: min(92vh, 52rem); }
+.screens-dialog { max-height: min(92vh, 52rem); max-height: min(calc(100dvh - 2rem), 52rem); }
 .screens-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .screens-head h2 { margin: 0; }
 .screens-pending { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .8rem 0 0; padding: .6rem .8rem; border: 2px solid var(--brand); border-radius: 10px; }

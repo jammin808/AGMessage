@@ -143,9 +143,7 @@ function rejoin() {
     CAN_PROPOSE = !!res.canPropose;
     STAGE_KEY = stageKey(res.stage);
     AI_ON = !!res.ai;
-    document.querySelectorAll('.ai-btn').forEach((b) => { b.hidden = !AI_ON; });
-    // Without AI, nothing else changes: say so where the draft button would be (research team only sees it).
-    document.querySelectorAll('.ai-off-note').forEach((n) => { n.hidden = AI_ON; });
+    drawAiButtons();
     if (res.note) notify(res.note);
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
     if (readOnly()) { document.getElementById('directorCompose').hidden = true; document.getElementById('researchCompose').hidden = true; }
@@ -155,7 +153,14 @@ function rejoin() {
     (res.seen || []).forEach(noteSeen);
     if (res.roomName) setRoomTitle(res.roomName);
     if (Array.isArray(res.ops)) {
-      for (const op of res.ops) applyOp(op);       // just the gap
+      // Just the gap, drawn in one pass: where the reader is is read once before it, and the feed moved at most once
+      // after it, so a page back from a drop reads no layout per message it missed.
+      catchUp = { follow: readerAtEnd(), toEnd: false };
+      try { for (const op of res.ops) applyOp(op); } finally {
+        const done = catchUp;
+        catchUp = null;
+        if (done.toEnd) scrollToBottom();
+      }
       // The hall's Stagewatch may have come or gone while the page was away: the messages already drawn offer what it
       // offers now.
       if (flagsWere !== CAN_STAGE + '|' + CAN_PROPOSE) refreshProposeButtons();
@@ -174,13 +179,15 @@ function rejoin() {
   });
 }
 
-/** The hall's name in the header (a rename arrives as a numbered change, like everything else). */
+/** The hall's name in the header (a rename arrives as a numbered change, like everything else), and in the name of
+ * Send, which says where a message goes (its word "Send" first, the word a person sees on it). */
 function setRoomTitle(name) {
   if (!name) return;
   const chip = document.getElementById('roomChip');
   if (chip) chip.title = 'Meeting: ' + name + ' (' + ROOM + ')';
   const titleStrong = document.querySelector('.app-title strong');
   if (titleStrong) titleStrong.textContent = name;
+  document.querySelectorAll('.send-btn').forEach((b) => b.setAttribute('aria-label', 'Send to ' + name));
 }
 
 // Every change carries the room's sequence number. A jump means we missed one: resume from what we have.
@@ -205,7 +212,7 @@ const UPD_EVENTS = {
 const ownField = (o, f) => Object.prototype.hasOwnProperty.call(o, f);
 function applyOp(op) {
   if (!op) return;
-  if (op.o === 'add') { op.m.seq = op.s; addMessage(op.m, { silent: true }); }
+  if (op.o === 'add') { op.m.seq = op.s; addMessage(op.m, { silent: true, arrived: true }); }
   else if (op.o === 'upd' && op.f) {
     for (const field of Object.keys(UPD_EVENTS)) if (ownField(op.f, field)) UPD_EVENTS[field][1](op.id, op.f[field]);
   }
@@ -215,8 +222,8 @@ function applyOp(op) {
   if (op.s > lastSeq) lastSeq = op.s;
 }
 
-socket.on('message', (msg) => { if (!bump(msg.seq)) return; addMessage(msg); scrollToBottom(); reportSeen(); });
-socket.on('system', (msg) => { if (!bump(msg.seq)) return; addMessage(msg); });
+socket.on('message', (msg) => { if (!bump(msg.seq)) return; addMessage(msg, { arrived: true }); reportSeen(); });
+socket.on('system', (msg) => { if (!bump(msg.seq)) return; addMessage(msg, { arrived: true }); });
 socket.on('users', renderUsers);
 // One listener per row of the op table: a change in order is drawn as a resumed one is; one past a gap rejoins.
 for (const field of Object.keys(UPD_EVENTS)) {
@@ -291,6 +298,7 @@ socket.on('roomMeta', ({ name, seq } = {}) => { if (bump(seq)) setRoomTitle(name
 function onReset() {
   // Admin cleared the room. Wipe local state but stay joined; what this page holds for sending is still drawn.
   feed.innerHTML = '';
+  forgetPlace();
   messagesById.clear();
   allMessages.length = 0;
   for (const node of echoes.values()) feed.appendChild(node);
@@ -373,10 +381,11 @@ function renderStage(v) {
   if (!chip) return;
   if (!v || !v.text) { chip.hidden = true; return; }
   chip.hidden = false;
-  document.getElementById('stageTime').textContent = v.text;
-  document.getElementById('stageTime').style.color = v.color || '';
-  document.getElementById('stageTitle').textContent = v.title || '';
   const live = !v.stale && (v.status === 'connected' || v.status === 'viewing');
+  document.getElementById('stageTime').textContent = v.text;
+  // Stagewatch's colour while the time is live; the last time known reads in the chip's dim ink, never faded
+  document.getElementById('stageTime').style.color = live ? v.color || '' : '';
+  document.getElementById('stageTitle').textContent = v.title || '';
   chip.classList.toggle('stale', !live);
   chip.title = (v.status === 'checking key' ? 'Stagewatch has not accepted this AGMessage\'s key yet: ' : live ? 'Live from Stagewatch: ' : 'Stagewatch link lost — last known: ') + (v.title || '') + (v.next ? ' · Next: ' + v.next : '') +
     (v.messageAck === 'done' ? ' · Speaker acknowledged the message' : '');
@@ -403,6 +412,7 @@ function isMine(msg) { return !!(msg.from && (MY_UID ? msg.from.uid === MY_UID :
 
 function renderHistory(history) {
   feed.innerHTML = '';
+  forgetPlace();
   messagesById.clear();
   allMessages.length = 0;
   for (const node of echoes.values()) feed.appendChild(node);
@@ -412,7 +422,12 @@ function renderHistory(history) {
   scrollToBottom();
 }
 
-function addMessage(msg, { silent = false } = {}) {
+/**
+ * Draw a message. `silent`: drawn without opening its file on the panel (the history, what a page missed); `arrived`: it
+ * reached the hall while this page was in it (heard live, or among what a page back from a drop missed), so it is
+ * marked new and the feed follows it only if the reader was at the end (keepPlace, below).
+ */
+function addMessage(msg, { silent = false, arrived = false } = {}) {
   // One of this person's held sends, now the server's message: its echo goes, and the outbox lets go of it.
   if (msg && typeof msg.cid === 'string' && msg.from && MY_UID && msg.from.uid === MY_UID) AGM.outbox.landed(msg.cid);
   if (!msg || messagesById.has(msg.id)) {
@@ -429,19 +444,21 @@ function addMessage(msg, { silent = false } = {}) {
   const oldest = echoes.size ? echoes.values().next().value : null;
   const firstEcho = oldest && oldest.parentNode === feed ? oldest : null;
   const prev = firstEcho ? firstEcho.previousElementSibling : feed.lastElementChild;
+  const follow = arrived && (catchUp ? catchUp.follow : readerAtEnd());   // where the reader is, read before anything moves
   if (msg.type === 'system' && PRESENCE.test(msg.text || '') && prev && prev.classList.contains('presence')) {
     const parts = (prev.dataset.parts ? prev.dataset.parts.split('\u0001') : [prev.textContent]).concat(msg.text).slice(-6);
     prev.dataset.parts = parts.join('\u0001');
     prev.textContent = parts.join(' · ');
     messagesById.set(msg.id, prev);
     allMessages.push(msg);
+    if (follow) toEnd();
     return;
   }
   const el = renderMessage(msg);
   feed.insertBefore(el, firstEcho);
   messagesById.set(msg.id, el);
   allMessages.push(msg);
-  if (!silent && msg.type !== 'system') flash(el);
+  if (arrived) keepPlace(el, msg, follow);
   if (msg.pinned) refreshPinned();
   if (!silent && msg.type === 'file' && HAS_STAGE) openDocInPanel(msg, { fromPush: true });
   if (msg.type === 'file') refreshDocPinnedList();
@@ -450,6 +467,7 @@ function addMessage(msg, { silent = false } = {}) {
 function removeMessageLocal(id) {
   const node = messagesById.get(id);
   if (node) node.remove();
+  tidyDivider();
   messagesById.delete(id);
   const idx = allMessages.findIndex((m) => m.id === id);
   if (idx >= 0) allMessages.splice(idx, 1);
@@ -539,8 +557,8 @@ function rerenderMessage(node, msg) {
       const target = messagesById.get(msg.replyTo.id);
       if (target) {
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        target.classList.add('flash');
-        setTimeout(() => target.classList.remove('flash'), 1500);
+        target.classList.add('found');
+        setTimeout(() => target.classList.remove('found'), 1500);
       }
     });
     body.appendChild(rt);
@@ -605,6 +623,7 @@ function rerenderMessage(node, msg) {
     };
   }
 
+  drawPinButton(node, !!msg.pinned);
   pinBtn.onclick = () => {
     const pinned = !(node.dataset.pinned === '1');
     AGM.outbox.now('pin', { messageId: msg.id, pinned }, saidIfNot('Not pinned.'));
@@ -990,11 +1009,19 @@ function renderResponses(container, msg) {
   }
 }
 
+/** The pin says whether the message is pinned in its state and its name, not by being brighter. */
+function drawPinButton(node, pinned) {
+  const b = node.querySelector('.pin-btn');
+  if (!b) return;
+  b.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+  b.title = pinned ? 'Unpin' : 'Pin';
+}
 function setMessagePinned(messageId, pinned) {
   const node = messagesById.get(messageId);
   if (node) {
     node.dataset.pinned = pinned ? '1' : '0';
     node.classList.toggle('pinned', !!pinned);
+    drawPinButton(node, !!pinned);
   }
   const data = findMessage(messageId);
   if (data) data.pinned = pinned;
@@ -1018,7 +1045,7 @@ function refreshPinned() {
     any = true;
     const clone = node.cloneNode(true);
     clone.classList.add('pinned-copy');
-    clone.classList.remove('flash');
+    clone.classList.remove('found');
     const pb = clone.querySelector('.pin-btn');
     if (pb) pb.onclick = () => AGM.outbox.now('pin', { messageId: m.id, pinned: false }, saidIfNot('Not unpinned.'));
     const db = clone.querySelector('.del-btn');
@@ -1581,6 +1608,7 @@ function setPriority(btn, on) {
   if (!btn) return;
   btn.dataset.priority = on ? '1' : '0';
   btn.classList.toggle('on', on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   btn.title = on ? 'High priority is ON — click to disable' : 'Mark as high priority';
 }
 function consumePriority(btn) {
@@ -1632,7 +1660,27 @@ function setAiHint(text, bad) {
   if (!h) return;
   h.textContent = text; h.hidden = !text; h.classList.toggle('bad', !!bad);
 }
+// The ✨ buttons are drawn from the join's answer: live while AI drafts can be made; otherwise shown but not usable, with
+// the reason as their title and, when one is pressed, in the line under the composer, where a touch screen shows it.
+// Pressed while off, they send nothing.
+const AI_OFF_WHY = 'AI drafts are off: they need an Anthropic key (admin) and the internet. Everything else works without them.';
+const AI_TITLES = new Map([...document.querySelectorAll('.ai-btn')].map((b) => [b, b.title]));
+function drawAiButtons() {
+  for (const [b, title] of AI_TITLES) {
+    b.hidden = false;
+    b.setAttribute('aria-disabled', AI_ON ? 'false' : 'true');
+    b.title = AI_ON ? title : AI_OFF_WHY;
+  }
+  if (AI_ON && document.getElementById('aiHint')?.textContent === AI_OFF_WHY) setAiHint('');
+}
+/** Whether AI drafts can be made now; if not, the reason is said where the person is looking. */
+function aiReady(where) {
+  if (AI_ON) return true;
+  if (where === 'draft') setAiHint(AI_OFF_WHY); else notify(AI_OFF_WHY);
+  return false;
+}
 document.getElementById('aiDraftBtn')?.addEventListener('click', () => {
+  if (!aiReady('draft')) return;
   const btn = document.getElementById('aiDraftBtn');
   const replying = replyState ? findMessage(replyState.id) : null;
   const lastBoard = [...allMessages].reverse().find((m) => m.from && m.from.role === 'board' && (m.text || m.type === 'action'));
@@ -1701,6 +1749,7 @@ document.getElementById('resetOptionsBtn')?.addEventListener('click', () => {
   renderOptionChips();
 });
 document.getElementById('aiOptionsBtn')?.addEventListener('click', () => {
+  if (!aiReady('options')) return;
   const btn = document.getElementById('aiOptionsBtn');
   const prompt = actionText.value.trim();
   if (!prompt) { notify('Type the question first.'); return; }
@@ -1836,13 +1885,98 @@ function escapeHtml(s) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 }
+
+// ---------------- The reader keeps their place, and a new message is marked, never flashed ----------------
+// The feed follows the newest message only while the reader is at its end (within a line of the bottom, as the feed
+// was last left) and no menu is open on it; otherwise it stays where the reader put it, and "↓ n new" says how many
+// came below. A New divider sits above the first message from someone else that arrived since the person last touched
+// the page while it was shown (a pointerdown, a key, or a wheel: a scroll of their own begins with one of them); it
+// moves only when one arrives after their next touch, and no timer takes it away. A scroll the page makes (following,
+// or the view kept still as the divider moves) is never a touch.
+const newBelow = document.getElementById('newBelow');
+const place = {
+  atEnd: true,      // the feed was within a line of the bottom when it was last moved, by the reader or the page
+  unread: 0,        // messages from others drawn below a feed the reader had scrolled up
+  touched: false,   // the person touched the page since the divider was put where it is
+  divider: null,
+};
+/** A menu anchored to a message: while one is open the feed never moves under it. */
+const MENUS_ON_FEED = '#fwdMenu, #rxPicker';
+function nearEnd() {
+  const line = parseFloat(getComputedStyle(feed).fontSize) * 1.5;
+  return feed.scrollHeight - feed.scrollTop - feed.clientHeight <= line;
+}
+function readerAtEnd() { return (place.atEnd || nearEnd()) && !document.querySelector(MENUS_ON_FEED); }
+/** While a page draws what it missed (rejoin): the reader's place as read before the first, and whether to follow. */
+let catchUp = null;
 function scrollToBottom() {
   feed.scrollTop = feed.scrollHeight;
+  place.atEnd = true;
+  if (place.unread) drawNewBelow(0);
 }
-function flash(el) {
-  el.classList.add('flash');
-  setTimeout(() => el.classList.remove('flash'), 30000);
+/** Follow the newest message: now, or once a page has drawn all it missed. */
+function toEnd() { if (catchUp) catchUp.toEnd = true; else scrollToBottom(); }
+/**
+ * Move something within the feed and keep what the reader sees where it was on the screen: the first message in view
+ * is put back where it was. A browser that anchors scrolling (overflow-anchor) has already kept it, and the correction
+ * is 0; one that does not (Safari before 27) would otherwise pull the feed up under the reader's eyes when the divider
+ * leaves a place above the view.
+ */
+function holdView(move) {
+  const top = feed.getBoundingClientRect().top;
+  const anchor = [...feed.children].find((n) => n !== place.divider && n.getBoundingClientRect().bottom > top);
+  const was = anchor ? anchor.getBoundingClientRect().top : 0;
+  move();
+  if (anchor) feed.scrollTop += anchor.getBoundingClientRect().top - was;
 }
+/** A message that reached the hall: it may move the divider, and the feed follows it or counts it below. */
+function keepPlace(el, msg, follow) {
+  const news = msg.type !== 'system' && !isMine(msg);
+  if (news && (!place.divider || place.touched)) {
+    const d = place.divider;
+    if (!d) {
+      place.divider = document.createElement('div');
+      place.divider.className = 'new-divider';
+      place.divider.setAttribute('role', 'separator');
+      place.divider.setAttribute('aria-label', 'New messages below');
+      place.divider.textContent = 'New';
+      feed.insertBefore(place.divider, el);
+    } else if (follow || d.parentNode !== feed) feed.insertBefore(d, el);
+    else holdView(() => feed.insertBefore(d, el));
+    place.touched = false;
+  }
+  if (follow) toEnd();
+  else if (news) drawNewBelow(place.unread + 1);
+}
+function drawNewBelow(n) {
+  place.unread = n;
+  newBelow.hidden = n === 0;
+  newBelow.textContent = '↓ ' + n + ' new';
+  newBelow.setAttribute('aria-label', n + (n === 1 ? ' new message' : ' new messages') + ' below');
+}
+/** The divider stays only above a message: when the one under it goes, it sits above the next, or goes with none. */
+function tidyDivider() {
+  const d = place.divider;
+  if (!d || !d.parentNode) return;
+  let next = d.nextElementSibling;
+  while (next && next.classList.contains('sys')) next = next.nextElementSibling;
+  if (!next || next.classList.contains('echo')) { d.remove(); place.divider = null; }
+  else if (next !== d.nextElementSibling) feed.insertBefore(d, next);
+}
+/** A feed drawn afresh (the history, a reset): no divider, nothing counted below. */
+function forgetPlace() {
+  if (place.divider) place.divider.remove();
+  place.divider = null;
+  place.touched = false;
+  drawNewBelow(0);
+}
+const noteTouch = () => { if (document.visibilityState === 'visible') place.touched = true; };
+for (const ev of ['pointerdown', 'keydown', 'wheel']) document.addEventListener(ev, noteTouch, { capture: true, passive: true });
+feed.addEventListener('scroll', () => {
+  place.atEnd = nearEnd();
+  if (place.atEnd && place.unread) drawNewBelow(0);
+}, { passive: true });
+newBelow.addEventListener('click', scrollToBottom);
 
 // Admin support view banner
 if (ADMIN_VIEW) {

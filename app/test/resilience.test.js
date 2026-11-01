@@ -533,6 +533,53 @@ test('guard rails: the timers the handler files start are counted, each with its
   assert.deepEqual([...server.matchAll(/new Latest\(\{\s*name: '([^']+)'/g)].map((m) => m[1]), ['board', 'screens', 'people', 'seen']);
 });
 
+// ---------------------------------------------------------------- the stylesheet's tokens
+/** A stylesheet's declaration blocks, comments taken out: each innermost `{…}` with the selector before it. */
+const cssBlocks = (src) => [...src.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]*)\{([^{}]*)\}/g)].map((m) => ({ selector: m[1].trim(), body: m[2] }));
+/** A colour written as hex: #rgb, #rgba, #rrggbb or #rrggbbaa, and not the start of a longer word. */
+const HEX = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![\w-])/g;
+const TOKEN_BLOCKS = [':root', 'html[data-theme="dark"]'];
+/** The hex colours of a stylesheet outside its two token blocks, and how many of each token block it has. */
+function hexOutsideTokens(src) {
+  const blocks = cssBlocks(src);
+  const tokens = Object.fromEntries(TOKEN_BLOCKS.map((t) => [t, blocks.filter((b) => b.selector === t).length]));
+  const outside = blocks.filter((b) => !TOKEN_BLOCKS.includes(b.selector)).reduce((n, b) => n + (b.body.match(HEX) || []).length, 0);
+  return { outside, tokens };
+}
+/**
+ * An opacity between 0 and 1 (hidden and shown are 0 and 1), as `opacity:` or a filter's `opacity()`, written as a number
+ * or a percentage: muted ink made by fading, refused. A value the guard cannot read as a number (a `var()`, a `calc()`)
+ * is refused with it, so another spelling of a fade never passes.
+ */
+const OPACITY = /(?:^|[;\s{])opacity\s*:\s*([^;}]*)|(?:^|[^\w-])opacity\(\s*([^)]*)\)/g;
+function faded(value) {
+  const n = /^(\d*\.?\d+)(%?)$/.exec(value.replace(/\s*!important\s*$/i, '').trim());
+  if (!n) return true;
+  const x = Number(n[1]) / (n[2] ? 100 : 1);
+  return x > 0 && x < 1;
+}
+const fadedIn = (src) => cssBlocks(src).flatMap((b) => [...b.body.matchAll(OPACITY)].filter((m) => faded(m[1] === undefined ? m[2] : m[1])).map(() => b.selector));
+test('guard rails: the stylesheet draws with its tokens: hex colours only in the two token blocks, counted down, and no ink made muted by opacity', () => {
+  // Every colour is named once in :root and once more under html[data-theme="dark"]; a component reads a token. The hex
+  // colours still written outside those two blocks are counted, and the count only goes down: a unit that takes some
+  // out lowers HEX_CAP with them, and none raises it (as the coverage gate only goes up). Muted words and icons read in
+  // --c-ink-muted, at 4.5:1 for words and 3:1 for icons in both themes; an opacity between 0 and 1 fades whatever
+  // is under it below that, so none is written (a toast or a switch hidden at 0 and shown at 1 is not muted ink).
+  const HEX_CAP = 292;
+  const css = fs.readFileSync(path.join(ROOT, 'public', 'styles.css'), 'utf8');
+  const { outside, tokens } = hexOutsideTokens(css);
+  assert.deepEqual(tokens, { ':root': 1, 'html[data-theme="dark"]': 1 }, 'the tokens are defined in one :root block and redefined in one dark block');
+  assert.ok(outside <= HEX_CAP, `styles.css writes ${outside} hex colours outside its token blocks, more than ${HEX_CAP}: a new colour is a token`);
+  assert.deepEqual(fadedIn(css), [], 'no opacity between 0 and 1 in styles.css: muted words and icons take --c-ink-muted');
+  // The reads see what they are for, and nothing else.
+  const planted = ':root { --a: #fff; --b: #12345678; }\nhtml[data-theme="dark"] { --a: #000; }\n/* #abcdef */ .x { color: #FFF; background: url(#frag); }\n#feed { border: 1px solid #c0ffee; }\n@media (x) { .y { color: #1234; } }\n@keyframes k { 50% { opacity: .5 } }\n.t { opacity: 0 } .u { opacity: 1; } .v{opacity:.35} .w { transition: opacity .25s; will-change: opacity }\n' +
+    '.a{opacity:60%} .b{opacity: var(--fade)} .c{filter: blur(1px) opacity(.4)} .d{opacity: calc(.5)} .e{opacity:100%} .f{filter:opacity(1)} .g{opacity:0 !important} .h{--x-opacity: .5}';
+  assert.deepEqual(hexOutsideTokens(planted), { outside: 3, tokens: { ':root': 1, 'html[data-theme="dark"]': 1 } }, 'one in .x, one in #feed (not the selector), one in @media; none in a token block or a comment');
+  assert.equal(hexOutsideTokens(planted + '\n:root { --c: #111; }').tokens[':root'], 2, 'a second :root block is seen');
+  assert.deepEqual(fadedIn(planted), ['50%', '.v', '.a', '.b', '.c', '.d'],
+    'an opacity between 0 and 1 is found wherever and however it is written (a number, a percentage, a filter\'s opacity(), or a value it cannot read); 0, 1, 100%, a transition of opacity and a property named for it are not');
+});
+
 test('guard rails: a page posts a message only to its own origin, and hears one only after checking who sent it', () => {
   let posts = 0, listeners = 0;
   for (const f of pageScripts()) {

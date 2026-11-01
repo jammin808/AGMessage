@@ -688,6 +688,83 @@ health's `peaks.compactMs`, reading 4 of `docs/DESIGN.md`, not measured yet)
   words, and none of them may say a power cut loses nothing.
 - Rolling back: nothing is stored; 0.5.1 reads the old snapshot before each backup again.
 
+**The hall page fits a phone, on a small token layer, and a new message is marked, not flashed** (the plan's Part 5,
+unit P; the owner's ask (E), "a simple but rich and efficient service"; WCAG 2.2 read from the computed colours and
+the layout in Chromium at 390 × 844 with a touch screen, by the smoke. Not yet walked on a phone or an iPad: that is
+`docs/DEVICES.md`'s, before the tag)
+- The hall page fits a phone. At 390 px it laid out 610 px wide for the Board, 644 backstage and 456 for an observer
+  (the plan's walk): the header's controls, the composer's row and a message's header never wrapped, so a presenter on
+  a phone read one message at a time and the help dialog's Send was off the screen's edge. Each of them wraps now, and
+  the compose tabs keep to the composer's edge; a long name or file name breaks rather than widens its message (with
+  `word-break: break-word` before `overflow-wrap: anywhere`, which Safari reads only from 15.4). The composer's text box
+  takes its row, its buttons at its end (and below it when the row is too narrow for both); below 540 px Send is a 44 px
+  button that shows ➤, and at every width its label names where it sends ("Send to Hall 2"); under a finger (a coarse
+  pointer) the header's controls and the composer's buttons are 44 px. A dialog is held inside the screen, never wider
+  or taller than it, its content scrolling inside it.
+- "AI drafts off — everything else works offline" leaves the composer's row. While AI drafts are off, ✨ Draft answer
+  and ✨ Suggest stay where they are, drawn as not usable now (a dashed edge, muted words, `aria-disabled`), with the
+  reason as their title: "AI drafts are off: they need an Anthropic key (admin) and the internet. Everything else works
+  without them." Pressed, they say it in the line under the composer (or as a note), where a finger can read it, and ask
+  the server for nothing. 0.5.1 hid them, and only the composer's line said why. `README.txt` says it too.
+- A new message is marked, not flashed. 0.5.1 filled every new message yellow for 30 s, so after a burst the whole feed
+  was yellow, and moved the feed to the bottom at every message, so a reader scrolled up lost their place and a menu
+  open on a message lost its anchor. The fill is gone (a reply's quote, followed to the message it quotes, rings that
+  message for a moment instead). A **New** divider sits above the first message from someone else that arrived since
+  the person last touched the page (a tap, a key, or a scroll of their own, while the page was shown); it moves only
+  when one arrives after their next touch, and no timer takes it away. The feed follows the newest message only while
+  the reader is within a line of its end and no menu is open on a message; otherwise it stays where they left it, and
+  a 44 px "↓ 3 new" says how many came below and takes them to the end. When the divider moves from above what the
+  reader sees, the page puts the first message in view back where it was, so the view holds still in a browser that does
+  not anchor scrolling (Safari before 27, every iPad the Board uses today) as in one that does. A message one sends
+  still goes to the end. A page back from a drop marks and counts what it missed the same way, in one pass: where the
+  reader was is read once before it and the feed moved at most once after it, never once per message missed.
+- A small token layer. Every size, space, target, layer and colour is named once in `:root` and every colour once more
+  under the dark theme: the type on one scale of about 1.2 (`--fs-xs` to `--fs-stage`), spaces on a 4 px base,
+  `--target-min` 24 px and `--target-touch` 44 px, the layers (`--z-header` to `--z-toast`) and the colour roles
+  (surface, ink, muted ink, border, action, ok, warn, info, off, fault and the words on it, a question's, the three
+  seats, another room), the plan's list with the Board's additions. 0.5's second pair of blocks (the stage's colours,
+  warn and ok) is merged in, and the names the components read (`--bg`, `--ink`, `--muted`, `--danger` and the rest)
+  read the roles. Two colours move with them: muted words from #6b7280, 4.47:1 on the page and under the 4.5:1 words
+  need, to #545d6b (6.16:1); and the red from #dc2626 to #b91c1c in light (white words on it 6.47:1) and from #f87171
+  to #fca5a5 in dark, where its words are dark (9.69:1). White on #f87171 was 2.77:1: the dark theme's 🔥 badge and the
+  halls board's help count. A button's surface, ink and border are the tokens', so the dark theme carries no rule of its
+  own for every button, nor for a message; the rules that leaned on those read tokens too, so each draws in dark as it
+  did: 🔥 Priority (outlined, and filled with the fault red while pressed, which it now also says with `aria-pressed`),
+  the admin page's Reset and Close (outlined in red, filled under the pointer; the close's confirm stays a primary
+  button), and one's own 🔥 message, whose name stays red. Two things do look different in dark: ✨'s indigo edge, which
+  the dark rule for every button had hidden, and the AI's line under the composer, now in the info colour of each theme
+  (its indigo read 2.05:1 on the dark composer; the words need 4.5:1).
+- No opacity for words or icons. The presence lines ("Ana joined as board", 2.23:1 at opacity .6) and a message's icon
+  buttons (2.42:1 in light and 2.78:1 in dark at .35; 🖥, 📝 and ⧉ at .7, the Board's 📌 at .55) read in muted ink, 4.5:1
+  and 3:1 or more in both themes, and the icon buttons are 24 px or more; a pinned message's 📌 says so with a ring in
+  the action colour and its state (pressed, "Unpin"), not by being brighter. The other fades go the same way: a
+  resolved help request, one someone is on the way to on the halls board, a turned-off account's row, a linked hall's
+  code beside its name, a stale countdown in the hall's chip and on the halls board (which keeps Stagewatch's colour
+  only while it is live), and an option an observer cannot press (a dashed edge, its words at full ink).
+- The three faults the walk found are gone: the On stage tag drew its dark colours in light mode (the dark rule's
+  second selector was not scoped to dark); Help lost its red in dark mode (the dark theme's rule for every button
+  outranked it), and so did a danger button; and muted words were made with opacity. The same unscoped list put the
+  Board's own rules (`display: flex`, half the width, opacity .55 among them) on the whole page of a link that says
+  `role=director`, the Board's old name, until its join was answered; each is scoped to what it styles.
+- `test/resilience.test.js`: the stylesheet's token blocks, one `:root` and one dark, and its hex colours outside them
+  counted, 292 now (327 before), a count that only goes down; no opacity between 0 and 1 anywhere in it, however it is
+  written (a number, a percentage, a filter's `opacity()`), and none the guard cannot read as a number (a `var()`, a
+  `calc()`); a planted sheet holds both reads to their rules. The smoke opens a hall of its own on a 390 × 844 phone
+  with a touch screen as On stage, backstage and an observer, and finds each page as wide as the screen, every button
+  of each of the hall page's three dialogs on the screen and reached by a tap at its centre, Send a 44 px button named
+  "Send to Phone hall", the header's controls 44 px; in both themes the icon buttons 24 px or more at 3:1 or more and
+  the presence lines at 4.5:1 or more, neither faded, the On stage tag light in light mode and dark in dark, Help on
+  the fault red, and 🔥 Priority on it only while pressed (and saying so); backstage, with no AI key, ✨ marked not
+  usable with its reason, which a press shows under the composer while nothing is sent. A new message has the divider
+  above it and is drawn as an older one is, unfilled and still; scrolled up by 10 messages with the mouse wheel, a new
+  one leaves what the reader sees where it was, "↓ 1 new" appears, 44 px tall, then "↓ 2 new", and the button takes
+  the feed to its end, where the next message is followed; with the divider above the view, the next message moves it
+  and what the reader sees stays within a pixel of where it was, with scroll anchoring and without it (as Safari before
+  27 draws); a page away while 25 messages are sent draws them on its return with the feed moved to the end once and
+  its layout read a few times in all; and the observer's page, which nothing touches, still has its divider above the
+  first new message 30 s and every message later.
+- Rolling back: nothing is stored; 0.5.1's stylesheet and hall page come back as they were.
+
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,

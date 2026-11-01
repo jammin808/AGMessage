@@ -61,6 +61,13 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
 - **A new frame of state is a `Latest`** (`app/lib/latest.js`): never a timer or a polled flag of its own, and never a
   volatile emit. `test/resilience.test.js` counts the timers each handler file starts, each with its reason, so a tick
   of its own moves that list with its words.
+- **The stylesheet draws with its tokens** (`app/public/styles.css`: sizes, spaces, targets, layers and colour roles
+  named once in `:root`, every colour once more under `html[data-theme="dark"]`): a new colour is a token, and a rule a
+  unit touches reads tokens instead of carrying colours and a dark rule of its own (a dark rule left beside a state's rule
+  outranks it in dark: `html[data-theme="dark"] .x` beats `.x.on`, so a state's colours are tokens too).
+  `test/resilience.test.js` counts the hex colours outside the two token blocks, a count that only goes down (a unit that
+  takes some out lowers it), and refuses an opacity between 0 and 1 however it is written: muted words and icons take
+  `--c-ink-muted`, never a fade.
 - **Test fixtures that look like keys** carry `// secret-scan: fixture` on their line.
 - **The audit log** gets a row for every security-relevant action, never a secret, token or screen link.
 - **The coverage gate** (`npm run coverage`) is raised as tests are added, never lowered to make a build green.
