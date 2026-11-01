@@ -254,6 +254,144 @@ test('store: the newest 500 tombstones are kept, in memory and in the snapshot; 
   assert.deepEqual(Array.from(c.get('BAD234').gone.values()), [{ id: 'ok' }]);
 });
 
+// ---------------------------------------------------------------- compaction trusts the snapshot it wrote
+const resilience = require('../lib/resilience');
+/** Run `fn`, counting the times `file` is read whole (fs.readFileSync); gives back that count. */
+function readsOf(file, fn) {
+  const read = fs.readFileSync;
+  let n = 0;
+  fs.readFileSync = (f, ...rest) => { if (path.resolve(String(f)) === path.resolve(file)) n++; return read.call(fs, f, ...rest); };
+  try { fn(); } finally { fs.readFileSync = read; }
+  return n;
+}
+
+test('atomic write: a file known whole is kept as .bak unread; one not known is read, and kept only when it parses', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-whole-'));
+  const f = path.join(dir, 'ABC234.json');
+  const text = (x) => fs.readFileSync(x, 'utf8');
+  resilience.writeFileAtomic(f, '{"v":1}', { keepBak: true });
+  assert.equal(readsOf(f, () => resilience.writeFileAtomic(f, '{"v":2}', { keepBak: true, knownWhole: true })), 0, 'a known-whole file is not read');
+  assert.deepEqual([text(f), text(f + '.bak')], ['{"v":2}', '{"v":1}'], 'and is copied to .bak');
+
+  // Not known whole: read and parsed first, so a torn file never replaces the good backup.
+  fs.writeFileSync(f, '{"v":3');
+  assert.equal(readsOf(f, () => resilience.writeFileAtomic(f, '{"v":4}', { keepBak: true })), 1, 'read before it may replace the .bak');
+  assert.deepEqual([text(f), text(f + '.bak')], ['{"v":4}', '{"v":1}'], 'the torn file was not kept');
+
+  // `knownWhole` is the writer's word, taken unread: a torn file vouched for is copied as it is. Only the one writer of
+  // a file, which wrote it or read it whole, may give it.
+  fs.writeFileSync(f, '{"v":5');
+  resilience.writeFileAtomic(f, '{"v":6}', { keepBak: true, knownWhole: true });
+  assert.equal(text(f + '.bak'), '{"v":5', 'copied without being parsed');
+  // Without `keepBak` nothing is kept, known whole or not; with no old file there is nothing to keep.
+  resilience.writeFileAtomic(f, '{"v":7}', { knownWhole: true });
+  assert.equal(text(f + '.bak'), '{"v":5');
+  const g = path.join(dir, 'NEW234.json');
+  resilience.writeFileAtomic(g, '{"v":1}', { keepBak: true, knownWhole: true });
+  assert.deepEqual([text(g), fs.existsSync(g + '.bak')], ['{"v":1}', false]);
+});
+
+test('atomic write: a read with its backup says whether the file itself parsed', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-whole-'));
+  const f = path.join(dir, 'ABC234.json');
+  assert.deepEqual(resilience.readJsonWhole(f), { data: null, whole: false }, 'neither file');
+  fs.writeFileSync(f + '.bak', '{"v":1}');
+  assert.deepEqual(resilience.readJsonWhole(f), { data: { v: 1 }, whole: false }, 'only the .bak: not whole');
+  fs.writeFileSync(f, '{"v":2');
+  assert.deepEqual(resilience.readJsonWhole(f), { data: { v: 1 }, whole: false }, 'a torn file falls back to its .bak: not whole');
+  fs.writeFileSync(f, '{"v":2}');
+  assert.deepEqual(resilience.readJsonWhole(f), { data: { v: 2 }, whole: true }, 'the file parsed: whole');
+  assert.deepEqual(resilience.readJsonWithBak(f), { v: 2 });
+  fs.rmSync(f + '.bak');
+  fs.writeFileSync(f, 'torn');
+  assert.deepEqual(resilience.readJsonWhole(f), { data: null, whole: false });
+  assert.equal(resilience.readJsonWithBak(f), null);
+});
+
+test('store: compaction copies the snapshot it wrote to .bak unread; a torn one is read first and never replaces a good .bak; a load from .bak clears snapWhole', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const json = path.join(dir, 'ABC234.json');
+  const seqOf = (f) => JSON.parse(fs.readFileSync(f, 'utf8')).seq;
+  const say = (store, room, id) => store.commit(room, { o: 'add', m: { id, type: 'text', text: id, at: 1 } });
+  /** Run `fn` with the snapshot's rename refused, as a file another program holds refuses it: nothing on disk changes. */
+  const failRename = (fn) => {
+    const rename = fs.renameSync;
+    fs.renameSync = (from, to) => { if (String(to).endsWith('.json')) throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }); return rename.call(fs, from, to); };
+    try { fn(); } finally { fs.renameSync = rename; }
+  };
+  const a = new RoomStore(dir);
+  const ra = a.create('ABC234', 'Test');
+  assert.equal(ra.snapWhole, true, 'a hall made writes its snapshot, and knows it whole');
+  say(a, ra, 'm1');
+  assert.equal(readsOf(json, () => a.compact('ABC234')), 0, 'a known-whole snapshot is not read again');
+  assert.deepEqual([seqOf(json), seqOf(json + '.bak')], [1, 0], 'the one before is the backup');
+  say(a, ra, 'm2');
+  assert.equal(readsOf(json, () => a.compact('ABC234')), 0);
+  assert.deepEqual([seqOf(json), seqOf(json + '.bak')], [2, 1]);
+  // A snapshot that fails leaves the file on disk the one the store wrote, so it is still known whole and still not read.
+  failRename(() => a.compact('ABC234'));
+  assert.ok(a.lastError, 'the failed snapshot is said');
+  assert.equal(ra.snapWhole, true, 'a failed snapshot leaves a known-whole file known whole');
+  assert.equal(seqOf(json), 2, 'the snapshot on disk is the one before');
+  assert.equal(readsOf(json, () => a.compact('ABC234')), 0, 'and the next snapshot copies it unread');
+  assert.equal(a.lastError, null, 'the snapshot that lands clears the error');
+  assert.deepEqual([seqOf(json), seqOf(json + '.bak')], [2, 2]);
+
+  // A load whose snapshot parsed knows it whole: the boot's compaction copies it unread.
+  const b = new RoomStore(dir);
+  b.loadAll(null, { compact: false });
+  assert.equal(b.get('ABC234').snapWhole, true, 'loaded whole');
+  assert.equal(readsOf(json, () => b.compact('ABC234')), 0);
+  assert.deepEqual([seqOf(json), seqOf(json + '.bak')], [2, 2]);
+  say(b, b.get('ABC234'), 'm3');
+  b.compact('ABC234');
+  say(b, b.get('ABC234'), 'm4');   // in the log only
+
+  // A torn snapshot: the load falls back to the .bak, and the store no longer knows the file on disk whole.
+  fs.writeFileSync(json, '{"code":"ABC2');
+  const c = new RoomStore(dir);
+  c.loadAll(null, { compact: false });
+  const rc = c.get('ABC234');
+  assert.equal(rc.snapWhole, false, 'a load from .bak clears snapWhole');
+  assert.deepEqual(rc.messages.map((m) => m.id), ['m1', 'm2', 'm4'], 'the .bak, and the log replayed on top');
+  // A compaction that fails changes nothing on disk, so it leaves snapWhole as it was.
+  failRename(() => c.compact('ABC234'));
+  assert.ok(c.lastError, 'the failed snapshot is said');
+  assert.equal(rc.snapWhole, false, 'a failed snapshot leaves it as it was');
+  assert.equal(seqOf(json + '.bak'), 2, 'the torn snapshot did not replace the good .bak');
+  // The next compaction reads the torn file, refuses it as a backup, and knows its own snapshot whole.
+  assert.equal(readsOf(json, () => c.compact('ABC234')), 1, 'a torn snapshot is read before it may replace the .bak');
+  assert.equal(seqOf(json + '.bak'), 2, 'and never replaces it');
+  assert.equal(seqOf(json), 4);
+  assert.equal(rc.snapWhole, true, 'the snapshot it wrote');
+  assert.equal(readsOf(json, () => c.compact('ABC234')), 0, 'and is trusted from then on');
+  assert.deepEqual([seqOf(json), seqOf(json + '.bak')], [4, 4]);
+
+  // A boot that compacts at load reads a torn snapshot twice, once to load and once before it may replace the .bak.
+  fs.writeFileSync(json, '{"code":"ABC2');
+  const d = new RoomStore(dir);
+  assert.equal(readsOf(json, () => d.loadAll()), 2);
+  assert.equal(seqOf(json + '.bak'), 4, 'the good .bak kept');
+  assert.equal(d.get('ABC234').snapWhole, true);
+});
+
+test('the papers say what a power cut can lose: a crash of AGMessage or of a browser nothing, a power cut the last few seconds', () => {
+  const ROOT = path.join(__dirname, '..', '..');
+  // Line breaks, a source comment's leading asterisks and capitals never split a phrase: a rewrap moves no words.
+  const read = (f) => {
+    const text = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    return (f.endsWith('.js') ? text.replace(/\n[ \t]*\*(?!\/)/g, ' ') : text).replace(/\s+/g, ' ').toLowerCase();
+  };
+  for (const f of ['README.md', 'README.txt']) {
+    const text = read(f);
+    assert.ok(text.includes('a crash of agmessage or of a browser loses nothing; a power cut can lose the last few seconds'), f + ' says what a power cut can lose');
+    assert.ok(!/power cut loses nothing/.test(text), f + ' never says a power cut loses nothing');
+  }
+  const store = read('app/lib/store.js');
+  assert.ok(store.includes('an acknowledged message is in the system\'s file cache'), 'lib/store.js says where an acknowledged message is');
+  assert.ok(!store.includes('an acknowledged message is on disk'), 'and never that it is on disk');
+});
+
 // ---------------------------------------------------------------- the op table
 const ops = require('../lib/ops');
 /** apply() on a real store, with what it sends, marks and says recorded, and each step in the order it was taken. */

@@ -28,7 +28,11 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   reactions, priority, seen receipts. A sent message shows "◷ Sending" until AGMessage has it, and is never posted
   twice; one written while the connection is down waits on the page, a reload included, and is sent when it is back,
   marked with its wait ("written 14:02 · sent 14:06 (offline)"). Every change is numbered and written to an append-only
-  log: a phone that drops off the Wi-Fi catches up with just what it missed, and a crash or power cut loses nothing. A watchdog restarts the server
+  log before it is answered: a phone that drops off the Wi-Fi catches up with just what it missed, and a crash of
+  AGMessage or of a browser loses nothing; a power cut can lose the last few seconds (what AGMessage has taken is in
+  the system's file cache at once, and on the disk once the system writes it back). A change the disk will not take (a
+  full disk, a log another program holds) is kept in memory, named on the admin page's health and put in the hall's
+  next snapshot; until that snapshot lands, a crash of AGMessage can lose it. A watchdog restarts the server
   after a crash or a hang, and every open page comes back by itself, without a reload: after a drop (at once when a
   phone is woken or the Wi-Fi is back), after a restart (announcing nobody), and after a refusal at a busy moment, at
   the pace the server gives ("Busy — trying again in 3 s."). The admin page's health reads the server's true delay and how busy it is, and keeps the peaks

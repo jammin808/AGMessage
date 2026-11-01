@@ -112,10 +112,13 @@ full) and `server.js` 16 (removing files went asynchronous).
 writer) or in `lib/secretbox.js` (still 3: the machine key read once, or made once in a whole temporary file and
 published by a hard link that never replaces one, then the temporary file removed). `lib/resilience.js` goes to 11 for
 `placeId`'s one real-path read per place at start, and the guard's pattern now counts `fs.realpathSync.native(`, which
-it did not see. `verify/` joins the files read, at 0: the audit log's key-free rules (`verify/auditrules.js`) are pure,
-and their own ESLint block turns off every Node global the shared block gives (so `require`, `process`, `Buffer` or
-`console` there is an undefined name), gives no browser global, and refuses any use of `module` but `module.exports` and
-any `import()`: a probe that reads a file there fails the lint.
+it did not see. A hall's snapshot copied to its backup unread, when the store knows it whole, adds none: the read it
+skips and the copy are still the source's two calls, so `lib/resilience.js` stays at 11 and `lib/store.js` at 10, whose
+reason now says where a change is when it is answered: appended to its log, in the system's file cache, or kept for the
+next snapshot when the disk refuses the append. `verify/` joins the files read, at 0: the audit log's key-free rules
+(`verify/auditrules.js`) are pure, and their own ESLint block turns off every Node global the shared block gives (so
+`require`, `process`, `Buffer` or `console` there is an undefined name), gives no browser global, and refuses any use of
+`module` but `module.exports` and any `import()`: a probe that reads a file there fails the lint.
 `verify/` is under the coverage gate with `server.js`, `supervise.js` and `lib/`.
 
 The audit log's export adds `lib/auditexport.js` and `lib/zip.js`, and the verifier `verify/verify-audit.js`, each at 0

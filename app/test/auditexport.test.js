@@ -96,6 +96,13 @@ function verify(args, script = VERIFY) {
 const copy = (dir) => { const to = path.join(tmp('agm-copy-'), path.basename(dir)); fs.cpSync(dir, to, { recursive: true }); return to; };
 /** One byte of a file changed in place. */
 const flip = (file, at = 10) => { const b = fs.readFileSync(file); b[at] ^= 1; fs.writeFileSync(file, b); };
+/** One hex digit of a file changed in place to another hex digit, so its line keeps its shape and only what it says differs. */
+const flipHex = (file, at) => {
+  const b = fs.readFileSync(file);
+  assert.match(String.fromCharCode(b[at]), /^[0-9a-f]$/, 'a hex digit to change');
+  b[at] = b[at] === 0x30 ? 0x31 : 0x30;
+  fs.writeFileSync(file, b);
+};
 /**
  * A bundle signed again by another key, as anyone could make one: its export row's key, the manifest's sizes and
  * fingerprint, the public key, SHA256SUMS and the signature all rewritten. Returns the new key's fingerprint.
@@ -357,7 +364,7 @@ test('the verifier: exit 3 for any byte changed after the export, a file gone or
     return r;
   };
   await three((d) => flip(path.join(d, 'log', 'audit.jsonl'), 40), /^✕ log\/audit\.jsonl is not what was signed: its SHA-256 differs from SHA256SUMS$/m);
-  await three((d) => flip(path.join(d, 'SHA256SUMS'), 5), /^✕ the signature over SHA256SUMS does not check against signing-key\.pem$/m);
+  await three((d) => flipHex(path.join(d, 'SHA256SUMS'), 5), /^✕ the signature over SHA256SUMS does not check against signing-key\.pem$/m);
   await three((d) => { const f = path.join(d, 'manifest.json'); fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('"name": "ana"', '"name": "eve"')); }, /^✕ manifest\.json is not what was signed/m);
   await three((d) => flip(path.join(d, 'SHA256SUMS.sig'), 7), /^✕ the signature over SHA256SUMS does not check/m);
   await three((d) => fs.rmSync(path.join(d, 'README.txt')), /^✕ README\.txt is not in the folder \(ENOENT\)$/m);

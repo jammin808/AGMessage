@@ -337,15 +337,22 @@ Troubleshooting
 
 - Conversation history is kept in:
       app\data\rooms\
-  Each room is saved as a JSON file. If the laptop crashes or you close the
+  Each room is saved as a JSON file. If the laptop restarts or you close the
   terminal by mistake, just relaunch start-agmessage.bat — every active room
   comes back with its full history, pinned messages, action prompts, and
   document references. Pages left open come back by themselves once it
-  runs again, and nobody is announced again.
+  runs again, and nobody is announced again. A crash of the laptop itself
+  (not of AGMessage) counts as a power cut: see below.
 
 - Changes are written as they happen to a small log beside each room
-  (app\data\rooms\<CODE>.log) and folded into the .json snapshot regularly,
-  so even a power cut loses nothing but the last instant.
+  (app\data\rooms\<CODE>.log), before AGMessage answers, and folded into the
+  .json snapshot regularly. A crash of AGMessage or of a browser loses
+  nothing; a power cut can lose the last few seconds: what AGMessage has
+  taken is in Windows' file cache at once, and on the disk once Windows
+  writes it back. A change the disk will not take (a full disk, a log
+  another program holds) is kept in memory, named on the admin page's
+  Health line and put in the room's next snapshot; until that snapshot
+  lands, a crash of AGMessage can lose it.
 
 What's new in 0.5
 -----------------

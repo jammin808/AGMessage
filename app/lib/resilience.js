@@ -67,12 +67,14 @@ class SupervisorPolicy {
 /**
  * Write a file so a power cut leaves either the old or the new one, never half of either:
  * write a temporary file, flush it to the disk, then rename it over the target. With `keepBak`, the old
- * file is kept as `.bak` — but only when `worthKeeping(oldText)` says it is whole, so a torn file never
- * replaces a good backup. Every byte reaches the temporary file or the write throws: a disk that fills part-way
+ * file is kept as `.bak` — but only when it is whole, so a torn file never replaces a good backup. It is whole when the
+ * caller says so with `knownWhole` (the file is one it wrote itself, or read whole: only the one writer of the file
+ * may say it), and then it is copied unread; otherwise it is read, and kept only when `worthKeeping(oldText)` says it
+ * is whole. Every byte reaches the temporary file or the write throws: a disk that fills part-way
  * never has a short file renamed over a whole one. A write that throws removes its temporary file, so it does not
  * keep the disk full. Returns the number of bytes written.
  */
-function writeFileAtomic(file, data, { keepBak = false, worthKeeping = isJson, mode } = {}) {
+function writeFileAtomic(file, data, { keepBak = false, knownWhole = false, worthKeeping = isJson, mode } = {}) {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = file + '.' + process.pid + '.tmp';
@@ -89,8 +91,7 @@ function writeFileAtomic(file, data, { keepBak = false, worthKeeping = isJson, m
     } finally { fs.closeSync(fd); }
     if (keepBak) {
       try {
-        const old = fs.readFileSync(file, 'utf8');
-        if (worthKeeping(old)) fs.copyFileSync(file, file + '.bak');
+        if (knownWhole || worthKeeping(fs.readFileSync(file, 'utf8'))) fs.copyFileSync(file, file + '.bak');
       } catch { /* no old file yet */ }
     }
     fs.renameSync(tmp, file);
@@ -105,13 +106,21 @@ function isJson(text) {
   try { JSON.parse(text); return true; } catch { return false; }
 }
 
-/** Read a JSON file, falling back to its .bak when the file is missing or torn. */
-function readJsonWithBak(file) {
-  for (const f of [file, file + '.bak']) {
-    try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { /* next */ }
+/**
+ * Read a JSON file, falling back to its .bak when the file is missing or torn: `{data, whole}`, `data` null when
+ * neither parses, and `whole` true only when the file itself parsed, so its writer may keep it as `.bak` unread
+ * (`knownWhole`). A file that fell back to its .bak is not whole: its next save reads it before it may replace the .bak.
+ */
+function readJsonWhole(file) {
+  const tries = [file, file + '.bak'];
+  for (let i = 0; i < tries.length; i++) {
+    try { return { data: JSON.parse(fs.readFileSync(tries[i], 'utf8')), whole: i === 0 }; } catch { /* next */ }
   }
-  return null;
+  return { data: null, whole: false };
 }
+
+/** Read a JSON file, falling back to its .bak when the file is missing or torn. */
+function readJsonWithBak(file) { return readJsonWhole(file).data; }
 
 /**
  * One writer for one file. `save(produce)` asks for a write; bursts coalesce (only the latest
@@ -238,4 +247,4 @@ function placeId(dir, name) {
   return crypto.createHash('sha256').update(process.platform === 'win32' ? p.toLowerCase() : p).digest('hex').slice(0, 16);
 }
 
-module.exports = { EXIT, SupervisorPolicy, writeFileAtomic, readJsonWithBak, isJson, WriteLane, Ring, ClockSampler, placeId };
+module.exports = { EXIT, SupervisorPolicy, writeFileAtomic, readJsonWhole, readJsonWithBak, isJson, WriteLane, Ring, ClockSampler, placeId };

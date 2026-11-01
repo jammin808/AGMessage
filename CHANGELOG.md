@@ -657,6 +657,37 @@ the show laptop yet)
   before its first restart; a 0.6 page it refuses tries again after 3 s. A 0.5.1 page cached across the upgrade
   ignores `retryMs` and stays as it was.
 
+**Compaction trusts the snapshot it wrote, and the papers say what a power cut can lose** (the plan's Part 5, unit D;
+the owner's answer 28, "a power cut can lose the last few seconds" until the show laptop's disk is measured; the tree's
+tests. No number is quoted: the plan's bench of a snapshot's stall is not rerun, and the stall on the show laptop is
+health's `peaks.compactMs`, reading 4 of `docs/DESIGN.md`, not measured yet)
+- A hall's snapshot (every 500 changes, at a start and at a stop) no longer reads back and parses the snapshot it
+  replaces before keeping it as the backup. 0.5.1 read the whole old file and parsed it every time, so that a torn file
+  would never replace a good `.bak`, though the file was the one it had written itself; the server waited for that read,
+  every hall's work with it, and the read grows with the hall. The store now knows its own snapshot (`snapWhole`): once
+  it has written one, or loaded one that parsed, the next snapshot copies it to `.bak` unread. After a start that found
+  the snapshot torn and loaded its `.bak`, the file on disk is read and parsed first, as before, so a torn snapshot
+  still never replaces a good backup; a snapshot that fails leaves `snapWhole` as it was, the file on disk being still
+  the one before. No file call is added, so the synchronous-call caps hold. `writeFileAtomic` takes `knownWhole`, and
+  `readJsonWhole` says whether the file itself parsed or its `.bak` was read; every other save is as it was.
+- What a power cut can lose, said as it is. A change is appended to its hall's log before it is answered, and is then in
+  the system's file cache: AGMessage does not flush it to the disk. A crash of AGMessage or of a browser loses nothing;
+  a power cut can lose the last few seconds, and a crash of the laptop itself counts as one. An append the disk refuses
+  (a full disk, a log another program holds) is kept in memory, named on the admin page's health and put in the hall's
+  next snapshot, and a crash of AGMessage before that snapshot lands loses it; the papers now say that too. `README.md`
+  said "a crash or power cut loses nothing", `README.txt` "even a power cut loses nothing but the last instant", and
+  `lib/store.js` that an acknowledged message was on disk; they, and `docs/DESIGN.md` (its "Nothing heavy on the game
+  loop" row for the snapshot, "Recover, don't stop" for the power cut), now say what is true. Whether every answered
+  change goes to the disk at once (a group commit) waits for the show laptop's fsync reading (reading 3,
+  `peaks.auditPutMs`).
+- `test/units.test.js`: a file known whole is kept as `.bak` without a read of it, and one not known is read and kept
+  only when it parses; a read with its backup says whether the file itself parsed; a hall made, or loaded whole,
+  compacts without reading its snapshot, and a snapshot that fails then leaves it known whole, so the next still copies
+  it unread; a load from a torn snapshot clears `snapWhole`, a snapshot that fails leaves it cleared, and the next one
+  reads the torn file and keeps the good `.bak`. A source read holds `README.md`, `README.txt` and `lib/store.js` to the
+  words, and none of them may say a power cut loses nothing.
+- Rolling back: nothing is stored; 0.5.1 reads the old snapshot before each backup again.
+
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,
@@ -685,6 +716,10 @@ the show laptop yet)
   cached clock, so the wait could end a millisecond early and the key's verdict was asked for again a moment too soon
   (Stagewatch then said "wait" again). The hold is read again when the timer fires. CI found it on Node 26, where the
   test that holds the 2 s Retry-After measured 1999 ms; with the hold read again it can no longer come short.
+- A test of the audit export's verifier no longer fails about one run in eight. To show that a changed `SHA256SUMS`
+  fails its signature it changed one digit of a digest, and when that digit was `a` or `f` the result was no hex digit
+  at all, so the verifier refused the line's shape before it reached the signature; the digit is now changed to another
+  hex digit. Nothing that ships changed.
 
 ## 0.5.1 — 2026-10-26 — the show desk and the Stagewatch link, as Stagewatch states them
 

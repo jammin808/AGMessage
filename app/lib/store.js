@@ -19,13 +19,19 @@
  * is still answered for what happened after a restart. Every index is kept in `_apply`, where the one writer applies an
  * op, so an op replayed from the log builds the same indexes as one committed now.
  *
- * Durability: the op append is synchronous on purpose (an acknowledged message is on disk). A snapshot is written
- * tmp -> fsync -> rename, keeping the previous snapshot as .bak only when it parses, and a torn snapshot falls back
- * to the .bak on load — the log is replayed on top of whichever loaded.
+ * Durability: the op append is synchronous on purpose, and is not flushed to the disk by AGMessage:
+ * an acknowledged message is in the system's file cache. A crash of AGMessage or of a browser loses nothing; a power
+ * cut can lose the last few seconds, what the system had not yet written back to the disk. An append the disk refuses
+ * leaves its op in memory only (`unsaved`, named in health) until the room's next snapshot lands: a crash before then
+ * loses it. A snapshot is written tmp -> fsync -> rename, keeping the previous snapshot as .bak only when it is whole,
+ * and a torn snapshot falls back to the .bak on load — the log is replayed on top of whichever loaded. The store knows
+ * its own snapshot (`snapWhole`): true once it wrote one, or loaded one that parsed, and then the next compaction
+ * copies it to .bak unread; false after a load that fell back to the .bak, and then the snapshot on disk is read and
+ * parsed before it may replace the .bak.
  */
 const fs = require('fs');
 const path = require('path');
-const { writeFileAtomic, readJsonWithBak } = require('./resilience');
+const { writeFileAtomic, readJsonWhole } = require('./resilience');
 
 const RING = 2000;          // ops kept in memory per room for resume
 const COMPACT_EVERY = 500;  // ops between snapshots
@@ -71,12 +77,13 @@ class RoomStore {
     for (const code of codes) {
       if (!RoomStore.validCode(code)) continue;
       try {
-        const data = readJsonWithBak(this.file(code, '.json'));
+        const { data, whole } = readJsonWhole(this.file(code, '.json'));
         if (!data) throw new Error('snapshot and its backup are both unreadable');
         const room = this._blank(code, typeof data.name === 'string' ? data.name : '', data.createdAt || Date.now());
         room.messages = Array.isArray(data.messages) ? data.messages.filter((m) => m && typeof m.id === 'string') : [];
         room.seq = Number.isInteger(data.seq) ? data.seq : room.messages.length;
         room.settings = data.settings && typeof data.settings === 'object' ? data.settings : {};
+        room.snapWhole = whole;   // the snapshot on disk parsed; one that fell back to the .bak is read again before it may replace it
         for (const m of room.messages) {
           room.byId.set(m.id, m);
           const key = cidKey(m);
@@ -99,7 +106,7 @@ class RoomStore {
   _blank(code, name, createdAt) {
     return {
       code, name, createdAt, messages: [], byId: new Map(), byCid: new Map(), gone: new Map(), goneKeys: new Map(), seq: 0, ring: [],
-      users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false, ragged: false, snapKb: null,
+      users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false, ragged: false, snapKb: null, snapWhole: false,
     };
   }
 
@@ -252,7 +259,9 @@ class RoomStore {
 
   /**
    * Write the snapshot atomically and truncate the log. The snapshot's size is kept as `room.snapKb` (null until the
-   * first one this run), so health reads a hall's size with no file call of its own.
+   * first one this run), so health reads a hall's size with no file call of its own. The snapshot it replaces is kept as
+   * .bak unread when the store knows it whole (`snapWhole`), and read first otherwise; once the new one is in place the
+   * store knows it whole. A snapshot that failed leaves `snapWhole` as it was: the file on disk is still the one before.
    */
   compact(code) {
     const room = this.rooms.get(code);
@@ -260,7 +269,8 @@ class RoomStore {
     const t0 = performance.now();
     const out = { code: room.code, name: room.name || '', createdAt: room.createdAt, seq: room.seq, settings: room.settings, messages: room.messages, savedAt: Date.now(), gone: Array.from(room.gone.values()) };
     try {
-      const bytes = writeFileAtomic(this.file(code, '.json'), JSON.stringify(out), { keepBak: true });
+      const bytes = writeFileAtomic(this.file(code, '.json'), JSON.stringify(out), { keepBak: true, knownWhole: room.snapWhole });
+      room.snapWhole = true;
       this._closeLog(room);
       fs.writeFileSync(this.file(code, '.log'), '');
       room.snapKb = Math.round(bytes / 102.4) / 10;
