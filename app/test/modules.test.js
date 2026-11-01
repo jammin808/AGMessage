@@ -17,7 +17,7 @@ const serverCode = () => ['server.js', 'supervise.js', ...filesUnder('lib', /\.[
 
 // ---------------------------------------------------------------- (a)-(c) the server's layers
 /** The pure core: functions of what they are given, their clocks default arguments. They require only each other. */
-const PURE = ['lib/board.js', 'lib/context.js', 'lib/deskresults.js', 'lib/ops.js', 'lib/rbac.js', 'lib/stagelines.js'];
+const PURE = ['lib/board.js', 'lib/context.js', 'lib/deskresults.js', 'lib/latest.js', 'lib/ops.js', 'lib/rbac.js', 'lib/stagelines.js'];
 /** What reaches a disk, a network, the machine or another process: a pure module names none of them. */
 const IO_BUILTINS = ['fs', 'net', 'http', 'https', 'dgram', 'tls', 'os', 'dns', 'child_process', 'ws'];
 /** Only the composition root, server.js, requires these: the HTTP domain and the handler modules. */
@@ -143,7 +143,7 @@ test('(a)-(c) a planted breach of each layer rule fails it', () => {
   assert.deepEqual(run(add('lib/rbac.js', "const util = require('util');")), ['lib/rbac.js (pure) requires util, outside the pure set']);
   assert.deepEqual(run(add('lib/board.js', 'const now = () => process.hrtime();')), ['lib/board.js (pure) reads process.']);
   assert.deepEqual(run(add('lib/board.js', "const later = () => import('./rbac.js');")), ['lib/board.js (pure) imports at run time']);
-  assert.deepEqual(run({}, [...pure, 'lib/latest.js']), ['lib/latest.js is in the pure set and not in the tree']);
+  assert.deepEqual(run({}, [...pure, 'lib/nothere.js']), ['lib/nothere.js is in the pure set and not in the tree']);
   assert.deepEqual(run(add('lib/resilience.js', "require('./store');")), ['a cycle: lib/resilience.js → lib/store.js → lib/resilience.js']);
   assert.deepEqual(run(add('test/units.test.js', "require('../server');")), ['test/units.test.js requires server.js']);
   // app/ itself, by any spelling, is its package.json's main.

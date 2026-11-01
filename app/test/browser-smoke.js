@@ -18,7 +18,7 @@ const path = require('path');
 const net = require('net');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
-const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY } = require('./helpers');
+const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = process.env.AGM_SMOKE_OUT || path.join(ROOT, '..', 'artifacts', 'smoke');
@@ -354,10 +354,25 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     })()`);
     report(typeof pages === 'string' && pages.startsWith('1|') && pages.includes('Capex'), `pdf.js renders an uploaded PDF and reads its text (${pages})`);
     await research.eval(`new Promise((r) => socket.emit('message', { type: 'text', text: 'Capex is on slide 14' }, r))`);
+    await research.eval(`(() => { window.__seenFrames = []; socket.on('seen', (f) => window.__seenFrames.push(f)); })()`);
 
     // Board: joins, sees the message and the document on stage, on a browser with no Promise.withResolvers.
     const board = await edge.tab(`${base}/app.html?code=${code}&name=Chair&role=board`, { init: NO_RESOLVERS, workerInit: NO_RESOLVERS });
     report(!!(await board.until('typeof joined !== "undefined" && joined && allMessages.some(m => m.text === "Capex is on slide 14")')), 'board view joins and sees the research message');
+    // Someone else's receipt (a page in another browser: these tabs share one identity) reaches the sender's page in
+    // the hall's batch of the receipts that moved, and is drawn under the message.
+    const reader = await connect(base);
+    const readerIn = await emit(reader, 'join', { roomCode: code, name: 'Sam', role: 'observer' });
+    reader.emit('seen', { seq: readerIn.seq });
+    const seenDrawn = await research.until(`(() => {
+      const node = messagesById.get(allMessages.find((m) => m.text === 'Capex is on slide 14').id);
+      const line = node && node.querySelector('.seen-line');
+      if (!line || line.textContent !== '✓ Seen by Sam') return null;
+      const frames = window.__seenFrames;
+      return { batches: frames.length > 0 && frames.every((f) => Object.keys(f).join() === 'seen' && Array.isArray(f.seen)), sam: frames.some((f) => f.seen.some((e) => e.name === 'Sam' && e.role === 'observer')), frames: frames.length };
+    })()`);
+    reader.close();
+    report(!!seenDrawn && seenDrawn.batches && seenDrawn.sam, `the sender's message reads "✓ Seen by Sam", from the hall's batched seen frames (${JSON.stringify(seenDrawn)})`);
     // The panel draws the PDF through pdf.js's legacy build, which defines what the browser lacks; then a Word file.
     const boardPdf = await board.until(`(() => {
       if (!window.__openedPdf) { window.__openedPdf = 1; openDocInPanel(allMessages.find((m) => m.filename === 'capex.pdf')); }

@@ -398,7 +398,8 @@ Reliability and speed
   - Saves are crash-safe (written, flushed to disk, then swapped in, with a
     backup of the last whole copy). Saved keys are encrypted with a key kept
     outside this folder, so a copied folder carries no usable key.
-  - "Seen by" under your own messages: research knows the board has read it.
+  - "Seen by" under your own messages: research knows the board has read it
+    (at once, or within a second when many read at the same moment).
 
 AI (optional; Admin -> AI drafts, or set ANTHROPIC_API_KEY)
   - Research: "Draft answer" writes a reply to the board's latest question (or

@@ -493,6 +493,48 @@ fence reads it, and the hall page in Chromium)
   comes back after it draw it the same way, with one listener for each row.
 - Rolling back: nothing is stored; 0.5.1 sends the same events.
 
+**State frames go out latest wins, through one primitive, and are no longer deflated** (the plan's Part 5, unit C; the
+tree's tests and the hall page in Chromium. No number from the plan's bench is quoted: its rerun, reading 0, is not
+taken yet, and its row in `docs/DESIGN.md` still says "not measured")
+- The WebSocket's frames are not deflated (`perMessageDeflate: false`): a handshake that offers `permessage-deflate`, as
+  every browser does, is answered without it. A broadcast is framed once and that frame written to every socket in the
+  hall, where each socket compressed it again before. HTTP long-polling keeps engine.io's HTTP compression. A first open
+  of a large hall now goes uncompressed; the first open is bounded later in 0.6.0 (unit 32).
+- One primitive for four frames of state, `Latest` (`app/lib/latest.js`, in the pure core): a change after a quiet
+  window is sent on the next turn, the changes inside a window fold into one frame at its end, each with its newest
+  state, and none is dropped (no frame is volatile; a page that stops reading is still let go by the heartbeat). The
+  halls board (300 ms) and a hall's screens console (150 ms) are moved onto it: a lone change now goes at once, where
+  0.5.1 waited for the board's 300 ms interval and sent the screens' change 150 ms after it. `nodes:changed` (the nodes
+  heard on the network told by their own 500 ms coalescer, a link's change at once) and Stagewatch's view (sent when it
+  changes) are as in 0.5.1. The people list and the seen receipts join the board and the screens:
+- The people list (`users`) goes to a hall at most once per 100 ms, not once per join, leave or role change to every
+  page in it, so a join storm of N pages is no longer N lists to up to N pages. A join, a leave and the admin's role
+  change only mark the hall; the frame keeps 0.5.1's split, one broadcast without the guests' links and each admin
+  page's own copy with them. After a burst the list may come up to 0.1 s later.
+- Seen receipts go to a hall in one frame per second at most, `seen {seen: [{uid, name, role, seq}…]}`, holding the
+  receipts that moved since the last. 0.5.1 sent each report to the whole hall, so a lone message brought N reports and
+  N² frames, each making every page look again at its messages. The hall page applies the batch, then draws its "Seen
+  by" lines once. After a burst a receipt may show up to 1 s later. The join's `seen` is unchanged.
+- Health's `latest` holds all four, `board`, `screens`, `people` and `seen`, each `{marks, flushes}`: the changes marked
+  and the frames sent for them.
+- A frame that faults while it is built is refused and counted in health's `handlerFaults`, as a socket handler's
+  throw is, and the rest of its batch still goes: each hall's frame, and each watcher's board, is sent apart
+  (`sendEach`). A frame only reads the state, so the one refused changed nothing. In 0.5.1 the people list and a
+  receipt were built inside their handlers, where a throw refused that one request; the board's interval and the
+  screens' timer had no guard, so a throw there ended the server for the watchdog to restart.
+- `test/resilience.test.js` counts the timers `server.js` and each handler module start (`setTimeout(` and
+  `setInterval(`), each with its reason: 13 in `server.js`, the board's interval and the screens' timer gone into
+  `Latest`. A new tick of its own moves the list, with its words; a new frame of state is a `Latest`. `lib/latest.js`
+  joins the module fence's pure core.
+- Two tests sent to Stagewatch as soon as the fake Stagewatch's socket opened, before AGMessage had the key's verdict,
+  which AGMessage waits for and refuses a send without. `shownet.test.js` C18 sent at once, and with frames no longer
+  deflated its send came first every time; `halls.test.js` C53 sends after a join's round trip and did not race in three
+  runs, but can likewise. Both now wait for AGMessage's own link status, which reads connected only once the key is
+  accepted. The halls board's own tests in `halls.test.js`, and `displays.test.js`, are unchanged.
+- Rolling back: nothing is stored; 0.5.1 deflates again and sends a list and a receipt per event. A 0.5.1 hall page
+  cached across the upgrade reads the batched `seen` frame as one with no `uid` and ignores it, so it draws no new "Seen
+  by" until it is reloaded; its people list and board are as before.
+
 **Fixed**
 - The clean copy is clean every time. `make-shareable-copy.bat` copied into one fixed folder and kept what was already
   there, so a clean copy that had been started once to test it kept its accounts and password hashes, sign-ins,

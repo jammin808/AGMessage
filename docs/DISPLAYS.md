@@ -76,5 +76,6 @@ Anyone with a screen's link can see that screen, so give it only to the machine 
 `app/lib/displays.js` (the store, what may be shown, the states), `server.js` (`/d/:token`, `serveDisplay`, the
 `display:*` events), `app/public/display.html|css|js` (the screen), `app/public/app.js` (Screens). A take is
 `display:take {ids, content}` (or `{id, content}` for one screen), answered `{ok, results: [{id, ok, seq, status} or
-{id, ok: false, error}]}`; a hall's operators hear `displays:changed` at most once per 150 ms, then re-read the list.
+{id, ok: false, error}]}`; a hall's operators hear `displays:changed` at once for a lone change, and at most once per
+150 ms in a burst (`lib/latest.js`), then re-read the list.
 Tests: `app/test/displays.test.js` and the browser smoke.

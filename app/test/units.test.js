@@ -254,6 +254,231 @@ test('op table: each change is committed, then sent under the event the table na
   assert.deepEqual(ops.eventsOf({ o: 'nothing', s: 1 }, t.room), [], 'a kind the table does not hold sends nothing');
 });
 
+// ---------------------------------------------------------------- latest wins: one primitive for every state frame
+const { Latest } = require('../lib/latest');
+/** Timers on a clock that moves only when told: `tick(ms)` fires each timer due by then, in order, each at its own time. */
+function manualTimers() {
+  let now = 0, next = 1;
+  const due = new Map();
+  const made = [];
+  const schedule = {
+    setTimeout: (fn, ms) => {
+      const h = { id: next++, at: now + ms, ms, fn, unrefd: false, unref() { this.unrefd = true; return this; } };
+      due.set(h.id, h); made.push(h);
+      return h;
+    },
+    clearTimeout: (h) => { if (h) due.delete(h.id); },
+  };
+  const tick = (ms = 0) => {
+    const end = now + ms;
+    for (;;) {
+      let first = null;
+      for (const h of due.values()) if (h.at <= end && (!first || h.at < first.at || (h.at === first.at && h.id < first.id))) first = h;
+      if (!first) break;
+      due.delete(first.id);
+      now = first.at;
+      first.fn();
+    }
+    now = end;
+  };
+  return { schedule, tick, now: () => now, waiting: () => due.size, made };
+}
+/** A Latest of 100 ms on manual timers, each flush recorded as [when, [[key, value]…]]. */
+function latestRig(opts = {}) {
+  const t = manualTimers();
+  const flushed = [];
+  const l = new Latest({ name: 'test', delayMs: 100, flush: (batch) => flushed.push([t.now(), [...batch]]), schedule: t.schedule, ...opts });
+  return { ...t, l, flushed };
+}
+
+test('latest: a lone change is flushed on the next turn, never inside the mark, and a quiet window leaves no timer', () => {
+  const r = latestRig();
+  r.l.mark('A', 1);
+  assert.deepEqual(r.flushed, [], 'not inside the mark');
+  assert.deepEqual(r.made.map((h) => h.ms), [0], 'a zero-delay timer: the next turn');
+  r.tick(0);
+  assert.deepEqual(r.flushed, [[0, [['A', 1]]]]);
+  assert.deepEqual(r.l.stats(), { marks: 1, flushes: 1 });
+  r.tick(100);
+  assert.equal(r.waiting(), 0, 'the window the flush opened ended with nothing marked in it: nothing waits');
+  assert.deepEqual(r.made.map((h) => h.ms), [0, 100]);
+  r.tick(500);
+  r.l.mark('B', 2);
+  r.tick(0);
+  assert.deepEqual(r.flushed, [[0, [['A', 1]]], [600, [['B', 2]]]], 'after a quiet window, at once again');
+  assert.deepEqual(r.l.stats(), { marks: 2, flushes: 2 });
+});
+
+test('latest: the marks inside a window fold into one flush at its end, each key once with its newest value', () => {
+  const r = latestRig();
+  r.l.mark('A', 1);
+  r.tick(0);   // the lone change, at once: its flush opens the window
+  r.tick(10); r.l.mark('A', 2);
+  r.tick(30); r.l.mark('B', 1);
+  r.tick(49); r.l.mark('A', 3);
+  r.tick(10);
+  assert.equal(r.flushed.length, 1, 'nothing more before the window ends (99 ms)');
+  r.tick(1);
+  assert.deepEqual(r.flushed, [[0, [['A', 1]]], [100, [['A', 3], ['B', 1]]]]);
+  assert.deepEqual(r.l.stats(), { marks: 4, flushes: 2 });
+  r.tick(100);
+  assert.equal(r.waiting(), 0);
+});
+
+test('latest: merge folds what waits for a key with what is marked next, and is asked only when something waits', () => {
+  const asked = [];
+  const r = latestRig({ merge: (a, b) => { asked.push([a.seq, b.seq]); return { seq: Math.max(a.seq, b.seq), priority: a.priority || b.priority }; } });
+  r.l.mark('R1', { seq: 5, priority: true });
+  r.tick(0);
+  r.tick(20);
+  r.l.mark('R1', { seq: 6, priority: true });
+  r.l.mark('R1', { seq: 8, priority: false });
+  r.l.mark('R1', { seq: 7, priority: false });
+  r.l.mark('R2', { seq: 1, priority: false });
+  r.tick(80);
+  assert.deepEqual(r.flushed, [
+    [0, [['R1', { seq: 5, priority: true }]]],
+    [100, [['R1', { seq: 8, priority: true }], ['R2', { seq: 1, priority: false }]]],
+  ], 'the priority marked first in the window is not folded away by the newer marks without it');
+  assert.deepEqual(asked, [[6, 8], [8, 7]]);
+});
+
+test('latest: flushNow flushes what waits at once and starts the window again from it', () => {
+  const r = latestRig();
+  assert.equal(r.l.flushNow(), 0, 'nothing waiting: nothing flushed');
+  assert.deepEqual([r.flushed, r.made.length, r.l.stats()], [[], 0, { marks: 0, flushes: 0 }]);
+  r.l.mark('A', 1);
+  assert.equal(r.l.flushNow(), 1);
+  assert.deepEqual(r.flushed, [[0, [['A', 1]]]], 'inside the call');
+  r.tick(0);
+  assert.equal(r.flushed.length, 1, 'the next turn\'s flush was taken back');
+  r.tick(20); r.l.mark('B', 1); r.tick(79);
+  assert.equal(r.flushed.length, 1, 'the window runs from the flush');
+  r.tick(1);
+  assert.deepEqual(r.flushed.at(-1), [100, [['B', 1]]]);
+  r.tick(30); r.l.mark('C', 1);
+  assert.equal(r.l.flushNow(), 1);
+  r.tick(20); r.l.mark('D', 1); r.tick(79);
+  assert.deepEqual(r.flushed.slice(2), [[130, [['C', 1]]]], 'the window that flush opened, not the one before it, holds D');
+  r.tick(1);
+  assert.deepEqual(r.flushed.slice(2), [[130, [['C', 1]]], [230, [['D', 1]]]]);
+  assert.deepEqual(r.l.stats(), { marks: 4, flushes: 4 });
+});
+
+test('latest: over a long run of bursts and lulls nothing is dropped, nothing is stale, and flushes are a window apart', () => {
+  const r = latestRig();
+  let x = 20261101;
+  const draw = (n) => { x = (x * 48271) % 2147483647; return x % n; };   // a fixed sequence: the run is the same every time
+  const log = [];   // every mark and flush, in the order they happened
+  const l = new Latest({ name: 'run', delayMs: 100, flush: (batch) => log.push(['flush', r.now(), [...batch]]), schedule: r.schedule });
+  for (let i = 0; i < 2000; i++) {
+    r.tick(draw(12) === 0 ? 150 + draw(200) : draw(40));
+    const key = 'k' + draw(8);
+    l.mark(key, i);
+    log.push(['mark', r.now(), key, i]);
+  }
+  r.tick(1000);
+  const waiting = new Map();   // key → [first marked at, newest value]
+  const flushes = [];
+  for (const e of log) {
+    if (e[0] === 'mark') { const w = waiting.get(e[2]); waiting.set(e[2], [w ? w[0] : e[1], e[3]]); continue; }
+    const [, at, batch] = e;
+    assert.deepEqual(batch.map(([k]) => k).sort(), [...waiting.keys()].sort(), 'a flush holds every key marked since the last, and only those');
+    for (const [k, v] of batch) {
+      assert.equal(v, waiting.get(k)[1], 'with its newest value');
+      assert.ok(at - waiting.get(k)[0] <= 100, 'flushed within one window of its first mark (' + (at - waiting.get(k)[0]) + ' ms)');
+    }
+    waiting.clear();
+    flushes.push(at);
+  }
+  assert.equal(waiting.size, 0, 'nothing left unflushed');
+  for (let i = 1; i < flushes.length; i++) assert.ok(flushes[i] - flushes[i - 1] >= 100, 'flushes a window apart: ' + flushes[i - 1] + ' then ' + flushes[i]);
+  assert.ok(flushes.length < 2000 / 2, flushes.length + ' flushes for 2000 marks');
+  assert.deepEqual(l.stats(), { marks: 2000, flushes: flushes.length });
+  assert.ok(r.made.length > 0 && r.made.every((h) => h.unrefd), 'every timer it made was unref()\'d');
+  assert.equal(r.waiting(), 0);
+});
+
+test('latest: a mark made while flushing goes in the next window; a flush that throws leaves the run as it was', () => {
+  const t = manualTimers();
+  const flushed = [];
+  let n = 0;
+  const l = new Latest({
+    name: 'odd', delayMs: 100, schedule: t.schedule,
+    flush: (batch) => {
+      n++;
+      flushed.push([t.now(), [...batch]]);
+      if (n === 1) l.mark('again', 'from inside');
+      if (n === 2) throw new Error('a flush fault');
+    },
+  });
+  l.mark('A', 1);
+  t.tick(0);
+  assert.deepEqual(flushed, [[0, [['A', 1]]]]);
+  assert.throws(() => t.tick(100), /a flush fault/, 'the fault is the flush\'s own, not swallowed');
+  assert.deepEqual(flushed, [[0, [['A', 1]]], [100, [['again', 'from inside']]]], 'marked inside the first flush, flushed at the end of the window it opened');
+  assert.deepEqual(l.stats(), { marks: 2, flushes: 2 });
+  t.tick(30); l.mark('B', 1);
+  t.tick(69);
+  assert.equal(flushed.length, 2, 'the window the faulted flush opened still runs');
+  t.tick(1);
+  assert.deepEqual(flushed.at(-1), [200, [['B', 1]]]);
+});
+
+test('latest: its timers never keep the process alive; the runtime\'s timers by default', async () => {
+  const handles = [];
+  const real = { setTimeout: (fn, ms) => { const h = setTimeout(fn, ms); handles.push(h); return h; }, clearTimeout };
+  const seen = [];
+  // A window far longer than the wait: what arrives in it is the lone change's own flush, on the next turn.
+  const l = new Latest({ name: 'real', delayMs: 60_000, flush: (b) => seen.push([...b.keys()]), schedule: real });
+  l.mark('A');
+  assert.ok(handles.length === 1 && handles[0].hasRef() === false, 'unref()\'d');
+  await new Promise((res) => { setTimeout(res, 50); });
+  assert.deepEqual(seen, [['A']]);
+  assert.ok(handles.length === 2 && handles[1].hasRef() === false, 'the window it opened too');
+  const byDefault = [];
+  const d = new Latest({ name: 'default', delayMs: 60_000, flush: (b) => byDefault.push([...b.keys()]) });
+  d.mark('B');
+  assert.deepEqual(byDefault, []);
+  await new Promise((res) => { setTimeout(res, 50); });
+  assert.deepEqual(byDefault, [['B']]);
+});
+
+test('latest: refuses what it cannot run, by name', () => {
+  const flush = () => {};
+  assert.throws(() => new Latest({ delayMs: 100, flush }), /A Latest needs a name/);
+  for (const delayMs of [0, -1, 1.5, NaN, '100', undefined]) assert.throws(() => new Latest({ name: 'x', delayMs, flush }), /Latest x: delayMs/, String(delayMs));
+  assert.throws(() => new Latest({ name: 'x', delayMs: 100 }), /Latest x: flush is a function/);
+  assert.throws(() => new Latest({ name: 'x', delayMs: 100, flush, merge: 'newest' }), /Latest x: merge is a function/);
+  for (const schedule of [null, {}, { setTimeout }]) assert.throws(() => new Latest({ name: 'x', delayMs: 100, flush, schedule }), /Latest x: schedule/);
+  assert.throws(() => new Latest(), /A Latest needs a name/);
+  assert.equal(new Latest({ name: 'x', delayMs: 1, flush }).name, 'x');
+});
+
+test('latest: sendEach sends every subject of a flush, and one that faults is handed over and holds back no other', () => {
+  const { sendEach } = require('../lib/latest');
+  const sent = [];
+  const faults = [];
+  const batch = new Map([['H1', 1], ['H2', 2], ['H3', 3]]);
+  const n = sendEach(batch, ([code, v]) => { if (code === 'H2') throw new Error('a frame fault'); sent.push([code, v]); }, (e, subject) => faults.push([e.message, subject]));
+  assert.equal(n, 2, 'the number sent');
+  assert.deepEqual(sent, [['H1', 1], ['H3', 3]], 'the subjects either side of the fault, in order');
+  assert.deepEqual(faults, [['a frame fault', ['H2', 2]]], 'the fault, with its subject, once');
+  assert.equal(sendEach(new Set(), () => assert.fail('nothing to send'), () => assert.fail('nothing to fault')), 0);
+  // A frame whose subjects all fault sends none and lets each one go to the fault.
+  const all = [];
+  assert.equal(sendEach(['a', 'b'], () => { throw new Error('x'); }, (e, s) => all.push(s)), 0);
+  assert.deepEqual(all, ['a', 'b']);
+  // A Latest whose flush sends through it: one hall's fault, the other hall still flushed, and the run carries on.
+  const r = latestRig({ flush: (b) => sendEach(b, ([k]) => { if (k === 'bad') throw new Error('no'); r.flushed.push([r.now(), k]); }, (e, [k]) => r.flushed.push([r.now(), 'refused ' + k])) });
+  r.l.mark('bad'); r.l.mark('good');
+  r.tick(0);
+  assert.deepEqual(r.flushed, [[0, 'refused bad'], [0, 'good']]);
+  r.tick(50); r.l.mark('good'); r.tick(50);
+  assert.deepEqual(r.flushed.at(-1), [100, 'good'], 'the window after a refused frame runs as any other');
+  assert.deepEqual(r.l.stats(), { marks: 3, flushes: 2 });
+});
+
 // ---------------------------------------------------------------- health's readings and a show day's peaks
 const readings = require('../lib/peaks');
 const { auditLog } = require('./helpers');

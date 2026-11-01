@@ -313,6 +313,8 @@ test('C18: a Stagewatch\'s numbers never cross a link made again, a restart or a
   crew.on('stage', (s) => stages.push(s));
   const roomMessages = async () => (await emit(ctl, 'admin:watchRoom', { roomCode: hall })).messages;
   await until(() => sw1.connected, 6000, 'hall linked');
+  // A socket open is not a link: AGMessage sends only once Stagewatch has accepted its key, which its own status says.
+  await until(async () => (await emit(ctl, 'hall:settings', { code: hall })).stagewatch.status === 'connected', 6000, 'the key accepted');
 
   await t.test('a hall\'s Stagewatch removed, then another set: a send to the first is not acknowledged by the second\'s message of that number', async () => {
     const sent = await emit(crew, 'stage:send', { text: 'Two minutes' });

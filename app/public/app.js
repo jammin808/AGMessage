@@ -261,7 +261,12 @@ function renderProposalLine(host, p) {
   line.textContent = text;
   line.dataset.state = (p && p.state) || '';
 }
-socket.on('seen', (s) => { noteSeen(s); refreshSeenLines(); });
+// The hall's receipts that moved, in one frame per second at most: each applied, then the lines drawn once.
+socket.on('seen', (frame) => {
+  if (!frame || !Array.isArray(frame.seen)) return;
+  frame.seen.forEach(noteSeen);
+  refreshSeenLines();
+});
 socket.on('roomReset', ({ seq } = {}) => { if (bump(seq)) onReset(); });
 socket.on('roomMeta', ({ name, seq } = {}) => { if (bump(seq)) setRoomTitle(name); });
 function onReset() {

@@ -49,6 +49,7 @@ const stagelines = require('./lib/stagelines');
 const peerlinks = require('./lib/peerlinks');
 const deskresults = require('./lib/deskresults');
 const ops = require('./lib/ops');
+const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
 const readings = require('./lib/peaks');
 const startup = require('./lib/startup');
@@ -229,8 +230,29 @@ const loopRing = new resilience.Ring(120);       // the loop's true delay (its p
 const eluRing = new resilience.Ring(120, 3);     // how busy the loop was (its utilisation, 0 to 1) per 5 s, the last 10 minutes
 let eluMark = performance.eventLoopUtilization();
 const joinBurst = new readings.Burst();          // the most people seated in one hall in any 5 s (a doors-open storm)
-// What latest-wins coalescing saves: changes marked, and the frames sent for them (the halls board's tick, the screens' 150 ms).
-const coalesced = { board: { marks: 0, flushes: 0 }, screens: { marks: 0, flushes: 0 } };
+// State frames, latest wins (lib/latest.js): each says its subject changed, and is sent with the newest state, once per
+// window at most; a lone change goes at once. Built before anything can mark them; each flush reads the state it sends
+// when it runs, and skips a hall that has gone. A frame only reads the state, so one that faults while it is built is
+// refused and counted as a handler's throw is (`frameRefused`), and the rest of its batch still goes. Health's `latest`
+// reads what each saved (changes marked, frames sent).
+const frames = {
+  // Every halls board watcher, with the halls it may see (one key: the board is rebuilt for every watcher).
+  board: new Latest({ name: 'board', delayMs: 300, flush: () => sendBoards() }),
+  // A hall's screens console re-reads its list (keyed by the hall): a take on 50 screens is one re-read per console.
+  screens: new Latest({ name: 'screens', delayMs: 150, flush: (halls) => eachHall('screens', halls, (r) => io.to(r.code).emit('displays:changed', { code: r.code })) }),
+  // A hall's people list (keyed by the hall): a join storm is one list per window, not one per join to every page.
+  people: new Latest({ name: 'people', delayMs: 100, flush: (halls) => eachHall('people', halls, (r) => sendPeople(r)) }),
+  // A hall's seen receipts (keyed by the hall, with the people whose receipt moved): one frame per hall per second.
+  seen: new Latest({
+    name: 'seen', delayMs: 1000,
+    merge: (a, b) => { for (const uid of b) a.add(uid); return a; },
+    flush: (halls) => eachHall('seen', halls, (r, uids) => sendSeen(r, uids)),
+  }),
+};
+/** Each hall of a frame's batch that is still here, given to `send` with its value; one that faults holds back no other. */
+function eachHall(frame, halls, send) {
+  sendEach(halls, ([code, value]) => { const r = store.get(code); if (r) send(r, value); }, (e) => frameRefused(frame, e));
+}
 /** Sockets open now: the most from one address, and those through the tunnel (counts only: health names no address). */
 function socketFacts() {
   const c = readings.countSockets(Array.from(io.sockets.sockets.values(), (s) => s.data));
@@ -259,7 +281,14 @@ setInterval(() => {
   savePeaks();   // this window's rises, and the snapshots and audit appends timed in it
 }, 5000).unref();
 let rejections = 0;
-let handlerFaults = 0;   // socket events refused because their handler threw (guardHandlers)
+let handlerFaults = 0;   // socket events refused because their handler threw (guardHandlers), and state frames that could not be built
+/** A throw refused, never the process: counted in health's `handlerFaults` and logged, the first 20 and then every 100th. */
+function noteFault(where, what, e) {
+  handlerFaults++;
+  if (handlerFaults <= 20 || handlerFaults % 100 === 0) console.error('  [' + where + '] ' + what + ' refused (' + handlerFaults + '): ' + (e && e.message ? e.message : e));
+}
+/** A state frame that faulted while it was built: it read the state and changed none, so it is refused and counted. */
+function frameRefused(frame, e) { noteFault('frame', frame, e); }
 /**
  * Health's facts about the audit log, in the order its readers take them (H.11): the log's own, the signing key's
  * fingerprint, then where the newest whole check began (1, or the archive point after the newest split), how many
@@ -300,7 +329,7 @@ function healthFacts() {
     rssMb: Math.round(process.memoryUsage.rss() / 1048576),
     ...socketFacts(),
     largestHall: largestHall(),
-    latest: { board: { ...coalesced.board }, screens: { ...coalesced.screens } },
+    latest: Object.fromEntries(Object.values(frames).map((l) => [l.name, l.stats()])),
     // Per show day, the last 14, oldest first: each reading's highest (docs/DESIGN.md, "Measured on the show laptop").
     peaks: peaks.view(),
     showDay: readings.dayOf(Date.now()),   // the show day this laptop is in now: its record in `peaks` is today's
@@ -361,11 +390,13 @@ function roomUserSummary(room, { links = false } = {}) {
     account: !!u.acct,
   }));
 }
+/** Who is in the room changed: its people list goes to every page in it once per 100 ms at most (`frames.people`). */
+function emitUsers(room) { frames.people.mark(room.code); }
 /**
- * The room's people to every page in it: one broadcast without the links (encoded once, however many are in the hall),
- * and the admin's pages, a few, each the list with them (their chips and Unlink).
+ * The room's people to every page in it: one broadcast without the links (framed once, however many are in the hall,
+ * since frames are not deflated), and the admin's pages, a few, each the list with them (their chips and Unlink).
  */
-function emitUsers(room) {
+function sendPeople(room) {
   const admins = Array.from(io.sockets.adapter.rooms.get(room.code) || []).filter((sid) => { const s = io.sockets.sockets.get(sid); return !!(s && s.data.isAdmin); });
   io.to(room.code).except(admins).emit('users', roomUserSummary(room));
   if (!admins.length) return;
@@ -763,7 +794,9 @@ const io = new Server(server, {
   maxHttpBufferSize: 1024 * 1024,
   pingInterval: 10_000,   // notice a dead phone in seconds, not a minute
   pingTimeout: 8_000,
-  perMessageDeflate: { threshold: 2048 },
+  // No per-message deflate: a broadcast is framed once and that frame written to every socket, where deflate compressed
+  // it again for each. HTTP long-polling keeps engine.io's HTTP compression.
+  perMessageDeflate: false,
 });
 
 // Connection rate per address (tunnels included).
@@ -796,8 +829,7 @@ function guardHandlers(socket) {
       const clean = args.map((a) => (a === null ? undefined : a));
       const ack = typeof clean[clean.length - 1] === 'function' ? clean[clean.length - 1] : null;
       const refuse = (e) => {
-        handlerFaults++;
-        if (handlerFaults <= 20 || handlerFaults % 100 === 0) console.error('  [socket] ' + String(event).slice(0, 40) + ' refused (' + handlerFaults + '): ' + (e && e.message ? e.message : e));
+        noteFault('socket', String(event).slice(0, 40), e);
         if (ack) { try { ack({ ok: false, error: 'That request could not be handled.' }); } catch { /* the client has gone */ } }
       };
       try {
@@ -1055,7 +1087,8 @@ io.on('connection', (socket) => {
     ok(ack)({ ok: true });
   });
 
-  // Seen receipts: the board knows research saw it, research knows the board read the answer.
+  // Seen receipts: the board knows research saw it, research knows the board read the answer. Each person's newest is
+  // kept, and the hall hears the receipts that moved in one frame per second at most (`frames.seen`).
   socket.on('seen', ({ seq } = {}) => {
     if (!room || !me || socket.data.adminView || !chatter.take()) return;
     if (!Number.isInteger(seq) || seq < 0 || seq > room.seq) return;
@@ -1063,7 +1096,7 @@ io.on('connection', (socket) => {
     const prev = room.seen.get(me.uid);
     if (prev && prev.seq >= seq) return;
     room.seen.set(me.uid, { uid: me.uid, name: me.name, role: me.role, seq });
-    io.to(room.code).emit('seen', { uid: me.uid, name: me.name, role: me.role, seq });
+    frames.seen.mark(room.code, new Set([me.uid]));
   });
 
   // Forwarding posts in another hall, so the person's rights there decide, never the hall the message comes from: an
@@ -1883,6 +1916,11 @@ io.on('connection', (socket) => {
 });
 
 function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : []; }
+/** One frame to the hall with the newest receipt of each person in `uids`: `{seen: [{uid, name, role, seq}…]}`. */
+function sendSeen(room, uids) {
+  const seen = room.seen ? Array.from(uids, (uid) => room.seen.get(uid)).filter(Boolean) : [];
+  if (seen.length) io.to(room.code).emit('seen', { seen });
+}
 
 /** What a hall's AI is told of the show network: its Stagewatch, and the nodes of that hall and of every hall in their own words (lib/context.js hallBrief). */
 function briefFor(code) {
@@ -1935,23 +1973,12 @@ function revokeDisplaySockets(id, words) {
 }
 /**
  * A hall's screens changed: the board redraws, and its operators are told once per 150 ms at most, however many takes,
- * reports and connections came in that time (latest wins: they re-read the list after the event, so the newest state is
- * what they read — a take on 50 screens is one re-read per console, not a hundred).
+ * reports and connections came in that time (`frames.screens`; they re-read the list after the event, so the newest
+ * state is what they read — a take on 50 screens is one re-read per console, not a hundred).
  */
-const screensDirty = new Set();
-let screensTimer = null;
 function displaysChanged(code) {
   boardDirty();
-  coalesced.screens.marks++;
-  screensDirty.add(code);
-  if (screensTimer) return;
-  screensTimer = setTimeout(() => {
-    screensTimer = null;
-    coalesced.screens.flushes++;
-    for (const c of screensDirty) io.to(c).emit('displays:changed', { code: c });
-    screensDirty.clear();
-  }, 150);
-  screensTimer.unref();
+  frames.screens.mark(code);
 }
 /** A Stagewatch's frame moved: the displays of every hall that follows it get the frame. */
 function stageChanged(link) {
@@ -1962,11 +1989,10 @@ const displaysOf = (code) => displays.ofHall(code).map((d) => { const st = Displ
 
 // ---------------------------------------------------------------- the halls board
 // Each watcher gets the halls it may see, recomputed when anything on them changes and sent at most every 300 ms
-// (latest wins: a slow phone gets the newest board, never a backlog). A hall's row is built once per tick for every
+// (`frames.board`: a slow phone gets the newest board, never a backlog). A hall's row is built once per send for every
 // watcher (`shared`); what differs per watcher — which halls, which links, whether it may answer — is added on top.
 const boardSockets = new Set();
-let boardIsDirty = false;
-function boardDirty() { boardIsDirty = true; coalesced.board.marks++; }
+function boardDirty() { frames.board.mark('board'); }
 function hallParts(r, shared) {
   let p = shared.get(r.code);
   if (!p) { p = { row: board.hallRow(r, { stage: stagePayload(linkFor(r.code)), displays: displaysOf(r.code) }), help: board.openHelp(r) }; shared.set(r.code, p); }
@@ -1985,13 +2011,11 @@ function boardFor(socket, shared = new Map()) {
     help: rooms.flatMap((r) => hallParts(r, shared).help.map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.can(a, 'hall.post', r.code))) }))),
   };
 }
-setInterval(() => {
-  if (!boardIsDirty) return;
-  boardIsDirty = false;
-  coalesced.board.flushes++;
+/** Every watcher's board, each hall's row built once for all of them; a board that faults holds back no other watcher's. */
+function sendBoards() {
   const shared = new Map();
-  for (const s of boardSockets) s.emit('board', boardFor(s, shared));
-}, 300).unref();
+  sendEach(boardSockets, (s) => s.emit('board', boardFor(s, shared)), (e) => frameRefused('board', e));
+}
 
 /** Every open socket `match` picks is told why (the pages reload on it) and closed: its next connection is judged afresh. */
 function endSockets(match, what, words) {

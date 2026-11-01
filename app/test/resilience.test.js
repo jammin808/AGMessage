@@ -13,7 +13,7 @@ const nodes = require('../lib/nodes');
 const { buildContext, showBrief } = require('../lib/context');
 
 const ROOT = path.join(__dirname, '..');
-const { filesUnder, pageScripts } = require('./helpers');
+const { filesUnder, handlerFiles, pageScripts } = require('./helpers');
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 async function until(fn, ms = 8000) { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await wait(50); } return false; }
@@ -459,6 +459,44 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   }
   const nodesSrc = fs.readFileSync(path.join(ROOT, 'lib/nodes.js'), 'utf8');
   assert.ok(!/[?&]pin=/.test(nodesSrc), 'no key in a WebSocket URL (Show Bus §7)');
+});
+
+/** A timer started: `setTimeout(` or `setInterval(`, bare or as a member, a space before its bracket or not. */
+const TIMER_CALLS = /\bset(?:Timeout|Interval)\s*\(/g;
+test('guard rails: the timers the handler files start are counted, each with its reason; a state frame is a Latest, never a tick of its own', () => {
+  // Every timer a handler file starts, in the file's order, each with why it is a timer. A new hand-written tick moves
+  // this list, with its words; a new state frame (latest wins) is a Latest (lib/latest.js), whose timers are its own.
+  const TIMERS = {
+    'server.js': [
+      'health: the loop\'s delay, how busy it is, the sockets and the day\'s peaks, every 5 s',
+      'the boot\'s saved seats let go once its first seconds are over, once',
+      'uploads nobody posted removed once past their wait',
+      'a page that dropped is announced as gone only once the Wi-Fi grace is over, one per page',
+      'a screen link not in use: told, then let go a moment later',
+      'a screen whose link went: told, then let go a moment later',
+      'an account changed: its pages told, then let go a moment later',
+      'expired sign-ins swept',
+      'the show desk: what it approved run and reported, one request at a time, every 3 s',
+      'each linked Stagewatch\'s context, posted on change and at least every 5 s, looked at each second',
+      'cloudflared\'s log read for the tunnel\'s address until it has one',
+      'the tunnel given 30 s to name its address',
+      'the watchdog\'s heartbeat, from the event loop, each second',
+    ],
+  };
+  const files = handlerFiles();
+  assert.deepEqual(Object.keys(TIMERS).filter((f) => !files.includes(f)), [], 'every file with a list is a handler file');
+  for (const f of files) {
+    const timers = (fs.readFileSync(path.join(ROOT, f), 'utf8').match(TIMER_CALLS) || []).length;
+    const why = TIMERS[f] || [];
+    assert.equal(timers, why.length, `${f}: ${timers} timers started, ${why.length} with a reason (${why.join('; ') || 'none'}): a state frame is a Latest; a tick of its own moves this list, with its words`);
+  }
+  // The read sees a timer in each form it can be written, and nothing else.
+  const count = (src) => (src.match(TIMER_CALLS) || []).length;
+  assert.equal(count('setTimeout(f, 1); setInterval (g, 2); global.setTimeout(h); timers.setInterval(i, 3);'), 4);
+  assert.equal(count('clearTimeout(t); clearInterval(t); resetTimeout(t); const { setTimeout } = timers; new Latest({ name: "x", delayMs: 100, flush });'), 0);
+  // The state frames that exist go through the one primitive, each by its name in health's `latest`.
+  const server = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+  assert.deepEqual([...server.matchAll(/new Latest\(\{\s*name: '([^']+)'/g)].map((m) => m[1]), ['board', 'screens', 'people', 'seen']);
 });
 
 test('guard rails: a page posts a message only to its own origin, and hears one only after checking who sent it', () => {

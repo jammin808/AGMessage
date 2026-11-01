@@ -342,6 +342,8 @@ test('C53: a restart keeps following a stage send the speaker has not acknowledg
   const ctl = await connect(srv.base, setup.cookie); sockets.push(ctl);
   assert.ok((await emit(ctl, 'hall:configure', { code, stagewatchUrl: sw.url, stagewatchKey: KEY_A })).ok);
   await until(() => sw.connected, 6000, 'linked');
+  // A socket open is not a link: AGMessage sends only once Stagewatch has accepted its key, which its own status says.
+  await until(async () => (await emit(ctl, 'hall:settings', { code })).stagewatch.status === 'connected', 6000, 'the key accepted');
   const crew = await connect(srv.base); sockets.push(crew);
   assert.ok((await emit(crew, 'join', { roomCode: code, name: 'Alex', role: 'research' })).ok);
   const sent = await emit(crew, 'stage:send', { text: 'Wrap up please' });

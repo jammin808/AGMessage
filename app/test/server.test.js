@@ -378,8 +378,8 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(read && read.messages >= h.largestHall.messages + 3, 'largestHall ' + JSON.stringify(read) + ' after ' + JSON.stringify(h.largestHall));
     assert.ok(typeof read.kb === 'number' && read.kb > 0, 'and its snapshot\'s size, kept when the hall was made');
 
-    // What coalescing saves: the halls board's changes, and the frames sent for them.
-    assert.deepEqual(Object.keys(h.latest), ['board', 'screens']);
+    // What coalescing saves: each state frame's changes, and the frames sent for them.
+    assert.deepEqual(Object.keys(h.latest), ['board', 'screens', 'people', 'seen']);
     for (const l of Object.values(h.latest)) assert.ok(Number.isInteger(l.marks) && Number.isInteger(l.flushes) && l.flushes <= l.marks, JSON.stringify(h.latest));
     assert.ok(h.latest.board.flushes >= 1, 'the board was sent: ' + JSON.stringify(h.latest.board));
     assert.ok(gone.latest.screens.marks > h.latest.screens.marks, 'a screen made, opened and closed is marked: ' + JSON.stringify(gone.latest.screens));
@@ -557,5 +557,99 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const words = [];
     JSON.stringify(onDisk, (k, v) => { if (typeof v === 'string') words.push(v); return v; });
     assert.ok(words.every((w) => /^\d{4}-\d{2}-\d{2}$/.test(w)), 'no hall, no name and no address on disk, only days: ' + words.join(', '));
+  });
+});
+
+// ---------------------------------------------------------------- state frames, latest wins (lib/latest.js)
+const helpers = require('./helpers');
+const http = require('http');
+const crypto = require('crypto');
+
+test('state frames: no per-message deflate; a join storm\'s people list and a burst of seen receipts each go once per window', async (t) => {
+  const srv = await helpers.startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await helpers.stopServer(srv.child); });
+  const admin = (await helpers.api(srv.base, 'POST', '/api/admin/login', { token: helpers.TOKEN })).cookie;
+  const code = (await helpers.api(srv.base, 'POST', '/api/rooms', { name: 'Frames' }, { cookie: admin })).body.code;
+  assert.match(code, /^[A-Z0-9]{6}$/);
+
+  await t.test('a WebSocket that offers permessage-deflate, as every browser does, is answered without it', async () => {
+    // Socket.IO's own path, engine.io's handshake only: no page joins, and nothing of the connection bucket is spent.
+    const req = http.request(srv.base + '/socket.io/?EIO=4&transport=websocket', {
+      headers: {
+        Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': crypto.randomBytes(16).toString('base64'),
+        'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits',
+      },
+    });
+    const res = await new Promise((resolve, reject) => {
+      req.once('upgrade', (r, socket) => { socket.destroy(); resolve(r); });
+      req.once('response', (r) => reject(new Error('answered ' + r.statusCode + ', not upgraded')));
+      req.once('error', reject);
+      req.end();
+    });
+    assert.equal(res.statusCode, 101);
+    assert.equal(res.headers['sec-websocket-extensions'], undefined, 'the handshake answers no extension: ' + JSON.stringify(res.headers));
+  });
+
+  // Thirty pages, joined at once: what each hears of who is in the hall, timed from before the first join.
+  const pages = [];
+  let joinedSeq = 0;
+  await t.test('during 30 joins each page gets at most one people list per 100 ms after its first, and the last holds all 30', async () => {
+    for (const s of await Promise.all(Array.from({ length: 30 }, () => helpers.connect(srv.base)))) {
+      sockets.push(s);
+      const p = { s, lists: [], seen: [], uid: '' };
+      s.on('users', (u) => p.lists.push([performance.now(), u]));
+      s.on('seen', (f) => p.seen.push([performance.now(), f]));
+      pages.push(p);
+    }
+    const t0 = performance.now();
+    const acks = await Promise.all(pages.map((p, i) => helpers.emit(p.s, 'join', { roomCode: code, name: 'Page ' + (i + 1), role: 'observer' })));
+    assert.ok(acks.every((a) => a.ok), JSON.stringify(acks.find((a) => !a.ok)));
+    acks.forEach((a, i) => { pages[i].uid = a.uid; });
+    joinedSeq = Math.max(...acks.map((a) => a.seq));
+    const all = Array.from({ length: 30 }, (_, i) => 'Page ' + (i + 1)).sort();
+    const names = (list) => list.map((u) => u.name).sort();
+    await helpers.until(() => pages.every((p) => p.lists.length && names(p.lists.at(-1)[1]).length === 30), 6000, 'every page\'s newest list holding the 30');
+    await helpers.wait(400);   // past a window more: anything still to come is counted too
+    for (const [i, p] of pages.entries()) {
+      const elapsed = p.lists.at(-1)[0] - t0;
+      const bound = Math.ceil(elapsed / 100) + 1;
+      assert.ok(p.lists.length <= bound, `page ${i + 1}: ${p.lists.length} people lists in ${Math.round(elapsed)} ms, at most ${bound}`);
+      assert.deepEqual(names(p.lists.at(-1)[1]), all, `page ${i + 1}'s last list holds all 30`);
+    }
+  });
+
+  await t.test('20 seen receipts at once reach every page in at most two frames, which hold the 20; a lone one goes at once', async () => {
+    const reporters = pages.slice(0, 20);
+    const t0 = performance.now();
+    for (const p of reporters) p.s.emit('seen', { seq: joinedSeq });
+    const held = (p) => p.seen.flatMap(([, f]) => (Array.isArray(f.seen) ? f.seen : []));
+    const want = reporters.map((p) => p.uid).sort();
+    await helpers.until(() => pages.every((p) => held(p).length >= 20), 4000, 'every page holding the 20 receipts');
+    await helpers.wait(1300);   // past the window those frames opened: nothing more comes for them
+    for (const [i, p] of pages.entries()) {
+      assert.ok(p.seen.length >= 1 && p.seen.length <= 2, `page ${i + 1}: ${p.seen.length} seen frames for 20 receipts`);
+      assert.deepEqual(held(p).map((e) => e.uid).sort(), want, `page ${i + 1}: the frames hold each of the 20 once`);
+      assert.ok(p.seen.at(-1)[0] - t0 < 2000, `page ${i + 1}: within the window (${Math.round(p.seen.at(-1)[0] - t0)} ms)`);
+      for (const [, f] of p.seen) assert.deepEqual(Object.keys(f), ['seen'], 'one batch, with no uid of its own: a page from before ignores it');
+      for (const e of held(p)) assert.deepEqual([Object.keys(e), e.role, e.seq], [['uid', 'name', 'role', 'seq'], 'observer', joinedSeq]);
+    }
+    const before = pages.map((p) => p.seen.length);
+    const lone = pages[20];
+    const sent = performance.now();
+    lone.s.emit('seen', { seq: joinedSeq });
+    await helpers.until(() => pages.every((p, i) => p.seen.length > before[i]), 800, 'the lone receipt on every page well inside its window');
+    const came = Math.max(...pages.map((p) => p.seen.at(-1)[0])) - sent;
+    assert.ok(came < 800, 'a lone receipt is not held for the window: ' + Math.round(came) + ' ms');
+    for (const p of pages) assert.deepEqual(p.seen.at(-1)[1].seen.map((e) => e.uid), [lone.uid], 'the frame holds only the receipt that moved');
+  });
+
+  await t.test('health says what each state frame saved: the changes marked and the frames sent', async () => {
+    const { latest } = await (await fetch(srv.base + '/api/health', { headers: { cookie: admin } })).json();
+    assert.deepEqual(Object.keys(latest), ['board', 'screens', 'people', 'seen']);
+    for (const [name, l] of Object.entries(latest)) assert.ok(Number.isInteger(l.marks) && Number.isInteger(l.flushes) && l.flushes <= l.marks, name + ' ' + JSON.stringify(l));
+    assert.ok(latest.people.marks >= 30 && latest.people.flushes < latest.people.marks / 3, 'the join storm\'s people lists: ' + JSON.stringify(latest.people));
+    assert.equal(latest.seen.marks, 21, 'every receipt that moved is marked');
+    assert.ok(latest.seen.flushes >= 2 && latest.seen.flushes <= 3, 'and sent in two or three frames: ' + JSON.stringify(latest.seen));
   });
 });

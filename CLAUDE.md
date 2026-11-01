@@ -50,6 +50,9 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
   health; health's `saves.built` counts the lanes made and `saves.named` the distinct lanes in that list, and a test
   holds them equal); one server per data folder (the folder lock), and nothing is written before the lock and the port
   are held.
+- **A new frame of state is a `Latest`** (`app/lib/latest.js`): never a timer or a polled flag of its own, and never a
+  volatile emit. `test/resilience.test.js` counts the timers each handler file starts, each with its reason, so a tick
+  of its own moves that list with its words.
 - **Test fixtures that look like keys** carry `// secret-scan: fixture` on their line.
 - **The audit log** gets a row for every security-relevant action, never a secret, token or screen link.
 - **The coverage gate** (`npm run coverage`) is raised as tests are added, never lowered to make a build green.
@@ -83,6 +86,7 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | The server: routes, sockets, rooms, the board tick, links, screens | `app/server.js` |
 | The watchdog | `app/supervise.js` |
 | Rooms, the op log and snapshots, atomic saves | `app/lib/store.js`, `app/lib/resilience.js` |
+| State frames, latest wins: the one primitive the halls board, a hall's screens, its people list and its seen receipts go through, each sent at once after a quiet window and at most once per window in a burst, each hall's frame sent apart so one that faults holds back no other | `app/lib/latest.js`, `app/server.js` (`frames`) |
 | The op table: the event each change is sent under (`apply()`), and the hall page's table that draws a change it missed and one it hears live alike (a new field of a change to a message is a row of both) | `app/lib/ops.js`, `app/public/app.js` (`UPD_EVENTS`) |
 | Identities, rate limits, lockouts, text cleaning | `app/lib/guard.js` |
 | Rights and roles (pure) | `app/lib/rbac.js` |
