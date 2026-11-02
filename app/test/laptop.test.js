@@ -13,7 +13,7 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const h = require('./helpers');
 const { ServerLog, Lines, redact, HIDDEN } = require('../lib/serverlog');
 const laptop = require('../lib/laptop');
@@ -297,6 +297,16 @@ test('on Windows, the script itself answers in its own shape: each part read, or
   };
   const answer = await laptop.readWindows(plan, { timeoutMs: 60000, started: heard });
   t.diagnostic('the read took ' + (Date.now() - began) + ' ms: ' + came.join(', '));
+  // A reading beside it: how long powershell.exe takes to start and end with nothing to do, in the plan's environment and
+  // in this process's (its own module path kept), twice each.
+  const bare = (env) => new Promise((resolve) => {
+    const at = Date.now();
+    execFile(plan.file, ['-NoProfile', '-NonInteractive', '-NoLogo', '-Command', '0'], { ...plan.options, env, timeout: 60000 }, (err) => resolve((Date.now() - at) + ' ms' + (err ? ' (' + (err.killed ? 'ended at 60 s' : err.code) + ')' : '')));
+  });
+  const full = { ...process.env, PSModulePath: plan.options.env.PSModulePath };
+  const starts = [];
+  for (const [name, env] of [['plan', plan.options.env], ['full', full], ['plan', plan.options.env], ['full', full]]) starts.push(name + ' ' + await bare(env));
+  t.diagnostic('powershell.exe started and ended in: ' + starts.join(', '));
   assert.equal(answer.why, '', 'it answered: ' + answer.why + ' (' + came.join(', ') + ')\n' + answer.text);
   const lines = answer.text.split(/\r?\n/).filter((l) => l.trim());
   assert.deepEqual(JSON.parse(lines[0]), { v: 1 }, answer.text);
@@ -571,8 +581,15 @@ test('how Windows is asked: on Windows only, by its absolute path under a System
   assert.ok(!s.includes('"') && !s.includes('\n') && !s.includes('\r'), 'one line, single quotes only');
   assert.ok(s.includes("& ($env:SystemRoot + '\\System32\\powercfg.exe')"), 'powercfg by its absolute path');
   // Each part said on its own line as soon as it is read, the firewall's rules last; each says why when it is not read.
-  const said = ['v', 'standbyAc', 'lidAc', 'task', 'record', 'network', 'rules'].map((part) => s.indexOf("AgmSay '" + part + "' "));
-  assert.ok(said.every((at, i) => at > 0 && (i === 0 || at > said[i - 1])), 'in that order: ' + said);
+  const said = ['standbyAc', 'lidAc', 'task', 'record', 'network', 'rules'].map((part) => s.indexOf("AgmSay '" + part + "' "));
+  said.unshift(s.indexOf("'{' + [char]34 + 'v' + [char]34 + ':1}'; AgmUse 'Microsoft.PowerShell.Utility';"));
+  assert.ok(said.every((at, i) => at > 0 && (i === 0 || at > said[i - 1])), 'in that order, the first before any module: ' + said);
+  // Each module by its manifest's path under $PSHOME, never found by name; each before the part that uses it.
+  assert.ok(s.includes("function AgmUse($m) { Import-Module ($PSHOME + '\\Modules\\' + $m + '\\' + $m + '.psd1') }"), 'Windows\' own module, by its path');
+  for (const [mod, cmd] of [['Microsoft.PowerShell.Utility', 'ConvertTo-Json -InputObject'], ['ScheduledTasks', 'Get-ScheduledTask '], ['Microsoft.PowerShell.Management', 'Get-ItemProperty '], ['NetConnection', 'Get-NetConnectionProfile'], ['NetSecurity', 'Get-NetFirewallApplicationFilter']]) {
+    const use = s.indexOf("AgmUse '" + mod + "'");
+    assert.ok(use > 0 && (mod === 'Microsoft.PowerShell.Utility' || use < s.indexOf(cmd)), mod + ' imported before ' + cmd);
+  }
   assert.ok(s.trim().endsWith("AgmSay 'rules' $v"), 'the firewall\'s rules last');
   assert.equal(s.split('$v = @{ error = (AgmWhy $_) }').length - 1, 6, 'each part says why it was not read');
   // The firewall's rules from its own object, the cmdlets only under Constrained Language Mode (which allows no COM

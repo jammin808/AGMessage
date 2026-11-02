@@ -155,7 +155,8 @@ its token file does. `server.js` stays at 15: "This laptop"'s read of Windows is
 so it starts no timer in a handler file either, and the child is ended by a stop. `lib/laptop.js` runs `powershell.exe`
 by its absolute path only (the fence the plan's U11 brings names it); its tests hold the path, the fixed script (one
 line, no double quote, `powercfg.exe` by its absolute path, each part on a line of its own, the firewall last, the
-firewall's own object asked, the NetSecurity cmdlets only under Constrained Language Mode) and an
+firewall's own object asked, the NetSecurity cmdlets only under Constrained Language Mode, each module imported by its
+manifest's path under `$PSHOME` before the part that uses it) and an
 environment of named Windows folders only (`PASSED`), no secret, `PATH` or module path of the account's; on Windows (the
 CI job) a test runs the script itself and holds its answer to its shape, saying when each part's line came. Every
 PowerShell AGMessage runs (that script, the lane's in `tools/readings-take.js`, `tools/*.ps1`) names its functions,

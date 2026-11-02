@@ -60,11 +60,12 @@ Windows Vista", https://learn.microsoft.com/en-us/windows/win32/services/interac
   reach is unknown). It does not see a rule a domain's policy sets, a rule by port alone, or a profile whose firewall
   is off. Under Constrained Language Mode, which allows no COM object, the NetSecurity cmdlets are asked instead
   (`Get-NetFirewallApplicationFilter -Program`, in this PC's own policy store), and their `-Program` reads a path as a
-  pattern, so there a folder whose name holds `[` or `]` matches no rule. Networks and rights past 32 are counted. Each line is ASCII JSON, any other character escaped, so no
-  code page changes a name. None of it reaches health over HTTP, the context, the hello or the AI's brief. The Windows
+  pattern, so there a folder whose name holds `[` or `]` matches no rule. Networks and rights past 32 are counted. Each
+  module a part uses is imported by its manifest's path under `$PSHOME`, Windows' own, never found by name. Each line is
+  ASCII JSON, any other character escaped, so no code page changes a name. None of it reaches health over HTTP, the context, the hello or the AI's brief. The Windows
   CI job runs the script at every push and checks its answer's shape (`test/laptop.test.js`: each part read, or refused
-  with Windows' reason; the task and the record missing on a runner; the read's time said); what it reads on a show
-  laptop is unread until a walk.
+  with Windows' reason; the task and the record missing on a runner; the read's time said, and when each part's line
+  came); what it reads on a show laptop is unread until a walk.
 - **The install record's `Grants`** is this shape: a key `HKLM\SOFTWARE\AGMessage\Grants`, one `REG_SZ` value per
   account, named by its SID (`S-1-…`), holding its rights comma-separated (`start,stop`). The machine's commands that
   write the record and its grants (the plan's U12 and U17) write it so; "This laptop" reads no other shape.

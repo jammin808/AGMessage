@@ -76,7 +76,7 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   System32 with a fixed script that holds nothing a page sent, within 5 s, ended when the server stops. Its environment
   is named, never the server's: Windows' folders and the machine's names (`lib/laptop.js` `PASSED`), Windows' own module
   path and this `node.exe`'s path, so no secret reaches it whatever the case of its name, and it loads no module from
-  the account's own folders or `PATH`. It reads, never writes: the network's profile,
+  the account's own folders or `PATH`: each module it uses is imported by its manifest's path under `$PSHOME`. It reads, never writes: the network's profile,
   the firewall's rules naming this `node.exe`, two power settings, the server task's state and the install record. Its
   functions are named so that none is one of Windows PowerShell's aliases, which would run in its place (a test holds
   this script, the lane's and `tools/*.ps1` to it). The

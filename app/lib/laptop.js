@@ -50,6 +50,10 @@ const LISTED_MAX = 32;
  * of the grants stay unread (their SIDs are said).
  * Its functions are named Agm…: PowerShell runs an alias before a function of the same name, so a function named as one
  * of Windows PowerShell's aliases (`ac` is Add-Content) runs that command instead.
+ * Each module a part uses is imported by its manifest's path under $PSHOME (Windows' own, in System32), never found by
+ * name: a command found by name has PowerShell look through the modules on its module path before it loads one, and
+ * the module it finds could be another's. The first line needs no module, so when it comes says how long powershell.exe
+ * took to start.
  * The firewall's rules naming this node.exe are read from the firewall's own object (HNetCfg.FwPolicy2), each rule's
  * program, its variables expanded, compared with this node.exe's path in any case; under Constrained Language Mode,
  * which allows no COM object, through the NetSecurity cmdlets, which fetch every application filter before they compare
@@ -62,6 +66,7 @@ $ProgressPreference = 'SilentlyContinue';
 function AgmWhy($e) { $r = [string]$e.CategoryInfo.Reason; if ($r -eq 'RuntimeException' -or -not $r) { $r = [string]$e.Exception.Message }; return $r };
 function AgmGone($e) { return ([string]$e.CategoryInfo.Category -eq 'ObjectNotFound') };
 function AgmAscii($j) { return (-join @(foreach ($c in $j.ToCharArray()) { if ([int]$c -gt 126) { '\u{0:x4}' -f [int]$c } else { [string]$c } })) };
+function AgmUse($m) { Import-Module ($PSHOME + '\Modules\' + $m + '\' + $m + '.psd1') };
 function AgmSay($k, $v) { $h = @{}; $h[$k] = $v; return (AgmAscii (ConvertTo-Json -InputObject $h -Depth 5 -Compress)) };
 function AgmPower($sub, $set) {
   $out = & ($env:SystemRoot + '\System32\powercfg.exe') /query SCHEME_CURRENT $sub $set;
@@ -89,23 +94,27 @@ function AgmRulesFast($node) {
   })
 };
 function AgmRulesSlow($node) {
+  AgmUse 'NetSecurity';
   $f = @();
   try { $f = @(Get-NetFirewallApplicationFilter -Program $node) } catch { if (-not (AgmGone $_)) { throw } };
   if ($f.Count -eq 0) { return @() };
   return @($f | Get-NetFirewallRule | ForEach-Object { @{ name = [string]$_.DisplayName; enabled = ([string]$_.Enabled -eq 'True'); direction = [string]$_.Direction; action = [string]$_.Action; profile = [string]$_.Profile } })
 };
-AgmSay 'v' 1;
+'{' + [char]34 + 'v' + [char]34 + ':1}';
+AgmUse 'Microsoft.PowerShell.Utility';
 try { $v = AgmPower 'SUB_SLEEP' 'STANDBYIDLE' } catch { $v = @{ error = (AgmWhy $_) } };
 AgmSay 'standbyAc' $v;
 try { $v = AgmPower 'SUB_BUTTONS' 'LIDACTION' } catch { $v = @{ error = (AgmWhy $_) } };
 AgmSay 'lidAc' $v;
 try {
+  AgmUse 'ScheduledTasks';
   $t = Get-ScheduledTask -TaskPath '\AGMessage\' -TaskName 'Server';
   $i = Get-ScheduledTaskInfo -TaskPath '\AGMessage\' -TaskName 'Server';
   $v = @{ state = [string]$t.State; lastResult = [int64]$i.LastTaskResult; lastRun = $(if ($i.LastRunTime) { $i.LastRunTime.ToUniversalTime().ToString('o') } else { '' }) }
 } catch { if (AgmGone $_) { $v = @{ missing = $true } } else { $v = @{ error = (AgmWhy $_) } } };
 AgmSay 'task' $v;
 try {
+  AgmUse 'Microsoft.PowerShell.Management';
   $r = Get-ItemProperty -Path 'HKLM:\SOFTWARE\AGMessage';
   $rec = @{ admin = [string]$r.Admin; adminName = [string]$r.AdminName; grants = @() };
   try {
@@ -121,7 +130,7 @@ try {
   $v = $rec
 } catch { if (AgmGone $_) { $v = @{ missing = $true } } else { $v = @{ error = (AgmWhy $_) } } };
 AgmSay 'record' $v;
-try { $v = @(Get-NetConnectionProfile | ForEach-Object { @{ name = [string]$_.Name; alias = [string]$_.InterfaceAlias; category = [string]$_.NetworkCategory } }) } catch { $v = @{ error = (AgmWhy $_) } };
+try { AgmUse 'NetConnection'; $v = @(Get-NetConnectionProfile | ForEach-Object { @{ name = [string]$_.Name; alias = [string]$_.InterfaceAlias; category = [string]$_.NetworkCategory } }) } catch { $v = @{ error = (AgmWhy $_) } };
 AgmSay 'network' $v;
 try {
   if ([string]$ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { $v = @(AgmRulesFast $env:AGM_NODE) } else { $v = @(AgmRulesSlow $env:AGM_NODE) }

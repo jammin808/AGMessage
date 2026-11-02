@@ -1632,7 +1632,8 @@ it cannot read says unknown, with why)
   firewall's own order says; past 512 such rules the reach is unknown, never guessed), read from the firewall's own
   object (`HNetCfg.FwPolicy2`), each rule's program compared in turn, and through the NetSecurity cmdlets only under
   Constrained Language Mode, which allows no COM object (the cmdlets fetch every application filter before they compare
-  one; the whole read, with them, took 57 s on one run of CI's Windows runner and did not end within 60 s on another). Networks and rights past 32 are
+  one; the whole read, with them, took 57 s on one run of CI's Windows runner and did not end within 60 s on another).
+  Each module a part uses is imported by its manifest's path under `$PSHOME`, Windows' own, never found by name. Networks and rights past 32 are
   counted ("and 3 more"). What the firewall's read does not see: a rule set by a domain's policy, a rule by port alone,
   and a profile whose firewall is off. Off Windows each reads "unknown (AGMessage is not running on Windows)". Its acts
   are the catalogue's (kind `laptop`): Refresh (`admin:laptop`, the admin page's alone; its read's facts come on
@@ -1664,7 +1665,8 @@ it cannot read says unknown, with why)
   same name (the script's `Ac` was Add-Content's alias: on CI's runner it wrote two files into System32 and read neither
   power setting); and, on Windows only (the Windows CI job), the script itself run, its answer in its own shape, each
   part read or refused with Windows' reason, the task and the install record missing on a runner, and how long the read
-  took, with when each part's line came. `test/catalog.test.js` and `test/menus.test.js` hold the new kind (Refresh refused to a Staff account's and a
+  took, with when each part's line came (the first needs no module, so it says when `powershell.exe` had started) and
+  how long `powershell.exe` takes to start with nothing to do, in the plan's environment and in the test's. `test/catalog.test.js` and `test/menus.test.js` hold the new kind (Refresh refused to a Staff account's and a
   code guest's sockets); the browser smoke holds its doors, each row's words and where it was read, and Refresh.
   `test/startrules.test.js`'s refused folders read the server's words in the watchdog's line, and the installed node's
   refusal record (none for a portable copy). The synchronous-call caps gain `lib/serverlog.js` at 4, with its reason;

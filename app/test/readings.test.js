@@ -751,9 +751,11 @@ test('the lane takes its readings on Windows only, and refuses a word it does no
 // served from a process of its own, as the folder's server is for the lane.
 const PIPE_SERVER = String.raw`require('node:net').createServer((c) => c.end()).listen(process.argv[1], () => process.stdout.write('ready\n'));`;
 
-test('on Windows: the PowerShell the lane asks answers in its shape (signatures, a pipe\'s access list, Defender), and icacls /save reads as SDDL', { skip: NOT_WINDOWS }, async () => {
+test('on Windows: the PowerShell the lane asks answers in its shape (signatures, a pipe\'s access list, Defender), and icacls /save reads as SDDL', { skip: NOT_WINDOWS }, async (t) => {
   const dir = tmp('agm-lane-');
-  const L = T.lane(dir, T.system32());
+  const lane = T.lane(dir, T.system32());
+  // How long each of the lane's PowerShell reads took, said beside the test (a reading, never a bound).
+  const L = { ps: (script, extra) => { const at = Date.now(); try { return lane.ps(script, extra); } finally { t.diagnostic(Object.keys(T.SCRIPTS).find((k) => T.SCRIPTS[k] === script) + ' took ' + (Date.now() - at) + ' ms'); } } };
   const pipeName = 'agmessage-' + require('crypto').randomBytes(8).toString('hex');
   const pipe = spawn(process.execPath, ['-e', PIPE_SERVER, '\\\\.\\pipe\\' + pipeName], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true });
   try {
