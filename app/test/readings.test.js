@@ -13,7 +13,7 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 const { PassThrough } = require('stream');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const h = require('./helpers');
 const zipmod = require('../lib/zip');
 
@@ -746,17 +746,28 @@ test('the lane takes its readings on Windows only, and refuses a word it does no
   for (const a of [['take'], ['take', '--zip', 'a', '--defender', 'b', '--out', 'c', '--port', '80'], ['probe-server'], ['nothing']]) assert.equal(await T.main(a), 64, a.join(' '));
 });
 
+// A pipe's server makes a new instance only while its loop runs (libuv keeps four waiting), and the lane's PowerShell runs
+// synchronously (L.ps), each read of the access list opening the pipe's client end and taking an instance. So the pipe is
+// served from a process of its own, as the folder's server is for the lane.
+const PIPE_SERVER = String.raw`require('node:net').createServer((c) => c.end()).listen(process.argv[1], () => process.stdout.write('ready\n'));`;
+
 test('on Windows: the PowerShell the lane asks answers in its shape (signatures, a pipe\'s access list, Defender), and icacls /save reads as SDDL', { skip: NOT_WINDOWS }, async () => {
   const dir = tmp('agm-lane-');
   const L = T.lane(dir, T.system32());
   const pipeName = 'agmessage-' + require('crypto').randomBytes(8).toString('hex');
-  const pipe = net.createServer((c) => c.end());
+  const pipe = spawn(process.execPath, ['-e', PIPE_SERVER, '\\\\.\\pipe\\' + pipeName], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true });
   try {
     const sig = L.ps(T.SCRIPTS.signatures, { AGM_READ_PATHS: process.execPath });
     const one = Array.isArray(sig) ? sig[0] : sig;
     assert.equal(one.path, process.execPath);
     assert.ok(['Valid', 'NotSigned', 'HashMismatch', 'NotTrusted', 'UnknownError', 'Incompatible', 'NotSupportedFileFormat'].includes(one.status), one.status);
-    await new Promise((resolve) => { pipe.listen('\\\\.\\pipe\\' + pipeName, resolve); });
+    await new Promise((resolve, reject) => {
+      let said = '';
+      pipe.stdout.on('data', (d) => { said += d; if (said.includes('ready')) resolve(); });
+      pipe.on('exit', (code) => reject(new Error('the pipe\'s server ended with ' + code + ' before it served')));
+      pipe.on('error', reject);
+      setTimeout(() => reject(new Error('the pipe\'s server did not serve within 20 s')), 20000).unref();
+    });
     const pipes = L.ps(T.SCRIPTS.pipes, { AGM_READ_PIPES: pipeName });
     const p = Array.isArray(pipes) ? pipes[0] : pipes;
     assert.equal(p.name, pipeName);
@@ -777,7 +788,7 @@ test('on Windows: the PowerShell the lane asks answers in its shape (signatures,
       assert.ok(R.daclOf(sddl).length > 0, where + ': ' + sddl);
     }
   } finally {
-    pipe.close();
+    pipe.kill();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -48,32 +48,63 @@ const LISTED_MAX = 32;
  * refuses says why (its error's reason, else its message) while the others are read. Each line is JSON in ASCII: any
  * other character is written \uXXXX, so no code page can change a name. Under Constrained Language Mode the account names
  * of the grants stay unread (their SIDs are said).
+ * Its functions are named Agm…: PowerShell runs an alias before a function of the same name, so a function named as one
+ * of Windows PowerShell's aliases (`ac` is Add-Content) runs that command instead.
+ * The firewall's rules naming this node.exe are read from the firewall's own object (HNetCfg.FwPolicy2), each rule's
+ * program, its variables expanded, compared with this node.exe's path in any case; under Constrained Language Mode,
+ * which allows no COM object, through the NetSecurity cmdlets, which fetch every application filter before they compare
+ * one. Either read that fails says its own reason. A function's list is taken with @() where it is called: PowerShell
+ * hands back a list of none or one as nothing or the one.
  */
 const SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop';
 $ProgressPreference = 'SilentlyContinue';
-function Why($e) { $r = [string]$e.CategoryInfo.Reason; if ($r -eq 'RuntimeException' -or -not $r) { $r = [string]$e.Exception.Message }; return $r };
-function Gone($e) { return ([string]$e.CategoryInfo.Category -eq 'ObjectNotFound') };
-function Ascii($j) { return (-join @(foreach ($c in $j.ToCharArray()) { if ([int]$c -gt 126) { '\u{0:x4}' -f [int]$c } else { [string]$c } })) };
-function Say($k, $v) { $h = @{}; $h[$k] = $v; return (Ascii (ConvertTo-Json -InputObject $h -Depth 5 -Compress)) };
-function Ac($sub, $set) {
+function AgmWhy($e) { $r = [string]$e.CategoryInfo.Reason; if ($r -eq 'RuntimeException' -or -not $r) { $r = [string]$e.Exception.Message }; return $r };
+function AgmGone($e) { return ([string]$e.CategoryInfo.Category -eq 'ObjectNotFound') };
+function AgmAscii($j) { return (-join @(foreach ($c in $j.ToCharArray()) { if ([int]$c -gt 126) { '\u{0:x4}' -f [int]$c } else { [string]$c } })) };
+function AgmSay($k, $v) { $h = @{}; $h[$k] = $v; return (AgmAscii (ConvertTo-Json -InputObject $h -Depth 5 -Compress)) };
+function AgmPower($sub, $set) {
   $out = & ($env:SystemRoot + '\System32\powercfg.exe') /query SCHEME_CURRENT $sub $set;
   if ($LASTEXITCODE -ne 0) { throw ('powercfg ended with ' + $LASTEXITCODE) };
   $m = @($out | Select-String -Pattern '0x[0-9a-fA-F]{8}' -AllMatches | ForEach-Object { $_.Matches } | ForEach-Object { $_.Value });
   if ($m.Count -lt 2) { throw 'powercfg named no value' };
   return [int64]$m[$m.Count - 2]
 };
-Say 'v' 1;
-try { $v = Ac 'SUB_SLEEP' 'STANDBYIDLE' } catch { $v = @{ error = (Why $_) } };
-Say 'standbyAc' $v;
-try { $v = Ac 'SUB_BUTTONS' 'LIDACTION' } catch { $v = @{ error = (Why $_) } };
-Say 'lidAc' $v;
+function AgmProfile($p) {
+  $p = [int64]$p;
+  if ($p -eq 0 -or ($p -band 7) -eq 7) { return 'Any' };
+  $n = @();
+  if ($p -band 1) { $n += 'Domain' };
+  if ($p -band 2) { $n += 'Private' };
+  if ($p -band 4) { $n += 'Public' };
+  return ($n -join ', ')
+};
+function AgmRulesFast($node) {
+  $fw = New-Object -ComObject 'HNetCfg.FwPolicy2';
+  return @(foreach ($r in $fw.Rules) {
+    $a = [string]$r.ApplicationName;
+    if ($a -and [string]::Equals([Environment]::ExpandEnvironmentVariables($a), $node, [StringComparison]::OrdinalIgnoreCase)) {
+      @{ name = [string]$r.Name; enabled = [bool]$r.Enabled; direction = $(if ([int]$r.Direction -eq 1) { 'Inbound' } else { 'Outbound' }); action = $(if ([int]$r.Action -eq 1) { 'Allow' } else { 'Block' }); profile = (AgmProfile $r.Profiles) }
+    }
+  })
+};
+function AgmRulesSlow($node) {
+  $f = @();
+  try { $f = @(Get-NetFirewallApplicationFilter -Program $node) } catch { if (-not (AgmGone $_)) { throw } };
+  if ($f.Count -eq 0) { return @() };
+  return @($f | Get-NetFirewallRule | ForEach-Object { @{ name = [string]$_.DisplayName; enabled = ([string]$_.Enabled -eq 'True'); direction = [string]$_.Direction; action = [string]$_.Action; profile = [string]$_.Profile } })
+};
+AgmSay 'v' 1;
+try { $v = AgmPower 'SUB_SLEEP' 'STANDBYIDLE' } catch { $v = @{ error = (AgmWhy $_) } };
+AgmSay 'standbyAc' $v;
+try { $v = AgmPower 'SUB_BUTTONS' 'LIDACTION' } catch { $v = @{ error = (AgmWhy $_) } };
+AgmSay 'lidAc' $v;
 try {
   $t = Get-ScheduledTask -TaskPath '\AGMessage\' -TaskName 'Server';
   $i = Get-ScheduledTaskInfo -TaskPath '\AGMessage\' -TaskName 'Server';
   $v = @{ state = [string]$t.State; lastResult = [int64]$i.LastTaskResult; lastRun = $(if ($i.LastRunTime) { $i.LastRunTime.ToUniversalTime().ToString('o') } else { '' }) }
-} catch { if (Gone $_) { $v = @{ missing = $true } } else { $v = @{ error = (Why $_) } } };
-Say 'task' $v;
+} catch { if (AgmGone $_) { $v = @{ missing = $true } } else { $v = @{ error = (AgmWhy $_) } } };
+AgmSay 'task' $v;
 try {
   $r = Get-ItemProperty -Path 'HKLM:\SOFTWARE\AGMessage';
   $rec = @{ admin = [string]$r.Admin; adminName = [string]$r.AdminName; grants = @() };
@@ -86,19 +117,16 @@ try {
         $rec.grants += @{ sid = [string]$p.Name; name = [string]$n; rights = [string]$p.Value }
       }
     }
-  } catch { if (-not (Gone $_)) { $rec.grantsError = (Why $_) } };
+  } catch { if (-not (AgmGone $_)) { $rec.grantsError = (AgmWhy $_) } };
   $v = $rec
-} catch { if (Gone $_) { $v = @{ missing = $true } } else { $v = @{ error = (Why $_) } } };
-Say 'record' $v;
-try { $v = @(Get-NetConnectionProfile | ForEach-Object { @{ name = [string]$_.Name; alias = [string]$_.InterfaceAlias; category = [string]$_.NetworkCategory } }) } catch { $v = @{ error = (Why $_) } };
-Say 'network' $v;
+} catch { if (AgmGone $_) { $v = @{ missing = $true } } else { $v = @{ error = (AgmWhy $_) } } };
+AgmSay 'record' $v;
+try { $v = @(Get-NetConnectionProfile | ForEach-Object { @{ name = [string]$_.Name; alias = [string]$_.InterfaceAlias; category = [string]$_.NetworkCategory } }) } catch { $v = @{ error = (AgmWhy $_) } };
+AgmSay 'network' $v;
 try {
-  $f = @();
-  try { $f = @(Get-NetFirewallApplicationFilter -Program $env:AGM_NODE) } catch { if (-not (Gone $_)) { throw } };
-  $v = @();
-  if ($f.Count -gt 0) { $v = @($f | Get-NetFirewallRule | ForEach-Object { @{ name = [string]$_.DisplayName; enabled = ([string]$_.Enabled -eq 'True'); direction = [string]$_.Direction; action = [string]$_.Action; profile = [string]$_.Profile } }) }
-} catch { $v = @{ error = (Why $_) } };
-Say 'rules' $v
+  if ([string]$ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { $v = @(AgmRulesFast $env:AGM_NODE) } else { $v = @(AgmRulesSlow $env:AGM_NODE) }
+} catch { $v = @{ error = (AgmWhy $_) } };
+AgmSay 'rules' $v
 `.trim().replace(/\s*\n\s*/g, ' ');
 
 /**

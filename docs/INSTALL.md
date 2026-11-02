@@ -55,10 +55,12 @@ Windows Vista", https://learn.microsoft.com/en-us/windows/win32/services/interac
   under its `Grants` key, one value per account's SID holding its rights, comma-separated, each account's name looked
   up by Windows where it can (under Constrained Language Mode the SID is shown); the connected networks' profiles
   (`Get-NetConnectionProfile`); and whether an enabled inbound rule names this `node.exe` on each
-  (`Get-NetFirewallApplicationFilter -Program`, in this PC's own policy store, every rule judged, a block rule winning
-  over an allow; past 512 the reach is unknown). It does not see a rule a domain's policy sets, a rule by port alone,
-  or a profile whose firewall is off, and `-Program` reads a path as a pattern, so a folder whose name holds `[` or `]`
-  matches no rule. Networks and rights past 32 are counted. Each line is ASCII JSON, any other character escaped, so no
+  (read from the firewall's own object, `HNetCfg.FwPolicy2`: each rule's program, its environment variables expanded,
+  compared with this `node.exe`'s path in any case; every rule judged, a block rule winning over an allow; past 512 the
+  reach is unknown). It does not see a rule a domain's policy sets, a rule by port alone, or a profile whose firewall
+  is off. Under Constrained Language Mode, which allows no COM object, the NetSecurity cmdlets are asked instead
+  (`Get-NetFirewallApplicationFilter -Program`, in this PC's own policy store), and their `-Program` reads a path as a
+  pattern, so there a folder whose name holds `[` or `]` matches no rule. Networks and rights past 32 are counted. Each line is ASCII JSON, any other character escaped, so no
   code page changes a name. None of it reaches health over HTTP, the context, the hello or the AI's brief. The Windows
   CI job runs the script at every push and checks its answer's shape (`test/laptop.test.js`: each part read, or refused
   with Windows' reason; the task and the record missing on a runner; the read's time said); what it reads on a show
@@ -238,8 +240,10 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
   the watchdog and the server inherit (each is started with no token of its own); the server counts as serving only when
   health answers with the build the bundle's stamp names. R4's firewall rule is made and read back; that it matches a
   connection needs a client on another machine (Windows Firewall does not filter loopback), which is the show laptop's.
-  R7 also connects to the pipe through SMB at the runner's own names (`\\localhost\pipe\…`, `\\<name>\pipe\…`): a network
-  logon, as a remote client's would be, but not a second machine. R12 runs two tasks, each with a folder of its own: one
+  R7's access list is read from a client's handle to the pipe (`GetSecurityInfo` on the handle, as a kernel object), else
+  through .NET by the pipe's name, else both reasons are recorded; each read opens the pipe's client end and takes one of
+  the server's instances. R7 also connects to the pipe through SMB at the runner's own names (`\\localhost\pipe\…`,
+  `\\<name>\pipe\…`): a network logon, as a remote client's would be, but not a second machine. R12 runs two tasks, each with a folder of its own: one
   whose action exits 1, measured and removed, then one whose action exits 0, so a restart the first still has queued
   is never counted for the second. R2 lays the newest release's payload whole, then this build over it, file by file,
   each inflated to a name of its own beside the one it replaces and renamed over it; R10 inflates `node.exe` alone into

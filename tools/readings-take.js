@@ -558,13 +558,14 @@ async function until(test, ms, every = 500) {
  * What PowerShell is asked, each a fixed script that answers one line of JSON; what it reads is named in its environment
  * (AGM_READ_PATHS, AGM_READ_PIPES, separated by `|`), never written into the script.
  *   signatures  Windows' verdict on each file's Authenticode signature, and its signer
- *   pipes       each named pipe's security descriptor, as SDDL (owner, group and access list), read through .NET, else
- *               through Get-Acl, else the reasons both gave
+ *   pipes       each named pipe's security descriptor, as SDDL (owner, group and access list), read from a client's
+ *               handle to it (GetSecurityInfo on the handle, as a kernel object), else through .NET by its name, else the
+ *               reasons both gave; each read opens the pipe's client end, so it takes one of its server's instances
  *   defender    Defender's real-time monitoring, its scanning on access, its mode, and the paths it excludes
  */
 const SCRIPTS = {
   signatures: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($p in ($env:AGM_READ_PATHS -split '\|')) { $s = Get-AuthenticodeSignature -LiteralPath $p; $out += @{ path = $p; status = [string]$s.Status; message = [string]$s.StatusMessage; signer = $(if ($s.SignerCertificate) { [string]$s.SignerCertificate.Subject } else { '' }); timestamped = [bool]$s.TimeStamperCertificate } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
-  pipes: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($n in ($env:AGM_READ_PIPES -split '\|')) { $p = '\\.\pipe\' + $n; try { $out += @{ name = $n; sddl = [System.IO.Directory]::GetAccessControl($p).GetSecurityDescriptorSddlForm('All') } } catch { $first = [string]$_.Exception.Message; try { $out += @{ name = $n; sddl = [string](Get-Acl -LiteralPath $p).Sddl } } catch { $out += @{ name = $n; error = ($first + '; ' + [string]$_.Exception.Message) } } } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
+  pipes: String.raw`$ErrorActionPreference = 'Stop'; $out = @(); foreach ($n in ($env:AGM_READ_PIPES -split '\|')) { $why = @(); $sddl = ''; $c = $null; try { $c = New-Object System.IO.Pipes.NamedPipeClientStream('.', $n, [System.IO.Pipes.PipeDirection]::In); $c.Connect(5000); $sddl = [string]$c.GetAccessControl().GetSecurityDescriptorSddlForm('All') } catch { $why += [string]$_.Exception.Message } finally { if ($c) { $c.Dispose() } }; if (-not $sddl) { try { $sddl = [string][System.IO.Directory]::GetAccessControl('\\.\pipe\' + $n).GetSecurityDescriptorSddlForm('All') } catch { $why += [string]$_.Exception.Message } }; if ($sddl) { $out += @{ name = $n; sddl = $sddl } } else { $out += @{ name = $n; error = ($why -join '; ') } } }; ConvertTo-Json -InputObject $out -Depth 4 -Compress`,
   defender: String.raw`$ErrorActionPreference = 'Stop'; $s = Get-MpComputerStatus; $p = Get-MpPreference; ConvertTo-Json -InputObject @{ realtime = [bool]$s.RealTimeProtectionEnabled; onAccess = [bool]$s.OnAccessProtectionEnabled; antivirus = [bool]$s.AntivirusEnabled; service = [bool]$s.AMServiceEnabled; mode = [string]$s.AMRunningMode; exclusions = @($p.ExclusionPath | Where-Object { $_ }) } -Compress`,
 };
 

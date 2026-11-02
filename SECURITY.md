@@ -77,7 +77,9 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   is named, never the server's: Windows' folders and the machine's names (`lib/laptop.js` `PASSED`), Windows' own module
   path and this `node.exe`'s path, so no secret reaches it whatever the case of its name, and it loads no module from
   the account's own folders or `PATH`. It reads, never writes: the network's profile,
-  the firewall's rules naming this `node.exe`, two power settings, the server task's state and the install record. The
+  the firewall's rules naming this `node.exe`, two power settings, the server task's state and the install record. Its
+  functions are named so that none is one of Windows PowerShell's aliases, which would run in its place (a test holds
+  this script, the lane's and `tools/*.ps1` to it). The
   laptop's admin and the rights given are on the admin page's answers alone (the token, or an account that may manage
   settings), never health over HTTP, the context, the hello or the AI's brief: a Windows account's name is not the show
   network's business.

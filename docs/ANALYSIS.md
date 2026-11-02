@@ -154,9 +154,14 @@ and it is renamed once it reaches its bound. `supervise.js` goes down from 3 to 
 its token file does. `server.js` stays at 15: "This laptop"'s read of Windows is one `execFile` with its own `timeout`,
 so it starts no timer in a handler file either, and the child is ended by a stop. `lib/laptop.js` runs `powershell.exe`
 by its absolute path only (the fence the plan's U11 brings names it); its tests hold the path, the fixed script (one
-line, no double quote, `powercfg.exe` by its absolute path, each part on a line of its own, the firewall last) and an
+line, no double quote, `powercfg.exe` by its absolute path, each part on a line of its own, the firewall last, the
+firewall's own object asked, the NetSecurity cmdlets only under Constrained Language Mode) and an
 environment of named Windows folders only (`PASSED`), no secret, `PATH` or module path of the account's; on Windows (the
-CI job) a test runs the script itself and holds its answer to its shape.
+CI job) a test runs the script itself and holds its answer to its shape, saying when each part's line came. Every
+PowerShell AGMessage runs (that script, the lane's in `tools/readings-take.js`, `tools/*.ps1`) names its functions,
+filters and workflows Verb-Noun or `Agm…` and makes none through the Function: drive (`test/laptop.test.js`): PowerShell
+runs an alias before a function of the same name, and Windows PowerShell's aliases are single words (`ac` is
+Add-Content).
 
 The data folder's format (the plan's U6) adds `lib/dataformat.js` at 8, with its reason: once a start, never on a
 request. Its marker is read through `lib/resilience.js`'s `readText` (only ENOENT reads as none) and written through

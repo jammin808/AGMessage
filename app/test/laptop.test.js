@@ -281,10 +281,23 @@ test('a give-up the watchdog recorded is "Before this start" for the start after
 test('on Windows, the script itself answers in its own shape: each part read, or refused with Windows\' reason', { skip: process.platform !== 'win32' && 'the script runs on Windows only' }, async (t) => {
   const plan = laptop.windowsPlan(process.env);
   assert.equal(plan.run, true, plan.why);
+  // When each part's line came, from the start: what a read ended at its time had said, and which part held it.
   const began = Date.now();
-  const answer = await laptop.readWindows(plan, { timeoutMs: 60000 });
-  t.diagnostic('the read took ' + (Date.now() - began) + ' ms');
-  assert.equal(answer.why, '', 'it answered: ' + answer.why);
+  const came = [];
+  const heard = (child) => {
+    let rest = '';
+    child.stdout.on('data', (d) => {
+      rest += d;
+      for (let at = rest.indexOf('\n'); at >= 0; at = rest.indexOf('\n')) {
+        const line = rest.slice(0, at).trim();
+        rest = rest.slice(at + 1);
+        if (line) came.push((/^\{"(\w+)"/.exec(line) || ['', '?'])[1] + ' ' + (Date.now() - began) + ' ms');
+      }
+    });
+  };
+  const answer = await laptop.readWindows(plan, { timeoutMs: 60000, started: heard });
+  t.diagnostic('the read took ' + (Date.now() - began) + ' ms: ' + came.join(', '));
+  assert.equal(answer.why, '', 'it answered: ' + answer.why + ' (' + came.join(', ') + ')\n' + answer.text);
   const lines = answer.text.split(/\r?\n/).filter((l) => l.trim());
   assert.deepEqual(JSON.parse(lines[0]), { v: 1 }, answer.text);
   assert.deepEqual(lines.slice(1).map((l) => Object.keys(JSON.parse(l))), [['standbyAc'], ['lidAc'], ['task'], ['record'], ['network'], ['rules']], answer.text);
@@ -558,10 +571,40 @@ test('how Windows is asked: on Windows only, by its absolute path under a System
   assert.ok(!s.includes('"') && !s.includes('\n') && !s.includes('\r'), 'one line, single quotes only');
   assert.ok(s.includes("& ($env:SystemRoot + '\\System32\\powercfg.exe')"), 'powercfg by its absolute path');
   // Each part said on its own line as soon as it is read, the firewall's rules last; each says why when it is not read.
-  const said = ['v', 'standbyAc', 'lidAc', 'task', 'record', 'network', 'rules'].map((part) => s.indexOf("Say '" + part + "' "));
+  const said = ['v', 'standbyAc', 'lidAc', 'task', 'record', 'network', 'rules'].map((part) => s.indexOf("AgmSay '" + part + "' "));
   assert.ok(said.every((at, i) => at > 0 && (i === 0 || at > said[i - 1])), 'in that order: ' + said);
-  assert.ok(s.trim().endsWith("Say 'rules' $v"), 'the firewall\'s rules last');
-  assert.equal(s.split('$v = @{ error = (Why $_) }').length - 1, 6, 'each part says why it was not read');
+  assert.ok(s.trim().endsWith("AgmSay 'rules' $v"), 'the firewall\'s rules last');
+  assert.equal(s.split('$v = @{ error = (AgmWhy $_) }').length - 1, 6, 'each part says why it was not read');
+  // The firewall's rules from its own object, the cmdlets only under Constrained Language Mode (which allows no COM
+  // object); either read that fails says its own reason; each list kept a list.
+  assert.ok(s.indexOf("New-Object -ComObject 'HNetCfg.FwPolicy2'") > 0, 'the firewall\'s own object');
+  assert.ok(s.includes("try { if ([string]$ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { $v = @(AgmRulesFast $env:AGM_NODE) } else { $v = @(AgmRulesSlow $env:AGM_NODE) } } catch { $v = @{ error = (AgmWhy $_) } }; AgmSay 'rules' $v"), 'chosen by the language mode, each list taken with @()');
+});
+
+// PowerShell runs an alias before a function of the same name: a function named as one of Windows PowerShell's aliases
+// (`ac` is Add-Content) runs that command instead. Windows PowerShell's own aliases are single words, never Verb-Noun and
+// never beginning Agm, so every function, filter or workflow a script AGMessage runs defines is named one of those two
+// ways (a scope before the name fails the rule, so it is never passed over), and none is made through the Function: drive.
+test('every PowerShell AGMessage runs names its functions so that no alias of Windows PowerShell\'s runs in their place', () => {
+  const root = path.join(__dirname, '..', '..');
+  const lane = require('../../tools/readings-take');
+  const scripts = [['lib/laptop.js SCRIPT', laptop.SCRIPT], ...Object.entries(lane.SCRIPTS).map(([k, v]) => ['tools/readings-take.js SCRIPTS.' + k, v])];
+  for (const f of fs.readdirSync(path.join(root, 'tools')).filter((n) => /\.ps1$/i.test(n))) scripts.push(['tools/' + f, fs.readFileSync(path.join(root, 'tools', f), 'utf8')]);
+  const named = [];
+  for (const [where, text] of scripts) {
+    assert.ok(!/\$\{function:|\bfunction:\\?\w/i.test(text), where + ' makes a function through the Function: drive');
+    for (const m of text.matchAll(/(?:^|[\s;{}(])(?:function|filter|workflow)\s+([^\s({]+)/gi)) {
+      named.push(where + ': ' + m[1]);
+      assert.ok(/^Agm[A-Z]\w*$/.test(m[1]) || /^[A-Z][a-z]+-[A-Z]\w*$/.test(m[1]), where + ' names a function ' + m[1] + ': not Verb-Noun, nor Agm…');
+    }
+  }
+  assert.ok(named.some((n) => n.startsWith('lib/laptop.js SCRIPT: AgmPower')), 'the fence reads the script: ' + named);
+  // The rule refuses the names that ran Add-Content and their other forms.
+  const refused = (text) => [...text.matchAll(/(?:^|[\s;{}(])(?:function|filter|workflow)\s+([^\s({]+)/gi)].map((m) => m[1]).filter((n) => !(/^Agm[A-Z]\w*$/.test(n) || /^[A-Z][a-z]+-[A-Z]\w*$/.test(n)));
+  assert.deepEqual(refused("function Ac($sub, $set) { }; filter sc { $_ }; workflow h { }; function script:AgmX { }; function Read-Defender { }; function AgmSay($k) { }"), ['Ac', 'sc', 'h', 'script:AgmX']);
+  for (const alias of ['ac', 'r', 'h', 'sc', 'set', 'sort', 'type', 'write', 'where', 'select', 'start', 'sleep', 'kill']) {
+    assert.ok(!named.some((n) => n.toLowerCase().endsWith(': ' + alias)), alias + ' is one of Windows PowerShell\'s aliases');
+  }
 });
 
 test('running the plan: its output, or why there is none: not in time, not run, too large; never a rejection', async () => {
