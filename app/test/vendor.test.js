@@ -11,10 +11,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const audit = require('../../tools/vendor-audit.js');
+const { tmpDir } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..', '..');
 const VENDOR = path.join(ROOT, 'app', 'public', 'vendor');
@@ -299,9 +299,10 @@ test('vendor-audit: a high or critical advisory not assessed, assessed at anothe
 /**
  * A throwaway checkout with tools/vendor-sbom.js, a vendor folder of `files`, its manifest, the notices and their licence
  * folders; `run(sbomFile, ...args)`, and `ship()`, a copy of what would ship (the bundle, extracted) to name with --tree.
+ * Both are throwaways of the test `ctx`.
  */
-function sbomTree(files, edit = (m) => m) {
-  const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-vendor-'));
+function sbomTree(ctx, files, edit = (m) => m) {
+  const tree = tmpDir(ctx, 'agm-vendor-');
   fs.mkdirSync(path.join(tree, 'tools'));
   fs.copyFileSync(path.join(ROOT, 'tools', 'vendor-sbom.js'), path.join(tree, 'tools', 'vendor-sbom.js'));
   const vendor = path.join(tree, 'app', 'public', 'vendor');
@@ -328,7 +329,7 @@ function sbomTree(files, edit = (m) => m) {
   fs.writeFileSync(path.join(vendor, 'VENDOR.json'), JSON.stringify(edit({ files: listed, assessments })));
   const run = (sbom, ...args) => spawnSync(process.execPath, [path.join(tree, 'tools', 'vendor-sbom.js'), ...(sbom ? [sbom] : []), ...args], { encoding: 'utf8' });
   const ship = () => {
-    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-vendor-ship-'));
+    const out = tmpDir(ctx, 'agm-vendor-ship-');
     for (const part of [path.join('app', 'public'), 'licenses', 'THIRD-PARTY-NOTICES.md']) fs.cpSync(path.join(tree, part), path.join(out, part), { recursive: true });
     return out;
   };
@@ -340,8 +341,8 @@ const npmSbom = () => ({
   dependencies: [{ ref: 'agmessage@0.6.0', dependsOn: ['express@5.3.0'] }, { ref: 'express@5.3.0', dependsOn: [] }],
 });
 
-test('vendor-sbom: each vendored file joins the SBOM with its own hash, licence, source, bundled libraries and their advisories\' analysis, once', () => {
-  const { tree, run } = sbomTree({ 'a.min.js': 'export const a = 1;\n', 'b.min.mjs': 'export const b = 2;\n' });
+test('vendor-sbom: each vendored file joins the SBOM with its own hash, licence, source, bundled libraries and their advisories\' analysis, once', (ctx) => {
+  const { tree, run } = sbomTree(ctx, { 'a.min.js': 'export const a = 1;\n', 'b.min.mjs': 'export const b = 2;\n' });
   const file = path.join(tree, 'sbom.cdx.json');
   fs.writeFileSync(file, '﻿' + JSON.stringify(npmSbom()));   // as PowerShell's Out-File may write it
   let r = run(file);
@@ -376,8 +377,8 @@ test('vendor-sbom: each vendored file joins the SBOM with its own hash, licence,
   assert.equal(fs.readFileSync(file, 'utf8'), once, 'a second run leaves the same SBOM: nothing doubled');
 });
 
-test('vendor-sbom: --tree reads the folder that ships, which must carry the files, the list and every notice as listed', () => {
-  const t = sbomTree({ 'a.min.js': 'export const a = 1;\n' });
+test('vendor-sbom: --tree reads the folder that ships, which must carry the files, the list and every notice as listed', (ctx) => {
+  const t = sbomTree(ctx, { 'a.min.js': 'export const a = 1;\n' });
   const sbomIn = () => { const f = path.join(t.tree, 'sbom.cdx.json'); fs.writeFileSync(f, JSON.stringify(npmSbom())); return f; };
   let file = sbomIn();
   let r = t.run(file, '--tree', t.ship());
@@ -407,7 +408,7 @@ test('vendor-sbom: --tree reads the folder that ships, which must carry the file
   assert.match(r.stderr, /--tree names the folder that ships/);
 });
 
-test('vendor-sbom: a file that is not the one listed, one not listed, one missing, a notice or assessment missing, or a document that is not an SBOM is refused, and nothing is written', () => {
+test('vendor-sbom: a file that is not the one listed, one not listed, one missing, a notice or assessment missing, or a document that is not an SBOM is refused, and nothing is written', (ctx) => {
   const sbomIn = (tree) => { const f = path.join(tree, 'sbom.cdx.json'); fs.writeFileSync(f, JSON.stringify(npmSbom())); return f; };
   const manifestEdit = (t, fn) => { const f = path.join(t.vendor, 'VENDOR.json'); const m = JSON.parse(fs.readFileSync(f, 'utf8')); fn(m); fs.writeFileSync(f, JSON.stringify(m)); };
   const cases = [
@@ -421,7 +422,7 @@ test('vendor-sbom: a file that is not the one listed, one not listed, one missin
     ['an advisory whose assessment is missing', (t) => manifestEdit(t, (m) => { delete m.assessments.parse; }), /pako's GHSA-2222-3333-4444 names the assessment "parse", which VENDOR\.json does not hold/],
   ];
   for (const [what, spoil, words] of cases) {
-    const t = sbomTree({ 'a.min.js': 'export const a = 1;\n' });
+    const t = sbomTree(ctx, { 'a.min.js': 'export const a = 1;\n' });
     const file = sbomIn(t.tree);
     const before = fs.readFileSync(file, 'utf8');
     spoil(t);
@@ -430,7 +431,7 @@ test('vendor-sbom: a file that is not the one listed, one not listed, one missin
     assert.match(r.stderr, words, what);
     assert.equal(fs.readFileSync(file, 'utf8'), before, what + ': the SBOM is as it was');
   }
-  const t = sbomTree({ 'a.min.js': 'x' });
+  const t = sbomTree(ctx, { 'a.min.js': 'x' });
   const notSbom = path.join(t.tree, 'other.json');
   fs.writeFileSync(notSbom, JSON.stringify({ bomFormat: 'SPDX', components: [] }));
   let r = t.run(notSbom);
@@ -445,8 +446,8 @@ test('vendor-sbom: a file that is not the one listed, one not listed, one missin
   assert.match(r.stderr, /could not be read as JSON/);
 });
 
-test('vendor-sbom: on this tree, the SBOM gains every vendored file with the hash, the bundled libraries and the advisories VENDOR.json lists', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-vendor-sbom-'));
+test('vendor-sbom: on this tree, the SBOM gains every vendored file with the hash, the bundled libraries and the advisories VENDOR.json lists', (ctx) => {
+  const dir = tmpDir(ctx, 'agm-vendor-sbom-');
   const file = path.join(dir, 'agmessage-sbom.cdx.json');
   fs.writeFileSync(file, JSON.stringify(npmSbom()));
   const r = spawnSync(process.execPath, [path.join(ROOT, 'tools', 'vendor-sbom.js'), file], { encoding: 'utf8' });

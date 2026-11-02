@@ -6,11 +6,10 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { io } = require('socket.io-client');
 const { Displays, cleanContent, describe } = require('../lib/displays');
-const { startServer, stopServer, api, connect, emit, wait, until, fakeStagewatch } = require('./helpers');
+const { tmpDir, startServer, stopServer, api, connect, emit, wait, until, fakeStagewatch } = require('./helpers');
 
 const IMG = '/uploads/1777424589360-onmqm0a3ew2r-holding.png';
 const KEY = 'swk_hall3_node_key_00001';   // secret-scan: fixture — a fake node key for the fake Stagewatch
@@ -49,9 +48,9 @@ test('displays: content is cleaned, or refused in words', () => {
   assert.equal(describe({ kind: 'holding', image: IMG }), 'holding image');
 });
 
-test('displays: the token is looked up by its hash, sealed at rest, replaced at once; "shown" only for the newest take', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-disp-'));
-  const seal = (t) => 'enc1:' + Buffer.from(t).toString('base64');
+test('displays: the token is looked up by its hash, sealed at rest, replaced at once; "shown" only for the newest take', (t) => {
+  const dir = tmpDir(t, 'agm-disp-');
+  const seal = (v) => 'enc1:' + Buffer.from(v).toString('base64');
   const open = (s) => Buffer.from(String(s).slice(5), 'base64').toString();
   const store = new Displays(path.join(dir, 'displays.json'), { seal, open });
   const { display, path: p } = store.create('HALL01', 'Lectern monitor', 'pat');
@@ -86,13 +85,13 @@ test('displays: the token is looked up by its hash, sealed at rest, replaced at 
   assert.ok(again);
 });
 
-const scratchStore = () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-disp-'));
-  return new Displays(path.join(dir, 'displays.json'), { seal: (t) => 'enc1:' + Buffer.from(t).toString('base64'), open: (x) => Buffer.from(String(x).slice(5), 'base64').toString() });
+const scratchStore = (t) => {
+  const dir = tmpDir(t, 'agm-disp-');
+  return new Displays(path.join(dir, 'displays.json'), { seal: (v) => 'enc1:' + Buffer.from(v).toString('base64'), open: (x) => Buffer.from(String(x).slice(5), 'base64').toString() });
 };
 
-test('displays: every browser on a link reports for itself — one that could not show a take is never hidden by one that did', () => {
-  const store = scratchStore();
+test('displays: every browser on a link reports for itself — one that could not show a take is never hidden by one that did', (t) => {
+  const store = scratchStore(t);
   const { display: d } = store.create('HALL01', 'Projector', 'pat');
   store.joined(d, 'projector'); store.joined(d, 'laptop');
   store.take(d.id, cleanContent({ kind: 'file', url: IMG, name: 'holding.png' }), 'pat');
@@ -127,8 +126,8 @@ test('displays: every browser on a link reports for itself — one that could no
   assert.equal(Displays.status(d).state, 'offline');
 });
 
-test('displays: a PDF page past the end — the screen\'s note reaches the operator beside ✓', () => {
-  const store = scratchStore();
+test('displays: a PDF page past the end — the screen\'s note reaches the operator beside ✓', (t) => {
+  const store = scratchStore(t);
   const { display: d } = store.create('HALL01', 'Projector', 'pat');
   store.joined(d, 'projector');
   store.take(d.id, cleanContent({ kind: 'file', url: '/uploads/1777424589360-onmqm0a3ew2r-agenda.pdf', name: 'agenda.pdf', page: 7 }), 'pat');

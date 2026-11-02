@@ -7,7 +7,6 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');
-const os = require('os');
 const path = require('path');
 const h = require('./helpers');
 const startup = require('../lib/startup');
@@ -86,8 +85,8 @@ test('opener: the browser is started once, with an argument array and no shell, 
 const PRELOAD = path.join(__dirname, 'opener-preload.js');
 // Windows keeps its own SystemRoot (its sockets need it); elsewhere one is stood in. The preload never runs explorer.exe.
 const SYSTEM_ROOT = process.platform === 'win32' ? process.env.SystemRoot : 'C:\\StubWindows';
-async function serverWithOpener(env) {
-  const opened = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-open-')), 'opened.jsonl');
+async function serverWithOpener(t, env) {
+  const opened = path.join(h.tmpDir(t, 'agm-open-'), 'opened.jsonl');
   const preload = '--require "' + PRELOAD.split(path.sep).join('/') + '"';   // forward slashes: no escapes inside the quotes
   const srv = await h.startServer({ NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '), AGM_TEST_OPENED: opened, SystemRoot: SYSTEM_ROOT, ...env });
   const read = () => { try { return fs.readFileSync(opened, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
@@ -96,12 +95,12 @@ async function serverWithOpener(env) {
 
 test('opener: the server opens http://localhost:<PORT> once, after it serves; never on a restart, unasked or in another channel', async (t) => {
   const cases = await Promise.all([
-    serverWithOpener({ AGM_OPEN: '1' }),
-    serverWithOpener({ AGM_OPEN: '1', AGM_RUNS: 'portable' }),
-    serverWithOpener({ AGM_OPEN: '1', AGM_RESTARTS: '1' }),
-    serverWithOpener({}),
-    serverWithOpener({ AGM_OPEN: '1', AGM_RUNS: 'task' }),
-    serverWithOpener({ AGM_OPEN: '1', AGM_RUNS: 'service' }),
+    serverWithOpener(t, { AGM_OPEN: '1' }),
+    serverWithOpener(t, { AGM_OPEN: '1', AGM_RUNS: 'portable' }),
+    serverWithOpener(t, { AGM_OPEN: '1', AGM_RESTARTS: '1' }),
+    serverWithOpener(t, {}),
+    serverWithOpener(t, { AGM_OPEN: '1', AGM_RUNS: 'task' }),
+    serverWithOpener(t, { AGM_OPEN: '1', AGM_RUNS: 'service' }),
   ]);
   t.after(() => Promise.all(cases.map((c) => h.stopServer(c.srv.child))));
   const [first, portable, restarted, unasked, task, other] = cases;
@@ -121,9 +120,9 @@ test('opener: the server opens http://localhost:<PORT> once, after it serves; ne
 });
 
 test('opener: a log the person at this laptop must answer opens the admin page; an intact one, the start page', async (t) => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  const dataDir = h.tmpDir(t, 'agm-e2e-');
   fs.writeFileSync(path.join(dataDir, 'audit.jsonl'), h.chainOf(3));   // 0.5.1's entries: △ until accepted at the laptop
-  const cases = await Promise.all([serverWithOpener({ AGM_OPEN: '1', AGM_DATA_DIR: dataDir }), serverWithOpener({ AGM_OPEN: '1' })]);
+  const cases = await Promise.all([serverWithOpener(t, { AGM_OPEN: '1', AGM_DATA_DIR: dataDir }), serverWithOpener(t, { AGM_OPEN: '1' })]);
   t.after(() => Promise.all(cases.map((c) => h.stopServer(c.srv.child))));
   const [seeded, intact] = cases;
   for (const c of cases) assert.ok(await until(() => c.read().length > 0), 'the opener ran:\n' + c.srv.out());
@@ -132,14 +131,14 @@ test('opener: a log the person at this laptop must answer opens the admin page; 
 
   // A keyed entry changed while the copy was stopped: open() reads only the tail, so the check at start finds it, and the
   // browser opens on the admin page once that check has answered.
-  const first = await h.startServer();
+  const first = await h.startServer({ AGM_DATA_DIR: h.tmpDir(t, 'agm-e2e-') });   // the test's: read and served again once this one stops
   await h.api(first.base, 'POST', '/api/admin/login', { token: h.TOKEN });
   await h.api(first.base, 'POST', '/api/admin/login', { token: h.TOKEN });
   await h.stopServer(first.child);
   const file = path.join(first.dataDir, 'audit.jsonl');
   const kept = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
   fs.writeFileSync(file, [kept[0].replace('"words":"', '"words":"changed: '), ...kept.slice(1)].join('\n') + '\n');
-  const changed = await serverWithOpener({ AGM_OPEN: '1', AGM_DATA_DIR: first.dataDir });
+  const changed = await serverWithOpener(t, { AGM_OPEN: '1', AGM_DATA_DIR: first.dataDir });
   t.after(() => h.stopServer(changed.srv.child));
   assert.ok(await until(() => changed.read().length > 0), 'the opener ran:\n' + changed.srv.out());
   assert.deepEqual(changed.read().map((x) => x.args), [[`http://localhost:${changed.srv.port}/admin`]]);
@@ -233,8 +232,8 @@ test('the port\'s holder: the words for each holder, in each channel', () => {
 });
 
 /** A server started on a port someone else holds (with `settings` in its data folder): resolves {code, out, ms, exitAt} once it has gone. */
-function refused(port, env = {}, settings = null) {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-port-'));
+function refused(t, port, env = {}, settings = null) {
+  const dataDir = h.tmpDir(t, 'agm-port-');
   if (settings) fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify(settings));
   const t0 = Date.now();
   return new Promise((resolve) => {
@@ -259,8 +258,8 @@ test('a port in use says who holds it, and the copy stops without serving; the r
   t.after(() => Promise.all([older, installed, other, olderForTask, otherForTask].map((f) => f.close())));
 
   const [a, b, c, d, e] = await Promise.all([
-    refused(ports[0]), refused(ports[1], { AGM_RUNS: 'portable' }), refused(ports[2]),
-    refused(ports[3], { AGM_RUNS: 'task' }), refused(ports[4], { AGM_RUNS: 'task' }),
+    refused(t, ports[0]), refused(t, ports[1], { AGM_RUNS: 'portable' }), refused(t, ports[2]),
+    refused(t, ports[3], { AGM_RUNS: 'task' }), refused(t, ports[4], { AGM_RUNS: 'task' }),
   ]);
   for (const r of [a, b, c]) assert.equal(r.code, 3, 'a portable copy: "cannot run as configured", which the watchdog does not restart:\n' + r.out);
   for (const r of [a, b, c, d, e]) {
@@ -291,7 +290,7 @@ test('a copy refused at the port leaves the show network before it reads the hol
   const holder = await silentHolder(port);
   const stagewatch = await silentHolder(swPort);
   t.after(() => Promise.all([holder.close(), stagewatch.close()]));
-  const r = await refused(port, {}, { nodeId: 'a1b2c3d4', stagewatchUrl: 'http://127.0.0.1:' + swPort });
+  const r = await refused(t, port, {}, { nodeId: 'a1b2c3d4', stagewatchUrl: 'http://127.0.0.1:' + swPort });
   assert.equal(r.code, 3, r.out);
   assert.ok(r.out.includes(`Another program is using port ${port}.`), r.out);
   assert.ok(r.ms >= 900, 'the read waited for the holder:\n' + r.out);

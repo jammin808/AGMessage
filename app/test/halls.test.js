@@ -7,7 +7,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
-const os = require('os');
 const http = require('http');
 const path = require('path');
 const { WebSocketServer } = require('ws');
@@ -16,7 +15,7 @@ const tlsmod = require('../lib/tls');
 const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
 const { io } = require('socket.io-client');
-const { startServer, stopServer, api, connect, emit, answer, wait, until, fakeStagewatch, freePort } = require('./helpers');
+const { tmpDir, startServer, stopServer, api, connect, emit, answer, wait, until, fakeStagewatch, freePort } = require('./helpers');
 
 // Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
 const KEY_A = 'swk_hallA_node_key_0001';   // secret-scan: fixture
@@ -334,7 +333,7 @@ test('a hall\'s Set up: its screens follow a removed Stagewatch at once; an unch
 
 test('C53: a restart keeps following a stage send the speaker has not acknowledged yet', async (t) => {
   const sw = await fakeStagewatch({ name: 'Lectern timer', messageId: 77 });
-  let srv = await startServer();
+  let srv = await startServer({ AGM_DATA_DIR: tmpDir(t, 'agm-e2e-') });   // the test's: a restart serves it again
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
   const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
@@ -372,7 +371,7 @@ test('a restart follows a stage send only while its Stagewatch is the one it wen
   // Three halls, each on its own Stagewatch, each sending "Two minutes" that becomes that Stagewatch's message 4:
   // P's Stagewatch restarts while AGMessage runs; Q's restarts while AGMessage is down (overnight); R's carries on.
   const [swP, swQ, swR] = [await fakeStagewatch({ name: 'P timer', messageId: 4 }), await fakeStagewatch({ name: 'Q timer', messageId: 4 }), await fakeStagewatch({ name: 'R timer', messageId: 4 })];
-  let srv = await startServer();
+  let srv = await startServer({ AGM_DATA_DIR: tmpDir(t, 'agm-e2e-') });   // the test's: a restart serves it again
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await swP.close(); await swQ.close(); await swR.close(); });
   const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
@@ -468,7 +467,7 @@ test('closing a hall forgets its own Stagewatch\'s certificate pins, unless anot
 
 test('a forward an earlier build stored with its hall\'s code is told without it, and saved without it', async (t) => {
   // Two halls on disk as an earlier build left them: hall D holds a message forwarded from hall A that names A's code.
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  const dataDir = tmpDir(t, 'agm-e2e-');
   fs.mkdirSync(path.join(dataDir, 'rooms'));
   const at = Date.now() - 60_000;
   const snapshot = (name, messages) => JSON.stringify({ name, createdAt: at, seq: messages.length, settings: {}, messages });
@@ -912,7 +911,7 @@ test('a locked hall\'s seats outlive the watchdog\'s restart for the pages back 
   // The watchdog restarts a crashed or hung server (SIGKILL) on the same folder and port; every page drops at once and
   // comes back on its own, with what its link says (name, role, identity) and no invite.
   const env = (srv) => ({ AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port), AGM_BOOT_SEAT_MS: '6000' });
-  let srv = await startServer({ AGM_BOOT_SEAT_MS: '6000' });
+  let srv = await startServer({ AGM_DATA_DIR: tmpDir(t, 'agm-e2e-'), AGM_BOOT_SEAT_MS: '6000' });   // the test's: each restart serves it again
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;

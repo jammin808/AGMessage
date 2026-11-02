@@ -4,10 +4,10 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const v = require('../lib/version');
+const { tmpDir } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -30,8 +30,8 @@ test('version: a stamp for another version, a bad build or commit, or an unknown
   assert.equal(v.readStamp(null, '0.5.0'), null);
 });
 
-test('stamp-build: numbers a CI build, names a release only for its own tag, refuses what is outside the scheme', () => {
-  const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-stamp-'));
+test('stamp-build: numbers a CI build, names a release only for its own tag, refuses what is outside the scheme', (t) => {
+  const tree = tmpDir(t, 'agm-stamp-');
   fs.mkdirSync(path.join(tree, 'app', 'lib'), { recursive: true });
   fs.mkdirSync(path.join(tree, 'tools'));
   fs.copyFileSync(path.join(ROOT, 'tools', 'stamp-build.js'), path.join(tree, 'tools', 'stamp-build.js'));

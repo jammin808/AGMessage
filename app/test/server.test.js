@@ -5,7 +5,6 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { spawn } = require('child_process');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const net = require('net');
 const { io } = require('socket.io-client');
@@ -19,10 +18,11 @@ function freePort() {
 
 async function startServer(dataDir, port) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', AGM_UPLOAD_DIR: dataDir + '-uploads', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   if (child.channel) child.channel.unref();
+  occupy(child, [dataDir]);   // the test's folder outlasts this server, never the other way round
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
@@ -33,7 +33,7 @@ async function startServer(dataDir, port) {
   child.kill();
   throw new Error('server did not start:\n' + out);
 }
-const { stopServer: stop } = require('./helpers');   // asked over IPC, so it saves first on Windows too
+const { tmpDir, occupy, stopServer: stop } = require('./helpers');   // asked over IPC, so it saves first on Windows too
 
 const emit = (s, ev, arg) => new Promise((resolve) => s.emit(ev, arg, resolve));
 const connect = (base, cookie) => new Promise((resolve, reject) => {
@@ -43,7 +43,7 @@ const connect = (base, cookie) => new Promise((resolve, reject) => {
 });
 
 test('AGMessage server: security, resume, persistence', async (t) => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-test-'));
+  const dataDir = tmpDir(t, 'agm-test-');
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   let child = await startServer(dataDir, port);

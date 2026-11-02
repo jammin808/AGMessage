@@ -10,7 +10,6 @@ const assert = require('node:assert');
 const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
-const os = require('os');
 const path = require('path');
 const vm = require('vm');
 const { spawn } = require('child_process');
@@ -26,8 +25,7 @@ const { auditLog, recordsOf, chainOf, keyedLogWithPoints, acceptAll, FIXTURE_KEY
 const SIGN = 'agmessage audit sign v1';
 const VERIFY = path.join(ROOT, 'verify', 'verify-audit.js');
 const VERIFY_DIR = path.join(ROOT, 'verify');
-const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
-const fresh = () => path.join(tmp('agm-arc-'), 'audit.jsonl');
+const fresh = (t) => path.join(h.tmpDir(t, 'agm-arc-'), 'audit.jsonl');
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 const keyOf = (machine = FIXTURE_KEY) => secretbox.signingKeyFrom(secretbox.deriveFrom(machine, SIGN));
 const FP = keyOf().fingerprint;
@@ -48,7 +46,7 @@ function writeOn(log, n, words = (i) => 'message ' + i) {
   return log;
 }
 /** A log of `before` entries, an archive point, and `after` more, flushed: {log, file, point}. */
-function pointed({ file = fresh(), before = 5, after = 3, key = FIXTURE_KEY } = {}) {
+function pointed(t, { file = fresh(t), before = 5, after = 3, key = FIXTURE_KEY } = {}) {
   const log = writeOn(auditLog(file, { key }), before);
   const point = log.point(HOST, '2026-10-27T14-02-00-000Z', EVENT, '127.0.0.1');
   writeOn(log, after, (i) => 'after ' + i);
@@ -82,7 +80,7 @@ function verify(args) {
   });
 }
 /** An export of `log` behind a plain HTTP server, as http-accounts mounts it, unpacked: {dir, zip, headers}. */
-async function exported(log, { machine = FIXTURE_KEY, archiver = null } = {}) {
+async function exported(t, log, { machine = FIXTURE_KEY, archiver = null } = {}) {
   const exporter = new Exporter({ audit: log, signingKey: () => keyOf(machine), verifyDir: VERIFY_DIR, version: 'test', node: NODE, archiver });
   const runs = [];
   const server = http.createServer((req, res) => {
@@ -96,10 +94,10 @@ async function exported(log, { machine = FIXTURE_KEY, archiver = null } = {}) {
     const body = Buffer.from(await r.arrayBuffer());
     await Promise.all(runs);
     assert.equal(r.status, 200, body.toString().slice(0, 300));
-    return { dir: h.unzipTo(body, tmp('agm-bundle-')), zip: body, headers: r.headers };
+    return { dir: h.unzipTo(body, h.tmpDir(t, 'agm-bundle-')), zip: body, headers: r.headers };
   } finally { await new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }); }
 }
-const copy = (dir) => { const to = path.join(tmp('agm-copy-'), path.basename(dir)); fs.cpSync(dir, to, { recursive: true }); return to; };
+const copy = (t, dir) => { const to = path.join(h.tmpDir(t, 'agm-copy-'), path.basename(dir)); fs.cpSync(dir, to, { recursive: true }); return to; };
 /**
  * An archive's folder signed again, as anyone who can write it could: `edit(dir)` first, then `key`'s public key put in and
  * named in archive.json, SHA256SUMS taken again over the files it lists, and signed by `key` ({privateKey, publicKey}).
@@ -154,8 +152,8 @@ async function onPage(dir, { fp = '' } = {}) {
 }
 
 // ---------------------------------------------------------------- the archive point
-test('the point: the first line of a new file, the one before it rotated; on an empty file nothing is rotated; its target names its run', async () => {
-  const { log, file, point } = pointed({ before: 5, after: 0 });
+test('the point: the first line of a new file, the one before it rotated; on an empty file nothing is rotated; its target names its run', async (t) => {
+  const { log, file, point } = pointed(t, { before: 5, after: 0 });
   assert.deepEqual([point.seq, point.action, point.actor], [6, 'audit.archive', { ...HOST }]);
   assert.equal(point.target, '2026-10-27T14-02-00-000Z;' + log.kid + ':1', 'the event archive\'s folder, then the run it stands in');
   assert.equal(point.words, EVENT);
@@ -164,11 +162,11 @@ test('the point: the first line of a new file, the one before it rotated; on an 
   assert.deepEqual(entries(file).map((e) => [e.seq, e.action]), [[6, 'audit.archive']], 'the point opens a file of its own');
   assert.equal(eventOf(point.words), 'Spring Summit');
   // On an empty current file (a fresh log) nothing is rotated.
-  const empty = fresh();
+  const empty = fresh(t);
   const e2 = auditLog(empty).point(HOST, 'x', 'first', '');
   assert.deepEqual([e2.seq, rotated(empty).length], [1, 0]);
   // After a restart whose newest file starts after the run began, the head's run names it: a 0.5.1 seed keyed at entry 6.
-  const seeded = fresh();
+  const seeded = fresh(t);
   fs.writeFileSync(seeded, chainOf(5));
   const first = auditLog(seeded);
   await acceptAll(first);   // the boundary (6), the accept (7)
@@ -183,8 +181,8 @@ test('the point: the first line of a new file, the one before it rotated; on an 
   assert.equal(JSON.parse(fs.readFileSync(path.join(recordsOf(seeded), 'head-' + again.l + '.json'))).run, 6);
 });
 
-test('the point: with an entry waiting (the disk refusing) it is written where it falls; a size rotation and a forced one in one millisecond give two files', async () => {
-  const file = fresh();
+test('the point: with an entry waiting (the disk refusing) it is written where it falls; a size rotation and a forced one in one millisecond give two files', async (t) => {
+  const file = fresh(t);
   const log = writeOn(auditLog(file), 3);
   log.flush();
   const p = await failing('writeSync', 'ENOSPC', () => true, () => { writeOn(log, 1, () => 'while the disk was full'); return log.point(HOST, 'full', 'while the disk was full', ''); });
@@ -195,7 +193,7 @@ test('the point: with an entry waiting (the disk refusing) it is written where i
   const r = await archiverOf(log).split(p.seq, HOST, '');
   assert.deepEqual([r.ok, r.error], [false, 'This archive point is not the first line of a file (the disk refused entries when it was written): split at another point.']);
   // A size rotation, then a forced one in the same millisecond (a stubbed clock): two files, neither replacing the other.
-  const f2 = fresh();
+  const f2 = fresh(t);
   const l2 = writeOn(auditLog(f2), 2);
   l2.flush();
   const realNow = Date.now;
@@ -215,8 +213,8 @@ test('the point: with an entry waiting (the disk refusing) it is written where i
   assert.equal((await l2.verify()).mark, 'intact');
 });
 
-test('the point: in a run with no machine key it is written, and no split is made at it (503, no row, nothing in audit-archive)', async () => {
-  const file = fresh();
+test('the point: in a run with no machine key it is written, and no split is made at it (503, no row, nothing in audit-archive)', async (t) => {
+  const file = fresh(t);
   const log = new audit.AuditLog(file, { keys: () => { throw Object.assign(new Error('no key'), { code: 'EBUSY' }); }, records: recordsOf(file) });
   writeOn(log, 3);
   const p = log.point(HOST, 'keyless', 'an event archived with no key', '');
@@ -230,8 +228,8 @@ test('the point: in a run with no machine key it is written, and no split is mad
 });
 
 // ---------------------------------------------------------------- the split
-test('the split: the files before the point move into a signed archive, byte for byte; the check walks from the point and names it; after a restart, the same', async () => {
-  const file = fresh();
+test('the split: the files before the point move into a signed archive, byte for byte; the check walks from the point and names it; after a restart, the same', async (t) => {
+  const file = fresh(t);
   const log = writeOn(auditLog(file), 3);
   log.size = 21 * 1024 * 1024;   // a size rotation before the point: two files move
   writeOn(log, 2);
@@ -289,8 +287,8 @@ test('the split: the files before the point move into a signed archive, byte for
   assert.equal(again.attention().length, 0);
 });
 
-test('the mark carries: a 0.5.1 seed accepted (◇) and then split off stays ◇, never ✓; a span accepted after the point is named in archive.json, and the archive alone reads ◇', async () => {
-  const file = fresh();
+test('the mark carries: a 0.5.1 seed accepted (◇) and then split off stays ◇, never ✓; a span accepted after the point is named in archive.json, and the archive alone reads ◇', async (t) => {
+  const file = fresh(t);
   fs.writeFileSync(file, chainOf(5));
   const log = auditLog(file);
   await acceptAll(log);
@@ -304,7 +302,7 @@ test('the mark carries: a 0.5.1 seed accepted (◇) and then split off stays ◇
   assert.match(c.words, /^Linked — entries 10–12, keyed here, are intact; entries 1–9 are in the archive audit-[0-9a-f]{8}-1-9, which holds entries 1–5 accepted on \d+ \w{3}$/);
   assert.equal(c.archives[0].mark, 'linked');
   // A span accepted after the event was archived: the accept stays in the live log, and archive.json names it by seq.
-  const f2 = fresh();
+  const f2 = fresh(t);
   fs.writeFileSync(f2, chainOf(4));
   const l2 = auditLog(f2);
   writeOn(l2, 1);
@@ -324,7 +322,7 @@ test('the mark carries: a 0.5.1 seed accepted (◇) and then split off stays ◇
   assert.equal(alone.code, 1, alone.out);
   assert.match(alone.out, /^1 {2}\S+ {2}◇ {2}sam {2}display\.take {2}dlectern1 {2}/m, 'a span\'s rows listed ◇, by the accept archive.json names');
   assert.match(alone.out, /^ {4}◇ entries 1–4 have plain hashes .+ \(accepted by entry \d+ on \d+ \w{3}\)$/m);
-  const extra = copy(dir);
+  const extra = copy(t, dir);
   fs.writeFileSync(path.join(extra, 'notes.txt'), 'not read');
   const three = await verify([extra, '--fingerprint', FP]);
   assert.equal(three.code, 3);
@@ -337,7 +335,7 @@ test('the mark carries: a 0.5.1 seed accepted (◇) and then split off stays ◇
   // the laptop's own key (as whoever holds it could) it is not the one the split pinned. Both read ✕, here and in the routine
   // check, never ✓.
   const toIntact = (d) => { const f = path.join(d, 'archive.json'); const a2 = JSON.parse(fs.readFileSync(f)); a2.check.mark = 'intact'; a2.check.findings = []; fs.writeFileSync(f, JSON.stringify(a2, null, 2) + '\n'); };
-  const saved = copy(dir);
+  const saved = copy(t, dir);
   const stranger = crypto.generateKeyPairSync('ed25519');
   resign(dir, stranger, toIntact);
   assert.equal((await verifier.check(dir, { fingerprint: sha(stranger.publicKey.export({ type: 'spki', format: 'der' })) })).code, 0, 'whole and signed, by its own claim');
@@ -356,26 +354,26 @@ test('the mark carries: a 0.5.1 seed accepted (◇) and then split off stays ◇
 });
 
 // ---------------------------------------------------------------- refused
-test('refused: a point under another key, the live log\'s first entry, a point that says `:?`, an open span or a broken entry before it, a head that could not be read, an export or a split running, an archive that exists', async () => {
+test('refused: a point under another key, the live log\'s first entry, a point that says `:?`, an open span or a broken entry before it, a head that could not be read, an export or a split running, an archive that exists', async (t) => {
   // A point under another machine's key: it lies in a span.
-  const other = pointed({ key: OTHER_KEY });
+  const other = pointed(t, { key: OTHER_KEY });
   const onB = auditLog(other.file);
   await acceptAll(onB);
   assert.equal((await archiverOf(onB).split(other.point.seq, HOST, '')).error, 'Entry ' + other.point.seq + ' is not an archive point this log can be split at.');
   // The live log's first entry, and an entry that is no point.
-  const p = pointed();
+  const p = pointed(t);
   const ar = archiverOf(p.log);
   assert.equal((await ar.split(2, HOST, '')).error, 'Entry 2 is not an archive point this log can be split at.');
   assert.equal((await ar.split(p.point.seq, HOST, '')).ok, true);
   assert.equal((await ar.split(p.point.seq, HOST, '')).error, 'Entry ' + p.point.seq + ' is not an archive point this log can be split at.', 'the live log\'s first entry now');
   // A broken entry before the point.
-  const b = pointed();
+  const b = pointed(t);
   const ls = lines(path.join(path.dirname(b.file), rotated(b.file)[0]));
   ls[1] = ls[1].replace('message 2', 'message X');
   fs.writeFileSync(path.join(path.dirname(b.file), rotated(b.file)[0]), ls.join('\n') + '\n');
   assert.equal((await archiverOf(b.log).split(b.point.seq, HOST, '')).error, 'Not split: entry 2 is broken, and a split would make the log read better than it is.');
   // A head that could not be read at this start, and a point whose run's first entry it could not know (`:?`).
-  const c = pointed({ before: 3, after: 0 });
+  const c = pointed(t, { before: 3, after: 0 });
   writeOn(c.log, 2);
   c.log.flush();
   const older = path.join(path.dirname(c.file), rotated(c.file)[0]);
@@ -389,12 +387,12 @@ test('refused: a point under another key, the live log\'s first entry, a point t
   assert.equal((await archiverOf(blind).split(q.seq, HOST, '')).error, 'This archive point does not say where its run of entries began (the head record could not be read when it was written): split at another point.');
   assert.equal((await archiverOf(blind).split(c.point.seq, HOST, '')).error, 'Not split: the head record could not be read at this start (EBUSY).');
   // A head that cannot be saved (its lane failing): the split says so, with the error's code.
-  const saving = pointed();
+  const saving = pointed(t);
   saving.log.headLane.lastError = 'EACCES: permission denied, open ' + path.join(recordsOf(saving.file), 'head.json');
   assert.equal((await archiverOf(saving.log).split(saving.point.seq, HOST, '')).error, 'Not split: the head record could not be saved (EACCES).');
   saving.log.headLane.lastError = null;
   // While an export streams, and while a split runs: 409 with who and since when.
-  const d = pointed();
+  const d = pointed(t);
   const since = Date.now();
   const busy = archiverOf(d.log, { exporter: { busy: () => ({ by: 'Ana', since }) } });
   const hhmm = (t) => { const x = new Date(t); return String(x.getHours()).padStart(2, '0') + ':' + String(x.getMinutes()).padStart(2, '0'); };
@@ -406,7 +404,7 @@ test('refused: a point under another key, the live log\'s first entry, a point t
   assert.match(second.error, /^A split is being made for ana since \d\d:\d\d: try again when it ends\.$/);
   assert.equal((await first).ok, true);
   // An archive of that name that exists already.
-  const e = pointed();
+  const e = pointed(t);
   const name = 'audit-' + e.log.l.slice(0, 8) + '-1-5';
   fs.mkdirSync(path.join(archiveDir(e.file), name), { recursive: true });
   assert.equal((await archiverOf(e.log).split(e.point.seq, HOST, '')).error, 'Not split: ' + path.join('audit-archive', name) + ' already exists.');
@@ -414,12 +412,12 @@ test('refused: a point under another key, the live log\'s first entry, a point t
 });
 
 // ---------------------------------------------------------------- after a split, what the data folder's writer can do
-test('after a split: the archive removed is ✕ until accepted with its confirmation, ◇ after; a file cut or removed, or archive.json changed, is ✕ "not what was split off"', async () => {
-  const p = pointed();
+test('after a split: the archive removed is ✕ until accepted with its confirmation, ◇ after; a file cut or removed, or archive.json changed, is ✕ "not what was split off"', async (t) => {
+  const p = pointed(t);
   const r = await archiverOf(p.log).split(p.point.seq, HOST, '');
   const dir = path.join(archiveDir(p.file), r.archive);
   const S = entries(p.file).find((e) => e.action === 'audit.split').seq;
-  const moved = copy(dir);
+  const moved = copy(t, dir);
   fs.rmSync(dir, { recursive: true });
   let c = await p.log.verify();
   assert.deepEqual([c.mark, c.findings.map((f) => [f.id, f.kind, f.mark, f.confirm])], ['broken', [['a' + S, 'archive', 'broken', true]]]);
@@ -439,7 +437,7 @@ test('after a split: the archive removed is ✕ until accepted with its confirma
     ['archive.json changed', (d) => { const f = path.join(d, 'archive.json'); fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('"name": "AGMessage laptop"', '"name": "someone else"')); }, /is not what was split off: archive\.json is not what its SHA256SUMS says$/],
     ['SHA256SUMS changed', (d) => { fs.appendFileSync(path.join(d, 'SHA256SUMS'), '0'.repeat(64) + '  log/audit-2026-01-01T00-00-00-000Z.jsonl\n'); }, /is not what was split off: its SHA256SUMS is not the one the split pinned$/],
   ]) {
-    const q = pointed();
+    const q = pointed(t);
     const qr = await archiverOf(q.log).split(q.point.seq, HOST, '');
     change(path.join(archiveDir(q.file), qr.archive));
     const qc = await q.log.verify();
@@ -449,14 +447,14 @@ test('after a split: the archive removed is ✕ until accepted with its confirma
   }
   // A byte changed in place keeps every size: the routine check (two small reads and a size per file) does not see it;
   // the archive's own Check, and every export, hash each file in full and do.
-  const z = pointed();
+  const z = pointed(t);
   const zr = await archiverOf(z.log).split(z.point.seq, HOST, '');
   const zdir = path.join(archiveDir(z.file), zr.archive);
   flip(path.join(zdir, 'log', fs.readdirSync(path.join(zdir, 'log'))[0]), 30);
   const zc = await archiverOf(z.log).checkArchive(zr.archive);
   assert.deepEqual([zc.ok, zc.mark], [false, 'broken']);
   assert.match(zc.why, /^log\/audit-.*\.jsonl is not what was signed: its SHA-256 differs from SHA256SUMS$/);
-  const zx = await exported(z.log);
+  const zx = await exported(t, z.log);
   const zm = JSON.parse(fs.readFileSync(path.join(zx.dir, 'manifest.json')));
   assert.equal(zm.check.mark, 'broken');
   assert.match(zm.check.words, /is not what was split off: log\/audit-.*\.jsonl is not what its SHA256SUMS says$/);
@@ -466,8 +464,8 @@ test('after a split: the archive removed is ✕ until accepted with its confirma
   assert.equal((await p.log.verify()).archives[0].finding, undefined);
 });
 
-test('after a split: the archived files moved back are walked from entry 1, the archive saying its files are missing; live files removed before a later point no split names are ✕, with a plain split added too', async () => {
-  const p = pointed();
+test('after a split: the archived files moved back are walked from entry 1, the archive saying its files are missing; live files removed before a later point no split names are ✕, with a plain split added too', async (t) => {
+  const p = pointed(t);
   const r = await archiverOf(p.log).split(p.point.seq, HOST, '');
   const dir = path.join(archiveDir(p.file), r.archive);
   for (const f of fs.readdirSync(path.join(dir, 'log'))) fs.renameSync(path.join(dir, 'log', f), path.join(path.dirname(p.file), f));
@@ -475,7 +473,7 @@ test('after a split: the archived files moved back are walked from entry 1, the 
   assert.deepEqual([c.from, c.mark], [1, 'broken'], 'the walk from entry 1 is whole; only the archive is found');
   assert.match(c.words, /^the archive of entries 1–5 is not what was split off: log\/audit-.*\.jsonl is missing$/);
   // Two points; the live files from the first to the second removed by hand: no split names the second.
-  const q = pointed({ before: 3, after: 2 });
+  const q = pointed(t, { before: 3, after: 2 });
   assert.equal((await archiverOf(q.log).split(q.point.seq, HOST, '')).ok, true);
   const q2 = q.log.point(HOST, 'later', 'the next event', '');
   writeOn(q.log, 2);
@@ -498,7 +496,7 @@ test('after a split: the archived files moved back are walked from entry 1, the 
   assert.deepEqual([plainSplit.mark, plainSplit.brokenAt, plainSplit.why], ['broken', 1, 'entries 1 to ' + (q2.seq - 1) + ' are missing: no split names entry ' + q2.seq]);
   // So is one under a made-up key id, MACed under a made-up key and closed by the next start's `audit.rekey`: a keyed split
   // counts only under the key of the point it names.
-  const r2 = pointed({ before: 3, after: 2 });
+  const r2 = pointed(t, { before: 3, after: 2 });
   assert.equal((await archiverOf(r2.log).split(r2.point.seq, HOST, '')).ok, true);
   const p2 = r2.log.point(HOST, 'later', 'the next event', '');
   r2.log.flush();
@@ -519,8 +517,8 @@ test('after a split: the archived files moved back are walked from entry 1, the 
 });
 
 // ---------------------------------------------------------------- a stop part way
-test('a stop part way: a rename refused for the second of three files is recorded and waits; the check reads △ "not finished", never ✕; the next start finishes it', async () => {
-  const file = fresh();
+test('a stop part way: a rename refused for the second of three files is recorded and waits; the check reads △ "not finished", never ✕; the next start finishes it', async (t) => {
+  const file = fresh(t);
   const log = writeOn(auditLog(file), 2);
   for (let i = 0; i < 2; i++) { log.size = 21 * 1024 * 1024; writeOn(log, 2); }
   const point = log.point(HOST, 'three files', EVENT, '');
@@ -558,8 +556,8 @@ test('a stop part way: a rename refused for the second of three files is recorde
   assert.deepEqual([c2.mark, c2.from, c2.archives.length], ['intact', 7, 1]);
 });
 
-test('a stop between the archive made aside and its split: no split pins the folder, which holds no log file; the next start removes it with `audit.split.fail`, nothing moved', async () => {
-  const p = pointed();
+test('a stop between the archive made aside and its split: no split pins the folder, which holds no log file; the next start removes it with `audit.split.fail`, nothing moved', async (t) => {
+  const p = pointed(t);
   const aside = path.join(archiveDir(p.file), '.audit-' + p.log.l.slice(0, 8) + '-1-5.partial');
   fs.mkdirSync(path.join(aside, 'log'), { recursive: true });
   fs.writeFileSync(path.join(aside, 'archive.json'), JSON.stringify({ kind: 'agmessage audit archive', v: 1, point: { seq: p.point.seq } }));
@@ -583,8 +581,8 @@ test('a stop between the archive made aside and its split: no split pins the fol
   assert.ok(again.attention().some((x) => x.kind === 'split' && x.mark === 'unvouched' && x.words === 'a split\'s folder (.audit-' + p.log.l.slice(0, 8) + '-1-3.partial) is left as it is: it holds files no split in the log pins'), 'health says so');
 });
 
-test('a stop part way: a pinned folder that no file reached yet, with the live log broken at the next start, is left as it is and said; nothing is removed, no `audit.split.fail`', async () => {
-  const p = pointed({ after: 3 });
+test('a stop part way: a pinned folder that no file reached yet, with the live log broken at the next start, is left as it is and said; nothing is removed, no `audit.split.fail`', async (t) => {
+  const p = pointed(t, { after: 3 });
   const r = await failing('rename', 'EBUSY', (from) => typeof from === 'string' && /audit-\d{4}-.*\.jsonl$/.test(from), () => archiverOf(p.log).split(p.point.seq, HOST, ''), { promises: true });
   assert.deepEqual([r.ok, r.status, r.moved, r.waiting], [true, 202, 0, 1]);
   const name = 'audit-' + p.log.l.slice(0, 8) + '-1-5';
@@ -612,9 +610,9 @@ test('a stop part way: a pinned folder that no file reached yet, with the live l
   assert.deepEqual([g.finished, fs.existsSync(aside)], [0, true]);
 });
 
-test('a stop part way: every file moved and the folder\'s rename refused reads "its folder is not renamed yet"; the split\'s entry refused by the disk keeps the folder, and the split waits, never ✕', async () => {
+test('a stop part way: every file moved and the folder\'s rename refused reads "its folder is not renamed yet"; the split\'s entry refused by the disk keeps the folder, and the split waits, never ✕', async (t) => {
   // The folder's own rename refused: every file is in it.
-  const p = pointed();
+  const p = pointed(t);
   const r = await failing('rename', 'EBUSY', (from) => typeof from === 'string' && /\.partial$/.test(from), () => archiverOf(p.log).split(p.point.seq, HOST, ''), { promises: true });
   assert.deepEqual([r.ok, r.status, r.moved, r.waiting, r.waits], [true, 202, 1, 0, true]);
   assert.match(r.words, /^The split is recorded \(entry \d+\), and every file is moved, and its folder is not renamed yet \(EBUSY\): it is finished at the next start, or by Finish the split on Admin → Health\.$/);
@@ -626,7 +624,7 @@ test('a stop part way: every file moved and the folder\'s rename refused reads "
   assert.deepEqual([(await p.log.verify()).mark, p.log.from], ['intact', 6]);
 
   // Entries waiting for the disk before a split: refused, nothing made.
-  const w = pointed();
+  const w = pointed(t);
   await failing('writeSync', 'ENOSPC', () => true, () => writeOn(w.log, 1, () => 'while the disk was full'));
   assert.equal(w.log.unwritten, 1);
   const refused = await archiverOf(w.log).split(w.point.seq, HOST, '');
@@ -636,7 +634,7 @@ test('a stop part way: every file moved and the folder\'s rename refused reads "
   w.log.flush();
 
   // The split's own entry refused: it is chained and cannot be withdrawn, so the folder made aside is kept for it.
-  const q = pointed();
+  const q = pointed(t);
   const ar = archiverOf(q.log);
   const real = q.log.write.bind(q.log);
   let split;
@@ -673,8 +671,8 @@ test('a stop part way: every file moved and the folder\'s rename refused reads "
 });
 
 // ---------------------------------------------------------------- two splits
-test('two splits: two archives tile the log, the second naming the first\'s pin; the check names both; the first removed is found through the second; a split made late at the first point, then at the second', async () => {
-  const file = fresh();
+test('two splits: two archives tile the log, the second naming the first\'s pin; the check names both; the first removed is found through the second; a split made late at the first point, then at the second', async (t) => {
+  const file = fresh(t);
   const log = writeOn(auditLog(file), 3);
   const p1 = log.point(HOST, 'one', EVENT, '');
   writeOn(log, 2);
@@ -698,7 +696,7 @@ test('two splits: two archives tile the log, the second naming the first\'s pin;
   assert.deepEqual([older.mark, older.archive.to], ['intact', 3]);
   assert.ok(!/is not on this laptop/.test(older.words), older.words);
   // An export carries both, oldest first, and the verifier walks from entry 1 across them.
-  const x = await exported(log, { archiver: ar });
+  const x = await exported(t, log, { archiver: ar });
   const m = JSON.parse(fs.readFileSync(path.join(x.dir, 'manifest.json')));
   assert.deepEqual(m.archives.map((a) => [a.name, a.present]), [[r1.archive, true], [r2.archive, true]]);
   const v = await verify([x.dir, '--fingerprint', FP]);
@@ -708,7 +706,7 @@ test('two splits: two archives tile the log, the second naming the first\'s pin;
   const gone = await log.verify();
   assert.deepEqual([gone.mark, gone.findings.map((f) => f.id)], ['broken', ['a' + s1.seq]], 'found through the second\'s previous');
   // A split at the first point made after the second was written, then at the second: both named.
-  const f2 = fresh();
+  const f2 = fresh(t);
   const l2 = writeOn(auditLog(f2), 3);
   const q1 = l2.point(HOST, 'one', EVENT, '');
   writeOn(l2, 2);
@@ -722,8 +720,8 @@ test('two splits: two archives tile the log, the second naming the first\'s pin;
   assert.deepEqual([both.mark, both.from, both.archives.length], ['intact', q2.seq, 2]);
 });
 
-test('the archive alone, out of reach of the live log (the archive that named it accepted as gone): ◇ at best, and its signer held to this laptop\'s key', async () => {
-  const file = fresh();
+test('the archive alone, out of reach of the live log (the archive that named it accepted as gone): ◇ at best, and its signer held to this laptop\'s key', async (t) => {
+  const file = fresh(t);
   const log = writeOn(auditLog(file), 3);
   const p1 = log.point(HOST, 'one', EVENT, '');
   writeOn(log, 2);
@@ -752,8 +750,8 @@ test('the archive alone, out of reach of the live log (the archive that named it
 });
 
 // ---------------------------------------------------------------- the archive alone
-test('the archive alone: Check on the laptop reads ✓ with its MACs checked; the verifier exits 0, 3 on a changed byte or another key, 4 without a key; the page agrees', async () => {
-  const p = pointed();
+test('the archive alone: Check on the laptop reads ✓ with its MACs checked; the verifier exits 0, 3 on a changed byte or another key, 4 without a key; the page agrees', async (t) => {
+  const p = pointed(t);
   const r = await archiverOf(p.log).split(p.point.seq, HOST, '');
   const dir = path.join(archiveDir(p.file), r.archive);
   const own = await archiverOf(p.log).checkArchive(r.archive);
@@ -769,7 +767,7 @@ test('the archive alone: Check on the laptop reads ✓ with its MACs checked; th
   const none = await verify([dir]);
   assert.equal(none.code, 4, none.out);
   assert.match(none.out, /Anyone can make such an archive with a key of their own\. Give --fingerprint \(exit 4\)\.$/m);
-  const changed = copy(dir);
+  const changed = copy(t, dir);
   flip(path.join(changed, 'log', fs.readdirSync(path.join(changed, 'log'))[0]), 20);
   const three = await verify([changed, '--fingerprint', FP]);
   assert.equal(three.code, 3, three.out);
@@ -792,7 +790,7 @@ test('the archive alone: Check on the laptop reads ✓ with its MACs checked; th
   assert.equal(rules.pathProblem('log/audit-2026-10-20T09-12-44-120Z.jsonl', 'archive'), '');
   // An entry's words changed in place, its MAC kept, and the archive re-signed with this laptop's own key to match: whole
   // and signed to the verifier, which holds no key; the laptop's MAC check finds the entry.
-  const m = pointed();
+  const m = pointed(t);
   const mr = await archiverOf(m.log).split(m.point.seq, HOST, '');
   const mdir = path.join(archiveDir(m.file), mr.archive);
   resign(mdir, keyOf(), (d) => editArchived(d, 3, 'message 3', 'massage 3'));
@@ -807,13 +805,13 @@ test('the archive alone: Check on the laptop reads ✓ with its MACs checked; th
 });
 
 // ---------------------------------------------------------------- the export across a split
-test('export across a split: the bundle carries the archive byte for byte and in its SHA256SUMS; the manifest lists it; the verifier walks from entry 1 across it; compare with an export from before the split', async () => {
-  const p = pointed();
+test('export across a split: the bundle carries the archive byte for byte and in its SHA256SUMS; the manifest lists it; the verifier walks from entry 1 across it; compare with an export from before the split', async (t) => {
+  const p = pointed(t);
   const ar = archiverOf(p.log);
-  const earlier = await exported(p.log, { archiver: ar });
+  const earlier = await exported(t, p.log, { archiver: ar });
   const r = await ar.split(p.point.seq, HOST, '');
   const dir = path.join(archiveDir(p.file), r.archive);
-  const x = await exported(p.log, { archiver: ar });
+  const x = await exported(t, p.log, { archiver: ar });
   const inBundle = path.join(x.dir, 'archive', r.archive);
   for (const f of fs.readdirSync(dir, { recursive: true }).map(String).filter((f) => fs.statSync(path.join(dir, f)).isFile())) {
     assert.ok(fs.readFileSync(path.join(inBundle, f)).equals(fs.readFileSync(path.join(dir, f))), f + ', byte for byte');
@@ -838,22 +836,22 @@ test('export across a split: the bundle carries the archive byte for byte and in
   assert.equal(same.code, 0, same.out);
   assert.match(same.out, /^✓ the same: entries 1–\d+ of the earlier export \(made .+\) are in this one, byte for byte$/m);
   // A byte changed inside archive/ after the export: 3.
-  const bad = copy(x.dir);
+  const bad = copy(t, x.dir);
   flip(path.join(bad, 'archive', r.archive, 'archive.json'), 40);
   assert.equal((await verify([bad, '--fingerprint', FP])).code, 3);
   // The bundle's paths: archive/../x, an archive name off the pattern, and a link in an archive's log/: 3, nothing opened outside.
   for (const p2 of ['archive/../x', 'archive/audit-xyz-1-5/archive.json', 'archive/' + r.archive + '/notes.txt']) {
-    const d = copy(x.dir);
+    const d = copy(t, x.dir);
     fs.appendFileSync(path.join(d, 'SHA256SUMS'), '0'.repeat(64) + '  ' + p2 + '\n');
     const v = await verifier.check(d, { fingerprint: FP });
     assert.equal(v.code, 3, p2);
     assert.match(v.why, /^SHA256SUMS names /, p2 + ': ' + v.why);
   }
   if (process.platform !== 'win32') {
-    const d = copy(x.dir);
+    const d = copy(t, x.dir);
     const logDir = path.join(d, 'archive', r.archive, 'log');
     const f = fs.readdirSync(logDir)[0];
-    const outside = tmp('agm-outside-');
+    const outside = h.tmpDir(t, 'agm-outside-');
     fs.renameSync(path.join(logDir, f), path.join(outside, f));
     fs.symlinkSync(path.join(outside, f), path.join(logDir, f));
     const v = await verifier.check(d, { fingerprint: FP });
@@ -861,24 +859,24 @@ test('export across a split: the bundle carries the archive byte for byte and in
   }
 });
 
-test('export across a split: an archive signed by another key is named, not failed; one accepted as gone is listed with its pin, the bundle beginning after it (exit 1)', async () => {
+test('export across a split: an archive signed by another key is named, not failed; one accepted as gone is listed with its pin, the bundle beginning after it (exit 1)', async (t) => {
   // The split signed by another signing key (the machine key changed after it), the export by the fixture's.
-  const p = pointed();
+  const p = pointed(t);
   const r = await archiverOf(p.log, { machine: OTHER_KEY }).split(p.point.seq, HOST, '');
-  const x = await exported(p.log);
+  const x = await exported(t, p.log);
   const v = await verify([x.dir, '--fingerprint', FP]);
   assert.equal(v.code, 0, v.out);
   assert.match(v.out, /^△ the archive audit-[0-9a-f]{8}-1-5 \(entries 1–5\) is signed by key \S{4} \S{4} \S{4} \S{4} … \(its own claim\): the machine key changed after the split$/m);
   assert.ok(v.out.includes('△ the archive ' + r.archive + ' '), v.out);
   // Accepted as gone: listed not present, with its pin; the bundle begins at the point; the verifier says so, exit 1.
-  const q = pointed();
-  const before = await exported(q.log);
+  const q = pointed(t);
+  const before = await exported(t, q.log);
   const qr = await archiverOf(q.log).split(q.point.seq, HOST, '');
   const S = entries(q.file).find((e) => e.action === 'audit.split').seq;
   fs.rmSync(path.join(archiveDir(q.file), qr.archive), { recursive: true });
   const c = await q.log.verify();
   const acc = await q.log.accept({ digest: c.digest, ids: ['a' + S], confirm: ['a' + S] }, HOST, '');
-  const gone = await exported(q.log);
+  const gone = await exported(t, q.log);
   const m = JSON.parse(fs.readFileSync(path.join(gone.dir, 'manifest.json')));
   assert.deepEqual([m.entries.from, m.archives.map((a) => [a.name, a.present, a.split])], [q.point.seq, [[qr.archive, false, S]]]);
   assert.equal(fs.existsSync(path.join(gone.dir, 'archive')), false);
@@ -895,8 +893,8 @@ test('export across a split: an archive signed by another key is named, not fail
   assert.equal((await verify([before.dir, '--fingerprint', FP, '--earlier', path.join(archiveDir(p.file), r.archive)])).code, 3);
 });
 
-test('export across a split: a live log broken after its split\'s entry still names its archives; the bundle carries them, and the verifier answers 2 where the laptop said it broke', async () => {
-  const p = pointed({ after: 2 });
+test('export across a split: a live log broken after its split\'s entry still names its archives; the bundle carries them, and the verifier answers 2 where the laptop said it broke', async (t) => {
+  const p = pointed(t, { after: 2 });
   assert.equal((await archiverOf(p.log).split(p.point.seq, HOST, '')).ok, true);
   writeOn(p.log, 3, (i) => 'later ' + i);
   p.log.flush();
@@ -907,7 +905,7 @@ test('export across a split: a live log broken after its split\'s entry still na
   fs.writeFileSync(p.file, ls.join('\n') + '\n');
   const c = await p.log.verify();
   assert.deepEqual([c.mark, c.brokenAt, c.from, c.archives.map((a) => a.mark)], ['broken', 6, p.point.seq, ['intact']], 'the archive is named though the walk broke');
-  const x = await exported(p.log);
+  const x = await exported(t, p.log);
   const m = JSON.parse(fs.readFileSync(path.join(x.dir, 'manifest.json')));
   assert.deepEqual([m.check.mark, m.entries.from, m.archives.map((a) => a.present)], ['broken', 1, [true]]);
   const v = await verify([x.dir, '--fingerprint', FP]);
@@ -915,12 +913,12 @@ test('export across a split: a live log broken after its split\'s entry still na
   assert.match(v.out, /^✕ the entries break where the laptop's own check said they do: line 6 of log\/audit\.jsonl is not a whole entry$/m);
 });
 
-test('one at a time: an export asked while a split is made waits for it and carries the archive; the split\'s slot names who; an archive not there is said', async () => {
-  const p = pointed();
+test('one at a time: an export asked while a split is made waits for it and carries the archive; the split\'s slot names who; an archive not there is said', async (t) => {
+  const p = pointed(t);
   const ar = archiverOf(p.log);
   const splitting = ar.split(p.point.seq, ANA, '');
   assert.equal(ar.busy().by, 'ana');
-  const x = await exported(p.log, { archiver: ar });
+  const x = await exported(t, p.log, { archiver: ar });
   const r = await splitting;
   assert.equal(r.ok, true);
   assert.equal(ar.busy(), null);
@@ -934,8 +932,8 @@ test('one at a time: an export asked while a split is made waits for it and carr
 });
 
 // ---------------------------------------------------------------- rollback
-test('rollback: plain entries written on in the live log after a split (0.5.1 again) read △, ◇ once accepted; the archive is untouched and still named', async () => {
-  const p = pointed();
+test('rollback: plain entries written on in the live log after a split (0.5.1 again) read △, ◇ once accepted; the archive is untouched and still named', async (t) => {
+  const p = pointed(t);
   const r = await archiverOf(p.log).split(p.point.seq, HOST, '');
   const dir = path.join(archiveDir(p.file), r.archive);
   const before = fs.readdirSync(dir, { recursive: true }).map(String).sort().map((f) => [f, fs.statSync(path.join(dir, f)).isFile() ? sha(fs.readFileSync(path.join(dir, f))) : '']);
@@ -978,8 +976,8 @@ test('the rules: a chain begins after entry 1 only at an archive point naming a 
 });
 
 // ---------------------------------------------------------------- no secret
-test('no secret: no key, seed or MAC key of the "no secret" row appears in any file of an archive, in hex or base64', async () => {
-  const p = pointed();
+test('no secret: no key, seed or MAC key of the "no secret" row appears in any file of an archive, in hex or base64', async (t) => {
+  const p = pointed(t);
   const r = await archiverOf(p.log).split(p.point.seq, HOST, '');
   const dir = path.join(archiveDir(p.file), r.archive);
   const k = h.auditKeys()();
@@ -995,7 +993,7 @@ test('no secret: no key, seed or MAC key of the "no secret" row appears in any f
 // ---------------------------------------------------------------- end to end: the routes, the rights, the readers
 /** A server whose log (under the fixture key, in its key folder) holds `n` entries with archive points at `points`. */
 async function serverWithPoints(t, n, points) {
-  const dataDir = tmp('agm-e2e-');
+  const dataDir = h.tmpDir(t, 'agm-e2e-');
   const keyDir = dataDir + '-keys';
   fs.mkdirSync(keyDir, { recursive: true });
   fs.writeFileSync(path.join(keyDir, 'machine.key'), FIXTURE_KEY.toString('base64'));

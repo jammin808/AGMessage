@@ -39,6 +39,20 @@ with ports held on purpose, so every run is the same: a port held by another pro
 AGMessage, then a fresh one that serves; a port held on every try, refused after 5; a named port refused once with the
 holder's words; a held data folder refused at once, on one port.
 
+A test run leaves the temp folder as it found it. Left there, the tests' folders filled a development machine's disk
+(some 70,000 `agm-*` folders, about 30 GB), and below 1 GB free the server pauses uploads, so the uploads test failed
+with 507 whatever the code. A data folder `startServer()` makes is its server's: `stopServer()` removes it, with the
+`-keys` and `-uploads` beside it, once the server has exited, and `restartServer()` keeps it for the restart. Every
+other folder is made with `tmpDir(t, prefix)` and is its test's: removed when the test ends, but never while a server
+runs in it (each server is counted in every throwaway holding its folders or a file its env names; a test that spawns
+a process itself counts it with `occupy()`). A test that starts a server on a folder again, or reads one after its
+server has stopped, makes the folder with `tmpDir`, and `startServer()` refuses a folder already removed rather than
+serve it empty. Whatever a test that failed part way leaves, and a folder made again by a save still pending in a store
+in the test's own process, is removed when that file's process exits. The browser smoke removes its folders and the
+browser's profile once the browser (closed with `Browser.close`) and every server it started have gone.
+`test/helpers.test.js` holds it: a server's folder gone at its stop and kept across a restart, a test's kept while its
+server runs and gone once the test ends, a removed folder refused.
+
 ## 2. The baseline, counted
 
 Every count is a distinct finding (file, line, rule) from one run over `app/` and `tools/` (the vendored pdf.js,

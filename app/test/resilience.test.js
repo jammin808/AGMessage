@@ -5,7 +5,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const r = require('../lib/resilience');
@@ -13,7 +12,7 @@ const nodes = require('../lib/nodes');
 const { buildContext, showBrief } = require('../lib/context');
 
 const ROOT = path.join(__dirname, '..');
-const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
+const { tmpDir, occupy } = require('./helpers');
 const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 async function until(fn, ms = 8000) { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await wait(50); } return false; }
 
@@ -65,12 +64,13 @@ function supervise(dir, child, extra = {}, { ipc = false } = {}) {
   p.out = '';
   p.stdout.on('data', (d) => { p.out += d; }); p.stderr.on('data', (d) => { p.out += d; });
   p.done = new Promise((res) => p.once('exit', (code) => res(code)));
+  occupy(p, [dir]);   // its server stops before it does: the folder outlasts both
   return p;
 }
 const runs = (dir) => (fs.existsSync(path.join(dir, 'runs')) ? Number(fs.readFileSync(path.join(dir, 'runs'), 'utf8')) : 0);
 
-test('watchdog: a crash restarts the server', async () => {
-  const dir = tmp('agm-wd-');
+test('watchdog: a crash restarts the server', async (t) => {
+  const dir = tmpDir(t, 'agm-wd-');
   const p = supervise(dir, fakeChild(dir, `if (n === 1) process.exit(70); beat();`));
   try {
     assert.ok(await until(() => runs(dir) >= 2), 'restarted after the crash:\n' + p.out);
@@ -78,8 +78,8 @@ test('watchdog: a crash restarts the server', async () => {
   } finally { p.kill(); await p.done; }
 });
 
-test('watchdog: a hung server (no heartbeat) is killed and restarted', async () => {
-  const dir = tmp('agm-wd-');
+test('watchdog: a hung server (no heartbeat) is killed and restarted', async (t) => {
+  const dir = tmpDir(t, 'agm-wd-');
   const p = supervise(dir, fakeChild(dir, `beat(); if (n === 1) setTimeout(() => { for (;;) {} }, 300);`));
   try {
     assert.ok(await until(() => runs(dir) >= 2, 10000), 'restarted after the hang:\n' + p.out);
@@ -87,13 +87,13 @@ test('watchdog: a hung server (no heartbeat) is killed and restarted', async () 
   } finally { p.kill(); await p.done; }
 });
 
-test('watchdog: stays stopped on a clean exit; gives up on a crash loop and leaves a marker', async () => {
-  const d1 = tmp('agm-wd-');
+test('watchdog: stays stopped on a clean exit; gives up on a crash loop and leaves a marker', async (t) => {
+  const d1 = tmpDir(t, 'agm-wd-');
   const clean = supervise(d1, fakeChild(d1, `process.exit(0);`));
   assert.equal(await clean.done, 0);
   assert.equal(runs(d1), 1);
 
-  const d2 = tmp('agm-wd-');
+  const d2 = tmpDir(t, 'agm-wd-');
   const loop = supervise(d2, fakeChild(d2, `process.exit(70);`));
   assert.equal(await loop.done, 3, 'gives up with "can\'t run as configured" so the launcher stops too');
   assert.equal(runs(d2), 7);
@@ -101,8 +101,8 @@ test('watchdog: stays stopped on a clean exit; gives up on a crash loop and leav
   assert.match(marker.reason, /7 times/);
 });
 
-test('watchdog: a stop asked of it lets its server save before it goes, on every platform', async () => {
-  const dir = tmp('agm-wd-');
+test('watchdog: a stop asked of it lets its server save before it goes, on every platform', async (t) => {
+  const dir = tmpDir(t, 'agm-wd-');
   const p = supervise(dir, fakeChild(dir, `beat(); fs.writeFileSync(path.join(path.dirname(runs), 'pid'), String(process.pid));`), {}, { ipc: true });
   assert.ok(await until(() => fs.existsSync(path.join(dir, 'pid'))), 'started:\n' + p.out);
   p.send({ t: 'stop' });   // as Ctrl+C or the window closing reach it: the watchdog asks its server over IPC
@@ -111,8 +111,8 @@ test('watchdog: a stop asked of it lets its server save before it goes, on every
   assert.equal(fs.readFileSync(path.join(dir, 'saved'), 'utf8'), 'asked to stop');
 });
 
-test('watchdog: a signal to it leaves no server behind — asked to stop where signals reach it, ended with it on Windows', async () => {
-  const dir = tmp('agm-wd-');
+test('watchdog: a signal to it leaves no server behind — asked to stop where signals reach it, ended with it on Windows', async (t) => {
+  const dir = tmpDir(t, 'agm-wd-');
   const p = supervise(dir, fakeChild(dir, `beat(); fs.writeFileSync(path.join(path.dirname(runs), 'pid'), String(process.pid));`));
   assert.ok(await until(() => fs.existsSync(path.join(dir, 'pid'))), 'started:\n' + p.out);
   const pid = Number(fs.readFileSync(path.join(dir, 'pid'), 'utf8'));
@@ -129,9 +129,10 @@ test('watchdog: a signal to it leaves no server behind — asked to stop where s
   }
 });
 
-test('a server whose watchdog has gone saves what is waiting and leaves, so no orphan holds the folder', async () => {
-  const { startServer, api } = require('./helpers');
+test('a server whose watchdog has gone saves what is waiting and leaves, so no orphan holds the folder', async (t) => {
+  const { startServer, stopServer, api } = require('./helpers');
   const srv = await startServer();
+  t.after(() => stopServer(srv.child));   // gone by itself, or ended if it did not go: its folder with it
   const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
   assert.equal(setup.status, 200);
   const gone = new Promise((resolve) => { srv.child.once('exit', (code) => resolve(code)); });
@@ -143,8 +144,8 @@ test('a server whose watchdog has gone saves what is waiting and leaves, so no o
 });
 
 // ---------------------------------------------------------------- safe saves
-test('atomic writes keep a backup only of a whole file; the lane coalesces and flushes', async () => {
-  const dir = tmp('agm-save-');
+test('atomic writes keep a backup only of a whole file; the lane coalesces and flushes', async (t) => {
+  const dir = tmpDir(t, 'agm-save-');
   const f = path.join(dir, 'settings.json');
   r.writeFileAtomic(f, '{"a":1}', { keepBak: true });
   r.writeFileAtomic(f, '{"a":2}', { keepBak: true });
@@ -167,8 +168,8 @@ test('atomic writes keep a backup only of a whole file; the lane coalesces and f
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'lane.json'), 'utf8')), { i: 21 });
 });
 
-test('a lane whose write fails keeps the content, says so, retries on its own and lands it', async () => {
-  const dir = tmp('agm-lane-');
+test('a lane whose write fails keeps the content, says so, retries on its own and lands it', async (t) => {
+  const dir = tmpDir(t, 'agm-lane-');
   const f = path.join(dir, 'lane.json');
   fs.mkdirSync(f);   // a rename over a directory fails, as one over a file another program holds does on Windows
   const lane = new r.WriteLane(f, { delayMs: 20 });
@@ -208,8 +209,8 @@ function diskFillsPartway(fn) {
   try { return fn(); } finally { fs.writeSync = write; }
 }
 
-test('a save the disk takes only part of never replaces the whole file, and gives its space back', () => {
-  const dir = tmp('agm-full-');
+test('a save the disk takes only part of never replaces the whole file, and gives its space back', (t) => {
+  const dir = tmpDir(t, 'agm-full-');
   const f = path.join(dir, 'accounts.json');
   r.writeFileAtomic(f, '{"v":1}', { keepBak: true });
   r.writeFileAtomic(f, '{"v":2}', { keepBak: true });
@@ -243,9 +244,9 @@ test('a save the disk takes only part of never replaces the whole file, and give
   assert.equal(b.get('ABC234').messages.length, 40, 'every message survives a restart');
 });
 
-test('room snapshots: a torn snapshot falls back to its backup, the log replays on top', () => {
+test('room snapshots: a torn snapshot falls back to its backup, the log replays on top', (t) => {
   const { RoomStore } = require('../lib/store');
-  const dir = tmp('agm-room-');
+  const dir = tmpDir(t, 'agm-room-');
   const a = new RoomStore(dir);
   const room = a.create('ABC234', 'T');
   a.commit(room, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } });
@@ -261,8 +262,8 @@ test('room snapshots: a torn snapshot falls back to its backup, the log replays 
 });
 
 // ---------------------------------------------------------------- sealed keys
-test('keys are sealed at rest with a machine key kept outside the app', () => {
-  process.env.AGM_KEY_DIR = tmp('agm-key-');
+test('keys are sealed at rest with a machine key kept outside the app', (t) => {
+  process.env.AGM_KEY_DIR = tmpDir(t, 'agm-key-');
   const box = require('../lib/secretbox');
   box._reset();
   const sealed = box.seal('swk_abc');
@@ -270,7 +271,7 @@ test('keys are sealed at rest with a machine key kept outside the app', () => {
   assert.equal(box.open(sealed), 'swk_abc');
   assert.equal(box.open('swk_abc'), '', 'a clear value is not a sealed one');
   assert.equal(box.open(sealed.slice(0, -4) + 'AAAA'), '', 'tampered → nothing');
-  process.env.AGM_KEY_DIR = tmp('agm-key-');
+  process.env.AGM_KEY_DIR = tmpDir(t, 'agm-key-');
   box._reset();
   assert.equal(box.open(sealed), '', 'another machine (another key) can\'t open it');
 });
@@ -474,7 +475,7 @@ test('a second start on the same data folder changes nothing and goes away; ever
     const stop = setTimeout(() => c.kill('SIGKILL'), 8000);   // a second copy that ran is a failure, not a hang
     c.on('exit', (code) => { clearTimeout(stop); resolve({ code, out }); });
   });
-  const a = await h.startServer();
+  const a = await h.startServer({ AGM_DATA_DIR: tmpDir(t, 'agm-e2e-') });   // the test's: a second copy, then a restart, use it
   let guest = null;
   t.after(async () => { if (guest) guest.close(); if (a.child.exitCode === null && a.child.signalCode === null) await h.stopServer(a.child); });
   const login = await h.api(a.base, 'POST', '/api/admin/login', { token: h.TOKEN });
@@ -517,7 +518,7 @@ test('a second start on the same data folder changes nothing and goes away; ever
 
 test('a show day\'s peaks are on disk by the end of the 5 s window they rose in: a hang the watchdog ends loses no earlier window', async (t) => {
   const h = require('./helpers');
-  const a = await h.startServer();
+  const a = await h.startServer({ AGM_DATA_DIR: tmpDir(t, 'agm-e2e-') });   // the test's: the restart after the kill serves it again
   let b = null;
   t.after(async () => {
     if (a.child.exitCode === null && a.child.signalCode === null) a.child.kill('SIGKILL');

@@ -8,14 +8,17 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const deskresults = require('../lib/deskresults');
-const { startServer, stopServer, restartServer, api, connect, emit, until, wait, fakeStagewatch } = require('./helpers');
+const { tmpDir, startServer, stopServer, restartServer, api, connect, emit, until, wait, fakeStagewatch } = require('./helpers');
 
 const KEY = 'swk_desk_results_key_0001';   // secret-scan: fixture — the node key the fake Stagewatch is given
 
-/** A server with one hall, linked to the fake Stagewatch `sw` (the default link, or the hall's own), its node id read off it. */
+/**
+ * A server with one hall, linked to the fake Stagewatch `sw` (the default link, or the hall's own), its node id read off
+ * it. Its data folder is the test's: a test stops the server, reads the folder and starts it again there.
+ */
 async function deskSetup(t, { sw: swOptions = {}, env = {}, hallLink = false } = {}) {
   const sw = await fakeStagewatch({ name: 'Desk', ...swOptions });
-  const ctx = { sw, srv: await startServer(env), sockets: [] };
+  const ctx = { sw, srv: await startServer({ AGM_DATA_DIR: tmpDir(t, 'agm-e2e-'), ...env }), sockets: [] };
   t.after(async () => { ctx.sockets.forEach((s) => s.close()); await stopServer(ctx.srv.child); await sw.close(); });
   ctx.admin = (await api(ctx.srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   ctx.hall = (await api(ctx.srv.base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: ctx.admin })).body.code;

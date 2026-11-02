@@ -2,12 +2,12 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const guard = require('../lib/guard');
 const { RoomStore } = require('../lib/store');
 const nodes = require('../lib/nodes');
 const ai = require('../lib/ai');
+const { auditLog, tmpDir } = require('./helpers');
 
 test('identities: signed by the server, tamper-evident', () => {
   const secret = Buffer.alloc(32, 7);
@@ -64,8 +64,8 @@ test('host-only check: from loopback, to a loopback name, and nothing that came 
   assert.equal(guard.clientIp(req('127.0.0.1', { 'cf-connecting-ip': '1.2.3.4' })), 'cf:1.2.3.4');
 });
 
-test('store: log, resume window, torn writes, compaction', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+test('store: log, resume window, torn writes, compaction', (t) => {
+  const dir = tmpDir(t, 'agm-store-');
   const a = new RoomStore(dir);
   const r = a.create('ABC234', 'Test');
   for (let i = 0; i < 5; i++) a.commit(r, { o: 'add', m: { id: 'm' + i, type: 'text', text: 'hello ' + i, at: i } });
@@ -87,8 +87,8 @@ test('store: log, resume window, torn writes, compaction', () => {
   assert.equal(b.opsSince(r2, 3), null, 'after a restart the gap needs a full history');
 });
 
-test('store: a load that may not write leaves the files as they were', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+test('store: a load that may not write leaves the files as they were', (t) => {
+  const dir = tmpDir(t, 'agm-store-');
   const a = new RoomStore(dir);
   const r = a.create('ABC234', 'Test');
   a.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } });
@@ -100,8 +100,8 @@ test('store: a load that may not write leaves the files as they were', () => {
   assert.deepEqual(files(), before, 'nothing written');
 });
 
-test('store: a failed append is said, and the room is snapshotted as soon as the disk takes writes again', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+test('store: a failed append is said, and the room is snapshotted as soon as the disk takes writes again', (t) => {
+  const dir = tmpDir(t, 'agm-store-');
   const a = new RoomStore(dir);
   const r = a.create('ABC234', 'Test');
   const log = path.join(dir, 'ABC234.log');
@@ -119,8 +119,8 @@ test('store: a failed append is said, and the room is snapshotted as soon as the
   assert.deepEqual(b.get('ABC234').messages.map((m) => m.id), ['m1', 'm2'], 'the op the log missed is on disk');
 });
 
-test('store: a log line the disk cut short, or a power cut tore, never swallows the next op', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+test('store: a log line the disk cut short, or a power cut tore, never swallows the next op', (t) => {
+  const dir = tmpDir(t, 'agm-store-');
   const a = new RoomStore(dir);
   const r = a.create('ABC234', 'Test');
   a.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } });
@@ -148,7 +148,6 @@ test('store: a log line the disk cut short, or a power cut tore, never swallows 
 
 // ---------------------------------------------------------------- health's readings and a show day's peaks
 const readings = require('../lib/peaks');
-const { auditLog } = require('./helpers');
 
 test('health: the loop\'s delay is its p99 less the sampler\'s own resolution, never below 0', () => {
   const asked = [];
@@ -268,8 +267,8 @@ test('peaks: saved with each day\'s buckets, so a restart counts on; what is not
   assert.deepEqual(new readings.Peaks().load(many).view().map((d) => d.hallMessages), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], 'the newest 14');
 });
 
-test('health\'s timings are taken in place: a snapshot and an audit append that reach the disk, never one that failed', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+test('health\'s timings are taken in place: a snapshot and an audit append that reach the disk, never one that failed', (t) => {
+  const dir = tmpDir(t, 'agm-store-');
   const store = new RoomStore(dir);
   const took = [];
   store.onCompact = (ms, messages) => took.push([typeof ms === 'number' && ms >= 0, messages]);
@@ -290,7 +289,7 @@ test('health\'s timings are taken in place: a snapshot and an audit append that 
   assert.ok(store.lastError);
   assert.equal(took.length, 2, 'a snapshot that failed is not timed');
 
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-audit-')), 'audit.jsonl');
+  const file = path.join(tmpDir(t, 'agm-audit-'), 'audit.jsonl');
   const log = auditLog(file);
   const puts = [];
   log.onPut = (ms) => puts.push(typeof ms === 'number' && ms >= 0);
@@ -326,12 +325,12 @@ test('peaks: the most joins one hall took in any 5 s, read whole when a storm cr
   assert.equal(slow.slots, 5);
 });
 
-test('health\'s timing hooks never reach what they time: a throw there leaves the snapshot and the audit entry on disk', () => {
+test('health\'s timing hooks never reach what they time: a throw there leaves the snapshot and the audit entry on disk', (t) => {
   const said = [];
   const error = console.error;
   console.error = (...a) => { said.push(a.join(' ')); };
   try {
-    const store = new RoomStore(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-')));
+    const store = new RoomStore(tmpDir(t, 'agm-store-'));
     store.onCompact = () => { throw new Error('bookkeeping'); };
     const r = store.create('ABC234', 'Test');
     store.commit(r, { o: 'add', m: { id: 'm1', type: 'text', text: 'kept', at: 1 } });
@@ -339,7 +338,7 @@ test('health\'s timing hooks never reach what they time: a throw there leaves th
     assert.equal(store.lastError, null, 'the snapshot was written');
     assert.equal(r.logCount, 0, 'and the log cut after it');
 
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-audit-')), 'audit.jsonl');
+    const file = path.join(tmpDir(t, 'agm-audit-'), 'audit.jsonl');
     const log = auditLog(file);
     log.onPut = () => { throw new Error('bookkeeping'); };
     const e = log.write({ t: 'system' }, 'boot', '', 'first');

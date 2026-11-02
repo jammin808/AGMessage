@@ -9,7 +9,6 @@ const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
-const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const { PassThrough } = require('stream');
@@ -27,7 +26,6 @@ const { auditLog, keyedChainOf, chainOf, FIXTURE_KEY, OTHER_KEY, readZip, unzipT
 const VERIFY = path.join(ROOT, 'verify', 'verify-audit.js');
 const VERIFY_DIR = path.join(ROOT, 'verify');
 const SIGN = 'agmessage audit sign v1';
-const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 const keyOf = (machine = FIXTURE_KEY) => secretbox.signingKeyFrom(secretbox.deriveFrom(machine, SIGN));
 const FP = keyOf().fingerprint;
@@ -35,12 +33,12 @@ const ANA = Object.freeze({ t: 'account', id: 'a9', name: 'ana' });
 const SAM = Object.freeze({ t: 'account', id: 'a1', name: 'sam' });
 const lines = (file) => fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
 const entries = (file) => lines(file).map((l) => JSON.parse(l));
-const fresh = () => path.join(tmp('agm-exp-'), 'audit.jsonl');
+const fresh = (t) => path.join(h.tmpDir(t, 'agm-exp-'), 'audit.jsonl');
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 const NOT_WINDOWS = process.platform === 'win32' ? 'the Windows job checks a bundle with Expand-Archive and the release\'s verifier (ci.yml, package)' : false;
 
 /** A keyed log written by this machine (the fixture key): `n` entries, flushed. */
-function written(n, file = fresh(), words = (i) => 'message ' + i) {
+function written(t, n, file = fresh(t), words = (i) => 'message ' + i) {
   const log = auditLog(file);
   for (let i = 1; i <= n; i++) log.write(SAM, 'display.take', 'D1', words(i), '10.0.0.9');
   log.flush();
@@ -73,13 +71,13 @@ async function fetchExport(base) {
   return { status: r.status, headers: r.headers, body, json: (r.headers.get('content-type') || '').includes('json') ? JSON.parse(body.toString()) : null };
 }
 /** An export of `log`, unpacked: {dir (the bundle's folder), zip, headers}. */
-async function exported(log, o) {
+async function exported(t, log, o) {
   const s = await exportServer(log, o);
   try {
     const r = await fetchExport(s.base);
     await s.settled();
     assert.equal(r.status, 200, r.json ? r.json.error : 'a zip');
-    return { dir: unzipTo(r.body, tmp('agm-bundle-')), zip: r.body, headers: r.headers };
+    return { dir: unzipTo(r.body, h.tmpDir(t, 'agm-bundle-')), zip: r.body, headers: r.headers };
   } finally { await s.close(); }
 }
 /** The verifier run as an auditor runs it, a process of its own: {code, out}. */
@@ -93,7 +91,7 @@ function verify(args, script = VERIFY) {
   });
 }
 /** A copy of a bundle's folder, to change. */
-const copy = (dir) => { const to = path.join(tmp('agm-copy-'), path.basename(dir)); fs.cpSync(dir, to, { recursive: true }); return to; };
+const copy = (t, dir) => { const to = path.join(h.tmpDir(t, 'agm-copy-'), path.basename(dir)); fs.cpSync(dir, to, { recursive: true }); return to; };
 /** One byte of a file changed in place. */
 const flip = (file, at = 10) => { const b = fs.readFileSync(file); b[at] ^= 1; fs.writeFileSync(file, b); };
 /**
@@ -175,9 +173,9 @@ test('rights: audit.export is admin-only, held by the admin role and not the man
 });
 
 // ---------------------------------------------------------------- the bundle
-test('the bundle: every log line byte for byte, SHA256SUMS over every member, signed by the fixture key, the export\'s own entry last, the laptop\'s check in the manifest, then `audit.export.sent` with the zip\'s SHA-256', async () => {
-  const file = fresh();
-  const log = written(6, file);
+test('the bundle: every log line byte for byte, SHA256SUMS over every member, signed by the fixture key, the export\'s own entry last, the laptop\'s check in the manifest, then `audit.export.sent` with the zip\'s SHA-256', async (t) => {
+  const file = fresh(t);
+  const log = written(t, 6, file);
   const before = await log.verify();
   const kept = [...fs.readdirSync(path.dirname(file)).sort(), '|', ...fs.readdirSync(h.recordsOf(file)).sort()];
   const s = await exportServer(log);
@@ -261,10 +259,10 @@ test('determinism: a fixed seed signs a fixed SHA256SUMS to fixed bytes; verify.
   assert.throws(() => verifier.assemblePage({ html: '__CSP__', css: '', rules: '', js: '', version: 'v' }), /must hold each/);
 });
 
-test('the formats: unzip -tq, and README.txt\'s three commands word for word (OpenSSL and sha256sum)', { skip: NOT_WINDOWS }, async () => {
-  const log = written(3);
-  const { dir, zip } = await exported(log);
-  const zipFile = path.join(tmp('agm-zip-'), 'export.zip');
+test('the formats: unzip -tq, and README.txt\'s three commands word for word (OpenSSL and sha256sum)', { skip: NOT_WINDOWS }, async (ctx) => {
+  const log = written(ctx, 3);
+  const { dir, zip } = await exported(ctx, log);
+  const zipFile = path.join(h.tmpDir(ctx, 'agm-zip-'), 'export.zip');
   fs.writeFileSync(zipFile, zip);
   const run = (cmd, args, cwd) => new Promise((resolve) => {
     const c = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -289,8 +287,8 @@ test('the formats: unzip -tq, and README.txt\'s three commands word for word (Op
 });
 
 // ---------------------------------------------------------------- the verifier
-test('the verifier: exit 0 on a fresh keyed log, 1 on a 0.5.1 seed not accepted, 2 when the laptop said ✕, 4 with no key to compare with; --list prints the entries, escaped', async () => {
-  const fine = await exported(written(4, fresh(), (i) => (i === 2 ? 'Lectern \u001b[31mRED\u001b[0m' : 'message ' + i)));
+test('the verifier: exit 0 on a fresh keyed log, 1 on a 0.5.1 seed not accepted, 2 when the laptop said ✕, 4 with no key to compare with; --list prints the entries, escaped', async (t) => {
+  const fine = await exported(t, written(t, 4, fresh(t), (i) => (i === 2 ? 'Lectern \u001b[31mRED\u001b[0m' : 'message ' + i)));
   const ok = await verify([fine.dir, '--fingerprint', FP, '--list']);
   assert.equal(ok.code, 0, ok.out);
   assert.match(ok.out, /^✓ signed by key a0d3 22dc 9f43 d14c .*, the key you expected$/m);
@@ -308,9 +306,9 @@ test('the verifier: exit 0 on a fresh keyed log, 1 on a 0.5.1 seed not accepted,
   assert.match(none.out, /not compared with a record of the laptop's key: not shown to be the laptop's\. Anyone can make such a bundle with a key of their own\. Give --fingerprint \(exit 4\)\.$/m);
 
   // A 0.5.1 log at its first keyed start, never accepted: △, exit 1, its span named as not accepted.
-  const seedFile = fresh();
+  const seedFile = fresh(t);
   fs.writeFileSync(seedFile, chainOf(5));
-  const seed = await exported(auditLog(seedFile));
+  const seed = await exported(t, auditLog(seedFile));
   const one = await verify([seed.dir, '--fingerprint', FP]);
   assert.equal(one.code, 1, one.out);
   assert.match(one.out, /^△ entries 1–5 with plain hashes: not accepted on the laptop$/m);
@@ -319,36 +317,36 @@ test('the verifier: exit 0 on a fresh keyed log, 1 on a 0.5.1 seed not accepted,
   // Accepted, then exported again: ◇, still exit 1, and the span names its accept.
   const acceptedLog = auditLog(seedFile);
   await h.acceptAll(acceptedLog);
-  const accepted = await exported(acceptedLog);
+  const accepted = await exported(t, acceptedLog);
   const linked = await verify([accepted.dir, '--fingerprint', FP]);
   assert.equal(linked.code, 1, linked.out);
   assert.match(linked.out, /^◇ entries 1–5 with plain hashes: accepted on the AGMessage laptop by entry \d+ /m);
   assert.match(linked.out, /^ {2}◇ Linked — /m);
 
   // An entry changed before the export: the laptop's check said ✕, the bundle agrees with itself, exit 2.
-  const editedFile = fresh();
-  const edited = written(5, editedFile);
+  const editedFile = fresh(t);
+  const edited = written(t, 5, editedFile);
   const ls = lines(editedFile);
   ls[2] = ls[2].replace('message 3', 'message X');
   fs.writeFileSync(editedFile, ls.join('\n') + '\n');
-  const broken = await exported(edited);
+  const broken = await exported(t, edited);
   assert.match(broken.headers.get('x-agm-export'), /; mark=broken; /);
   const two = await verify([broken.dir, '--fingerprint', FP]);
   assert.equal(two.code, 2, two.out);
   assert.match(two.out, /^ {2}✕ Broken at line 3 of audit\.jsonl: entry 3 was changed after it was written$/m);
   // A plain entry changed before the export: the verifier finds it too, where the laptop did, and still says 2.
-  const plainFile = fresh();
+  const plainFile = fresh(t);
   fs.writeFileSync(plainFile, chainOf(4).replace('Lectern screen 2', 'Lectern screen 9'));
-  const plainBroken = await exported(auditLog(plainFile));
+  const plainBroken = await exported(t, auditLog(plainFile));
   const twoToo = await verify([plainBroken.dir, '--fingerprint', FP]);
   assert.equal(twoToo.code, 2, twoToo.out);
   assert.match(twoToo.out, /^✕ the entries break where the laptop's own check said they do: entry 2 \(line 2 of log\/audit\.jsonl\) was changed after it was written$/m);
 });
 
-test('the verifier: exit 3 for any byte changed after the export, a file gone or added, another key\'s signature, or a bundle re-signed whole by another key; 4 for that bundle with no key given', async () => {
-  const { dir } = await exported(written(3));
+test('the verifier: exit 3 for any byte changed after the export, a file gone or added, another key\'s signature, or a bundle re-signed whole by another key; 4 for that bundle with no key given', async (t) => {
+  const { dir } = await exported(t, written(t, 3));
   const three = async (change, want) => {
-    const d = copy(dir);
+    const d = copy(t, dir);
     change(d);
     const r = await verify([d, '--fingerprint', FP]);
     assert.equal(r.code, 3, r.out);
@@ -369,7 +367,7 @@ test('the verifier: exit 3 for any byte changed after the export, a file gone or
     fs.writeFileSync(path.join(d, 'SHA256SUMS.sig'), crypto.sign(null, fs.readFileSync(path.join(d, 'SHA256SUMS')), other.privateKey));
   }, /^✕ manifest\.json names key a0d3 22dc 9f43 d14c …, and signing-key\.pem is key /m);
   // Re-signed whole by another key: it agrees with itself (4 without a key), and is refused against the laptop's (3).
-  const whole = copy(dir);
+  const whole = copy(t, dir);
   const theirs = resign(whole, other);
   const four = await verify([whole]);
   assert.equal(four.code, 4, four.out);
@@ -378,7 +376,7 @@ test('the verifier: exit 3 for any byte changed after the export, a file gone or
   assert.equal(refused.code, 3, refused.out);
   assert.match(refused.out, /^✕ signed by key \S{4} \S{4} \S{4} \S{4} …, not the key you expected \(a0d3 22dc 9f43 d14c …\)$/m);
   // A line over 64 KB, in a bundle otherwise whole and signed: it fails there.
-  const long = copy(dir);
+  const long = copy(t, dir);
   const logFile = path.join(long, 'log', 'audit.jsonl');
   const ls = lines(logFile);
   const e = JSON.parse(ls[0]);
@@ -394,10 +392,10 @@ test('the verifier: exit 3 for any byte changed after the export, a file gone or
   assert.equal((await verify([])).code, 3);
 });
 
-test('the verifier\'s paths: a SHA256SUMS naming ../x, /etc/passwd, C:\\x or \\\\host\\share\\f ends the check before anything else is opened; a folder linked out of the bundle is refused', async () => {
-  const { dir } = await exported(written(2));
+test('the verifier\'s paths: a SHA256SUMS naming ../x, /etc/passwd, C:\\x or \\\\host\\share\\f ends the check before anything else is opened; a folder linked out of the bundle is refused', async (t) => {
+  const { dir } = await exported(t, written(t, 2));
   for (const bad of ['../x', '/etc/passwd', 'C:\\x', '\\\\host\\share\\f', 'log/../../x', 'verify/evil.js']) {
-    const d = copy(dir);
+    const d = copy(t, dir);
     fs.appendFileSync(path.join(d, 'SHA256SUMS'), '0'.repeat(64) + '  ' + bad + '\n');
     const seen = [];
     const record = (name) => async (p, ...rest) => { seen.push(path.resolve(String(p))); return fs.promises[name](p, ...rest); };
@@ -410,8 +408,8 @@ test('the verifier\'s paths: a SHA256SUMS naming ../x, /etc/passwd, C:\\x or \\\
     assert.equal((await verify([d, '--fingerprint', FP])).code, 3, bad);
   }
   // The log's folder a link (a junction on Windows) to a copy outside: a link is no part of an export, and is not followed.
-  const d = copy(dir);
-  const outside = tmp('agm-outside-');
+  const d = copy(t, dir);
+  const outside = h.tmpDir(t, 'agm-outside-');
   fs.cpSync(path.join(d, 'log'), path.join(outside, 'log'), { recursive: true });
   fs.rmSync(path.join(d, 'log'), { recursive: true });
   fs.symlinkSync(path.join(outside, 'log'), path.join(d, 'log'), 'junction');
@@ -420,7 +418,7 @@ test('the verifier\'s paths: a SHA256SUMS naming ../x, /etc/passwd, C:\\x or \\\
   assert.equal((await verify([d, '--fingerprint', FP])).code, 3);
   // A log file that is a link (a file link needs an administrator on Windows, so there the folder's link above stands for it).
   if (process.platform !== 'win32') {
-    const f = copy(dir);
+    const f = copy(t, dir);
     fs.renameSync(path.join(f, 'log', 'audit.jsonl'), path.join(outside, 'moved.jsonl'));
     fs.symlinkSync(path.join(outside, 'moved.jsonl'), path.join(f, 'log', 'audit.jsonl'));
     const fileLink = await verifier.check(f, { fingerprint: FP });
@@ -433,12 +431,12 @@ test('the verifier\'s paths: a SHA256SUMS naming ../x, /etc/passwd, C:\\x or \\\
     ['SHA256SUMS does not end with a line end', 'line 1 of SHA256SUMS is not "<sha256>  <path>"', 'SHA256SUMS lists SHA256SUMS', 'SHA256SUMS lists README.txt twice']);
 });
 
-test('the verifier says where it came from: run from the bundle, it says so; run from a release\'s copy, a bundled verify file that differs is named', async () => {
-  const { dir } = await exported(written(2));
+test('the verifier says where it came from: run from the bundle, it says so; run from a release\'s copy, a bundled verify file that differs is named', async (t) => {
+  const { dir } = await exported(t, written(t, 2));
   const fromBundle = await verify([dir, '--fingerprint', FP], path.join(dir, 'verify', 'verify-audit.js'));
   assert.equal(fromBundle.code, 0, fromBundle.out);
   assert.match(fromBundle.out, /^△ this verifier came from the bundle it is checking: check it again with the release's verifier/m);
-  const release = tmp('agm-release-');
+  const release = h.tmpDir(t, 'agm-release-');
   fs.copyFileSync(VERIFY, path.join(release, 'verify-audit.js'));
   fs.writeFileSync(path.join(release, 'auditrules.js'), fs.readFileSync(path.join(VERIFY_DIR, 'auditrules.js'), 'utf8') + '// another release\n');
   fs.writeFileSync(path.join(release, 'verify.html'), await verifier.pageFrom(VERIFY_DIR, 'test'));
@@ -450,14 +448,14 @@ test('the verifier says where it came from: run from the bundle, it says so; run
   assert.ok(!/this verifier came from|is not this verifier's/.test(same.out), same.out);
 });
 
-test('compare: two exports of one log are the same for the earlier\'s entries; one rewritten and re-MACed by a key holder is named; another key is named; --earlier stands in for --fingerprint and says so', async () => {
-  const file = fresh();
+test('compare: two exports of one log are the same for the earlier\'s entries; one rewritten and re-MACed by a key holder is named; another key is named; --earlier stands in for --fingerprint and says so', async (t) => {
+  const file = fresh(t);
   keyedChainOf(4, { file });
   const log = auditLog(file);
-  const first = await exported(log);
+  const first = await exported(t, log);
   log.write(SAM, 'login', 'sam', 'signed in', '10.0.0.9');
   log.flush();
-  const second = await exported(log);
+  const second = await exported(t, log);
   const same = await verify([second.dir, '--fingerprint', FP, '--earlier', first.dir]);
   assert.equal(same.code, 0, same.out);
   assert.match(same.out, /^✓ the same: entries 1–5 of the earlier export \(made .+\) are in this one, byte for byte$/m);
@@ -465,24 +463,24 @@ test('compare: two exports of one log are the same for the earlier\'s entries; o
   assert.equal(stand.code, 0, stand.out);
   assert.ok(stand.out.includes('The key you expect is taken from the earlier export ' + first.dir + ' (' + FP.match(/.{4}/g).join(' ') + '): it must be one you kept off the laptop.'), stand.out);
   // A key holder writes the log again (entry 3's words, every entry after it re-MACed, the records too) and exports it.
-  const again = fresh();
+  const again = fresh(t);
   keyedChainOf(4, { file: again, words: (i) => (i === 3 ? 'written again' : h.SEED_WORDS(i)) });
-  const rewritten = await exported(auditLog(again));
+  const rewritten = await exported(t, auditLog(again));
   assert.equal((await verify([rewritten.dir, '--fingerprint', FP])).code, 0, 'on its own it checks: the key holder signs what they wrote');
   const named = await verify([rewritten.dir, '--fingerprint', FP, '--earlier', first.dir]);
   assert.equal(named.code, 3, named.out);
   assert.match(named.out, /^✕ entry 3 is not the same in the two exports: the log was written again between \d+ \w{3} and \d+ \w{3}$/m);
   // Another laptop's key: named, and the earlier standing in for the key refuses the later.
-  const otherFile = fresh();
+  const otherFile = fresh(t);
   const otherLog = auditLog(otherFile, { key: OTHER_KEY });
   otherLog.write(SAM, 'login', 'sam', 'signed in', '10.0.0.9');
-  const otherExport = await exported(otherLog, { machine: OTHER_KEY });
+  const otherExport = await exported(t, otherLog, { machine: OTHER_KEY });
   const otherKey = await verify([otherExport.dir, '--earlier', first.dir]);
   assert.equal(otherKey.code, 3, otherKey.out);
   assert.match(otherKey.out, /^△ signed by another key than the earlier export: the laptop's machine key changed between them, or they come from two laptops$/m);
   assert.match(otherKey.out, /not the key you expected/);
   // An earlier export that does not check is said, and nothing is compared.
-  const bad = copy(first.dir);
+  const bad = copy(t, first.dir);
   flip(path.join(bad, 'manifest.json'), 20);
   const refused = await verify([second.dir, '--fingerprint', FP, '--earlier', bad]);
   assert.equal(refused.code, 3);
@@ -519,8 +517,8 @@ async function onPage(dir, { fp = '', earlier = null } = {}) {
 }
 
 /** A log whose 0.5.1 file, set aside before this run, has entry 2 changed: the laptop's own check says ✕ there. */
-function brokenInRotated() {
-  const file = fresh();
+function brokenInRotated(t) {
+  const file = fresh(t);
   fs.writeFileSync(path.join(path.dirname(file), 'audit-2026-01-01T00-00-00-000Z.jsonl'), chainOf(4).replace('Lectern screen 2', 'Lectern screen 9'));
   const log = auditLog(file);
   log.write(SAM, 'login', 'sam', 'signed in', '10.0.0.9');
@@ -528,9 +526,9 @@ function brokenInRotated() {
   return log;
 }
 
-test('the verifier: a laptop that said ✕ is code 2 only while every file is what was signed and its last entry the export\'s own; a later file changed or removed after the export is 3; an earlier export whose entries break holds none to compare (Node, and the page)', async () => {
-  const log = brokenInRotated();
-  const { dir } = await exported(log);
+test('the verifier: a laptop that said ✕ is code 2 only while every file is what was signed and its last entry the export\'s own; a later file changed or removed after the export is 3; an earlier export whose entries break holds none to compare (Node, and the page)', async (t) => {
+  const log = brokenInRotated(t);
+  const { dir } = await exported(t, log);
   const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json')));
   assert.deepEqual([m.check.mark, m.check.file, m.check.brokenAt, m.files.map((f) => f.path)], ['broken', 'audit-2026-01-01T00-00-00-000Z.jsonl', 2, ['log/audit-2026-01-01T00-00-00-000Z.jsonl', 'log/audit.jsonl']]);
   const two = await verify([dir, '--fingerprint', FP, '--list']);
@@ -549,9 +547,9 @@ test('the verifier: a laptop that said ✕ is code 2 only while every file is wh
 
   // After the export: the live file, which the laptop's verdict never named, changed or removed; or the export's own
   // entry taken off its end with every digest made again. None is what the laptop exported: 3, in Node and on the page.
-  const replaced = copy(dir);
+  const replaced = copy(t, dir);
   fs.writeFileSync(path.join(replaced, 'log', 'audit.jsonl'), 'anything at all\n');
-  const removed = copy(dir);
+  const removed = copy(t, dir);
   fs.rmSync(path.join(removed, 'log', 'audit.jsonl'));
   for (const [d, want] of [[replaced, /^✕ log\/audit\.jsonl is not what was signed: its SHA-256 differs from SHA256SUMS$/m], [removed, /^✕ log\/audit\.jsonl is not in the folder \(ENOENT\)$/m]]) {
     const r = await verify([d, '--fingerprint', FP]);
@@ -564,7 +562,7 @@ test('the verifier: a laptop that said ✕ is code 2 only while every file is wh
     assert.match(p.text, /^✕ Nothing in the bundle is vouched for: log\/audit\.jsonl is (not what was signed|not in the folder)/);
   }
   const other = crypto.generateKeyPairSync('ed25519');
-  const cut = copy(dir);
+  const cut = copy(t, dir);
   const live = path.join(cut, 'log', 'audit.jsonl');
   fs.writeFileSync(live, lines(live).slice(0, -1).join('\n') + '\n');
   const cutFp = resign(cut, other);
@@ -576,7 +574,7 @@ test('the verifier: a laptop that said ✕ is code 2 only while every file is wh
   // An earlier export whose entries break holds none to compare with: said, never a crash.
   log.write(SAM, 'login', 'sam', 'signed in again', '10.0.0.9');
   log.flush();
-  const later = await exported(log);
+  const later = await exported(t, log);
   const against = await verify([later.dir, '--fingerprint', FP, '--earlier', dir]);
   assert.equal(against.code, 3, against.out);
   assert.match(against.out, /^✕ The earlier export does not check: its entries break where its laptop's own check said they do \(entry 2 \(line 2 of log\/audit-2026-01-01T00-00-00-000Z\.jsonl\) was changed after it was written\), so they cannot be compared$/m);
@@ -585,7 +583,7 @@ test('the verifier: a laptop that said ✕ is code 2 only while every file is wh
   assert.equal(pageAgainst.code, 3);
   assert.match(pageAgainst.text, /^✕ Nothing in the bundle is vouched for: the earlier export does not check: its entries break where its laptop's own check said they do \(entry 2 /);
   // The page agrees with the Node verifier on a whole bundle: ✓ with the key, "not compared" without it, entries drawn.
-  const fine = await exported(written(3));
+  const fine = await exported(t, written(t, 3));
   const ok = await onPage(fine.dir, { fp: FP });
   assert.deepEqual([ok.code, ok.text, ok.entries], [0, '✓ Signed by the key you expected and whole; the laptop said ✓.', 4]);
   assert.equal((await onPage(fine.dir)).code, 4);
@@ -595,8 +593,8 @@ test('the verifier: a laptop that said ✕ is code 2 only while every file is wh
 /** Lines no deflate makes smaller, so a stream waits on a client that does not read. */
 const noise = () => crypto.randomBytes(140).toString('hex');
 /** The most entries of `noise` a keyed chain may hold and stay under `bytes` (each line's length is known from its seq's digits). */
-function entriesUnder(bytes) {
-  const probe = fresh();
+function entriesUnder(t, bytes) {
+  const probe = fresh(t);
   keyedChainOf(1, { file: probe, words: noise });
   const base = fs.statSync(probe).size;   // a line whose seq has one digit
   let total = 0;
@@ -626,8 +624,8 @@ function slowClient(base) {
   });
 }
 
-test('one at a time: a second export while one streams is refused with who and since when; a browser that goes leaves `audit.export.fail`, a free slot and no handle open', async () => {
-  const file = fresh();
+test('one at a time: a second export while one streams is refused with who and since when; a browser that goes leaves `audit.export.fail`, a free slot and no handle open', async (t) => {
+  const file = fresh(t);
   keyedChainOf(30_000, { file, words: noise });
   const log = auditLog(file);
   const s = await exportServer(log);
@@ -653,13 +651,13 @@ test('one at a time: a second export while one streams is refused with who and s
   } finally { await s.close(); }
 });
 
-test('rotation: an export whose own entry rotates the file holds that entry; writes that rotate the file while it streams leave a whole bundle whose digests hold', async () => {
+test('rotation: an export whose own entry rotates the file holds that entry; writes that rotate the file while it streams leave a whole bundle whose digests hold', async (t) => {
   // Over 20 MB: the export's own entry is the first line of a new audit.jsonl.
-  const over = fresh();
+  const over = fresh(t);
   keyedChainOf(34_500, { file: over, words: noise });
   assert.ok(fs.statSync(over).size > 20 * 1024 * 1024);
   const overLog = auditLog(over);
-  const rotated = await exported(overLog);
+  const rotated = await exported(t, overLog);
   const m = JSON.parse(fs.readFileSync(path.join(rotated.dir, 'manifest.json')));
   assert.equal(m.files.length, 2);
   assert.match(m.files[0].path, /^log\/audit-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.jsonl$/);
@@ -668,8 +666,8 @@ test('rotation: an export whose own entry rotates the file holds that entry; wri
   assert.equal((await verify([rotated.dir, '--fingerprint', FP])).code, 0);
 
   // Just under 20 MB: entries written while the export streams rotate the file it has open; the bundle is what was checked.
-  const under = fresh();
-  keyedChainOf(entriesUnder(20 * 1024 * 1024 - 3000), { file: under, words: noise });
+  const under = fresh(t);
+  keyedChainOf(entriesUnder(t, 20 * 1024 * 1024 - 3000), { file: under, words: noise });
   assert.ok(fs.statSync(under).size > 20 * 1024 * 1024 - 4000);
   const log = auditLog(under);
   const s = await exportServer(log);
@@ -681,7 +679,7 @@ test('rotation: an export whose own entry rotates the file holds that entry; wri
     const got = await a.read();
     await s.settled();
     assert.equal(got.whole, true);
-    const dir = unzipTo(got.body, tmp('agm-bundle-'));
+    const dir = unzipTo(got.body, h.tmpDir(t, 'agm-bundle-'));
     const v = await verify([dir, '--fingerprint', FP]);
     assert.equal(v.code, 0, v.out);
     const mm = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json')));
@@ -690,9 +688,9 @@ test('rotation: an export whose own entry rotates the file holds that entry; wri
   } finally { await s.close(); }
 });
 
-test('rotation between the listing and the opens: the files are listed and opened again, the bundle ends at the file the export\'s own entry was rotated into, and it is whole; rotating at every try refuses after three', async () => {
-  const file = fresh();
-  const log = written(3, file);
+test('rotation between the listing and the opens: the files are listed and opened again, the bundle ends at the file the export\'s own entry was rotated into, and it is whole; rotating at every try refuses after three', async (t) => {
+  const file = fresh(t);
+  const log = written(t, 3, file);
   const realOpen = fs.promises.open;
   let opens = 0;
   // The first open of the export: another request writes meanwhile, and that write rotates the file (it was full).
@@ -701,7 +699,7 @@ test('rotation between the listing and the opens: the files are listed and opene
     return realOpen.call(fs.promises, p, ...rest);
   };
   let got;
-  try { got = await exported(log); } finally { fs.promises.open = realOpen; }
+  try { got = await exported(t, log); } finally { fs.promises.open = realOpen; }
   assert.equal(log.rotations, 1);
   const m = JSON.parse(fs.readFileSync(path.join(got.dir, 'manifest.json')));
   const rotatedName = path.basename(log.rotated()[0]);
@@ -714,8 +712,8 @@ test('rotation between the listing and the opens: the files are listed and opene
   assert.deepEqual(entries(file).map((e) => [e.seq, e.action]), [[5, 'login'], [6, 'audit.export.sent']]);
 
   // A rotation at every try: refused after the third, its end written, nothing left open.
-  const busyFile = fresh();
-  const busy = written(2, busyFile);
+  const busyFile = fresh(t);
+  const busy = written(t, 2, busyFile);
   const s = await exportServer(busy);
   fs.promises.open = async (p, ...rest) => {
     await wait(2);   // each rotated name carries its millisecond
@@ -731,8 +729,8 @@ test('rotation between the listing and the opens: the files are listed and opene
   assert.deepEqual([entries(busyFile).pop().action, s.exporter.busy(), s.exporter.handles.length], ['audit.export.fail', null, 0]);
 });
 
-test('a rotated file changed between the check and the stream ends the export with its words, and the browser never gets a whole zip', async () => {
-  const file = fresh();
+test('a rotated file changed between the check and the stream ends the export with its words, and the browser never gets a whole zip', async (t) => {
+  const file = fresh(t);
   keyedChainOf(34_500, { file, words: noise });
   const log = auditLog(file);
   log.write(SAM, 'login', 'sam', 'signed in', '10.0.0.9');   // rotates: the 20 MB file is set aside
@@ -759,8 +757,8 @@ test('a rotated file changed between the check and the stream ends the export wi
   } finally { await s.close(); }
 });
 
-test('refused before its row: a run with no machine key (503), a copy with no verifier to ship (503); a row the disk will not take says so, and its end follows it', async () => {
-  const keylessFile = fresh();
+test('refused before its row: a run with no machine key (503), a copy with no verifier to ship (503); a row the disk will not take says so, and its end follows it', async (t) => {
+  const keylessFile = fresh(t);
   const keyless = new audit.AuditLog(keylessFile, { keys: () => { throw Object.assign(new Error('the machine key could not be read (EBUSY)'), { code: 'EBUSY' }); }, records: h.recordsOf(keylessFile) });
   const k = await exportServer(keyless);
   try {
@@ -768,9 +766,9 @@ test('refused before its row: a run with no machine key (503), a copy with no ve
     assert.deepEqual([r.status, r.json.error], [503, 'not exported: this run has no machine key (EBUSY), so an export cannot be signed']);
     assert.deepEqual(entries(keylessFile).map((e) => e.action), ['audit.keyless'], 'no row');
   } finally { await k.close(); }
-  const bareFile = fresh();
-  const bare = written(2, bareFile);
-  const n = await exportServer(bare, { verifyDir: tmp('agm-noverify-') });
+  const bareFile = fresh(t);
+  const bare = written(t, 2, bareFile);
+  const n = await exportServer(bare, { verifyDir: h.tmpDir(t, 'agm-noverify-') });
   try {
     const r = await fetchExport(n.base);
     assert.equal(r.status, 503);
@@ -779,8 +777,8 @@ test('refused before its row: a run with no machine key (503), a copy with no ve
     assert.equal(n.exporter.busy(), null);
   } finally { await n.close(); }
   // The disk refuses the row: nothing is listed or sent, and the row's end is written after it once the disk takes them.
-  const fullFile = fresh();
-  const full = written(2, fullFile);
+  const fullFile = fresh(t);
+  const full = written(t, 2, fullFile);
   const f = await exportServer(full);
   const real = fs.openSync;
   try {
@@ -795,11 +793,11 @@ test('refused before its row: a run with no machine key (503), a copy with no ve
   ]);
 });
 
-test('Last export: the newest `audit.export.sent` this machine wrote, read again at the next start; a changed one is not, nor one not on disk yet; none says so', async () => {
-  const file = fresh();
-  const log = written(2, file);
+test('Last export: the newest `audit.export.sent` this machine wrote, read again at the next start; a changed one is not, nor one not on disk yet; none says so', async (t) => {
+  const file = fresh(t);
+  const log = written(t, 2, file);
   assert.equal(log.facts().lastExport, null);
-  await exported(log);
+  await exported(t, log);
   const sent = entries(file).pop();
   assert.deepEqual(log.facts().lastExport, { at: sent.at, by: 'ana', from: 1, to: 3 });
   log.flush();
@@ -860,7 +858,7 @@ async function settled(dir) {
 }
 
 test('end to end: who may export — the token at the laptop and an admin at the laptop or over HTTPS; never a manager, an account without audit.read, a code guest, plain HTTP from another device, the token off the laptop or from before a restart, nor the right through the tunnel', async (t) => {
-  const dataDir = tmp('agm-e2e-');
+  const dataDir = h.tmpDir(t, 'agm-e2e-');
   let srv = await h.startServer({ AGM_DATA_DIR: dataDir, AGM_TLS: '1' });
   t.after(async () => { await h.stopServer(srv.child); });
   const { base } = srv;
@@ -943,7 +941,7 @@ test('end to end: who may export — the token at the laptop and an admin at the
 });
 
 test('speed: an export of the 56,000-entry log while a page asks and a person signs in: neither waits more than 300 ms for it', async (t) => {
-  const dataDir = tmp('agm-e2e-');
+  const dataDir = h.tmpDir(t, 'agm-e2e-');
   const keyDir = dataDir + '-keys';
   fs.mkdirSync(keyDir, { recursive: true });
   fs.writeFileSync(path.join(keyDir, 'machine.key'), FIXTURE_KEY.toString('base64'));

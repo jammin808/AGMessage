@@ -6,17 +6,14 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { startServer, stopServer, api, connect, emit, until, TOKEN } = require('./helpers');
+const { tmpDir, startServer, stopServer, api, connect, emit, until, TOKEN } = require('./helpers');
 
-const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const form = (name, bytes) => { const f = new FormData(); f.append('file', new Blob([bytes], { type: 'text/plain' }), name); return f; };
 const upload = (base, token, name = 'notes.txt', bytes = 'Capex was 4.2m') => fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': token }, body: form(name, bytes) });
 const files = (dir) => fs.readdirSync(dir).filter((f) => !f.startsWith('.')).sort();
 
 async function hallServer(t, env = {}) {
-  const uploads = tmp('agm-up-');
+  const uploads = tmpDir(t, 'agm-up-');
   const srv = await startServer({ AGM_UPLOAD_DIR: uploads, ...env });
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });

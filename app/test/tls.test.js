@@ -5,13 +5,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const https = require('https');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const tlsmod = require('../lib/tls');
 const nodes = require('../lib/nodes');
+const { tmpDir } = require('./helpers');
 
 const until = async (fn, ms = 3000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await new Promise((r) => setTimeout(r, 25)); } return false; };
 
@@ -29,8 +29,8 @@ test('certificate: a self-signed P-256 server certificate Node parses, verifies 
   assert.match(tlsmod.fingerprint(certDer), tlsmod.FP_RE);
 });
 
-test('certificate: made once, kept sealed outside the app folder, reused, renewed on request', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-tls-'));
+test('certificate: made once, kept sealed outside the app folder, reused, renewed on request', (t) => {
+  const dir = tmpDir(t, 'agm-tls-');
   const seal = (s) => 'sealed:' + Buffer.from(s).toString('base64');
   const open = (s) => (String(s).startsWith('sealed:') ? Buffer.from(s.slice(7), 'base64').toString() : '');
   const a = tlsmod.loadOrCreate({ dir, name: 'A', seal, open });

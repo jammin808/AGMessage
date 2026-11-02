@@ -7,14 +7,12 @@ const assert = require('node:assert');
 const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
-const os = require('os');
 const path = require('path');
 const rbac = require('../lib/rbac');
 const acc = require('../lib/accounts');
 const guard = require('../lib/guard');
-const { startServer, stopServer, api, connect, emit, once, wait, until, fakeStagewatch, TOKEN, FIXTURE_KEY, auditLog, serverAudit, chainOf, keyedChainOf, acceptAll, brief } = require('./helpers');
+const { tmpDir, startServer, stopServer, api, connect, emit, once, wait, until, fakeStagewatch, TOKEN, FIXTURE_KEY, auditLog, serverAudit, chainOf, keyedChainOf, acceptAll, brief } = require('./helpers');
 
-const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
 // ---------------------------------------------------------------- the permission model
 test('rbac: roles, hall scope, grants and revokes, deny by default', () => {
@@ -102,8 +100,8 @@ test('passwords: scrypt, the same work for an unknown name, the policy', async (
   assert.match(acc.temporaryPassword(), /^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/);
 });
 
-test('sessions: only a hash on disk; idle, age, a moved epoch and a turned-off account end them', async () => {
-  const dir = tmp('agm-acc-');
+test('sessions: only a hash on disk; idle, age, a moved epoch and a turned-off account end them', async (t) => {
+  const dir = tmpDir(t, 'agm-acc-');
   const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
   const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
   const { account } = await accounts.create({ username: 'sam', name: 'Sam Patel', role: 'tech', password: 'blue door at the back' });
@@ -125,8 +123,8 @@ test('sessions: only a hash on disk; idle, age, a moved epoch and a turned-off a
   assert.equal(sessions.resolve('x'.repeat(10)), null);
 });
 
-test('accounts: a check changes nothing; a password at an older cost is stored again by upgrade, never over a new one', async () => {
-  const dir = tmp('agm-acc-');
+test('accounts: a check changes nothing; a password at an older cost is stored again by upgrade, never over a new one', async (t) => {
+  const dir = tmpDir(t, 'agm-acc-');
   const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
   const pw = 'blue door at the back';
   const { account } = await accounts.create({ username: 'sam', role: 'tech', password: pw });
@@ -146,8 +144,8 @@ test('accounts: a check changes nothing; a password at an older cost is stored a
   accounts.flush();
 });
 
-test('sessions: an account\'s device count is the sessions that still let it in', async () => {
-  const dir = tmp('agm-acc-');
+test('sessions: an account\'s device count is the sessions that still let it in', async (t) => {
+  const dir = tmpDir(t, 'agm-acc-');
   const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
   const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
   const { account } = await accounts.create({ username: 'sam', name: 'Sam Patel', role: 'tech', password: 'blue door at the back' });
@@ -163,9 +161,9 @@ test('sessions: an account\'s device count is the sessions that still let it in'
   sessions.flush(); accounts.flush();
 });
 
-test('sessions: a session with a page open is in use, and the sweep names the open ones that have ended', async () => {
+test('sessions: a session with a page open is in use, and the sweep names the open ones that have ended', async (t) => {
   const HOUR = 3600_000;
-  const dir = tmp('agm-acc-');
+  const dir = tmpDir(t, 'agm-acc-');
   const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
   const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
   const { account } = await accounts.create({ username: 'ana', name: 'Ana', role: 'admin', password: 'the green room kettle' });
@@ -183,8 +181,8 @@ test('sessions: a session with a page open is in use, and the sweep names the op
   sessions.flush(); accounts.flush();
 });
 
-test('sessions: one account signing in again and again keeps its 20 newest and never signs anyone else out', async () => {
-  const dir = tmp('agm-acc-');
+test('sessions: one account signing in again and again keeps its 20 newest and never signs anyone else out', async (t) => {
+  const dir = tmpDir(t, 'agm-acc-');
   const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
   const sessions = new acc.Sessions(path.join(dir, 'sessions.json'), accounts);
   const ana = (await accounts.create({ username: 'ana', name: 'Ana', role: 'admin', password: 'the green room kettle' })).account;
@@ -206,8 +204,8 @@ test('sessions: one account signing in again and again keeps its 20 newest and n
   sessions.flush(); accounts.flush(); many.flush();
 });
 
-test('token sessions: only a hash on disk, kept across a restart under the same token, ended by a new token, a day at most', () => {
-  const dir = tmp('agm-acc-');
+test('token sessions: only a hash on disk, kept across a restart under the same token, ended by a new token, a day at most', (t) => {
+  const dir = tmpDir(t, 'agm-acc-');
   const file = path.join(dir, 'admin-sessions.json');
   const a = new acc.TokenSessions(file, 'tag-one');
   const sid = a.create();
@@ -228,8 +226,8 @@ test('token sessions: only a hash on disk, kept across a restart under the same 
   a.flush();
 });
 
-test('token sessions: a new sign-in takes the ended ones with it, in memory and on disk', () => {
-  const file = path.join(tmp('agm-acc-'), 'admin-sessions.json');
+test('token sessions: a new sign-in takes the ended ones with it, in memory and on disk', (t) => {
+  const file = path.join(tmpDir(t, 'agm-acc-'), 'admin-sessions.json');
   const a = new acc.TokenSessions(file, 'tag-one');
   const T = Date.now();
   for (let i = 0; i < 50; i++) a.create(T - acc.TOKEN_SESSION_MS - i);   // signed in more than a day ago, never back
@@ -240,8 +238,8 @@ test('token sessions: a new sign-in takes the ended ones with it, in memory and 
   assert.ok(a.has(sid));
 });
 
-test('accounts: two creates of one name at once make one, and two first admins at once make one', async () => {
-  const dir = tmp('agm-acc-');
+test('accounts: two creates of one name at once make one, and two first admins at once make one', async (t) => {
+  const dir = tmpDir(t, 'agm-acc-');
   const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
   const pw = 'blue door at the back';
   const [x, y] = await Promise.all([accounts.create({ username: 'sam', role: 'tech', password: pw }), accounts.create({ username: 'Sam', role: 'tech', password: pw })]);
@@ -254,8 +252,8 @@ test('accounts: two creates of one name at once make one, and two first admins a
   accounts.flush(); fresh.flush();
 });
 
-test('accounts: what an untouched editor sends back is no change; only a field that now holds something else is one', async () => {
-  const dir = tmp('agm-acc-');
+test('accounts: what an untouched editor sends back is no change; only a field that now holds something else is one', async (t) => {
+  const dir = tmpDir(t, 'agm-acc-');
   const accounts = new acc.Accounts(path.join(dir, 'accounts.json'));
   const pw = 'blue door at the back';
   const { account } = await accounts.create({ username: 'kim', name: 'Kim Tech', role: 'tech', halls: ['HALL01'], allHalls: false, grant: ['nodes.control'], revoke: ['stage.send'], password: pw });
@@ -342,8 +340,8 @@ test('limits: a flood of new addresses never hands back an allowance used up, no
 });
 
 // ---------------------------------------------------------------- the audit chain
-test('audit: chained with a key; an edited, removed or reordered line is found; no secret fields', async () => {
-  const dir = tmp('agm-audit-');
+test('audit: chained with a key; an edited, removed or reordered line is found; no secret fields', async (t) => {
+  const dir = tmpDir(t, 'agm-audit-');
   const file = path.join(dir, 'audit.jsonl');
   const log = auditLog(file);
   for (let i = 0; i < 5; i++) log.write({ t: 'account', id: 'a1', name: 'sam' }, 'display.take', 'D1', 'message ' + i, '10.0.0.' + i);
@@ -368,29 +366,29 @@ test('audit: chained with a key; an edited, removed or reordered line is found; 
   assert.deepEqual(Object.keys(e.actor).sort(), ['id', 'name', 't'], 'only the listed fields are kept');
 });
 
-const fiveEntries = () => {
-  const file = path.join(tmp('agm-audit-'), 'audit.jsonl');
+const fiveEntries = (t) => {
+  const file = path.join(tmpDir(t, 'agm-audit-'), 'audit.jsonl');
   const log = auditLog(file);
   for (let i = 0; i < 5; i++) log.write({ t: 'account', id: 'a1', name: 'sam' }, 'login', 'sam', 'entry ' + i);
   log.flush();
   return { file, log, lines: fs.readFileSync(file, 'utf8').trim().split('\n') };
 };
 
-test('audit: the first line, the last line and the whole file are part of the chain', async () => {
-  const a = fiveEntries();
+test('audit: the first line, the last line and the whole file are part of the chain', async (t) => {
+  const a = fiveEntries(t);
   fs.writeFileSync(a.file, a.lines.slice(1).join('\n') + '\n');
   const first = await auditLog(a.file).verify();
   assert.equal(first.ok, false, 'the oldest line removed: ' + JSON.stringify(first));
   assert.equal(first.brokenAt, 1);
   assert.match(first.why, /entry 1 is missing/);
 
-  const b = fiveEntries();
+  const b = fiveEntries(t);
   fs.writeFileSync(b.file, b.lines.slice(0, -1).join('\n') + '\n');
   const last = await b.log.verify();
   assert.equal(last.ok, false, 'the newest line removed while the server runs: ' + JSON.stringify(last));
   assert.match(last.why, /after entry 4, entry 5 is missing/);
 
-  const c = fiveEntries();
+  const c = fiveEntries(t);
   fs.unlinkSync(c.file);
   const gone = await c.log.verify();
   assert.equal(gone.ok, false, 'the file removed while the server runs: ' + JSON.stringify(gone));
@@ -401,8 +399,8 @@ test('audit: the first line, the last line and the whole file are part of the ch
   assert.match(after.why, /entries 1 to 5 are missing/);
 });
 
-test('audit: a rotated log is checked with the current one as one chain', async () => {
-  const dir = tmp('agm-audit-');
+test('audit: a rotated log is checked with the current one as one chain', async (t) => {
+  const dir = tmpDir(t, 'agm-audit-');
   const file = path.join(dir, 'audit.jsonl');
   const text = chainOf(36_000, (i) => 'take ' + i + ' ' + 'x'.repeat(300));   // just over 20 MB
   assert.ok(text.length > 20 * 1024 * 1024);
@@ -436,8 +434,8 @@ test('audit: a rotated log is checked with the current one as one chain', async 
   assert.match(removed.why, /entries 1 to 36000 are missing/);
 });
 
-test('audit: one failed write is kept and written with the next, so the chain on disk stays whole', async () => {
-  const dir = tmp('agm-audit-');
+test('audit: one failed write is kept and written with the next, so the chain on disk stays whole', async (t) => {
+  const dir = tmpDir(t, 'agm-audit-');
   const file = path.join(dir, 'audit.jsonl');
   const log = auditLog(file);
   log.write({ t: 'system' }, 'boot', '', 'first');
@@ -459,7 +457,7 @@ test('audit: one failed write is kept and written with the next, so the chain on
 });
 
 test('audit: an entry still waiting when the server stops is put on disk by the stop, not lost with it', async (t) => {
-  const log = auditLog(path.join(tmp('agm-audit-'), 'audit.jsonl'));
+  const log = auditLog(path.join(tmpDir(t, 'agm-audit-'), 'audit.jsonl'));
   log.write({ t: 'system' }, 'boot', '', 'first');
   fs.renameSync(log.file, log.file + '.held'); fs.mkdirSync(log.file);
   log.write({ t: 'account', id: 'a1', name: 'sam' }, 'login', 'sam', 'second, while the disk would not take it');
@@ -470,7 +468,7 @@ test('audit: an entry still waiting when the server stops is put on disk by the 
   assert.deepEqual(brief(await log.verify()), { ok: true, mark: 'intact', entries: 2 });
 
   // End to end: the disk refuses one audited action; it is back by the time the server stops (SIGTERM).
-  const srv = await startServer();
+  const srv = await startServer({ AGM_DATA_DIR: tmpDir(t, 'agm-e2e-') });   // the test's: read once its server has stopped
   let up = true;
   t.after(async () => { if (up) await stopServer(srv.child); });
   const file = path.join(srv.dataDir, 'audit.jsonl');
@@ -486,8 +484,8 @@ test('audit: an entry still waiting when the server stops is put on disk by the 
   assert.deepEqual(brief(await serverAudit(srv.dataDir).verify()), { ok: true, mark: 'intact', entries: actions.length }, 'checked under the server\'s own key and records');
 });
 
-test('audit: a write the disk takes only part of is cut back, on Windows too, and the chain on disk stays whole', async () => {
-  const dir = tmp('agm-audit-');
+test('audit: a write the disk takes only part of is cut back, on Windows too, and the chain on disk stays whole', async (t) => {
+  const dir = tmpDir(t, 'agm-audit-');
   const file = path.join(dir, 'audit.jsonl');
   const log = auditLog(file);
   log.write({ t: 'system' }, 'boot', '', 'first');
@@ -521,8 +519,8 @@ test('audit: a write the disk takes only part of is cut back, on Windows too, an
 });
 
 for (const [what, tail] of [['a half-written last line', '{"seq":4,"at":17'], ['a NUL-filled tail (NTFS after a power cut)', Buffer.alloc(180)]]) {
-  test('audit: ' + what + ' is cut at the next start, the cut is an entry, and the chain goes on whole', async () => {
-    const dir = tmp('agm-audit-');
+  test('audit: ' + what + ' is cut at the next start, the cut is an entry, and the chain goes on whole', async (t) => {
+    const dir = tmpDir(t, 'agm-audit-');
     const file = path.join(dir, 'audit.jsonl');
     const log = auditLog(file);
     for (let i = 0; i < 3; i++) log.write({ t: 'system' }, 'x', '', 'message ' + i);
@@ -543,8 +541,8 @@ for (const [what, tail] of [['a half-written last line', '{"seq":4,"at":17'], ['
 // Two seeds: the 0.5.1 chain, which reads △ with its one plain finding until accepted, and a chain keyed under this
 // machine's key, whose every entry is MAC-checked and which reads ✓.
 for (const seed of ['plain', 'keyed']) {
-  test('audit: checking a full-size ' + seed + ' log keeps the event loop turning, one check at a time, and still finds an edited line', async () => {
-    const dir = tmp('agm-audit-');
+  test('audit: checking a full-size ' + seed + ' log keeps the event loop turning, one check at a time, and still finds an edited line', async (t) => {
+    const dir = tmpDir(t, 'agm-audit-');
     const file = path.join(dir, 'audit.jsonl');
     const n = 56_000;
     if (seed === 'plain') fs.writeFileSync(file, chainOf(n));   // about 20 MB, just under the rotation size
@@ -1113,7 +1111,7 @@ test('saving an account unchanged changes nothing; the device count is what stil
 
 // ---------------------------------------------------------------- saves that fail
 test('a change to accounts.json that cannot be written is retried until it lands, and health names it meanwhile', async (t) => {
-  let srv = await startServer();
+  let srv = await startServer({ AGM_DATA_DIR: tmpDir(t, 'agm-e2e-') });   // the test's: a restart serves it again
   const { dataDir } = srv;
   t.after(async () => { await stopServer(srv.child); });
   const file = path.join(dataDir, 'accounts.json');
@@ -1146,7 +1144,7 @@ test('a change to accounts.json that cannot be written is retried until it lands
 });
 
 for (const seed of ['plain', 'keyed']) test('six quick clicks on Check the log of a full-size ' + seed + ' log share one check and do not hold up anyone else', async (t) => {
-  const dataDir = tmp('agm-e2e-');
+  const dataDir = tmpDir(t, 'agm-e2e-');
   const n = 56_000;
   if (seed === 'plain') fs.writeFileSync(path.join(dataDir, 'audit.jsonl'), chainOf(n));
   else {

@@ -19,8 +19,7 @@ const { BUILD } = require('../lib/version');
 const h = require('./helpers');
 
 const { auditLog, recordsOf, chainOf, keyedChainOf, acceptAll, brief, FIXTURE_KEY, OTHER_KEY, HOST } = h;
-const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
-const fresh = () => path.join(tmp('agm-audit-'), 'audit.jsonl');
+const fresh = (t) => path.join(h.tmpDir(t, 'agm-audit-'), 'audit.jsonl');
 const SAM = { t: 'account', id: 'a1', name: 'sam' };
 const lines = (file) => fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
 const entries = (file) => lines(file).map((l) => JSON.parse(l));
@@ -33,7 +32,7 @@ const headOf = (file, records = recordsOf(file)) => {
   return JSON.parse(fs.readFileSync(path.join(records, 'head-' + l + '.json'), 'utf8'));
 };
 /** A keyed log of `n` entries written by this machine, flushed: its file, its log and its lines. */
-function written(n, file = fresh(), key = FIXTURE_KEY) {
+function written(t, n, file = fresh(t), key = FIXTURE_KEY) {
   const log = auditLog(file, { key });
   for (let i = 1; i <= n; i++) log.write(SAM, 'display.take', 'D1', 'message ' + i, '10.0.0.9');
   log.flush();
@@ -66,8 +65,8 @@ const at = (file) => (p) => typeof p === 'string' && path.resolve(p) === path.re
 const restoreKeyDir = (was) => { if (was === undefined) delete process.env.AGM_KEY_DIR; else process.env.AGM_KEY_DIR = was; };
 
 // ---------------------------------------------------------------- the keyed chain
-test('keyed chain: each entry carries the log id, the key id and an HMAC under Ke; edits, a 0.5.1 forgery and relabels are found', async () => {
-  const a = written(6);
+test('keyed chain: each entry carries the log id, the key id and an HMAC under Ke; edits, a 0.5.1 forgery and relabels are found', async (t) => {
+  const a = written(t, 6);
   const ke = h.auditKeys()().entry;
   const es = entries(a.file);
   for (const e of es) {
@@ -80,7 +79,7 @@ test('keyed chain: each entry carries the log id, the key id and an HMAC under K
   assert.equal(new Set(es.map((e) => e.l)).size, 1, 'one log, one id');
   assert.deepEqual(brief(await a.log.verify()), { ok: true, mark: 'intact', entries: 6 });
 
-  const variant = async (change) => { const b = written(6); put(b.file, change(b.lines)); return { b, r: await auditLog(b.file).verify() }; };
+  const variant = async (change) => { const b = written(t, 6); put(b.file, change(b.lines)); return { b, r: await auditLog(b.file).verify() }; };
   let { r } = await variant((l) => l.map((x, i) => (i === 2 ? x.replace('message 3', 'message X') : x)));
   assert.deepEqual([r.ok, r.mark, r.brokenAt], [false, 'broken', 3]);
   assert.match(r.why, /entry 3 was changed after it was written/);
@@ -124,7 +123,7 @@ test('keyed chain: each entry carries the log id, the key id and an HMAC under K
   assert.deepEqual([r.mark, r.brokenAt], ['broken', 5]);
 
   // A recent row edited while stopped, its h kept, reads ✕ in the list before any check.
-  const c = written(4);
+  const c = written(t, 4);
   put(c.file, c.lines.map((x, i) => (i === 1 ? x.replace('message 2', 'message Z') : x)));
   const rows = auditLog(c.file).latest(10);
   assert.deepEqual(rows.filter((e) => e.seq <= 4).map((e) => [e.seq, e.mark]), [[4, 'intact'], [3, 'intact'], [2, 'broken'], [1, 'intact']]);
@@ -134,7 +133,7 @@ test('keyed chain: each entry carries the log id, the key id and an HMAC under K
   assert.deepEqual(bad, { line: 4, file: 'audit.jsonl', mark: 'broken', words: 'line 4 of audit.jsonl is not a whole entry' });
 });
 
-test('keyed chain: the entry this machine recorded last, under a made-up key id with its hash kept, is a changed entry: ✕ at every check, never a span, never accepted', async () => {
+test('keyed chain: the entry this machine recorded last, under a made-up key id with its hash kept, is a changed entry: ✕ at every check, never a span, never accepted', async (t) => {
   const made = 'deadbeefdeadbeef';
   /** Entry i (0-based) as a keyed line under `k`, the fields in their written order. */
   const line = (e, k) => JSON.stringify({ seq: e.seq, at: e.at, actor: e.actor, action: e.action, target: e.target, words: e.words, ip: e.ip, prev: e.prev, l: e.l, k, h: e.h });
@@ -145,7 +144,7 @@ test('keyed chain: the entry this machine recorded last, under a made-up key id 
     assert.match(x.error, /a broken entry is never accepted/);
   };
   // The newest two relabelled, their h kept; the first of them dressed as a boundary naming this machine's run.
-  const a = written(6);
+  const a = written(t, 6);
   const own = entries(a.file)[0].k;
   put(a.file, entries(a.file).map((e, i) => {
     if (i < 4) return a.lines[i];
@@ -170,7 +169,7 @@ test('keyed chain: the entry this machine recorded last, under a made-up key id 
 
   // The newest entries cut, and the log padded up to the head's seq with entries under a made-up key, the last with the
   // head's h: the same changed entry, never a cut a person may accept.
-  const p = written(6);
+  const p = written(t, 6);
   const es = entries(p.file);
   const pad5 = { ...es[4], action: 'audit.rekey', target: own + ':1', words: 'padding' };
   pad5.h = crypto.createHmac('sha256', 'a key nobody has').update(rules.canonical2({ ...pad5, k: made })).digest('hex');
@@ -182,8 +181,8 @@ test('keyed chain: the entry this machine recorded last, under a made-up key id 
   await refused(auditLog(p.file));
 });
 
-test('the check: a chain broken at a line is what health and the console read until a whole check replaces it', async () => {
-  const a = written(6);
+test('the check: a chain broken at a line is what health and the console read until a whole check replaces it', async (t) => {
+  const a = written(t, 6);
   put(a.file, a.lines.map((x, i) => (i === 1 ? x.replace('message 2', 'message X') : x)));
   const b = auditLog(a.file);
   b.open();
@@ -197,8 +196,8 @@ test('the check: a chain broken at a line is what health and the console read un
   assert.deepEqual(b.facts().attention, []);
 });
 
-test('the records: a start that writes no entry writes no record, so an empty start and stop reads ✓ next time and a 0.5.1 log copied in after it is still asked about', async () => {
-  const file = fresh();
+test('the records: a start that writes no entry writes no record, so an empty start and stop reads ✓ next time and a 0.5.1 log copied in after it is still asked about', async (t) => {
+  const file = fresh(t);
   const records = recordsOf(file);
   const empty = auditLog(file);
   empty.open();
@@ -218,7 +217,7 @@ test('the records: a start that writes no entry writes no record, so an empty st
 
   // A 0.5.1 log whose boundary the disk would not take: nothing names the new log id, so nothing is recorded, and the
   // next start finds the same log and asks the same question.
-  const p = fresh();
+  const p = fresh(t);
   fs.writeFileSync(p, chainOf(3));
   await failing('openSync', 'ENOSPC', at(p), () => { const log = auditLog(p); log.open(); log.flush(); });
   assert.ok(!fs.existsSync(recordsOf(p)) || fs.readdirSync(recordsOf(p)).length === 0, 'nothing recorded while no entry carries the log\'s id');
@@ -229,10 +228,10 @@ test('the records: a start that writes no entry writes no record, so an empty st
   assert.ok(fs.readdirSync(recordsOf(p)).some((f) => f.startsWith('head-')), 'once an entry carries it, the records are written');
 });
 
-test('the log refuses to start without its keys and its records folder, and makes nothing', () => {
-  const dir = path.join(tmp('agm-refuse-'), 'data');
+test('the log refuses to start without its keys and its records folder, and makes nothing', (t) => {
+  const dir = path.join(h.tmpDir(t, 'agm-refuse-'), 'data');
   const file = path.join(dir, 'audit.jsonl');
-  const records = path.join(tmp('agm-refuse-'), 'audit');
+  const records = path.join(h.tmpDir(t, 'agm-refuse-'), 'audit');
   for (const o of [undefined, {}, { keys: h.auditKeys() }, { records }, { keys: 'a key', records }, { keys: h.auditKeys(), records: '' }]) {
     assert.throws(() => new audit.AuditLog(file, o), /the audit log needs its keys and its records folder/, JSON.stringify(o && Object.keys(o)));
   }
@@ -261,10 +260,10 @@ test('the rules that need no key: the runs a boundary names, and the two canonic
 });
 
 // ---------------------------------------------------------------- the keys
-test('keys: two machine keys give two key ids and two fingerprints; one key folder, one fingerprint; labels are allow-listed', () => {
+test('keys: two machine keys give two key ids and two fingerprints; one key folder, one fingerprint; labels are allow-listed', (t) => {
   const was = process.env.AGM_KEY_DIR;
   try {
-    const facts = [tmp('agm-key-'), tmp('agm-key-')].map((d) => {
+    const facts = [h.tmpDir(t, 'agm-key-'), h.tmpDir(t, 'agm-key-')].map((d) => {
       process.env.AGM_KEY_DIR = d;
       secretbox._reset();
       const ke = secretbox.derive(audit.LABELS.entry);
@@ -292,11 +291,11 @@ test('keys: two machine keys give two key ids and two fingerprints; one key fold
   } finally { restoreKeyDir(was); secretbox._reset(); }
 });
 
-test('no key: a link the key folder refuses, a key that cannot be read and a short key each make a keyless run and leave the file as it is', async () => {
+test('no key: a link the key folder refuses, a key that cannot be read and a short key each make a keyless run and leave the file as it is', async (t) => {
   const was = process.env.AGM_KEY_DIR;
   try {
     // A key folder that cannot hold a hard link (FAT, exFAT): no key is published, and the words name the code and the folder.
-    const d = tmp('agm-key-');
+    const d = h.tmpDir(t, 'agm-key-');
     process.env.AGM_KEY_DIR = d;
     secretbox._reset();
     await failing('linkSync', 'EPERM', () => true, () => {
@@ -308,7 +307,7 @@ test('no key: a link the key folder refuses, a key that cannot be read and a sho
     assert.deepEqual(fs.readdirSync(d), [], 'no key and no temporary file left');
     // EBUSY and EACCES: the key is never read, never replaced.
     for (const code of ['EBUSY', 'EACCES']) {
-      const k = tmp('agm-key-');
+      const k = h.tmpDir(t, 'agm-key-');
       const keyFile = path.join(k, 'machine.key');
       fs.writeFileSync(keyFile, FIXTURE_KEY.toString('base64'));
       const before = fs.readFileSync(keyFile);
@@ -323,7 +322,7 @@ test('no key: a link the key folder refuses, a key that cannot be read and a sho
       assert.deepEqual(fs.readdirSync(k), ['machine.key']);
     }
     // A key that is not 32 bytes is not replaced.
-    const s = tmp('agm-key-');
+    const s = h.tmpDir(t, 'agm-key-');
     fs.writeFileSync(path.join(s, 'machine.key'), 'c2hvcnQ=');
     process.env.AGM_KEY_DIR = s;
     secretbox._reset();
@@ -333,8 +332,8 @@ test('no key: a link the key folder refuses, a key that cannot be read and a sho
   } finally { restoreKeyDir(was); secretbox._reset(); }
 });
 
-test('no key: two first starts at once keep one machine key', async () => {
-  const d = tmp('agm-key-');
+test('no key: two first starts at once keep one machine key', async (t) => {
+  const d = h.tmpDir(t, 'agm-key-');
   const script = 'const b = require(' + JSON.stringify(path.join(__dirname, '..', 'lib', 'secretbox.js')) + '); process.stdout.write(b.derive("agmessage audit entry v1").toString("hex"));';
   const one = () => new Promise((resolve) => {
     const c = spawn(process.execPath, ['-e', script], { env: { ...process.env, AGM_KEY_DIR: d }, stdio: ['ignore', 'pipe', 'inherit'] });
@@ -347,7 +346,7 @@ test('no key: two first starts at once keep one machine key', async () => {
   assert.match(keys[0], /^[0-9a-f]{64}$/);
   assert.deepEqual(fs.readdirSync(d), ['machine.key'], 'one key, no temporary file left');
   // A start that made its own key meets one published meanwhile: it reads that one.
-  const e = tmp('agm-key-');
+  const e = h.tmpDir(t, 'agm-key-');
   const was = process.env.AGM_KEY_DIR;
   try {
     process.env.AGM_KEY_DIR = e;
@@ -362,8 +361,8 @@ test('no key: two first starts at once keep one machine key', async () => {
 });
 
 // ---------------------------------------------------------------- a 0.5.1 log at its first keyed start
-test('legacy then keyed: the first keyed start writes `audit.keyed …;first`, reads △ with one plain finding, and ◇ once accepted', async () => {
-  const file = fresh();
+test('legacy then keyed: the first keyed start writes `audit.keyed …;first`, reads △ with one plain finding, and ◇ once accepted', async (t) => {
+  const file = fresh(t);
   fs.writeFileSync(file, chainOf(5));
   const log = auditLog(file);
   const r = await log.verify();
@@ -395,8 +394,8 @@ test('legacy then keyed: the first keyed start writes `audit.keyed …;first`, r
   assert.deepEqual([s.mark, s.findings[0].id, s.findings[0].first], ['unvouched', 's1-5', false]);
 });
 
-test('legacy then keyed: plain entries after keyed ones open to `audit.unkeyed`, past 500 lines too; a torn 0.5.1 log orders its cut, the boundary, the repair', async () => {
-  const a = written(3);
+test('legacy then keyed: plain entries after keyed ones open to `audit.unkeyed`, past 500 lines too; a torn 0.5.1 log orders its cut, the boundary, the repair', async (t) => {
+  const a = written(t, 3);
   plainAfter(a.file, 600);
   const reopened = auditLog(a.file);
   const r = await reopened.verify();
@@ -405,7 +404,7 @@ test('legacy then keyed: plain entries after keyed ones open to `audit.unkeyed`,
   assert.deepEqual(r.findings.map((f) => [f.id, f.kind, f.mark]), [['s4-603', 'unkeyed', 'unvouched']]);
   assert.match(r.findings[0].words, /^entries 4–603 have plain hashes after entry 3: written by an AGMessage that does not key its log/);
 
-  const file = fresh();
+  const file = fresh(t);
   fs.writeFileSync(file, chainOf(5) + '{"seq":6,"at":17');
   const log = auditLog(file);
   log.write(SAM, 'login', 'sam', 'signed in');
@@ -414,8 +413,8 @@ test('legacy then keyed: plain entries after keyed ones open to `audit.unkeyed`,
 });
 
 // ---------------------------------------------------------------- the records outside the data folder
-test('the head: a cut while stopped is ✕ until accepted, also after more writes and a restart; a NUL tail over whole entries is found as missing', async () => {
-  const a = written(6);
+test('the head: a cut while stopped is ✕ until accepted, also after more writes and a restart; a NUL tail over whole entries is found as missing', async (t) => {
+  const a = written(t, 6);
   put(a.file, a.lines.slice(0, 4));
   const b = auditLog(a.file);
   let r = await b.verify();
@@ -434,7 +433,7 @@ test('the head: a cut while stopped is ✕ until accepted, also after more write
   assert.equal((await c.verify()).mark, 'linked');
 
   // NTFS after a power cut: the newest whole entries' bytes are NULs. Kept aside, cut, and found as missing.
-  const n = written(6);
+  const n = written(t, 6);
   const text = fs.readFileSync(n.file);
   const keep = Buffer.byteLength(n.lines.slice(0, 4).join('\n') + '\n');
   fs.writeFileSync(n.file, Buffer.concat([text.subarray(0, keep), Buffer.alloc(text.length - keep)]));
@@ -446,26 +445,26 @@ test('the head: a cut while stopped is ✕ until accepted, also after more write
   assert.ok(fs.readFileSync(path.join(path.dirname(n.file), aside)).every((x) => x === 0), 'the NULs kept aside');
 });
 
-test('the head: a fork, the whole log removed (but not moved), a changed head, a missing head, a head that cannot be read', async () => {
+test('the head: a fork, the whole log removed (but not moved), a changed head, a missing head, a head that cannot be read', async (t) => {
   // A fork: the head's entry 6 is not the log's entry 6.
-  const a = written(4);
+  const a = written(t, 4);
   const snapshot = fs.readFileSync(a.file);
   a.log.write(SAM, 'login', 'sam', 'five'); a.log.write(SAM, 'login', 'sam', 'six'); a.log.flush();
   fs.writeFileSync(a.file, snapshot);
-  const elsewhere = auditLog(a.file, { records: tmp('agm-rec-') });
+  const elsewhere = auditLog(a.file, { records: h.tmpDir(t, 'agm-rec-') });
   for (const w of ['5′', '6′', '7′']) elsewhere.write(SAM, 'login', 'sam', w);
   elsewhere.flush();
   let r = await auditLog(a.file).verify();
   assert.ok(r.findings.some((f) => f.kind === 'fork' && f.words === 'the log forked: this machine\'s entry 6 is not the log\'s entry 6'), JSON.stringify(r.findings));
 
   // The whole log removed: ✕ "this folder held another log". Moved: not a finding.
-  const g = written(3);
+  const g = written(t, 3);
   fs.unlinkSync(g.file);
   r = await auditLog(g.file).verify();
   assert.deepEqual(kinds(r), ['another']);
   assert.match(r.findings[0].words, /^this folder held another log \(3 entries, the newest at \d\d:\d\d on \d+ \w{3}\); it is not here$/);
-  const m = written(3);
-  const to = path.join(tmp('agm-moved-'), 'audit.jsonl');
+  const m = written(t, 3);
+  const to = path.join(h.tmpDir(t, 'agm-moved-'), 'audit.jsonl');
   fs.copyFileSync(m.file, to); fs.unlinkSync(m.file);
   const moved = auditLog(to, { records: recordsOf(m.file) });
   r = await moved.verify();
@@ -473,7 +472,7 @@ test('the head: a fork, the whole log removed (but not moved), a changed head, a
   assert.deepEqual([entries(to)[3].action, entries(to)[3].words], ['audit.moved', 'this log was last written at ' + path.dirname(m.file)]);
 
   // A changed head: kept aside, ✕.
-  const c = written(3);
+  const c = written(t, 3);
   const headFile = path.join(recordsOf(c.file), 'head-' + entries(c.file)[0].l + '.json');
   const changed = fs.readFileSync(headFile, 'utf8').replace(/"seq":3/, '"seq":2');
   fs.writeFileSync(headFile, changed);
@@ -484,14 +483,14 @@ test('the head: a fork, the whole log removed (but not moved), a changed head, a
   assert.match(r.findings[0].words, /^the head record outside the data folder was changed: kept aside as head-/);
 
   // Entries under this key and no head (ENOENT): ✕ "no record".
-  const d = written(3);
+  const d = written(t, 3);
   fs.unlinkSync(path.join(recordsOf(d.file), 'head-' + entries(d.file)[0].l + '.json'));
   r = await auditLog(d.file).verify();
   assert.deepEqual([r.mark, kinds(r)], ['broken', ['nohead']]);
   assert.equal(r.findings[0].words, 'this machine keyed this log and has no record of it: the head record outside the data folder is missing');
 
   // A head that cannot be read (EBUSY): △, nothing compared, and the head is never written over this run.
-  const e = written(3);
+  const e = written(t, 3);
   const eHead = path.join(recordsOf(e.file), 'head-' + entries(e.file)[0].l + '.json');
   const bytes = fs.readFileSync(eHead);
   const latestFile = path.join(recordsOf(e.file), 'latest.json');
@@ -511,9 +510,9 @@ test('the head: a fork, the whole log removed (but not moved), a changed head, a
   assert.deepEqual(fs.readFileSync(eHead), bytes, 'the head file is byte for byte unchanged after that run');
 });
 
-test('the records: keyed.json or the keyless marker that cannot be read is △, said, and never written over', async () => {
+test('the records: keyed.json or the keyless marker that cannot be read is △, said, and never written over', async (t) => {
   // keyed.json held by a backup tool: a finding of its own, and the file as it was.
-  const a = written(2);
+  const a = written(t, 2);
   const keyedFile = path.join(recordsOf(a.file), 'keyed.json');
   const keyedBytes = fs.readFileSync(keyedFile);
   const plain = path.join(path.dirname(a.file), 'second.jsonl');
@@ -529,7 +528,7 @@ test('the records: keyed.json or the keyless marker that cannot be read is △, 
   assert.deepEqual(fs.readFileSync(keyedFile), keyedBytes, 'keyed.json as it was');
 
   // The keyless marker held: a keyed run says so; a keyless run does not write over it.
-  const b = written(2);
+  const b = written(t, 2);
   const marker = path.join(recordsOf(b.file), 'keyless-' + entries(b.file)[0].l + '.json');
   fs.writeFileSync(marker, JSON.stringify({ v: 1, log: entries(b.file)[0].l, runs: [] }));
   const markerBytes = fs.readFileSync(marker);
@@ -544,8 +543,8 @@ test('the records: keyed.json or the keyless marker that cannot be read is △, 
   assert.deepEqual(fs.readFileSync(marker), markerBytes, 'the marker as it was');
 });
 
-test('the head: findings whose entries are not on disk are held, 16 and one `more`; a stop leaves the head at the last entry; a failed fsync never reaches it', async () => {
-  const a = written(2);
+test('the head: findings whose entries are not on disk are held, 16 and one `more`; a stop leaves the head at the last entry; a failed fsync never reaches it', async (t) => {
+  const a = written(t, 2);
   const head = () => headOf(a.file);
   // The disk refuses every append: 17 findings wait, and the head carries 16 of them and a `more`.
   await failing('openSync', 'ENOSPC', at(a.file), async () => {
@@ -570,7 +569,7 @@ test('the head: findings whose entries are not on disk are held, 16 and one `mor
   assert.equal((await a.log.verify()).findings.filter((f) => f.held).length, 0);
 
   // An fsync that fails: the entry is written, never in the head, until an fsync returns.
-  const b = written(2);
+  const b = written(t, 2);
   let once = true;
   await failing('fsyncSync', 'EIO', () => (once ? !(once = false) : false), () => { b.log.write(SAM, 'login', 'sam', 'not durable yet'); });
   b.log.headLane.flushSync();
@@ -579,8 +578,8 @@ test('the head: findings whose entries are not on disk are held, 16 and one `mor
   assert.equal(headOf(b.file).seq, 3);
 });
 
-test('the head: findings it held when the process ended, their entries never on disk, are found again at the next start', async () => {
-  const a = written(2);
+test('the head: findings it held when the process ended, their entries never on disk, are found again at the next start', async (t) => {
+  const a = written(t, 2);
   await failing('openSync', 'ENOSPC', at(a.file), () => {
     for (let i = 1; i <= 17; i++) a.log._finding('fork', 'finding ' + i);
     a.log.headLane.flushSync();
@@ -595,8 +594,8 @@ test('the head: findings it held when the process ended, their entries never on 
   assert.deepEqual([r.mark, r.findings.length, r.findings.every((f) => f.confirm && !f.held)], ['broken', 17, true]);
 });
 
-test('the head: a lane that cannot save it is △ with its error; a head saved or a rotation during a check does not change its answer', async () => {
-  const a = written(2);
+test('the head: a lane that cannot save it is △ with its error; a head saved or a rotation during a check does not change its answer', async (t) => {
+  const a = written(t, 2);
   const headFile = path.join(recordsOf(a.file), 'head-' + entries(a.file)[0].l + '.json');
   fs.rmSync(headFile);
   fs.mkdirSync(headFile); fs.writeFileSync(path.join(headFile, 'x'), 'x');   // the rename over it fails, as a held file does
@@ -609,7 +608,7 @@ test('the head: a lane that cannot save it is △ with its error; a head saved o
   a.log.headLane.flushSync();
   assert.equal((await a.log.verify()).mark, 'intact', 'and back to ✓ once it lands');
 
-  const file = fresh();
+  const file = fresh(t);
   keyedChainOf(56_000, { file });   // over 20 MB: the next entry rotates the file
   const log = auditLog(file);
   log.open();
@@ -624,46 +623,46 @@ test('the head: a lane that cannot save it is △ with its error; a head saved o
 });
 
 // ---------------------------------------------------------------- a moved log, and the log written last
-test('moved, and the last log: an upgrade\'s copy is ✓, a cut meanwhile is found, a stripped or another log where the last one is gone is ✕', async () => {
-  const records = recordsOf(fresh());
+test('moved, and the last log: an upgrade\'s copy is ✓, a cut meanwhile is found, a stripped or another log where the last one is gone is ✕', async (t) => {
+  const records = recordsOf(fresh(t));
   const open = (file) => auditLog(file, { records });
   // Each log here keeps one records folder: one machine.
-  const at1 = path.join(tmp('agm-at-'), 'audit.jsonl');
+  const at1 = path.join(h.tmpDir(t, 'agm-at-'), 'audit.jsonl');
   const one = auditLog(at1, { records });
   for (let i = 0; i < 4; i++) one.write(SAM, 'login', 'sam', 'one ' + i);
   one.flush();
   // The copy an upgrade makes, at a new path, with a cut made meanwhile.
-  const at2 = path.join(tmp('agm-at-'), 'audit.jsonl');
+  const at2 = path.join(h.tmpDir(t, 'agm-at-'), 'audit.jsonl');
   put(at2, lines(at1).slice(0, 3));
   const r = await open(at2).verify();
   assert.deepEqual(actionsOf(at2).slice(3), ['audit.cut', 'audit.moved']);
   assert.deepEqual(kinds(r), ['cut']);
 
   // Stripped to plain hashes and put at a new path, the last log's folder gone: ✕ "is not there".
-  const s = path.join(tmp('agm-at-'), 'audit.jsonl');
+  const s = path.join(h.tmpDir(t, 'agm-at-'), 'audit.jsonl');
   const solo = auditLog(s, { records });
   for (let i = 0; i < 3; i++) solo.write(SAM, 'login', 'sam', 'solo ' + i);
   solo.flush();
   let prev = rules.GENESIS;
   const stripped = entries(s).map(({ l: _l, k: _k, h: _h, ...e }) => { e.prev = prev; e.h = audit.hashOf(e); prev = e.h; return JSON.stringify(e); });
   fs.rmSync(path.dirname(s), { recursive: true });
-  const s2 = path.join(tmp('agm-at-'), 'audit.jsonl');
+  const s2 = path.join(h.tmpDir(t, 'agm-at-'), 'audit.jsonl');
   put(s2, stripped);
   const sr = await open(s2).verify();
   assert.ok(sr.findings.some((f) => f.kind === 'last' && f.words.startsWith('the log this machine wrote last (3 entries, at ' + path.dirname(s) + ', ')), JSON.stringify(sr.findings));
   assert.equal(sr.mark, 'broken');
 
   // Another genuine log of this machine at a new path: ✕ while the last log's folder is gone, nothing while it is there.
-  const x = path.join(tmp('agm-at-'), 'audit.jsonl');
-  const y = path.join(tmp('agm-at-'), 'audit.jsonl');
+  const x = path.join(h.tmpDir(t, 'agm-at-'), 'audit.jsonl');
+  const y = path.join(h.tmpDir(t, 'agm-at-'), 'audit.jsonl');
   for (const [f, w] of [[x, 'x'], [y, 'y']]) { const l = auditLog(f, { records }); l.write(SAM, 'login', 'sam', w); l.flush(); }
   // y was written last. x, moved to a new path while y is still where it was: only the move.
-  const x2 = path.join(tmp('agm-at-'), 'audit.jsonl');
+  const x2 = path.join(h.tmpDir(t, 'agm-at-'), 'audit.jsonl');
   fs.copyFileSync(x, x2);
   const kept = await open(x2).verify();
   assert.deepEqual([kept.mark, kinds(kept)], ['intact', []], 'the last log is still there: not a finding');
   // Now x2 was written last; y written again elsewhere, x2's folder gone.
-  const y2 = path.join(tmp('agm-at-'), 'audit.jsonl');
+  const y2 = path.join(h.tmpDir(t, 'agm-at-'), 'audit.jsonl');
   fs.copyFileSync(y, y2);
   fs.rmSync(path.dirname(x2), { recursive: true });
   const gone = await open(y2).verify();
@@ -671,14 +670,14 @@ test('moved, and the last log: an upgrade\'s copy is ✓, a cut meanwhile is fou
 });
 
 // ---------------------------------------------------------------- another machine's key
-test('another machine: a log keyed under A and opened under B is a span B accepts; back on A, a fork and B\'s span are accepted together', async () => {
-  const file = fresh();
+test('another machine: a log keyed under A and opened under B is a span B accepts; back on A, a fork and B\'s span are accepted together', async (t) => {
+  const file = fresh(t);
   const recA = recordsOf(file);
-  const recB = tmp('agm-rec-b-');
+  const recB = h.tmpDir(t, 'agm-rec-b-');
   const a = auditLog(file, { records: recA });
   for (let i = 0; i < 4; i++) a.write(SAM, 'login', 'sam', 'A ' + i);
   a.flush();
-  const copy = path.join(tmp('agm-b-'), 'audit.jsonl');
+  const copy = path.join(h.tmpDir(t, 'agm-b-'), 'audit.jsonl');
   fs.copyFileSync(file, copy);
   for (const w of ['A 5', 'A 6', 'A 7']) a.write(SAM, 'login', 'sam', w);
   a.flush();
@@ -709,8 +708,8 @@ test('another machine: a log keyed under A and opened under B is a span B accept
   assert.equal((await back.verify()).mark, 'linked');
 });
 
-test('another machine: a run appended after the head under a made-up key, opened by a made-up `audit.keyless`, is their own claim; a genuine keyless run reads as one', async () => {
-  const a = written(4);
+test('another machine: a run appended after the head under a made-up key, opened by a made-up `audit.keyless`, is their own claim; a genuine keyless run reads as one', async (t) => {
+  const a = written(t, 4);
   const last = entries(a.file).pop();
   const made = 'deadbeefdeadbeef';
   let prev = last.h;
@@ -730,9 +729,9 @@ test('another machine: a run appended after the head under a made-up key, opened
 
   // A genuine keyless run: the machine key could not be read (EBUSY), so the run had a key of its own and marked it.
   const was = process.env.AGM_KEY_DIR;
-  const keyDir = tmp('agm-key-');
+  const keyDir = h.tmpDir(t, 'agm-key-');
   fs.writeFileSync(path.join(keyDir, 'machine.key'), FIXTURE_KEY.toString('base64'));
-  const file = fresh();
+  const file = fresh(t);
   const records = path.join(keyDir, 'audit');
   const real = () => new audit.AuditLog(file, { keys: audit.keysFrom(secretbox.derive), records });
   try {
@@ -760,8 +759,8 @@ test('another machine: a run appended after the head under a made-up key, opened
   } finally { restoreKeyDir(was); secretbox._reset(); }
 });
 
-test('a span with no boundary after it is ✕: entries added behind the running server\'s back', async () => {
-  const a = written(3);
+test('a span with no boundary after it is ✕: entries added behind the running server\'s back', async (t) => {
+  const a = written(t, 3);
   plainAfter(a.file, 2);   // while this log is open: no start has seen them
   const r = await a.log.verify();
   assert.deepEqual([r.ok, r.mark], [false, 'broken']);
@@ -770,8 +769,8 @@ test('a span with no boundary after it is ✕: entries added behind the running 
 });
 
 // ---------------------------------------------------------------- Accept, in the log
-test('accept: by the ids ticked under the digest shown; a ✕ only with its confirmation; the span alone leaves a cut open; never a broken entry', async () => {
-  const file = fresh();
+test('accept: by the ids ticked under the digest shown; a ✕ only with its confirmation; the span alone leaves a cut open; never a broken entry', async (t) => {
+  const file = fresh(t);
   fs.writeFileSync(file, chainOf(5));
   const log = auditLog(file);
   for (let i = 0; i < 3; i++) log.write(SAM, 'login', 'sam', 'keyed ' + i);
@@ -797,7 +796,7 @@ test('accept: by the ids ticked under the digest shown; a ✕ only with its conf
   assert.equal((await b.verify()).mark, 'linked');
 
   // A changed entry is never accepted: the check is broken, and nothing is written.
-  const c = written(3);
+  const c = written(t, 3);
   plainAfter(c.file, 2);
   const cr = await auditLog(c.file).verify();
   put(c.file, lines(c.file).map((x, i) => (i === 1 ? x.replace('message 2', 'message Q') : x)));
@@ -809,8 +808,8 @@ test('accept: by the ids ticked under the digest shown; a ✕ only with its conf
   assert.equal(lines(c.file).length, before);
 });
 
-test('accept: while the disk refuses the entry, "not accepted yet" and the head unchanged; it takes effect once the entry is on disk', async () => {
-  const file = fresh();
+test('accept: while the disk refuses the entry, "not accepted yet" and the head unchanged; it takes effect once the entry is on disk', async (t) => {
+  const file = fresh(t);
   fs.writeFileSync(file, chainOf(3));
   const log = auditLog(file);
   const r = await log.verify();
@@ -831,8 +830,8 @@ test('accept: while the disk refuses the entry, "not accepted yet" and the head 
 });
 
 // ---------------------------------------------------------------- a rollback
-test('rollback: entries written on with plain hashes after keyed ones (0.5.1 again) read △, ◇ once accepted, and an edit before them is still found', async () => {
-  const a = written(4);
+test('rollback: entries written on with plain hashes after keyed ones (0.5.1 again) read △, ◇ once accepted, and an edit before them is still found', async (t) => {
+  const a = written(t, 4);
   plainAfter(a.file, 3);
   const log = auditLog(a.file);
   const r = await log.verify();
@@ -846,12 +845,15 @@ test('rollback: entries written on with plain hashes after keyed ones (0.5.1 aga
 });
 
 // ---------------------------------------------------------------- the data folder's lock
-test('the lock: a copy refuses a folder held under 0.5.1\'s name for it, and under its own name by another path to it; a log\'s record has one id from its first start', async () => {
-  const real = tmp('agm-lock-');
+test('the lock: a copy refuses a folder held under 0.5.1\'s name for it, and under its own name by another path to it; a log\'s record has one id from its first start', async (t) => {
+  const real = h.tmpDir(t, 'agm-lock-');
   const link = real + '-link';
   fs.symlinkSync(real, link, process.platform === 'win32' ? 'junction' : 'dir');
+  t.after(() => fs.rmSync(link, { force: true }));   // the link itself, never what it points to
   const pipe = (id) => (process.platform === 'win32' ? '\\\\.\\pipe\\agmessage-' + id : path.join(os.tmpdir(), 'agmessage-' + id + '.sock'));
   const legacy = (dir) => crypto.createHash('sha256').update(process.platform === 'win32' ? path.resolve(dir).toLowerCase() : path.resolve(dir)).digest('hex').slice(0, 16);
+  // A copy refused at its second name has gone (process.exit) still holding its first: that socket stays on the disk.
+  if (process.platform !== 'win32') t.after(() => fs.rmSync(pipe(legacy(link)), { force: true }));
   const hold = (where) => new Promise((resolve) => { const s = net.createServer((c) => c.end()); s.listen(where, () => resolve(s)); });
   const second = (dataDir) => new Promise((resolve) => {
     const c = spawn(process.execPath, [path.join(h.ROOT, 'server.js')], { env: { ...process.env, PORT: '0', HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: real + '-keys', ADMIN_TOKEN: h.TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -888,7 +890,7 @@ test('the lock: a copy refuses a folder held under 0.5.1\'s name for it, and und
   assert.match(said[0], /is taken by its path as given: its real path could not be read \(ENOENT\)/);
 
   // The folder record's id at a first start, with no log file yet, is the id at the next start.
-  const file = fresh();
+  const file = fresh(t);
   const id = placeId(path.dirname(file), 'audit.jsonl');
   const first = auditLog(file);
   first.write(SAM, 'login', 'sam', 'first');
@@ -899,7 +901,7 @@ test('the lock: a copy refuses a folder held under 0.5.1\'s name for it, and und
 
 // ---------------------------------------------------------------- end to end
 test('end to end: the first start asks in the black window and in health, the token at the laptop accepts, and nothing else does', async (t) => {
-  const dataDir = tmp('agm-e2e-');
+  const dataDir = h.tmpDir(t, 'agm-e2e-');
   fs.writeFileSync(path.join(dataDir, 'audit.jsonl'), chainOf(5));
   let srv = await h.startServer({ AGM_DATA_DIR: dataDir });
   t.after(async () => { await h.stopServer(srv.child); });
@@ -970,7 +972,7 @@ test('end to end: the first start asks in the black window and in health, the to
 });
 
 test('end to end: a run with no machine key still starts and signs in, opens with `audit.keyless`, marks the run and says so; nothing is sealed', async (t) => {
-  const dataDir = tmp('agm-e2e-');
+  const dataDir = h.tmpDir(t, 'agm-e2e-');
   const keyDir = dataDir + '-keys';
   fs.mkdirSync(path.join(keyDir, 'machine.key'), { recursive: true });   // a key that cannot be read (EISDIR)
   const srv = await h.startServer({ AGM_DATA_DIR: dataDir });
@@ -1025,7 +1027,7 @@ test('end to end: a run with no machine key still starts and signs in, opens wit
 });
 
 test('end to end: a later start says again what is still open, and a line changed while it was stopped, in the black window and in health', async (t) => {
-  const dataDir = tmp('agm-e2e-');
+  const dataDir = h.tmpDir(t, 'agm-e2e-');
   const file = path.join(dataDir, 'audit.jsonl');
   fs.writeFileSync(file, chainOf(3));
   let srv = await h.startServer({ AGM_DATA_DIR: dataDir });

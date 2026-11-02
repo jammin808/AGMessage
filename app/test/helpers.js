@@ -15,17 +15,55 @@ const TOKEN = 'testadmintoken01';
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
+// ---------------------------------------------------------------- throwaway folders
+// A test run leaves the temp folder as it found it. Each folder made here is removed with the -keys and -uploads
+// folders a server keeps beside its data folder (launch names them so) once its owner is done and no server started
+// here runs in it: a data folder startServer makes is its server's, removed when that server stops (restartServer keeps
+// it for the restart); a folder tmpDir makes is its test's, removed when the test ends, after the servers in it stop.
+// Whatever a test that failed part way leaves is removed when its file's process exits.
+const BESIDE = ['', '-keys', '-uploads'];
+/** Each throwaway not yet removed → {server: startServer made it, due: its owner is done, on: the servers running in it}. */
+const throwaways = new Map();
+/** Throwaways already removed: no server starts in one again (a test that reuses a folder makes it with tmpDir). */
+const removed = new Set();
+const own = (dir, server) => { throwaways.set(dir, { server, due: false, on: new Set() }); return dir; };
+function remove(dir) {
+  for (const s of BESIDE) fs.rmSync(dir + s, { recursive: true, force: true, maxRetries: 5 });
+  throwaways.delete(dir);
+  removed.add(dir);
+}
+/** Remove `dir` once its owner is done and no server runs in it. */
+const settle = (dir) => { const f = throwaways.get(dir); if (f && f.due && f.on.size === 0) remove(dir); };
+const within = (p, dir) => BESIDE.some((s) => p === dir + s || p.startsWith(dir + s + path.sep));
+/** The throwaways holding any of these folders (a server's data, key and upload folders). */
+const holding = (folders) => [...throwaways.keys()].filter((dir) => folders.some((p) => typeof p === 'string' && within(path.resolve(p), dir)));
+/** A throwaway folder (<temp>/<prefix>XXXXXX) for test `t`, removed with its -keys and -uploads when `t` is done. */
+function tmpDir(t, prefix) {
+  const dir = own(fs.mkdtempSync(path.join(os.tmpdir(), prefix)), false);
+  t.after(() => { const f = throwaways.get(dir); if (f) { f.due = true; settle(dir); } });
+  return dir;
+}
+// At exit, and again for those removed already: a save a store in this process still had pending when its test ended (a
+// WriteLane's, on its timer) makes its folder again, and no timer runs after this.
+process.on('exit', () => {
+  for (const dir of [...throwaways.keys(), ...removed]) {
+    if (throwaways.get(dir)?.on.size) continue;   // a server still runs in it (one this file never stopped): it saves there as it goes
+    try { remove(dir); } catch (e) { process.stderr.write(`test/helpers.js: a throwaway folder is left behind: ${dir} (${e.code || e.message})\n`); }
+  }
+});
+
 /** How many ports startServer tries when each one it chose is held by the time its server binds it. */
 const START_TRIES = 5;
 // What server.js says when its port is held, whoever holds it (lib/startup.js portHolderWords), and the port it names:
 // "… is already running on port N", "… is serving on port N", "… holds port N", "Another program is using port N".
 const PORT_HELD = /(?:is already running on|is serving on|holds|is using) port (\d+)\b/g;
 const saysPortHeld = (out, port) => [...out.matchAll(PORT_HELD)].some((m) => Number(m[1]) === port);
+const exited = (child) => child.exitCode !== null || child.signalCode !== null;
 
 /**
  * One server on `port`: resolves {srv} once it serves (as startServer resolves), or {out, held} once it has gone
- * without serving, every line it wrote read (`held`: it said `port` is held), or after 15 s without serving (then it is
- * ended, and `held` is false).
+ * without serving, every line it wrote read (`held`: it said `port` is held), or once it has been ended for not serving
+ * within 15 s (`held` false).
  */
 function launch(port, dataDir, env) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
@@ -46,7 +84,11 @@ function launch(port, dataDir, env) {
     child.stderr.on('data', read);
     // 'close' comes after the exit and the last of its output: a server that stops by itself has said why by then.
     child.once('close', () => finish({ out, held: saysPortHeld(out, port) }));
-    timer = setTimeout(() => { child.kill(); finish({ out, held: false }); }, 15000);
+    timer = setTimeout(() => {
+      if (exited(child)) { finish({ out, held: false }); return; }
+      child.once('exit', () => finish({ out, held: false }));
+      child.kill();
+    }, 15000);
   });
 }
 
@@ -60,29 +102,59 @@ function launch(port, dataDir, env) {
  * START_TRIES ports in all. Only for that: a server that stops for any other reason, or does not serve within 15 s,
  * fails the start with its own words. A port the test names (env.PORT, as restartServer does) is never moved: it is
  * tried once. `pickPort` chooses each port (freePort; this helper's own test hands it ports it holds).
+ *
+ * Without env.AGM_DATA_DIR the data folder is made here and is the server's: stopServer removes it (and its -keys and
+ * -uploads). A test that starts a server on a folder again, or reads it once its server has stopped, makes the folder
+ * with tmpDir(t, …) and names it; a folder already removed is refused, never served empty.
  */
 async function startServer(env = {}, { pickPort = freePort } = {}) {
-  const dataDir = env.AGM_DATA_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  if (removed.has(env.AGM_DATA_DIR)) throw new Error(`server not started: ${env.AGM_DATA_DIR} went with the server that stopped on it; a test that starts a server on a folder again makes it with tmpDir(t, …)`);
+  const made = !env.AGM_DATA_DIR;
+  const dataDir = made ? own(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-')), true) : env.AGM_DATA_DIR;
+  // A folder made here for a server that never served is removed with the error (that server has exited by then).
+  const fail = (words) => { if (made) { throwaways.get(dataDir).due = true; settle(dataDir); } return new Error(words); };
   const named = env.PORT ? Number(env.PORT) : null;
   const held = [];
   for (;;) {
     const port = named ?? await pickPort();
     const r = await launch(port, dataDir, env);
-    if (r.srv) return r.srv;
-    if (named !== null || !r.held) throw new Error('server did not start:\n' + r.out);
+    if (r.srv) { serve(r.srv.child, dataDir, env); return r.srv; }
+    if (named !== null || !r.held) throw fail('server did not start:\n' + r.out);
     held.push(port);
-    if (held.length >= START_TRIES) throw new Error(`server did not start: each of ${START_TRIES} ports was held by the time it bound it (${held.join(', ')}):\n` + r.out);
+    if (held.length >= START_TRIES) throw fail(`server did not start: each of ${START_TRIES} ports was held by the time it bound it (${held.join(', ')}):\n` + r.out);
   }
+}
+/** A server → the data folder startServer made, which it holds: stopping it removes the folder unless asked to keep it. */
+const serversFolder = new WeakMap();
+/**
+ * The throwaways holding any of `paths` are not removed until `child` (a server, or another process using them) has
+ * exited. startServer does it for its servers; a test that spawns one itself does it for its own.
+ */
+function occupy(child, paths) {
+  if (exited(child)) return;
+  const dirs = holding(paths);
+  for (const dir of dirs) throwaways.get(dir).on.add(child);
+  child.once('exit', () => { for (const dir of dirs) { const f = throwaways.get(dir); if (f) { f.on.delete(child); settle(dir); } } });
+}
+/** A server that serves occupies its folders and any file its env names (a test clock, the opener's record). */
+function serve(child, dataDir, env) {
+  occupy(child, [dataDir, env.AGM_KEY_DIR ?? dataDir + '-keys', env.AGM_UPLOAD_DIR ?? dataDir + '-uploads', ...Object.values(env)]);
+  if (throwaways.get(dataDir)?.server) serversFolder.set(child, dataDir);
 }
 /**
  * Stop a server as the watchdog does: asked over IPC, so it saves first on every platform (on Windows a signal sent to a
- * child ends it at once, unsaved). One that has not gone in 3 s is ended.
+ * child ends it at once, unsaved). One that has not gone in 3 s is ended. Resolves once it has exited, the data folder
+ * startServer made for it removed by then, unless `keep` (restartServer starts the same server on it again).
  */
-const stopServer = (child) => new Promise((resolve) => {
-  if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
-  child.once('exit', resolve);
+const stopServer = (child, { keep = false } = {}) => new Promise((resolve) => {
+  const mine = serversFolder.get(child);
+  if (mine && !keep && throwaways.has(mine)) throwaways.get(mine).due = true;
+  let timer = null;
+  const gone = () => { clearTimeout(timer); if (mine) settle(mine); resolve(); };
+  if (exited(child)) { gone(); return; }
+  child.once('exit', gone);
   try { child.send({ t: 'stop' }); } catch { child.kill('SIGTERM'); }
-  setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } resolve(); }, 3000);
+  timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, 3000);
 });
 
 /** fetch with JSON in and out; returns {status, body, cookie, headers}. */
@@ -373,7 +445,7 @@ async function fakeNode({ t = 'patterns', name = 'Patterns FOH', token = 'node-t
 
 /** The same server stopped (saved first) and started again on its data folder and port, as the watchdog would. */
 async function restartServer(srv, env = {}) {
-  await stopServer(srv.child);
+  await stopServer(srv.child, { keep: true });
   return startServer({ AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port), ...env });
 }
 
@@ -530,7 +602,7 @@ function unzipTo(buf, dir) {
 }
 
 module.exports = {
-  stagewatchQuery, ROOT, TOKEN, freePort, START_TRIES, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
+  stagewatchQuery, ROOT, TOKEN, freePort, START_TRIES, wait, until, tmpDir, occupy, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
   FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, acceptAll, brief,
   readZip, unzipTo, SEED_WORDS,
 };

@@ -44,9 +44,21 @@ function browserPath() {
 }
 const freePort = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 
+// Every folder the smoke makes under the temp folder: removed, with the -keys and -uploads a server keeps beside its data
+// folder, once the browser and every server it started have gone. A run leaves the temp folder as it found it.
+const scratch = [];
+const scratchDir = (prefix) => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); scratch.push(dir); return dir; };
+function removeScratch() {
+  for (const dir of scratch) {
+    for (const d of [dir, dir + '-keys', dir + '-uploads']) {
+      try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5 }); } catch (e) { console.error(`  left behind: ${d} (${e.code || e.message})`); }
+    }
+  }
+}
+
 async function startServer(port, dataDir) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '', TZ: SERVER_TZ },
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', AGM_UPLOAD_DIR: dataDir + '-uploads', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '', TZ: SERVER_TZ },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   if (child.channel) child.channel.unref();
@@ -95,7 +107,7 @@ async function launchEdge() {
   const exe = browserPath();
   if (!exe) throw new Error('no Edge, Chrome or Chromium found (set AGM_BROWSER to one)');
   const port = await freePort();
-  const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-edge-'));
+  const prof = scratchDir('agm-edge-');
   // A container running as root has no user namespace for Chromium's sandbox; everywhere else the sandbox stays on.
   const sandbox = typeof process.getuid === 'function' && process.getuid() === 0 ? ['--no-sandbox'] : [];
   // Each tab stands for a device of its own (a laptop, a phone, a stage screen) whose page is in front. A page in a hidden
@@ -191,7 +203,18 @@ async function launchEdge() {
         close: () => ws.close(),
       };
     },
-    close() { try { browser.ws.close(); proc.kill(); } catch { /* ignore */ } setTimeout(() => { try { fs.rmSync(prof, { recursive: true, force: true }); } catch { /* ignore */ } }, 1500); },
+    /**
+     * Closes the browser as its own menu would (Browser.close: it clears its temporary files, the profile's lock among
+     * them) and resolves once it has gone, so its profile can go then. Without DevTools it is ended; after 5 s, outright.
+     */
+    close() {
+      if (proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve();
+      return new Promise((resolve) => {
+        const hard = setTimeout(() => proc.kill('SIGKILL'), 5000);
+        proc.once('exit', () => { clearTimeout(hard); resolve(); });
+        browser.send('Browser.close').catch(() => proc.kill());   // its DevTools socket already closed
+      });
+    },
   };
 }
 
@@ -322,18 +345,18 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-'));
+  const dataDir = scratchDir('agm-smoke-');
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
-  const server = await startServer(port, dataDir);
-  const edge = await launchEdge();
+  let server = null;
+  let edge = null;
   let sw = null;
   let patterns = null;
   let server2 = null;
-  let dataDir2 = null;
   let server3 = null;
-  let dataDir3 = null;
   try {
+    server = await startServer(port, dataDir);
+    edge = await launchEdge();   // a browser that cannot be found or started fails the run here, and it is cleared away all the same
     const login = await fetch(base + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
     const cookie = login.headers.get('set-cookie').split(';')[0];
     const { code } = await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Smoke AGM' }) })).json();
@@ -412,7 +435,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const grouped = (fp) => String(fp).match(/.{4}/g).join(' ');
     const keyShown = await admin.until(`(() => { const k = document.getElementById('auditSignKey'); return !k.hidden && !document.getElementById('auditExportRow').hidden && document.getElementById('signKeyText').textContent + '|' + document.getElementById('auditLastExport').textContent; })()`);
     report(keyShown === grouped(signKey) + '|No export in the log\'s newest file: export at the end of each show day.', `Health shows the signing key in full, no export yet, and Export… to the token (${keyShown})`);
-    const dlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-dl-'));
+    const dlDir = scratchDir('agm-smoke-dl-');
     const downloads = new Map();
     edge.onBrowser((m) => {
       if (m.method === 'Browser.downloadWillBegin') downloads.set(m.params.guid, { name: m.params.suggestedFilename, state: '' });
@@ -487,7 +510,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await admin.eval(`document.getElementById('exportDialog').close()`);
     // The browser verifier, opened from disk: "not compared" until the key is typed, then ✓; the entries drawn; nothing
     // asked of the network; one byte changed reads "nothing in the bundle is vouched for".
-    const bundleDir = savedExport ? unzipTo(savedBytes, fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-bundle-'))) : os.tmpdir();
+    const bundleRoot = scratchDir('agm-smoke-bundle-');   // empty when nothing was saved: the checks below then fail, on it
+    const bundleDir = savedExport ? unzipTo(savedBytes, bundleRoot) : bundleRoot;
     const checker = await edge.tab(pathToFileURL(path.join(bundleDir, 'verify', 'verify.html')).href);
     await checker.until('document.readyState === "complete"');
     const asked = [];
@@ -500,7 +524,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const seeded = await checker.eval(`[...document.querySelectorAll('#rows tr')].some((tr) => tr.textContent.includes('signed in with the host laptop\\'s admin token'))`);
     report(/not compared with a record of the laptop's key/.test(notCompared || '') && pageOk === '✓ Signed by the key you expected and whole; the laptop said ✓.' && seeded === true, `the browser verifier reads "not compared" without the key and ✓ with it, and draws the entries (${pageOk})`);
     await checker.shot(path.join(OUT, 'audit-verifier.png'));
-    const changedDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-changed-')), path.basename(bundleDir));
+    const changedDir = path.join(scratchDir('agm-smoke-changed-'), path.basename(bundleDir));
     fs.cpSync(bundleDir, changedDir, { recursive: true });
     const logBytes = fs.readFileSync(path.join(changedDir, 'log', 'audit.jsonl'));
     logBytes[20] ^= 1;
@@ -912,7 +936,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // The audit log's four marks and Accept, on a second AGMessage whose log came from 0.5.1 (△) and lost its newest entry
     // while it was stopped (✕): an admin account is told where to accept; the token at the laptop accepts, a ✕ only with
     // its own confirmation, and the log reads △, then ◇.
-    dataDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-audit-'));
+    const dataDir2 = scratchDir('agm-smoke-audit-');
     fs.writeFileSync(path.join(dataDir2, 'audit.jsonl'), chainOf(5));
     const port2 = await freePort();
     const base2 = `http://127.0.0.1:${port2}`;
@@ -977,7 +1001,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // The audit log carried across events, on a third AGMessage whose log holds an event's archive point at entry 9: the
     // token at the laptop splits it from Health (the point listed, the word typed), Health then names where the check
     // begins, and Accounts → Audit log draws the archive with its mark and checks it on its own.
-    dataDir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-smoke-split-'));
+    const dataDir3 = scratchDir('agm-smoke-split-');
     fs.mkdirSync(dataDir3 + '-keys', { recursive: true });
     fs.writeFileSync(path.join(dataDir3 + '-keys', 'machine.key'), FIXTURE_KEY.toString('base64'));   // the tests' fixed machine key: the seeded log is this copy's own
     keyedLogWithPoints(12, { file: path.join(dataDir3, 'audit.jsonl'), records: path.join(dataDir3 + '-keys', 'audit'), points: [9] });
@@ -1025,11 +1049,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
   } finally {
     if (sw) await sw.close();
     if (patterns) await patterns.close();
-    edge.close();
-    try { server.send({ t: 'stop' }); } catch { server.kill(); }   // as the watchdog stops it: saved first
-    if (server2) await stopServer(server2);
-    if (server3) await stopServer(server3);
-    setTimeout(() => { for (const d of [dataDir, dataDir2, dataDir3]) if (d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } } }, 1000);
+    if (edge) await edge.close();
+    await Promise.all([server, server2, server3].filter(Boolean).map(stopServer));   // as the watchdog stops them: saved first
+    removeScratch();
   }
   console.log(failures === 0 ? `ALL OK (screenshots in ${OUT})` : `${failures} FAILED`);
   setTimeout(() => process.exit(failures ? 1 : 0), 1500);

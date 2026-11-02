@@ -7,11 +7,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { io } = require('socket.io-client');
 const acc = require('../lib/accounts');
-const { startServer, stopServer, api, connect, emit, once, wait, until, TOKEN } = require('./helpers');
+const { tmpDir, startServer, stopServer, api, connect, emit, once, wait, until, TOKEN } = require('./helpers');
 
 let addr = 0;
 /** Cloudflare's headers for a visitor at an address of its own (each address has its own sign-in allowance). */
@@ -84,7 +83,7 @@ test('a refused sign-in never says a password was right, nor writes down a passw
 });
 
 test('a password stored at an older cost is stored again only once its sign-in is let in: a refused one does no more than a wrong one', async (t) => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  const dataDir = tmpDir(t, 'agm-e2e-');
   const old = await acc.hashPassword(ANA.password, { ...acc.SCRYPT, logN: acc.SCRYPT.logN - 1 });
   const at = Date.now();
   fs.writeFileSync(path.join(dataDir, 'accounts.json'), JSON.stringify({ v: 1, users: [{
@@ -282,8 +281,8 @@ test('when a session ends its open pages end with it; admin rights through the t
 
 // ---------------------------------------------------------------- a page in use all day
 const CLOCK = path.join(__dirname, 'clock-preload.js');
-async function serverWithClock() {
-  const clock = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-clock-')), 'offset');
+async function serverWithClock(t) {
+  const clock = path.join(tmpDir(t, 'agm-clock-'), 'offset');
   fs.writeFileSync(clock, '0');
   const preload = '--require "' + CLOCK.split(path.sep).join('/') + '"';   // forward slashes: no escapes inside the quotes
   const srv = await startServer({ NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '), AGM_TEST_CLOCK: clock, AGM_SESSION_SWEEP_MS: '100' });
@@ -296,7 +295,7 @@ async function serverWithClock() {
 
 test('a page in use all day keeps its session past 14 hours; an idle one still ends; seven days ends even an open one', async (t) => {
   const HOUR = 3600_000;
-  const srv = await serverWithClock();
+  const srv = await serverWithClock(t);
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
@@ -333,7 +332,7 @@ test('a page in use all day keeps its session past 14 hours; an idle one still e
 
 // ---------------------------------------------------------------- what a restart keeps
 test('a restart keeps the admin token\'s sign-in; one account signing in again and again signs nobody else out', async (t) => {
-  let srv = await startServer();
+  let srv = await startServer({ AGM_DATA_DIR: tmpDir(t, 'agm-e2e-') });   // the test's: its server stops and starts again on it
   const { dataDir } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });

@@ -453,6 +453,15 @@ pdf.js's worker, as older iPads lack it, and no iPad was walked)
   5 ports in all; a test that names its port is never moved, and a server that stops for any other reason fails at
   once instead of after 15 s. `test/helpers.test.js` holds it with ports held on purpose (`docs/ANALYSIS.md` §1).
   Nothing the product does changed.
+- A test run leaves the temp folder as it found it. The tests made throwaway folders (`agm-*`, with a server's `-keys`
+  and `-uploads` beside them) and never removed them: on one development machine some 70,000, about 30 GB, filled the
+  disk, and below 1 GB free the server pauses uploads, so the uploads case of `test/server.test.js` failed with 507
+  whatever the code. Each is now removed when its test, or its server, is done, and never while a server runs in it.
+  The browser smoke removes its data folders, downloads, bundles and the browser's profile once the browser and its
+  servers have gone, closes the browser with `Browser.close` so it clears its own folder too, and checks a failed
+  export on an empty folder, never on the temp folder itself. `test/server.test.js` and the smoke keep a server's
+  uploads beside its data folder, no longer in `app/uploads`. `test/helpers.test.js` holds it (`docs/ANALYSIS.md` §1).
+  Nothing the product does changed.
 
 ## 0.5.1 — 2026-10-26 — the show desk and the Stagewatch link, as Stagewatch states them
 

@@ -5,6 +5,7 @@
 // every run.
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
 const net = require('net');
 const h = require('./helpers');
 
@@ -86,4 +87,30 @@ test('startServer: a server that stops for another reason than its port fails at
   assert.equal(handed.length, 1, 'one port chosen, no retry: ' + handed.join(', '));
   assert.ok(Date.now() - from < 10000, 'it fails when the server has gone, not after the 15 s a server is given to start');
   assert.equal((await h.api(holder.base, 'GET', '/api/health')).status, 200, 'the holder still serves');
+});
+
+test('throwaway folders: a server\'s own goes when it stops (kept across restartServer); a test\'s when the test ends, after its server', async (t) => {
+  const srv = await h.startServer();
+  const dir = srv.dataDir;
+  const beside = [dir, dir + '-keys', dir + '-uploads'];
+  assert.ok(beside.every((d) => fs.existsSync(d)), 'the data, key and upload folders, while it serves');
+  const again = await h.restartServer(srv);
+  assert.equal(again.dataDir, dir);
+  await h.stopServer(again.child);
+  for (const d of beside) assert.ok(!fs.existsSync(d), d + ' went with its server, after the restart that kept it');
+  await assert.rejects(h.startServer({ AGM_DATA_DIR: dir }), /went with the server that stopped on it/, 'never served again, empty');
+  assert.ok(!fs.existsSync(dir), 'and not made again');
+
+  let mine = '';
+  await t.test('a test\'s folder with a server in it', async (st) => {
+    mine = h.tmpDir(st, 'agm-e2e-');
+    const first = await h.startServer({ AGM_DATA_DIR: mine });
+    await h.stopServer(first.child);
+    assert.ok(fs.existsSync(mine) && fs.existsSync(mine + '-keys'), 'a test\'s folder outlives a server stopped in it');
+    const s = await h.startServer({ AGM_DATA_DIR: mine });
+    // The test's hooks run in the order they were added: the folder's first, then these two.
+    st.after(() => { assert.ok(fs.existsSync(mine) && fs.existsSync(mine + '-keys'), 'kept while its server runs'); });
+    st.after(() => h.stopServer(s.child));
+  });
+  assert.ok(![mine, mine + '-keys', mine + '-uploads'].some((d) => fs.existsSync(d)), 'removed once the test ended and its last server stopped');
 });
