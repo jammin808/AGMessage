@@ -106,8 +106,15 @@ async function startServer(port, dataDir, env = {}) {
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
-  for (let i = 0; i < 100 && !out.includes('is running'); i++) await sleep(100);
-  if (!out.includes('is running')) throw new Error('server did not start:\n' + out);
+  // As long as the tests' own start waits (test/helpers.js, 15 s). Missed, it says how long it waited, whether the server
+  // had ended and how, and what it said, and ends it, so a start that never came leaves nothing running.
+  const began = Date.now();
+  for (let i = 0; i < 150 && !out.includes('is running') && child.exitCode === null && child.signalCode === null; i++) await sleep(100);
+  if (!out.includes('is running')) {
+    const ended = child.exitCode !== null || child.signalCode !== null ? 'it ended (' + (child.signalCode || 'code ' + child.exitCode) + ')' : 'it was still running, and is ended';
+    child.kill();
+    throw new Error('server did not start within ' + (Date.now() - began) + ' ms: ' + ended + '; it said:\n' + (out || '(nothing)'));
+  }
   return child;
 }
 
