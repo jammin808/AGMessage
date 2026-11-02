@@ -21,9 +21,17 @@ async function deskSetup(t, { sw: swOptions = {}, env = {}, hallLink = false } =
   ctx.hall = (await api(ctx.srv.base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: ctx.admin })).body.code;
   ctx.ctl = await connect(ctx.srv.base, ctx.admin); ctx.sockets.push(ctx.ctl);
   ctx.nodeId = (await emit(ctx.ctl, 'admin:settings')).nodeId;
+  const linked = Date.now();
   if (hallLink) assert.ok((await emit(ctx.ctl, 'hall:configure', { code: ctx.hall, stagewatchUrl: sw.url, stagewatchKey: KEY })).ok);
   else assert.ok((await emit(ctx.ctl, 'admin:settings', { stagewatchUrl: sw.url, stagewatchKey: KEY })).ok);
-  await until(() => sw.requests.some((r) => r.url.includes('?target=')), 15000, 'AGMessage collects from the desk');
+  // The first collect follows the desk's check, and comes only once every Retry-After the test's own answers to that check
+  // ask for is out: its wait is 15 s more than those. Missed, it says what reached the desk and when.
+  const held = (swOptions.answerDeskChecks || []).reduce((ms, a) => ms + (a.retryAfter || 0) * 1000, 0);
+  try {
+    await until(() => sw.requests.some((r) => r.url.includes('?target=')), 15000 + held, 'AGMessage collects from the desk');
+  } catch (e) {
+    throw new Error(e.message + ' within ' + (15000 + held) + ' ms of the link: ' + sw.requests.map((r) => '+' + (r.at - linked) + ' ms ' + r.method + ' ' + r.url.split('?')[0] + (r.url.includes('?') ? '?' + r.url.split('?')[1].split('=')[0] : '')).join(', '), { cause: e });
+  }
   return ctx;
 }
 const forUs = (ctx, line) => ({ line, state: 'approved', decidedBy: 'SM', from: { t: 'main', id: 'swdesk', name: 'Desk' }, target: { t: 'messenger', id: ctx.nodeId, name: 'AGMessage' } });
