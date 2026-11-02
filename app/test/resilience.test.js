@@ -161,8 +161,12 @@ test('watchdog: a signal to it leaves no server behind — asked to stop where s
   assert.ok(await until(() => !alive(), 6000), 'no server outlives its watchdog');
   if (process.platform === 'win32') {
     // A signal ends the watchdog at once, and the job libuv puts every child in ends its server with it: no orphan, and
-    // nothing saved. Ctrl+C and the window closing reach the server itself (SIGINT, SIGHUP), so they still save.
-    assert.ok(!fs.existsSync(path.join(dir, 'saved')));
+    // the watchdog never asks it to stop. Ending the watchdog also closes the server's channel, and which comes first is
+    // Windows' to order: a server that hears its channel close before the job ends it saves, as a server whose watchdog
+    // went away does; one ended first saves nothing. Ctrl+C and the window closing reach the server itself (SIGINT,
+    // SIGHUP), so they save.
+    const saved = fs.existsSync(path.join(dir, 'saved')) ? fs.readFileSync(path.join(dir, 'saved'), 'utf8') : '';
+    assert.ok(['', 'the watchdog went away'].includes(saved), 'never asked to stop by a watchdog that was ended: ' + saved);
   } else {
     assert.equal(fs.readFileSync(path.join(dir, 'saved'), 'utf8'), 'asked to stop', 'a signalled watchdog asks its server; it does not kill it');
   }

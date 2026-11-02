@@ -594,8 +594,14 @@ test('the probes: a start recorded and its exit code; a profile\'s change listed
     fs.writeFileSync(path.join(home, 'NTUSER.DAT'), 'hive, longer');
     assert.deepEqual(T.snapshotDiff(before, T.snapshot(home)), { added: [path.join('AppData', 'Local', 'cloudflared.json')], addedCount: 1, changed: ['NTUSER.DAT'], changedCount: 1, removed: 0 });
     assert.equal(T.snapshot(home, { max: 1 }).size, 1, 'bounded');
-    // UDP: a hello this process sends is heard on its port.
-    const udp = await T.udpHeard({ port: await h.freePort(), to: '127.0.0.1', ms: 2000 });
+    // UDP: a hello this process sends is heard on its port. The port is one Windows gives a UDP socket: a free TCP port
+    // can lie in a range Windows keeps from UDP (its excluded port ranges), where a bind is refused with EACCES.
+    const udpPort = await new Promise((resolve, reject) => {
+      const probe = require('dgram').createSocket('udp4');
+      probe.once('error', reject);
+      probe.bind(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
+    });
+    const udp = await T.udpHeard({ port: udpPort, to: '127.0.0.1', ms: 2000 });
     assert.deepEqual([udp.bound, udp.sent, udp.heard], [true, true, true], JSON.stringify(udp));
     // Health: waited for until it answers, its build read; a port nobody answers on is not served.
     const health = http.createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true, build: '0.6.0-dev.40+abc1234' })); });
