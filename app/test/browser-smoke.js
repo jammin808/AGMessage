@@ -1827,18 +1827,35 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const rae = await edge.tab(`${base4}/app.html?code=${hall4}&name=Rae&role=research`);
       await rae.until('typeof connection !== "undefined" && connection.state().back');
       const CONN = `JSON.stringify({ strip: document.getElementById('connStrip').hidden ? '' : document.getElementById('connStrip').textContent, dot: (document.getElementById('connDot').classList.contains('ok') ? '● ' : '○ ') + document.getElementById('connDot').getAttribute('aria-label'), words: document.getElementById('connWords').hidden ? '' : document.getElementById('connWords').textContent })`;
-      // Refused: this address's connections drained from here (3 a second, bursts of 30) while the page connects again.
+      // Refused: this address's connections (3 a second, bursts of 30) drained from here until the server refuses one,
+      // and then until it takes one asked after that refusal was seen: that one took the token that had just come, so the
+      // bucket is empty and its next token a third of a second away. The drain stops there, and the page connects again
+      // at once (its backoff set to nothing; a refusal's wait is the server's), well inside that third of a second, so
+      // the server refuses it whatever the drain's pace on this machine; and by the wait it is told, tokens have come.
+      await rae.eval(`(() => { socket.io.reconnectionDelay(0); socket.io.reconnectionDelayMax(0); })()`);
       const drains = [];
-      const draining = { on: true };   // until the page says it was refused
-      const drain = (async () => { while (draining.on) { drains.push(ioClient(base4, { transports: ['websocket'], forceNew: true, reconnection: false })); await sleep(20); } })();
-      await sleep(300);
-      await rae.eval(`(() => { window.__sameLoad = 1; socket.io.engine.close(); })()`);
-      const busy = await rae.until(`(() => { const s = document.getElementById('connStrip'); return !s.hidden && /^Busy — trying again in [1-4] s\\.$/.test(s.textContent) && s.textContent; })()`, 10000);
+      let drained = false;   // the server has refused one of the drain's connections
+      const draining = { on: true };
+      let tokenTaken;
+      const taken = new Promise((resolve) => { tokenTaken = resolve; });
+      const drain = (async () => {
+        while (draining.on) {
+          const askedAfterRefusal = drained;
+          const d = ioClient(base4, { transports: ['websocket'], forceNew: true, reconnection: false });
+          d.once('connect_error', (e) => { if (e && e.data && e.data.why === 'rate') drained = true; });
+          d.once('connect', () => { if (askedAfterRefusal) tokenTaken(true); });
+          drains.push(d);
+          await sleep(20);
+        }
+      })();
+      const atBoundary = await Promise.race([taken, sleep(10000).then(() => false)]);
       draining.on = false;
+      await rae.eval(`(() => { window.__sameLoad = 1; socket.io.engine.close(); })()`);
       await drain;
+      const busy = await rae.until(`(() => { const s = document.getElementById('connStrip'); return !s.hidden && /^Busy — trying again in [1-4] s\\.$/.test(s.textContent) && s.textContent; })()`, 10000);
       const busyBack = await rae.until(`connection.state().back && window.__sameLoad === 1 && ${CONN}`, 15000);
       drains.forEach((d) => d.close());
-      report(!!busy && busyBack === JSON.stringify({ strip: '', dot: '● Connected', words: '' }), `a page refused at connect says "${busy}" and comes back by itself at that wait, without a reload (${busyBack})`);
+      report(atBoundary && !!busy && busyBack === JSON.stringify({ strip: '', dot: '● Connected', words: '' }), `a page refused at connect says "${busy}" and comes back by itself at that wait, without a reload (${busyBack}${atBoundary ? '' : '; the drain never saw this address\'s bucket empty'})`);
       // Dropped: the server stops. The page's backoff is made long, so only being shown again can bring it back soon.
       await rae.eval(`(() => { socket.io.reconnectionDelay(30000); socket.io.reconnectionDelayMax(30000); socket.once('disconnect', () => { window.__downAt = performance.now(); }); })()`);
       await stopServer(server4);

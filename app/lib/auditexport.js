@@ -275,16 +275,23 @@ class Exporter {
     this.slot = { by: actor.name || actor.t, since: Date.now() };
     this.archiveDigests.clear();
     let row = null;
-    let ended = false;
-    /** The export's end, said once: `audit.export.sent` or `audit.export.fail`, then the handles closed and the slot freed. */
-    const end = async (sent, words) => {
-      if (ended) return;
-      ended = true;
-      if (row) audit.write(actor, sent ? 'audit.export.sent' : 'audit.export.fail', '1-' + row.seq, words, ip);
-      // The handles are taken off the list now, so the slot is free with the row: the next export opens its own.
-      const closing = this._closeAll();
-      this.slot = null;
-      await closing;
+    let ending = null;
+    /**
+     * The export's end, said once: `audit.export.sent` or `audit.export.fail`, then the handles closed and the slot freed.
+     * Every call answers that one end, so whichever path says it first (the browser's close may), each caller resumes
+     * only once every handle is closed.
+     */
+    const end = (sent, words) => {
+      if (!ending) {
+        ending = (async () => {
+          if (row) audit.write(actor, sent ? 'audit.export.sent' : 'audit.export.fail', '1-' + row.seq, words, ip);
+          // The handles are taken off the list now, so the slot is free with the row: the next export opens its own.
+          const closing = this._closeAll();
+          this.slot = null;
+          await closing;
+        })();
+      }
+      return ending;
     };
     try {
       let kit;
@@ -428,7 +435,9 @@ class Exporter {
       }
       return undefined;
     } finally {
-      if (!ended && !res.headersSent) await end(false, 'the export of entries 1–' + (row ? row.seq : '?') + ' was not made');
+      if (!ending && !res.headersSent) end(false, 'the export of entries 1–' + (row ? row.seq : '?') + ' was not made');
+      // The run resolves once its end is said and its handles are closed, the browser's close's end included.
+      if (ending) await ending;
     }
   }
 }

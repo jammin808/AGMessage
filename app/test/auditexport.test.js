@@ -647,6 +647,16 @@ test('one at a time: a second export while one streams is refused with who and s
   keyedChainOf(30_000, { file, words: noise });
   const log = auditLog(file);
   const s = await exportServer(log);
+  // Each file the export opens is let go 200 ms after it is asked to close, as when a read its stream has in flight ends
+  // late on a busy thread pool: whichever path ends the export (here the browser's close), the run resolves only once
+  // every handle is closed.
+  const realOpen = fs.promises.open;
+  fs.promises.open = async (...args) => {
+    const fh = await realOpen.apply(fs.promises, args);
+    const close = fh.close;
+    fh.close = async () => { await wait(200); return close(); };
+    return fh;
+  };
   try {
     const a = await slowClient(s.base);
     assert.equal(a.status, 200);
@@ -666,7 +676,7 @@ test('one at a time: a second export while one streams is refused with who and s
     await s.settled();
     assert.equal(c.status, 200);
     assert.equal(entries(file).pop().action, 'audit.export.sent');
-  } finally { await s.close(); }
+  } finally { fs.promises.open = realOpen; await s.close(); }
 });
 
 test('rotation: an export whose own entry rotates the file holds that entry; writes that rotate the file while it streams leave a whole bundle whose digests hold', async () => {
