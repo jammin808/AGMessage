@@ -10,7 +10,8 @@
  * The machine key is never replaced. A missing file is made once and published whole (a whole temporary file hard-linked
  * into place, which fails when another start made one first: that one is read instead). Any other read error, a file
  * that is not a key, or a key folder that cannot publish one makes this run keyless: nothing is sealed, `open()` returns
- * '', `derive()` throws, and the file is left as it is.
+ * '', `derive()` throws, and the file is left as it is. A server reads it before it holds its data folder and makes it
+ * only after (`deferMaking`, `allowMaking`): a copy that is refused there has written nothing in the key folder.
  *
  * Stored form: "enc1:" + base64(iv(12) | tag(16) | ciphertext).
  */
@@ -35,6 +36,7 @@ function keyDir() {
 
 let cached = null;    // the machine key, once read or made
 let problem = null;   // why this run has none: {code, words}
+let making = true;    // a missing key may be made now (a server defers it until it holds its data folder)
 const derived = new Map();
 
 const noKey = (p) => Object.assign(new Error(p.words), { code: p.code, noKey: true });
@@ -53,6 +55,8 @@ function machineKey() {
     if (e.noKey) throw e;
     if (e.code !== 'ENOENT') fail(e.code || 'EIO', 'the machine key at ' + file + ' could not be read (' + (e.code || e.message) + ')');
   }
+  // None yet, and not made until making is allowed: nothing is kept of this answer, so the first call after makes it.
+  if (!making) throw noKey({ code: 'ENOENT', words: 'the machine key at ' + file + ' is not made yet' });
   // None yet: made whole in a temporary file, then published by a link that refuses to replace a key another start made.
   const fresh = file + '.' + process.pid + '-' + crypto.randomBytes(4).toString('hex') + '.new';
   const k = crypto.randomBytes(32);
@@ -78,7 +82,25 @@ function machineKey() {
 /** Whether this run has its machine key; the first call reads (or makes) it. */
 function hasKey() { try { machineKey(); return true; } catch { return false; } }
 /** Why this run has no machine key, as {code, words}, or null when it has one. */
-function keyProblem() { return hasKey() ? null : { ...problem }; }
+function keyProblem() {
+  if (hasKey()) return null;
+  return problem ? { ...problem } : { code: 'ENOENT', words: 'the machine key at ' + path.join(keyDir(), 'machine.key') + ' is not made yet' };
+}
+/**
+ * The machine key as this start finds it: {state: 'key'}; {state: 'absent'} when there is no file yet and making waits
+ * (`deferMaking`); or {state: 'unusable', code, words}, which makes this run keyless. While making waits, nothing is
+ * written.
+ */
+function keyState() {
+  try { machineKey(); return { state: 'key' }; } catch (e) {
+    if (!problem && e.code === 'ENOENT') return { state: 'absent' };
+    return { state: 'unusable', ...problem };
+  }
+}
+/** A missing machine key is not made until `allowMaking()`: read, and nothing written (a server before it holds its folder). */
+function deferMaking() { making = false; }
+/** A missing machine key may be made from now on (a server that holds its folder). */
+function allowMaking() { making = true; }
 
 function seal(plain) {
   if (!plain) return '';
@@ -130,6 +152,6 @@ function signingKeyFrom(seed) {
 function signingKey() { return signingKeyFrom(deriveFrom(machineKey(), SIGN)); }
 
 /** For tests: forget the machine key, why there was none and every key derived from it (after pointing AGM_KEY_DIR elsewhere). */
-function _reset() { cached = null; problem = null; derived.clear(); }
+function _reset() { cached = null; problem = null; making = true; derived.clear(); }
 
-module.exports = { seal, open, isSealed, keyDir, hasKey, keyProblem, derive, deriveFrom, signingKey, signingKeyFrom, _reset };
+module.exports = { seal, open, isSealed, keyDir, hasKey, keyProblem, keyState, deferMaking, allowMaking, derive, deriveFrom, signingKey, signingKeyFrom, _reset };

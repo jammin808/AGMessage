@@ -57,6 +57,18 @@ const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD } = require('./lib/version');
 const VERSION = BUILD.version;
+// The channel this copy runs in (AGM_RUNS: the portable folder, or the installed node's task) and, for the task, its three
+// folders: checked before anything is read or written. One that cannot be used stops the start with code 3 and its words.
+/** This copy cannot start, found before it holds or has written anything: its words on the console, and code 3. */
+function cannotStartYet(words) {
+  console.error('\n  AGMessage cannot start: ' + words + '\n');
+  process.exit(resilience.EXIT.CONFIG);
+}
+const CHANNEL = startup.channelOf(process.env, { programDir: path.dirname(__dirname) });
+if (CHANNEL.problem) cannotStartYet(CHANNEL.problem);
+const RUNS = CHANNEL.runs;
+// The machine key is read now and made, when there is none, only once this copy holds its data folder (`firstWrites`).
+secretbox.deferMaking();
 const PORT = parseInt(process.env.PORT || '3023', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const UPLOAD_DIR = process.env.AGM_UPLOAD_DIR || path.join(__dirname, 'uploads');
@@ -79,10 +91,15 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = process.env.AGM_DATA_DIR || path.join(__dirname, 'data');
 const ROOMS_DIR = path.join(DATA_DIR, 'rooms');
 const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
-fs.mkdirSync(ROOMS_DIR, { recursive: true });
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+// Nothing is written until this copy holds its data folder and its port (`holdDataFolder`, at the end of this file): every
+// store is read now, and the folders, the keys, the certificate, the server secret and the saves asked meanwhile are made
+// then (`firstWrites`). A copy refused at the folder or the port has written nothing, in the data folder or the key folder.
+let serving = false;   // this copy holds its data folder and its port: from then on it writes
 
-const SECRET = guard.loadSecret(DATA_DIR);
+// The server secret: read now, made once the folder is held when there is no file. One that cannot be read is never
+// replaced: this run signs with a secret of its own (the installed node stops instead), and the file is left as it is.
+const secretFound = guard.readSecret(DATA_DIR);
+const SECRET = secretFound.secret;
 
 // One-time admin token printed at boot; login only from the host laptop (never through the tunnel).
 const ADMIN_TOKEN = (process.env.ADMIN_TOKEN || crypto.randomBytes(8).toString('hex')).toLowerCase();
@@ -115,37 +132,80 @@ function userStateOf(payload) {
 // Saved through one write lane (tmp -> fsync -> rename, a .bak of the last whole file); keys sealed at rest
 // (lib/secretbox.js) so a copied folder carries none.
 const settingsLane = new resilience.WriteLane(SETTINGS_PATH, { delayMs: 100, keepBak: true, mode: 0o600 });
+/**
+ * The settings as read: {data, unread, words, fix}. Only ENOENT says the file is not there. A settings.json that cannot be
+ * read (EBUSY, EACCES) is `unread`, whatever its .bak holds: the .bak is a save behind, and a token or link saved since is
+ * only in the file. Its .bak is read only for a file that is not there or does not parse, under the same rule. Unread
+ * settings hold the sealed keys and links this run cannot see: nothing is saved over them, a setting changed is refused
+ * with `words`, and no context token answers (one made now would be saved over the real one). `fix` is what a person does.
+ */
 function loadSettings() {
-  const s = resilience.readJsonWithBak(SETTINGS_PATH);
-  return s && typeof s === 'object' ? s : {};
+  const r = resilience.readJsonWhole(SETTINGS_PATH);
+  const [file, bak] = r.codes;
+  const again = 'Start AGMessage again once nothing else holds it (an antivirus or a backup may).';
+  if (file && file !== 'ENOENT') return { data: {}, unread: file, words: SETTINGS_PATH + ' could not be read (' + file + ')', fix: again };
+  if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) return { data: r.data, unread: '', words: '', fix: '' };
+  if (bak && bak !== 'ENOENT') return { data: {}, unread: bak, words: SETTINGS_PATH + ' is ' + (file ? 'missing' : 'not whole') + ', and its .bak could not be read (' + bak + ')', fix: again };
+  // Not there, and its .bak not there or holding nothing AGMessage wrote: there is nothing to write over, so a start begins anew.
+  if (file === 'ENOENT') return { data: {}, unread: '', words: '', fix: '' };
+  return { data: {}, unread: 'not JSON', words: SETTINGS_PATH + ' holds no settings AGMessage can read, nor does its .bak', fix: 'Put back a copy of it, or move it aside and start AGMessage again to begin with new settings (its links and keys set again).' };
 }
-const settings = loadSettings();
-function saveSettings() { settingsLane.save(() => JSON.stringify(settings, null, 2)); }
-// One-time migration from 0.2: keys stored in clear become sealed ones, in a run that has its machine key (a run without
-// one leaves them as they are for the next).
-for (const [plain, sealed] of [['aiKey', 'aiKeySealed'], ['stagewatchKey', 'stagewatchKeySealed']]) {
-  if (typeof settings[plain] === 'string' && secretbox.hasKey()) {
-    if (settings[plain]) settings[sealed] = secretbox.seal(settings[plain]);
-    delete settings[plain];
-    saveSettings();
+const settingsRead = loadSettings();
+const settings = settingsRead.data;
+let settingsDue = false;   // a save asked before this copy held its folder: made once it does
+function saveSettings() {
+  if (settingsRead.unread) return;
+  if (!serving) { settingsDue = true; return; }
+  settingsLane.save(() => JSON.stringify(settings, null, 2));
+}
+/**
+ * One-time migration from 0.2: keys stored in clear become sealed ones, in a run that has its machine key (a run without
+ * one leaves them as they are for the next). Asked when the settings are read, and again once a key missing then is made.
+ * True when it sealed one.
+ */
+function migrateClearKeys() {
+  let sealed = false;
+  for (const [plain, kept] of [['aiKey', 'aiKeySealed'], ['stagewatchKey', 'stagewatchKeySealed']]) {
+    if (typeof settings[plain] === 'string' && secretbox.hasKey()) {
+      if (settings[plain]) settings[kept] = secretbox.seal(settings[plain]);
+      delete settings[plain];
+      sealed = true;
+    }
   }
+  if (sealed) saveSettings();
+  return sealed;
 }
+migrateClearKeys();
 // This install's id on the show network (Show Bus §2): stable, so a renamed AGMessage is still the same node.
 if (!/^[0-9a-f]{8}$/.test(settings.nodeId || '')) { settings.nodeId = crypto.randomBytes(4).toString('hex'); saveSettings(); }
 const aiKey = () => process.env.ANTHROPIC_API_KEY || secretbox.open(settings.aiKeySealed) || '';
 const stagewatchKey = () => secretbox.open(settings.stagewatchKeySealed) || '';
-// A read-only token other nodes use for GET /api/context (shown on the admin page). A run without its machine key keeps
-// a new one in memory for this run, and leaves the sealed one for the next.
+// A read-only token other nodes use for GET /api/context (shown on the admin page), made only when none is saved. A run
+// without its machine key keeps a new one in memory for this run, and leaves the sealed one for the next.
 let contextTokenThisRun = '';
-function contextToken() {
-  let t = secretbox.open(settings.contextTokenSealed);
-  if (t) return t;
-  t = contextTokenThisRun || 'agn_' + crypto.randomBytes(18).toString('base64url');
-  if (!secretbox.hasKey()) return (contextTokenThisRun = t);
-  settings.contextTokenSealed = secretbox.seal(t);
-  saveSettings();
-  return t;
+/**
+ * Why no context token answers this run, in words, or '': a saved token that does not open with this machine's key is
+ * kept, never replaced by a new one (the admin's New token makes one), and so are unread settings. Context reads with a
+ * token are refused with these words meanwhile.
+ */
+function contextTokenProblem() {
+  if (settingsRead.unread) return 'This AGMessage could not read its settings (' + settingsRead.unread + '), so no context token answers this run. ' + settingsRead.fix;
+  const stored = settings.contextTokenSealed;
+  if (typeof stored !== 'string' || !stored || !secretbox.hasKey() || secretbox.open(stored)) return '';
+  return 'This AGMessage\'s context token does not open with its laptop\'s machine key, so no context token answers. Its admin makes a new one: New token, on the admin page.';
 }
+function contextToken() {
+  if (contextTokenProblem()) return '';
+  const t = secretbox.open(settings.contextTokenSealed);
+  if (t) return t;
+  const fresh = contextTokenThisRun || 'agn_' + crypto.randomBytes(18).toString('base64url');
+  if (!secretbox.hasKey()) return (contextTokenThisRun = fresh);
+  settings.contextTokenSealed = secretbox.seal(fresh);
+  saveSettings();
+  return fresh;
+}
+/** Why a setting changed now cannot be saved: the settings could not be read, and nothing is saved over them. '' when it can. */
+const settingsUnsaved = () => (settingsRead.unread ? 'Not saved: ' + settingsRead.words + ', so this run saves no setting over it. ' + settingsRead.fix : '');
 /** Why a key or token typed now cannot be saved: this run has no machine key to seal it with. '' when it can. */
 const unsealable = () => { const p = secretbox.keyProblem(); return p ? 'Not saved: this run has no machine key (' + p.code + '), so nothing can be sealed. ' + p.words.charAt(0).toUpperCase() + p.words.slice(1) + '.' : ''; };
 
@@ -161,8 +221,9 @@ const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json
 const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'), { keys: keysFrom(secretbox.derive), records: path.join(secretbox.keyDir(), 'audit'), version: VERSION });
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
 // The fingerprint of the key this machine signs its exports with (lib/secretbox.js), '' in a run without the machine key.
-// Only the fingerprint is kept: the key itself is derived again when an export signs, and dropped after.
-const AUDIT_SIGN_KEY = (() => { try { return secretbox.signingKey().fingerprint; } catch { return ''; } })();
+// Only the fingerprint is kept: the key itself is derived again when an export signs, and dropped after. Read once the
+// machine key is there (`firstWrites`), which a first start makes only after it holds its folder.
+let AUDIT_SIGN_KEY = '';
 // The signed export (lib/auditexport.js): one at a time, made as it streams, its verifier taken from app/verify.
 const auditNode = () => ({ id: settings.nodeId, name: 'AGMessage ' + os.hostname(), version: VERSION, build: BUILD.full });
 const auditExporter = new Exporter({ audit, signingKey: () => secretbox.signingKey(), verifyDir: path.join(__dirname, 'verify'), version: BUILD.full, node: auditNode });
@@ -184,8 +245,7 @@ let deskLastAnswer = { status: null, at: null };   // the desk's last answer to 
 // The peaks a show day reaches (lib/peaks.js), the last 14 days, read back at start. Saved at the end of each 5 s window in
 // which one rose (the health tick), through the lane's usual tenth of a second, latest wins, and at once by a stop or a
 // crash the server catches: a hang the watchdog ends, or a power cut, loses at most the window it fell in. Written only
-// once this copy holds its data folder.
-let serving = false;   // this copy holds its data folder and its port: the desk loop and the peaks' saves wait for it
+// once this copy holds its data folder (`serving`), as the desk loop's saves are.
 const PEAKS_PATH = path.join(DATA_DIR, 'peaks.json');
 const peaksLane = new resilience.WriteLane(PEAKS_PATH, { delayMs: 100, keepBak: true });
 const peaks = new readings.Peaks().load(resilience.readJsonWithBak(PEAKS_PATH));
@@ -216,10 +276,15 @@ function flushLanes() {
 // ---------------------------------------------------------------- encrypted connections (Show Bus 1.2 §10)
 // One certificate per install, kept beside the machine key (outside the app folder), private key sealed. The same port
 // serves HTTP and HTTPS (lib/tls.js). AGM_TLS=0 turns HTTPS off (tests of the plain path, or a machine that can't).
+// Read now; one there is none of is made, and one near its end renewed, once this copy holds its folder (`firstWrites`).
+// One that cannot be read, or whose key does not open, turns HTTPS off this run and is left as it is.
 let cert = null;
-if (process.env.AGM_TLS !== '0') {
-  try { cert = tlsmod.loadOrCreate({ dir: secretbox.keyDir(), name: 'AGMessage ' + os.hostname(), seal: secretbox.seal, open: secretbox.open }); }
-  catch (e) { console.warn('  [tls] HTTPS off: ' + e.message); }
+let tlsOff = '';   // why HTTPS is off this run, in words ('' while it is on, and when AGM_TLS=0 turned it off)
+const tlsFound = process.env.AGM_TLS === '0' ? null : tlsmod.readCertificate({ dir: secretbox.keyDir(), open: secretbox.open });
+if (tlsFound && tlsFound.cert) cert = tlsFound.cert;
+if (tlsFound && tlsFound.state === 'unusable') {
+  const key = secretbox.keyState();
+  tlsOff = (key.state === 'unusable' ? 'this run has no machine key (' + key.code + '), so ' + tlsFound.file + ' cannot be opened' : tlsFound.words) + '. It is left as it is';
 }
 const pins = new tlsmod.PinStore(settings.tlsPins && typeof settings.tlsPins === 'object' ? settings.tlsPins : {});
 const isLoopback = (req) => { const a = (req.socket && req.socket.remoteAddress) || ''; return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1'; };
@@ -233,8 +298,7 @@ const tlsFacts = () => ({
 const RESTARTS = parseInt(process.env.AGM_RESTARTS || '0', 10) || 0;
 const CRASH_PATH = path.join(DATA_DIR, 'last-crash.json');
 const lastCrash = resilience.readJsonWithBak(CRASH_PATH);
-const watchdogGaveUp = resilience.readJsonWithBak(path.join(DATA_DIR, 'watchdog.json'));
-if (watchdogGaveUp) { try { fs.renameSync(path.join(DATA_DIR, 'watchdog.json'), path.join(DATA_DIR, 'watchdog.seen.json')); } catch { /* shown once anyway */ } }
+const watchdogGaveUp = resilience.readJsonWithBak(path.join(DATA_DIR, 'watchdog.json'));   // marked seen by `firstWrites`
 // The sampler's timer fires every LOOP_RESOLUTION_MS, so an idle loop reads that much delay: it is taken off each window.
 const LOOP_RESOLUTION_MS = 10;
 const loopDelay = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS });
@@ -363,6 +427,8 @@ function healthFacts() {
     showDay: readings.dayOf(Date.now()),   // the show day this laptop is in now: its record in `peaks` is today's
     // The tunnel's places and today's refusals through it, and the venue's: counts only, never an address.
     ...tunnelFacts(),
+    // Connections the port could not take once it listened (EMFILE and the like): how many, and the last one's code.
+    acceptErrors: { ...acceptErrors },
   };
 }
 
@@ -373,18 +439,25 @@ const recentEvents = [];
 function noteEvent(text, link) { recentEvents.push({ at: Date.now(), text, link: link ? link.id : '' }); if (recentEvents.length > 40) recentEvents.shift(); }
 
 // ---------------------------------------------------------------- rooms
-// Loaded without writing: until this copy holds the data folder and its port (`holdDataFolder`, at the end of this file),
-// another copy may be appending to these same files.
-const store = new RoomStore(ROOMS_DIR);
+// Loaded without writing, its folder not made: until this copy holds the data folder and its port (`holdDataFolder`, at the
+// end of this file), another copy may be appending to these same files.
+const store = new RoomStore(ROOMS_DIR, { make: false });
 // Timed where they run; saved with the window they fall in (the health tick), or at once by a stop or a crash.
 store.onCompact = (ms, messages) => { peaks.compacted(ms, messages, Date.now()); };
 audit.onPut = (ms) => { peaks.auditPut(ms, Date.now()); };
-const restored = store.loadAll((room) => {
-  for (const m of room.messages) {
-    if (m.from && m.from.role === 'director') m.from.role = 'board';   // legacy role name
-    if (m.forwardedFrom) delete m.forwardedFrom.roomCode;   // a forward names its hall, never its code (an earlier build kept it)
-  }
-}, { compact: false });
+// A rooms folder that is there but cannot be read (a file in its place, a folder this account may not list) stops the start
+// with its words, in either channel: a copy that served without its halls would make new ones over them.
+let restored = 0;
+try {
+  restored = store.loadAll((room) => {
+    for (const m of room.messages) {
+      if (m.from && m.from.role === 'director') m.from.role = 'board';   // legacy role name
+      if (m.forwardedFrom) delete m.forwardedFrom.roomCode;   // a forward names its hall, never its code (an earlier build kept it)
+    }
+  }, { compact: false });
+} catch (e) {
+  cannotStartYet('the rooms folder ' + ROOMS_DIR + ' cannot be read (' + (e.code || e.message) + '). Choose a data folder this Windows account can read and write (AGM_DATA_DIR), or fix that one\'s permissions.');
+}
 if (restored) console.log('  Restored', restored, 'room(s) from', ROOMS_DIR);
 
 /**
@@ -702,6 +775,9 @@ app.get('/api/context', (req, res) => {
   const network = guard.limitKey(guard.clientIp(req));
   if (contextLock.locked(network)) return res.status(429).json({ ok: false, error: 'Too many wrong tokens — wait a minute.' });
   const t = bearer(req);
+  // A saved token this run cannot open is kept, never replaced: a token read is refused with why, and counts as no guess.
+  const why = t && !isAdminReq(req) ? contextTokenProblem() : '';
+  if (why) return res.status(503).json({ ok: false, error: why });
   const allowed = isAdminReq(req) || (t && guard.safeEqual(t, contextToken()));
   if (!allowed) { if (t) contextLock.fail(network); return res.status(401).json({ ok: false, error: 'A context token is needed (AGMessage admin → Show network).' }); }
   res.setHeader('Cache-Control', 'no-store');
@@ -755,7 +831,9 @@ function newRoom(name) {
 // ----- uploads (only from people in a room; content must match the name)
 const upload = multer({
   storage: multer.diskStorage({
-    destination: UPLOAD_DIR,
+    // A function, not the folder's name: given a name, multer makes the folder as it is built, before this copy holds its
+    // data folder. `firstWrites` makes it.
+    destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
     filename: (_req, file, cb) => {
       const safe = String(file.originalname || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-60) || 'file';
       cb(null, `${Date.now()}-${makeMessageId()}-${safe}`);
@@ -821,8 +899,9 @@ app.use((err, _req, res, _next) => {
 
 // ---------------------------------------------------------------- Socket.io
 const server = http.createServer(app);
-// The listening socket: one port, HTTP and HTTPS (the first byte decides) — or plain HTTP only when HTTPS is off.
-const front = cert ? tlsmod.dualPortServer(server, { certPem: cert.certPem, keyPem: cert.keyPem }) : server;
+// The listening socket: one port, HTTP and HTTPS (the first byte decides) — or plain HTTP only when HTTPS is off. A
+// certificate made or renewed once the folder is held is given to it then; until it has one, a TLS handshake is ended.
+const front = tlsFound && tlsFound.state !== 'unusable' ? tlsmod.dualPortServer(server, cert ? { certPem: cert.certPem, keyPem: cert.keyPem } : null) : server;
 server.headersTimeout = 15_000;
 server.requestTimeout = 120_000;
 const io = new Server(server, {
@@ -1612,6 +1691,7 @@ io.on('connection', (socket) => {
     ack = ok(ack);
     if (!socket.data.isAdmin) return ack({ ok: false, error: 'Linking another show system is the admin\'s.' });
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(guard.str(id))) return ack({ ok: false, error: 'A node id is the one its hello announces.' });
+    if (settingsUnsaved()) return ack({ ok: false, error: settingsUnsaved() });
     if (typeof token === 'string' && token.trim() && unsealable()) return ack({ ok: false, error: unsealable() });
     const peer = discovery ? discovery.peers.get(guard.str(id)) : null;
     const cfg = settings.peerLinks && settings.peerLinks[guard.str(id)];
@@ -1765,6 +1845,17 @@ io.on('connection', (socket) => {
     const url = typeof stagewatchUrl === 'string' && stagewatchUrl.trim() ? nodes.normaliseBase(stagewatchUrl) : '';
     if (typeof stagewatchUrl === 'string' && stagewatchUrl.trim() && !url) return ack({ ok: false, error: 'That is not a Stagewatch address: type its IP or name, with the port if it is not 9924.' });
     if (url && typeof stagewatchKey === 'string' && stagewatchKey.trim() && unsealable()) return ack({ ok: false, error: unsealable() });
+    const prev = hallStagewatch(r.code) || {};
+    const next = url ? {
+      url,
+      keySealed: typeof stagewatchKey === 'string' && stagewatchKey.trim() ? secretbox.seal(stagewatchKey.trim().slice(0, 80)) : (url === prev.url ? prev.keySealed || '' : ''),
+      fp: typeof stagewatchFingerprint === 'string' ? tlsmod.cleanFingerprint(stagewatchFingerprint) : (url === prev.url ? prev.fp || '' : ''),
+    } : null;
+    // The page sends the address on every save: only a real change is saved, applied and recorded. Without a new key,
+    // next.keySealed is prev's, so the plain compare holds; a newly typed key is sealed again and counts.
+    const same = typeof stagewatchUrl !== 'string' || (next ? prev.url === next.url && (prev.keySealed || '') === next.keySealed && (prev.fp || '') === next.fp : !prev.url);
+    // Settings that could not be read are never saved over: a change of the hall's Stagewatch is refused, its name with it.
+    if (!same && settingsUnsaved()) return ack({ ok: false, error: settingsUnsaved() });
     const changed = [];
     if (typeof name === 'string') {
       const n = guard.cleanText(name, 80);
@@ -1773,25 +1864,14 @@ io.on('connection', (socket) => {
         for (const d of displays.ofHall(r.code)) io.to('display:' + d.id).emit('display:state', displayState(d));
       }
     }
-    if (typeof stagewatchUrl === 'string') {
-      const prev = hallStagewatch(r.code) || {};
-      const next = url ? {
-        url,
-        keySealed: typeof stagewatchKey === 'string' && stagewatchKey.trim() ? secretbox.seal(stagewatchKey.trim().slice(0, 80)) : (url === prev.url ? prev.keySealed || '' : ''),
-        fp: typeof stagewatchFingerprint === 'string' ? tlsmod.cleanFingerprint(stagewatchFingerprint) : (url === prev.url ? prev.fp || '' : ''),
-      } : null;
-      // The page sends the address on every save: only a real change is saved, applied and recorded. Without a new key,
-      // next.keySealed is prev's, so the plain compare holds; a newly typed key is sealed again and counts.
-      const same = next ? prev.url === next.url && (prev.keySealed || '') === next.keySealed && (prev.fp || '') === next.fp : !prev.url;
-      if (!same) {
-        if (!next && hallLinks.has(r.code)) forgetStagewatchPins(hallLinks.get(r.code));
-        settings.hallStagewatch = { ...(settings.hallStagewatch || {}) };
-        if (next) settings.hallStagewatch[r.code] = next; else delete settings.hallStagewatch[r.code];
-        saveSettings();
-        configureHallLink(r);
-        hallStageChanged(r.code);
-        changed.push(url ? 'Stagewatch → ' + url + (typeof stagewatchKey === 'string' && stagewatchKey.trim() ? ' (new key, sealed)' : (next.fp !== (prev.fp || '') && url === prev.url ? ' (fingerprint)' : '')) : 'Stagewatch → the default');
-      }
+    if (!same) {
+      if (!next && hallLinks.has(r.code)) forgetStagewatchPins(hallLinks.get(r.code));
+      settings.hallStagewatch = { ...(settings.hallStagewatch || {}) };
+      if (next) settings.hallStagewatch[r.code] = next; else delete settings.hallStagewatch[r.code];
+      saveSettings();
+      configureHallLink(r);
+      hallStageChanged(r.code);
+      changed.push(url ? 'Stagewatch → ' + url + (typeof stagewatchKey === 'string' && stagewatchKey.trim() ? ' (new key, sealed)' : (next.fp !== (prev.fp || '') && url === prev.url ? ' (fingerprint)' : '')) : 'Stagewatch → the default');
     }
     if (changed.length) audit.write(socket.data.actor || HOST_ACTOR, 'hall.update', r.code, changed.join('; '), socket.data.ip);
     boardDirty();
@@ -2016,7 +2096,9 @@ io.on('connection', (socket) => {
   socket.on('admin:settings', (patch, ack) => {
     if (typeof patch === 'function') { ack = patch; patch = null; }
     if (!admin(ack)) return;
-    // A key typed while this run has no machine key is refused, with the reason, before anything is taken.
+    // A change while the settings could not be read is refused, as is a key typed while this run has no machine key, with
+    // the reason, before anything is taken: nothing would be saved, and the answer never says it was.
+    if (patch && typeof patch === 'object' && Object.keys(patch).length && settingsUnsaved()) return ok(ack)({ ok: false, error: settingsUnsaved() });
     if (patch && typeof patch === 'object' && (typeof patch.aiKey === 'string' || typeof patch.stagewatchKey === 'string') && unsealable()) return ok(ack)({ ok: false, error: unsealable() });
     if (patch && typeof patch === 'object') {
       // Each setting is taken only in its own type; the audit row names exactly what was taken (a secret as sealed).
@@ -2051,7 +2133,7 @@ io.on('connection', (socket) => {
       aiKeySet: !!aiKey(), aiFromEnv: !!process.env.ANTHROPIC_API_KEY, model: ai.MODEL,
       stagewatchUrl: settings.stagewatchUrl || '', stagewatchKeySet: !!stagewatchKey(),
       stage: stageLink.status, peers: discovery ? forPages(discovery.list()) : [],
-      nodeId: settings.nodeId, contextToken: contextToken(), health: healthFacts(),
+      nodeId: settings.nodeId, contextToken: contextToken(), contextTokenWhy: contextTokenProblem(), health: healthFacts(),
       stageContext: stageLink.context ? { headline: stageLink.context.headline, light: stageLink.context.light, peers: stageLink.context.peers || [] } : null,
       tls: tlsFacts(), stagewatchFingerprint: settings.stagewatchFingerprint || '',
       remoteAdmin: !!settings.remoteAdmin, accounts: accounts.size, build: BUILD.full,
@@ -2391,9 +2473,10 @@ function makeLink(id) {
       const seen = epoch + '|' + k.state + '|' + k.words;
       if ((k.state !== 'accepted' && k.state !== 'refused') || seen === link.keyAudited) return;
       link.keyAudited = seen;
-      audit.write({ t: 'system' }, 'stagewatch.key', id === 'default' ? 'default' : id, k.state === 'accepted'
+      const words = k.state === 'accepted'
         ? 'Stagewatch accepted the key (' + (k.via === 'auth' ? 'its auth message' : 'an authenticated read') + ')' + (link.tlsState.on && link.tlsState.pinned ? ', certificate pinned' : '')
-        : 'Stagewatch refused the ' + (link.key ? 'key' : 'view') + ': ' + k.words);
+        : 'Stagewatch refused the ' + (link.key ? 'key' : 'view') + ': ' + k.words;
+      whenServing(() => audit.write({ t: 'system' }, 'stagewatch.key', id === 'default' ? 'default' : id, words));
     },
     findPeer: (t, host, port) => (discovery ? discovery.find(t, host, port) : null),
     pins,
@@ -2939,14 +3022,31 @@ function stopTunnel() {
 
 // ---------------------------------------------------------------- lifecycle
 let shuttingDown = false;
+/** A stop: the rooms, lanes and audit entries saved, then gone. Before this copy holds its folder there is nothing of its own to save, and it writes nothing. */
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   if (tunnelProc) { try { tunnelProc.kill('SIGTERM'); } catch { /* ignore */ } }
-  console.log('\n  Saving rooms…');
-  store.compactAll();
-  flushLanes();
+  if (serving) {
+    console.log('\n  Saving rooms…');
+    store.compactAll();
+    flushLanes();
+  }
   leaveShowNetwork();
+  releaseDataFolder();
+  process.exit(code);
+}
+/** What waits for this copy to hold its folder before it is written (a row a link's first answer asks for); now once it does. */
+const untilServing = [];
+function whenServing(fn) { if (serving) fn(); else untilServing.push(fn); }
+/**
+ * This copy cannot run as configured: its words on the console and the code the watchdog reads (3, which it never
+ * restarts; 75 when the installed node's port or folder is held, which it tries again). Called before anything is
+ * written, or when a first write fails; the show network is left and the folder let go.
+ */
+function cannotStart(words, code = resilience.EXIT.CONFIG) {
+  console.error('\n  AGMessage cannot start: ' + words + '\n');
+  try { leaveShowNetwork(); } catch { /* this copy ends either way: nothing of the network may keep it from stopping */ }
   releaseDataFolder();
   process.exit(code);
 }
@@ -2971,6 +3071,8 @@ if (typeof process.send === 'function') {
 // the meeting carries on.
 process.on('uncaughtException', (e) => {
   console.error('  [error]', e && e.stack ? e.stack : e);
+  // Before this copy holds its folder another copy may own those files, and nothing of this one's is there to save.
+  if (!serving) { releaseDataFolder(); process.exit(resilience.EXIT.CRASH); }
   try { store.compactAll(); } catch { /* best effort */ }
   try { flushLanes(); } catch { /* best effort: a lane that cannot write has said so on the console */ }
   try {
@@ -2989,14 +3091,30 @@ if (typeof process.send === 'function') setInterval(() => { if (process.connecte
 
 // A port already in use is named by who holds it: its health, read once at loopback with no token, chooses the words (an
 // AGMessage, the one installed on this PC, or another program), and nothing else. Either way this copy stops without
-// serving (code 3, which the watchdog does not restart), whatever the read or its words do. A copy that will never serve
-// first leaves the show network: its links and discovery, started before the port was known, say nothing during the read.
+// serving, whatever the read or its words do: code 3, which the watchdog does not restart, in the portable folder, where a
+// person reads the words; 75 for the installed node, which the watchdog tries again on its ladder, never counted as a
+// crash, so whatever holds the port during a restart cannot keep the node down. A copy that will never serve first leaves
+// the show network: its links and discovery, started before the port was known, say nothing during the read.
+//
+// Once it listens, an error on the port is one Node met taking a connection (EMFILE: out of file handles, ENFILE,
+// ENOMEM): that connection is lost, the port still listens, and the copy keeps serving, the error counted in health and
+// said. Should the port stop listening, the copy stops as a crash does: saved, with a code the watchdog restarts.
+let listening = false;
+const acceptErrors = { count: 0, last: '' };   // errors on the port after it listened (health's `acceptErrors`)
 front.on('error', (e) => {
-  const stop = () => { releaseDataFolder(); process.exit(resilience.EXIT.CONFIG); };
+  if (listening) {
+    acceptErrors.count++;
+    acceptErrors.last = String(e && e.code ? e.code : 'EIO').slice(0, 20);
+    if (acceptErrors.count <= 20 || acceptErrors.count % 100 === 0) console.error('  [port] a connection could not be taken (' + acceptErrors.last + ', ' + acceptErrors.count + ' so far): ' + (front.listening ? 'still serving' : 'the port stopped listening, so AGMessage saves and stops for its watchdog to start it again'));
+    if (!front.listening) shutdown(resilience.EXIT.CRASH);
+    return;
+  }
+  const held = e.code === 'EADDRINUSE';
+  const stop = () => { releaseDataFolder(); process.exit(held && RUNS === 'task' ? resilience.EXIT.HELD : resilience.EXIT.CONFIG); };
   try { leaveShowNetwork(); } catch { /* this copy ends either way: nothing of the network may keep it from stopping */ }
-  if (e.code !== 'EADDRINUSE') { console.error('  Server error: ' + e.message); stop(); return; }
+  if (!held) { console.error('\n  AGMessage cannot start: port ' + PORT + ' cannot be used (' + (e.code || e.message) + ').\n'); stop(); return; }
   startup.readPortHolder(PORT).catch(() => null)
-    .then((holder) => { console.error('\n  ' + startup.portHolderWords(holder, { port: PORT, runs: process.env.AGM_RUNS }) + '\n'); })
+    .then((holder) => { console.error('\n  ' + startup.portHolderWords(holder, { port: PORT, runs: RUNS }) + '\n'); })
     .finally(stop);
 });
 
@@ -3004,17 +3122,19 @@ front.on('error', (e) => {
 // Two copies on one folder would each number the same rooms' ops, chain the same audit log and save the same accounts.
 // The folder is held by a local socket named after it — a named pipe on Windows, gone with the process; a Unix socket
 // elsewhere, a leftover of a killed process known by nobody answering it — and a second copy that finds it held stops
-// (code 3, which the watchdog does not restart) before it has written anything.
+// before it has written anything: code 3, which the watchdog does not restart, in the portable folder; 75 for the
+// installed node, which tries again, so whatever takes the pipe's name during a restart cannot keep the node down.
 // It is held under two names when they differ: 0.5.1's (the folder's path as given), so a 0.5.1 copy and this one refuse
-// each other, and the folder's own (resilience.placeId, its real path), so two paths to one folder are one folder.
+// each other, and the folder's own (resilience.placeId, its real path), so two paths to one folder are one folder. A
+// folder not made yet (this copy makes it once it holds it) is held by its path as given.
 const folderHolds = [];
 function holdDataFolder(then) {
   const legacy = crypto.createHash('sha256').update(process.platform === 'win32' ? path.resolve(DATA_DIR).toLowerCase() : path.resolve(DATA_DIR)).digest('hex').slice(0, 16);
-  const own = resilience.placeId(DATA_DIR);
+  const own = resilience.placeId(DATA_DIR, undefined, { absentOk: true });
   const ids = own === legacy ? [legacy] : [legacy, own];
   const refuse = () => {
-    console.error('\n  AGMessage is already running on this data folder (' + DATA_DIR + '). Use that window, or give this copy a folder of its own.\n');
-    process.exit(resilience.EXIT.CONFIG);
+    console.error('\n  AGMessage is already running on this data folder (' + DATA_DIR + '). ' + (RUNS === 'task' ? 'AGMessage tries again once it is free.' : 'Use that window, or give this copy a folder of its own.') + '\n');
+    process.exit(RUNS === 'task' ? resilience.EXIT.HELD : resilience.EXIT.CONFIG);
   };
   const holdOne = (i) => {
     if (i >= ids.length) { then(); return; }
@@ -3031,12 +3151,20 @@ function holdDataFolder(then) {
       probe.once('connect', () => { probe.destroy(); refuse(); });
       probe.once('error', () => {
         hold.once('error', unchecked);
-        fs.unlink(where, () => { hold.listen(where, () => { folderHolds.push(hold); next(); }); });
+        fs.unlink(where, () => { hold.listen(where, () => { folderHolds.push(hold); keepHolding(hold); next(); }); });
       });
     });
-    hold.listen(where, () => { folderHolds.push(hold); next(); });
+    hold.listen(where, () => { folderHolds.push(hold); keepHolding(hold); next(); });
   };
   holdOne(0);
+}
+/**
+ * A hold that listens is kept for the life of the copy: an error on it afterwards (a connection it could not take) is said
+ * and the hold kept, since it is there to be found held, never to answer.
+ */
+function keepHolding(hold) {
+  hold.removeAllListeners('error');
+  hold.on('error', (e) => { console.warn('  [folder] the hold on the data folder met ' + ((e && e.code) || 'an error') + ': still held'); });
 }
 /**
  * The black window's lines for what the audit log needs of the person at this laptop that `said` has not said yet, each
@@ -3070,16 +3198,111 @@ function auditBanner(said) {
 /** Let go of the data folder (a clean stop): the next start finds it free at once. */
 function releaseDataFolder() { for (const hold of folderHolds.splice(0)) { try { hold.close(); } catch { /* the process is ending: the OS frees it */ } } }
 
+/**
+ * Every sealed value this copy keeps in its data folder, as [what it is, the sealed value]: the words name the kind, never
+ * the value or whose it is.
+ */
+function sealedValues() {
+  const out = [];
+  const add = (what, v) => { if (typeof v === 'string' && v) out.push([what, v]); };
+  const each = (o) => (o && typeof o === 'object' ? Object.values(o) : []);
+  add('the AI key', settings.aiKeySealed);
+  add('the Stagewatch key', settings.stagewatchKeySealed);
+  add('the context token', settings.contextTokenSealed);
+  for (const sw of each(settings.hallStagewatch)) add('a hall\'s Stagewatch key', sw && sw.keySealed);
+  for (const link of each(settings.peerLinks)) add('a Patterns or PlayMap link\'s token', link && link.tokenSealed);
+  for (const d of displays.list.values()) add('a screen\'s link', d.tokenSealed);
+  return out;
+}
+/**
+ * Why the installed node may not start with the keys it reads, in words, or '': a machine key, server secret or
+ * certificate that cannot be read, a machine key missing while values sealed with one are here (or while a file that may
+ * hold them could not be read, so none can be ruled out), or a sealed value that does not open. Read before it holds its
+ * folder, so nothing is made over them. A portable copy goes on without what it cannot read (its keyless run, its own
+ * secret, HTTPS off, context reads refused), and says so.
+ */
+function taskKeysProblem() {
+  const key = secretbox.keyState();
+  if (key.state === 'unusable') return key.words;
+  if (secretFound.state === 'unusable') return secretFound.words;
+  if (tlsFound && tlsFound.state === 'unusable') return tlsFound.words;
+  const sealed = sealedValues();
+  const kinds = (list) => [...new Set(list.map(([what]) => what))].join(', ');
+  if (key.state === 'absent' && sealed.length) {
+    return 'the machine key is not in ' + secretbox.keyDir() + ', and ' + plural(sealed.length, 'value') + ' in ' + DATA_DIR + (sealed.length === 1 ? ' was' : ' were') + ' sealed with one (' + kinds(sealed) + ')';
+  }
+  // A new machine key is made only where nothing sealed with the old one can be: a file that holds sealed values and
+  // could not be read leaves that unknown.
+  const unread = [[SETTINGS_PATH, settingsRead.unread], [path.join(DATA_DIR, 'displays.json'), displays.unread]].filter(([, code]) => code);
+  if (key.state === 'absent' && unread.length) {
+    return 'the machine key is not in ' + secretbox.keyDir() + ', and ' + unread.map(([file, code]) => file + ' (' + code + ')').join(' and ') + ' could not be read, so whether values were sealed with one cannot be told. Start it again once ' + (unread.length === 1 ? 'that file' : 'those files') + ' can be read';
+  }
+  const shut = key.state === 'key' ? sealed.filter(([, v]) => !secretbox.open(v)) : [];
+  if (shut.length) return plural(shut.length, 'sealed value') + ' in ' + DATA_DIR + (shut.length === 1 ? ' does' : ' do') + ' not open with the machine key in ' + secretbox.keyDir() + ' (' + kinds(shut) + ')';
+  return '';
+}
+
+/**
+ * What a start writes, only once this copy holds its data folder and its port: its folders; the machine key, the
+ * certificate and the server secret where there are none (never over one that is there, or that could not be read); the
+ * settings' saves asked meanwhile; the watchdog's give-up marked as seen. A data or uploads folder that cannot be made
+ * stops the start (code 3), in either channel; for the installed node, so does a machine key, certificate or server secret
+ * that cannot be made, since it never runs without them.
+ */
+function firstWrites() {
+  for (const [dir, what, name] of [[ROOMS_DIR, 'data', 'AGM_DATA_DIR'], [UPLOAD_DIR, 'uploads', 'AGM_UPLOAD_DIR']]) {
+    try { fs.mkdirSync(dir, { recursive: true }); } catch (e) {
+      cannotStart('the ' + what + ' folder ' + dir + ' cannot be made (' + (e.code || e.message) + '). Choose a folder this Windows account can write to (' + name + '), or fix that one\'s permissions.');
+    }
+  }
+  secretbox.allowMaking();
+  if (!secretbox.hasKey() && RUNS === 'task') cannotStart(secretbox.keyProblem().words + '. The installed node does not run without its machine key.');
+  AUDIT_SIGN_KEY = (() => { try { return secretbox.signingKey().fingerprint; } catch { return ''; } })();
+  // Keys kept in clear by 0.2, sealed now that a key missing at the read has been made: the link takes its key again.
+  if (migrateClearKeys()) stageLink.configure(settings.stagewatchUrl || '', stagewatchKey(), settings.stagewatchFingerprint || '');
+  if (tlsFound && (tlsFound.state === 'absent' || tlsFound.state === 'renew')) {
+    try {
+      cert = tlsmod.loadOrCreate({ dir: secretbox.keyDir(), name: 'AGMessage ' + os.hostname(), seal: secretbox.seal, open: secretbox.open });
+      front.setCert({ certPem: cert.certPem, keyPem: cert.keyPem });
+      if (discovery) discovery.tls = cert.fp;
+    } catch (e) {
+      // None at all: the installed node does not run without one. One whose renewal failed still serves, its key having
+      // opened, until a later start renews it.
+      if (tlsFound.state === 'absent' && RUNS === 'task') cannotStart('no certificate can be made in ' + secretbox.keyDir() + ' (' + (e.code || e.message) + '). The installed node does not run without it.');
+      if (tlsFound.state === 'absent') tlsOff = 'no certificate can be made (' + e.message + ')';
+      else console.warn('  [tls] the certificate, which ends ' + cert.validTo + ', could not be renewed (' + (e.code || e.message) + '): it serves on, and the next start tries again');
+    }
+  }
+  if (secretFound.state === 'absent') {
+    let why = '';
+    try { if (!guard.makeSecret(secretFound)) why = 'one appeared there while this copy started, and it is left as it is'; } catch (e) { why = 'it could not be written (' + (e.code || e.message) + ')'; }
+    if (why && RUNS === 'task') cannotStart('the server secret ' + secretFound.file + ' was not made: ' + why + '. The installed node does not run without it.');
+    if (why) secretFound.words = secretFound.file + ' was not made: ' + why;
+  }
+  if (settingsDue) saveSettings();
+  if (watchdogGaveUp) { try { fs.renameSync(path.join(DATA_DIR, 'watchdog.json'), path.join(DATA_DIR, 'watchdog.seen.json')); } catch { /* shown once anyway */ } }
+}
+
+// The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.
+if (RUNS === 'task') {
+  const why = taskKeysProblem();
+  if (why) cannotStart(why + '. Nothing was changed: the installed node does not run without its keys, and never makes new ones over them.');
+}
+
 holdDataFolder(() => front.listen(PORT, HOST, () => {
-  // This copy holds the folder and the port: now it writes. Each replayed log is folded into a fresh snapshot (a torn last
-  // line cut before anything is appended after it), each hall says AGMessage restarted, the audit log is opened, and the show
-  // desk's loop may run (and save what it reports), as may the peaks' saves (from the next 5 s window).
+  // This copy holds the folder and the port: now it writes. Its folders, keys and secret are made where there are none,
+  // each replayed log is folded into a fresh snapshot (a torn last line cut before anything is appended after it), each
+  // hall says AGMessage restarted, the audit log is opened (and given what waited for it), and the show desk's loop may
+  // run (and save what it reports), as may the peaks' saves (from the next 5 s window).
+  listening = true;
   serving = true;
+  firstWrites();
   store.compactAll();
   for (const room of store.rooms.values()) {
     store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— AGMessage restarted · ' + plural(room.messages.length, 'message') + ' kept —', at: Date.now() } });
   }
   audit.open();
+  for (const fn of untilServing.splice(0)) fn();
   // The whole log is checked once, beside the show, so health, the rows' marks and the black window read what the log
   // holds from the start: findings an earlier start left open, and a chain broken at a line, included. Then a split a stop
   // left part way is finished (or its leftovers, which no split pins, removed), which checks the log again.
@@ -3094,6 +3317,11 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   console.log(`  Local:   http://localhost:${PORT}`);
   for (const a of addresses) console.log(`  LAN:     http://${a}:${PORT}` + (cert ? `   (or https://${a}:${PORT})` : ''));
   if (cert) console.log('  HTTPS:   on, same port — certificate ' + cert.fp.slice(0, 23) + '…  (trust it once per device: /tls)' + (settings.requireHttps ? ' · required from other devices' : ''));
+  if (tlsOff) console.log('  HTTPS:   off — ' + tlsOff);
+  // What this run goes without, kept as it is and never made again over it: each said once, here.
+  if (secretFound.words) console.log('  Secret:  ' + secretFound.words + '. This run signs guests and invite links with a secret of its own, so those made before do not hold until it is read again.');
+  if (settingsRead.unread) console.log('  Settings: ' + settingsRead.words + '. Nothing is saved over it this run, which goes without its links and keys, and refuses a setting changed. ' + settingsRead.fix);
+  else if (contextTokenProblem()) console.log('  Context: ' + contextTokenProblem());
   console.log('');
   console.log('  ============================================');
   console.log('  Admin login (only from this host laptop):');

@@ -52,9 +52,10 @@ function readTomb(t) {
 }
 
 class RoomStore {
-  constructor(dir) {
+  /** `make: false`: the folder is not made here (a server makes it once it holds its data folder, and loads before). */
+  constructor(dir, { make = true } = {}) {
     this.dir = dir;
-    fs.mkdirSync(dir, { recursive: true });
+    if (make) fs.mkdirSync(dir, { recursive: true });
     this.rooms = new Map();
     this.lastError = null;   // the last append or snapshot that failed, until every room is on disk again
     // Told of each snapshot written: (ms it took — the stall a commit waits — the room's message count). Health's peaks.
@@ -72,8 +73,11 @@ class RoomStore {
    */
   loadAll(onMigrate, { compact = true } = {}) {
     let n = 0;
-    // A room whose snapshot was lost mid-rename still has its .bak: both name the room.
-    const codes = new Set(fs.readdirSync(this.dir).map((f) => (/^(.+)\.json(\.bak)?$/.exec(f) || [])[1]).filter(Boolean));
+    // A room whose snapshot was lost mid-rename still has its .bak: both name the room. A folder not made yet holds none;
+    // one that cannot be read throws, with its code.
+    let names = [];
+    try { names = fs.readdirSync(this.dir); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    const codes = new Set(names.map((f) => (/^(.+)\.json(\.bak)?$/.exec(f) || [])[1]).filter(Boolean));
     for (const code of codes) {
       if (!RoomStore.validCode(code)) continue;
       try {

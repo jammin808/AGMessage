@@ -49,7 +49,11 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
 - **Every store** on disk goes through a `WriteLane` that is in `saveLanes()` (flushed at stop and crash, named in
   health; health's `saves.built` counts the lanes made and `saves.named` the distinct lanes in that list, and a test
   holds them equal); one server per data folder (the folder lock), and nothing is written before the lock and the port
-  are held.
+  are held: a store is read at load and written only once `serving` (`firstWrites` makes the folders, keys and secret; a
+  save asked earlier waits; a stop or crash before then saves nothing). A secret or key file is made only where there is
+  none (`readText`'s ENOENT, then `publishOnce`), never over one that could not be read; a settings file that could not be
+  read (EBUSY, EACCES) is never saved over nor stood in for by its `.bak`, and an act that would save it is refused with
+  why.
 - **A page's write goes through the outbox** (`app/public/outbox.js`): `AGM.outbox.hold('x', …)` for what a person
   wrote or answered (never anything secret: it is kept in the tab's `sessionStorage`), `AGM.outbox.now('x', …)` for an
   act on something, never a bare `socket.emit` of a write; a read or a page's own sync may still be a plain emit. A verb
@@ -153,7 +157,7 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | HTTPS and certificate pins | `app/lib/tls.js` |
 | The machine key (never replaced), sealed secrets, the keys derived from it | `app/lib/secretbox.js` |
 | Health's readings and a show day's peaks | `app/lib/peaks.js` |
-| What a start opens and says: the browser opener, the port's holder | `app/lib/startup.js` |
+| What a start opens and says, and what it may write: the browser opener, the port's holder, the channel and the installed node's folders (`channelOf`), nothing written before the data folder and the port are held (`firstWrites`), a folder or key that cannot be used ending the start with its words (`cannotStart`, code 3; the installed node's port or folder held, 75), a secret made only where there is none (`publishOnce`, `readText`, `readSecret`, `readCertificate`), settings that could not be read never saved over (`loadSettings`, `settingsUnsaved`: a setting changed is refused with why), an error on the port once it listens counted, not fatal; their tests, with the port's accept error and files another program holds (a read that throws EBUSY or EACCES, a rename onto it EBUSY) raised through preloads | `app/lib/startup.js`, `app/server.js` (`firstWrites`, `cannotStart`, `cannotStartYet`, `taskKeysProblem`, `loadSettings`, `front`'s error), `app/supervise.js`, `app/lib/resilience.js` (`EXIT`, `publishOnce`, `readText`), `app/test/startrules.test.js`, `app/test/accept-preload.js`, `app/test/busy-preload.js` |
 | AI drafts | `app/lib/ai.js` |
 | The version | `app/lib/version.js`, `tools/stamp-build.js`, `app/package.json` (`version`, `agmessage.runBase`) |
 | The pages | `app/public/` (`index` sign-in and codes, `halls` the board, `users` accounts and audit, `app` a hall, `admin`, `display`) |

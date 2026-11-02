@@ -7,7 +7,10 @@
  *  - Waits between crash restarts: 0.5, 4, 8, 15, 30 s; a run of 5 minutes resets them. More than 6 crashes in
  *    10 minutes: it gives up, writes data/watchdog.json and a line to data/watchdog.log, and the next start shows
  *    that on the admin page.
- *  - Exit codes carry intent (lib/resilience.js EXIT): 0 stopped, 3 can't start as configured, 82 restart now.
+ *  - Exit codes carry intent (lib/resilience.js EXIT): 0 stopped, 3 can't start as configured, 75 the installed node's
+ *    port or data folder held by another program (tried again on the ladder, never counted as a crash), 82 restart now.
+ *  - The channel (AGM_RUNS) and, for the installed node, its folders are checked before anything is written; an unknown
+ *    channel, or a data folder that cannot be made, stops it with code 3 and the words of why.
  *  - The admin token is made once here and handed to every restart, so a restart doesn't change it.
  *  - Ctrl+C, closing the window or a stop: the server is asked over IPC and saves before it goes (a signal to a child
  *    on Windows would end it unsaved). If the watchdog itself is ended: elsewhere the server sees its channel close and
@@ -20,6 +23,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { SupervisorPolicy, EXIT } = require('./lib/resilience');
+const { channelOf } = require('./lib/startup');
 
 const CHILD = process.env.AGM_CHILD || path.join(__dirname, 'server.js');
 const DATA_DIR = process.env.AGM_DATA_DIR || path.join(__dirname, 'data');
@@ -27,15 +31,31 @@ const HANG_MS = Number(process.env.AGM_HANG_MS) || 10_000;
 const STARTUP_MS = Number(process.env.AGM_STARTUP_MS) || 30_000;
 const policy = new SupervisorPolicy(process.env.AGM_BACKOFF ? { backoffSec: process.env.AGM_BACKOFF.split(',').map(Number) } : {});
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
+/** This watchdog cannot run as configured: the words on its console, and code 3, which nothing restarts. */
+function cannotStart(words) {
+  console.error('\n  AGMessage cannot start: ' + words + '\n');
+  process.exit(EXIT.CONFIG);
+}
+const channel = channelOf(process.env, { programDir: path.dirname(__dirname) });
+if (channel.problem) cannotStart(channel.problem);
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {
+  cannotStart('the data folder ' + DATA_DIR + ' cannot be made (' + (e.code || e.message) + '). Choose a folder this Windows account can write to (AGM_DATA_DIR), or fix that one\'s permissions.');
+}
 const env = { ...process.env, AGM_SUPERVISED: '1', AGM_DATA_DIR: DATA_DIR };
 if (!env.ADMIN_TOKEN) env.ADMIN_TOKEN = crypto.randomBytes(8).toString('hex');
 
-function log(line) {
+/** A line on the console and, unless `consoleOnly`, in data/watchdog.log. */
+function log(line, consoleOnly = false) {
   const text = new Date().toISOString() + ' ' + line;
   console.log('  [watchdog] ' + line);
+  if (consoleOnly) return;
   try { fs.appendFileSync(path.join(DATA_DIR, 'watchdog.log'), text + '\n'); } catch { /* the console has it */ }
 }
+// While the installed node's port or folder stays held (code 75) it is tried again every step of the ladder for as long as
+// it takes, 2,880 times a day at the last step: watchdog.log takes the first try of such a run and every HELD_LOG_EVERY-th
+// after it, with the count, and the console takes each, so a port held for days never grows the log without bound.
+const HELD_LOG_EVERY = Number(process.env.AGM_HELD_LOG_EVERY) || 100;
+let heldRun = 0;   // tries in a row that found the port or folder held
 
 let child = null;
 let lastBeat = 0;
@@ -70,7 +90,9 @@ function decide(code, hung, signal) {
     process.exit(EXIT.CONFIG);   // the .bat stops too: something is wrong that restarting won't fix
   }
   restarts++;
-  log('server ' + d.reason + (signal ? ' [' + signal + ']' : '') + ' — restarting' + (d.delayMs ? ' in ' + d.delayMs / 1000 + ' s' : ''));
+  heldRun = code === EXIT.HELD && !hung ? heldRun + 1 : 0;
+  const tries = heldRun > 1 ? ' (try ' + heldRun + ')' : '';
+  log('server ' + d.reason + (signal ? ' [' + signal + ']' : '') + tries + ' — restarting' + (d.delayMs ? ' in ' + d.delayMs / 1000 + ' s' : ''), heldRun > 1 && heldRun % HELD_LOG_EVERY !== 0);
   setTimeout(() => { if (!stopping) start(); }, d.delayMs);
 }
 

@@ -5,22 +5,32 @@
  * role invites. Pure where possible so they are unit tested (test/guard.test.js).
  */
 const crypto = require('crypto');
-const fs = require('fs');
 const net = require('net');
 const path = require('path');
+const { publishOnce, readText } = require('./resilience');
 
 // ---------- the server secret (kept beside the data so identities survive restarts) ----------
-function loadSecret(dataDir) {
-  const p = path.join(dataDir, 'secret.key');
-  try {
-    const s = fs.readFileSync(p, 'utf8').trim();
-    if (/^[0-9a-f]{64}$/.test(s)) return Buffer.from(s, 'hex');
-  } catch { /* create below */ }
-  const s = crypto.randomBytes(32);
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(p, s.toString('hex'), { mode: 0o600 });
-  return s;
+/**
+ * The server secret as a start finds `<dataDir>/secret.key`, read and never written: {secret, state, file, code?, words?}.
+ *  - 'read': the file's secret.
+ *  - 'absent': no file (ENOENT, and only that): a new secret, which `makeSecret` writes once the server holds its folder.
+ *  - 'unusable': any other read error, or a file that is not a secret: this run signs with a secret of its own, and the
+ *    file is left as it is (a secret is never made over one that could not be read).
+ */
+function readSecret(dataDir) {
+  const file = path.join(dataDir, 'secret.key');
+  const r = readText(file);
+  const hex = r.code ? '' : r.text.trim();
+  if (/^[0-9a-f]{64}$/.test(hex)) return { secret: Buffer.from(hex, 'hex'), state: 'read', file };
+  const secret = crypto.randomBytes(32);
+  if (r.code === 'ENOENT') return { secret, state: 'absent', file };
+  return { secret, state: 'unusable', file, code: r.code || 'EBADKEY', words: r.code ? file + ' could not be read (' + r.code + ')' : file + ' does not hold a server secret' };
 }
+/**
+ * Write a secret `readSecret` found absent, in the folder this server holds: published whole, and never over a file that
+ * is there now. True when it was written, false when one was there; throws when the folder cannot take it.
+ */
+function makeSecret(found) { return publishOnce(found.file, found.secret.toString('hex'), { mode: 0o600, held: true }); }
 
 function mac(secret, text, len = 24) {
   return crypto.createHmac('sha256', secret).update(text).digest('base64url').slice(0, len);
@@ -319,7 +329,7 @@ function validUploadUrl(url) {
 }
 
 module.exports = {
-  loadSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
+  readSecret, makeSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
   Bucket, Buckets, Places, Lockout, limitKey, laneOf, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, str,
   UPLOAD_TYPES, uploadType, validUploadUrl, extOf,
 };

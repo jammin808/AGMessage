@@ -1389,6 +1389,98 @@ header's chips)
   colours fewer, 265.
 - Rolling back: nothing is stored.
 
+**A folder or a key that cannot be used stops the start with words; nothing is written before the folder is held; nothing
+secret is made again over one that could not be read** (the plan's Part 6, unit U1, with the owner's answers 34 and 35;
+the plan's readings on Linux, which this unit's tests take again: a data folder that could not be made ended the server
+with exit 1 after 42 ms, and the watchdog started it again 7 times and gave up, about 89 s; a copy refused at the data
+folder had already written `machine.key` and `tls.json`; and the code made a new `secret.key` on any read error, a new
+certificate over a `tls.json` whose key did not open or that did not parse, and a new context token over one that did
+not open. Nothing of it is run on Windows yet)
+- Nothing is written before the copy holds its data folder and its port. Every store is read first, and only then are
+  made: the rooms and uploads folders (multer made the uploads folder as it was built, before any hold); the machine
+  key, the certificate and `secret.key` where there are none; the settings' saves asked meanwhile (a new node id, the
+  0.2 keys kept in clear, now sealed with a machine key made at the same start); and the watchdog's give-up marked as
+  seen. A copy refused at the folder or the port has written nothing, in its data folder or its key folder; a stop or a
+  crash before the hold saves nothing and writes no crash record (another copy may own those files); a Stagewatch link
+  that answers before the hold has its `stagewatch.key` row written once the log is open. A data folder not made yet is
+  held by its path as given, without a word.
+- A folder that cannot be used stops the start with code 3, which no watchdog starts again, and its words: "AGMessage
+  cannot start: the uploads folder … cannot be made (ENOTDIR). Choose a folder this Windows account can write to
+  (AGM_UPLOAD_DIR), or fix that one's permissions." The watchdog says it of the data folder, the server of its rooms
+  and uploads folders, in either channel, and of a rooms folder that is there but cannot be read ("the rooms folder …
+  cannot be read (ENOTDIR)", a file in its place, or a folder this account may not list), before anything is written.
+  It was exit 1, a crash to the watchdog, seven times and a give-up. The server writes nothing first; its watchdog has
+  made the data folder and adds its line to `watchdog.log`.
+- `AGM_RUNS` names the channel: unset or empty, the portable folder; `portable`; `task`, the installed node. Any other
+  word (`service`, `session`, `Portable`) is refused, by the watchdog and the server, before anything is written. Under
+  `task` the data, uploads and key folders are each named (`AGM_DATA_DIR`, `AGM_UPLOAD_DIR`, `AGM_KEY_DIR`), a full path,
+  and outside the program's folder (the one that holds `app\` and `node\`, where an upgrade replaces files), read as
+  written: a folder named `..data` is inside, and a `\\?\` or `\\.\` prefix, another spelling of the same folders, is not
+  a full path; else code 3 with which and why, before any write. No build sets `task` yet: the installer's units do.
+- The installed node never runs without its keys. A `machine.key`, `secret.key` or `tls.json` that cannot be read, a
+  machine key missing while values sealed with one are in the data folder (or while `settings.json` or `displays.json`,
+  which hold them, cannot be read, so none can be ruled out), or a sealed value that does not open with
+  it (the AI key, the Stagewatch key, the context token, a hall's Stagewatch key, a Patterns or PlayMap link's token, a
+  screen's link, the certificate's key) is code 3 before anything is made, its words naming the kinds and never a
+  value: "1 sealed value in … does not open with the machine key in … (the context token). Nothing was changed: the
+  installed node does not run without its keys, and never makes new ones over them." Its port in use, or its data
+  folder held, is code 75: the watchdog starts it again on its ladder (0.5, 4, 8, 15, 30 s, the last repeating) for as
+  long as it is held, never counted as a crash and never given up, so whatever holds the port or takes the folder
+  pipe's name during a restart cannot keep the node down; each try is said on its console, and `watchdog.log` takes the
+  first of such a run and every hundredth after it, with its count (2,880 tries a day at the last step otherwise). A
+  certificate in date whose renewal fails is kept, said and served, as in the portable folder; only one that cannot be
+  made at all is code 3. A portable copy still stops with code 3 at a held port or folder, where a person reads its
+  words.
+- Each secret is made only where there is none (ENOENT). `secret.key` is published whole and never over one (on a
+  drive with no hard links, by the atomic writer's rename in the folder the copy holds); `tls.json` by a hard link that
+  refuses one another start made at the same moment, which is then taken; the machine key as unit H made it. Any other
+  failure, in the portable folder, and this run goes without and says so in the window, the file left as it is: a
+  secret of its own ("Secret: … could not be read (EISDIR). This run signs guests and invite links with a secret of its
+  own, …"); HTTPS off with why ("HTTPS: off — the private key in … does not open with this laptop's machine key. It is
+  left as it is"), a TLS handshake ended until a certificate is there; a context token kept as it is, every token read
+  refused with 503 and the words ("This AGMessage's context token does not open with its laptop's machine key, so no
+  context token answers. Its admin makes a new one: New token, on the admin page."), never counted as a guess, and the
+  admin page saying the same under the token until New token makes one. A certificate near its end, whose key opens, is
+  still renewed. A `settings.json` that cannot be read (EBUSY, EACCES) is never written over that run, and its `.bak`,
+  a save behind, is never taken for it (a token or link saved since is only in the file): the run goes without its
+  settings and says so ("Settings: … could not be read (EBUSY). Nothing is saved over it this run, …"), makes no context
+  token (token reads 503 with why), and refuses every setting changed with why ("Not saved: … could not be read (EBUSY),
+  so this run saves no setting over it. Start AGMessage again once nothing else holds it …": the admin's settings, a
+  Patterns or PlayMap link, a hall's own Stagewatch with its name), never answering it as done. Its `.bak` is read only
+  for a file not there or not whole; one not whole, with no `.bak` that parses, is kept the same way, with words to put
+  a copy back or move it aside. 0.5.1 loaded the `.bak`, or nothing, and saved a new node id and token over it.
+- An error on the port once it listens no longer ends a serving copy. It is one Node meets taking a connection (EMFILE,
+  out of file handles): the connection is lost, the port still listens, the copy serves on, and the error is counted in
+  health (`acceptErrors`, `{count, last}`, at the end of `/api/health`'s detail) and said (the first 20, then each 100th).
+  A port that stops listening saves and ends as a crash (70), which the watchdog starts again. It ended with code 3,
+  unsaved and never started again (found beside unit 4). The data folder's hold, likewise, keeps holding through an
+  error of its own.
+- The fences: `test/startrules.test.js` (new) holds a copy refused at its folder, in each channel, to a data and key
+  folder byte for byte as they were, settings with a 0.2 key and no node id included; a first start to its folders,
+  keys, certificate, secret and settings, the 0.2 key sealed; a data, uploads or key folder that cannot be made, under
+  the watchdog, to code 3 with the folder named and no restart; each unknown channel and each unset, relative or inside
+  folder to code 3 from the watchdog and the server with nothing made; each key the installed node cannot use to code 3
+  with nothing changed; a portable copy without its secret or certificate to serving, HTTPS off in health, each left as
+  it was; a context token that does not open to 503s with the words, no lockout, kept across a save, until New token; a
+  port held under `task` to eight starts and more without a give-up, then serving once it is free; and an EMFILE on the
+  port (raised through `test/accept-preload.js`) to serving on, counted, and a port that stopped listening to a save and
+  code 70. Files another program holds are stood in by `test/busy-preload.js` (a read of a real file throws EBUSY or
+  EACCES, or a rename onto it EBUSY): the installed node held to code 3, nothing made, for each of `machine.key`,
+  `secret.key` and `tls.json` held, and for no machine key beside a `settings.json` or `displays.json` held; a portable
+  copy whose secret, certificate and settings are held to serving, each said, and each byte for byte after a start, a
+  setting asked and a stop; a held `settings.json` beside a `.bak` a save behind to no token made, 503s, every setting
+  change refused and both files byte for byte; a file missing beside a held `.bak`, and one not whole with no `.bak`, to
+  both kept as they were with their words, and one missing beside a `.bak` not whole to new settings, the `.bak` as it
+  was; and a certificate in date whose renewal fails to HTTPS on with it. A rooms folder that cannot be read, under the
+  watchdog, in each channel, to code 3 and no restart. `test/startup.test.js` holds `channelOf` (a `..data` folder, and
+  the device and long-path prefixes, included) and the port held under `task` to 75; `test/resilience.test.js` the
+  watchdog's ladder for 75 and its bounded log; `test/tls.test.js` and `test/units.test.js` the certificate, the secret,
+  `publishOnce` and `readText` never writing over what is there. The synchronous-call caps move with their reasons:
+  `lib/resilience.js` 11 → 13 (`publishOnce`'s link and its temporary file), `server.js` 16 → 15, `lib/guard.js` 3 → 0
+  and `lib/tls.js` 4 → 0 (their reads and writes go through `readText`, `publishOnce` and the atomic writer).
+- Rolling back: nothing stored changes form. 0.5.1 reads the same `secret.key`, `tls.json` and settings, and would make
+  again what this build keeps.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

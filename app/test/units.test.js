@@ -352,21 +352,91 @@ test('atomic write: a file known whole is kept as .bak unread; one not known is 
   assert.deepEqual([text(g), fs.existsSync(g + '.bak')], ['{"v":1}', false]);
 });
 
-test('atomic write: a read with its backup says whether the file itself parsed', () => {
+test('atomic write: a read with its backup says whether the file itself parsed, and why each was not read', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-whole-'));
   const f = path.join(dir, 'ABC234.json');
-  assert.deepEqual(resilience.readJsonWhole(f), { data: null, whole: false }, 'neither file');
+  assert.deepEqual(resilience.readJsonWhole(f), { data: null, whole: false, codes: ['ENOENT', 'ENOENT'] }, 'neither file');
   fs.writeFileSync(f + '.bak', '{"v":1}');
-  assert.deepEqual(resilience.readJsonWhole(f), { data: { v: 1 }, whole: false }, 'only the .bak: not whole');
+  assert.deepEqual(resilience.readJsonWhole(f), { data: { v: 1 }, whole: false, codes: ['ENOENT', ''] }, 'only the .bak: not whole');
   fs.writeFileSync(f, '{"v":2');
-  assert.deepEqual(resilience.readJsonWhole(f), { data: { v: 1 }, whole: false }, 'a torn file falls back to its .bak: not whole');
+  assert.deepEqual(resilience.readJsonWhole(f), { data: { v: 1 }, whole: false, codes: ['', ''] }, 'a torn file falls back to its .bak: not whole');
   fs.writeFileSync(f, '{"v":2}');
-  assert.deepEqual(resilience.readJsonWhole(f), { data: { v: 2 }, whole: true }, 'the file parsed: whole');
+  assert.deepEqual(resilience.readJsonWhole(f), { data: { v: 2 }, whole: true, codes: [''] }, 'the file parsed: whole');
   assert.deepEqual(resilience.readJsonWithBak(f), { v: 2 });
   fs.rmSync(f + '.bak');
   fs.writeFileSync(f, 'torn');
-  assert.deepEqual(resilience.readJsonWhole(f), { data: null, whole: false });
+  assert.deepEqual(resilience.readJsonWhole(f), { data: null, whole: false, codes: ['', 'ENOENT'] });
   assert.equal(resilience.readJsonWithBak(f), null);
+  // A file that cannot be read is not a file that is not there: its code says so (a folder in its place, as EBUSY would).
+  fs.rmSync(f);
+  fs.mkdirSync(f);
+  assert.deepEqual(resilience.readJsonWhole(f), { data: null, whole: false, codes: ['EISDIR', 'ENOENT'] });
+  assert.deepEqual(resilience.readText(f), { text: null, code: 'EISDIR' });
+  assert.deepEqual(resilience.readText(f + '.none'), { text: null, code: 'ENOENT' });
+  fs.writeFileSync(f + '.txt', 'é');
+  assert.deepEqual(resilience.readText(f + '.txt'), { text: 'é', code: '' });
+});
+
+test('publish once: a file is made whole only where none is, never over one; in a folder held, a drive without hard links renames it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-once-'));
+  const f = path.join(dir, 'secret.key');
+  assert.equal(resilience.publishOnce(f, 'first', { mode: 0o600 }), true, 'made');
+  assert.equal(fs.readFileSync(f, 'utf8'), 'first');
+  assert.equal(resilience.publishOnce(f, 'second'), false, 'one is there: not written over');
+  assert.equal(fs.readFileSync(f, 'utf8'), 'first');
+  assert.deepEqual(fs.readdirSync(dir), ['secret.key'], 'no temporary file left either way');
+  // A drive that cannot hold a hard link (FAT, exFAT): refused with its code, unless the folder is this copy's (held).
+  const link = fs.linkSync;
+  fs.linkSync = () => { throw Object.assign(new Error('EPERM: operation not permitted, link'), { code: 'EPERM' }); };
+  try {
+    const g = path.join(dir, 'tls.json');
+    assert.throws(() => resilience.publishOnce(g, 'x'), (e) => e.code === 'EPERM');
+    assert.ok(!fs.existsSync(g));
+    assert.equal(resilience.publishOnce(g, 'held', { held: true }), true, 'held: renamed into place, whole');
+    assert.equal(fs.readFileSync(g, 'utf8'), 'held');
+  } finally { fs.linkSync = link; }
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['secret.key', 'tls.json'], 'no temporary file left');
+  // A folder that cannot take it (a file where the folder should be): thrown, and nothing left.
+  fs.writeFileSync(path.join(dir, 'file'), '');
+  assert.throws(() => resilience.publishOnce(path.join(dir, 'file', 'x'), 'y'), (e) => ['EEXIST', 'ENOTDIR'].includes(e.code));
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['file', 'secret.key', 'tls.json']);
+});
+
+test('the server secret: read and never written; only a file that is not there is made, once the folder is held, and never over one', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-secret-'));
+  const file = path.join(dir, 'secret.key');
+  const absent = guard.readSecret(dir);
+  assert.deepEqual([absent.state, absent.file, absent.secret.length], ['absent', file, 32]);
+  assert.deepEqual(fs.readdirSync(dir), [], 'reading writes nothing');
+  assert.equal(guard.makeSecret(absent), true);
+  const read = guard.readSecret(dir);
+  assert.deepEqual([read.state, read.secret.equals(absent.secret)], ['read', true], 'the secret made is the one read next');
+  assert.equal(guard.makeSecret({ ...absent, secret: Buffer.alloc(32, 7) }), false, 'one is there: never written over');
+  assert.ok(guard.readSecret(dir).secret.equals(absent.secret));
+  // Anything else is unusable: this run signs with its own, and the file is left as it is.
+  fs.writeFileSync(file, 'not a secret');
+  const bad = guard.readSecret(dir);
+  assert.deepEqual([bad.state, bad.code, bad.words], ['unusable', 'EBADKEY', file + ' does not hold a server secret']);
+  assert.equal(bad.secret.length, 32);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'not a secret');
+  fs.rmSync(file);
+  fs.mkdirSync(file);   // a file that cannot be read (as EBUSY or EACCES)
+  const unread = guard.readSecret(dir);
+  assert.deepEqual([unread.state, unread.code, unread.words], ['unusable', 'EISDIR', file + ' could not be read (EISDIR)']);
+  assert.ok(!unread.secret.equals(guard.readSecret(dir).secret), 'a secret of its own for each run');
+  assert.ok(fs.statSync(file).isDirectory(), 'left as it is');
+});
+
+test('store: a store whose folder is not made yet loads no hall and makes nothing; one that cannot be read says why', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-')), 'rooms');
+  const s = new RoomStore(dir, { make: false });
+  assert.equal(s.loadAll(null, { compact: false }), 0);
+  assert.ok(!fs.existsSync(dir), 'not made by the store');
+  fs.writeFileSync(dir, '');   // a file where the folder should be
+  assert.throws(() => new RoomStore(dir, { make: false }).loadAll(null, { compact: false }), (e) => e.code === 'ENOTDIR');
+  fs.rmSync(dir);
+  new RoomStore(dir);   // made by default, as a test or a tool asks
+  assert.ok(fs.statSync(dir).isDirectory());
 });
 
 test('store: compaction copies the snapshot it wrote to .bak unread; a torn one is read first and never replaces a good .bak; a load from .bak clears snapWhole', () => {

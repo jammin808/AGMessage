@@ -372,8 +372,43 @@ Troubleshooting
   app\node_modules.
 
 - "AGMessage did not start - the reason is above.": the lines just above
-  it say why (a port in use, a data folder already in use, or the
-  watchdog giving up). "Server stopped." means it was stopped on purpose.
+  it say why (a port in use, a data folder already in use, a folder that
+  cannot be made, or the watchdog giving up). "Server stopped." means it
+  was stopped on purpose.
+
+- "AGMessage cannot start: the uploads folder ... cannot be made
+  (EACCES). ...": the folder named cannot be made or written by this
+  Windows account (the data folder's words are the same, and "the
+  rooms folder ... cannot be read" for one inside it this account
+  cannot list). Move this copy to a folder of its own that you can
+  write to, or set AGM_DATA_DIR / AGM_UPLOAD_DIR to one. It is not
+  started again by itself; folders made before the one that failed
+  stay, empty. "AGM_RUNS is ..., which names no way AGMessage runs":
+  remove AGM_RUNS from the .bat; the portable folder needs none.
+
+- Lines that say what this run goes without. Each file is left as it is,
+  never replaced, and the copy serves on:
+  - "Secret: ...secret.key could not be read (...)": guests and invite
+    links are signed with a secret of this run's own, so links handed
+    out before do not work until it can be read again (another program,
+    often an antivirus, may hold it: start AGMessage again).
+  - "HTTPS: off — ...tls.json could not be read" or "the private key in
+    ...tls.json does not open with this laptop's machine key": devices
+    use http:// this run. A certificate made on another laptop or
+    Windows account never opens here: to make a new one, close
+    AGMessage, move tls.json out of %LOCALAPPDATA%\AGMessage, and start
+    it again (each device trusts the new one once).
+  - "Context: This AGMessage's context token does not open ...": other
+    show systems cannot read this AGMessage until Admin -> Health -> New
+    token makes one; give them the new token.
+  - "Settings: ...settings.json could not be read (EBUSY)": this run
+    has no Stagewatch link or saved keys, and refuses any setting
+    changed ("Not saved: ..."), so the file is never written over.
+    Start AGMessage again once nothing else holds it (an antivirus or
+    a backup may). "...holds no settings AGMessage can read, nor does
+    its .bak": put back a copy of settings.json, or move it aside and
+    start AGMessage again to begin with new settings (set its links
+    and keys again).
 
 - A port already in use is named by who holds it:
   - "AGMessage 0.5.1 (build ...) is already running on port 3023. Use its

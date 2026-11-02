@@ -285,7 +285,6 @@ class AuditLog {
       if (p.head) this.saved = p.at;
       if (p.open) this.openDue = false;
     };
-    fs.mkdirSync(path.dirname(file), { recursive: true });
     let buf = readOr(file).buf || Buffer.alloc(0);
     const whole = buf.lastIndexOf(10) + 1;
     this.torn = buf.length - whole;     // a last line without its newline (a power cut mid-append): kept aside and cut at open()
@@ -442,6 +441,9 @@ class AuditLog {
   open() {
     if (this.opened) return;
     this.opened = true;
+    // Its folder is made here, at the first write, never when the log is read: a server reads it before it holds its data
+    // folder. One that cannot be made is said by the first append that fails.
+    try { fs.mkdirSync(path.dirname(this.file), { recursive: true }); } catch { /* the append that follows says why */ }
     try {
       const k = this.keysOf();
       this.Ke = k.entry; this.Kh = k.head;

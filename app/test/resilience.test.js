@@ -41,6 +41,23 @@ test('watchdog policy: the first restart after 0.5 s, then backoff, reset after 
   assert.match(q.exited(0, 0, true).reason, /not responding/, 'a hang is a crash whatever the code');
 });
 
+test('watchdog policy: a port or data folder held (code 75) is tried again on the ladder for as long as it is held, never counted as a crash', () => {
+  const p = new r.SupervisorPolicy();
+  let t = 0;
+  const held = [];
+  for (let i = 0; i < 20; i++) { p.started(t); t += 1000; held.push(p.exited(75, t)); }
+  assert.ok(held.every((d) => d.action === 'restart'), 'never a give-up, however often: ' + JSON.stringify(held.map((d) => d.action)));
+  assert.deepEqual(held.slice(0, 7).map((d) => d.delayMs), [500, 4000, 8000, 15000, 30000, 30000, 30000], 'the ladder\'s waits, the last repeating');
+  assert.equal(held[0].reason, 'could not take its port or data folder, which another program holds (code 75)');
+  assert.equal(p.crashes.length, 0, 'no crash counted');
+  // Crashes after it are counted from none: the seventh in ten minutes gives up, as ever.
+  for (let i = 0; i < 6; i++) { p.started(t); t += 1000; assert.equal(p.exited(70, t).action, 'restart'); }
+  p.started(t); t += 1000;
+  assert.equal(p.exited(70, t).action, 'giveup');
+  assert.equal(r.EXIT.HELD, 75);
+  assert.equal(new r.SupervisorPolicy().exited(75, 0, true).reason, 'not responding (no heartbeat)', 'a hang is a crash whatever the code');
+});
+
 // ---------------------------------------------------------------- the watchdog, for real (fake servers)
 function fakeChild(dir, body) {
   const f = path.join(dir, 'child.js');
@@ -100,6 +117,27 @@ test('watchdog: stays stopped on a clean exit; gives up on a crash loop and leav
   assert.equal(runs(d2), 7);
   const marker = JSON.parse(fs.readFileSync(path.join(d2, 'watchdog.json'), 'utf8'));
   assert.match(marker.reason, /7 times/);
+});
+
+test('watchdog: a server whose port or folder is held (75) is started again on the ladder, past where a crash loop gives up, and runs once it is free', async () => {
+  const dir = tmp('agm-wd-');
+  // Held nine times (seven crashes would give up), then it runs; asked to stop, it saves and goes.
+  const p = supervise(dir, fakeChild(dir, `if (n <= 9) process.exit(75); beat();`), { AGM_HELD_LOG_EVERY: '4' }, { ipc: true });
+  try {
+    assert.ok(await until(() => runs(dir) >= 10, 15000), 'tried again each time:\n' + p.out);
+    // Each held try's line, as the try it was: the first says no number, the rest say theirs.
+    const held = (text) => text.split('\n').filter((l) => l.includes('could not take its port or data folder, which another program holds (code 75)') && l.includes(' — restarting'))
+      .map((l) => { const m = / \(try (\d+)\)/.exec(l); return m ? Number(m[1]) : 1; });
+    assert.deepEqual(held(p.out), [1, 2, 3, 4, 5, 6, 7, 8, 9], 'each try said on the console:\n' + p.out);
+    // The log takes the first try of a run and every fourth after it (a hundredth unless told): bounded while it is held.
+    const log = fs.readFileSync(path.join(dir, 'watchdog.log'), 'utf8');
+    assert.deepEqual(held(log), [1, 4, 8], log);
+    assert.ok(!/giving up/.test(log) && !fs.existsSync(path.join(dir, 'watchdog.json')), 'never given up:\n' + log);
+    await wait(300);
+    assert.equal(p.exitCode, null, 'the watchdog runs its server');
+    p.send({ t: 'stop' });
+    assert.equal(await p.done, 0);
+  } finally { if (p.exitCode === null) { p.kill(); await p.done; } }
 });
 
 test('watchdog: a stop asked of it lets its server save before it goes, on every platform', async () => {
@@ -318,6 +356,37 @@ test('keys are sealed at rest with a machine key kept outside the app', () => {
   assert.equal(box.open(sealed), '', 'another machine (another key) can\'t open it');
 });
 
+test('the machine key: while making waits it is read and never made, a missing one read as absent; once allowed it is made', () => {
+  const box = require('../lib/secretbox');
+  const dir = tmp('agm-key-');
+  process.env.AGM_KEY_DIR = dir;
+  box._reset();
+  box.deferMaking();
+  assert.deepEqual(box.keyState(), { state: 'absent' });
+  assert.equal(box.hasKey(), false);
+  assert.throws(() => box.seal('swk_abc'), (e) => e.code === 'ENOENT' && e.noKey === true);
+  assert.deepEqual(box.keyProblem(), { code: 'ENOENT', words: 'the machine key at ' + path.join(dir, 'machine.key') + ' is not made yet' });
+  assert.deepEqual(fs.readdirSync(dir), [], 'nothing written while making waits');
+  box.allowMaking();
+  assert.deepEqual(box.keyState(), { state: 'key' }, 'the first ask once allowed makes it');
+  assert.deepEqual(fs.readdirSync(dir), ['machine.key']);
+  assert.equal(box.open(box.seal('swk_abc')), 'swk_abc');
+  // A key there is read while making waits; one that cannot be read is unusable, and left as it is.
+  box._reset();
+  box.deferMaking();
+  assert.deepEqual(box.keyState(), { state: 'key' });
+  const bad = tmp('agm-key-');
+  fs.mkdirSync(path.join(bad, 'machine.key'));
+  process.env.AGM_KEY_DIR = bad;
+  box._reset();
+  box.deferMaking();
+  assert.deepEqual(box.keyState(), { state: 'unusable', code: 'EISDIR', words: 'the machine key at ' + path.join(bad, 'machine.key') + ' could not be read (EISDIR)' });
+  box.allowMaking();
+  assert.equal(box.keyState().state, 'unusable', 'never made over one that could not be read');
+  assert.ok(fs.statSync(path.join(bad, 'machine.key')).isDirectory());
+  box._reset();
+});
+
 // ---------------------------------------------------------------- latency and clocks
 test('ring: percentiles over a fixed window; clock offset from the best round trip', () => {
   const ring = new r.Ring(4);
@@ -473,13 +542,11 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   // Synchronous fs calls block every meeting on the server while they run. These are allowed — each with its reason —
   // and the count may not grow without someone deciding it here.
   const allowed = {
-    'server.js': { max: 16, why: 'startup (dirs, settings, crash record), the crash handler, upload sniffing (4 KB), tunnel log tail (and, through its lane, the show desk results a tick collects, flushed once before they are reported)' },
+    'server.js': { max: 15, why: 'the first writes once the folder is held (its folders, the watchdog\'s marker seen), the crash handler, upload sniffing (4 KB), tunnel log tail (and, through its lane, the show desk results a tick collects, flushed once before they are reported)' },
     'supervise.js': { max: 3, why: 'the watchdog process: its own log and marker, never on a request' },
     'lib/store.js': { max: 10, why: 'durability: a change is appended to its log (the system\'s file cache) before the ack, or kept for the next snapshot when the disk refuses it; snapshots every 500 ops' },
-    'lib/resilience.js': { max: 11, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full; a folder\'s real path, read once per place at start (placeId)' },
+    'lib/resilience.js': { max: 13, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full; a file read with why it was not (readText), every store\'s read; a file made only where none is (publishOnce: its link, which refuses one there, and its temporary file removed); a folder\'s real path, read once per place at start (placeId)' },
     'lib/secretbox.js': { max: 3, why: 'the machine key, read once, or made once and published whole' },
-    'lib/guard.js': { max: 3, why: 'the server secret, read once at startup' },
-    'lib/tls.js': { max: 4, why: 'the certificate, read (or made) once at startup and when the admin renews it' },
     'lib/version.js': { max: 8, why: 'the version and its stamp (or the checkout\'s commit), read once at startup' },
     'lib/audit.js': { max: 11, why: 'the audit trail: an entry is on disk (fsync) before the action is acknowledged, a short write cut back, the file rotated at 20 MB; read once at startup, and the records outside the data folder, read once at open; verify reads asynchronously in slices' },
   };

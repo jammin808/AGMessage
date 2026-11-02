@@ -8,7 +8,8 @@
  *    quietly. The alternative — PowerShell's New-SelfSignedCertificate — drops the key into the Windows certificate
  *    store as a side effect, takes seconds and needs Windows; this works everywhere and is instant.
  *  - Kept beside the machine key, outside the app folder (%LOCALAPPDATA%\AGMessage\tls.json), private key sealed by
- *    lib/secretbox.js: a copied AGMessage folder carries no certificate, so a copy on another laptop makes its own.
+ *    lib/secretbox.js: a copied AGMessage folder carries no certificate, so a copy on another laptop makes its own. Made
+ *    only where there is none: a file that cannot be read, or whose key does not open, turns HTTPS off and is kept.
  *  - Validity: 825 days, not the five years the contract suggests — Apple devices refuse TLS server certificates
  *    valid for longer, even ones the user has chosen to trust, and an iPad on the board's table is the usual browser
  *    here. It is renewed automatically 30 days before it ends (a new fingerprint: pinned peers see CERTIFICATE CHANGED
@@ -20,13 +21,13 @@
  *    that certificate for the request.
  */
 const crypto = require('crypto');
-const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
 const tls = require('tls');
 const http = require('http');
 const https = require('https');
+const { publishOnce, readText, writeFileAtomic } = require('./resilience');
 
 // ---------------------------------------------------------------- DER, the bits a certificate needs
 
@@ -123,51 +124,91 @@ function lanAddresses() {
   return out;
 }
 
+const RENEW_MS = 30 * 86400 * 1000;   // a certificate is renewed when it has this long or less to run
+
 /**
- * This install's certificate: loaded, or made (and renewed 30 days before it ends).
+ * This install's certificate as `<dir>/tls.json` holds it, read and never written: {state, file, cert?, code?, words?}.
+ *  - 'ok': its certificate, whose private key opens with this machine's key and is the certificate's, with more than 30
+ *    days to run;
+ *  - 'renew': the same, with 30 days or fewer (or past its end): renewed over the old one, whose key opened;
+ *  - 'absent': no file (ENOENT, and only that): one is made;
+ *  - 'unusable': any other read error, a file that holds no certificate AGMessage wrote, or a private key that does not
+ *    open or is not the certificate's. HTTPS is off, and the file is left as it is: never a new certificate over it.
+ */
+function readCertificate({ dir, open, now = new Date() }) {
+  const file = path.join(dir, 'tls.json');
+  const r = readText(file);
+  if (r.code === 'ENOENT') return { state: 'absent', file };
+  if (r.code) return { state: 'unusable', file, code: r.code, words: file + ' could not be read (' + r.code + ')' };
+  let sealed, der, x;
+  try {
+    const j = JSON.parse(r.text);
+    sealed = j.keySealed;
+    der = Buffer.from(j.certDer, 'base64');
+    x = new crypto.X509Certificate(der);
+  } catch { return { state: 'unusable', file, code: 'EBADCERT', words: file + ' holds no certificate AGMessage wrote' }; }
+  const keyPem = open(sealed);
+  if (!keyPem) return { state: 'unusable', file, code: 'ESEALED', words: 'the private key in ' + file + ' does not open with this laptop\'s machine key' };
+  let mine = false;
+  try { mine = x.checkPrivateKey(crypto.createPrivateKey(keyPem)); } catch { /* not a private key: it is not the certificate's */ }
+  if (!mine) return { state: 'unusable', file, code: 'EBADCERT', words: 'the private key in ' + file + ' is not its certificate\'s' };
+  const cert = { der, certPem: toPem(der), keyPem, fp: fingerprint(der), validTo: x.validTo, created: false };
+  return { state: new Date(x.validTo).getTime() - now.getTime() > RENEW_MS ? 'ok' : 'renew', file, cert };
+}
+
+/** A certificate made now for this install, its private key sealed (`seal` throws when this run has no machine key). */
+function freshCertificate({ name, seal, now }) {
+  const { certDer, keyPem } = makeCertificate({ name, hosts: [os.hostname(), 'localhost'], ips: ['127.0.0.1', ...lanAddresses()], now });
+  const text = JSON.stringify({ v: 1, certDer: certDer.toString('base64'), keySealed: seal(keyPem), created: now.toISOString() });
+  const x = new crypto.X509Certificate(certDer);
+  return { text, cert: { der: certDer, certPem: toPem(certDer), keyPem, fp: fingerprint(certDer), validTo: x.validTo, created: true } };
+}
+
+/**
+ * This install's certificate: read; made when there is none (published whole, never over a file another start made at
+ * the same moment: that one is taken); renewed 30 days before it ends, or when asked (`renew`), over the old one only
+ * because its key opened. A file that could not be read, holds no certificate, or whose key does not open throws with
+ * the words of why, and is left as it is.
  * @param {{dir:string, name:string, seal:(s:string)=>string, open:(s:string)=>string, now?:Date, renew?:boolean}} o
  */
 function loadOrCreate({ dir, name, seal, open, now = new Date(), renew = false }) {
-  const file = path.join(dir, 'tls.json');
-  if (!renew) {
-    try {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-      const der = Buffer.from(j.certDer, 'base64');
-      const keyPem = open(j.keySealed);
-      const x = new crypto.X509Certificate(der);
-      if (keyPem && x.checkPrivateKey(crypto.createPrivateKey(keyPem)) && new Date(x.validTo).getTime() - now.getTime() > 30 * 86400 * 1000) {
-        return { der, certPem: toPem(der), keyPem, fp: fingerprint(der), validTo: x.validTo, created: false };
-      }
-    } catch { /* make one */ }
+  const found = readCertificate({ dir, open, now });
+  if (found.state === 'unusable') throw Object.assign(new Error(found.words), { code: found.code });
+  if (found.state === 'ok' && !renew) return found.cert;
+  const made = freshCertificate({ name, seal, now });
+  if (found.state !== 'absent') {
+    writeFileAtomic(found.file, made.text, { mode: 0o600 });
+    return made.cert;
   }
-  const { certDer, keyPem } = makeCertificate({ name, hosts: [os.hostname(), 'localhost'], ips: ['127.0.0.1', ...lanAddresses()], now });
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({ v: 1, certDer: certDer.toString('base64'), keySealed: seal(keyPem), created: now.toISOString() }), { mode: 0o600 });
-  fs.renameSync(tmp, file);
-  const x = new crypto.X509Certificate(certDer);
-  return { der: certDer, certPem: toPem(certDer), keyPem, fp: fingerprint(certDer), validTo: x.validTo, created: true };
+  if (publishOnce(found.file, made.text, { mode: 0o600 })) return made.cert;
+  const other = readCertificate({ dir, open, now });
+  if (other.cert) return other.cert;
+  throw Object.assign(new Error(other.words || found.file + ' was made by another start and is gone again'), { code: other.code || 'ENOENT' });
 }
 
 /**
  * One listening port for HTTP and HTTPS: the first byte decides. Both end up in the same http.Server (and so the same
- * Express app and Socket.io); an HTTPS request's socket is a TLSSocket (req.socket.encrypted).
+ * Express app and Socket.io); an HTTPS request's socket is a TLSSocket (req.socket.encrypted). `keys` ({certPem, keyPem})
+ * may be null, and given later with `front.setCert`.
  */
-function dualPortServer(httpServer, { certPem, keyPem }) {
-  const tlsServer = tls.createServer({ cert: certPem, key: keyPem, minVersion: 'TLSv1.2', ALPNProtocols: ['http/1.1'] }, (s) => httpServer.emit('connection', s));
+function dualPortServer(httpServer, keys) {
+  const tlsServer = tls.createServer({ ...(keys ? { cert: keys.certPem, key: keys.keyPem } : {}), minVersion: 'TLSv1.2', ALPNProtocols: ['http/1.1'] }, (s) => httpServer.emit('connection', s));
   tlsServer.on('tlsClientError', () => { /* a browser that refused the certificate: nothing to log */ });
+  // Started without a certificate (one is made once the server holds its folder), a TLS handshake is ended until it has one.
+  let hasCert = !!keys;
   const front = net.createServer((socket) => {
     socket.setTimeout(15_000, () => socket.destroy());                             // a connection that never speaks
     socket.on('error', () => { /* reset by peer */ });
     socket.once('data', (buf) => {
       socket.setTimeout(0);
+      if (buf[0] === 0x16 && !hasCert) { socket.destroy(); return; }
       socket.pause();
       socket.unshift(buf);
       (buf[0] === 0x16 ? tlsServer : httpServer).emit('connection', socket);
       process.nextTick(() => socket.resume());
     });
   });
-  front.setCert = ({ certPem: c, keyPem: k }) => tlsServer.setSecureContext({ cert: c, key: k, minVersion: 'TLSv1.2' });
+  front.setCert = ({ certPem: c, keyPem: k }) => { tlsServer.setSecureContext({ cert: c, key: k, minVersion: 'TLSv1.2' }); hasCert = true; };
   return front;
 }
 
@@ -283,4 +324,4 @@ function httpsGate({ required, on, encrypted, loopback, method = 'GET', path = '
   return { refuse: 'This AGMessage requires HTTPS — use https:// (see /tls to trust its certificate).' };
 }
 
-module.exports = { httpsGate, makeCertificate, fingerprint, cleanFingerprint, typedFingerprint, fingerprintStarts, TYPED_MIN, toPem, loadOrCreate, dualPortServer, PinStore, probeCertificate, pinnedTlsOptions, request, FP_RE, lanAddresses };
+module.exports = { httpsGate, makeCertificate, fingerprint, cleanFingerprint, typedFingerprint, fingerprintStarts, TYPED_MIN, toPem, readCertificate, loadOrCreate, dualPortServer, PinStore, probeCertificate, pinnedTlsOptions, request, FP_RE, lanAddresses };

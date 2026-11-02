@@ -41,7 +41,11 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   reload: after a drop (at once when a phone is woken or the Wi-Fi is back), after a restart (announcing nobody), and
   after a refusal at a busy moment, at the pace the server gives ("Busy — trying again in 3 s."). The admin page's
   health reads the server's true delay and how busy it is, and keeps the peaks of each show day for 14 days, through a
-  restart or a shutdown, so one look after a show says how it ran.
+  restart or a shutdown, so one look after a show says how it ran. A start that cannot run says why and stops, never
+  looping: a folder it cannot make or read, a second copy on the same folder or port (whose server has written nothing;
+  its watchdog logs the refusal). A key, certificate or settings file it cannot read is never made again or saved over:
+  the copy says what it goes without this run, refuses a setting changed meanwhile with why, and serves on, and a laptop
+  out of file handles loses a connection, not the server.
 - **Right-click.** Every act on a message, on a file in the panel, on a screen, on a person (a sender's name, a row of
   People: @ Mention), on the composer's Send (✨ Draft a reply, 🔥 Priority, Attach a file…, Cancel the reply) and on the
   header's code and countdown chips (Copy guest code, Copy join link; Speaker's screen…, Show the countdown on screens)

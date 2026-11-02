@@ -43,6 +43,79 @@ test('certificate: made once, kept sealed outside the app folder, reused, renewe
   assert.ok(d.created && d.fp !== c.fp, 'renewed automatically when it is about to end');
 });
 
+test('certificate: only one that is not there is made; one that cannot be read, holds none, or whose key does not open is never written over', () => {
+  const seal = (s) => 'sealed:' + Buffer.from(s).toString('base64');
+  const open = (s) => (String(s).startsWith('sealed:') ? Buffer.from(s.slice(7), 'base64').toString() : '');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-tls-'));
+  const file = path.join(dir, 'tls.json');
+  assert.deepEqual(tlsmod.readCertificate({ dir, open }), { state: 'absent', file });
+  assert.deepEqual(fs.readdirSync(dir), [], 'a read writes nothing');
+  const made = tlsmod.loadOrCreate({ dir, name: 'A', seal, open });
+  const found = tlsmod.readCertificate({ dir, open });
+  assert.deepEqual([found.state, found.cert.fp, found.cert.created], ['ok', made.fp, false]);
+  assert.equal(tlsmod.readCertificate({ dir, open, now: new Date(Date.now() + 800 * 86400000) }).state, 'renew', '30 days or fewer to run');
+  assert.equal(tlsmod.readCertificate({ dir, open, now: new Date(Date.now() + 900 * 86400000) }).state, 'renew', 'past its end, its key opening');
+
+  // Each way a file can be there and unusable: HTTPS off with its words, the file byte for byte as it was.
+  const other = tlsmod.makeCertificate({ name: 'B', hosts: ['localhost'], ips: ['127.0.0.1'] });
+  const genuine = fs.readFileSync(file, 'utf8');
+  const cases = [
+    ['{"v":1,"certDer":"', 'EBADCERT', file + ' holds no certificate AGMessage wrote'],
+    ['null', 'EBADCERT', file + ' holds no certificate AGMessage wrote'],
+    [JSON.stringify({ ...JSON.parse(genuine), keySealed: 'enc1:sealed-by-another-machine' }), 'ESEALED', 'the private key in ' + file + ' does not open with this laptop\'s machine key'],
+    [JSON.stringify({ ...JSON.parse(genuine), keySealed: seal(other.keyPem) }), 'EBADCERT', 'the private key in ' + file + ' is not its certificate\'s'],
+    [JSON.stringify({ ...JSON.parse(genuine), keySealed: seal('not a key') }), 'EBADCERT', 'the private key in ' + file + ' is not its certificate\'s'],
+  ];
+  for (const [text, code, words] of cases) {
+    fs.writeFileSync(file, text);
+    assert.deepEqual(tlsmod.readCertificate({ dir, open }), { state: 'unusable', file, code, words }, text.slice(0, 40));
+    for (const renew of [false, true]) {
+      assert.throws(() => tlsmod.loadOrCreate({ dir, name: 'A', seal, open, renew }), (e) => e.code === code && e.message === words);
+      assert.equal(fs.readFileSync(file, 'utf8'), text, 'never written over' + (renew ? ', asked to renew or not' : ''));
+    }
+  }
+  fs.rmSync(file);
+  fs.mkdirSync(file);   // a file that cannot be read, as EBUSY or EACCES
+  assert.deepEqual(tlsmod.readCertificate({ dir, open }), { state: 'unusable', file, code: 'EISDIR', words: file + ' could not be read (EISDIR)' });
+  assert.throws(() => tlsmod.loadOrCreate({ dir, name: 'A', seal, open }), (e) => e.code === 'EISDIR');
+  assert.ok(fs.statSync(file).isDirectory() && fs.readdirSync(file).length === 0, 'left as it is');
+
+  // A run that cannot seal (no machine key) makes none, and leaves nothing behind.
+  const keyless = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-tls-'));
+  assert.throws(() => tlsmod.loadOrCreate({ dir: keyless, name: 'A', seal: () => { throw Object.assign(new Error('no key'), { code: 'EBUSY' }); }, open }), /no key/);
+  assert.deepEqual(fs.readdirSync(keyless), []);
+  // Two starts at once on one key folder: the one that publishes second takes the first one's certificate.
+  const race = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-tls-'));
+  const realLink = fs.linkSync;
+  let first = null;
+  fs.linkSync = (from, to) => { fs.linkSync = realLink; first = tlsmod.loadOrCreate({ dir: race, name: 'first', seal, open }); return realLink(from, to); };
+  let second;
+  try { second = tlsmod.loadOrCreate({ dir: race, name: 'second', seal, open }); } finally { fs.linkSync = realLink; }
+  assert.equal(second.fp, first.fp, 'the certificate another start published');
+  assert.equal(tlsmod.readCertificate({ dir: race, open }).cert.fp, first.fp);
+  assert.deepEqual(fs.readdirSync(race), ['tls.json'], 'no temporary file left');
+});
+
+test('one port: without a certificate yet, a TLS handshake is ended and HTTP is served; given one, both are', async () => {
+  const srv = http.createServer((req, res) => res.end('plain ' + (req.socket.encrypted ? 'tls' : 'http')));
+  const front = tlsmod.dualPortServer(srv, null);
+  await new Promise((r) => front.listen(0, '127.0.0.1', r));
+  const port = front.address().port;
+  const get = (mod, opts) => new Promise((resolve) => {
+    const req = mod.get({ host: '127.0.0.1', port, path: '/', agent: false, ...opts }, (res) => { let b = ''; res.on('data', (d) => { b += d; }); res.on('end', () => resolve(b)); });
+    req.on('error', (e) => resolve('error ' + (e.code || e.message)));
+  });
+  const { certDer, keyPem } = tlsmod.makeCertificate({ name: 'AGMessage', hosts: ['localhost'], ips: ['127.0.0.1'] });
+  const pinned = tlsmod.pinnedTlsOptions(tlsmod.toPem(certDer), tlsmod.fingerprint(certDer));
+  try {
+    assert.equal(await get(http, {}), 'plain http');
+    assert.match(await get(https, pinned), /^error /, 'no certificate yet: the handshake is ended');
+    front.setCert({ certPem: tlsmod.toPem(certDer), keyPem });
+    assert.equal(await get(https, pinned), 'plain tls', 'given one, HTTPS is served on the same port');
+    assert.equal(await get(http, {}), 'plain http');
+  } finally { await new Promise((r) => front.close(r)); }
+});
+
 test('pins: trust on first authenticated use; a change is refused until accepted', () => {
   const fpA = 'sha256:' + 'a'.repeat(64);
   const fpB = 'SHA256:' + 'B'.repeat(64).match(/../g).join(':');   // as a person might type it

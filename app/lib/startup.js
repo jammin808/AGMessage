@@ -7,6 +7,8 @@
  *                                  /admin when the audit log needs the person at this laptop
  *   readPortHolder, portHolderWords  a port already in use says who holds it, read once from the holder's own health at
  *                                  loopback with no token; the answer only chooses the words, nothing is decided on it
+ *   channelOf                      the channel this copy runs in (AGM_RUNS) and, for the installed node, its three
+ *                                  folders, read before the watchdog or the server writes anything
  */
 const http = require('http');
 const path = require('path');
@@ -129,4 +131,54 @@ function portHolderWords(holder, { port, runs }) {
   return `AGMessage ${holder.version} (build ${holder.build}) is already running on port ${port}. Use its window, or close it and start this copy again.`;
 }
 
-module.exports = { openerPlan, openBrowser, readPortHolder, portHolderWords, holderOf };
+/** The channels a copy runs in (AGM_RUNS): the portable folder (unset, or empty, as cmd leaves it), or the installed node. */
+const CHANNELS = Object.freeze(['portable', 'task']);
+/** The installed node's folders, each named by its own variable, as the task's launcher sets them. */
+const TASK_FOLDERS = Object.freeze([['AGM_DATA_DIR', 'data'], ['AGM_UPLOAD_DIR', 'uploads'], ['AGM_KEY_DIR', 'key']]);
+
+/**
+ * Whether `dir` is a full path: from a drive (C:\…) or a share (\\host\…) on Windows, from / elsewhere (pure). A Windows
+ * device or long-path prefix (\\?\, \\.\) is not taken: it names the same folders by another spelling, which the check
+ * against the program's folder would not see.
+ */
+function isFullPath(dir, platform) {
+  if (platform !== 'win32') return dir.startsWith('/');
+  if (/^[\\/]{2}[?.][\\/]/.test(dir)) return false;
+  return /^[A-Za-z]:[\\/]/.test(dir) || /^[\\/]{2}[^\\/]/.test(dir);
+}
+/** Whether `dir` is `root` or a folder inside it, by the paths as written (letter case aside on Windows) (pure). */
+function isInside(dir, root, platform) {
+  const p = platform === 'win32' ? path.win32 : path.posix;
+  const fold = (x) => (platform === 'win32' ? p.resolve(x).toLowerCase() : p.resolve(x));
+  const rel = p.relative(fold(root), fold(dir));
+  // Outside is a step up ('..' itself, or '..' and a separator), or another drive; a folder named '..data' is inside.
+  const up = rel === '..' || rel.startsWith('..' + p.sep);
+  return !up && !p.isAbsolute(rel);
+}
+
+/**
+ * The channel this copy runs in, and whether it may start in it: {runs, problem}, `problem` '' when it may, else the words
+ * of why not (said on the console, and the start ends with code 3 before anything is written).
+ *  - AGM_RUNS unset or empty is the portable folder; 'portable' and 'task' are taken as they are spelled, and any other
+ *    value is refused: never read as the portable folder.
+ *  - Under 'task', the installed node's three folders (AGM_DATA_DIR, AGM_UPLOAD_DIR, AGM_KEY_DIR) are each named, a full
+ *    path, and outside the program's folder (`programDir`, the folder that holds app\ and node\): a task passes no
+ *    folder of its own, and a default inside the program's folder would put the node's data where an upgrade replaces it.
+ */
+function channelOf(env, { programDir, platform = process.platform }) {
+  const asked = env.AGM_RUNS === undefined || env.AGM_RUNS === '' ? 'portable' : String(env.AGM_RUNS);
+  if (!CHANNELS.includes(asked)) {
+    return { runs: '', problem: `AGM_RUNS is "${cleanText(asked, 40)}", which names no way AGMessage runs. Leave it unset for the portable folder, or set it to task for the installed node.` };
+  }
+  if (asked === 'portable') return { runs: asked, problem: '' };
+  for (const [name, what] of TASK_FOLDERS) {
+    const dir = typeof env[name] === 'string' ? env[name] : '';
+    const said = cleanText(dir, 260);
+    if (!dir) return { runs: asked, problem: `the installed node needs its ${what} folder in ${name}, and it is not set. Each of its folders is a full path outside ${programDir}.` };
+    if (!isFullPath(dir, platform)) return { runs: asked, problem: `${name} is "${said}", which is not a full path. The installed node's ${what} folder is a full path outside ${programDir}.` };
+    if (isInside(dir, programDir, platform)) return { runs: asked, problem: `${name} is ${said}, inside the program's folder ${programDir}. The installed node's ${what} folder is outside it, where an upgrade never replaces it.` };
+  }
+  return { runs: asked, problem: '' };
+}
+
+module.exports = { openerPlan, openBrowser, readPortHolder, portHolderWords, holderOf, channelOf, CHANNELS };

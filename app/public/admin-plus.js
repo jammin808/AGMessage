@@ -41,6 +41,9 @@
       $('swContext').hidden = !ctx;
       if (ctx) $('swContext').textContent = 'Stagewatch says: ' + (ctx.headline || '') + ((ctx.peers || []).length ? ' · it hears ' + ctx.peers.map((p) => p.t + ' “' + (p.name || '') + '”').join(', ') : '');
       $('ctxToken').textContent = s.contextToken || '—';
+      // A saved token this run cannot open is kept, not replaced: why none answers, until New token makes one.
+      $('ctxWhy').textContent = s.contextTokenWhy || '';
+      $('ctxWhy').hidden = !s.contextTokenWhy;
       renderTls(s.tls, s.stagewatchFingerprint);
       $('remoteAdmin').checked = !!s.remoteAdmin;
       $('acctCount').textContent = s.accounts ? s.accounts + ' account' + (s.accounts === 1 ? '' : 's') : 'No accounts yet — sign in on the start page to make the first admin';

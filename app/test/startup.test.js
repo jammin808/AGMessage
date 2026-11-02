@@ -82,6 +82,51 @@ test('opener: the browser is started once, with an argument array and no shell, 
   assert.equal(lines.length, 1, 'only the plan that has something to say says it');
 });
 
+// ---------------------------------------------------------------- the channel, before anything is written
+test('channel: unset or empty is the portable folder, task is the installed node, and any other word is refused', () => {
+  const at = { programDir: '/opt/AGMessage', platform: 'linux' };
+  for (const env of [{}, { AGM_RUNS: '' }, { AGM_RUNS: 'portable' }]) assert.deepEqual(startup.channelOf(env, at), { runs: 'portable', problem: '' }, JSON.stringify(env));
+  for (const word of ['service', 'session', 'Portable', 'TASK', 'task ', 'portable;task']) {
+    const c = startup.channelOf({ AGM_RUNS: word }, at);
+    assert.equal(c.runs, '', 'refused, never read as the portable folder: ' + JSON.stringify(word));
+    assert.equal(c.problem, `AGM_RUNS is "${word.trim()}", which names no way AGMessage runs. Leave it unset for the portable folder, or set it to task for the installed node.`);
+  }
+  assert.equal(startup.channelOf({ AGM_RUNS: 'x\u001b[2Jy' }, at).problem.includes('\u001b'), false, 'a value is said without its control characters');
+  assert.deepEqual(startup.CHANNELS, ['portable', 'task']);
+});
+
+test('channel: the installed node needs its data, uploads and key folders, each a full path outside the program\'s folder', () => {
+  const linux = { programDir: '/opt/AGMessage', platform: 'linux' };
+  const all = { AGM_RUNS: 'task', AGM_DATA_DIR: '/var/lib/agm/data', AGM_UPLOAD_DIR: '/var/lib/agm/uploads', AGM_KEY_DIR: '/var/lib/agm/keys' };
+  assert.deepEqual(startup.channelOf(all, linux), { runs: 'task', problem: '' });
+  assert.deepEqual(startup.channelOf({ ...all, AGM_UPLOAD_DIR: '/opt/AGMessage-uploads' }, linux), { runs: 'task', problem: '' }, 'a folder beside the program\'s, not inside it');
+  for (const [name, what] of [['AGM_DATA_DIR', 'data'], ['AGM_UPLOAD_DIR', 'uploads'], ['AGM_KEY_DIR', 'key']]) {
+    for (const unset of [undefined, '']) {
+      const env = { ...all, [name]: unset };
+      assert.deepEqual(startup.channelOf(env, linux), { runs: 'task', problem: `the installed node needs its ${what} folder in ${name}, and it is not set. Each of its folders is a full path outside /opt/AGMessage.` });
+    }
+    for (const rel of ['data', './data', '../agm/data', 'C:\\ProgramData\\AGMessage\\data']) {
+      assert.deepEqual(startup.channelOf({ ...all, [name]: rel }, linux), { runs: 'task', problem: `${name} is "${rel}", which is not a full path. The installed node's ${what} folder is a full path outside /opt/AGMessage.` }, rel);
+    }
+    for (const inside of ['/opt/AGMessage', '/opt/AGMessage/app/data', '/opt/AGMessage/./app/../data', '/opt/AGMessage/..data', '/opt/AGMessage/...']) {
+      assert.deepEqual(startup.channelOf({ ...all, [name]: inside }, linux), { runs: 'task', problem: `${name} is ${inside}, inside the program's folder /opt/AGMessage. The installed node's ${what} folder is outside it, where an upgrade never replaces it.` }, inside);
+    }
+  }
+  // Windows: a full path is from a drive or a share; inside is read without letter case.
+  const win = { programDir: 'C:\\Program Files\\AGMessage', platform: 'win32' };
+  const pd = { AGM_RUNS: 'task', AGM_DATA_DIR: 'C:\\ProgramData\\AGMessage\\data', AGM_UPLOAD_DIR: 'C:\\ProgramData\\AGMessage\\uploads', AGM_KEY_DIR: 'C:\\ProgramData\\AGMessage\\keys' };
+  assert.deepEqual(startup.channelOf(pd, win), { runs: 'task', problem: '' });
+  assert.deepEqual(startup.channelOf({ ...pd, AGM_KEY_DIR: '\\\\server\\share\\keys' }, win).problem, '', 'a share is a full path');
+  // A device or long-path prefix names the same folders by another spelling: never taken as a full path.
+  for (const notFull of ['\\ProgramData\\AGMessage\\data', 'C:ProgramData\\data', 'data', '\\\\?\\C:\\Program Files\\AGMessage\\data', '\\\\.\\C:\\ProgramData\\data', '//?/C:/ProgramData/data']) {
+    assert.match(startup.channelOf({ ...pd, AGM_DATA_DIR: notFull }, win).problem, /which is not a full path/, notFull);
+  }
+  assert.match(startup.channelOf({ ...pd, AGM_DATA_DIR: 'C:\\Program Files\\AGMessage\\..data' }, win).problem, /inside the program's folder/, 'a folder named ..data is inside');
+  assert.match(startup.channelOf({ ...pd, AGM_UPLOAD_DIR: 'c:\\program files\\agmessage\\app\\uploads' }, win).problem, /^AGM_UPLOAD_DIR is c:\\program files\\agmessage\\app\\uploads, inside the program's folder C:\\Program Files\\AGMessage\./);
+  // The portable folder keeps its defaults inside the program's folder: nothing is asked of it.
+  assert.deepEqual(startup.channelOf({ AGM_DATA_DIR: 'C:\\AGMessage\\app\\data' }, { programDir: 'C:\\AGMessage', platform: 'win32' }), { runs: 'portable', problem: '' });
+});
+
 // ---------------------------------------------------------------- the opener, in the server
 const PRELOAD = path.join(__dirname, 'opener-preload.js');
 // Windows keeps its own SystemRoot (its sockets need it); elsewhere one is stood in. The preload never runs explorer.exe.
@@ -95,16 +140,16 @@ async function serverWithOpener(env) {
 }
 
 test('opener: the server opens http://localhost:<PORT> once, after it serves; never on a restart, unasked or in another channel', async (t) => {
+  // Every channel the server runs in (an unknown one never starts: test/startrules.test.js).
   const cases = await Promise.all([
     serverWithOpener({ AGM_OPEN: '1' }),
     serverWithOpener({ AGM_OPEN: '1', AGM_RUNS: 'portable' }),
     serverWithOpener({ AGM_OPEN: '1', AGM_RESTARTS: '1' }),
     serverWithOpener({}),
     serverWithOpener({ AGM_OPEN: '1', AGM_RUNS: 'task' }),
-    serverWithOpener({ AGM_OPEN: '1', AGM_RUNS: 'service' }),
   ]);
   t.after(() => Promise.all(cases.map((c) => h.stopServer(c.srv.child))));
-  const [first, portable, restarted, unasked, task, other] = cases;
+  const [first, portable, restarted, unasked, task] = cases;
   for (const c of [first, portable]) {
     assert.ok(await until(() => c.read().length > 0), 'the opener ran:\n' + c.srv.out());
     await h.wait(300);
@@ -114,7 +159,7 @@ test('opener: the server opens http://localhost:<PORT> once, after it serves; ne
     }], 'exactly once, by its absolute path, while this copy answers on its port');
   }
   await h.wait(300);
-  for (const [c, why] of [[restarted, 'a watchdog restart'], [unasked, 'AGM_OPEN unset'], [task, 'AGM_RUNS=task'], [other, 'AGM_RUNS=service']]) {
+  for (const [c, why] of [[restarted, 'a watchdog restart'], [unasked, 'AGM_OPEN unset'], [task, 'AGM_RUNS=task']]) {
     assert.deepEqual(c.read(), [], why + ' opens nothing');
     assert.ok(!/Browser:/.test(c.srv.out()), why + ' says nothing of a browser');
   }
@@ -263,10 +308,8 @@ test('a port in use says who holds it, and the copy stops without serving; the r
     refused(ports[3], { AGM_RUNS: 'task' }), refused(ports[4], { AGM_RUNS: 'task' }),
   ]);
   for (const r of [a, b, c]) assert.equal(r.code, 3, 'a portable copy: "cannot run as configured", which the watchdog does not restart:\n' + r.out);
-  for (const r of [a, b, c, d, e]) {
-    assert.notEqual(r.code, 0, 'it ended as refused (the installed node\'s own code is its channel\'s):\n' + r.out);
-    assert.ok(!/is running/.test(r.out), 'it never served:\n' + r.out);
-  }
+  for (const r of [d, e]) assert.equal(r.code, 75, 'the installed node: held, which the watchdog tries again on its ladder, never counted as a crash:\n' + r.out);
+  for (const r of [a, b, c, d, e]) assert.ok(!/is running/.test(r.out), 'it never served:\n' + r.out);
   assert.ok(a.out.includes(`AGMessage 0.5.1 (build 0.5.1+9.abc1234) is already running on port ${ports[0]}. Use its window, or close it and start this copy again.`), a.out);
   assert.ok(b.out.includes(`The AGMessage installed on this PC (0.6.0, build 0.6.0+3.def5678) is serving on port ${ports[1]}.`), b.out);
   assert.ok(c.out.includes(`Another program is using port ${ports[2]}. Close it, or set PORT to another number.`), c.out);

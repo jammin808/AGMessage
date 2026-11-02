@@ -127,6 +127,16 @@ next snapshot when the disk refuses the append. `verify/` joins the files read, 
 `module` but `module.exports` and any `import()`: a probe that reads a file there fails the lint.
 `verify/` is under the coverage gate with `server.js`, `supervise.js` and `lib/`.
 
+0.6.0's start rules (nothing written before the hold; a secret made only where there is none) move four caps, each with
+its reason. `lib/resilience.js` goes to 13: `publishOnce`, the one way a file that must never be written over is made
+(whole in a temporary file, then a hard link that refuses one already there), adds its link and the removal of its
+temporary file; `readText`, the one read that tells a file not there (ENOENT) from one that could not be read, takes
+`readJsonWhole`'s read, so it adds none. `lib/guard.js` (the server secret) and `lib/tls.js` (the certificate) go to 0,
+off the list: their reads and writes go through `readText`, `publishOnce` and the atomic writer. `server.js` goes to 15:
+its two folder makes at load are one, made once the folder is held, and the watchdog's marker is renamed then too.
+`lib/secretbox.js` stays at 3; `lib/store.js` and `lib/audit.js` keep theirs (a store may now be built without making
+its folder, and the audit log makes its folder at its first write, not when it is read).
+
 The audit log's export adds `lib/auditexport.js` and `lib/zip.js`, and the verifier `verify/verify-audit.js`, each at 0
 synchronous calls (the guard names them, so a file that drops out of its list fails it): the export reads, digests and
 streams on the thread pool and in slices, and the verifier on another computer reads through `fs.promises` only. The

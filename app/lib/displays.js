@@ -16,7 +16,7 @@
  * as any one of them could not, "sending" until then, and "offline" when no browser holds the link.
  */
 const crypto = require('crypto');
-const { WriteLane, readJsonWithBak } = require('./resilience');
+const { WriteLane, readJsonWhole } = require('./resilience');
 const { customAlphabet } = require('./ids');
 const guard = require('./guard');
 
@@ -88,7 +88,11 @@ class Displays {
   constructor(file, { seal, open }) {
     this.seal = seal; this.open = open;
     this.lane = new WriteLane(file, { delayMs: 100, keepBak: true, mode: 0o600 });
-    const data = readJsonWithBak(file) || {};
+    const read = readJsonWhole(file);
+    const data = read.data || {};
+    // Why the file itself could not be read (EBUSY, EACCES), or '': what it holds, screens' sealed links among them, is
+    // not known this run, whatever its .bak gave.
+    this.unread = read.codes[0] && read.codes[0] !== 'ENOENT' ? read.codes[0] : '';
     this.list = new Map();
     this.byHash = new Map();
     this.halls = data.halls && typeof data.halls === 'object' ? data.halls : {};   // CODE -> {holding}
