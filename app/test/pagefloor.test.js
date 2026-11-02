@@ -13,7 +13,9 @@ const path = require('path');
 const vm = require('vm');
 const { ROOT } = require('./helpers');
 
-const read = (f) => fs.readFileSync(path.join(ROOT, 'public', f), 'utf8');
+// A source read as LF: a Windows checkout writes CR LF, and the fences below read lines.
+const lf = (text) => text.replace(/\r\n/g, '\n');
+const read = (f) => lf(fs.readFileSync(path.join(ROOT, 'public', f), 'utf8'));
 const FLOOR_WORDS = 'This browser is too old for AGMessage. Update this device (iPadOS or iOS 14.5, or Chrome 84, or later), or use another.';
 const plain = (v) => JSON.parse(JSON.stringify(v));   // a value from the page's realm, compared as data
 const settle = () => new Promise((r) => { setImmediate(r); });
@@ -257,7 +259,7 @@ test('the floor\'s fences: every page with people loads theme-init.js first and 
   for (const f of Object.keys(DEFINE_ONLY)) assert.ok(own.has(f), f + ' is loaded by a page with people (a script no page loads leaves this list)');
   assert.equal(firstAsk('AGM.idle(() => {}); const t = fetchAll; prefetch(1);'), -1, 'the read finds a call, not a name that holds one');
   for (const f of ['public/join.js', 'public/users.js', 'public/halls.js', 'public/admin-plus.js']) {
-    assert.match(fs.readFileSync(path.join(ROOT, f), 'utf8'), /^\(function \(\) \{\n {2}'use strict';\n {2}if \(document\.documentElement\.dataset\.floor === 'old'\) return;/m, f + ': does nothing below the floor');
+    assert.match(lf(fs.readFileSync(path.join(ROOT, f), 'utf8')), /^\(function \(\) \{\n {2}'use strict';\n {2}if \(document\.documentElement\.dataset\.floor === 'old'\) return;/m, f + ': does nothing below the floor');
   }
   assert.match(read('admin.js'), /\(async function init\(\) \{\n {2}if \(document\.documentElement\.dataset\.floor === 'old'\) return;/, 'admin.js: its start asks nothing below the floor');
 });
