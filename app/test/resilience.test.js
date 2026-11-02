@@ -556,6 +556,7 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
     'lib/secretbox.js': { max: 3, why: 'the machine key, read once, or made once and published whole' },
     'lib/serverlog.js': { max: 4, why: 'the watchdog\'s process alone, never the server\'s: a console line appended to server.log as it is said, so a line said just before the watchdog ends is on disk; its folder made and its size read once, and a rename when it reaches its bound' },
     'lib/version.js': { max: 8, why: 'the version and its stamp (or the checkout\'s commit), read once at startup' },
+    'lib/dataformat.js': { max: 8, why: 'the data folder\'s format, once a start: read through to tell a new folder from a 0.5 one, and a folder of a lower format copied whole into backups/ (a copy a stop left part way removed, its size and the disk\'s free space read, its folder made, a partial copy made, renamed whole, or removed when it failed, the watchdog\'s beat sent while it runs) before anything else is written in it, never on a request' },
     'lib/audit.js': { max: 11, why: 'the audit trail: an entry is on disk (fsync) before the action is acknowledged, a short write cut back, the file rotated at 20 MB; read once at startup, and the records outside the data folder, read once at open; verify reads asynchronously in slices' },
   };
   for (const f of files) {

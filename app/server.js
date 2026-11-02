@@ -54,6 +54,7 @@ const { Displays, cleanContent, describe: describeContent } = require('./lib/dis
 const readings = require('./lib/peaks');
 const startup = require('./lib/startup');
 const laptop = require('./lib/laptop');
+const dataformat = require('./lib/dataformat');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD } = require('./lib/version');
@@ -92,6 +93,13 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = process.env.AGM_DATA_DIR || path.join(__dirname, 'data');
 const ROOMS_DIR = path.join(DATA_DIR, 'rooms');
 const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
+// The data folder's format (lib/dataformat.js), read before anything else of it: a folder a build of a higher format
+// wrote, or whose marker cannot be read, stops the start with code 3 and its words, in either channel, nothing written.
+// It is read again once this copy holds the folder (`firstWrites`), and what that start found and did is health's
+// `format` and "This laptop"'s.
+const formatRefused = dataformat.refusal(dataformat.read(DATA_DIR), { dataDir: DATA_DIR, build: BUILD.full });
+if (formatRefused) cannotStartYet(formatRefused);
+let formatNow = null;
 // Nothing is written until this copy holds its data folder and its port (`holdDataFolder`, at the end of this file): every
 // store is read now, and the folders, the keys, the certificate, the server secret and the saves asked meanwhile are made
 // then (`firstWrites`). A copy refused at the folder or the port has written nothing, in the data folder or the key folder.
@@ -458,8 +466,19 @@ function healthFacts() {
     ...tunnelFacts(),
     // Connections the port could not take once it listened (EMFILE and the like): how many, and the last one's code.
     acceptErrors: { ...acceptErrors },
+    // The data folder's format, and what this start found of it: the build that wrote it before (and whether that one is
+    // newer), the copy kept when it moved from a lower format.
+    format: formatFacts(),
   };
 }
+/** Health's `format`: the folder's format now, and what this start found of it (null until it holds the folder). */
+function formatFacts() {
+  if (!formatNow) return null;
+  const { format, was, before, newer, backup } = formatNow;
+  return { format, was, before, newer, backup };
+}
+/** The data folder's row as "This laptop" draws it (lib/laptop.js), for the banner's line: its words and mark. */
+function formatWords() { return laptop.formatRow({ ...formatFacts(), build: BUILD.full, dir: DATA_DIR }); }
 
 // ---------------------------------------------------------------- "This laptop" (lib/laptop.js)
 // What this AGMessage knows of the laptop it serves from, read each time it is asked, and what Windows says of it: read by
@@ -529,7 +548,7 @@ function laptopFacts() {
       screens: { total: displays.list.size, shown, offline },
       stagewatch: { total: linked, connected },
       tunnel: { running: !!tunnelProc, url: tunnelUrl || '', error: tunnelError || '' },
-      before: beforeWords(), without,
+      before: beforeWords(), without, format: formatNow ? { ...formatFacts(), build: BUILD.full, dir: DATA_DIR } : null,
     }, laptopRead.windows),
   };
 }
@@ -3217,10 +3236,12 @@ process.on('uncaughtException', (e) => {
 });
 process.on('unhandledRejection', (e) => { rejections++; console.error('  [error] unhandled rejection:', e && e.message ? e.message : e); });
 
-// The watchdog's heartbeat: sent from the event loop, so a hung loop stops it (that silence is what restarts us).
+// The watchdog's heartbeat: sent from the event loop, so a hung loop stops it (that silence is what restarts us), and
+// from the one long piece of work a start does in one go, the data folder's copy before it moves to a new format.
 // A send's failure (the watchdog gone, its pipe broken) comes to the callback: without one it would be an 'error' event on
 // the process, unhandled, and end it before 'disconnect' lets it save.
-if (typeof process.send === 'function') setInterval(() => { if (process.connected) process.send({ t: 'beat' }, () => { /* the watchdog gone: 'disconnect' stops us */ }); }, 1000).unref();
+function beat() { if (typeof process.send === 'function' && process.connected) process.send({ t: 'beat' }, () => { /* the watchdog gone: 'disconnect' stops us */ }); }
+if (typeof process.send === 'function') setInterval(beat, 1000).unref();
 
 // A port already in use is named by who holds it: its health, read once at loopback with no token, chooses the words (an
 // AGMessage, the one installed on this PC, or another program), and nothing else. Either way this copy stops without
@@ -3426,6 +3447,10 @@ function firstWrites() {
       cannotStart('the ' + what + ' folder ' + dir + ' cannot be made (' + (e.code || e.message) + '). Choose a folder this Windows account can write to (' + name + '), or fix that one\'s permissions.');
     }
   }
+  // The folder's format before anything else is written in it, its marker read again now that this copy holds it: a lower
+  // one copied whole into backups/ first (the watchdog's beat sent while it runs, the disk's reserve kept), then moved and
+  // marked; a marker refused, or a copy, step or marker that cannot be done, stops the start with the folder as it was.
+  try { formatNow = dataformat.settle(DATA_DIR, { build: BUILD.full, reserve: UPLOAD_MIN_FREE, beat }); } catch (e) { cannotStart(e.words || String(e && e.message)); }
   secretbox.allowMaking();
   if (!secretbox.hasKey() && RUNS === 'task') cannotStart(secretbox.keyProblem().words + '. The installed node does not run without its machine key.');
   AUDIT_SIGN_KEY = (() => { try { return secretbox.signingKey().fingerprint; } catch { return ''; } })();
@@ -3480,6 +3505,8 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
     store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— AGMessage restarted · ' + plural(room.messages.length, 'message') + ' kept —', at: Date.now() } });
   }
   audit.open();
+  const upgraded = dataformat.rowWords(formatNow, BUILD.full);
+  if (upgraded) audit.write({ t: 'system' }, 'server.upgraded', BUILD.full, upgraded);
   for (const fn of untilServing.splice(0)) fn();
   readLaptop();
   // The whole log is checked once, beside the show, so health, the rows' marks and the black window read what the log
@@ -3501,6 +3528,8 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   if (secretFound.words) console.log('  Secret:  ' + secretFound.words + '. This run signs guests and invite links with a secret of its own, so those made before do not hold until it is read again.');
   if (settingsRead.unread) console.log('  Settings: ' + settingsRead.words + '. Nothing is saved over it this run, which goes without its links and keys, and refuses a setting changed. ' + settingsRead.fix);
   else if (contextTokenProblem()) console.log('  Context: ' + contextTokenProblem());
+  // The data folder's line, when there is something to say: a move from a lower format, or a newer build before this one.
+  if (formatNow.backup || formatNow.newer === true) console.log('  Data folder: ' + formatWords().words);
   console.log('');
   console.log('  ============================================');
   console.log('  Admin login (only from this host laptop):');

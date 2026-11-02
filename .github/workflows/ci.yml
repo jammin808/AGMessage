@@ -3,7 +3,9 @@
 # Linux with Chrome, then builds the portable Windows zip, numbered by this run (tools/stamp-build.js): a development
 # build 0.5.0-dev.<run>+<sha> on a branch, a release 0.5.0+<run>.<sha> on the tag v0.5.0. The zip is extracted and started
 # once, and must answer with that build. GitHub hands the artifact as a zip around the zip. A tag publishes a GitHub
-# Release with the zip, its SBOM, SHA256SUMS and a build-provenance attestation, once every job above is green.
+# Release with the zip, its SBOM, SHA256SUMS and a build-provenance attestation, once every job above is green and only
+# when its version is above every release already published and every other version tagged, asked again just before it
+# publishes, one release job at a time.
 name: CI
 
 on:
@@ -44,10 +46,21 @@ jobs:
         working-directory: app
       - name: Secret scan (tools/scan-secrets.js)
         run: node tools/scan-secrets.js
+      # A tag is released only when it names app/package.json's version and that version is above every release already
+      # published and every other version tagged (SemVer), so among releases SemVer and MAJOR.MINOR.BUILD, the order
+      # "newer" is read by, agree. Asked here first, so a tag that would be refused stops before the tests; the release
+      # job asks again just before it publishes. A list that cannot be read stops the release: the assignment fails the
+      # step.
       - name: The version this commit builds as
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           node tools/stamp-build.js --print
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then node tools/stamp-build.js --check-tag "${GITHUB_REF_NAME}"; fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            released="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --json tagName --jq '.[].tagName')"
+            tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref | ltrimstr("refs/tags/")')"
+            node tools/stamp-build.js --check-tag "${GITHUB_REF_NAME}" --released "$released" --tags "$tags"
+          fi
 
   test-linux:
     name: Tests (Node ${{ matrix.node }}, Linux)
@@ -233,11 +246,35 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: package
     runs-on: ubuntu-latest
+    # One release job at a time across every tag, none cancelled by the next: each reads the releases the one before it
+    # published.
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
+      # The release order asked again here, before anything is attested or published, of the releases and tags as they
+      # stand now: another tag's run may have published, or a tag been pushed, since this run's analyze job asked.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            tools/stamp-build.js
+            app/lib/version.js
+            app/package.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_LTS }}
+      - name: Refuse a release not above every release published and every version tagged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          released="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --exclude-drafts --json tagName --jq '.[].tagName')"
+          tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref | ltrimstr("refs/tags/")')"
+          node tools/stamp-build.js --check-tag "${GITHUB_REF_NAME}" --released "$released" --tags "$tags"
       - uses: actions/download-artifact@v8
         with:
           name: agmessage-portable-${{ github.sha }}

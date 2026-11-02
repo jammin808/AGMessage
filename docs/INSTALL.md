@@ -159,6 +159,33 @@ log), so the token is never in it (`supervise.js`, `lib/startup.js` `taskTokenPr
 - **The first admin account** is made with the token, as on every AGMessage: `/api/setup` takes it typed, or the
   token's sign-in made by this run, at the laptop, and never loopback alone (`docs/ACCOUNTS.md`, The first admin).
 
+## The version number, the release order and the data folder's format
+
+- **The version number** an installer and an upgrade compare is MAJOR.MINOR.BUILD (PlayMap's rule, in the bounds an
+  MSI's ProductVersion carries: MAJOR and MINOR up to 255, BUILD up to 65535): `app\build.json`'s `installVersion`,
+  written by `tools/stamp-build.js` (`0.6.41` for build 41 of 0.6.x), which stamps no version past those bounds. A local
+  build has none and is ordered against nothing; the installer's units refuse one.
+- **Newer** is that number, on every node of the show network (`lib/version.js` `compareBuilds`). A release is published
+  only when its version is above every release already published and every other version tagged, released or not
+  (`stamp-build.js --check-tag --released --tags`, asked in the analyze job and again as the release job's first step,
+  one release job at a time), so among releases SemVer and MAJOR.MINOR.BUILD agree: an older PATCH built after a newer
+  one is never released, even when two tags run side by side. Development builds of one MAJOR.MINOR order by build
+  number alone.
+- **The data folder's format** (`lib/dataformat.js`): `data\format.json`, `{format, build, at}` and, after a move,
+  `backup`, read before anything else of the folder (by the watchdog and by the server, before either writes anything)
+  and read again and written once the node holds it. 0.6.0 writes format 2; a folder without one is format 1 (0.5), or
+  new when it holds nothing a server wrote. A higher format ends the start with code 3 in this channel too (no wait
+  lifts it, so never 75), its words naming the build that wrote the folder and the copy it kept, and nothing is written
+  in the folder, the watchdog's log included: the words are on the watchdog's error output. A lower one is copied whole
+  into `data\backups\format-<n>-<time>-<suffix>\` first (a copy a stop cut short removed, and refused with words when
+  the disk would keep less than the 1 GB reserve beside it; the watchdog's beat goes on while it runs), then moved, then
+  marked last; a copy, step or marker that fails ends the start with code 3, the marker as it was. A marker that cannot
+  be written ends the start the same way for a new folder and another build of the format: a node never serves a folder
+  that does not say which build last wrote it. A newer build of the same format before this one is served and said
+  (health's `format`, "This laptop"'s Data folder row, the log's "Data folder:" line), and a marker whose build changed
+  is one `server.upgraded` audit row. The upgrade's own backup at its stop (`data\backups\upgrade-<build>-<time>\`) is
+  the installer's units', beside these.
+
 ## A portable copy on a PC where AGMessage is installed
 
 - `start-agmessage.bat` reads the install record (`Version` under `HKLM\SOFTWARE\AGMessage`, in the 64-bit view,

@@ -1663,6 +1663,102 @@ it cannot read says unknown, with why)
 - Rolling back: nothing stored changes form. 0.5.1 leaves `data/logs/` as it is, says nothing of it, renews a
   certificate at any start, and reads a `watchdog.json` that records a refused start as a give-up, once.
 
+**"Newer" is defined, and the data folder says which build and format last wrote it** (the plan's Part 6, unit U6, with
+the owner's answer 29, "wrap into 0.6.0": there is no 0.5.2; the plan's reading of three version orders over seven
+composed builds, which this unit's tests take again, and the code; the copy's time on a show laptop is not measured)
+- "Newer" is one rule across the show network, PlayMap's: MAJOR.MINOR.BUILD. `tools/stamp-build.js` writes it into
+  `build.json` as `installVersion` (`0.6.41` for build 41 of 0.6.x), within an MSI ProductVersion's bounds, MAJOR and
+  MINOR up to 255 and BUILD up to 65535 (`INSTALL_MAX`): a version past them is never stamped. A local copy has none and
+  is ordered against nothing. A stamp whose install version is missing or not its own is no stamp, and the build reads
+  as local. `lib/version.js` reads a build back from its name (`parseBuild`) and orders two (`compareBuilds`). Over seven
+  builds (21 pairs) SemVer's order disagrees with MAJOR.MINOR.BUILD on 3 pairs and the four-part MAJOR.MINOR.PATCH.BUILD
+  on 2; MAJOR.MINOR.BUILD and the four-part order on 1, a 0.6.0 built after a 0.6.1 development build. So a release is
+  published only when its SemVer is above every release already published and every other version tagged, released or
+  not: `stamp-build.js --check-tag <tag> --released <tags> --tags <tags>` refuses ("v0.6.0 is not above the last
+  release, v0.6.1: … nothing is released"; "v0.6.0 is not above the tag v0.6.1, which the repository holds: …"). The
+  analyze job asks it first (`gh release list`, and the repository's `v` tags), and the release job asks it again as its
+  first step, before anything is attested or published, one release job at a time across every tag
+  (`concurrency: release-<repository>`, none cancelled): two tags pushed side by side never both pass on a list read
+  before either published, and since a tag's run number is given when it is pushed, a release published later than
+  another always carries the higher build. A list that cannot be read stops the release, and a tag that names no
+  version is refused by name, never passed over. Among releases the orders then agree; development builds of one
+  MAJOR.MINOR order by their build number alone.
+- **`data/format.json`** (`lib/dataformat.js`): `{format, build, at}`, and `backup` after a move. 0.6.0 writes format 2;
+  a folder without one is format 1 (0.5 and earlier), unless it holds nothing a server wrote (the watchdog's console
+  and empty folders only), which is new. It is read before anything else of the folder, by the watchdog and by the
+  server, and read again and written only once this copy holds its folder and its port, before anything else is
+  written in it (what was read before the hold is never trusted past it):
+  - a new folder is marked;
+  - a lower format is copied whole, but `backups\` and the console in `logs\`, into
+    `data\backups\format-1-<time>-<suffix>\` (made as `.partial-…` and renamed once whole, so a copy that did not finish
+    never reads as one; a `.partial-…` a stop left, killed or the power gone, is removed before the next copy), then each
+    step up to format 2 runs (from 1 nothing is rewritten: 0.6 reads a 0.5 folder as it is), then the marker is written
+    last, naming the copy. The disk's free space is read first: a copy that would leave less than the uploads' reserve
+    (1 GB, `AGM_UPLOAD_MIN_FREE`) beside it is refused with words ("…its disk has 600 MB free: the copy needs 75 MB, and
+    1024 MB is kept free beside it for the saves and the logs. Nothing in the folder was changed. …"). While it runs the
+    server sends the watchdog its beat at most every 250 ms, so a copy longer than the watchdog's start window (30 s) or
+    its hang limit (10 s) is never taken for a hang and killed up the restart ladder. A copy that fails (the partial copy
+    removed), a step that fails or a marker that cannot be written after the move stops the start with code 3 and words
+    naming the copy where there is one; the marker is as it was, so the next start begins again. The folder is copied
+    once per format, before AGMessage serves: 75 MB (20 halls of 10,000 messages, each snapshot with its `.bak`, and
+    20,000 audit entries) took 40 to 60 ms on Linux here, from the system's file cache; on the show laptop, with
+    Defender, it is not measured;
+  - a higher format stops the start with code 3, in either channel, before anything is written: "this data folder (…)
+    was last written by AGMessage 0.7.0+52 in format 3, and this build (…) reads format 2 and older. Nothing was
+    changed. Start 0.7.0+52 or a newer build on this folder. To go back to this build, start it on the copy that build
+    kept of the folder before it changed it: …\backups\format-2-…", or that the copy is no longer there, or that none is
+    named. A marker that cannot be read (EBUSY, EACCES) or holds no format is refused the same way, never taken for
+    none. The watchdog asks before it opens its console's log, so nothing is written in that folder, `logs\server.log`
+    and `watchdog.log` included: the words are on its console (its error output) alone;
+  - a marker that cannot be written stops the start with code 3 and its words in every case, a new folder ("the new data
+    folder's marker … could not be written, so the folder would not say which build and format wrote it. No hall,
+    account or setting was written in it. …") and another build of the format ("… would go on naming 0.6.0+45.… as the
+    build that last wrote it …") as after a move: a copy never serves a folder that does not say which build last wrote
+    it, so the next start never reads a 0.6 folder as a 0.5 one, and the import's "same build" rule never reads a stale
+    one. The next start, once the marker can be written, marks it;
+  - the same format written by another build is marked as this build's; a newer one before it is said: health's
+    `format` (`{format, was, before, newer, backup}`, at its end; `newer` is `null` when no build was named before, or
+    the two are not ordered), the admin page's Health line ("⚠ the data folder was last written by a newer build, …:
+    this one reads its format and writes it now"), "This laptop"'s new Data folder row (△) and the window's "Data
+    folder:" line, which also says a move;
+  - a marker whose build changed is one `server.upgraded` audit row, written once the log opens: "from a folder with no
+    marker (format 1, as 0.5 and earlier leave it) to 0.6.0+41.…: the folder moved from format 1 to 2, and the folder as
+    it was is kept in backups/format-1-…", or "from 0.6.0+45.… to 0.6.0+41.… (format 2, an older build than the one
+    before it)". The same build again writes nothing and no row. `docs/ACCOUNTS.md` and README.txt name the row.
+  - 0.5.1 reads no marker, so it still opens a 0.6 folder (design §1.8), with the losses README.txt names.
+- The papers: README.txt gains "Upgrading" (between shows: extract a new folder, copy `app\data` and `app\uploads` before
+  its first start, start it from the same Windows account; the copy kept at the first start of 0.6 and the space it
+  needs; newer is the build number; going back) and the firewall's case: a new folder is a new program to Windows
+  Firewall, whose Allow access a standard account cannot give without an administrator, and a network Windows calls
+  Public that the rule does not cover; and Troubleshooting's lines for a higher format, a marker that cannot be read or
+  written, and a disk too full for the copy. `docs/INSTALL.md` says the version number and its bounds, the release
+  order the installer's units read, and the data folder's format; `docs/NODES.md` names health's `format`.
+- The fences: `test/dataformat.test.js` (new) holds the marker read by type and each refusal's words (pure, on disk); a
+  new folder marked; a 0.5 folder copied byte for byte (the console left out), marked last with its copy, and the same
+  build again writing nothing, file times included; another build of the format marked, newer, older or neither (a
+  local build, one number); the marker read again at the settle, a higher one written since refused; a copy whose
+  folder cannot be made, one that fails part way (no partial left), a partial a stop left removed by the next copy, a
+  disk short of the copy and its reserve (nothing written), a step that fails, and a marker that cannot be written
+  after a move, for a new folder and for another build, each leaving the folder unmarked or as it was; the copy's beat,
+  at most every 250 ms on a clock that moves; the Data folder row's words and marks; and on a real server and its
+  watchdog, a higher format, a marker held by another program and a torn one refused with code 3 in both channels,
+  through `supervise.js` and `server.js` alike, with no file's time or bytes changed (the watchdog's logs included), a
+  copy refused at its held folder writing no marker or copy, a first start marked, a 0.5 folder moved with its window
+  line, health, row and one audit row and a restart writing none of them again, a newer and an older build before a
+  stamped one (`test/stamp-preload.js`, new: the server runs as a CI build without a file in the tree), a marker that
+  cannot be written stopping the start in both channels and the next start marking it, and a copy slowed past the
+  watchdog's start window (`test/slowcopy-preload.js`, new: each file the copy takes waits) served with no kill, which
+  without the beat is killed up the ladder. `test/version.test.js` holds the 21 pairs, the three orders'
+  disagreements, a build read back in each channel and refused in any other shape, the install version's MSI bounds,
+  the release order (0.6.0 after 0.6.1 refused though its build is newer, the same version, 0.10 above 0.9, a tag that
+  names no version, a higher version tagged and not yet released), `stamp-build.js`'s `installVersion`, `--released`,
+  `--tags` and a version past 255 refused, and the release job: its check before the attestation and the publish, one
+  job at a time. `test/server.test.js` holds `format` at the end of health's detail. The browser smoke reads the Data
+  folder row, and its folder from 0.5.1 now holds one `server.upgraded` row (keyed, ✓) after its first start, and none
+  after the next. The synchronous-call caps gain `lib/dataformat.js` at 8, with its reason; `server.js` stays at 15 and
+  `supervise.js` at 2 (the marker goes through the atomic writer and `lib/dataformat.js`).
+- Rolling back: 0.5.1 never reads `format.json` or `data\backups\`, and leaves both as they are.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

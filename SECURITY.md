@@ -24,7 +24,8 @@ problem ships as a patch release, with credit if you want it.
 fences; a rule that refuses unescaped values on their way into a page's HTML; a module fence that holds the server's
 layers and closes the wire's words both ways; an in-tree secret scan; CodeQL (`security-extended`); `npm audit` with
 registry signatures and provenance; dependency review on pull requests; the tests, the coverage gate and the browser
-smoke on Linux and Windows. A release carries its SBOM (CycloneDX), `SHA256SUMS` and a build-provenance attestation
+smoke on Linux and Windows. A release is published only when its version is above every release before it and every other
+version tagged, so the newest release is always the highest number, by its version and by its build. A release carries its SBOM (CycloneDX), `SHA256SUMS` and a build-provenance attestation
 (`gh attestation verify <zip> --repo <owner>/AGMessage`). The SBOM lists npm's packages and the browser libraries
 vendored in `app/public/vendor`, each of those with its file's SHA-256 and the libraries bundled in it, read from the
 bundle as the zip extracts it. Each vendored file is its package's file byte for byte, listed in

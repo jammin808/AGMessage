@@ -2376,19 +2376,20 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     for (const [what, d] of Object.entries(adminDoors)) report(doorsInStep(d), `the admin page's ${what}: right-click = ⋯ = Shift+F10 = the catalogue's set, the bar in it (${d.want}; ${d.right} / ${d.dots} / ${d.key}; ${d.inline}; hit ${d.hit})`);
     // "This laptop": every fact with its words and where it was read, in the server's order; Windows' facts read on
     // Windows and unknown with why elsewhere; Refresh reads Windows again and says when.
-    const LAPTOP_ROWS = ['build', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin'];
+    const LAPTOP_ROWS = ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin'];
     const laptopRows = await admin.until(`(() => {
       const rows = [...document.querySelectorAll('#laptopFacts > li[data-fact]')];
       if (!rows.length) return false;
       return JSON.stringify({ ids: rows.map((r) => r.dataset.fact), said: rows.every((r) => r.querySelector('strong').textContent.endsWith(': ') && r.querySelector('.lf-words').textContent.length > 0 && /^ · read from \\S/.test(r.querySelector('.lf-from').textContent)),
-        marks: rows.every((r) => (r.querySelector('.lf-mark').textContent === '') === (r.dataset.state === '')), elsewhere: ${process.platform === 'win32'} || rows.filter((r) => ['network', 'sleep', 'lid', 'task', 'admin'].includes(r.dataset.fact)).every((r) => r.querySelector('.lf-words').textContent === 'unknown (AGMessage is not running on Windows)') });
+        marks: rows.every((r) => (r.querySelector('.lf-mark').textContent === '') === (r.dataset.state === '')), elsewhere: ${process.platform === 'win32'} || rows.filter((r) => ['network', 'sleep', 'lid', 'task', 'admin'].includes(r.dataset.fact)).every((r) => r.querySelector('.lf-words').textContent === 'unknown (AGMessage is not running on Windows)'),
+        folder: rows.filter((r) => r.dataset.fact === 'format').map((r) => r.querySelector('.lf-words').textContent).join('') });
     })()`, 8000);
     const laptopRead = JSON.parse(laptopRows || '{}');
     await admin.eval(`(() => { document.getElementById('laptopRead').textContent = ''; document.querySelector('#laptopActs [data-action="laptop.refresh"]').click(); })()`);
     const refreshed = await admin.until(`(() => { const t = document.getElementById('laptopRead').textContent; return /^Read at \\d\\d:\\d\\d on \\d+ \\w+\\. Refresh reads it again\\.$/.test(t) && t; })()`, 15000);
     await admin.eval(`document.getElementById('laptopSection').scrollIntoView({ block: 'start' })`);
     await admin.shot(path.join(OUT, 'admin-laptop.png'));
-    report(LAPTOP_ROWS.every((id) => (laptopRead.ids || []).includes(id)) && laptopRead.said && laptopRead.marks && laptopRead.elsewhere && !!refreshed,
+    report(LAPTOP_ROWS.every((id) => (laptopRead.ids || []).includes(id)) && laptopRead.said && laptopRead.marks && laptopRead.elsewhere && /^format 2 · /.test(laptopRead.folder || '') && !!refreshed,
       `the admin page's "This laptop" says each fact, its mark beside its shape, and where it was read, and Refresh reads Windows again (${laptopRows}; "${refreshed}")`);
     report(JSON.parse(adminDoors.hall.want).includes('adminRoom.watch') && !JSON.parse(adminDoors.header.want).includes('adminRoom.watch') && JSON.parse(adminDoors.person.want).includes('person.seat') && JSON.parse(adminDoors.message.want).includes('adminMsg.delete'),
       `the admin page's menus: Watch for a hall not watched and none in the watched one's header, a code guest's Seat, a message's Delete for everyone (${adminDoors.hall.want}; ${adminDoors.header.want})`);
@@ -2707,9 +2708,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       return audit2.until(`(() => { const c = document.getElementById('chainState'); return c.dataset.mark && !document.getElementById('verifyBtn').disabled && c.dataset.mark + '|' + c.textContent; })()`);
     };
     const cut2 = await check2();
-    report(/^broken\|✕ entry 7 is missing: this machine recorded entry 7; the log ended at entry 6/.test(cut2 || ''), `a log cut while it was stopped reads ✕, with what is missing (${cut2})`);
+    report(/^broken\|✕ entry 8 is missing: this machine recorded entry 8; the log ended at entry 7/.test(cut2 || ''), `a log cut while it was stopped reads ✕, with what is missing (${cut2})`);
     const rows2 = await audit2.eval(`[...document.querySelectorAll('#auditList .audit-row')].map((li) => li.querySelector('.audit-mark [aria-hidden]').textContent).join('')`);
-    report(rows2 === '✓✓✓△△△△△', `the rows read ✓ under this key (the sign-in, the cut, the boundary) and △ for the 0.5.1 entries (${rows2})`);
+    // The folder 0.5.1 left (format 1, no marker) was copied and marked at its first start under this build: one
+    // server.upgraded row, keyed, and none at the start after it.
+    const upgraded2 = await audit2.eval(`[...document.querySelectorAll('#auditList .audit-row .audit-action')].filter((a) => a.textContent.startsWith('server.upgraded')).length`);
+    report(rows2 === '✓✓✓✓△△△△△' && upgraded2 === 1, `the rows read ✓ under this key (the sign-in, the cut, the boundary, the folder's upgrade, once: ${upgraded2}) and △ for the 0.5.1 entries (${rows2})`);
     const admin2 = await edge.tab(`${base2}/admin.html`);
     const where2 = await admin2.until(`(() => { const w = document.getElementById('auditWhere'); return !document.getElementById('dashboard').hidden && !w.hidden && document.getElementById('auditAcceptRow').hidden && document.getElementById('auditLine').dataset.mark === 'broken' && w.textContent; })()`, 20000);
     report(where2 === 'Accept this on the AGMessage laptop: sign in there with its token (Admin login in the AGMessage window; installed: Start → AGMessage → Show the admin token).', `an admin account is told where to accept, and offered no Accept button (${where2})`);
@@ -2717,7 +2721,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const button2 = await admin2.until(`!document.getElementById('dashboard').hidden && !document.getElementById('auditAcceptRow').hidden && document.getElementById('auditWhere').hidden`, 20000);
     await admin2.eval(`document.getElementById('auditAcceptBtn').click()`);
     const ticks = await admin2.until(`(() => { const boxes = [...document.querySelectorAll('#acceptList input[data-id]')]; return document.getElementById('acceptDialog').open && boxes.length === 2 && boxes.map((b) => b.dataset.id + '=' + b.checked).join(' '); })()`);
-    report(!!button2 && ticks === 's1-5=true e7=false', `the token at the laptop is offered Accept, and in its dialog a △ starts ticked and a ✕ unticked (${ticks})`);
+    report(!!button2 && ticks === 's1-5=true e8=false', `the token at the laptop is offered Accept, and in its dialog a △ starts ticked and a ✕ unticked (${ticks})`);
     await admin2.shot(path.join(OUT, 'audit-accept.png'));
     // The cut alone, confirmed: △ is what is left.
     await admin2.eval(`(() => { const [plain, cut] = document.querySelectorAll('#acceptList input[data-id]'); plain.checked = false; plain.dispatchEvent(new Event('change')); cut.checked = true; cut.dispatchEvent(new Event('change')); document.querySelector('#acceptList input[data-confirm]').checked = true; document.getElementById('acceptToken').value = '${TOKEN}'; document.getElementById('acceptForm').requestSubmit(); })()`);

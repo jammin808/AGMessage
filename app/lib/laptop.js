@@ -12,6 +12,7 @@
  *   windowsFacts   that output read by type, part by part, as each line came: each part read, or unknown with why;
  *                  never a value it did not check
  *   facts          the panel's rows, each a label, its words, a mark (ok, warn, fault, off, or none) and where it was read
+ *   formatRow      the data folder's row: its format, and what this start found of it (lib/dataformat.js)
  *
  * The laptop's admin and the rights given are read from the install record (HKLM\SOFTWARE\AGMessage: `Admin`,
  * `AdminName`, and under `Grants` one value per account's SID, its rights as a comma-separated list), the names each
@@ -237,14 +238,29 @@ const row = (id, label, words, mark, from) => Object.freeze({ id, label, words, 
 const unknownRow = (id, label, part, from) => row(id, label, 'unknown (' + part.why + ')', '', from);
 
 /**
+ * The data folder's row (pure): its format and what this start found of it (lib/dataformat.js `settle`, as health's
+ * `format` says it), with `build` this build and `dir` the folder. △ when a newer build wrote it before this start.
+ */
+function formatRow(f) {
+  let said;
+  if (!f.was) said = 'begun by this build';
+  else if (f.was !== f.format) said = 'moved from format ' + f.was + ' at this start; the folder as it was is kept in ' + path.join(f.dir, ...String(f.backup).split('/'));
+  else if (f.before === f.build) said = 'last written by this build';
+  else if (!f.before) said = 'last written by a build its marker did not name; this build writes it now';
+  else said = 'last written by ' + f.before + (f.newer === true ? ', a newer build than this one,' : f.newer === false ? ', an older build,' : '') + ' before this start; this build ' + (f.newer === true ? 'reads its format, and ' : '') + 'writes it now';
+  return row('format', 'Data folder', 'format ' + f.format + ' · ' + said, f.newer === true ? 'warn' : '', 'the data folder\'s format.json (' + path.join(f.dir, 'format.json') + '), read at this start');
+}
+
+/**
  * The panel's rows, from what this server knows (`k`) and what Windows said (`w`, windowsFacts's), in the panel's order
  * (pure). `k`: {build, runs, addresses, port, https: {on, fingerprint, validTo, off, renewal, file}, sealed: {total, open,
  * keyWords}, screens: {total, shown, offline}, stagewatch: {total, connected}, tunnel: {running, url, error}, before,
- * without: [words], node}.
+ * without: [words], node, format: formatRow's, or none}.
  */
 function facts(k, w) {
   const rows = [];
   rows.push(row('build', 'AGMessage', k.build + ' · ' + (k.runs === 'task' ? 'installed: a Windows task starts it with Windows' : 'the portable folder'), '', 'this server'));
+  if (k.format) rows.push(formatRow(k.format));
   rows.push(k.addresses.length
     ? row('addresses', 'Addresses', k.addresses.map((a) => 'http://' + a + ':' + k.port).join(' · '), '', 'this laptop\'s network adapters, read now')
     : row('addresses', 'Addresses', 'none now: no device can reach this laptop; on it, http://localhost:' + k.port, 'warn', 'this laptop\'s network adapters, read now'));
@@ -310,4 +326,4 @@ function facts(k, w) {
   return Object.freeze(rows);
 }
 
-module.exports = { windowsPlan, readWindows, windowsFacts, facts, reach, SCRIPT, WINDOWS_MS, PASSED, RULES_MAX, LISTED_MAX };
+module.exports = { windowsPlan, readWindows, windowsFacts, facts, formatRow, reach, SCRIPT, WINDOWS_MS, PASSED, RULES_MAX, LISTED_MAX };

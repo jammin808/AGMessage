@@ -4,22 +4,27 @@
  * Stamps a CI build (app/build.json) and checks a release tag against the version. One scheme: app/lib/version.js.
  *
  *   node tools/stamp-build.js --run <github.run_number> --commit <github.sha> [--ref <github.ref>]
- *       writes app/build.json; the channel is "release" for the ref refs/tags/v<version>, "dev" for anything else
- *   node tools/stamp-build.js --check-tag <tag>
- *       fails unless the tag is v<package.json version>: a release is never built from a tag that names another version
+ *       writes app/build.json ({version, build, installVersion, commit, channel, builtAt}); the channel is "release" for
+ *       the ref refs/tags/v<version>, "dev" for anything else; installVersion is MAJOR.MINOR.BUILD, the order "newer" is
+ *       read by (app/lib/version.js)
+ *   node tools/stamp-build.js --check-tag <tag> [--released <tags>] [--tags <tags>]
+ *       fails unless the tag is v<package.json version>: a release is never built from a tag that names another version;
+ *       with --released (the tags of the releases already published, one per line or space; none for a first release),
+ *       also unless that version is above every one of them by SemVer; with --tags (every v-tag the repository holds),
+ *       also unless it is above every other one, released or not, so among releases SemVer and MAJOR.MINOR.BUILD agree
  *   node tools/stamp-build.js --print
  *       prints the version this tree reads as (local builds included)
  *
- * The build number is the run number less package.json's agmessage.runBase, 1 to 65535 (a Windows file version's part);
- * outside that range nothing is written and the step fails with words. Raise the version's MAJOR or MINOR and set runBase
- * to the last run's number to start the count again at 1.
+ * The build number is the run number less package.json's agmessage.runBase, 1 to 65535 (an MSI ProductVersion's BUILD),
+ * and MAJOR and MINOR are at most 255 (its first two parts); outside those nothing is written and the step fails with
+ * words. Raise the version's MAJOR or MINOR and set runBase to the last run's number to start the count again at 1.
  */
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const APP = path.join(ROOT, 'app');
-const { compose, SEMVER, COMMIT, BUILD } = require(path.join(APP, 'lib', 'version.js'));
+const { compose, installVersionOf, releaseRefusal, INSTALL_MAX, SEMVER, COMMIT, BUILD } = require(path.join(APP, 'lib', 'version.js'));
 
 function fail(words) { console.error('stamp-build: ' + words); process.exit(1); }
 function arg(name) { const i = process.argv.indexOf(name); return i > 0 ? String(process.argv[i + 1] || '') : null; }
@@ -33,7 +38,14 @@ if (process.argv.includes('--print')) { console.log(BUILD.full); process.exit(0)
 const tag = arg('--check-tag');
 if (tag !== null) {
   if (tag !== 'v' + version) fail('the tag "' + tag + '" does not name this version (v' + version + ', app/package.json); nothing is released');
-  console.log('stamp-build: tag ' + tag + ' matches the version');
+  const released = arg('--released');
+  const tags = arg('--tags');
+  if (released !== null || tags !== null) {
+    const list = (v) => (v || '').split(/\s+/).filter(Boolean);
+    const refusal = releaseRefusal(version, list(released), list(tags));
+    if (refusal) fail(refusal);
+  }
+  console.log('stamp-build: tag ' + tag + ' matches the version' + (released !== null ? ', above every release published' : '') + (tags !== null ? ', above every other version tagged' : ''));
   process.exit(0);
 }
 
@@ -46,11 +58,12 @@ const runBase = pkg.agmessage && Number.isInteger(pkg.agmessage.runBase) ? pkg.a
 if (runBase < 0) fail('agmessage.runBase in app/package.json is not a whole number');
 const build = Number(run) - runBase;
 if (build < 1) fail('run ' + run + ' is not past agmessage.runBase ' + runBase + '; nothing was stamped');
-if (build > 65535) fail('build ' + build + ' is past 65535; raise MAJOR or MINOR and set agmessage.runBase to the last run (app/package.json)');
+if (build > INSTALL_MAX.build) fail('build ' + build + ' is past ' + INSTALL_MAX.build + '; raise MAJOR or MINOR and set agmessage.runBase to the last run (app/package.json)');
+if (!installVersionOf(version, build)) fail('the version ' + version + ' has a MAJOR or MINOR past ' + INSTALL_MAX.major + ', which an installer\'s version (MAJOR.MINOR.BUILD, as an MSI\'s ProductVersion carries it) cannot carry; nothing was stamped');
 const channel = ref === 'refs/tags/v' + version ? 'release' : 'dev';
 if (/^refs\/tags\//.test(ref) && channel !== 'release') fail('the tag ' + ref.slice(10) + ' does not name this version (v' + version + ')');
 
-const stamp = { version, build, commit, channel, builtAt: new Date().toISOString() };
+const stamp = { version, build, installVersion: installVersionOf(version, build), commit, channel, builtAt: new Date().toISOString() };
 fs.writeFileSync(path.join(APP, 'build.json'), JSON.stringify(stamp, null, 2) + '\n');
 const full = compose(version, stamp);
 console.log('stamp-build: ' + full + ' (' + channel + ')');

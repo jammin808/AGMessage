@@ -114,7 +114,11 @@ window: a file missing beside the .bat, or who holds the port. Full instructions
 One scheme for every build (`app/lib/version.js`): `app/package.json` names the version, CI stamps the build number and
 commit. A release reads `0.5.0+17.abc1234`, a CI development build `0.5.0-dev.17+abc1234`, a local copy
 `0.5.0-dev+abc1234`. The console window, `/api/health`, the admin page and the Show Bus hello say which build runs; the
-zip is named by it. A tag `vX.Y.Z` publishes a release only when it names `app/package.json`'s version. Changes:
+zip is named by it. "Newer" is MAJOR.MINOR.BUILD (the stamp's `installVersion`, `0.6.41`; a local copy has none). A tag
+`vX.Y.Z` publishes a release only when it names `app/package.json`'s version and that version is above every release
+already published and every other version tagged, so among releases SemVer and MAJOR.MINOR.BUILD agree. The data folder says which build and format
+last wrote it (`data/format.json`): a folder of a higher format is refused, a 0.5 folder is copied into `data/backups/`
+before it is moved, and a newer build before this one is said on the admin page (README.txt, Upgrading). Changes:
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Develop

@@ -141,6 +141,8 @@
       parts.push('⚠ ' + n + ' show-desk result' + (n === 1 ? '' : 's') + ' waiting for Stagewatch to take ' + (n === 1 ? 'it' : 'them') + ' (' + [last, next].filter(Boolean).join(', ') + ')');
     }
     if (h.tls && h.tls.link && h.tls.link.changed) parts.push('⚠ CERTIFICATE CHANGED — Stagewatch\'s certificate is not the one pinned; the link is refused until you accept it');
+    // The data folder was last written by a newer build of its format: this one serves it (This laptop says the rest).
+    if (h.format && h.format.newer === true) parts.push('⚠ the data folder was last written by a newer build, ' + h.format.before + ': this one reads its format and writes it now');
     $('healthLine').textContent = parts.join(' · ');
   }
 

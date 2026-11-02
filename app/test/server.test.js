@@ -386,8 +386,9 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const health = async () => (await fetch(base + '/api/health')).json();
     const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
     const h = await health();
-    assert.deepEqual(Object.keys(h).slice(-11), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors'], 'appended at the end of the detail');
+    assert.deepEqual(Object.keys(h).slice(-12), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format'], 'appended at the end of the detail');
     assert.deepEqual(h.acceptErrors, { count: 0, last: '' }, 'no connection the port could not take');
+    assert.deepEqual(h.format, { format: 2, was: 0, before: '', newer: null, backup: '' }, 'a new folder, marked by this build: no build named before it');
     assert.deepEqual(Object.keys(h.elu), ['count', 'p50', 'p95', 'max']);
     assert.ok(Number.isInteger(h.rssMb) && h.rssMb > 0, 'rssMb ' + h.rssMb);
     assert.deepEqual(Object.keys(h.maxSocketsPerAddress), ['venue', 'tunnel'], 'per lane');

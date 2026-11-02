@@ -194,7 +194,9 @@ screens (made, renamed, re-linked, removed, and every take: which screen, by who
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and
 the desk's number, never the words), every line Stagewatch takes for the speaker's screen sent straight to it
 (`stagewatch.send`: who sent it and how many characters, never the words; an emoji counts as one character in both),
-and commands to Patterns and PlayMap.
+commands to Patterns and PlayMap, and a start by another build than the one that last wrote the data folder
+(`server.upgraded`, a system row: from which build to which, older or newer, and the copy of the folder kept when its
+format moved; `data/format.json`, `lib/dataformat.js`).
 
 **Chained with a key.** Each line carries the hash of the line before it, from a fixed first hash, and its own
 HMAC-SHA256 under a key derived from this machine's key (`machine.key`, outside the data folder: `lib/secretbox.js`).

@@ -10,7 +10,8 @@
  *  - Exit codes carry intent (lib/resilience.js EXIT): 0 stopped, 3 can't start as configured, 75 the installed node's
  *    port or data folder held by another program (tried again on the ladder, never counted as a crash), 82 restart now.
  *  - The channel (AGM_RUNS) and, for the installed node, its folders are checked before anything is written; an unknown
- *    channel, or a data folder that cannot be made, stops it with code 3 and the words of why.
+ *    channel, a data folder that cannot be made, or one a build of a higher format wrote (or whose format marker cannot
+ *    be read, lib/dataformat.js), stops it with code 3 and the words of why, on its console alone.
  *  - The admin token is made once here and handed to every restart, so a restart doesn't change it. It is said only where
  *    a person sits: once its server serves and asks, the banner's Token line holds it on a console and never in output
  *    that is kept (a file, a log). The installed node writes it into its token folder (AGM_TOKEN_DIR), a folder of its
@@ -36,6 +37,8 @@ const path = require('path');
 const { SupervisorPolicy, EXIT, writeFileAtomic } = require('./lib/resilience');
 const { channelOf, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE } = require('./lib/startup');
 const { ServerLog, Lines, redact } = require('./lib/serverlog');
+const dataformat = require('./lib/dataformat');
+const { BUILD } = require('./lib/version');
 
 const CHILD = process.env.AGM_CHILD || path.join(__dirname, 'server.js');
 const DATA_DIR = process.env.AGM_DATA_DIR || path.join(__dirname, 'data');
@@ -54,6 +57,12 @@ const tokenProblem = taskTokenProblem(process.env, { programDir: path.dirname(__
 if (tokenProblem) cannotStart(tokenProblem);
 // The installed node's token file, which its admin reads ('' for a portable copy, whose token is said in its window only).
 const TOKEN_PATH = channel.runs === 'task' ? path.join(process.env.AGM_TOKEN_DIR, TOKEN_FILE) : '';
+// A data folder a build of a higher format wrote, or whose format marker cannot be read (lib/dataformat.js), is refused
+// here with its words, on the console alone, before this watchdog writes its console, its log or its record in it: that
+// folder is left byte for byte as the build that wrote it left it. The server asks the same before it writes anything,
+// and again once it holds the folder.
+const formatRefused = dataformat.refusal(dataformat.read(DATA_DIR), { dataDir: DATA_DIR, build: BUILD.full });
+if (formatRefused) cannotStart(formatRefused);
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {
   cannotStart('the data folder ' + DATA_DIR + ' cannot be made (' + (e.code || e.message) + '). Choose a folder this Windows account can write to (AGM_DATA_DIR), or fix that one\'s permissions.');
 }

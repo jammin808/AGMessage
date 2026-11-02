@@ -99,6 +99,64 @@ Every day of the event
 - When the event is over, close the black window (or press Ctrl+C in it).
   Halls, history and accounts are kept for next time.
 
+Upgrading
+---------
+Upgrade between shows, never the night before one: upgrade, rehearse, then
+run the show on the build you rehearsed.
+
+1. Close the old copy's black window (or press Ctrl+C in it): it saves
+   as it stops.
+2. Extract the new zip into a new folder (Extract All).
+3. Copy the old folder's app\data and app\uploads into the new folder,
+   over its empty ones, before the new copy's first start.
+4. Start the new folder's start-agmessage.bat from the same Windows
+   account as before. The keys that open the saved links, the
+   certificate and the audit log's key are in that account's
+   %LOCALAPPDATA%\AGMessage, not in the folder.
+5. Windows Firewall asks about the new folder's node.exe (below).
+
+- The data folder says which build and format last wrote it
+  (app\data\format.json). The first start of 0.6 on a 0.5 folder copies
+  the folder, as it was, into app\data\backups\format-1-<time>-... before
+  it changes anything, and the black window says so ("Data folder:
+  format 2 · moved from format 1 at this start; the folder as it was is
+  kept in ..."). It needs free space for the copy and 1 GB beside it.
+  Keep that copy until the show on the new version is over; then it
+  may be deleted.
+- The first start of a version that keys the audit log asks you to
+  accept the older entries at Admin -> Health (type the token from this
+  window).
+- Newer is the build number: 0.6.0+41 is newer than 0.6.0+37, and
+  0.6.1+40 than 0.6.0+39. Admin -> This laptop's "Data folder" line
+  names the build that wrote the folder before this start; "a newer
+  build than this one" there means an older build was started on it.
+- Going back: an older build of the same format opens the folder and
+  says so. A build of an older format refuses it and changes nothing:
+  "AGMessage cannot start: this data folder (...) was last written by
+  AGMessage 0.7.0+52 in format 3, and this build (...) reads format 2
+  and older. ..." Start the newer build again, or start the older one on
+  the copy the words name. 0.5.1 reads no format: it opens a 0.6 folder
+  with the losses "Going back to 0.5.1" names below. Do not go back to
+  0.5.1 during a show.
+
+Windows Firewall, a new folder, a standard account, a Public network
+---------------------------------------------------------------------
+Windows asks about node.exe the first time a copy serves from a new
+folder, and each version you extract is a new folder.
+- Choose "Allow access". On a standard Windows account that button
+  needs an administrator's password. Without one, phones and tablets
+  cannot reach this laptop (http://localhost:3023 still works on it);
+  Cancel may leave a rule that blocks it.
+- On a network Windows calls Public (often a venue's Wi-Fi), the rule
+  must cover Public networks too. Or make the network Private: Settings
+  -> Network & internet -> Wi-Fi (or Ethernet) -> the network -> Private
+  network.
+- Admin -> This laptop says the network's profile and whether a rule
+  lets this copy's node.exe in on it ("no rule ... on Public: phones
+  there may not reach AGMessage", "a block rule on Private: phones there
+  cannot reach AGMessage"). Allow it once on the show's Windows account,
+  on the kind of network the venue has, before you go.
+
 The words AGMessage uses
 ------------------------
 One word for each thing, on every page:
@@ -129,7 +187,10 @@ as "Session restored", stays as it was.
 The audit log, and where to keep this folder
 --------------------------------------------
 Halls -> Accounts -> Audit log lists every sign-in, change of rights, room
-control and screen take, newest first. Each entry is chained to the one
+control and screen take, newest first, and each start by another build
+than the one that last wrote the data folder (server.upgraded: from
+which build to which, and the copy kept when the folder's format moved).
+Each entry is chained to the one
 before it with this laptop's key (machine.key, kept outside this folder),
 so a line that was changed, removed, or written without the key shows.
 "Check the log" answers with one mark, and each row carries its own:
@@ -408,7 +469,8 @@ Troubleshooting
   under "Before this start".
 
 - Admin -> This laptop says, each with where it was read: the build and
-  how it runs, the LAN addresses (Copy LAN address copies one), HTTPS
+  how it runs, the data folder's format and the build that wrote it
+  before this start, the LAN addresses (Copy LAN address copies one), HTTPS
   and why it is off, how many sealed values open, the screens that
   confirmed what they show, Stagewatch, the internet link, why the
   watchdog started it again (or why the start before was refused, or
@@ -479,6 +541,24 @@ Troubleshooting
   too. The portable copy runs beside it only on a port of its own. A copy
   missing its files then ends with "To use the installed AGMessage:
   Start -> AGMessage -> Open AGMessage."
+
+- "AGMessage cannot start: this data folder (...) was last written by
+  AGMessage ... in format 3, and this build (...) reads format 2 and
+  older.": a newer AGMessage has changed this folder; see Upgrading,
+  Going back. Nothing was changed, and nothing is written in the folder,
+  not even the window's log. "...format.json could not be read (EBUSY)":
+  another program holds it; start AGMessage again. "...holds no format
+  AGMessage can read": put back the copy it had.
+- "AGMessage cannot start: ...marker ...format.json could not be written
+  (EBUSY)": the folder would not say which build last wrote it, so
+  AGMessage does not serve it. Another program (an antivirus, a backup)
+  holds it: start AGMessage again; nothing waits for it.
+- "AGMessage cannot start: the data folder (...) is moved from format 1
+  to 2 only once a copy of it is kept, and its disk has ... MB free":
+  the first start of 0.6 on a 0.5 folder copies it first, and keeps
+  1 GB free beside the copy for the saves and logs. Free some space on
+  that disk and start again. A copy cut short (the window closed, the
+  power gone) is removed at the next start, which copies again.
 
 - "AGMessage is already running on this data folder": a second copy of
   this folder was started while the first runs. It stops before it
