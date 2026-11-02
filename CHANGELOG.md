@@ -1074,6 +1074,61 @@ taken away, not yet on the owner's devices: every row of `docs/DEVICES.md`'s wal
   Board or replaces it, and the floor is not lowered for it.
 - Rolling back: nothing is stored; 0.5.1's pages come back as they were.
 
+**An On stage seat chats, answers and asks for help; it shares no file, asks no question and forwards nothing** (the
+plan's Part 7, unit G; the owner's ask of 2026-10-26, "The Boards chat view doesn't need to let them add file attachments
+or create action prompts. They can chat and respond", and answer B2, "Anyone in that same room sees the messages";
+probed in 0.5.1 on a throwaway server, where an On stage guest's upload, file message, question and forwards into
+another hall, through the admin's link too, were each accepted)
+- On stage seats are no longer given an upload token, and cannot share files, post questions, or forward anything into
+  another room. A seat now has a limit, read before any right (`rbac.SEAT_LIMITS`, `seatAllows`): On stage holds
+  reading and writing messages and nothing else, and the server refuses the rest by the seat, whatever the page sends.
+  A file message is refused with "On stage seats send messages, not files.", a question with "Questions for the Board
+  come from the backstage team.", and every forward, text included, whatever hall it names and whatever link the admin
+  gave, with "Messages from On stage stay in this room.", before the message is read or the rate taken, in the same
+  words whatever hall the code names (only a repeat of the person's own earlier forward, made before the seat moved, is
+  answered with what it did); the forward picker offers no room. Screens, a hall's set-up and the show network are refused from an On stage page with "Do that from a
+  backstage page." (the show network's list too, never an empty list), and drafts with "Drafting is for the backstage
+  team.". A text, a reply, 🔥 Priority (stored as priority), a help request, a reaction and an answer to a question, in
+  words up to 200 characters, are taken as before.
+- The admin seated On stage from the token is held to the seat on that page: no upload token, no file, no question, no
+  forward, no speaker's screen, no drafts, no screens or set-up. Its admin verbs answer as from any of its pages, and
+  its pages in no hall are not limited. The seat is the page's: a guest On stage in one hall and backstage in another
+  keeps backstage's rights on that page.
+- An upload token is checked again when it is used, and the admin's move of a page to a seat that shares no file ends
+  it in the same tick, without waiting for the page's reload: its next use is refused in that seat's words ("On stage
+  seats send messages, not files.", "Observers can read but not post.") and it is gone, and a page moved back before
+  using it uploads nothing more with it (its join after the reload takes a new one). In 0.5.1 a token uploaded for as
+  long as its page stayed open.
+- Forwarding from a backstage page keeps two rules of the room a message comes from: a file moves only from a seat that
+  may share files there ("Files are moved by the backstage team."; in 0.5.1 a guest who only reads one hall and sits
+  backstage in another could take the first hall's files into the second), and a file or a question goes only where the
+  forwarder sits backstage, never into a room where the same person sits On stage ("You may not share files in that
+  hall.", "Questions for the Board come from the backstage team."), which the picker no longer offers for either. A
+  picker emptied by a rule of the room the message comes from says that rule in the forward's words (`myRooms`' `why`),
+  and the page shows them instead of asking for a hall the person may already have open. A guest seated both On stage
+  and backstage in one room forwards into it as backstage, whichever page joined first (0.5.1 took the first seat that
+  could post). With no seat there, the admin's link posts and shares files as before, by a set of its own
+  (`rbac.LINKED_CAPS`).
+- The hall page offers no ↗ on any message On stage, and none on a file from a page given no upload token (an observer,
+  a Viewer account), which the server would refuse. The Board's composer already held the words, 🔥 and Send only.
+- `test/onstage.test.js` (new), end to end: an On stage guest given no token and refused a backstage upload as a file
+  message and a question; its text, reply, 🔥, help request, 👍 and an answer of 201 characters stored (at 200); its
+  forwards of a text, a file and a question refused with hall B's number unchanged, and no room offered for either; its
+  screens (every `display:*` verb), set-up (every `hall:*` verb), show network and draft refused in their words; a
+  backstage guest's question and file refused into a hall where it sits On stage, and not offered, the question's
+  picker saying why; one seated On stage and backstage in a room, On stage first, forwarding a question into it stamped
+  backstage; a backstage guest forwarding a file through the admin's link and an On stage guest forwarding nothing
+  through one; an observer's file refused into a hall where it sits backstage, its picker saying why, while a text
+  still goes; a token moved On stage refused and gone, one moved to observer refused, one moved On stage and back
+  refused, its page's new token taking a file, and another backstage token still taking one; the admin On stage from
+  the token refused each in its words while `admin:setRole`, `admin:watchRoom` and `nodes:link` answer in theirs, and
+  the same token's page in no hall listing the hall's screens. `test/accounts.test.js`: `seatAllows('board', …)` true
+  for `hall.view` and `hall.post` alone of every right, and every right for backstage and observer.
+  `test/server.test.js`'s join now holds a backstage token and an On stage seat's `null`. The smoke: an On stage page
+  shows no ↗ on a text, a file or a question, and its composer the words, 🔥 and Send; a backstage page offers a file's
+  ↗ and a Viewer's page does not.
+- Rolling back: nothing is stored; 0.5.1 gives On stage seats files, questions and forwards again.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

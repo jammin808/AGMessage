@@ -35,6 +35,16 @@ test('rbac: roles, hall scope, grants and revokes, deny by default', () => {
   assert.equal(rbac.roomRoleFor({ role: 'tech', halls: ['H1H1'] }, 'H1H1'), 'research');
 });
 
+test('rbac: an On stage seat allows reading and writing messages and nothing else; the other seats are bounded by their rights alone', () => {
+  const caps = Object.keys(rbac.CAPS);
+  assert.deepEqual(caps.filter((c) => rbac.seatAllows('board', c)), ['hall.view', 'hall.post']);
+  for (const seat of ['research', 'observer']) assert.deepEqual(caps.filter((c) => rbac.seatAllows(seat, c)), caps, seat + ' is unlimited');
+  assert.ok(!rbac.seatAllows('board', 'no.such.cap'));
+  // The admin's link is a set of its own: it keeps post and share files, never the On stage seat's narrower set.
+  assert.deepEqual([...rbac.LINKED_CAPS], ['hall.view', 'hall.post', 'hall.files']);
+  assert.ok(Object.isFrozen(rbac.SEAT_LIMITS) && Object.isFrozen(rbac.SEAT_LIMITS.board) && Object.isFrozen(rbac.LINKED_CAPS), 'no caller widens a limit');
+});
+
 test('rbac: rights never escalate', () => {
   const admin = { id: 'a1', role: 'admin' };
   const manager = { id: 'a2', role: 'manager', grant: ['users.manage'] };

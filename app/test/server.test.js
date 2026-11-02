@@ -83,7 +83,9 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(jb.ok && jr.ok);
     assert.ok(jb.identity && jb.identity.includes('.'));
     assert.notEqual(jb.uid, 'u-forged-client-id');
-    assert.ok(jb.uploadToken && jr.uploadToken);
+    // Backstage shares files; On stage sends messages, not files, so it is given no upload token.
+    assert.ok(jr.uploadToken);
+    assert.equal(jb.uploadToken, null);
   });
 
   await t.test('names are unique per room (case-insensitive)', async () => {

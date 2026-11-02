@@ -1560,6 +1560,18 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await admin.shot(path.join(OUT, 'admin-room.png'));
     await research.eval(`Promise.all([new Promise((r) => socket.emit('message', { type: 'help', category: 'Sound', text: 'radio mic 3 dead' }, r)), new Promise((r) => socket.emit('message', { type: 'action', text: 'Ready for Q&A?', options: ['Yes', 'No'] }, r))])`);
     report(!!(await research.until(`(() => { const h = document.querySelector('.msg[data-type="help"] .fwd-btn'); const t = Array.from(document.querySelectorAll('.msg[data-type="text"] .fwd-btn')); return h && h.hidden && t.length && t.every((b) => !b.hidden); })()`)), 'a help request offers no forward; a message does');
+    // On stage, what is written stays in the room: no message offers ↗, a text, a file or a question, and nothing that
+    // is not hidden is drawn for it; the Board's composer has no file or question door.
+    const boardForward = await board.until(`(() => {
+      const kinds = new Set(Array.from(document.querySelectorAll('.msg[data-type]')).map((n) => n.dataset.type));
+      if (!['text', 'file', 'action'].every((k) => kinds.has(k))) return null;
+      const shown = (el) => !!el && getComputedStyle(el).display !== 'none' && !el.closest('[hidden]');
+      return JSON.stringify({ forward: Array.from(document.querySelectorAll('.msg .fwd-btn')).filter(shown).length,
+        composer: Array.from(document.querySelectorAll('#directorCompose button, #directorCompose input')).filter(shown).map((b) => b.id || (b.classList.contains('send-btn') ? 'send' : b.outerHTML)) });
+    })()`);
+    report(boardForward === JSON.stringify({ forward: 0, composer: ['directorInput', 'dirPriorityBtn', 'send'] }), `an On stage page offers no forward on any message, and its composer holds the words, 🔥 and Send (${boardForward})`);
+    // A file is forwarded from a page that may share files here: backstage offers ↗ on it (a Viewer, below, does not).
+    report(!!(await research.until(`Array.from(document.querySelectorAll('.msg[data-type="file"] .fwd-btn')).some((b) => !b.hidden && !b.closest('[hidden]'))`)), 'a backstage page offers a file\'s forward');
     // A page opened before its hall had a Stagewatch offers 🖥 once it has one (the server's answer, asked again when the
     // link's state changes).
     report(!!(await research.until(`CAN_STAGE && [...document.querySelectorAll('.msg[data-type="text"] .stage-btn')].some((b) => !b.hidden)`)), 'a page opened before its hall had a Stagewatch offers 🖥 once it has one');
@@ -1595,9 +1607,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         react: Array.from(document.querySelectorAll('.msg .react-btn')).some(visible),
         answer: Array.from(document.querySelectorAll('.action-btn')).some((b) => !b.disabled),
         replyText: !!document.querySelector('.reply-text-btn'),
+        forwardFile: document.querySelectorAll('.msg[data-type="file"]').length ? Array.from(document.querySelectorAll('.msg[data-type="file"] .fwd-btn')).some(visible) : 'no file drawn',
       });
     })()`);
-    report(shown === JSON.stringify({ composer: false, stage: false, pin: false, react: false, answer: false, replyText: false }), `the Viewer is offered nothing the server refuses (${shown})`);
+    report(shown === JSON.stringify({ composer: false, stage: false, pin: false, react: false, answer: false, replyText: false, forwardFile: false }), `the Viewer is offered nothing the server refuses, a file's forward included (${shown})`);
     await readOldWords('the hall page opened by a Viewer account, Observer', viewerHall);
     const pagesRead = Object.keys(oldWords);
     report(pagesRead.length === 13 && pagesRead.every((p) => Array.isArray(oldWords[p]) && oldWords[p].length === 0),

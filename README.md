@@ -42,6 +42,9 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   after a refusal at a busy moment, at the pace the server gives ("Busy — trying again in 3 s."). The admin page's
   health reads the server's true delay and how busy it is, and keeps the peaks of each show day for 14 days, through a
   restart or a shutdown, so one look after a show says how it ran.
+- **The Board.** People On stage read, reply, answer the backstage team's questions, send 🔥 Priority and ask for help;
+  what they write stays in their room, where the backstage team reads it. They never share files, ask questions or
+  forward anything into another room: the server refuses each by the seat, for the admin seated On stage too.
 - **Remote phones.** Through the built-in Cloudflare tunnel, up to 150 at once — a Quick Tunnel's 200 in-flight
   requests, less room for page loads and files — and half of them at most from one network (an IPv6 phone counted by
   its /64, so a phone that changes its address is still one network). A page that has not joined a room within 20 s

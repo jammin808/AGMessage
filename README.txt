@@ -63,6 +63,10 @@ Every day of the event
 - Presenters and guests: open the LAN URL, choose "Join with a code", type
   the hall's code, a name, and where you are (on stage, backstage,
   observer).
+- On stage: read, reply, answer the backstage team's questions, send
+  Priority and ask for Help. On stage seats cannot share files, ask
+  questions or send to other rooms: what they write stays in their room,
+  where the backstage team reads it.
 - A browser signed in to an account opens its halls from the halls board,
   never with a code: a code link opened there says so and offers "Open your
   halls" or "Sign out". To join as a guest on that device, sign out first.

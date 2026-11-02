@@ -160,6 +160,17 @@ function giveable(actor) {
   return { admin: false, caps: Array.from(e.caps).filter((c) => !ADMIN_ONLY.has(c)).sort(), allHalls: e.allHalls, halls: e.allHalls ? [] : Array.from(e.halls).sort() };
 }
 
+/**
+ * What a seat allows at all, whatever the rights behind it: an On stage seat reads and writes messages, and nothing else
+ * (it shares no file, drives no screen, sends nothing to the stage or the show network). A seat with no limit here
+ * (backstage, observer) is bounded by its rights alone. The admin seated On stage is held to it on that page too.
+ */
+const SEAT_LIMITS = Object.freeze({ board: Object.freeze(['hall.view', 'hall.post']) });
+/** Whether a seat allows a right at all: only a seat with a limit narrows anything. */
+const seatAllows = (seat, cap) => !Object.prototype.hasOwnProperty.call(SEAT_LIMITS, seat) || SEAT_LIMITS[seat].includes(cap);
+/** What the admin's link (admin:linkRoom) lets a guest do in a hall where it has no seat: post and share files. */
+const LINKED_CAPS = Object.freeze(['hall.view', 'hall.post', 'hall.files']);
+
 /** The room view an account joins a hall with: crew (can post) or observer (read only). */
 const roomRoleFor = (account, hall) => (can(account, 'hall.post', hall) ? 'research' : 'observer');
 
@@ -169,4 +180,4 @@ function rightsView(account) {
   return { role: account ? account.role : '', roleLabel: account && isRole(account.role) ? ROLES[account.role].label : '', caps: Array.from(e.caps).sort(), allHalls: e.allHalls, halls: Array.from(e.halls).sort() };
 }
 
-module.exports = { CAPS, ROLES, HALL_SCOPED, ADMIN_ONLY, isCap, isRole, effective, can, seesHall, holdsAdminOnly, mayChange, giveable, roomRoleFor, rightsView };
+module.exports = { CAPS, ROLES, HALL_SCOPED, ADMIN_ONLY, SEAT_LIMITS, LINKED_CAPS, isCap, isRole, effective, can, seesHall, holdsAdminOnly, mayChange, giveable, seatAllows, roomRoleFor, rightsView };

@@ -121,7 +121,8 @@ on a `v*` tag that names `app/package.json`'s version, `release` with a build-pr
 | Pages back by themselves: every page's socket at one reconnection pace, a refusal tried again at the wait the server names (`retryMs`) and said, a page shown again or back online started afresh, the strip and the dot's words while it is down; the server's half: the refusal's wait (`Bucket.waitMs`), and a page back in the restart's first seconds not announced | `app/public/reconnect.js` (`AGM.reconnect`; its tests and fence: `app/test/reconnect.test.js`), `app/server.js` (the connection's refusal, `join`) |
 | Identities, rate limits, lockouts, text cleaning; the key a per-address bound counts by (`limitKey`) and the tunnel's places (`Places`) | `app/lib/guard.js` |
 | Remote phones through the tunnel: the connection's gate (per network, the places, the join's wait, the refusals' words), the link's check from the laptop, health's `tunnel`; their tests, with cloudflared and its address stood in for | `app/server.js` (the connection's gate, `checkTunnel`), `app/lib/peaks.js` (`Refusals`, `linkCheck`), `app/test/tunnel.test.js`, `app/test/tunnel-preload.js` |
-| Rights and roles (pure) | `app/lib/rbac.js` |
+| Rights and roles (pure), and each seat's limit: On stage holds messages only (`SEAT_LIMITS`, `seatAllows`); the admin's link, a set of its own (`LINKED_CAPS`) | `app/lib/rbac.js` |
+| What a seat may do on its page, on the server: the socket's seat (`socket.data.seat`, `onStage()`), read first by `allowed()`, by the checks that do not call it (screens, a hall's set-up, the show network, drafts, forward and its picker, `myRooms`, whose `why` names a source rule) and by an upload token at use, which `admin:setRole`'s move to a seat that shares no file ends; a code guest's rights by seat (`GUEST_CAPS`); their tests | `app/server.js` (`onStage()`, `allowed()`, `GUEST_CAPS`, `rightsIn`, `myRooms`), `app/test/onstage.test.js` |
 | Accounts, password hashing, sessions; their routes | `app/lib/accounts.js`, `app/lib/http-accounts.js` |
 | The audit log (chained with a key; its records beside the machine key, outside the data folder; the check and Accept) | `app/lib/audit.js` |
 | The audit log's rules that need no key (whole lines, links, runs and boundaries, archive points and splits, an export's and an archive's paths, `SHA256SUMS`, manifest and `archive.json`) and the folder check itself, shared with a checker on another computer | `app/verify/auditrules.js` |
@@ -160,12 +161,14 @@ version's heading), `README.md` / `README.txt` where the product changed, `docs/
 
 ## House words
 
-**a hall** — a venue space with its Main room, its own code, Stagewatch link, screens and help requests; **the halls board** — every hall an
-account may see; **a screen** — a browser holding a screen's link; **a take** — what a screen is told to show, numbered;
-**the desk** — Stagewatch's approval queue, where a proposal waits for the operator; **a link** — AGMessage's
-connection to a Stagewatch, Patterns or PlayMap; **a fence** — a test or lint rule that fails the build when an
-invariant breaks; **the air** — what the audience and the speaker see; **the outbox** — what holds a page's send until
-the server answers it, so it is never lost and never made twice.
+**a hall** — a venue space with its Main room, its own code, Stagewatch link, screens and help requests; **the halls
+board** — every hall an account may see; **a screen** — a browser holding a screen's link; **a take** — what a screen is
+told to show, numbered; **the desk** — Stagewatch's approval queue, where a proposal waits for the operator; **a link**
+— AGMessage's connection to a Stagewatch, Patterns or PlayMap; **a fence** — a test or lint rule that fails the build
+when an invariant breaks; **a seat limit** — what a seat allows at all, whatever the rights behind it, read before any
+right and the admin's too (On stage: reading and writing messages, nothing else); **the air** — what the audience and
+the speaker see; **the outbox** — what holds a page's send until the server answers it, so it is never lost and never
+made twice.
 
 **One word per thing** (the smoke's word check holds the pages to it): a hall (never "meeting", "session" or "room");
 a room — Main, Legal, Media, named "Hall 2 › Legal" (never "hall"); a code — what guests type ("guest code" in the

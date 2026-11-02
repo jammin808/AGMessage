@@ -31,6 +31,12 @@ let CAN_SCREENS = false;   // this account may drive the hall's screens (display
 const HAS_STAGE = ROLE === 'board' || ROLE === 'research';
 // Read only (an observer, a Viewer account): the server refuses posts, pins, reactions and answers, so none is offered.
 const readOnly = () => document.body.dataset.role === 'observer';
+// On stage (the seat the server answered): what is written here stays in this room, so the server refuses every forward
+// and no message offers one. Files and questions come from the backstage team: the Board's composer has neither.
+const onStage = () => document.body.dataset.role === 'board';
+// A forward is offered where the server would take it from this page: never On stage, never a help request, and a file
+// only from a page given an upload token (the server's sign that this seat shares files here, which a file's forward needs).
+const offersForward = (m) => m.type !== 'help' && !onStage() && (m.type !== 'file' || !!UPLOAD_TOKEN);
 
 // ---------------- UI sync state (declared early to avoid TDZ traps) ----------------
 // These are accessed by pushUserState / setStageCollapsed / setZoom / applyTheme,
@@ -667,7 +673,7 @@ function rerenderMessage(node, msg) {
   // Forward button — opens a small picker of the other halls this person may post in (a help request stays in its hall)
   const fwdBtn = node.querySelector('.fwd-btn');
   if (fwdBtn) {
-    fwdBtn.hidden = msg.type === 'help';
+    fwdBtn.hidden = !offersForward(msg);
     fwdBtn.onclick = (e) => { e.stopPropagation(); offerForward(fwdBtn, msg.id); };
   }
 
@@ -1098,7 +1104,7 @@ function refreshPinned() {
     // re-wired here.
     const fb = clone.querySelector(".fwd-btn");
     if (fb) {
-      fb.hidden = m.type === 'help';
+      fb.hidden = !offersForward(m);
       fb.onclick = (e) => { e.stopPropagation(); offerForward(fb, m.id); };
     }
     const rxb = clone.querySelector(".react-btn");
@@ -2053,6 +2059,8 @@ function offerForward(anchor, messageId) {
   socket.emit('myRooms', { messageId }, (res) => {
     if (!res || !res.ok) { alert('Could not check your other halls.'); return; }
     if (!res.rooms.length) {
+      // A rule of this hall emptied the list: its words, not a hall to open (the person may have it open already).
+      if (typeof res.why === 'string' && res.why) { alert(res.why); return; }
       const m = findMessage(messageId);
       alert('To forward, open another hall where you may ' + (m && m.type === 'file' ? 'share files' : 'post') + ' (in another tab, as ' + NAME + ').');
       return;

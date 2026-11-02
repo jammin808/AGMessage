@@ -55,6 +55,14 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   stored only as hashes, `HttpOnly`, `SameSite=Strict` and `Secure` over HTTPS; logins are rate limited and locked out.
   A browser signed in to an account is refused a code join, so an account never seats itself as a guest with rights
   its own do not hold; a join's role that the page does not offer is refused.
+- A seat On stage holds messages and nothing else, on the server, for the admin seated there too: it is given no upload
+  token, and an upload token is checked again when it is used, against the seat its page holds then; the admin's move of
+  a page to a seat that shares no file ends its token in the same tick, so that page uploads nothing more with the one it
+  had, even if it is moved back (it is refused and dropped at its next use). It sends nothing into another room, text
+  included: a forward from it is refused before the message is read or the rate taken, in the same words for a code
+  that names a hall and one that does not; only a repeat of the person's own earlier forward into that hall is answered
+  first, with what it did. A file is forwarded only from a seat that may share files where it is, and a file or a
+  question never into a room where the forwarder sits On stage.
 - A connection refused for its rate says when to try again (`retryMs`, read from that address's own bucket, with a
   random spread) and nothing else: no address and no count; the page waits it out. A page that comes back in a
   restart's first 30 s naming a change its hall holds is not announced again: that is the "joined" words only, and its

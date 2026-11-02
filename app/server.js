@@ -504,7 +504,10 @@ setTimeout(() => { for (const room of store.rooms.values()) if (Object.keys(room
 // network's (`guard.limitKey`: an address on the venue, a /64 for an IPv6 phone through the tunnel), not the token's, so
 // joining again, opening more sockets or taking the next address refills nothing. The network buckets are never reset:
 // past 5,000 the fullest go first, so a flood of new addresses hands no drained one its burst back.
-const uploadTokens = new Map();    // token -> {room, uid, bucket (the connection's), key (its network)}
+const uploadTokens = new Map();    // token -> {room, uid, sid, bucket (the connection's), key (its network), may(), seat(), revoked}
+// A token whose socket no longer holds hall.files, or that a move of its seat ended (`revoked`), is refused at its next
+// use in the words of the seat its page holds then, and goes; a revoked one never uploads again, whatever seat follows.
+const UPLOAD_REFUSED = Object.freeze({ board: 'On stage seats send messages, not files.', observer: 'Observers can read but not post.' });
 const uploadBuckets = new guard.Buckets(0.5, 8, 5000);
 // Files uploaded in this run and not yet past their wait: one nobody posted by then is removed.
 const freshUploads = new Map();    // file name -> uploaded at
@@ -764,8 +767,13 @@ const upload = multer({
 
 let statfsWarned = false;
 app.post('/api/upload', async (req, res, next) => {
-  const t = uploadTokens.get(String(req.headers['x-agm-upload'] || ''));
+  const given = String(req.headers['x-agm-upload'] || '');
+  const t = uploadTokens.get(given);
   if (!t) return res.status(403).json({ error: 'Join a room to share files.' });
+  if (t.revoked || !t.may()) {
+    uploadTokens.delete(given);
+    return res.status(403).json({ error: UPLOAD_REFUSED[t.seat()] || (t.revoked ? 'Join a room to share files.' : 'Your account may not share files here.') });
+  }
   if (!t.bucket.take() || !uploadBuckets.take(t.key)) return res.status(429).json({ error: 'Slow down — one file at a time.' });
   // Before anything is written: a disk short of space keeps it for the messages, the logs and the saves.
   try {
@@ -957,10 +965,16 @@ io.on('connection', (socket) => {
   const ok = (ack) => (typeof ack === 'function' ? ack : () => {});
   // `busy` says the refusal is the rate's, not the request's: the outbox keeps a held send and sends it again shortly.
   const limited = (ack) => { ok(ack)({ ok: false, error: 'Slow down a little.', busy: true }); };
+  // The socket's seat: set at join, changed by admin:setRole, never by the page. The admin's support view is unseated
+  // (adminView), so it is never On stage. A seat is keyed on the socket: the same person keeps their rights on a page
+  // where they sit backstage, and is limited only on the page where they sit On stage.
+  const onStage = () => !!me && socket.data.seat === 'board' && !socket.data.adminView;
   // What this person may do in the room they are in: an account by its rights in that hall, a code guest by the role
-  // they joined with (backstage: post, files, the stage; on stage: post and files; observer: read), the admin everything.
-  const GUEST_CAPS = { research: ['hall.view', 'hall.post', 'hall.files', 'stage.send'], board: ['hall.view', 'hall.post', 'hall.files'], observer: ['hall.view'] };
+  // they joined with (backstage: post, files, the stage; On stage: post; observer: read), the admin everything. The
+  // seat's limit comes first (rbac.SEAT_LIMITS): On stage holds only messages, for the admin seated there too.
+  const GUEST_CAPS = { research: ['hall.view', 'hall.post', 'hall.files', 'stage.send'], board: ['hall.view', 'hall.post'], observer: ['hall.view'] };
   const allowed = (cap) => {
+    if (onStage() && !rbac.seatAllows('board', cap)) return false;
     if (socket.data.isAdmin) return true;
     if (!me || !room) return false;
     if (me.acct) return rbac.can(socket.data.account, cap, room.code);
@@ -1038,6 +1052,7 @@ io.on('connection', (socket) => {
     if (!stillSeated) me = { uid: id, name: cleanName, role: cleanRole, joinedAt: Date.now(), ...(acct ? { acct: acct.username } : {}) };
     room = r;
     socket.data.adminView = isAdminView;
+    socket.data.seat = isAdminView ? '' : me.role;
     socket.data.userName = cleanName;
     socket.data.uid = id;
     socket.data.userRoom = code;
@@ -1065,7 +1080,8 @@ io.on('connection', (socket) => {
     uploadToken = null;
     if (allowed('hall.files')) {
       uploadToken = crypto.randomBytes(18).toString('base64url');
-      uploadTokens.set(uploadToken, { room: code, uid: id, bucket: uploadBucket, key: socket.data.key });
+      // Checked again at use, and ended by admin:setRole's move to a seat that shares no file (found by `sid`).
+      uploadTokens.set(uploadToken, { room: code, uid: id, sid: socket.id, bucket: uploadBucket, key: socket.data.key, may: () => allowed('hall.files'), seat: () => socket.data.seat, revoked: false });
     }
 
     // Resume: just what they missed, when we still have it; otherwise the whole history.
@@ -1106,6 +1122,20 @@ io.on('connection', (socket) => {
     ok(ack)({ ok: false, error: 'Observers can read but not post.' });
     return false;
   };
+  // A question (an action prompt) is asked of the Board by the backstage team: an On stage seat answers, never asks.
+  const mayAsk = () => allowed('hall.post') && !onStage();
+  // Screens, a hall's set-up and the show network are driven from a backstage page: On stage, each is refused first,
+  // in one sentence, whatever its own check would say.
+  const backstage = (ack) => {
+    if (!onStage()) return true;
+    ok(ack)({ ok: false, error: 'Do that from a backstage page.' });
+    return false;
+  };
+  // What a seat On stage writes stays in its room's feed (owner answer B2): a forward of anything is refused.
+  const STAYS_HERE = 'Messages from On stage stay in this room.';
+  // The two rules of the room a forward comes from, in the words the forward and its picker both answer with.
+  const FILES_BACKSTAGE = 'Files are moved by the backstage team.';
+  const ASKS_BACKSTAGE = 'Questions for the Board come from the backstage team.';
 
   // A send is said once: a repeat of a send (its client id, from the same person) is answered with what the first one
   // became, before any limit or right is read, since it asks for nothing new — never refused for what succeeded.
@@ -1117,7 +1147,8 @@ io.on('connection', (socket) => {
     if (was) return ok(ack)(was.gone ? { ok: true, id: was.id, seq: was.seq, gone: true } : { ok: true, id: was.id, seq: was.seq });
     if (!writes.take()) return limited(ack);
     if (!mayPost(ack)) return;
-    if (payload && payload.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: 'Your account may not share files here.' });
+    if (payload && payload.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: onStage() ? 'On stage seats send messages, not files.' : 'Your account may not share files here.' });
+    if (payload && payload.type === 'action' && !mayAsk()) return ok(ack)({ ok: false, error: ASKS_BACKSTAGE });
     // An upload that is no longer here (a send held past the wait an unposted upload is kept for) is uploaded again by
     // the page that holds the file, and sent with the same client id.
     if (payload && payload.type === 'file' && guard.validUploadUrl(payload.url) && !fs.existsSync(path.join(UPLOAD_DIR, payload.url.slice(9)))) return ok(ack)({ ok: false, error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true });
@@ -1206,30 +1237,39 @@ io.on('connection', (socket) => {
 
   // Forwarding posts in another hall, so the person's rights there decide, never the hall the message comes from: an
   // account goes by its rights in that hall; a code guest by their own seat there (a locked hall's observer seat
-  // included), or, with no seat there, by the admin's link (post and share files).
+  // included), the seat with the most rights when they hold more than one (backstage, then On stage, then observer, so
+  // the answer never depends on which page joined first), or, with no seat there, by the admin's link (LINKED_CAPS).
+  const SEAT_RANK = { research: 0, board: 1, observer: 2 };
   const rightsIn = (r) => {
     if (socket.data.isAdmin) return { role: me.role, may: () => true };
     if (me.acct) return { role: rbac.roomRoleFor(socket.data.account, r.code), may: (cap) => rbac.can(socket.data.account, cap, r.code) };
     const seats = Array.from(r.users.values()).filter((u) => u.uid === me.uid);
-    const seat = seats.find((u) => (GUEST_CAPS[u.role] || []).includes('hall.post')) || seats[0];
+    const seat = seats.reduce((best, u) => (!best || SEAT_RANK[u.role] < SEAT_RANK[best.role] ? u : best), null);
     const linked = me.linkedRooms instanceof Set && me.linkedRooms.has(r.code);
-    const caps = seat ? GUEST_CAPS[seat.role] || [] : linked ? GUEST_CAPS.board : [];
+    const caps = seat ? GUEST_CAPS[seat.role] || [] : linked ? rbac.LINKED_CAPS : [];
     return { role: seat ? seat.role : me.role, may: (cap) => caps.includes(cap) };
   };
   // The forward picker: the other halls the forward of this message (`messageId`; none: a text) would be taken in — a
-  // file needs hall.files there too, as forward asks.
+  // file needs hall.files there too, as forward asks, and moves only from a seat that may share files here; a question
+  // never goes where this person sits On stage. On stage, nothing is forwarded, so no hall is offered. A list emptied by
+  // a rule of the room the message comes from says which (`why`, the forward's own words), so the page names the rule
+  // instead of asking for a hall the person already has open.
   socket.on('myRooms', (q, ack) => {
     if (typeof q === 'function') [ack, q] = [q, {}];
     if (!me) return ok(ack)({ ok: false, error: 'Not joined' });
+    if (onStage()) return ok(ack)({ ok: true, rooms: [] });
     const src = q && typeof q === 'object' ? room.byId.get(guard.str(q.messageId)) : null;
+    if (src && src.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: true, rooms: [], why: FILES_BACKSTAGE });
     const needs = src && src.type === 'file' ? ['hall.post', 'hall.files'] : ['hall.post'];
     const linked = me.linkedRooms instanceof Set ? Array.from(me.linkedRooms) : [];
+    let askedOnStage = false;
     const others = Array.from(new Set([...(userRooms.get(me.uid) || []), ...linked])).filter((c) => {
       if (c === room.code || !store.has(c)) return false;
       const there = rightsIn(store.get(c));
+      if (src && src.type === 'action' && there.role === 'board') { askedOnStage = true; return false; }
       return needs.every((cap) => there.may(cap));
     });
-    ok(ack)({ ok: true, rooms: others.map((c) => ({ code: c, name: store.get(c).name || '' })) });
+    ok(ack)({ ok: true, rooms: others.map((c) => ({ code: c, name: store.get(c).name || '' })), ...(!others.length && askedOnStage ? { why: ASKS_BACKSTAGE } : {}) });
   });
 
   socket.on('forward', (args, ack) => {
@@ -1242,6 +1282,11 @@ io.on('connection', (socket) => {
     // this person's own forward into that hall answers so, so it tells nothing of a code they did not already send to.
     const was = dst && sent.cid ? store.sentAs(dst, me.uid, sent.cid) : null;
     if (was) return ok(ack)(was.gone ? { ok: true, id: was.id, gone: true } : { ok: true, id: was.id });
+    // On stage, nothing leaves this room, text included, and neither the halls this person is in nor an admin's link is
+    // the admin's per-person choice that would let it: refused before the message is read or the rate taken, in the same
+    // words whatever hall the code names. Only a repeat of this person's own earlier forward is answered first (above),
+    // with what it did, since a send that succeeded is never refused.
+    if (onStage()) return ok(ack)({ ok: false, error: STAYS_HERE });
     // A code is a guest's way in: whether one names a hall is told no faster than the rate lets a send through.
     if (!writes.take()) return limited(ack);
     if (!dst) return ok(ack)({ ok: false, error: 'Target room not found' });
@@ -1251,9 +1296,14 @@ io.on('connection', (socket) => {
     const src = room.byId.get(messageId);
     // Only what stands on its own in another hall; a help request is tracked and answered in its own hall.
     if (!src || !FORWARDABLE.has(src.type)) return ok(ack)({ ok: false, error: src && src.type === 'help' ? 'A help request belongs to its hall — ask in the other hall instead.' : 'Cannot forward this message' });
+    // A file moves only from a seat that may share files where it is: a seat that may only read here takes none of this
+    // hall's files into one where it sits backstage.
+    if (src.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: FILES_BACKSTAGE });
     const there = rightsIn(dst);
     if (!there.may('hall.post')) return ok(ack)({ ok: false, error: 'You may read that hall but not post in it.' });
     if (src.type === 'file' && !there.may('hall.files')) return ok(ack)({ ok: false, error: 'You may not share files in that hall.' });
+    // A forwarded question is a new one by the forwarder, so it is asked only where they sit backstage.
+    if (src.type === 'action' && there.role === 'board') return ok(ack)({ ok: false, error: ASKS_BACKSTAGE });
     const fwd = {
       id: makeMessageId(), type: src.type, at: Date.now(), from: { uid: me.uid, name: me.name, role: there.role, ...(me.acct ? { acct: true } : {}) },
       pinned: false, priority: !!src.priority, ...(sent.cid ? { cid: sent.cid } : {}),
@@ -1296,7 +1346,7 @@ io.on('connection', (socket) => {
     catch (e) { ack({ ok: false, error: 'AI request failed.' }); }
     finally { aiRunning--; socket.off('disconnect', onGone); }
   }
-  const canDraft = () => me && (me.role === 'research' || socket.data.isAdmin);
+  const canDraft = () => me && !onStage() && (me.role === 'research' || socket.data.isAdmin);
 
   socket.on('ai:draft', (args = {}, ack) => {
     if (!need(ack)) return;
@@ -1418,9 +1468,10 @@ io.on('connection', (socket) => {
 
   // ----- Displays: a hall's screens. Seeing and changing what they show is display.control; making, renaming, moving,
   // replacing the link and removing is display.manage. Both are an account's (or the admin's) rights in that hall.
-  const canDisplays = (cap, code) => socket.data.isAdmin || !!(socket.data.account && rbac.can(socket.data.account, cap, code));
+  const canDisplays = (cap, code) => !onStage() && (socket.data.isAdmin || !!(socket.data.account && rbac.can(socket.data.account, cap, code)));
   socket.on('display:list', ({ code } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     const c = guard.str(code).toUpperCase();
     if (!store.has(c) || !canDisplays('display.control', c)) return ack({ ok: false, error: 'Your account may not drive this hall\'s screens.' });
     const manage = canDisplays('display.manage', c);
@@ -1432,6 +1483,7 @@ io.on('connection', (socket) => {
   // screen, which took it (`results`) and, for one screen, its seq and status as well.
   socket.on('display:take', ({ id, ids, content } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     const wanted = ids === undefined ? [guard.str(id)] : Array.isArray(ids) ? [...new Set(ids.map(guard.str))] : [];
     if (!wanted.length || wanted.length > 50) return ack({ ok: false, error: 'Tick between 1 and 50 screens.' });
     if (!writes.take()) return limited(ack);
@@ -1461,6 +1513,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:identify', ({ id } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     const d = displays.get(guard.str(id));
     if (!d || !canDisplays('display.control', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
     if (!chatter.take()) return limited(ack);
@@ -1469,6 +1522,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:create', ({ code, name } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     const c = guard.str(code).toUpperCase();
     if (!store.has(c) || !canDisplays('display.manage', c)) return ack({ ok: false, error: 'Your account may not add screens to this hall.' });
     if (displays.ofHall(c).length >= 50) return ack({ ok: false, error: 'A hall has at most 50 screens.' });
@@ -1481,6 +1535,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:update', ({ id, name, hall } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     const d = displays.get(guard.str(id));
     const to = typeof hall === 'string' && hall ? hall.toUpperCase() : '';
     if (!d || !canDisplays('display.manage', d.hall) || (to && (!store.has(to) || !canDisplays('display.manage', to)))) return ack({ ok: false, error: 'No such screen or hall, or not yours to change.' });
@@ -1493,6 +1548,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:rotate', ({ id } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     const d = displays.get(guard.str(id));
     if (!d || !canDisplays('display.manage', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
     if (unsealable()) return ack({ ok: false, error: unsealable() });   // the old link keeps working: nothing was replaced
@@ -1504,6 +1560,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:remove', ({ id } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     const d = displays.get(guard.str(id));
     if (!d || !canDisplays('display.manage', d.hall)) return ack({ ok: false, error: 'No such screen, or not yours to change.' });
     revokeDisplaySockets(d.id, 'This screen was removed from AGMessage.');
@@ -1514,6 +1571,7 @@ io.on('connection', (socket) => {
   });
   socket.on('display:hallHolding', ({ code, image } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     const c = guard.str(code).toUpperCase();
     if (!store.has(c) || !(canDisplays('display.manage', c) || canManageHall())) return ack({ ok: false, error: 'Your account may not set this hall\'s holding image.' });
     const h = cleanContent({ kind: 'holding', image });
@@ -1529,6 +1587,7 @@ io.on('connection', (socket) => {
   // directly (AGMessage holds only their pairing token, full control of them). Linking a node (its token) is the admin's.
   socket.on('nodes:list', (_args, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     const any = socket.data.isAdmin || (socket.data.account && rbac.can(socket.data.account, 'nodes.control'));
     if (!any) return ack({ ok: false, error: 'Your account may not drive other show systems.' });
     // Each node with whether its own hall's Stagewatch (its own, else the default) keeps a show desk: Propose is offered
@@ -1598,6 +1657,7 @@ io.on('connection', (socket) => {
   });
   socket.on('nodes:command', async ({ id, line, mode } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     const link = peerLinks.get(guard.str(id));
     if (!link || !mayDriveNode(socket, link)) return ack({ ok: false, error: 'No such link, or not yours to drive.' });
     if (!writes.take()) return limited(ack);
@@ -1661,9 +1721,10 @@ io.on('connection', (socket) => {
   });
 
   // ----- A hall's own settings: its name and its own Stagewatch (halls.manage).
-  const canManageHall = () => socket.data.isAdmin || (socket.data.account && rbac.can(socket.data.account, 'halls.manage'));
+  const canManageHall = () => !onStage() && (socket.data.isAdmin || (socket.data.account && rbac.can(socket.data.account, 'halls.manage')));
   socket.on('hall:settings', ({ code } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     if (!canManageHall()) return ack({ ok: false, error: 'Your account may not set halls up.' });
     const r = store.get(guard.str(code).toUpperCase());
     if (!r) return ack({ ok: false, error: 'No such hall.' });
@@ -1678,6 +1739,7 @@ io.on('connection', (socket) => {
   });
   socket.on('hall:configure', ({ code, name, stagewatchUrl, stagewatchKey, stagewatchFingerprint } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     if (!canManageHall()) return ack({ ok: false, error: 'Your account may not set halls up.' });
     if (!writes.take()) return limited(ack);
     const r = store.get(guard.str(code).toUpperCase());
@@ -1720,6 +1782,7 @@ io.on('connection', (socket) => {
   });
   socket.on('hall:acceptCertificate', ({ code } = {}, ack) => {
     ack = ok(ack);
+    if (!backstage(ack)) return;
     if (!canManageHall()) return ack({ ok: false, error: 'Your account may not set halls up.' });
     const link = hallLinks.get(guard.str(code).toUpperCase());
     if (!link || !link.acceptCertificate()) return ack({ ok: false, error: 'No changed certificate to accept.' });
@@ -1825,11 +1888,15 @@ io.on('connection', (socket) => {
     const prev = target.role;
     const seats = seatsOf(r, target.uid);
     const from = Array.from(new Set(seats.map(([, seat]) => seat.role))).filter((x) => x !== role);   // the roles this changes
+    // Each page's seat moves in this tick, with what it allows, without waiting for the page to reload: an upload token
+    // of a page whose new seat shares no file ends now (its page's join after the reload takes a new one where it may).
     for (const [sid, seat] of seats) {
       seat.role = role;
       const s = io.sockets.sockets.get(sid);
-      if (s) s.emit('roleChanged', { role });
+      if (s) { s.data.seat = role; s.emit('roleChanged', { role }); }
     }
+    const moved = new Set(seats.map(([sid]) => sid));
+    for (const t of uploadTokens.values()) if (moved.has(t.sid) && !t.may()) t.revoked = true;
     emitUsers(r);
     syncSeats(r);
     systemMessage(r, `The admin moved ${target.name} from ${SEAT[prev]} to ${SEAT[role]}.`);

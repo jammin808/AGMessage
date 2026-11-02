@@ -44,7 +44,7 @@ widen one, or reset a richer one's password (the page offers only what it holds,
 person's other halls are a count — and shows a richer person as "Locked"); nobody changes their own role, rights or
 halls, nor turns themselves off or removes themselves (on one's own row the page offers the name, a new one-time
 password and Sign out everywhere); the last admin who can sign in stays one. A code guest's rights come from where they joined: backstage posts, shares files and sends to Stagewatch; on
-stage posts and shares files; an observer reads; a role the join page does not offer is refused ("Choose On stage,
+stage posts; an observer reads; a role the join page does not offer is refused ("Choose On stage,
 Backstage or Observer."), never seated as another. A browser signed in to an account is that account in every hall, a
 one-time password not yet changed included: its code join is refused ("You are signed in as Ana: open the room from your
 halls, or sign out to join with a code."), so an account never takes a guest's seat, and the rights that come with it,
@@ -68,6 +68,29 @@ their pages is open and for the few seconds before "left" (Wi-Fi drops, the page
 role), under the same name and role; after the admin logs them out it is gone. The seat also holds across the watchdog's
 restart, which drops every page at once: a locked hall's seats are saved with the hall, and a page back within the first
 30 seconds after the restart takes its seat again; a seat not taken up by then is gone.
+
+**On stage.** A seat On stage reads and writes messages, and nothing else: it sends text, replies and 🔥 Priority, asks
+for help, reacts and answers the backstage team's questions (in words too, up to 200 characters). It is given no upload
+token and shares no file ("On stage seats send messages, not files."), asks no question ("Questions for the Board come
+from the backstage team."), and sends nothing into another room, text included ("Messages from On stage stay in this
+room."): what it writes is in its room's feed, which everyone in that room reads, and the forward picker offers it no
+room, whatever halls the person is in and whatever link the admin gave them. Screens, a hall's set-up, the show network
+and drafts are not driven from that page ("Do that from a backstage page."; "Drafting is for the backstage team."). The
+server refuses each by the seat (`rbac.SEAT_LIMITS`), whatever the page sends. The limit is the page's, not the
+person's: it is read first, before any right, so the admin who joins a hall On stage from the token is held to it there,
+while its admin verbs answer as from any of its pages and its other pages are not limited; a guest seated On stage in one
+hall and backstage in another keeps backstage's rights on that page. When the admin moves a guest's seat, the page is
+held to its new seat at once: an upload token it holds ends with the move, is refused at its next use in the new seat's
+words ("On stage seats send messages, not files.", "Observers can read but not post.") and is gone, and the page's join
+after its reload takes a new one where the seat shares files. Accounts are seated by their rights
+(backstage, or an observer without `hall.post`), so the limit reaches an account when accounts are given On stage seats.
+
+Forwarding keeps two rules of the room a message comes from: a file moves only from a seat that may share files there
+("Files are moved by the backstage team."), and a file or a question goes only into a room where the forwarder sits
+backstage, never where they sit On stage. The forward picker offers no room that would refuse the message, and when a
+rule of the room it comes from leaves none, it says that rule in the same words. A guest seated both On stage and
+backstage in one room forwards into it as backstage, whichever page joined first; with no seat there, the admin's link
+posts and shares files (`rbac.LINKED_CAPS`).
 
 **Who is told a hall's code.** A code lets anyone in as a guest (backstage in an unlocked hall, an observer in a locked
 one), so it goes only to those who may open that hall: the halls board, the show network's list and the Accounts page
