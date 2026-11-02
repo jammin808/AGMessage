@@ -53,11 +53,15 @@ beside its own; the refusal spends nothing of the code lockout. The admin's supp
 
 **Inside a hall.** Reading is `hall.view`; everything that changes what the others see — a message, a reply, a help
 request, an answer to an action prompt, a pin, a reaction — is `hall.post`, so an observer or a Viewer reads, sees a
-prompt's options and its tally, and is offered nothing to press. Forwarding a message posts it in the other hall, so the
+prompt's options and its tally, and is offered nothing to press. What a page offers on a message (its row's acts, its ⋯,
+its right-click and Shift+F10) is drawn from one catalogue of acts (`app/public/catalog.js`), each shown by rights that
+match a refusal the server words: hiding an act is never the check, and `test/menus.test.js` sends every act to each seat
+it is not offered, and each is refused. Forwarding a message posts it in the other hall, so the
 rights there decide: an account's rights in that hall (and `hall.files` for a file), a code guest's own seat there (a
 locked hall's observer seat stays an observer's), or, where the guest has no seat, the admin's link. The forward carries
-the role and the account mark a post there would carry, and the picker lists only the halls that would take that
-message (for a file, those where they may share files too). A help request is not forwarded: it is tracked and
+the role and the account mark a post there would carry, and Send to ▸ lists only the halls that would take that
+message (for a file, those where they may share files too); it is offered only where there is one (the join's
+`forwardable`, asked again when the admin's link changes). A help request is not forwarded: it is tracked and
 answered in its own hall. An account's role in a hall follows its rights, so
 the admin page's room list changes a code guest's role and refuses an account's (that is the Accounts page's); its link
 lets a code guest forward into a hall, and is refused for an account that may not post there. An account with a hall
@@ -73,8 +77,8 @@ restart, which drops every page at once: a locked hall's seats are saved with th
 for help, reacts and answers the backstage team's questions (in words too, up to 200 characters). It is given no upload
 token and shares no file ("On stage seats send messages, not files."), asks no question ("Questions for the Board come
 from the backstage team."), and sends nothing into another room, text included ("Messages from On stage stay in this
-room."): what it writes is in its room's feed, which everyone in that room reads, and the forward picker offers it no
-room, whatever halls the person is in and whatever link the admin gave them. Screens, a hall's set-up, the show network
+room."): what it writes is in its room's feed, which everyone in that room reads, and its page offers no Send to ▸
+(the join's `forwardable` is false On stage), whatever halls the person is in and whatever link the admin gave them. Screens, a hall's set-up, the show network
 and drafts are not driven from that page ("Do that from a backstage page."; "Drafting is for the backstage team."). Help
 requests are answered by the backstage team: an On stage page marks its own request resolved and nothing else, so On my
 way or Resolved on someone else's, and On my way on its own, are refused ("Help requests are answered by the backstage
@@ -93,8 +97,8 @@ Board member of a hall will answer none of that hall's requests from any page, i
 
 Forwarding keeps two rules of the room a message comes from: a file moves only from a seat that may share files there
 ("Files are moved by the backstage team."), and a file or a question goes only into a room where the forwarder sits
-backstage, never where they sit On stage. The forward picker offers no room that would refuse the message, and when a
-rule of the room it comes from leaves none, it says that rule in the same words. A guest seated both On stage and
+backstage, never where they sit On stage. Send to ▸ lists no room that would refuse the message, and when a rule of the
+room it comes from leaves none, it says that rule in the same words. A guest seated both On stage and
 backstage in one room forwards into it as backstage, whichever page joined first; with no seat there, the admin's link
 posts and shares files (`rbac.LINKED_CAPS`).
 

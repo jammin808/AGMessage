@@ -1096,6 +1096,9 @@ io.on('connection', (socket) => {
       canPropose: !!(linkFor(code).desk && linkFor(code).key && !linkFor(code).deskRefusal) && allowed('stage.send'),
       account: acct ? { username: acct.username, name: acct.name, role: acct.role, roleLabel: rbac.ROLES[acct.role].label } : null,
       seen: seenFor(r),
+      // Whether a message here could be sent to another hall (the forward picker would list one): a fact the page's
+      // ↗ Send to reads, false On stage, where nothing leaves the room. The support view is unseated: it has none.
+      forwardable: !isAdminView && forwardTargets(null).rooms.length > 0,
     });
 
     if (!isAdminView) {
@@ -1249,27 +1252,35 @@ io.on('connection', (socket) => {
     const caps = seat ? GUEST_CAPS[seat.role] || [] : linked ? rbac.LINKED_CAPS : [];
     return { role: seat ? seat.role : me.role, may: (cap) => caps.includes(cap) };
   };
-  // The forward picker: the other halls the forward of this message (`messageId`; none: a text) would be taken in — a
-  // file needs hall.files there too, as forward asks, and moves only from a seat that may share files here; a question
-  // never goes where this person sits On stage. On stage, nothing is forwarded, so no hall is offered. A list emptied by
-  // a rule of the room the message comes from says which (`why`, the forward's own words), so the page names the rule
-  // instead of asking for a hall the person already has open.
-  socket.on('myRooms', (q, ack) => {
-    if (typeof q === 'function') [ack, q] = [q, {}];
-    if (!me) return ok(ack)({ ok: false, error: 'Not joined' });
-    if (onStage()) return ok(ack)({ ok: true, rooms: [] });
-    const src = q && typeof q === 'object' ? room.byId.get(guard.str(q.messageId)) : null;
-    if (src && src.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: true, rooms: [], why: FILES_BACKSTAGE });
+  /**
+   * The other halls the forward of `src` (a message of this room; null: a text) would be taken in, by the forward's own
+   * rules: a file needs hall.files there too and moves only from a seat that may share files here; a question never goes
+   * where this person sits On stage; On stage, nothing leaves this room. `why`: the rule of this room that emptied the
+   * list, in the forward's own words.
+   */
+  const forwardTargets = (src) => {
+    if (onStage()) return { rooms: [] };
+    if (src && src.type === 'file' && !allowed('hall.files')) return { rooms: [], why: FILES_BACKSTAGE };
     const needs = src && src.type === 'file' ? ['hall.post', 'hall.files'] : ['hall.post'];
     const linked = me.linkedRooms instanceof Set ? Array.from(me.linkedRooms) : [];
     let askedOnStage = false;
-    const others = Array.from(new Set([...(userRooms.get(me.uid) || []), ...linked])).filter((c) => {
+    const rooms = Array.from(new Set([...(userRooms.get(me.uid) || []), ...linked])).filter((c) => {
       if (c === room.code || !store.has(c)) return false;
       const there = rightsIn(store.get(c));
       if (src && src.type === 'action' && there.role === 'board') { askedOnStage = true; return false; }
       return needs.every((cap) => there.may(cap));
     });
-    ok(ack)({ ok: true, rooms: others.map((c) => ({ code: c, name: store.get(c).name || '' })), ...(!others.length && askedOnStage ? { why: ASKS_BACKSTAGE } : {}) });
+    return !rooms.length && askedOnStage ? { rooms, why: ASKS_BACKSTAGE } : { rooms };
+  };
+  // The page's ↗ Send to ▸: the halls the forward of this message (`messageId`; none: a text) would be taken in. A list
+  // emptied by a rule of this room says which (`why`), so the page names the rule instead of asking for a hall the person
+  // already has open.
+  socket.on('myRooms', (q, ack) => {
+    if (typeof q === 'function') [ack, q] = [q, {}];
+    if (!me) return ok(ack)({ ok: false, error: 'Not joined' });
+    const src = q && typeof q === 'object' ? room.byId.get(guard.str(q.messageId)) : null;
+    const t = forwardTargets(src);
+    ok(ack)({ ok: true, rooms: t.rooms.map((c) => ({ code: c, name: store.get(c).name || '' })), ...(t.why ? { why: t.why } : {}) });
   });
 
   socket.on('forward', (args, ack) => {

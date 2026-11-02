@@ -229,6 +229,23 @@ If the laptop is lost, the exports you kept are what is left to check.
   laptop's clock), nor anything about someone who could change AGMessage on
   the laptop or holds its machine.key.
 
+Menus and keys in a hall
+------------------------
+A message keeps two buttons on its row: Reply, and the one you use most
+(Ask the operator, Send now or Show on screens). Everything else you may
+do with it is in its ⋯ button, and right-click or Shift+F10 (or the menu
+key) opens the same list. Delete, Ask the operator and Show on screens
+moved there in 0.6.0. A file in the On stage panel and each screen in
+Screens have one too. Something you may do but not now is greyed, with
+the reason under it ("Not connected — AGMessage is reconnecting.").
+On a message with the focus (click it first):
+  R reply, E react, F send to another hall, P pin (the note at the bottom
+  offers Undo for 10 seconds), D download a file, Enter look at a file,
+  Delete or Backspace delete your own (it asks first).
+Shift+right-click opens the browser's own menu (Copy, spelling). Nothing
+on the hall page opens a browser pop-up: what cannot be undone asks in
+place, beside what it acts on, and Escape answers no.
+
 Screens (projector PC, lectern monitor, foyer TV)
 -------------------------------------------------
 In a hall, Screens -> Add screen. The screen's link is copied: open it in
@@ -236,9 +253,11 @@ the browser on that screen (double-click for full screen) and leave it.
 From the hall you can then show on it: the holding image, a message, an
 image or PDF page shared in the hall, the hall's countdown with a message
 under it (the speaker's comfort monitor), the clock, or black. The console
-says "on screen" only when the screen confirms it. Anyone with a screen's
-link can see that screen: give it only to that machine. "New link" stops
-the old one at once.
+says "on screen" only when the screen confirms it. Each screen's row keeps
+Identify; its ⋯ (or a right-click on it) has Tick only this one, Copy
+link, Open, Rename..., New link... and Remove.... Anyone with a screen's
+link can see that screen: give it only to that machine. "New link..."
+stops the old one at once.
 
 Stagewatch (the countdown) for each hall
 ----------------------------------------

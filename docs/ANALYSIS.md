@@ -184,8 +184,9 @@ the others still go (`test/units.test.js` holds `sendEach`).
 The guard reads the stylesheet too (`public/styles.css`, the one every page with people loads). Its colours, sizes,
 spaces, targets and layers are tokens, named once in `:root` and every colour once more under `html[data-theme="dark"]`;
 the guard holds each of those to one block, so a second `:root` is a failure, and counts the hex colours written outside
-the two: 292 when the token layer landed (327 before it), a count that may only go down, as the coverage gate may only
-go up. A unit that takes colours out lowers the cap with them; a new colour is a token. Beside it, no opacity between 0
+the two: 292 when the token layer landed (327 before it), 281 once the catalogue's menus replaced the five icon-button
+variants, the forward and reaction pickers, the observer's hiding rules and the panel's own Pin button, a count that may
+only go down, as the coverage gate may only go up. A unit that takes colours out lowers the cap with them; a new colour is a token. Beside it, no opacity between 0
 and 1 is written anywhere in the stylesheet, as `opacity:` or a filter's `opacity()`, a number or a percentage, and no
 opacity is written as something the guard cannot read as a number (a `var()`, a `calc()`), so another spelling of a fade
 never passes: words and icons are muted with `--c-ink-muted` (4.5:1 or more for words, 3:1 for icons, in both themes),
@@ -194,7 +195,7 @@ their rules: a colour in a token block, in a comment or in a selector (`#feed`) 
 is, a second `:root` is seen, and an opacity of .5 in a keyframe, .35 on an icon, 60 %, `var(--fade)`, `calc(.5)` and a
 filter's `opacity(.4)` are found while 0, 1, 100 %, `opacity(1)`, a transition of opacity and a custom property named
 for it are not. The smoke holds what the stylesheet draws, on the hall page at 390 × 844 with a touch screen for each
-seat, in both themes: computed contrast for the icon buttons (and their size, 24 px or more) and the presence lines, the
+seat, in both themes: computed contrast for a message's acts and its ⋯ (and their size, 44 px under a finger) and the presence lines, the
 On stage tag's light colours in light mode, Help at rest neutral and outlined (no red in its fill, words or edge, its
 words at 4.5:1 and its edge at 3:1), 🔥 Priority on the fault red only while pressed, and no fade on any of them.
 
@@ -220,7 +221,7 @@ through the config itself, so a change to the config cannot drop a rule unseen. 
 `theme-init.js` and `common.js` as a page runs them (the floor's mark, words and held forms; `AGM.awake`'s causes;
 `AGM.idle`'s timer and slice), and holds every page with people to load `theme-init.js` first, a screen's page to load
 none, and every script of theirs to stop below the floor before it first asks the server anything or opens a socket,
-but the four that only define at load, each named with its reason. The smoke takes the features away in Chromium: at the floor
+but the six that only define at load (`common.js`, `outbox.js`, `reconnect.js`, `audit-export.js`, `catalog.js` and `menus.js`), each named with its reason. The smoke takes the features away in Chromium: at the floor
 (no `showModal()`, popover API, Wake Lock, `requestIdleCallback` or `requestSubmit()`), with no `<dialog>` at all, and
 below it (no `WeakRef`, every fetch, request, WebSocket and beacon counted: none).
 
@@ -249,15 +250,15 @@ each be a new dev dependency (audit, signatures, SBOM) for rules a node:test rea
 | (a) the pure set | `lib/board.js`, `context.js`, `deskresults.js`, `latest.js`, `ops.js`, `rbac.js` and `stagelines.js`, the pure core, require only each other | a require of anything else, an I/O built-in named (`fs`, `net`, `http`, `https`, `dgram`, `tls`, `os`, `dns`, `child_process`, `ws`), `process.` read, an `import()`, a file the set names that is not there |
 | (b) no cycle | among `server.js`, `supervise.js`, `lib/` and `verify/`, no file requires another that leads back to it; no file, a test included, requires `server.js`, by its name or as app/ | each cycle, named once from its first file |
 | (c) one root | only `server.js` requires `lib/http-accounts.js` and the handler modules in `lib/handlers/` (a test may, to test one) | any other shipped file that does; a relative require of a file that is not there |
-| (f) the wire's words, closed both ways | every event a page sends (`socket.emit('x'`, the outbox's `AGM.outbox.hold`, `now` and `self('x'`, and `verb: 'x'` in `public/catalog.js`) is a verb a handler file registers; every verb is sent by some page; every event a handler file sends is heard by some page (`socket.on` or `once`); every event a page hears is one a handler file sends, or Socket.IO's own (`connect`, `connect_error`, `disconnect`) | each word left open, by file; an event named by an expression, on either side, unless a row names what it takes (on the server, `apply()`'s `opEvent`, whose names are the op table's `EVENTS` in `lib/ops.js`, is the one; on the pages, the hall page's listeners made from its op table, `public/app.js: socket.on(event`, named by the table's events, is the one, and the outbox's own send, `public/outbox.js: socket.emit(verb`, whose callers name its verbs where they call it, is the other); a verb registered in a form the fuzz does not read: `socket.on(` with anything but a single-quoted name, or `socket.once`, `addListener`, `prependListener` or `prependOnceListener` for any event but Socket.IO's own (`disconnect`, `disconnecting`); an allow-list row whose reason has gone |
+| (f) the wire's words, closed both ways | every event a page sends (`socket.emit('x'`, the outbox's `AGM.outbox.hold`, `now` and `self('x'`, and `verb: 'x'` in `public/catalog.js`, where `local` and an HTTP route are no socket's send) is a verb a handler file registers; every verb is sent by some page; every event a handler file sends is heard by some page (`socket.on` or `once`); every event a page hears is one a handler file sends, or Socket.IO's own (`connect`, `connect_error`, `disconnect`) | each word left open, by file; an event named by an expression, on either side, unless a row names what it takes (on the server, `apply()`'s `opEvent`, whose names are the op table's `EVENTS` in `lib/ops.js`, is the one; on the pages, the hall page's listeners made from its op table, `public/app.js: socket.on(event`, named by the table's events, is the one, and the outbox's own send, `public/outbox.js: socket.emit(verb`, whose callers name its verbs where they call it, is the other); a verb registered in a form the fuzz does not read: `socket.on(` with anything but a single-quoted name, or `socket.once`, `addListener`, `prependListener` or `prependOnceListener` for any event but Socket.IO's own (`disconnect`, `disconnecting`); an allow-list row whose reason has gone |
 | (g) one file list | `handlerFiles()` in `test/helpers.js`: `server.js`, then each module in `lib/handlers/`, sorted. The fuzz reads its events from it with its own regex, and so does (f); the guard's timer count, (o), reads its files. No other shipped file (`supervise.js`, `lib/` in every folder below it, a folder below `lib/handlers/` included, `verify/`) listens on a socket, so no verb is registered where neither reads it | a file of another kind or a folder below read as a handler module (a planted folder); a listener on a socket in any other shipped file, unless a row names its events and why: `lib/tls.js`, the shared port's own TCP socket (its first byte and a reset by its peer), is the one, and fails once its listeners change or go |
 | (k) one op table | the hall page's `UPD_EVENTS` (`public/app.js`, field → [event, draw], read from its source) is `lib/ops.js`'s, field by field and event by event, and the page names each of its events once, there; the op of every `apply(` call in the handler files (not a method's `.apply(`, and `apply()` with nothing in it passes none) and every op whose kind is written `upd` wherever it is built (its `o` bare or quoted, its kind in any quotes) is an object written out, of a kind the table holds, and an `upd`'s `f` is written out with each field in the table; every field of the table is one some `upd` sends; `apply()` is the one `server.js` makes with `ops.applier(`, given the store's commit and a refusal that only logs. The ops are read as code (a bracket, a comma or a word inside a string, a template or a comment is not the code's; a call written out in a comment is read as one) | a field in one table and not the other, or under two events; a page with no table, a row not `field: ['event', draw]`, or an event of the table named again beside it; an op given to `apply()` that is not written out (a variable, no op), whose kind is not (`o` from a variable, or none), that holds a spread or a computed key, or of a kind the table does not hold (by file and line); an `upd` of a field outside the table, of no field, or whose fields cannot be read (an `f` not written out as an object, a spread or a computed key in it, an op not an object literal); a field of the table no `upd` sends; another `apply` declared or assigned in a handler file, or a refusal that does more than log |
 
-The allow-list of (f) has one row of events no page hears: `linkedRoomsChanged`, sent to a guest's pages when the admin
-lets them forward into another hall or takes it back, which the hall page does not hear yet (it asks which halls it may
-forward into as its forward picker opens). The row fails the fence once a page hears it, or once the server stops
-sending it. On the tree before 0.6.0 the fence failed on two words, both `typing`'s: a verb no page sent, and an event
-no page heard. `typing` was removed (the owner's answer 26 wants no typing indicator), which lowered the fuzz's count of
+The allow-list of (f), of events no page hears, is empty: its one row, `linkedRoomsChanged`, sent to a guest's pages when
+the admin lets them forward into another hall or takes it back, went once the hall page heard it, to keep its
+`forwardable` fact live (§3.6). A row fails the fence once a page hears it, or once the server stops sending it, and a
+planted tree holds both. On the tree before 0.6.0 the fence failed on two words, both `typing`'s: a verb no page sent,
+and an event no page heard. `typing` was removed (the owner's answer 26 wants no typing indicator), which lowered the fuzz's count of
 events by one, to 55.
 
 (k) holds at build time what `apply()` refuses at run time: a change the table cannot send (a field outside it, no field,
@@ -282,6 +283,54 @@ write lanes `saveLanes()` names, the lanes a stop or a crash flushes. The test h
 `saves.stores` (a lane under two names, or a name given twice, makes them differ) and `built` to `named`: every lane
 named is one this process made, so as many named as made is every lane made. A store whose lane is not in `saveLanes()`
 fails the build, beside another named twice or not.
+
+### 3.6 The action catalogue (`test/catalog.test.js`, `test/menus.test.js`; the plan's fence (p))
+
+Every act the hall page offers on a message, a file in its panel and a screen of its Screens dialog is an entry of
+`public/catalog.js`, data and pure functions of the page's facts (read from the server's answers) and the object, with no
+DOM and no socket: its row's acts, its ⋯, its right-click, Shift+F10 and its single keys are drawn from the same entries,
+so they cannot drift, and the page binds only what each act does. `test/catalog.test.js` loads it as a page does (a vm
+with nothing but the script) and holds: ids shaped `kind.verb`, unique; groups known and in their fixed order (respond,
+send, keep, manage, danger), the danger group last, at most two acts in it, each asking first or with an Undo; a key a
+single letter or digit that needs no Shift, or Enter or Delete, one per act in a kind (the entries of a fold share one);
+no icon a status mark, ↩, ↗ and ⤴ kept to Reply, Send to and Send back, and Show again, and an icon shared only by
+entries of one act (Look, Download, Pin, Show on screens in two kinds; 🗑 for Delete and Remove); every verb one a handler
+file registers (read as the fuzz reads them), a route the server mounts,
+or `local`, with its outbox mode (what a person wrote or answered is held, and Got it, the one reaction held; `local`
+sends nothing); "…" ending exactly the
+labels of acts that ask first or open a dialog; "screen" only in an act on a `/d/` screen or the speaker's screen; and the
+verbs of the kinds landed so far all present (a list each later unit grows). Then, for 16 seats (backstage with every
+fact, alone in its hall, without a desk, with the link down, offline; On stage in the full view and in the simple view,
+with messages waiting for its answer; an observer, one who may post elsewhere, a Viewer, and a Viewer granted
+`hall.post`; Staff; Tech with and without screens; the admin; the support view) and 10 objects, the shown sets, which
+must show every act to some seat (so none passes by its absence); none of what an On stage seat is kept from, in either
+view; the simple view's sets, which are its buttons, since it has no menu (Got it and Reply on the newest plain message
+waiting and on each 🔥 one, "Got all N" for N waiting, a question's answers, a file's Look); the reasons of what is
+shown disabled (offline, the link, no screens, the support view's); the inline bar (at most two, the lowest ranks, in
+the menu under the same label); the folds (the speaker's screen's line box, which edits the line where Stagewatch keeps
+no desk, beside Send now); the menu's caps (12 items, 2 dangers on the richest seat of each kind); and the single keys.
+The ids later units' matrices name are these: `msg.speaker` is the speaker's screen's line box, present wherever the
+Speaker's screen ▸ door is; a help request's answers are `msg.helpRespond` (On my way) and `msg.helpResolve` (Resolved).
+`test/menus.test.js` holds the other half (the plan's R3): on a real server with the hall's Stagewatch linked (so the
+speaker's screen is hidden by a seat's rights, never by a link that is not there), seven seats read their facts from
+their own join and `display:list` answers through the catalogue's `facts()`, and every act whose rights hide it from a
+seat (and whose fit holds, so no view is ever asked of the server) is sent as that seat with its smallest payload: each
+is refused with words, not for the rate, the On stage seat's with the words its table names, every verb of that table
+sent as it, every verb is refused to some seat, and the hall, its screens and the other hall are as they were. A new
+verb an act sends has no payload until its refusal case is written, which fails the test. The source guard
+(§3.4) holds `addEventListener('contextmenu'` to `public/menus.js` (its door and a menu's own panel, which keeps the
+browser's menu off it) and `.cloneNode(` in `public/app.js` to the message template's one site, so a message is never
+copied with its listeners lost (the pinned strip draws each pinned message afresh); `catalog.js` and `menus.js` are page
+scripts every fence reads, and `test/pagefloor.test.js` names them as scripts that only define at load. The browser
+smoke holds the doors to each other: right-click, ⋯ and Shift+F10 open the catalogue's set for each object, the ⋯
+clicked again (a mouse's press and release) closes its menu, the key's menu has the focus on its first enabled item and
+Escape gives it back, the row's acts are in the menu under the same names, an open menu keeps its order as its object
+changes, a disabled act says why and sends nothing, and a tab fails the run on any native `alert`, `confirm` or
+`prompt` (`Page.javascriptDialogOpening`), which it dismisses so the run ends. It walks each act's path: F's Send to ▸
+("Looking…", then the hall, then the forward there), E's React ▸ (a check changed elsewhere redrawn in place, then
+Enter), D and Enter on a file, Answer in words… as a field, Delete's ask (Escape back to the message, yes on to the
+next), Copy text where the page has no clipboard API (the focus back on the ⋯), New link…, an ask about a screen
+removed elsewhere, and a pinned copy that keeps the focus while another page's reaction redraws it.
 
 ## 4. Considered and not adopted
 

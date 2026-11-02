@@ -265,7 +265,6 @@ body[data-role="research"] .doc-panel {
 .doc-caption { margin: 0; padding: .55rem .85rem; background: #fff8e6; border-top: 1px solid #f3dfb8; color: #6a4a00; font-style: italic; }
 .doc-actions { display: flex; gap: .4rem; padding: .55rem .65rem; border-top: 1px solid var(--border); background: #fff; flex: 0 0 auto; }
 .doc-actions .btn { flex: 1; }
-#pinDocBtn[data-pinned="1"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .doc-pinned { border-top: 1px solid var(--border); padding: .55rem .8rem .8rem; background: #fffaf0; max-height: 28vh; overflow: auto; flex: 0 0 auto; }
 .doc-pinned h4 { margin: .25rem 0 .35rem; font-size: .8rem; color: #7a4d00; letter-spacing: .06em; text-transform: uppercase; }
@@ -282,12 +281,6 @@ body[data-role="research"] .doc-panel {
 .pinned-item:hover { background: #fff7e6; border-color: var(--accent); }
 .pinned-item .ico { flex-shrink: 0; }
 .pinned-item .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.unpin {
-  background: #fff; border: 1px solid #f3dfb8; cursor: pointer;
-  padding: 0 .55rem; border-radius: 6px; color: var(--muted);
-  font-size: 1rem;
-}
-.unpin:hover { color: var(--danger); border-color: var(--danger); }
 
 /* Director: clickable file in feed re-frames it on the stage panel */
 body[data-role="director"] .file.clickable, body[data-role="board"] .file.clickable,
@@ -380,18 +373,26 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 .role-tag[data-role="research"] { background: #e0f2fe; color: var(--c-seat-backstage); }
 .role-tag[data-role="observer"] { background: #f1f5f9; color: var(--c-seat-observer); }
 .msg time { margin-left: auto; font-variant-numeric: tabular-nums; }
-/* A message's icon buttons: muted ink, 3:1 or more on every message in both themes, never faded with opacity, and at
-   least --target-min. Pinned, the pin says so with a ring, not by being brighter. */
-.msg .pin-btn, .msg .del-btn, .msg .fwd-btn, .msg .reply-btn, .msg .react-btn, .msg .stage-btn, .msg .propose-btn, .msg .screen-btn {
-  display: inline-flex; align-items: center; justify-content: center;
+/* An object's acts (catalog.js): at most two icon buttons and a ⋯, in muted ink, 3:1 or more on every surface they sit on
+   in both themes, never faded with opacity, each at least --target-min, and --target-touch on a coarse pointer. A
+   disabled act keeps its ink and says why in its title and its menu item; a dashed ring marks it. */
+.msg-acts, .file-acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+.msg-act, .obj-more {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-1);
   min-width: var(--target-min); min-height: var(--target-min); padding: 0 var(--sp-1);
   background: none; border: 0; border-radius: var(--radius-sm); cursor: pointer;
   font-size: 1rem; line-height: 1; color: var(--c-ink-muted);
 }
-.msg .pin-btn:hover, .msg .fwd-btn:hover, .msg .reply-btn:hover, .msg .react-btn:hover, .msg .stage-btn:hover,
-.msg .propose-btn:hover, .msg .screen-btn:hover { color: var(--c-action); background: var(--c-surface); }
-.msg .del-btn:hover { color: var(--c-fault); background: var(--c-surface); }
-.msg.pinned .pin-btn { box-shadow: inset 0 0 0 1.5px var(--c-action); }
+.msg-act:hover, .obj-more:hover { color: var(--c-action); background: var(--c-surface); }
+.msg-act[aria-disabled="true"], .file-acts .btn[aria-disabled="true"] { cursor: default; box-shadow: inset 0 0 0 1px var(--c-border); }
+.obj-more { font-weight: 700; letter-spacing: .05em; }
+.msg-act .act-words { font-size: var(--fs-sm); }
+.pinned-mark { font-size: var(--fs-xs); color: var(--c-ink-muted); }
+.msg:focus { outline: none; }
+.msg:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .msg-act, .obj-more { min-width: var(--target-touch); min-height: var(--target-touch); }
+}
 /* Pinned action prompts are hoisted to the pinned strip — hide the original
    in the feed so it isn't shown twice. The pinned-strip clone lives in
    #pinnedList (outside .feed) so it stays visible. Unpinning flips
@@ -507,9 +508,6 @@ body[data-role="director"] .action-btn, body[data-role="board"] .action-btn {
   padding: .8rem 1.3rem;
 }
 body[data-role="director"] .pinned-strip, body[data-role="board"] .pinned-strip { background: #fff7e6; }
-body[data-role="director"] .msg .pin-btn, body[data-role="board"] .msg .pin-btn {
-  font-size: calc(1.15rem * var(--zoom-msg, 1));
-}
 /* Message headers (name + role tag + time) scale too, in BOTH roles */
 .msg header { font-size: calc(.85rem * var(--zoom-msg, 1)); }
 
@@ -698,7 +696,6 @@ html[data-theme="dark"] .doc-pinned { background: #1d1810; border-color: #3a2e15
 html[data-theme="dark"] .doc-pinned h4 { color: #f0a14a; }
 html[data-theme="dark"] .pinned-item { background: #2a2415; border-color: #3a2e15; color: var(--ink); }
 html[data-theme="dark"] .pinned-item:hover { background: #3a2e15; border-color: var(--accent); }
-html[data-theme="dark"] .unpin { background: var(--card); border-color: #3a2e15; color: var(--muted); }
 
 /* Inline document renderers — keep doc body white-ish so PDFs/Word read naturally,
    but match the panel chrome to dark surroundings */
@@ -1022,32 +1019,6 @@ html[data-theme="dark"] .doc-expand-rail:hover { background: linear-gradient(180
 html[data-theme="dark"] .doc-collapse-btn { color: var(--muted); border-color: var(--border); }
 html[data-theme="dark"] .doc-collapse-btn:hover { color: var(--ink); border-color: var(--brand); }
 
-/* ====================================================================
-   FORWARD-TO-ANOTHER-ROOM
-   ==================================================================== */
-
-.fwd-menu {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: var(--shadow);
-  z-index: 200;
-  min-width: 180px;
-  padding: .25rem;
-}
-.fwd-menu-title {
-  font-size: .72rem; letter-spacing: .06em; text-transform: uppercase;
-  color: var(--muted); padding: .35rem .55rem;
-}
-.fwd-menu-item {
-  display: block; width: 100%;
-  background: none; border: 0; cursor: pointer;
-  padding: .55rem .65rem; text-align: left;
-  font: inherit; letter-spacing: 2px; font-weight: 700;
-  color: var(--ink); border-radius: 6px;
-}
-.fwd-menu-item:hover { background: #eef2fb; color: var(--brand-dark); }
-
 .fwd-meta {
   font-size: .82rem;
   color: var(--muted);
@@ -1071,7 +1042,6 @@ html[data-theme="dark"] .doc-collapse-btn:hover { color: var(--ink); border-colo
 }
 .agm-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-html[data-theme="dark"] .fwd-menu-item:hover { background: #243054; color: #b8c8ff; }
 html[data-theme="dark"] .fwd-meta { background: #1f2942; color: #b8c8ff; }
 html[data-theme="dark"] .agm-toast { background: #fff; color: #15202b; }
 
@@ -1080,14 +1050,8 @@ html[data-theme="dark"] .agm-toast { background: #fff; color: #15202b; }
    .doc-actions { display: flex } rule beat the UA [hidden] rule. */
 [hidden] { display: none !important; }
 
-/* Read only (an observer, a Viewer account): the server refuses pins, reactions, replies and answers, so the page offers
-   none of them; an action prompt's options and its tally still show, as words, not buttons to press. */
-body[data-role="observer"] .msg .pin-btn,
-body[data-role="observer"] .msg .react-btn,
-body[data-role="observer"] .msg .reply-btn,
-body[data-role="observer"] .unpin,
-body[data-role="observer"] #pinDocBtn { display: none !important; }
-/* Not to be pressed: a dashed edge says so, and its words keep their full ink */
+/* Not to be pressed (a seat that may not answer or react): a dashed edge says so, and its words keep their full ink.
+   Which acts a seat is offered is the catalogue's (catalog.js), never a rule here. */
 .action-btn:disabled, .rx-pill:disabled { cursor: default; border-style: dashed; }
 .action-btn:disabled:hover { background: #fff; color: #7a4d00; }
 .rx-pill:disabled:hover { border-color: var(--border); }
@@ -1169,6 +1133,7 @@ body[data-role="observer"] #roomChip { display: none !important; }
   padding: .25rem .55rem;
   margin: 0 0 .35rem;
   border-radius: 0 6px 6px 0;
+  cursor: pointer;   /* a click goes to the message it answers */
 }
 html[data-theme="dark"] .reply-quote { background: #1f2942; color: #b8c8ff; }
 
@@ -1213,20 +1178,6 @@ html[data-theme="dark"] .mention { background: #1f2942; color: #b8c8ff; }
 .rx-pill:hover { border-color: var(--brand); }
 html[data-theme="dark"] .rx-pill { background: #1f2840; border-color: var(--border); color: var(--ink); }
 html[data-theme="dark"] .rx-pill.mine { background: #243054; border-color: #3554a0; color: #b8c8ff; }
-
-/* Reaction picker popover */
-.rx-picker {
-  background: var(--card); border: 1px solid var(--border);
-  border-radius: 10px; box-shadow: var(--shadow);
-  z-index: 200; padding: .25rem;
-  display: flex; gap: .15rem;
-}
-.rx-picker button {
-  background: none; border: 0; cursor: pointer;
-  font-size: 1.3rem; padding: .3rem .45rem; border-radius: 6px;
-}
-.rx-picker button:hover { background: #eef2fb; }
-html[data-theme="dark"] .rx-picker button:hover { background: #243054; }
 
 /* Lazy-pdf placeholder while a page hasn't been rendered yet */
 .pdf-page-pending {
@@ -1355,40 +1306,6 @@ html[data-theme="dark"] .doc-display::-webkit-scrollbar-thumb:active {
   background-clip: padding-box;
   border: 5px solid transparent;
 }
-
-/* Forward menu — two-line name + code layout
-   ------------------------------------------
-   When the menu items show a room NAME, render it as the prominent
-   line with the 6-char CODE small underneath. Rooms without a name
-   still show their code, but at the prominent size. The original
-   .fwd-menu-item rule above had letter-spacing: 2px and font-weight: 700
-   that was tuned for code-only display — these rules override that for
-   the new structured contents, scoped via inner classes so they don't
-   apply to legacy code-only items. */
-.fwd-menu-item .fwd-room-name {
-  display: block;
-  font-size: calc(.95rem * var(--zoom-msg, 1));
-  font-weight: 600;
-  letter-spacing: normal;
-  color: var(--ink);
-  line-height: 1.2;
-}
-.fwd-menu-item .fwd-room-code {
-  display: block;
-  font-size: calc(.72rem * var(--zoom-msg, 1));
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: var(--muted);
-  line-height: 1.2;
-  margin-top: .1rem;
-}
-.fwd-menu-item .fwd-room-code.primary {
-  font-size: calc(.95rem * var(--zoom-msg, 1));
-  color: var(--ink);
-  margin-top: 0;
-}
-html[data-theme="dark"] .fwd-menu-item .fwd-room-name { color: #e6ecf5; }
-html[data-theme="dark"] .fwd-menu-item:hover .fwd-room-name { color: #b8c8ff; }
 
 /* Admin link picker — same visual language as the user's forward menu */
 .link-picker {
@@ -1867,3 +1784,63 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 @media (max-width: 640px) { .node-cmd { grid-template-columns: 1fr 1fr; } .node-cmd select, .node-cmd input { grid-column: 1 / -1; } }
 .node-out[data-ok="1"] { color: var(--ok); }
 .node-out[data-ok="0"] { color: var(--danger); }
+
+/* ---------- Menus and asks in place (menus.js) ----------
+   A menu is the catalogue's list for an object (catalog.js), opened alike by right-click, its ⋯ and Shift+F10. Where the
+   popover API is, it is a manual popover in the top layer (the inset and margin here replace the popover's own centring),
+   over every panel and dialog; elsewhere it is fixed at the menu's layer. A disabled item keeps its ink and says why on
+   its second line; a danger item carries its shape and word, and red only as a second cue. At 480 px or less with a
+   coarse pointer it is a sheet at the bottom of the screen; with a coarse pointer each row is --target-touch. */
+.agm-menu { position: fixed; top: auto; right: auto; bottom: auto; left: auto; inset: auto; margin: 0; z-index: var(--z-menu);
+  min-width: 12rem; max-width: min(22rem, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto;
+  padding: var(--sp-1); border: 1px solid var(--c-border); border-radius: var(--radius-md);
+  background: var(--c-surface-raised); color: var(--c-ink); box-shadow: var(--shadow); font-size: var(--fs-md); text-align: left; }
+.agm-menu.sheet { top: auto; right: 0; bottom: 0; left: 0; inset: auto 0 0 0; width: 100%; max-width: none; max-height: 70vh;
+  border-radius: var(--radius-md) var(--radius-md) 0 0; padding-bottom: var(--sp-3); }
+.agm-menu-head { padding: var(--sp-1) var(--sp-2) var(--sp-2); font-size: var(--fs-xs); color: var(--c-ink-muted); overflow-wrap: anywhere; }
+.agm-mi { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 2rem; padding: var(--sp-1) var(--sp-2);
+  border: 0; border-radius: var(--radius-sm); background: none; color: var(--c-ink); font: inherit; text-align: left; cursor: pointer; }
+.agm-mi:hover, .agm-mi:focus { background: var(--c-surface); outline: none; }
+.agm-mi:focus-visible { box-shadow: inset 0 0 0 2px var(--c-action); }
+.agm-mi[aria-disabled="true"] { cursor: default; }
+.agm-mi .mi-icon { flex: none; width: 1.5em; text-align: center; }
+.agm-mi .mi-text { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+.agm-mi .mi-why { font-size: var(--fs-xs); color: var(--c-ink-muted); overflow-wrap: anywhere; }
+.agm-mi .mi-key, .agm-mi .mi-more { flex: none; margin-left: var(--sp-3); font-size: var(--fs-xs); color: var(--c-ink-muted); }
+.agm-mi.danger .mi-label { color: var(--c-fault); }
+.agm-mi[aria-checked="true"] .mi-label { font-weight: 700; }
+.agm-mi[aria-checked="true"] .mi-label::after { content: " ✓"; }
+.agm-sep { height: 1px; margin: var(--sp-1) 0; background: var(--c-border); }
+@media (pointer: coarse) { .agm-mi { min-height: var(--target-touch); } }
+
+.agm-ask { position: fixed; top: auto; right: auto; bottom: auto; left: auto; inset: auto; margin: 0; z-index: var(--z-menu);
+  width: min(22rem, calc(100vw - 16px)); padding: var(--sp-3); border: 1px solid var(--c-border); border-radius: var(--radius-md);
+  background: var(--c-surface-raised); color: var(--c-ink); box-shadow: var(--shadow); font-size: var(--fs-md); text-align: left; }
+.agm-ask-title { margin: 0 0 var(--sp-1); font-weight: 700; overflow-wrap: anywhere; }
+.agm-ask-words { margin: 0 0 var(--sp-3); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.agm-ask-field { display: block; margin: 0 0 var(--sp-3); }
+.agm-ask-field > span { display: block; margin-bottom: var(--sp-1); font-size: var(--fs-sm); font-weight: 600; }
+.agm-ask-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); }
+.agm-ask-acts .btn { min-height: var(--target-touch); }
+
+/* The panel's files and the file open in it: the name opens it (Look), then its acts and its ⋯ */
+.file-entry { display: flex; align-items: center; gap: var(--sp-1); }
+.file-entry:focus { outline: none; }
+.file-entry:focus-visible { outline: 2px solid var(--c-action); outline-offset: 1px; }
+.file-entry .file-acts { flex: none; }
+.doc-actions .file-acts { flex: 1 1 auto; gap: var(--sp-2); }
+.doc-actions .msg-act { min-height: 2rem; padding: 0 var(--sp-3); border: 1px solid var(--c-border); background: var(--c-surface-raised); color: var(--c-ink); }
+.screen-acts .msg-act { color: var(--c-ink); }
+
+/* What moved, said once per browser above the feed */
+.moved-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); flex: 0 0 auto; margin: 0; padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--c-border); background: var(--c-surface-raised); color: var(--c-ink); font-size: var(--fs-sm); }
+
+/* A toast's Undo: a button inside it while it shows. A toast that is not showing is nothing to reach or to press: it
+   takes no pointer, so it never stands over what is under it at the foot of the page */
+.toast-undo { min-height: var(--target-min); margin-left: var(--sp-1); padding: 0 var(--sp-1); border: 0; background: none; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.agm-toast:not(.show) { pointer-events: none; }
+.agm-toast:not(.show) .toast-undo { visibility: hidden; }
+
+/* The words a copy without the clipboard API selects, out of sight */
+.copy-source { position: fixed; top: 0; left: -10000px; width: 1px; height: 1px; }

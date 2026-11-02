@@ -55,9 +55,11 @@ the screen is black: share the page as an image and take that instead.
 ## Managing screens
 
 With `display.manage` (project managers, admins): **Add screen** (the new link is copied — open it on that screen),
-**Copy link**, **Open**, **Rename**, **New link**, **Remove**, and the hall's **holding image** (pick one of the images
-shared in the hall, then **Use it**; the pick stays while the list refreshes, until the dialog closes). The halls board
-shows every hall's screens and their state, in the same words as the console.
+**Copy link**, **Open**, **Rename…**, **New link…**, **Remove…**, and the hall's **holding image** (pick one of the
+images shared in the hall, then **Use it**; the pick stays while the list refreshes, until the dialog closes). A screen's
+row keeps **Identify**; the rest, with **Tick only this one**, is in its ⋯, which a right-click on the row and Shift+F10
+open too. Rename… is a field in place; New link… and Remove… ask in place, naming the screen, inside the console, which
+stays open. The halls board shows every hall's screens and their state, in the same words as the console.
 
 ## The link is a capability
 
@@ -70,7 +72,7 @@ shows every hall's screens and their state, in the same words as the console.
   and sends no referrer;
 - AGMessage looks it up by its SHA-256; the token itself is sealed at rest so a manager can copy it again; it is never
   written to a log or the audit log (the screen's short id is);
-- **New link** replaces it at once, and every screen holding the old one is told and stops.
+- **New link…** replaces it at once, and every screen holding the old one is told and stops.
 
 Anyone with a screen's link can see that screen, so give it only to the machine that shows it.
 

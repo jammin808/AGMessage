@@ -42,6 +42,13 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   after a refusal at a busy moment, at the pace the server gives ("Busy — trying again in 3 s."). The admin page's
   health reads the server's true delay and how busy it is, and keeps the peaks of each show day for 14 days, through a
   restart or a shutdown, so one look after a show says how it ran.
+- **Right-click.** Every act on a message, on a file in the panel and on a screen is on its ⋯, its right-click and
+  Shift+F10 (or the menu key) — one list, drawn from one catalogue, so the buttons and the menus never disagree. A
+  message keeps two acts on its row: ↩ Reply and the one the seat uses most (Ask the operator, Send now or Show on
+  screens). What a seat may not do is not offered; what it cannot do now is greyed with the reason. Keys on a message
+  with the focus: R reply, E react, F send to, P pin (with Undo), D download, Enter look, Delete delete. What reaches
+  other people for good asks in place, naming what it acts on: nothing on the hall page opens a browser dialog, which
+  would pause the page and drop its connection. Shift+right-click keeps the browser's own menu.
 - **The Board.** People On stage read, reply, answer the backstage team's questions, send 🔥 Priority and ask for help,
   and mark their own help request sorted; what they write stays in their room, where the backstage team reads it. They
   never share files, ask questions, forward anything into another room or answer other people's help requests: the

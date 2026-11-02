@@ -1154,6 +1154,80 @@ stage guest's On my way on someone else's request, the new test's first step)
   resolved by the Board member, and a backstage page draws both on the Board's request.
 - Rolling back: nothing is stored; 0.5.1 lets On stage seats answer anyone's help request again.
 
+**One action catalogue draws a message's buttons and its right-click, ⋯ and Shift+F10 menus** (the plan's Part 5, unit
+3a; the owner's ask that right-click menus and the buttons be in step; measured on a VM in Chromium, the plan's §16.1: a
+`confirm()` left open 20 s dropped the page's socket, and 30 s told the whole hall its person had left and joined again;
+the tree before it had no context menu, a pinned message whose 🖥, 📝, ⧉ and help buttons did nothing, and native
+dialogs on a message's and a screen's acts)
+- Every act the hall page offers on a message, on a file in its panel and on a screen of its Screens dialog is one entry
+  of one catalogue (`app/public/catalog.js`): its label, icon and key, its group, the server verb it sends and in which
+  of the outbox's modes, the rights that show it (each matched to a refusal the server words) and what it fits. A
+  message's row keeps at most two acts and a ⋯: ↩ Reply, and the seat's main act — 📝 Ask the operator… where the hall's
+  Stagewatch keeps a desk, else 🖥 Send now to the speaker's screen, else ⧉ Show on screens…. Right-click, ⋯ and
+  Shift+F10 (or the menu key) open the same list, in groups — respond, send, keep, then the danger last — with each
+  key beside its act. Speaker's screen ▸ holds Ask the operator… (Edit, then send… where Stagewatch keeps no desk: the
+  same box, to change the line and choose its urgency before it goes) and Send now; React ▸ the eight reactions, yours
+  checked; Answer ▸ a question's answers; Send to ▸ the halls the server says would take the message ("Looking…" until
+  it answers, its words when there is none). Pin, Look, Download, Copy text and Delete… are in the menu. A screen keeps
+  Identify on its row, and Tick only this one, Copy link, Open, Rename…, New link… and Remove… in its ⋯. A file in the
+  panel's pinned list keeps 👁 Look and 📌 Unpin, and the file open in the panel 📌 Pin and Close (it read "✕ Dismiss"),
+  each with its ⋯.
+- An act the seat may never do is absent. One it may do but not now is shown disabled and focusable, its reason on a
+  second line, which choosing it says again, sending nothing: not connected ("Not connected — AGMessage is
+  reconnecting.", for an act on something; a send the outbox holds stays live, "◷ sent when the connection is back"),
+  the hall's Stagewatch not connected (in its words), no screens yet. An observer's and a Viewer's menu holds Copy text,
+  and Send to on words where they may post in another hall: no pin, reaction, answer, Look or Download (a Viewer account
+  granted posting neither). On stage: no Download, Send to, Show on screens or speaker's screen. Download is kept off
+  those pages by the menu alone for now: the server withholds a file's link from them with the stage's units. The admin's support view draws the person's menus with every
+  item disabled — "This is Chair's view — act from your own page." — and sends nothing.
+- Keys on a message that has the focus (click it): R reply, E react, F send to, P pin, D download, Enter look, Delete or
+  Backspace delete…. A pin or an unpin says so with Undo for 10 s ("Pinned. · Undo"). Shift+right-click, a text field
+  and a text selection inside a message keep the browser's own menu.
+- No act on a message, a file or a screen opens a native dialog. Delete…, New link… and Remove… ask in place, naming
+  what they act on and what follows, the safe answer focused and Escape its "no"; Rename… and Answer in words… (it read
+  "Reply with text") are a field in place; a link the browser will not copy (a page over plain http has no clipboard
+  API) is copied with the browser's own copy, else shown in a field to copy by hand. Inside the Screens dialog a menu and
+  its asks open in the dialog, and Escape closes them, not it.
+- The pinned strip draws each pinned message from its record, so its 📝, 🖥, ⧉, answers and On my way act as in the
+  feed (it copied the feed's message, which lost them), and draws it again in place: a reaction from another page keeps
+  the focus on a pinned message, and a menu opened from it gives the focus back to it. An open menu keeps its items and
+  their order while its message changes: Pin reads Unpin in place, React ▸'s and Answer ▸'s checks follow, an act no
+  longer possible turns disabled ("Not available any more."), and a message or a screen removed closes its menu or its
+  ask ("That message is gone.", "That screen is gone."). The feed does not move while a menu or an ask is open. The ⋯
+  opens its menu and closes it again. An ask opened by a key gives the focus back to the message the key was pressed
+  on; a menu says what it acts on to a screen reader ("Message actions: Message from Kim · 14:02").
+- The join's answer appends `forwardable` at its end: whether a message here could be sent to another hall, by the
+  rule Send to ▸ lists halls by (`myRooms`, both read through `forwardTargets`), and false On stage. The page asks again when the admin lets it forward into
+  another hall or takes that back (`linkedRoomsChanged`, which no page heard before) and when it is shown again, since
+  another hall may have been opened in another tab. ↗ Send to is offered only then.
+- One line above the feed on the first open in each browser: "Delete, Ask the operator and Show on screens are now in ⋯
+  — or right-click, or Shift+F10.", gone for good with Got it.
+- The catalogue knows the Board's simple view, which no page draws yet: there no object has a menu, and its acts are its
+  buttons — 👍 Got it (a held 👍, "Got all N" for N plain messages waiting, one each) and ↩ Reply on the newest plain
+  message from backstage waiting and on each 🔥 one, a question's answers, a file's Look. The facts gain `view`, the
+  messages that wait for the person's answer, whether the account is a Viewer, and `ask` and `respondHelp` (a question
+  and an answer to others' help come from backstage). A draft of a reply is refused at once while the page is down.
+- The fences (`docs/ANALYSIS.md` §3.6): `test/catalog.test.js`, pure, holds the entries' shape, groups, keys, icons,
+  verbs (each one the server registers, or local) and modes, the one-word rules, one icon for one act (↩, ↗ and ⤴
+  kept to theirs; a screen's Open, Tick only this one and Rename… have icons of their own), and for 16 seats (the Board
+  in both views among them) and 10 objects the shown sets, the inline bar, the disabled reasons, the folds, the caps (12
+  items, 2 dangers) and Got it; `test/menus.test.js`, with the hall's Stagewatch linked, sends every act each of seven
+  seats is not offered, as that seat, to a real server, and holds each refused with words (the On stage seat's, the
+  words its table names) and nothing changed, and the join's `forwardable` to the rule Send to ▸ lists halls by
+  (`myRooms`: alone, with another hall, On stage, the admin's link given and taken back, the support view); `test/resilience.test.js` holds `contextmenu` to `menus.js` and `cloneNode` in the hall page to
+  its message template; the module fence reads the catalogue's verbs and keeps no event unheard. The smoke:
+  right-click, ⋯ and Shift+F10 open the catalogue's set for ten messages on three seats, a file in the panel's list and
+  open, and a screen inside its dialog, the key's menu focused on its first enabled item and Escape giving the focus
+  back, and the ⋯ clicked twice closing it; the row's acts are in the menu under the same names; the pinned strip's
+  acts, and its focus kept through another page's reaction; a disabled act says why and sends nothing; an open menu
+  keeps its order; P and Undo; F's Send to ▸ ("Looking…", the hall, the forward), E's React ▸, D and Enter on a file,
+  Answer in words…, Delete's ask and the focus after it, Copy text with no clipboard API, New link…, an ask about a
+  screen removed elsewhere; the support view; a menu's words at 4.5:1 in both themes; a message's acts 44 px under a
+  finger; and every page fails the run on a native dialog.
+- The stylesheet loses the five icon-button variants, the forward and reaction pickers, the observer's hiding rules
+  (which offer is the catalogue's) and the panel's own Pin button: 11 hex colours fewer, 281.
+- Rolling back: nothing is stored but the browser's `agm.moved`; 0.5.1's page ignores `forwardable`.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

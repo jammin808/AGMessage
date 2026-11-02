@@ -566,7 +566,7 @@ test('guard rails: the stylesheet draws with its tokens: hex colours only in the
   // out lowers HEX_CAP with them, and none raises it (as the coverage gate only goes up). Muted words and icons read in
   // --c-ink-muted, at 4.5:1 for words and 3:1 for icons in both themes; an opacity between 0 and 1 fades whatever
   // is under it below that, so none is written (a toast or a switch hidden at 0 and shown at 1 is not muted ink).
-  const HEX_CAP = 292;
+  const HEX_CAP = 281;
   const css = fs.readFileSync(path.join(ROOT, 'public', 'styles.css'), 'utf8');
   const { outside, tokens } = hexOutsideTokens(css);
   assert.deepEqual(tokens, { ':root': 1, 'html[data-theme="dark"]': 1 }, 'the tokens are defined in one :root block and redefined in one dark block');
@@ -725,6 +725,25 @@ test('guard rails: the stylesheet holds on every browser from the page floor: ea
     '.v: a nested rule (Safari 16.5, Chrome 112)',
     '.x: height: 100svh has no height in vh before it',
   ], 'each newer feature without its fallback is found, and each with it (or inside @supports) passes');
+});
+
+// ---------------------------------------------------------------- the catalogue's doors (docs/ANALYSIS.md)
+/** Where a source hears the context menu, however the call is spelt. */
+const contextmenuListeners = (src) => (src.match(/addEventListener\(\s*['"`]contextmenu['"`]/g) || []).length;
+/** The nodes a source copies: each `.cloneNode(`, with the expression it copies. */
+const clonesIn = (src) => [...src.matchAll(/([\w.$]+(?:\(\))?)\s*\.cloneNode\s*\(/g)].map((m) => m[1]);
+test('guard rails: one page script hears the context menu, menus.js, so every object\'s right-click is its catalogue menu; the hall page copies only its message template', () => {
+  const pages = pageScripts();
+  for (const f of ['public/catalog.js', 'public/menus.js', 'public/outbox.js']) assert.ok(pages.includes(f), f + ' is a page script every fence reads');
+  const heard = Object.fromEntries(pages.map((f) => [f, contextmenuListeners(fs.readFileSync(path.join(ROOT, f), 'utf8'))]).filter(([, n]) => n));
+  // Two there: the door (AGM.menu.door), and a menu's own panel, which keeps the browser's menu from opening over it.
+  assert.deepEqual(heard, { 'public/menus.js': 2 }, 'contextmenu only in menus.js: a right-click heard anywhere else would be a menu out of step with the catalogue');
+  // A copy of a drawn message drops its listeners and goes stale: the pinned strip draws each message afresh instead, so
+  // the template is the one node the hall page copies.
+  assert.deepEqual(clonesIn(fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8')), ['tpl.content.firstElementChild'], 'cloneNode in app.js only at the template\'s site');
+  // The reads find what they are for.
+  assert.equal(contextmenuListeners("a.addEventListener('contextmenu', f); b.addEventListener( \"contextmenu\", g); c.addEventListener('click', h); // contextmenu"), 2);
+  assert.deepEqual(clonesIn('const c = node.cloneNode(true); tpl.content.firstElementChild.cloneNode(true); x.cloneNodes(); el().cloneNode(false);'), ['node', 'tpl.content.firstElementChild', 'el()']);
 });
 
 test('guard rails: a page posts a message only to its own origin, and hears one only after checking who sent it', () => {

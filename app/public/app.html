@@ -52,6 +52,11 @@
         <div id="pinnedList"></div>
       </section>
 
+      <p class="moved-line" id="movedLine" hidden>
+        <span>Delete, Ask the operator and Show on screens are now in ⋯ — or right-click, or Shift+F10.</span>
+        <button class="btn ghost small" type="button" id="movedOk">Got it</button>
+      </p>
+
       <div class="feed-wrap">
         <main class="feed" id="feed" aria-live="polite"></main>
         <button class="new-below" id="newBelow" type="button" hidden>↓ 0 new</button>
@@ -143,9 +148,8 @@
 
       <p class="doc-caption" id="docCaption" hidden></p>
 
-      <div class="doc-actions" id="docActions" hidden>
-        <button id="pinDocBtn" class="btn" data-pinned="0" type="button">📌 Pin</button>
-        <button id="dismissDocBtn" class="btn ghost" type="button">✕ Dismiss</button>
+      <div class="doc-actions" id="docActions" tabindex="-1" hidden>
+        <span class="file-acts" id="docActs"></span>
       </div>
 
       <section class="doc-pinned" id="docPinnedSection" hidden>
@@ -225,19 +229,17 @@
     </form>
   </dialog>
 
+  <!-- A message: its acts are the catalogue's (catalog.js), drawn into .msg-acts as at most two buttons and a ⋯; its whole
+       list opens on the ⋯, a right-click and Shift+F10 alike (app.js, menus.js). -->
   <template id="msgTpl">
-    <article class="msg">
+    <article class="msg" tabindex="-1">
       <header>
         <span class="from"></span>
         <span class="role-tag"></span>
         <span class="priority-badge">🔥 HIGH</span>
+        <span class="pinned-mark" hidden><span aria-hidden="true">📌</span> Pinned</span>
         <time></time>
-        <button class="fwd-btn" title="Forward to another room" type="button">↗</button>
-        <button class="pin-btn" title="Pin">📌</button>
-        <button class="stage-btn" title="Show on the speaker's screen (Stagewatch)" type="button" hidden>🖥</button>
-        <button class="propose-btn" title="Send to Stagewatch — the speaker's screen, a role screen, a department, or the operator" type="button" hidden>📝</button>
-        <button class="screen-btn" title="Show on this hall's screens" type="button" hidden>⧉</button>
-        <button class="del-btn" title="Delete this message" hidden>🗑</button>
+        <span class="msg-acts"></span>
       </header>
       <div class="body"></div>
     </article>
@@ -248,6 +250,8 @@
   <script src="/vendor/xlsx.full.min.js" defer></script>
   <script src="/outbox.js" defer></script>
   <script src="/reconnect.js" defer></script>
+  <script src="/catalog.js" defer></script>
+  <script src="/menus.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

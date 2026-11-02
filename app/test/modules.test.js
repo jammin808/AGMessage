@@ -174,10 +174,11 @@ const PAGE_NAMED_BY_EXPRESSION = {
   'public/app.js: socket.on(event': { names: Object.values(ops.UPD_EVENTS), why: 'the op table\'s listeners, one per row of the hall page\'s table, which (k) holds equal to lib/ops.js\'s' },
   'public/outbox.js: socket.emit(verb': { names: [], why: 'the outbox sends what its callers name, each read where it is called: AGM.outbox.hold(\'x\', AGM.outbox.now(\'x\', AGM.outbox.self(\'x\'' },
 };
-/** A server emit that no page hears, with why. The fence fails on a row a page hears, or that no handler file sends. */
-const UNHEARD = {
-  linkedRoomsChanged: 'told to a guest\'s pages when the admin lets them forward into another hall, or takes it back; the hall page asks which halls it may forward into as its forward picker opens (myRooms), and hears this once it keeps that fact live',
-};
+/**
+ * A server emit that no page hears, with why. The fence fails on a row a page hears, or that no handler file sends. None
+ * today: every emit is heard (the hall page hears linkedRoomsChanged, which keeps its `forwardable` fact live).
+ */
+const UNHEARD = {};
 
 const literal = (re, src) => [...src.matchAll(re)].map((m) => m[2]);
 /** Every way a listener is added to a socket, its first argument as written. The fuzz reads one: `socket.on('x'`. */
@@ -203,7 +204,8 @@ function wireWords(handlers, pages) {
   for (const [file, src] of pages) {
     for (const v of literal(/socket\.emit\(\s*(['"])([^'"]+)\1/g, src)) note(sends, v, file);
     for (const v of literal(/AGM\.outbox\.(?:hold|now|self)\(\s*(['"])([^'"]+)\1/g, src)) note(sends, v, file);
-    if (file === 'public/catalog.js') for (const v of literal(/\bverb:\s*(['"])([^'"]+)\1/g, src)) note(sends, v, file);
+    // A catalogue row's verb is a socket verb its runner sends; 'local' sends nothing, and an HTTP route is not a socket's.
+    if (file === 'public/catalog.js') for (const v of literal(/\bverb:\s*(['"])([^'"]+)\1/g, src)) if (v !== 'local' && !v.startsWith('http:')) note(sends, v, file);
     for (const e of literal(/socket\.(?:on|once)\(\s*(['"])([^'"]+)\1/g, src)) note(hears, e, file);
     for (const m of src.matchAll(/(socket\.(?:emit|on|once)|AGM\.outbox\.(?:hold|now|self))\(\s*(?![\s'"])([^,)]*)/g)) {
       note(pageComputed, file + ': ' + m[1] + '(' + m[2].trim(), { file, sends: !/^socket\.(?:on|once)$/.test(m[1]) });
@@ -250,6 +252,7 @@ test('(f) the wire\'s words: every page send is a verb, every verb is sent, ever
   assert.equal(w.sends.get('forward'), 'public/app.js', 'a send in double quotes is read');
   assert.equal(w.sends.get('display:shown'), 'public/display.js', 'the screen\'s page is read');
   assert.ok(!w.verbs.has('typing') && !w.emits.has('typing'), 'no typing: no page sent it or heard it');
+  assert.equal(w.hears.get('linkedRoomsChanged'), 'public/app.js', 'the hall page hears linkedRoomsChanged: its forwardable fact is kept live');
   // The pages' writes are sent through the outbox, read at its callers: every message the hall page sends is held by it.
   assert.ok(w.pageComputed.has('public/outbox.js: socket.emit(verb'), 'the outbox sends what its callers name');
   assert.ok(/AGM\.outbox\.hold\('message'/.test(pages.get('public/app.js')) && !/socket\.emit\(\s*['"]message['"]/.test(pages.get('public/app.js')), 'the hall page sends a message only through the outbox');
@@ -273,7 +276,9 @@ test('(f) a planted word left open, in either direction, fails it', () => {
     handlers: { 'server.js': ["socket.on('join', (a, ack) => {});", "socket.on('disconnect', () => {});", "io.to(code).emit('roomMeta', {});", ternary, "s.emit('linkedRoomsChanged', { added: code });"].join('\n') },
     pages: { 'public/app.js': ["socket.emit('join', {});", "socket.on('roomMeta', f);", "socket.on('message', f);", "socket.on('system', f);", "socket.on('connect', f);", "socket.on('disconnect', f);"].join('\n') },
   };
-  const run = ({ handlers = {}, pages = {} } = {}, opts = {}) => wireProblems(new Map(Object.entries({ ...base.handlers, ...handlers })), new Map(Object.entries({ ...base.pages, ...pages })), { named, pageNamed: {}, ...opts });
+  // A planted allow-list row: an emit no page of the planted tree hears, with its reason.
+  const unheard = { linkedRoomsChanged: 'told to a guest\'s pages when the admin links them to another hall; no planted page hears it' };
+  const run = ({ handlers = {}, pages = {} } = {}, opts = {}) => wireProblems(new Map(Object.entries({ ...base.handlers, ...handlers })), new Map(Object.entries({ ...base.pages, ...pages })), { named, pageNamed: {}, unheard, ...opts });
   const plus = (side, f, line) => ({ [side]: { [f]: (base[side][f] || '') + '\n' + line } });
   assert.deepEqual(run(), [], 'the planted tree passes');
 
@@ -297,6 +302,7 @@ test('(f) a planted word left open, in either direction, fails it', () => {
   // catalog.js is not a send.
   const roomCreate = { handlers: { 'lib/handlers/rooms.js': "socket.on('room:create', (a, ack) => {}); socket.on('room:send', (a, ack) => {});" } };
   assert.deepEqual(run({ ...roomCreate, pages: { 'public/halls.js': "AGM.outbox.hold('room:create', {});", 'public/catalog.js': "{ id: 'msg.send', verb: 'room:send' }" } }), []);
+  assert.deepEqual(run({ ...roomCreate, pages: { 'public/halls.js': "AGM.outbox.hold('room:create', {}); AGM.outbox.hold('room:send', {});", 'public/catalog.js': "{ id: 'msg.copy', verb: 'local' }, { id: 'account.edit', verb: 'http:PATCH /api/users/:id' }" } }), [], 'a local act and an HTTP route are no socket sends');
   assert.deepEqual(run({ ...roomCreate, pages: { 'public/halls.js': "AGM.outbox.now('room:create', {}); const row = { verb: 'room:send' };" } }), ["lib/handlers/rooms.js registers 'room:send', which no page sends"]);
 
   // A page that names an event by an expression is read through its row: a carrier whose callers name the verbs, and

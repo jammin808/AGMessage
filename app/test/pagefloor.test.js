@@ -229,6 +229,8 @@ const DEFINE_ONLY = {
   'outbox.js': 'AGM.outbox: sends only on a socket a page attaches',
   'reconnect.js': 'AGM.reconnect: acts only on a socket a page attaches',
   'audit-export.js': 'AGMAuditExport.open: asks only when a person opens Export…',
+  'catalog.js': 'AGM.catalog: data and pure functions of a page\'s facts, with no socket',
+  'menus.js': 'AGM.menu and AGM.ask: draw what a page gives them, and send nothing',
 };
 /** The first place a page script asks the server anything or opens a socket. */
 const firstAsk = (src) => src.search(/\bfetch\(|\bAGM\.api\(|\bio\(|\bnew WebSocket\(|\bXMLHttpRequest\b|\bsendBeacon\(/);

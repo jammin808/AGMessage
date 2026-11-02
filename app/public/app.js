@@ -29,17 +29,15 @@ let STAGE_KEY = '';        // the link's state and desk the flags were last aske
 let AI_ON = false;
 let CAN_SCREENS = false;   // this account may drive the hall's screens (display.control)
 const HAS_STAGE = ROLE === 'board' || ROLE === 'research';
-// Read only (an observer, a Viewer account): the server refuses posts, pins, reactions and answers, so none is offered.
+// Read only (an observer, a Viewer account): the server refuses every post, so the page draws no composer.
 const readOnly = () => document.body.dataset.role === 'observer';
-// On stage (the seat the server answered): what is written here stays in this room, so the server refuses every forward
-// and no message offers one. Files and questions come from the backstage team: the Board's composer has neither.
-const onStage = () => document.body.dataset.role === 'board';
-// A forward is offered where the server would take it from this page: never On stage, never a help request, and a file
-// only from a page given an upload token (the server's sign that this seat shares files here, which a file's forward needs).
-const offersForward = (m) => m.type !== 'help' && !onStage() && (m.type !== 'file' || !!UPLOAD_TOKEN);
-// Help requests are answered by the backstage team: On stage, a page marks its own request resolved and answers no one
-// else's, On my way included, as the server refuses (owner answer B1); an observer answers none.
-const mayAnswerHelp = (m, state) => !readOnly() && (!onStage() || (state === 'resolved' && isMine(m)));
+// What this page may do, and with what, is the action catalogue's (catalog.js): its facts are what the server told this
+// page (the join's answer, the screens it may drive, the link's state, whether it is connected), kept current by its
+// events, and every button, menu and key on a message, a file and a screen is drawn from the catalogue's entries for them.
+// A page binds only what each act does: RUN, by the entry's id.
+const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false };
+let F = AGM.catalog.facts(pageFacts);
+const RUN = {};
 
 // ---------------- UI sync state (declared early to avoid TDZ traps) ----------------
 // These are accessed by pushUserState / setStageCollapsed / setZoom / applyTheme,
@@ -155,11 +153,12 @@ function rejoin() {
     if (res.identity) { IDENTITY = res.identity; try { localStorage.setItem('agm.id', IDENTITY); } catch { /* private mode: identity lives for this tab only */ } }
     MY_UID = res.uid || MY_UID;
     UPLOAD_TOKEN = res.uploadToken || '';
-    const flagsWere = CAN_STAGE + '|' + CAN_PROPOSE;
     CAN_STAGE = !!res.canSendToStage;
     CAN_PROPOSE = !!res.canPropose;
     STAGE_KEY = stageKey(res.stage);
     AI_ON = !!res.ai;
+    // The catalogue's facts from this answer, before anything is drawn with them; `connected` once the outbox is ready.
+    factsChanged({ role: res.role || ROLE, uid: MY_UID, account: res.account || null, uploadToken: UPLOAD_TOKEN, canSendToStage: CAN_STAGE, canPropose: CAN_PROPOSE, ai: AI_ON, stage: res.stage || null, forwardable: !!res.forwardable, name: NAME });
     drawAiButtons();
     if (res.note) notify(res.note);
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
@@ -178,9 +177,6 @@ function rejoin() {
         catchUp = null;
         if (done.toEnd) scrollToBottom();
       }
-      // The hall's Stagewatch may have come or gone while the page was away: the messages already drawn offer what it
-      // offers now.
-      if (flagsWere !== CAN_STAGE + '|' + CAN_PROPOSE) refreshProposeButtons();
     } else {
       renderHistory(res.history || []);
     }
@@ -193,8 +189,41 @@ function rejoin() {
     // Joined, with what it missed drawn (so a held send that landed meanwhile is already matched): what this person
     // holds for this hall is sent now, a reload's included, and a reload's send already among the drawn is done.
     AGM.outbox.ready({ scope: 'hall|' + ROOM, who: MY_UID, has: (cid) => allMessages.some((m) => m.cid === cid && !!m.from && m.from.uid === MY_UID) });
+    factsChanged({ connected: AGM.outbox.online });
   });
 }
+// Down: an act on something is refused at once (it would otherwise be sent late), and every door says so.
+socket.on('disconnect', () => factsChanged({ connected: false }));
+
+/**
+ * The page's facts changed: each object's bar is drawn again where what it offers changed, and an open menu keeps its
+ * items in place and says what each says now (R5).
+ */
+function factsChanged(patch) {
+  Object.assign(pageFacts, patch || {});
+  const next = AGM.catalog.facts(pageFacts);
+  if (JSON.stringify(next) === JSON.stringify(F)) return;
+  F = next;
+  const records = new Map(allMessages.map((m) => [m.id, m]));
+  for (const [id, node] of messagesById) { const m = records.get(id); if (m && m.type !== 'system' && node.classList.contains('msg')) drawActs(node, m); }
+  for (const node of document.querySelectorAll('#pinnedList .msg[data-id]')) { const m = records.get(node.dataset.id); if (m) drawActs(node, m); }
+  drawDocActs();
+  refreshDocPinnedList();
+  Screens.redraw();
+  refreshOpenMenu();
+}
+
+/**
+ * The rooms a message could be sent to: whether there are any is the `forwardable` fact, from the join's answer, asked
+ * again when the admin links this person to another hall or takes it back (linkedRoomsChanged), and when the page is
+ * shown again (another hall may have been opened in another tab meanwhile).
+ */
+function askForwardable() {
+  if (!joined || !socket.connected || ADMIN_VIEW) return;
+  socket.emit('myRooms', {}, (r) => { if (r && r.ok && Array.isArray(r.rooms)) factsChanged({ forwardable: r.rooms.length > 0 }); });
+}
+socket.on('linkedRoomsChanged', askForwardable);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') askForwardable(); });
 
 /** The room as the header names it (a hall's Main room by the hall's name; a rename arrives as a numbered change, like
  * everything else): the header, the code chip's title, and the name of Send, which says where a message goes (its word
@@ -261,7 +290,8 @@ function outOfHall(words, to) {
   const back = document.getElementById('outBack');
   back.href = to;
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
-  document.querySelectorAll(MENUS_ON_FEED).forEach((m) => m.remove());
+  AGM.menu.close();
+  AGM.ask.close();
   HelpChip.close(false);
   for (const id of ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn']) document.getElementById(id).hidden = true;
   document.querySelector('.main-row').hidden = true;
@@ -275,18 +305,16 @@ socket.on('roleChanged', ({ role }) => { notify('The admin changed your seat to 
 const stageKey = (v) => (v ? v.status || '' : 'off') + '|' + !!(v && v.desk);
 socket.on('stage', (v) => {
   renderStage(v);
+  factsChanged({ stage: v || null });
   const key = stageKey(v);
   if (!joined || key === STAGE_KEY) return;
   STAGE_KEY = key;
   socket.emit('stage:targets', {}, (r) => {
     if (!r || !r.ok) return;
     const s = !!r.canSend, p = !!r.canPropose;
-    if (s !== CAN_STAGE || p !== CAN_PROPOSE) { CAN_STAGE = s; CAN_PROPOSE = p; refreshProposeButtons(); }
+    if (s !== CAN_STAGE || p !== CAN_PROPOSE) { CAN_STAGE = s; CAN_PROPOSE = p; factsChanged({ canSendToStage: s, canPropose: p }); }
   });
 });
-function refreshProposeButtons() {
-  for (const [id, node] of messagesById) { const m = findMessage(id); if (m && m.type !== 'system') rerenderMessage(node, m); }
-}
 // A proposal's state (pending → approved / rejected → done / failed), on the message it came from, or on its system
 // line. A drawn message whose record is not held is given the line, as a system line is.
 function setProposal(messageId, proposal) {
@@ -343,6 +371,7 @@ function onReset() {
   refreshDocPinnedList();
   HelpChip.draw();
   if (typeof dismissDoc === 'function') dismissDoc();
+  refreshOpenMenu();
 }
 // A message sent to the speaker's screen: Stagewatch's receipt, then the speaker's acknowledgement, on that message.
 function setStage(messageId, stage) {
@@ -379,8 +408,9 @@ function setReactions(messageId, reactions) {
   if (msg) msg.reactions = reactions;
   const node = messagesById.get(messageId);
   if (node) renderReactions(node, reactions);
-  // Refresh pinned strip if this message is pinned
-  if (msg && msg.pinned) refreshPinned();
+  // Its pinned copy says the same, and so does its open menu (React ▸'s checks).
+  if (msg && msg.pinned) refreshPinned(messageId);
+  if (openOn && openOn.kind === 'msg' && openOn.id === messageId) refreshOpenMenu();
 }
 socket.on('messageDeleted', ({ messageId, seq }) => {
   if (!bump(seq)) return;
@@ -430,14 +460,36 @@ function renderStage(v) {
 }
 
 // ---------------- Toasts (never a blocking dialog) ----------------
-function notify(text, bad) {
+// A toast says what an act did, or why not. One that can be taken back carries Undo, a button inside it, and holds for
+// 10 s while neither hovered nor focused, so it is there to press.
+const UNDO_MS = 10000;
+function notify(text, bad, opts) {
   let box = document.getElementById('agmToast');
-  if (!box) { box = document.createElement('div'); box.id = 'agmToast'; box.className = 'agm-toast'; document.body.appendChild(box); }
+  if (!box) {
+    box = document.createElement('div'); box.id = 'agmToast'; box.className = 'agm-toast'; box.setAttribute('role', 'status');
+    const hold = () => clearTimeout(notify._t);
+    const go = () => { if (box.dataset.undo && !box.matches(':hover') && !box.contains(document.activeElement)) notify._t = setTimeout(() => box.classList.remove('show'), UNDO_MS); };
+    box.addEventListener('pointerenter', hold);
+    box.addEventListener('focusin', hold);
+    box.addEventListener('pointerleave', go);
+    box.addEventListener('focusout', (e) => { if (!box.contains(e.relatedTarget)) go(); });
+    document.body.appendChild(box);
+  }
   box.textContent = text;
+  const undo = opts && typeof opts.undo === 'function' ? opts.undo : null;
+  if (undo) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'toast-undo';
+    b.textContent = 'Undo';
+    b.addEventListener('click', () => { clearTimeout(notify._t); box.classList.remove('show'); delete box.dataset.undo; undo(); });
+    box.append(' · ', b);
+    box.dataset.undo = '1';
+  } else delete box.dataset.undo;
   box.classList.toggle('bad', !!bad);
   box.classList.add('show');
   clearTimeout(notify._t);
-  notify._t = setTimeout(() => box.classList.remove('show'), 4000);
+  notify._t = setTimeout(() => box.classList.remove('show'), undo ? UNDO_MS : 4000);
 }
 
 // ---------------- Feed rendering ----------------
@@ -459,6 +511,7 @@ function renderHistory(history) {
   refreshDocPinnedList();
   HelpChip.draw();
   scrollToBottom();
+  refreshOpenMenu();
 }
 
 /**
@@ -516,6 +569,7 @@ function removeMessageLocal(id) {
   refreshDocPinnedList();
   if (currentDocMsgId === id) dismissDoc();
   HelpChip.draw();
+  refreshOpenMenu();
 }
 
 // A presence line: "Ana joined Backstage", "Ben joined On stage", "Wes joined as an observer", "Ana left"; an older line in a
@@ -550,34 +604,6 @@ function rerenderMessage(node, msg) {
   const rt = node.querySelector('.role-tag');
   const time = node.querySelector('time');
   const body = node.querySelector('.body');
-  const pinBtn = node.querySelector('.pin-btn');
-  const delBtn = node.querySelector('.del-btn');
-  const screenBtn = node.querySelector('.screen-btn');
-  if (screenBtn) {
-    const showable = (msg.type === 'text' && !!msg.text) || (msg.type === 'file' && /^(image\/(png|jpeg|gif|webp)|application\/pdf)$/.test(msg.mime || ''));
-    screenBtn.hidden = !(CAN_SCREENS && showable);
-    screenBtn.onclick = showable ? () => Screens.offer(msg) : null;
-  }
-  const stageBtn = node.querySelector('.stage-btn');
-  if (stageBtn) {
-    const canStage = CAN_STAGE && document.body.dataset.role === 'research' && (msg.type === 'text' || msg.type === 'action') && !!msg.text;
-    stageBtn.hidden = !canStage;
-    stageBtn.onclick = canStage ? () => {
-      stageBtn.disabled = true;
-      AGM.outbox.now('stage:send', { messageId: msg.id }, (res) => {
-        stageBtn.disabled = false;
-        notify(res && res.ok
-          ? (res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.')
-          : (res && res.error) || 'Could not send to the speaker\'s screen.', !(res && res.ok));
-      });
-    } : null;
-  }
-  const proposeBtn = node.querySelector('.propose-btn');
-  if (proposeBtn) {
-    const canPropose = (CAN_PROPOSE || CAN_STAGE) && document.body.dataset.role === 'research' && (msg.type === 'text' || msg.type === 'action') && !!msg.text;
-    proposeBtn.hidden = !canPropose;
-    proposeBtn.onclick = canPropose ? () => ToStagewatch.open(msg) : null;
-  }
   if (msg.from) {
     from.textContent = msg.from.name;
     // Staff sign in; guests join with a code: the mark says which, so a name alone is never taken on trust.
@@ -587,24 +613,17 @@ function rerenderMessage(node, msg) {
     rt.dataset.role = msg.from.role;
   }
   time.textContent = formatTime(msg.at);
+  node.querySelector('.pinned-mark').hidden = !msg.pinned;
   body.innerHTML = '';
 
-  // Reply preview (small quote block at the top of the body)
+  // Reply preview (small quote block at the top of the body): a click goes to the message it answers.
   if (msg.replyTo) {
     const rt = document.createElement('div');
     rt.className = 'reply-quote';
     rt.innerHTML = '↩ <strong>' + escapeHtml(msg.replyTo.name) + '</strong>: ' +
       '<em>' + escapeHtml((msg.replyTo.snippet || '').slice(0, 120)) + '</em>';
     rt.title = 'Click to scroll to original';
-    rt.style.cursor = 'pointer';
-    rt.addEventListener('click', () => {
-      const target = messagesById.get(msg.replyTo.id);
-      if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        target.classList.add('found');
-        setTimeout(() => target.classList.remove('found'), 1500);
-      }
-    });
+    rt.dataset.goto = msg.replyTo.id;
     body.appendChild(rt);
   }
 
@@ -628,7 +647,7 @@ function rerenderMessage(node, msg) {
     body.appendChild(held);
   }
 
-  // Reactions row + add-reaction button. We render after body so it sits beneath the content.
+  // Reactions row, beneath the content.
   let rx = node.querySelector('.reactions');
   if (!rx) {
     rx = document.createElement('div');
@@ -636,49 +655,6 @@ function rerenderMessage(node, msg) {
     node.appendChild(rx);
   }
   renderReactions(node, msg.reactions || []);
-
-  // Reply button — sets the composer's replyTo state
-  const headerEl = node.querySelector('header');
-  let replyBtn = headerEl.querySelector('.reply-btn');
-  if (!replyBtn && msg.type !== 'system') {
-    replyBtn = document.createElement('button');
-    replyBtn.className = 'reply-btn';
-    replyBtn.title = 'Reply';
-    replyBtn.textContent = '↩';
-    headerEl.insertBefore(replyBtn, headerEl.querySelector('.fwd-btn'));
-  }
-  if (replyBtn) {
-    replyBtn.onclick = () => beginReply(msg);
-  }
-
-  // React button (➕😊) — opens a small picker
-  let rxBtn = headerEl.querySelector('.react-btn');
-  if (!rxBtn && msg.type !== 'system') {
-    rxBtn = document.createElement('button');
-    rxBtn.className = 'react-btn';
-    rxBtn.title = 'Add reaction';
-    rxBtn.textContent = '😊';
-    headerEl.insertBefore(rxBtn, headerEl.querySelector('.fwd-btn') || headerEl.querySelector('.pin-btn'));
-  }
-  if (rxBtn) {
-    rxBtn.onclick = (e) => {
-      e.stopPropagation();
-      showReactionPicker(rxBtn, msg.id);
-    };
-  }
-
-  drawPinButton(node, !!msg.pinned);
-  pinBtn.onclick = () => {
-    const pinned = !(node.dataset.pinned === '1');
-    AGM.outbox.now('pin', { messageId: msg.id, pinned }, saidIfNot('Not pinned.'));
-  };
-
-  // Forward button — opens a small picker of the other halls this person may post in (a help request stays in its hall)
-  const fwdBtn = node.querySelector('.fwd-btn');
-  if (fwdBtn) {
-    fwdBtn.hidden = !offersForward(msg);
-    fwdBtn.onclick = (e) => { e.stopPropagation(); offerForward(fwdBtn, msg.id); };
-  }
 
   // "Forwarded from Hall 2 · originally by Sarah": the hall by its name (a forward never carries its code).
   if (msg.forwardedFrom) {
@@ -690,21 +666,357 @@ function rerenderMessage(node, msg) {
     meta.textContent = '↗ Forwarded from ' + (msg.forwardedFrom.roomName || 'another hall') + orig;
     body.prepend(meta);
   }
+  drawActs(node, msg);
+  // A message in the pinned strip is drawn there from its record (no copy of this node), so it acts as it does here.
+  if (msg.pinned && messagesById.get(msg.id) === node) refreshPinned(msg.id);
+  if (openOn && openOn.kind === 'msg' && openOn.id === msg.id) refreshOpenMenu();
+}
 
-  // Show delete only on the current user's own messages
-  if (delBtn) {
-    if (isMine(msg)) {
-      delBtn.hidden = false;
-      delBtn.onclick = () => {
-        if (confirm('Delete this message? This cannot be undone.')) {
-          AGM.outbox.now('delete', { messageId: msg.id }, saidIfNot('Could not delete'));
-        }
-      };
-    } else {
-      delBtn.hidden = true;
-    }
+// ---------------- The doors of an object: its bar, its ⋯, right-click, Shift+F10 and its keys (catalog.js, menus.js) ----------------
+// An object's bar holds the two acts of lowest inline rank the catalogue shows it, then its ⋯; right-click, ⋯ and
+// Shift+F10 (or the menu key) open its whole list; a single key on the focused object runs the act that carries it. Each
+// door reads the same entries with the same facts, so they are in step, and every act runs through act() below.
+const drawnActs = new WeakMap();   // an object's bar → what it was drawn from, so an unchanged bar is not drawn again
+/** One act of a bar, drawn into its button: its icon (and, with `words`, its label beside it), named by its catalogue label. */
+function drawActButton(b, item, words) {
+  b.dataset.action = item.id;
+  b.setAttribute('aria-label', item.label);
+  b.title = item.disabled || item.label;
+  if (item.disabled) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
+  b.textContent = '';
+  if (item.icon) { const i = document.createElement('span'); i.setAttribute('aria-hidden', 'true'); i.textContent = item.icon; b.appendChild(i); }
+  if (words || !item.icon) { const w = document.createElement('span'); w.className = 'act-words'; w.textContent = item.label; b.appendChild(w); }
+}
+function actButton(item, words) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'msg-act';
+  drawActButton(b, item, words);
+  return b;
+}
+/** The ⋯ of an object: the door to its whole list on every device, a touch screen's included. */
+function moreButton(name) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'obj-more';
+  b.dataset.more = '1';
+  b.setAttribute('aria-haspopup', 'menu');
+  b.setAttribute('aria-expanded', 'false');
+  b.setAttribute('aria-label', name);
+  b.title = name + ' (or right-click, or Shift+F10)';
+  b.textContent = '⋯';
+  return b;
+}
+/**
+ * Draw an object's bar into `bar`: its inline acts and its ⋯ (none when it has no menu), and its keys named. A button
+ * that still offers the same act is drawn again in place (a reason or a label changed), and the ⋯ is kept while there
+ * is a menu, so a change of the page's facts never takes the focus, or an open menu's opener, away.
+ */
+function drawBar(bar, kind, o, { words = false, more = 'More actions', keysOn = null } = {}) {
+  const inl = AGM.catalog.inline(kind, F, o);
+  const shown = AGM.catalog.shown(kind, F, o);
+  const menu = AGM.catalog.items(kind, F, o).length > 0;
+  const key = JSON.stringify([inl.map((i) => [i.id, i.label, i.icon, i.disabled]), menu, words]);
+  if (drawnActs.get(bar) === key) return;
+  drawnActs.set(bar, key);
+  const had = [...bar.querySelectorAll(':scope > .msg-act')];
+  const dots = bar.querySelector(':scope > .obj-more');
+  if (had.length === inl.length && had.every((b, n) => b.dataset.action === inl[n].id)) inl.forEach((i, n) => drawActButton(had[n], i, words));
+  else {
+    had.forEach((b) => b.remove());
+    for (const i of inl) bar.insertBefore(actButton(i, words), dots);
+  }
+  if (menu && !dots) bar.appendChild(moreButton(more));
+  else if (!menu && dots) dots.remove();
+  else if (dots) { dots.setAttribute('aria-label', more); dots.title = more + ' (or right-click, or Shift+F10)'; }
+  if (keysOn) {
+    const keys = shown.filter((e) => e.key).map((e) => e.key);
+    if (keys.length) keysOn.setAttribute('aria-keyshortcuts', keys.join(' ')); else keysOn.removeAttribute('aria-keyshortcuts');
   }
 }
+function drawActs(node, msg) {
+  const bar = node.querySelector(':scope > header .msg-acts');
+  if (bar) drawBar(bar, 'msg', msg, { keysOn: node });
+  // The body's own doors (a prompt's answers, a help request's answers) are the same entries, and say why when they
+  // cannot run now.
+  const shown = new Set(AGM.catalog.shown('msg', F, msg).map((e) => e.id));
+  for (const b of node.querySelectorAll('.body button[data-action]')) {
+    const id = b.dataset.action;
+    const why = shown.has(id) ? AGM.catalog.ready('msg', id, F, msg) : AGM.catalog.WORDS.gone;
+    if (why === true) { b.removeAttribute('aria-disabled'); b.removeAttribute('title'); } else { b.setAttribute('aria-disabled', 'true'); b.title = why; }
+  }
+}
+
+/**
+ * Run an act of the catalogue on an object: shown to this seat and ready now, or the words that say why not and nothing
+ * sent; an act that asks first asks in place (AGM.ask), and runs on its yes. `ctx`: `anchor` (where an ask or a
+ * submenu opens), `node` (the object's element), `opener` (where the focus goes back when an ask closes: the object a
+ * key was pressed on, or the menu's opener), `value` (a submenu's choice), `item` (the menu item chosen).
+ */
+function act(kind, id, o, ctx) {
+  const c = ctx || {};
+  const e = AGM.catalog.entry(kind, id);
+  const run = RUN[id];
+  if (!e || !run || !AGM.catalog.shown(kind, F, o).some((x) => x.id === id)) { notify(AGM.catalog.WORDS.gone, true); return; }
+  const r = AGM.catalog.ready(kind, id, F, o);
+  if (r !== true) { notify(r, true); return; }
+  if (e.confirm) {
+    // The ask is about this object: should it go meanwhile, the ask goes with it (refreshOpenMenu).
+    const asked = { kind, get: () => objectNow(kind, o) };
+    askOn = asked;
+    AGM.ask(c.anchor || c.node || null, e.confirm(F, o), { opener: c.opener || null, refocus: () => refocusNear(kind, o) }).then((a) => {
+      if (askOn === asked) askOn = null;
+      if (a.yes) run(o, Object.assign({}, c, { values: a.values }));
+    });
+    return;
+  }
+  run(o, c);
+}
+/** An object as it is now (null: it is gone): a message's record, a file's (where it was), a screen's row. */
+function objectNow(kind, o) {
+  if (kind === 'msg') return findMessage(o.id) || null;
+  if (kind === 'file') return fileObject(o.id, o.where);
+  return Screens.of(o.id);
+}
+/**
+ * The focus, when what held it is gone (its row drawn again, its message removed): the object's element as it is drawn
+ * now, else where it was listed (the Screens dialog, the panel), else the composer; never the page itself.
+ */
+function refocusNear(kind, o) {
+  const id = o && o.id;
+  const same = (sel, key) => [...document.querySelectorAll(sel)].find((n) => n.dataset[key] === id) || null;
+  const node = kind === 'msg' ? messagesById.get(id) : kind === 'screen' ? same('.screen-item', 'screenId') : same('#docPinnedList .file-entry', 'fileId');
+  if (node && node.isConnected && node.hasAttribute('tabindex') && node.offsetParent) { node.focus(); return; }
+  const near = kind === 'screen' ? document.getElementById('screensClose') : kind === 'file' ? document.querySelector('#docActs button') : null;
+  if (near && near.offsetParent) { near.focus(); return; }
+  const c = document.getElementById(ROLE === 'board' ? 'directorInput' : 'textInput');
+  if (c && c.offsetParent) c.focus(); else document.getElementById('feed').focus();
+}
+
+// The open menu, if any: its kind and object, so a change to the object updates it in place (R5); and the object an
+// open ask is about.
+let openOn = null;
+let askOn = null;
+/**
+ * Open the menu of an object at `at` ({x, y}, or {anchor}). `get()` reads the object as it is now (null: it is gone),
+ * `node` is its element and `more` its ⋯. False when the object offers nothing here (the browser's menu then stays).
+ */
+function openObjectMenu(kind, get, { node, more, at, opener, label, header }) {
+  const o = get();
+  if (!o) return false;
+  const list = AGM.catalog.items(kind, F, o);
+  if (!list.length) return false;
+  const anchor = more || node;
+  const from = opener || anchor;
+  const handle = AGM.menu(list, at || { anchor }, {
+    label, header: header(o), opener: from,
+    goneWords: AGM.catalog.WORDS.gone,
+    onPick: (id, value, item) => { const now = get(); if (now) act(kind, id, now, { anchor, node, value, item, opener: from }); else notify(goneWords(kind), true); },
+    onDisabled: (words) => notify(words, true),
+    submenu: (item) => submenuFor(kind, item, get() || o),
+    // An open submenu's values as they are now (a reaction's check, an answer chosen); the rooms are asked once.
+    values: (item) => (item.id ? AGM.catalog.submenu(kind, item.id, F, get() || o) : null),
+    refocus: () => refocusNear(kind, o),
+    onClose: () => { if (openOn && openOn.handle === handle) openOn = null; },
+  });
+  openOn = { kind, get, header, handle };
+  openOn.id = o.id;
+  return true;
+}
+const goneWords = (kind) => (kind === 'msg' ? 'That message is gone.' : kind === 'file' ? 'That file is gone.' : 'That screen is gone.');
+/** The open menu says what its object's items say now; its object gone, it closes and says so, and so does an ask. */
+function refreshOpenMenu() {
+  if (askOn && !askOn.get()) { const k = askOn.kind; askOn = null; AGM.ask.close(); notify(goneWords(k), true); }
+  if (!openOn) return;
+  const o = openOn.get();
+  if (!o) { const k = openOn.kind; openOn.handle.close(); openOn = null; AGM.ask.close(); notify(goneWords(k), true); return; }
+  openOn.handle.update(AGM.catalog.items(openOn.kind, F, o), openOn.header(o));
+}
+/** One level down: a catalogue entry's values (reactions, answers), or the rooms a message could be sent to, asked now. */
+function submenuFor(kind, item, o) {
+  const fixed = AGM.catalog.submenu(kind, item.id, F, o);
+  if (fixed) return fixed;
+  if (item.id === 'msg.send') return sendTargets(o);
+  return [];
+}
+/** The rooms this message would be taken in, as the server answers (myRooms): each a value; none, the words why. */
+function sendTargets(o) {
+  const why = (words) => [{ id: '', label: words, disabled: words }];
+  if (!AGM.outbox.online) return why(AGM.catalog.WORDS.offline);
+  return new Promise((resolve) => {
+    socket.emit('myRooms', { messageId: o.id }, (res) => {
+      if (!res || !res.ok) { resolve(why((res && res.error) || 'Could not check your other halls.')); return; }
+      if (!res.rooms.length) {
+        // A rule of this room emptied the list: its words, not a hall to open (the person may have it open already).
+        resolve(why(typeof res.why === 'string' && res.why ? res.why
+          : 'To send it to another hall, open that hall where you may ' + (o.type === 'file' ? 'share files' : 'post') + ' (in another tab, as ' + NAME + ').'));
+        return;
+      }
+      resolve(res.rooms.filter((r) => r && typeof r.code === 'string').map((r) => ({ value: r.code, label: r.name ? r.name + ' · ' + r.code : r.code })));
+    });
+  });
+}
+
+// A message's doors: one handler for the feed and the pinned strip, which draws each pinned message afresh.
+const msgHeader = (m) => (isMine(m) ? 'Your message' : 'Message from ' + ((m.from && m.from.name) || 'someone')) + ' · ' + formatTime(m.at);
+function msgDoor(node) {
+  const id = node.dataset.id;
+  const more = node.querySelector(':scope > header .obj-more');
+  return {
+    el: node, more,
+    open: (at) => openObjectMenu('msg', () => findMessage(id), { node, more, at, opener: node.contains(document.activeElement) ? document.activeElement : node, label: 'Message actions', header: msgHeader }),
+  };
+}
+function findMsgDoor(t) {
+  const node = t.closest('.msg[data-id]');
+  return node && !node.classList.contains('echo') ? msgDoor(node) : null;
+}
+function onMsgClick(e) {
+  const el = e.target.closest('[data-action], [data-more], [data-goto]');
+  if (!el || !this.contains(el)) return;
+  const node = el.closest('.msg[data-id]');
+  const msg = node && findMessage(node.dataset.id);
+  if (!msg) return;
+  if (el.dataset.goto) {
+    const target = messagesById.get(el.dataset.goto);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.add('found');
+      setTimeout(() => target.classList.remove('found'), 1500);
+    }
+    return;
+  }
+  e.preventDefault();
+  if (el.dataset.more) {
+    if (openOn && openOn.kind === 'msg' && openOn.id === msg.id) { AGM.menu.close(); return; }
+    openObjectMenu('msg', () => findMessage(msg.id), { node, more: el, opener: el, label: 'Message actions', header: msgHeader });
+    return;
+  }
+  const more = node.querySelector(':scope > header .obj-more');
+  const entry = AGM.catalog.entry('msg', el.dataset.action);
+  // An act with values one level down, chosen on its own door (not a value): its submenu opens in the object's menu.
+  if (entry && entry.submenu && el.dataset.value === undefined) { openSubmenu(node, more, entry.id); return; }
+  act('msg', el.dataset.action, msg, { anchor: more || el, node, value: el.dataset.value, opener: el });
+}
+/** The object's menu, opened at its ⋯ with one of its submenus open (E reacts, F sends to). */
+function openSubmenu(node, more, id) {
+  const door = msgDoor(node);
+  if (door.open({ anchor: more || node }) && AGM.menu.current()) AGM.menu.current().expand(id);
+}
+/** A single key on the focused message runs the act that carries it: R E F P D, Enter, and Delete or Backspace. */
+function onMsgKey(e) {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
+  const node = e.target;
+  if (!node || !node.matches || !node.matches('.msg[data-id]')) return;
+  const msg = findMessage(node.dataset.id);
+  const entry = msg && AGM.catalog.byKey('msg', F, msg, e.key);
+  if (!entry) return;
+  e.preventDefault();
+  const more = node.querySelector(':scope > header .obj-more');
+  if (entry.submenu) { openSubmenu(node, more, entry.id); return; }
+  act('msg', entry.id, msg, { anchor: more || node, node, opener: node });
+}
+for (const host of [document.getElementById('feed'), document.getElementById('pinnedList')]) {
+  host.addEventListener('click', onMsgClick);
+  host.addEventListener('keydown', onMsgKey);
+  AGM.menu.door(host, findMsgDoor);
+}
+
+// What each act on a message does. The server decides; every write goes through the outbox in its entry's mode.
+const isFileUrl = (u) => typeof u === 'string' && /^\/uploads\/[\w.-]+$/.test(u);
+/** A file of this hall saved by the browser, under its own name. */
+function download(m) {
+  if (!isFileUrl(m.url)) return;
+  const a = document.createElement('a');
+  a.href = m.url;
+  a.download = m.filename || '';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+/**
+ * Words to the clipboard: the clipboard API where the page is a secure context, else the browser's copy of a selection
+ * (a page served over plain http on the venue network has no clipboard API), else a field in place to copy from by hand.
+ */
+async function copyText(text, said, anchor) {
+  try {
+    if (window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') { await navigator.clipboard.writeText(text); notify(said); return; }
+  } catch { /* refused (no permission, not focused): the selection's copy below */ }
+  const host = (anchor && anchor.closest && anchor.closest('dialog[open]')) || document.body;
+  // The selection's copy takes the focus into a field of its own: it goes back where it was (the opener), never to the page.
+  const back = document.activeElement && document.activeElement !== document.body ? document.activeElement : anchor;
+  const t = document.createElement('textarea');
+  t.value = text;
+  t.setAttribute('readonly', '');
+  t.className = 'copy-source';
+  host.appendChild(t);
+  t.select();
+  let copied;
+  try { copied = document.execCommand('copy'); } catch { copied = false; }
+  t.remove();
+  if (back && back.isConnected && typeof back.focus === 'function') back.focus();
+  if (copied) { notify(said); return; }
+  AGM.ask(anchor || null, { title: 'Copy it from here', words: 'This browser would not copy it by itself: select it and copy.', fields: [{ name: 'text', label: 'To copy', value: text }], yes: 'Done', no: 'Close' });
+}
+/** Pin or unpin, with Undo for 10 s: the opposite op of the same kind. */
+function pinWithUndo(o) {
+  const pinned = !o.pinned;
+  AGM.outbox.now('pin', { messageId: o.id, pinned }, (r) => {
+    if (!r || !r.ok) { notify((r && r.error) || (pinned ? 'Not pinned.' : 'Not unpinned.'), true); return; }
+    notify(pinned ? 'Pinned.' : 'Unpinned.', false, { undo: () => AGM.outbox.now('pin', { messageId: o.id, pinned: !pinned }, saidIfNot(pinned ? 'Not unpinned.' : 'Not pinned.')) });
+  });
+}
+/** The object after `node` in its list (or before it, at the end): where the focus goes when `node` is removed. */
+function neighbour(node) {
+  const sel = '.msg[data-id]';
+  let n = node.nextElementSibling;
+  while (n && !n.matches(sel)) n = n.nextElementSibling;
+  if (n) return n;
+  n = node.previousElementSibling;
+  while (n && !n.matches(sel)) n = n.previousElementSibling;
+  return n;
+}
+Object.assign(RUN, {
+  // Got it answers the backstage team with this person's 👍, held through a blip; Got all N answers each plain message
+  // that waits, one send each.
+  'msg.ack': (m) => {
+    for (const id of m.priority ? [m.id] : F.waiting.plain) AGM.outbox.hold('react', { messageId: id, emoji: '👍', on: true });
+  },
+  'msg.reply': (m) => beginReply(m),
+  'msg.react': (m, { value }) => {
+    const on = !(m.reactions || []).some((r) => r.uid === MY_UID && r.emoji === value);
+    AGM.outbox.now('react', { messageId: m.id, emoji: String(value), on }, saidIfNot('Not changed.'));
+  },
+  'msg.answer': (m, { value }) => answerPrompt(m.id, Number(value)),
+  'msg.answerWords': (m, { values }) => { const note = values && values.note ? values.note.trim() : ''; if (note) answerPrompt(m.id, -1, note); },
+  'msg.helpRespond': (m) => AGM.outbox.hold('help:respond', { code: ROOM, messageId: m.id, state: 'coming' }),
+  'msg.helpResolve': (m) => AGM.outbox.hold('help:respond', { code: ROOM, messageId: m.id, state: 'resolved' }),
+  'msg.draft': (m) => { beginReply(m); draftAnswer(m); },
+  'msg.speaker': (m) => ToStagewatch.open(m),
+  'msg.sendNow': (m) => AGM.outbox.now('stage:send', { messageId: m.id }, (res) => {
+    notify(res && res.ok
+      ? (res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.')
+      : (res && res.error) || 'Could not send to the speaker\'s screen.', !(res && res.ok));
+  }),
+  'msg.screens': (m) => Screens.offer(m),
+  'msg.send': (m, { value, item }) => {
+    if (typeof value !== 'string' || !value) return;
+    AGM.outbox.hold('forward', { messageId: m.id, targetRoom: value }, { tag: { forward: item && item.label ? item.label : value } });
+  },
+  'msg.pin': (m) => pinWithUndo(m),
+  'msg.look': (m) => openDocInPanel(m),
+  'msg.download': (m) => download(m),
+  'msg.copy': (m, { anchor }) => copyText(m.text || '', 'Copied.', anchor),
+  'msg.delete': (m, { node }) => {
+    const next = node ? neighbour(messagesById.get(m.id) || node) : null;
+    AGM.outbox.now('delete', { messageId: m.id }, (r) => {
+      if (!r || !r.ok) { notify((r && r.error) || 'Could not delete', true); return; }
+      // The focus goes to the next message, never to the page.
+      if (next && next.isConnected && (!document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected)) next.focus();
+    });
+  },
+});
 
 // ---------------- What this page holds for sending: the outbox's echoes ----------------
 // A message held by the outbox is drawn below the hall's messages, saying what is true of it: ◷ Sending, ◷ Waiting while
@@ -726,6 +1038,7 @@ function drawHeld(item) {
   if (item.verb === 'message') drawEcho(item);
   else if (item.verb === 'actionResponse' || item.verb === 'help:respond') drawHeldAnswer(item);
   else if (item.verb === 'forward') drawHeldForward(item);
+  else if (item.verb === 'react' && item.state === 'refused') { notify(item.words, true); AGM.outbox.drop(item.cid); }
 }
 
 /** What a held message says, in one line. */
@@ -864,7 +1177,7 @@ function drawHeldAnswer(item) {
   const m = findMessage(a.messageId);
   const node = messagesById.get(a.messageId);
   if (m && node) rerenderMessage(node, m);
-  if (m && m.pinned) refreshPinned();
+  if (m && m.pinned) refreshPinned(m.id);
 }
 
 function drawHeldForward(item) {
@@ -897,19 +1210,21 @@ function renderHelpBody(msg) {
   line.dataset.state = h.state;
   line.textContent = (h.state === 'resolved' ? '✓ ' : h.state === 'coming' ? '▶ ' : '■ ') + HELP_WORDS[h.state] + (h.by ? ' — ' + h.by : '') + (h.at && h.state !== 'open' ? ' at ' + formatTime(h.at) : '');
   wrap.appendChild(line);
-  if (h.state !== 'resolved' && mayAnswerHelp(msg, 'resolved')) {
+  // Its answers are the catalogue's (On my way, Resolved): the backstage team answers anyone's, and a seat On stage
+  // marks only its own request resolved, as the server refuses otherwise (owner answer B1).
+  const answers = AGM.catalog.shown('msg', F, msg).filter((e) => e.id === 'msg.helpRespond' || e.id === 'msg.helpResolve');
+  if (answers.length) {
     const row = document.createElement('div');
     row.className = 'help-actions';
-    const act = (label, state) => {
+    const held = heldAnswers.get('help|' + msg.id);
+    for (const e of answers) {
+      const state = e.id === 'msg.helpRespond' ? 'coming' : 'resolved';
       const b = document.createElement('button');
-      b.type = 'button'; b.className = 'btn small' + (state === 'coming' ? ' primary' : ''); b.textContent = label;
-      const held = heldAnswers.get('help|' + msg.id);
-      if (held && held.option === state) { b.textContent = '◷ ' + label; b.dataset.state = 'sending'; }
-      b.onclick = () => AGM.outbox.hold('help:respond', { code: ROOM, messageId: msg.id, state });
+      b.type = 'button'; b.className = 'btn small' + (state === 'coming' ? ' primary' : ''); b.dataset.action = e.id;
+      b.textContent = (held && held.option === state ? '◷ ' : '') + e.label;
+      if (held && held.option === state) b.dataset.state = 'sending';
       row.appendChild(b);
-    };
-    if (h.state === 'open' && mayAnswerHelp(msg, 'coming')) act('On my way', 'coming');
-    act('Resolved', 'resolved');
+    }
     wrap.appendChild(row);
   }
   return wrap;
@@ -945,13 +1260,11 @@ function renderFileBody(msg) {
     c.textContent = msg.caption;
     wrap.appendChild(c);
   }
-  if (HAS_STAGE) {
+  // A tap on the file is its Look (the catalogue's msg.look), where this seat has one.
+  if (AGM.catalog.shown('msg', F, msg).some((e) => e.id === 'msg.look')) {
     wrap.classList.add('clickable');
-    wrap.title = 'Show on stage panel';
-    wrap.addEventListener('click', (e) => {
-      e.preventDefault();
-      openDocInPanel(msg);
-    });
+    wrap.title = 'Look: open it in the panel';
+    wrap.dataset.action = 'msg.look';
   }
   return wrap;
 }
@@ -965,29 +1278,27 @@ function renderActionBody(msg) {
   wrap.appendChild(q);
   const btnRow = document.createElement('div');
   btnRow.className = 'action-buttons';
+  // Its answers are the catalogue's msg.answer, each with its value; Answer in words… is msg.answerWords. A seat that may
+  // not answer sees them and the tally, and answers nothing.
+  const shown = new Set(AGM.catalog.shown('msg', F, msg).map((e) => e.id));
   msg.options.forEach((opt, i) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'btn action-btn';
-    b.dataset.idx = String(i);
+    b.dataset.action = 'msg.answer';
+    b.dataset.value = String(i);
     b.textContent = opt;
     const held = heldAnswers.get('answer|' + msg.id);
     if (held && held.option === i) { b.textContent = '◷ ' + opt; b.dataset.state = 'sending'; }
-    b.disabled = readOnly();
-    b.onclick = () => answerPrompt(msg.id, i);
+    b.disabled = !shown.has('msg.answer');
     btnRow.appendChild(b);
   });
-  // Both board and research can free-text reply to an action prompt.
-  // Observers are read-only: they see the options and the tally, and answer nothing.
-  if (HAS_STAGE && !readOnly()) {
+  if (shown.has('msg.answerWords')) {
     const other = document.createElement('button');
     other.type = 'button';
-    other.className = 'btn ghost small reply-text-btn';
-    other.textContent = 'Reply with text';
-    other.onclick = () => {
-      const note = prompt('Quick reply to the backstage team:');
-      if (note && note.trim()) answerPrompt(msg.id, -1, note.trim());
-    };
+    other.className = 'btn ghost small answer-words-btn';
+    other.dataset.action = 'msg.answerWords';
+    other.textContent = AGM.catalog.entry('msg', 'msg.answerWords').label;
     btnRow.appendChild(other);
   }
   wrap.appendChild(btnRow);
@@ -1009,8 +1320,9 @@ function updateActionResponses(messageId, responses) {
   els.forEach((el) => renderResponses(el, { responses, options: msg?.options || [] }));
   const node = messagesById.get(messageId);
   if (node) node.classList.add('answered');
-  // Re-clone any pinned copy so the .answered class etc. are mirrored too.
-  if (node && node.dataset.pinned === '1') refreshPinned();
+  // Its pinned copy says the same, and so does its open menu (Answer ▸'s choice).
+  if (node && node.dataset.pinned === '1') refreshPinned(messageId);
+  if (openOn && openOn.kind === 'msg' && openOn.id === messageId) refreshOpenMenu();
 }
 
 // Classify an option label so its pill can be colour-coded.
@@ -1050,83 +1362,59 @@ function renderResponses(container, msg) {
   }
 }
 
-/** The pin says whether the message is pinned in its state and its name, not by being brighter. */
-function drawPinButton(node, pinned) {
-  const b = node.querySelector('.pin-btn');
-  if (!b) return;
-  b.setAttribute('aria-pressed', pinned ? 'true' : 'false');
-  b.title = pinned ? 'Unpin' : 'Pin';
-}
 function setMessagePinned(messageId, pinned) {
-  const node = messagesById.get(messageId);
-  if (node) {
-    node.dataset.pinned = pinned ? '1' : '0';
-    node.classList.toggle('pinned', !!pinned);
-    drawPinButton(node, !!pinned);
-  }
   const data = findMessage(messageId);
   if (data) data.pinned = pinned;
+  const node = messagesById.get(messageId);
+  if (node && node.classList.contains('msg')) {
+    node.dataset.pinned = pinned ? '1' : '0';
+    node.classList.toggle('pinned', !!pinned);
+    node.querySelector('.pinned-mark').hidden = !pinned;
+    if (data) drawActs(node, data);
+  }
   refreshPinned();
   refreshDocPinnedList();
-  if (currentDocMsgId === messageId) syncPinButton();
+  if (currentDocMsgId === messageId) drawDocActs();
+  refreshOpenMenu();
 }
 
-function refreshPinned() {
+/**
+ * The pinned strip: each pinned message (text, prompts and help; files are in the panel's pinned list) drawn afresh from
+ * its record, as the feed draws it, so every act on it is the feed's, through the one delegated handler. A pinned prompt
+ * is hidden from the feed while it is pinned and answered here.
+ */
+/**
+ * The pinned strip: each pinned message drawn from its record, in the hall's order. A copy already drawn is kept and
+ * drawn again in place (only `onlyId`'s, when given), and moved only when its place changed, so a reaction or an answer
+ * elsewhere never takes the focus or an open menu's opener from it. An unpinned copy that held the focus gives it to
+ * the message in the feed.
+ */
+function refreshPinned(onlyId) {
   const strip = document.getElementById('pinnedStrip');
   const list = document.getElementById('pinnedList');
-  list.innerHTML = '';
-  let any = false;
-  // Pinned messages strip: text + action prompts only. Files live in the
-  // "On stage" panel's pinned files list, where the open-handler works.
-  for (const m of allMessages) {
-    if (!m.pinned) continue;
-    if (m.type === 'file' || m.type === 'system') continue;
-    const node = messagesById.get(m.id);
-    if (!node) continue;
-    any = true;
-    const clone = node.cloneNode(true);
-    clone.classList.add('pinned-copy');
-    clone.classList.remove('found');
-    const pb = clone.querySelector('.pin-btn');
-    if (pb) pb.onclick = () => AGM.outbox.now('pin', { messageId: m.id, pinned: false }, saidIfNot('Not unpinned.'));
-    const db = clone.querySelector('.del-btn');
-    if (db) db.remove();
-    clone.querySelectorAll('.action-btn').forEach((b) => {
-      const idx = parseInt(b.dataset.idx, 10);
-      b.onclick = () => answerPrompt(m.id, idx);
-    });
-    clone.querySelectorAll('.reply-text-btn').forEach((b) => {
-      b.onclick = () => {
-        const note = prompt('Quick reply to the backstage team:');
-        if (note && note.trim()) answerPrompt(m.id, -1, note.trim());
-      };
-    });
-    // Forward (↗), React (😊), and Reply (↩) buttons — re-bind
-    // since cloneNode(true) drops listeners. CLAUDE.md gotcha #9:
-    // any new interactive element added to messages must also be
-    // re-wired here.
-    const fb = clone.querySelector(".fwd-btn");
-    if (fb) {
-      fb.hidden = !offersForward(m);
-      fb.onclick = (e) => { e.stopPropagation(); offerForward(fb, m.id); };
+  const have = new Map([...list.querySelectorAll(':scope > .msg[data-id]')].map((n) => [n.dataset.id, n]));
+  const want = allMessages.filter((m) => m.pinned && m.type !== 'file' && m.type !== 'system' && messagesById.has(m.id));
+  let prev = null;
+  for (const m of want) {
+    let copy = have.get(m.id);
+    if (copy) {
+      have.delete(m.id);
+      if (!onlyId || onlyId === m.id) rerenderMessage(copy, m);
+    } else {
+      copy = renderMessage(m);
+      copy.classList.add('pinned-copy');
     }
-    const rxb = clone.querySelector(".react-btn");
-    if (rxb) {
-      rxb.onclick = (e) => {
-        e.stopPropagation();
-        showReactionPicker(rxb, m.id);
-      };
-    }
-    const rpb = clone.querySelector(".reply-btn");
-    if (rpb) {
-      rpb.onclick = () => beginReply(m);
-    }
-    // Re-render the reactions row so existing rx-pill toggle handlers
-    // are recreated (cloneNode drops those onclicks too).
-    renderReactions(clone, m.reactions || []);
-    list.appendChild(clone);
+    const at = prev ? prev.nextElementSibling : list.firstElementChild;
+    if (at !== copy) list.insertBefore(copy, at);
+    prev = copy;
   }
-  strip.hidden = !any;
+  for (const [id, gone] of have) {
+    const held = gone.contains(document.activeElement);
+    gone.remove();
+    const there = held && messagesById.get(id);
+    if (there && there.isConnected) there.focus();
+  }
+  strip.hidden = !want.length;
 }
 
 // ---------------- Doc panel ----------------
@@ -1138,8 +1426,6 @@ const docDisplay = document.getElementById('docDisplay');
 const docTitleEl = document.getElementById('docTitle');
 const docCaptionEl = document.getElementById('docCaption');
 const docActions = document.getElementById('docActions');
-const pinDocBtn = document.getElementById('pinDocBtn');
-const dismissDocBtn = document.getElementById('dismissDocBtn');
 const docPinnedList = document.getElementById('docPinnedList');
 const docPinnedSection = document.getElementById('docPinnedSection');
 const docPinnedCount = document.getElementById('docPinnedCount');
@@ -1171,7 +1457,7 @@ function openDocInPanel(msg, opts) {
   }
   docActions.hidden = false;
   if (!_applyingRemote && !opts.fromPush) pushUserState('doc', { messageId: msg.id });
-  syncPinButton();
+  drawDocActs();
 }
 
 function fileExt(name) {
@@ -1426,6 +1712,7 @@ async function renderPdfInline(url, host, msg) {
 
 function dismissDoc() {
   currentDocMsgId = null;
+  drawDocActs();
   docForAi.id = null; docForAi.name = ''; docForAi.text = '';
   docPanel.dataset.state = 'empty';
   docPanel.classList.remove('priority');
@@ -1438,54 +1725,88 @@ function dismissDoc() {
   docActions.hidden = true;
 }
 
-function syncPinButton() {
-  if (!currentDocMsgId) return;
-  const m = findMessage(currentDocMsgId);
-  const pinned = !!(m && m.pinned);
-  pinDocBtn.dataset.pinned = pinned ? '1' : '0';
-  pinDocBtn.textContent = pinned ? '📌 Unpin' : '📌 Pin';
+// ---------------- The panel's files: the file open in it (the Preview's header) and its pinned list (kind `file`) ----------------
+/** A file as the catalogue sees it: its message's record, and where it is drawn ('preview' or 'list'). */
+const fileObject = (id, where) => { const m = findMessage(id); return m && m.type === 'file' ? Object.assign({}, m, { where }) : null; };
+const docActs = document.getElementById('docActs');
+/** The open file's bar: its inline acts with their words (📌 Pin, Close) and its ⋯. */
+function drawDocActs() {
+  const o = currentDocMsgId ? fileObject(currentDocMsgId, 'preview') : null;
+  if (!o) { docActs.textContent = ''; return; }
+  docActions.dataset.fileId = o.id;
+  drawBar(docActs, 'file', o, { words: true, more: 'More for this file' });
 }
 
 function refreshDocPinnedList() {
-  docPinnedList.innerHTML = '';
+  docPinnedList.textContent = '';
   let count = 0;
   for (const m of allMessages) {
     if (m.type !== 'file' || !m.pinned) continue;
     count++;
     const li = document.createElement('li');
-    const open = document.createElement('button');
-    open.type = 'button';
-    open.className = 'pinned-item';
-    open.title = 'Show on stage panel';
-    const ico = (m.mime || '').startsWith('image/') ? '🖼' :
-                (m.mime === 'application/pdf' ? '📕' : '📄');
-    open.innerHTML =
-      `<span class="ico">${escapeHtml(ico)}</span>` +
-      `<span class="name">${escapeHtml(m.filename)}</span>`;
-    open.onclick = () => openDocInPanel(m);
-    const unpin = document.createElement('button');
-    unpin.type = 'button';
-    unpin.className = 'unpin';
-    unpin.title = 'Unpin';
-    unpin.textContent = '×';
-    unpin.onclick = (e) => {
-      e.stopPropagation();
-      AGM.outbox.now('pin', { messageId: m.id, pinned: false }, saidIfNot('Not unpinned.'));
-    };
-    li.appendChild(open);
-    li.appendChild(unpin);
+    li.className = 'file-entry';
+    li.dataset.fileId = m.id;
+    li.tabIndex = -1;
+    // The name opens it where this seat may look (the catalogue's file.look, also the bar's 👁).
+    const name = document.createElement('span');
+    name.className = 'pinned-item';
+    const ico = (m.mime || '').startsWith('image/') ? '🖼' : (m.mime === 'application/pdf' ? '📕' : '📄');
+    name.innerHTML = `<span class="ico" aria-hidden="true">${escapeHtml(ico)}</span><span class="name">${escapeHtml(m.filename)}</span>`;
+    const o = fileObject(m.id, 'list');
+    if (AGM.catalog.shown('file', F, o).some((e) => e.id === 'file.look')) name.dataset.action = 'file.look';
+    const bar = document.createElement('span');
+    bar.className = 'file-acts';
+    li.append(name, bar);
+    drawBar(bar, 'file', o, { more: 'More for ' + (m.filename || 'this file'), keysOn: li });
     docPinnedList.appendChild(li);
   }
   docPinnedCount.textContent = count > 0 ? `(${count})` : '';
   docPinnedSection.hidden = count === 0;
 }
 
-pinDocBtn?.addEventListener('click', () => {
-  if (!currentDocMsgId) return;
-  const isPinned = pinDocBtn.dataset.pinned === '1';
-  AGM.outbox.now('pin', { messageId: currentDocMsgId, pinned: !isPinned }, saidIfNot(isPinned ? 'Not unpinned.' : 'Not pinned.'));
+// A file's doors: a click on an act or its ⋯, right-click and Shift+F10 on the open file's header or an entry of the list.
+function fileDoor(t) {
+  const li = t.closest('#docPinnedList .file-entry');
+  const where = li ? 'list' : t.closest('#docActions, .doc-panel-header') && currentDocMsgId ? 'preview' : '';
+  if (!where) return null;
+  const id = li ? li.dataset.fileId : currentDocMsgId;
+  const holder = li || docActions;
+  const more = holder.querySelector('.obj-more');
+  return {
+    el: holder, more, where, id,
+    open: (at) => openObjectMenu('file', () => fileObject(id, where), { node: holder, more, at, opener: holder.contains(document.activeElement) ? document.activeElement : more, label: 'File actions', header: (o) => o.filename || 'A file' }),
+  };
+}
+docPanel.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-action^="file."], [data-more]');
+  const door = el && fileDoor(el);
+  if (!door) return;
+  e.preventDefault();
+  if (el.dataset.more) {
+    if (openOn && openOn.kind === 'file' && openOn.id === door.id) { AGM.menu.close(); return; }
+    openObjectMenu('file', () => fileObject(door.id, door.where), { node: door.el, more: el, opener: el, label: 'File actions', header: (o) => o.filename || 'A file' });
+    return;
+  }
+  const o = fileObject(door.id, door.where);
+  if (o) act('file', el.dataset.action, o, { anchor: door.more || el, node: door.el, opener: el });
 });
-dismissDocBtn?.addEventListener('click', dismissDoc);
+docPanel.addEventListener('keydown', (e) => {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !e.target.matches || !e.target.matches('#docPinnedList .file-entry')) return;
+  const door = fileDoor(e.target);
+  const o = door && fileObject(door.id, door.where);
+  const entry = o && AGM.catalog.byKey('file', F, o, e.key);
+  if (!entry) return;
+  e.preventDefault();
+  act('file', entry.id, o, { anchor: door.more || door.el, node: door.el, opener: door.el });
+});
+AGM.menu.door(docPanel, fileDoor);
+Object.assign(RUN, {
+  'file.screens': (o) => Screens.offer(o),
+  'file.look': (o) => openDocInPanel(findMessage(o.id) || o),
+  'file.download': (o) => download(o),
+  'file.pin': (o) => pinWithUndo(o),
+  'file.close': () => dismissDoc(),
+});
 
 // ---------------- Stage panel collapse/expand ----------------
 const stageToggleBtn = document.getElementById('stageToggleBtn');
@@ -1722,10 +2043,19 @@ function aiReady(where) {
 }
 document.getElementById('aiDraftBtn')?.addEventListener('click', () => {
   if (!aiReady('draft')) return;
-  const btn = document.getElementById('aiDraftBtn');
   const replying = replyState ? findMessage(replyState.id) : null;
   const lastBoard = [...allMessages].reverse().find((m) => m.from && m.from.role === 'board' && (m.text || m.type === 'action'));
-  const q = replying || lastBoard;
+  draftAnswer(replying || lastBoard);
+});
+/**
+ * An AI draft of the answer to `q` (a Board question, or none), from the thread and the document on stage, in the
+ * composer. It is a read: it changes nothing on the server and nothing reaches the hall, so it is a plain emit, refused
+ * at once while the page is not connected (as the catalogue's `now` is), and answered when the AI has answered, which
+ * takes longer than the outbox's 5 s for an act on something.
+ */
+function draftAnswer(q) {
+  if (!socket.connected) { setAiHint(AGM.catalog.WORDS.offline, true); return; }
+  const btn = document.getElementById('aiDraftBtn');
   btn.disabled = true; btn.textContent = '✨ Drafting…';
   setAiHint('Claude is drafting from the thread' + (docForAi.text ? ' and “' + docForAi.name + '”' : '') + '…');
   socket.emit('ai:draft', {
@@ -1742,7 +2072,7 @@ document.getElementById('aiDraftBtn')?.addEventListener('click', () => {
     setAiHint('✨ Draft (' + res.confidence + ' confidence) — check it, edit it, then Send.' + (res.gaps && res.gaps.length ? ' Missing: ' + res.gaps.join('; ') : ''));
     textInput.focus();
   });
-});
+}
 textInput?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
@@ -1945,13 +2275,12 @@ const place = {
   touched: false,   // the person touched the page since the divider was put where it is
   divider: null,
 };
-/** A menu anchored to a message: while one is open the feed never moves under it. */
-const MENUS_ON_FEED = '#fwdMenu, #rxPicker';
 function nearEnd() {
   const line = parseFloat(getComputedStyle(feed).fontSize) * 1.5;
   return feed.scrollHeight - feed.scrollTop - feed.clientHeight <= line;
 }
-function readerAtEnd() { return (place.atEnd || nearEnd()) && !document.querySelector(MENUS_ON_FEED); }
+/** While a menu or an ask is open the feed never moves under it. */
+function readerAtEnd() { return (place.atEnd || nearEnd()) && !AGM.menu.isOpen() && !AGM.ask.isOpen(); }
 /** While a page draws what it missed (rejoin): the reader's place as read before the first, and whether to follow. */
 let catchUp = null;
 function scrollToBottom() {
@@ -2023,6 +2352,20 @@ feed.addEventListener('scroll', () => {
 }, { passive: true });
 newBelow.addEventListener('click', scrollToBottom);
 
+// What moved, said once per browser: the acts that left a message's own buttons are in its ⋯, and on its right-click and
+// Shift+F10. The support view is the admin's browser, which is not told.
+(function () {
+  const line = document.getElementById('movedLine');
+  let seen;
+  try { seen = localStorage.getItem('agm.moved') === '0.6.0'; } catch { seen = false; /* storage blocked: said on each open */ }
+  if (seen || ADMIN_VIEW) return;
+  line.hidden = false;
+  document.getElementById('movedOk').addEventListener('click', () => {
+    line.hidden = true;
+    try { localStorage.setItem('agm.moved', '0.6.0'); } catch { /* storage blocked: said again on the next open */ }
+  });
+})();
+
 // Admin support view banner
 if (ADMIN_VIEW) {
   document.body.classList.add('is-admin-view');
@@ -2056,62 +2399,6 @@ if (ADMIN_VIEW) {
   });
 }
 
-
-/** The forward picker: the server lists only the other halls this person is in that would take this message. */
-function offerForward(anchor, messageId) {
-  socket.emit('myRooms', { messageId }, (res) => {
-    if (!res || !res.ok) { alert('Could not check your other halls.'); return; }
-    if (!res.rooms.length) {
-      // A rule of this hall emptied the list: its words, not a hall to open (the person may have it open already).
-      if (typeof res.why === 'string' && res.why) { alert(res.why); return; }
-      const m = findMessage(messageId);
-      alert('To forward, open another hall where you may ' + (m && m.type === 'file' ? 'share files' : 'post') + ' (in another tab, as ' + NAME + ').');
-      return;
-    }
-    showForwardMenu(anchor, res.rooms, messageId);
-  });
-}
-
-function showForwardMenu(anchor, otherRooms, messageId) {
-  const old = document.getElementById('fwdMenu');
-  if (old) old.remove();
-  const menu = document.createElement('div');
-  menu.id = 'fwdMenu';
-  menu.className = 'fwd-menu';
-  menu.innerHTML = '<div class="fwd-menu-title">Forward to…</div>';
-  for (const r of otherRooms) {
-    const code = (typeof r === "string") ? r : (r && r.code) || "";
-    const name = (typeof r === "string") ? "" : (r && r.name) || "";
-    if (!code) continue;
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "fwd-menu-item";
-    if (name) {
-      item.innerHTML = "<span class=\"fwd-room-name\">" + escapeHtml(name) +
-        "</span><span class=\"fwd-room-code\">" + escapeHtml(code) + "</span>";
-    } else {
-      item.innerHTML = "<span class=\"fwd-room-code primary\">" + escapeHtml(code) + "</span>";
-    }
-    item.onclick = () => {
-      AGM.outbox.hold('forward', { messageId, targetRoom: code }, { tag: { forward: name ? name + ' (' + code + ')' : code } });
-      menu.remove();
-    };
-    menu.appendChild(item);
-  }
-  const rect = anchor.getBoundingClientRect();
-  menu.style.position = 'fixed';
-  menu.style.top = (rect.bottom + 4) + 'px';
-  menu.style.left = Math.min(rect.left, window.innerWidth - 260) + 'px';
-  document.body.appendChild(menu);
-  setTimeout(() => {
-    document.addEventListener('click', function outside(e) {
-      if (!menu.contains(e.target)) {
-        menu.remove();
-        document.removeEventListener('click', outside);
-      }
-    });
-  }, 0);
-}
 
 function flashStatus(text) {
   const t = document.createElement('div');
@@ -2226,53 +2513,20 @@ function renderReactions(node, reactions) {
     if (r.uid === myUid) cur.mine = true;
     counts.set(r.emoji, cur);
   }
-  const id = node.dataset.id;
+  // Each pill is the catalogue's msg.react with its emoji: a tap adds this person's or takes it away.
   for (const [emoji, data] of counts) {
     const pill = document.createElement('button');
     pill.type = 'button';
     pill.className = 'rx-pill' + (data.mine ? ' mine' : '');
     pill.title = data.names.join(', ');
     pill.innerHTML = '<span>' + escapeHtml(emoji) + '</span> <small>' + escapeHtml(String(data.n)) + '</small>';
-    pill.disabled = readOnly();
-    pill.onclick = () => AGM.outbox.now('react', { messageId: id, emoji, on: !data.mine }, saidIfNot('Not changed.'));
+    pill.dataset.action = 'msg.react';
+    pill.dataset.value = emoji;
+    pill.setAttribute('aria-pressed', data.mine ? 'true' : 'false');
+    pill.disabled = !F.post;
     rx.appendChild(pill);
   }
   rx.hidden = false;
-}
-
-const COMMON_REACTIONS = ['👍','👎','❤️','🎉','🤔','👀','😂','🔥'];
-function showReactionPicker(anchor, messageId) {
-  const old = document.getElementById('rxPicker');
-  if (old) old.remove();
-  const menu = document.createElement('div');
-  menu.id = 'rxPicker';
-  menu.className = 'rx-picker';
-  for (const e of COMMON_REACTIONS) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = e;
-    b.title = 'React with ' + e;
-    b.onclick = () => {
-      const m = findMessage(messageId);
-      const mine = !!m && (m.reactions || []).some((r) => r.uid === MY_UID && r.emoji === e);
-      AGM.outbox.now('react', { messageId, emoji: e, on: !mine }, saidIfNot('Not changed.'));
-      menu.remove();
-    };
-    menu.appendChild(b);
-  }
-  const rect = anchor.getBoundingClientRect();
-  menu.style.position = 'fixed';
-  menu.style.top = (rect.bottom + 4) + 'px';
-  menu.style.left = Math.min(rect.left, window.innerWidth - 260) + 'px';
-  document.body.appendChild(menu);
-  setTimeout(() => {
-    document.addEventListener('click', function outside(e) {
-      if (!menu.contains(e.target)) {
-        menu.remove();
-        document.removeEventListener('click', outside);
-      }
-    });
-  }, 0);
 }
 
 // ---------- Reply / threading ----------
@@ -2539,11 +2793,12 @@ const Screens = (function () {
       CAN_SCREENS = true;
       $('screensBtn').hidden = false;
       list = r.displays; manage = r.manage; holding = r.holding || '';
-      if (first) { for (const d of list) ticked.add(d.id); refreshScreenButtons(); }
+      if (first) for (const d of list) ticked.add(d.id);
+      // The screens this page may drive are a fact of the catalogue: ⧉ on a message, and each screen's own acts.
+      factsChanged({ screens: { manage: !!r.manage, displays: list } });
       render();
     });
   }
-  function refreshScreenButtons() { for (const [id, node] of messagesById) { const m = findMessage(id); if (m && m.type !== 'system') rerenderMessage(node, m); } }
 
   function render() {
     const ul = $('screenList');
@@ -2554,6 +2809,8 @@ const Screens = (function () {
       const li = document.createElement('li');
       li.className = 'screen-item';
       li.dataset.state = d.state;
+      li.dataset.screenId = d.id;
+      li.tabIndex = -1;
       const pick = document.createElement('input');
       pick.type = 'checkbox'; pick.checked = ticked.has(d.id); pick.setAttribute('aria-label', 'Show on ' + d.name);
       pick.onchange = () => { if (pick.checked) ticked.add(d.id); else ticked.delete(d.id); syncAll(); };
@@ -2563,16 +2820,9 @@ const Screens = (function () {
       const head = document.createElement('div'); head.className = 'screen-line';
       head.append(pick, name, st);
       if (refused.has(d.id)) { const no = document.createElement('span'); no.className = 'screen-refused'; no.textContent = '✕ the last take did not reach it: ' + refused.get(d.id); head.append(no); }
+      // Identify on the row, and the rest of the screen's acts (the catalogue's kind `screen`) in its ⋯.
       const acts = document.createElement('div'); acts.className = 'screen-acts';
-      acts.appendChild(btn('Identify', () => AGM.outbox.now('display:identify', { id: d.id }, (r) => notify(r && r.ok ? (r.screens ? 'Showing its name on ' + (r.screens > 1 ? 'its ' + r.screens + ' screens' : 'the screen') + ' for 6 seconds.' : 'No screen has this link open.') : (r && r.error) || 'Not sent.', !(r && r.ok)))));
-      if (manage) {
-        acts.appendChild(btn('Copy link', () => copy(location.origin + d.path)));
-        const open = document.createElement('a'); open.className = 'btn ghost small'; open.href = d.path; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open';
-        acts.appendChild(open);
-        acts.appendChild(btn('Rename', () => { const n = prompt('Name this screen', d.name); if (n) AGM.outbox.now('display:update', { id: d.id, name: n }, done('Renamed.')); }));
-        acts.appendChild(btn('New link', () => { if (confirm('Give ' + d.name + ' a new link? The old one stops at once, on every screen that has it.')) AGM.outbox.now('display:rotate', { id: d.id }, (r) => { if (r && r.ok) { copy(location.origin + r.path); notify('New link copied — open it on the screen.'); } else notify((r && r.error) || 'Not changed.', true); }); }));
-        acts.appendChild(btn('Remove', () => { if (confirm('Remove ' + d.name + '? Its link stops working.')) AGM.outbox.now('display:remove', { id: d.id }, done('Removed.')); }));
-      }
+      drawBar(acts, 'screen', d, { words: true, more: 'More for ' + d.name });
       li.append(head, what, acts);
       ul.appendChild(li);
     }
@@ -2587,13 +2837,52 @@ const Screens = (function () {
     $('holdingName').textContent = holding ? (cur ? cur.filename : 'an image') : 'none';
     syncAll();
     renderPending();
+    if ((openOn && openOn.kind === 'screen') || (askOn && askOn.kind === 'screen')) refreshOpenMenu();
   }
   function syncAll() { $('screensAll').checked = list.length > 0 && list.every((d) => ticked.has(d.id)); }
-  function btn(label, onclick) { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small'; b.textContent = label; b.onclick = onclick; return b; }
   function done(words) { return (r) => notify(r && r.ok ? words : (r && r.error) || 'Not changed.', !(r && r.ok)); }
-  async function copy(text) {
-    try { await navigator.clipboard.writeText(text); notify('Link copied.'); } catch { prompt('Copy this screen link', text); }
+  const copy = (text, anchor) => copyText(text, 'Link copied.', anchor);
+  /** The screens' rows drawn again with the page's facts (its connection, its rights), while the dialog shows them. */
+  function redraw() { if (list.length) render(); }
+
+  // A screen's doors: its row's Identify and ⋯, right-click and Shift+F10 on the row (inside the dialog, where the menu
+  // and its asks are mounted, so the dialog stays open under them).
+  const screenOf = (id) => list.find((d) => d.id === id) || null;
+  function screenDoor(t) {
+    const li = t.closest('.screen-item[data-screen-id]');
+    if (!li) return null;
+    const more = li.querySelector('.obj-more');
+    const id = li.dataset.screenId;
+    return { el: li, more, id, open: (at) => openObjectMenu('screen', () => screenOf(id), { node: li, more, at, opener: li.contains(document.activeElement) ? document.activeElement : more, label: 'Screen actions', header: (d) => d.name + ' · ' + d.words }) };
   }
+  $('screenList').addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action^="screen."], [data-more]');
+    const door = el && screenDoor(el);
+    if (!door) return;
+    e.preventDefault();
+    if (el.dataset.more) {
+      if (openOn && openOn.kind === 'screen' && openOn.id === door.id) { AGM.menu.close(); return; }
+      openObjectMenu('screen', () => screenOf(door.id), { node: door.el, more: el, opener: el, label: 'Screen actions', header: (d) => d.name + ' · ' + d.words });
+      return;
+    }
+    const d = screenOf(door.id);
+    if (d) act('screen', el.dataset.action, d, { anchor: door.more || el, node: door.el, opener: el });
+  });
+  AGM.menu.door($('screenList'), screenDoor);
+  Object.assign(RUN, {
+    'screen.identify': (d) => AGM.outbox.now('display:identify', { id: d.id }, (r) => notify(r && r.ok ? (r.screens ? 'Showing its name on ' + (r.screens > 1 ? 'its ' + r.screens + ' screens' : 'the screen') + ' for 6 seconds.' : 'No screen has this link open.') : (r && r.error) || 'Not sent.', !(r && r.ok))),
+    'screen.only': (d) => { ticked.clear(); ticked.add(d.id); render(); },
+    'screen.copy': (d, { anchor }) => copy(location.origin + d.path, anchor),
+    'screen.open': (d) => { window.open(d.path, '_blank', 'noopener,noreferrer'); },
+    'screen.rename': (d, { values }) => {
+      const name = values && values.name ? values.name.trim() : '';
+      if (name && name !== d.name) AGM.outbox.now('display:update', { id: d.id, name }, done('Renamed.'));
+    },
+    'screen.rotate': (d, { anchor }) => AGM.outbox.now('display:rotate', { id: d.id }, (r) => {
+      if (r && r.ok) { copyText(location.origin + r.path, 'New link copied — open it on the screen.', anchor); } else notify((r && r.error) || 'Not changed.', true);
+    }),
+    'screen.remove': (d) => AGM.outbox.now('display:remove', { id: d.id }, done('Removed.')),
+  });
 
   /**
    * Put a content on every ticked screen, in one request however many are ticked; say how many took it (each confirms on
@@ -2663,8 +2952,7 @@ const Screens = (function () {
       if (!r || !r.ok) { notify((r && r.error) || 'Not added.', true); return; }
       $('newScreenName').value = '';
       ticked.add(r.display.id);
-      copy(location.origin + r.display.path);
-      notify(r.display.name + ' added — its link is copied: open it on that screen.');
+      copyText(location.origin + r.display.path, r.display.name + ' added — its link is copied: open it on that screen.', $('addScreenBtn'));
     });
   });
   $('holdingPick').addEventListener('change', () => { holdingChoice = $('holdingPick').value === holding ? null : $('holdingPick').value; });
@@ -2673,7 +2961,7 @@ const Screens = (function () {
     AGM.outbox.now('display:hallHolding', { code: ROOM, image }, (r) => { if (r && r.ok) { holding = image; holdingChoice = null; } done('Holding image saved.')(r); });
   });
   socket.on('displays:changed', ({ code } = {}) => { if (code === ROOM && CAN_SCREENS) load(); });
-  return { load, offer };
+  return { load, offer, redraw, of: screenOf };
 })();
 
 // ---------------- Send to Stagewatch: where a message goes — sent now (the speaker's screen), or asked of the operator ----------------

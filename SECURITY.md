@@ -72,6 +72,12 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   seat, role and rights are decided as at any join, and the people list shows it.
 - One person's pages relay to each other only the settings a page applies, each read by its type and rebuilt; the
   admin's support view acts only on what the admin page that frames it sends (its parent, from this origin).
+- What a hall page offers on a message, a file or a screen is drawn from one catalogue of acts (`app/public/catalog.js`),
+  each shown by rights that match a refusal the server words: hiding an act is never the check. A test sends every act
+  to each seat it is not offered, on a real server, and each is refused with nothing changed. The admin's support view
+  draws the person's acts and runs none of them. No act there opens a native dialog, which pauses the page: a
+  `confirm()` left open past the server's ping timeout dropped the page's socket and told the hall its person had left.
+  The join's `forwardable` says only whether Send to ▸ would list a hall, by the rule it lists halls by, never which.
 - The server listens only for the verbs its pages send, and sends only events a page hears: a test fails the build on
   a verb no page sends, an event no page hears (each exception named with its reason) and an event named in a way it
   cannot read. `typing`, which took a word from anyone who may post and sent it on to the whole hall, and which no page
