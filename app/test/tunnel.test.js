@@ -14,6 +14,8 @@ const path = require('path');
 const WebSocket = require('ws');
 const { io } = require('socket.io-client');
 const { TOKEN, startServer, stopServer, api, connect, emit, wait, until } = require('./helpers');
+const readings = require('../lib/peaks');
+const tunnelend = require('../lib/tunnelend');
 
 const SMALL = { AGM_TUNNEL_MAX: '4', AGM_TUNNEL_JOIN_MS: '300' };
 let ray = 0;
@@ -87,7 +89,7 @@ test('the tunnel\'s places: in all and per network, worded and counted; a venue 
     sockets.push(venue.s);
     assert.equal(venue.err, undefined, 'the venue never waits for the tunnel');
     const h = await health(base);
-    assert.deepEqual(h.tunnel, { places: 4, max: 4, share: 2, networks: 4, refused: { rate: 0, share: 0, full: 1, idle: 0, wrongCode: 0 } });
+    assert.deepEqual(h.tunnel, { places: 4, max: 4, share: 2, networks: 4, refused: { rate: 0, share: 0, full: 1, idle: 0, wrongCode: 0 }, until: null });
     assert.deepEqual(h.refused, { venue: { rate: 0 } });
     assert.deepEqual([h.tunnelSockets, h.maxSocketsPerAddress.tunnel], [4, 1], 'the tunnel\'s sockets are the places\' sockets');
     assert.ok(!JSON.stringify(h).includes('203.0.113.'), 'health names no address');
@@ -231,11 +233,11 @@ test('today\'s refusals through the tunnel outlive a restart: the card\'s count 
 
 /**
  * A local server standing in for the link (Cloudflare, then cloudflared, back to AGMessage): it hands each request on as
- * cloudflared does, from loopback with Cloudflare's headers, and counts them. `mode`: 'on', 'off' (a link that does not
- * answer) or 'slow' (each answer 1.5 s late). With a server under test whose cloudflared it stands in for (the preload).
+ * cloudflared does, from loopback with Cloudflare's headers, to the server `target` names, and counts them. `mode`: 'on',
+ * 'off' (a link that does not answer) or 'slow' (each answer 1.5 s late).
  */
-async function linkServer(t, env = {}) {
-  const link = { asked: [], mode: 'on', target: '' };
+async function standInLink(t) {
+  const link = { asked: [], mode: 'on', target: '', port: 0 };
   const standIn = http.createServer((req, res) => {
     link.asked.push(req.url);
     if (link.mode === 'off') { res.writeHead(502); res.end('Bad gateway'); return; }
@@ -245,17 +247,30 @@ async function linkServer(t, env = {}) {
     if (link.mode === 'slow') setTimeout(pass, 1500); else pass();
   });
   await new Promise((resolve) => { standIn.listen(0, '127.0.0.1', resolve); });
-  const preload = '--require "' + path.join(__dirname, 'tunnel-preload.js').split(path.sep).join('/') + '"';
-  const srv = await startServer({ NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '), AGM_TEST_TUNNEL: 'http://127.0.0.1:' + standIn.address().port, ...env });
+  link.port = standIn.address().port;
+  t.after(() => { standIn.close(); });
+  return link;
+}
+/** The preloads a server under test runs with: its cloudflared stood in for (and `more`, each a file of test/). */
+const preloads = (...more) => [process.env.NODE_OPTIONS, ...['tunnel-preload.js', ...more].map((f) => '--require "' + path.join(__dirname, f).split(path.sep).join('/') + '"')].filter(Boolean).join(' ');
+/**
+ * A server under test whose cloudflared and link are stood in for (`link`, which then hands requests on to it), with the
+ * admin's socket hearing tunnel:status: {srv, ctl, heard}. Stopped when the test ends, if it is still running.
+ */
+async function serverWithLink(t, link, env = {}) {
+  const srv = await startServer({ NODE_OPTIONS: preloads(), AGM_TEST_TUNNEL: 'http://127.0.0.1:' + link.port, ...env });
   link.target = srv.base;
-  const sockets = [];
-  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); standIn.close(); });
   const login = await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN });
   const ctl = await connect(srv.base, login.cookie);
-  sockets.push(ctl);
+  t.after(async () => { ctl.close(); await stopServer(srv.child); });
   const heard = [];
   ctl.on('tunnel:status', (st) => heard.push(st));
-  return { link, srv, ctl, heard };
+  return { srv, ctl, heard };
+}
+/** A link stood in for and a server under test on it: {link, srv, ctl, heard}. */
+async function linkServer(t, env = {}) {
+  const link = await standInLink(t);
+  return { link, ...(await serverWithLink(t, link, env)) };
 }
 const ADDRESS = /^https:\/\/agm-test-link-\d+\.trycloudflare\.com$/;
 
@@ -263,11 +278,11 @@ test('the internet link is checked from the laptop when it is up, and again only
   const { link, ctl, heard } = await linkServer(t);
   const { asked } = link;
 
-  assert.deepEqual(await ask(ctl, 'admin:tunnelStatus'), { ok: true, running: false, url: null, error: null, checking: false, check: null }, 'off: no check');
+  assert.deepEqual(await ask(ctl, 'admin:tunnelStatus'), { ok: true, running: false, url: null, error: null, checking: false, check: null, until: null, untilWords: '', untilClock: '', again: null, againWords: '', notKept: '' }, 'off: no check, no end');
   assert.equal((await ask(ctl, 'admin:tunnelStart')).ok, true);
   await until(() => heard.some((s) => s.check), 15_000, 'the check on tunnel:status');
   const done = heard.find((s) => s.check);
-  assert.deepEqual(Object.keys(done), ['running', 'url', 'error', 'checking', 'check'], 'check appended at the end');
+  assert.deepEqual(Object.keys(done), ['running', 'url', 'error', 'checking', 'check', 'until', 'untilWords', 'untilClock', 'again', 'againWords', 'notKept'], 'check appended, then the end');
   assert.match(done.url, ADDRESS);
   const c = done.check;
   assert.deepEqual(Object.keys(c), ['at', 'ok', 'p50Ms', 'maxMs', 'words']);
@@ -331,4 +346,276 @@ test('a cloudflared that never says its connection is registered still has its l
   assert.ok(Date.now() - began >= 1400, 'at the wait\'s end: ' + (Date.now() - began) + ' ms');
   const done = heard.find((s) => s.check);
   assert.deepEqual([done.check.ok, done.checking, link.asked.length], [true, false, 5]);
+});
+
+// ---------------------------------------------------------------- the tunnel's end, kept across a restart
+/**
+ * A time of day about `hours` from now by this laptop's clock ("HH:MM") and the end it names (`at`): the first hour on
+ * whose wall minute no change of the clocks falls twice, so the end the server reads from it is the moment the test means,
+ * and which is not `avoid` (the end already kept, which naming again would not move).
+ */
+function timeAbout(hours, avoid = null) {
+  const now = Date.now();
+  for (let h = hours; h < hours + 4; h++) {
+    const at = new Date(now + h * 3600_000).setSeconds(0, 0);
+    const hm = tunnelend.clockOf(at);
+    if (tunnelend.endAt(hm, now) === at && at !== avoid) return { hm, at };
+  }
+  throw new Error('no time of day near ' + hours + ' h names one moment');
+}
+/** The audit log's rows of the internet link in the data folder `s` runs on, oldest first: [action, the actor's kind, words]. */
+const linkRows = async (s) => fs.readFileSync(path.join(s.srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  .filter((e) => e.action.startsWith('tunnel.')).map((e) => [e.action, e.actor.t, e.words]);
+/** "This laptop"'s internet link row: [words, mark]. */
+const linkRow = async (ctl) => { const r = (await emit(ctl, 'admin:laptop', {})).laptop.facts.find((x) => x.id === 'tunnel'); return [r.words, r.mark]; };
+/** One of two words, read before and after a call (a midnight between them changes "tomorrow" to "today"). */
+const eitherOf = (f, before) => [f(before), f(Date.now())];
+
+test('the tunnel\'s end, read by type: inside it, past it, nothing kept, or one no act sets; Turn on\'s end an hour or more away; a time of day is its next minute; words by the laptop\'s clock', () => {
+  const now = new Date(2026, 10, 2, 22, 15, 30).getTime();
+  assert.deepEqual(tunnelend.keptEnd(now + 60_000, now), { on: true, until: now + 60_000, why: '' });
+  assert.deepEqual(tunnelend.keptEnd(now, now), { on: false, until: now, why: 'past' }, 'an end that has come is past');
+  assert.deepEqual(tunnelend.keptEnd(now - 1, now), { on: false, until: now - 1, why: 'past' });
+  assert.deepEqual([undefined, null].map((v) => tunnelend.keptEnd(v, now)), [{ on: false, until: null, why: 'none' }, { on: false, until: null, why: 'none' }]);
+  // Further ahead than any act sets one (a day, the hour a default end adds and the hour a change of the clocks adds), or
+  // not a time: never a tunnel.
+  assert.equal(tunnelend.MAX_AHEAD_MS, 26 * 3600_000);
+  assert.deepEqual(tunnelend.keptEnd(now + tunnelend.MAX_AHEAD_MS, now).on, true);
+  for (const v of [now + tunnelend.MAX_AHEAD_MS + 1, String(now + 60_000), NaN, Infinity, {}, [now + 60_000], true]) {
+    assert.deepEqual(tunnelend.keptEnd(v, now), { on: false, until: null, why: 'unread' }, JSON.stringify(v));
+  }
+  // Turn on's end: the end of the show day (the next 06:00), or the next day's when that is under an hour away, so a link
+  // turned on at 05:50 is not cut at 06:00; every one reads as an end a start turns the link on again inside.
+  const at = (d, h, m = 0, sec = 0) => new Date(2026, 10, d, h, m, sec).getTime();
+  assert.deepEqual([at(2, 22, 15), at(3, 0, 30), at(3, 4, 59), at(3, 5, 0), at(3, 5, 0, 1), at(3, 5, 50), at(3, 5, 59, 59), at(3, 6, 0), at(3, 12, 0)].map((t) => tunnelend.defaultEnd(t, readings.dayEnds)),
+    [at(3, 6), at(3, 6), at(3, 6), at(3, 6), at(4, 6), at(4, 6), at(4, 6), at(4, 6), at(4, 6)]);
+  for (const t of [at(3, 5, 0, 1), at(3, 6, 0), at(3, 23, 59)]) {
+    const end = tunnelend.defaultEnd(t, readings.dayEnds);
+    assert.ok(end - t >= tunnelend.MIN_AHEAD_MS && tunnelend.keptEnd(end, t).on, new Date(t).toString());
+  }
+  // A time of day: the next such minute after now, so one already past today (or this very minute) is tomorrow's.
+  assert.equal(tunnelend.endAt('23:30', now), new Date(2026, 10, 2, 23, 30).getTime());
+  assert.equal(tunnelend.endAt(' 6:05 ', now), new Date(2026, 10, 3, 6, 5).getTime());
+  assert.equal(tunnelend.endAt('22:15', now), new Date(2026, 10, 3, 22, 15).getTime(), 'this minute, its seconds gone: tomorrow\'s');
+  assert.equal(tunnelend.endAt('00:00', now), new Date(2026, 10, 3, 0, 0).getTime());
+  // The end kept, when it is the time of day given: a field filled with it and confirmed unchanged moves nothing, though
+  // today's such minute is still ahead (Turn on at 05:30 keeps tomorrow's 06:00).
+  const early = at(3, 5, 30);
+  assert.deepEqual([tunnelend.endAt('06:00', early, at(4, 6)), tunnelend.endAt('6:00', early, at(4, 6)), tunnelend.endAt('06:00', early), tunnelend.endAt('07:00', early, at(4, 6)), tunnelend.endAt('06:00', early, at(3, 5, 0))],
+    [at(4, 6), at(4, 6), at(3, 6), at(3, 7), at(3, 6)], 'the end kept; else the next such minute (a kept end already past names nothing)');
+  for (const v of ['24:00', '7:60', '23:5', '2330', '11pm', '', '23:30:00', null, 2330, { toString: () => '23:30' }]) assert.equal(tunnelend.endAt(v, now), null, JSON.stringify(String(v)));
+  // As a time field holds it, and in words, against now: today, tomorrow, yesterday, else its date.
+  assert.deepEqual([at(3, 6, 0), at(2, 23, 5), at(3, 0, 0)].map((t) => tunnelend.clockOf(t)), ['06:00', '23:05', '00:00']);
+  assert.deepEqual([new Date(2026, 10, 2, 23, 30), new Date(2026, 10, 3, 6, 0), new Date(2026, 10, 1, 21, 0), new Date(2026, 10, 5, 6, 0)].map((d) => tunnelend.clockWords(d.getTime(), now)),
+    ['23:30 today', '06:00 tomorrow', '21:00 yesterday', '06:00 on 2026-11-05']);
+});
+
+test('the tunnel is kept on until its end: a start inside it turns it on again with a new address, said to the admin and audited; turned off, it stays off', { timeout: 60_000 }, async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  const settingsOf = () => JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'));
+  const link = await standInLink(t);
+  const ENV = { AGM_DATA_DIR: dataDir };
+  let s = await serverWithLink(t, link, ENV);
+
+  // Turned on: until the end of the show day (the next 06:00 an hour or more away), kept in the settings, and said in its
+  // answer, on tunnel:status in the laptop's words and time of day, in health, in "This laptop" and in the audit log.
+  const before = Date.now();
+  const on = await ask(s.ctl, 'admin:tunnelStart');
+  assert.equal(on.ok, true);
+  assert.ok(eitherOf((x) => tunnelend.defaultEnd(x, readings.dayEnds), before).includes(on.until), 'the end of the show day: ' + new Date(on.until).toString());
+  assert.ok(on.until - before >= tunnelend.MIN_AHEAD_MS, 'never an end minutes away');
+  assert.ok(eitherOf((x) => tunnelend.clockWords(on.until, x), before).includes(on.untilWords), on.untilWords);
+  assert.equal(on.notKept, '');
+  await until(() => s.heard.some((x) => x.url), 8000, 'the address');
+  const first = await ask(s.ctl, 'admin:tunnelStatus');
+  assert.deepEqual(Object.keys(first), ['ok', 'running', 'url', 'error', 'checking', 'check', 'until', 'untilWords', 'untilClock', 'again', 'againWords', 'notKept']);
+  assert.deepEqual([first.running, first.until, first.untilWords, first.untilClock, first.again, first.againWords, first.notKept], [true, on.until, on.untilWords, '06:00', null, '', '']);
+  await until(() => settingsOf().tunnelUntil === on.until, 4000, 'the end kept in the settings');
+  assert.equal((await health(s.srv.base)).tunnel.until, on.until, 'health says the end');
+  assert.deepEqual(await linkRow(s.ctl), ['on: ' + first.url + ' · until ' + on.untilWords + ', then off', 'ok']);
+  assert.deepEqual(await ask(s.ctl, 'admin:tunnelStart'), { ok: true, running: true, url: first.url, until: on.until, untilWords: on.untilWords, notKept: '' }, 'one already on keeps its end');
+
+  // Tunnel until…: the next such time by the laptop's clock, kept, said to every admin page with its words; asked again,
+  // the same answer and no second row. One that names no time of day, or with the tunnel off, is refused with words.
+  const two = timeAbout(2, on.until);
+  const words = tunnelend.clockWords(two.at, Date.now());
+  const moved = await emit(s.ctl, 'admin:tunnelUntil', { until: two.hm });
+  assert.deepEqual(moved, { ok: true, until: two.at, untilWords: words });
+  await until(() => s.heard.some((x) => x.until === two.at && x.untilWords === words && x.untilClock === two.hm), 4000, 'the new end on tunnel:status');
+  await until(() => settingsOf().tunnelUntil === two.at, 4000, 'the new end kept');
+  assert.deepEqual(await emit(s.ctl, 'admin:tunnelUntil', { until: two.hm }), moved, 'asked again, the same answer');
+  const NOT_A_TIME = 'Give the end as a time of day, HH:MM by this laptop\'s clock (for example 23:30).';
+  for (const p of [{ until: '25:00' }, { until: 2330 }, { until: ['23:30'] }, {}, null, 'x']) assert.deepEqual(await emit(s.ctl, 'admin:tunnelUntil', p), { ok: false, error: NOT_A_TIME }, JSON.stringify(p));
+  assert.equal((await ask(s.ctl, 'admin:tunnelStatus')).until, two.at, 'refusals moved nothing');
+  assert.deepEqual(await linkRows(s), [['tunnel.on', 'admin', 'the internet link turned on, until ' + on.untilWords], ['tunnel.until', 'admin', 'the internet link\'s end moved to ' + words]]);
+
+  // AGMessage stops and starts again inside the end: the tunnel is turned on again, its end the same, its address new,
+  // and once cloudflared gives that address the admin is told so: `again` on tunnel:status, "This laptop", the console
+  // and the audit log.
+  await stopServer(s.srv.child);
+  const restartedAt = Date.now();
+  s = await serverWithLink(t, link, ENV);
+  await until(async () => { const st = await ask(s.ctl, 'admin:tunnelStatus'); return st.running && st.url; }, 10_000, 'the tunnel on again');
+  const again = await ask(s.ctl, 'admin:tunnelStatus');
+  assert.match(again.url, ADDRESS);
+  assert.notEqual(again.url, first.url, 'a new address');
+  assert.deepEqual([again.until, again.untilClock, again.notKept, again.error], [two.at, two.hm, '', null]);
+  assert.ok(Number.isInteger(again.again) && again.again >= restartedAt && again.again <= Date.now(), 'turned on again by this start: ' + again.again);
+  assert.equal(again.againWords, tunnelend.clockWords(again.again, Date.now()));
+  assert.equal((await health(s.srv.base)).tunnel.until, two.at);
+  assert.deepEqual(await linkRow(s.ctl), ['on: ' + again.url + ' · until ' + again.untilWords + ', then off · turned on again as AGMessage started at '
+    + again.againWords + ': a new address, so remote people need this one', 'ok']);
+  const out = s.srv.out();
+  assert.ok(out.indexOf('[tunnel] ' + again.url) >= 0 && out.indexOf('[tunnel] ' + again.url) < out.indexOf('[tunnel] on again until ' + again.untilWords + ': a quick tunnel\'s address is new at each start'),
+    'on again said once its address is given:\n' + out);
+  await until(() => link.asked.some((u) => u === '/api/health'), 15_000, 'the new address checked from the laptop');
+  assert.deepEqual((await linkRows(s)).slice(2), [['tunnel.again', 'system', 'the internet link turned on again as AGMessage started, until ' + again.untilWords + ', with a new address']]);
+
+  // Turned off: forgotten at once, so the next start leaves it off.
+  assert.equal((await ask(s.ctl, 'admin:tunnelStop')).ok, true);
+  await until(() => s.heard.some((x) => !x.running), 4000, 'the tunnel off');
+  await until(() => !Object.hasOwn(settingsOf(), 'tunnelUntil'), 4000, 'the end forgotten');
+  assert.deepEqual(await emit(s.ctl, 'admin:tunnelUntil', { until: two.hm }), { ok: false, error: 'The internet link is off: turn it on first.' });
+  assert.deepEqual((await linkRows(s)).slice(3), [['tunnel.off', 'admin', 'the internet link turned off']]);
+  await stopServer(s.srv.child);
+  s = await serverWithLink(t, link, ENV);
+  await wait(1500);
+  const off = await ask(s.ctl, 'admin:tunnelStatus');
+  assert.deepEqual([off.running, off.url, off.until, off.again], [false, null, null, null], 'turned off, it stays off');
+  assert.ok(!/\[tunnel\]/.test(s.srv.out()), 'nothing said of a tunnel:\n' + s.srv.out());
+});
+
+test('past its end, or with an end no act sets, a start leaves the tunnel off and forgets it; a running tunnel is turned off as its end comes; unread settings turn it on for this run and refuse a new end', { timeout: 90_000 }, async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  const file = path.join(dataDir, 'settings.json');
+  const settingsOf = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+  const keep = (until) => { fs.writeFileSync(file, JSON.stringify({ ...settingsOf(), tunnelUntil: until }, null, 2)); };
+  const link = await standInLink(t);
+  const ENV = { AGM_DATA_DIR: dataDir };
+  let s = await serverWithLink(t, link, ENV);
+  await stopServer(s.srv.child);
+  const kept = settingsOf();
+
+  // Past its end: off, the end forgotten, and said.
+  keep(Date.now() - 60_000);
+  s = await serverWithLink(t, link, ENV);
+  await until(() => /\[tunnel\] its end, \d\d:\d\d (today|yesterday), came while AGMessage was not running: the internet link stays off/.test(s.srv.out()), 4000, 'the past end said');
+  await until(() => !Object.hasOwn(settingsOf(), 'tunnelUntil'), 4000, 'the past end forgotten');
+  assert.deepEqual(settingsOf(), kept, 'nothing else of the settings changed');
+  const past = await ask(s.ctl, 'admin:tunnelStatus');
+  assert.deepEqual([past.running, past.until, past.again], [false, null, null]);
+  assert.equal((await health(s.srv.base)).tunnel.until, null);
+  await stopServer(s.srv.child);
+
+  // Further ahead than any end can be set (a clock set back, a file written by hand): off, and forgotten.
+  keep(Date.now() + tunnelend.MAX_AHEAD_MS + 3600_000);
+  s = await serverWithLink(t, link, ENV);
+  await until(() => /\[tunnel\] its kept end is not one AGMessage sets: the internet link stays off/.test(s.srv.out()), 4000, 'the unread end said');
+  await until(() => !Object.hasOwn(settingsOf(), 'tunnelUntil'), 4000, 'the unread end forgotten');
+  assert.equal((await ask(s.ctl, 'admin:tunnelStatus')).running, false);
+  await stopServer(s.srv.child);
+  assert.deepEqual(link.asked, [], 'no tunnel was started, so nothing came through the link');
+
+  // Inside its end at the start, then the end comes while it runs: turned off within a health window, forgotten, audited,
+  // and off at the next start.
+  const soon = Date.now() + 6000;
+  keep(soon);
+  s = await serverWithLink(t, link, ENV);
+  await until(async () => (await ask(s.ctl, 'admin:tunnelStatus')).running, 6000, 'on again inside its end');
+  assert.equal((await ask(s.ctl, 'admin:tunnelStatus')).until, soon);
+  await until(() => s.heard.some((x) => !x.running), 20_000, 'turned off as its end comes');
+  assert.ok(Date.now() >= soon, 'not before its end');
+  await until(() => !Object.hasOwn(settingsOf(), 'tunnelUntil'), 4000, 'the end forgotten');
+  assert.match(s.srv.out(), /\[tunnel\] its end, \d\d:\d\d (today|yesterday), has come: the internet link is off/);
+  assert.deepEqual((await linkRows(s)).map(([a, who]) => [a, who]), [['tunnel.again', 'system'], ['tunnel.ended', 'system']]);
+  await stopServer(s.srv.child);
+  s = await serverWithLink(t, link, ENV);
+  await wait(1500);
+  assert.equal((await ask(s.ctl, 'admin:tunnelStatus')).running, false, 'its end come, it stays off');
+  await stopServer(s.srv.child);
+
+  // Settings that could not be read: Turn on still turns the link on, its end held for this run only, and every answer
+  // says a restart does not turn it on again; Tunnel until…, which would only change a setting, is refused with why, as
+  // every setting is; nothing is written over the file.
+  const bytes = fs.readFileSync(file);
+  s = await serverWithLink(t, link, { ...ENV, NODE_OPTIONS: preloads('busy-preload.js'), AGM_TEST_UNREADABLE: 'settings.json' });
+  const unkeptOn = await ask(s.ctl, 'admin:tunnelStart');
+  assert.match(unkeptOn.notKept, /^Not saved: .*settings\.json could not be read \(EBUSY\), so this run saves no setting over it\. /);
+  await until(() => s.heard.some((x) => x.url), 8000, 'the address');
+  const unkept = await ask(s.ctl, 'admin:tunnelStatus');
+  assert.deepEqual([unkept.notKept, unkept.until], [unkeptOn.notKept, unkeptOn.until], 'its end held in memory, and said not kept');
+  assert.deepEqual(await emit(s.ctl, 'admin:tunnelUntil', { until: timeAbout(3).hm }), { ok: false, error: unkept.notKept });
+  assert.equal((await ask(s.ctl, 'admin:tunnelStatus')).until, unkeptOn.until, 'the refusal moved nothing');
+  const [words, mark] = await linkRow(s.ctl);
+  assert.equal(mark, 'warn');
+  assert.ok(words.endsWith(' · ' + unkept.notKept), words);
+  await stopServer(s.srv.child);
+  assert.deepEqual(fs.readFileSync(file), bytes, 'nothing written over the settings it could not read');
+  s = await serverWithLink(t, link, ENV);
+  await wait(1500);
+  assert.equal((await ask(s.ctl, 'admin:tunnelStatus')).running, false, 'no end was kept, so the next start leaves it off');
+});
+
+test('a start that cannot turn the link on again says so and keeps its end; a crash ends cloudflared and keeps it; with it off and its end kept, Turn on keeps that end and Turn off forgets it', { timeout: 90_000 }, async (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  const file = path.join(dataDir, 'settings.json');
+  const kills = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agm-kills-')), 'kills.txt');
+  const settingsOf = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+  const keep = (until) => { fs.writeFileSync(file, JSON.stringify({ ...settingsOf(), tunnelUntil: until }, null, 2)); };
+  const link = await standInLink(t);
+  const ENV = { AGM_DATA_DIR: dataDir };
+  const FAILS = { ...ENV, AGM_TEST_TUNNEL_FAIL: '1' };
+  let s = await serverWithLink(t, link, ENV);
+  await stopServer(s.srv.child);
+  const end = Date.now() + 3 * 3600_000;
+  const NOT_AGAIN = /^Not turned on again as AGMessage started at \d\d:\d\d (today|yesterday): cloudflared exited \(code 1\)\.$/;
+
+  // A start whose cloudflared ends before it gives an address (a boot before the network is up): never said to be on
+  // again; said not turned on again on the card, "This laptop" and the console; its end kept for the next start.
+  keep(end);
+  s = await serverWithLink(t, link, FAILS);
+  const notAgain = async () => { const st = await ask(s.ctl, 'admin:tunnelStatus'); return !st.running && !!st.error && st; };
+  await until(notAgain, 6000, 'the link not turned on again');
+  const failed = await ask(s.ctl, 'admin:tunnelStatus');
+  assert.match(failed.error, NOT_AGAIN);
+  assert.deepEqual([failed.running, failed.url, failed.until, failed.again], [false, null, end, null]);
+  assert.match(s.srv.out(), /\[tunnel\] not turned on again: cloudflared exited \(code 1\)\. It was to stay on until \d\d:\d\d (today|tomorrow): Turn on on the admin page, or a start of AGMessage before then, tries again\./);
+  assert.ok(!/\[tunnel\] on again/.test(s.srv.out()), 'never said to be on again:\n' + s.srv.out());
+  assert.deepEqual(await linkRow(s.ctl), ['off: ' + failed.error + ' · it was to stay on until ' + failed.untilWords + ': Turn on, or a start of AGMessage before then, turns it on again', 'warn']);
+  assert.equal(settingsOf().tunnelUntil, end, 'its end kept');
+  assert.deepEqual(await linkRows(s), [], 'nothing turned on, nothing audited');
+  // Turn on keeps that end; its own cloudflared ending before an address leaves nothing on, so nothing kept.
+  const on = await ask(s.ctl, 'admin:tunnelStart');
+  assert.deepEqual([on.ok, on.until], [true, end], 'Turn on keeps the end a start could not turn on again');
+  await until(() => !Object.hasOwn(settingsOf(), 'tunnelUntil'), 6000, 'a Turn on that turned nothing on keeps no end');
+  assert.equal((await ask(s.ctl, 'admin:tunnelStatus')).error, 'cloudflared exited (code 1).');
+  assert.deepEqual(await linkRows(s), [], 'nothing was on, so nothing is audited');
+  await stopServer(s.srv.child);
+
+  // Off with its end kept: Turn off… keeps it off, audited, and the next start leaves it off.
+  keep(end);
+  s = await serverWithLink(t, link, FAILS);
+  await until(notAgain, 6000, 'the link not turned on again');
+  assert.equal((await ask(s.ctl, 'admin:tunnelStop')).ok, true);
+  assert.equal((await ask(s.ctl, 'admin:tunnelStatus')).until, null);
+  await until(() => !Object.hasOwn(settingsOf(), 'tunnelUntil'), 4000, 'forgotten');
+  assert.deepEqual((await linkRows(s)).slice(-1), [['tunnel.off', 'admin', 'the internet link kept off (cloudflared had ended; a start before its end would have turned it on again)']]);
+  await stopServer(s.srv.child);
+  s = await serverWithLink(t, link, ENV);
+  await wait(1500);
+  assert.equal((await ask(s.ctl, 'admin:tunnelStatus')).running, false, 'kept off, it stays off');
+  await stopServer(s.srv.child);
+
+  // A crash with the link up: cloudflared is ended with the server (never left running beside the next one's) and the end
+  // is kept, so the next start turns the link on again.
+  keep(end);
+  s = await serverWithLink(t, link, { ...ENV, AGM_TEST_TUNNEL_KILLS: kills, AGM_TEST_TUNNEL_CRASH: '2000' });
+  const crashedChild = s.srv.child;
+  const code = crashedChild.exitCode !== null ? crashedChild.exitCode : await new Promise((resolve) => { crashedChild.once('exit', resolve); });
+  assert.equal(code, require('../lib/resilience').EXIT.CRASH, 'a crash');
+  assert.match(s.srv.out(), /\[tunnel\] on again until [^\n]*\n[\s\S]*a crash under test, with the tunnel up/, 'on again, then the crash:\n' + s.srv.out());
+  assert.deepEqual(fs.readFileSync(kills, 'utf8'), crashedChild.pid + ' SIGTERM\n', 'its cloudflared ended by the crash');
+  assert.equal(settingsOf().tunnelUntil, end, 'its end kept through the crash');
+  s = await serverWithLink(t, link, ENV);
+  await until(async () => { const st = await ask(s.ctl, 'admin:tunnelStatus'); return st.running && st.url && Number.isInteger(st.again); }, 10_000, 'on again after the crash');
 });

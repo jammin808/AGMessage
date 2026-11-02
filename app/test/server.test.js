@@ -398,8 +398,8 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.deepEqual(Object.keys(h.maxSocketsPerAddress), ['venue', 'tunnel'], 'per lane');
     assert.ok(h.maxSocketsPerAddress.venue >= 3 && h.maxSocketsPerAddress.venue <= h.clients, 'every page here is on one address: ' + h.maxSocketsPerAddress.venue + ' of ' + h.clients);
     assert.deepEqual([h.tunnelSockets, h.maxSocketsPerAddress.tunnel], [0, 0]);
-    // The tunnel's places (150, half for one network) and today's refusals, by lane: counts only.
-    assert.deepEqual(h.tunnel, { places: 0, max: 150, share: 75, networks: 0, refused: { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 } });
+    // The tunnel's places (150, half for one network) and today's refusals, by lane (counts only), and no tunnel's end.
+    assert.deepEqual(h.tunnel, { places: 0, max: 150, share: 75, networks: 0, refused: { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, until: null });
     assert.deepEqual(h.refused, { venue: { rate: 0 } });
 
     // A page and a screen through the tunnel are counted, and their address is in no reading.

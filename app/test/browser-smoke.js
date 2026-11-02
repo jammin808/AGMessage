@@ -2947,10 +2947,11 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       });
       await new Promise((resolve) => { link5.listen(0, '127.0.0.1', resolve); });
       const preload = '--require "' + path.join(__dirname, 'tunnel-preload.js').split(path.sep).join('/') + '"';
-      server5 = await startServer(port5, dataDir5, {
+      const ENV5 = {
         AGM_TUNNEL_MAX: '2', AGM_TUNNEL_JOIN_MS: '600000',
         NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '), AGM_TEST_TUNNEL: 'http://127.0.0.1:' + link5.address().port,
-      });
+      };
+      server5 = await startServer(port5, dataDir5, ENV5);
       const login5 = await fetch(base5 + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
       const hall5 = (await (await fetch(base5 + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie: login5.headers.get('set-cookie').split(';')[0] }, body: JSON.stringify({ name: 'Remote hall' }) })).json()).code;
       const taken = [];
@@ -2977,7 +2978,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         `a hall page through the tunnel, its places taken, says "${full}" and comes back by itself once one frees, ${Math.round(waited / 1000)} s later, without a reload (${back}; ${seated}; refused ${counted.tunnel.refused.full}, then ${after.tunnel.places} of ${after.tunnel.max} places)`);
       report(tia.problems.length === 0, `a page refused through the tunnel: no script errors or CSP violations${tia.problems.length ? ' — ' + tia.problems.slice(0, 3).join(' | ') : ''}`);
 
-      const card = await edge.tab(`${base5}/admin.html`);
+      const card = await edge.tab(`${base5}/admin.html`, { timezone: 'America/New_York' });   // an admin page set to another zone than the laptop's
       await card.until('document.readyState === "complete"');
       await card.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
       const places = await card.until(`(() => { const t = document.getElementById('tunnelPlaces').textContent; return /^Internet link: 2 of 2 places · 2 networks · refused today: \\d+ full$/.test(t) && t; })()`, 15000);
@@ -2991,7 +2992,59 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         `the admin page's tunnel card reads "${places}" ("${offWhy}"), and with the tunnel turned on its link is checked from the laptop: "${checked}" (${linkAsked.length} tries)`);
       await card.eval(`document.getElementById('tunnelLink').scrollIntoView({ block: 'center' })`);
       await card.shot(path.join(OUT, 'tunnel-card.png'));
-      report(card.problems.length === 0, `the admin page's tunnel card: no script errors or CSP violations${card.problems.length ? ' — ' + card.problems.slice(0, 3).join(' | ') : ''}`);
+
+      // While it runs the card says its end, the end of the show day by the laptop's clock (the server's words, though this
+      // page is set to another zone), and Tunnel until… (from the card's ⋯) asks for a time of day filled with that end, by
+      // the laptop's clock: confirmed as filled, the end stays; given another time, it moves there. Then AGMessage stops and
+      // starts again inside that end: the link is on again, at the same end, and the card says its address is new.
+      const laptopHM = (t) => new Intl.DateTimeFormat('en-GB', { timeZone: SERVER_TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(t);
+      const wallMin = (t) => { const [h, m] = laptopHM(t).split(':').map(Number); return h * 60 + m; };
+      /** A time about `hours` from now by the laptop's clock, on a wall minute no change of its clocks repeats, never `avoid`: {hm, at}. */
+      const laptopTimeAbout = (hours, avoid) => {
+        const now = Date.now();
+        for (let h = hours; h < hours + 4; h++) {
+          const at = new Date(now + h * 3600000).setSeconds(0, 0);
+          if (at !== avoid && (wallMin(at) - wallMin(at - 3600000) + 1440) % 1440 === 60 && (wallMin(at + 3600000) - wallMin(at) + 1440) % 1440 === 60) return { hm: laptopHM(at), at };
+        }
+        return { hm: '', at: null };
+      };
+      const healthUntil = async () => (await (await fetch(base5 + '/api/health')).json()).tunnel.until;
+      const firstEnd = await healthUntil();
+      const endWords = await card.until(`(() => { const l = document.getElementById('tunnelUntilLine'); return !l.hidden && l.textContent; })()`, 5000);
+      const firstUrl = await card.eval(`document.getElementById('tunnelUrl').textContent`);
+      const askUntil = async () => {
+        await card.eval(`document.querySelector('#tunnelActs .obj-more').click()`);
+        await card.until(`!!document.querySelector('.agm-menu [data-action="tunnel.until"]')`, 3000);
+        await card.eval(`document.querySelector('.agm-menu [data-action="tunnel.until"]').click()`);
+        return card.until(`(() => { const a = document.querySelector('.agm-ask'); const i = a && a.querySelector('input[name="until"]');
+          return !!i && JSON.stringify({ title: a.querySelector('.agm-ask-title').textContent, type: i.type, value: i.value, focused: document.activeElement === i }); })()`, 3000);
+      };
+      const untilAsk = await askUntil();
+      await card.eval(`document.querySelector('.agm-ask [data-answer=yes]').click()`);
+      const keptSaid = await card.until(`(() => { const t = document.getElementById('agmToast'); return !!t && t.classList.contains('show') && t.textContent.startsWith('The internet link stays on until') && t.textContent; })()`, 5000);
+      const unchanged = await healthUntil();
+      const two = laptopTimeAbout(2, firstEnd);
+      await askUntil();
+      await card.eval(`(() => { const i = document.querySelector('.agm-ask input[name="until"]'); i.value = ${JSON.stringify(two.hm)}; document.querySelector('.agm-ask [data-answer=yes]').click(); })()`);
+      const movedEnd = await card.until(`(() => { const l = document.getElementById('tunnelUntilLine').textContent; return l.startsWith('On until ' + ${JSON.stringify(two.hm)} + ' ') && l; })()`, 5000);
+      const endAt = two.at;
+      const keptUntil = await healthUntil();
+      report(laptopHM(firstEnd) === '06:00' && new RegExp('^On until 06:00 (today|tomorrow), then off and it stays off\\. If AGMessage starts again before then, the link is turned on again, with a new address\\.$').test(endWords || '')
+        && untilAsk === JSON.stringify({ title: 'Keep the internet link on until…', type: 'time', value: '06:00', focused: true }) && unchanged === firstEnd && !!keptSaid
+        && !!two.hm && !!movedEnd && keptUntil === endAt,
+        `an admin page set to another zone says the link's end by the laptop's clock ("${endWords}"); Tunnel until… asks with that end (${untilAsk}), confirmed as filled keeps it ("${keptSaid}"; health: ${unchanged === firstEnd ? 'the same end' : unchanged}), and moves it to ${two.hm}: "${movedEnd}" (health: ${keptUntil === endAt ? 'that end' : keptUntil})`);
+      await stopServer(server5);
+      server5 = await startServer(port5, dataDir5, ENV5);
+      const again = await card.until(`(() => { const a = document.getElementById('tunnelAgain'); const u = document.getElementById('tunnelUrl').textContent;
+        return !a.hidden && /^https:\\/\\/agm-test-link-\\d+\\.trycloudflare\\.com$/.test(u) && u !== ${JSON.stringify(firstUrl)} && document.getElementById('tunnelUntilLine').textContent === ${JSON.stringify(movedEnd)}
+          && document.getElementById('tunnelToggle').checked && a.textContent + ' | ' + u; })()`, 30000);
+      const againHealth = (await (await fetch(base5 + '/api/health')).json()).tunnel.until;
+      report(/^△ New address: AGMessage started again at .+ and turned the internet link on again\. Send this address to remote people; the one before no longer works\. \| https:/.test(again || '') && againHealth === endAt,
+        `AGMessage started again inside the link's end: the link is on again until the same end, and the card says "${again}"`);
+      await card.eval(`document.getElementById('tunnelSection').scrollIntoView({ block: 'start' })`);
+      await card.shot(path.join(OUT, 'tunnel-again.png'));   // the new address, said
+      const cardProblems = card.problems.filter((p) => !/WebSocket connection to|ERR_CONNECTION_REFUSED|net::ERR_/.test(p));
+      report(cardProblems.length === 0, `the admin page's tunnel card: no script errors or CSP violations, the stopped server's refused connections aside${cardProblems.length ? ' — ' + cardProblems.slice(0, 3).join(' | ') : ''}`);
       card.close();
       tia.close();
       taken.forEach((s) => s.close());

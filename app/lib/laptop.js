@@ -339,9 +339,28 @@ function powerRow(pw) {
 }
 
 /**
+ * The internet link's row (`t`: {running, url, error, until, again, notKept}, its end and the start that turned it on
+ * again in words by the laptop's clock, '' when none): on until its end, and when a start turned it on again, that its
+ * address is new; off with an end still kept (cloudflared ended, or a start could not turn it on again), that a start
+ * before then turns it on again; △ when a restart would not turn it on again, or it is off with an error (pure).
+ */
+function tunnelRow(t) {
+  const FROM = 'cloudflared, turned on from this page, and again by a start before its end (kept in the settings)';
+  const kept = t.notKept ? ' · ' + t.notKept : '';
+  if (!t.running) {
+    const still = t.until ? ' · it was to stay on until ' + t.until + ': Turn on, or a start of AGMessage before then, turns it on again' : '';
+    return row('tunnel', 'Internet link', (t.error ? 'off: ' + t.error : 'off') + still + kept, t.error || t.until ? 'warn' : 'off', FROM);
+  }
+  const until = t.until ? ' · until ' + t.until + ', then off' : '';
+  if (!t.url) return row('tunnel', 'Internet link', 'starting' + until + (t.again ? ' · turned on again as AGMessage started at ' + t.again + ': its address will be new' : '') + kept, t.notKept ? 'warn' : '', FROM);
+  const again = t.again ? ' · turned on again as AGMessage started at ' + t.again + ': a new address, so remote people need this one' : '';
+  return row('tunnel', 'Internet link', 'on: ' + t.url + until + again + kept, t.notKept ? 'warn' : 'ok', FROM);
+}
+
+/**
  * The panel's rows, from what this server knows (`k`) and what Windows said (`w`, windowsFacts's), in the panel's order
  * (pure). `k`: {build, runs, addresses, port, https: {on, fingerprint, validTo, off, renewal, file}, sealed: {total, open,
- * keyWords}, screens: {total, shown, offline}, stagewatch: {total, connected}, tunnel: {running, url, error}, sleeps:
+ * keyWords}, screens: {total, shown, offline}, stagewatch: {total, connected}, tunnel: tunnelRow's, sleeps:
  * sleepsRow's, power: powerRow's, before, without: [words], node, format: formatRow's, or none}.
  */
 function facts(k, w) {
@@ -365,9 +384,7 @@ function facts(k, w) {
   const sw = k.stagewatch;
   rows.push(!sw.total ? row('stagewatch', 'Stagewatch', 'not linked', 'off', 'the Stagewatch links this AGMessage keeps')
     : row('stagewatch', 'Stagewatch', sw.connected === sw.total ? (sw.total === 1 ? 'connected' : 'all ' + sw.total + ' links connected') : sw.connected + ' of ' + sw.total + ' links connected', sw.connected === sw.total ? 'ok' : 'warn', 'the Stagewatch links this AGMessage keeps'));
-  const t = k.tunnel;
-  rows.push(t.running ? row('tunnel', 'Internet link', t.url ? 'on: ' + t.url + ' · until it is turned off, or AGMessage stops' : 'starting', t.url ? 'ok' : '', 'cloudflared, started from this page')
-    : row('tunnel', 'Internet link', t.error ? 'off: ' + t.error : 'off', t.error ? 'warn' : 'off', 'cloudflared, started from this page'));
+  rows.push(tunnelRow(k.tunnel));
   if (k.sleeps) rows.push(sleepsRow(k.sleeps));
   if (k.power) rows.push(powerRow(k.power));
   if (k.before) rows.push(row('before', 'Before this start', k.before, 'warn', 'the watchdog'));

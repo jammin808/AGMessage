@@ -1359,6 +1359,8 @@ html[data-theme="dark"] .doc-display::-webkit-scrollbar-thumb:active {
 .admin-tunnel-body { font-size: .92rem; }
 .admin-tunnel-state { margin-bottom: .6rem; }
 .admin-tunnel-state p { margin: .25rem 0; }
+/* The link turned on again by a start: its address is new, said with its mark (△) beside the warning's colour. */
+.admin-tunnel-again { color: var(--c-warn); font-weight: 600; }
 
 .admin-tunnel-url-row {
   display: flex; align-items: center; gap: .5rem;
@@ -1505,7 +1507,7 @@ form[data-held="1"] textarea, form[data-held="1"] input { background: var(--bg);
 .entry-hint { text-align: center; margin-top: .9rem; }
 .role-fieldset { border: 0; padding: 0; margin: 0 0 1rem; }
 .role-fieldset legend { font-weight: 600; font-size: .85rem; margin-bottom: .3rem; padding: 0; }
-input[type="password"], select { width: 100%; padding: .6rem .7rem; border: 1px solid var(--border); border-radius: var(--radius); font: inherit; background: var(--card); color: var(--ink); }
+input[type="password"], input[type="time"], select { width: 100%; padding: .6rem .7rem; border: 1px solid var(--border); border-radius: var(--radius); font: inherit; background: var(--card); color: var(--ink); }
 html[data-theme="dark"] input, html[data-theme="dark"] textarea { background: var(--card); color: var(--ink); border-color: var(--border); }
 
 /* The account area's frame */

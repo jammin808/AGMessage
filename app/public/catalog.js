@@ -336,7 +336,8 @@
         confirm: (f, o) => ({ title: 'Unlink ' + o.name + '?', words: 'Its token and its certificate pin are forgotten: linking it again takes its token again.', yes: 'Unlink', no: 'Keep it linked', danger: true }) },
     ],
     // The internet link (the admin page's tunnel card): `running`, `url`, `checking`, `checkedAgo` (seconds since its
-    // newest check, or null).
+    // newest check, or null), and the end it is kept on until, in the server's words by the laptop's clock: `untilWords`
+    // ("06:00 tomorrow", '' when none is kept) and `untilClock` ("06:00"), kept too while it is off after cloudflared ended.
     tunnel: [
       { id: 'tunnel.check', label: 'Check again', icon: '🔄', group: '3_keep', inline: () => 1, verb: 'admin:tunnelStatus', mode: 'now',
         may: (f) => f.admin, fits: () => true, ready: (f, o) => tunnelWhy(o) || true },
@@ -344,9 +345,20 @@
         may: (f) => f.admin, fits: (f, o) => !!o.running && typeof o.url === 'string' && o.url.length > 0 },
       { id: 'tunnel.on', label: 'Turn on', icon: '🌐', group: '4_manage', verb: 'admin:tunnelStart', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => !o.running },
-      { id: 'tunnel.off', label: 'Turn off…', icon: '⏹', group: '9_danger', verb: 'admin:tunnelStop', mode: 'now',
+      // Its end moved: the next such time by the laptop's clock, kept, so a restart before it turns the link on again.
+      { id: 'tunnel.until', label: 'Tunnel until…', icon: '⏰', group: '4_manage', verb: 'admin:tunnelUntil', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => !!o.running,
-        confirm: () => ({ title: 'Turn the internet link off?', words: 'Every phone and laptop joined through it is cut off now, and its address stops working. A new one is given when it is turned on again.', yes: 'Turn it off', no: 'Keep it on', danger: true }) },
+        confirm: (f, o) => ({ title: 'Keep the internet link on until…',
+          words: [(o.untilWords ? 'It is on until ' + o.untilWords + '.' : 'It is on.') + ' At the time you give, it is turned off and stays off.',
+            'If AGMessage starts again before then, the link is turned on again, with a new address to send to remote people.'],
+          fields: [{ name: 'until', type: 'time', label: 'Until (this laptop\'s clock; a time already past today is tomorrow\'s)', value: o.untilClock || '' }],
+          yes: 'Keep it on until then', no: 'Cancel' }) },
+      // Off while an end is kept (cloudflared ended), it keeps the link off: no start before the end turns it on again.
+      { id: 'tunnel.off', label: 'Turn off…', icon: '⏹', group: '9_danger', verb: 'admin:tunnelStop', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => !!o.running || !!o.untilWords,
+        confirm: (f, o) => (o.running
+          ? { title: 'Turn the internet link off?', words: 'Every phone and laptop joined through it is cut off now, and its address stops working. A new one is given when it is turned on again.', yes: 'Turn it off', no: 'Keep it on', danger: true }
+          : { title: 'Keep the internet link off?', words: 'It was to stay on until ' + o.untilWords + ', so a start of AGMessage before then would turn it on again. Kept off, it stays off until it is turned on here.', yes: 'Keep it off', no: 'Cancel', danger: true }) },
     ],
     // "This laptop" (the admin page's panel): `addresses` (each LAN address as devices open it, http://address:port) and
     // `reading` (Windows is being read now). Refresh reads Windows again; Copy LAN address offers each address.

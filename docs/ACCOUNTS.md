@@ -194,7 +194,10 @@ screens (made, renamed, re-linked, removed, and every take: which screen, by who
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and
 the desk's number, never the words), every line Stagewatch takes for the speaker's screen sent straight to it
 (`stagewatch.send`: who sent it and how many characters, never the words; an emoji counts as one character in both),
-commands to Patterns and PlayMap, and a start by another build than the one that last wrote the data folder
+commands to Patterns and PlayMap, the internet link (`tunnel.on`: who turned it on and its end, once cloudflared gave
+its address; `tunnel.until`: its end moved; `tunnel.off`: who turned it off, or kept it off with only its end left; and
+system rows, `tunnel.again`: turned on again by a start inside its end, and `tunnel.ended`: turned off at its end; never
+its address), and a start by another build than the one that last wrote the data folder
 (`server.upgraded`, a system row: from which build to which, older or newer, and the copy of the folder kept when its
 format moved; `data/format.json`, `lib/dataformat.js`).
 

@@ -548,7 +548,8 @@
   /**
    * Ask in place before an act: `spec` {title, words, fields: [{name, label, value, max, type, options, hint}], yes, no,
    * choices, danger}. `words` is one paragraph or a list of them; a field's `type` 'text' (the default), 'password',
-   * 'checkbox' (its value true or false) or 'select' (its `options` [{value, label}]). `choices` [{answer, label,
+   * 'checkbox' (its value true or false), 'select' (its `options` [{value, label}]) or 'time' (a time of day, its value
+   * "HH:MM" whatever the browser shows; one that has no time field takes it typed). `choices` [{answer, label,
    * danger}] are more than one way to say yes, drawn in their order before `no` in place of `yes`. The answer: {yes:
    * true, values} (with `choice`, the answer chosen, where there are choices) or {yes: false}. When it closes the focus
    * goes back to `opts.opener` (the object a key was pressed on, or the button that opened it), else to the anchor it is
@@ -574,7 +575,7 @@
     drawWords(box, wordsOf(s.words));
     const inputs = [];
     for (const f of s.fields || []) {
-      const type = f.type === 'checkbox' || f.type === 'select' || f.type === 'password' ? f.type : 'text';
+      const type = f.type === 'checkbox' || f.type === 'select' || f.type === 'password' || f.type === 'time' ? f.type : 'text';
       const lab = make('label', type === 'checkbox' ? 'agm-ask-field agm-ask-check' : 'agm-ask-field');
       const span = make('span', '', f.label || f.name);
       let input;

@@ -924,6 +924,9 @@ test('peaks: per show day (06:00 to 06:00 by the laptop\'s clock), raised and ne
   assert.deepEqual(p.view().map((d) => [d.day, d.joinBurst]), [['2026-10-31', 60], ['2026-11-01', 7]]);
   assert.deepEqual([new Date(2026, 11, 1, 3), new Date(2027, 0, 1, 1), new Date(2027, 0, 1, 6)].map((d) => readings.dayOf(d.getTime())),
     ['2026-11-30', '2026-12-31', '2027-01-01'], 'named by the date the show day starts on, across a month and a year');
+  // A show day ends at the next 06:00: an evening past midnight ends with it, and 06:00 itself starts the next one.
+  assert.deepEqual([new Date(2026, 11, 31, 23, 30), new Date(2027, 0, 1, 5, 59, 59), new Date(2027, 0, 1, 6), new Date(2026, 10, 30, 12)].map((d) => readings.dayEnds(d.getTime())),
+    [new Date(2027, 0, 1, 6), new Date(2027, 0, 1, 6), new Date(2027, 0, 2, 6), new Date(2026, 11, 1, 6)].map((d) => d.getTime()));
   // Fifteen more days: only the newest 14 stay, oldest first.
   for (let d = 2; d <= 16; d++) p.note({ hallMessages: d }, new Date(2026, 10, d, 12).getTime());
   const days = p.view().map((d) => d.day);

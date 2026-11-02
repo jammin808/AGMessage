@@ -396,7 +396,21 @@ separate install needed.
   3. Within 5-10 seconds a public HTTPS URL appears
      (e.g. https://xxxxx.trycloudflare.com) — click Copy and send it
      to the remote person with their hall's code or their account.
-  4. Toggle off when the event ends to take the tunnel down.
+  4. It stays on until the end of the show day (06:00 by this laptop's
+     clock; turned on after 05:00, 06:00 the next day), then turns off
+     by itself and stays off. To end it sooner, or keep it later, choose
+     Tunnel until... in the card's ... menu and give a time of day by
+     this laptop's clock (a time already past today is tomorrow's).
+     Toggle it off when the event ends.
+
+If AGMessage starts again before that time (a restart, a crash, an
+upgrade, the laptop woken or restarted), the link is turned on again by
+itself, until the same time. Its address is new: the card says "New
+address" and shows it. Send the new address to the remote people; the
+one before no longer works. If the laptop is not online yet when
+AGMessage starts (just after a boot), the card says the link was "Not
+turned on again": once the laptop is online, turn it on again (it keeps
+the same end), or it comes back at AGMessage's next start.
 
 The internet link has 150 places: at most 150 phones, tablets, pages and
 screens through it at once, and half of them at most from one network (a
@@ -419,9 +433,13 @@ Before doors, with the tunnel on:
 
 Accounts with admin rights cannot sign in through the tunnel unless an
 admin allows it (Admin -> Accounts and access). The bundle ships
-cloudflared.exe in bin\. If you'd rather run cloudflared yourself (e.g. a
-named tunnel with a stable subdomain), leave the toggle off and run your
-own from a separate window — the server doesn't depend on it.
+cloudflared.exe in bin\.
+
+For a show with remote people, a named Cloudflare Tunnel is better: it
+keeps one address across restarts, so nobody needs a new one mid-show.
+Set one up in your Cloudflare account (a stable subdomain pointing at
+http://localhost:3023), run cloudflared with it from a separate window,
+and leave this toggle off — the server doesn't depend on it.
 
 Troubleshooting
 ---------------

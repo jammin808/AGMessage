@@ -1942,6 +1942,99 @@ laptop that sleeps: lab 1 is the show laptop's, and reads "not run")
   `README.md` and `README.txt` (the watchdog, This laptop, health) say the rest.
 - Rolling back: 0.5.1 ignores the new health keys and `peaks.json`, and its watchdog kills the server at a wake again.
 
+**The internet link is kept on until an end time, and comes back after a restart** (the plan's Part 6, unit U10; the
+code and its tests, with cloudflared and its address stood in for; nothing in it is measured through a real tunnel)
+- **On until its end.** Turning the internet link on keeps it on until the end of the show day, the next 06:00 by the
+  laptop's clock (the show day the peaks already keep, so an evening that runs past midnight keeps its link), or the
+  next day's when that 06:00 is under an hour away, so a load-in that turns it on at 05:50 is not cut ten minutes later
+  (`tunnelend.defaultEnd`); Turn on's toast says the end ("The internet link is turning on, until 06:00 tomorrow
+  (Tunnel until… moves its end)."). The end is kept in the settings (`tunnelUntil`, through the settings lane: no new
+  store). **Tunnel until…** (the tunnel card's ⋯, a catalogue row, `tunnel.until`; `admin:tunnelUntil`, the admin's)
+  moves it, asked in place with a time of day by the laptop's clock, filled with the end it has: a time already past
+  today is tomorrow's, and the end it has, confirmed unchanged, stays where it is (Turn on's 06:00 at 05:30 is
+  tomorrow's). Its answer is the end it kept, with its words, and every admin page hears it. A payload that names no
+  time of day is refused with words ("Give the end as a time of day, HH:MM by this laptop's clock (for example
+  23:30).") whether or not the link runs, and with the link off, "The internet link is off: turn it on first.". At its
+  end the link is turned off within a 5 s health window, read against the wall clock (so a sleep or a moved clock never
+  lets it outlive its end), and stays off: "[tunnel] its end, 06:00 today, has come: the internet link is off" on the
+  console. Until now it ran until someone turned it off or AGMessage stopped; under the installed node's task, with no
+  window to close, that could be days.
+- **By the laptop's clock, on every page.** The end and the start that turned the link on again come from the server in
+  the laptop's words and time of day (`untilWords`, `untilClock`, `againWords`), sent again when they change ("tomorrow"
+  become "today" at midnight), so an admin page set to another zone shows, fills and confirms the laptop's time, never
+  its own (a page in New York filled the field with 01:00 for the laptop's 06:00, and confirming it unchanged would have
+  moved the end).
+- **Back after a restart, with its new address said once it has one.** A start inside the end (a watchdog restart, a
+  crash, an upgrade, a wake, a boot under the task) turns the link on again once the start's banner is whole, at the
+  same end. A quick tunnel's address is new at every start, so once cloudflared gives it the admin is told: the tunnel
+  card says "△ New address: AGMessage started again at 14:02 today and turned the internet link on again. Send this
+  address to remote people; the one before no longer works." with the new address, "This laptop"'s Internet link row
+  says "turned on again as AGMessage started at 14:02 today: a new address, so remote people need this one", and the
+  console says "[tunnel] on again until …". **A start that cannot turn it on again says so**: a cloudflared that
+  cannot start, or ends before it gives an address (one that cannot reach Cloudflare, as at a boot before the network
+  is up), is "Not turned on again as AGMessage started at 08:02 today: cloudflared exited (code 1)." on the card and in
+  "This laptop", and "[tunnel] not turned on again: … It was to stay on until …: Turn on on the admin page, or a start
+  of AGMessage before then, tries again." on the console; never "on again". Its end is kept, so the next start inside it
+  (or Turn on, which keeps that end) brings the link back; nothing tries again by itself. A link a person turned on while
+  the start's banner was said is theirs, and nothing is said of it as turned on again.
+- **What forgets the end.** Turn off forgets it at once (so a stop before cloudflared has gone does not bring the link
+  back), as do the end coming, a start past it or with an end no act could have set (further ahead than a day and two
+  hours: a clock set back, a file written by hand; said on the console), and a Turn on whose cloudflared ended before it
+  gave an address (nothing was on). A stop or a crash keeps it, and so does a cloudflared that ends of its own once it
+  gave its address: the card then says "It was to stay on until 23:30 today. Turn on starts it again until then, as
+  does a start of AGMessage before then; Turn off… keeps it off.", Turn off… (asked as "Keep the internet link off?")
+  forgets it, and "This laptop" says the same with △. A crash ends cloudflared with the server, its end kept for the
+  restart. On Windows a cloudflared already ended with its server however the server ended (libuv puts each child Node
+  starts, unless detached, in a job object that ends it with its parent: read in libuv's source, not measured here);
+  elsewhere a crash could leave it running, and a server the watchdog kills as hung still can, its address working
+  until that cloudflared is ended by hand.
+- **Where it is said.** `tunnel:status` and `admin:tunnelStatus`'s answer gain, at their end, `until` (the end kept, ms
+  since the epoch; null when none is), `untilWords`, `untilClock`, `again` (when a start turned it on again),
+  `againWords` and `notKept`; Turn on's answer gains `until`, `untilWords` and `notKept`, Tunnel until…'s is `{ok,
+  until, untilWords}`. Appended to health's `tunnel`, at its end: `until`. The tunnel card says "On until 06:00
+  tomorrow, then off and it stays off. If AGMessage starts again before then, the link is turned on again, with a new
+  address." and "This laptop" says "on: … · until 06:00 tomorrow, then off". The context's `recent` gains "the internet
+  link was turned on again as AGMessage started, with a new address", "the internet link was not turned on again as
+  AGMessage started" and "the internet link ended at its end time"; the context's tunnel item, the hello and the AI's
+  brief are unchanged.
+- **Audited.** The link opened to the internet is now an audit row, never its address: `tunnel.on` (the person who
+  turned it on and its end, written once cloudflared gives the address, so one that never opened is no row),
+  `tunnel.until` (its end moved; asked again with the same time, no row), `tunnel.off` (the person; "kept off" when
+  cloudflared had ended and only its end was forgotten), and system rows `tunnel.again` (turned on again by a start,
+  with its end) and `tunnel.ended` (turned off at its end).
+- **Settings that could not be read.** Tunnel until… is refused with the settings' own "Not saved: …" words, as every
+  setting is. Turn on is the one act that still runs: what it does is the link itself, which never waited on the
+  settings, so it turns the link on with its end held for this run only, and its answer, the card and "This laptop" (△)
+  say why a restart would not turn it on again (`notKept`); nothing is written over the file.
+- **A named tunnel for shows with remote people.** The card's instructions and the papers recommend a named Cloudflare
+  Tunnel, run by the admin beside AGMessage, which keeps one address across restarts; the built-in quick tunnel stays.
+- The tests: the end read by type (inside, past, none, beyond any end an act sets, not a number), Turn on's end an hour
+  or more away (05:50 keeps the next day's 06:00, each such end one a start reads as inside its time), a time of day as
+  its next minute (this minute's is tomorrow's; the end kept, named again, stays), as a time field holds it and in
+  words by the laptop's clock, and the show day's end at 06:00. On a server with cloudflared stood in for (each start's
+  addresses its own): turned on, the end of the show day kept and said in its answer, on `tunnel:status` with its
+  laptop words and time of day, in health and "This laptop"; Tunnel until… kept, heard, the same answer and no second
+  row asked twice, refused with words for every payload that names no time and with the link off; stopped and started
+  again inside the end, the link on again at the same end with a new address, `again` set, "This laptop", the console
+  (after the address, never before) and the audit log saying so, and the new address checked from the laptop; turned
+  off, the end forgotten and the next start leaving it off; a start past the end, and one with an end no act sets,
+  leaving it off, forgetting it and saying so, with nothing through the link; a link turned off as its end comes,
+  audited, and off at the next start; unread settings turning it on with its end said not kept, refusing Tunnel until…,
+  writing nothing over the file, and the next start leaving it off; a start whose cloudflared ends before its address
+  (a stand-in that cannot reach Cloudflare) never said on again, said not turned on again on the card, "This laptop"
+  and the console, its end kept and nothing audited; Turn on then keeping that end, and its own failure forgetting it;
+  Turn off… with the link off forgetting a kept end, audited, and the next start leaving it off; and a crash with the
+  link up (an error nothing catches) ending its cloudflared (each kill recorded) and keeping the end, the next start
+  turning it on again. The browser smoke opens the card on a page set to another zone than the laptop's: it says the
+  end by the laptop's clock, Tunnel until… is filled with the laptop's 06:00 and, confirmed unchanged, keeps the end,
+  then moves it; stopped and started, the server turns the link on again and the card says "△ New address: …" with
+  the new address, at the same end.
+- The papers: `README.md`, `README.txt` (Remote participants), `docs/DESIGN.md` (The internet link), `docs/INSTALL.md`,
+  `docs/NODES.md` (health), `docs/ACCOUNTS.md` (the audit log's rows), `SECURITY.md` (and the settings rule's one
+  exception, Turn on) and `docs/ANALYSIS.md` (the pure set gains `lib/tunnelend.js`; 31 verbs refused by right).
+- Rolling back: 0.5.1 ignores `tunnelUntil` in the settings and the new fields, and its tunnel ends with every restart
+  again.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

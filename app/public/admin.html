@@ -188,13 +188,17 @@
             </div>
 
             <div class="admin-tunnel-state admin-tunnel-on" id="tunnelOnState" hidden>
+              <!-- Said while the link runs after a start turned it on again: its address is new. -->
+              <p class="admin-tunnel-again" id="tunnelAgain" hidden></p>
               <p class="admin-tunnel-url-label"><strong>Public URL — share with remote users:</strong></p>
               <div class="admin-tunnel-url-row">
                 <code id="tunnelUrl" class="admin-tunnel-url">—</code>
               </div>
-              <p class="hint">The URL stays live until you toggle this off (or stop the server).
-                 Anyone with the URL <em>and</em> a room's guest code can join.</p>
+              <p class="hint">Anyone with the URL <em>and</em> a hall's guest code can join.</p>
             </div>
+
+            <!-- The link's end, kept until Turn off, so a start before it turns the link on again: while it runs, and while it is off with its end kept. -->
+            <p class="hint" id="tunnelUntilLine" hidden></p>
 
             <div class="admin-tunnel-state admin-tunnel-error" id="tunnelErrorState" hidden>
               <p class="error" id="tunnelErrorMsg">—</p>
@@ -218,10 +222,14 @@
                     <code>cloudflared tunnel --url http://localhost:&lt;port&gt;</code> for you and watches its output for the public URL.</li>
                 <li>Once the URL appears, click <strong>📋 Copy</strong> and share it with each remote user, along with the room's guest code.</li>
                 <li>The remote user opens the URL in any browser, enters the code, their name and their seat, and joins as they would on the venue's network.</li>
-                <li>When the show is over, toggle this off to take the tunnel down.</li>
+                <li>It stays on until the end of the show day (06:00 by this laptop's clock; turned on after 05:00, 06:00 the next day), or the
+                    time <strong>Tunnel until…</strong> sets: then it is turned off and stays off. If AGMessage starts again before then, the link is
+                    turned on again with a new address, which this card says: send the new one to remote people. If it could not be turned on again
+                    (the laptop not online yet), this card says so: turn it on once the laptop is online. Turn it off sooner when the show is over.</li>
               </ol>
-              <p class="hint">If you'd rather run cloudflared manually (e.g. with a named tunnel and a stable subdomain),
-                 you can leave this toggle off and start your own — the server doesn't depend on it.</p>
+              <p class="hint">For a show with remote people, a named Cloudflare Tunnel keeps one address across restarts:
+                 run it yourself (cloudflared, with a stable subdomain, pointing at this laptop's port) and leave this toggle off —
+                 the server doesn't depend on it.</p>
             </details>
           </div>
         </section>

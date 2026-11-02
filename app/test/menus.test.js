@@ -335,6 +335,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     'nodes:link': (o) => ({ id: o.id, token: 'not-the-token' }), 'nodes:unlink': (o) => ({ id: o.id }), 'nodes:acceptCertificate': (o) => ({ id: o.id, fingerprint: '0123456789abcdef' }),
     'nodes:command': (o) => ({ id: o.id, line: 'CUE 1', mode: 'propose' }),
     'admin:acceptCertificate': null, 'admin:tunnelStart': null, 'admin:tunnelStop': null, 'admin:tunnelStatus': null, 'admin:laptop': null,   // the ack alone
+    'admin:tunnelUntil': () => ({ until: '23:30' }),
     'hall:settings': (o) => ({ code: o.code }), 'nodes:list': () => ({}),
     'help:respond': (o, e) => ({ code: o.code, messageId: o.id, state: e.id === 'help.respond' ? 'coming' : 'resolved' }),
   };

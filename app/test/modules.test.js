@@ -17,7 +17,7 @@ const serverCode = () => ['server.js', 'supervise.js', ...filesUnder('lib', /\.[
 
 // ---------------------------------------------------------------- (a)-(c) the server's layers
 /** The pure core: functions of what they are given, their clocks default arguments. They require only each other. */
-const PURE = ['lib/board.js', 'lib/context.js', 'lib/deskresults.js', 'lib/latest.js', 'lib/ops.js', 'lib/rbac.js', 'lib/stagelines.js'];
+const PURE = ['lib/board.js', 'lib/context.js', 'lib/deskresults.js', 'lib/latest.js', 'lib/ops.js', 'lib/rbac.js', 'lib/stagelines.js', 'lib/tunnelend.js'];
 /** What reaches a disk, a network, the machine or another process: a pure module names none of them. */
 const IO_BUILTINS = ['fs', 'net', 'http', 'https', 'dgram', 'tls', 'os', 'dns', 'child_process', 'ws'];
 /** Only the composition root, server.js, requires these: the HTTP domain and the handler modules. */

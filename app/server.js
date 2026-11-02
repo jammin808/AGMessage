@@ -56,6 +56,7 @@ const startup = require('./lib/startup');
 const laptop = require('./lib/laptop');
 const power = require('./lib/power');
 const dataformat = require('./lib/dataformat');
+const tunnelend = require('./lib/tunnelend');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD } = require('./lib/version');
@@ -235,6 +236,8 @@ const sessions = new Sessions(path.join(DATA_DIR, 'sessions.json'), accounts);
 const tokenSessions = new TokenSessions(path.join(DATA_DIR, 'admin-sessions.json'), guard.mac(SECRET, 'admin-token:' + ADMIN_TOKEN, 43));
 const audit = new AuditLog(path.join(DATA_DIR, 'audit.jsonl'), { keys: keysFrom(secretbox.derive), records: path.join(secretbox.keyDir(), 'audit'), version: VERSION });
 const HOST_ACTOR = Object.freeze({ t: 'admin', id: 'host', name: 'AGMessage laptop' });
+// What AGMessage does of itself, with no person's act: a start by another build, the internet link turned on again or ended.
+const SYSTEM_ACTOR = Object.freeze({ t: 'system', id: '', name: '' });
 // The fingerprint of the key this machine signs its exports with (lib/secretbox.js), '' in a run without the machine key.
 // Only the fingerprint is kept: the key itself is derived again when an export signs, and dropped after. Read once the
 // machine key is there (`firstWrites`), which a first start makes only after it holds its folder.
@@ -381,10 +384,14 @@ function socketFacts() {
   const c = readings.countSockets(Array.from(io.sockets.sockets.values(), (s) => s.data));
   return { maxSocketsPerAddress: c.maxPerAddress, tunnelSockets: c.tunnel };
 }
-/** The tunnel's places now, and today's refusals (counts only: `networks` is how many networks hold a place, never which). */
+/**
+ * The tunnel's places now, today's refusals (counts only: `networks` is how many networks hold a place, never which), and
+ * the end the internet link is kept on until (`until`, ms since the epoch; null when none is kept): a start before it
+ * turns the link on again.
+ */
 function tunnelFacts(now = Date.now()) {
   const refused = refusals.view(now);
-  return { tunnel: { places: tunnelPlaces.taken, max: tunnelPlaces.max, share: tunnelPlaces.share, networks: tunnelPlaces.networks, refused: refused.tunnel }, refused: { venue: refused.venue } };
+  return { tunnel: { places: tunnelPlaces.taken, max: tunnelPlaces.max, share: tunnelPlaces.share, networks: tunnelPlaces.networks, refused: refused.tunnel, until: keptUntil(now) }, refused: { venue: refused.venue } };
 }
 /** The hall with the most messages: how many, and its snapshot's size (kept by each compaction, so no file is read). */
 function largestHall() {
@@ -409,6 +416,7 @@ setInterval(() => {
   }, now);
   savePeaks();   // this window's rises, the tunnel's refusals, and the snapshots and audit appends timed in it
   keepAwake();   // read again each window, whatever marked the board
+  tunnelAtItsEnd(now);   // the tunnel's end read against the wall clock each window, so a sleep or a clock moved never outlives it, and its words kept true
   const refusedLine = refusals.logLine(now);   // one line a minute at most while the tunnel refuses
   if (refusedLine) console.log('  ' + refusedLine);
 }, 5000).unref();
@@ -547,6 +555,7 @@ function laptopFacts() {
   let linked = 0, connected = 0;
   for (const l of allLinks()) if (l.base) { linked++; if (l.status === 'connected') connected++; }
   const without = [secretFound.words ? secretFound.words + ': this run signs guests and invite links with a secret of its own' : '', settingsRead.unread ? settingsRead.words + ': nothing is saved over it this run' : ''].filter(Boolean);
+  const link = tunnelStatus();
   return {
     at: laptopRead.at || null, reading: laptopRead.reading, addresses, port: PORT,
     facts: laptop.facts({
@@ -555,7 +564,7 @@ function laptopFacts() {
       sealed: { total: sealed.length, open: key.state === 'key' ? sealed.filter(([, v]) => !!secretbox.open(v)).length : 0, keyWords: key.state === 'key' ? '' : key.state === 'absent' ? 'this laptop has no machine key' : 'this run has no machine key (' + key.code + ')' },
       screens: { total: displays.list.size, shown, offline },
       stagewatch: { total: linked, connected },
-      tunnel: { running: !!tunnelProc, url: tunnelUrl || '', error: tunnelError || '' },
+      tunnel: { running: !!tunnelProc, url: tunnelUrl || '', error: tunnelError || '', until: link.untilWords, again: link.againWords, notKept: link.notKept },
       sleeps: { watched: SUPERVISED, list: peaks.sleeps(), today: peaks.sleptOn(Date.now()) },
       power: powerRequest.view(),
       before: beforeWords(), without, format: formatNow ? { ...formatFacts(), build: BUILD.full, dir: DATA_DIR } : null,
@@ -2363,8 +2372,51 @@ io.on('connection', (socket) => {
     readLaptop();
     ok(ack)({ ok: true, laptop: laptopAnswer() });
   });
-  socket.on('admin:tunnelStart', (ack) => { if (admin(ack)) ok(ack)(startTunnel()); });
-  socket.on('admin:tunnelStop', (ack) => { if (admin(ack)) { stopTunnel(); ok(ack)({ ok: true }); } });
+  // Turn on: until the end the link keeps (one a start that could not turn it on again, or a cloudflared that ended of its
+  // own, left inside its time), else the end of the show day (`tunnelend.defaultEnd`: the next 06:00 an hour or more
+  // away), kept in the settings, so a start before then turns it on again; Tunnel until… moves the end, Turn off forgets
+  // it. One already on keeps its end. With settings that could not be read it still turns on, its end held for this run
+  // only and the answer saying so (`notKept`): the one act that keeps a setting it cannot save, since what it does is the
+  // link itself, which never waited on the settings.
+  socket.on('admin:tunnelStart', (ack) => {
+    if (!admin(ack)) return;
+    if (tunnelProc) return ok(ack)({ ...startTunnel(), ...tunnelEndFacts(), notKept: tunnelNotKept() });
+    const now = Date.now();
+    const kept = tunnelend.keptEnd(settings.tunnelUntil, now);
+    const until = kept.on ? kept.until : tunnelend.defaultEnd(now, readings.dayEnds);
+    keepTunnelEnd(until);
+    const r = startTunnel(null, { actor: socket.data.actor || HOST_ACTOR, ip: socket.data.ip });
+    if (!r.ok) { keepTunnelEnd(null); return ok(ack)(r); }   // nothing turned on, so no end to keep
+    ok(ack)({ ...r, ...tunnelEndFacts(now), notKept: tunnelNotKept() });
+  });
+  socket.on('admin:tunnelStop', (ack) => {
+    if (!admin(ack)) return;
+    const was = tunnelProc ? 'the internet link turned off' : keptUntil() !== null ? 'the internet link kept off (cloudflared had ended; a start before its end would have turned it on again)' : '';
+    stopTunnel();
+    if (was) audit.write(socket.data.actor || HOST_ACTOR, 'tunnel.off', 'tunnel', was, socket.data.ip);
+    ok(ack)({ ok: true });
+  });
+  // Tunnel until…: the running tunnel's end moved to the next HH:MM by this laptop's clock (a time already past today is
+  // tomorrow's; the end it has, when it is that time of day, stays) and kept. The payload is read by type first, so one
+  // that names no time of day is refused with words whether or not the tunnel runs; with settings that could not be read
+  // it is refused with why, as every setting is. Asked again with the same time, it answers the same end (and audits only
+  // a move).
+  socket.on('admin:tunnelUntil', (first, second) => {
+    const ack = typeof first === 'function' ? first : second;
+    if (!admin(ack)) return;
+    const asked = first && typeof first === 'object' ? guard.str(first.until).slice(0, 10) : '';
+    const now = Date.now();
+    const until = tunnelend.endAt(asked, now, keptUntil(now));
+    if (until === null) return ok(ack)({ ok: false, error: 'Give the end as a time of day, HH:MM by this laptop\'s clock (for example 23:30).' });
+    if (!tunnelProc) return ok(ack)({ ok: false, error: 'The internet link is off: turn it on first.' });
+    if (settingsUnsaved()) return ok(ack)({ ok: false, error: settingsUnsaved() });
+    if (keptUntil() !== until) {
+      keepTunnelEnd(until);
+      audit.write(socket.data.actor || HOST_ACTOR, 'tunnel.until', 'tunnel', 'the internet link\'s end moved to ' + tunnelend.clockWords(until, now), socket.data.ip);
+      broadcastTunnelStatus();
+    }
+    ok(ack)({ ok: true, ...tunnelEndFacts(now) });
+  });
   // Answered at once with the newest check; a check of the link starts too when the link is up and the newest check is
   // over a minute old (or there is none), and its result comes on `tunnel:status`.
   socket.on('admin:tunnelStatus', (ack) => {
@@ -3088,6 +3140,7 @@ let tunnelProc = null, tunnelUrl = null, tunnelError = null, cfLogfile = null, c
 let tunnelUp = false;          // the address is taken as reachable: cloudflared said its connection is registered, or the wait for it ran out
 let tunnelCheck = null;        // the newest check of the link: {at, ok, p50Ms, maxMs, words}
 let tunnelChecking = false;    // one check at a time
+let tunnelAgain = null;        // when a start turned the running tunnel on again, inside its kept end: its address is new
 const TRYCF_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
 // Cloudflare's banner gives the address before it is reachable ("it may take some time to be reachable"); this line is
 // cloudflared's own word that a connection to Cloudflare stands. A cloudflared that words it otherwise is checked once
@@ -3099,10 +3152,109 @@ const TUNNEL_CHECK_TRIES = 5;
 const TUNNEL_CHECK_DEADLINE_MS = 5000;
 const TUNNEL_CHECK_EVERY_MS = 60_000;
 
-/** What an admin page is told of the tunnel: whether a check of the link is under way, and the newest one's facts. */
-const tunnelStatus = () => ({ running: !!tunnelProc, url: tunnelUrl, error: tunnelError, checking: tunnelChecking, check: tunnelCheck });
+/**
+ * What an admin page is told of the tunnel: whether a check of the link is under way, and the newest one's facts; the end
+ * it is kept on until (`until`, null when none is kept), with its words and its time of day by this laptop's clock
+ * (`untilWords`, `untilClock`: a page shows these, never its own clock's, since Tunnel until… is read by this laptop's);
+ * when a start turned it on again, so its address is new (`again`, `againWords`); and why a restart would not turn it on
+ * again (`notKept`, '' when it would).
+ */
+function tunnelStatus(now = Date.now()) {
+  const until = keptUntil(now);
+  const again = tunnelProc ? tunnelAgain : null;
+  return {
+    running: !!tunnelProc, url: tunnelUrl, error: tunnelError, checking: tunnelChecking, check: tunnelCheck,
+    until, untilWords: until === null ? '' : tunnelend.clockWords(until, now), untilClock: until === null ? '' : tunnelend.clockOf(until),
+    again, againWords: again === null ? '' : tunnelend.clockWords(again, now), notKept: tunnelNotKept(),
+  };
+}
+/**
+ * The end the internet link is kept on until (ms since the epoch), or null: `tunnelUntil` in the settings, as a start reads
+ * it (inside its time or past it; never one no act could set). Turn on keeps one, Tunnel until… moves it; it is forgotten
+ * by Turn off, by the end coming, by a start past it and by a Turn on whose cloudflared ended before it gave an address.
+ * A stop or a crash of AGMessage keeps it, and so do a cloudflared that ends of its own once it gave its address and one
+ * a start could not turn on again: a start before the end turns the link on again, and Turn on keeps that end.
+ */
+const keptUntil = (now = Date.now()) => tunnelend.keptEnd(settings.tunnelUntil, now).until;
+/** The kept end and its words by this laptop's clock, as Turn on and Tunnel until… answer them. */
+const tunnelEndFacts = (now = Date.now()) => { const until = keptUntil(now); return { until, untilWords: until === null ? '' : tunnelend.clockWords(until, now) }; };
+/** Why a restart would not turn the link on again, in words: an end is held, but the settings could not be read, so it is saved nowhere. */
+const tunnelNotKept = () => (keptUntil() !== null ? settingsUnsaved() : '');
+/** The tunnel's end kept (a time) or forgotten (null) in the settings; a run whose settings could not be read holds it in memory only. */
+function keepTunnelEnd(until) {
+  if (until === null) {
+    if (!Object.hasOwn(settings, 'tunnelUntil')) return;
+    delete settings.tunnelUntil;
+  } else settings.tunnelUntil = until;
+  saveSettings();
+}
+let tunnelStartRead = false;   // the start has read the kept end: until then, the health tick leaves it to the start
+/**
+ * A start reads the tunnel's kept end: inside it the tunnel is turned on again, and once cloudflared gives the address
+ * the admin page, "This laptop" and the console say it is new (a quick tunnel's always is); past it, or one that does not
+ * read as an end any act could set, it is forgotten and the tunnel stays off. A link a person turned on while the
+ * banner was said is theirs, with the end Turn on kept, and nothing is said of it here.
+ */
+function tunnelAtStart(now) {
+  tunnelStartRead = true;
+  if (tunnelProc) return;
+  const kept = tunnelend.keptEnd(settings.tunnelUntil, now);
+  if (kept.why === 'none') return;
+  if (!kept.on) {
+    keepTunnelEnd(null);
+    console.log('  [tunnel] ' + (kept.why === 'past' ? 'its end, ' + tunnelend.clockWords(kept.until, now) + ', came while AGMessage was not running' : 'its kept end is not one AGMessage sets') + ': the internet link stays off');
+    return;
+  }
+  const started = startTunnel(now);
+  if (!started.ok) tunnelNotAgain(now, started.error);
+}
+/** Words that end as a sentence does. */
+const sentence = (w) => (/[.!?]$/.test(w) ? w : w + '.');
+/** A start's cloudflared gave its address: the link is on again, and its address is new, said where the admin reads. */
+function tunnelOnAgain(now = Date.now()) {
+  const until = keptUntil(now);
+  const end = until === null ? '' : ' until ' + tunnelend.clockWords(until, now);
+  console.log('  [tunnel] on again' + end + ': a quick tunnel\'s address is new at each start, so remote people need the new one (the admin page gives it)');
+  noteEvent('the internet link was turned on again as AGMessage started, with a new address');
+  audit.write(SYSTEM_ACTOR, 'tunnel.again', 'tunnel', 'the internet link turned on again as AGMessage started,' + end + ', with a new address');
+}
+/**
+ * A start could not turn the link on again (`cause`: cloudflared could not start, or ended before it gave an address,
+ * as at a boot before the network is up): said on the card (the error), "This laptop" and the console, and its end kept,
+ * so Turn on, or a start before the end, tries again.
+ */
+function tunnelNotAgain(at, cause) {
+  const now = Date.now();
+  const until = keptUntil(now);
+  tunnelError = 'Not turned on again as AGMessage started at ' + tunnelend.clockWords(at, now) + ': ' + sentence(cause);
+  console.log('  [tunnel] not turned on again: ' + sentence(cause) + (until === null ? '' : ' It was to stay on until ' + tunnelend.clockWords(until, now) + ': Turn on on the admin page, or a start of AGMessage before then, tries again.'));
+  noteEvent('the internet link was not turned on again as AGMessage started');
+}
+/**
+ * Read each health window against the wall clock: once the kept end has come the tunnel is turned off (or, when cloudflared
+ * had ended, the end forgotten) and stays off; before it, the status goes again to the admin pages when its words by this
+ * laptop's clock have changed ("tomorrow" become "today" at midnight).
+ */
+function tunnelAtItsEnd(now) {
+  if (!tunnelStartRead) return;
+  const until = keptUntil(now);
+  if (until !== null && now >= until) {
+    const on = !!tunnelProc;
+    console.log('  [tunnel] its end, ' + tunnelend.clockWords(until, now) + ', has come: the internet link ' + (on ? 'is off' : 'stays off'));
+    if (on) {
+      noteEvent('the internet link ended at its end time');
+      audit.write(SYSTEM_ACTOR, 'tunnel.ended', 'tunnel', 'the internet link turned off at its end, ' + tunnelend.clockWords(until, now));
+    }
+    stopTunnel();
+    return;
+  }
+  if ((until !== null || tunnelAgain !== null) && tunnelWords(tunnelStatus(now)) !== tunnelWordsSaid) broadcastTunnelStatus();
+}
+let tunnelWordsSaid = '';   // the words by this laptop's clock the admin pages were last given
+const tunnelWords = (st) => st.untilWords + '|' + st.againWords;
 function broadcastTunnelStatus() {
   const payload = tunnelStatus();
+  tunnelWordsSaid = tunnelWords(payload);
   for (const [, s] of io.sockets.sockets) if (s.data && s.data.isAdmin) s.emit('tunnel:status', payload);
 }
 /** One try of the link: the ms its answer took, or null when none came within the deadline or it was not this copy's. */
@@ -3150,9 +3302,15 @@ function resolveCloudflaredBin() {
   try { if (fs.existsSync(bundled)) return bundled; } catch { /* ignore */ }
   return 'cloudflared';
 }
-function startTunnel() {
+/**
+ * cloudflared started for this laptop's port; `again`, when a start turns the tunnel on again inside its kept end, else
+ * `by` ({actor, ip}), the person who turned it on. Its end is the caller's: Turn on keeps one first, a start reads the one
+ * kept. The audit log's row is written once cloudflared gives the address, when the link is open: one that ends before
+ * then opened nothing.
+ */
+function startTunnel(again = null, by = null) {
   if (tunnelProc) return { ok: true, running: true, url: tunnelUrl };
-  tunnelError = null; tunnelUrl = null; tunnelUp = false; tunnelCheck = null;
+  tunnelError = null; tunnelUrl = null; tunnelUp = false; tunnelCheck = null; tunnelAgain = again;
   let proc;
   try {
     // In AGMessage's own data folder (one server per folder), not a guessable name in the shared temp folder.
@@ -3161,6 +3319,7 @@ function startTunnel() {
     proc = spawn(resolveCloudflaredBin(), ['tunnel', '--url', `http://localhost:${PORT}`, '--no-autoupdate', '--logfile', cfLogfile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   } catch (e) {
     tunnelError = 'Could not start cloudflared: ' + e.message;
+    tunnelAgain = null;
     broadcastTunnelStatus();
     return { ok: false, error: tunnelError };
   }
@@ -3170,7 +3329,16 @@ function startTunnel() {
   const sniff = (chunk) => {
     if (tunnelProc !== proc) return;
     buf = (buf + chunk.toString()).slice(-32768);
-    if (!tunnelUrl) { const m = buf.match(TRYCF_RE); if (m) { tunnelUrl = m[0]; console.log('  [tunnel] ' + tunnelUrl); broadcastTunnelStatus(); } }
+    if (!tunnelUrl) {
+      const m = buf.match(TRYCF_RE);
+      if (m) {
+        tunnelUrl = m[0];
+        console.log('  [tunnel] ' + tunnelUrl);
+        if (tunnelAgain !== null) tunnelOnAgain();
+        else if (by) { const until = keptUntil(); audit.write(by.actor, 'tunnel.on', 'tunnel', 'the internet link turned on' + (until === null ? '' : ', until ' + tunnelend.clockWords(until, Date.now())), by.ip); }
+        broadcastTunnelStatus();
+      }
+    }
     if (tunnelUrl && !tunnelUp && TUNNEL_UP_RE.test(buf)) { tunnelUp = true; startCheck(); }
   };
   if (proc.stdout) proc.stdout.on('data', sniff);
@@ -3200,24 +3368,46 @@ function startTunnel() {
       broadcastTunnelStatus();
     } else if (!tunnelUp) { tunnelUp = true; startCheck(); }
   }, TUNNEL_URL_MS);
+  /**
+   * This cloudflared gone (`cause`: why, in words, when it was not asked to go). Before it gave an address, a start's is a
+   * link not turned on again, its end kept for Turn on or the next start; Turn on's kept nothing, since nothing was on.
+   * Once it gave one, its end is kept: it was on, and a start before the end turns it on again.
+   */
+  const gone = (cause) => {
+    const hadAddress = !!tunnelUrl;
+    const again = tunnelAgain;
+    tunnelProc = null; tunnelUrl = null; tunnelUp = false; tunnelAgain = null;
+    if (!hadAddress && again !== null) tunnelNotAgain(again, cause);
+    else if (!hadAddress) keepTunnelEnd(null);
+    else {
+      const until = keptUntil();
+      if (until !== null) console.log('  [tunnel] cloudflared ended: ' + sentence(cause) + ' It was to stay on until ' + tunnelend.clockWords(until, Date.now()) + ': Turn on on the admin page, or a start of AGMessage before then, turns it on again.');
+    }
+    broadcastTunnelStatus();
+  };
   proc.on('error', (err) => {
     tunnelError = err && err.code === 'ENOENT' ? 'cloudflared not found — re-extract the bundle (bin/cloudflared.exe).' : 'cloudflared error: ' + (err && err.message);
-    if (tunnelProc === proc) { tunnelProc = null; tunnelUrl = null; tunnelUp = false; }
-    broadcastTunnelStatus();
+    if (tunnelProc === proc) gone(tunnelError);
+    else broadcastTunnelStatus();
   });
   proc.on('exit', (code, signal) => {
     if (cfLogPoll) { clearInterval(cfLogPoll); cfLogPoll = null; }
     if (cfLogfile) { try { fs.unlinkSync(cfLogfile); } catch { /* ignore */ } cfLogfile = null; }
     if (tunnelProc === proc) {
-      tunnelProc = null; tunnelUrl = null; tunnelUp = false;
       if (code !== 0 && code !== null && !tunnelError) tunnelError = 'cloudflared exited (code ' + code + (signal ? ', signal ' + signal : '') + ').';
-      broadcastTunnelStatus();
+      gone(tunnelError || 'cloudflared ended (' + (signal ? 'signal ' + signal : 'code ' + code) + ').');
     }
   });
   broadcastTunnelStatus();
   return { ok: true, running: true, url: null };
 }
+/**
+ * Turn off, and the end come: the end forgotten at once (so a stop of AGMessage before cloudflared has ended does not turn
+ * it on again) and cloudflared asked to end, which, asked, says nothing of a link not turned on again.
+ */
 function stopTunnel() {
+  keepTunnelEnd(null);
+  tunnelAgain = null;
   if (!tunnelProc) { tunnelUrl = null; tunnelError = null; broadcastTunnelStatus(); return; }
   try { tunnelProc.kill('SIGTERM'); } catch { /* ignore */ }
 }
@@ -3282,6 +3472,8 @@ process.on('uncaughtException', (e) => {
   // Before this copy holds its folder another copy may own those files, and nothing of this one's is there to save.
   if (!serving) { releaseDataFolder(); process.exit(resilience.EXIT.CRASH); }
   try { powerRequest.end(); } catch { /* its input closes as this process ends, which ends it too */ }
+  // cloudflared ends with this copy, its end kept: the restart turns the tunnel on again rather than leave this one beside it.
+  if (tunnelProc) { try { tunnelProc.kill('SIGTERM'); } catch { /* it has ended */ } }
   try { store.compactAll(); } catch { /* best effort */ }
   try { flushLanes(); } catch { /* best effort: a lane that cannot write has said so on the console */ }
   try {
@@ -3563,7 +3755,7 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   }
   audit.open();
   const upgraded = dataformat.rowWords(formatNow, BUILD.full);
-  if (upgraded) audit.write({ t: 'system' }, 'server.upgraded', BUILD.full, upgraded);
+  if (upgraded) audit.write(SYSTEM_ACTOR, 'server.upgraded', BUILD.full, upgraded);
   for (const fn of untilServing.splice(0)) fn();
   readLaptop();
   // The whole log is checked once, beside the show, so health, the rows' marks and the black window read what the log
@@ -3600,6 +3792,8 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
     console.log('  Saved rooms: ' + ROOMS_DIR);
     console.log('  Uploads:     ' + UPLOAD_DIR + '\n');
   });
+  // The tunnel's kept end, read once the banner is whole, so no line of it falls inside the banner.
+  bannerSaid.then(() => tunnelAtStart(Date.now()));
   // What the check at start found that the banner has not said is said once it answers and the banner is whole. Only
   // then, with this copy serving, may the browser open: the page it opens is this copy's (lib/startup.js), and a log that
   // needs the person at this laptop opens it on the admin page, where Health asks it.

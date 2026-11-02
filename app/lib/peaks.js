@@ -132,6 +132,13 @@ const dayOf = (at) => {
   if (d.getHours() < DAY_TURNS_AT_HOUR) d.setDate(d.getDate() - 1);
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 };
+/** When the show day a time falls in ends: the next 06:00 after it, by the laptop's own clock and zone. */
+const dayEnds = (at) => {
+  const d = new Date(at);
+  if (d.getHours() >= DAY_TURNS_AT_HOUR) d.setDate(d.getDate() + 1);
+  d.setHours(DAY_TURNS_AT_HOUR, 0, 0, 0);
+  return d.getTime();
+};
 // The readings a window raises, and the digits each keeps; `socketsPerAddress` is kept per lane.
 const WINDOW = { loopMs: 1, elu: 3, tunnelSockets: 0, hallMessages: 0, hallKb: 1, joinBurst: 0 };
 const LANES = ['venue', 'tunnel'];
@@ -393,4 +400,4 @@ function linkCheck(tries, at) {
   return { at, ok, p50Ms, maxMs, words };
 }
 
-module.exports = { loopDelayMs, countSockets, Burst, Hist, Peaks, Refusals, REFUSED, linkCheck, dayOf, BOUNDS, readSleep, SLEEPS_KEPT };
+module.exports = { loopDelayMs, countSockets, Burst, Hist, Peaks, Refusals, REFUSED, linkCheck, dayOf, dayEnds, BOUNDS, readSleep, SLEEPS_KEPT };

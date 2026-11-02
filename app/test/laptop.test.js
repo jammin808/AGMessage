@@ -705,14 +705,14 @@ test('what AGMessage knows, row by row: each with its mark, its words and where 
     build: '0.6.0+31', runs: 'portable', addresses: ['192.0.2.10'], port: 3023, node: '/usr/bin/node',
     https: { on: true, fingerprint: 'sha256:' + 'ab'.repeat(32), validTo: 'Jan 10 12:00:00 2028 GMT', off: '', renewal: '', file: '/k/tls.json' },
     sealed: { total: 5, open: 4, keyWords: '' }, screens: { total: 3, shown: 1, offline: 2 }, stagewatch: { total: 3, connected: 2 },
-    tunnel: { running: true, url: 'https://a-b.trycloudflare.com', error: '' }, before: 'server not responding (no heartbeat)', without: ['the secret could not be read', 'the settings could not be read'],
+    tunnel: { running: true, url: 'https://a-b.trycloudflare.com', error: '', until: '06:00 tomorrow', again: '', notKept: '' }, before: 'server not responding (no heartbeat)', without: ['the secret could not be read', 'the settings could not be read'],
   };
   const r = (rows) => Object.fromEntries(rows.map((x) => [x.id, [x.words, x.mark]]));
   assert.deepEqual(r(laptop.facts(k, w)), {
     build: ['0.6.0+31 · the portable folder', ''], addresses: ['http://192.0.2.10:3023', ''],
     https: ['on · certificate ' + 'ab'.repeat(8) + '… until Jan 10 12:00:00 2028 GMT', 'ok'],
     sealed: ['4 of 5 open', 'warn'], screens: ['1 of 3 confirmed what they show · 2 offline', 'warn'], stagewatch: ['2 of 3 links connected', 'warn'],
-    tunnel: ['on: https://a-b.trycloudflare.com · until it is turned off, or AGMessage stops', 'ok'],
+    tunnel: ['on: https://a-b.trycloudflare.com · until 06:00 tomorrow, then off', 'ok'],
     before: ['server not responding (no heartbeat)', 'warn'], without: ['the secret could not be read · the settings could not be read', 'warn'],
     network: ['none connected', 'warn'], firewall: ['no network to check it on', ''], sleep: ['never', 'ok'], lid: ['sleep', 'warn'],
     task: ['Running · last result 0x0 at 2026-11-02 13:02 UTC', 'ok'], admin: ['LAPTOP\\ana', ''], grants: ['LAPTOP\\ben: start,stop · S-1-5-21-1-2-3-1003: token', ''],
@@ -721,6 +721,18 @@ test('what AGMessage knows, row by row: each with its mark, its words and where 
   assert.deepEqual(r(laptop.facts(all, w).slice(3, 7)), { sealed: ['2 of 2 open', 'ok'], screens: ['2 of 2 confirmed what they show', 'ok'], stagewatch: ['connected', 'ok'], tunnel: ['starting', ''] });
   const many = { ...all, stagewatch: { total: 2, connected: 2 }, sealed: { total: 3, open: 0, keyWords: 'this run has no machine key (EACCES)' }, tunnel: { running: false, url: '', error: 'cloudflared not found' } };
   assert.deepEqual(r(laptop.facts(many, w).slice(3, 7)), { sealed: ['none of 3 open: this run has no machine key (EACCES)', 'fault'], screens: ['2 of 2 confirmed what they show', 'ok'], stagewatch: ['all 2 links connected', 'ok'], tunnel: ['off: cloudflared not found', 'warn'] });
+  // The internet link: on until its end; turned on again by a start inside it, its address said to be new; △ where a
+  // restart would not turn it on again (the settings could not be read), and its end still said.
+  const linkRow = (tunnel) => r(laptop.facts({ ...all, tunnel }, w).filter((x) => x.id === 'tunnel')).tunnel;
+  const AGAIN = { running: true, url: 'https://c-d.trycloudflare.com', error: '', until: '23:30 today', again: '14:02 today', notKept: '' };
+  assert.deepEqual(linkRow(AGAIN), ['on: https://c-d.trycloudflare.com · until 23:30 today, then off · turned on again as AGMessage started at 14:02 today: a new address, so remote people need this one', 'ok']);
+  assert.deepEqual(linkRow({ ...AGAIN, url: '' }), ['starting · until 23:30 today, then off · turned on again as AGMessage started at 14:02 today: its address will be new', '']);
+  assert.deepEqual(linkRow({ ...AGAIN, again: '', notKept: 'Not saved: settings.json could not be read (EBUSY).' }), ['on: https://c-d.trycloudflare.com · until 23:30 today, then off · Not saved: settings.json could not be read (EBUSY).', 'warn']);
+  // Off with its end still kept (cloudflared ended, or a start could not turn it on again): what turns it on again, △.
+  assert.deepEqual(linkRow({ running: false, url: '', error: 'Not turned on again as AGMessage started at 08:02 today: cloudflared exited (code 1).', until: '23:30 today', again: '', notKept: '' }),
+    ['off: Not turned on again as AGMessage started at 08:02 today: cloudflared exited (code 1). · it was to stay on until 23:30 today: Turn on, or a start of AGMessage before then, turns it on again', 'warn']);
+  assert.deepEqual(linkRow({ running: false, url: '', error: '', until: '23:30 today', again: '', notKept: '' }), ['off · it was to stay on until 23:30 today: Turn on, or a start of AGMessage before then, turns it on again', 'warn']);
+  assert.equal(laptop.facts({ ...all, tunnel: AGAIN }, w).find((x) => x.id === 'tunnel').from, 'cloudflared, turned on from this page, and again by a start before its end (kept in the settings)');
   const grantsNone = laptop.windowsFacts({ text: JSON.stringify({ ...ANSWER, lidAc: 9, record: { admin: '', adminName: '', grants: [] } }), why: '' });
   assert.deepEqual(r(laptop.facts(k, grantsNone).slice(-4)), { lid: ['action 9', 'warn'], task: ['Running · last result 0x0 at 2026-11-02 13:02 UTC', 'ok'], admin: ['not named in the install record', ''], grants: ['none given', ''] });
 });

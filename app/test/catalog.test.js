@@ -32,7 +32,7 @@ const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:
   'message',
   // the admin page, the halls board and the Accounts page (adminRoom, person, adminMsg, link, tunnel, hall, help, account, audit)
   'admin:watchRoom', 'admin:summary', 'admin:invites', 'admin:resetRoom', 'admin:deleteRoom', 'admin:setRole', 'admin:linkRoom', 'admin:unlinkRoom', 'admin:kick', 'admin:deleteMessage',
-  'admin:settings', 'nodes:link', 'nodes:unlink', 'nodes:acceptCertificate', 'nodes:command', 'admin:acceptCertificate', 'admin:tunnelStart', 'admin:tunnelStop', 'admin:tunnelStatus',
+  'admin:settings', 'nodes:link', 'nodes:unlink', 'nodes:acceptCertificate', 'nodes:command', 'admin:acceptCertificate', 'admin:tunnelStart', 'admin:tunnelStop', 'admin:tunnelStatus', 'admin:tunnelUntil',
   // "This laptop" (laptop)
   'admin:laptop',
   'hall:settings', 'nodes:list', 'http:PATCH /api/users/:id', 'http:POST /api/users/:id/password', 'http:POST /api/users/:id/signout', 'http:DELETE /api/users/:id',
@@ -151,10 +151,12 @@ const PAGE_OBJECTS = {
   },
   tunnel: {
     off: { running: false, url: '', checking: false, checkedAgo: null },
-    starting: { running: true, url: '', checking: false, checkedAgo: null },
-    checking: { running: true, url: 'https://a-b.trycloudflare.com', checking: true, checkedAgo: null },
-    justChecked: { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: 20.4 },
-    on: { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: 90 },
+    starting: { running: true, url: '', checking: false, checkedAgo: null, untilWords: '06:00 tomorrow', untilClock: '06:00' },
+    checking: { running: true, url: 'https://a-b.trycloudflare.com', checking: true, checkedAgo: null, untilWords: '06:00 tomorrow', untilClock: '06:00' },
+    justChecked: { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: 20.4, untilWords: '06:00 tomorrow', untilClock: '06:00' },
+    on: { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: 90, untilWords: '23:30 today', untilClock: '23:30' },
+    // Off with its end still kept: cloudflared ended, or a start could not turn it on again.
+    kept: { running: false, url: '', checking: false, checkedAgo: null, untilWords: '23:30 today', untilClock: '23:30' },
   },
   // "This laptop": its addresses as devices open them, and whether Windows is read now.
   laptop: {
@@ -615,8 +617,9 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['link', 'admin', O.link.heardAgent, []],
     ['link', 'notAdmin', O.link.node, []],
     ['tunnel', 'admin', O.tunnel.off, ['tunnel.check', 'tunnel.on']],
-    ['tunnel', 'admin', O.tunnel.on, ['tunnel.check', 'tunnel.copy', 'tunnel.off']],
-    ['tunnel', 'admin', O.tunnel.starting, ['tunnel.check', 'tunnel.off']],
+    ['tunnel', 'admin', O.tunnel.on, ['tunnel.check', 'tunnel.copy', 'tunnel.until', 'tunnel.off']],
+    ['tunnel', 'admin', O.tunnel.starting, ['tunnel.check', 'tunnel.until', 'tunnel.off']],
+    ['tunnel', 'admin', O.tunnel.kept, ['tunnel.check', 'tunnel.on', 'tunnel.off']],
     ['tunnel', 'notAdmin', O.tunnel.on, []],
     // "This laptop": read again, and each LAN address copied, where it has one.
     ['laptop', 'admin', O.laptop.two, ['laptop.refresh', 'laptop.copy']],
@@ -734,6 +737,18 @@ test('the other pages: the inline bar, the asks and their words, the caps and th
   assert.deepEqual([C.entry('link', 'link.propose').may(PAGE.admin, O.link.node), C.entry('link', 'link.propose').may(PAGE.notAdmin, O.link.node)], [true, false]);
   assert.deepEqual([ask('account', 'account.disable', 'accountsAdmin', O.account.off), C.entry('account', 'account.disable').label(PAGE.accountsAdmin, O.account.off)], [null, 'Turn on'], 'turning an account on asks nothing');
   assert.deepEqual(ask('audit', 'audit.split', 'accountsAdmin', O.audit.archive).fields, [{ name: 'word', label: 'Type the word split to split there', max: 10 }]);
+  // Tunnel until…: asked with a time of day, its end now filled in, and what the end and a restart before it do.
+  assert.deepEqual(ask('tunnel', 'tunnel.until', 'admin', O.tunnel.on), {
+    title: 'Keep the internet link on until…',
+    words: ['It is on until 23:30 today. At the time you give, it is turned off and stays off.', 'If AGMessage starts again before then, the link is turned on again, with a new address to send to remote people.'],
+    fields: [{ name: 'until', type: 'time', label: 'Until (this laptop\'s clock; a time already past today is tomorrow\'s)', value: '23:30' }],
+    yes: 'Keep it on until then', no: 'Cancel',
+  });
+  assert.equal(ask('tunnel', 'tunnel.until', 'admin', { ...O.tunnel.starting, untilWords: '', untilClock: '' }).words[0], 'It is on. At the time you give, it is turned off and stays off.', 'no end read yet: none named');
+  // Turn off…: on, it cuts everyone off; off with its end kept, it keeps the link off, so no start before the end turns it on.
+  assert.deepEqual([O.tunnel.on, O.tunnel.kept].map((o) => { const a = ask('tunnel', 'tunnel.off', 'admin', o); return [a.title, a.yes, a.danger]; }),
+    [['Turn the internet link off?', 'Turn it off', true], ['Keep the internet link off?', 'Keep it off', true]]);
+  assert.equal(ask('tunnel', 'tunnel.off', 'admin', O.tunnel.kept).words, 'It was to stay on until 23:30 today, so a start of AGMessage before then would turn it on again. Kept off, it stays off until it is turned on here.');
   // The keys: Enter opens a hall, an account and a help request's hall, and watches a hall; Delete deletes a message.
   const key = (kind, seat, o, k) => { const e = C.byKey(kind, PAGE[seat], o, k); return e ? e.id : null; };
   assert.deepEqual([key('hall', 'boardCrew', O.hall.row, 'Enter'), key('account', 'accountsAdmin', O.account.other, 'Enter'), key('help', 'board', O.help.open, 'Enter'),

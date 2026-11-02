@@ -557,9 +557,10 @@ AGM.page = Object.freeze({ facts: () => ADMIN_F, object: (kind, key) => (ADMIN_O
 // child's stdout/stderr and pushes it to admin sockets via tunnel:status.
 // Status states: off | starting (running but no URL yet) | on | error.
 // The internet link's block says its places and today's refusals (admin-plus.js, from health) and its newest check from
-// this laptop ("Checked 14:02 · round trip 85 ms (max 140 ms)"). Its acts are the catalogue's: Check again (at most
-// once a minute, saying why it cannot when it cannot), Copy address, Turn on, and Turn off…, asked first: the toggle is
-// a door to the same two acts.
+// this laptop ("Checked 14:02 · round trip 85 ms (max 140 ms)"); its end ("On until 06:00 tomorrow"), in the server's
+// words by the laptop's clock, never this page's (which may be set to another zone); and when a start turned it on again,
+// that its address is new. Its acts are the catalogue's: Check again (at most once a minute, saying why it cannot when it
+// cannot), Copy address, Turn on, Tunnel until… and Turn off…, asked first: the toggle is a door to Turn on and Turn off….
 
 /** The tunnel's card on the dashboard's socket: what the server pushes, and the status asked at each connection. */
 function wireTunnel() {
@@ -596,13 +597,19 @@ const tunnelCard = (function initTunnelControl() {
     }
   }
 
-  /** The internet link as the catalogue reads it: on or not, its address, a check running, and how long ago the last was. */
+  const hhmm = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const text = (v) => (typeof v === 'string' ? v : '');
+  /**
+   * The internet link as the catalogue reads it: on or not, its address, a check running, how long ago the last was, and
+   * the end it is kept on until, in the server's words and time of day by the laptop's clock ('' when none is kept).
+   */
   function object() {
     const s = last || {};
     const check = s.check && typeof s.check === 'object' ? s.check : null;
-    return { running: !!s.running, url: s.running && typeof s.url === 'string' ? s.url : '', checking: !!s.checking, checkedAgo: check ? (Date.now() - check.at) / 1000 : null };
+    const kept = Number.isFinite(s.until);
+    return { running: !!s.running, url: s.running && typeof s.url === 'string' ? s.url : '', checking: !!s.checking, checkedAgo: check ? (Date.now() - check.at) / 1000 : null,
+      untilWords: kept ? text(s.untilWords) : '', untilClock: kept ? text(s.untilClock) : '' };
   }
-  const hhmm = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   // Written only when its words change, so the status line is not announced again at every redraw.
   const put = (el, text) => { if (el.textContent !== text) el.textContent = text; };
   /**
@@ -622,6 +629,31 @@ const tunnelCard = (function initTunnelControl() {
     line.classList.toggle('bad', !!(up && check && !check.ok));
     const r = AGM.catalog.ready('tunnel', 'tunnel.check', ADMIN_F, o);
     put(why, refusedWhy || (r === true ? '' : r));
+    drawEnd(s, o);
+  }
+  /**
+   * Its end, and what a restart before it does (or why a restart would not, when the settings could not be read); off with
+   * an end still kept (cloudflared ended, or a start could not turn it on again), what turns it on again; and once a start
+   * turned it on again, that its address is new, said until it is turned off.
+   */
+  function drawEnd(s, o) {
+    const end = document.getElementById('tunnelUntilLine');
+    const again = document.getElementById('tunnelAgain');
+    const notKept = text(s.notKept);
+    if (end) {
+      const words = !o.untilWords ? ''
+        : o.running ? 'On until ' + o.untilWords + ', then off and it stays off. '
+          + (notKept ? notKept + ' A restart of AGMessage does not turn it on again.' : 'If AGMessage starts again before then, the link is turned on again, with a new address.')
+          : 'It was to stay on until ' + o.untilWords + '. Turn on starts it again until then, as does a start of AGMessage before then; Turn off… keeps it off.'
+            + (notKept ? ' ' + notKept : '');
+      put(end, words);
+      end.hidden = !words;
+    }
+    if (again) {
+      const words = s.running && text(s.againWords) ? '△ New address: AGMessage started again at ' + s.againWords + ' and turned the internet link on again. Send this address to remote people; the one before no longer works.' : '';
+      put(again, words);
+      again.hidden = !words;
+    }
   }
 
   function applyStatus(s) {
@@ -648,12 +680,17 @@ const tunnelCard = (function initTunnelControl() {
       draw();
     }),
     'tunnel.copy': (o, c) => AGM.copy(o.url, { said: 'Copied the internet link\'s address.', anchor: c.anchor, say }),
+    'tunnel.until': (o, c) => AGM.outbox.now('admin:tunnelUntil', { until: (c.values && c.values.until) || '' }, (res) => {
+      if (!res || !res.ok) { say((res && res.error) || 'The end was not moved.', true); return; }
+      say('The internet link stays on until ' + text(res.untilWords) + '.');
+    }),
     'tunnel.on': () => {
       showState('starting');
       if (toggle) toggle.checked = true;
       AGM.outbox.now('admin:tunnelStart', undefined, (res) => {
-        if (!res || !res.ok) { showState('error', { error: (res && res.error) || 'Could not start tunnel' }); if (toggle) toggle.checked = false; }
-        // success path: status:push will switch us to on/starting
+        if (!res || !res.ok) { showState('error', { error: (res && res.error) || 'Could not start tunnel' }); if (toggle) toggle.checked = false; return; }
+        // Its state comes on tunnel:status; its end is said now, so a short one is never a surprise.
+        if (text(res.untilWords)) say('The internet link is turning on, until ' + res.untilWords + ' (Tunnel until… moves its end).' + (text(res.notKept) ? ' ' + res.notKept : ''), !!text(res.notKept));
       });
     },
     'tunnel.off': () => {

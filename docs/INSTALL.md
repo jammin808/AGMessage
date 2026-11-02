@@ -37,7 +37,7 @@ Windows Vista", https://learn.microsoft.com/en-us/windows/win32/services/interac
   records nothing.
 - **"This laptop"** on the admin page, each fact with where it was read: the build and how it runs, the LAN addresses,
   HTTPS and why it is off, how many sealed values open (never which), the screens confirmed, the Stagewatch links, the
-  internet link, before this start (the watchdog's line for the run it restarted, or its record of a refused start or a
+  internet link and its end, before this start (the watchdog's line for the run it restarted, or its record of a refused start or a
   give-up), and what the start goes without. A read of them that fails (an adapter list the system refuses) is one row
   that says so; the rest of the admin page's answer is drawn. Windows' facts are read by one `powershell.exe`,
   `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` by that absolute path, run from System32 with a fixed
@@ -76,6 +76,26 @@ Windows Vista", https://learn.microsoft.com/en-us/windows/win32/services/interac
   page renews it, as does a start that has one. It is never renewed without a person, since every device that trusted
   the old one is asked again. Not measured: whether the task's boot start comes before the network on the show laptop;
   an adapter that is always up (a virtual switch, a VPN) gives an address devices may not reach the laptop by.
+
+## The internet link, until its end
+
+The installed node has no window for a person to close at the end of a show, so the internet link (the Cloudflare quick
+tunnel the admin page turns on) is kept to an end instead. Turned on, it runs until the end of the show day, the next
+06:00 by the laptop's clock (the next day's when that is under an hour away), or the time of day the card's Tunnel
+until… gives; then it is turned off (within 5 s, read against the wall clock) and stays off. The end is kept in
+`data\settings.json` until Turn off, so any start before it (the watchdog's restart, a crash, an upgrade, a boot under
+the task) turns the link on again at the same end. A quick tunnel's address is new at every start: once cloudflared
+gives it, the tunnel card says "New address" with the new one, "This laptop" says the link was turned on again as
+AGMessage started, and the console says "[tunnel] on again until …", so the admin sends the new address to the remote
+people. A start whose cloudflared cannot reach Cloudflare (a boot start before the network has an address) says "Not
+turned on again" on the card, in "This laptop" and on the console, and keeps the end: Turn on, once the laptop is
+online, starts the link again until that end, and so does the next start before it; nothing tries again by itself. A
+cloudflared that ends of its own once it was on keeps the end too, and Turn off… keeps the link off. A start past the
+end, or with an end no act could have set (a clock set back), leaves it off and says so. Turn off forgets the end at
+once. On Windows a cloudflared ends with its server however the server ends, a hang kill included (libuv puts each child
+Node starts in a job object that ends it with its parent: read in libuv's source, not measured here), so the address
+before a restart stops working. For a show with remote people, a named Cloudflare Tunnel run beside AGMessage keeps one
+address across restarts. Not measured: whether the task's boot start comes before the network on the show laptop.
 
 ## A port already in use
 

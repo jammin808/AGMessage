@@ -324,7 +324,7 @@ each be a new dev dependency (audit, signatures, SBOM) for rules a node:test rea
 
 | Rule | Holds | Fails on |
 |---|---|---|
-| (a) the pure set | `lib/board.js`, `context.js`, `deskresults.js`, `latest.js`, `ops.js`, `rbac.js` and `stagelines.js`, the pure core, require only each other | a require of anything else, an I/O built-in named (`fs`, `net`, `http`, `https`, `dgram`, `tls`, `os`, `dns`, `child_process`, `ws`), `process.` read, an `import()`, a file the set names that is not there |
+| (a) the pure set | `lib/board.js`, `context.js`, `deskresults.js`, `latest.js`, `ops.js`, `rbac.js`, `stagelines.js` and `tunnelend.js`, the pure core, require only each other | a require of anything else, an I/O built-in named (`fs`, `net`, `http`, `https`, `dgram`, `tls`, `os`, `dns`, `child_process`, `ws`), `process.` read, an `import()`, a file the set names that is not there |
 | (b) no cycle | among `server.js`, `supervise.js`, `lib/` and `verify/`, no file requires another that leads back to it; no file, a test included, requires `server.js`, by its name or as app/ | each cycle, named once from its first file |
 | (c) one root | only `server.js` requires `lib/http-accounts.js` and the handler modules in `lib/handlers/` (a test may, to test one) | any other shipped file that does; a relative require of a file that is not there |
 | (f) the wire's words, closed both ways | every event a page sends (`socket.emit('x'`, the outbox's `AGM.outbox.hold`, `now` and `self('x'`, and `verb: 'x'` in `public/catalog.js`, where `local` and an HTTP route are no socket's send) is a verb a handler file registers; every verb is sent by some page; every event a handler file sends is heard by some page (`socket.on` or `once`); every event a page hears is one a handler file sends, or Socket.IO's own (`connect`, `connect_error`, `disconnect`) | each word left open, by file; an event named by an expression, on either side, unless a row names what it takes (on the server, `apply()`'s `opEvent`, whose names are the op table's `EVENTS` in `lib/ops.js`, is the one; on the pages, the hall page's listeners made from its op table, `public/app.js: socket.on(event`, named by the table's events, is the one, and the outbox's own send, `public/outbox.js: socket.emit(verb`, whose callers name its verbs where they call it, is the other); a verb registered in a form the fuzz does not read: `socket.on(` with anything but a single-quoted name, or `socket.once`, `addListener`, `prependListener` or `prependOnceListener` for any event but Socket.IO's own (`disconnect`, `disconnecting`); an allow-list row whose reason has gone |
@@ -427,13 +427,14 @@ Close hall… is `adminRoom.remove`; a person's Let them forward into ▸ is `pe
 tick, and taking one back is `person.unforward` (`admin:unlinkRoom`), which an unticked hall and a chip's × run; the
 default Stagewatch's Set up… is `link.configure` (`admin:settings`), a node's `link.setup`; Propose… reads the drive
 right, `canDrive`, which the admin page's facts carry for the socket its gate admits; the internet link's Turn off… is
-`tunnel.off`, which the card's toggle asks for too; a hall's Copy link is `hall.copy` and its guest code `hall.code`. `test/catalog.test.js` asserts the three facts' readings, 39 seat-and-object sets and three of "This laptop" (none shown to a page
+`tunnel.off`, which the card's toggle asks for too, and its Tunnel until… is `tunnel.until` (`admin:tunnelUntil`, its end
+asked in place as a time of day, `AGM.ask`'s `time` field); a hall's Copy link is `hall.copy` and its guest code `hall.code`. `test/catalog.test.js` asserts the three facts' readings, 39 seat-and-object sets and three of "This laptop" (none shown to a page
 the admin page's gate does not admit), the reasons of what is disabled (Check again's four, a locked account, the
 minutes with no key, a node whose Stagewatch keeps no desk, not connected), the bars, the asks' words, the caps and the
 keys, and reads every act's words on an object it fits. `test/menus.test.js`'s second test reads each seat's facts from
 the server's answers — a Staff account's and a code guest's sockets on the admin page, a Viewer on the halls board, and
 on the Accounts page a Staff account, a manager and a manager who may manage accounts (but not an admin's) — and sends
-each act these pages hide from them, the routes by HTTP with the seat's sign-in: 30 verbs and routes, each refused with
+each act these pages hide from them, the routes by HTTP with the seat's sign-in: 31 verbs and routes, each refused with
 words, and the halls, the people and their forwarding, the link, the default Stagewatch, the accounts and the log as
 they were. The smoke holds the doors of each of these objects to the catalogue as on the hall page, and their asks,
 skip links and lists, the three pages in both themes and under a finger, and a disabled act that emits and asks nothing

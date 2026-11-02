@@ -83,7 +83,12 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   gives its place back. A phone refused is told what and for how long ("AGMessage's internet link is full (150 phones).
   Trying again in 34 s. On the venue's Wi-Fi there is room.") and comes back by itself; the venue's Wi-Fi never waits for
   the tunnel. The admin page counts the places, the networks and the day's refusals, and checks the link from the laptop
-  before the show ("Checked 14:02 · round trip 85 ms (max 140 ms)").
+  before the show ("Checked 14:02 · round trip 85 ms (max 140 ms)"). Turned on, the link stays on until the end of the
+  show day (06:00 by the laptop's clock, the next day's when that is under an hour away), or the time Tunnel until…
+  sets, then turns off and stays off; a restart of AGMessage before then turns it on again, and since a quick tunnel's
+  address is new at each start, the admin page says "New address" and gives it (or, when cloudflared cannot reach
+  Cloudflare, says it was not turned on again, and the next start or Turn on tries again). For a show with remote
+  people, a named Cloudflare Tunnel keeps one address throughout.
 - **Devices.** The Board's mixture — iPads, Android tablets and phones — from iPadOS and iOS 14.5 and Chrome 84 (PDFs
   from iPadOS 16.4 and Chrome 103). An older browser is told so in one line and opens nothing, so it never joins a hall
   half working. A newer feature a device lacks has a fallback chosen by what the browser has, never by what it calls

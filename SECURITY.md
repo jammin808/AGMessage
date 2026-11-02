@@ -217,3 +217,16 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   read only from a connection that came from this laptop's loopback, as before, so a page on the venue cannot pass for a
   tunnel network; a program on the laptop itself could, and could take the tunnel's places, as it could already do
   anything a page can.
+- The internet link is open only until its end: the end of the show day (the next 06:00 by the laptop's clock an hour or
+  more away) when it is turned on, or the time an admin sets with Tunnel until… (`admin:tunnelUntil`, the admin's
+  alone), never more than a day and two hours ahead. The end is kept in `settings.json` until Turn off, so a restart
+  inside it opens the link again, with no person's act, at a new address only the admin page shows; past the end, or
+  with an end no act could have set (a clock set back, a file written by hand), a start leaves it closed and forgets it,
+  and a running link is closed within 5 s of its end, read against the wall clock. Turn off forgets the end at once,
+  also while the link is down with its end kept. Under the installed node, which has no window to close, the link no
+  longer stays open after the show because nobody turned it off. A crash ends cloudflared with the server; on Windows a
+  cloudflared ends with its server however the server ends (libuv's job object, read in its source), while elsewhere a
+  server killed as hung can leave one running. Settings that could not be read keep no end (a restart then leaves the
+  link closed) and refuse Tunnel until…. The link's opening, its end moved, its closing and a start that opened it again
+  are audit rows (`tunnel.on`, `tunnel.until`, `tunnel.off`, `tunnel.again`, `tunnel.ended`), with the end and never the
+  address; the address is said on the admin page and the console, never in the context, the hello or an audit row.
