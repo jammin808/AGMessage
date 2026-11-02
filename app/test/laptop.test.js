@@ -333,7 +333,7 @@ test('the admin page\'s answer: the LAN addresses and the port, as the banner sa
   // Off Windows nothing is run, so the read is done at once; on Windows its powershell.exe may still be reading.
   if (process.platform !== 'win32') assert.deepEqual([l.reading, typeof l.at], [false, 'number']);
   // The rights given are a row only where there is an install record (a Windows runner's read may find none).
-  assert.deepEqual(l.facts.map((r) => r.id).filter((id) => id !== 'grants'), ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin']);
+  assert.deepEqual(l.facts.map((r) => r.id).filter((id) => id !== 'grants'), ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'asleep', 'awake', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin']);
   if (process.platform !== 'win32') assert.equal(l.facts[l.facts.length - 1].id, 'grants');
   assert.ok(l.facts.every((r) => typeof r.label === 'string' && r.label && typeof r.words === 'string' && r.words && typeof r.from === 'string' && r.from), 'each row says where it was read');
   assert.deepEqual(rowsOf(l, ['format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel']), {
@@ -342,6 +342,11 @@ test('the admin page\'s answer: the LAN addresses and the port, as the banner sa
     https: ['off: AGM_TLS=0 turned it off for this run', 'off'],
     sealed: ['1 of 1 open', 'ok'],   // the context token, made for the answer's own contextToken
     screens: ['none in any hall', ''], stagewatch: ['not linked', 'off'], tunnel: ['off', 'off'],
+  });
+  // No watchdog runs a server started alone, and no hall is live: neither a sleep recorded nor a power request asked.
+  assert.deepEqual(rowsOf(l, ['asleep', 'awake']), {
+    asleep: ['none recorded: no watchdog runs this server, so a sleep goes unseen', 'off'],
+    awake: ['not asked: no hall is live', 'off'],
   });
   assert.match(row(l, 'build').words, /^\S+ · the portable folder$/);
   const off = 'unknown (AGMessage is not running on Windows)';

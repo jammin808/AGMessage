@@ -474,7 +474,10 @@ Troubleshooting
   and why it is off, how many sealed values open, the screens that
   confirmed what they show, Stagewatch, the internet link, why the
   watchdog started it again (or why the start before was refused, or
-  the watchdog gave up), and what this run goes without. From
+  the watchdog gave up), what this run goes without, the sleeps the
+  watchdog recorded ("once today · the last asleep from ..."), and
+  whether the laptop is kept awake while a hall is live ("not held: ..."
+  says why not; PowerShell locked down by IT is one reason). From
   Windows: the network's profile (Private, Public or Domain) and whether
   a firewall rule lets this copy's node.exe in on it ("no rule ... on
   Public: phones there may not reach AGMessage" is the case to fix
@@ -721,7 +724,19 @@ Reliability and speed
     heartbeat for 10 s) it is restarted - after half a second, then 4, 8,
     15, 30 s if it keeps failing - and everything comes back from the saved
     log. After 6 crashes in 10 minutes it stops and the admin page says why.
-    The last crash is on the admin page (Health).
+    The last crash is on the admin page (Health). A laptop that slept is not
+    a server that stopped responding: the watchdog did not run either, so it
+    judges nothing of that time, and AGMessage carries on after the wake.
+    It writes "asleep from 2026-11-02 14:02:03 to 14:20:11 UTC (18 min
+    8 s)" in app\data\watchdog.log, and Admin -> This laptop says it under
+    Sleeps.
+  - While a hall is live (a page open in it, a screen showing something
+    other than holding, or its Stagewatch countdown running) AGMessage asks
+    Windows to keep this laptop from going to sleep when idle (This laptop:
+    Kept awake). Closing the lid or pressing the power button still does
+    what the power plan says: set "When I close the lid" to "Do nothing" on
+    mains before doors. A laptop that sleeps takes AGMessage with it, and
+    every page waits until it wakes.
   - Open pages come back by themselves: after a drop (from half a second,
     and at once when a phone is woken or the Wi-Fi is back), after a restart
     (nobody is announced again: the hall reads "AGMessage restarted"), and

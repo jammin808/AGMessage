@@ -177,6 +177,20 @@ again once the server holds the folder. `server.js` stays at 15, `supervise.js` 
 `lib/dataformat.js`), and `lib/version.js` at 8: "newer" (`compareBuilds`) and the release order (`releaseRefusal`)
 are pure.
 
+The watchdog telling a sleep from a hang (the plan's U9) moves no cap and no timer. `supervise.js` stays at 2: a sleep's
+line goes through its own `log()`, which `watchdog.log` already takes, and its judge (`lib/resilience.js` `BeatClock`)
+is pure, every time handed to it (the steady clock's and the wall clock's), so the rule is held on a fake clock; the
+real watchdog is held by the plan's proxies, both processes frozen and thawed (SIGSTOP, SIGCONT: Linux only), in
+`test/sleep.test.js`. `server.js` starts no timer of its own for the power request: it is read again when the halls
+board's frame is flushed (a page, a screen, a Stagewatch frame mark it) and in health's 5 s window, which is also where
+a child that has not answered within 30 s is read as failed and one that failed is asked again a minute after; its one
+clock is handed to it, so those bounds are held on a fake clock. `lib/power.js` runs `powershell.exe` by its absolute
+path only, through `lib/laptop.js` `powershellPlan`, the one plan "This laptop"'s read also uses (the fence the plan's
+U11 brings names it), at 0 synchronous calls; its tests hold the path, the environment of named Windows folders, the
+fixed script (one line, no double quote, Constrained Language Mode said before `Add-Type`, held only when the call
+returned non-zero, then a wait on its input), and its answer read by type; on Windows (the CI job) a test runs the
+script itself.
+
 The audit log's export adds `lib/auditexport.js` and `lib/zip.js`, and the verifier `verify/verify-audit.js`, each at 0
 synchronous calls (the guard names them, so a file that drops out of its list fails it): the export reads, digests and
 streams on the thread pool and in slices, and the verifier on another computer reads through `fs.promises` only. Its

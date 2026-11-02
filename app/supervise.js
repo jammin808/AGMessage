@@ -3,7 +3,12 @@
  * The watchdog: runs the server as a child process and keeps it running through a meeting.
  *
  *  - The server sends a heartbeat over IPC from its event loop every second. A crash, or a hang (no beat for
- *    AGM_HANG_MS, default 10 s; the first beat may take AGM_STARTUP_MS, default 30 s), restarts it.
+ *    AGM_HANG_MS, default 10 s; the first beat may take AGM_STARTUP_MS, default 30 s), restarts it. A hang is this
+ *    watchdog ticking on time with no beat: a tick of its own that comes more than AGM_LATE_MS (default 2 s) late, on its
+ *    steady clock or the wall clock, means it did not run (the laptop slept, or both processes were frozen), so it
+ *    judges nothing of that gap (a step of the laptop's clock forward is taken for one too). The beat clock
+ *    starts again, a sleep is never counted as a crash, and "asleep from … to …" goes to its console, data/watchdog.log
+ *    and server.log, and to its server, which keeps it in health and "This laptop" (lib/resilience.js BeatClock).
  *  - Waits between crash restarts: 0.5, 4, 8, 15, 30 s; a run of 5 minutes resets them. More than 6 crashes in
  *    10 minutes: it gives up, writes data/watchdog.json and a line to data/watchdog.log, and the next start shows
  *    that on the admin page.
@@ -34,7 +39,8 @@ const { fork } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { SupervisorPolicy, EXIT, writeFileAtomic } = require('./lib/resilience');
+const { performance } = require('perf_hooks');
+const { SupervisorPolicy, BeatClock, asleepWords, EXIT, writeFileAtomic } = require('./lib/resilience');
 const { channelOf, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE } = require('./lib/startup');
 const { ServerLog, Lines, redact } = require('./lib/serverlog');
 const dataformat = require('./lib/dataformat');
@@ -44,6 +50,8 @@ const CHILD = process.env.AGM_CHILD || path.join(__dirname, 'server.js');
 const DATA_DIR = process.env.AGM_DATA_DIR || path.join(__dirname, 'data');
 const HANG_MS = Number(process.env.AGM_HANG_MS) || 10_000;
 const STARTUP_MS = Number(process.env.AGM_STARTUP_MS) || 30_000;
+const LATE_MS = Number(process.env.AGM_LATE_MS) || 2000;
+const TICK_MS = 500;
 const policy = new SupervisorPolicy(process.env.AGM_BACKOFF ? { backoffSec: process.env.AGM_BACKOFF.split(',').map(Number) } : {});
 
 /** This watchdog cannot run as configured: the words on its console, and code 3, which nothing restarts. */
@@ -112,10 +120,18 @@ const HELD_LOG_EVERY = Number(process.env.AGM_HELD_LOG_EVERY) || 100;
 let heldRun = 0;   // tries in a row that found the port or folder held
 
 let child = null;
-let lastBeat = 0;
 let stopping = false;
 let restarts = 0;
 let before = '';   // the watchdog's line for the server's run before this start, handed to it (AGM_BEFORE)
+// The judge of the server's silence, on the steady clock (performance.now(), which a change to the laptop's clock does not
+// move); a tick of its own is late on that clock or the wall clock (a steady clock may stop while the laptop sleeps), and
+// the wall clock says when a sleep was. Silence is judged only from a tick that came on time.
+// Its ticks are taken as beginning now: the heartbeat check below is armed in this same turn of the loop.
+const judge = new BeatClock({ tickMs: TICK_MS, lateMs: LATE_MS, hangMs: HANG_MS, startupMs: STARTUP_MS, at: performance.now(), wall: Date.now() });
+// Sleeps said and not yet given to a server: given to the one that runs at its next beat. The newest UNTOLD_MAX are kept
+// (each is in watchdog.log whatever happens to it).
+const UNTOLD_MAX = 20;
+const untold = [];
 
 /**
  * One of the server's outputs read line by line, the token taken out of each before it is cut (lib/serverlog.js Lines):
@@ -134,7 +150,7 @@ function tee(from, to, take) {
 }
 
 function start() {
-  lastBeat = 0;
+  judge.started(performance.now());
   policy.started(Date.now());
   child = fork(CHILD, [], { env: { ...env, AGM_RESTARTS: String(restarts), AGM_BEFORE: before }, stdio: ['inherit', 'pipe', 'pipe', 'ipc'] });
   const me = child;
@@ -151,8 +167,7 @@ function start() {
   });
   tee(me.stderr, process.stderr, (line) => { if (line.trim()) reason = line.trim(); return true; });
   me.on('message', (m) => {
-    if (m && m.t === 'beat') lastBeat = Date.now();
-    else if (m && m.t === 'token') { token.asked = true; sayWhenBoth(); }
+    if (m && m.t === 'beat') { if (me === child) { judge.beat(performance.now()); tell(me); } } else if (m && m.t === 'token') { token.asked = true; sayWhenBoth(); }
   });
   me.on('exit', (code, signal) => {
     if (child !== me) return;
@@ -221,23 +236,46 @@ function decide(code, hung, signal, said = '') {
   setTimeout(() => { if (!stopping) start(); }, d.delayMs);
 }
 
-// The heartbeat check: a hung server is killed so it can be restarted.
-setInterval(() => {
-  if (!child || stopping) return;
-  const since = Date.now() - (lastBeat || policy.startedAt);
-  const limit = lastBeat ? HANG_MS : STARTUP_MS;
-  if (since > limit) {
-    log('no heartbeat for ' + Math.round(since / 1000) + ' s — the server is not responding');
-    child.hung = true;
-    try { child.kill('SIGKILL'); } catch { /* exit handler restarts */ }
+/**
+ * A sleep is said once the watchdog has run on time after it: on its console, in watchdog.log and server.log, and to its
+ * server (now when one has beaten since, else at the next one's beat), which keeps it in health and "This laptop".
+ */
+function slept(s) {
+  log(asleepLine(s));
+  untold.push(s);
+  if (untold.length > UNTOLD_MAX) untold.shift();
+  if (child && child.connected && judge.beaten) tell(child);
+}
+/** A sleep's line, as the console and both logs say it. */
+function asleepLine(s) { return asleepWords(s) + ': the watchdog did not run, so it judged nothing of the server for that time'; }
+/** The sleeps not yet given to the server `me`, given to it, which reads each by type. */
+function tell(me) {
+  while (untold.length && me.connected) {
+    const s = untold.shift();
+    me.send({ t: 'slept', from: s.from, to: s.to, parts: s.parts }, () => { /* gone: watchdog.log has it */ });
   }
-}, 500);
+}
+
+// The heartbeat check, every TICK_MS: a tick of its own that came late is a sleep, and starts the beat clock again; on a
+// tick that came on time, a server silent past its limit is hung, and is killed so it can be restarted.
+setInterval(() => {
+  const t = judge.tick(performance.now(), Date.now());
+  if (t.slept) slept(t.slept);
+  if (!child || stopping || child.hung || !t.hungMs) return;
+  log('no heartbeat for ' + Math.round(t.hungMs / 1000) + ' s — the server is not responding');
+  child.hung = true;
+  try { child.kill('SIGKILL'); } catch { /* exit handler restarts */ }
+}, TICK_MS);
 
 // The server is asked to stop over IPC, so it saves its rooms, lanes and audit entries first: on Windows a signal sent
 // to a child is not delivered, it ends the process at once. One that has not gone within 4 s is ended.
 function stop() {
   if (stopping) return;
   stopping = true;
+  // A sleep the watchdog woke from moments ago is said before it goes, and told to a server that runs, ahead of the stop,
+  // so its stop saves it with the show day's peaks.
+  const s = judge.close();
+  if (s) slept(s);
   if (!child) process.exit(EXIT.STOP);
   const me = child;
   try { me.send({ t: 'stop' }); } catch { try { me.kill('SIGTERM'); } catch { /* already gone */ } }

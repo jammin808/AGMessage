@@ -125,6 +125,71 @@ watchdog and the server read it, and these rules, before either writes anything 
   gave up; anything else is a crash of the watchdog itself. What the task does with each (stays stopped on 0 and 3) is
   the installer's units', with the log that keeps these words.
 
+## Sleep, the power request and the lid
+
+Both channels (the plan's Part 6, unit U9). Nothing here has been measured on a laptop that sleeps: the proxies are
+Linux processes frozen and thawed, and lab 1 is the show laptop's.
+
+- **A sleep is not a hang** (`supervise.js`, `lib/resilience.js` `BeatClock`). The watchdog ticks every half second and
+  measures its server's silence on a steady clock (`performance.now()`, which a change to the laptop's clock does not
+  move). A tick that comes more than 2 s late, on that clock or on the wall clock, means the watchdog did not run either
+  (the laptop slept, or a standby froze or throttled both processes), so it judges nothing of that gap: the beat clock
+  starts again at that tick, and a sleep is never counted as a crash. A hang is the watchdog ticking on time with no
+  beat from its server for 10 s, which is still killed and restarted. So a wake no longer kills the server unsaved, and
+  a node throttled in Modern Standby ("no more than one second of activity every 30 seconds",
+  https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/prepare-software-for-modern-standby) no
+  longer gives up and stays down. Either clock, because a steady clock may stop while the machine sleeps (Linux's
+  monotonic clock does; whether Windows' does is lab 1's to read) and would then see no gap, while the wall clock does.
+  What the rule cannot tell apart from a sleep, and records as one:
+  - a step of the laptop's clock forward by more than 2 s (a person setting it, a time sync's jump): the beat clock
+    starts again once, and the step is recorded as a sleep; a clock set back is no sleep and hides no hang;
+  - the watchdog itself held from running for more than 2.5 s while the laptop was awake (a machine starved of memory
+    and swapping, a disk that held its write to `watchdog.log` or `server.log`): it judges nothing of that gap either,
+    so while it keeps being held that long, a server that hangs meanwhile is not killed until the watchdog runs on
+    time for 10 s.
+- **The sleeps recorded.** Once the watchdog has ticked on time for 10 s after one, "asleep from 2026-11-02 14:02:03 to
+  14:20:11 UTC (18 min 8 s)" goes to its console, `data\watchdog.log` and `data\logs\server.log`; gaps with it awake
+  less than that between (a throttled standby) are one sleep, with how many times it went. A sleep the watchdog is
+  stopped in before then is said as it stops. The server is told each (one the watchdog stops in, ahead of the stop, so
+  the stop saves it) and keeps it with the show day's peaks (`peaks.json`: each day's count and longest, and the newest
+  20 whole), so a restart keeps them: health's `sleeps`, the admin page's peaks and "This laptop"'s Sleeps row.
+- **The power request** (`lib/power.js`). While a hall is live, the server holds a power request. A hall is live while
+  it has an open page seated in it, idle or not (a Board reading quietly through a long session is a live show, so a
+  page left open in a hall holds the request until it is closed: "This laptop" says what makes the halls live, "2 pages
+  open, 1 screen showing"); a screen on which a browser confirmed a take other than holding (another browser on the same
+  link that could not show it takes nothing from it); or its Stagewatch countdown counting, as Stagewatch says now (a
+  link connected, its frame not gone quiet): running, or past zero and counting on into overtime, never held at zero.
+  The default Stagewatch, which every hall without its own follows, is one countdown: it makes one hall live, never
+  each. The request is held through one `powershell.exe`, by its absolute path under `SystemRoot`, from System32, in the
+  same named environment "This laptop"'s read has (`lib/laptop.js` `powershellPlan`), with a fixed script of one line:
+  it declares `SetThreadExecutionState` with `Add-Type`, calls it with `ES_CONTINUOUS | ES_SYSTEM_REQUIRED` and waits on
+  its standard input. `Add-Type` compiles that one-line declaration with the .NET Framework's compiler: Windows
+  PowerShell 5.1 runs `csc.exe` (the .NET Framework's, under `%SystemRoot%\Microsoft.NET`) as a child of its own on
+  files it writes in the `TEMP` folder the server passes, loads the library it built and removes them, so an AppLocker
+  or WDAC policy that governs those sees the compiler and the temporary library too. The request ends when no hall is
+  live (the server closes that input and ends the child) and with the server, however it ends (its input closes; on
+  Windows the job libuv puts every child in ends it too). It reads "held" only when the call returned non-zero. Under
+  Constrained Language Mode (an AppLocker or WDAC policy), where `Add-Type` is refused, it says so and asks nothing, and
+  is asked again only once no hall is live and one is again: nothing about it changes while the halls stay live. A
+  failure (the call returned 0, `powershell.exe` could not be run, did not answer within 30 s, or ended while the
+  request was wanted) is asked again a minute after while a hall stays live, never sooner; a failure in the same words
+  as the one before it is said once. Each is said on the console ("[power] …") and on "This laptop". A child is started
+  at each change from no hall live to one live, which the board's frame and the 5 s window read; what each start costs
+  on the show laptop (a start of PowerShell and its compile) is not measured, and no hold-off is put on it until it is.
+  Health's `power` and "This laptop"'s Kept awake row say its state.
+- **What it keeps off, and what it does not.** "Held" is what Windows answered, never more: it took the request to keep
+  off idle sleep. "Power requests will block the NoCS phase indefinitely on AC power, and for up to 5 minutes on DC
+  power" (the Modern Standby page above), so on battery a laptop with Modern Standby only delays its idle-out, and "This
+  laptop" says so beside "held". And "the SetThreadExecutionState function cannot be used to prevent the user from
+  putting the computer to sleep. Applications should respect that the user expects a certain behavior when they close
+  the lid on their laptop or press the power button"
+  (https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-setthreadexecutionstate): the lid and the
+  power button stay the power plan's. Before doors, on mains, "This laptop" should read Lid closed on mains: do nothing,
+  and Kept awake: held, once a hall is live; and no Windows restart should be pending (Stop AGMessage first if one must
+  happen).
+- **Lab 1** (lid closed and idle-out, on mains and on battery, with and without the power request: serving after,
+  sleeps recorded, no kill) is the show laptop's, and reads "not run" until it is taken there.
+
 ## The admin token
 
 The installed node has no window to print its token in, and its output is kept (the installer's units keep it in a

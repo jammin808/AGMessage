@@ -54,6 +54,7 @@ const { Displays, cleanContent, describe: describeContent } = require('./lib/dis
 const readings = require('./lib/peaks');
 const startup = require('./lib/startup');
 const laptop = require('./lib/laptop');
+const power = require('./lib/power');
 const dataformat = require('./lib/dataformat');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
@@ -354,8 +355,9 @@ refusals.carry(peaks.refusedOn(bootAt), bootAt);   // the tunnel's, today's so f
 // refused and counted as a handler's throw is (`frameRefused`), and the rest of its batch still goes. Health's `latest`
 // reads what each saved (changes marked, frames sent).
 const frames = {
-  // Every halls board watcher, with the halls it may see (one key: the board is rebuilt for every watcher).
-  board: new Latest({ name: 'board', delayMs: 300, flush: () => sendBoards() }),
+  // Every halls board watcher, with the halls it may see (one key: the board is rebuilt for every watcher). A hall's
+  // people, screens and Stagewatch mark it, which are what make a hall live: the power request follows it then.
+  board: new Latest({ name: 'board', delayMs: 300, flush: () => { sendBoards(); keepAwake(); } }),
   // A hall's screens console re-reads its list (keyed by the hall): a take on 50 screens is one re-read per console.
   screens: new Latest({ name: 'screens', delayMs: 150, flush: (halls) => eachHall('screens', halls, (r) => io.to(r.code).emit('displays:changed', { code: r.code })) }),
   // A hall's people list (keyed by the hall): a join storm is one list per window, not one per join to every page.
@@ -406,6 +408,7 @@ setInterval(() => {
     hallMessages: hall.messages, hallKb: hall.kb, joinBurst: joinBurst.take(performance.now()),
   }, now);
   savePeaks();   // this window's rises, the tunnel's refusals, and the snapshots and audit appends timed in it
+  keepAwake();   // read again each window, whatever marked the board
   const refusedLine = refusals.logLine(now);   // one line a minute at most while the tunnel refuses
   if (refusedLine) console.log('  ' + refusedLine);
 }, 5000).unref();
@@ -469,6 +472,11 @@ function healthFacts() {
     // The data folder's format, and what this start found of it: the build that wrote it before (and whether that one is
     // newer), the copy kept when it moved from a lower format.
     format: formatFacts(),
+    // The sleeps the watchdog recorded, beside the show day's peaks (each day's count and longest are in `peaks`): whether
+    // a watchdog runs this server, and the newest kept whole, oldest first, each {from, to, parts}.
+    sleeps: { watched: SUPERVISED, list: peaks.sleeps() },
+    // The power request a live show holds (lib/power.js): its state, how many halls are live, and why it is not held.
+    power: powerRequest.view(),
   };
 }
 /** Health's `format`: the folder's format now, and what this start found of it (null until it holds the folder). */
@@ -548,10 +556,53 @@ function laptopFacts() {
       screens: { total: displays.list.size, shown, offline },
       stagewatch: { total: linked, connected },
       tunnel: { running: !!tunnelProc, url: tunnelUrl || '', error: tunnelError || '' },
+      sleeps: { watched: SUPERVISED, list: peaks.sleeps(), today: peaks.sleptOn(Date.now()) },
+      power: powerRequest.view(),
       before: beforeWords(), without, format: formatNow ? { ...formatFacts(), build: BUILD.full, dir: DATA_DIR } : null,
     }, laptopRead.windows),
   };
 }
+
+// ---------------------------------------------------------------- a live show keeps the laptop awake (lib/power.js)
+// One powershell.exe child holds a power request while a hall is live, started once this copy serves; it ends when no hall
+// is, and with the server. Read again whenever the halls board is marked (a page seated or gone, a screen's take or
+// report, a Stagewatch frame) and every 5 s window.
+const powerRequest = new power.PowerRequest({ planOf: () => power.plan(process.env), say: (words) => console.log('  [power] ' + words) });
+/**
+ * Each hall now, as the power request reads it (lib/power.js isLive): its open pages seated there, idle or not (a Board
+ * reading quietly is a live show; the admin's support view takes no seat), its screens on which a browser confirmed a
+ * take other than holding (one of a screen's browsers that could not show it takes nothing from one that did), and
+ * whether its countdown counts, as its Stagewatch says now (a link connected, its frame not gone quiet): running, or
+ * past zero and counting on into overtime. A Stagewatch several halls follow (the default) is one countdown: it makes
+ * one hall live, never each, so "This laptop" counts the halls truly.
+ */
+function hallsNow() {
+  const takes = new Map();
+  for (const d of displays.list.values()) {
+    if (!d.content || d.content.kind === 'holding') continue;
+    if (Array.from(d.live.reports.values()).some((x) => x.seq === d.seq && x.ok)) takes.set(d.hall, (takes.get(d.hall) || 0) + 1);
+  }
+  const counting = (link) => {
+    const v = link.view;
+    if (!link.base || !v || v.stale || (link.status !== 'connected' && link.status !== 'viewing')) return false;
+    return v.state === 'running' || (v.state === 'expired' && Number.isFinite(v.seconds) && v.seconds < 0);
+  };
+  const halls = [];
+  const following = [];   // the halls that follow the default Stagewatch
+  for (const r of store.rooms.values()) {
+    let pages = 0;
+    for (const sid of r.users.keys()) if (io.sockets.sockets.has(sid)) pages++;
+    const own = hallLinks.get(r.code);
+    const h = { pages, takes: takes.get(r.code) || 0, running: own ? counting(own) : false };
+    if (!own) following.push(h);
+    halls.push(h);
+  }
+  // The default's countdown makes live the first hall that follows it, unless one of them is live already.
+  if (following.length && counting(stageLink) && !following.some(power.isLive)) following[0].running = true;
+  return halls;
+}
+/** The power request follows the halls, once this copy serves and until it stops. */
+function keepAwake() { if (serving && !shuttingDown) powerRequest.want(hallsNow()); }
 
 // Role-level events for the show network's context: never names, never content. Each keeps the Stagewatch link of the
 // halls it happened in (none: the whole node's), so a link's own context carries only its halls' events; the tag never
@@ -3179,6 +3230,7 @@ function shutdown(code = 0) {
   shuttingDown = true;
   if (tunnelProc) { try { tunnelProc.kill('SIGTERM'); } catch { /* ignore */ } }
   if (laptopRead.child) { try { laptopRead.child.kill('SIGKILL'); } catch { /* it has ended */ } }   // a read of Windows ends with the server
+  powerRequest.end();   // and so does the power request
   if (serving) {
     console.log('\n  Saving rooms…');
     store.compactAll();
@@ -3213,8 +3265,12 @@ process.on('SIGTERM', () => shutdown(0));
 process.on('SIGHUP', () => shutdown(0));   // the console window closed (Windows allows about 10 s) or the terminal went away
 // A stop asked over IPC (the watchdog, a test) saves exactly as a signal does: on Windows a signal sent to a child is not
 // delivered, the process just ends, and nothing would be saved. A watchdog gone (its channel closed) leaves no server.
+// A sleep the watchdog recorded (supervise.js) is kept with the show day's peaks, read by type, and saved with its window.
 if (typeof process.send === 'function') {
-  process.on('message', (m) => { if (m && m.t === 'stop') shutdown(0); });
+  process.on('message', (m) => {
+    if (m && m.t === 'stop') shutdown(0);
+    else if (m && m.t === 'slept') peaks.slept(m, Date.now());
+  });
   process.on('disconnect', () => shutdown(0));
 }
 // An uncaught error leaves Node in an unknown state, so it doesn't carry on: save the rooms, record the crash
@@ -3225,6 +3281,7 @@ process.on('uncaughtException', (e) => {
   console.error('  [error]', e && e.stack ? e.stack : e);
   // Before this copy holds its folder another copy may own those files, and nothing of this one's is there to save.
   if (!serving) { releaseDataFolder(); process.exit(resilience.EXIT.CRASH); }
+  try { powerRequest.end(); } catch { /* its input closes as this process ends, which ends it too */ }
   try { store.compactAll(); } catch { /* best effort */ }
   try { flushLanes(); } catch { /* best effort: a lane that cannot write has said so on the console */ }
   try {

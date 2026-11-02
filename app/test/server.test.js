@@ -386,7 +386,11 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const health = async () => (await fetch(base + '/api/health')).json();
     const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
     const h = await health();
-    assert.deepEqual(Object.keys(h).slice(-12), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format'], 'appended at the end of the detail');
+    assert.deepEqual(Object.keys(h).slice(-14), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format', 'sleeps', 'power'], 'appended at the end of the detail');
+    assert.deepEqual(h.sleeps, { watched: false, list: [] }, 'no watchdog runs a server started alone: none recorded');
+    assert.deepEqual(Object.keys(h.power), ['state', 'live', 'why', 'since', 'what']);
+    assert.ok(h.power.live >= 1, 'pages are seated in a hall: it is live');
+    if (process.platform !== 'win32') assert.deepEqual([h.power.state, h.power.why], ['unavailable', 'AGMessage is not running on Windows']);
     assert.deepEqual(h.acceptErrors, { count: 0, last: '' }, 'no connection the port could not take');
     assert.deepEqual(h.format, { format: 2, was: 0, before: '', newer: null, backup: '' }, 'a new folder, marked by this build: no build named before it');
     assert.deepEqual(Object.keys(h.elu), ['count', 'p50', 'p95', 'max']);
@@ -441,7 +445,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.match(h.showDay, /^\d{4}-\d{2}-\d{2}$/);
     const today = h.peaks.find((d) => d.day === h.showDay);
     assert.ok(today, 'today has its record: ' + JSON.stringify(h.peaks.map((d) => d.day)));
-    assert.deepEqual(Object.keys(today), ['day', 'loopMs', 'elu', 'socketsPerAddress', 'tunnelSockets', 'tunnelRefused', 'hallMessages', 'hallKb', 'joinBurst', 'compactMs', 'auditPutMs', 'at']);
+    assert.deepEqual(Object.keys(today), ['day', 'loopMs', 'elu', 'socketsPerAddress', 'tunnelSockets', 'tunnelRefused', 'hallMessages', 'hallKb', 'joinBurst', 'compactMs', 'auditPutMs', 'at', 'sleeps', 'sleptMs']);
     assert.deepEqual(Object.keys(today.socketsPerAddress), ['venue', 'tunnel']);
     assert.match(today.day, /^\d{4}-\d{2}-\d{2}$/);
     assert.deepEqual(Object.keys(today.auditPutMs), ['count', 'p99', 'max']);

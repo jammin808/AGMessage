@@ -93,6 +93,7 @@
       'refused through the tunnel: ' + refusedWords(d.tunnelRefused)];
     if (d.compactMs && (d.compactMs.max || d.compactMs.messages)) w.push('snapshot ' + d.compactMs.max + ' ms (' + n(d.compactMs.messages) + ' messages)');
     if (d.auditPutMs && d.auditPutMs.count) w.push('audit write p99 ' + d.auditPutMs.p99 + ' ms (max ' + d.auditPutMs.max + ')');
+    if (d.sleeps) w.push('asleep ' + n(d.sleeps) + (d.sleeps === 1 ? ' time' : ' times') + ' (the longest ' + Math.max(1, Math.round(Number(d.sleptMs || 0) / 60000)) + ' min)');
     return (d.day === showDay ? 'today\'s peaks: ' : 'peaks of ' + d.day + ': ') + w.join(', ');
   }
 
@@ -126,6 +127,10 @@
     if (h.loopMs && h.loopMs.count) parts.push('loop delay p95 ' + h.loopMs.p95 + ' ms (max ' + h.loopMs.max + ')' + (h.elu && h.elu.count ? ' · busy ' + Math.round(h.elu.p95 * 100) + ' %' : ''));
     const peaks = peaksWords(h.peaks, h.showDay);
     if (peaks) parts.push(peaks);
+    // The power request a live show holds: said while a hall is live ("This laptop" says the rest).
+    const pw = h.power;
+    if (pw && pw.state === 'held') parts.push('kept awake while ' + pw.live + (pw.live === 1 ? ' hall is' : ' halls are') + ' live');
+    else if (pw && (pw.state === 'refused' || pw.state === 'failed')) parts.push('⚠ not kept awake: ' + pw.why);
     if (h.stageRttMs && h.stageRttMs.count) parts.push('send-to-stage ' + h.stageRttMs.p50 + ' ms typical, ' + h.stageRttMs.max + ' worst');
     if (h.clock) parts.push('clock vs Stagewatch ' + (h.clock.offsetMs >= 0 ? '+' : '') + h.clock.offsetMs + ' ms' + (h.clock.apart ? ' — CLOCKS APART' : ''));
     // Each store that could not be saved, by name: what it holds is kept and tried again until it is on disk.

@@ -908,7 +908,7 @@ test('peaks: per show day (06:00 to 06:00 by the laptop\'s clock), raised and ne
   const today = p.view()[0];
   assert.deepEqual({ ...today, auditPutMs: undefined }, {
     day: '2026-10-31', loopMs: 7, elu: 0.123, socketsPerAddress: { venue: 4, tunnel: 3 }, tunnelSockets: 1, tunnelRefused: { rate: 0, share: 1, full: 2, idle: 1, wrongCode: 0 }, hallMessages: 1250, hallKb: 340.3, joinBurst: 12,
-    compactMs: { max: 0, messages: 0 }, auditPutMs: undefined, at: at(31, 11),
+    compactMs: { max: 0, messages: 0 }, auditPutMs: undefined, at: at(31, 11), sleeps: 0, sleptMs: 0,
   });
   assert.deepEqual(p.refusedOn(at(31, 23)), today.tunnelRefused, 'the show day\'s refusals, read');
   assert.deepEqual(p.refusedOn(at(30, 12)), { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, 'a day with no record: none, and none made');
@@ -986,7 +986,7 @@ test('peaks: saved with each day\'s buckets, so a restart counts on; what is not
   ] });
   assert.deepEqual(odd.view(), [{
     day: '2026-10-30', loopMs: 0, elu: 0, socketsPerAddress: { venue: 0, tunnel: 0 }, tunnelSockets: 0, tunnelRefused: { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, hallMessages: 3, hallKb: 0, joinBurst: 0,
-    compactMs: { max: 0, messages: 0 }, auditPutMs: { count: 0, p99: null, max: null }, at: 0,
+    compactMs: { max: 0, messages: 0 }, auditPutMs: { count: 0, p99: null, max: null }, at: 0, sleeps: 0, sleptMs: 0,
   }], 'a day named twice is its last record; a count the buckets cannot account for is none');
   // Per lane, by type: a build that counted every address in one number is read as the venue's; anything else is none.
   const lanes = (v) => new readings.Peaks().load({ days: [{ day: '2026-10-29', socketsPerAddress: v, tunnelRefused: 4.7 }] }).view()[0];

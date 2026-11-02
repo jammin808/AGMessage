@@ -1860,6 +1860,88 @@ reading is recorded yet, and every lab line is the show laptop's and not run)
   on a folder and on `C:\` are run and read.
 - Rolling back: nothing ships; the lane and its tools are CI's.
 
+**The watchdog tells a sleep from a hang, and a live show keeps the laptop awake** (the plan's Part 6, unit U9: the
+plan's proxies, both processes frozen and thawed on Linux, made tests on the real watchdog; the code and its tests, with
+`powershell.exe` stood in for on Linux and the script itself run by CI's Windows job; nothing in it is measured on a
+laptop that sleeps: lab 1 is the show laptop's, and reads "not run")
+- **A late tick is a sleep, never a hang.** The watchdog ticks every half second and measures its server's silence on a
+  steady clock (`performance.now()`, which a change to the laptop's clock does not move; `lib/resilience.js`
+  `BeatClock`). A tick of its own that comes more than 2 s late (`AGM_LATE_MS`), on that clock or on the wall clock,
+  means it did not run itself (the laptop slept, or both processes were frozen), so it judges nothing of that gap: the
+  beat clock starts again at that tick, and the gap is never counted as a crash. Either clock, because a steady clock
+  may stop while the machine sleeps (Linux's monotonic clock does; whether Windows' does is lab 1's) and would see no
+  gap there, while the wall clock does. A hang is the watchdog ticking on time with no beat for 10 s, as before, and is
+  still killed and restarted. Until now the watchdog compared the wall clock with the last beat, which jumps across a
+  sleep: every wake from a sleep longer than 10 s killed the server unsaved and wrote "AGMessage restarted" in every
+  hall, and a laptop's standby that lets a process run a second at a time made it kill seven times, give up and stay
+  down. The first tick is judged from when the ticks began, so a freeze before it is a sleep too. What the rule cannot
+  tell from a sleep, and records as one (`docs/INSTALL.md` says so): a step of the laptop's clock forward by more than
+  2 s, and the watchdog itself held from running for more than 2.5 s while the laptop is awake (swapping, a disk that
+  holds its log's write), during which a server that hangs is not killed until the watchdog runs on time for 10 s.
+- **The sleeps recorded.** "asleep from 2026-11-02 14:02:03 to 14:20:11 UTC (18 min 8 s): the watchdog did not run, so
+  it judged nothing of the server for that time" goes to the watchdog's console, `data/watchdog.log` and `server.log`
+  once it has run on time for 10 s after it, or as it stops; sleeps with it awake less than that between (a standby that
+  lets it run a moment at a time) are one sleep, "…, 24 times in a row, awake a moment between". The server is told
+  each (now, at the next server's first beat, the newest 20 waiting, or, for one the watchdog stops in, ahead of the
+  stop, so the stop saves it), reads it by type and keeps it with the show day's peaks: each day's record gains `sleeps`
+  (how many woke in it) and `sleptMs` (the longest), and `peaks.json` keeps the newest 20 whole (`asleep`), so a restart
+  keeps them. Appended to `/api/health`'s detail (the admin and this laptop only), at its end: `sleeps` (`watched`:
+  whether a watchdog runs this server; `list`: the newest kept, oldest first, each `{from, to, parts}`). The admin
+  page's peaks read "asleep 2 times (the longest 18 min)", and "This laptop" gains **Sleeps**: "once today · the last
+  asleep from … UTC (18 min 8 s)" (△), "none recorded" (✓), or, for a server run alone, "none recorded: no watchdog
+  runs this server, so a sleep goes unseen".
+- **A live show keeps the laptop awake.** While a hall is live the server holds a power request (`lib/power.js`). A hall
+  is live while it has an open page seated in it, idle or not (a Board reading quietly through a long session is a live
+  show: a page left open holds the request until it is closed, and "This laptop" says what makes the halls live); a
+  screen on which a browser confirmed a take other than holding (another browser on the same link that could not show
+  it takes nothing from it); or its Stagewatch countdown counting, as Stagewatch says now: running, or past zero and
+  counting on into overtime, never held at zero. The default Stagewatch, which every hall without its own follows, is
+  one countdown and makes one hall live, never each. The request is held through one `powershell.exe` child, run by its
+  absolute path under `SystemRoot`, from System32, in an environment of named Windows folders only (`lib/laptop.js`
+  `powershellPlan`, which "This laptop"'s read uses too), with a fixed script of one line: it declares
+  `SetThreadExecutionState` with `Add-Type` (which Windows PowerShell 5.1 compiles with the .NET Framework's `csc.exe`,
+  run as its child on files in the `TEMP` folder passed, then loads and removes), calls it with `ES_CONTINUOUS |
+  ES_SYSTEM_REQUIRED` and waits on its standard input, so the request ends when the server ends it (no hall live) or
+  the server ends (its input closes; on Windows the job every child is in ends it too). It reads "held" only when the
+  call returned non-zero; under Constrained Language Mode, where `Add-Type` is refused, it says so before it asks. It is
+  read again whenever the halls board is marked (a page seated or gone, a screen's take or its report, a Stagewatch
+  frame) and every 5 s, and started only once this copy serves. A request refused is said ("[power] not held: …" on
+  the console) and asked again only when the halls have gone quiet and are live again; one that failed (the call
+  returned 0, `powershell.exe` could not be run, did not answer within 30 s, or ended while it was wanted) is asked
+  again a minute after while a hall stays live, never sooner, and the same failure again is said once. It keeps off
+  idle sleep only: the lid and the power button stay the power plan's, as Microsoft says of the call, and on battery a
+  laptop with Modern Standby keeps the request 5 minutes at most. Appended to `/api/health`'s detail, after `sleeps`:
+  `power` (`state`: off, asking, held, refused, failed or unavailable; `live`, how many halls; `why`; `since`; `what`,
+  the open pages, screens showing and countdowns running that make the live halls live). "This laptop" gains **Kept
+  awake**: "held while 1 hall is live (1 page open): Windows took the request to keep off idle sleep, which on battery
+  a laptop with Modern Standby keeps 5 minutes at most · the lid and the power button still do what the power plan
+  says" (✓), "not asked: no hall is live", or "not held while …: why", with when it is asked again (△; off Windows,
+  "AGMessage is not running on Windows"); the admin page's health line says "kept awake while 1 hall is live", or "⚠
+  not kept awake: …". Until now nothing kept a laptop on mains from its idle sleep during a show.
+- The tests: on a fake clock, on-time ticks with no beat kill at the hang's limit, a late tick starts the beat clock
+  again and is a sleep (also before the first tick, and one only the wall clock saw, after which the hang's limit still
+  holds), a wall clock set back is no sleep and hides no hang, a tick exactly at the late limit is not late, and the
+  plan's throttle proxy (a second awake in every fifteen for six minutes) is one sleep of 24 parts, never a kill. On the
+  real watchdog (Linux; each fails on the watchdog before it): both processes frozen past the hang's limit three times,
+  never killed, each sleep said in `watchdog.log`, `server.log` and on the console, and told to the server, and one it
+  is stopped in moments after the wake told ahead of the stop; frozen most of the time eight times, past the crash
+  count, never killed or given up, one sleep said; the server frozen alone with the watchdog on time, still killed at
+  the hang's limit, and no sleep said; the real server keeps the sleep in health, the day's peaks and "This laptop", and
+  across a restart; a sleep the server is told that does not read is kept nowhere. The power request on a fake clock
+  and with its child stood in for: held only on its word, refused not asked again while live, a failure asked again a
+  minute after and never sooner, a child silent for 30 s failed and ended, the same failure said once, an answer it
+  cannot read or past 4 KB not taken. On a server with `powershell.exe` stood in for (`test/power-preload.js`): nothing
+  asked while no hall is live; started when a page is seated, a screen confirms a message (a screen holding is not live;
+  a second browser on its link that could not show it takes nothing from it) and a Stagewatch countdown runs or counts
+  into overtime (held at zero is not live), the default Stagewatch two halls follow making one live; ended when each
+  stops and when the server stops or is killed (its input closes); refused under Constrained Language Mode, said on
+  "This laptop" and never asked again while live. On Windows the script itself answers held and ends when its input
+  closes.
+- The papers: `docs/INSTALL.md` gains "Sleep, the power request and the lid"; `docs/DESIGN.md`, `SECURITY.md` (the
+  child, what it runs, `csc.exe` and the temporary library included, and its environment), `docs/ANALYSIS.md`,
+  `README.md` and `README.txt` (the watchdog, This laptop, health) say the rest.
+- Rolling back: 0.5.1 ignores the new health keys and `peaks.json`, and its watchdog kills the server at a wake again.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

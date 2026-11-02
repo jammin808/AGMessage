@@ -12,7 +12,8 @@
  *   Burst        : the most arrivals one key (a hall) took in any 5 s, read at each arrival, not cut at a window's edge
  *   Hist         : durations in fixed buckets; its p99 is the bucket bound it falls under (never above the max), its max exact
  *   Peaks        : one record per show day (06:00 to 06:00), the newest 14; a reading only ever raises its day's value,
- *                  and the day's refusals through the tunnel, by what was refused, only ever add up
+ *                  and the day's refusals through the tunnel, by what was refused, only ever add up; the sleeps the
+ *                  watchdog recorded, counted on the day each woke in (its longest kept), the newest 20 kept whole
  *   Refusals     : today's refusals, by lane and by what was refused, and one log line a minute at most while refusing
  *   linkCheck    : the internet link's check, from the round trips of its tries
  */
@@ -155,9 +156,27 @@ const perLane = (v) => {
   return { venue: Math.floor(num(o.venue)), tunnel: Math.floor(num(o.tunnel)) };
 };
 
+/** The most sleeps kept whole (`asleep`); each day counts all of its own. */
+const SLEEPS_KEPT = 20;
+/** The longest sleep read as one: past it, what was said is not a sleep this watchdog could have measured. */
+const SLEEP_MAX_MS = 366 * 86_400_000;
+/**
+ * A sleep the watchdog recorded ({from, to, parts}: the wall clock's ms, and how many times it went in a row), read by
+ * type: whole numbers, `from` before `to`, no longer than SLEEP_MAX_MS, and, when `at` is given, ended by then (a minute's
+ * leeway); else null.
+ */
+function readSleep(s, at = Infinity) {
+  if (!s || typeof s !== 'object') return null;
+  const { from, to, parts } = s;
+  if (![from, to, parts].every(Number.isSafeInteger) || from <= 0 || to <= from || to - from > SLEEP_MAX_MS || parts < 1) return null;
+  if (to > at + 60_000) return null;
+  return { from, to, parts };
+}
+
 class Peaks {
   constructor({ keepDays = 14 } = {}) {
     this.keepDays = keepDays; this.days = [];
+    this.asleep = [];     // the newest SLEEPS_KEPT sleeps, oldest first
     this.dirty = false;   // a record changed since the server last asked the lane for a save
   }
 
@@ -175,14 +194,18 @@ class Peaks {
       rec.compactMs = { max: round(num(c.max), 1), messages: Math.floor(num(c.messages)) };
       rec.auditPutMs = Hist.from(d.auditPutMs);
       rec.at = num(d.at);
+      rec.sleeps = Math.floor(num(d.sleeps));
+      rec.sleptMs = Math.floor(num(d.sleptMs));
       byDay.set(rec.day, rec);
     }
     this.days = Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? -1 : 1)).slice(-this.keepDays);
+    const asleep = saved && Array.isArray(saved.asleep) ? saved.asleep : [];
+    this.asleep = asleep.map((x) => readSleep(x)).filter(Boolean).sort((a, b) => a.to - b.to).slice(-SLEEPS_KEPT);
     return this;
   }
 
   _blank(day) {
-    return { day, loopMs: 0, elu: 0, socketsPerAddress: { venue: 0, tunnel: 0 }, tunnelSockets: 0, tunnelRefused: zero(REFUSED.tunnel), hallMessages: 0, hallKb: 0, joinBurst: 0, compactMs: { max: 0, messages: 0 }, auditPutMs: new Hist(), at: 0 };
+    return { day, loopMs: 0, elu: 0, socketsPerAddress: { venue: 0, tunnel: 0 }, tunnelSockets: 0, tunnelRefused: zero(REFUSED.tunnel), hallMessages: 0, hallKb: 0, joinBurst: 0, compactMs: { max: 0, messages: 0 }, auditPutMs: new Hist(), at: 0, sleeps: 0, sleptMs: 0 };
   }
 
   /** The record of the day `at` falls on, made when it is the first reading of that day; only the newest days are kept. */
@@ -258,11 +281,39 @@ class Peaks {
     return true;
   }
 
+  /**
+   * A sleep the watchdog recorded (`s`: {from, to, parts}, read by type, ended by `at`): counted on the show day it woke
+   * in, which keeps its longest, and kept whole among the newest SLEEPS_KEPT. Whether it was taken; anything else changes
+   * nothing.
+   */
+  slept(s, at) {
+    const r = readSleep(s, at);
+    if (!r) return false;
+    const rec = this._day(r.to);
+    rec.sleeps++;
+    if (r.to - r.from > rec.sleptMs) rec.sleptMs = r.to - r.from;
+    rec.at = at;
+    this.asleep.push(r);
+    this.asleep.sort((a, b) => a.to - b.to);
+    if (this.asleep.length > SLEEPS_KEPT) this.asleep.splice(0, this.asleep.length - SLEEPS_KEPT);
+    this.dirty = true;
+    return true;
+  }
+
+  /** The sleeps kept whole, oldest first: [{from, to, parts}]. */
+  sleeps() { return this.asleep.map((x) => ({ ...x })); }
+
+  /** The show day `at` falls in: how many sleeps woke in it, and the longest (none when it has no record). */
+  sleptOn(at) {
+    const rec = this.days.find((d) => d.day === dayOf(at));
+    return rec ? { sleeps: rec.sleeps, sleptMs: rec.sleptMs } : { sleeps: 0, sleptMs: 0 };
+  }
+
   /** What health shows: the days, oldest first, the audit writes as {count, p99, max}. */
   view() { return this.days.map((d) => ({ ...d, socketsPerAddress: { ...d.socketsPerAddress }, tunnelRefused: { ...d.tunnelRefused }, compactMs: { ...d.compactMs }, auditPutMs: d.auditPutMs.view() })); }
 
   /** What peaks.json keeps: the days with each histogram's buckets, so the day goes on counting after a restart. */
-  toJSON() { return { v: 1, days: this.days.map((d) => ({ ...d, socketsPerAddress: { ...d.socketsPerAddress }, tunnelRefused: { ...d.tunnelRefused }, compactMs: { ...d.compactMs }, auditPutMs: d.auditPutMs.toJSON() })) }; }
+  toJSON() { return { v: 1, days: this.days.map((d) => ({ ...d, socketsPerAddress: { ...d.socketsPerAddress }, tunnelRefused: { ...d.tunnelRefused }, compactMs: { ...d.compactMs }, auditPutMs: d.auditPutMs.toJSON() })), asleep: this.sleeps() }; }
 }
 
 // The log's words for each, in the order its line gives them.
@@ -342,4 +393,4 @@ function linkCheck(tries, at) {
   return { at, ok, p50Ms, maxMs, words };
 }
 
-module.exports = { loopDelayMs, countSockets, Burst, Hist, Peaks, Refusals, REFUSED, linkCheck, dayOf, BOUNDS };
+module.exports = { loopDelayMs, countSockets, Burst, Hist, Peaks, Refusals, REFUSED, linkCheck, dayOf, BOUNDS, readSleep, SLEEPS_KEPT };

@@ -37,7 +37,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   last few seconds (what AGMessage has taken is in the system's file cache at once, and on the disk once the system
   writes it back). A change the disk will not take (a full disk, a log another program holds) is kept in memory, named
   on the admin page's health and put in the hall's next snapshot; until that snapshot lands, a crash of AGMessage can
-  lose it. A watchdog restarts the server after a crash or a hang, and every open page comes back by itself, without a
+  lose it. A watchdog restarts the server after a crash or a hang, and tells a hang from a sleep: a wake from the laptop's
+  sleep is recorded ("asleep from … to …"), never killed or counted as a crash, and while a hall is live (a page open in
+  it, a screen showing a take, its countdown running) the server asks Windows to keep the laptop from its idle sleep
+  (the lid and the power button stay the power plan's). Every open page comes back by itself, without a
   reload: after a drop (at once when a phone is woken or the Wi-Fi is back), after a restart (announcing nobody), and
   after a refusal at a busy moment, at the pace the server gives ("Busy — trying again in 3 s."). The admin page's
   health reads the server's true delay and how busy it is, and keeps the peaks of each show day for 14 days, through a
@@ -49,7 +52,8 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   (rotated at 2 MB, two files at most, never the admin token), with the server's own words in the watchdog's line for a
   start it refused, and the admin page's **This laptop** says what AGMessage knows of the laptop it serves from — the
   build and how it runs, the addresses, HTTPS and why it is off, the sealed values that open, the screens confirmed,
-  Stagewatch, the internet link — and what Windows says (the network's profile and whether the firewall lets this
+  Stagewatch, the internet link, the sleeps the watchdog recorded and whether the laptop is kept awake — and what Windows
+  says (the network's profile and whether the firewall lets this
   AGMessage in on it, sleep and the lid on mains, the server task, the laptop's admin and the rights given), each fact
   with where it was read, and "unknown" with why where it could not be. A certificate due for renewal is not renewed at
   a start that has no network address, so it never names none: it serves on, and This laptop says when New certificate

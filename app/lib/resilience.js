@@ -2,6 +2,9 @@
 /**
  * Resilience parts with no I/O policy of their own (pure or file-only), tested in test/units.test.js:
  *   SupervisorPolicy : when the watchdog restarts the server, how long it waits, when it gives up
+ *   BeatClock        : how the watchdog judges its server: a hang is the watchdog ticking on time with no beat; a tick
+ *                      of its own that came late is a sleep, never a hang
+ *   asleepWords      : a sleep the watchdog recorded, in the words its log and "This laptop" say it in
  *   writeFileAtomic  : tmp → fsync → rename, with a .bak kept only when the old file is whole
  *   publishOnce      : a file made only where none is: published whole, never over one that is there
  *   readText         : a file's text, or the code of why it was not read (only ENOENT means it is not there)
@@ -73,6 +76,85 @@ class SupervisorPolicy {
     this.step++;
     return delayMs;
   }
+}
+
+/**
+ * How the watchdog judges its server (pure: every time is given, `at` on one steady clock, `wall` the wall clock's ms).
+ * The watchdog ticks every `tickMs`. A hang is the watchdog ticking on time with no beat from its server for `hangMs`
+ * (`startupMs` before a run's first beat), its silence measured on the steady clock alone, which no change to the
+ * laptop's clock moves. A tick that comes more than `lateMs` after it was due, on either clock, means the watchdog itself
+ * did not run (the laptop slept, both processes were frozen, or the watchdog alone was held from running that long:
+ * starved, swapping, a disk holding its log's write), so the silence in that gap says nothing of the server:
+ * the beat clock starts again at that tick, and the gap is a sleep, never a hang, never a crash. Either clock, because a
+ * steady clock that stops while the machine sleeps (Linux's monotonic clock does; Windows' is lab 1's to read) sees no
+ * gap there, while the wall clock does; the price is that a step of the laptop's clock forward by more than `lateMs` is
+ * taken for a sleep too, which starts the beat clock again once and records it. Sleeps with the watchdog awake less
+ * than `hangMs` between them (a laptop's standby that lets a process run a second at a time) are one sleep, its `parts`
+ * how many gaps it took; it is said once the watchdog has ticked `hangMs` after its last gap, or when it is closed (a
+ * stop).
+ */
+class BeatClock {
+  /** `at` and `wall`: when the ticks begin, so the first is judged late or on time as every other is. */
+  constructor({ tickMs = 500, lateMs = 2000, hangMs = 10_000, startupMs = 30_000, at = 0, wall = 0 } = {}) {
+    this.tickMs = tickMs; this.lateMs = lateMs; this.hangMs = hangMs; this.startupMs = startupMs;
+    this.from = at;         // since when the server's silence counts: its newest beat, its start or the newest late tick
+    this.beaten = false;    // whether this run of the server has beaten yet
+    this.last = { at, wall };   // the tick before (at first, when the ticks began)
+    this.open = null;       // the sleep not yet said: {from, to, parts, wokeAt}
+  }
+
+  /** A run of the server starts at `at`: its silence counts from now, against `startupMs` until its first beat. */
+  started(at) { this.from = at; this.beaten = false; }
+
+  /** The server beat at `at`. */
+  beat(at) { this.from = at; this.beaten = true; }
+
+  /**
+   * One tick at `at` (`wall` beside it): {late, hungMs, slept}. `late` when this tick came late (the beat clock started
+   * again); `hungMs`, the server's silence, when it is past its limit on a tick that came on time (else 0); `slept`, a
+   * sleep the watchdog has now been awake long enough after to say ({from, to, parts}, the wall clock's ms), or null.
+   */
+  tick(at, wall) {
+    const before = this.last;
+    this.last = { at, wall };
+    let slept = null;
+    const due = this.tickMs + this.lateMs;
+    if (at - before.at > due || wall - before.wall > due) {
+      this.from = at;
+      if (this.open) { this.open.to = wall; this.open.parts++; this.open.wokeAt = at; } else this.open = { from: before.wall, to: wall, parts: 1, wokeAt: at };
+      return { late: true, hungMs: 0, slept: null };
+    }
+    if (this.open && at - this.open.wokeAt >= this.hangMs) slept = this.close();
+    const silent = at - this.from;
+    return { late: false, hungMs: silent > (this.beaten ? this.hangMs : this.startupMs) ? silent : 0, slept };
+  }
+
+  /** The sleep not yet said, said now ({from, to, parts}), or null. */
+  close() {
+    const s = this.open;
+    this.open = null;
+    return s ? { from: s.from, to: s.to, parts: s.parts } : null;
+  }
+}
+
+/** A span of time in words: "45 s", "18 min 8 s", "8 h 58 min". */
+function spanWords(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return s + ' s';
+  if (s < 3600) return Math.floor(s / 60) + ' min' + (s % 60 ? ' ' + (s % 60) + ' s' : '');
+  const m = Math.floor((s % 3600) / 60);
+  return Math.floor(s / 3600) + ' h' + (m ? ' ' + m + ' min' : '');
+}
+/**
+ * A sleep the watchdog recorded ({from, to, parts}, the wall clock's ms), in the words its log, the console and "This
+ * laptop" say it in: "asleep from 2026-11-02 14:02:03 to 14:20:11 UTC (18 min 8 s)", the second date only when it is
+ * another day's, and how many times it went when it went more than once.
+ */
+function asleepWords(s) {
+  const at = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+  const from = at(s.from), to = at(s.to);
+  const times = s.parts > 1 ? ', ' + s.parts + ' times in a row, awake a moment between' : '';
+  return 'asleep from ' + from + ' to ' + (to.slice(0, 10) === from.slice(0, 10) ? to.slice(11) : to) + ' UTC (' + spanWords(s.to - s.from) + times + ')';
 }
 
 /**
@@ -300,4 +382,4 @@ function placeId(dir, name, { absentOk = false } = {}) {
   return crypto.createHash('sha256').update(process.platform === 'win32' ? p.toLowerCase() : p).digest('hex').slice(0, 16);
 }
 
-module.exports = { EXIT, SupervisorPolicy, writeFileAtomic, publishOnce, readText, readJsonWhole, readJsonWithBak, isJson, WriteLane, Ring, ClockSampler, placeId };
+module.exports = { EXIT, SupervisorPolicy, BeatClock, asleepWords, spanWords, writeFileAtomic, publishOnce, readText, readJsonWhole, readJsonWithBak, isJson, WriteLane, Ring, ClockSampler, placeId };

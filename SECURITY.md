@@ -83,6 +83,18 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   laptop's admin and the rights given are on the admin page's answers alone (the token, or an account that may manage
   settings), never health over HTTP, the context, the hello or the AI's brief: a Windows account's name is not the show
   network's business.
+- While a hall is live the server holds a power request through one more `powershell.exe`, run the same way (by its
+  absolute path under `SystemRoot`, from System32, in that named environment, `lib/power.js`), with a fixed script of
+  one line that takes nothing from a page: it declares `SetThreadExecutionState` with `Add-Type`, calls it and waits on
+  its standard input, which carries nothing; it ends when no hall is live and with the server. `Add-Type` compiles
+  that one-line declaration with the .NET Framework's `csc.exe`, which Windows PowerShell 5.1 runs as a child of its
+  own on files it writes in the `TEMP` folder the server passes (the source, the compiler's arguments and the library
+  it builds), then loads that library and removes the files: so the request runs `csc.exe` beside `powershell.exe`, and
+  writes and loads a temporary library, which an AppLocker or WDAC policy sees as such. Nothing of it comes from a page
+  or the network. Its answer is read by type, and only its state (held, refused, failed), what makes the halls live (as
+  counts) and Windows' words for why reach "This laptop" and health. It keeps off idle sleep only: it cannot keep a lid
+  that is closed from sleeping. The sleeps the watchdog records are times and counts, never a hall, a name or an
+  address.
 - A seat On stage holds messages and nothing else, on the server, for the admin seated there too: it is given no upload
   token, and an upload token is checked again when it is used, against the seat its page holds then; the admin's move of
   a page to a seat that shares no file ends its token in the same tick, so that page uploads nothing more with the one it

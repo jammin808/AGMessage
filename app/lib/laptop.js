@@ -3,15 +3,18 @@
  * "This laptop" on the admin page: what AGMessage knows of the laptop it serves from, and what Windows says of it, each
  * fact with where it was read (tested in test/laptop.test.js).
  *
- *   windowsPlan    how Windows is asked: one powershell.exe, by its absolute path under SystemRoot, running SCRIPT, a fixed
- *                  script that takes nothing from a page, in an environment of named system folders only (PASSED); on
- *                  any other system, or without a SystemRoot named from its drive, nothing is run and every Windows fact
- *                  reads unknown with why
+ *   powershellPlan how powershell.exe is run with a fixed script: by its absolute path under SystemRoot, in an
+ *                  environment of named system folders only (PASSED); on any other system, or without a SystemRoot named
+ *                  from its drive, nothing is run (the power request's child, lib/power.js, is run so too)
+ *   windowsPlan    how Windows is asked: one powershell.exe, as powershellPlan runs it, running SCRIPT, a fixed script
+ *                  that takes nothing from a page; where nothing is run every Windows fact reads unknown with why
  *   readWindows    runs the plan once, within its time (5 s): its output, what it said before its time ran out included,
  *                  and why it said no more; never rejects
  *   windowsFacts   that output read by type, part by part, as each line came: each part read, or unknown with why;
  *                  never a value it did not check
- *   facts          the panel's rows, each a label, its words, a mark (ok, warn, fault, off, or none) and where it was read
+ *   facts          the panel's rows, each a label, its words, a mark (ok, warn, fault, off, or none) and where it was read:
+ *                  among them the sleeps the watchdog recorded and the power request a live show holds (lib/power.js),
+ *                  with what makes the halls live (liveWords, hallsWords: the power request's words too)
  *   formatRow      the data folder's row: its format, and what this start found of it (lib/dataformat.js)
  *
  * The laptop's admin and the rights given are read from the install record (HKLM\SOFTWARE\AGMessage: `Admin`,
@@ -22,6 +25,7 @@
 const childProcess = require('child_process');
 const path = require('path');
 const { cleanText } = require('./guard');
+const { asleepWords } = require('./resilience');
 
 /** How long Windows has to answer, in ms: the child is ended then, and each fact reads unknown. */
 const WINDOWS_MS = 5000;
@@ -139,12 +143,12 @@ AgmSay 'rules' $v
 `.trim().replace(/\s*\n\s*/g, ' ');
 
 /**
- * How Windows is asked here: {run: true, file, args, options} for powershell.exe by its absolute path in System32, from
- * that folder, hidden, its environment SystemRoot, the names PASSED that this server's has, Windows' own module path and
- * this node.exe's path (`node`, AGM_NODE) for the firewall's rules, and nothing else; or {run: false, why}: not Windows,
- * or no SystemRoot named from its drive (pure).
+ * How powershell.exe runs `script` here: {run: true, file, args, options} by its absolute path in System32, from that
+ * folder, hidden, its environment SystemRoot, the names PASSED that this server's has, Windows' own module path and
+ * `extra` (names AGMessage sets), and nothing else; or {run: false, why}: not Windows, or no SystemRoot named from its
+ * drive (pure).
  */
-function windowsPlan(env, { platform = process.platform, node = process.execPath } = {}) {
+function powershellPlan(env, script, { platform = process.platform, extra = {} } = {}) {
   if (platform !== 'win32') return { run: false, why: 'AGMessage is not running on Windows' };
   const root = typeof env.SystemRoot === 'string' ? env.SystemRoot.trim() : '';
   if (!DRIVE_PATH.test(root)) return { run: false, why: 'SystemRoot does not name the Windows folder, so powershell.exe has no path to run from' };
@@ -152,13 +156,20 @@ function windowsPlan(env, { platform = process.platform, node = process.execPath
   const childEnv = { SystemRoot: root };
   for (const name of PASSED) if (typeof env[name] === 'string' && env[name]) childEnv[name] = env[name];
   childEnv.PSModulePath = path.win32.join(sys, 'WindowsPowerShell', 'v1.0', 'Modules');
-  childEnv.AGM_NODE = node;
+  Object.assign(childEnv, extra);
   return {
     run: true,
     file: path.win32.join(sys, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    args: ['-NoProfile', '-NonInteractive', '-NoLogo', '-Command', SCRIPT],
+    args: ['-NoProfile', '-NonInteractive', '-NoLogo', '-Command', script],
     options: { cwd: sys, windowsHide: true, env: childEnv },
   };
+}
+/**
+ * How Windows is asked here: powershell.exe as powershellPlan runs it, running SCRIPT, with this node.exe's path (`node`,
+ * AGM_NODE) for the firewall's rules (pure).
+ */
+function windowsPlan(env, { platform = process.platform, node = process.execPath } = {}) {
+  return powershellPlan(env, SCRIPT, { platform, extra: { AGM_NODE: node } });
 }
 
 /**
@@ -289,10 +300,49 @@ function formatRow(f) {
 }
 
 /**
+ * The sleeps row: the sleeps the watchdog recorded (`sl`: {watched, list: the newest kept, oldest first, today: {sleeps,
+ * sleptMs}}), today's counted, the newest said whole; △ when one woke today (pure).
+ */
+function sleepsRow(sl) {
+  const FROM = 'the watchdog: a tick of its own that came late, so it did not run';
+  const last = sl.list.length ? sl.list[sl.list.length - 1] : null;
+  const n = sl.today.sleeps;
+  if (!last && !n) return row('asleep', 'Sleeps', sl.watched ? 'none recorded' : 'none recorded: no watchdog runs this server, so a sleep goes unseen', sl.watched ? 'ok' : 'off', FROM);
+  const today = !n ? 'none today' : n === 1 ? 'once today' : n + ' times today';
+  return row('asleep', 'Sleeps', today + (last ? ' · the last ' + asleepWords(last) : ''), n ? 'warn' : '', FROM);
+}
+/** "1 hall is live", "2 halls are live" (pure). */
+const hallsWords = (live) => (live === 1 ? '1 hall is live' : live + ' halls are live');
+/**
+ * What makes the live halls live (`w`: {pages, screens, countdowns}, summed over them), in words: "2 pages open, 1 screen
+ * showing"; '' when nothing does (pure).
+ */
+function liveWords(w) {
+  const n = (k, one, many) => (w && w[k] > 0 ? w[k] + ' ' + (w[k] === 1 ? one : many) : '');
+  return [n('pages', 'page open', 'pages open'), n('screens', 'screen showing', 'screens showing'), n('countdowns', 'countdown running', 'countdowns running')].filter(Boolean).join(', ');
+}
+/**
+ * The power request's row (`pw`: lib/power.js PowerRequest's view, {state, live, why, what}): held while a hall is live,
+ * what makes it live (so a page left open is seen), and what Windows took it to keep off (idle sleep, never the lid or
+ * the power button, and on battery with Modern Standby for 5 minutes at most); not held, with why and when it is asked
+ * again (pure).
+ */
+function powerRow(pw) {
+  const FROM = 'powershell.exe, asked by this server while a hall is live (SetThreadExecutionState)';
+  const what = liveWords(pw.what);
+  const halls = hallsWords(pw.live) + (what ? ' (' + what + ')' : '');
+  if (pw.state === 'off') return row('awake', 'Kept awake', 'not asked: no hall is live', 'off', FROM);
+  if (pw.state === 'held') return row('awake', 'Kept awake', 'held while ' + halls + ': Windows took the request to keep off idle sleep, which on battery a laptop with Modern Standby keeps 5 minutes at most · the lid and the power button still do what the power plan says', 'ok', FROM);
+  if (pw.state === 'asking') return row('awake', 'Kept awake', 'asked of Windows while ' + halls + ': no answer yet', '', FROM);
+  const again = pw.state === 'failed' ? ' · asked again a minute after' : pw.state === 'refused' ? ' · asked again once no hall is live and one is again' : '';
+  return row('awake', 'Kept awake', 'not held while ' + halls + ': ' + pw.why + again, pw.state === 'unavailable' ? 'off' : 'warn', FROM);
+}
+
+/**
  * The panel's rows, from what this server knows (`k`) and what Windows said (`w`, windowsFacts's), in the panel's order
  * (pure). `k`: {build, runs, addresses, port, https: {on, fingerprint, validTo, off, renewal, file}, sealed: {total, open,
- * keyWords}, screens: {total, shown, offline}, stagewatch: {total, connected}, tunnel: {running, url, error}, before,
- * without: [words], node, format: formatRow's, or none}.
+ * keyWords}, screens: {total, shown, offline}, stagewatch: {total, connected}, tunnel: {running, url, error}, sleeps:
+ * sleepsRow's, power: powerRow's, before, without: [words], node, format: formatRow's, or none}.
  */
 function facts(k, w) {
   const rows = [];
@@ -318,6 +368,8 @@ function facts(k, w) {
   const t = k.tunnel;
   rows.push(t.running ? row('tunnel', 'Internet link', t.url ? 'on: ' + t.url + ' · until it is turned off, or AGMessage stops' : 'starting', t.url ? 'ok' : '', 'cloudflared, started from this page')
     : row('tunnel', 'Internet link', t.error ? 'off: ' + t.error : 'off', t.error ? 'warn' : 'off', 'cloudflared, started from this page'));
+  if (k.sleeps) rows.push(sleepsRow(k.sleeps));
+  if (k.power) rows.push(powerRow(k.power));
   if (k.before) rows.push(row('before', 'Before this start', k.before, 'warn', 'the watchdog'));
   if (k.without.length) rows.push(row('without', 'Goes without', k.without.join(' · '), 'warn', 'this start\'s reads of its keys and settings'));
 
@@ -363,4 +415,4 @@ function facts(k, w) {
   return Object.freeze(rows);
 }
 
-module.exports = { windowsPlan, readWindows, windowsFacts, facts, formatRow, reach, SCRIPT, WINDOWS_MS, PASSED, RULES_MAX, LISTED_MAX };
+module.exports = { powershellPlan, windowsPlan, hallsWords, liveWords, readWindows, windowsFacts, facts, formatRow, reach, SCRIPT, WINDOWS_MS, PASSED, RULES_MAX, LISTED_MAX };
