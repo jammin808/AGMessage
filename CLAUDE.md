@@ -9,8 +9,8 @@ AGMessage is the messenger of the show network (Stagewatch, Patterns, PlayMap): 
 screens for every hall of a live event, on any browser on the venue network. One Node.js server (`app/server.js`, run by
 the watchdog `app/supervise.js`) shipped as a portable Windows folder with its own Node runtime and cloudflared; no
 install, no database. Crew, project managers and admins sign in with accounts; presenters and guests join with a hall's
-6-character code. Each hall is a room with its own Stagewatch link, its screens (`/d/<token>` capability URLs) and its
-help requests; the halls board shows every hall an account may see. It speaks Show Bus 1.2 (`docs/SHOWBUS.md`,
+6-character code. Each hall is a venue space with its Main room, its own Stagewatch link, its screens (`/d/<token>`
+capability URLs) and its help requests; the halls board shows every hall an account may see. It speaks Show Bus 1.2 (`docs/SHOWBUS.md`,
 `docs/NODES.md`).
 
 ## The standing brief (the owner's)
@@ -95,6 +95,8 @@ cd app
 npm ci
 npm run check        # ESLint fences, the secret scan, every test under the coverage gate — must exit 0 before a commit
 npm test             # the tests alone; end-to-end tests start a real server on a throwaway data folder
+                     # (test, coverage and smoke run through test/run-tests.js: a temporary folder of their own,
+                     # removed when the run ends, so no run leaves its data folders behind)
 node --test test/displays.test.js                     # one file
 AGM_BROWSER=<chrome or edge> npm run smoke            # the browser smoke (every page, sign-in, a hall, a screen)
 npm run audit        # shipped packages' advisories and registry signatures; the vendored libraries' (tools/vendor-audit.js)
@@ -158,9 +160,17 @@ version's heading), `README.md` / `README.txt` where the product changed, `docs/
 
 ## House words
 
-**a hall** — a room with its own code, Stagewatch link, screens and help requests; **the halls board** — every hall an
-account may see; **a screen** — a browser holding a display link; **a take** — what a screen is told to show, numbered;
+**a hall** — a venue space with its Main room, its own code, Stagewatch link, screens and help requests; **the halls board** — every hall an
+account may see; **a screen** — a browser holding a screen's link; **a take** — what a screen is told to show, numbered;
 **the desk** — Stagewatch's approval queue, where a proposal waits for the operator; **a link** — AGMessage's
 connection to a Stagewatch, Patterns or PlayMap; **a fence** — a test or lint rule that fails the build when an
 invariant breaks; **the air** — what the audience and the speaker see; **the outbox** — what holds a page's send until
 the server answers it, so it is never lost and never made twice.
+
+**One word per thing** (the smoke's word check holds the pages to it): a hall (never "meeting", "session" or "room");
+a room — Main, Legal, Media, named "Hall 2 › Legal" (never "hall"); a code — what guests type ("guest code" in the
+admin's words); a seat — On stage · Backstage · Observer · Member ("role" only in code); the Board — everyone seated On
+stage in Main (never "directors"); the backstage team (never "research team" or "Support Team" on a page); Chat view —
+By seat · Simple · Full; screens — `/d/` links (never "displays" on a page); the speaker's screen — Stagewatch's
+confidence monitor; Show people (📺 Show the Board, Show Ana, under Send to stage; undone by Take down or Back to chat),
+Show on a thing, Send into a room. Stagewatch's "meetings" stay, as Stagewatch reads them.
