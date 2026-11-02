@@ -122,9 +122,12 @@ node ../tools/stamp-build.js --print                  # the version this checkou
 ```
 
 CI (`.github/workflows/ci.yml`): `analyze` (lint, secret scan, version), `test-linux` (Node 24 and 26, coverage,
-Chrome smoke), `test-windows` (tests, Edge smoke), `package` (the stamped portable zip, CycloneDX SBOM, SHA256SUMS) and,
-on a `v*` tag that names `app/package.json`'s version, above every release already published and every other version
-tagged (asked again as its first step, one release job at a time), `release` with a build-provenance attestation.
+Chrome smoke), `test-windows` (tests, Edge smoke), `package` (the stamped portable zip, CycloneDX SBOM, SHA256SUMS),
+`readings` (the Windows evidence lane on `windows-2025`, its actions pinned by commit: Defender turned back on first, then
+the readings of that zip, judged against their marks; they inform and never hold) and, on a `v*` tag that names
+`app/package.json`'s version, above every release already published and every other version tagged (asked again as its
+first step, one release job at a time), `release` with a build-provenance attestation, waiting for the lane and never
+held by it, its notes saying each reading that missed its mark.
 `.github/workflows/security.yml`: CodeQL `security-extended`, the dependency audit (npm's packages and the vendored libraries), dependency review on pull requests.
 
 ## Where things live
@@ -171,6 +174,7 @@ tagged (asked again as its first step, one release job at a time), `release` wit
 | The house lint rule | `app/eslint-rules/no-unescaped-html.js` |
 | The module fence: the server's layers (the pure core, no cycle, one composition root), the wire's words closed both ways and the op table's two halves in step; the one list of the files that register socket verbs, and of the page scripts, that the fences read | `app/test/modules.test.js`, `app/test/helpers.js` (`handlerFiles()`, `pageScripts()`) |
 | The portable build | `tools/fetch-runtime.ps1`, `tools/build-portable.ps1`, `start-agmessage.bat`, `make-shareable-copy.bat` |
+| The Windows evidence lane (the plan's U7): the readings R1-R13 and the lab lines 1-7, each with its mark and what a miss means (`READINGS`, `LABS`), judged only on what was measured (met, missed, recorded, open, not run with why; never met without Defender where the mark needs it), the job's summary and the release's notes, which exit 0 whatever the lane wrote (`judge`, `notes`), and a run's verdicts written into `docs/INSTALL.md` (`record`); Defender's real-time monitoring turned back on first and whether it took (also the installer's job's first step); what the lane measures on `windows-2025` and the stand-in tasks it registers until the server task, the control tasks and the installer exist (`take`, CI's alone: it refuses any other machine, a work folder or a `\AGMessage\Server` it did not make, `placeRefusal`; `probe-server`, `probe-exit`, `probe-release`, which a task runs from the lane's copy of the file, Node's own modules only); the record of each reading and lab line taken; their tests and fences (the register against the plan's table, the paper against the register, the job and the release in the workflow), with the PowerShell the lane asks run on Windows | `tools/readings.js`, `tools/readings-take.js`, `tools/defender-on.ps1`, `.github/workflows/ci.yml` (`readings`, `release`), `docs/INSTALL.md` (The Windows readings and the lab lines), `app/test/readings.test.js` |
 | Papers | `README.md`, `README.txt`, `CHANGELOG.md` (fenced by a test), `SECURITY.md`, `docs/ACCOUNTS.md`, `docs/DISPLAYS.md`, `docs/NODES.md`, `docs/SHOWBUS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `docs/DEVICES.md`, `docs/INSTALL.md` (the installed node, as far as it is built) |
 | The 0.6.0 plan: what to build, in which order, and the owner's answers it rests on | `docs/plan/0.6.0/PLAN.md` (Part 0: the decisions register and the global build order, whose numbers the unit commits use), `docs/plan/0.6.0/DECISIONS.md`, `docs/plan/0.6.0/board-view/` (the Board view's mock) |
 

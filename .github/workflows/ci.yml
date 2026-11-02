@@ -5,7 +5,8 @@
 # once, and must answer with that build. GitHub hands the artifact as a zip around the zip. A tag publishes a GitHub
 # Release with the zip, its SBOM, SHA256SUMS and a build-provenance attestation, once every job above is green and only
 # when its version is above every release already published and every other version tagged, asked again just before it
-# publishes, one release job at a time.
+# publishes, one release job at a time. Beside them, the Windows evidence lane takes its readings of that zip on
+# windows-2025, with Defender's real-time monitoring back on: they inform the release's notes and never hold it.
 name: CI
 
 on:
@@ -241,10 +242,96 @@ jobs:
             dist/SHA256SUMS
           if-no-files-found: error
 
+  # The Windows evidence lane (the 0.6.0 plan's Part 6, unit U7): the readings R1-R13 of the zip the package job built,
+  # taken on the image the installer is proven on, each judged against its mark (tools/readings.js, which says what each
+  # miss means and which readings wait for a later unit's code). They inform the release and never hold it: a reading
+  # that misses its mark is written in the release's notes with the fallback its unit names; only a lane that cannot
+  # write its readings fails here, and the release does not wait on that. Every action here is pinned by its commit.
+  # Every step has a bound of its own, and together they end well inside the job's (the lane's own bound, BUDGET_MS in
+  # tools/readings-take.js, inside the take step's): a step that runs over fails, the job ends failed, never cancelled,
+  # and the release, which waits for it, still publishes.
+  readings:
+    name: Windows readings (the evidence lane)
+    needs: package
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      # No credential is left in the checkout: the stand-in tasks run the bundle's code from this workspace.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+      # First, before anything is laid down or measured: the image turns Defender's real-time monitoring off and
+      # excludes C:\ and D:\. Every reading below is taken with it back on, and whether that took is recorded beside them.
+      - name: Defender's real-time monitoring back on, the image's exclusions removed (tools/defender-on.ps1)
+        shell: powershell
+        timeout-minutes: 5
+        run: ./tools/defender-on.ps1 -Out "$env:RUNNER_TEMP\defender.json"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        timeout-minutes: 5
+        with:
+          node-version: ${{ env.NODE_LTS }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 5
+        with:
+          name: agmessage-portable-${{ github.sha }}
+          path: dist
+      # R13 reads GitHub's answer for the newest release published, from a SYSTEM task that holds no token; R2 lays this
+      # build over that release's payload. Only R13 and R2 need these, so a GitHub answer that fails here stops nothing:
+      # R13 then reads not run, and R2 lays this build over its own, each saying why.
+      - name: The newest release published (for R13), and its zip (for R2)
+        id: release
+        shell: pwsh
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = gh release list --repo $env:GITHUB_REPOSITORY --limit 1 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[0].tagName // ""'
+          if ($LASTEXITCODE -ne 0 -or "$tag" -notmatch '^v\d+\.\d+\.\d+$') { $tag = '' }
+          if ($tag) {
+            gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern 'AGMessage-Portable-Windows-*.zip' --dir (Join-Path $env:RUNNER_TEMP 'previous')
+            if ($LASTEXITCODE -ne 0) { Write-Host "the zip of $tag was not downloaded: R2 lays this build over its own" }
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          exit 0
+      - name: Take the readings (tools/readings-take.js)
+        shell: pwsh
+        timeout-minutes: 45
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-Windows-*.zip')
+          if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
+          $previous = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'previous') -Filter 'AGMessage-Portable-Windows-*.zip' -ErrorAction SilentlyContinue)
+          $over = if ($previous.Count -eq 1) { @('--previous', $previous[0].FullName) } else { @() }
+          # No release named: no --tag at all, never an empty argument, and R13 reads not run with why.
+          $release = if ($env:RELEASE_TAG) { @('--repo', $env:GITHUB_REPOSITORY, '--tag', $env:RELEASE_TAG) } else { @() }
+          node tools/readings-take.js take --zip $zip[0].FullName --defender "$env:RUNNER_TEMP\defender.json" --out readings/readings.raw.json @release @over
+          if ($LASTEXITCODE -ne 0) { throw "the lane could not write its readings (exit $LASTEXITCODE)" }
+      # The record is written before the first reading and after each, so a take step cut short still has what it took
+      # judged.
+      - name: Judge them against their marks (tools/readings.js)
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          node tools/readings.js judge readings/readings.raw.json --out readings/readings.json --summary $env:GITHUB_STEP_SUMMARY
+          if ($LASTEXITCODE -ne 0) { throw "the lane's record could not be judged (exit $LASTEXITCODE)" }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        timeout-minutes: 5
+        with:
+          name: agmessage-readings-${{ github.sha }}
+          path: readings
+          if-no-files-found: warn
+
   release:
     name: GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: package
+    # The Windows readings inform the notes and never hold the release: it waits for the lane to end, whatever it found
+    # and however it ended, and publishes once the package job has.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.package.result == 'success' }}
+    needs: [package, readings]
     runs-on: ubuntu-latest
     # One release job at a time across every tag, none cancelled by the next: each reads the releases the one before it
     # published.
@@ -262,8 +349,10 @@ jobs:
         with:
           sparse-checkout: |
             tools/stamp-build.js
+            tools/readings.js
             app/lib/version.js
             app/package.json
+            docs/INSTALL.md
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@v7
         with:
@@ -285,10 +374,21 @@ jobs:
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*.zip
+      # The lane's readings, when it wrote them: a lane that failed or wrote none leaves the notes saying so.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: agmessage-readings-${{ github.sha }}
+          path: readings
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          {
+            echo "Build ${{ needs.package.outputs.full }}. Extract All first (right-click the zip), then run start-agmessage.bat from the extracted folder: run from inside the zip it finds nothing beside it. The zip's SHA-256 is in SHA256SUMS; its packages are listed in agmessage-sbom.cdx.json. The audit log's verifier is agmessage-audit-verifier-${GITHUB_REF_NAME#v}.zip: take it from here to check an export on another computer, its SHA-256 in SHA256SUMS."
+            echo
+            node tools/readings.js notes readings/readings.json --install docs/INSTALL.md || printf '### The Windows readings\n\nThe Windows readings for this build could not be read: nothing is claimed for them. They inform the release and never hold it.\n'
+          } > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "AGMessage ${GITHUB_REF_NAME#v}" \
-            --notes "Build ${{ needs.package.outputs.full }}. Extract All first (right-click the zip), then run start-agmessage.bat from the extracted folder: run from inside the zip it finds nothing beside it. The zip's SHA-256 is in SHA256SUMS; its packages are listed in agmessage-sbom.cdx.json. The audit log's verifier is agmessage-audit-verifier-${GITHUB_REF_NAME#v}.zip: take it from here to check an export on another computer, its SHA-256 in SHA256SUMS." \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             --generate-notes dist/*.zip dist/agmessage-sbom.cdx.json dist/SHA256SUMS

@@ -198,3 +198,98 @@ log), so the token is never in it (`supervise.js`, `lib/startup.js` `taskTokenPr
   copy beside it."
 - The .bat's preflight, its exit codes, the browser opener and the clean copy are the portable folder's alone: the
   installed node has no .bat.
+
+## The Windows readings and the lab lines
+
+What is measured on Windows before anything installed is trusted (the 0.6.0 plan's Part 6, unit U7). **The readings
+inform each release and never hold it** (the owner's answer 34): each mark stays a mark, and a reading that misses it is
+written in the release's notes, here and on the hour-before-doors card, with the fallback its unit names. A test is not
+a reading: the installer's life cycle in CI, when it lands, is a gate, as every test is.
+
+- **The lane.** CI's `readings` job runs on `windows-2025`, every action in it pinned by its commit, once the package
+  job has built the zip; its checkout keeps no credential (the stand-in tasks run the bundle's code from that folder).
+  Its first step after that checkout, `tools/defender-on.ps1`, turns Defender's real-time monitoring back on (GitHub's
+  image turns it off), removes the image's exclusions of `C:\` and `D:\`, and records whether that took, read back from
+  Defender itself: on means real-time monitoring and scanning on access on, in Defender's Normal mode (in passive or EDR
+  block mode it does no real-time scanning), and neither drive excluded. The image's other Defender settings (archive,
+  download and script scanning, behaviour monitoring, cloud protection) stay as it left them, so the runner's Defender
+  is narrower than a laptop's: lab 3 is the laptop's own. Then the newest release published is named and its zip
+  downloaded (a GitHub answer that fails here stops nothing: R13 then reads not run, and R2 lays this build over its
+  own, each saying why); `tools/readings-take.js` lays the zip down and takes each reading this build can, each on its
+  own (one that fails is written with why, and the rest are taken), reading Defender again at the end; and
+  `tools/readings.js` judges each against its mark. The job's summary is the table below with the run's verdicts; its
+  artifact, `agmessage-readings-<commit>`, holds the measurements and the verdicts. A reading that needs Defender on and
+  was taken without it is never met: it reads "not run", unless it is over its mark anyway, which Defender would only
+  make worse.
+- **Bounded.** Every step of the job has a bound of its own, and together they end inside the job's, so the job ends
+  passed or failed, never cancelled by its own timeout, and the release that waits for it still runs. The take step
+  begins no reading after 20 minutes (the lane's own bound); its record is written before the first reading and after
+  each, and marked whole at its end, so a lane cut short still has what it took (and Defender's record) judged, and each
+  reading it had not reached reads "not run".
+- **CI's alone.** `take` registers tasks as SYSTEM and LocalService, adds a firewall rule and grants LocalService its
+  work folder, so it refuses, before it makes or removes anything, a machine that is not a GitHub-hosted runner, a work
+  folder it did not make, and a `\AGMessage\Server` task it did not make (the installed node's). It is never run on the
+  show laptop: lab 3 is taken there by hand.
+- **What it stands in for.** The server task, the control tasks and the installer are later units'. Until they land, R4,
+  R7 and R12 are taken under stand-in tasks with the server task's principal and settings (`\AGMessage\Server`:
+  LocalService under its own SID, `SeChangeNotifyPrivilege` only, no time limit, RestartOnFailure 3 × 1 min), R4's
+  action starting the bundle's own watchdog in the installed channel (`AGM_RUNS=task`, the four folders); R13 under a
+  stand-in task as SYSTEM, with no token. R4's `whoami /priv` and `/groups` are run by the task's action, whose token
+  the watchdog and the server inherit (each is started with no token of its own); the server counts as serving only when
+  health answers with the build the bundle's stamp names. R4's firewall rule is made and read back; that it matches a
+  connection needs a client on another machine (Windows Firewall does not filter loopback), which is the show laptop's.
+  R7 also connects to the pipe through SMB at the runner's own names (`\\localhost\pipe\…`, `\\<name>\pipe\…`): a network
+  logon, as a remote client's would be, but not a second machine. R12 runs two tasks, each with a folder of its own: one
+  whose action exits 1, measured and removed, then one whose action exits 0, so a restart the first still has queued
+  is never counted for the second. R2 lays the newest release's payload whole, then this build over it, file by file,
+  each inflated to a name of its own beside the one it replaces and renamed over it; R10 inflates `node.exe` alone into
+  `%TEMP%` and runs it once, and a round counts only when it ran to exit 0. Every stand-in task and the firewall rule
+  are removed at the end. A reading whose unit is not built yet reads "not run", naming the unit; that unit adds its step
+  to the lane, and a test fails once its code is in the tree while a reading still waits for it.
+- **The verdicts:** met; missed (over its mark, or what the miss names was found: R10 over 5 s, R12's restarts as U.5
+  fears them, R13's answer not read); recorded (taken, where the mark is "recorded", and no miss found); open (taken,
+  its mark waiting for another reading: R2's waits for R9's backup); not run, with why; retired.
+- **The release's notes** (`tools/readings.js notes`, in the release job) say each reading that missed its mark with its
+  fallback, those met, recorded, open and not run, and the lab lines as the table below records them. A lane that wrote
+  nothing leaves the notes saying the readings were not taken, and a file that is not its verdicts, saying they could
+  not be read; neither stops the release. The release waits for the lane to end and publishes whatever it found.
+- **This paper** records a run's readings in the Measured column (the day, the build, the verdict and what was found):
+  `node tools/readings.js record <the run's readings.json>`, from the run's artifact, writes each reading the run took
+  and keeps the rest, and the change is committed with the run named. A lab line's record is written by hand in its
+  Taken column, from what the show laptop showed. The hour-before-doors card is the installer's papers'; it takes each
+  miss when it is written.
+
+| Reading | What | Mark | A miss means | This build's lane | Measured |
+|---|---|---|---|---|---|
+| R1 | `gap.js` (the stop at loopback with the proof, not SIGUSR2) at an empty hall and at 20 × 10,000 | the default page back ≤ 1.5 s at the largest real hall | handoff is revisited (U.10) | not run: needs U8 (#36), the stop at loopback with the proof | not measured |
+| R2 | lay about 5,120 files and 188 MB over the previous payload, Defender on | ≤ 6 s together with R9 (a screen's "lost") | version folders (U.10) | taken: the zip laid on an empty folder, then 3 rounds of the newest release's payload laid whole and this build laid over it (over its own when that release's zip could not be had, said so), the slowest round judged; its mark waits for R9 | not measured |
+| R3 | retired: it was B-service's (shawl's stop under `NT SERVICE\AGMessage`), which is not the shape (U.5) | — | — | — | — |
+| R3′ | the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog's give-up and a configuration refusal end the task with 0, and it stays stopped | 10 of 10 | the release notes name the failing case; a stop that does not save is said on "This laptop" | not run: needs U4 (#34), U8 (#36) and U12 (#72) | not measured |
+| R4 | under the task: `LOCALAPPDATA`, `os.homedir()`, UDP 9928 broadcast heard, a quick tunnel's URL returned with nothing written in the account's profile, a rule by program, protocol and port matching `node.exe` under the task, `whoami /priv` from the server's process, `schtasks /showsid` | `SeImpersonatePrivilege` absent, and the server serves with `SeChangeNotifyPrivilege` alone | the privilege list U12 sets is widened by the one privilege the reading names, with its reason | taken under the stand-in server task (U12, #72, puts its own task in its place): the token's privileges and groups (read by the task's action, which the server inherits), the task's SID, `LOCALAPPDATA` and the home folder, health answering with this bundle's build, UDP 9928 heard from this machine, a quick tunnel and the profile before and after, a rule by program, protocol and port made and read back; a client on another machine is the show laptop's | not measured |
+| R5 | `Get-AuthenticodeSignature` on `node.exe`, `cloudflared.exe` and the installer | the first two Valid; the installer recorded | `README.txt` names the file Windows does not trust | taken for `node.exe` and `cloudflared.exe`; the installer once U13 (#73) builds it | not measured |
+| R6 | over-the-shoulder elevation: U.5.1's two readings of the account that started Setup; the user's own export (U14) run through `ExecAsOriginalUser` into the laptop's admin's inbox; an elevated read of another account's `%LOCALAPPDATA%\AGMessage` | both readings name the standard account | the admin page asks the person to choose, as U.5.1 says | not run: needs U13 (#73) and U14 (#75) | not measured |
+| R7 | the folder pipe's access list as libuv makes it (`CreateNamedPipeW(…, NULL)`, `crit-dl/pipe.c:596-599`) under the task's token, and whether a remote client reaches it | recorded | nothing machine-level writes the pipe any more (U8); the busy line's readers are named | taken: the stand-in server's folder pipe, who may read and write it, and whether a client reaches it through SMB at the runner's own names (a network logon on one machine; a second machine is the show laptop's) | not measured |
+| R8 | `icacls C:\` and `icacls %ProgramData%` (may a standard account create `C:\node_modules` or `%ProgramData%\AGMessage`?); `schtasks /query /xml` of each task as a standard account: readable or not, and no secret in it | recorded | U11 and U12's order already assume the worst | taken: both access lists, read by SID (`icacls /save`); the tasks' definitions as a standard account once U12 (#72) and U17 (#74) make them | not measured |
+| R9 | the upgrade backup's time at an empty hall and at 20 × 10,000 | recorded, beside R2 | as R2 | not run: needs U8 (#36) and U12 (#72), the upgrade's stop and its backup | not measured |
+| R10 | extracting `node.exe` to `%TEMP%` for each machine command, Defender on | recorded | over 5 s: an upgrade runs its checks with the installed `node.exe` | taken: 5 rounds, each extracted from the zip and run once, the slowest judged against 5 s; a round that did not run to exit 0 is said, and measured no command | not measured |
+| R11 | a control task whose descriptor gives one standard account read and execute: that account runs it with `schtasks /run`; a second standard account is refused; the task runs as SYSTEM with `--for` that account's SID | 10 of 10 | the Start menu's acts fall back to an administrator's approval, and the release notes say so | not run: needs U17 (#74) | not measured |
+| R12 | RestartOnFailure on the server task: does a non-zero exit of the action start it again, and does exit 0 leave it stopped | recorded | U.5's second cost reads as measured | taken under two stand-ins with the server task's settings (U12, #72, puts its own task in their place), one whose action exits 1, then one whose action exits 0; a non-zero exit not started again, or a 0 started again, is the miss | not measured |
+| R13 | from a control task as SYSTEM, `api.github.com`'s release answer for a published tag: `immutable` and each asset's `digest` read; with no network, the words | recorded | U18's offline words are the ones shown | taken online from the stand-in SYSTEM task (U17, #74, puts a control task in its place), for the newest release published (a refusal for the runner's rate limit reads "not run"); with no network, once U18 (#77) has its words | not measured |
+
+R7's `crit-dl/pipe.c:596-599` is the plan's reading of libuv's `src/win/pipe.c`, where the folder's pipe is made with no
+security attributes, so Windows gives it the default descriptor for the token that makes it.
+
+**The lab lines** run on the show laptop (Windows 11) and are never replaced by a reading of the runner, which has no
+Modern Standby, no Smart App Control and no lid. Each is the plan's line, word for word, with the pass it names
+("recorded" where it names none). Each reads "not run" until it is taken there; its Taken cell then says the day, the
+build and what the laptop showed, and the release's notes read it from here. They inform the release as the readings do.
+
+| Lab | What | Pass | Taken |
+|---|---|---|---|
+| Lab 1 | lid closed and idle-out, on mains and on battery, with and without U9's power request. Serving after, sleeps recorded, no kill | Serving after, sleeps recorded, no kill | not run |
+| Lab 2 | Fast Startup's Shut down, then power on, under the task. Fast Startup keeps session 0 across a Shut down (https://learn.microsoft.com/en-us/windows/win32/power/system-power-states), so the server should be resumed, not restarted (inferred). Pass: no kill | no kill | not run |
+| Lab 3 | R2, R9 and R10 with the laptop's own Defender | recorded | not run |
+| Lab 4 | Smart App Control, evaluating and then enforcing: which of `node.exe`, `cloudflared.exe`, the installer and the .bat run | recorded | not run |
+| Lab 5 | a Windows restart and a shutdown with the server busy, under the task (expected: ended unsaved, U.5) and for the portable copy (console close). What `last-stop.json`, the next start's words and the audit head say | recorded | not run |
+| Lab 6 | an upgrade during a rehearsal, PlayMap's L11 for AGMessage: stop to health, and pages back | recorded | not run |
+| Lab 7 | the laptop's admin as a standard account: Show the admin token, Start, Stop with a reason, Upgrade (online and offline) and Go back; then the same from a second standard account given `start` and `stop` only, and from a third given nothing | recorded | not run |

@@ -1759,6 +1759,92 @@ composed builds, which this unit's tests take again, and the code; the copy's ti
   `supervise.js` at 2 (the marker goes through the atomic writer and `lib/dataformat.js`).
 - Rolling back: 0.5.1 never reads `format.json` or `data\backups\`, and leaves both as they are.
 
+**The Windows evidence lane, and the lab lines** (the plan's Part 6, unit U7, with the owner's answer 34, "Installer in
+0.6.0": the readings inform the release and never hold it; the code and its tests, on Linux, and the PowerShell the lane
+asks run by CI's Windows job; the lane itself runs first on CI's windows-2025 with the push that carries it, so no
+reading is recorded yet, and every lab line is the show laptop's and not run)
+- **A CI job of its own, `readings`**, on `windows-2025`, every action in it pinned by its commit (its tag beside it),
+  after the package job; its checkout keeps no credential, since the stand-in tasks run the bundle's code from that
+  folder. Its first step after the checkout, `tools/defender-on.ps1` (new), turns Defender's real-time monitoring back
+  on, which GitHub's image turns off, removes the image's exclusions of `C:\` and `D:\`, and records whether that took,
+  read back from Defender itself and read again when the readings end: on means real-time monitoring and scanning on
+  access on, in Defender's Normal mode (passive and EDR block modes scan nothing in real time), and neither drive
+  excluded; the image's other Defender settings stay as it left them, which lab 3 is for. It never fails the job for
+  Defender. Then the newest release published is named and its zip downloaded, a step whose failure stops nothing.
+  Every step has a bound of its own and together they end inside the job's, so the job ends passed or failed, never
+  cancelled by its own timeout.
+- **The readings** (`tools/readings-take.js`, new) lay the zip the package job built and take each reading this build
+  can, each on its own, so one that fails is written with why and the rest are taken: R2, the newest release's payload
+  laid whole and this build (about 5,120 files and 188 MB, as the plan counted them) laid over it, three times, each
+  file inflated to a name of its own beside the one it replaces and renamed over it (over its own when that release's
+  zip could not be had, said so); R10, `node.exe` extracted alone into `%TEMP%` and run once, five times, a round
+  counted only when it ran to exit 0; R5, Windows' verdict on `node.exe`'s and `cloudflared.exe`'s signatures; R8, the
+  access lists of `C:\` and `%ProgramData%`, read by SID from `icacls /save`, and whether a standard account may make
+  `C:\node_modules` or `%ProgramData%\AGMessage`; R4 and R7 under a stand-in for the server task (`\AGMessage\Server`:
+  LocalService under its own SID, `SeChangeNotifyPrivilege` alone, no time limit, RestartOnFailure 3 × 1 min), whose
+  action starts the bundle's own watchdog in the installed channel: the token's privileges and groups (read by the
+  task's action, whose token the watchdog and the server inherit), the task's SID, `LOCALAPPDATA` and the home folder,
+  health answering with the build the bundle's stamp names (an answer from anything else on the port is not its
+  server), UDP 9928 heard, a quick tunnel and the account's profile before and after, a firewall rule by program,
+  protocol and port made and read back, and, while it serves, its folder pipe's access list and whether a client
+  reaches the pipe through SMB at the runner's own names (a network logon, on one machine); R12, two stand-ins with the
+  server task's settings, each with a folder of its own, one whose action exits 1, measured and removed, then one
+  whose action exits 0, so a restart the first still has queued is never counted for the second; R13, GitHub's release
+  answer for the newest release published, read from a stand-in task as SYSTEM holding no token. Every stand-in task
+  and the rule are removed at the end, every program is run by its absolute path, the admin token the stand-in server
+  makes is taken out of anything kept (by value, and anything of its shape), and a quick tunnel's address is not kept.
+  The record is written before the first reading and after each, and marked whole at the end; a reading not begun
+  within the lane's own 20 minutes reads "not run". It is CI's alone: before it makes or removes anything it refuses a
+  machine that is not a GitHub-hosted runner, a work folder it did not make and a `\AGMessage\Server` task it did not
+  make (the installed node's); lab 3 is taken on the laptop by hand. R1, R3′, R6, R9 and R11, and the parts of R5, R8
+  and R13 that measure the installer, the tasks and U18's words, read "not run", naming the unit whose code they
+  measure; each adds its step when it lands.
+- **The verdicts** (`tools/readings.js`, new): each reading against the plan's mark, as met, missed, recorded, open
+  (R2's mark waits for R9's backup) or not run with why; R3 retired. A reading is judged only on what was measured: one
+  taken without what its mark needs (Defender on, for R2, R9 and R10) is never met, and is missed only when it is over
+  its mark anyway; R4 is met only when health named the bundle's build. GitHub's refusal of the runner's address for its
+  rate limit reads "not run", not a miss. A lane cut short says so, and each reading it had not reached reads "not
+  run". The job's summary is the table, and its artifact, `agmessage-readings-<commit>`, holds the measurements and the
+  verdicts. Only a lane that cannot write or judge its readings fails the job; a reading never does.
+  `readings.js record <readings.json>` writes a run's verdicts into `docs/INSTALL.md`'s Measured column, each with its
+  day and build, and keeps what the run did not take.
+- **The release's notes** carry them: the release job waits for the lane to end and publishes whatever it found, once
+  the package job has (`!cancelled()`, `needs.package.result == 'success'`), and its notes say each reading that missed
+  its mark with the fallback its unit names, those met, recorded, open and not run, and the lab lines as
+  `docs/INSTALL.md` records them. A lane that wrote nothing leaves the notes saying the readings were not taken, and a
+  file that is not its verdicts, that they could not be read; the notes exit 0 whatever the file holds, and the step
+  writes words of its own if they still fail, so nothing in the lane can hold the release.
+- The papers: `docs/INSTALL.md` gains "The Windows readings and the lab lines": the lane, its bounds, why it is CI's
+  alone, what it stands in for, the verdicts, R1-R13 with what each is, its mark, what a miss means, what this build's
+  lane takes and a Measured column that reads "not measured" until a run is recorded in it; and the lab lines 1-7, each
+  the plan's line word for word with the pass it names ("recorded" where it names none) and a Taken column that reads
+  "not run" until the show laptop takes them. The hour-before-doors card takes each miss when the installer's papers
+  write it. `docs/ANALYSIS.md` names the lane, its fences and the pinned actions; `README.md` names the lane in CI;
+  `docs/DESIGN.md`'s readings 0-9 point to these.
+- The fences: `test/readings.test.js` (new) holds the register to the plan's U7 table and lab lines word for word and
+  `docs/INSTALL.md` to the register; a reading that still waits for a unit whose code is in the tree fails; nothing
+  measured is nothing met; each reading's verdict on its edges (R2 over the previous payload or its own, with and
+  without R9 and Defender; Defender with scanning on access off, in passive or EDR block mode, or a drive still
+  excluded in a list of one as Windows PowerShell may write it; R4's token with
+  SeImpersonatePrivilege or another privilege, a server that did not serve, an answer naming another build or none,
+  and a stamp its server would not take; R5's untrusted file named; R7's and R8's access lists read from SDDL by SID
+  with an inherit-only entry, a deny first, generic rights and an entry it does not read, and R7's SMB reach; R10 over
+  5 s, and rounds that did not run to exit 0, fast or slow; R12's two misses, and as the lane takes it, a scheduler
+  whose queued restarts land during the exit 0's watch; R13's rate limit and an answer not read); the notes and the
+  summary, and notes on files that parse but are not the verdicts; the command line's exits (a miss 0, a record that
+  is not the lane's 2, the notes always 0); `record` on a copy of the paper; the payload laid over an earlier build's
+  from a zip, node.exe extracted alone, a member outside its folder, torn bytes or a bundle that is not one folder
+  refused; the stand-in task's principal, privileges and settings and Windows' reading of its arguments; the probes (a
+  start and its code, a profile's change, UDP heard, health waited for and its build read, a quick tunnel seen and
+  ended, GitHub's answer and a refusal read); what is kept (an access list from `icacls /save`, a drive root's
+  included, a server's last whole lines with the token taken out, a pipe reached or not); the lane's refusals of a
+  machine, a work folder and a server task it did not make; the job (windows-2025, pinned actions, no credential kept,
+  Defender first, every step bounded inside the job, the GitHub list unable to stop it, the readings kept whatever they
+  say, one token for one step) and the release (waits, never held, its notes from the readings, words of its own if
+  they fail). On Windows, the PowerShell the lane asks (a signature, a pipe's access list, Defender) and `icacls /save`
+  on a folder and on `C:\` are run and read.
+- Rolling back: nothing ships; the lane and its tools are CI's.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

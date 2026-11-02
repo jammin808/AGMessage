@@ -46,7 +46,9 @@ not observed). This page says which practice is used where, so a change can keep
 What each reading of health's `peaks` (and the walks beside them) triggers, from the 0.6.0 plan (Part 5 §13.4). A row
 says "not measured" until a show or a rehearsal on the show laptop fills it, with the day and the build: that is a
 fact, not a block. Only a recorded number goes here. A day in `peaks` is a show day: from 06:00 to 06:00 by the show
-laptop's clock, named by the date it starts (health's `showDay` names the one it is in now).
+laptop's clock, named by the date it starts (health's `showDay` names the one it is in now). These are the readings
+0-9; the Windows readings R1-R13 of an install, taken by CI's evidence lane, and the lab lines on the show laptop are
+[INSTALL.md](INSTALL.md)'s (The Windows readings and the lab lines): they inform a release and never hold it.
 
 | # | Reading | Where it comes from | Threshold | Then | Measured |
 |---|---|---|---|---|---|
