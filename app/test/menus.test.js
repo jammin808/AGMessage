@@ -115,7 +115,15 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   const messages = before.messages;
   const screen = before.displays[0];
   const fileOf = (where) => ({ ...messages.find((m) => m.type === 'file'), where });
-  const objects = { msg: messages, file: [fileOf('list'), fileOf('preview')], screen: [screen] };
+  // The rest of the hall page: each composer, the stage chip (the link up), the code chip, and the people of the room as
+  // the server lists them (a person: `person`'s hall half; the admin's rows fit the admin page alone).
+  const composer = (form) => ({ id: 'compose:' + form, form, room: 'Hall A', file: form === 'file' ? 'capex.pdf' : '', replying: '', priority: false });
+  const people = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallA })).users.map((u) => ({ id: 'person:' + u.uid, uid: u.uid, name: u.name, role: u.role }));
+  const objects = {
+    msg: messages, file: [fileOf('list'), fileOf('preview')], screen: [screen],
+    compose: ['director', 'text', 'action', 'file'].map(composer), chip: [{ id: 'stage', live: true, text: '04:30', words: 'Live from Stagewatch' }], code: [{ id: 'code', code: hallA }], person: people,
+  };
+  assert.ok(people.length >= 7, 'the room\'s people, as the join lists them');
 
   // Each verb's smallest payload, naming the object. A verb an act sends that has no row here fails the test, so a new
   // act is held to its refusal from the day it is written.
@@ -134,9 +142,15 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'display:update': (o) => ({ id: o.id, name: 'Renamed by a seat that may not' }),
     'display:rotate': (o) => ({ id: o.id }),
     'display:remove': (o) => ({ id: o.id }),
+    message: () => ({ type: 'text', text: 'From a seat that may not post' }),
   };
-  const sent = new Set(['msg', 'file', 'screen'].flatMap((k) => C.KINDS[k]).filter((e) => e.verb !== 'local' && !e.verb.startsWith('http:')).map((e) => e.verb));
+  // The acts the hall page draws: each that fits some seat's facts and some object here (a kind's rows another page draws
+  // never fit this one).
+  const fitsHere = (kind, e) => Object.values(seats).some(({ f }) => objects[kind].some((o) => e.fits(f, o)));
+  const hallEntries = Object.fromEntries(Object.keys(objects).map((k) => [k, C.KINDS[k].filter((e) => fitsHere(k, e))]));
+  const sent = new Set(Object.values(hallEntries).flat().filter((e) => e.verb !== 'local' && !e.verb.startsWith('http:')).map((e) => e.verb));
   assert.deepEqual([...sent].filter((v) => !PAYLOADS[v]), [], 'every verb an act sends has its refusal case');
+  assert.ok(['message', 'ai:draft', 'stage:propose', 'display:take'].every((v) => sent.has(v)), 'the composer\'s and the stage chip\'s verbs are among them');
 
   // A refusal for the rate is not the verb's: asked again once the rate allows.
   const refusal = async (s, verb, payload) => {
@@ -153,7 +167,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   for (const [name, { s, f }] of Object.entries(seats)) {
     for (const [kind, list] of Object.entries(objects)) {
       for (const o of list) {
-        for (const e of C.KINDS[kind]) {
+        for (const e of hallEntries[kind]) {
           if (e.verb === 'local' || e.verb.startsWith('http:') || !e.fits(f, o) || e.may(f, o)) continue;
           const r = await refusal(s, e.verb, PAYLOADS[e.verb](o, e));
           if (!r || r.ok !== false || typeof r.error !== 'string' || !r.error || r.busy) wrong.push(name + ' · ' + e.id + ' on ' + (o.type || kind) + ': ' + JSON.stringify(r));

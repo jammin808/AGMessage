@@ -246,6 +246,18 @@ Shift+right-click opens the browser's own menu (Copy, spelling). No page
 opens a browser pop-up: what cannot be undone asks in place, beside what
 it acts on, and Escape answers no.
 
+The rest of the hall page works the same way. A person's name on a
+message, and each person under People, opens a small menu: Mention puts
+"@Kim " in your message box. The ⋯ beside Send holds Draft a reply,
+Priority, Attach a file..., Remove the file and Cancel the reply (Escape
+in the message box or on Send does that too). The guest code in the header copies
+the code or the join link; the countdown there, for the backstage team,
+opens the speaker's screen box or shows the countdown on the hall's
+screens. The first Tab is "Skip to message box" ("Skip to messages" for
+an observer). The messages are one Tab stop: the arrow keys move between
+them, Up from an empty message box goes to the newest, and Escape comes
+back to the box. An observer reads a question's answers as words.
+
 The other pages work the same way. On the admin page each hall, person,
 message of the live feed, linked Patterns or PlayMap, the Stagewatch
 link and the internet link's card has its ⋯ (Close hall..., Clear

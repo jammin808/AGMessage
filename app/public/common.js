@@ -1,5 +1,6 @@
-// Shared by the account pages (sign-in, halls, accounts): escaping, JSON calls, toasts, the theme. One global, AGM, which
-// each shared script extends (never replaces), so no order they load in erases another's part.
+// Shared by every page with people (sign-in, halls, accounts, admin, a hall): escaping, JSON calls, the one toast, the
+// theme, and the page floor's helpers. One global, AGM, which each shared script extends (never replaces), so no order
+// they load in erases another's part. Nothing here acts on load: a page calls what it uses.
 // Every value shown as HTML goes through AGM.esc (the lint fence agm/no-unescaped-html holds the pages to it).
 (function () {
   'use strict';
@@ -22,15 +23,49 @@
     }
   }
 
-  /** A toast that never blocks: the words, and whether it is a problem. */
-  function toast(text, bad) {
+  // The toast: one per page, a role=status live region, so what an act did, or why not, is said to a screen reader as it
+  // is shown, and it never blocks. `badOrOpts` is whether it is a problem (true, false), or {bad, undo}: with `undo`, a
+  // function, it carries Undo, a button inside it, and holds for 10 s while it is neither hovered nor focused, so it is
+  // there to press; a newer toast takes its place (and its Undo with it).
+  const TOAST_MS = 4000;
+  const TOAST_BAD_MS = 6000;
+  const TOAST_UNDO_MS = 10000;
+  let toastTimer = null;
+  function toastBox() {
     let box = document.getElementById('agmToast');
-    if (!box) { box = document.createElement('div'); box.id = 'agmToast'; box.className = 'agm-toast'; box.setAttribute('role', 'status'); document.body.appendChild(box); }
-    box.textContent = text;
-    box.classList.toggle('bad', !!bad);
+    if (box) return box;
+    box = document.createElement('div');
+    box.id = 'agmToast';
+    box.className = 'agm-toast';
+    box.setAttribute('role', 'status');
+    const hide = () => box.classList.remove('show');
+    const hold = () => clearTimeout(toastTimer);
+    const go = () => { if (box.dataset.undo && !box.matches(':hover') && !box.contains(document.activeElement)) { clearTimeout(toastTimer); toastTimer = setTimeout(hide, TOAST_UNDO_MS); } };
+    box.addEventListener('pointerenter', hold);
+    box.addEventListener('focusin', hold);
+    box.addEventListener('pointerleave', go);
+    box.addEventListener('focusout', (e) => { if (!box.contains(e.relatedTarget)) go(); });
+    document.body.appendChild(box);
+    return box;
+  }
+  function toast(text, badOrOpts) {
+    const o = badOrOpts && typeof badOrOpts === 'object' ? badOrOpts : { bad: !!badOrOpts };
+    const box = toastBox();
+    box.textContent = String(text == null ? '' : text);
+    const undo = typeof o.undo === 'function' ? o.undo : null;
+    if (undo) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'toast-undo';
+      b.textContent = 'Undo';
+      b.addEventListener('click', () => { clearTimeout(toastTimer); box.classList.remove('show'); delete box.dataset.undo; undo(); });
+      box.append(' · ', b);
+      box.dataset.undo = '1';
+    } else delete box.dataset.undo;
+    box.classList.toggle('bad', !!o.bad);
     box.classList.add('show');
-    clearTimeout(toast.t);
-    toast.t = setTimeout(() => box.classList.remove('show'), bad ? 6000 : 3500);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => box.classList.remove('show'), undo ? TOAST_UNDO_MS : o.bad ? TOAST_BAD_MS : TOAST_MS);
   }
 
   function theme() {

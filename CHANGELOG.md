@@ -1314,6 +1314,77 @@ Accounts page's one — and the theme toggle drawn over the admin's Logout at ev
 - The stylesheet loses the linked-hall picker and the destructive button's rules: 6 hex colours fewer, 275.
 - Rolling back: nothing is stored.
 
+**The rest of the hall page acts from the catalogue, and the hall page has no blocking dialog** (the plan's Part 5, unit
+3c; the measured cause is unit 3a's, the plan's §16.1: a native dialog left open 20 s dropped the page's socket; the tree
+before it opened the hall page's three dialogs with a bare `showModal()`, which a browser below Safari 15.4 does not
+have, drew a forward's result in a toast of its own that no screen reader heard, drew an observer's answers to a question
+as buttons that did nothing, and had no skip link, five Tab stops a message and no menu on a person, the composer or the
+header's chips)
+- The rest of the hall page's acts are entries of the catalogue, each drawn by its bar, its ⋯, right-click and
+  Shift+F10 (or the menu key) alike: a person (`person`, the hall page's half: @ Mention, which puts "@Kim " in the
+  message box where the cursor is), from a row of the People panel or a message's sender's name, which is a button that
+  opens that person's menu wherever the seat has an act on them (one's own name stays words); the composer (`compose`:
+  Send is its one act on the row, named for where it sends, and its ⋯ holds ✨ Draft a reply, Send, 🔥 Priority — a
+  toggle, checked while pressed — Attach a file…, Remove the file once one is chosen, and Cancel the reply (Esc) while
+  replying: Escape anywhere in the composer takes a reply back, the composer's catalogue key); the stage chip (`chip`: Speaker's screen…, the line
+  box opened empty, and Show the countdown on screens, the screens Screens has ticked); and the code chip (`code`: Copy
+  guest code, Copy join link — the join page's link with the code). A chip with an act for this seat is a button whose
+  click opens its menu; one without stays words. A chip and a sender's name are targets of 24 px, 44 px under a finger,
+  as the header's buttons are; a page sent out of its hall, or refused at its join, offers neither chip. Send, Enter, 🔥, ✨, the reply's × and the file's Remove each run
+  their act through the one checked path, so a send the page cannot make says why ("Choose a file first." where Send
+  was greyed with nothing said), and the admin's support view sends nothing from its composer, its Help's categories or
+  its Help chip's answers either ("This is Kim's view — act from your own page."); its banner reads "what Kim sees.
+  Nothing here acts: act from your own page.", where it read "acting as Kim". ✨ Draft a reply with AI drafts off is
+  greyed with why in a message's menu as in the composer's (it was left out of the message's): AI off is the laptop's
+  state, not a right. The text field keeps the browser's own menu. A kind two pages draw (`person`: the
+  hall page's half here, the admin's on the admin page) fits each page's rows only on that page, by the page's facts.
+- One toast on every page (`AGM.toast` in `common.js`, which the hall page now loads): a `role=status` region, so a
+  screen reader hears what an act did or why not; its Undo held 10 s while hovered or focused. A forward's "Forwarded
+  to …" had a toast of its own, with no role, drawn over the other; and a problem's toast read white in dark, a dark
+  rule outranking its colour: it is on the fault colour in both themes. The stylesheet's three toasts are one.
+- The hall page's Help, Screens and Stagewatch dialogs open through `AGM.openDialog`, so they open below Safari 15.4 too
+  (they did not); no page script calls `showModal()` itself. The Help chip's ask is the pages' one ask in place
+  (`AGM.ask`), with its words, its three answers (It's sorted, Cancel request, Keep it open, the last focused) and its
+  place right after the chip, so Tab runs from the chip through it and on; a tap on the chip closes it, as its own
+  door. Any other ask opened from a ⋯ (Delete…, Log out…) is answered no by that ⋯ pressed again, as by any press
+  outside it, so no ask is left open beneath the menu the ⋯ opens.
+- The first Tab on the hall page is a skip link: "Skip to message box" takes the focus to the composer, and "Skip to
+  messages", for a seat with no composer, to the newest message. The feed is one Tab stop, the newest message until the
+  focus has been in another: ↑ and ↓ between messages, Home and End, Tab into the one focused, its keys and Shift+F10 on
+  it; a question pinned (answered in the pinned strip) is passed over. ↑ in the empty message box goes to the newest
+  message and Escape on a message back to the box. The pinned strip, the People panel, the panel's files and the
+  Screens dialog's screens are one Tab stop each. A list's rows are set as they are drawn, each once (the list is read
+  once for each batch of changes, to place its stop, and never set whole again), and a control left out of the tab
+  order gets its own tabindex back. Escape follows the plan's order as far as its steps exist: an open menu closes, then
+  an open ask is answered no, then in the composer a reply begun is taken back, and on a message the focus goes back to
+  the message box; the take layer's step (minimised, before the reply) comes with the take layer (unit 18), and the
+  simple view's with its unit (20a).
+- An observer, or a Viewer, reads a question's answers as words, "Options: Yes · No", with the live tally, where it had
+  buttons that did nothing. The action and file panes' "Send to stage" read Send, as the message box's does (one word
+  per thing: a chat message is sent), and ✨ reads "✨ Draft a reply", as the message's menu does.
+- The fences: `test/catalog.test.js` holds the four kinds to the rules (`message` among the required verbs; the facts gain
+  `page` and `mayKnowCode`) and asserts 23 seat-and-object sets of the composer, the chips and a person, the simple
+  view's (no menu; Send and 🔥 its buttons), the bar (Send alone, named for the room), the reasons (no file chosen, AI
+  drafts off, the link down, no screens, not connected, a held send live, the support view), the toggle and the caps,
+  and that each page is shown only its own half of `person`. `test/menus.test.js` sends every act of these kinds each
+  hall seat is not offered — a message as an observer or a Viewer, a draft as an On stage seat, the speaker's screen and
+  the countdown as a seat without their rights — and holds each refused with words and the hall as it was, reading only
+  the rows the hall page draws. `test/resilience.test.js` holds `showModal()` to `common.js` alone (the hall page's
+  three counted sites are gone) and the hall and admin pages to load `common.js` before their scripts, and no page script
+  but `common.js` to name the toast's class or id (a toast of its own), the stylesheet's one toast class `.agm-toast`.
+  `test/catalog.test.js` also holds Cancel the reply's Escape and ✨'s one rule with AI drafts off. The smoke: one
+  toast, a `role=status` region; a sender's name, a People row, the composer's Send, the stage chip and the code chip,
+  each opened by its every door to the catalogue's set; Mention; 🔥 checked in the menu; the text field's own menu; the
+  feed one stop, ↑ from the box, ↑ again, Shift+F10 and Escape twice; Speaker's screen… empty, the countdown on the
+  hall's screens; Copy join link; the skip link on a fresh page and an observer's, whose question reads as words; a ⋯
+  pressed again under the Delete… it opened, which answers it no; the chips and a sender's name 24 px or more, and those
+  and the composer's ⋯ 44 px on a phone; a page out of its hall with no chip that opens a menu; the support view's Help
+  sending nothing and its banner's words; and at the floor, Help opening through `AGM.openDialog`'s own and its chip's
+  ask in place.
+- The stylesheet loses the hall page's two extra toasts, the Help chip's own ask and the disabled answer's rules: 10 hex
+  colours fewer, 265.
+- Rolling back: nothing is stored.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

@@ -8,6 +8,8 @@
   <script src="/theme-init.js"></script>
 </head>
 <body class="app-page" data-role="">
+  <!-- The first Tab: to the message box, or to the messages for a seat with no composer (app.js, drawSkip). -->
+  <a class="skip-link" id="skipLink" href="#feed">Skip to message box</a>
   <header class="app-header">
     <div class="app-title">
       <strong>AGMessage</strong>
@@ -58,7 +60,7 @@
       </p>
 
       <div class="feed-wrap">
-        <main class="feed" id="feed" aria-live="polite"></main>
+        <main class="feed" id="feed" aria-live="polite" tabindex="-1"></main>
         <button class="new-below" id="newBelow" type="button" hidden>↓ 0 new</button>
       </div>
 
@@ -80,7 +82,7 @@
         <form class="pane" id="textPane" data-pane="text">
           <textarea id="textInput" rows="1" placeholder="Type a message to the stage…"></textarea>
           <div class="row end">
-            <button type="button" class="btn ghost ai-btn" id="aiDraftBtn" title="Claude drafts an answer to the board's latest question (or the one you're replying to) from the thread and the document on stage. You edit it; nothing is sent until you press Send." hidden>✨ Draft answer</button>
+            <button type="button" class="btn ghost ai-btn" id="aiDraftBtn" title="Claude drafts an answer to the board's latest question (or the one you're replying to) from the thread and the document on stage. You edit it; nothing is sent until you press Send." hidden>✨ Draft a reply</button>
             <button type="button" class="btn ghost priority-btn" id="textPriorityBtn" data-priority="0" aria-pressed="false" title="Mark as high priority">🔥 Priority</button>
             <button class="btn primary send-btn" type="submit" aria-label="Send"><span class="send-icon" aria-hidden="true">➤</span><span class="send-word">Send</span></button>
           </div>
@@ -104,7 +106,7 @@
           </label>
           <div class="row end">
             <button type="button" class="btn ghost priority-btn" id="actionPriorityBtn" data-priority="0" aria-pressed="false" title="Mark as high priority">🔥 Priority</button>
-            <button class="btn primary" type="submit">Send to stage</button>
+            <button class="btn primary send-btn" type="submit" aria-label="Send"><span class="send-icon" aria-hidden="true">➤</span><span class="send-word">Send</span></button>
           </div>
         </form>
 
@@ -121,7 +123,7 @@
           </label>
           <div class="row end">
             <button type="button" class="btn ghost priority-btn" id="filePriorityBtn" data-priority="0" aria-pressed="false" title="Mark as high priority">🔥 Priority</button>
-            <button class="btn primary" type="submit" id="sendFileBtn" disabled>Send to stage</button>
+            <button class="btn primary send-btn" type="submit" aria-label="Send"><span class="send-icon" aria-hidden="true">➤</span><span class="send-word">Send</span></button>
           </div>
         </form>
       </section>
@@ -230,7 +232,8 @@
   </dialog>
 
   <!-- A message: its acts are the catalogue's (catalog.js), drawn into .msg-acts as at most two buttons and a ⋯; its whole
-       list opens on the ⋯, a right-click and Shift+F10 alike (app.js, menus.js). -->
+       list opens on the ⋯, a right-click and Shift+F10 alike (app.js, menus.js). Its sender's name is the door to that
+       person's menu where the seat has acts on them; the feed is one Tab stop (AGM.roving), so tabindex is drawn. -->
   <template id="msgTpl">
     <article class="msg" tabindex="-1">
       <header>
@@ -246,6 +249,7 @@
   </template>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/common.js" defer></script>
   <script src="/vendor/mammoth.browser.min.js" defer></script>
   <script src="/vendor/xlsx.full.min.js" defer></script>
   <script src="/outbox.js" defer></script>

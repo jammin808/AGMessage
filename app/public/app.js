@@ -21,6 +21,8 @@ const INVITE = qs.get('invite') || '';
 let UPLOAD_TOKEN = '';
 let lastSeq = -1;            // the newest change we have; resume from here after a drop
 let joined = false;
+// Out of the hall (sent out, the hall closed, or the join refused): from then on the page offers nothing of the hall.
+let outOf = false;
 // What this person may do with the hall's Stagewatch (🖥 send now, 📝 propose): the server's answer, from the join and
 // again from stage:targets whenever the link's state or its desk changes — never read off the hall-wide 'stage' event.
 let CAN_STAGE = false;
@@ -33,8 +35,8 @@ const HAS_STAGE = ROLE === 'board' || ROLE === 'research';
 const readOnly = () => document.body.dataset.role === 'observer';
 // What this page may do, and with what, is the action catalogue's (catalog.js): its facts are what the server told this
 // page (the join's answer, the screens it may drive, the link's state, whether it is connected), kept current by its
-// events, and every button, menu and key on a message, a file and a screen is drawn from the catalogue's entries for them.
-// A page binds only what each act does: RUN, by the entry's id.
+// events, and every button, menu and key on a message, a file, a screen, a person, the composer and the header's chips is
+// drawn from the catalogue's entries for them. A page binds only what each act does: RUN, by the entry's id.
 const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false };
 let F = AGM.catalog.facts(pageFacts);
 const RUN = {};
@@ -52,7 +54,7 @@ if (!ROOM || (!NAME && !AS_ACCOUNT)) location.href = '/';
 document.body.dataset.role = ROLE;
 const _roomChip = document.getElementById('roomChip');
 _roomChip.textContent = ROOM;
-if (ROLE === 'observer') _roomChip.hidden = true;
+_roomChip.hidden = !F.mayKnowCode;
 document.getElementById('whoami').textContent = AS_ACCOUNT ? '' : `${NAME} · ${roleLabel(ROLE)}`;
 document.querySelectorAll('a[href="/"].btn').forEach((a) => { a.href = HOME; if (AS_ACCOUNT) a.textContent = 'All halls'; });
 document.title = `AGMessage · ${ROOM}`;
@@ -116,7 +118,7 @@ function drawConnection(st) {
 // here meanwhile (drawHeld, below).
 AGM.outbox.attach(socket, { onChange: (item) => drawHeld(item) });
 /** An act's answer: nothing to say when it is done, the server's words (or the outbox's) when it is not. */
-const saidIfNot = (fallback) => (r) => { if (!r || !r.ok) notify((r && r.error) || fallback, true); };
+const saidIfNot = (fallback) => (r) => { if (!r || !r.ok) AGM.toast((r && r.error) || fallback, true); };
 
 socket.on('connect', rejoin);
 
@@ -127,7 +129,7 @@ function rejoin() {
     if (!res || !res.ok) {
       // Signing in is the way into this hall: the sign-in page opens, and brings the person back here after.
       if (res && res.signIn) {
-        notify(res.error || 'Sign in first.', true);
+        AGM.toast(res.error || 'Sign in first.', true);
         setTimeout(() => { location.href = '/?next=' + encodeURIComponent(location.pathname + location.search); }, 2500);
         return;
       }
@@ -160,9 +162,11 @@ function rejoin() {
     // The catalogue's facts from this answer, before anything is drawn with them; `connected` once the outbox is ready.
     factsChanged({ role: res.role || ROLE, uid: MY_UID, account: res.account || null, uploadToken: UPLOAD_TOKEN, canSendToStage: CAN_STAGE, canPropose: CAN_PROPOSE, ai: AI_ON, stage: res.stage || null, forwardable: !!res.forwardable, name: NAME });
     drawAiButtons();
-    if (res.note) notify(res.note);
+    if (res.note) AGM.toast(res.note);
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
     if (readOnly()) { document.getElementById('directorCompose').hidden = true; document.getElementById('researchCompose').hidden = true; }
+    drawSkip();
+    drawComposers();
     renderStage(res.stage);
     document.getElementById('helpBtn').hidden = (res.role || ROLE) === 'observer';
     if (AS_ACCOUNT || ADMIN_VIEW) Screens.load();
@@ -210,6 +214,9 @@ function factsChanged(patch) {
   drawDocActs();
   refreshDocPinnedList();
   Screens.redraw();
+  drawPeopleActs();
+  drawComposers();
+  drawChips();
   refreshOpenMenu();
 }
 
@@ -226,15 +233,18 @@ socket.on('linkedRoomsChanged', askForwardable);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') askForwardable(); });
 
 /** The room as the header names it (a hall's Main room by the hall's name; a rename arrives as a numbered change, like
- * everything else): the header, the code chip's title, and the name of Send, which says where a message goes (its word
- * "Send" first, the word a person sees on it). */
+ * everything else): the header, the code chip's title, and the name of Send (the catalogue's compose.send), which says
+ * where a message goes (its word "Send" first, the word a person sees on it). */
+let ROOM_NAME = '';
 function setRoomTitle(name) {
   if (!name) return;
+  ROOM_NAME = name;
   const chip = document.getElementById('roomChip');
   if (chip) chip.title = name;
   const titleStrong = document.querySelector('.app-title strong');
   if (titleStrong) titleStrong.textContent = name;
-  document.querySelectorAll('.send-btn').forEach((b) => b.setAttribute('aria-label', 'Send to ' + name));
+  drawComposers();
+  refreshOpenMenu();
 }
 
 // Every change carries the room's sequence number. A jump means we missed one: resume from what we have.
@@ -286,6 +296,7 @@ socket.on('kicked', ({ reason }) => { AGM.outbox.clear(); outOfHall(reason || 'A
  * send: its dialogs and menus close, and the hall's own buttons go with the hall.
  */
 function outOfHall(words, to) {
+  outOf = true;
   document.getElementById('outWords').textContent = words;
   const back = document.getElementById('outBack');
   back.href = to;
@@ -293,15 +304,16 @@ function outOfHall(words, to) {
   AGM.menu.close();
   AGM.ask.close();
   HelpChip.close(false);
-  for (const id of ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn']) document.getElementById(id).hidden = true;
+  for (const id of ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn', 'skipLink']) document.getElementById(id).hidden = true;
+  drawChips();
   document.querySelector('.main-row').hidden = true;
   document.getElementById('outOfHall').hidden = false;
   if (socket.connected) socket.disconnect();
   back.focus();
 }
 // An admin changed this account: the server closes the socket; open the hall again with the rights it has now.
-socket.on('account:changed', ({ words } = {}) => { notify(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1500); });
-socket.on('roleChanged', ({ role }) => { notify('The admin changed your seat to ' + roleLabel(role) + ' — reloading…'); setTimeout(() => { const q = new URLSearchParams(location.search); q.set('role', role); location.search = q.toString(); }, 1500); });
+socket.on('account:changed', ({ words } = {}) => { AGM.toast(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1500); });
+socket.on('roleChanged', ({ role }) => { AGM.toast('The admin changed your seat to ' + roleLabel(role) + ' — reloading…'); setTimeout(() => { const q = new URLSearchParams(location.search); q.set('role', role); location.search = q.toString(); }, 1500); });
 const stageKey = (v) => (v ? v.status || '' : 'off') + '|' + !!(v && v.desk);
 socket.on('stage', (v) => {
   renderStage(v);
@@ -444,10 +456,12 @@ function refreshSeenLines() {
 }
 
 // ---------------- Stage (Stagewatch): the live timer, for everyone in the hall ----------------
+/** The stage chip's object (catalog.js, kind `chip`): the link's last state that had a time, or null while it shows none. */
+let stageNow = null;
 function renderStage(v) {
   const chip = document.getElementById('stageChip');
   if (!chip) return;
-  if (!v || !v.text) { chip.hidden = true; return; }
+  if (!v || !v.text) { chip.hidden = true; stageNow = null; drawChips(); refreshOpenMenu(); return; }
   chip.hidden = false;
   const live = !v.stale && (v.status === 'connected' || v.status === 'viewing');
   document.getElementById('stageTime').textContent = v.text;
@@ -457,43 +471,72 @@ function renderStage(v) {
   chip.classList.toggle('stale', !live);
   chip.title = (v.status === 'checking key' ? 'Stagewatch has not accepted this AGMessage\'s key yet: ' : live ? 'Live from Stagewatch: ' : 'Stagewatch link lost — last known: ') + (v.title || '') + (v.next ? ' · Next: ' + v.next : '') +
     (v.messageAck === 'done' ? ' · Speaker acknowledged the message' : '');
+  stageNow = { id: 'stage', live, text: v.text, words: chip.title };
+  drawChips();
+  refreshOpenMenu();
 }
 
-// ---------------- Toasts (never a blocking dialog) ----------------
-// A toast says what an act did, or why not. One that can be taken back carries Undo, a button inside it, and holds for
-// 10 s while neither hovered nor focused, so it is there to press.
-const UNDO_MS = 10000;
-function notify(text, bad, opts) {
-  let box = document.getElementById('agmToast');
-  if (!box) {
-    box = document.createElement('div'); box.id = 'agmToast'; box.className = 'agm-toast'; box.setAttribute('role', 'status');
-    const hold = () => clearTimeout(notify._t);
-    const go = () => { if (box.dataset.undo && !box.matches(':hover') && !box.contains(document.activeElement)) notify._t = setTimeout(() => box.classList.remove('show'), UNDO_MS); };
-    box.addEventListener('pointerenter', hold);
-    box.addEventListener('focusin', hold);
-    box.addEventListener('pointerleave', go);
-    box.addEventListener('focusout', (e) => { if (!box.contains(e.relatedTarget)) go(); });
-    document.body.appendChild(box);
-  }
-  box.textContent = text;
-  const undo = opts && typeof opts.undo === 'function' ? opts.undo : null;
-  if (undo) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'toast-undo';
-    b.textContent = 'Undo';
-    b.addEventListener('click', () => { clearTimeout(notify._t); box.classList.remove('show'); delete box.dataset.undo; undo(); });
-    box.append(' · ', b);
-    box.dataset.undo = '1';
-  } else delete box.dataset.undo;
-  box.classList.toggle('bad', !!bad);
-  box.classList.add('show');
-  clearTimeout(notify._t);
-  notify._t = setTimeout(() => box.classList.remove('show'), undo ? UNDO_MS : 4000);
+// ---------------- The header's chips: the code (kind `code`) and the stage chip (kind `chip`) ----------------
+// A chip with acts for this seat is a button that opens its menu (a click, Enter or Space, a right-click, Shift+F10 or the
+// menu key); one without stays words, so nothing is drawn as a button that does nothing.
+const stageChipEl = document.getElementById('stageChip');
+/** The code chip's object: the room's guest code. */
+const codeObject = () => ({ id: 'code', code: ROOM });
+const CHIPS = {
+  roomChip: { kind: 'code', get: codeObject, label: 'Guest code actions', header: (o) => 'Guest code ' + o.code + (ROOM_NAME ? ' · ' + ROOM_NAME : '') },
+  stageChip: { kind: 'chip', get: () => stageNow, label: 'Countdown actions', header: (o) => o.words },
+};
+function chipIsDoor(el, on) {
+  if (on) {
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+    el.setAttribute('aria-haspopup', 'menu');
+    if (!el.hasAttribute('aria-expanded')) el.setAttribute('aria-expanded', 'false');
+  } else for (const a of ['role', 'tabindex', 'aria-haspopup', 'aria-expanded']) el.removeAttribute(a);
 }
+/** The chips as the page stands: shown and a door where this seat has acts on them; out of the hall, neither. */
+function drawChips() {
+  _roomChip.hidden = outOf || !F.mayKnowCode;
+  if (outOf) stageChipEl.hidden = true;
+  chipIsDoor(_roomChip, !outOf && !_roomChip.hidden && AGM.catalog.items('code', F, codeObject()).length > 0);
+  chipIsDoor(stageChipEl, !outOf && !!stageNow && AGM.catalog.items('chip', F, stageNow).length > 0);
+}
+function chipDoor(t) {
+  const el = t.closest && t.closest('#roomChip, #stageChip');
+  if (!el || el.getAttribute('aria-haspopup') !== 'menu') return null;
+  const c = CHIPS[el.id];
+  return { el, more: el, open: (at) => openObjectMenu(c.kind, c.get, { node: el, more: el, at, opener: el, label: c.label, header: c.header }) };
+}
+function onChip(e) {
+  if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+  const door = chipDoor(e.target);
+  if (!door) return;
+  e.preventDefault();
+  if (openOn && openOn.node === door.el) { AGM.menu.close(); return; }
+  door.open({ anchor: door.el });
+}
+for (const el of [_roomChip, stageChipEl]) { el.addEventListener('click', onChip); el.addEventListener('keydown', onChip); }
+AGM.menu.door(document.querySelector('.app-meta'), chipDoor);
+Object.assign(RUN, {
+  // Speaker's screen…: the line box, empty, to write a line and send it or ask the operator for it.
+  'chip.speaker': () => ToStagewatch.open(null),
+  'chip.screens': () => Screens.countdown(),
+  'code.code': (o, { anchor }) => copyText(o.code, 'Copied the guest code, ' + o.code + '.', anchor),
+  'code.copy': (o, { anchor }) => copyText(new URL('/?code=' + encodeURIComponent(o.code), location.href).href, 'Copied the join link: it opens the join page with this code.', anchor),
+});
+drawChips();
+
+// ---------------- The toast (never a blocking dialog) ----------------
+// What an act did, or why not, is said in the page's one toast (AGM.toast, common.js): a role=status region, so a screen
+// reader hears it; one that can be taken back carries Undo for 10 s while it is neither hovered nor focused.
 
 // ---------------- Feed rendering ----------------
 const feed = document.getElementById('feed');
+// The feed is one Tab stop (AGM.roving): the newest message until the focus has been in another, ↑ and ↓ between them,
+// Home and End to the first and the newest, Tab into the one with the focus; a question pinned (drawn in the pinned strip
+// alone) is passed over. The pinned strip, the People panel, the panel's files and the Screens dialog's list are one
+// stop each too.
+const feedRoving = AGM.roving(feed, { item: '.msg[data-key]', start: 'last', skip: '[data-type="action"][data-pinned="1"]' });
 const tpl = document.getElementById('msgTpl');
 const messagesById = new Map();
 const allMessages = [];
@@ -587,6 +630,7 @@ function renderMessage(msg) {
   }
   const node = tpl.content.firstElementChild.cloneNode(true);
   node.dataset.id = msg.id;
+  node.dataset.key = msg.id;   // its place in the roving list it is drawn in (the feed, the pinned strip)
   node.dataset.type = msg.type;
   rerenderMessage(node, msg);
   return node;
@@ -600,15 +644,10 @@ function rerenderMessage(node, msg) {
   if (msg.type === 'help') node.dataset.help = (msg.help && msg.help.state) || 'open';
   node.classList.toggle('mine', isMine(msg));
   node.classList.toggle('priority', !!msg.priority);
-  const from = node.querySelector('.from');
   const rt = node.querySelector('.role-tag');
   const time = node.querySelector('time');
   const body = node.querySelector('.body');
   if (msg.from) {
-    from.textContent = msg.from.name;
-    // Staff sign in; guests join with a code: the mark says which, so a name alone is never taken on trust.
-    from.classList.toggle('acct', !!msg.from.acct);
-    from.title = msg.from.acct ? 'Signed in with an AGMessage account' : 'Joined with a code';
     rt.textContent = roleLabel(msg.from.role);
     rt.dataset.role = msg.from.role;
   }
@@ -735,6 +774,7 @@ function drawBar(bar, kind, o, { words = false, more = 'More actions', keysOn = 
   }
 }
 function drawActs(node, msg) {
+  senderName(node, msg);
   const bar = node.querySelector(':scope > header .msg-acts');
   if (bar) drawBar(bar, 'msg', msg, { keysOn: node });
   // The body's own doors (a prompt's answers, a help request's answers) are the same entries, and say why when they
@@ -757,9 +797,9 @@ function act(kind, id, o, ctx) {
   const c = ctx || {};
   const e = AGM.catalog.entry(kind, id);
   const run = RUN[id];
-  if (!e || !run || !AGM.catalog.shown(kind, F, o).some((x) => x.id === id)) { notify(AGM.catalog.WORDS.gone, true); return; }
+  if (!e || !run || !AGM.catalog.shown(kind, F, o).some((x) => x.id === id)) { AGM.toast(AGM.catalog.WORDS.gone, true); return; }
   const r = AGM.catalog.ready(kind, id, F, o);
-  if (r !== true) { notify(r, true); return; }
+  if (r !== true) { AGM.toast(r, true); return; }
   if (e.confirm) {
     // The ask is about this object: should it go meanwhile, the ask goes with it (refreshOpenMenu).
     const asked = { kind, get: () => objectNow(kind, o) };
@@ -776,7 +816,11 @@ function act(kind, id, o, ctx) {
 function objectNow(kind, o) {
   if (kind === 'msg') return findMessage(o.id) || null;
   if (kind === 'file') return fileObject(o.id, o.where);
-  return Screens.of(o.id);
+  if (kind === 'screen') return Screens.of(o.id);
+  if (kind === 'person') return personNow(o.uid);
+  if (kind === 'compose') return composeObject(o.form);
+  if (kind === 'chip') return stageNow;
+  return codeObject();
 }
 /**
  * The focus, when what held it is gone (its row drawn again, its message removed): the object's element as it is drawn
@@ -789,8 +833,8 @@ function refocusNear(kind, o) {
   if (node && node.isConnected && node.hasAttribute('tabindex') && node.offsetParent) { node.focus(); return; }
   const near = kind === 'screen' ? document.getElementById('screensClose') : kind === 'file' ? document.querySelector('#docActs button') : null;
   if (near && near.offsetParent) { near.focus(); return; }
-  const c = document.getElementById(ROLE === 'board' ? 'directorInput' : 'textInput');
-  if (c && c.offsetParent) c.focus(); else document.getElementById('feed').focus();
+  const c = composerField();
+  if (c) c.focus(); else if (!feedRoving.focus('current')) feed.focus();
 }
 
 // The open menu, if any: its kind and object, so a change to the object updates it in place (R5); and the object an
@@ -811,25 +855,26 @@ function openObjectMenu(kind, get, { node, more, at, opener, label, header }) {
   const handle = AGM.menu(list, at || { anchor }, {
     label, header: header(o), opener: from,
     goneWords: AGM.catalog.WORDS.gone,
-    onPick: (id, value, item) => { const now = get(); if (now) act(kind, id, now, { anchor, node, value, item, opener: from }); else notify(goneWords(kind), true); },
-    onDisabled: (words) => notify(words, true),
+    onPick: (id, value, item) => { const now = get(); if (now) act(kind, id, now, { anchor, node, value, item, opener: from }); else AGM.toast(goneWords(kind), true); },
+    onDisabled: (words) => AGM.toast(words, true),
     submenu: (item) => submenuFor(kind, item, get() || o),
     // An open submenu's values as they are now (a reaction's check, an answer chosen); the rooms are asked once.
     values: (item) => (item.id ? AGM.catalog.submenu(kind, item.id, F, get() || o) : null),
     refocus: () => refocusNear(kind, o),
     onClose: () => { if (openOn && openOn.handle === handle) openOn = null; },
   });
-  openOn = { kind, get, header, handle };
+  openOn = { kind, get, header, handle, node: node || null };
   openOn.id = o.id;
   return true;
 }
-const goneWords = (kind) => (kind === 'msg' ? 'That message is gone.' : kind === 'file' ? 'That file is gone.' : 'That screen is gone.');
+const GONE = { msg: 'That message is gone.', file: 'That file is gone.', screen: 'That screen is gone.' };
+const goneWords = (kind) => GONE[kind] || AGM.catalog.WORDS.gone;
 /** The open menu says what its object's items say now; its object gone, it closes and says so, and so does an ask. */
 function refreshOpenMenu() {
-  if (askOn && !askOn.get()) { const k = askOn.kind; askOn = null; AGM.ask.close(); notify(goneWords(k), true); }
+  if (askOn && !askOn.get()) { const k = askOn.kind; askOn = null; AGM.ask.close(); AGM.toast(goneWords(k), true); }
   if (!openOn) return;
   const o = openOn.get();
-  if (!o) { const k = openOn.kind; openOn.handle.close(); openOn = null; AGM.ask.close(); notify(goneWords(k), true); return; }
+  if (!o) { const k = openOn.kind; openOn.handle.close(); openOn = null; AGM.ask.close(); AGM.toast(goneWords(k), true); return; }
   openOn.handle.update(AGM.catalog.items(openOn.kind, F, o), openOn.header(o));
 }
 /** One level down: a catalogue entry's values (reactions, answers), or the rooms a message could be sent to, asked now. */
@@ -857,7 +902,47 @@ function sendTargets(o) {
   });
 }
 
-// A message's doors: one handler for the feed and the pinned strip, which draws each pinned message afresh.
+// ---------------- A person: a row of the People panel, and a message's sender (kind `person`, the hall page's half) ----------------
+/** A person as the catalogue sees them: who they are in this room. */
+const personOf = (p) => (p && typeof p.uid === 'string' && p.uid ? { id: 'person:' + p.uid, uid: p.uid, name: String(p.name || ''), role: p.role || '' } : null);
+const personHeader = (p) => p.name + ' · ' + roleLabel(p.role);
+/**
+ * A message's sender's name: a button that opens the person's menu where this seat has acts on them (@ Mention), else
+ * the name as words. The same element is kept while it stays what it is, so a redraw never takes the focus from it.
+ * Staff sign in and guests join with a code: its mark says which, so a name alone is never taken on trust.
+ */
+function senderName(node, msg) {
+  let el = node.querySelector(':scope > header .from');
+  if (!msg.from) return;
+  const p = personOf(msg.from);
+  const door = !!p && AGM.catalog.items('person', F, p).length > 0;
+  if (door !== (el.tagName === 'BUTTON')) {
+    const was = el;
+    el = document.createElement(door ? 'button' : 'span');
+    el.className = was.className;
+    if (door) { el.type = 'button'; el.setAttribute('aria-haspopup', 'menu'); el.setAttribute('aria-expanded', 'false'); }
+    was.replaceWith(el);
+  }
+  if (door) el.dataset.person = p.uid; else delete el.dataset.person;
+  if (el.textContent !== msg.from.name) el.textContent = msg.from.name;
+  el.classList.toggle('acct', !!msg.from.acct);
+  el.title = (msg.from.acct ? 'Signed in with an AGMessage account' : 'Joined with a code') + (door ? ' — choose it for what you can do with ' + msg.from.name : '');
+}
+/** The person whose name `el` is, as they are now (null: the message is gone). */
+function senderOf(el) {
+  const node = el.closest('.msg[data-id]');
+  const m = node && findMessage(node.dataset.id);
+  return m && m.from ? personOf(m.from) : null;
+}
+function senderDoor(el) {
+  const node = el.closest('.msg[data-id]');
+  const id = node ? node.dataset.id : '';
+  const get = () => { const m = findMessage(id); return m && m.from ? personOf(m.from) : null; };
+  return { el, more: el, open: (at) => openObjectMenu('person', get, { node: el, more: el, at, opener: el, label: 'Person actions', header: personHeader }) };
+}
+
+// A message's doors: one handler for the feed and the pinned strip, which draws each pinned message afresh. A sender's
+// name is the door to that person's menu.
 const msgHeader = (m) => (isMine(m) ? 'Your message' : 'Message from ' + ((m.from && m.from.name) || 'someone')) + ' · ' + formatTime(m.at);
 function msgDoor(node) {
   const id = node.dataset.id;
@@ -868,15 +953,23 @@ function msgDoor(node) {
   };
 }
 function findMsgDoor(t) {
+  const name = t.closest('.from[data-person]');
+  if (name && senderOf(name)) return senderDoor(name);
   const node = t.closest('.msg[data-id]');
   return node && !node.classList.contains('echo') ? msgDoor(node) : null;
 }
 function onMsgClick(e) {
-  const el = e.target.closest('[data-action], [data-more], [data-goto]');
+  const el = e.target.closest('[data-action], [data-more], [data-goto], [data-person]');
   if (!el || !this.contains(el)) return;
   const node = el.closest('.msg[data-id]');
   const msg = node && findMessage(node.dataset.id);
   if (!msg) return;
+  if (el.dataset.person) {
+    e.preventDefault();
+    if (openOn && openOn.kind === 'person' && openOn.node === el) { AGM.menu.close(); return; }
+    senderDoor(el).open({ anchor: el });
+    return;
+  }
   if (el.dataset.goto) {
     const target = messagesById.get(el.dataset.goto);
     if (target) {
@@ -908,6 +1001,8 @@ function onMsgKey(e) {
   if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
   const node = e.target;
   if (!node || !node.matches || !node.matches('.msg[data-id]')) return;
+  // Escape on a message (no menu or ask open: theirs end first, as they hear it first) goes back to the composer.
+  if (e.key === 'Escape') { const field = composerField(); if (field) { e.preventDefault(); field.focus(); } return; }
   const msg = findMessage(node.dataset.id);
   const entry = msg && AGM.catalog.byKey('msg', F, msg, e.key);
   if (!entry) return;
@@ -921,6 +1016,7 @@ for (const host of [document.getElementById('feed'), document.getElementById('pi
   host.addEventListener('keydown', onMsgKey);
   AGM.menu.door(host, findMsgDoor);
 }
+AGM.roving(document.getElementById('pinnedList'), { item: '.msg[data-key]' });
 
 // What each act on a message does. The server decides; every write goes through the outbox in its entry's mode.
 const isFileUrl = (u) => typeof u === 'string' && /^\/uploads\/[\w.-]+$/.test(u);
@@ -935,36 +1031,14 @@ function download(m) {
   a.click();
   a.remove();
 }
-/**
- * Words to the clipboard: the clipboard API where the page is a secure context, else the browser's copy of a selection
- * (a page served over plain http on the venue network has no clipboard API), else a field in place to copy from by hand.
- */
-async function copyText(text, said, anchor) {
-  try {
-    if (window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') { await navigator.clipboard.writeText(text); notify(said); return; }
-  } catch { /* refused (no permission, not focused): the selection's copy below */ }
-  const host = (anchor && anchor.closest && anchor.closest('dialog[open]')) || document.body;
-  // The selection's copy takes the focus into a field of its own: it goes back where it was (the opener), never to the page.
-  const back = document.activeElement && document.activeElement !== document.body ? document.activeElement : anchor;
-  const t = document.createElement('textarea');
-  t.value = text;
-  t.setAttribute('readonly', '');
-  t.className = 'copy-source';
-  host.appendChild(t);
-  t.select();
-  let copied;
-  try { copied = document.execCommand('copy'); } catch { copied = false; }
-  t.remove();
-  if (back && back.isConnected && typeof back.focus === 'function') back.focus();
-  if (copied) { notify(said); return; }
-  AGM.ask(anchor || null, { title: 'Copy it from here', words: 'This browser would not copy it by itself: select it and copy.', fields: [{ name: 'text', label: 'To copy', value: text }], yes: 'Done', no: 'Close' });
-}
+/** Words to the clipboard (AGM.copy: over plain http too), said in the toast; the focus goes back where it was. */
+const copyText = (text, said, anchor) => AGM.copy(text, { said, anchor, say: (w) => AGM.toast(w) });
 /** Pin or unpin, with Undo for 10 s: the opposite op of the same kind. */
 function pinWithUndo(o) {
   const pinned = !o.pinned;
   AGM.outbox.now('pin', { messageId: o.id, pinned }, (r) => {
-    if (!r || !r.ok) { notify((r && r.error) || (pinned ? 'Not pinned.' : 'Not unpinned.'), true); return; }
-    notify(pinned ? 'Pinned.' : 'Unpinned.', false, { undo: () => AGM.outbox.now('pin', { messageId: o.id, pinned: !pinned }, saidIfNot(pinned ? 'Not unpinned.' : 'Not pinned.')) });
+    if (!r || !r.ok) { AGM.toast((r && r.error) || (pinned ? 'Not pinned.' : 'Not unpinned.'), true); return; }
+    AGM.toast(pinned ? 'Pinned.' : 'Unpinned.', { undo: () => AGM.outbox.now('pin', { messageId: o.id, pinned: !pinned }, saidIfNot(pinned ? 'Not unpinned.' : 'Not pinned.')) });
   });
 }
 /** The object after `node` in its list (or before it, at the end): where the focus goes when `node` is removed. */
@@ -995,7 +1069,7 @@ Object.assign(RUN, {
   'msg.draft': (m) => { beginReply(m); draftAnswer(m); },
   'msg.speaker': (m) => ToStagewatch.open(m),
   'msg.sendNow': (m) => AGM.outbox.now('stage:send', { messageId: m.id }, (res) => {
-    notify(res && res.ok
+    AGM.toast(res && res.ok
       ? (res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.')
       : (res && res.error) || 'Could not send to the speaker\'s screen.', !(res && res.ok));
   }),
@@ -1011,7 +1085,7 @@ Object.assign(RUN, {
   'msg.delete': (m, { node }) => {
     const next = node ? neighbour(messagesById.get(m.id) || node) : null;
     AGM.outbox.now('delete', { messageId: m.id }, (r) => {
-      if (!r || !r.ok) { notify((r && r.error) || 'Could not delete', true); return; }
+      if (!r || !r.ok) { AGM.toast((r && r.error) || 'Could not delete', true); return; }
       // The focus goes to the next message, never to the page.
       if (next && next.isConnected && (!document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected)) next.focus();
     });
@@ -1038,7 +1112,7 @@ function drawHeld(item) {
   if (item.verb === 'message') drawEcho(item);
   else if (item.verb === 'actionResponse' || item.verb === 'help:respond') drawHeldAnswer(item);
   else if (item.verb === 'forward') drawHeldForward(item);
-  else if (item.verb === 'react' && item.state === 'refused') { notify(item.words, true); AGM.outbox.drop(item.cid); }
+  else if (item.verb === 'react' && item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
 }
 
 /** What a held message says, in one line. */
@@ -1059,8 +1133,8 @@ function drawEcho(item) {
   if (!SENDING.has(item.state) && item.state !== 'refused' && item.state !== 'lost') {
     if (node) node.remove();
     echoes.delete(item.cid);
-    if (item.state === 'gone') notify('That message was removed.');
-    if (item.state === 'done' && item.args.type === 'help') notify('Help request sent — it stays up until someone marks it resolved.');
+    if (item.state === 'gone') AGM.toast('That message was removed.');
+    if (item.state === 'done' && item.args.type === 'help') AGM.toast('Help request sent — it stays up until someone marks it resolved.');
   } else {
     if (!node) {
       node = document.createElement('article');
@@ -1126,7 +1200,7 @@ function lockComposer(c, on) {
   form.setAttribute('aria-busy', on ? 'true' : 'false');
   for (const f of form.querySelectorAll('input, textarea')) f.readOnly = on;
   for (const b of form.querySelectorAll('button')) b.disabled = on;
-  if (!on && c === 'file') sendFileBtn.disabled = !pendingFile;
+  if (!on) drawCompose(c);
 }
 function clearComposer(c, item) {
   const a = item.args;
@@ -1134,11 +1208,8 @@ function clearComposer(c, item) {
   if (c === 'text' && textInput.value.trim() === a.text) { textInput.value = ''; aiDrafted = false; setAiHint(''); }
   if (c === 'action' && actionText.value.trim() === a.text) { actionText.value = ''; currentOptions = ['Yes', 'No']; renderOptionChips(); }
   if (c === 'file' && pendingFile && pendingFile.file === item.file) {
-    pendingFile = null;
-    filePreview.hidden = true;
-    filePreview.innerHTML = '';
     fileCaption.value = '';
-    fileInput.value = '';
+    removePendingFile();
   }
 }
 /**
@@ -1156,11 +1227,11 @@ function editHeld(item) {
     replyState = { id: a.replyTo, name: parent ? (parent.from && parent.from.name) || 'system' : 'an earlier message', snippet: parent ? parent.text || parent.filename || '' : '' };
     renderReplyChip();
   }
-  const tab = (name) => { const t = document.querySelector('.compose-tabs .tab[data-tab="' + name + '"]'); if (t && !t.classList.contains('active')) t.click(); };
+  const tab = selectTab;
   // A help request: its words back in the dialog, where a category's tap sends it again (none is chosen for the person).
   if (a.type === 'help') { openHelpDialog(a.text || ''); return; }
   if (a.type === 'action') { tab('action'); if (!kept) { actionText.value = a.text || ''; currentOptions = Array.isArray(a.options) ? a.options.slice(0, 6) : ['Yes', 'No']; renderOptionChips(); } actionText.focus(); return; }
-  if (a.type === 'file') { tab('file'); if (!kept) fileCaption.value = a.caption || ''; notify('Choose the file again to send it.'); return; }
+  if (a.type === 'file') { tab('file'); if (!kept) fileCaption.value = a.caption || ''; AGM.toast('Choose the file again to send it.'); return; }
   const field = c === 'director' || document.getElementById('researchCompose').hidden ? dInput : textInput;
   if (c !== 'director') tab('text');
   if (field && !kept) field.value = a.text || '';
@@ -1173,7 +1244,7 @@ function drawHeldAnswer(item) {
   const mine = heldAnswers.get(key);
   if (SENDING.has(item.state)) heldAnswers.set(key, { cid: item.cid, option: item.verb === 'actionResponse' ? a.optionIndex : a.state });
   else if (mine && mine.cid === item.cid) heldAnswers.delete(key);
-  if (item.state === 'refused') { notify(item.words, true); AGM.outbox.drop(item.cid); }
+  if (item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
   const m = findMessage(a.messageId);
   const node = messagesById.get(a.messageId);
   if (m && node) rerenderMessage(node, m);
@@ -1182,9 +1253,9 @@ function drawHeldAnswer(item) {
 
 function drawHeldForward(item) {
   const to = (item.tag && item.tag.forward) || 'the other hall';
-  if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) notify('◷ Held — it is forwarded to ' + to + ' when the connection is back.');
-  else if (item.state === 'done' || item.state === 'gone') flashStatus('Forwarded to ' + to);
-  else if (item.state === 'refused') { notify(item.words, true); AGM.outbox.drop(item.cid); }
+  if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) AGM.toast('◷ Held — it is forwarded to ' + to + ' when the connection is back.');
+  else if (item.state === 'done' || item.state === 'gone') AGM.toast('Forwarded to ' + to);
+  else if (item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
 }
 
 /** An answer to a prompt, held until the server has it: the option chosen, or -1 and a note in words. */
@@ -1276,12 +1347,19 @@ function renderActionBody(msg) {
   q.className = 'action-text';
   q.textContent = msg.text;
   wrap.appendChild(q);
+  // Its answers are the catalogue's msg.answer, each with its value; Answer in words… is msg.answerWords. A seat that may
+  // never answer (an observer, a Viewer) reads the options as words, with the live tally: nothing drawn as a button that
+  // does nothing.
+  const shown = new Set(AGM.catalog.shown('msg', F, msg).map((e) => e.id));
+  if (!shown.has('msg.answer')) {
+    const words = document.createElement('p');
+    words.className = 'action-options';
+    words.textContent = 'Options: ' + msg.options.join(' · ');
+    wrap.appendChild(words);
+  }
   const btnRow = document.createElement('div');
   btnRow.className = 'action-buttons';
-  // Its answers are the catalogue's msg.answer, each with its value; Answer in words… is msg.answerWords. A seat that may
-  // not answer sees them and the tally, and answers nothing.
-  const shown = new Set(AGM.catalog.shown('msg', F, msg).map((e) => e.id));
-  msg.options.forEach((opt, i) => {
+  if (shown.has('msg.answer')) msg.options.forEach((opt, i) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'btn action-btn';
@@ -1290,7 +1368,6 @@ function renderActionBody(msg) {
     b.textContent = opt;
     const held = heldAnswers.get('answer|' + msg.id);
     if (held && held.option === i) { b.textContent = '◷ ' + opt; b.dataset.state = 'sending'; }
-    b.disabled = !shown.has('msg.answer');
     btnRow.appendChild(b);
   });
   if (shown.has('msg.answerWords')) {
@@ -1301,7 +1378,7 @@ function renderActionBody(msg) {
     other.textContent = AGM.catalog.entry('msg', 'msg.answerWords').label;
     btnRow.appendChild(other);
   }
-  wrap.appendChild(btnRow);
+  if (btnRow.childElementCount) wrap.appendChild(btnRow);
   const tally = document.createElement('div');
   tally.className = 'action-responses';
   tally.dataset.for = msg.id;
@@ -1746,7 +1823,7 @@ function refreshDocPinnedList() {
     const li = document.createElement('li');
     li.className = 'file-entry';
     li.dataset.fileId = m.id;
-    li.tabIndex = -1;
+    li.dataset.key = m.id;
     // The name opens it where this seat may look (the catalogue's file.look, also the bar's 👁).
     const name = document.createElement('span');
     name.className = 'pinned-item';
@@ -1800,6 +1877,7 @@ docPanel.addEventListener('keydown', (e) => {
   act('file', entry.id, o, { anchor: door.more || door.el, node: door.el, opener: door.el });
 });
 AGM.menu.door(docPanel, fileDoor);
+AGM.roving(docPinnedList, { item: 'li[data-key]' });
 Object.assign(RUN, {
   'file.screens': (o) => Screens.offer(o),
   'file.look': (o) => openDocInPanel(findMessage(o.id) || o),
@@ -1944,26 +2022,93 @@ const peopleBtn = document.getElementById('peopleBtn');
 const peoplePanel = document.getElementById('peoplePanel');
 peopleBtn.onclick = () => { peoplePanel.hidden = !peoplePanel.hidden; };
 
+// Who is in the room, a row each (kind `person`): its seat, its name, and its ⋯ where this seat has acts on them. Rows are
+// drawn again in place by the person's id, so a people frame never takes the focus or an open menu's opener away.
+const peopleList = document.getElementById('peopleList');
+let people = [];
+/** A person in the room as they are now (null: they left). */
+const personNow = (uid) => personOf(people.find((u) => u.uid === uid) || null);
 function renderUsers(users) {
-  const list = document.getElementById('peopleList');
-  list.innerHTML = '';
-  users.forEach((u) => {
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="role-tag" data-role="${escapeHtml(u.role)}">${escapeHtml(roleLabel(u.role))}</span> ${escapeHtml(u.name)}`;
-    list.appendChild(li);
-  });
-  peopleBtn.textContent = `People · ${users.length}`;
+  people = Array.isArray(users) ? users.filter((u) => u && typeof u.uid === 'string' && u.uid) : [];
+  const have = new Map([...peopleList.querySelectorAll(':scope > li[data-key]')].map((li) => [li.dataset.key, li]));
+  let prev = null;
+  for (const u of people) {
+    let li = have.get(u.uid);
+    if (li) have.delete(u.uid);
+    else {
+      li = document.createElement('li');
+      li.className = 'person-row';
+      li.dataset.key = u.uid;
+      const tag = document.createElement('span');
+      tag.className = 'role-tag';
+      const name = document.createElement('span');
+      name.className = 'name';
+      const bar = document.createElement('span');
+      bar.className = 'person-acts';
+      li.append(tag, name, bar);
+    }
+    const tag = li.querySelector('.role-tag');
+    tag.dataset.role = u.role;
+    tag.textContent = roleLabel(u.role);
+    li.querySelector('.name').textContent = u.name;
+    drawPersonRow(li);
+    const at = prev ? prev.nextElementSibling : peopleList.firstElementChild;
+    if (at !== li) peopleList.insertBefore(li, at);
+    prev = li;
+  }
+  for (const gone of have.values()) gone.remove();
+  peopleBtn.textContent = `People · ${people.length}`;
+  if (openOn && openOn.kind === 'person') refreshOpenMenu();
 }
+function drawPersonRow(li) {
+  const p = personNow(li.dataset.key);
+  if (p) drawBar(li.querySelector('.person-acts'), 'person', p, { more: 'More for ' + p.name, keysOn: li });
+}
+function drawPeopleActs() { for (const li of peopleList.querySelectorAll(':scope > li[data-key]')) drawPersonRow(li); }
+function personDoor(t) {
+  const li = t.closest('li[data-key]');
+  if (!li || !peopleList.contains(li)) return null;
+  const uid = li.dataset.key;
+  const more = li.querySelector('.obj-more');
+  return { el: li, more, uid, open: (at) => openObjectMenu('person', () => personNow(uid), { node: li, more, at, opener: li.contains(document.activeElement) ? document.activeElement : more || li, label: 'Person actions', header: personHeader }) };
+}
+peopleList.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-action^="person."], [data-more]');
+  const door = el && personDoor(el);
+  if (!door) return;
+  e.preventDefault();
+  if (el.dataset.more) {
+    if (openOn && openOn.kind === 'person' && openOn.node === door.el) { AGM.menu.close(); return; }
+    openObjectMenu('person', () => personNow(door.uid), { node: door.el, more: el, opener: el, label: 'Person actions', header: personHeader });
+    return;
+  }
+  const p = personNow(door.uid);
+  if (p) act('person', el.dataset.action, p, { anchor: door.more || el, node: door.el, opener: el });
+});
+AGM.menu.door(peopleList, personDoor);
+AGM.roving(peopleList, { item: 'li[data-key]' });
+Object.assign(RUN, {
+  // @ Mention: the person's name in the composer, where the cursor is, and the focus there to go on writing.
+  'person.mention': (p) => {
+    const field = composerField({ text: true });
+    if (!field) return;
+    const v = field.value;
+    const at = typeof field.selectionStart === 'number' ? field.selectionStart : v.length;
+    const before = v.slice(0, at);
+    const put = (before && !/\s$/.test(before) ? ' ' : '') + '@' + p.name + ' ';
+    field.value = before + put + v.slice(at);
+    field.focus();
+    const caret = (before + put).length;
+    if (typeof field.setSelectionRange === 'function') field.setSelectionRange(caret, caret);
+  },
+});
 
 
-// ---------------- Priority toggle (per-composer) ----------------
-function wirePriority(btnId) {
+// ---------------- Priority toggle (per-composer): the catalogue's compose.priority ----------------
+function wirePriority(btnId, form) {
   const btn = document.getElementById(btnId);
   if (!btn) return null;
-  btn.addEventListener('click', () => {
-    const on = btn.dataset.priority === '1';
-    setPriority(btn, !on);
-  });
+  btn.addEventListener('click', () => { const o = composeObject(form); if (o) act('compose', 'compose.priority', o, { opener: btn, anchor: btn }); });
   return btn;
 }
 function setPriority(btn, on) {
@@ -1979,20 +2124,144 @@ function consumePriority(btn) {
   setPriority(btn, false);
   return v;
 }
-const dirPriBtn = wirePriority('dirPriorityBtn');
-const textPriBtn = wirePriority('textPriorityBtn');
-const actionPriBtn = wirePriority('actionPriorityBtn');
-const filePriBtn = wirePriority('filePriorityBtn');
+const dirPriBtn = wirePriority('dirPriorityBtn', 'director');
+const textPriBtn = wirePriority('textPriorityBtn', 'text');
+const actionPriBtn = wirePriority('actionPriorityBtn', 'action');
+const filePriBtn = wirePriority('filePriorityBtn', 'file');
+const PRIORITY = { director: () => dirPriBtn, text: () => textPriBtn, action: () => actionPriBtn, file: () => filePriBtn };
+
+// ---------------- The composer's doors (catalog.js, kind `compose`) ----------------
+// Its Send button is its one act on the row and its ⋯ the door to the rest (✨ Draft a reply, 🔥 Priority, Attach a
+// file…, Remove the file, Cancel the reply); a right-click or Shift+F10 on either (or on the file chosen) opens the same
+// list, while the text field keeps the browser's own menu. A send, from Send, Enter or the menu, runs through act().
+/** The composer shown: 'director' On stage; backstage the open tab's, 'text', 'action' or 'file'; '' for none. */
+function activeComposer() {
+  if (!document.getElementById('directorCompose').hidden) return 'director';
+  if (document.getElementById('researchCompose').hidden) return '';
+  const tab = document.querySelector('.compose-tabs .tab.active');
+  return tab ? tab.dataset.tab : 'text';
+}
+/** The composer `form` as the catalogue sees it (the one shown when none is named), or null where there is none. */
+function composeObject(form) {
+  const f = form || activeComposer();
+  if (!f || !COMPOSER_FORMS[f] || !COMPOSER_FORMS[f]()) return null;
+  const pri = PRIORITY[f]();
+  return { id: 'compose:' + f, form: f, room: ROOM_NAME, file: f === 'file' && pendingFile ? pendingFile.filename : '', replying: replyState ? replyState.name : '', priority: !!pri && pri.dataset.priority === '1' };
+}
+/**
+ * The field a person types the next message in (`text`: the words' field, the Message tab opened for it backstage),
+ * or, without `text`, the shown composer's first control; null where the page draws no composer.
+ */
+function composerField({ text = false } = {}) {
+  const form = activeComposer();
+  if (!form) return null;
+  if (form === 'director') return dInput;
+  if (text && form !== 'text') selectTab('text');
+  const now = text ? 'text' : form;
+  return now === 'text' ? textInput : now === 'action' ? actionText : pickFileBtn;
+}
+/** Open a tab of the backstage composer. */
+function selectTab(name) {
+  const t = document.querySelector('.compose-tabs .tab[data-tab="' + name + '"]');
+  if (t && !t.classList.contains('active')) t.click();
+}
+const composeHeader = (o) => (o.replying ? 'Replying to ' + o.replying : 'Your message' + (o.room ? ' to ' + o.room : ''));
+/** A composer's Send drawn as the catalogue says it now (its name, or why it cannot send), and its ⋯ while it has a menu. */
+function drawCompose(form) {
+  const el = COMPOSER_FORMS[form] && COMPOSER_FORMS[form]();
+  const o = composeObject(form);
+  const send = el && el.querySelector('.send-btn');
+  if (!o || !send) return;
+  const inl = AGM.catalog.inline('compose', F, o).find((i) => i.id === 'compose.send');
+  if (inl) {
+    send.dataset.action = inl.id;
+    send.setAttribute('aria-label', inl.label);
+    send.title = inl.disabled || inl.label;
+    if (inl.disabled) send.setAttribute('aria-disabled', 'true'); else send.removeAttribute('aria-disabled');
+  }
+  const menu = AGM.catalog.items('compose', F, o).length > 0;
+  let more = el.querySelector('.compose-more');
+  if (menu && !more) {
+    more = moreButton('More for this message');
+    more.classList.add('compose-more');
+    more.disabled = send.disabled;
+    send.after(more);
+  } else if (!menu && more) more.remove();
+}
+function drawComposers() { for (const form of Object.keys(COMPOSER_FORMS)) drawCompose(form); }
+const FORM_OF = new Map();   // a composer's form element → its name
+function composeDoor(t) {
+  const formEl = t.closest('form');
+  const form = formEl && FORM_OF.get(formEl);
+  if (!form || !t.closest('.send-btn, .compose-more, #filePreview')) return null;
+  const more = formEl.querySelector('.compose-more');
+  const opener = t.closest('button') || more || formEl.querySelector('.send-btn');
+  return { el: formEl, more, form, open: (at) => openObjectMenu('compose', () => composeObject(form), { node: formEl, more, at, opener, label: 'Message actions', header: composeHeader }) };
+}
+for (const host of [document.getElementById('directorCompose'), document.getElementById('researchCompose')]) {
+  host.addEventListener('click', (e) => {
+    const more = e.target.closest('.compose-more');
+    const door = more && composeDoor(more);
+    if (!door) return;
+    e.preventDefault();
+    if (openOn && openOn.kind === 'compose' && openOn.node === door.el) { AGM.menu.close(); return; }
+    door.open({ anchor: more });
+  });
+  AGM.menu.door(host, composeDoor);
+}
+/** Send what a composer holds: through the catalogue's compose.send (shown, ready), from Send, Enter or the menu. */
+function sendFrom(form, opener) {
+  const o = composeObject(form);
+  const el = COMPOSER_FORMS[form]();
+  if (o) act('compose', 'compose.send', o, { opener: opener || null, anchor: el.querySelector('.compose-more') || el.querySelector('.send-btn'), node: el });
+}
+// What each composer sends: what its fields hold, held by the outbox until the server has it.
+const SENDS = {
+  director: () => {
+    const text = dInput.value.trim();
+    if (!text || composerHeld('director')) return;
+    holdMessage('director', { type: 'text', text, priority: consumePriority(dirPriBtn), replyTo: consumeReplyTo() });
+  },
+  text: () => {
+    const text = textInput.value.trim();
+    if (!text || composerHeld('text')) return;
+    holdMessage('text', { type: 'text', text, priority: consumePriority(textPriBtn), replyTo: consumeReplyTo(), aiDraft: aiDrafted });
+  },
+  action: () => {
+    const text = actionText.value.trim();
+    if (!text || composerHeld('action')) return;
+    holdMessage('action', { type: 'action', text, options: currentOptions.slice(), priority: consumePriority(actionPriBtn), replyTo: consumeReplyTo() });
+  },
+  file: () => {
+    if (!pendingFile || composerHeld('file')) return;
+    holdMessage('file', {
+      type: 'file',
+      url: pendingFile.url,
+      filename: pendingFile.filename,
+      mime: pendingFile.mime,
+      caption: fileCaption.value.trim(),
+      priority: consumePriority(filePriBtn),
+      replyTo: consumeReplyTo(),
+    }, { file: pendingFile.file, upload: uploadFile });
+  },
+};
+Object.assign(RUN, {
+  'compose.send': (o) => SENDS[o.form](),
+  'compose.draft': () => {
+    const replying = replyState ? findMessage(replyState.id) : null;
+    const lastBoard = [...allMessages].reverse().find((m) => m.from && m.from.role === 'board' && (m.text || m.type === 'action'));
+    draftAnswer(replying || lastBoard);
+  },
+  'compose.priority': (o) => setPriority(PRIORITY[o.form](), !o.priority),
+  'compose.attach': () => { selectTab('file'); fileInput.click(); },
+  'compose.removeFile': () => { removePendingFile(); pickFileBtn.focus(); },
+  'compose.cancelReply': () => { cancelReply(); const field = composerField(); if (field) field.focus(); },
+});
 
 // ---------------- Compose: director ----------------
 const dForm = document.getElementById('directorForm');
 const dInput = document.getElementById('directorInput');
-dForm?.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const text = dInput.value.trim();
-  if (!text || composerHeld('director')) return;
-  holdMessage('director', { type: 'text', text, priority: consumePriority(dirPriBtn), replyTo: consumeReplyTo() });
-});
+dForm?.addEventListener('submit', (e) => { e.preventDefault(); sendFrom('director', e.submitter); });
 
 // ---------------- Compose: research tabs ----------------
 document.querySelectorAll('.compose-tabs .tab').forEach((tab) => {
@@ -2007,12 +2276,28 @@ document.querySelectorAll('.compose-tabs .tab').forEach((tab) => {
 
 const textPane = document.getElementById('textPane');
 const textInput = document.getElementById('textInput');
-textPane?.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const text = textInput.value.trim();
-  if (!text || composerHeld('text')) return;
-  holdMessage('text', { type: 'text', text, priority: consumePriority(textPriBtn), replyTo: consumeReplyTo(), aiDraft: aiDrafted });
-});
+textPane?.addEventListener('submit', (e) => { e.preventDefault(); sendFrom('text', e.submitter); });
+// In an empty message box ↑ goes to the newest message (one Tab stop, the feed's).
+for (const field of [dInput, textInput]) {
+  field?.addEventListener('keydown', (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
+    if (e.key === 'ArrowUp' && field.value === '') { if (feedRoving.focus('last')) e.preventDefault(); }
+  });
+}
+// A key on the composer (its message box, Send, its ⋯, 🔥) is the composer's catalogue key: Escape takes back a reply begun.
+// An open menu or ask inside it keeps its own Escape (it stops there).
+for (const host of [document.getElementById('directorCompose'), document.getElementById('researchCompose')]) {
+  host.addEventListener('keydown', (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing || e.defaultPrevented) return;
+    const formEl = e.target.closest && e.target.closest('form');
+    const form = formEl && FORM_OF.get(formEl);
+    const o = form && composeObject(form);
+    const entry = o && AGM.catalog.byKey('compose', F, o, e.key);
+    if (!entry) return;
+    e.preventDefault();
+    act('compose', entry.id, o, { opener: e.target, node: formEl });
+  });
+}
 
 // ---------------- AI: drafts for the backstage team (a person always edits and sends) ----------------
 let aiDrafted = false;
@@ -2025,7 +2310,7 @@ function setAiHint(text, bad) {
 // The ✨ buttons are drawn from the join's answer: live while AI drafts can be made; otherwise shown but not usable, with
 // the reason as their title and, when one is pressed, in the line under the composer, where a touch screen shows it.
 // Pressed while off, they send nothing.
-const AI_OFF_WHY = 'AI drafts are off: they need an Anthropic key (admin) and the internet. Everything else works without them.';
+const AI_OFF_WHY = AGM.catalog.WORDS.aiOff;
 const AI_TITLES = new Map([...document.querySelectorAll('.ai-btn')].map((b) => [b, b.title]));
 function drawAiButtons() {
   for (const [b, title] of AI_TITLES) {
@@ -2038,14 +2323,14 @@ function drawAiButtons() {
 /** Whether AI drafts can be made now; if not, the reason is said where the person is looking. */
 function aiReady(where) {
   if (AI_ON) return true;
-  if (where === 'draft') setAiHint(AI_OFF_WHY); else notify(AI_OFF_WHY);
+  if (where === 'draft') setAiHint(AI_OFF_WHY); else AGM.toast(AI_OFF_WHY);
   return false;
 }
-document.getElementById('aiDraftBtn')?.addEventListener('click', () => {
+// ✨ is the catalogue's compose.draft: with AI drafts off it says why under the composer, where a finger reads it.
+document.getElementById('aiDraftBtn')?.addEventListener('click', (e) => {
   if (!aiReady('draft')) return;
-  const replying = replyState ? findMessage(replyState.id) : null;
-  const lastBoard = [...allMessages].reverse().find((m) => m.from && m.from.role === 'board' && (m.text || m.type === 'action'));
-  draftAnswer(replying || lastBoard);
+  const o = composeObject('text');
+  if (o) act('compose', 'compose.draft', o, { opener: e.currentTarget, anchor: e.currentTarget });
 });
 /**
  * An AI draft of the answer to `q` (a Board question, or none), from the thread and the document on stage, in the
@@ -2063,7 +2348,7 @@ function draftAnswer(q) {
     instruction: textInput.value.trim(),
     docName: docForAi.name, docText: docForAi.text,
   }, (res) => {
-    btn.disabled = false; btn.textContent = '✨ Draft answer';
+    btn.disabled = false; btn.textContent = '✨ Draft a reply';
     if (!res || !res.ok) { setAiHint((res && res.error) || 'No draft.', true); return; }
     textInput.value = res.draft || '';
     textInput.dispatchEvent(new Event('input'));
@@ -2127,22 +2412,17 @@ document.getElementById('aiOptionsBtn')?.addEventListener('click', () => {
   if (!aiReady('options')) return;
   const btn = document.getElementById('aiOptionsBtn');
   const prompt = actionText.value.trim();
-  if (!prompt) { notify('Type the question first.'); return; }
+  if (!prompt) { AGM.toast('Type the question first.'); return; }
   btn.disabled = true;
   socket.emit('ai:options', { prompt }, (res) => {
     btn.disabled = false;
-    if (!res || !res.ok || !res.options || !res.options.length) { notify((res && res.error) || 'No suggestions.', true); return; }
+    if (!res || !res.ok || !res.options || !res.options.length) { AGM.toast((res && res.error) || 'No suggestions.', true); return; }
     currentOptions = res.options.slice(0, 6);
     renderOptionChips();
   });
 });
 
-actionPane?.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const text = actionText.value.trim();
-  if (!text || composerHeld('action')) return;
-  holdMessage('action', { type: 'action', text, options: currentOptions.slice(), priority: consumePriority(actionPriBtn), replyTo: consumeReplyTo() });
-});
+actionPane?.addEventListener('submit', (e) => { e.preventDefault(); sendFrom('action', e.submitter); });
 
 const filePane = document.getElementById('filePane');
 const fileInput = document.getElementById('fileInput');
@@ -2150,7 +2430,6 @@ const dropzone = document.getElementById('dropzone');
 const filePreview = document.getElementById('filePreview');
 const fileCaption = document.getElementById('fileCaption');
 const pickFileBtn = document.getElementById('pickFileBtn');
-const sendFileBtn = document.getElementById('sendFileBtn');
 let pendingFile = null;
 
 pickFileBtn?.addEventListener('click', () => fileInput.click());
@@ -2194,11 +2473,20 @@ async function handleFiles(files) {
     pendingFile = { url: '', filename: file.name, mime: file.type || '', file, waiting: true };
   } else {
     filePreview.textContent = up.error;
-    sendFileBtn.disabled = true;
+    pendingFile = null;
+    drawCompose('file');
     return;
   }
   renderFilePreview();
-  sendFileBtn.disabled = false;
+  drawCompose('file');
+}
+/** The file chosen to send is put down: nothing to send until another is chosen. */
+function removePendingFile() {
+  pendingFile = null;
+  filePreview.hidden = true;
+  filePreview.innerHTML = '';
+  fileInput.value = '';
+  drawCompose('file');
 }
 
 function renderFilePreview() {
@@ -2215,34 +2503,29 @@ function renderFilePreview() {
     p.textContent = `📄 ${pendingFile.filename}` + (pendingFile.waiting ? ' — not uploaded yet: it goes with the message when the connection is back' : '');
     filePreview.appendChild(p);
   }
+  // Its Remove is the catalogue's compose.removeFile, named as its menu item is.
   const rm = document.createElement('button');
   rm.type = 'button';
   rm.className = 'btn ghost small';
   rm.textContent = 'Remove';
-  rm.onclick = () => {
-    pendingFile = null;
-    filePreview.hidden = true;
-    filePreview.innerHTML = '';
-    sendFileBtn.disabled = true;
-    fileInput.value = '';
-  };
+  rm.setAttribute('aria-label', AGM.catalog.entry('compose', 'compose.removeFile').label);
+  rm.addEventListener('click', () => { const o = composeObject('file'); if (o) act('compose', 'compose.removeFile', o, { opener: rm, anchor: rm }); });
   filePreview.appendChild(rm);
 }
 
-filePane?.addEventListener('submit', (e) => {
+filePane?.addEventListener('submit', (e) => { e.preventDefault(); sendFrom('file', e.submitter); });
+for (const [name, el] of [['director', dForm], ['text', textPane], ['action', actionPane], ['file', filePane]]) if (el) FORM_OF.set(el, name);
+
+// The skip link: the page's first Tab, "Skip to message box" for a seat with a composer (it takes the focus to the
+// composer's field) and "Skip to messages" for one without (to the feed's one stop, the newest message).
+const skipLink = document.getElementById('skipLink');
+function drawSkip() { skipLink.textContent = composerField() ? 'Skip to message box' : 'Skip to messages'; }
+skipLink.addEventListener('click', (e) => {
   e.preventDefault();
-  if (!pendingFile || composerHeld('file')) return;
-  const caption = fileCaption.value.trim();
-  holdMessage('file', {
-    type: 'file',
-    url: pendingFile.url,
-    filename: pendingFile.filename,
-    mime: pendingFile.mime,
-    caption,
-    priority: consumePriority(filePriBtn),
-    replyTo: consumeReplyTo(),
-  }, { file: pendingFile.file, upload: uploadFile });
+  const field = composerField();
+  if (field) field.focus(); else if (!feedRoving.focus('current')) feed.focus();
 });
+drawSkip();
 
 // ---------------- Helpers ----------------
 function roleLabel(role) {
@@ -2371,7 +2654,7 @@ if (ADMIN_VIEW) {
   document.body.classList.add('is-admin-view');
   const b = document.createElement('div');
   b.className = 'admin-view-banner';
-  b.innerHTML = 'Admin support view — acting as <strong>' + escapeHtml(NAME) + '</strong>';
+  b.innerHTML = 'Admin support view — what <strong>' + escapeHtml(NAME) + '</strong> sees. Nothing here acts: act from your own page.';
   document.body.prepend(b);
 
   // Robust initial sync: ask peers to publish their state several times in
@@ -2399,15 +2682,6 @@ if (ADMIN_VIEW) {
   });
 }
 
-
-function flashStatus(text) {
-  const t = document.createElement('div');
-  t.className = 'agm-toast';
-  t.textContent = text;
-  document.body.appendChild(t);
-  setTimeout(() => t.classList.add('show'), 10);
-  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 250); }, 2400);
-}
 
 // ---------------- Bidirectional UI sync (user ↔ admin support view) ----------------
 // Any same-name peer in the same room receives UI state changes — keeps the
@@ -2562,8 +2836,9 @@ function renderReplyChip() {
   }
   chip.innerHTML = '<span>↩ Replying to <strong>' + escapeHtml(replyState.name) + '</strong>: <em>' +
     escapeHtml((replyState.snippet || '').slice(0, 80)) + '</em></span>' +
-    '<button type="button" class="reply-cancel" title="Cancel reply">×</button>';
-  chip.querySelector('.reply-cancel').onclick = cancelReply;
+    '<button type="button" class="reply-cancel" title="Cancel the reply (Esc)" aria-label="Cancel the reply">×</button>';
+  const x = chip.querySelector('.reply-cancel');
+  x.addEventListener('click', () => { const o = composeObject(); if (o) act('compose', 'compose.cancelReply', o, { opener: x, anchor: x }); });
 }
 function consumeReplyTo() {
   const r = replyState ? replyState.id : null;
@@ -2583,7 +2858,7 @@ const helpText = document.getElementById('helpText');
 /** The help dialog, open with these words (a request held and refused comes back with its own), the heading focused. */
 function openHelpDialog(words) {
   helpText.value = words || '';
-  helpDialog.showModal();
+  AGM.openDialog(helpDialog);
   document.getElementById('helpTitle').focus();
 }
 (function () {
@@ -2595,9 +2870,11 @@ function openHelpDialog(words) {
     b.dataset.cat = category;
     b.textContent = label;
     b.addEventListener('click', () => {
+      // The admin's support view draws the person's Help and sends nothing for them (R8): it says whose view it is.
+      if (F.support) { helpDialog.close(); AGM.toast(AGM.catalog.supportWords(F.support), true); return; }
       AGM.outbox.hold('message', { type: 'help', category, text: helpText.value.trim() });
       helpDialog.close();
-      if (!AGM.outbox.online) notify('Help request held — it goes as soon as the connection is back.');
+      if (!AGM.outbox.online) AGM.toast('Help request held — it goes as soon as the connection is back.');
     });
     box.appendChild(b);
   }
@@ -2613,18 +2890,20 @@ function openHelpDialog(words) {
  * request is open it is that request's status chip: "■ Help asked", then "▶ Ana is on the way", read from the request
  * as the hall's record of it changes here (helpUpdate), so the chip says what the hall says, never what was only sent;
  * a request seen resolved here reads "✓ Resolved" for 30 s, and an open one of theirs outranks it. A tap on the chip asks
- * in place, not as a menu, naming the request and what each answer does for everyone: It's sorted (the author's own
- * Resolved), Cancel request (the author's own delete) or Keep it open, the safe choice, where the focus starts; Escape,
- * a tap outside it and the focus moved to another control are Keep it open. The ask goes when its request is resolved
- * or removed, and with the hall.
+ * in place (AGM.ask, right after the chip, so Tab runs from the chip into it and on), not as a menu, naming the request
+ * and what each answer does for everyone: It's sorted (the author's own Resolved), Cancel request (the author's own
+ * delete) or Keep it open, the safe choice, where the focus starts; Escape, a tap outside it and the focus moved to
+ * another control are Keep it open. The ask says what its request says as it changes, and goes when its request is
+ * resolved or removed, and with the hall.
  */
 const HelpChip = (function () {
   const btn = document.getElementById('helpBtn');
   const status = document.getElementById('helpStatus');
   const RESOLVED_MS = 30000;
   const AT_REST = btn.title;
+  const ASK_THEN = 'It\'s sorted marks it resolved for everyone. Cancel request takes it away from everyone. Neither can be undone.';
   let resolved = null;   // this person's request seen resolved on this page: {id, timer}
-  let ask = null;        // the open ask: {box, id, words}
+  let asked = null;      // the request the open ask is about: {id}
   let drawn = '';
 
   /** This person's newest help request that is not resolved, or null. */
@@ -2641,6 +2920,11 @@ const HelpChip = (function () {
     if (m) return ['open', '■', 'Help asked'];
     if (resolved) return ['resolved', '✓', 'Resolved'];
     return ['', '', 'Help'];
+  }
+  /** The ask's words: its request and where it stands, then what each answer does to it for everyone. */
+  function askWords(m) {
+    const h = m.help || { state: 'open' };
+    return [m.category + (m.text ? ': ' + m.text : '') + ' · ' + (h.state === 'coming' ? '▶ ' + (h.by || 'Someone') + ' is on the way' : '■ ' + HELP_WORDS.open), ASK_THEN];
   }
   function draw() {
     if (resolved && !findMessage(resolved.id)) forgetResolved();
@@ -2662,10 +2946,10 @@ const HelpChip = (function () {
       status.textContent = state ? 'Your help request: ' + words : '';
     }
     btn.title = m ? 'Your help request (' + m.category + '): mark it sorted, or cancel it' : AT_REST;
-    if (m) btn.setAttribute('aria-expanded', ask ? 'true' : 'false'); else btn.removeAttribute('aria-expanded');
+    if (m) btn.setAttribute('aria-expanded', asked ? 'true' : 'false'); else btn.removeAttribute('aria-expanded');
     // Its request resolved or gone while the person was in the ask: the focus goes back to the chip, never to the page.
-    if (ask && (!m || m.id !== ask.id)) close(ask.box.contains(document.activeElement));
-    else if (ask) askWords(m);
+    if (asked && (!m || m.id !== asked.id)) { const box = AGM.ask.box(); close(!!box && box.contains(document.activeElement)); }
+    else if (asked) AGM.ask.update({ words: askWords(m) });
   }
   function forgetResolved() {
     if (resolved) clearTimeout(resolved.timer);
@@ -2679,96 +2963,40 @@ const HelpChip = (function () {
     }
     draw();
   }
-  /** The ask names its request and where it stands, then what each answer does to it for everyone. */
-  function askWords(m) {
-    const h = m.help || { state: 'open' };
-    ask.words.textContent = m.category + (m.text ? ': ' + m.text : '') + ' · ' +
-      (h.state === 'coming' ? '▶ ' + (h.by || 'Someone') + ' is on the way' : '■ ' + HELP_WORDS.open);
-  }
-  const ASK_THEN = 'It\'s sorted marks it resolved for everyone. Cancel request takes it away from everyone. Neither can be undone.';
-  function place(box) {
-    const r = btn.getBoundingClientRect();
-    const w = box.offsetWidth;
-    box.style.top = Math.round(r.bottom + 6) + 'px';
-    box.style.left = Math.round(Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))) + 'px';
-  }
   function open(m) {
-    const box = document.createElement('div');
-    box.id = 'helpAsk';
-    box.className = 'chip-ask';
-    box.setAttribute('role', 'dialog');
-    box.setAttribute('aria-modal', 'false');
-    box.setAttribute('aria-labelledby', 'helpAskTitle');
-    const title = document.createElement('p');
-    title.id = 'helpAskTitle';
-    title.className = 'chip-ask-title';
-    title.textContent = 'Your help request';
-    const words = document.createElement('p');
-    words.id = 'helpAskWords';
-    words.className = 'chip-ask-words';
-    const then = document.createElement('p');
-    then.id = 'helpAskThen';
-    then.className = 'chip-ask-then';
-    then.textContent = ASK_THEN;
-    box.setAttribute('aria-describedby', 'helpAskWords helpAskThen');
-    const acts = document.createElement('div');
-    acts.className = 'chip-ask-acts';
-    const act = (label, fn) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'btn';
-      b.textContent = label;
-      b.addEventListener('click', fn);
-      acts.appendChild(b);
-      return b;
-    };
-    act('It\'s sorted', () => { close(true); AGM.outbox.hold('help:respond', { code: ROOM, messageId: m.id, state: 'resolved' }); });
-    act('Cancel request', () => { close(true); AGM.outbox.now('delete', { messageId: m.id }, saidIfNot('Could not cancel the request.')); });
-    const keep = act('Keep it open', () => close(true));
-    box.append(title, words, then, acts);
-    box.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      close(true);
-    });
-    box.addEventListener('focusout', leaves);
-    ask = { box, id: m.id, words };
-    askWords(m);
-    // Right after the chip, so Tab runs from the chip into the ask and on to the header's next control, which closes it.
-    // In the top layer where the popover API is, above every panel of the page; elsewhere fixed in the header's layer.
-    const top = typeof box.showPopover === 'function';
-    if (top) box.setAttribute('popover', 'manual');
-    btn.after(box);
-    if (top) box.showPopover();
-    place(box);
+    const mine = { id: m.id };
+    asked = mine;
     btn.setAttribute('aria-expanded', 'true');
-    btn.setAttribute('aria-controls', 'helpAsk');
-    keep.focus();
+    AGM.ask(btn, { title: 'Your help request', words: askWords(m), choices: [{ answer: 'sorted', label: 'It\'s sorted' }, { answer: 'cancel', label: 'Cancel request' }], no: 'Keep it open' },
+      { opener: btn, after: btn, toggles: true }).then((a) => {
+      if (asked !== mine) return;
+      asked = null;
+      if (btn.hasAttribute('aria-expanded')) btn.setAttribute('aria-expanded', 'false');
+      if (!a.yes || !findMessage(mine.id)) return;
+      if (F.support) { AGM.toast(AGM.catalog.supportWords(F.support), true); return; }
+      if (a.choice === 'sorted') AGM.outbox.hold('help:respond', { code: ROOM, messageId: mine.id, state: 'resolved' });
+      else if (a.choice === 'cancel') AGM.outbox.now('delete', { messageId: mine.id }, saidIfNot('Could not cancel the request.'));
+    });
   }
-  /** Focus gone from the chip and its ask to another control of the page: the ask closes, and the request stays. */
-  function leaves(e) {
-    const to = e.relatedTarget;
-    if (ask && to && !ask.box.contains(to) && !btn.contains(to)) close(false);
-  }
-  /** The ask closes; `focusBack`: the focus returns to the chip (an answer, Escape), not where a tap outside went. */
+  /** The ask closes, its request kept; `focusBack`: the focus returns to the chip (its request gone from under it). */
   function close(focusBack) {
-    if (!ask) return;
-    const { box } = ask;
-    ask = null;
-    box.remove();
-    btn.removeAttribute('aria-controls');
+    if (!asked) return;
+    asked = null;
+    AGM.ask.close();
     if (btn.hasAttribute('aria-expanded')) btn.setAttribute('aria-expanded', 'false');
     if (focusBack && !btn.hidden) btn.focus();
   }
   btn.addEventListener('click', () => {
     const m = openRequest();
     if (!m) { openHelpDialog(''); return; }
-    if (ask) close(true); else open(m);
+    if (asked) close(true); else open(m);
   });
-  btn.addEventListener('focusout', leaves);
-  document.addEventListener('pointerdown', (e) => { if (ask && !ask.box.contains(e.target) && !btn.contains(e.target)) close(false); }, true);
-  window.addEventListener('resize', () => { if (ask) place(ask.box); });
+  // Focus gone from the chip to another control of the page (neither into the ask nor back to the chip): it closes.
+  btn.addEventListener('focusout', (e) => {
+    const to = e.relatedTarget;
+    const box = AGM.ask.box();
+    if (asked && to && !(box && box.contains(to)) && !btn.contains(to)) close(false);
+  });
   return { draw, changed, close };
 })();
 
@@ -2810,7 +3038,7 @@ const Screens = (function () {
       li.className = 'screen-item';
       li.dataset.state = d.state;
       li.dataset.screenId = d.id;
-      li.tabIndex = -1;
+      li.dataset.key = d.id;
       const pick = document.createElement('input');
       pick.type = 'checkbox'; pick.checked = ticked.has(d.id); pick.setAttribute('aria-label', 'Show on ' + d.name);
       pick.onchange = () => { if (pick.checked) ticked.add(d.id); else ticked.delete(d.id); syncAll(); };
@@ -2840,7 +3068,7 @@ const Screens = (function () {
     if ((openOn && openOn.kind === 'screen') || (askOn && askOn.kind === 'screen')) refreshOpenMenu();
   }
   function syncAll() { $('screensAll').checked = list.length > 0 && list.every((d) => ticked.has(d.id)); }
-  function done(words) { return (r) => notify(r && r.ok ? words : (r && r.error) || 'Not changed.', !(r && r.ok)); }
+  function done(words) { return (r) => AGM.toast(r && r.ok ? words : (r && r.error) || 'Not changed.', !(r && r.ok)); }
   const copy = (text, anchor) => copyText(text, 'Link copied.', anchor);
   /** The screens' rows drawn again with the page's facts (its connection, its rights), while the dialog shows them. */
   function redraw() { if (list.length) render(); }
@@ -2869,8 +3097,9 @@ const Screens = (function () {
     if (d) act('screen', el.dataset.action, d, { anchor: door.more || el, node: door.el, opener: el });
   });
   AGM.menu.door($('screenList'), screenDoor);
+  AGM.roving($('screenList'), { item: 'li[data-key]' });
   Object.assign(RUN, {
-    'screen.identify': (d) => AGM.outbox.now('display:identify', { id: d.id }, (r) => notify(r && r.ok ? (r.screens ? 'Showing its name on ' + (r.screens > 1 ? 'its ' + r.screens + ' screens' : 'the screen') + ' for 6 seconds.' : 'No screen has this link open.') : (r && r.error) || 'Not sent.', !(r && r.ok))),
+    'screen.identify': (d) => AGM.outbox.now('display:identify', { id: d.id }, (r) => AGM.toast(r && r.ok ? (r.screens ? 'Showing its name on ' + (r.screens > 1 ? 'its ' + r.screens + ' screens' : 'the screen') + ' for 6 seconds.' : 'No screen has this link open.') : (r && r.error) || 'Not sent.', !(r && r.ok))),
     'screen.only': (d) => { ticked.clear(); ticked.add(d.id); render(); },
     'screen.copy': (d, { anchor }) => copy(location.origin + d.path, anchor),
     'screen.open': (d) => { window.open(d.path, '_blank', 'noopener,noreferrer'); },
@@ -2879,7 +3108,7 @@ const Screens = (function () {
       if (name && name !== d.name) AGM.outbox.now('display:update', { id: d.id, name }, done('Renamed.'));
     },
     'screen.rotate': (d, { anchor }) => AGM.outbox.now('display:rotate', { id: d.id }, (r) => {
-      if (r && r.ok) { copyText(location.origin + r.path, 'New link copied — open it on the screen.', anchor); } else notify((r && r.error) || 'Not changed.', true);
+      if (r && r.ok) { copyText(location.origin + r.path, 'New link copied — open it on the screen.', anchor); } else AGM.toast((r && r.error) || 'Not changed.', true);
     }),
     'screen.remove': (d) => AGM.outbox.now('display:remove', { id: d.id }, done('Removed.')),
   });
@@ -2888,18 +3117,18 @@ const Screens = (function () {
    * Put a content on every ticked screen, in one request however many are ticked; say how many took it (each confirms on
    * its own line when it has shown it) and name the ones it did not reach.
    */
-  function take(content) {
+  function take(content, noneTicked) {
     const ids = list.filter((d) => ticked.has(d.id)).map((d) => d.id);
-    if (!ids.length) { notify('Tick at least one screen.', true); return; }
+    if (!ids.length) { AGM.toast(noneTicked || 'Tick at least one screen.', true); return; }
     const names = new Map(list.map((d) => [d.id, d.name]));   // as ticked, though the list may be re-read meanwhile
     AGM.outbox.now('display:take', { ids, content }, (r) => {
       const results = r && Array.isArray(r.results) ? r.results : [];
-      if (!results.length) { notify((r && r.error) || 'Not sent.', true); return; }
+      if (!results.length) { AGM.toast((r && r.error) || 'Not sent.', true); return; }
       refused.clear();
       for (const x of results) if (!x.ok) refused.set(x.id, x.error || 'not sent');
       const sent = results.length - refused.size;
-      if (!refused.size) notify('Sent to ' + sent + ' screen' + (sent === 1 ? '' : 's') + ' — each shows ✓ once it is on screen.');
-      else notify('Sent to ' + sent + ' of ' + results.length + ' screens. Not to ' + Array.from(refused.keys(), (id) => names.get(id) || id).join(', ') + ': ' + refused.values().next().value, true);
+      if (!refused.size) AGM.toast('Sent to ' + sent + ' screen' + (sent === 1 ? '' : 's') + ' — each shows ✓ once it is on screen.');
+      else AGM.toast('Sent to ' + sent + ' of ' + results.length + ' screens. Not to ' + Array.from(refused.keys(), (id) => names.get(id) || id).join(', ') + ': ' + refused.values().next().value, true);
       render();
     });
   }
@@ -2909,7 +3138,7 @@ const Screens = (function () {
   function open() {
     if (dlg.open) return;
     holdingChoice = null;
-    dlg.showModal();
+    AGM.openDialog(dlg);
   }
   function offer(msg) {
     pending = msg;
@@ -2936,7 +3165,7 @@ const Screens = (function () {
     const text = $('screenMsgText').value.trim();
     const tone = $('screenMsgTone').value;
     if ($('screenMsgUnder').checked) take({ kind: 'countdown', text, tone });
-    else if (!text) notify('Type the message first.', true);
+    else if (!text) AGM.toast('Type the message first.', true);
     else take({ kind: 'message', text, tone });
   });
   $('pendingShow').addEventListener('click', () => {
@@ -2947,9 +3176,9 @@ const Screens = (function () {
   $('pendingCancel').addEventListener('click', () => { pending = null; renderPending(); });
   $('addScreenBtn').addEventListener('click', () => {
     const name = $('newScreenName').value.trim();
-    if (!name) { notify('Name the screen first.', true); return; }
+    if (!name) { AGM.toast('Name the screen first.', true); return; }
     AGM.outbox.now('display:create', { code: ROOM, name }, (r) => {
-      if (!r || !r.ok) { notify((r && r.error) || 'Not added.', true); return; }
+      if (!r || !r.ok) { AGM.toast((r && r.error) || 'Not added.', true); return; }
       $('newScreenName').value = '';
       ticked.add(r.display.id);
       copyText(location.origin + r.display.path, r.display.name + ' added — its link is copied: open it on that screen.', $('addScreenBtn'));
@@ -2961,7 +3190,9 @@ const Screens = (function () {
     AGM.outbox.now('display:hallHolding', { code: ROOM, image }, (r) => { if (r && r.ok) { holding = image; holdingChoice = null; } done('Holding image saved.')(r); });
   });
   socket.on('displays:changed', ({ code } = {}) => { if (code === ROOM && CAN_SCREENS) load(); });
-  return { load, offer, redraw, of: screenOf };
+  // The countdown on the ticked screens (every screen, until a person unticks one in Screens): the stage chip's act.
+  const countdown = () => take({ kind: 'countdown' }, 'No screen is ticked in Screens: tick the ones for the countdown there.');
+  return { load, offer, redraw, of: screenOf, countdown };
 })();
 
 // ---------------- Send to Stagewatch: where a message goes — sent now (the speaker's screen), or asked of the operator ----------------
@@ -2987,7 +3218,7 @@ const ToStagewatch = (function () {
     $('swText').value = said.slice(0, said.length > 500 && /[\uD800-\uDBFF]/.test(said.charAt(499)) ? 499 : 500);
     $('swError').hidden = true;
     socket.emit('stage:targets', {}, (r) => {
-      if (!r || !r.ok) { notify((r && r.error) || 'Stagewatch is not linked to this hall.', true); return; }
+      if (!r || !r.ok) { AGM.toast((r && r.error) || 'Stagewatch is not linked to this hall.', true); return; }
       caps = r;
       $('swWhich').textContent = r.linked ? 'To ' + (r.title || 'this hall\'s Stagewatch') + '.'
         : r.cert ? 'Stagewatch\'s certificate changed — nothing can be sent until an admin accepts it (Halls → Set up, or Admin → Show network).'
@@ -3001,7 +3232,7 @@ const ToStagewatch = (function () {
         const o = document.createElement('option'); o.value = t.id; o.textContent = t.label; sel.appendChild(o);
       }
       sync();
-      dlg.showModal();
+      AGM.openDialog(dlg);
     });
   }
   const fail = (text) => { $('swError').textContent = text; $('swError').hidden = false; };
@@ -3010,7 +3241,7 @@ const ToStagewatch = (function () {
     AGM.outbox.now('stage:send', { text: $('swText').value.trim(), urgency: $('swUrg').value, messageId: source && source.text === $('swText').value.trim() ? source.id : undefined }, (res) => {
       if (!res || !res.ok) return fail((res && res.error) || 'Not sent.');
       dlg.close();
-      notify(res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.');
+      AGM.toast(res.stage === 'applied' ? 'On the speaker\'s screen — their acknowledgement shows on the message.' : 'Stagewatch took it — the speaker\'s acknowledgement shows on the message.');
     });
   });
   $('swForm').addEventListener('submit', (e) => {
@@ -3020,7 +3251,7 @@ const ToStagewatch = (function () {
     AGM.outbox.now('stage:propose', { text, destination: $('swDest').value, urgency: $('swUrg').value, messageId: source && source.text === text ? source.id : undefined }, (res) => {
       if (!res || !res.ok) return fail((res && res.error) || 'Not sent.');
       dlg.close();
-      notify('Asked — the show caller approves it in Stagewatch; its state shows on the message.');
+      AGM.toast('Asked — the show caller approves it in Stagewatch; its state shows on the message.');
     });
   });
   return { open };

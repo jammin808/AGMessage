@@ -42,13 +42,18 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   after a refusal at a busy moment, at the pace the server gives ("Busy — trying again in 3 s."). The admin page's
   health reads the server's true delay and how busy it is, and keeps the peaks of each show day for 14 days, through a
   restart or a shutdown, so one look after a show says how it ran.
-- **Right-click.** Every act on a message, on a file in the panel and on a screen is on its ⋯, its right-click and
-  Shift+F10 (or the menu key) — one list, drawn from one catalogue, so the buttons and the menus never disagree. A
-  message keeps two acts on its row: ↩ Reply and the one the seat uses most (Ask the operator, Send now or Show on
-  screens). What a seat may not do is not offered; what it cannot do now is greyed with the reason. Keys on a message
-  with the focus: R reply, E react, F send to, P pin (with Undo), D download, Enter look, Delete delete. What reaches
-  other people for good asks in place, naming what it acts on: no page opens a browser dialog, which would pause the
-  page and drop its connection. Shift+right-click keeps the browser's own menu. The admin page, the halls board and the
+- **Right-click.** Every act on a message, on a file in the panel, on a screen, on a person (a sender's name, a row of
+  People: @ Mention), on the composer's Send (✨ Draft a reply, 🔥 Priority, Attach a file…, Cancel the reply) and on the
+  header's code and countdown chips (Copy guest code, Copy join link; Speaker's screen…, Show the countdown on screens)
+  is on its ⋯ (a chip is its own), its right-click and Shift+F10 (or the menu key) — one list, drawn from one
+  catalogue, so the buttons and the menus never disagree. A message keeps two acts on its row: ↩ Reply and the one the
+  seat uses most (Ask the operator, Send now or Show on screens). What a seat may not do is not offered; what it cannot
+  do now is greyed with the reason. Keys on a message with the focus: R reply, E react, F send to, P pin (with Undo), D
+  download, Enter look, Delete delete. The hall page's first Tab is a skip link to the message box (or the messages), its
+  feed is one Tab stop (↑ and ↓ between messages; ↑ from an empty message box goes to the newest, Escape comes back),
+  and what an act did is said in one toast a screen reader hears. What reaches other people for good asks in place,
+  naming what it acts on: no page opens a browser dialog, which would pause the page and drop its connection.
+  Shift+right-click keeps the browser's own menu. The admin page, the halls board and the
   Accounts page act the same way: a hall, a person, a message of the live feed, a linked Patterns or PlayMap, the
   internet link, a help request, an account and an entry of the audit log each have their ⋯, right-click and
   Shift+F10, and each of these pages has a skip link and lists that are one Tab stop (↑ and ↓ between their rows).

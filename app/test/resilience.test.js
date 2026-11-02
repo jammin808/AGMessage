@@ -566,7 +566,7 @@ test('guard rails: the stylesheet draws with its tokens: hex colours only in the
   // out lowers HEX_CAP with them, and none raises it (as the coverage gate only goes up). Muted words and icons read in
   // --c-ink-muted, at 4.5:1 for words and 3:1 for icons in both themes; an opacity between 0 and 1 fades whatever
   // is under it below that, so none is written (a toast or a switch hidden at 0 and shown at 1 is not muted ink).
-  const HEX_CAP = 275;
+  const HEX_CAP = 265;
   const css = fs.readFileSync(path.join(ROOT, 'public', 'styles.css'), 'utf8');
   const { outside, tokens } = hexOutsideTokens(css);
   assert.deepEqual(tokens, { ':root': 1, 'html[data-theme="dark"]': 1 }, 'the tokens are defined in one :root block and redefined in one dark block');
@@ -584,23 +584,46 @@ test('guard rails: the stylesheet draws with its tokens: hex colours only in the
 // ---------------------------------------------------------------- the page floor (Safari 14.1, Chrome 84; docs/DEVICES.md)
 /** `.showModal(` calls in a source: a dialog opened past AGM.openDialog, which a browser below Safari 15.4 cannot open. */
 const showModalCalls = (src) => (src.match(/\.showModal\s*\(/g) || []).length;
-test('guard rails: a dialog opens through AGM.openDialog, which still opens it where showModal() is missing; the sites not yet moved are counted, each with its reason', () => {
-  // common.js's one call is the helper's own. Each other page script holds none, but for the sites a later unit moves,
-  // counted here with the unit that moves them: a new bare call fails, and a moved one lowers its count.
-  const NOT_YET = {
-    'public/app.js': { count: 3, why: 'the hall page\'s Help, Screens & pages and Stagewatch dialogs: the hall page loads common.js from unit 3c, which moves these three onto AGM.openDialog (the plan\'s §0.6)' },
-  };
+test('guard rails: a dialog opens through AGM.openDialog, which still opens it where showModal() is missing; no page script calls showModal() itself', () => {
+  // common.js's one call is the helper's own; every other page script, the hall page's included, holds none.
   const counted = {};
   for (const f of pageScripts()) {
     const n = showModalCalls(fs.readFileSync(path.join(ROOT, f), 'utf8'));
     if (n) counted[f] = n;
   }
-  const allowed = { 'public/common.js': 1, ...Object.fromEntries(Object.entries(NOT_YET).map(([f, x]) => [f, x.count])) };
-  assert.deepEqual(counted, allowed, 'showModal() only in common.js\'s AGM.openDialog, and the counted sites not yet moved (' + Object.entries(NOT_YET).map(([f, x]) => f + ': ' + x.why).join('; ') + ')');
+  assert.deepEqual(counted, { 'public/common.js': 1 }, 'showModal() only in common.js\'s AGM.openDialog');
+  // The hall page and the admin page load common.js before their own scripts (deferred alike on the hall page), so
+  // AGM.openDialog and the one toast are there when they run.
+  for (const [page, own] of [['app.html', '/app.js'], ['admin.html', '/admin.js']]) {
+    const scripts = [...fs.readFileSync(path.join(ROOT, 'public', page), 'utf8').matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
+    assert.ok(scripts.indexOf('/common.js') > 0 && scripts.indexOf('/common.js') < scripts.indexOf(own), page + ' loads common.js before ' + own);
+  }
   const common = fs.readFileSync(path.join(ROOT, 'public', 'common.js'), 'utf8');
   assert.match(common, /function openDialog\(dlg\) \{\s*if \(!dlg\) return;\s*if \(typeof dlg\.showModal === 'function'\) \{ dlg\.showModal\(\); return; \}/, 'common.js calls showModal() only behind its probe, in AGM.openDialog');
   // The read sees a call however it is spaced, and nothing that only names it.
   assert.equal(showModalCalls('d.showModal(); $("x").showModal (); typeof d.showModal === "function"; d.showModalLater(); // showModal'), 2);
+});
+
+/** What makes a toast of a page's own in a source (comments out): the toast's class or its id named. A page's other status
+ * regions (a chip's words to a screen reader, a dialog's progress) are no toast: each says one thing in its own place. */
+const ownToast = (src) => {
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+  return [/['"`]agm-toast\b/, /['"`]agmToast['"`]/].filter((re) => re.test(code)).map(String);
+};
+test('guard rails: a page has one toast, AGM.toast (common.js), and no page script makes a toast of its own', () => {
+  const own = {};
+  for (const f of pageScripts()) {
+    const found = ownToast(fs.readFileSync(path.join(ROOT, f), 'utf8'));
+    if (found.length) own[f] = found;
+  }
+  assert.deepEqual(Object.keys(own), ['public/common.js'], 'only common.js makes the toast (' + JSON.stringify(own) + ')');
+  // The stylesheet draws the one toast: `.agm-toast` is its only toast class.
+  const css = fs.readFileSync(path.join(ROOT, 'public', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.deepEqual([...new Set(css.match(/\.[a-z-]*toast[a-z-]*/g))].sort(), ['.agm-toast', '.toast-undo']);
+  // The read sees a toast made by hand, and nothing that only calls the one toast or says the word in a comment.
+  assert.equal(ownToast("const t = document.createElement('div'); t.className = 'agm-toast';").length, 1);
+  assert.equal(ownToast("box.setAttribute('role', 'status'); box.id = \"agmToast\"; box.className = `agm-toast show`;").length, 2);
+  assert.deepEqual(ownToast("AGM.toast('Copied.'); // a toast ('agm-toast') of the page's own is refused"), []);
 });
 
 /** A stylesheet's style rules, comments taken out: each with its selector, its declarations in order, the at-rules it sits in, and whether it holds a rule of its own (nesting). */

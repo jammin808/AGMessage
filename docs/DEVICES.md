@@ -64,12 +64,12 @@ Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built
 
 | Feature | From (MDN) | Where | The fallback | Today |
 |---|---|---|---|---|
-| `<dialog>` and `showModal()` | `api.HTMLDialogElement`: Safari 15.4, Chrome 37 | every dialog | `AGM.openDialog(dlg)` (`app/public/common.js`): `showModal()` where it exists. Elsewhere the dialog gets its `open` attribute and is fixed in the viewport, centred as a browser centres a modal dialog (its four sides at 0, auto margins, `height: fit-content`; no transform, so a menu fixed inside it is placed by the viewport as in the top layer), above a backdrop element in `::backdrop`'s colour; the focus goes to its first control, stays inside it and goes back to the opener when it closes; Escape closes it; the rest of the page is `aria-hidden` while it is open. A browser with no `<dialog>` at all is given the dialog's `close()`, `open` and `returnValue`, its `method="dialog"` forms' closing (which would otherwise send the form to the page's address) and the submit event's `submitter` (which came with it) | the halls board's four dialogs, the Accounts page's two and its Export…, and the admin page's Accept and Split open through it; their Cancel is a plain button, so Enter in a field saves. The hall page's three (Help, Screens & pages, the Stagewatch dialog) still call `showModal()` until the unit that moves the hall page onto `common.js` (3c): until then, below Safari 15.4 they do not open |
+| `<dialog>` and `showModal()` | `api.HTMLDialogElement`: Safari 15.4, Chrome 37 | every dialog | `AGM.openDialog(dlg)` (`app/public/common.js`): `showModal()` where it exists. Elsewhere the dialog gets its `open` attribute and is fixed in the viewport, centred as a browser centres a modal dialog (its four sides at 0, auto margins, `height: fit-content`; no transform, so a menu fixed inside it is placed by the viewport as in the top layer), above a backdrop element in `::backdrop`'s colour; the focus goes to its first control, stays inside it and goes back to the opener when it closes; Escape closes it; the rest of the page is `aria-hidden` while it is open. A browser with no `<dialog>` at all is given the dialog's `close()`, `open` and `returnValue`, its `method="dialog"` forms' closing (which would otherwise send the form to the page's address) and the submit event's `submitter` (which came with it) | every dialog opens through it: the halls board's four, the Accounts page's two and its Export…, the admin page's Accept and Split, and the hall page's three (Help, Screens & pages, the Stagewatch dialog); their Cancel is a plain button, so Enter in a field saves |
 | Screen Wake Lock | `api.WakeLock`: Safari 16.4 (iOS and iPadOS 16.4 in a Safari tab, from the Home Screen from 18.4), Chrome 84, Samsung Internet 14.0; only in a secure context (HTTPS) | the Board's simple view; screens keep their own (`display.js`) | `AGM.awake(say)`: the lock where it exists, asked again each time the page is shown. Where it cannot be had, `say` hears the cause and its words: not a secure context, "This device may sleep: open AGMessage over HTTPS."; no Wake Lock in this browser, "This device may sleep: set its screen to stay on in its own settings (Auto-Lock or Screen timeout)."; refused with `NotAllowedError` (the platform could not take it, for example on low battery), or taken back while the page is shown, "This device would not stay awake (its battery may be low): plug it in." | the helper; the simple view's sheet draws its words with the chat view's unit (20a) |
 | A form's `requestSubmit()` | `api.HTMLFormElement.requestSubmit`: Safari 16, Chrome 76 | Return in the hall page's composer | behind its probe; where it is missing, the form's own submit button is clicked, which submits it the same way. A bare call fails the lint | in `app.js` |
 | `requestIdleCallback` | `api.Window.requestIdleCallback`: no Safari | a first open's older messages (unit 32) | `AGM.idle(fn)`: `requestIdleCallback` where it exists, else a timer at once; either way each chunk's deadline gives at most 8 ms by `performance.now()`. A bare call fails the lint | the helper |
-| Popover | `api.HTMLElement.showPopover`: Safari 17, Chrome 114 | the Help chip's ask; the hall page's menus and their asks | where the popover API is missing an ask or a menu is fixed at the menus' layer (`--z-menu`), and one opened from inside an open modal dialog (Screens) is mounted in that dialog, which makes everything outside it inert; a menu is never popover-only | the Help chip's ask; the menus and asks of a message, a file and a screen (`menus.js`) |
-| A long press | `api.Element.contextmenu_event`: iOS fires none on a long press; Chrome on Android and Samsung Internet do | menus | ⋯ is the touch door on every device; where a long press fires `contextmenu` the same menu opens in the full view; the simple view opens none; AGMessage runs no timer of its own; at 480 px or less with a coarse pointer a menu is a sheet at the screen's foot, and a submenu drills in with "‹ Back" | the menus of a message, a file and a screen (`menus.js`) |
+| Popover | `api.HTMLElement.showPopover`: Safari 17, Chrome 114 | the Help chip's ask; every page's menus and their asks | where the popover API is missing an ask or a menu is fixed at the menus' layer (`--z-menu`), and one opened from inside an open modal dialog (Screens) is mounted in that dialog, which makes everything outside it inert; a menu is never popover-only | the menus and asks of every page (`menus.js`), the Help chip's ask among them |
+| A long press | `api.Element.contextmenu_event`: iOS fires none on a long press; Chrome on Android and Samsung Internet do | menus | ⋯ is the touch door on every device (a chip and a sender's name are their own); where a long press fires `contextmenu` the same menu opens in the full view; the simple view opens none; AGMessage runs no timer of its own; at 480 px or less with a coarse pointer a menu is a sheet at the screen's foot, and a submenu drills in with "‹ Back" | the menus of every page (`menus.js`) |
 | `dvh` | `css.types.length.dvh`: Safari 15.4, Chrome 108 | the hall page's height, the dialogs' and Screens & pages' height | the same property in `vh` first | in `styles.css` |
 | `:focus-visible` | `css.selectors.focus-visible`: Safari 15.4, Chrome 86 | the buttons' focus ring | in a rule of its own: a browser that does not know it drops the whole rule, so the fields' `:focus` ring stands apart and holds | in `styles.css` |
 | `:has()` | `css.selectors.has`: Safari 15.4, Chrome 105 | the chosen seat on the sign-in page | a highlight only: the seat's radio stays visible | in `styles.css` |
@@ -84,8 +84,8 @@ Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built
 - **The lint** (`eslint.config.mjs`): a bare `requestIdleCallback` or `cancelIdleCallback` in a page script, a
   `requestSubmit()` call not behind its probe, and any read of the user agent however it is reached
   (`window.navigator.userAgent`, `userAgentData`, a computed key, a destructuring) fail; `theme-init.js` parses as ES5. `test/lint-rules.test.js` holds the config to each.
-- **`test/resilience.test.js`:** `.showModal(` appears only in `common.js` (`AGM.openDialog`, behind its probe), but for
-  the hall page's three, counted with the unit that moves them. `styles.css` is read for each feature above the floor:
+- **`test/resilience.test.js`:** `.showModal(` appears only in `common.js` (`AGM.openDialog`, behind its probe), which
+  the hall page and the admin page load before their own scripts. `styles.css` is read for each feature above the floor:
   a `dvh`, `svh` or `lvh` value follows the same property in `vh`; `:focus-visible` and `:has(` never share a selector
   list with a selector the floor reads; `color-mix(`, `light-dark(` and `text-wrap` follow a plain declaration of the
   same property or sit inside `@supports`, as a rule inside `@container` must; an `inset` follows `top`, `right`,
@@ -100,7 +100,9 @@ Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built
   `requestSubmit()`, the halls board's New hall opens through `AGM.openDialog`'s own, fixed in view above its backdrop
   with the focus in it and the page hidden from a screen reader; Escape closes it and gives the focus back; Enter in its
   name makes the hall and closes it; `AGM.idle` runs on its timer; `AGM.awake` says the settings words; no script error.
-  The hall page in that hall sends by Return, taken once, with no script error. With no `<dialog>` at all beside that,
+  The hall page in that hall sends by Return, taken once, with no script error; its Help opens through
+  `AGM.openDialog`'s own with its heading focused, a category sends it and closes it with the focus back on Help, and
+  the chip's ask opens in place (no popover API) with Keep it open focused. With no `<dialog>` at all beside that,
   the Accounts page's Add a person opens, its Cancel closes it on the page and saves nothing, Escape closes it, Enter in
   a field submits through Save with Save as its submitter, and Export… opens and closes.
 - **The smoke's leg below the floor:** without `WeakRef`, the sign-in page, the halls board, the Accounts page, the admin
@@ -109,9 +111,9 @@ Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built
   nowhere.
 - **Not in CI:** Safari, Samsung Internet and WebView. Playwright's WebKit is refused: it would be a new dev dependency,
   and it is not the older iPadOS Safari this answer is about. The legs take features away in Chromium; the walk runs
-  the real browsers. The device legs (a phone's and a tablet's viewport with touch), the floor leg's Help and menu steps,
-  the sheet's words and a first open's older messages through `AGM.idle` come with the units that build what they test
-  (3a, 3c, 20a, 32).
+  the real browsers. The device legs (a phone's and a tablet's viewport with touch), the floor leg's menu steps, the
+  sheet's words and a first open's older messages through `AGM.idle` come with the units that build what they test
+  (20a, 32).
 
 ## 5. The walk (before 0.6.0 is tagged)
 

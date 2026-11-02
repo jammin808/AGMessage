@@ -19,14 +19,14 @@
 // selection inside the object, on a link (but an object's own link, which takes the object's menu), and always with
 // Shift+right-click.
 //
-// AGM.roving(list, {item}) makes a list's objects one tab stop, moved through with the arrows, Home and End. AGM.acts
+// AGM.roving(list, {item, start, skip}) makes a list's objects one tab stop, moved through with the arrows, Home and End. AGM.acts
 // is a page's runner of the catalogue's acts: what each act does is the page's (its runners), and the rest — the bar, the
 // ⋯, a key, right-click and Shift+F10, the ask before an act, an open menu kept in step — is the same on every page.
 //
 // AGM.ask(anchor, spec) is a non-modal role=dialog anchored to the object, labelled by its title, naming the object and
 // what follows; its buttons are verbs, the focus starts on the safe one (or the first field), and Escape, a tap outside it
 // and the focus moved away are its "no". One is open at a time: opening another answers the first "no". It answers a
-// promise: {yes, values}.
+// promise: {yes, values}, and with more than one way to say yes (`choices`), which (`choice`).
 (function () {
   'use strict';
 
@@ -102,6 +102,8 @@
     b.addEventListener('pointerenter', () => hover(r));
     return r;
   }
+  /** A named key as a menu shows it beside its item (as keyboards print it). */
+  const KEY_WORDS = { Escape: 'Esc' };
   /** A row says what its item says now: its words, its state and why it cannot run. Its place never changes. */
   function draw(r, item) {
     r.item = item;
@@ -115,7 +117,7 @@
     r.parts.icon.textContent = item.icon || '';
     r.parts.label.textContent = item.label;
     b.setAttribute('aria-label', item.label);
-    r.parts.key.textContent = item.key || '';
+    r.parts.key.textContent = KEY_WORDS[item.key] || item.key || '';
     // A disabled item says why on its second line; a row that is its own reason ("Looking…") says it once.
     const why = item.disabled && item.disabled !== item.label ? item.disabled : item.held || '';
     r.parts.why.textContent = why;
@@ -425,12 +427,34 @@
   };
 
   // ---------------------------------------------------------------- an ask in place
+  /** An ask's words: one paragraph, or one for each of a list, each describing it. */
+  const wordsOf = (w) => (Array.isArray(w) ? w : w ? [w] : []).map(String).filter(Boolean);
+  function drawWords(box, list) {
+    for (const old of box.querySelectorAll(':scope > .agm-ask-words')) old.remove();
+    const title = box.querySelector(':scope > .agm-ask-title');
+    const ids = [];
+    let after = title;
+    list.forEach((text, i) => {
+      const w = make('p', 'agm-ask-words', text);
+      w.id = box.id + '-w' + i;
+      ids.push(w.id);
+      after.after(w);
+      after = w;
+    });
+    if (ids.length) box.setAttribute('aria-describedby', ids.join(' ')); else box.removeAttribute('aria-describedby');
+  }
   /**
    * Ask in place before an act: `spec` {title, words, fields: [{name, label, value, max, type, options, hint}], yes, no,
-   * danger}, a field's `type` 'text' (the default), 'password', 'checkbox' (its value true or false) or 'select' (its
-   * `options` [{value, label}]). The answer: {yes: true, values} or {yes: false}. When it closes the focus goes back to
-   * `opts.opener` (the object a key was pressed on, or the button that opened it), else to the anchor it is placed by,
-   * else to `opts.refocus()`.
+   * choices, danger}. `words` is one paragraph or a list of them; a field's `type` 'text' (the default), 'password',
+   * 'checkbox' (its value true or false) or 'select' (its `options` [{value, label}]). `choices` [{answer, label,
+   * danger}] are more than one way to say yes, drawn in their order before `no` in place of `yes`. The answer: {yes:
+   * true, values} (with `choice`, the answer chosen, where there are choices) or {yes: false}. When it closes the focus
+   * goes back to `opts.opener` (the object a key was pressed on, or the button that opened it), else to the anchor it is
+   * placed by, else to `opts.refocus()`. `opts.after`: the element it follows in the page's order (a header's chip), so
+   * Tab runs from that element into it and on; otherwise it is mounted at the end (inside an open dialog that holds the
+   * anchor). `opts.toggles`: a press on `opts.opener` is left to that opener's click, which closes it (a chip that opens and
+   * closes its own ask); without it a press there is outside like any other, the ask's "no", so a ⋯ pressed again under
+   * an ask opened from its menu never leaves the ask open beneath the menu it opens.
    */
   function ask(anchor, spec, opts) {
     if (asking) asking.finish(false, false);
@@ -445,12 +469,7 @@
     title.id = id + '-t';
     box.setAttribute('aria-labelledby', title.id);
     box.appendChild(title);
-    if (s.words) {
-      const w = make('p', 'agm-ask-words', s.words);
-      w.id = id + '-w';
-      box.setAttribute('aria-describedby', w.id);
-      box.appendChild(w);
-    }
+    drawWords(box, wordsOf(s.words));
     const inputs = [];
     for (const f of s.fields || []) {
       const type = f.type === 'checkbox' || f.type === 'select' || f.type === 'password' ? f.type : 'text';
@@ -486,18 +505,24 @@
     const no = make('button', 'btn', s.no || 'Cancel');
     no.type = 'button';
     no.dataset.answer = 'no';
-    const yes = make('button', 'btn ' + (s.danger ? 'danger' : 'primary'), s.yes || 'OK');
-    yes.type = 'button';
-    yes.dataset.answer = 'yes';
-    acts.append(no, yes);
+    const choices = Array.isArray(s.choices) && s.choices.length ? s.choices : null;
+    const yeses = (choices || [{ answer: 'yes', label: s.yes || 'OK', danger: s.danger, primary: true }]).map((c) => {
+      const b = make('button', 'btn' + (c.danger ? ' danger' : c.primary ? ' primary' : ''), c.label);
+      b.type = 'button';
+      b.dataset.answer = String(c.answer);
+      return b;
+    });
+    // The safe answer last where there are choices (as their words read: do this, do that, or keep it), else first.
+    if (choices) acts.append(...yeses, no); else acts.append(no, ...yeses);
     box.appendChild(acts);
     return new Promise((resolve) => {
       let done = false;
-      const finish = (said, focusBack) => {
+      const finish = (said, focusBack, choice) => {
         if (done) return;
         done = true;
         if (asking && asking.box === box) asking = null;
         document.removeEventListener('pointerdown', outside, true);
+        window.removeEventListener('resize', replace);
         unmount(box);
         if (focusBack) {
           const back = [o.opener, anchor].find((n) => n && n.isConnected && typeof n.focus === 'function');
@@ -506,21 +531,27 @@
         }
         const values = {};
         for (const i of inputs) values[i.name] = i.type === 'checkbox' ? i.checked : i.value.trim();
-        resolve(said ? { yes: true, values } : { yes: false });
+        resolve(!said ? { yes: false } : choices ? { yes: true, choice, values } : { yes: true, values });
       };
-      const outside = (e) => { if (!box.contains(e.target)) finish(false, false); };
+      const opensIt = (t) => !!(o.toggles && o.opener && o.opener.contains && o.opener.contains(t));
+      const outside = (e) => { if (!box.contains(e.target) && !opensIt(e.target)) finish(false, false); };
+      const replace = () => place(box, anchor ? { anchor } : { x: 16, y: 16 });
       asking = { box, anchor, finish };
       no.addEventListener('click', () => finish(false, true));
-      yes.addEventListener('click', () => finish(true, true));
+      for (const b of yeses) b.addEventListener('click', () => finish(true, true, b.dataset.answer));
       box.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false, true); return; }
         // Enter in a typed field answers yes; on a tick or a choice it does what it does there, never yes.
-        if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox' && !e.isComposing) { e.preventDefault(); finish(true, true); }
+        if (e.key === 'Enter' && !choices && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox' && !e.isComposing) { e.preventDefault(); finish(true, true); }
       });
-      box.addEventListener('focusout', (e) => { const to = e.relatedTarget; if (to && !box.contains(to)) finish(false, false); });
+      box.addEventListener('focusout', (e) => { const to = e.relatedTarget; if (to && !box.contains(to) && !opensIt(to)) finish(false, false); });
       document.addEventListener('pointerdown', outside, true);
-      mount(box, anchor);
-      place(box, anchor ? { anchor } : { x: 16, y: 16 });
+      window.addEventListener('resize', replace);
+      if (o.after && o.after.isConnected) {
+        o.after.after(box);
+        if (typeof box.showPopover === 'function') { box.setAttribute('popover', 'manual'); box.showPopover(); }
+      } else mount(box, anchor);
+      replace();
       (firstField || no).focus();
       if (firstField && firstField.tagName === 'INPUT' && typeof firstField.select === 'function') firstField.select();
     });
@@ -528,38 +559,86 @@
   ask.isOpen = () => !!asking;
   /** Answer the open ask "no" (its object is gone, or the page left the hall). */
   ask.close = () => { if (asking) asking.finish(false, false); };
+  /** The open ask says what its object says now: its title and words drawn again in place, its buttons and focus kept. */
+  ask.update = (spec) => {
+    if (!asking || !spec) return;
+    const box = asking.box;
+    if (typeof spec.title === 'string') box.querySelector(':scope > .agm-ask-title').textContent = spec.title;
+    if (spec.words !== undefined) drawWords(box, wordsOf(spec.words));
+  };
+  /** The element of the open ask, or null. */
+  ask.box = () => (asking ? asking.box : null);
 
   // ---------------------------------------------------------------- a list, one tab stop
   const CONTROL = 'a[href], button, input, select, textarea, [tabindex]';
   /**
-   * AGM.roving(list, {item}): the objects of `list` that match `item` are one tab stop. The current one (the first, until
-   * the focus has been in another) takes Tab; ↑ and ↓ move between them, Home and End to the first and the last; on a
-   * focused object Tab goes on into its own controls, and the controls of the others are left out of the tab order, so a
-   * list of a hundred rows is passed in one Tab. Rows drawn again keep the current one by its `data-key`. Returns
-   * {refresh()}.
+   * AGM.roving(list, {item, start, skip}): the objects of `list` that match `item` are one tab stop. The current one
+   * takes Tab: the one the focus was last in, else the first (`start: 'last'`: the newest, for a feed, so a Tab into it
+   * lands where the reader is and nothing scrolls away); ↑ and ↓ move between them, Home and End to the first and the
+   * last; on a focused object Tab goes on into its own controls, and the controls of the others are left out of the tab
+   * order (each given back its own tabindex when its object is current again), so a list of a hundred rows is passed in
+   * one Tab. An object that matches `skip` (one drawn elsewhere, hidden here) is passed over. Rows drawn again keep the
+   * current one by its `data-key`. What is drawn later is set as it lands, each object once: a change reads the list once
+   * to place its stop and never sets it whole again. Returns {refresh(), focus(which)}: `which` is 'last', 'first' or 'current'.
    */
-  function roving(list, { item }) {
+  function roving(list, { item, start = 'first', skip = '' }) {
     let current = '';   // the current object's data-key
-    const all = () => [...list.querySelectorAll(item)];
+    let stop = null;    // the object that holds the list's tab stop now
+    const counts = (el) => !skip || !el.matches(skip);
+    const every = () => [...list.querySelectorAll(item)];
+    const all = () => every().filter(counts);
     const keyOf = (el) => el.dataset.key || '';
+    /** A control out of the tab order keeps what its tabindex was, to have it back. */
+    const out = (c) => {
+      if (c.dataset.roving || c.getAttribute('tabindex') === '-1') return;
+      c.dataset.roving = c.hasAttribute('tabindex') ? 't' + c.getAttribute('tabindex') : 'none';
+      c.setAttribute('tabindex', '-1');
+    };
+    const back = (c) => {
+      const was = c.dataset.roving;
+      if (!was) return;
+      if (was === 'none') c.removeAttribute('tabindex'); else c.setAttribute('tabindex', was.slice(1));
+      delete c.dataset.roving;
+    };
+    function set(el, on) {
+      const want = on && counts(el) ? '0' : '-1';
+      if (el.getAttribute('tabindex') !== want) el.setAttribute('tabindex', want);
+      for (const c of el.querySelectorAll(CONTROL)) { if (want === '0') back(c); else out(c); }
+    }
+    /** The object that holds the stop: the current one while it is listed, else the first, or the newest. */
+    const pick = (objs) => objs.find((el) => current && keyOf(el) === current) || (start === 'last' ? objs[objs.length - 1] : objs[0]) || null;
+    function moveStop(to) {
+      if (stop && stop !== to && stop.isConnected) set(stop, false);
+      stop = to;
+      if (to) set(to, true);
+    }
     function apply() {
-      const objs = all();
-      if (!objs.length) return;
-      const cur = objs.find((el) => current && keyOf(el) === current) || objs[0];
-      for (const el of objs) {
-        const on = el === cur;
-        if (el.getAttribute('tabindex') !== (on ? '0' : '-1')) el.setAttribute('tabindex', on ? '0' : '-1');
-        for (const c of el.querySelectorAll(CONTROL)) {
-          if (on && c.dataset.roving) { c.removeAttribute('tabindex'); delete c.dataset.roving; }
-          else if (!on && !c.dataset.roving && c.getAttribute('tabindex') !== '-1') { c.setAttribute('tabindex', '-1'); c.dataset.roving = '1'; }
+      const cur = pick(all());
+      for (const el of every()) if (el !== cur) set(el, false);
+      stop = null;
+      moveStop(cur);
+    }
+    /** What changed: each object drawn (or drawn into, or shown or hidden) set as it is now, then the stop placed. */
+    function changed(records) {
+      const touched = new Set();
+      for (const r of records) {
+        const nodes = r.type === 'childList' ? r.addedNodes : [r.target];
+        for (const n of nodes) {
+          if (n.nodeType !== 1) continue;
+          const owner = n.closest(item);
+          if (owner && list.contains(owner)) touched.add(owner);
+          if (r.type === 'childList') for (const o of n.querySelectorAll(item)) touched.add(o);
         }
       }
+      const cur = pick(all());
+      for (const el of touched) if (el !== cur) set(el, false);
+      if (cur !== stop || touched.has(cur)) moveStop(cur);
     }
     list.addEventListener('focusin', (e) => {
       const el = e.target.closest && e.target.closest(item);
-      if (!el || !list.contains(el) || keyOf(el) === current) return;
+      if (!el || !list.contains(el) || !counts(el) || keyOf(el) === current) return;
       current = keyOf(el);
-      apply();
+      moveStop(el);
     });
     list.addEventListener('keydown', (e) => {
       if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !e.target.matches || !e.target.matches(item)) return;
@@ -570,13 +649,25 @@
       e.preventDefault();
       const next = objs[Math.max(0, Math.min(objs.length - 1, to))];
       current = keyOf(next);
-      apply();
+      moveStop(next);
       next.focus();
     });
-    // Rows drawn or drawn again: the tab order is set once the list has settled, in the same task.
-    new MutationObserver(apply).observe(list, { childList: true, subtree: true });
+    // Rows drawn, drawn again, shown or hidden: set once the list has settled, in the same task.
+    new MutationObserver(changed).observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'data-pinned'] });
     apply();
-    return { refresh: apply };
+    return {
+      refresh: apply,
+      /** Focus an object of the list (the newest, the first, or the current one) and make it current; false when there is none. */
+      focus(which) {
+        const objs = all();
+        const el = which === 'last' ? objs[objs.length - 1] : which === 'first' ? objs[0] : pick(objs);
+        if (!el) return false;
+        current = keyOf(el);
+        moveStop(el);
+        el.focus();
+        return true;
+      },
+    };
   }
 
   // ---------------------------------------------------------------- a page's acts

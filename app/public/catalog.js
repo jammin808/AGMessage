@@ -20,6 +20,10 @@
 // where Stagewatch keeps no show desk), shown wherever the Speaker's screen ▸ door is, and folded there with
 // `msg.sendNow`; a help request's answers are two ids, `msg.helpRespond` (On my way) and `msg.helpResolve` (Resolved),
 // so each can be absent alone. In the simple view (`view: 'simple'`) no object has a menu: its acts are its buttons.
+// A kind drawn on more than one page (`person`: the hall page's People panel and a message's sender, and the admin
+// page's people rows) fits each page's rows only on that page (`page`, a fact of each page's facts), so a page never
+// draws a row whose runner is another page's, and no row is hidden by a right the server would not refuse.
+// An entry with `checked` is a toggle, drawn as a menu item that is checked or not (🔥 Priority).
 (function (root) {
   'use strict';
 
@@ -35,6 +39,8 @@
     linkRefused: 'Stagewatch refused this AGMessage\'s key — nothing can be sent until an admin enters a node key it lists (Halls → Set up).',
     linkCert: 'Stagewatch\'s certificate changed — nothing can be sent until an admin accepts it (Halls → Set up, or Admin → Show network).',
     noAi: 'AI drafts are off: no Anthropic API key — add one under ✨ AI drafts.',
+    aiOff: 'AI drafts are off: they need an Anthropic key (admin) and the internet. Everything else works without them.',
+    noFile: 'Choose a file first.',
   });
   /** The support view's words (R8): every door the person has, drawn, and none of them acts. */
   const supportWords = (name) => 'This is ' + name + '\'s view — act from your own page.';
@@ -57,6 +63,9 @@
   // stage's withheld link).
   const seesFiles = (f) => (f.role === 'research' || f.role === 'board') && !f.viewer;
   const full = (f) => f.view !== 'simple';
+  /** The page an object's row is drawn on: the hall page's facts say 'hall', the admin page's 'admin'. */
+  const onHall = (f) => f.page === 'hall';
+  const onAdmin = (f) => f.page === 'admin';
   const newestPlain = (f) => (f.waiting.plain.length ? f.waiting.plain[f.waiting.plain.length - 1] : '');
   /**
    * The simple view's one response place for a message: each waiting 🔥 message, and the newest waiting plain one (the
@@ -118,8 +127,9 @@
         may: (f) => f.respondHelp, fits: (f, o) => full(f) && o.type === 'help' && helpState(o) === 'open' },
       { id: 'msg.helpResolve', label: 'Resolved', icon: '🏁', group: '1_respond', verb: 'help:respond', mode: 'hold',
         may: (f, o) => f.respondHelp || (f.post && mine(f, o)), fits: (f, o) => full(f) && o.type === 'help' && helpState(o) !== 'resolved' },
+      // AI drafts off (no key, no internet) is the laptop's state, not a right: shown, with why, as the composer's ✨ is.
       { id: 'msg.draft', label: 'Draft a reply', icon: '✨', group: '1_respond', verb: 'ai:draft', mode: 'now',
-        may: (f) => backstage(f) && f.ai, fits: (f, o) => full(f) && !!o.from && o.from.role === 'board' && said(o) },
+        may: (f) => backstage(f), fits: (f, o) => full(f) && !!o.from && o.from.role === 'board' && said(o), ready: (f) => f.ai || WORDS.aiOff },
       // The speaker's screen ▸: its line box, to edit the line and choose its urgency (Ask the operator where Stagewatch
       // keeps a show desk, else Edit, then send), and Send now, which sends the message's words as they are.
       { id: 'msg.speaker', label: (f) => (f.canPropose ? 'Ask the operator…' : 'Edit, then send to the speaker\'s screen…'), short: (f) => (f.canPropose ? 'Ask the operator…' : 'Edit, then send…'),
@@ -183,6 +193,46 @@
         confirm: (f, o) => ({ title: 'Remove ' + o.name + '?', words: 'Its link stops working on every screen that has it open.', yes: 'Remove', no: 'Keep it', danger: true }) },
     ],
 
+    // The composer: its Send button (its one act on the row) and its ⋯, never its text field, where the browser's own
+    // menu stays (spelling, paste). `form` is the composer shown ('director' On stage; 'text', 'action' or 'file'
+    // backstage), `room` the room's name, `file` the name of the file chosen to send ('' for none), `replying` whom the
+    // next send answers ('' for nobody), `priority` whether 🔥 is pressed.
+    compose: [
+      // ✨ A draft of a reply, from the thread and the document on stage, into the composer: a person edits and sends it.
+      // AI drafts off (no key, no internet) is the laptop's state, not a right: shown, with why.
+      { id: 'compose.draft', label: 'Draft a reply', icon: '✨', group: '1_respond', verb: 'ai:draft', mode: 'now',
+        may: (f) => backstage(f), fits: (f, o) => full(f) && o.form === 'text', ready: (f) => f.ai || WORDS.aiOff },
+      { id: 'compose.send', label: (f, o) => (o.room ? 'Send to ' + o.room : 'Send'), icon: '➤', group: '2_send', inline: () => 1, verb: 'message', mode: 'hold',
+        may: (f) => f.post, fits: () => true, ready: (f, o) => (o.form === 'file' && !o.file ? WORDS.noFile : true) },
+      { id: 'compose.priority', label: 'Priority', icon: '🔥', group: '2_send', verb: 'local', mode: 'local', checked: (f, o) => !!o.priority,
+        may: (f) => f.post, fits: () => true },
+      { id: 'compose.attach', label: 'Attach a file…', icon: '📎', group: '2_send', verb: 'local', mode: 'local',
+        may: (f) => f.files, fits: (f, o) => o.form !== 'director' },
+      { id: 'compose.removeFile', label: 'Remove the file', group: '4_manage', verb: 'local', mode: 'local',
+        may: (f) => f.files, fits: (f, o) => o.form === 'file' && !!o.file },
+      { id: 'compose.cancelReply', label: 'Cancel the reply', key: 'Escape', group: '4_manage', verb: 'local', mode: 'local',
+        may: (f) => f.post, fits: (f, o) => !!o.replying },
+    ],
+
+    // The stage chip: the hall's countdown from its Stagewatch, in the full view's header (`live`: the time is Stagewatch's
+    // now; `words`: what the chip says of the link). Its acts are the backstage team's.
+    chip: [
+      // Speaker's screen…: the line box, empty, with Ask the operator and Send now as the seat may (as msg.speaker's).
+      { id: 'chip.speaker', label: 'Speaker\'s screen…', icon: '📝', group: '2_send', verb: 'stage:propose', mode: 'now',
+        may: (f) => backstage(f) && (f.canPropose || f.canSendToStage), fits: (f) => full(f), ready: (f) => f.stageWhy || true },
+      // The countdown on the ticked screens (all of them until Screens says otherwise), while the link is up.
+      { id: 'chip.screens', label: 'Show the countdown on screens', icon: '⧉', group: '2_send', verb: 'display:take', mode: 'now',
+        may: (f) => f.canScreens, fits: (f) => full(f), ready: (f) => f.stageWhy || (f.screens > 0 || WORDS.noScreens) },
+    ],
+
+    // The code chip: the room's guest code (`code`), for a seat that may know it.
+    code: [
+      { id: 'code.code', label: 'Copy guest code', icon: '🔢', group: '3_keep', verb: 'local', mode: 'local',
+        may: (f, o) => f.mayKnowCode && typeof o.code === 'string' && o.code.length > 0, fits: () => true },
+      { id: 'code.copy', label: 'Copy join link', icon: '🔗', group: '3_keep', verb: 'local', mode: 'local',
+        may: (f, o) => f.mayKnowCode && typeof o.code === 'string' && o.code.length > 0, fits: () => true },
+    ],
+
     // ------------------------------------------------------------ the admin page (adminFacts)
     // A hall in the admin page's list, and the hall it watches (its header): `code`, `name`, `watched`. Every act here is
     // the admin page's: whom it admits (`admin`), which every admin:* verb checks again.
@@ -203,24 +253,29 @@
         confirm: (f, o) => ({ title: 'Close hall ' + hallOf(o) + '?', words: 'Everyone in it is sent out and its saved history is deleted. Open its transcript first if you need it.',
           fields: [{ name: 'purge', type: 'checkbox', label: 'Also delete the files shared only in this hall', value: true }], yes: 'Close and delete', no: 'Keep it open', danger: true }) },
     ],
-    // A person in the watched hall (the admin page's half; the hall page's comes with its People panel): `socketId`,
-    // `name`, `role`, `account` (signs in with an account: its seat follows its rights), `linkedRooms`, `hall` (its name).
+    // A person: on the hall page, a row of its People panel and a message's sender (`uid`, `name`, `role`); on the admin
+    // page, a person in the watched hall (`socketId`, `name`, `role`, `account`: signs in with an account, so its seat
+    // follows its rights, `linkedRooms`, `hall`: its name). Each page draws its own half: the hall page's acts are a
+    // seat's in its room, the admin page's the admin's, run on its own socket.
     person: [
+      // @ Mention puts the person's name in this page's composer, to be sent with what follows it.
+      { id: 'person.mention', label: 'Mention', icon: '@', group: '1_respond', verb: 'local', mode: 'local',
+        may: (f) => f.post, fits: (f, o) => onHall(f) && full(f) && typeof o.name === 'string' && o.name.length > 0 && o.uid !== f.uid },
       { id: 'person.seat', label: 'Seat', icon: '💺', group: '4_manage', verb: 'admin:setRole', mode: 'now',
-        may: (f) => f.admin, fits: (f, o) => !o.account,
+        may: (f) => f.admin, fits: (f, o) => onAdmin(f) && !o.account,
         submenu: (f, o) => SEATS.map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: seatOf(o.role) === value })) },
       // Let them forward into ▸ ticks a hall (admin:linkRoom); a hall unticked there, or a chip's ×, is No longer forward
       // into ▸ (admin:unlinkRoom), an act of its own: one verb for one act, each refused by the server alike. `linkedNames`
       // names the halls by code, as the page knows them.
       { id: 'person.forward', label: 'Let them forward into', icon: '➦', group: '4_manage', verb: 'admin:linkRoom', mode: 'now',
-        may: (f) => f.admin, fits: () => true, submenu: () => null },
+        may: (f) => f.admin, fits: (f) => onAdmin(f), submenu: () => null },
       { id: 'person.unforward', label: 'No longer forward into', icon: '🚫', group: '4_manage', verb: 'admin:unlinkRoom', mode: 'now',
-        may: (f) => f.admin, fits: (f, o) => Array.isArray(o.linkedRooms) && o.linkedRooms.length > 0,
+        may: (f) => f.admin, fits: (f, o) => onAdmin(f) && Array.isArray(o.linkedRooms) && o.linkedRooms.length > 0,
         submenu: (f, o) => o.linkedRooms.map((code) => ({ value: code, label: (o.linkedNames && o.linkedNames[code]) || code })) },
       { id: 'person.view', label: 'Open their view', icon: '🪟', group: '4_manage', verb: 'local', mode: 'local',
-        may: (f) => f.admin, fits: () => true },
+        may: (f) => f.admin, fits: (f) => onAdmin(f) },
       { id: 'person.kick', label: 'Log out…', icon: '⏏', group: '9_danger', verb: 'admin:kick', mode: 'now',
-        may: (f) => f.admin, fits: () => true,
+        may: (f) => f.admin, fits: (f) => onAdmin(f),
         confirm: (f, o) => ({ title: 'Log ' + o.name + ' out of ' + hallOf(o) + '?',
           words: 'Every page ' + o.name + ' has open here closes. ' + (o.account
             ? o.name + '\'s account still has ' + hallOf(o) + ' and can open it again. To keep ' + o.name + ' out, take ' + hallOf(o) + ' off the account on the Accounts page.'
@@ -381,8 +436,8 @@
    * The page's facts, from what the server told it: the join's answer (its seat, its view, its account, upload token,
    * Stagewatch rights and link, AI, `forwardable`, and the support view's own name), the screens it may drive
    * (display:list's answer, or null), whether it is connected and joined now, and, in the simple view, the messages that
-   * wait for this person's answer (`waiting`: `plain` oldest first, and `priority`). Pure: the same answers give the
-   * same facts on the page and in the tests, which read real answers.
+   * wait for this person's answer (`waiting`: `plain` oldest first, and `priority`). `page` is 'hall', the page these
+   * facts are drawn on. Pure: the same answers give the same facts on the page and in the tests, which read real answers.
    */
   function facts(s) {
     const role = s.role === 'board' || s.role === 'director' ? 'board' : s.role === 'research' ? 'research' : 'observer';
@@ -390,7 +445,7 @@
     const screens = s.screens && typeof s.screens === 'object' ? s.screens : null;
     const waiting = s.waiting && typeof s.waiting === 'object' ? s.waiting : {};
     return Object.freeze({
-      role, view: s.view === 'simple' ? 'simple' : 'full', uid: typeof s.uid === 'string' ? s.uid : '', post,
+      page: 'hall', role, view: s.view === 'simple' ? 'simple' : 'full', uid: typeof s.uid === 'string' ? s.uid : '', post,
       viewer: !!(s.account && s.account.role === 'viewer'),
       pin: post,                              // the room's pin: a seat that posts
       ask: post && role !== 'board',          // a question for the Board comes from backstage
@@ -401,6 +456,7 @@
       ai: !!s.ai,
       canScreens: !!screens, screensManage: !!(screens && screens.manage), screens: screens && Array.isArray(screens.displays) ? screens.displays.length : 0,
       forwardable: !!s.forwardable,
+      mayKnowCode: post,                      // the room's guest code: a seat that posts (an observer's page shows none)
       connected: !!s.connected,
       support: s.adminView ? String(s.name || 'this person') : '',
     });
@@ -460,11 +516,13 @@
   /** One drawn item for an entry: its words and state as they are now. */
   function itemOf(kind, e, f, o, inFold) {
     const r = ready(kind, e.id, f, o);
-    return {
+    const item = {
       id: e.id, label: call(inFold && e.short ? e.short : e.label, f, o), icon: e.icon || '', key: e.key || '', group: e.group,
       disabled: r === true ? '' : r, held: r === true && e.mode === 'hold' && !f.connected && !f.support ? WORDS.held : '',
       submenu: typeof e.submenu === 'function', asks: !!(e.confirm && e.confirm(f, o)),
     };
+    if (e.checked) { item.role = 'menuitemcheckbox'; item.checked = !!e.checked(f, o); }
+    return item;
   }
 
   /**

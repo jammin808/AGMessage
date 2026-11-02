@@ -1030,32 +1030,28 @@ html[data-theme="dark"] .doc-collapse-btn:hover { color: var(--ink); border-colo
   border-radius: 0 6px 6px 0;
 }
 
-.agm-toast {
-  position: fixed;
-  left: 50%; bottom: 1.5rem; transform: translateX(-50%) translateY(20px);
-  background: var(--ink); color: #fff;
-  padding: .55rem .9rem; border-radius: 999px;
-  font-size: .9rem; font-weight: 500;
-  box-shadow: 0 4px 18px rgba(0,0,0,.25);
-  z-index: 300;
-  opacity: 0; transition: opacity .25s, transform .25s;
-}
+/* The toast (AGM.toast, common.js): one on every page, in the ink of the page's text on its own surface (a dark toast in
+   light, a light one in dark), and a problem's on the fault colour, which its own rule gives in both themes. Out of
+   view and taking no pointer until it shows. */
+.agm-toast { position: fixed; left: 50%; bottom: 1.2rem; z-index: var(--z-toast); max-width: 90vw; padding: .6rem 1rem; border-radius: var(--radius-md);
+  background: var(--c-ink); color: var(--c-surface-raised); font-size: .95rem; font-weight: 500; box-shadow: 0 6px 24px rgba(0,0,0,.25);
+  opacity: 0; transform: translateX(-50%) translateY(150%); transition: opacity .2s ease, transform .2s ease; }
 .agm-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.agm-toast.bad { background: var(--c-fault); color: var(--c-on-fault); }
 
 html[data-theme="dark"] .fwd-meta { background: #1f2942; color: #b8c8ff; }
-html[data-theme="dark"] .agm-toast { background: #fff; color: #15202b; }
 
 /* Make sure [hidden] always wins over class-level display rules.
    This was why the doc-actions row stayed visible after dismiss — the
    .doc-actions { display: flex } rule beat the UA [hidden] rule. */
 [hidden] { display: none !important; }
 
-/* Not to be pressed (a seat that may not answer or react): a dashed edge says so, and its words keep their full ink.
-   Which acts a seat is offered is the catalogue's (catalog.js), never a rule here. */
-.action-btn:disabled, .rx-pill:disabled { cursor: default; border-style: dashed; }
-.action-btn:disabled:hover { background: #fff; color: #7a4d00; }
+/* Not to be pressed (a seat that may not react): a dashed edge says so, and its words keep their full ink. Which acts a
+   seat is offered is the catalogue's (catalog.js), never a rule here; a seat that may not answer a question reads its
+   options as words (.action-options), with no button. */
+.rx-pill:disabled { cursor: default; border-style: dashed; }
 .rx-pill:disabled:hover { border-color: var(--border); }
-html[data-theme="dark"] .action-btn:disabled:hover { background: #2a2415; color: #f5d8a0; }
+.action-options { margin: .5rem 0 0; color: var(--c-ink); font-weight: 600; }
 
 /* Dark-mode response pill variants */
 html[data-theme="dark"] .response-pill          { background: #232b40; border-color: #2c3450; color: var(--ink); }
@@ -1438,9 +1434,6 @@ html[data-theme="dark"] .admin-tunnel-error .error {
 /* AI off: the button stays, with the reason as its title and, when pressed, in the line under the composer; a dashed
    edge and muted words say it cannot be used now, never a fade */
 .ai-btn[aria-disabled="true"]{border-style:dashed;border-color:var(--c-ink-muted);color:var(--c-ink-muted);cursor:default}
-.agm-toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%) translateY(150%);background:#111827;color:#f9fafb;padding:.6rem 1rem;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);z-index:9999;transition:transform .2s ease;max-width:90vw;font-size:.95rem}
-.agm-toast.show{transform:translateX(-50%) translateY(0)}
-.agm-toast.bad{background:#7f1d1d}
 
 .admin-tools{border:1px solid #e2e6ec;border-radius:10px;padding:.8rem 1rem;margin:.6rem 0;background:var(--card-bg,#fff)}
 .admin-inline{display:flex;gap:.5rem;align-items:center;margin:.3rem 0}
@@ -1668,20 +1661,6 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .help-cats-label { margin: var(--sp-3) 0 var(--sp-2); font-weight: 600; font-size: var(--fs-sm); }
 .help-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: var(--sp-2); margin-bottom: var(--sp-3); }
 .help-cat { min-height: var(--target-touch); font-size: var(--fs-md); font-weight: 600; text-align: center; }
-/* The Help chip's ask: in place under the chip, not a menu and not modal; its buttons are verbs, and the safe one,
-   Keep it open, has the focus when it opens. It follows the chip in the header, so Tab runs from the chip through it
-   and on; where the popover API is, it is a manual popover in the top layer (the inset and margin here replace the
-   popover's own centring), and elsewhere it is fixed at the menu's layer inside the sticky header, so it draws over the
-   feed and the composer beneath it. Its size and ink are its own, not the header's */
-.chip-ask { position: fixed; top: auto; right: auto; bottom: auto; left: auto; inset: auto; margin: 0; z-index: var(--z-menu); width: min(20rem, calc(100vw - 1rem)); padding: var(--sp-3);
-  border: 1px solid var(--c-border); border-radius: var(--radius-md); background: var(--c-surface-raised); color: var(--c-ink);
-  font-size: var(--fs-md); text-align: left; box-shadow: var(--shadow); }
-.chip-ask-title { margin: 0 0 var(--sp-1); font-weight: 700; }
-.chip-ask-words { margin: 0 0 var(--sp-2); color: var(--c-ink); font-size: var(--fs-sm); word-break: break-word; overflow-wrap: anywhere; }
-.chip-ask-then { margin: 0 0 var(--sp-3); color: var(--c-ink-muted); font-size: var(--fs-sm); }
-.chip-ask-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.chip-ask-acts .btn { min-height: var(--target-touch); flex: 1 1 auto; }
-
 /* Screens: an operator's view of the hall's displays — tick, then take; each line says what its screen confirmed */
 .screens-dialog { max-height: min(92vh, 52rem); max-height: min(calc(100dvh - 2rem), 52rem); }
 .screens-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
@@ -1803,6 +1782,29 @@ h1[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 .doc-actions .file-acts { flex: 1 1 auto; gap: var(--sp-2); }
 .doc-actions .msg-act { min-height: 2rem; padding: 0 var(--sp-3); border: 1px solid var(--c-border); background: var(--c-surface-raised); color: var(--c-ink); }
 .screen-acts .msg-act { color: var(--c-ink); }
+
+/* A sender's name that opens the person's menu: the name as it reads, a button by what it does, a target of
+   --target-min, and --target-touch under a finger (the header's row is that tall there already, for its acts and ⋯) */
+.msg button.from { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; text-align: left; cursor: pointer; min-height: var(--target-min); min-width: var(--target-min); }
+.msg button.from:hover { text-decoration: underline; }
+.msg button.from:focus-visible { outline: 2px solid var(--c-action); outline-offset: 1px; border-radius: var(--radius-sm); }
+/* The People panel's rows: a seat, a name and the person's ⋯; one Tab stop for the list */
+.people-panel li.person-row { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.people-panel li.person-row:focus { outline: none; }
+.people-panel li.person-row:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+.person-acts { display: inline-flex; align-items: center; }
+.person-acts:empty { display: none; }
+/* The composer's ⋯ beside Send */
+.compose .compose-more { flex: none; }
+/* The header's chips that open a menu: a pointer, a ring and a target of --target-min (--target-touch under a finger),
+   nothing else of a button */
+.room-chip[role="button"], .stage-chip[role="button"] { display: inline-flex; align-items: center; min-height: var(--target-min); cursor: pointer; }
+.room-chip[role="button"]:focus-visible, .stage-chip[role="button"]:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .room-chip[role="button"], .stage-chip[role="button"], .msg button.from { min-height: var(--target-touch); min-width: var(--target-touch); }
+}
+/* The feed takes the focus only as the skip link's last resort (no message yet): no ring on the whole feed */
+.feed:focus { outline: none; }
 
 /* What moved, said once per browser above the feed */
 .moved-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); flex: 0 0 auto; margin: 0; padding: var(--sp-2) var(--sp-4);

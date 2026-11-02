@@ -28,6 +28,8 @@ const SOCKET_VERBS = new Set(handlerFiles().flatMap((f) => [...fs.readFileSync(p
 const ROUTES = new Set(['server.js', 'lib/http-accounts.js'].flatMap((f) => [...fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/\bapp\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)].map((m) => m[1].toUpperCase() + ' ' + m[2])));
 /** The verbs §16.7 names for the kinds landed so far: each must be some entry's. A unit that adds an act adds its verb. */
 const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:propose', 'stage:send', 'display:take', 'forward', 'pin', 'delete', 'display:identify', 'display:update', 'display:rotate', 'display:remove',
+  // the rest of the hall page (compose, chip, code, person's hall half)
+  'message',
   // the admin page, the halls board and the Accounts page (adminRoom, person, adminMsg, link, tunnel, hall, help, account, audit)
   'admin:watchRoom', 'admin:summary', 'admin:invites', 'admin:resetRoom', 'admin:deleteRoom', 'admin:setRole', 'admin:linkRoom', 'admin:unlinkRoom', 'admin:kick', 'admin:deleteMessage',
   'admin:settings', 'nodes:link', 'nodes:unlink', 'nodes:acceptCertificate', 'nodes:command', 'admin:acceptCertificate', 'admin:tunnelStart', 'admin:tunnelStop', 'admin:tunnelStatus',
@@ -44,9 +46,9 @@ const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack'], '⤴': [
  */
 const ONE_ACT = [['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure']];
 /** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export) and so end their label with "…" as an ask does. */
-const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'hall.setup', 'hall.network', 'account.edit', 'audit.export']);
+const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'compose.attach', 'hall.setup', 'hall.network', 'account.edit', 'audit.export']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
-const NAMED_KEYS = ['Enter', 'Delete'];
+const NAMED_KEYS = ['Enter', 'Delete', 'Escape'];
 
 // ---------------------------------------------------------------- the fixtures: seats, as their join answers make them
 const at = 1_700_000_000_000;
@@ -88,6 +90,20 @@ const OBJECTS = {
   anaHot: { id: 'm10', type: 'text', text: 'Wrap up now', priority: true, from: from(ANA, 'research', 'Ana'), at, reactions: [] },
 };
 const ids = (kind, f, o) => plain(C.ids(kind, f, o));
+// The rest of the hall page's objects: its composers (`form`, `room`, the `file` chosen, whom it is `replying` to, 🔥
+// `priority`), the stage chip, the code chip.
+const COMPOSE = {
+  text: { id: 'compose:text', form: 'text', room: 'Hall 2', file: '', replying: '', priority: false },
+  replying: { id: 'compose:text', form: 'text', room: 'Hall 2', file: '', replying: 'Chair', priority: true },
+  action: { id: 'compose:action', form: 'action', room: 'Hall 2', file: '', replying: '', priority: false },
+  fileEmpty: { id: 'compose:file', form: 'file', room: 'Hall 2', file: '', replying: '', priority: false },
+  fileChosen: { id: 'compose:file', form: 'file', room: 'Hall 2', file: 'capex.pdf', replying: '', priority: false },
+  director: { id: 'compose:director', form: 'director', room: 'Hall 2', file: '', replying: '', priority: false },
+  directorReplying: { id: 'compose:director', form: 'director', room: '', file: '', replying: 'Ana', priority: false },
+};
+const STAGE = { id: 'stage', live: true, text: '04:30', words: 'Live from Stagewatch: Keynote' };
+const CODE = { id: 'code', code: 'K7P2QX' };
+const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], code: [CODE] };
 
 // ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
 const HALLS = [{ code: 'K7P2QX', name: 'Hall 2' }, { code: 'M3N4PQ', name: 'Legal' }];
@@ -160,19 +176,20 @@ const PAGE_OBJECTS = {
 /** The seats an act's words are read for, per kind: the hall page's for its kinds, each other page's own. */
 const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
-  adminRoom: [PAGE.admin, PAGE.adminNoAi], person: [PAGE.admin], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin],
+  compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple], chip: [SEATS.admin, SEATS.researchNoDesk], code: [SEATS.admin, SEATS.board],
+  adminRoom: [PAGE.admin, PAGE.adminNoAi], person: [PAGE.admin, SEATS.research, SEATS.board], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin],
   hall: [PAGE.board], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
 /** Every seat of a kind with every object of it ([f, o] pairs): messages, a file where it is listed and where it is open, a screen, and the other pages' objects. */
 function pairsOf(kind) {
-  const objs = PAGE_OBJECTS[kind] ? Object.values(PAGE_OBJECTS[kind])
+  const objs = PAGE_OBJECTS[kind] ? Object.values(PAGE_OBJECTS[kind]) : HALL_OBJECTS[kind] ? HALL_OBJECTS[kind]
     : kind === 'file' ? ['list', 'preview'].map((where) => Object.assign({}, OBJECTS.anaFile, { where }))
       : kind === 'screen' ? [SCREEN] : Object.values(OBJECTS);
   return KIND_SEATS[kind].flatMap((f) => objs.map((o) => [f, o]));
 }
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'hall', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'code', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'hall', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -272,7 +289,8 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, connected: true, support: '' });
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, mayKnowCode: true, connected: true, support: '' });
+  assert.equal(C.facts({ role: 'observer' }).mayKnowCode, false, 'an observer\'s page shows no guest code');
   assert.equal(C.facts({ role: 'nonsense' }).role, 'observer', 'an unknown seat reads as the one with no rights');
   assert.deepEqual(['observer', 'board', 'research'].map((role) => { const x = C.facts({ role }); return [x.post, x.ask, x.respondHelp]; }), [[false, false, false], [true, false, false], [true, true, true]],
     'a question and an answer to others\' help come from backstage');
@@ -294,8 +312,8 @@ test('the seat matrix: what each seat is shown on each message', () => {
       cyHelp: ['msg.reply', 'msg.react', 'msg.helpResolve', 'msg.pin', 'msg.copy'],
       system: [],
     },
-    // Alone in this hall with AI off: no Send to and no draft.
-    researchAlone: { boardText: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.pin', 'msg.copy'] },
+    // Alone in this hall with AI off: no Send to; the draft is there, saying why it cannot be made (the laptop's state).
+    researchAlone: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.pin', 'msg.copy'] },
     // A Stagewatch that keeps no show desk: the line box is still there to edit the line before it goes, beside Send now.
     researchNoDesk: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'] },
     // On stage (the full view): it answers, reacts, pins and copies; it sends nothing elsewhere, shows nothing, downloads
@@ -355,6 +373,8 @@ test('what a seat may do but not now is shown, disabled, with the words why; the
   const disabled = (s, o) => Object.fromEntries(plain(C.items('msg', SEATS[s], OBJECTS[o])).filter((i) => !i.sep).flatMap((i) => (i.children || [i])).map((i) => [i.id, i.disabled || i.held || '']));
   // The link down: the speaker's screen says why, and the rest acts.
   assert.deepEqual(disabled('researchLinkDown', 'boardText'), { 'msg.reply': '', 'msg.react': '', 'msg.draft': '', 'msg.speaker': C.WORDS.linkDown, 'msg.sendNow': C.WORDS.linkDown, 'msg.send': '', 'msg.pin': '', 'msg.copy': '' });
+  // AI drafts off: the message's ✨ and the composer's say why alike, and the rest acts.
+  assert.deepEqual(disabled('researchAlone', 'boardText'), { 'msg.reply': '', 'msg.react': '', 'msg.draft': C.WORDS.aiOff, 'msg.speaker': '', 'msg.sendNow': '', 'msg.pin': '', 'msg.copy': '' });
   // Not connected: an act on something says so; a send held by the outbox and a local act go on (◷ for the held).
   assert.deepEqual(disabled('researchOffline', 'anaQuestion'), {
     'msg.reply': '', 'msg.react': C.WORDS.offline, 'msg.answer': C.WORDS.held, 'msg.answerWords': C.WORDS.held, 'msg.speaker': C.WORDS.offline, 'msg.sendNow': C.WORDS.offline,
@@ -467,6 +487,84 @@ test('a single key on the focused object: R E F P D, Enter, Delete or Backspace,
   assert.deepEqual(['Enter', 'd'].map((k) => key('research', OBJECTS.anaFile, k)), ['msg.look', 'msg.download']);
   assert.equal(key('observer', OBJECTS.anaText, 'p'), null, 'a key runs only what the seat is shown');
   assert.equal(key('board', OBJECTS.anaFile, 'd'), null, 'On stage downloads nothing, by key either');
+  // On the composer: Escape takes back a reply begun, and is nothing while none is.
+  assert.deepEqual([key('research', COMPOSE.replying, 'Escape', 'compose'), key('board', COMPOSE.directorReplying, 'Escape', 'compose'), key('research', COMPOSE.text, 'Escape', 'compose')],
+    ['compose.cancelReply', 'compose.cancelReply', null]);
+});
+
+// ---------------------------------------------------------------- the rest of the hall page: the composer, the chips, a person
+test('the rest of the hall page: what each seat is shown on the composer, the stage chip, the code chip and a person', () => {
+  const PERSON = { id: 'person:u-kim', uid: 'u-kim', name: 'Kim', role: 'research' };
+  const SELF = { id: 'person:' + ANA, uid: ANA, name: 'Ana', role: 'research' };
+  const M = [
+    // Backstage: ✨ Draft a reply in the Message tab, Send, 🔥 Priority and Attach a file… in every tab; Remove the file
+    // once one is chosen; Cancel the reply while replying. Send is the composer's one act on its row.
+    ['compose', 'research', COMPOSE.text, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach']],
+    ['compose', 'research', COMPOSE.replying, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach', 'compose.cancelReply']],
+    ['compose', 'research', COMPOSE.action, ['compose.send', 'compose.priority', 'compose.attach']],
+    ['compose', 'research', COMPOSE.fileChosen, ['compose.send', 'compose.priority', 'compose.attach', 'compose.removeFile']],
+    // On stage: its words, 🔥 and Send, no file and no draft.
+    ['compose', 'board', COMPOSE.director, ['compose.send', 'compose.priority']],
+    ['compose', 'board', COMPOSE.directorReplying, ['compose.send', 'compose.priority', 'compose.cancelReply']],
+    // A Viewer granted posting sits backstage: it drafts, sends and attaches.
+    ['compose', 'viewerPost', COMPOSE.text, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach']],
+    ['compose', 'observer', COMPOSE.text, []],
+    // The stage chip: the speaker's screen for a seat with its rights, the countdown on screens for one that drives them.
+    ['chip', 'research', STAGE, ['chip.speaker']],
+    ['chip', 'tech', STAGE, ['chip.speaker', 'chip.screens']],
+    ['chip', 'admin', STAGE, ['chip.speaker', 'chip.screens']],
+    ['chip', 'staff', STAGE, []],
+    ['chip', 'board', STAGE, []],
+    ['chip', 'observer', STAGE, []],
+    // The code chip: copied by a seat that posts; an observer's page shows no code.
+    ['code', 'research', CODE, ['code.code', 'code.copy']],
+    ['code', 'board', CODE, ['code.code', 'code.copy']],
+    ['code', 'observer', CODE, []],
+    ['code', 'viewer', CODE, []],
+    // A person: mentioned by a seat that posts, never oneself; the hall page's admin account is shown the hall page's half
+    // only (the admin's rows are the admin page's, run on its socket).
+    ['person', 'research', PERSON, ['person.mention']],
+    ['person', 'research', SELF, []],
+    ['person', 'board', PERSON, ['person.mention']],
+    ['person', 'admin', PERSON, ['person.mention']],
+    ['person', 'observer', PERSON, []],
+  ];
+  for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, SEATS[seat], o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
+  for (const kind of ['compose', 'chip', 'code']) for (const e of C.KINDS[kind]) assert.ok(M.some((r) => r[0] === kind && r[3].includes(e.id)), e.id + ' is shown to some seat in the matrix');
+  // The admin page's facts show none of the hall page's half, and the hall page's none of the admin's.
+  assert.deepEqual(ids('person', PAGE.admin, PERSON), ['person.seat', 'person.forward', 'person.view', 'person.kick']);
+  for (const f of Object.values(SEATS)) assert.ok(ids('person', f, PERSON).every((id) => id === 'person.mention'), 'a hall seat is shown only the hall page\'s half');
+
+  // The simple view: no menu door; its composer's acts are its buttons (Send, 🔥).
+  assert.deepEqual([ids('compose', SEATS.boardSimple, COMPOSE.director), plain(C.shown('compose', SEATS.boardSimple, COMPOSE.director)).map((e) => e.id)], [[], ['compose.send', 'compose.priority']]);
+  assert.deepEqual([ids('person', SEATS.boardSimple, PERSON), ids('chip', SEATS.boardSimple, STAGE)], [[], []], 'nothing of a person or the chip in the simple view');
+
+  // The bar: Send alone, named for where it sends (its aria-label and its menu item alike).
+  assert.deepEqual(plain(C.inline('compose', SEATS.research, COMPOSE.text)).map((i) => [i.id, i.label]), [['compose.send', 'Send to Hall 2']]);
+  assert.deepEqual(plain(C.inline('compose', SEATS.board, COMPOSE.directorReplying)).map((i) => [i.id, i.label]), [['compose.send', 'Send']], 'before the room is named: Send');
+  for (const [kind, o] of [['chip', STAGE], ['code', CODE], ['person', PERSON]]) assert.deepEqual(plain(C.inline(kind, SEATS.admin, o)), [], kind + ': no act on a row, only the menu');
+
+  // Disabled, with the reason: a file not chosen, AI drafts off, the link down, no screens, not connected; a send held
+  // by the outbox stays live; the support view acts on nothing.
+  const why = (seat, kind, o) => Object.fromEntries(plain(C.items(kind, SEATS[seat], o)).filter((i) => !i.sep).map((i) => [i.id, i.disabled || i.held || '']));
+  assert.deepEqual(why('research', 'compose', COMPOSE.fileEmpty), { 'compose.send': C.WORDS.noFile, 'compose.priority': '', 'compose.attach': '' });
+  assert.equal(why('researchAlone', 'compose', COMPOSE.text)['compose.draft'], C.WORDS.aiOff, 'AI drafts off: shown, with why');
+  assert.deepEqual(why('researchLinkDown', 'chip', STAGE), { 'chip.speaker': C.WORDS.linkDown });
+  assert.deepEqual(why('techNoScreens', 'chip', STAGE), { 'chip.speaker': '', 'chip.screens': C.WORDS.noScreens });
+  assert.deepEqual(why('researchOffline', 'compose', COMPOSE.text), { 'compose.draft': C.WORDS.offline, 'compose.send': C.WORDS.held, 'compose.priority': '', 'compose.attach': '' });
+  assert.deepEqual(why('researchOffline', 'chip', STAGE), { 'chip.speaker': C.WORDS.offline });
+  assert.deepEqual([...new Set(Object.values(why('support', 'compose', COMPOSE.text)))], [C.supportWords('Kim')], 'the support view: every act disabled, whose view it is');
+
+  // 🔥 Priority is a toggle in the menu: checked while pressed.
+  const pri = (o) => plain(C.items('compose', SEATS.research, o)).find((i) => i.id === 'compose.priority');
+  assert.deepEqual([pri(COMPOSE.text).role, pri(COMPOSE.text).checked, pri(COMPOSE.replying).checked], ['menuitemcheckbox', false, true]);
+  assert.equal(plain(C.items('code', SEATS.research, CODE)).find((i) => i.id === 'code.code').role, undefined, 'an act that is no toggle is a plain item');
+
+  // The caps, on the richest seat of each kind.
+  for (const [kind, o] of [['compose', COMPOSE.replying], ['chip', STAGE], ['code', CODE], ['person', PERSON]]) {
+    const items = plain(C.items(kind, SEATS.admin, o)).filter((i) => !i.sep);
+    assert.ok(items.length > 0 && items.length <= 12 && items.filter((i) => i.group === '9_danger').length <= 2, kind + ': at most 12 items and 2 dangers');
+  }
 });
 
 // ---------------------------------------------------------------- the admin page, the halls board, the Accounts page
@@ -535,7 +633,10 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['audit', 'filtered', O.audit.entry, ['audit.copy', 'audit.target', 'audit.all', 'audit.check', 'audit.export']],
     ['audit', 'accountsManager', O.audit.entry, ['audit.copy', 'audit.actor', 'audit.target', 'audit.check']],
   ];
-  for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, PAGE[seat], o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
+  // The person kind's other half, the hall page's (a seat there, read by its facts): it mentions a person.
+  M.push(['person', 'research', O.person.guest, ['person.mention']]);
+  const facts = (seat) => PAGE[seat] || SEATS[seat];
+  for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, facts(seat), o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
   // Every act of these kinds is shown to some seat: none passes the matrix by its absence.
   const kinds = ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'hall', 'help', 'account', 'audit'];
   const shownSomewhere = new Set(M.flatMap((r) => r[3]));

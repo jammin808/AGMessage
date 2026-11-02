@@ -74,9 +74,10 @@ const CHROME_OLD_WORDS = (doc = 'document') => `((doc) => {
   return found;
 })(${doc})`;
 // A hall page out of its hall (sent out, or its join refused): the words in place of the hall, the way back, the socket,
-// and what it still offers of the hall (its header's buttons, an open dialog): nothing.
+// and what it still offers of the hall (its header's buttons, a chip that is a door, an open dialog, an ask): nothing.
 const OUT_OF_HALL = `(() => { const box = document.getElementById('outOfHall'); const back = document.getElementById('outBack');
-  const offered = ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn'].filter((id) => !document.getElementById(id).hidden).concat([...document.querySelectorAll('dialog[open], #helpAsk')].map((d) => d.id));
+  const doors = [...document.querySelectorAll('.app-meta [role=button], .app-meta [aria-haspopup]')].filter((n) => n.getClientRects().length > 0).map((n) => n.id);
+  const offered = [...new Set(['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn'].filter((id) => !document.getElementById(id).hidden).concat(doors, [...document.querySelectorAll('dialog[open], .agm-ask')].map((d) => d.id)))];
   return !box.hidden && JSON.stringify({ words: document.getElementById('outWords').textContent, back: back.textContent, to: back.getAttribute('href'),
     hall: document.querySelector('.main-row').hidden, offered, focused: document.activeElement === back, connected: socket.connected }); })()`;
 // The server's own time zone for the smoke: a screen in another zone must still show this one's time of day.
@@ -420,7 +421,7 @@ const PHONE_READ = `(() => {
   const vis = (e) => e.getClientRects().length > 0;
   const low = (xs) => ({ n: xs.length, ratio: xs.length ? Math.min(...xs.map((x) => x.ratio)) : 0, opacity: xs.length ? Math.min(...xs.map((x) => x.opacity)) : 0, bgLum: xs.length ? [Math.min(...xs.map((x) => x.bgLum)), Math.max(...xs.map((x) => x.bgLum))] : [],
     size: xs.length ? Math.min(...xs.map((x) => x.size === undefined ? Infinity : x.size)) : 0 });
-  const icons = low([...document.querySelectorAll('#feed .msg header button')].filter(vis).map((b) => { const r = b.getBoundingClientRect(); return { ...__ink(b), size: Math.min(r.width, r.height) }; }));
+  const icons = low([...document.querySelectorAll('#feed .msg header .msg-act, #feed .msg header .obj-more')].filter(vis).map((b) => { const r = b.getBoundingClientRect(); return { ...__ink(b), size: Math.min(r.width, r.height) }; }));
   const presence = low([...document.querySelectorAll('#feed .sys.presence')].filter(vis).map((p) => __ink(p)));
   const tags = low([...document.querySelectorAll('#feed .role-tag[data-role="board"]')].filter(vis).map((t) => __ink(t)));
   const fault = document.createElement('i'); fault.style.color = 'var(--c-fault)'; document.body.appendChild(fault);
@@ -428,6 +429,7 @@ const PHONE_READ = `(() => {
   const help = document.getElementById('helpBtn');
   const send = [...document.querySelectorAll('.send-btn')].filter(vis).map((b) => { const r = b.getBoundingClientRect(); return { w: r.width, h: r.height, label: b.getAttribute('aria-label'), word: getComputedStyle(b.querySelector('.send-word')).display, mark: getComputedStyle(b.querySelector('.send-icon')).display }; });
   const header = [...document.querySelectorAll('.app-meta .btn')].filter(vis).map((b) => b.getBoundingClientRect().height);
+  const doors = [...document.querySelectorAll('.app-meta [role=button], #feed .msg header button.from, .compose .compose-more')].filter(vis).map((b) => { const r = b.getBoundingClientRect(); return { door: b.id || b.className, size: Math.round(Math.min(r.width, r.height) * 10) / 10 }; });
   const pri = [...document.querySelectorAll('.compose .priority-btn')].find(vis);
   let priority = null;
   if (pri) {
@@ -440,7 +442,7 @@ const PHONE_READ = `(() => {
   return { fits: de.scrollWidth <= de.clientWidth && de.clientWidth === 390 && innerWidth === 390, width: de.scrollWidth + '/' + de.clientWidth + '/' + innerWidth,
     icons, presence, tags, help: vis(help) ? { red: [getComputedStyle(help).backgroundColor, getComputedStyle(help).color, getComputedStyle(help).borderTopColor].includes(red), ratio: __ink(help).ratio,
       edge: parseFloat(getComputedStyle(help).borderTopWidth) >= 1 ? __edge(help) : 0, state: help.dataset.state || '' } : null,
-    send, coarse: matchMedia('(pointer: coarse)').matches, header: header.length ? Math.min(...header) : 0, priority };
+    send, coarse: matchMedia('(pointer: coarse)').matches, header: header.length ? Math.min(...header) : 0, doors, full: F.view !== 'simple', priority };
 })()`;
 // Every dialog of the hall page opened in turn (Help through its button where the seat has it): each of its buttons,
 // brought into view inside the dialog, lies on the phone's screen and is what a tap at its centre reaches.
@@ -473,7 +475,7 @@ const NEW_MARK = (text) => `(() => {
 })()`;
 // ---------------------------------------------------------------- an object's doors (catalog.js, menus.js)
 /** A key on a tab, as a keyboard sends it: its down, its character (for one that has one) and its up. */
-const KEY_CODES = { F10: 121, Escape: 27, Enter: 13, Delete: 46, ArrowDown: 40, Tab: 9, p: 80, d: 68, e: 69, f: 70 };
+const KEY_CODES = { F10: 121, Escape: 27, Enter: 13, Delete: 46, ArrowDown: 40, ArrowUp: 38, Tab: 9, p: 80, d: 68, e: 69, f: 70 };
 async function press(tab, key, { shift = false } = {}) {
   const vk = KEY_CODES[key];
   const k = { key, code: key.length === 1 ? 'Key' + key.toUpperCase() : key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: shift ? 8 : 0 };
@@ -587,6 +589,32 @@ async function barsUnderAFinger(edge, url, ready) {
   ph.close();
   return read;
 }
+/**
+ * The doors of an object that is its own door (a chip, a sender's name): a right-click on it, a click on it (and a click
+ * again, which closes its menu with the focus on it), and Shift+F10 on it focused each open the catalogue's set for it;
+ * the key's menu has the focus on its first enabled item, and Escape gives it back. `size` is its smaller side, a target
+ * of 24 px or more (44 px under a finger: the phone pass reads the same doors there).
+ */
+async function selfDoors(tab, kind, sel, obj) {
+  const out = { want: await tab.eval(`JSON.stringify(AGM.catalog.ids(${codeLiteral(kind)}, F, ${obj}))`) };
+  out.size = await tab.eval(`(() => { const q = (${sel}).getBoundingClientRect(); return Math.round(Math.min(q.width, q.height) * 10) / 10; })()`);
+  await rightClick(tab, await middleOf(tab, sel));
+  out.right = await tab.until(MENU_IDS, 3000);
+  await press(tab, 'Escape');
+  out.rightClosed = !!(await tab.until(NO_MENU, 3000));
+  await leftClick(tab, await middleOf(tab, sel));
+  out.click = await tab.until(MENU_IDS, 3000);
+  await leftClick(tab, await tab.eval(`(() => { const q = (${sel}).getBoundingClientRect(); return { x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2) }; })()`));
+  out.clickBack = !!(await tab.until(`${NO_MENU} && document.activeElement === (${sel})`, 3000));
+  await tab.eval(`(${sel}).focus()`);
+  await press(tab, 'F10', { shift: true });
+  out.key = await tab.until(MENU_IDS, 3000);
+  out.keyFirst = await tab.eval(`(() => { const first = [...document.querySelectorAll('.agm-menu:not(.agm-sub) > .agm-mi')].find((b) => b.getAttribute('aria-disabled') !== 'true'); return !!first && document.activeElement === first; })()`);
+  await press(tab, 'Escape');
+  out.keyBack = !!(await tab.until(`${NO_MENU} && document.activeElement === (${sel})`, 3000));
+  return out;
+}
+const selfInStep = (d) => !!d.want && d.want !== '[]' && d.size >= 24 && d.right === d.want && d.click === d.want && d.key === d.want && d.rightClosed && d.clickBack && d.keyFirst && d.keyBack;
 /** Whether an object's doors are in step: every door the catalogue's set, focus where it belongs, the bar in the menu. */
 const doorsInStep = (d) => !!d.want && d.want !== '[]' && d.right === d.want && d.dots === d.want && d.key === d.want && d.rightClosed && d.dotsStill && d.dotsBack && d.keyFirst && d.keyBack &&
   JSON.parse(d.inline).every(([, same]) => same);
@@ -764,9 +792,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await sleep(300);
     const heardEdited = heard.filter((m) => m.type === 'help' && m.text === 'Refused help, then sent').map((m) => m.category);
     await ob.eval(`document.getElementById('helpBtn').click()`);
-    await ob.until(`!!document.getElementById('helpAsk')`);
-    await ob.eval(`[...document.querySelectorAll('#helpAsk button')].find((b) => b.textContent === 'Cancel request').click()`);
-    const editCancelled = await ob.until(`!document.getElementById('helpAsk') && !allMessages.some((m) => m.type === 'help') && document.getElementById('helpBtn').textContent === 'Help'`);
+    await ob.until(`!!document.querySelector('#helpBtn + .agm-ask')`);
+    await ob.eval(`[...document.querySelectorAll('#helpBtn + .agm-ask button')].find((b) => b.textContent === 'Cancel request').click()`);
+    const editCancelled = await ob.until(`!document.querySelector('#helpBtn + .agm-ask') && !allMessages.some((m) => m.type === 'help') && document.getElementById('helpBtn').textContent === 'Help'`);
     report(refusedHelp === JSON.stringify({ words: '△ Not sent: Too many help requests at once.', buttons: ['Retry', 'Edit'], chip: 'Help' }) &&
       editedHelp === JSON.stringify({ words: 'Refused help, then sent', focused: 'helpTitle', chosen: 0, echo: false, held: 0 }) && !!editSent && JSON.stringify(heardEdited) === '["Lighting"]' && !!editCancelled,
       `a refused help request: Help stays Help while it is not sent; Edit brings its words back to the dialog, heading focused and no category chosen, and one tap sends it, once, as that category; Cancel request on the chip then takes it away (${refusedHelp}; ${editedHelp}; heard ${JSON.stringify(heardEdited)})`);
@@ -799,7 +827,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const outThen = await ob.eval(`${HELD_KEYS}.length + '|' + AGM.outbox.items().map((i) => i.state).join()`);
     // Sent out while asking about help: Ola's request is open, so Help is its chip, and a tap on it opens its ask.
     await ob.eval(`document.getElementById('helpBtn').click()`);
-    const askingThen = await ob.eval(`JSON.stringify({ ask: !!document.getElementById('helpAsk'), chip: document.getElementById('helpBtn').textContent })`);
+    const askingThen = await ob.eval(`JSON.stringify({ ask: !!document.querySelector('#helpBtn + .agm-ask'), chip: document.getElementById('helpBtn').textContent })`);
     const obAdmin = await connect(base, cookie);
     const kicked = await emit(obAdmin, 'admin:kick', { socketId: await ob.eval('socket.id') });
     obAdmin.close();
@@ -878,9 +906,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const { light, dark } = seen;
       const writes = seat !== 'observer';
       const sendOk = writes ? light.send.length === 1 && light.send[0].w >= 44 && light.send[0].h >= 44 && light.send[0].label === 'Send to Phone hall' && light.send[0].word === 'none' && light.send[0].mark !== 'none' : light.send.length === 0;
+      // The doors that are not buttons by look (the code chip, a sender's name, the composer's ⋯): 44 px under a finger too;
+      // a seat that writes has the code chip at least, and in the full view the composer's ⋯.
+      const doorsOk = light.doors.every((d) => d.size >= 44) && (!writes || light.doors.some((d) => d.door === 'roomChip') && (!light.full || light.doors.some((d) => /compose-more/.test(d.door))));
       report(light.fits && dark.fits && Array.isArray(dialogs) && dialogs.length === 3 && dialogs.every((d) => d.buttons > 0 && d.missed.length === 0) && (dialogs[0].via === 'Help') === writes &&
-        sendOk && light.coarse && light.header >= 44,
-        `the hall page fits a 390 px phone as ${seat}: no wider than the screen (${light.width}), every dialog's buttons on the screen and reached by a tap, Send a 44 px button named for where it sends, the header's controls 44 px under a finger (${JSON.stringify({ dialogs, send: light.send, header: light.header })})`);
+        sendOk && light.coarse && light.header >= 44 && doorsOk,
+        `the hall page fits a 390 px phone as ${seat}: no wider than the screen (${light.width}), every dialog's buttons on the screen and reached by a tap, Send a 44 px button named for where it sends, the header's controls and the doors (the code chip, a sender's name, the composer's ⋯) 44 px under a finger (${JSON.stringify({ dialogs, send: light.send, header: light.header, doors: light.doors })})`);
       // 🔥 Priority pressed is filled with the fault red and says it is pressed; unpressed it is neither; each click turns it.
       const priorityOk = (t) => (writes ? !!t.priority && !t.priority.off.red && t.priority.off.pressed !== 'true' && t.priority.on.red && t.priority.on.pressed === 'true' && t.priority.on.ratio >= 4.5 &&
         !t.priority.back.red && t.priority.back.pressed === 'false' : t.priority === null);
@@ -1007,17 +1038,18 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       `help in two taps on a phone: Help opens the dialog with its heading focused and no category chosen; Enter in the words sends nothing and moves to the categories; a tap on Sound sends Sound at once, once, and Help reads "■ Help asked" on the fault red (${dialogAt}; ${afterEnter}; sent by Enter ${sentByEnter}; the page sent ${sentFirst}; ${askedChip})`);
     const coming = await emit(pat, 'help:respond', { messageId: helpAsked && helpAsked.id, state: 'coming' });
     const comingChip = await bea.until(`(() => { const c = ${CHIP}; return c.state === 'coming' && ${SETTLED} && JSON.stringify(c); })()`, 5000);
-    const askOpen = await tapAt(bea, '#helpBtn') && await bea.until(`!!document.getElementById('helpAsk')`, 3000);
-    const askRead = await bea.eval(`(() => { const a = document.getElementById('helpAsk'); const vis = (b) => { const r = b.getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight && b.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) && r.height >= 44; };
-      return JSON.stringify({ role: a.getAttribute('role'), modal: a.getAttribute('aria-modal'), title: document.getElementById(a.getAttribute('aria-labelledby')).textContent, words: a.querySelector('.chip-ask-words').textContent, then: a.querySelector('.chip-ask-then').textContent,
+    const askOpen = await tapAt(bea, '#helpBtn') && await bea.until(`!!document.querySelector('#helpBtn + .agm-ask')`, 3000);
+    const askRead = await bea.eval(`(() => { const a = document.querySelector('#helpBtn + .agm-ask'); const vis = (b) => { const r = b.getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight && b.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) && r.height >= 44; };
+      const words = a.querySelectorAll('.agm-ask-words');
+      return JSON.stringify({ role: a.getAttribute('role'), modal: a.getAttribute('aria-modal'), title: document.getElementById(a.getAttribute('aria-labelledby')).textContent, words: words[0].textContent, then: words[1].textContent,
         described: (a.getAttribute('aria-describedby') || '').split(' ').map((id) => (document.getElementById(id) || {}).className).join(), inHeader: a.previousElementSibling === document.getElementById('helpBtn'),
         buttons: [...a.querySelectorAll('button')].map((b) => b.textContent), reached: [...a.querySelectorAll('button')].every(vis), focused: document.activeElement.textContent, expanded: document.getElementById('helpBtn').getAttribute('aria-expanded') }); })()`);
-    const cancelTapped = await bea.eval(`(() => { const b = [...document.querySelectorAll('#helpAsk button')].find((x) => x.textContent === 'Cancel request'); b.id = '__cancel'; return true; })()`) && await tapAt(bea, '#__cancel');
+    const cancelTapped = await bea.eval(`(() => { const b = [...document.querySelectorAll('#helpBtn + .agm-ask button')].find((x) => x.textContent === 'Cancel request'); b.id = '__cancel'; return true; })()`) && await tapAt(bea, '#__cancel');
     await waitFor(() => patHeard.some(([ev, x]) => ev === 'messageDeleted' && helpAsked && x.messageId === helpAsked.id), 5000);
-    const cancelChip = await bea.until(`(() => { const c = ${CHIP}; return c.state === '' && !document.getElementById('helpAsk') && !allMessages.some((m) => m.type === 'help') && ${SETTLED} && JSON.stringify(c); })()`, 5000);
+    const cancelChip = await bea.until(`(() => { const c = ${CHIP}; return c.state === '' && !document.querySelector('#helpBtn + .agm-ask') && !allMessages.some((m) => m.type === 'help') && ${SETTLED} && JSON.stringify(c); })()`, 5000);
     report(!!coming && coming.ok && comingChip === JSON.stringify({ words: '▶ Pat is on the way', state: 'coming', red: false, said: 'Your help request: Pat is on the way' }) && askOpen &&
       askRead === JSON.stringify({ role: 'dialog', modal: 'false', title: 'Your help request', words: 'Sound: Lectern mic 4 is dead · ▶ Pat is on the way',
-        then: 'It\'s sorted marks it resolved for everyone. Cancel request takes it away from everyone. Neither can be undone.', described: 'chip-ask-words,chip-ask-then', inHeader: true, buttons: ['It\'s sorted', 'Cancel request', 'Keep it open'], reached: true, focused: 'Keep it open', expanded: 'true' }) &&
+        then: 'It\'s sorted marks it resolved for everyone. Cancel request takes it away from everyone. Neither can be undone.', described: 'agm-ask-words,agm-ask-words', inHeader: true, buttons: ['It\'s sorted', 'Cancel request', 'Keep it open'], reached: true, focused: 'Keep it open', expanded: 'true' }) &&
       cancelTapped && patHeard.some(([ev, x]) => ev === 'messageDeleted' && x.messageId === helpAsked.id) && cancelChip === JSON.stringify({ words: 'Help', state: '', red: false, said: '' }),
       `the asker sees what happened: "▶ Pat is on the way" after Pat's On my way; a tap on the chip asks in place, right after the chip, naming the request and what each answer does for everyone (It's sorted, Cancel request, Keep it open, the last focused, every one on the screen and 44 px), and Cancel request deletes the request for the hall and puts Help back (${comingChip}; ${askRead}; ${cancelChip})`);
     // Something else, with no words: the page sends 'Other'. Then Escape keeps it open, so does Tab out of the ask (to the
@@ -1030,17 +1062,17 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const sentBoth = await sentHelp();
     await bea.until(`(${CHIP}).state === 'open'`, 5000);
     await tapAt(bea, '#helpBtn');
-    await bea.until(`!!document.getElementById('helpAsk')`, 3000);
+    await bea.until(`!!document.querySelector('#helpBtn + .agm-ask')`, 3000);
     await key(bea, 'Escape', 27);
-    const escaped = await bea.eval(`JSON.stringify({ ask: !!document.getElementById('helpAsk'), focused: document.activeElement.id, state: document.getElementById('helpBtn').dataset.state || '' })`);
+    const escaped = await bea.eval(`JSON.stringify({ ask: !!document.querySelector('#helpBtn + .agm-ask'), focused: document.activeElement.id, state: document.getElementById('helpBtn').dataset.state || '' })`);
     await tapAt(bea, '#helpBtn');
-    const tabFrom = await bea.until(`!!document.getElementById('helpAsk') && document.activeElement.textContent`, 3000);
+    const tabFrom = await bea.until(`!!document.querySelector('#helpBtn + .agm-ask') && document.activeElement.textContent`, 3000);
     await key(bea, 'Tab', 9);
     const tabbedOut = await bea.eval(`(() => { const help = document.getElementById('helpBtn'); const all = [...document.querySelectorAll('.app-meta button, .app-meta a[href]')].filter((x) => x.getClientRects().length);
-      const next = all[all.indexOf(help) + 1]; return JSON.stringify({ ask: !!document.getElementById('helpAsk'), next: !!next && document.activeElement === next, state: help.dataset.state || '' }); })()`);
+      const next = all[all.indexOf(help) + 1]; return JSON.stringify({ ask: !!document.querySelector('#helpBtn + .agm-ask'), next: !!next && document.activeElement === next, state: help.dataset.state || '' }); })()`);
     await tapAt(bea, '#helpBtn');
-    await bea.until(`!!document.getElementById('helpAsk')`, 3000);
-    await bea.eval(`[...document.querySelectorAll('#helpAsk button')].find((x) => x.textContent === "It's sorted").id = '__sorted'`);
+    await bea.until(`!!document.querySelector('#helpBtn + .agm-ask')`, 3000);
+    await bea.eval(`[...document.querySelectorAll('#helpBtn + .agm-ask button')].find((x) => x.textContent === "It's sorted").id = '__sorted'`);
     await tapAt(bea, '#__sorted');
     await waitFor(() => patHeard.some(([ev, x]) => ev === 'helpUpdate' && other && x.messageId === other.id && x.help.state === 'resolved'), 5000);
     const sortedBy = (patHeard.find(([ev, x]) => ev === 'helpUpdate' && other && x.messageId === other.id && x.help.state === 'resolved') || [])[1];
@@ -1432,6 +1464,20 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const padSent = await floorPad.until(`!document.querySelector('.msg.echo') && textInput.value === '' && allMessages.filter((m) => m.text === 'Sent at the floor by Return').length === 1`, 5000);
     report(!!padJoined && !!padSent && floorPad.problems.length === 0,
       `the hall page at the floor: Return in the composer sends without requestSubmit(), taken once, and no script error${floorPad.problems.length ? ' — ' + floorPad.problems.slice(0, 3).join(' | ') : ''}`);
+    // Help at the floor: opened through AGM.openDialog's own (no showModal()), the heading focused; a category sends it and
+    // closes it, the focus back on Help, which is then the request's chip; its ask opens in place (no popover API).
+    const openHelp = `(() => { const b = document.getElementById('helpBtn'); b.focus(); b.click(); })()`;
+    await floorPad.eval(openHelp);
+    const padHelp = await floorPad.until(FALLBACK_OPEN('helpDialog'), 3000);
+    await floorPad.eval(`document.querySelector('#helpCats button[data-cat="Sound"]').click()`);
+    const padHelpClosed = await floorPad.until(`${FALLBACK_CLOSED('helpDialog')}`, 3000);
+    await floorPad.until(`document.getElementById('helpBtn').dataset.state === 'open'`, 5000);
+    await floorPad.eval(openHelp);
+    const padAsk = await floorPad.until(`(() => { const a = document.querySelector('#helpBtn + .agm-ask'); return a && JSON.stringify({ focused: document.activeElement.textContent, fixed: getComputedStyle(a).position === 'fixed' }); })()`, 3000);
+    await key(floorPad, 'Escape', 27);
+    const padAskGone = await floorPad.until(`!document.querySelector('.agm-ask') && document.activeElement.id === 'helpBtn' && 'kept'`, 3000);
+    report(padHelp === shownWith('helpTitle') && padHelpClosed === closedTo('helpBtn') && padAsk === JSON.stringify({ focused: 'Keep it open', fixed: true }) && padAskGone === 'kept' && floorPad.problems.length === 0,
+      `the hall page at the floor: Help opens through AGM.openDialog's own (${padHelp}), a category sends it and closes it (${padHelpClosed}), and the chip's ask opens in place, Keep it open focused, Escape keeping the request (${padAsk}; ${padAskGone})`);
     floorPad.close();
     // With no <dialog> at all beside it (below Safari 15.4): the Accounts page's Add a person opens the same way, its Cancel
     // closes it without leaving the page and saves nothing; Escape closes it; Enter in a field submits through Save, the
@@ -1744,7 +1790,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await Promise.all([research.until(drawnAll), board.until(drawnAll), hallView.until(drawnAll)]);
     // The account's page reads its doors once its hall's Stagewatch is up, as the sets below expect.
     await hallView.until(`F.stageWhy === '' && F.canPropose && F.canSendToStage`, 8000);
-    const msgDoors = async (tab, id) => doorsOf(tab, 'msg', `messagesById.get(${codeLiteral(id)})`, `findMessage(${codeLiteral(id)})`);
+    const msgDoors = async (tab, id) => doorsOf(tab, 'msg', `messagesById.get(${codeLiteral(id)})`, `findMessage(${codeLiteral(id)})`, { hit: 'time' });
     const doorRuns = {};
     for (const [name, id] of [...Object.entries(doorMsgs), ['capex', capexId]]) doorRuns['research ' + name] = await msgDoors(research, id);
     for (const name of ['chairText', 'adminAsk']) doorRuns['account ' + name] = await msgDoors(hallView, doorMsgs[name]);
@@ -1930,6 +1976,19 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(deleteAsk === JSON.stringify({ title: 'Delete your message?', focused: 'no' }) && deleteKept === 'kept' && deletedOn === 'next',
       `Delete on a focused message asks in place with "no" focused, Escape gives the focus back to the message, and yes deletes it with the focus on the next one (${JSON.stringify({ deleteAsk, deleteKept, deletedOn })})`);
 
+    // An ask opened from a ⋯ menu is answered "no" by a press on that ⋯ again, as by any press outside it: the ask goes,
+    // the message stays, and only the ⋯'s own menu is open (never an ask left open beneath it).
+    const keptDots = `messagesById.get(${codeLiteral(doorMsgs.ownText)}).querySelector('.obj-more')`;
+    await leftClick(research, await middleOf(research, keptDots));
+    await research.until(`!!document.querySelector('.agm-menu .agm-mi[data-action="msg.delete"]')`, 3000);
+    await research.eval(`document.querySelector('.agm-menu .agm-mi[data-action="msg.delete"]').click()`);
+    const dotsAsk = await research.until(`(() => { const a = document.querySelector('.agm-ask'); return a && !document.querySelector('.agm-menu') && a.querySelector('.agm-ask-title').textContent; })()`, 3000);
+    await leftClick(research, await middleOf(research, keptDots));
+    const dotsAgain = await research.until(`!document.querySelector('.agm-ask') && !!document.querySelector('.agm-menu:not(.agm-sub)') && messagesById.has(${codeLiteral(doorMsgs.ownText)}) && 'no'`, 3000);
+    await press(research, 'Escape');
+    await research.until(NO_MENU, 3000);
+    report(dotsAsk === 'Delete your message?' && dotsAgain === 'no', `The ⋯ pressed again under the Delete… it opened answers the ask "no": the ask goes, the message stays, and only the ⋯'s menu opens (${JSON.stringify({ dotsAsk, dotsAgain })})`);
+
     // Copy text over plain http (no clipboard API there): the browser's own copy, else a field to copy from; either way
     // the focus comes back where it was, never to the page.
     await research.eval(`(() => { window.__secure = Object.getOwnPropertyDescriptor(window, 'isSecureContext'); Object.defineProperty(window, 'isSecureContext', { get: () => false, configurable: true }); const t = document.getElementById('agmToast'); if (t) t.textContent = ''; })()`);
@@ -2036,11 +2095,140 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await supportView.eval(`document.querySelector('.agm-menu .agm-mi').click()`);
     const supportSaid = await supportView.until(`(document.getElementById('agmToast') || {}).textContent`);
     const supportInline = await supportView.eval(`[...messagesById.get(${codeLiteral(doorMsgs.adminText)}).querySelectorAll('.msg-act')].every((b) => b.getAttribute('aria-disabled') === 'true')`);
+    // Its Help: the person's dialog, drawn; a category says whose view it is and sends nothing.
+    await supportView.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; openHelpDialog(''); })()`);
+    await supportView.until(`document.getElementById('helpDialog').open`, 3000);
+    await supportView.eval(`document.querySelector('#helpCats .help-cat').click()`);
+    const supportHelp = await supportView.until(`!document.getElementById('helpDialog').open && (document.getElementById('agmToast') || {}).textContent`, 3000);
+    const banner = await supportView.eval(`document.querySelector('.admin-view-banner').textContent`);
     const supportSent = await supportView.eval(`JSON.stringify(window.__sent.filter((ev) => !['seen', 'userState:requestPeers', 'userState:push', 'stage:targets', 'myRooms'].includes(ev)))`);
     const supportProblems = supportView.problems.slice();
     supportView.close();
-    report(!!supportMenu && JSON.parse(supportMenu).disabled && JSON.stringify(JSON.parse(supportMenu).why) === JSON.stringify(['This is Chair\'s view — act from your own page.']) && supportSaid === 'This is Chair\'s view — act from your own page.' && supportInline && supportSent === '[]' && supportProblems.length === 0,
-      `the support view draws the person's menu with every item disabled, saying whose view it is, and sends nothing (${supportMenu}; "${supportSaid}"; sent ${supportSent}${supportProblems.length ? '; ' + supportProblems.join(' | ') : ''})`);
+    report(!!supportMenu && JSON.parse(supportMenu).disabled && JSON.stringify(JSON.parse(supportMenu).why) === JSON.stringify(['This is Chair\'s view — act from your own page.']) && supportSaid === 'This is Chair\'s view — act from your own page.' && supportInline &&
+      supportHelp === 'This is Chair\'s view — act from your own page.' && banner === 'Admin support view — what Chair sees. Nothing here acts: act from your own page.' && supportSent === '[]' && supportProblems.length === 0,
+      `the support view draws the person's menu with every item disabled, saying whose view it is, and its Help's categories say so too; it sends nothing, and its banner says nothing acts (${supportMenu}; "${supportSaid}"; "${supportHelp}"; "${banner}"; sent ${supportSent}${supportProblems.length ? '; ' + supportProblems.join(' | ') : ''})`);
+
+    // ---------------- The rest of the hall page (unit 3c): the composer, a person, the chips, the lists, the skip link ----------------
+    // Kim is someone else (a socket of her own: the smoke's pages share this browser's one identity), backstage, with a
+    // message of her own.
+    const kim = await connect(base);
+    await emit(kim, 'join', { roomCode: code, name: 'Kim', role: 'research' });
+    const kimSaid = await emit(kim, 'message', { type: 'text', text: 'Doors: from Kim' });
+    await research.until(`messagesById.has(${codeLiteral(kimSaid.id)}) && people.some((u) => u.name === 'Kim')`);
+    // The one toast: a role=status region, and only one on the page, though a pin's Undo, a forward's "Forwarded to …"
+    // and a refusal's words were all said on it above (the forward's had a toast of its own, with no role).
+    const toasts = await research.eval(`JSON.stringify([...document.querySelectorAll('.agm-toast')].map((t) => [t.id, t.getAttribute('role')]))`);
+    report(toasts === JSON.stringify([['agmToast', 'status']]), `the hall page has one toast, a role=status region a screen reader hears, for every act's words (${toasts})`);
+
+    // A sender's name is the door to that person's menu (@ Mention), by a click, a right-click and Shift+F10; Mention puts
+    // "@Kim " in the message box and the focus there. One's own name is words.
+    const kimName = `messagesById.get(${codeLiteral(kimSaid.id)}).querySelector('.from')`;
+    await research.eval(`(() => { selectTab('text'); textInput.value = ''; })()`);
+    const nameDoors = await selfDoors(research, 'person', kimName, `senderOf(${kimName})`);
+    await research.eval(`${kimName}.click()`);
+    await research.until(`!!document.querySelector('.agm-menu [data-action="person.mention"]')`, 3000);
+    await research.eval(`document.querySelector('.agm-menu [data-action="person.mention"]').click()`);
+    const mentioned = await research.until(`textInput.value === '@Kim ' && document.activeElement === textInput && 'mentioned'`, 3000);
+    const ownName = await research.eval(`messagesById.get(${codeLiteral(doorMsgs.ownText)}).querySelector('.from').tagName`);
+    await research.eval(`textInput.value = ''`);
+    report(selfInStep(nameDoors) && nameDoors.want === '["person.mention"]' && mentioned === 'mentioned' && ownName === 'SPAN',
+      `a sender's name opens that person's menu by a click, a right-click and Shift+F10 alike, Mention puts "@Kim " in the message box, and one's own name is words (${JSON.stringify({ want: nameDoors.want, mentioned, ownName })}${selfInStep(nameDoors) ? '' : '; ' + JSON.stringify(nameDoors)})`);
+
+    // The People panel: a row each, its ⋯, right-click and Shift+F10 in step; one Tab stop for the list.
+    await research.eval(`document.getElementById('peoplePanel').hidden = false`);
+    const kimRow = `[...document.querySelectorAll('#peopleList li[data-key]')].find((li) => li.querySelector('.name').textContent === 'Kim')`;
+    await research.until(`!!${kimRow} && !!${kimRow}.querySelector('.obj-more')`, 3000);
+    const rowDoors = await doorsOf(research, 'person', kimRow, `personNow(${kimRow}.dataset.key)`, { hit: '.name', bar: '.person-acts > .msg-act' });
+    const peopleStops = await research.eval(`document.querySelectorAll('#peopleList li[tabindex="0"]').length`);
+    await research.eval(`document.getElementById('peoplePanel').hidden = true`);
+    report(doorsInStep(rowDoors) && rowDoors.want === '["person.mention"]' && peopleStops === 1, `a person's row in the People panel: its ⋯, right-click and Shift+F10 open the catalogue's set, and the list is one Tab stop (${JSON.stringify({ want: rowDoors.want, peopleStops })}${doorsInStep(rowDoors) ? '' : '; ' + JSON.stringify(rowDoors)})`);
+
+    // The composer: Send is its act on the row, named for where it sends; its ⋯, a right-click and Shift+F10 on Send open
+    // the same list (✨ Draft a reply, Send, 🔥 Priority, Attach a file…); 🔥 is a checked toggle there; the text field
+    // keeps the browser's own menu.
+    const composeDoors = await doorsOf(research, 'compose', 'textPane', `composeObject('text')`, { hit: '.send-btn', bar: '.send-btn', focus: `textPane.querySelector('.send-btn')` });
+    await research.eval(`textPriBtn.click()`);
+    await research.eval(`textPane.querySelector('.compose-more').click()`);
+    const priorityItem = await research.until(`(() => { const r = document.querySelector('.agm-menu [data-action="compose.priority"]'); return r && JSON.stringify([r.getAttribute('role'), r.getAttribute('aria-checked')]); })()`, 3000);
+    await research.eval(`document.querySelector('.agm-menu [data-action="compose.priority"]').click()`);
+    const priorityOff = await research.until(`textPriBtn.getAttribute('aria-pressed') === 'false' && ${NO_MENU} && 'off'`, 3000);
+    const fieldMenu = await research.eval(`(() => { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5, button: 2 }); textInput.dispatchEvent(e); return JSON.stringify({ prevented: e.defaultPrevented, menu: !!document.querySelector('.agm-menu') }); })()`);
+    const sendName = await research.eval(`textPane.querySelector('.send-btn').getAttribute('aria-label')`);
+    report(doorsInStep(composeDoors) && JSON.parse(composeDoors.want).join() === 'compose.draft,compose.send,compose.priority,compose.attach' && sendName === 'Send to Smoke AGM' &&
+      priorityItem === JSON.stringify(['menuitemcheckbox', 'true']) && priorityOff === 'off' && fieldMenu === JSON.stringify({ prevented: false, menu: false }),
+      `the composer: Send ("${sendName}") and its ⋯, right-click and Shift+F10 on it open one list; 🔥 Priority is a checked toggle in it, which unpresses 🔥; the text field keeps the browser's own menu (${JSON.stringify({ want: composeDoors.want, priorityItem, fieldMenu })}${doorsInStep(composeDoors) ? '' : '; ' + JSON.stringify(composeDoors)})`);
+
+    // The roving feed: one Tab stop, the newest message; ↑ in the empty message box goes to it, ↑ again to the one before,
+    // whose Shift+F10 opens its catalogue's set; Escape closes the menu with the focus back on the message, and Escape
+    // again goes back to the message box.
+    const feedStops = await research.eval(`JSON.stringify([...feed.querySelectorAll('.msg[tabindex="0"]')].map((n) => n.dataset.id))`);
+    const newest = await research.eval(`(() => { const all = [...feed.querySelectorAll('.msg[data-key]')].filter((n) => !n.matches('[data-type="action"][data-pinned="1"]')); return JSON.stringify([all[all.length - 1].dataset.id, all[all.length - 2].dataset.id]); })()`);
+    await research.eval(`textInput.focus()`);
+    await press(research, 'ArrowUp');
+    const upOnce = await research.until(`document.activeElement.matches('.msg[data-key]') && document.activeElement.dataset.id`, 3000);
+    await press(research, 'ArrowUp');
+    const upTwice = await research.until(`document.activeElement.matches('.msg[data-key]') && document.activeElement.dataset.id !== ${codeLiteral(JSON.parse(newest)[0])} && document.activeElement.dataset.id`, 3000);
+    await press(research, 'F10', { shift: true });
+    const rovingMenu = await research.until(MENU_IDS, 3000);
+    const rovingWant = await research.eval(`JSON.stringify(AGM.catalog.ids('msg', F, findMessage(${codeLiteral(upTwice || '')})))`);
+    await press(research, 'Escape');
+    const rovingBack = await research.until(`${NO_MENU} && document.activeElement.dataset.id === ${codeLiteral(upTwice || '')} && document.querySelectorAll('#feed .msg[tabindex="0"]').length === 1 && 'back'`, 3000);
+    await press(research, 'Escape');
+    const toComposer = await research.until(`document.activeElement === textInput && 'composer'`, 3000);
+    report(JSON.parse(feedStops).length === 1 && JSON.parse(feedStops)[0] === JSON.parse(newest)[0] && upOnce === JSON.parse(newest)[0] && upTwice === JSON.parse(newest)[1] && rovingMenu === rovingWant && rovingBack === 'back' && toComposer === 'composer',
+      `the feed is one Tab stop, its newest message; ↑ from the empty message box goes to it and ↑ again to the one before, whose Shift+F10 opens its set; Escape closes the menu, then goes back to the message box (${JSON.stringify({ feedStops, upOnce, upTwice, rovingMenu, rovingBack, toComposer })})`);
+
+    // The header's chips, each its own door: the stage chip (the account's: the speaker's screen and the countdown on its
+    // screens) and the code chip (copy the guest code or the join link).
+    await hallView.until(`!document.getElementById('stageChip').hidden && document.getElementById('stageChip').getAttribute('role') === 'button'`, 8000);
+    const stageDoors = await selfDoors(hallView, 'chip', `document.getElementById('stageChip')`, 'stageNow');
+    await hallView.eval(`document.getElementById('stageChip').click()`);
+    await hallView.until(`!!document.querySelector('.agm-menu [data-action="chip.speaker"]')`, 3000);
+    await hallView.eval(`document.querySelector('.agm-menu [data-action="chip.speaker"]').click()`);
+    const lineBox = await hallView.until(`document.getElementById('swDialog').open && JSON.stringify({ text: document.getElementById('swText').value, dest: document.getElementById('swDest').options.length > 0 })`, 5000);
+    await hallView.eval(`document.getElementById('swDialog').close()`);
+    // Every screen ticked in Screens (the steps above left one ticked that is gone), then the countdown from the chip.
+    await hallView.eval(`(() => { document.getElementById('screensBtn').click(); const all = document.getElementById('screensAll'); if (!all.checked) all.click(); document.getElementById('screensClose').click(); })()`);
+    await hallView.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; document.getElementById('stageChip').click(); })()`);
+    await hallView.until(`!!document.querySelector('.agm-menu [data-action="chip.screens"]')`, 3000);
+    await hallView.eval(`document.querySelector('.agm-menu [data-action="chip.screens"]').click()`);
+    const countdownSaid = await hallView.until(`(document.getElementById('agmToast') || {}).textContent`, 5000);
+    const countdownOn = await hallView.until(`new Promise((r) => socket.emit('display:list', { code: ROOM }, (x) => r(x.displays.length > 0 && x.displays.every((d) => d.content && d.content.kind === 'countdown') && x.displays.length)))`, 5000);
+    report(selfInStep(stageDoors) && stageDoors.want === '["chip.speaker","chip.screens"]' && lineBox === JSON.stringify({ text: '', dest: true }) && /^Sent to \d+ screens? — each shows ✓/.test(countdownSaid || '') && !!countdownOn,
+      `the stage chip opens its menu by a click, a right-click and Shift+F10 alike; Speaker's screen… opens the line box empty, and Show the countdown on screens puts it on the hall's ${countdownOn} screens (${JSON.stringify({ want: stageDoors.want, lineBox, countdownSaid })}${selfInStep(stageDoors) ? '' : '; ' + JSON.stringify(stageDoors)})`);
+    const codeDoors = await selfDoors(research, 'code', `document.getElementById('roomChip')`, 'codeObject()');
+    await research.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; document.getElementById('roomChip').click(); })()`);
+    await research.until(`!!document.querySelector('.agm-menu [data-action="code.copy"]')`, 3000);
+    await research.eval(`document.querySelector('.agm-menu [data-action="code.copy"]').click()`);
+    const joinLink = await research.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; const a = document.querySelector('.agm-ask');
+      if (/^Copied the join link/.test(t)) return 'copied'; return a && a.querySelector('input').value === location.origin + '/?code=' + ROOM && 'field'; })()`, 3000);
+    if (joinLink === 'field') await press(research, 'Escape');
+    report(selfInStep(codeDoors) && codeDoors.want === '["code.code","code.copy"]' && !!joinLink, `the code chip opens its menu by a click, a right-click and Shift+F10 alike, and Copy join link copies the join page's link with the code (${JSON.stringify({ want: codeDoors.want, joinLink })}${selfInStep(codeDoors) ? '' : '; ' + JSON.stringify(codeDoors)})`);
+
+    // The skip link: the first Tab of a fresh page; Enter takes the focus to the message box, or, for an observer (who
+    // has none), to the newest message. An observer reads a question's options as words, with no button.
+    const skipTo = async (tab) => {
+      await press(tab, 'Tab');
+      const first = await tab.until(`document.activeElement && document.activeElement.id === 'skipLink' && JSON.stringify({ words: document.activeElement.textContent, shown: document.activeElement.getBoundingClientRect().top >= 0 })`, 3000);
+      await pressEnter(tab);
+      const to = await tab.until(`document.activeElement && document.activeElement !== document.getElementById('skipLink') && (document.activeElement.id || document.activeElement.className)`, 3000);
+      return { first, to };
+    };
+    const fresh = await edge.tab(`${base}/app.html?code=${code}&name=Ana&role=research`);
+    await fresh.until(`typeof joined !== 'undefined' && joined && messagesById.size > 0`);
+    const freshSkip = await skipTo(fresh);
+    fresh.close();
+    const obi = await edge.tab(`${base}/app.html?code=${code}&name=Obi&role=observer`);
+    await obi.until(`typeof joined !== 'undefined' && joined && messagesById.has(${codeLiteral(doorMsgs.adminAsk)})`);
+    const obiSkip = await skipTo(obi);
+    const obiNewest = await obi.eval(`(() => { const all = [...feed.querySelectorAll('.msg[data-key]')]; return document.activeElement === all[all.length - 1]; })()`);
+    const obiAsk = await obi.eval(`(() => { const n = messagesById.get(${codeLiteral(doorMsgs.adminAsk)}); return JSON.stringify({ words: (n.querySelector('.action-options') || {}).textContent || '', buttons: n.querySelectorAll('.action-buttons button, .action-btn').length, tally: !!n.querySelector('.action-responses') }); })()`);
+    const obiProblems = obi.problems.slice();
+    obi.close();
+    report(freshSkip.first === JSON.stringify({ words: 'Skip to message box', shown: true }) && freshSkip.to === 'textInput' && obiSkip.first === JSON.stringify({ words: 'Skip to messages', shown: true }) && /\bmsg\b/.test(obiSkip.to || '') && obiNewest &&
+      obiAsk === JSON.stringify({ words: 'Options: Yes · No', buttons: 0, tally: true }) && obiProblems.length === 0,
+      `the first Tab is the skip link: "Skip to message box" takes the focus to it; an observer's "Skip to messages" to the newest message; an observer reads a question's options as words with its tally, no button (${JSON.stringify({ freshSkip, obiSkip, obiAsk })}${obiProblems.length ? '; ' + obiProblems.join(' | ') : ''})`);
+    kim.close();
 
     // Both themes: a menu's words read at 4.5:1 or more, its reason too, on its own surface.
     await research.eval(INK);
@@ -2239,9 +2427,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       if (!['text', 'file', 'action'].every((k) => kinds.has(k))) return null;
       const shown = (el) => !!el && getComputedStyle(el).display !== 'none' && !el.closest('[hidden]');
       return JSON.stringify({ forward: allMessages.filter((m) => AGM.catalog.ids('msg', F, m).includes('msg.send')).length + Array.from(document.querySelectorAll('.msg [data-action="msg.send"]')).filter(shown).length,
-        composer: Array.from(document.querySelectorAll('#directorCompose button, #directorCompose input')).filter(shown).map((b) => b.id || (b.classList.contains('send-btn') ? 'send' : b.outerHTML)) });
+        composer: Array.from(document.querySelectorAll('#directorCompose button, #directorCompose input')).filter(shown).map((b) => b.id || (b.classList.contains('send-btn') ? 'send' : b.classList.contains('compose-more') ? 'more' : b.outerHTML)) });
     })()`);
-    report(boardForward === JSON.stringify({ forward: 0, composer: ['directorInput', 'dirPriorityBtn', 'send'] }), `an On stage page offers no forward on any message, and its composer holds the words, 🔥 and Send (${boardForward})`);
+    report(boardForward === JSON.stringify({ forward: 0, composer: ['directorInput', 'dirPriorityBtn', 'send', 'more'] }), `an On stage page offers no forward on any message, and its composer holds the words, 🔥, Send and its ⋯ (${boardForward})`);
     // Help requests are answered by the backstage team: an On stage page draws no On my way or Resolved on someone else's
     // request and only Resolved on its own, which it marks; a backstage page draws both on the Board's. Someone else is
     // Cy, on a socket of her own: the smoke's pages share this browser's one identity, so each is the same person.
