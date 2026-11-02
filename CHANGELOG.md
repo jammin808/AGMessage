@@ -306,9 +306,9 @@ an entry in it. Admin can choose to split the audit log and archive the older pa
   under this laptop's key by MAC, then what pins it (its `SHA256SUMS` the one the split pinned, and under this laptop's
   key id this laptop's signing key: otherwise ✕, as the routine check reads it), and the point after it here. One the
   chain no longer reaches reads ◇ at best under this laptop's key, △ under another. Two Checks of one archive asked
-  together share one walk, which turns the event loop every 1,000 entries (a 49,999-entry archive, checked while a page
-  asks, holds it at most 300 ms, a test). A byte changed in place is found there and by every export, which hash each
-  archive file in full; the routine check sees a file's size, not its bytes.
+  together share one walk, which turns the event loop every 1,000 entries, walked and MAC-checked alike (a test counts
+  them on a 49,999-entry archive, never the time a turn takes). A byte changed in place is found there and by every
+  export, which hash each archive file in full; the routine check sees a file's size, not its bytes.
 - The Accept dialog for an archive gone or changed says what goes with it: "Entries 1–811 are in an older archive this
   one named: Accounts then lists it as not reached from the live log, with its own Check."
 - Every export carries the archives byte for byte (`archive/<name>/…`, each file in the bundle's `SHA256SUMS` too), and

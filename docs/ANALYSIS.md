@@ -173,7 +173,12 @@ are pure.
 
 The audit log's export adds `lib/auditexport.js` and `lib/zip.js`, and the verifier `verify/verify-audit.js`, each at 0
 synchronous calls (the guard names them, so a file that drops out of its list fails it): the export reads, digests and
-streams on the thread pool and in slices, and the verifier on another computer reads through `fs.promises` only. The
+streams on the thread pool and in slices, and the verifier on another computer reads through `fs.promises` only. Its
+speed fence counts that work in a real server (`test/audit-preload.js`), never the time a turn of the event loop takes,
+which a busy machine stretches: on the 56,000-entry seed, at most 1,000 lines walked and 1 MiB of the log digested
+between two turns, no synchronous read of the log, one read of it and one deflate in flight at a time (two of the thread
+pool's four threads, the rest a sign-in's), and a sign-in answered while the export holds its slot, its entry written
+and its files open. The
 browser verifier's script, `verify/page.js`, has its own ESLint block: browser globals only (every Node global off, as
 for the rules), one function scope, and `agm/no-unescaped-html`; it writes with `textContent` alone. It is put inline in
 `verify.html` beside `auditrules.js`, under a meta Content-Security-Policy that carries their SHA-256 and allows nothing
@@ -196,10 +201,12 @@ both, and the page's test (`page.js` run against a stand-in document) holds the 
 verifier's codes. The path rule gains an archive's own set (`archive.json`, `signing-key.pem`, `SHA256SUMS`,
 `SHA256SUMS.sig`, rotated `log/` files), under `archive/<name>/` in a bundle, the name held to
 `audit-<8 hex>-<from>-<to>`: a test gives it `archive/../x`, a name off the pattern and a file off the set, and a link
-in an archive's `log/`. The speed fence beside the split's (a page asking `/api/auth/me` waits at most 300 ms while the
-56,000-entry seed is split at entry 50,000) holds an archive's own Check of the 49,999 entries split off to the same
-bound: the folder check takes a turn of the event loop every 1,000 lines when the reader hands it one (`io.turn`, which
-the Node verifier gives and the page needs not), and the MAC walk every 1,000 entries.
+in an archive's `log/`. The split's speed fence counts its work as the export's does, while the 56,000-entry seed is
+split at entry 50,000: at most 1,000 lines walked between two turns of the event loop, no turn hashing more than one
+file (each is hashed whole as its read ends, and a file is at most the rotation's size), the log read off the loop one
+read at a time, and a sign-in answered while the split holds its slot. It holds an archive's own Check of the 49,999
+entries split off to the same counts: the folder check takes a turn of the event loop every 1,000 lines when the reader
+hands it one (`io.turn`, which the Node verifier gives and the page needs not), and the MAC walk every 1,000 entries.
 
 0.6.0 adds the pages' message channels to it: every `postMessage` in a page script under `public/` names this origin as
 its target, never `'*'`, and every `message` listener's first line returns unless both the sending window and its origin

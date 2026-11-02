@@ -40,7 +40,6 @@ const entries = (file) => lines(file).map((l) => JSON.parse(l));
 const firstOf = (file) => JSON.parse(lines(file)[0]);
 const rotated = (file) => fs.readdirSync(path.dirname(file)).filter((f) => /^audit-\d{4}-.*\.jsonl$/.test(f)).sort();
 const archiveDir = (file) => path.join(path.dirname(file), 'audit-archive');
-const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 /** `n` entries written by this machine (the fixture key) on `log`. */
 function writeOn(log, n, words = (i) => 'message ' + i) {
@@ -994,14 +993,17 @@ test('no secret: no key, seed or MAC key of the "no secret" row appears in any f
 
 // ---------------------------------------------------------------- end to end: the routes, the rights, the readers
 /** A server whose log (under the fixture key, in its key folder) holds `n` entries with archive points at `points`. */
-async function serverWithPoints(t, n, points) {
+async function serverWithPoints(t, n, points, { counted = false } = {}) {
   const dataDir = tmp('agm-e2e-');
   const keyDir = dataDir + '-keys';
   fs.mkdirSync(keyDir, { recursive: true });
   fs.writeFileSync(path.join(keyDir, 'machine.key'), FIXTURE_KEY.toString('base64'));
   keyedLogWithPoints(n, { file: path.join(dataDir, 'audit.jsonl'), records: path.join(keyDir, 'audit'), points });
-  const srv = await h.startServer({ AGM_DATA_DIR: dataDir });
-  t.after(async () => { await h.stopServer(srv.child); });
+  // `counted`: the server's audit work counted (test/audit-preload.js), read through `srv.meter`.
+  const meter = counted ? h.auditMeter(dataDir) : null;
+  const srv = await h.startServer({ AGM_DATA_DIR: dataDir, ...(meter ? meter.env : {}) });
+  t.after(async () => { await h.stopServer(srv.child); if (meter) meter.remove(); });
+  if (meter) srv.meter = meter;
   return srv;
 }
 
@@ -1050,42 +1052,53 @@ test('end to end: only the admin splits (the token, an admin account); never a m
   await h.until(() => /Audit log: {3}keyed \(key [0-9a-f]{16}\) · from entry 9, 1 archive · Admin → Health/.test(srv.out()), 8000, 'the from line');
 });
 
-test('speed: a split of the 56,000-entry log at entry 50,000 while a page asks and a person signs in: neither waits more than 300 ms; the check after walks about 6,000 entries', async (t) => {
-  const srv = await serverWithPoints(t, 56_000, [50_000]);
+// A split, and an archive's own Check, in a real server, counted as work by test/audit-preload.js, never timed: how long
+// a turn of the loop takes is the machine's (a busy one stretches it), how much a turn does is the code's. A page asking
+// meanwhile is read and answered at each turn. The split's check walks at most 1,000 lines between two turns
+// (lib/audit.js's SLICE), and the split takes each file's SHA-256 whole, in the turn its read ends: never more than one
+// file's bytes between two turns (a file is at most the rotation's 20 MB and the entry that passed it). An archive's own
+// Check walks its entries with the verifier and then MAC-checks them, each at most 1,000 between two turns, and hashes
+// each file whole as its read ends. Both read the log through fs.promises, one read at a time: one of the thread pool's
+// four threads, the rest left to a sign-in's password check. And a sign-in is answered while the split holds its slot,
+// waiting to read: it waits for nothing the split holds.
+test('speed: a split of the 56,000-entry log at entry 50,000 walks at most 1,000 entries and hashes at most one file between two turns of the event loop, reads the log off the loop one read at a time, and a sign-in is answered while it holds its slot; the check after walks about 6,000 entries; the archive\'s own Check walks and MAC-checks at most 1,000 entries between two turns', async (t) => {
+  const srv = await serverWithPoints(t, 56_000, [50_000], { counted: true });
   const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   await h.api(srv.base, 'POST', '/api/users', { username: 'bob', name: 'Bob', role: 'staff', password: 'clipboard and coffee' }, { cookie: admin });
-  const signIn = async () => { const t0 = performance.now(); const r = await h.api(srv.base, 'POST', '/api/auth/login', { username: 'bob', password: 'clipboard and coffee' }); assert.equal(r.status, 200); return performance.now() - t0; };
-  const alone = Math.min(await signIn(), await signIn());
-  /** `fn` run while a page asks /api/auth/me over and over: its answer, and the longest any ask waited (ms). */
-  const asking = async (fn) => {
-    let worst = 0;
-    const state = { running: true };
-    const probe = (async () => {
-      while (state.running) {
-        const t0 = performance.now();
-        await h.api(srv.base, 'GET', '/api/auth/me');
-        worst = Math.max(worst, performance.now() - t0);
-      }
-    })();
-    try { return { out: await fn(), worst: () => worst }; } finally { state.running = false; await probe; }
-  };
-  let during = 0;
-  const split = await asking(async () => {
-    const splitting = h.api(srv.base, 'POST', '/api/audit/split', { seq: 50_000 }, { cookie: admin });
-    await wait(150);
-    during = await signIn();
-    return splitting;
-  });
-  const r = split.out;
+  assert.equal((await h.api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin })).status, 200, 'the check at start, or one after it, answered: no walk runs now');
+  // The seed's two files: entries 1-49,999, the one the split moves, and the live one from the archive point on.
+  const sizes = fs.readdirSync(srv.dataDir).filter((f) => /^audit[^/\\]*\.jsonl$/.test(f)).map((f) => fs.statSync(path.join(srv.dataDir, f)).size);
+  const largest = Math.max(...sizes);
+  assert.equal(sizes.length, 2, 'the seed is two files');
+  const splitting = h.api(srv.base, 'POST', '/api/audit/split', { seq: 50_000 }, { cookie: admin, headers: { 'x-agm-test-hold': 'sign-in' } });
+  await h.until(() => srv.meter.waiting() > 0, 20_000, 'the split waiting to read the log');
+  const signIn = await h.api(srv.base, 'POST', '/api/auth/login', { username: 'bob', password: 'clipboard and coffee' });
+  assert.equal(signIn.status, 200, 'a sign-in while the split holds its slot: ' + JSON.stringify(signIn.body));
+  const r = await splitting;
   assert.equal(r.status, 200, JSON.stringify(r.body));
-  assert.ok(split.worst() < 300, 'a page asking meanwhile waited at most ' + Math.round(split.worst()) + ' ms');
-  assert.ok(during - alone < 300, 'a sign-in meanwhile took ' + Math.round(during) + ' ms, ' + Math.round(alone) + ' ms alone');
+  const w = srv.meter.seen();
+  const said = JSON.stringify(w);
+  assert.equal(w.opened, 'sign-in', 'the sign-in was answered while the split waited to read the log: ' + said);
+  assert.deepEqual([w.walks, w.atOnce], [2, 1], 'the split\'s own check, then the check after it, one at a time: ' + said);
+  assert.ok(w.lines >= 56_000 + 6_000, 'the split\'s check walked the whole log, and the check after it the live log: ' + said);
+  assert.ok(w.most.lines > 0 && w.most.lines <= 1000, 'at most 1,000 lines between two turns of the loop: ' + said);
+  assert.ok(w.digested >= sizes.reduce((a, b) => a + b, 0), 'each file of the log was hashed, and counted: ' + said);
+  assert.ok(w.most.digested > 0 && w.most.digested <= largest, 'at most one file of the log hashed between two turns of the loop (' + largest + ' bytes): ' + said);
+  assert.ok(w.turns >= Math.ceil(w.lines / 1000), 'the loop turned at least once per 1,000 lines: ' + said);
+  assert.deepEqual([w.syncReads, w.asyncReads > 0, w.reading], [0, true, 1], 'the log read off the event loop, one read at a time: ' + said);
   const c = (await h.api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin })).body;
   assert.deepEqual([c.mark, c.from], ['intact', 50_000]);
   assert.ok(c.entries > 6000 && c.entries < 6100, 'the check walks the live log only: ' + c.entries);
-  // The archive's own Check walks its 49,999 entries and their MACs: the loop turns as it does, so a page asking waits
-  // at most 300 ms.
-  const own = await asking(() => h.api(srv.base, 'GET', '/api/audit/verify?archive=' + r.body.archive, undefined, { cookie: admin }));
-  assert.deepEqual([own.out.body.mark, own.out.body.entries, own.out.body.archive.pinned], ['intact', 49_999, true]);
-  assert.ok(own.worst() < 300, 'a page asking during the archive\'s Check waited at most ' + Math.round(own.worst()) + ' ms');
+  // The archive's own Check: its 49,999 entries walked by the verifier, then each MAC-checked.
+  const own = await h.api(srv.base, 'GET', '/api/audit/verify?archive=' + r.body.archive, undefined, { cookie: admin, headers: { 'x-agm-test-hold': '1' } });
+  assert.deepEqual([own.body.mark, own.body.entries, own.body.archive.pinned], ['intact', 49_999, true]);
+  const a = srv.meter.seen();
+  const aSaid = JSON.stringify(a);
+  assert.deepEqual([a.walks, a.lines, a.macs], [0, 49_999, 49_999], 'each entry walked once by the verifier and MAC-checked once, and no check of the live log: ' + aSaid);
+  assert.ok(a.most.lines > 0 && a.most.lines <= 1000, 'at most 1,000 entries walked between two turns of the loop: ' + aSaid);
+  assert.ok(a.most.macs > 0 && a.most.macs <= 1000, 'at most 1,000 entries MAC-checked between two turns of the loop: ' + aSaid);
+  assert.ok(a.digested >= largest, 'the archive\'s file was hashed, and counted: ' + aSaid);
+  assert.ok(a.most.digested > 0 && a.most.digested <= largest, 'at most one file hashed between two turns of the loop: ' + aSaid);
+  assert.ok(a.turns >= Math.ceil(a.lines / 1000) + Math.ceil(a.macs / 1000) - 1, 'the loop turned at least once per 1,000 entries of each: ' + aSaid);
+  assert.deepEqual([a.syncReads, a.asyncReads > 0, a.reading], [0, true, 1], 'the archive read off the event loop, one read at a time: ' + aSaid);
 });

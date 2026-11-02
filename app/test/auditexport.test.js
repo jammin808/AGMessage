@@ -968,37 +968,49 @@ test('end to end: who may export — the token at the laptop and an admin at the
   assert.equal((await h.api(srv.base, 'POST', '/api/audit/export', {}, { cookie: again })).status, 200);
 });
 
-test('speed: an export of the 56,000-entry log while a page asks and a person signs in: neither waits more than 300 ms for it', async (t) => {
+// The export's work in a real server, counted as work by test/audit-preload.js, never timed: how long a turn of the loop
+// takes is the machine's (a busy one stretches it), how much a turn does is the export's. A page asking meanwhile is read
+// and answered at each turn: the export's check walks at most 1,000 lines between two turns (lib/audit.js's SLICE), its
+// digests take at most 1 MiB (lib/auditexport.js's SLICE), and the zip's SHA-256 and CRC-32 go a 64 KiB chunk at a time.
+// A sign-in's password check runs on libuv's thread pool (four threads), where the export reads the log through its
+// handles one read at a time and deflates one member at a time: two threads at most, the rest left to the sign-in. And a
+// sign-in is answered while the export holds its slot, its own entry written and the log's files open, waiting to read:
+// it waits for nothing the export holds.
+test('speed: an export of the 56,000-entry log digests at most 1 MiB and walks at most 1,000 lines between two turns of the event loop, reads the log off the loop one read at a time and deflates one member at a time, and a sign-in is answered while it holds its slot', async (t) => {
   const dataDir = tmp('agm-e2e-');
   const keyDir = dataDir + '-keys';
   fs.mkdirSync(keyDir, { recursive: true });
   fs.writeFileSync(path.join(keyDir, 'machine.key'), FIXTURE_KEY.toString('base64'));
   keyedChainOf(56_000, { file: path.join(dataDir, 'audit.jsonl'), records: path.join(keyDir, 'audit') });
-  const srv = await h.startServer({ AGM_DATA_DIR: dataDir });
-  t.after(async () => { await h.stopServer(srv.child); });
+  const meter = h.auditMeter(dataDir);
+  const srv = await h.startServer({ AGM_DATA_DIR: dataDir, ...meter.env });
+  t.after(async () => { await h.stopServer(srv.child); meter.remove(); });
   const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   await h.api(srv.base, 'POST', '/api/users', { username: 'bob', name: 'Bob', role: 'staff', password: 'clipboard and coffee' }, { cookie: admin });
-  const signIn = async () => { const t0 = performance.now(); const r = await h.api(srv.base, 'POST', '/api/auth/login', { username: 'bob', password: 'clipboard and coffee' }); assert.equal(r.status, 200); return performance.now() - t0; };
-  const alone = Math.min(await signIn(), await signIn());
-  let worst = 0;
-  const state = { running: true };
-  const probe = (async () => {
-    while (state.running) {
-      const t0 = performance.now();
-      await h.api(srv.base, 'GET', '/api/auth/me');
-      worst = Math.max(worst, performance.now() - t0);
-    }
+  assert.equal((await h.api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin })).status, 200, 'the check at start, or one after it, answered: no walk runs now');
+  const exporting = (async () => {
+    const r = await fetch(srv.base + '/api/audit/export', { method: 'POST', headers: { cookie: admin, 'x-agm-test-hold': 'sign-in' } });
+    return { status: r.status, said: r.headers.get('x-agm-export'), body: Buffer.from(await r.arrayBuffer()) };
   })();
-  const exporting = (async () => { const r = await fetch(srv.base + '/api/audit/export', { method: 'POST', headers: { cookie: admin } }); return { status: r.status, body: Buffer.from(await r.arrayBuffer()) }; })();
-  await wait(150);
-  const during = await signIn();
+  await h.until(() => meter.waiting() > 0, 20_000, 'the export waiting to read the log');
+  const signIn = await h.api(srv.base, 'POST', '/api/auth/login', { username: 'bob', password: 'clipboard and coffee' });
+  assert.equal(signIn.status, 200, 'a sign-in while the export holds its slot: ' + JSON.stringify(signIn.body));
   const r = await exporting;
-  state.running = false;
-  await probe;
   assert.equal(r.status, 200);
-  assert.ok(readZip(r.body).some((m) => m.name.endsWith('/log/audit.jsonl')), 'the whole log was exported');
-  assert.ok(worst < 300, 'a page asking meanwhile waited at most ' + Math.round(worst) + ' ms');
-  assert.ok(during - alone < 300, 'a sign-in meanwhile took ' + Math.round(during) + ' ms, ' + Math.round(alone) + ' ms alone');
+  const logs = readZip(r.body).filter((m) => /\/log\/audit[^/]*\.jsonl$/.test(m.name));
+  assert.ok(logs.some((m) => m.name.endsWith('/log/audit.jsonl')), 'the whole log was exported');
+  const bytes = logs.reduce((n, m) => n + m.data.length, 0);
+  const to = Number(/^entries=1-(\d+);/.exec(r.said)[1]);
+  const w = meter.seen();
+  const said = JSON.stringify(w);
+  assert.equal(w.opened, 'sign-in', 'the sign-in was answered while the export waited to read the log: ' + said);
+  assert.deepEqual([w.walks, w.atOnce], [1, 1], 'the export\'s own check, one walk: ' + said);
+  assert.equal(w.lines, to, 'the check read each line through the export\'s own entry once: ' + said);
+  assert.ok(w.most.lines > 0 && w.most.lines <= 1000, 'at most 1,000 lines between two turns of the loop: ' + said);
+  assert.ok(w.digested >= bytes, 'every byte of the log was digested on the loop, and counted (' + bytes + ' bytes): ' + said);
+  assert.ok(w.most.digested > 0 && w.most.digested <= 1024 * 1024, 'at most 1 MiB of the log digested between two turns of the loop: ' + said);
+  assert.ok(w.turns >= Math.max(Math.ceil(w.lines / 1000), Math.ceil(w.digested / (1024 * 1024))), 'the loop turned at least once per 1,000 lines, and once per MiB digested: ' + said);
+  assert.deepEqual([w.syncReads, w.asyncReads > 0, w.reading, w.deflating], [0, true, 1, 1], 'the log read off the event loop one read at a time, and one member deflated at a time: ' + said);
 });
 
 test('the screen rows\' voice: a message\'s words and a file\'s name taken to a screen are in no row this version writes, and in no member of an export made after; with HTTPS off, another device is sent to the laptop', async (t) => {

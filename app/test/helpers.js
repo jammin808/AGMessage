@@ -484,6 +484,23 @@ function keyedLogWithPoints(n, { file, points = [], key = FIXTURE_KEY, records =
   fs.writeFileSync(path.join(records, 'keyed.json'), audit.sealRecord({ v: 1, since: at, log: l }, k.head));
   return { l, kid, last: prev, files };
 }
+/**
+ * A server's audit work counted (test/audit-preload.js), never timed: `env` preloads the meter into a server started with
+ * it and names the file it writes beside `dataDir`; `seen()` reads that file once the request it counts is answered (it is
+ * written whole before then); `waiting()` is how many of the work's reads a hold has waiting now, 0 until the file says.
+ */
+function auditMeter(dataDir) {
+  const file = dataDir + '-meter.json';
+  const preload = '--require "' + path.join(__dirname, 'audit-preload.js').split(path.sep).join('/') + '"';   // forward slashes: no escapes inside the quotes
+  return {
+    env: { NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '), AGM_TEST_AUDIT: file },
+    seen: () => JSON.parse(fs.readFileSync(file, 'utf8')),
+    waiting() {
+      try { return JSON.parse(fs.readFileSync(file, 'utf8')).waiting; } catch { return 0; }   // not written yet, or being written: asked again
+    },
+    remove: () => { fs.rmSync(file, { force: true }); },
+  };
+}
 /** Accept every open finding as the typed token would (✕ ones confirmed): the accepted state, ◇. */
 async function acceptAll(log) {
   const c = await log.verify();
@@ -539,6 +556,6 @@ function unzipTo(buf, dir) {
 module.exports = {
   stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
   filesUnder, handlerFiles, pageScripts,
-  FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, acceptAll, brief,
+  FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, auditMeter, acceptAll, brief,
   readZip, unzipTo, SEED_WORDS,
 };

@@ -12,7 +12,8 @@ const path = require('path');
 const rbac = require('../lib/rbac');
 const acc = require('../lib/accounts');
 const guard = require('../lib/guard');
-const { startServer, stopServer, api, connect, emit, once, wait, until, fakeStagewatch, TOKEN, FIXTURE_KEY, auditLog, serverAudit, chainOf, keyedChainOf, acceptAll, brief } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, once, wait, until, fakeStagewatch, TOKEN, FIXTURE_KEY, auditLog, serverAudit, chainOf, keyedChainOf, auditMeter, acceptAll, brief } = require('./helpers');
+const { meter } = require('./audit-preload');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
@@ -579,9 +580,12 @@ for (const [what, tail] of [['a half-written last line', '{"seq":4,"at":17'], ['
 }
 
 // Two seeds: the 0.5.1 chain, which reads △ with its one plain finding until accepted, and a chain keyed under this
-// machine's key, whose every entry is MAC-checked and which reads ✓.
+// machine's key, whose every entry is MAC-checked and which reads ✓. The walk is counted as work by test/audit-preload.js,
+// never timed: how long a turn of the loop takes is the machine's (a busy one stretches it), how much a turn does is the
+// check's. The loop turns after every 1,000 lines (lib/audit.js's SLICE), which is when a page asking meanwhile is read
+// and answered; the log is read off the loop; and a second click while the walk runs shares it.
 for (const seed of ['plain', 'keyed']) {
-  test('audit: checking a full-size ' + seed + ' log keeps the event loop turning, one check at a time, and still finds an edited line', async () => {
+  test('audit: checking a full-size ' + seed + ' log reads it off the event loop and walks at most 1,000 lines between two turns of the loop, one check at a time, and still finds an edited line', async () => {
     const dir = tmp('agm-audit-');
     const file = path.join(dir, 'audit.jsonl');
     const n = 56_000;
@@ -589,22 +593,24 @@ for (const seed of ['plain', 'keyed']) {
     else keyedChainOf(n, { file });
     const log = auditLog(file);
     log.open();   // the server's start, before anyone can ask for a check
-    let turns = 0;
-    let done = false;
-    let worst = 0;
-    let lastTick = performance.now();
-    const spin = () => { if (done) return; const now = performance.now(); worst = Math.max(worst, now - lastTick); lastTick = now; turns++; setImmediate(spin); };
-    setImmediate(spin);
-    const check = log.verify();
-    assert.strictEqual(log.verify(), check, 'a second click shares the running check');
-    const r = await check;
-    done = true;
+    const m = meter();
+    let r;
+    try {
+      const check = log.verify();
+      assert.strictEqual(log.verify(), check, 'a second click shares the running check');
+      r = await check;
+    } finally { m.stop(); }
     if (seed === 'plain') {
       assert.deepEqual(brief(r), { ok: false, mark: 'unvouched', entries: n + 1 }, 'the seed and its `audit.keyed`');
       assert.deepEqual(r.findings.map((f) => [f.id, f.kind, f.first]), [['s1-' + n, 'plain', true]]);
     } else assert.deepEqual(brief(r), { ok: true, mark: 'intact', entries: n });
-    assert.ok(turns >= 40, 'the loop turned ' + turns + ' times during the check');
-    assert.ok(worst < 250, 'the longest the loop waited: ' + Math.round(worst) + ' ms');
+    const w = m.seen();
+    const said = JSON.stringify(w);
+    assert.deepEqual([w.walks, w.atOnce], [1, 1], 'two clicks, one walk: ' + said);
+    assert.equal(w.lines, r.entries, 'the walk read each line of the chain once: ' + said);
+    assert.ok(w.most.lines > 0 && w.most.lines <= 1000, 'at most 1,000 lines between two turns of the loop: ' + said);
+    assert.ok(w.turns >= Math.ceil(w.lines / 1000), 'the loop turned at least once per 1,000 lines: ' + said);
+    assert.deepEqual([w.syncReads, w.asyncReads > 0, w.reading], [0, true, 1], 'the log read off the event loop one read at a time, never with a synchronous read: ' + said);
 
     const lines = fs.readFileSync(file, 'utf8').split('\n');
     lines[100] = lines[100].replace('Lectern', 'Foyer');
@@ -1188,7 +1194,6 @@ test('a change to accounts.json that cannot be written is retried until it lands
 // (lib/audit.js's SLICE), which is when a page asking meanwhile is read and answered; the log is read off the loop; and
 // six clicks that come while a walk runs share it. The preload's hold has the walk wait to read until all six have come,
 // so they share it however the machine schedules them; the check at start, or one after it, is answered first.
-const AUDIT_PRELOAD = path.join(__dirname, 'audit-preload.js');
 for (const seed of ['plain', 'keyed']) test('six quick clicks on Check the log of a full-size ' + seed + ' log share one walk, which reads the log off the event loop and lets the loop turn every 1,000 lines', async (t) => {
   const dataDir = tmp('agm-e2e-');
   const n = 56_000;
@@ -1200,10 +1205,9 @@ for (const seed of ['plain', 'keyed']) test('six quick clicks on Check the log o
     fs.writeFileSync(path.join(keyDir, 'machine.key'), FIXTURE_KEY.toString('base64'));
     keyedChainOf(n, { file: path.join(dataDir, 'audit.jsonl'), records: path.join(keyDir, 'audit') });
   }
-  const walks = dataDir + '-walks.json';
-  const preload = '--require "' + AUDIT_PRELOAD.split(path.sep).join('/') + '"';   // forward slashes: no escapes inside the quotes
-  const srv = await startServer({ AGM_DATA_DIR: dataDir, NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '), AGM_TEST_AUDIT: walks });
-  t.after(async () => { await stopServer(srv.child); fs.rmSync(walks, { force: true }); });
+  const meter = auditMeter(dataDir);
+  const srv = await startServer({ AGM_DATA_DIR: dataDir, ...meter.env });
+  t.after(async () => { await stopServer(srv.child); meter.remove(); });
   const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const first = await api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin });
   assert.equal(first.status, 200, 'the check at start, or one after it, answered: no walk runs now');
@@ -1214,12 +1218,12 @@ for (const seed of ['plain', 'keyed']) test('six quick clicks on Check the log o
     assert.equal(c.body.ok, seed === 'keyed');
     assert.ok(c.body.entries > n, 'the seeded chain and the server\'s own entries: ' + c.body.entries);
   }
-  const w = JSON.parse(fs.readFileSync(walks, 'utf8'));
+  const w = meter.seen();
   const said = JSON.stringify(w);
-  assert.equal(w.held, 6, 'all six clicks came while the walk waited to read: ' + said);
+  assert.deepEqual([w.held, w.opened], [6, 'all came'], 'all six clicks came while the walk waited to read: ' + said);
   assert.deepEqual([w.walks, w.atOnce], [1, 1], 'six clicks, one walk, and never two at once: ' + said);
   assert.equal(w.lines, checks[0].body.entries, 'the walk read each line of the chain once: ' + said);
-  assert.ok(w.most > 0 && w.most <= 1000, 'at most 1,000 lines between two turns of the loop: ' + said);
+  assert.ok(w.most.lines > 0 && w.most.lines <= 1000, 'at most 1,000 lines between two turns of the loop: ' + said);
   assert.ok(w.turns >= Math.ceil(w.lines / 1000), 'the loop turned at least once per 1,000 lines: ' + said);
-  assert.deepEqual([w.syncReads, w.asyncReads > 0], [0, true], 'the log read off the event loop, never with a synchronous read: ' + said);
+  assert.deepEqual([w.syncReads, w.asyncReads > 0, w.reading], [0, true, 1], 'the log read off the event loop one read at a time, never with a synchronous read: ' + said);
 });
