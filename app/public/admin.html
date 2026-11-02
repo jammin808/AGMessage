@@ -153,6 +153,17 @@
           <p id="ctxWhy" class="hint" role="status" hidden></p>
         </section>
 
+        <!-- This laptop: what AGMessage knows of the laptop it serves from, and what Windows says of it, each fact with
+             where it was read. Its acts are the catalogue's (kind laptop): Refresh and Copy LAN address. -->
+        <section class="admin-laptop-section" id="laptopSection" data-key="laptop" aria-labelledby="laptopTitle">
+          <header class="admin-laptop-header">
+            <h3 id="laptopTitle">💻 This laptop</h3>
+            <span class="obj-bar" id="laptopActs"></span>
+          </header>
+          <p id="laptopRead" class="hint" role="status"></p>
+          <ul id="laptopFacts" class="laptop-facts" aria-labelledby="laptopTitle"></ul>
+        </section>
+
         <!-- Cloudflare tunnel control: lets remote users (off-LAN) join via a
              public URL the admin can spin up and tear down from the dashboard. -->
         <section class="admin-tunnel-section" id="tunnelSection" data-key="tunnel">

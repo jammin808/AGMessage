@@ -398,6 +398,37 @@ Troubleshooting
   stay, empty. "AGM_RUNS is ..., which names no way AGMessage runs":
   remove AGM_RUNS from the .bat; the portable folder needs none.
 
+- The black window's lines are kept in app\data\logs\server.log, each
+  with its time (never the admin token; past 2 MB it becomes
+  server.1.log and a new one begins, so at most two). When the window
+  has closed, or AGMessage stopped by itself, read why there. The
+  watchdog's line for a start it refused carries the reason: "server
+  stopped: cannot start as configured (code 3): the uploads folder ...".
+  On an installed PC the next start says it on Admin -> This laptop,
+  under "Before this start".
+
+- Admin -> This laptop says, each with where it was read: the build and
+  how it runs, the LAN addresses (Copy LAN address copies one), HTTPS
+  and why it is off, how many sealed values open, the screens that
+  confirmed what they show, Stagewatch, the internet link, why the
+  watchdog started it again (or why the start before was refused, or
+  the watchdog gave up), and what this run goes without. From
+  Windows: the network's profile (Private, Public or Domain) and whether
+  a firewall rule lets this copy's node.exe in on it ("no rule ... on
+  Public: phones there may not reach AGMessage" is the case to fix
+  before doors: allow it, or make the network Private), sleep and the
+  lid on mains (a laptop that sleeps takes AGMessage with it), the
+  server task, and the laptop's admin. Refresh reads Windows again; a
+  fact it could not read in 5 s says "unknown" and why.
+
+- "[tls] the certificate, which ends ..., is due for renewal and not
+  renewed at this start, which has no network address": this laptop had
+  no network yet, so a new one would have named no address. It serves
+  on with the one it has. Once the laptop is on the network, press New
+  certificate on the admin page (HTTPS), which This laptop's HTTPS line
+  names too; starting AGMessage again then renews it as well. Devices
+  that trusted the old certificate are asked to trust the new one.
+
 - "Token: not shown here, since this output is not a window a person
   reads and may be kept.": AGMessage was started with its output sent
   to a file or a log, where a token would stay for anyone to read.

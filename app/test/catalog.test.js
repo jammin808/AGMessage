@@ -33,6 +33,8 @@ const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:
   // the admin page, the halls board and the Accounts page (adminRoom, person, adminMsg, link, tunnel, hall, help, account, audit)
   'admin:watchRoom', 'admin:summary', 'admin:invites', 'admin:resetRoom', 'admin:deleteRoom', 'admin:setRole', 'admin:linkRoom', 'admin:unlinkRoom', 'admin:kick', 'admin:deleteMessage',
   'admin:settings', 'nodes:link', 'nodes:unlink', 'nodes:acceptCertificate', 'nodes:command', 'admin:acceptCertificate', 'admin:tunnelStart', 'admin:tunnelStop', 'admin:tunnelStatus',
+  // "This laptop" (laptop)
+  'admin:laptop',
   'hall:settings', 'nodes:list', 'http:PATCH /api/users/:id', 'http:POST /api/users/:id/password', 'http:POST /api/users/:id/signout', 'http:DELETE /api/users/:id',
   'http:GET /api/audit/verify', 'http:POST /api/audit/export', 'http:POST /api/audit/split'];
 /** The status marks the pages draw (the marks table of the plan's §15.6): no act's icon is one, so a mark has one meaning. */
@@ -154,6 +156,12 @@ const PAGE_OBJECTS = {
     justChecked: { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: 20.4 },
     on: { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: 90 },
   },
+  // "This laptop": its addresses as devices open them, and whether Windows is read now.
+  laptop: {
+    two: { addresses: ['http://192.168.1.20:3023', 'http://10.0.4.7:3023'], reading: false },
+    reading: { addresses: ['http://192.168.1.20:3023'], reading: true },
+    none: { addresses: [], reading: false },
+  },
   hall: { row: { code: 'K7P2QX', name: 'Hall 2' } },
   help: {
     open: { code: 'K7P2QX', id: 'h1', state: 'open', canRespond: true, hall: 'Hall 2', category: 'Sound' },
@@ -177,7 +185,7 @@ const PAGE_OBJECTS = {
 const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
   compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple], chip: [SEATS.admin, SEATS.researchNoDesk], code: [SEATS.admin, SEATS.board],
-  adminRoom: [PAGE.admin, PAGE.adminNoAi], person: [PAGE.admin, SEATS.research, SEATS.board], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin],
+  adminRoom: [PAGE.admin, PAGE.adminNoAi], person: [PAGE.admin, SEATS.research, SEATS.board], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
   hall: [PAGE.board], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
 /** Every seat of a kind with every object of it ([f, o] pairs): messages, a file where it is listed and where it is open, a screen, and the other pages' objects. */
@@ -189,7 +197,7 @@ function pairsOf(kind) {
 }
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'code', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'hall', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'code', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -610,6 +618,10 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['tunnel', 'admin', O.tunnel.on, ['tunnel.check', 'tunnel.copy', 'tunnel.off']],
     ['tunnel', 'admin', O.tunnel.starting, ['tunnel.check', 'tunnel.off']],
     ['tunnel', 'notAdmin', O.tunnel.on, []],
+    // "This laptop": read again, and each LAN address copied, where it has one.
+    ['laptop', 'admin', O.laptop.two, ['laptop.refresh', 'laptop.copy']],
+    ['laptop', 'admin', O.laptop.none, ['laptop.refresh']],
+    ['laptop', 'notAdmin', O.laptop.two, []],
     // A hall's row: opened (here or in a tab) and its code copied by everyone it is listed for; set up and the show
     // network by right.
     ['hall', 'board', O.hall.row, ['hall.open', 'hall.tab', 'hall.copy', 'hall.code', 'hall.setup', 'hall.network']],
@@ -638,11 +650,11 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
   const facts = (seat) => PAGE[seat] || SEATS[seat];
   for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, facts(seat), o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
   // Every act of these kinds is shown to some seat: none passes the matrix by its absence.
-  const kinds = ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'hall', 'help', 'account', 'audit'];
+  const kinds = ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'help', 'account', 'audit'];
   const shownSomewhere = new Set(M.flatMap((r) => r[3]));
   for (const k of kinds) for (const e of C.KINDS[k]) assert.ok(shownSomewhere.has(e.id), e.id + ' is shown to some seat in the matrix');
   // Every act a seat is shown is one its rights allow: the admin page's acts need its gate, the split "the admin".
-  for (const k of ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel']) for (const o of Object.values(PAGE_OBJECTS[k])) assert.deepEqual(ids(k, PAGE.notAdmin, o), [], k + ': nothing to a page the admin page\'s gate does not admit');
+  for (const k of ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop']) for (const o of Object.values(PAGE_OBJECTS[k])) assert.deepEqual(ids(k, PAGE.notAdmin, o), [], k + ': nothing to a page the admin page\'s gate does not admit');
 });
 
 test('the other pages: what may be done but not now is shown, disabled, with the words why', () => {
@@ -661,6 +673,9 @@ test('the other pages: what may be done but not now is shown, disabled, with the
     'adminRoom.watch': C.WORDS.offline, 'adminRoom.transcript': '', 'adminRoom.minutes': C.WORDS.offline, 'adminRoom.invites': C.WORDS.offline, 'adminRoom.clear': C.WORDS.offline, 'adminRoom.remove': C.WORDS.offline,
   });
   assert.deepEqual(why('adminMsg', 'adminOffline', O.adminMsg.text), { 'adminMsg.copy': '', 'adminMsg.delete': C.WORDS.offline });
+  // "This laptop": Refresh while Windows is read says so, and offline says so too; a copy sends nothing, so it goes on.
+  assert.deepEqual(why('laptop', 'admin', O.laptop.reading), { 'laptop.refresh': 'Reading Windows\' facts now…', 'laptop.copy': '' });
+  assert.deepEqual(why('laptop', 'adminOffline', O.laptop.two), { 'laptop.refresh': C.WORDS.offline, 'laptop.copy': '' });
   // The Accounts page has no socket: nothing there is refused for a connection.
   assert.deepEqual(Object.values(why('account', 'accountsAdmin', O.account.other)).filter(Boolean), []);
 });
@@ -675,6 +690,9 @@ test('the other pages: the inline bar, the asks and their words, the caps and th
   assert.deepEqual(bar('link', 'admin', O.link.nodeWaits), ['link.confirm', 'link.setup']);
   assert.deepEqual(bar('link', 'admin', O.link.stagewatchChanged), ['link.accept']);
   assert.deepEqual(bar('tunnel', 'admin', O.tunnel.on), ['tunnel.check', 'tunnel.copy']);
+  assert.deepEqual(bar('laptop', 'admin', O.laptop.two), ['laptop.refresh', 'laptop.copy'], '"This laptop": Refresh, then Copy LAN address');
+  // Copy LAN address ▸: each address, as devices open it.
+  assert.deepEqual(plain(C.submenu('laptop', 'laptop.copy', PAGE.admin, O.laptop.two)), [{ value: 'http://192.168.1.20:3023', label: 'http://192.168.1.20:3023' }, { value: 'http://10.0.4.7:3023', label: 'http://10.0.4.7:3023' }]);
   assert.deepEqual(bar('hall', 'board', O.hall.row), [], 'a hall\'s row opens by its name, its one link');
   assert.deepEqual(bar('help', 'board', O.help.open), ['help.respond', 'help.resolve'], 'a help request: its two answers');
   assert.deepEqual(bar('account', 'accountsAdmin', O.account.other), ['account.edit']);

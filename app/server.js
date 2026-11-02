@@ -53,6 +53,7 @@ const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
 const readings = require('./lib/peaks');
 const startup = require('./lib/startup');
+const laptop = require('./lib/laptop');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD } = require('./lib/version');
@@ -106,6 +107,8 @@ const SECRET = secretFound.secret;
 // person sits (`sayToken`). A server run alone makes its own and prints it in its banner.
 const ADMIN_TOKEN = (process.env.ADMIN_TOKEN || crypto.randomBytes(8).toString('hex')).toLowerCase();
 const SUPERVISED = !!process.env.AGM_SUPERVISED;
+// The watchdog reads this server's output line by line (supervise.js), and so is told where the Token line goes.
+const TEED = process.env.AGM_TEED === '1';
 
 const makeRoomCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 const makeMessageId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
@@ -283,6 +286,7 @@ function flushLanes() {
 // One that cannot be read, or whose key does not open, turns HTTPS off this run and is left as it is.
 let cert = null;
 let tlsOff = '';   // why HTTPS is off this run, in words ('' while it is on, and when AGM_TLS=0 turned it off)
+let tlsRenewWaited = false;   // a certificate due for renewal was not renewed at this start, which had no network address
 const tlsFound = process.env.AGM_TLS === '0' ? null : tlsmod.readCertificate({ dir: secretbox.keyDir(), open: secretbox.open });
 if (tlsFound && tlsFound.cert) cert = tlsFound.cert;
 if (tlsFound && tlsFound.state === 'unusable') {
@@ -292,16 +296,38 @@ if (tlsFound && tlsFound.state === 'unusable') {
 const pins = new tlsmod.PinStore(settings.tlsPins && typeof settings.tlsPins === 'object' ? settings.tlsPins : {});
 const isLoopback = (req) => { const a = (req.socket && req.socket.remoteAddress) || ''; return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1'; };
 const isEncrypted = (req) => !!(req.socket && req.socket.encrypted);
+/**
+ * Why the certificate serves on unrenewed this run, in words true now, or '' when it does not: a start with no network
+ * address leaves one due for renewal as it is, and New certificate (admin:renewCertificate) renews it once the laptop has
+ * an address, as a start that has one does.
+ */
+function renewalWords() {
+  if (!tlsRenewWaited || !cert) return '';
+  return tlsmod.networkAddresses(lanNow()).length
+    ? 'due for renewal, and not renewed at this start, which had no network address: New certificate renews it now'
+    : 'due for renewal, and not renewed at this start, which has no network address yet: New certificate renews it once this laptop has one, as does a start that has one';
+}
+/** This laptop's LAN addresses now, or none while the system will not list its adapters: an answer that names them is drawn all the same. */
+function lanNow() { try { return tlsmod.lanAddresses(); } catch { return []; } }
+/** Why HTTPS is off this run, in words, or '' while it is on: what the banner's HTTPS line says, for the admin page too. */
+function httpsOff() {
+  if (cert) return '';
+  if (process.env.AGM_TLS === '0') return 'AGM_TLS=0 turned it off for this run';
+  return tlsOff || 'this run has no certificate';
+}
 const tlsFacts = () => ({
   on: !!cert, fingerprint: cert ? cert.fp : '', validTo: cert ? cert.validTo : '', requireHttps: !!settings.requireHttps,
   link: stageLink.tlsState, desk: stageLink.desk, deskRefusal: stageLink.deskRefusal,
+  off: httpsOff(), renewal: renewalWords(),
 });
 
 // ---------------------------------------------------------------- health: crashes, the loop, latency
 const RESTARTS = parseInt(process.env.AGM_RESTARTS || '0', 10) || 0;
 const CRASH_PATH = path.join(DATA_DIR, 'last-crash.json');
 const lastCrash = resilience.readJsonWithBak(CRASH_PATH);
-const watchdogGaveUp = resilience.readJsonWithBak(path.join(DATA_DIR, 'watchdog.json'));   // marked seen by `firstWrites`
+// How the watchdog ended before this start, as it recorded it (supervise.js `record`: a give-up, or the installed node's
+// start refused as configured, `refused`); marked seen by `firstWrites`.
+const watchdogBefore = resilience.readJsonWithBak(path.join(DATA_DIR, 'watchdog.json'));
 // The sampler's timer fires every LOOP_RESOLUTION_MS, so an idle loop reads that much delay: it is taken off each window.
 const LOOP_RESOLUTION_MS = 10;
 const loopDelay = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS });
@@ -397,7 +423,7 @@ function healthFacts() {
   return {
     restarts: RESTARTS,
     lastCrash: lastCrash ? { at: lastCrash.at, message: String(lastCrash.message || '').slice(0, 200) } : null,
-    watchdog: watchdogGaveUp ? { at: watchdogGaveUp.at, reason: String(watchdogGaveUp.reason || '').slice(0, 200) } : null,
+    watchdog: watchdogBefore ? { at: watchdogBefore.at, reason: String(watchdogBefore.reason || '').slice(0, 700), refused: watchdogBefore.refused === true } : null,
     rejections,
     handlerFaults,
     loopMs: loopRing.stats(),
@@ -432,6 +458,79 @@ function healthFacts() {
     ...tunnelFacts(),
     // Connections the port could not take once it listened (EMFILE and the like): how many, and the last one's code.
     acceptErrors: { ...acceptErrors },
+  };
+}
+
+// ---------------------------------------------------------------- "This laptop" (lib/laptop.js)
+// What this AGMessage knows of the laptop it serves from, read each time it is asked, and what Windows says of it: read by
+// one powershell.exe once this copy serves and again at the admin page's Refresh, one read at a time, each within its time.
+// Only the admin page's answers carry it: never the context, the hello or the AI's brief.
+const LAPTOP_MS = envNumber('AGM_LAPTOP_MS', laptop.WINDOWS_MS);
+// The watchdog's line for the server's run before this start, handed over by it (supervise.js): its words, no secret.
+const BEFORE = guard.cleanText(process.env.AGM_BEFORE || '', 800);
+/**
+ * "Before this start", in words: the watchdog's line for the run it restarted, or else how a watchdog ended before this
+ * start, as it recorded it (a start refused as configured, a give-up), with when; '' when neither.
+ */
+function beforeWords() {
+  if (RESTARTS && BEFORE) return BEFORE;
+  if (!watchdogBefore || typeof watchdogBefore !== 'object') return '';
+  const at = Number.isFinite(watchdogBefore.at) ? ' at ' + new Date(watchdogBefore.at).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : '';
+  const reason = guard.cleanText(String(watchdogBefore.reason || ''), 700) || 'no reason recorded';
+  return (watchdogBefore.refused === true ? 'the start' + at + ' was refused: ' : 'the watchdog gave up' + at + ': ') + reason;
+}
+const laptopRead = { at: 0, reading: false, windows: laptop.windowsFacts(null), child: null };
+/** Windows read again, unless a read is under way; once it is done the admin pages are told the facts (laptop:facts). */
+function readLaptop() {
+  if (laptopRead.reading) return;
+  const plan = laptop.windowsPlan(process.env, { node: process.execPath });
+  if (!plan.run) { laptopRead.windows = laptop.windowsFacts({ text: '', why: plan.why }); laptopRead.at = Date.now(); return; }
+  laptopRead.reading = true;
+  // readWindows never rejects, and its answer is read by type: the read ends, whatever it found.
+  laptop.readWindows(plan, { timeoutMs: LAPTOP_MS, started: (child) => { laptopRead.child = child; } })
+    .then((answer) => { laptopRead.windows = laptop.windowsFacts(answer); laptopRead.at = Date.now(); })
+    .finally(() => {
+      laptopRead.reading = false;
+      laptopRead.child = null;
+      const facts = laptopAnswer();
+      for (const [, s] of io.sockets.sockets) if (s.data && s.data.isAdmin) s.emit('laptop:facts', facts);
+    });
+}
+/**
+ * "This laptop" for an answer: its facts, or, should reading them throw (an adapter's list the system refused, a sealed
+ * value that would not open), one row that says so, so the rest of the admin page's answer is drawn all the same.
+ */
+function laptopAnswer() {
+  try { return laptopFacts(); } catch (e) {
+    const why = guard.cleanText(String((e && (e.code || e.message)) || 'unknown error'), 120);
+    return { at: laptopRead.at || null, reading: laptopRead.reading, addresses: [], port: PORT, facts: [{ id: 'unread', label: 'This laptop', words: 'unknown (its facts could not be read: ' + why + ')', mark: 'warn', from: 'this server' }] };
+  }
+}
+/**
+ * "This laptop" as the admin page draws it: when Windows was last read (`at`), whether a read is under way, the LAN
+ * addresses and the port, and its rows (lib/laptop.js facts), each with where it was read. Sealed values are counted,
+ * never named; screens and Stagewatch links counted by their state.
+ */
+function laptopFacts() {
+  const addresses = tlsmod.lanAddresses();
+  const sealed = sealedValues();
+  const key = secretbox.keyState();
+  let shown = 0, offline = 0;
+  for (const d of displays.list.values()) { const st = Displays.status(d).state; if (st === 'shown') shown++; else if (st === 'offline') offline++; }
+  let linked = 0, connected = 0;
+  for (const l of allLinks()) if (l.base) { linked++; if (l.status === 'connected') connected++; }
+  const without = [secretFound.words ? secretFound.words + ': this run signs guests and invite links with a secret of its own' : '', settingsRead.unread ? settingsRead.words + ': nothing is saved over it this run' : ''].filter(Boolean);
+  return {
+    at: laptopRead.at || null, reading: laptopRead.reading, addresses, port: PORT,
+    facts: laptop.facts({
+      build: BUILD.full, runs: RUNS, addresses, port: PORT, node: process.execPath,
+      https: { on: !!cert, fingerprint: cert ? cert.fp : '', validTo: cert ? cert.validTo : '', off: httpsOff(), renewal: renewalWords(), file: path.join(secretbox.keyDir(), 'tls.json') },
+      sealed: { total: sealed.length, open: key.state === 'key' ? sealed.filter(([, v]) => !!secretbox.open(v)).length : 0, keyWords: key.state === 'key' ? '' : key.state === 'absent' ? 'this laptop has no machine key' : 'this run has no machine key (' + key.code + ')' },
+      screens: { total: displays.list.size, shown, offline },
+      stagewatch: { total: linked, connected },
+      tunnel: { running: !!tunnelProc, url: tunnelUrl || '', error: tunnelError || '' },
+      before: beforeWords(), without,
+    }, laptopRead.windows),
   };
 }
 
@@ -2159,6 +2258,8 @@ io.on('connection', (socket) => {
       stageContext: stageLink.context ? { headline: stageLink.context.headline, light: stageLink.context.light, peers: stageLink.context.peers || [] } : null,
       tls: tlsFacts(), stagewatchFingerprint: settings.stagewatchFingerprint || '',
       remoteAdmin: !!settings.remoteAdmin, accounts: accounts.size, build: BUILD.full,
+      // Where devices reach this laptop, as the banner's LAN lines say it, and "This laptop".
+      addresses: lanNow(), port: PORT, laptop: laptopAnswer(),
     });
   });
 
@@ -2179,9 +2280,18 @@ io.on('connection', (socket) => {
       cert = tlsmod.loadOrCreate({ dir: secretbox.keyDir(), name: 'AGMessage ' + os.hostname(), seal: secretbox.seal, open: secretbox.open, renew: true });
       front.setCert({ certPem: cert.certPem, keyPem: cert.keyPem });
       if (discovery) discovery.tls = cert.fp;
+      tlsRenewWaited = false;
       noteEvent('the admin renewed this AGMessage\'s certificate');
       ok(ack)({ ok: true, tls: tlsFacts() });
     } catch (e) { ok(ack)({ ok: false, error: e.message }); }
+  });
+  // "This laptop": its facts now, and Windows read again (one read at a time), whose facts come on laptop:facts. Asked
+  // with the answer alone, or with a payload first, which it reads nothing of.
+  socket.on('admin:laptop', (first, second) => {
+    const ack = typeof first === 'function' ? first : second;
+    if (!admin(ack)) return;
+    readLaptop();
+    ok(ack)({ ok: true, laptop: laptopAnswer() });
   });
   socket.on('admin:tunnelStart', (ack) => { if (admin(ack)) ok(ack)(startTunnel()); });
   socket.on('admin:tunnelStop', (ack) => { if (admin(ack)) { stopTunnel(); ok(ack)({ ok: true }); } });
@@ -3049,6 +3159,7 @@ function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   if (tunnelProc) { try { tunnelProc.kill('SIGTERM'); } catch { /* ignore */ } }
+  if (laptopRead.child) { try { laptopRead.child.kill('SIGKILL'); } catch { /* it has ended */ } }   // a read of Windows ends with the server
   if (serving) {
     console.log('\n  Saving rooms…');
     store.compactAll();
@@ -3219,8 +3330,9 @@ function auditBanner(said) {
 }
 /**
  * The banner's URL line and its Token line. A server run alone prints both. A server its watchdog runs never says the
- * token: once the URL line is written it asks the watchdog over IPC, which says the Token line where a person sits
- * (lib/startup.js tokenLine) and answers once it is written, so the line keeps its place in the banner. With no answer
+ * token: it writes the URL line, and the place the Token line goes (lib/startup.js TOKEN_HERE) for a watchdog that reads
+ * this output line by line (AGM_TEED), then asks the watchdog over IPC, which says the Token line where a person sits
+ * (tokenLine) once it has both, and answers once it is written, so the line keeps its place in the banner. With no answer
  * within TOKEN_SAY_MS (no watchdog on the channel, or one that does not answer) the banner says so and goes on. The wait
  * keeps no process alive: a server that is stopping goes without it.
  */
@@ -3245,9 +3357,11 @@ function sayToken(urlLine) {
     const heard = (m) => { if (m && m.t === 'token-said') finish(''); };
     timer = setTimeout(() => finish(unsaid), TOKEN_SAY_MS);
     timer.unref();
-    process.on('message', heard);
-    process.stdout.write(urlLine + '\n', () => {
-      if (typeof process.send !== 'function' || !process.connected) { finish(unsaid); return; }
+    // With no channel to a watchdog nothing would read the place the line goes: the URL line alone, and the words.
+    const watched = typeof process.send === 'function' && process.connected;
+    if (watched) process.on('message', heard);
+    process.stdout.write(urlLine + '\n' + (watched && TEED ? startup.TOKEN_HERE + '\n' : ''), () => {
+      if (!watched || !process.connected) { finish(unsaid); return; }
       process.send({ t: 'token' }, (e) => { if (e) finish(unsaid); });
     });
   });
@@ -3317,7 +3431,14 @@ function firstWrites() {
   AUDIT_SIGN_KEY = (() => { try { return secretbox.signingKey().fingerprint; } catch { return ''; } })();
   // Keys kept in clear by 0.2, sealed now that a key missing at the read has been made: the link takes its key again.
   if (migrateClearKeys()) stageLink.configure(settings.stagewatchUrl || '', stagewatchKey(), settings.stagewatchFingerprint || '');
-  if (tlsFound && (tlsFound.state === 'absent' || tlsFound.state === 'renew')) {
+  // A certificate due for renewal is renewed only at a start where this laptop has a network address: one made before the
+  // network gives one would name none of the addresses devices reach it by. The one it has serves on until a person asks
+  // for a new one (New certificate), or a start that has an address renews it; never renewed behind a person's back, since
+  // every device that trusted the old one would be asked again at its next connection.
+  if (tlsmod.renewalWaits(tlsFound, tlsmod.lanAddresses())) {
+    tlsRenewWaited = true;
+    console.warn('  [tls] the certificate, which ends ' + cert.validTo + ', is due for renewal and not renewed at this start, which has no network address: it serves on; New certificate on the admin page renews it once this laptop has one, as does a start that has one');
+  } else if (tlsFound && (tlsFound.state === 'absent' || tlsFound.state === 'renew')) {
     try {
       cert = tlsmod.loadOrCreate({ dir: secretbox.keyDir(), name: 'AGMessage ' + os.hostname(), seal: secretbox.seal, open: secretbox.open });
       front.setCert({ certPem: cert.certPem, keyPem: cert.keyPem });
@@ -3337,7 +3458,7 @@ function firstWrites() {
     if (why) secretFound.words = secretFound.file + ' was not made: ' + why;
   }
   if (settingsDue) saveSettings();
-  if (watchdogGaveUp) { try { fs.renameSync(path.join(DATA_DIR, 'watchdog.json'), path.join(DATA_DIR, 'watchdog.seen.json')); } catch { /* shown once anyway */ } }
+  if (watchdogBefore) { try { fs.renameSync(path.join(DATA_DIR, 'watchdog.json'), path.join(DATA_DIR, 'watchdog.seen.json')); } catch { /* shown once anyway */ } }
 }
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.
@@ -3360,6 +3481,7 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   }
   audit.open();
   for (const fn of untilServing.splice(0)) fn();
+  readLaptop();
   // The whole log is checked once, beside the show, so health, the rows' marks and the black window read what the log
   // holds from the start: findings an earlier start left open, and a chain broken at a line, included. Then a split a stop
   // left part way is finished (or its leftovers, which no split pins, removed), which checks the log again. What it says
@@ -3368,8 +3490,7 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
     .then(() => auditArchiver.finish({ t: 'system', id: '', name: '' }, '', { atStart: true }))
     .then((r) => () => { if (r && r.ok && r.words && !/^No split/.test(r.words)) console.log('  Audit log:   ' + r.words); },
       (e) => () => { console.error('  [audit] the check at start did not finish: ' + (e && e.message ? e.message : e)); });
-  const addresses = [];
-  for (const list of Object.values(os.networkInterfaces())) for (const n of list || []) if (n.family === 'IPv4' && !n.internal) addresses.push(n.address);
+  const addresses = tlsmod.lanAddresses();
   console.log('\n  AGMessage ' + BUILD.full + ' is running');
   console.log('  ---------------------');
   console.log(`  Local:   http://localhost:${PORT}`);

@@ -237,8 +237,8 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   assert.equal((await emit(view, 'join', { roomCode: hallA, name: 'Ana', role: 'research', adminView: true })).forwardable, false);
 });
 
-// The admin page, the halls board and the Accounts page (kinds adminRoom, person, adminMsg, link, tunnel; hall, help;
-// account, audit): each act hidden from a seat by its rights, sent as that seat — its socket, or its HTTP sign-in — is
+// The admin page, the halls board and the Accounts page (kinds adminRoom, person, adminMsg, link, tunnel, laptop; hall,
+// help; account, audit): each act hidden from a seat by its rights, sent as that seat — its socket, or its HTTP sign-in — is
 // refused with words, and changes nothing. Each seat's facts are read from the server's own answers, as its page reads
 // them (/api/admin/me, /api/halls and the board, /api/auth/me).
 test('every act of the admin page, the halls board and the Accounts page hidden by rights is refused as that seat, with words, and changes nothing', async (t) => {
@@ -285,6 +285,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     // needs a TLS peer: those two states are the page's to draw, and the acts they show are refused by right alike.
     link: [nodeObj, { ...nodeObj, certificateWaits: true, certificateChanged: true }, { t: 'main', name: 'Stagewatch', url: '127.0.0.1:9', changed: true }],
     tunnel: [{ running: false, url: '', checking: false, checkedAgo: null }, { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: null }],
+    laptop: [{ addresses: (await emit(ctl, 'admin:settings', null)).addresses.map((a) => 'http://' + a + ':' + srv.port), reading: false }],
   };
 
   // Each seat of a page: its socket (or none), its HTTP cookie, and its facts from the server's answers.
@@ -323,12 +324,12 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     'admin:kick': (o) => ({ socketId: o.socketId }), 'admin:deleteMessage': (o) => ({ roomCode: hallA, messageId: o.id }),
     'nodes:link': (o) => ({ id: o.id, token: 'not-the-token' }), 'nodes:unlink': (o) => ({ id: o.id }), 'nodes:acceptCertificate': (o) => ({ id: o.id, fingerprint: '0123456789abcdef' }),
     'nodes:command': (o) => ({ id: o.id, line: 'CUE 1', mode: 'propose' }),
-    'admin:acceptCertificate': null, 'admin:tunnelStart': null, 'admin:tunnelStop': null, 'admin:tunnelStatus': null,   // the ack alone
+    'admin:acceptCertificate': null, 'admin:tunnelStart': null, 'admin:tunnelStop': null, 'admin:tunnelStatus': null, 'admin:laptop': null,   // the ack alone
     'hall:settings': (o) => ({ code: o.code }), 'nodes:list': () => ({}),
     'help:respond': (o, e) => ({ code: o.code, messageId: o.id, state: e.id === 'help.respond' ? 'coming' : 'resolved' }),
   };
   const BODIES = { 'account.edit': { name: 'Renamed by a seat that may not' }, 'account.disable': { disabled: true }, 'audit.split': { seq: 2 } };
-  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel'], board: ['hall', 'help'], accounts: ['account', 'audit'] };
+  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop'], board: ['hall', 'help'], accounts: ['account', 'audit'] };
   const verbsOf = Object.values(KINDS).flat().flatMap((k) => C.KINDS[k]).filter((e) => e.verb !== 'local');
   assert.deepEqual([...new Set(verbsOf.filter((e) => !e.verb.startsWith('http:') && !(e.verb in PAYLOADS)).map((e) => e.verb))], [], 'every socket verb an act sends has its refusal case');
   const say = (s, verb, payload) => new Promise((resolve) => { if (payload === null) s.emit(verb, resolve); else s.emit(verb, payload, resolve); });

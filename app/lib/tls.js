@@ -127,6 +127,23 @@ function lanAddresses() {
 const RENEW_MS = 30 * 86400 * 1000;   // a certificate is renewed when it has this long or less to run
 
 /**
+ * The addresses a network gave this laptop: `addresses` (lanAddresses()'s) without the link-local ones (169.254/16),
+ * which an adapter gives itself while no network has answered it, as at a start before the Wi-Fi joins (pure).
+ */
+function networkAddresses(addresses) {
+  return (Array.isArray(addresses) ? addresses : []).filter((a) => typeof a === 'string' && !/^169\.254\./.test(a));
+}
+
+/**
+ * Whether a certificate due for renewal at start (`found.state` 'renew', its key opening) is left as it is: while no
+ * network has given this laptop an address (`addresses`, lanAddresses()'s, by networkAddresses), one made now would name
+ * none of the addresses devices reach it by, for every day it runs. The one it has serves on meanwhile (pure).
+ */
+function renewalWaits(found, addresses) {
+  return !!found && found.state === 'renew' && networkAddresses(addresses).length === 0;
+}
+
+/**
  * This install's certificate as `<dir>/tls.json` holds it, read and never written: {state, file, cert?, code?, words?}.
  *  - 'ok': its certificate, whose private key opens with this machine's key and is the certificate's, with more than 30
  *    days to run;
@@ -324,4 +341,4 @@ function httpsGate({ required, on, encrypted, loopback, method = 'GET', path = '
   return { refuse: 'This AGMessage requires HTTPS — use https:// (see /tls to trust its certificate).' };
 }
 
-module.exports = { httpsGate, makeCertificate, fingerprint, cleanFingerprint, typedFingerprint, fingerprintStarts, TYPED_MIN, toPem, readCertificate, loadOrCreate, dualPortServer, PinStore, probeCertificate, pinnedTlsOptions, request, FP_RE, lanAddresses };
+module.exports = { httpsGate, makeCertificate, fingerprint, cleanFingerprint, typedFingerprint, fingerprintStarts, TYPED_MIN, toPem, readCertificate, loadOrCreate, renewalWaits, networkAddresses, dualPortServer, PinStore, probeCertificate, pinnedTlsOptions, request, FP_RE, lanAddresses };

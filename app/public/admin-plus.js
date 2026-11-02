@@ -1,5 +1,5 @@
 // The admin page's other parts: AI minutes, role invites, the AI key, the show network's links, HTTPS, Health and the
-// audit log there. Shares admin.js's globals (socket, currentRoom, the page's acts ADMIN and their runners ADMIN_RUN) —
+// audit log there, and "This laptop". Shares admin.js's globals (socket, currentRoom, the page's acts ADMIN and their runners ADMIN_RUN) —
 // loaded after it. A link's acts are the catalogue's (kind link); nothing here opens a native dialog.
 /* global socket, currentRoom, ADMIN, ADMIN_RUN, ADMIN_DRAWERS, ADMIN_OBJECTS, adminFactsChanged, say, watchRoom */
 (function () {
@@ -50,6 +50,7 @@
       $('buildLine').textContent = s.build ? 'This is AGMessage ' + s.build + '.' : '';
       renderHealth(s.health);
       renderAudit(s.health);
+      renderLaptop(s.laptop);
       renderPeers(s.peers || []);
       drawLinks();
     };
@@ -60,7 +61,7 @@
   function pretty(fp) { return fp ? fp.replace(/^sha256:/, '').match(/../g).join(':').toUpperCase() : '—'; }
   function renderTls(t, typed) {
     if (!t) return;
-    $('tlsFp').textContent = t.on ? pretty(t.fingerprint) : 'HTTPS is off';
+    $('tlsFp').textContent = t.on ? pretty(t.fingerprint) : 'HTTPS is off' + (t.off ? ': ' + t.off : '');
     $('tlsValid').textContent = t.on && t.validTo ? '(valid until ' + t.validTo + ')' : '';
     $('tlsRenew').hidden = !t.on;
     $('requireHttps').checked = !!t.requireHttps;
@@ -119,7 +120,7 @@
     $('tunnelPlaces').textContent = tunnelWords(h.tunnel);
     const parts = [];
     parts.push(h.restarts ? 'restarted by the watchdog ' + h.restarts + '×' : 'running since start');
-    if (h.watchdog) parts.push('⚠ the watchdog gave up at ' + new Date(h.watchdog.at).toLocaleTimeString() + ': ' + h.watchdog.reason);
+    if (h.watchdog) parts.push((h.watchdog.refused ? '⚠ the start before this one was refused at ' : '⚠ the watchdog gave up at ') + new Date(h.watchdog.at).toLocaleTimeString() + ': ' + h.watchdog.reason);
     if (h.lastCrash) parts.push('last crash ' + new Date(h.lastCrash.at).toLocaleString() + ': ' + h.lastCrash.message);
     if (h.rejections) parts.push(h.rejections + ' failed background task(s)');
     if (h.loopMs && h.loopMs.count) parts.push('loop delay p95 ' + h.loopMs.p95 + ' ms (max ' + h.loopMs.max + ')' + (h.elu && h.elu.count ? ' · busy ' + Math.round(h.elu.p95 * 100) + ' %' : ''));
@@ -417,6 +418,47 @@
   for (const ul of [$('swLinkList'), $('peerList'), $('nodeLinks')]) { ADMIN.bind(ul, linkSpec(ul)); AGM.roving(ul, { item: 'li.link-row[data-key]' }); }
   ADMIN_OBJECTS.link = linkObject;
 
+  // ---------------------------------------------------------------- "This laptop" (kind laptop)
+  // Its rows are the server's (lib/laptop.js): a label, the words, a mark (its shape beside its colour) and where each was
+  // read. Drawn from the settings' answer, from Refresh's, and from laptop:facts once a read of Windows ends.
+  const LAPTOP_MARK = { ok: '✓', warn: '△', fault: '✕', off: '○' };
+  let laptopNow = null;
+  /** "This laptop" as the catalogue reads it: each LAN address as devices open it, and whether Windows is read now. */
+  function laptopObject() {
+    const l = laptopNow || {};
+    return { addresses: Array.isArray(l.addresses) ? l.addresses.map((a) => 'http://' + a + ':' + l.port) : [], reading: !!l.reading };
+  }
+  /** Written only when its words change, so the status line is not announced again at every reading of the settings. */
+  const putText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+  function renderLaptop(l) {
+    if (!l || !Array.isArray(l.facts)) return;
+    laptopNow = l;
+    const ul = $('laptopFacts');
+    ul.textContent = '';
+    for (const f of l.facts) {
+      const li = document.createElement('li');
+      li.dataset.fact = f.id;
+      li.dataset.state = f.mark || '';
+      const mark = document.createElement('span'); mark.className = 'lf-mark'; mark.textContent = LAPTOP_MARK[f.mark] || '';
+      const label = document.createElement('strong'); label.textContent = f.label + ': ';
+      const words = document.createElement('span'); words.className = 'lf-words'; words.textContent = f.words;
+      const from = document.createElement('span'); from.className = 'lf-from'; from.textContent = ' · read from ' + f.from;
+      li.append(mark, label, words, from);
+      ul.appendChild(li);
+    }
+    putText($('laptopRead'), l.reading ? 'Reading Windows\' facts now…' : l.at ? 'Read at ' + at(l.at) + '. Refresh reads it again.' : '');
+    drawLaptop();
+    ADMIN.refresh();
+  }
+  function drawLaptop() { ADMIN.draw($('laptopActs'), 'laptop', laptopObject(), { more: 'This laptop actions', words: true, cls: 'btn ghost small' }); }
+  Object.assign(ADMIN_RUN, {
+    'laptop.refresh': () => AGM.outbox.now('admin:laptop', undefined, (r) => { if (!r || !r.ok) { say((r && r.error) || 'Not read again.', true); return; } renderLaptop(r.laptop); }),
+    'laptop.copy': (o, c) => { if (c.value) AGM.copy(c.value, { said: 'Copied ' + c.value + '.', anchor: c.anchor, say }); },
+  });
+  ADMIN.bind($('laptopSection'), { kind: 'laptop', find: (el) => el.closest('#laptopSection'), get: laptopObject, label: 'This laptop actions', header: () => 'This laptop' });
+  ADMIN_DRAWERS.push(drawLaptop);
+  ADMIN_OBJECTS.laptop = laptopObject;
+
   function showInvites(on) {
     const box = $('inviteLinks');
     box.textContent = '';
@@ -476,6 +518,7 @@
     socket.on('connect', () => loadSettings());
     socket.on('nodes', (list) => { renderPeers(list); });
     socket.on('nodes:changed', loadNodes);
+    socket.on('laptop:facts', renderLaptop);
     loadNodes();
     if (socket.connected) loadSettings();
 

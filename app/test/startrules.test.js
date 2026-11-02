@@ -160,7 +160,9 @@ test('a data, uploads or key folder that cannot be made stops the start with cod
     assert.match(r.out, /\(ENOTDIR\)/, why);
     assert.ok(!/restarting|AGMessage \S+ is running/.test(r.out), 'started at most once, and never served: ' + why);
     const log = path.join(base, 'ok-' + i, 'data', 'watchdog.log');
-    if (name !== 'AGM_DATA_DIR') assert.match(fs.readFileSync(log, 'utf8'), /server stopped: cannot start as configured \(code 3\)\n$/, why);
+    // The watchdog's line carries the server's own words, which name the folder.
+    const own = (/^ {2}AGMessage cannot start: (.+)$/m.exec(r.out) || [])[1] || '';
+    if (name !== 'AGM_DATA_DIR') assert.ok(own.includes(path.join(file, what)) && fs.readFileSync(log, 'utf8').endsWith('server stopped: cannot start as configured (code 3): ' + own + '\n'), why + '\n' + fs.readFileSync(log, 'utf8'));
   });
   // A portable copy whose key folder cannot be made runs keyless, as one whose key cannot be read does (test/audit.test.js).
 });
@@ -179,8 +181,17 @@ test('a rooms folder that is there but cannot be read stops the start with code 
     assert.ok(r.out.includes('AGMessage cannot start: the rooms folder ' + path.join(f.AGM_DATA_DIR, 'rooms') + ' cannot be read (ENOTDIR).'), why);
     assert.ok(!/restarting|giving up|\[error\]|AGMessage \S+ is running/.test(r.out), 'started once, no crash, never served: ' + why);
     const after = tree(where);
-    assert.match(fs.readFileSync(path.join(f.AGM_DATA_DIR, 'watchdog.log'), 'utf8'), /^\S+ server stopped: cannot start as configured \(code 3\)\n$/, why);
-    delete after['data/watchdog.log'];
+    // The watchdog's line, in watchdog.log and the console it keeps (logs/server.log), carries the server's words.
+    const line = 'server stopped: cannot start as configured (code 3): the rooms folder ' + path.join(f.AGM_DATA_DIR, 'rooms') + ' cannot be read (ENOTDIR). Choose a data folder this Windows account can read and write (AGM_DATA_DIR), or fix that one\'s permissions.';
+    assert.match(fs.readFileSync(path.join(f.AGM_DATA_DIR, 'watchdog.log'), 'utf8'), /^\S+ server stopped: /, why);
+    assert.equal(fs.readFileSync(path.join(f.AGM_DATA_DIR, 'watchdog.log'), 'utf8').replace(/^\S+ /, ''), line + '\n', why);
+    assert.ok(fs.readFileSync(path.join(f.AGM_DATA_DIR, 'logs', 'server.log'), 'utf8').endsWith('  [watchdog] ' + line + '\n'), why);
+    // The installed node, which has no window, records the refusal for its next start (the watchdog's own file); a
+    // portable copy's refusal is read in its window, and leaves none.
+    const record = (() => { try { return JSON.parse(fs.readFileSync(path.join(f.AGM_DATA_DIR, 'watchdog.json'), 'utf8')); } catch { return null; } })();
+    if (channel === 'task') assert.deepEqual([record && record.reason, record && record.refused], [line.replace(/^server stopped: /, ''), true], why);
+    else assert.equal(record, null, why);
+    for (const watchdogs of ['data/watchdog.log', 'data/watchdog.json', 'data/logs/', 'data/logs/server.log']) delete after[watchdogs];
     assert.deepEqual(after, before, 'the server wrote nothing: ' + why);
   }
 });

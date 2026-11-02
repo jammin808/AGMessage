@@ -14,9 +14,65 @@ Windows Vista", https://learn.microsoft.com/en-us/windows/win32/services/interac
 - **No browser.** The server opens one only in the portable channel (`AGM_RUNS` unset or `portable`, `lib/startup.js`),
   when the .bat asks (`AGM_OPEN=1`). The installed node's channel is `task`: it never opens one, whatever `AGM_OPEN`
   holds.
-- **No window.** What a portable copy says in its window, the installed node says on its console, which its log keeps.
-  Open AGMessage and AGMessage status in the Start menu, and the admin page's "This laptop", are where those words are
-  read, the port-holder words below included, once the installer's units bring them.
+- **No window.** What a portable copy says in its window, the installed node says on its console, which its watchdog
+  keeps in `data\logs\server.log` (What it says, kept, below). The admin page's "This laptop" says what it knows and
+  what Windows says; Open AGMessage and AGMessage status in the Start menu show the log's tail once the installer's
+  units bring them.
+
+## What it says, kept, and "This laptop"
+
+- **`data\logs\server.log`** (`supervise.js`, `lib/serverlog.js`). The watchdog reads its server's output through a
+  pipe, says each line on its own console, and appends it, with its time, to the log, with its own lines, and no blank
+  line. Past 2 MB the file becomes `server.1.log`, replacing the one before, so the folder holds about 4 MB of it at
+  most. A held port's tries (2,880 a day at the ladder's last step) were measured at 139 bytes each, the server's words
+  and the watchdog's line only where `watchdog.log` takes it: about 390 KB a day, some ten days in the two files. It never
+  holds the admin token: the Token line goes to the console alone, and every line is searched for the token by value,
+  before a long line is cut. A log that cannot be written never stops the node, and a console nobody reads holds at
+  most 1 MB waiting. The watchdog's line for a start the server refused carries the server's own words ("server stopped:
+  cannot start as configured (code 3): …", "server could not take its port or data folder, which another program holds
+  (code 75): Another program is using port 3023. …"), in `watchdog.log` too. A restart is handed the line for the run
+  before it; a start refused as configured, which ends the watchdog, is recorded in `data\watchdog.json` (`refused:
+  true`), where a give-up is, so the next start, whichever watchdog runs it, says it once on "This laptop" and in the
+  admin page's health, and renames the file `watchdog.seen.json`. A portable copy's refusal is read in its window and
+  records nothing.
+- **"This laptop"** on the admin page, each fact with where it was read: the build and how it runs, the LAN addresses,
+  HTTPS and why it is off, how many sealed values open (never which), the screens confirmed, the Stagewatch links, the
+  internet link, before this start (the watchdog's line for the run it restarted, or its record of a refused start or a
+  give-up), and what the start goes without. A read of them that fails (an adapter list the system refuses) is one row
+  that says so; the rest of the admin page's answer is drawn. Windows' facts are read by one `powershell.exe`,
+  `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` by that absolute path, run from System32 with a fixed
+  script (`lib/laptop.js` `SCRIPT`: one line, nothing from a page in it); once the server serves and again at Refresh,
+  one read at a time, ended after 5 s or when the server stops. Its environment is named, never the server's:
+  `SystemRoot`, Windows' folders and the machine's names (`PASSED`: `SystemDrive`, `windir`, `TEMP`, `TMP`,
+  `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `ProgramData`, `ProgramFiles`, `COMPUTERNAME`, `NUMBER_OF_PROCESSORS`,
+  `PROCESSOR_ARCHITECTURE`), `PSModulePath` set to `%SystemRoot%\System32\WindowsPowerShell\v1.0\Modules`, and
+  `AGM_NODE`, this `node.exe`'s path; so no secret whatever the case of its name, no `PATH`, no module of the account's
+  own. Each part is read on its own and said on a line of its own as soon as it is read (`{"v":1}` first), the cheap
+  ones first and the firewall last, so a read ended at its time keeps what it said; a part Windows refuses says
+  "unknown" with its reason: sleep and the lid on mains (`powercfg /query SCHEME_CURRENT`, `STANDBYIDLE` and
+  `LIDACTION`, the AC index); the server task `\AGMessage\Server`, its state and last result (`Get-ScheduledTask`,
+  `Get-ScheduledTaskInfo`); the install record, `HKLM\SOFTWARE\AGMessage`: `AdminName` (else `Admin`, its SID) and,
+  under its `Grants` key, one value per account's SID holding its rights, comma-separated, each account's name looked
+  up by Windows where it can (under Constrained Language Mode the SID is shown); the connected networks' profiles
+  (`Get-NetConnectionProfile`); and whether an enabled inbound rule names this `node.exe` on each
+  (`Get-NetFirewallApplicationFilter -Program`, in this PC's own policy store, every rule judged, a block rule winning
+  over an allow; past 512 the reach is unknown). It does not see a rule a domain's policy sets, a rule by port alone,
+  or a profile whose firewall is off, and `-Program` reads a path as a pattern, so a folder whose name holds `[` or `]`
+  matches no rule. Networks and rights past 32 are counted. Each line is ASCII JSON, any other character escaped, so no
+  code page changes a name. None of it reaches health over HTTP, the context, the hello or the AI's brief. The Windows
+  CI job runs the script at every push and checks its answer's shape (`test/laptop.test.js`: each part read, or refused
+  with Windows' reason; the task and the record missing on a runner; the read's time said); what it reads on a show
+  laptop is unread until a walk.
+- **The install record's `Grants`** is this shape: a key `HKLM\SOFTWARE\AGMessage\Grants`, one `REG_SZ` value per
+  account, named by its SID (`S-1-…`), holding its rights comma-separated (`start,stop`). The machine's commands that
+  write the record and its grants (the plan's U12 and U17) write it so; "This laptop" reads no other shape.
+- **The certificate at a boot start.** A certificate due for renewal (30 days or fewer to run) is renewed at start only
+  while a network has given the laptop an address (an address an adapter gives itself, `169.254.x.x`, is none): one
+  made before the network gives one would name no address devices reach it by, for its 825 days. It serves on, said in
+  the log and on "This laptop" in words true when read: once the laptop has an address, New certificate on the admin
+  page renews it, as does a start that has one. It is never renewed without a person, since every device that trusted
+  the old one is asked again. Not measured: whether the task's boot start comes before the network on the show laptop;
+  an adapter that is always up (a virtual switch, a VPN) gives an address devices may not reach the laptop by.
 
 ## A port already in use
 
@@ -44,7 +100,8 @@ watchdog and the server read it, and these rules, before either writes anything 
   channel.
 - **Nothing before the hold.** The server writes nothing, in the data folder or the key folder, until the copy holds its
   data folder and its port: a copy refused at either has made no folder, key, certificate, secret or setting. Only its
-  watchdog writes there first: the data folder itself, and `watchdog.log`'s line for how the start ended.
+  watchdog writes there first: the data folder itself, `watchdog.log`'s line for how the start ended, the console it
+  keeps in `logs\server.log`, and, for a start refused as configured, its record in `watchdog.json`.
 - **Its keys.** It never runs without them. A `machine.key`, `secret.key` or `tls.json` that cannot be read, a machine key
   missing while the data folder holds values sealed with one (or while `settings.json` or `displays.json`, which hold
   them, cannot be read, so none can be ruled out), or a sealed value that does not open with it ends the start with code

@@ -45,7 +45,15 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   looping: a folder it cannot make or read, a second copy on the same folder or port (whose server has written nothing;
   its watchdog logs the refusal). A key, certificate or settings file it cannot read is never made again or saved over:
   the copy says what it goes without this run, refuses a setting changed meanwhile with why, and serves on, and a laptop
-  out of file handles loses a connection, not the server.
+  out of file handles loses a connection, not the server. What the window says is kept in `data/logs/server.log`
+  (rotated at 2 MB, two files at most, never the admin token), with the server's own words in the watchdog's line for a
+  start it refused, and the admin page's **This laptop** says what AGMessage knows of the laptop it serves from — the
+  build and how it runs, the addresses, HTTPS and why it is off, the sealed values that open, the screens confirmed,
+  Stagewatch, the internet link — and what Windows says (the network's profile and whether the firewall lets this
+  AGMessage in on it, sleep and the lid on mains, the server task, the laptop's admin and the rights given), each fact
+  with where it was read, and "unknown" with why where it could not be. A certificate due for renewal is not renewed at
+  a start that has no network address, so it never names none: it serves on, and This laptop says when New certificate
+  renews it. The installed node's next start says why the start before was refused.
 - **Right-click.** Every act on a message, on a file in the panel, on a screen, on a person (a sender's name, a row of
   People: @ Mention), on the composer's Send (✨ Draft a reply, 🔥 Priority, Attach a file…, Cancel the reply) and on the
   header's code and countdown chips (Copy guest code, Copy join link; Speaker's screen…, Show the countdown on screens)

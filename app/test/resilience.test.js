@@ -550,10 +550,11 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   // and the count may not grow without someone deciding it here.
   const allowed = {
     'server.js': { max: 15, why: 'the first writes once the folder is held (its folders, the watchdog\'s marker seen), the crash handler, upload sniffing (4 KB), tunnel log tail (and, through its lane, the show desk results a tick collects, flushed once before they are reported)' },
-    'supervise.js': { max: 3, why: 'the watchdog process: its own log and marker, never on a request (the installed node\'s token file, once its server serves, goes through lib/resilience.js\'s atomic writer)' },
+    'supervise.js': { max: 2, why: 'the watchdog process: its data folder made and its own log line (watchdog.log), never on a request (its record of how it ended, watchdog.json, and the installed node\'s token file, once its server serves, go through lib/resilience.js\'s atomic writer)' },
     'lib/store.js': { max: 10, why: 'durability: a change is appended to its log (the system\'s file cache) before the ack, or kept for the next snapshot when the disk refuses it; snapshots every 500 ops' },
     'lib/resilience.js': { max: 13, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full; a file read with why it was not (readText), every store\'s read; a file made only where none is (publishOnce: its link, which refuses one there, and its temporary file removed); a folder\'s real path, read once per place at start (placeId)' },
     'lib/secretbox.js': { max: 3, why: 'the machine key, read once, or made once and published whole' },
+    'lib/serverlog.js': { max: 4, why: 'the watchdog\'s process alone, never the server\'s: a console line appended to server.log as it is said, so a line said just before the watchdog ends is on disk; its folder made and its size read once, and a rename when it reaches its bound' },
     'lib/version.js': { max: 8, why: 'the version and its stamp (or the checkout\'s commit), read once at startup' },
     'lib/audit.js': { max: 11, why: 'the audit trail: an entry is on disk (fsync) before the action is acknowledged, a short write cut back, the file rotated at 20 MB; read once at startup, and the records outside the data folder, read once at open; verify reads asynchronously in slices' },
   };

@@ -65,6 +65,21 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   right token is taken while that lock holds, so guessing at the laptop is bounded only by the token until the first
   admin exists: the watchdog's is 64 random bits, and a token a portable copy is given by `ADMIN_TOKEN` is as strong as
   it is long and random (the papers ask for 16 or more random letters and digits).
+- What the console says is kept by the watchdog in `data/logs/server.log` (`lib/serverlog.js`), read by the Windows
+  account AGMessage runs as (mode 0600 where the system honours it), bounded at two files of 2 MB. It never holds the
+  admin token: the Token line goes to the console alone, and every line is searched for the token by value and written
+  with `[the admin token]` instead, before a line past 16 KB is cut, so no token is written in two halves. A line the server writes holds no other secret by rule (the papers' "secrets ride in
+  no log line"); the log holds what the window shows: paths, addresses, hall names in the server's lines.
+- "This laptop" on the admin page reads Windows through one `powershell.exe` named by its absolute path under
+  `SystemRoot` (never a bare name, which Windows looks for in the current folder and on `PATH` first), run from
+  System32 with a fixed script that holds nothing a page sent, within 5 s, ended when the server stops. Its environment
+  is named, never the server's: Windows' folders and the machine's names (`lib/laptop.js` `PASSED`), Windows' own module
+  path and this `node.exe`'s path, so no secret reaches it whatever the case of its name, and it loads no module from
+  the account's own folders or `PATH`. It reads, never writes: the network's profile,
+  the firewall's rules naming this `node.exe`, two power settings, the server task's state and the install record. The
+  laptop's admin and the rights given are on the admin page's answers alone (the token, or an account that may manage
+  settings), never health over HTTP, the context, the hello or the AI's brief: a Windows account's name is not the show
+  network's business.
 - A seat On stage holds messages and nothing else, on the server, for the admin seated there too: it is given no upload
   token, and an upload token is checked again when it is used, against the seat its page holds then; the admin's move of
   a page to a seat that shares no file ends its token in the same tick, so that page uploads nothing more with the one it
@@ -159,7 +174,7 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   never turns into new keys that leave every sealed value unopened. Nor does it make a machine key while a file that may
   hold values sealed with the old one (`settings.json`, `displays.json`) cannot be read: none of them can be ruled out.
 - Nothing is written before a copy holds its data folder and its port: a copy refused at either has made no folder, key,
-  certificate, secret or setting (its watchdog adds one line to `watchdog.log` saying the start was refused), so a second
+  certificate, secret or setting (its watchdog adds its line saying the start was refused, and why, to `watchdog.log` and to the console it keeps in `logs/server.log`; the installed node's watchdog records a start refused as configured in `watchdog.json`, never a portable copy's, which may be refused by another copy's folder), so a second
   start can never write a key or a certificate into a folder another copy runs on. A `settings.json` that cannot be read
   (EBUSY, EACCES) is never written over, nor taken from its `.bak`, which is a save behind: that run makes no context
   token, refuses a setting changed with why, and goes without the links and keys the file holds. The installed node's folders are each a full path outside the program's folder, checked before any write.

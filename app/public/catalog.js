@@ -348,6 +348,15 @@
         may: (f) => f.admin, fits: (f, o) => !!o.running,
         confirm: () => ({ title: 'Turn the internet link off?', words: 'Every phone and laptop joined through it is cut off now, and its address stops working. A new one is given when it is turned on again.', yes: 'Turn it off', no: 'Keep it on', danger: true }) },
     ],
+    // "This laptop" (the admin page's panel): `addresses` (each LAN address as devices open it, http://address:port) and
+    // `reading` (Windows is being read now). Refresh reads Windows again; Copy LAN address offers each address.
+    laptop: [
+      { id: 'laptop.refresh', label: 'Refresh', icon: '⟳', group: '3_keep', inline: () => 1, verb: 'admin:laptop', mode: 'now',
+        may: (f) => f.admin, fits: () => true, ready: (f, o) => (o.reading ? 'Reading Windows\' facts now…' : true) },
+      { id: 'laptop.copy', label: 'Copy LAN address', icon: '📋', group: '3_keep', inline: () => 2, verb: 'local', mode: 'local',
+        may: (f) => f.admin, fits: (f, o) => Array.isArray(o.addresses) && o.addresses.length > 0,
+        submenu: (f, o) => o.addresses.map((a) => ({ value: a, label: a })) },
+    ],
 
     // ------------------------------------------------------------ the halls board (boardFacts)
     // A hall's row: `code`, `name`. Its name is the row's one link, which opens it.

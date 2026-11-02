@@ -1446,6 +1446,18 @@ html[data-theme="dark"] .admin-tunnel-error .error {
 .peer-list li{display:flex;gap:.6rem;align-items:center;margin:.2rem 0}
 .sys.presence{font-size:var(--fs-xs);margin:.05rem 0}   /* quieter by its size, never by opacity: muted ink, 4.5:1 */
 .admin-network-section input{width:auto;flex:1 1 220px;max-width:420px}
+/* This laptop: each fact's mark, its shape beside its colour, then its words and, in muted ink, where it was read */
+.admin-laptop-section { margin-top: var(--sp-6); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--sp-4); }
+.admin-laptop-header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+.admin-laptop-header h3 { margin: 0; }
+.laptop-facts { list-style: none; margin: var(--sp-2) 0 0; padding: 0; font-size: var(--fs-sm); }
+.laptop-facts li { margin: var(--sp-1) 0; overflow-wrap: anywhere; }
+.laptop-facts .lf-mark { display: inline-block; min-width: 1.4em; font-weight: 700; }
+.laptop-facts li[data-state="ok"] .lf-mark { color: var(--c-ok); }
+.laptop-facts li[data-state="warn"] .lf-mark { color: var(--c-warn); }
+.laptop-facts li[data-state="fault"] .lf-mark { color: var(--c-fault); }
+.laptop-facts li[data-state="off"] .lf-mark { color: var(--c-off); }
+.laptop-facts .lf-from { color: var(--c-ink-muted); }
 
 /* Show Bus 1.1: a stage message's receipt and the speaker's acknowledgement, on the message that was sent */
 .stage-line { font-size: .78rem; font-style: normal; margin-top: .25rem; color: var(--muted); }

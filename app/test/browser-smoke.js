@@ -2371,8 +2371,25 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       person: await doorsOf(admin, 'person', 'window.__guestRow', `AGM.page.object('person', window.__guestRow.dataset.key)`, { ...PAGE_DOORS, hit: 'td strong' }),
       message: await doorsOf(admin, 'adminMsg', 'window.__feedMsg', `AGM.page.object('adminMsg', window.__feedMsg.dataset.key)`, { ...PAGE_DOORS, hit: '.admin-msg-head strong' }),
       tunnel: await doorsOf(admin, 'tunnel', `document.getElementById('tunnelSection')`, `AGM.page.object('tunnel')`, { ...PAGE_DOORS, hit: 'h3', focus: `document.querySelector('#tunnelActs .obj-more')` }),
+      laptop: await doorsOf(admin, 'laptop', `document.getElementById('laptopSection')`, `AGM.page.object('laptop')`, { ...PAGE_DOORS, hit: 'h3', focus: `document.querySelector('#laptopActs .obj-more')` }),
     };
     for (const [what, d] of Object.entries(adminDoors)) report(doorsInStep(d), `the admin page's ${what}: right-click = ⋯ = Shift+F10 = the catalogue's set, the bar in it (${d.want}; ${d.right} / ${d.dots} / ${d.key}; ${d.inline}; hit ${d.hit})`);
+    // "This laptop": every fact with its words and where it was read, in the server's order; Windows' facts read on
+    // Windows and unknown with why elsewhere; Refresh reads Windows again and says when.
+    const LAPTOP_ROWS = ['build', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin'];
+    const laptopRows = await admin.until(`(() => {
+      const rows = [...document.querySelectorAll('#laptopFacts > li[data-fact]')];
+      if (!rows.length) return false;
+      return JSON.stringify({ ids: rows.map((r) => r.dataset.fact), said: rows.every((r) => r.querySelector('strong').textContent.endsWith(': ') && r.querySelector('.lf-words').textContent.length > 0 && /^ · read from \\S/.test(r.querySelector('.lf-from').textContent)),
+        marks: rows.every((r) => (r.querySelector('.lf-mark').textContent === '') === (r.dataset.state === '')), elsewhere: ${process.platform === 'win32'} || rows.filter((r) => ['network', 'sleep', 'lid', 'task', 'admin'].includes(r.dataset.fact)).every((r) => r.querySelector('.lf-words').textContent === 'unknown (AGMessage is not running on Windows)') });
+    })()`, 8000);
+    const laptopRead = JSON.parse(laptopRows || '{}');
+    await admin.eval(`(() => { document.getElementById('laptopRead').textContent = ''; document.querySelector('#laptopActs [data-action="laptop.refresh"]').click(); })()`);
+    const refreshed = await admin.until(`(() => { const t = document.getElementById('laptopRead').textContent; return /^Read at \\d\\d:\\d\\d on \\d+ \\w+\\. Refresh reads it again\\.$/.test(t) && t; })()`, 15000);
+    await admin.eval(`document.getElementById('laptopSection').scrollIntoView({ block: 'start' })`);
+    await admin.shot(path.join(OUT, 'admin-laptop.png'));
+    report(LAPTOP_ROWS.every((id) => (laptopRead.ids || []).includes(id)) && laptopRead.said && laptopRead.marks && laptopRead.elsewhere && !!refreshed,
+      `the admin page's "This laptop" says each fact, its mark beside its shape, and where it was read, and Refresh reads Windows again (${laptopRows}; "${refreshed}")`);
     report(JSON.parse(adminDoors.hall.want).includes('adminRoom.watch') && !JSON.parse(adminDoors.header.want).includes('adminRoom.watch') && JSON.parse(adminDoors.person.want).includes('person.seat') && JSON.parse(adminDoors.message.want).includes('adminMsg.delete'),
       `the admin page's menus: Watch for a hall not watched and none in the watched one's header, a code guest's Seat, a message's Delete for everyone (${adminDoors.hall.want}; ${adminDoors.header.want})`);
     // Asks in place, never a native dialog: Delete for everyone…, Close hall… (its files' tick) and Log out…, each named

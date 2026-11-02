@@ -187,6 +187,13 @@ function channelOf(env, { programDir, platform = process.platform }) {
 /** The admin token's file in the installed node's token folder (AGM_TOKEN_DIR), which its watchdog writes. */
 const TOKEN_FILE = 'admin-token';
 /**
+ * The line a server its watchdog runs writes on its output right after the banner's URL line, before it asks for the
+ * Token line: the watchdog reads that output through a pipe and its asks through their own channel, so it says the Token
+ * line once it has met this line, and the banner keeps its order whichever of the two it reads first. The line itself is
+ * never shown or kept.
+ */
+const TOKEN_HERE = '\u0000AGMessage: the Token line goes here\u0000';
+/**
  * Secrets the installed node never takes from its environment: whatever starts it (a scheduled task's definition) can be
  * read by every account allowed to read that task. Its token is its watchdog's own, and its AI key is sealed in its settings.
  */
@@ -231,4 +238,4 @@ function tokenLine({ tty, runs, token, file }) {
   return '    Token: not shown here, since this output is not a window a person reads and may be kept. Start AGMessage in its own window to see it, or set ADMIN_TOKEN, 16 or more random letters and digits, before it starts.';
 }
 
-module.exports = { openerPlan, openBrowser, readPortHolder, portHolderWords, holderOf, channelOf, CHANNELS, taskTokenProblem, tokenLine, TOKEN_FILE, TASK_SECRETS };
+module.exports = { openerPlan, openBrowser, readPortHolder, portHolderWords, holderOf, channelOf, CHANNELS, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE, TASK_SECRETS };

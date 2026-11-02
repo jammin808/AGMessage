@@ -1562,6 +1562,107 @@ the capture. Nothing of it is run on Windows yet)
 - Rolling back: nothing stored changes form. 0.5.1's server prints the token in every banner again, takes loopback
   alone for the first admin account, and leaves the token file as it is.
 
+**What the console says reaches the admin page, a bounded log and "This laptop"** (the plan's Part 6, unit U3, with the
+owner's answer 38 for the laptop's admin and its grants; the plan's reading, which this unit's tests take again: what the
+window said, the LAN addresses, why HTTPS was off and why a start was refused, was said only on the console, which the
+installed node has none of. Its Windows readings are taken by a PowerShell script that no show laptop has run yet: the
+Windows CI job runs it at every push and checks its answer's shape, on Linux its answers are stood in for, and each fact
+it cannot read says unknown, with why)
+- The watchdog reads its server's output through a pipe and says each line on its own console as before, and keeps it,
+  with its time, in `data/logs/server.log` (`lib/serverlog.js`), with the watchdog's own lines, and no blank line.
+  Bounded: once a line would take it past 2 MB it becomes `server.1.log`, replacing the one before, and a new one begins,
+  so the folder holds about 4 MB of it at most. A show day's console is a few hundred lines; an installed node whose port
+  stays held is tried 2,880 times a day, measured at 139 bytes a try (the server's words, and the watchdog's line only
+  where `watchdog.log` takes it: the first try of a run and every hundredth), about 390 KB a day, so the two files hold
+  some ten days of it (447 bytes a try, about 1.3 MB a day, with every line kept). A line past 16 KB goes on as the next.
+  It never holds the admin token: the Token line is said on the console alone, and every line is searched for the token
+  by value and written with `[the admin token]` instead, before a long line is cut, so no token is written in two
+  halves. A log that cannot be written (a full disk, a folder in its way) stops nothing: said once on the console, each
+  line tried again, and the first that lands says how many were not written. The Token line still keeps its place in the
+  banner: the server writes where it goes, and the watchdog says it once it has read that far and been asked, whichever
+  comes first. A console that goes away no longer ends the watchdog, and one nobody reads holds at most 1 MB waiting:
+  the lines past it are in `server.log` alone.
+- A server that cannot start as configured, or whose port or folder is held, says why as it ends, and the watchdog's
+  line now carries those words: "server stopped: cannot start as configured (code 3): the uploads folder … cannot be
+  made (ENOTDIR). Choose a folder …", in `watchdog.log`, `server.log` and on its console; a held port's tries, "server
+  could not take its port or data folder, which another program holds (code 75): Another program is using port 3023.
+  AGMessage tries again; …". The watchdog hands a restart its line for the run before (`AGM_BEFORE`). The installed node,
+  which has no window, also records a start refused as configured in `data/watchdog.json` (`refused: true`), where a
+  give-up is recorded, so the next start, from the next boot's watchdog or a person's Start, says it: "This laptop"'s
+  Before this start, "the start at 2026-11-02 13:00 UTC was refused: cannot start as configured (code 3): …" (a give-up:
+  "the watchdog gave up at …: …"), and the admin page's health, "the start before this one was refused at …", once,
+  since the file is renamed `watchdog.seen.json` once it serves. Health's `watchdog` gains `refused`, at its end, and its
+  `reason` is cut at 700 characters (was 200). A portable copy's refusal is read in its window and records nothing: one
+  refused because another copy holds its folder must leave nothing in that copy's folder. The watchdog's line said only
+  "(code 3)" before.
+- The admin page's settings answer gains `addresses` (the LAN addresses, as the banner's LAN lines say them; none while
+  the system will not list its adapters) and `port`, at its end, and its `tls`, health's too, gains `off` (why HTTPS is
+  off, as the banner's "HTTPS: off — …" says it: "AGM_TLS=0 turned it off for this run", a certificate that could not be
+  read or opened, none made) and `renewal`. The admin page's Encrypted connections line reads "HTTPS is off: …" with why.
+- A certificate due for renewal (30 days or fewer to run) is renewed at start only while a network has given this laptop
+  an address (an address an adapter gives itself, 169.254/16, is none): one made before the network gives one would name
+  none of the addresses devices reach it by, for the 825 days it runs. It serves on with the one it has, said ("[tls] the
+  certificate, which ends …, is due for renewal and not renewed at this start, which has no network address: it serves
+  on; New certificate on the admin page renews it once this laptop has one, as does a start that has one") and in
+  `tls.renewal`, in words true when they are read: "… which has no network address yet: New certificate renews it once
+  this laptop has one, as does a start that has one", and once the laptop has one, "… which had no network address: New
+  certificate renews it now". New certificate clears it. It is never renewed behind a person's back, since every device
+  that trusted the old one would be asked again at its next connection. A first certificate is still made at once. Not
+  measured: under the installed node a start at boot, before the network, is the common case, and an adapter that is
+  always up (a virtual switch, a VPN) gives the laptop an address that devices may not reach it by.
+- **This laptop** on the admin page: what AGMessage knows and what Windows says, each fact with its mark (✓, △, ✕ or ○,
+  its shape beside its colour) and where it was read. AGMessage's own: the serving build and how it runs (the portable
+  folder, or installed); the addresses; HTTPS, and why it is off; how many sealed values open (a count, never which);
+  the screens that confirmed what they show; the Stagewatch links connected; the internet link; before this start (the
+  watchdog's line for the run it restarted, or its record of a refused start or a give-up); and what this start goes
+  without (a secret or settings it could not read). Should reading them fail (an adapter list the system refuses), one
+  row says so and the rest of the admin page's answer is drawn. Windows', read by one `powershell.exe` by its absolute
+  path under `SystemRoot`, from System32, with a fixed script, once the server serves and again at Refresh, one read at a
+  time, within 5 s (then ended), and ended when the server stops. Its environment is named, never the server's: Windows'
+  folders and the machine's names, Windows' own module path and this `node.exe`'s path, so no secret whatever the case
+  of its name, no `PATH` and no module of the account's own. It says each part on a line of its own as soon as it is
+  read, the cheap ones first and the firewall's rules last, so a read ended at its time keeps what it said and only the
+  rest read "unknown (Windows did not answer within 5 s)": sleep and the lid on mains; the server task
+  `\AGMessage\Server`, its state and last result; the laptop's admin and the rights given, from the install record
+  (`HKLM\SOFTWARE\AGMessage`: `AdminName`, and under `Grants` one value per account's SID, its rights); the active
+  network's profile; and whether a rule names this `node.exe` on it, every rule judged (a block rule wins, as the
+  firewall's own order says; past 512 such rules the reach is unknown, never guessed). Networks and rights past 32 are
+  counted ("and 3 more"). What the firewall's read does not see: a rule set by a domain's policy, a rule by port alone,
+  and a profile whose firewall is off. Off Windows each reads "unknown (AGMessage is not running on Windows)". Its acts
+  are the catalogue's (kind `laptop`): Refresh (`admin:laptop`, the admin page's alone; its read's facts come on
+  `laptop:facts`) and Copy LAN address ▸, one per address. Only the admin page's answers carry it: never health over
+  HTTP, the context, the hello or the AI's brief. The last stop, sleeps and the power request, and the internet link's
+  end time are later units' rows. The plan's test row reads the laptop's admin and grants "from a stubbed `reg.exe`":
+  they are read by the one `powershell.exe` the unit names, whose answer the tests stand in for.
+- The fences: `test/laptop.test.js` (new) holds the log's lines and its bound, rotation and failure, and a token across
+  the cut, in one line or arriving in two pieces, never written in halves (pure); the watchdog's console kept in a log
+  under its bound, rotated, every line of it said on the console in order, and neither the token (a console stood in, so
+  the Token line holds it), the Token line nor its marker in either file; a log that cannot be written said once while
+  the node serves; a console closed under a watchdog that then stops as asked, saved, with exit 0, and the stop's lines
+  in the log; a refusal's words in the watchdog's line, in both logs; a held port's words in `server.log` at each try,
+  the watchdog's line once, no blank line, and the words in "This laptop" once it serves; the installed node's refused
+  start recorded and said by the next start from another watchdog, on "This laptop" and in health, once; a give-up's
+  record said so, once; the addresses and the port in the admin's answer as the banner says them, and why HTTPS is off as
+  the banner says it, for `AGM_TLS=0` and for a certificate that is not one (this laptop's adapters stood in for by
+  `test/network-preload.js`, read at each look from a file, so an address can come while it serves, or the list be
+  refused); a certificate due for renewal kept byte for byte at a start with only a 169.254 address, its words changing
+  when an address comes, then renewed naming the address at the next start, or at once by New certificate; the admin's
+  answer drawn while the adapter list is refused; Windows asked by its absolute path with the fixed script and an
+  environment of the named folders only, one read at a time, a read that does not answer ending in time with every
+  Windows fact unknown, one that ends part way keeping what it said, a stop ending the read, and an answer stood in for
+  (`test/windows-preload.js`) read into the network, the firewall on it, sleep, the lid, the task, the laptop's admin and
+  the rights given, none of them in the context; the plan, the script's order, the run, the answer's lines read by type
+  (a line cut short passed over, no key but the parts' taken), every rule judged, the lists counted past 32, and every
+  row's words (pure); and, on Windows only (the Windows CI job), the script itself run, its answer in its own shape, each
+  part read or refused with Windows' reason, the task and the install record missing on a runner, and how long the read
+  took. `test/catalog.test.js` and `test/menus.test.js` hold the new kind (Refresh refused to a Staff account's and a
+  code guest's sockets); the browser smoke holds its doors, each row's words and where it was read, and Refresh.
+  `test/startrules.test.js`'s refused folders read the server's words in the watchdog's line, and the installed node's
+  refusal record (none for a portable copy). The synchronous-call caps gain `lib/serverlog.js` at 4, with its reason;
+  `supervise.js`'s goes down to 2, since its record goes through the atomic writer.
+- Rolling back: nothing stored changes form. 0.5.1 leaves `data/logs/` as it is, says nothing of it, renews a
+  certificate at any start, and reads a `watchdog.json` that records a refused start as a give-up, once.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and
