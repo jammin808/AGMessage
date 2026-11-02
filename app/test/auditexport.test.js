@@ -877,12 +877,15 @@ const tunnel = { 'cf-connecting-ip': '203.0.113.9', 'cf-ray': 'x', 'cf-visitor':
 const listing = (dir) => fs.readdirSync(dir, { recursive: true }).map((f) => String(f)).filter((f) => fs.statSync(path.join(dir, f)).isFile()).sort();
 /**
  * A folder's files, listed at a moment no store is saving into it: the atomic writer's `<file>.<pid>.tmp` is there only
- * while a save is under way (a sign-in's sessions, say), and is never a file the folder keeps.
+ * while a save is under way (a sign-in's sessions, say), and is never a file the folder keeps. A store's `<file>.bak`
+ * beside its `<file>` is that store's last version, kept by its own save whenever that save lands (the sessions' second
+ * save makes sessions.json.bak), so it is left out: what is listed is what the stores keep, and any other new file is a
+ * copy someone made.
  */
 async function settled(dir) {
   let seen = null;
   await h.until(() => { const l = listing(dir); if (l.some((f) => /\.\d+\.tmp$/.test(f))) return false; seen = l; return true; }, 5000, 'a moment no store saves into ' + dir);
-  return seen;
+  return seen.filter((f) => !(f.endsWith('.bak') && seen.includes(f.slice(0, -4))));
 }
 
 test('end to end: who may export — the token at the laptop and an admin at the laptop or over HTTPS; never a manager, an account without audit.read, a code guest, plain HTTP from another device, the token off the laptop or from before a restart, nor the right through the tunnel', async (t) => {
