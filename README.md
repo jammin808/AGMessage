@@ -97,7 +97,8 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 
 Download the portable zip from a release (or a CI run's artifacts), Extract All, and double-click `start-agmessage.bat`
 in the extracted folder (run from inside the zip it finds nothing beside it, and says so). The browser opens on
-`http://localhost:3023` once that copy serves, to make the first admin account. A start that cannot run says why in its
+`http://localhost:3023` once that copy serves, to make the first admin account with the token its window shows (the
+token is printed only in a console window, never into output kept in a file). A start that cannot run says why in its
 window: a file missing beside the .bat, or who holds the port. Full instructions: [README.txt](README.txt).
 
 ## Versions

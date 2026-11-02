@@ -21,7 +21,7 @@ test('an On stage seat chats, answers and asks for help; it shares no file, asks
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
 
-  const admin = (await api(base, 'POST', '/api/setup', { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const [hallA, hallB, hallC, hallD] = [await hall('Hall A'), await hall('Hall B'), await hall('Hall C'), await hall('Hall D')];
   const ctl = await open(admin);

@@ -30,7 +30,7 @@
       <p class="tagline">Halls, rooms and people, for the admin.</p>
     </div>
     <p class="hint" id="loginNotice">
-      Enter the admin token printed in the server terminal.
+      Type the token from the AGMessage window (installed: Start → AGMessage → Show the admin token).
     </p>
     <form id="loginForm" autocomplete="off">
       <label class="field">
@@ -141,7 +141,7 @@
           <div id="auditHealth" class="audit-health">
             <p id="auditLine" class="hint audit-line" data-mark="">Audit log: —</p>
             <ul id="auditFindings" class="audit-findings"></ul>
-            <p id="auditWhere" class="hint" hidden>Accept this on the AGMessage laptop: sign in there with its token (Admin login in the black window).</p>
+            <p id="auditWhere" class="hint" hidden>Accept this on the AGMessage laptop: sign in there with its token (Admin login in the AGMessage window; installed: Start → AGMessage → Show the admin token).</p>
             <p id="auditAcceptRow" class="row" hidden><button id="auditAcceptBtn" class="btn small" type="button">Accept…</button></p>
             <p id="auditSignKey" class="hint" hidden>Audit log signing key: <code id="signKeyText">—</code> <button id="signKeyCopy" class="btn ghost small" type="button">📋 Copy</button></p>
             <p id="auditLastExport" class="hint"></p>
@@ -243,7 +243,7 @@
       <p class="hint">What you accept is written in the log as accepted on this laptop, with what it was. △ entries read ◇ afterwards, never ✓; ✕ findings are accepted only with their own confirmation, and what they name cannot be brought back.</p>
       <ul id="acceptList" class="accept-list"></ul>
       <p id="acceptMore" class="hint" hidden>Accept these first, then accept again for the rest.</p>
-      <label class="field"><span>The token from the black window</span><input id="acceptToken" autocomplete="off" spellcheck="false" autocapitalize="none" /></label>
+      <label class="field"><span>The token from the AGMessage window</span><input id="acceptToken" autocomplete="off" spellcheck="false" autocapitalize="none" /></label>
       <p id="acceptError" class="error" role="alert" hidden></p>
       <div class="row end">
         <button id="acceptCancel" class="btn ghost" type="button">Cancel</button>

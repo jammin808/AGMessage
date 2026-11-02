@@ -10,7 +10,7 @@ const os = require('os');
 const path = require('path');
 const { io } = require('socket.io-client');
 const { Displays, cleanContent, describe } = require('../lib/displays');
-const { startServer, stopServer, api, connect, emit, wait, until, fakeStagewatch } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, wait, until, fakeStagewatch, TOKEN } = require('./helpers');
 
 const IMG = '/uploads/1777424589360-onmqm0a3ew2r-holding.png';
 const KEY = 'swk_hall3_node_key_00001';   // secret-scan: fixture — a fake node key for the fake Stagewatch
@@ -148,7 +148,7 @@ test('displays end to end: links, takes, confirmations, rights, the countdown, t
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
 
-  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
   const other = (await api(base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
   await api(base, 'POST', '/api/users', { username: 'sam', name: 'Sam Tech', role: 'tech', halls: [hall], password: 'mixing desk on stage left' }, { cookie: admin });
@@ -301,7 +301,7 @@ test('displays end to end, a hall of screens: every browser counts, one take rea
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
-  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
   const big = (await api(base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: admin })).body.code;
   const other = (await api(base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;

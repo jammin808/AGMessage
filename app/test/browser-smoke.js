@@ -1294,7 +1294,18 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       } finally { AGM.api = real; document.getElementById('name').value = ''; document.getElementById('code').value = ''; }
     })()`);
     report(joinDeck === JSON.stringify({ hint: 'The 6-character code for your room.', refused: 'No room has that code. Check it with whoever gave it to you.' }), `the join form asks for the code of a room, and says so when no room has it (${joinDeck})`);
-    await signin.eval(`(() => { document.getElementById('setupName').value = 'Ana Admin'; document.getElementById('setupUser').value = 'ana'; document.getElementById('setupPass').value = 'the green room kettle'; document.getElementById('setupPane').requestSubmit(); })()`);
+    // The first admin is made with the laptop's token: a wrong one is refused in place, the token field chosen again,
+    // and nothing is made, though this browser holds the token's sign-in (the admin tab's), since a token typed is always
+    // judged; the right one makes it.
+    signin.expectFailure(/\/api\/setup$/);   // the wrong token's 401 is this step's own
+    const wrongToken = await signin.eval(`(async () => {
+      document.getElementById('setupToken').value = 'not the token'; document.getElementById('setupName').value = 'Ana Admin'; document.getElementById('setupUser').value = 'ana'; document.getElementById('setupPass').value = 'the green room kettle';
+      document.getElementById('setupPane').requestSubmit();
+      for (let i = 0; i < 80 && document.getElementById('setupError').hidden; i++) await new Promise((r) => { setTimeout(r, 25); });
+      return JSON.stringify({ error: document.getElementById('setupError').textContent, focused: document.activeElement && document.activeElement.id, setup: (await AGM.api('GET', '/api/auth/me')).setup, at: location.pathname });
+    })()`);
+    report(wrongToken === JSON.stringify({ error: 'That is not the token in the AGMessage window.', focused: 'setupToken', setup: true, at: '/' }), `the first admin is not made with a wrong token: the pane says so and chooses the token again (${wrongToken})`);
+    await signin.eval(`(() => { document.getElementById('setupToken').value = '${TOKEN}'; document.getElementById('setupPane').requestSubmit(); })()`);
     report(!!(await signin.until(`location.pathname === '/halls.html' && document.querySelectorAll('.hall-row').length >= 1 && document.getElementById('linkState').dataset.ok === '1'`)), 'the first admin lands on the halls board, live, with the hall listed');
     const boardHeld = await signin.until(`(() => { const li = [...document.querySelectorAll('#helpList .help-item')].find((x) => x.textContent.includes('mic 4 crackles')); return li && li.querySelector('.help-who').textContent; })()`);
     report(HELD_WORDS.test(String(boardHeld || '').split(' · ').slice(-2).join(' · ')), `a help request held for a minute reads "written … · sent …" on the halls board too (${boardHeld})`);
@@ -2665,7 +2676,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const port2 = await freePort();
     const base2 = `http://127.0.0.1:${port2}`;
     server2 = await startServer(port2, dataDir2);
-    await fetch(base2 + '/api/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', name: 'Ana Admin', password: 'the green room kettle' }) });
+    await fetch(base2 + '/api/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' }) });
     await stopServer(server2);
     const kept2 = fs.readFileSync(path.join(dataDir2, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean);
     fs.writeFileSync(path.join(dataDir2, 'audit.jsonl'), kept2.slice(0, -1).join('\n') + '\n');
@@ -2684,7 +2695,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(rows2 === '✓✓✓△△△△△', `the rows read ✓ under this key (the sign-in, the cut, the boundary) and △ for the 0.5.1 entries (${rows2})`);
     const admin2 = await edge.tab(`${base2}/admin.html`);
     const where2 = await admin2.until(`(() => { const w = document.getElementById('auditWhere'); return !document.getElementById('dashboard').hidden && !w.hidden && document.getElementById('auditAcceptRow').hidden && document.getElementById('auditLine').dataset.mark === 'broken' && w.textContent; })()`, 20000);
-    report(where2 === 'Accept this on the AGMessage laptop: sign in there with its token (Admin login in the black window).', `an admin account is told where to accept, and offered no Accept button (${where2})`);
+    report(where2 === 'Accept this on the AGMessage laptop: sign in there with its token (Admin login in the AGMessage window; installed: Start → AGMessage → Show the admin token).', `an admin account is told where to accept, and offered no Accept button (${where2})`);
     await admin2.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
     const button2 = await admin2.until(`!document.getElementById('dashboard').hidden && !document.getElementById('auditAcceptRow').hidden && document.getElementById('auditWhere').hidden`, 20000);
     await admin2.eval(`document.getElementById('auditAcceptBtn').click()`);
@@ -2752,7 +2763,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const port3 = await freePort();
     const base3 = `http://127.0.0.1:${port3}`;
     server3 = await startServer(port3, dataDir3);
-    await fetch(base3 + '/api/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', name: 'Ana Admin', password: 'the green room kettle' }) });
+    await fetch(base3 + '/api/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' }) });
     const admin3 = await edge.tab(`${base3}/admin.html`);
     await admin3.until('document.readyState === "complete"');
     await admin3.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);

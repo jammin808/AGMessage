@@ -169,9 +169,9 @@ test('watchdog: a signal to it leaves no server behind — asked to stop where s
 });
 
 test('a server whose watchdog has gone saves what is waiting and leaves, so no orphan holds the folder', async () => {
-  const { startServer, api } = require('./helpers');
+  const { startServer, api, TOKEN } = require('./helpers');
   const srv = await startServer();
-  const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const setup = await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
   assert.equal(setup.status, 200);
   const gone = new Promise((resolve) => { srv.child.once('exit', (code) => resolve(code)); });
   srv.child.disconnect();   // the watchdog ended without a word (Task Manager, a crash of its own)
@@ -228,6 +228,13 @@ test('atomic writes keep a backup only of a whole file; the lane coalesces and f
   fs.writeFileSync(f, '{"torn');
   assert.deepEqual(r.readJsonWithBak(f), { a: 1 }, 'a torn file falls back to its backup');
   assert.ok(!fs.readdirSync(dir).some((x) => x.endsWith('.tmp')), 'no temporary files left behind');
+  // A folder another program makes (its access list its own) is never made here: the write throws, and nothing is left.
+  assert.throws(() => r.writeFileAtomic(path.join(dir, 'theirs', 'admin-token'), 'x', { makeDir: false }), { code: 'ENOENT' });
+  assert.ok(!fs.existsSync(path.join(dir, 'theirs')), 'its folder is not made');
+  fs.mkdirSync(path.join(dir, 'theirs'));
+  r.writeFileAtomic(path.join(dir, 'theirs', 'admin-token'), 'one', { makeDir: false });
+  r.writeFileAtomic(path.join(dir, 'theirs', 'admin-token'), 'two', { makeDir: false });
+  assert.deepEqual([fs.readdirSync(path.join(dir, 'theirs')), fs.readFileSync(path.join(dir, 'theirs', 'admin-token'), 'utf8')], [['admin-token'], 'two'], 'replaced whole where it is');
 
   const lane = new r.WriteLane(path.join(dir, 'lane.json'), { delayMs: 50 });
   for (let i = 1; i <= 20; i++) lane.save(() => JSON.stringify({ i }));
@@ -543,7 +550,7 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   // and the count may not grow without someone deciding it here.
   const allowed = {
     'server.js': { max: 15, why: 'the first writes once the folder is held (its folders, the watchdog\'s marker seen), the crash handler, upload sniffing (4 KB), tunnel log tail (and, through its lane, the show desk results a tick collects, flushed once before they are reported)' },
-    'supervise.js': { max: 3, why: 'the watchdog process: its own log and marker, never on a request' },
+    'supervise.js': { max: 3, why: 'the watchdog process: its own log and marker, never on a request (the installed node\'s token file, once its server serves, goes through lib/resilience.js\'s atomic writer)' },
     'lib/store.js': { max: 10, why: 'durability: a change is appended to its log (the system\'s file cache) before the ack, or kept for the next snapshot when the disk refuses it; snapshots every 500 ops' },
     'lib/resilience.js': { max: 13, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full; a file read with why it was not (readText), every store\'s read; a file made only where none is (publishOnce: its link, which refuses one there, and its temporary file removed); a folder\'s real path, read once per place at start (placeId)' },
     'lib/secretbox.js': { max: 3, why: 'the machine key, read once, or made once and published whole' },
@@ -583,6 +590,7 @@ test('guard rails: the timers the handler files start are counted, each with its
       'cloudflared\'s log read for the tunnel\'s address, and its registered connection, until it has both (the wait below at most, once it has the address)',
       'the tunnel given 30 s to name its address, and its link checked then when cloudflared never said its connection is registered',
       'the watchdog\'s heartbeat, from the event loop, each second',
+      'the banner\'s Token line: the watchdog given 2 s to say it, once a start',
     ],
   };
   const files = handlerFiles();

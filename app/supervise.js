@@ -11,7 +11,10 @@
  *    port or data folder held by another program (tried again on the ladder, never counted as a crash), 82 restart now.
  *  - The channel (AGM_RUNS) and, for the installed node, its folders are checked before anything is written; an unknown
  *    channel, or a data folder that cannot be made, stops it with code 3 and the words of why.
- *  - The admin token is made once here and handed to every restart, so a restart doesn't change it.
+ *  - The admin token is made once here and handed to every restart, so a restart doesn't change it. It is said only where
+ *    a person sits: once its server serves and asks, the banner's Token line holds it on a console and never in output
+ *    that is kept (a file, a log). The installed node writes it into its token folder (AGM_TOKEN_DIR), a folder of its
+ *    own that this PC's AGMessage admin reads, and takes no secret (ADMIN_TOKEN, ANTHROPIC_API_KEY) from its environment.
  *  - Ctrl+C, closing the window or a stop: the server is asked over IPC and saves before it goes (a signal to a child
  *    on Windows would end it unsaved). If the watchdog itself is ended: elsewhere the server sees its channel close and
  *    saves; on Windows the job libuv puts every child in ends the server with it, so no orphan is left either way.
@@ -22,8 +25,8 @@ const { fork } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { SupervisorPolicy, EXIT } = require('./lib/resilience');
-const { channelOf } = require('./lib/startup');
+const { SupervisorPolicy, EXIT, writeFileAtomic } = require('./lib/resilience');
+const { channelOf, taskTokenProblem, tokenLine, TOKEN_FILE } = require('./lib/startup');
 
 const CHILD = process.env.AGM_CHILD || path.join(__dirname, 'server.js');
 const DATA_DIR = process.env.AGM_DATA_DIR || path.join(__dirname, 'data');
@@ -38,6 +41,10 @@ function cannotStart(words) {
 }
 const channel = channelOf(process.env, { programDir: path.dirname(__dirname) });
 if (channel.problem) cannotStart(channel.problem);
+const tokenProblem = taskTokenProblem(process.env, { programDir: path.dirname(__dirname) });
+if (tokenProblem) cannotStart(tokenProblem);
+// The installed node's token file, which its admin reads ('' for a portable copy, whose token is said in its window only).
+const TOKEN_PATH = channel.runs === 'task' ? path.join(process.env.AGM_TOKEN_DIR, TOKEN_FILE) : '';
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {
   cannotStart('the data folder ' + DATA_DIR + ' cannot be made (' + (e.code || e.message) + '). Choose a folder this Windows account can write to (AGM_DATA_DIR), or fix that one\'s permissions.');
 }
@@ -67,13 +74,37 @@ function start() {
   policy.started(Date.now());
   child = fork(CHILD, [], { env: { ...env, AGM_RESTARTS: String(restarts) }, stdio: 'inherit' });
   const me = child;
-  me.on('message', (m) => { if (m && m.t === 'beat') lastBeat = Date.now(); });
+  me.on('message', (m) => {
+    if (m && m.t === 'beat') lastBeat = Date.now();
+    else if (m && m.t === 'token') sayToken(me);
+  });
   me.on('exit', (code, signal) => {
     if (child !== me) return;
     child = null;
     if (stopping) { process.exit(EXIT.STOP); return; }
     decide(code === null ? -1 : code, me.hung === true, signal);
   });
+}
+
+/**
+ * The server serves and asks for its banner's Token line: the installed node's token is written into its token folder
+ * first (only now, so a copy whose port or folder is held never writes over the token of the copy that serves), whole,
+ * through the atomic writer, so Show the admin token reads the old token or the new one, never a file cut short; the
+ * folder is never made here (its access list is the installer's). Then the line is said on this console
+ * (lib/startup.js tokenLine), and the server is told once it is written, so the line keeps its place in the banner. A
+ * token file that cannot be written leaves the node serving without it, said here and in watchdog.log: guests, screens
+ * and accounts need no token. The file is left when the node stops: a token nothing answers to until the next start
+ * replaces it, which launch.js's words say.
+ */
+function sayToken(me) {
+  let line = tokenLine({ tty: process.stdout.isTTY === true, runs: channel.runs, token: env.ADMIN_TOKEN, file: TOKEN_PATH });
+  if (TOKEN_PATH) {
+    try { writeFileAtomic(TOKEN_PATH, env.ADMIN_TOKEN, { mode: 0o600, makeDir: false }); } catch (e) {
+      log('the admin token could not be written to ' + TOKEN_PATH + ' (' + (e.code || e.message) + '), so nobody can read it this run: AGMessage serves on without it. Its folder is the installer\'s, which lets the server write there.');
+      if (process.stdout.isTTY !== true) line = '    Token: not shown here, and not written (the line above says why).';
+    }
+  }
+  process.stdout.write(line + '\n', () => { if (me.connected) me.send({ t: 'token-said' }, () => { /* gone: its banner goes on after its wait */ }); });
 }
 
 function decide(code, hung, signal) {

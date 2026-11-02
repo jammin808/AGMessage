@@ -891,7 +891,7 @@ test('end to end: who may export — the token at the laptop and an admin at the
   t.after(async () => { await h.stopServer(srv.child); });
   const { base } = srv;
   const tok = (await h.api(base, 'POST', '/api/admin/login', { token: h.TOKEN })).cookie;
-  const ana = (await h.api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const ana = (await h.api(base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const make = async (username, role, grant = []) => {
     const r = await h.api(base, 'POST', '/api/users', { username, name: username, role, grant, password: 'a long pass phrase here' }, { cookie: ana });
     assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -976,7 +976,7 @@ test('speed: an export of the 56,000-entry log while a page asks and a person si
   keyedChainOf(56_000, { file: path.join(dataDir, 'audit.jsonl'), records: path.join(keyDir, 'audit') });
   const srv = await h.startServer({ AGM_DATA_DIR: dataDir });
   t.after(async () => { await h.stopServer(srv.child); });
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   await h.api(srv.base, 'POST', '/api/users', { username: 'bob', name: 'Bob', role: 'staff', password: 'clipboard and coffee' }, { cookie: admin });
   const signIn = async () => { const t0 = performance.now(); const r = await h.api(srv.base, 'POST', '/api/auth/login', { username: 'bob', password: 'clipboard and coffee' }); assert.equal(r.status, 200); return performance.now() - t0; };
   const alone = Math.min(await signIn(), await signIn());
@@ -1005,7 +1005,7 @@ test('the screen rows\' voice: a message\'s words and a file\'s name taken to a 
   const srv = await h.startServer();
   t.after(async () => { await h.stopServer(srv.child); });
   const tok = (await h.api(srv.base, 'POST', '/api/admin/login', { token: h.TOKEN })).cookie;
-  const ana = (await h.api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const ana = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const device = await asDevice(srv.base, 'POST', '/api/audit/export', { cookie: ana });
   assert.deepEqual([device.status, device.json.error], [403, 'Export at the AGMessage laptop: HTTPS is off on this AGMessage, and from another device an export goes only over HTTPS.']);
   const code = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: tok })).body.code;

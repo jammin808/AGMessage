@@ -46,7 +46,7 @@
       $('ctxWhy').hidden = !s.contextTokenWhy;
       renderTls(s.tls, s.stagewatchFingerprint);
       $('remoteAdmin').checked = !!s.remoteAdmin;
-      $('acctCount').textContent = s.accounts ? s.accounts + ' account' + (s.accounts === 1 ? '' : 's') : 'No accounts yet — sign in on the start page to make the first admin';
+      $('acctCount').textContent = s.accounts ? s.accounts + ' account' + (s.accounts === 1 ? '' : 's') : 'No accounts yet — make the first admin on the start page, with the token';
       $('buildLine').textContent = s.build ? 'This is AGMessage ' + s.build + '.' : '';
       renderHealth(s.health);
       renderAudit(s.health);

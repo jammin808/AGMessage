@@ -121,13 +121,37 @@ manager's and the admin's), so an admin who gives it to someone of one hall give
 ## The first admin
 
 A new AGMessage has no accounts. Open it **on the AGMessage laptop** (`http://localhost:3023`): the sign-in page asks
-for the first admin's name, username and password. "On the laptop" means a request from the laptop's own loopback,
-addressed to `localhost`, `127.0.0.1` or `[::1]`, with no proxy or tunnel headers — a page served under any other name
-is refused, even when that name leads back to the laptop. There is one first admin, even when two requests arrive at
+for **the laptop's admin token** and the first admin's name, username and password. "On the laptop" means a request
+from the laptop's own loopback, addressed to `localhost`, `127.0.0.1` or `[::1]`, with no proxy or tunnel headers — a
+page served under any other name is refused, even when that name leads back to the laptop. Loopback alone is not
+enough: a second Windows account on the laptop reaches it too, so the first admin is made only with the token, typed
+into the form, or, when none is typed, by the token's sign-in made by this run at the laptop (one read back from
+`admin-sessions.json` after a restart is a record anyone who could write the data folder could add, and does not
+count). The sign-in page always asks for the typed token (its field is required, of any length); the token's sign-in
+serves a request made without the page's field. A token typed is always judged, whatever sign-in is beside it, and
+judged first: a wrong one is refused, counted toward the token's lockout (5 a minute) and written as `login.token.fail` "a
+wrong admin token (at setup)"; while the lock holds a wrong one is refused and not written again, and the right one is
+still taken, so nobody else at the laptop keeps its person out by typing wrong tokens. That leaves guessing at the
+laptop unbounded until the first admin exists: the watchdog's token is 64 random bits, and a portable copy given its
+token by `ADMIN_TOKEN` is as strong as that token, so the papers ask for 16 or more random letters and digits. The
+`setup` row says which way the token came. There is one first admin, even when two requests arrive at
 once. The admin then adds everyone else on the Accounts page (Halls → Accounts); each new person gets a **one-time
 password**, shown once, which they replace at their first sign-in (two saves at once still make one account). The host
-laptop's admin token (printed in its window) still opens the admin page there; that sign-in lasts a day and survives a
-watchdog restart, which keeps the token, but not a fresh start of AGMessage, which prints a new one.
+laptop's admin token still opens the admin page there; that sign-in lasts a day and survives a watchdog restart, which
+keeps the token, but not a fresh start of AGMessage, which makes a new one.
+
+**Where the token is said.** The watchdog makes the token and says it only where a person sits: the banner's Token line,
+under Admin login, holds it in a console window (the portable folder's black window), and never in output that is kept
+(redirected to a file or a log), where the line says how to see it instead. A server run without its watchdog prints its
+own. The installed node has no window: its watchdog writes the token into `admin-token` in its token
+folder (`AGM_TOKEN_DIR`, `%ProgramData%\AGMessage\token`), once its server serves. That folder is one of its own, which
+this PC's AGMessage admin (the Windows account that installed it) and the accounts it gives `token` may read (the
+installer's units set its access list and add the Start menu; no build installs AGMessage yet). Start → AGMessage → Show
+the admin token runs `launch.js token`, which prints it in the person's own console, or says "This PC's AGMessage admin
+has not given you the token: ask LAPTOP\ana". The file is replaced whole each time the node serves and is left when it
+stops, so the token it holds is the one the node last served with. The installed node takes no `ADMIN_TOKEN` (nor
+`ANTHROPIC_API_KEY`) from its environment: a scheduled task's definition is read by every account allowed to read the
+task, so either one there stops it with code 3.
 
 ## Passwords and sessions
 

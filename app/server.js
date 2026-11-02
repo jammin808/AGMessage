@@ -101,8 +101,11 @@ let serving = false;   // this copy holds its data folder and its port: from the
 const secretFound = guard.readSecret(DATA_DIR);
 const SECRET = secretFound.secret;
 
-// One-time admin token printed at boot; login only from the host laptop (never through the tunnel).
+// The laptop's admin token: login only from the host laptop (never through the tunnel). A server its watchdog runs
+// (AGM_SUPERVISED) is handed the watchdog's, the same for every restart, and never says it: the watchdog does, where a
+// person sits (`sayToken`). A server run alone makes its own and prints it in its banner.
 const ADMIN_TOKEN = (process.env.ADMIN_TOKEN || crypto.randomBytes(8).toString('hex')).toLowerCase();
+const SUPERVISED = !!process.env.AGM_SUPERVISED;
 
 const makeRoomCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
 const makeMessageId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
@@ -659,6 +662,8 @@ app.use(express.json({ limit: '256kb' }));
 const web = mountAccounts(app, {
   accounts, sessions, audit, settings, isEncrypted, isLoopback,
   isTokenAdmin: (req) => isValidAdminCookie(req),
+  // The token typed at the laptop (the first admin account): judged as the token sign-in judges it, the typed token first.
+  typedToken: (req, typed, where) => typedTokenProblem(req, typed, where),
   // The export: the token's sign-in made by this run, who the token is in the log, the signing key, and HTTPS's state.
   tokenHere: (req) => tokenSessions.mintedHere(readCookie(req, 'agm_admin')), hostActor: HOST_ACTOR,
   exporter: auditExporter, signKey: () => AUDIT_SIGN_KEY, httpsOn: () => !!cert, port: PORT,
@@ -695,6 +700,23 @@ app.get('/uploads/:name', (req, res) => {
 const readCookie = (req, name) => guard.readCookie(req.headers.cookie, name);
 const isValidAdminCookie = (req) => tokenSessions.has(readCookie(req, 'agm_admin'));
 const adminLockout = new guard.Lockout(5, 60_000);
+/**
+ * The laptop's token typed at the laptop to make the first admin account: null when it is the token, else {status, error}.
+ * The typed token is judged first, so the right one is taken even while wrong ones hold the token's lockout: someone
+ * else at the laptop typing five wrong tokens a minute never keeps its person out (the token's 64 random bits make the
+ * lock nothing against guessing). A wrong one counts toward the lockout and is written as `login.token.fail`, naming where
+ * it was typed, unless the lock already holds, when it is refused and not written again: a flood writes five rows a
+ * minute at most. A request that typed none guessed nothing, and is told to type it.
+ */
+function typedTokenProblem(req, typed, where) {
+  const t = typeof typed === 'string' ? typed.toLowerCase().trim() : '';
+  if (t && guard.safeEqual(t, ADMIN_TOKEN)) { adminLockout.ok('host'); return null; }
+  if (!t) return { status: 401, error: 'Type the token from the AGMessage window (installed: Start → AGMessage → Show the admin token).' };
+  if (adminLockout.locked('host')) return { status: 429, error: 'Too many wrong tokens — wait a minute.' };
+  adminLockout.fail('host');
+  audit.write(HOST_ACTOR, 'login.token.fail', 'host', 'a wrong admin token (at ' + where + ')', guard.clientIp(req));
+  return { status: 401, error: 'That is not the token in the AGMessage window.' };
+}
 
 app.post('/api/admin/login', (req, res) => {
   if (!guard.isHostMachine(req)) return res.status(403).json({ ok: false, error: 'Admin login is only allowed on the host laptop.' });
@@ -733,7 +755,7 @@ app.post('/api/audit/accept', async (req, res) => {
   if (!t || !guard.safeEqual(t, ADMIN_TOKEN)) {
     adminLockout.fail('host');
     audit.write(HOST_ACTOR, 'login.token.fail', 'host', 'a wrong admin token (at Accept)', guard.clientIp(req));
-    return res.status(401).json({ ok: false, error: 'That is not the token in the black window.' });
+    return res.status(401).json({ ok: false, error: 'That is not the token in the AGMessage window.' });
   }
   adminLockout.ok('host');
   const list = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 40).map((x) => x.slice(0, 24)) : []);
@@ -3195,6 +3217,41 @@ function auditBanner(said) {
   if (process.env.AGM_KEY_DIR) lines.push('  Key folder:  ' + secretbox.keyDir() + ' (set by AGM_KEY_DIR, not the default)');
   return [...lines, ...auditAttentionLines(said)];
 }
+/**
+ * The banner's URL line and its Token line. A server run alone prints both. A server its watchdog runs never says the
+ * token: once the URL line is written it asks the watchdog over IPC, which says the Token line where a person sits
+ * (lib/startup.js tokenLine) and answers once it is written, so the line keeps its place in the banner. With no answer
+ * within TOKEN_SAY_MS (no watchdog on the channel, or one that does not answer) the banner says so and goes on. The wait
+ * keeps no process alive: a server that is stopping goes without it.
+ */
+const TOKEN_SAY_MS = 2000;
+function sayToken(urlLine) {
+  if (!SUPERVISED) {
+    console.log(urlLine);
+    console.log('    Token: ' + ADMIN_TOKEN);
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let timer = null;
+    const finish = (words) => {
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = null;
+      process.removeListener('message', heard);
+      if (words) console.log(words);
+      resolve();
+    };
+    const unsaid = '    Token: not shown here: the watchdog that keeps it did not answer.';
+    const heard = (m) => { if (m && m.t === 'token-said') finish(''); };
+    timer = setTimeout(() => finish(unsaid), TOKEN_SAY_MS);
+    timer.unref();
+    process.on('message', heard);
+    process.stdout.write(urlLine + '\n', () => {
+      if (typeof process.send !== 'function' || !process.connected) { finish(unsaid); return; }
+      process.send({ t: 'token' }, (e) => { if (e) finish(unsaid); });
+    });
+  });
+}
 /** Let go of the data folder (a clean stop): the next start finds it free at once. */
 function releaseDataFolder() { for (const hold of folderHolds.splice(0)) { try { hold.close(); } catch { /* the process is ending: the OS frees it */ } } }
 
@@ -3305,11 +3362,12 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   for (const fn of untilServing.splice(0)) fn();
   // The whole log is checked once, beside the show, so health, the rows' marks and the black window read what the log
   // holds from the start: findings an earlier start left open, and a chain broken at a line, included. Then a split a stop
-  // left part way is finished (or its leftovers, which no split pins, removed), which checks the log again.
+  // left part way is finished (or its leftovers, which no split pins, removed), which checks the log again. What it says
+  // waits for the banner to be whole, so no line of it falls inside the banner's Admin login block.
   const checkedAtStart = audit.verify()
     .then(() => auditArchiver.finish({ t: 'system', id: '', name: '' }, '', { atStart: true }))
-    .then((r) => { if (r && r.ok && r.words && !/^No split/.test(r.words)) console.log('  Audit log:   ' + r.words); return true; },
-      (e) => { console.error('  [audit] the check at start did not finish: ' + (e && e.message ? e.message : e)); return false; });
+    .then((r) => () => { if (r && r.ok && r.words && !/^No split/.test(r.words)) console.log('  Audit log:   ' + r.words); },
+      (e) => () => { console.error('  [audit] the check at start did not finish: ' + (e && e.message ? e.message : e)); });
   const addresses = [];
   for (const list of Object.values(os.networkInterfaces())) for (const n of list || []) if (n.family === 'IPv4' && !n.internal) addresses.push(n.address);
   console.log('\n  AGMessage ' + BUILD.full + ' is running');
@@ -3325,20 +3383,21 @@ holdDataFolder(() => front.listen(PORT, HOST, () => {
   console.log('');
   console.log('  ============================================');
   console.log('  Admin login (only from this host laptop):');
-  console.log('    URL:   http://localhost:' + PORT + '/admin');
-  console.log('    Token: ' + ADMIN_TOKEN);
-  console.log('  ============================================');
   const said = new Set();
-  for (const line of auditBanner(said)) console.log(line);
-  console.log('  AI drafts:   ' + (aiKey() ? 'on (' + ai.MODEL + ')' : 'off — add a key in Admin → AI (messaging and the show network work without it)'));
-  if (RESTARTS) console.log('  Restarted by the watchdog (' + RESTARTS + 'x)' + (lastCrash ? ' — last crash: ' + String(lastCrash.message || '').slice(0, 120) : ''));
-  console.log('  Stagewatch:  ' + (settings.stagewatchUrl || 'not linked (Admin → Show network)'));
-  console.log('  Saved rooms: ' + ROOMS_DIR);
-  console.log('  Uploads:     ' + UPLOAD_DIR + '\n');
-  // What the check at start found that the banner has not said is said once it answers. Only then, with this copy
-  // serving, may the browser open: the page it opens is this copy's (lib/startup.js), and a log that needs the person at
-  // this laptop opens it on the admin page, where Health asks it.
-  checkedAtStart.then(() => {
+  const bannerSaid = sayToken('    URL:   http://localhost:' + PORT + '/admin').then(() => {
+    console.log('  ============================================');
+    for (const line of auditBanner(said)) console.log(line);
+    console.log('  AI drafts:   ' + (aiKey() ? 'on (' + ai.MODEL + ')' : 'off — add a key in Admin → AI (messaging and the show network work without it)'));
+    if (RESTARTS) console.log('  Restarted by the watchdog (' + RESTARTS + 'x)' + (lastCrash ? ' — last crash: ' + String(lastCrash.message || '').slice(0, 120) : ''));
+    console.log('  Stagewatch:  ' + (settings.stagewatchUrl || 'not linked (Admin → Show network)'));
+    console.log('  Saved rooms: ' + ROOMS_DIR);
+    console.log('  Uploads:     ' + UPLOAD_DIR + '\n');
+  });
+  // What the check at start found that the banner has not said is said once it answers and the banner is whole. Only
+  // then, with this copy serving, may the browser open: the page it opens is this copy's (lib/startup.js), and a log that
+  // needs the person at this laptop opens it on the admin page, where Health asks it.
+  Promise.all([checkedAtStart, bannerSaid]).then(([sayChecked]) => {
+    sayChecked();
     // After a split the check begins at its archive point and names each archive (H.11's banner line, said once known).
     if (audit.from > 1) console.log('  Audit log:   keyed (key ' + audit.kid + ') · from entry ' + audit.from + ', ' + audit.archives.length + ' archive' + (audit.archives.length === 1 ? '' : 's') + ' · Admin → Health');
     const more = auditAttentionLines(said);

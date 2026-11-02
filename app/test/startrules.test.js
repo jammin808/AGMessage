@@ -1,5 +1,5 @@
 'use strict';
-// A start's rules: the channel (AGM_RUNS) and, for the installed node, its three folders are checked before anything is
+// A start's rules: the channel (AGM_RUNS) and, for the installed node, its folders are checked before anything is
 // written; nothing is written, in the data folder or the key folder, before the data folder and the port are held; a
 // folder that cannot be used stops the start with its words (code 3), never a crash loop; the installed node never runs
 // without its keys, and its port or folder held is code 75, which its watchdog tries again; the machine key, the server
@@ -20,8 +20,8 @@ const ROOT = h.ROOT;
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const until = async (fn, ms = 10000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await h.wait(50); } return false; };
 
-/** The three folders a copy is given, under `base`: none of them made. */
-const folders = (base) => ({ AGM_DATA_DIR: path.join(base, 'data'), AGM_UPLOAD_DIR: path.join(base, 'uploads'), AGM_KEY_DIR: path.join(base, 'keys') });
+/** The folders a copy is given, under `base`: none of them made. The token folder is the installed node's watchdog's alone. */
+const folders = (base) => ({ AGM_DATA_DIR: path.join(base, 'data'), AGM_UPLOAD_DIR: path.join(base, 'uploads'), AGM_KEY_DIR: path.join(base, 'keys'), AGM_TOKEN_DIR: path.join(base, 'token') });
 /** Every folder and file under `dir`, with each file's bytes: what a copy may not change. */
 function tree(dir) {
   const out = {};
@@ -36,13 +36,15 @@ function tree(dir) {
   walk(dir, '');
   return out;
 }
-/** `server.js` or `supervise.js` run to its end on its own folders (never the tree's): {code, out}. */
+/**
+ * `server.js` or `supervise.js` run to its end on its own folders (never the tree's): {code, out}. The installed node's
+ * watchdog is given no ADMIN_TOKEN, which it refuses: it makes its own.
+ */
 function run(file, env, { cwd = os.tmpdir(), ms = 20000 } = {}) {
   return new Promise((resolve) => {
-    const c = spawn(process.execPath, [path.join(ROOT, file)], {
-      cwd, env: { ...process.env, PORT: '0', HOST: '127.0.0.1', ADMIN_TOKEN: h.TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', AGM_BACKOFF: '0.05', ...env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const all = { ...process.env, PORT: '0', HOST: '127.0.0.1', ADMIN_TOKEN: h.TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', AGM_BACKOFF: '0.05', ...env };
+    if (file === 'supervise.js' && all.AGM_RUNS === 'task') delete all.ADMIN_TOKEN;
+    const c = spawn(process.execPath, [path.join(ROOT, file)], { cwd, env: all, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
     const kill = setTimeout(() => c.kill('SIGKILL'), ms);   // a copy that ran when it should have stopped is a failure, not a hang
@@ -456,7 +458,7 @@ test('the installed node\'s port held: code 75, and its watchdog starts it again
   const base = tmp('agm-held-');
   const f = folders(base);
   const p = spawn(process.execPath, [path.join(ROOT, 'supervise.js')], {
-    env: { ...process.env, ...f, AGM_RUNS: 'task', PORT: String(port), HOST: '127.0.0.1', ADMIN_TOKEN: h.TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', AGM_BACKOFF: '0.05' },
+    env: { ...process.env, ...f, AGM_RUNS: 'task', PORT: String(port), HOST: '127.0.0.1', ADMIN_TOKEN: '', AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', AGM_BACKOFF: '0.05' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   let out = '';

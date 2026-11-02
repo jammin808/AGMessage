@@ -1007,7 +1007,7 @@ async function serverWithPoints(t, n, points) {
 
 test('end to end: only the admin splits (the token, an admin account); never a manager, one granted settings.manage, Staff, a code guest or the tunnel; health, /api/audit and the window name the archive', async (t) => {
   let srv = await serverWithPoints(t, 12, [9]);
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const mk = async (username, role, password, grant = []) => {
     const made = await h.api(srv.base, 'POST', '/api/users', { username, name: username, role, grant, password }, { cookie: admin });
     assert.equal(made.status, 200, JSON.stringify(made.body));
@@ -1052,7 +1052,7 @@ test('end to end: only the admin splits (the token, an admin account); never a m
 
 test('speed: a split of the 56,000-entry log at entry 50,000 while a page asks and a person signs in: neither waits more than 300 ms; the check after walks about 6,000 entries', async (t) => {
   const srv = await serverWithPoints(t, 56_000, [50_000]);
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   await h.api(srv.base, 'POST', '/api/users', { username: 'bob', name: 'Bob', role: 'staff', password: 'clipboard and coffee' }, { cookie: admin });
   const signIn = async () => { const t0 = performance.now(); const r = await h.api(srv.base, 'POST', '/api/auth/login', { username: 'bob', password: 'clipboard and coffee' }); assert.equal(r.status, 200); return performance.now() - t0; };
   const alone = Math.min(await signIn(), await signIn());

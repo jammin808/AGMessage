@@ -16,7 +16,7 @@ const tlsmod = require('../lib/tls');
 const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
 const { io } = require('socket.io-client');
-const { startServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, freePort } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, freePort, TOKEN } = require('./helpers');
 
 // Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
 const KEY_A = 'swk_hallA_node_key_0001';   // secret-scan: fixture
@@ -69,7 +69,7 @@ test('halls end to end: two Stagewatches, the board, help', async (t) => {
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await swA.close(); await swB.close(); });
 
-  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hallA = (await api(base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
   const hallB = (await api(base, 'POST', '/api/rooms', { name: 'Hall B' }, { cookie: admin })).body.code;
   await api(base, 'POST', '/api/users', { username: 'pat', name: 'Pat PM', role: 'manager', password: 'clipboard and coffee' }, { cookie: admin });
@@ -289,7 +289,7 @@ test('a hall\'s Set up: its screens follow a removed Stagewatch at once; an unch
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await hallSw.close(); await defSw.close(); });
-  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const ctl = await connect(base, admin); sockets.push(ctl);
   const hallUpdates = async (code) => (await api(base, 'GET', '/api/audit?limit=200', undefined, { cookie: admin })).body.entries.filter((e) => e.action === 'hall.update' && e.target === code).length;
   // What halls.js sends on Save: the dialog's fields as hall:settings filled them, with the person's edits.
@@ -379,7 +379,7 @@ test('C53: a restart keeps following a stage send the speaker has not acknowledg
   let srv = await startServer();
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
-  const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const setup = await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
   const code = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall R' }, { cookie: setup.cookie })).body.code;
   const ctl = await connect(srv.base, setup.cookie); sockets.push(ctl);
   assert.ok((await emit(ctl, 'hall:configure', { code, stagewatchUrl: sw.url, stagewatchKey: KEY_A })).ok);
@@ -419,7 +419,7 @@ test('a restart follows a stage send only while its Stagewatch is the one it wen
   let srv = await startServer();
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await swP.close(); await swQ.close(); await swR.close(); });
-  const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const setup = await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
   let ctl = await connect(srv.base, setup.cookie); sockets.push(ctl);
   const halls = {};
   for (const [k, sw, seq] of [['P', swP, 10], ['Q', swQ, 50], ['R', swR, 20]]) {
@@ -484,7 +484,7 @@ test('closing a hall forgets its own Stagewatch\'s certificate pins, unless anot
   const srv = await startServer();
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
-  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
   const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const pins = () => Object.keys(JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'settings.json'), 'utf8')).tlsPins || {});
@@ -548,7 +548,7 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
   };
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
 
-  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const [hallA, hallB, hallC, hallD, hallE, hallF, hallG] = [await hall('Hall A'), await hall('Hall B'), await hall('Hall C'), await hall('Hall D'), await hall('Hall E'), await hall('Hall F'), await hall('Hall G')];
   const account = async (body) => {
@@ -958,7 +958,7 @@ test('a locked hall\'s seats outlive the watchdog\'s restart for the pages back 
   let srv = await startServer({ AGM_BOOT_SEAT_MS: '6000' });
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
-  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
   const code = (await api(srv.base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: admin })).body.code;
   const join = async (name, role, extra = {}) => { const s = await connect(srv.base); sockets.push(s); const j = await emit(s, 'join', { roomCode: code, name, role, ...extra }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };

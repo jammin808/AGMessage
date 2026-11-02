@@ -9,6 +9,9 @@
  *                                  loopback with no token; the answer only chooses the words, nothing is decided on it
  *   channelOf                      the channel this copy runs in (AGM_RUNS) and, for the installed node, its three
  *                                  folders, read before the watchdog or the server writes anything
+ *   taskTokenProblem, tokenLine    where the admin token is said: the installed node's watchdog takes no secret from its
+ *                                  environment and writes the token into a folder of its own; the banner's Token line
+ *                                  holds the token only on a console, where a person sits
  */
 const http = require('http');
 const path = require('path');
@@ -181,4 +184,51 @@ function channelOf(env, { programDir, platform = process.platform }) {
   return { runs: asked, problem: '' };
 }
 
-module.exports = { openerPlan, openBrowser, readPortHolder, portHolderWords, holderOf, channelOf, CHANNELS };
+/** The admin token's file in the installed node's token folder (AGM_TOKEN_DIR), which its watchdog writes. */
+const TOKEN_FILE = 'admin-token';
+/**
+ * Secrets the installed node never takes from its environment: whatever starts it (a scheduled task's definition) can be
+ * read by every account allowed to read that task. Its token is its watchdog's own, and its AI key is sealed in its settings.
+ */
+const TASK_SECRETS = Object.freeze([
+  ['ADMIN_TOKEN', 'Its watchdog makes the admin token at each start and writes it where this PC\'s AGMessage admin reads it'],
+  ['ANTHROPIC_API_KEY', 'Add the key on the admin page instead (Admin → AI), where it is sealed with this PC\'s machine key'],
+]);
+/**
+ * What stops the installed node's watchdog before it writes anything, in words, or '' (pure): a secret in its environment
+ * (TASK_SECRETS, any value but an empty one), or a token folder (AGM_TOKEN_DIR) that is not set, not a full path, inside the
+ * program's folder, or not one of its own: the data, uploads or key folder, inside one of them, or holding one. Whoever is
+ * given the token reads that folder, and nothing else of the node. Only the installed node ('task') is asked.
+ */
+function taskTokenProblem(env, { programDir, platform = process.platform }) {
+  if (env.AGM_RUNS !== 'task') return '';
+  for (const [name, instead] of TASK_SECRETS) {
+    if (typeof env[name] === 'string' && env[name] !== '') return `${name} is set in the installed node's environment, where every account that may read its task reads it too. ${instead}: remove ${name} from it.`;
+  }
+  const dir = typeof env.AGM_TOKEN_DIR === 'string' ? env.AGM_TOKEN_DIR : '';
+  const said = cleanText(dir, 260);
+  if (!dir) return `the installed node needs its token folder in AGM_TOKEN_DIR, and it is not set. It is a full path outside ${programDir}, a folder of its own.`;
+  if (!isFullPath(dir, platform)) return `AGM_TOKEN_DIR is "${said}", which is not a full path. The installed node's token folder is a full path outside ${programDir}, a folder of its own.`;
+  if (isInside(dir, programDir, platform)) return `AGM_TOKEN_DIR is ${said}, inside the program's folder ${programDir}. The installed node's token folder is outside it, where an upgrade never replaces it.`;
+  for (const [name, what] of TASK_FOLDERS) {
+    const other = typeof env[name] === 'string' ? env[name] : '';
+    if (other && isFullPath(other, platform) && (isInside(dir, other, platform) || isInside(other, dir, platform))) {
+      return `AGM_TOKEN_DIR is ${said}, and the ${what} folder (${name}) is ${cleanText(other, 260)}. The token folder is one of its own, neither inside another of the node's folders nor holding one: whoever is given the token reads that folder, and nothing else of the node.`;
+    }
+  }
+  return '';
+}
+
+/**
+ * The banner's Token line, which the watchdog says (it made the token) once its server serves (pure). On a console (`tty`),
+ * where a person sits, it holds the token. Anywhere else (output kept in a file or a log, the installed node's, which has
+ * no window) it never does, and says where the token is instead: the installed node's token file (`file`), or, for a
+ * portable copy, how to see it.
+ */
+function tokenLine({ tty, runs, token, file }) {
+  if (tty) return '    Token: ' + token;
+  if (runs === 'task') return '    Token: not shown here. It is in ' + file + ', which this PC\'s AGMessage admin reads (Start → AGMessage → Show the admin token).';
+  return '    Token: not shown here, since this output is not a window a person reads and may be kept. Start AGMessage in its own window to see it, or set ADMIN_TOKEN, 16 or more random letters and digits, before it starts.';
+}
+
+module.exports = { openerPlan, openBrowser, readPortHolder, portHolderWords, holderOf, channelOf, CHANNELS, taskTokenProblem, tokenLine, TOKEN_FILE, TASK_SECRETS };

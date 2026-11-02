@@ -83,11 +83,12 @@ class SupervisorPolicy {
  * may say it), and then it is copied unread; otherwise it is read, and kept only when `worthKeeping(oldText)` says it
  * is whole. Every byte reaches the temporary file or the write throws: a disk that fills part-way
  * never has a short file renamed over a whole one. A write that throws removes its temporary file, so it does not
- * keep the disk full. Returns the number of bytes written.
+ * keep the disk full. Its folder is made when it is not there, unless `makeDir` is false: a folder another program
+ * makes, with an access list of its own, is never made here, and the write then throws ENOENT. A reader sees the old file
+ * or the new one whole, never one cut short or empty. Returns the number of bytes written.
  */
-function writeFileAtomic(file, data, { keepBak = false, knownWhole = false, worthKeeping = isJson, mode } = {}) {
-  const dir = path.dirname(file);
-  fs.mkdirSync(dir, { recursive: true });
+function writeFileAtomic(file, data, { keepBak = false, knownWhole = false, worthKeeping = isJson, mode, makeDir = true } = {}) {
+  if (makeDir) fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.' + process.pid + '.tmp';
   const bytes = Buffer.from(data);
   try {

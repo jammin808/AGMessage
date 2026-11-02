@@ -26,7 +26,7 @@ const connectWith = (base, headers) => new Promise((resolve, reject) => {
 });
 /** An event whose only argument is its answer (admin:listRooms). */
 const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
-const ANA = { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' };
+const ANA = { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' };
 
 // ---------------------------------------------------------------- what a refused sign-in says and writes down
 test('a refused sign-in never says a password was right, nor writes down a password typed into the username box', async (t) => {
@@ -111,7 +111,7 @@ test('a stranger\'s wrong passwords hold a username only where the stranger is; 
   const srv = await startServer();
   const { base } = srv;
   t.after(() => stopServer(srv.child));
-  const admin = (await api(base, 'POST', '/api/setup', { ...ANA, password: 'gaffer tape and coffee' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, ...ANA, password: 'gaffer tape and coffee' })).cookie;
   const sam = (await api(base, 'POST', '/api/users', { username: 'sam', name: 'Sam Tech', role: 'tech' }, { cookie: admin })).body;
   assert.equal((await api(base, 'POST', '/api/users', { username: 'pat', name: 'Pat PM', role: 'manager', password: 'clipboard and coffee' }, { cookie: admin })).status, 200);
   const strangerTries = async (username) => {

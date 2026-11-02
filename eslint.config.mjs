@@ -88,7 +88,7 @@ export default [
 
   // The server, its libraries, the verifier and the tools: strict mode, and a promise's executor returns nothing.
   {
-    files: ['app/server.js', 'app/supervise.js', 'app/lib/**/*.js', 'app/verify/**/*.js', 'app/eslint-rules/**/*.js', 'tools/**/*.js'],
+    files: ['app/server.js', 'app/supervise.js', 'app/launch.js', 'app/lib/**/*.js', 'app/verify/**/*.js', 'app/eslint-rules/**/*.js', 'tools/**/*.js'],
     rules: { strict: ['error', 'global'], 'no-promise-executor-return': 'error' },
   },
   // The audit log's key-free rules run on the laptop and in a checker on another computer, so they are pure: every Node

@@ -912,7 +912,7 @@ test('end to end: the first start asks in the black window and in health, the to
   assert.match(health.saves.stores.audit.kid, /^[0-9a-f]{16}$/);
   assert.equal(health.saves.stores.auditHead.error, null, 'the head\'s lane is in health');
 
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   // A page cached from 0.5.1 reads only `ok`: never ✓ for △.
   const v = (await h.api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin })).body;
   assert.deepEqual([v.ok, v.mark, v.error === v.words], [false, 'unvouched', true]);
@@ -990,7 +990,7 @@ test('end to end: a run with no machine key still starts and signs in, opens wit
   const auditFacts = (await h.api(srv.base, 'GET', '/api/health')).body.saves.stores.audit;
   assert.deepEqual([auditFacts.signKey, auditFacts.lastExport], ['', null]);
   // The audit list names no key: this run's key id is of a key made for it alone, which nothing after it can check.
-  const admin = (await h.api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const list = await h.api(srv.base, 'GET', '/api/audit', undefined, { cookie: admin });
   assert.deepEqual([list.status, list.body.key], [200, { kid: '', fingerprint: '' }]);
   const attention = auditFacts.attention;
@@ -1052,7 +1052,7 @@ test('end to end: no secret in any audit file, record, health, the rows, /api/ad
   t.after(async () => { await h.stopServer(srv.child); });
   const base = srv.base;
   const tok = (await h.api(base, 'POST', '/api/admin/login', { token: h.TOKEN })).cookie;
-  const setup = await h.api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const setup = await h.api(base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
   const admin = setup.cookie;
   const code = (await h.api(base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
   const socket = await h.connect(base, tok);

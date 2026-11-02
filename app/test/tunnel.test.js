@@ -120,7 +120,7 @@ test('the tunnel\'s places: in all and per network, worded and counted; a venue 
   });
 
   await t.test('a tunnel page that has not joined within the wait is let go and counted; one that joins, one with an account and the admin\'s stay', async () => {
-    const ana = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+    const ana = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
     assert.match(ana, /^agm_s=/);
     const idle = await open(base, viaTunnel('198.51.100.1'));
     const gone = new Promise((resolve) => { idle.s.once('disconnect', resolve); });

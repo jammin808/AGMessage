@@ -36,10 +36,12 @@
       <p class="hint entry-hint">No account? Ask your project manager, or join a hall with its code.</p>
     </form>
 
-    <!-- The first admin: only while AGMessage has no accounts, and only on its own laptop. -->
+    <!-- The first admin: only while AGMessage has no accounts, only on its own laptop, and only with its token. -->
     <form id="setupPane" class="entry-pane" hidden autocomplete="on">
       <h2 class="entry-title">Create the first admin</h2>
-      <p class="hint">AGMessage has no accounts yet. The first one is an admin, made here on the AGMessage laptop; it then makes everyone else's.</p>
+      <p class="hint">AGMessage has no accounts yet. The first one is an admin, made here on the AGMessage laptop with its token; it then makes everyone else's.</p>
+      <label class="field"><span>Admin token</span><input id="setupToken" required autocomplete="off" spellcheck="false" autocapitalize="none" />
+        <small class="hint">Type the token from the AGMessage window (installed: Start → AGMessage → Show the admin token).</small></label>
       <label class="field"><span>Your name</span><input id="setupName" maxlength="40" required autocomplete="name" /></label>
       <label class="field"><span>Username</span><input id="setupUser" maxlength="32" required autocapitalize="none" spellcheck="false" autocomplete="username" /></label>
       <label class="field"><span>Password</span><input id="setupPass" type="password" maxlength="128" required autocomplete="new-password" />

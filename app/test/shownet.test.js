@@ -8,7 +8,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const nodes = require('../lib/nodes');
-const { startServer, stopServer, api, connect, emit, answer, until, fakeStagewatch } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, answer, until, fakeStagewatch, TOKEN } = require('./helpers');
 
 const PATTERNS_TOKEN = 'K7QM-3XWD-P9RA';   // secret-scan: fixture — a fake pairing token for the fake Patterns
 
@@ -41,7 +41,7 @@ test('C03 end to end: a hello flood on UDP 9928 reaches the admin page and Stage
   const sockets = [];
   const udp = require('dgram').createSocket('udp4');
   t.after(async () => { udp.close(); sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
-  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
   await emit(ctl, 'admin:settings', { stagewatchUrl: sw.url, stagewatchKey: 'swk_flood_node_key_00001' /* secret-scan: fixture */ });
   await until(() => sw.connected, 6000, 'Stagewatch linked');
@@ -67,7 +67,7 @@ test('two AGMessages and a hall link on one Stagewatch: each dials as its own Sh
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(a.child); await stopServer(b.child); await sw.close(); });
   const link = async (srv, key) => {
-    const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+    const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
     const ctl = await connect(srv.base, admin); sockets.push(ctl);
     const r = await emit(ctl, 'admin:settings', { stagewatchUrl: sw.url, stagewatchKey: key });
     return { admin, ctl, nodeId: r.nodeId };
@@ -115,7 +115,7 @@ test('C20: a Patterns certificate that changes is refused until the admin types 
   const srv = await startServer();
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); node.closeAllConnections(); await new Promise((resolve) => { node.close(resolve); }); });
-  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   await api(srv.base, 'POST', '/api/users', { username: 'sol', name: 'Sol Senior', role: 'senior', password: 'radio check one two' }, { cookie: admin });
   const sol = await connect(srv.base, (await api(srv.base, 'POST', '/api/auth/login', { username: 'sol', password: 'radio check one two' })).cookie); sockets.push(sol);
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
@@ -176,7 +176,7 @@ test('AG-1: a Patterns over HTTPS on another machine gets its token only once a 
   const srv = await startServer();
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); node.closeAllConnections(); await new Promise((resolve) => { node.close(resolve); }); });
-  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
   const view = async (id) => (await emit(ctl, 'nodes:list', {})).linked.find((n) => n.id === id);
@@ -231,7 +231,7 @@ test('C18: the show desk\'s ids are its own — after a Stagewatch restart or a 
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw1.close(); await sw2.close(); });
-  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
   const ctl = await connect(base, admin); sockets.push(ctl);
   assert.ok((await emit(ctl, 'hall:configure', { code: hall, stagewatchUrl: sw1.url, stagewatchKey: 'swk_desk_one_node_key_01' /* secret-scan: fixture */ })).ok);
@@ -300,7 +300,7 @@ test('C18: a Stagewatch\'s numbers never cross a link made again, a restart or a
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw1.close(); await sw2.close(); });
-  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
   const ctl = await connect(base, admin); sockets.push(ctl);
   const configure = async (sw, key) => assert.ok((await emit(ctl, 'hall:configure', { code: hall, stagewatchUrl: sw ? sw.url : '', stagewatchKey: key })).ok);
@@ -385,7 +385,7 @@ test('C22: until PlayMap\'s own risk rules are read, a line reaches the show des
   const srv = await startServer();
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await pm.close(); await sw.close(); });
-  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
   assert.ok((await emit(ctl, 'hall:configure', { code: hall, stagewatchUrl: sw.url, stagewatchKey: 'swk_hall1_node_key_00009' /* secret-scan: fixture */ })).ok);

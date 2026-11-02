@@ -55,6 +55,16 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   stored only as hashes, `HttpOnly`, `SameSite=Strict` and `Secure` over HTTPS; logins are rate limited and locked out.
   A browser signed in to an account is refused a code join, so an account never seats itself as a guest with rights
   its own do not hold; a join's role that the page does not offer is refused.
+- The laptop's admin token is said only where a person sits: the watchdog that makes it says it in its console window,
+  never into output that is kept (a redirect, a log, a task's capture), and a server under its watchdog never prints it.
+  The installed node writes it into a token folder of its own, which its admin and the accounts it gives `token` read,
+  once its server serves, and refuses an `ADMIN_TOKEN` or `ANTHROPIC_API_KEY` in its environment (a scheduled task's
+  definition is read by every account allowed to read the task). The first admin account is made only with the token,
+  typed at the laptop or by the token's sign-in made by this run, never from loopback alone, which a second Windows
+  account on the laptop reaches too; a wrong token there counts toward the token's lockout and is written down. The
+  right token is taken while that lock holds, so guessing at the laptop is bounded only by the token until the first
+  admin exists: the watchdog's is 64 random bits, and a token a portable copy is given by `ADMIN_TOKEN` is as strong as
+  it is long and random (the papers ask for 16 or more random letters and digits).
 - A seat On stage holds messages and nothing else, on the server, for the admin seated there too: it is given no upload
   token, and an upload token is checked again when it is used, against the seat its page holds then; the admin's move of
   a page to a seat that shares no file ends its token in the same tick, so that page uploads nothing more with the one it

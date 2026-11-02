@@ -1,5 +1,5 @@
-// The way in: sign in with an account, or join a room with its code. The first admin is made here too, and a
-// one-time password is changed here before anything else.
+// The way in: sign in with an account, or join a room with its code. The first admin is made here too, with the
+// laptop's token, and a one-time password is changed here before anything else.
 (function () {
   'use strict';
   if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): its words, and nothing else
@@ -85,8 +85,8 @@
     settingUp = true; btn.disabled = true;
     fail('setupError', '');
     try {
-      const r = await AGM.api('POST', '/api/setup', { name: $('setupName').value.trim(), username: $('setupUser').value.trim(), password: $('setupPass').value });
-      if (!r.ok) { fail('setupError', r.error); return; }
+      const r = await AGM.api('POST', '/api/setup', { token: $('setupToken').value.trim(), name: $('setupName').value.trim(), username: $('setupUser').value.trim(), password: $('setupPass').value });
+      if (!r.ok) { fail('setupError', r.error); if (r.status === 401 || r.status === 429) $('setupToken').select(); return; }
       location.replace('/halls.html');
     } finally { settingUp = false; btn.disabled = false; }
   });

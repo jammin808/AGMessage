@@ -649,13 +649,13 @@ test('accounts end to end: first admin, sign-in, rights, joining a hall, revocat
   });
   assert.equal(rebound, 403, 'the first admin is not made from a page under another name');
   assert.equal((await api(base, 'GET', '/api/auth/me')).body.setup, true, 'still no accounts');
-  const weak = await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'short' });
+  const weak = await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'short' });
   assert.equal(weak.status, 400);
-  const setup = await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const setup = await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
   assert.equal(setup.status, 200, JSON.stringify(setup.body));
   const admin = setup.cookie;
   assert.match(admin, /^agm_s=/);
-  assert.equal((await api(base, 'POST', '/api/setup', { username: 'ben', name: 'B', password: 'the green room kettle' })).status, 409, 'only once');
+  assert.equal((await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ben', name: 'B', password: 'the green room kettle' })).status, 409, 'only once');
 
   // A hall, two accounts: a tech in that hall, a project manager everywhere. One-time passwords, changed at first sign-in.
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
@@ -1014,7 +1014,7 @@ test('two first admins sent at once make one; two accounts of one name sent at o
   const { base } = srv;
   t.after(() => stopServer(srv.child));
   const pw = 'purple stage lights';
-  const [a, b] = await Promise.all([api(base, 'POST', '/api/setup', { name: 'Ada Lovelace', username: 'ada', password: pw }), api(base, 'POST', '/api/setup', { name: 'Ben Admin', username: 'ben', password: pw })]);
+  const [a, b] = await Promise.all([api(base, 'POST', '/api/setup', { token: TOKEN, name: 'Ada Lovelace', username: 'ada', password: pw }), api(base, 'POST', '/api/setup', { token: TOKEN, name: 'Ben Admin', username: 'ben', password: pw })]);
   assert.deepEqual([a.status, b.status].sort(), [200, 409]);
   const admin = (a.status === 200 ? a : b).cookie;
   assert.equal((await api(base, 'GET', '/api/users', undefined, { cookie: admin })).body.users.length, 1, 'one first admin');
@@ -1034,7 +1034,7 @@ test('a one-hall tech given users.manage manages only accounts within its own ri
   const srv = await startServer();
   const { base } = srv;
   t.after(() => stopServer(srv.child));
-  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hallA = (await api(base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
   const hallB = (await api(base, 'POST', '/api/rooms', { name: 'Hall B' }, { cookie: admin })).body.code;
   const made = {};
@@ -1095,7 +1095,7 @@ test('saving an account unchanged changes nothing; the device count is what stil
   const { base } = srv;
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
-  const admin = (await api(base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const hall = (await api(base, 'POST', '/api/rooms', { name: 'Hall 3' }, { cookie: admin })).body.code;
   const users = {};
   for (const username of ['sam', 'kim', 'lee']) {
@@ -1155,7 +1155,7 @@ test('a change to accounts.json that cannot be written is retried until it lands
   const { dataDir } = srv;
   t.after(async () => { await stopServer(srv.child); });
   const file = path.join(dataDir, 'accounts.json');
-  const setup = await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
+  const setup = await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' });
   const admin = setup.cookie;
   const bob = await api(srv.base, 'POST', '/api/users', { username: 'bob', name: 'Bob Staff', role: 'staff', password: 'clipboard and coffee' }, { cookie: admin });
   assert.equal(bob.status, 200, JSON.stringify(bob.body));
@@ -1204,7 +1204,7 @@ for (const seed of ['plain', 'keyed']) test('six quick clicks on Check the log o
   const preload = '--require "' + AUDIT_PRELOAD.split(path.sep).join('/') + '"';   // forward slashes: no escapes inside the quotes
   const srv = await startServer({ AGM_DATA_DIR: dataDir, NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '), AGM_TEST_AUDIT: walks });
   t.after(async () => { await stopServer(srv.child); fs.rmSync(walks, { force: true }); });
-  const admin = (await api(srv.base, 'POST', '/api/setup', { username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const first = await api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin });
   assert.equal(first.status, 200, 'the check at start, or one after it, answered: no walk runs now');
   const checks = await Promise.all(Array.from({ length: 6 }, () => api(srv.base, 'GET', '/api/audit/verify', undefined, { cookie: admin, headers: { 'x-agm-test-hold': '6' } })));

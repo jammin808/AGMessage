@@ -171,11 +171,20 @@ function mountAccounts(app, o) {
     res.json({ ok: true });
   });
 
-  // The first admin: only while there are no accounts, and only from this laptop (or the host's admin token).
+  // The first admin: only while there are no accounts, only on this laptop, and only with its token: typed into the form,
+  // or, when none is typed, the token's sign-in made by this run (a sign-in read back from its file is a record anyone who
+  // could write the data folder could add). A token typed is always judged, a sign-in beside it or not. Loopback alone
+  // never makes one: a second Windows account on the laptop reaches it too.
   app.post('/api/setup', async (req, res) => {
     if (accounts.size > 0) return res.status(409).json({ ok: false, error: 'Accounts are set up already — sign in.' });
-    if (!(guard.isHostMachine(req) || o.isTokenAdmin(req))) return res.status(403).json({ ok: false, error: 'The first admin account is made on the AGMessage laptop itself.' });
-    const b = req.body || {};
+    if (!guard.isHostMachine(req)) return res.status(403).json({ ok: false, error: 'The first admin account is made on the AGMessage laptop itself, with its token.' });
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    const typed = typeof b.token === 'string' && b.token.trim() !== '';
+    const bySignIn = !typed && o.tokenHere(req);
+    if (!bySignIn) {
+      const no = o.typedToken(req, b.token, 'setup');
+      if (no) return res.status(no.status).json({ ok: false, error: no.error });
+    }
     const problem = passwordProblem(b.password, { username: b.username, name: b.name });
     if (problem) return res.status(400).json({ ok: false, error: problem });
     const r = await accounts.create({ username: b.username, name: b.name, role: 'admin', password: b.password }, 'setup', { firstAdmin: true });
@@ -183,7 +192,7 @@ function mountAccounts(app, o) {
     if (r.error) return res.status(400).json({ ok: false, error: r.error });
     const token = sessions.create(r.account, { ip: guard.clientIp(req), ua: req.headers['user-agent'] });
     res.setHeader('Set-Cookie', cookie(req, token, 7 * 86400));
-    audit.write({ t: 'admin', id: 'host', name: 'AGMessage laptop' }, 'setup', r.account.username, 'the first admin account was made', guard.clientIp(req));
+    audit.write({ t: 'admin', id: 'host', name: 'AGMessage laptop' }, 'setup', r.account.username, 'the first admin account was made, ' + (bySignIn ? 'by the token\'s sign-in' : 'with the token typed') + ' at the laptop', guard.clientIp(req));
     res.json({ ok: true, account: Accounts.view(r.account) });
   });
 

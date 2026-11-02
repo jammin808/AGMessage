@@ -34,9 +34,21 @@ First time on a new laptop
    which folder. LEAVE IT OPEN — the server runs inside it. Once this
    copy is serving, your browser opens on it at http://localhost:3023.
 
-3. On this laptop only, the sign-in page asks for the FIRST ADMIN: your
-   name, a username and a password (10 characters or more; a few words
-   together is easiest to remember). That account can do everything.
+3. On this laptop only, the sign-in page asks for the FIRST ADMIN: the
+   admin token from the black window (its "Token:" line, under Admin
+   login), your name, a username and a password (10 characters or more;
+   a few words together is easiest to remember). That account can do
+   everything. Nobody makes it without the token, not even on this
+   laptop.
+
+   The token is printed only in the black window itself. Started with
+   its output sent to a file or a log, AGMessage says "Token: not shown
+   here": start it from its own window, or set ADMIN_TOKEN before the
+   start to choose one. A token you choose is 16 or more random letters
+   and digits, never a word or a name: until the first admin account is
+   made, anyone signed in to this laptop may try tokens there without
+   limit. A new token is made each time the window is started; a
+   restart inside it keeps the same one.
 
 4. Halls -> Accounts: add everyone who works the event. Pick a role
    (Project manager, Senior tech, Tech, Staff, Viewer) and their halls.
@@ -385,6 +397,13 @@ Troubleshooting
   started again by itself; folders made before the one that failed
   stay, empty. "AGM_RUNS is ..., which names no way AGMessage runs":
   remove AGM_RUNS from the .bat; the portable folder needs none.
+
+- "Token: not shown here, since this output is not a window a person
+  reads and may be kept.": AGMessage was started with its output sent
+  to a file or a log, where a token would stay for anyone to read.
+  Start it from start-agmessage.bat in its own window, or set
+  ADMIN_TOKEN before the start to choose a token yourself: 16 or more
+  random letters and digits, never a word.
 
 - Lines that say what this run goes without. Each file is left as it is,
   never replaced, and the copy serves on:

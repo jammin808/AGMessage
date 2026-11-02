@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStagewatch, fakeNode } = require('./helpers');
+const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStagewatch, fakeNode, TOKEN } = require('./helpers');
 
 function loadCatalog() {
   const ctx = vm.createContext({});
@@ -45,7 +45,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); });
   const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
 
-  const root = (await api(base, 'POST', '/api/setup', { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const root = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: root })).body.code;
   const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
   const account = async (username, role, halls, password) => {
@@ -197,7 +197,7 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
-  const root = (await api(base, 'POST', '/api/setup', { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const root = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: root })).body.code;
   const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
   const join = async (s, code, name, role, extra = {}) => { const j = await emit(s, 'join', { roomCode: code, name, role, ...extra }); assert.ok(j.ok, JSON.stringify(j)); return j; };
@@ -248,7 +248,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await node.close(); });
   const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
-  const root = (await api(base, 'POST', '/api/setup', { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const root = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: root })).body.code;
   const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
   const account = async (username, role, halls, password, extra = {}) => {

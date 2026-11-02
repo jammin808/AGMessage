@@ -1481,6 +1481,87 @@ not open. Nothing of it is run on Windows yet)
 - Rolling back: nothing stored changes form. 0.5.1 reads the same `secret.key`, `tls.json` and settings, and would make
   again what this build keeps.
 
+**The admin token is said only where a person sits** (the plan's Part 6, unit U2, with the owner's answers 38 and 40, and
+Part 3's 3-K.7 for the first admin account in both channels; the plan's reading on Linux, which this unit's tests take
+again: the watchdog run with its output captured, as a redirect, a log or a scheduled task keeps it, wrote `Token: …` into
+the capture. Nothing of it is run on Windows yet)
+- A server its watchdog runs never says the token. The watchdog, which makes it, says the banner's Token line once its
+  server serves, in its place under the admin URL: in a console window (the .bat's black window) the token, as before;
+  in output that is not a console (a file, a log, a task's capture) never the token, but "Token: not shown here, since
+  this output is not a window a person reads and may be kept. Start AGMessage in its own window to see it, or set
+  ADMIN_TOKEN, 16 or more random letters and digits, before it starts." The server asks over its channel to the watchdog and goes on once the line is written,
+  so the banner keeps its order; with no answer within 2 s it says "Token: not shown here: the watchdog that keeps it did
+  not answer." and goes on. Each restart says it again, the same token. A server run alone, without its watchdog, prints
+  it as it always has.
+- The installed node (`AGM_RUNS=task`) writes its token into `admin-token` in a token folder of its own
+  (`AGM_TOKEN_DIR`, the installer's `%ProgramData%\AGMessage\token`, which this PC's AGMessage admin and the accounts it
+  gives `token` read), and its Token line names that file, never the token. It is written only once its server serves,
+  so a copy whose port or folder is held never writes over the token of the copy that serves, and written whole (a
+  temporary file renamed over the old one), so Show the admin token reads the old token or the new, never a file cut
+  short; it is left when the node stops, a token nothing answers to until the next start. The folder is a full
+  path, outside the program's folder, and neither another of the node's folders, inside one, nor holding one: whoever is
+  given the token reads that folder, and nothing else of the node. Else the watchdog stops with code 3 and why, before
+  anything is written; the node never makes the folder. A token that cannot be written there leaves the node serving
+  without it (guests, screens and accounts need none), said on its console and in `watchdog.log`. An `ADMIN_TOKEN` or
+  `ANTHROPIC_API_KEY` in the installed node's environment stops its watchdog with code 3 and words that never hold the
+  value: whatever starts the node, a scheduled task's definition, can be read by every account allowed to read that
+  task, so the token is the watchdog's own and the AI key is added on the admin page, sealed. A portable copy may still
+  be given both.
+- The first admin account is made only with the token, in both channels: typed into the sign-in page's new Admin token
+  field ("Type the token from the AGMessage window (installed: Start → AGMessage → Show the admin token)."; the page
+  always asks for it, of any length), or, when none is typed, by the token's sign-in made by this run, at the laptop (a
+  request made without the page's field); a token typed is judged whatever sign-in is beside it. Loopback alone made one in 0.5.1, which a second Windows account on
+  the laptop reaches too, as does a writer who empties `accounts.json` in a copied folder before its first start. The
+  typed token is judged first: a wrong one is refused ("That is not the token in the AGMessage window."), the field
+  chosen again, counted toward the token's lockout and written as `login.token.fail` "a wrong admin token (at setup)";
+  while the lock holds a wrong one is refused 429 and not written again, and the right one is still taken, so nobody
+  else at the laptop can keep its person out by typing wrong tokens. That leaves guessing there bounded by the token
+  alone until the first admin exists: the watchdog's is 64 random bits, and the Token line, README.txt, `SECURITY.md` and
+  `docs/ACCOUNTS.md` ask a token chosen by `ADMIN_TOKEN` to be 16 or more random letters and digits. None typed is told
+  to type it, nothing counted. A token sign-in read back after a restart does not count (it is a record in the data
+  folder). The `setup` row says which way the token came.
+- The admin page names the token where the setup pane does: Admin login says "Type the token from the AGMessage window
+  (installed: Start → AGMessage → Show the admin token).", Health's "Accept this on the AGMessage laptop: sign in there
+  with its token (Admin login in the AGMessage window; installed: Start → AGMessage → Show the admin token).", the Accept
+  dialog's field "The token from the AGMessage window", and Accept's refusal "That is not the token in the AGMessage
+  window.", as the setup's: the installed node has no black window, and the server terminal is no longer where the
+  token is.
+- What the check at start says (a split finished or left at start, a check that did not finish) waits for the banner to
+  be whole, so no line of it falls between the admin URL and the Token line the watchdog is asked for.
+- Show the admin token: `app/launch.js` (new), the installed node's commands for the person at the PC, each run as that
+  person and never elevated. This unit gives it `token --machine <folder> [--sys <folder>]`, which the Start menu's Show
+  the admin token (the installer's units, passing `{commonappdata}` and `{sys}`) runs: it prints the token from
+  `<folder>\token\admin-token` ("It holds while AGMessage serves; each start makes a new one"), or, when this Windows
+  account may not read it, "This PC's AGMessage admin has not given you the token: ask LAPTOP\ana", the name the install
+  record keeps (`HKLM\SOFTWARE\AGMessage`, `AdminName`, read by `reg.exe` by its absolute path in the `--sys` folder,
+  run from there; without `--sys` the words name no one, and no machine path is read from the environment), with words
+  for a node that has not served yet and a file that holds no token (never what it holds). Any other word, a word twice
+  or a `--sys` not named from its drive is refused (64); in a console window it waits for Enter. It requires Node's own
+  modules only, and ships in the portable bundle's `app\` for the installer's stage. The installer's source fence (U11)
+  names its `reg.exe` beside its `schtasks.exe`. `--out`, the installer's log and the machine's events, where the plan
+  also keeps the token out, are the installer's units' (U12, U17), whose tests hold them.
+- The fences: `test/admintoken.test.js` (new) holds the Token line's words and the installed node's secrets and token
+  folder (pure); the watchdog with its output captured to a banner whose Token line is in its place and holds no token,
+  and, as a console (`test/tty-preload.js` stands one in), to the token there once; a server under a watchdog that does
+  not answer to its 2 s and its words, and one run alone to the token in its banner; each secret in the installed
+  node's environment, and each token folder not its own, to code 3 with nothing written; the installed node's token
+  file written only once it serves, never by a copy whose port is held, the capture and `watchdog.log` without it, and
+  the file's token signing in, no temporary file beside it; a token file that cannot be written to serving on, said;
+  the check at start's words after the banner while the Token line is awaited (a split's folder planted aside).
+  `/api/setup` with no token, a
+  token of the wrong type, a wrong token five times (five rows, then 429 and no row), off the host, and the right token
+  while the lock holds; the token's sign-in made by this run (a wrong token typed beside it refused), and one read back
+  after a restart refused; and under `AGM_RUNS=task`, loopback without the token refused and the token taken.
+  `launch.js`'s `token` with a stubbed read (the token, EACCES and EPERM with and without the admin's name, ENOENT,
+  EBUSY, a file that holds no token), its `reg.exe` read stubbed (from the `--sys` folder, never from `SystemRoot`), its
+  words for the command line, and run as a process, a read refused through `test/busy-preload.js`. Every test that makes the first admin account types the token; the browser smoke
+  types a wrong one first, in a browser that holds the token's sign-in, and reads the refusal in place, and reads
+  Health's new words. The synchronous-call cap of `supervise.js` stays at 3: the token file goes through
+  `lib/resilience.js`'s atomic writer, whose `makeDir: false` never makes a folder another program makes (tested), so
+  no cap moves; `server.js`'s timers gain the Token line's 2 s wait, which keeps no process alive.
+- Rolling back: nothing stored changes form. 0.5.1's server prints the token in every banner again, takes loopback
+  alone for the first admin account, and leaves the token file as it is.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and
