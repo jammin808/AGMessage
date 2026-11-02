@@ -898,5 +898,15 @@ test('the papers: docs/INSTALL.md gives each reading its mark and what a miss me
   assert.deepEqual(Object.keys(R.labRecord(doc)), R.LABS.map((l) => l.id), 'the notes read every lab line from it');
   // The fence reads what it holds: a word changed in a row is found.
   assert.ok(paperProblems(doc.replace('| Lab 6 | an upgrade during a rehearsal', '| Lab 6 | an upgrade in a rehearsal')).length > 0);
-  assert.ok(paperProblems(doc.replace(/^(\| R10 \|.*\| )not measured \|$/m, '$1fine |')).length > 0);
+  // …and a Measured cell that is neither a run's record nor "not measured" is found, whatever the cell held before (a run's
+  // record, once the lane has written one).
+  const measuredAs = (id, words) => doc.split('\n').map((line) => {
+    const cells = line.split(/(?<!\\)\|/);
+    if (cells.length < 8 || cells[1].trim() !== id) return line;
+    cells[cells.length - 2] = ' ' + words + ' ';
+    return cells.join('|');
+  }).join('\n');
+  assert.notEqual(measuredAs('R10', 'fine'), doc, 'R10 has a row to change');
+  assert.ok(paperProblems(measuredAs('R10', 'fine')).length > 0);
+  assert.deepEqual(paperProblems(measuredAs('R10', 'not measured')), [], 'and "not measured" is one');
 });
