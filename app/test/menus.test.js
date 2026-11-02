@@ -5,7 +5,9 @@
 // display:list's) through the catalogue's facts(), as a page reads them, with the hall's Stagewatch linked, so the
 // speaker's screen is hidden by a seat's rights and never by a link that is not there. Only `may` is iterated: an act
 // hidden by `fits` (the object's kind or state) is never sent, so the server is never asked to read a view. The
-// catalogue's own rules are test/catalog.test.js's.
+// catalogue's own rules are test/catalog.test.js's. And where a menu is drawn (menus.js spot(), its pure rule): from a
+// button, never over it, wherever the button is and however tall the menu; the page held still under an open menu is the
+// browser smoke's.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -20,6 +22,14 @@ function loadCatalog() {
   return ctx.AGM.catalog;
 }
 const C = loadCatalog();
+/** menus.js as a page loads it, in a vm with the few names it reads as it loads: AGM.menu, for its placement rule. */
+function loadMenus() {
+  const hear = () => {};
+  const ctx = vm.createContext({ document: { addEventListener: hear }, innerWidth: 1400, addEventListener: hear });
+  vm.runInContext('globalThis.window = globalThis;', ctx);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'public', 'menus.js'), 'utf8'), ctx, { filename: 'menus.js' });
+  return ctx.AGM.menu;
+}
 const wait = (ms) => new Promise((r) => { setTimeout(r, ms); });
 const KEY = 'swk_menus_node_key_0001';   // secret-scan: fixture
 /** What an On stage seat is told for each verb its rights hide (the plan's §17.1 table, in the server's words). */
@@ -375,4 +385,55 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   assert.deepEqual(usersAfter.map((u) => [u.username, u.name, !!u.disabled]), users.map((u) => [u.username, u.name, !!u.disabled]));
   assert.ok(guest.connected, 'the guest was not logged out');
   assert.deepEqual((await api(base, 'GET', '/api/audit/split', undefined, { cookie: root })).body.unfinished || null, null, 'no split was begun');
+});
+
+test('a menu opened from a button is drawn under it or above it and never over it, wherever the button is and however tall the menu: where it fits on neither side it scrolls on the side with more room; an ask is drawn whole, a pointer\'s menu and a submenu where they were', () => {
+  const { spot } = loadMenus();
+  const M = 8;
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  const over = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  const at = (s, w, h) => ({ left: s.x, top: s.y, right: s.x + w, bottom: s.y + (s.h === null ? h : s.h) });
+  // The hall's nine-row menu (321 px) from a ⋯ in the middle of a window 420 px high: room for 190 px under it and 186
+  // above it, so under it, cut to 190 and scrolled, where a menu kept whole inside the window would lie over the ⋯.
+  const dots = { left: 624, top: 196, right: 648, bottom: 220 };
+  assert.deepEqual(plain(spot({ under: dots }, { w: 236, h: 321 }, { w: 1400, h: 420 })), { x: 624, y: 222, h: 190 });
+  // Every place of a 24 px button on four windows (the smoke's, Windows' 1376 × 808, a laptop's and a short one), and
+  // menus of five heights: never over the button, inside the window by 8 px; whole, it touches the button (under it, else
+  // above it); cut, it takes all the room on the side with more.
+  let whole = 0, cut = 0;
+  for (const view of [{ w: 1400, h: 757 }, { w: 1376, h: 808 }, { w: 1366, h: 600 }, { w: 1024, h: 420 }]) {
+    for (const h of [120, 321, 360, 474, 700]) {
+      for (let top = 0; top + 24 <= view.h; top += 3) {
+        for (const left of [0, 16, 624, view.w - 24]) {
+          const b = { left, top, right: left + 24, bottom: top + 24 };
+          const s = spot({ under: b }, { w: 236, h }, view);
+          const m = at(s, 236, h);
+          const where = JSON.stringify({ view, h, b, s });
+          assert.ok(!over(m, b), 'never over its button: ' + where);
+          assert.ok(m.left >= M && m.right <= view.w - M && m.top >= M && m.bottom <= view.h - M, 'inside the window: ' + where);
+          if (s.h === null) {
+            whole++;
+            assert.ok(m.top === b.bottom + 2 || m.bottom === b.top - 2, 'whole, under its button or above it: ' + where);
+            if (m.top !== b.bottom + 2) assert.ok(view.h - M - (b.bottom + 2) < h, 'above only where it does not fit under: ' + where);
+          } else {
+            cut++;
+            const below = view.h - M - (b.bottom + 2), above = b.top - 2 - M;
+            assert.ok(h > below && h > above, 'cut only where it fits on neither side: ' + where);
+            assert.equal(s.h, Math.max(below, above), 'cut to the room on the side with more: ' + where);
+            assert.ok(below >= above ? m.top === b.bottom + 2 : m.bottom === b.top - 2, 'on that side: ' + where);
+          }
+        }
+      }
+    }
+  }
+  assert.ok(whole > 0 && cut > 0, `both kinds are read (${whole} whole, ${cut} cut)`);
+  // An ask does not scroll: drawn whole and kept inside the window, as before.
+  assert.deepEqual(plain(spot({ under: dots }, { w: 352, h: 300 }, { w: 1400, h: 420 }, { whole: true })), { x: 624, y: 8, h: null });
+  // A pointer's menu: at it + 2 px, flipped where it does not fit, kept inside; a submenu beside its row, flipped.
+  assert.deepEqual(plain(spot({ x: 100, y: 100 }, { w: 236, h: 321 }, { w: 1400, h: 757 })), { x: 102, y: 102, h: null });
+  assert.deepEqual(plain(spot({ x: 1300, y: 700 }, { w: 236, h: 321 }, { w: 1400, h: 757 })), { x: 1062, y: 377, h: null });
+  assert.deepEqual(plain(spot({ x: 100, y: 300 }, { w: 236, h: 700 }, { w: 1400, h: 757 })), { x: 102, y: 8, h: null });
+  const row = { left: 624, top: 300, right: 860, bottom: 332 };
+  assert.deepEqual(plain(spot({ beside: row }, { w: 200, h: 120 }, { w: 1400, h: 757 })), { x: 858, y: 300, h: null });
+  assert.deepEqual(plain(spot({ beside: row }, { w: 200, h: 120 }, { w: 1000, h: 757 })), { x: 426, y: 300, h: null });
 });

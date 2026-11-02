@@ -9574,6 +9574,11 @@ data and pure functions of facts, with no DOM and no socket. Each page binds onl
   - the keyboard (Shift+F10, the ContextMenu key, or an event whose `pointerType` is empty) anchors it at the
     bottom-left of the object's ⋯, as browsers place their own
     (https://developer.mozilla.org/en-US/docs/Web/API/Element/contextmenu_event);
+  - a menu opened from a ⋯ is never drawn over that ⋯ (the owner's answer, 2026-11-02): under it, else above it, and
+    when it fits neither side, on the side with more room, cut to that height and scrolled. While it is open, the page
+    keeps its ⋯ where it was when lines arrive above it (a seen line, a new message), and places the menu again by the
+    same rule when the ⋯ cannot be held, so pressing ⋯ again always reaches the ⋯ and closes the menu
+    (`AGM.menu.spot`, `public/menus.js`; `test/menus.test.js`);
   - at 480 px or less with a coarse pointer, it is a bottom sheet (§15.8).
 - **In the top layer.** It is a `popover="manual"` where `showPopover` exists (Baseline 2024,
   https://web.dev/blog/popover-api), so it draws above the take layer and any dialog. Otherwise, inside a modal dialog

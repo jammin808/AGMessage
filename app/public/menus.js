@@ -13,6 +13,10 @@
 // A menu and an ask are placed in the top layer where the popover API is, so they draw over every panel and dialog; a
 // dialog open with showModal() makes everything outside it inert, so one opened from inside such a dialog is mounted in
 // it. Elsewhere they are fixed at the menu's layer (--z-menu). Escape inside either never reaches a dialog around it.
+// A menu opened from a button (its ⋯, or the object for a key) sits under it or above it, never over it: where it fits
+// on neither side it takes the side with more room and scrolls (spot()). While it is open nothing moves under it: its
+// opener is held where it was as the page changes around it, and where it cannot be held the menu follows it (keep()),
+// so pressing the ⋯ again always reaches the ⋯ and closes the menu.
 //
 // AGM.menu.door(container, find) is the one place a page hears `contextmenu` (and Shift+F10 or the menu key): a
 // right-click, the keys and the object's ⋯ open the same menu. The browser keeps its own menu in a field, on a text
@@ -32,7 +36,7 @@
 
   const SUB_HOVER_MS = 200;
   const MARGIN = 8;
-  let open = null;      // the open menu: {root, panels: [panel…], opener, opts, rows: Map(key → row)}
+  let open = null;      // the open menu: {root, panels: [panel…], opener, anchor, at (its place: {x, y} or {anchor}), opts, handle, stop}
   let asking = null;    // the open ask: {box, anchor, finish}
   let seq = 0;
 
@@ -49,28 +53,55 @@
     if (typeof el.hidePopover === 'function' && el.matches && el.matches(':popover-open')) { try { el.hidePopover(); } catch { /* already hidden */ } }
     el.remove();
   }
-  /** Fixed in the viewport: at the pointer + 2 px, or under the anchor's bottom-left, flipped and kept 8 px inside. */
-  function place(el, at) {
-    const vw = document.documentElement.clientWidth || window.innerWidth;
-    const vh = window.innerHeight;
-    const w = el.offsetWidth, h = el.offsetHeight;
-    let x, y;
-    if (at && at.beside) {
-      const r = at.beside.getBoundingClientRect();
+  /**
+   * Where a panel of `size` {w, h} goes in a viewport `view` {w, h}: the rule, apart from the page (pure). `at` is {x, y},
+   * a pointer: at it + 2 px, flipped where it does not fit; {under: rect}, the button it opened from: under its
+   * bottom-left, else above it, and where it fits on neither side, on the side with more room, cut to that room (a menu
+   * scrolls), so a menu never covers the button that opened it and pressing that button again closes it, as a browser's
+   * own drop-down is placed; or {beside: rect}, a submenu: beside its row, flipped to the other side. Kept 8 px inside.
+   * `whole`: never cut (an ask, which does not scroll), kept inside instead. Answers {x, y, h}: `h` the height it is cut
+   * to, or null where it is drawn whole.
+   */
+  function spot(at, size, view, { whole = false } = {}) {
+    const { w, h } = size;
+    let x, y, cut = null;
+    if (at.beside) {
+      const r = at.beside;
       x = r.right - 2; y = r.top;
-      if (x + w > vw - MARGIN) x = r.left - w + 2;
-    } else if (at && at.anchor) {
-      const r = at.anchor.getBoundingClientRect();
-      x = r.left; y = r.bottom + 2;
-      if (y + h > vh - MARGIN) y = r.top - h - 2;
+      if (x + w > view.w - MARGIN) x = r.left - w + 2;
+    } else if (at.under) {
+      const r = at.under;
+      const below = view.h - MARGIN - (r.bottom + 2), above = r.top - 2 - MARGIN;
+      x = r.left;
+      if (h <= below) y = r.bottom + 2;
+      else if (h <= above) y = r.top - 2 - h;
+      else if (!whole && Math.max(below, above) > 0) {
+        cut = Math.max(below, above);
+        y = below >= above ? r.bottom + 2 : r.top - 2 - cut;
+      } else y = r.top - 2 - h;
     } else {
-      const px = at ? at.x : 0, py = at ? at.y : 0;
-      x = px + 2; y = py + 2;
-      if (x + w > vw - MARGIN) x = px - w - 2;
-      if (y + h > vh - MARGIN) y = py - h - 2;
+      x = at.x + 2; y = at.y + 2;
+      if (x + w > view.w - MARGIN) x = at.x - w - 2;
+      if (y + h > view.h - MARGIN) y = at.y - h - 2;
     }
-    el.style.left = Math.round(Math.max(MARGIN, Math.min(x, vw - w - MARGIN))) + 'px';
-    el.style.top = Math.round(Math.max(MARGIN, Math.min(y, vh - h - MARGIN))) + 'px';
+    x = Math.max(MARGIN, Math.min(x, view.w - w - MARGIN));
+    if (cut === null) y = Math.max(MARGIN, Math.min(y, view.h - h - MARGIN));
+    return { x: Math.round(x), y: Math.round(y), h: cut === null ? null : Math.floor(cut) };
+  }
+  /** Fixed in the viewport where spot() says for its whole height: `at` {x, y}, {anchor: element} or {beside: element}. */
+  function place(el, at, opts) {
+    el.style.maxHeight = '';
+    const where = at && at.beside ? { beside: at.beside.getBoundingClientRect() }
+      : at && at.anchor ? { under: at.anchor.getBoundingClientRect() } : { x: at ? at.x : 0, y: at ? at.y : 0 };
+    const view = { w: document.documentElement.clientWidth || window.innerWidth, h: window.innerHeight };
+    const w = el.offsetWidth;
+    const s = spot(where, { w, h: el.offsetHeight }, view, opts);
+    el.style.left = s.x + 'px';
+    el.style.top = s.y + 'px';
+    if (s.h === null) return;
+    el.style.maxHeight = s.h + 'px';
+    // Cut, it scrolls, and a scrollbar that takes room widens it: kept inside at that width.
+    if (el.offsetWidth > w) el.style.left = Math.max(MARGIN, Math.min(s.x, view.w - el.offsetWidth - MARGIN)) + 'px';
   }
 
   // ---------------------------------------------------------------- a row
@@ -253,14 +284,12 @@
     if (drill) {
       // In the same panel: its rows give way to the submenu's until ‹ Back.
       sub.el.classList.add('drill');
-      sub.el.style.left = p.el.style.left;
-      sub.el.style.top = p.el.style.top;
       p.el.hidden = true;
       mount(sub.el, open.anchor);
       placeDrill(sub, p);
     } else {
       mount(sub.el, open.anchor);
-      place(sub.el, { beside: r.el });
+      placePanel(sub);
     }
     open.panels.push(sub);
     if (focus) focusRow(sub, firstUsable(sub));
@@ -270,15 +299,14 @@
         for (const old of sub.rows.filter((x) => !x.back)) old.el.remove();
         sub.rows = sub.rows.filter((x) => x.back);
         fill(sub, Array.isArray(later) && later.length ? later : []);
-        if (drill) placeDrill(sub, p); else place(sub.el, { beside: r.el });
+        if (drill) placeDrill(sub, p); else placePanel(sub);
         if (sub.el.contains(document.activeElement) || document.activeElement === document.body) focusRow(sub, firstUsable(sub));
       });
     }
   }
   function placeDrill(sub, p) {
     if (p.el.classList.contains('sheet')) { sub.el.classList.add('sheet'); return; }
-    sub.el.style.left = p.el.style.left;
-    sub.el.style.top = p.el.style.top;
+    placePanel(sub);
   }
   function closeSub(p, focusBack) {
     clearTimeout(p.timer);
@@ -290,7 +318,77 @@
     if (open) open.panels = open.panels.filter((x) => x !== sub);
     sub.parentRow.el.setAttribute('aria-expanded', 'false');
     p.el.hidden = false;
+    if (open && sub.el.classList.contains('drill')) placePanel(p);   // shown again where the menu's place is now
     if (focusBack) sub.parentRow.el.focus();
+  }
+
+  // ---------------------------------------------------------------- where the panels are
+  /** What a panel is placed against: the menu's place (`open.at`) for its first panel and one drilled into, its row for a submenu that flies out. */
+  const targetOf = (q) => (q.parentRow && !q.el.classList.contains('drill') ? { beside: q.parentRow.el } : open.at);
+  /** What a panel's place is found from: where its target is now, and its own size (its rows, uncut). */
+  function keyOf(q) {
+    const t = targetOf(q);
+    const n = t.beside || t.anchor;
+    const r = n ? n.getBoundingClientRect() : { left: t.x, top: t.y, right: t.x, bottom: t.y };
+    return [r.left, r.top, r.right, r.bottom].map(Math.round).concat(q.el.offsetWidth, q.el.scrollHeight).join(' ');
+  }
+  /** A panel placed by the rule (a sheet keeps its own place, at the bottom of the screen). */
+  function placePanel(q) {
+    if (q.el.classList.contains('sheet')) return;
+    place(q.el, targetOf(q));
+    q.key = keyOf(q);
+  }
+  /** Scroll `boxes` (what holds `node`, nearest first, the page last) until its top is back at `top`; a box that does not scroll it is left as it was. */
+  function holdStill(node, top, boxes) {
+    const off = () => node.getBoundingClientRect().top - top;
+    for (const box of boxes) {
+      const dy = off();
+      if (Math.abs(dy) < 1) return;
+      if (box !== document.scrollingElement && !/^(auto|scroll|overlay)$/.test(getComputedStyle(box).overflowY)) continue;
+      const before = box.scrollTop;
+      box.scrollTop = before + dy;
+      if (Math.abs(off() - dy) < 0.5) box.scrollTop = before;
+    }
+  }
+  /**
+   * While a menu is open nothing moves under it. Its opener (the ⋯, or the object) stays where it was on the screen: a
+   * change of the page around it (a line drawn into a message above it, a strip shown above its list, an image drawn late)
+   * is taken up by scrolling what holds it, as the reader's place is kept. Where it cannot be held so (nothing left to
+   * scroll), and when something is scrolled (the reader turning the wheel over the page), the menu follows it; a panel
+   * whose rows change size is placed again by the rule. So the button that opened a menu is never under it, and pressing
+   * it again closes it. Answers the stop.
+   */
+  function keep(m) {
+    const held = m.at.anchor || m.opener;
+    if (!held || typeof MutationObserver !== 'function') return () => {};
+    const boxes = [];
+    for (let n = held.parentElement; n && n !== document.body && n !== document.documentElement; n = n.parentElement) boxes.push(n);
+    if (document.scrollingElement) boxes.push(document.scrollingElement);
+    const moved = (a, b) => Math.abs(a.top - b.top) >= 1 || Math.abs(a.left - b.left) >= 1;
+    let was = held.getBoundingClientRect();
+    const check = (scrolled) => {
+      if (open !== m || !held.isConnected) return;
+      if (!scrolled && moved(held.getBoundingClientRect(), was)) holdStill(held, was.top, boxes);
+      const now = held.getBoundingClientRect();
+      if (moved(now, was)) {
+        if (!m.at.anchor) m.at = { x: m.at.x + now.left - was.left, y: m.at.y + now.top - was.top };
+        was = now;
+      }
+      for (const q of m.panels) if (!q.el.hidden && !q.el.classList.contains('sheet') && q.key !== keyOf(q)) placePanel(q);
+    };
+    const changed = () => check(false);
+    const scrolled = () => check(true);
+    const watch = new MutationObserver(changed);
+    watch.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+    document.addEventListener('scroll', scrolled, true);   // a scroll of any box
+    document.addEventListener('load', changed, true);      // an image drawn late
+    window.addEventListener('resize', changed);
+    return () => {
+      watch.disconnect();
+      document.removeEventListener('scroll', scrolled, true);
+      document.removeEventListener('load', changed, true);
+      window.removeEventListener('resize', changed);
+    };
   }
 
   // ---------------------------------------------------------------- the menu
@@ -306,10 +404,11 @@
     const o = Object.assign({ onPick() {}, onDisabled() {}, submenu: () => [], values: () => null, onClose() {}, refocus() {} }, opts || {});
     const top = panelOf(items, { label: o.label, header: o.header });
     const anchor = (at && at.anchor) || o.opener || null;
-    open = { root: top, panels: [top], opener: o.opener || null, anchor, opts: o };
+    open = { root: top, panels: [top], opener: o.opener || null, anchor, at: at || { x: 0, y: 0 }, opts: o, stop() {} };
     if (o.opener && o.opener.hasAttribute && o.opener.hasAttribute('aria-haspopup')) o.opener.setAttribute('aria-expanded', 'true');
     mount(top.el, anchor);
-    if (!top.el.classList.contains('sheet')) place(top.el, at);
+    placePanel(top);
+    open.stop = keep(open);
     focusRow(top, firstUsable(top));
     const handle = {
       /**
@@ -366,6 +465,7 @@
     if (!open) return;
     const was = open;
     open = null;
+    was.stop();
     for (const p of was.panels.slice().reverse()) { clearTimeout(p.timer); unmount(p.el); }
     if (was.opener && was.opener.hasAttribute && was.opener.hasAttribute('aria-haspopup')) was.opener.setAttribute('aria-expanded', 'false');
     if (focusBack) {
@@ -375,6 +475,8 @@
     was.opts.onClose();
   }
   menu.close = () => close(true);
+  /** The placement rule, apart from the page (pure). */
+  menu.spot = spot;
   menu.isOpen = () => !!open;
   /** The open menu's handle, or null. */
   menu.current = () => (open ? open.handle : null);
@@ -535,7 +637,7 @@
       };
       const opensIt = (t) => !!(o.toggles && o.opener && o.opener.contains && o.opener.contains(t));
       const outside = (e) => { if (!box.contains(e.target) && !opensIt(e.target)) finish(false, false); };
-      const replace = () => place(box, anchor ? { anchor } : { x: 16, y: 16 });
+      const replace = () => place(box, anchor ? { anchor } : { x: 16, y: 16 }, { whole: true });
       asking = { box, anchor, finish };
       no.addEventListener('click', () => finish(false, true));
       for (const b of yeses) b.addEventListener('click', () => finish(true, true, b.dataset.answer));

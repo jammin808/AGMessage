@@ -1846,6 +1846,45 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(JSON.parse(doorRuns['account chairText'].key).includes('msg.speaker') && JSON.parse(doorRuns['account capex'].key).includes('msg.screens') && JSON.parse(doorRuns['board adminAsk'].key).includes('msg.answer') && !JSON.parse(doorRuns['board adminAsk'].key).includes('msg.speaker'),
       `the sets are the seat's: the account's has Ask the operator and Show on screens, the Board's an answer (${doorRuns['account chairText'].key}; ${doorRuns['account capex'].key}; ${doorRuns['board adminAsk'].key})`);
 
+    // Nothing moves under an open menu (menus.js keep()). The hall's seen receipts land when they land, so a frame can land
+    // while a message's menu is open and draw "✓ Seen by" into the account's messages above it. Drawn here through the
+    // page's own path: the receipts taken back to before the doors' messages, the menu opened, then the receipts given again
+    // under it, taken and given once more: the ⋯ stays where it was, out from under its menu, and pressing it closes the
+    // menu with the focus on it. In a window too short for the menu's rows above or below its ⋯, the menu takes the side
+    // with more room and scrolls, never over its ⋯ (menus.js spot()), and pressing the ⋯ closes it the same.
+    const askSel = `messagesById.get(${codeLiteral(doorMsgs.adminAsk)})`;
+    const askDots = `${askSel}.querySelector('.obj-more')`;
+    const aboveAsk = `messagesById.get(${codeLiteral(doorMsgs.adminText)})`;
+    const DOTS_READ = `(() => { const q = ${askDots}.getBoundingClientRect(); const c = { x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2) };
+      const m = document.querySelector('.agm-menu:not(.agm-sub)'); const r = m && m.getBoundingClientRect();
+      return JSON.stringify({ at: Math.round(q.top), c, hit: document.elementFromPoint(c.x, c.y) === ${askDots}, menu: r ? [Math.round(r.top), Math.round(r.bottom)] : null,
+        over: !!r && r.top < q.bottom && q.top < r.bottom && r.left < q.right && q.left < r.right, scrolls: !!m && m.scrollHeight > m.clientHeight, inside: !!r && r.top >= 8 && r.bottom <= innerHeight - 8,
+        line: !!${aboveAsk}.querySelector('.seen-line') }); })()`;
+    const openAsk = async () => { await hallView.eval(`${askSel}.scrollIntoView({ block: 'center' })`); await leftClick(hallView, await middleOf(hallView, askDots)); return hallView.until(MENU_IDS, 3000); };
+    const closeOnDots = async (read) => { await leftClick(hallView, read.c); return !!(await hallView.until(`${NO_MENU} && document.activeElement === ${askDots}`, 3000)); };
+    await hallView.until(`!!${aboveAsk}.querySelector('.seen-line')`, 8000);
+    const receipts = await hallView.eval('JSON.stringify([...seenBy.values()])');
+    const firstDoor = await hallView.eval(`findMessage(${codeLiteral(doorMsgs.adminText)}).seq`);
+    const TAKE = `const all = [...seenBy.values()]; seenBy.clear(); all.forEach((s) => noteSeen(Object.assign({}, s, { seq: Math.min(s.seq, ${firstDoor} - 1) }))); refreshSeenLines();`;
+    const GIVE = `JSON.parse(${codeLiteral(receipts)}).forEach(noteSeen); refreshSeenLines();`;
+    const settled = async (act) => JSON.parse(await hallView.eval(`(async () => { ${act} await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); return ${DOTS_READ}; })()`));
+    await settled(TAKE);
+    const seenOpen = await openAsk();
+    const seenBefore = JSON.parse(await hallView.eval(DOTS_READ));
+    const seenSteps = [await settled(GIVE), await settled(TAKE), await settled(GIVE)];
+    const seenClosed = await closeOnDots(seenSteps[2]);
+    report(!!seenOpen && !seenBefore.line && seenSteps.map((r) => r.line).join() === 'true,false,true' && seenSteps.every((r) => r.at === seenBefore.at && r.hit && !r.over) && seenClosed,
+      `a message's ⋯ stays where it was while seen lines are drawn into the message above it under its open menu, out from under the menu, and pressing it closes the menu with the focus on it (⋯ at ${seenBefore.at} px, then ${seenSteps.map((r) => r.at + (r.line ? ' with the line' : ' without')).join(', ')}; menu ${JSON.stringify(seenSteps[0].menu)}; reached ${seenSteps.map((r) => r.hit).join('/')}; closed ${seenClosed})`);
+    await hallView.eval('AGM.menu.close()');   // the short window's check opens its own menu, from none
+    const vw = await hallView.eval('innerWidth');
+    await hallView.resize(vw, 420);
+    const shortOpen = await openAsk();
+    const shortRead = JSON.parse(await hallView.eval(DOTS_READ));
+    const shortClosed = await closeOnDots(shortRead);
+    await hallView.send('Emulation.clearDeviceMetricsOverride');
+    report(!!shortOpen && !shortRead.over && shortRead.hit && shortRead.scrolls && shortRead.inside && shortClosed,
+      `in a window 420 px high a message's ⋯ menu that fits neither under nor above its ⋯ scrolls on the side with more room, never over the ⋯, and pressing the ⋯ closes it (⋯ at ${shortRead.at} px, menu ${JSON.stringify(shortRead.menu)}, scrolls ${shortRead.scrolls}; reached ${shortRead.hit}; closed ${shortClosed})`);
+
     // A pinned message is drawn afresh in the pinned strip, so every act of it works there as in the feed: a question's
     // 📝 (its bar), a message's 🖥 Send now and ⧉ Show on screens… (its ⋯), a help request's On my way, a question's answer.
     for (const name of ['adminText', 'adminAsk', 'adminHelp']) await hallView.eval(`new Promise((r) => socket.emit('pin', { messageId: ${codeLiteral(doorMsgs[name])}, pinned: true }, r))`);

@@ -1196,9 +1196,12 @@ dialogs on a message's and a screen's acts)
   the focus on a pinned message, and a menu opened from it gives the focus back to it. An open menu keeps its items and
   their order while its message changes: Pin reads Unpin in place, React ▸'s and Answer ▸'s checks follow, an act no
   longer possible turns disabled ("Not available any more."), and a message or a screen removed closes its menu or its
-  ask ("That message is gone.", "That screen is gone."). The feed does not move while a menu or an ask is open. The ⋯
-  opens its menu and closes it again. An ask opened by a key gives the focus back to the message the key was pressed
-  on; a menu says what it acts on to a screen reader ("Message actions: Message from Kim · 14:02").
+  ask ("That message is gone.", "That screen is gone."). The feed does not move while a menu or an ask is open, and a
+  menu's ⋯ stays where it was when a line is drawn into a message above it (a seen receipt) or a strip is shown above the
+  feed; where it cannot stay, the menu follows it. A menu with no room for all its rows under or above its ⋯ takes the
+  side with more room and scrolls, never over it. The ⋯ opens its menu and closes it again. An ask opened by a key gives
+  the focus back to the message the key was pressed on; a menu says what it acts on to a screen reader ("Message
+  actions: Message from Kim · 14:02").
 - The join's answer appends `forwardable` at its end: whether a message here could be sent to another hall, by the
   rule Send to ▸ lists halls by (`myRooms`, both read through `forwardTargets`), and false On stage. The page asks again when the admin lets it forward into
   another hall or takes that back (`linkedRoomsChanged`, which no page heard before) and when it is shown again, since
