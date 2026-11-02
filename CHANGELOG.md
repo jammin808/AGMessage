@@ -1632,9 +1632,13 @@ it cannot read says unknown, with why)
   firewall's own order says; past 512 such rules the reach is unknown, never guessed), read from the firewall's own
   object (`HNetCfg.FwPolicy2`), each rule's program compared in turn, and through the NetSecurity cmdlets only under
   Constrained Language Mode, which allows no COM object (the cmdlets fetch every application filter before they compare
-  one; the whole read, with them, took 57 s on one run of CI's Windows runner and did not end within 60 s on another).
-  Each module a part uses is imported by its manifest's path under `$PSHOME`, Windows' own, never found by name. Networks and rights past 32 are
-  counted ("and 3 more"). What the firewall's read does not see: a rule set by a domain's policy, a rule by port alone,
+  one). Each module a part uses is imported by its manifest's path under `$PSHOME`, Windows' own, never found by name: a
+  command found by name had PowerShell look through the modules on its module path first, which on CI's Windows runner
+  took 44 s before the first line, so the read took 57 s on one run and did not end within 60 s on another. Measured
+  there since: the whole read 863 ms (`powershell.exe` started at 124 ms, the server task's line at 724 ms, the
+  firewall's rules at 841 ms), and `powershell.exe` started and ended with nothing to do in 119 to 139 ms in the plan's
+  environment and in the test's alike; the 5 s it is given is not measured on a show laptop. Networks and rights past 32
+  are counted ("and 3 more"). What the firewall's read does not see: a rule set by a domain's policy, a rule by port alone,
   and a profile whose firewall is off. Off Windows each reads "unknown (AGMessage is not running on Windows)". Its acts
   are the catalogue's (kind `laptop`): Refresh (`admin:laptop`, the admin page's alone; its read's facts come on
   `laptop:facts`) and Copy LAN address ▸, one per address. Only the admin page's answers carry it: never health over
