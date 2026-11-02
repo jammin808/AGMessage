@@ -1017,7 +1017,9 @@ taken away, not yet on the owner's devices: every row of `docs/DEVICES.md`'s wal
   where it exists; elsewhere it opens the dialog as the page's own: fixed in the viewport and centred as a browser
   centres a modal dialog (no transform, so a menu fixed inside it is placed by the viewport), above a backdrop in the
   backdrop's colour, the focus on its first control and kept there, Escape closing it, the rest of the page hidden from
-  a screen reader while it is open, and the focus back on what opened it when it closes, however it closes. A browser
+  a screen reader while it is open, and the focus back on what opened it when it closes, however it closes: also when it
+  is opened again before the close event of a `<dialog>`'s own `close()` or `method="dialog"` form has come (a task
+  later), which then ends nothing of the new opening; one the browser closed itself ends as the next begins. A browser
   with no `<dialog>` at all is also given the dialog's `close()`, `open` and `returnValue`, its forms' `method="dialog"`
   closing, which it would otherwise answer by sending the form to the page's address (a Cancel reloaded the page), and
   the submit event's `submitter`, without which a page cannot tell which button sent its form. A closed dialog draws nothing there:
@@ -1060,7 +1062,8 @@ taken away, not yet on the owner's devices: every row of `docs/DEVICES.md`'s wal
   with its reason). The smoke: at the floor (no `showModal()`, popover API, Wake Lock, `requestIdleCallback` or
   `requestSubmit()`), the halls board's New hall opens through the fallback, fixed in view above its backdrop with the
   focus in it and the page hidden from a screen reader, Escape closes it with the focus back on New hall, and Enter in
-  its name makes the hall and closes it; `AGM.idle` runs on its timer and `AGM.awake` says the settings words; the hall
+  its name makes the hall and closes it; Escape and New hall again in one task, the late close event ending nothing (one
+  backdrop, the focus in the name), then Enter, the focus back on New hall; `AGM.idle` runs on its timer and `AGM.awake` says the settings words; the hall
   page in that hall sends by Return, taken once, with no script error; with no `<dialog>` at all beside that, the
   Accounts page's Add a person opens, its Cancel closes it on the page and saves nothing, Escape closes it, Enter in a
   field submits through Save with Save as its submitter, and Export… opens and closes; below the floor (no `WeakRef`)
@@ -1379,8 +1382,9 @@ header's chips)
   hall's screens; Copy join link; the skip link on a fresh page and an observer's, whose question reads as words; a ⋯
   pressed again under the Delete… it opened, which answers it no; the chips and a sender's name 24 px or more, and those
   and the composer's ⋯ 44 px on a phone; a page out of its hall with no chip that opens a menu; the support view's Help
-  sending nothing and its banner's words; and at the floor, Help opening through `AGM.openDialog`'s own and its chip's
-  ask in place.
+  sending nothing and its banner's words; and at the floor, Help opening through `AGM.openDialog`'s own, its Close (the
+  form's own) and Help again in one task leaving one opening and one backdrop, the focus back on Help once a category
+  sends it, and its chip's ask in place.
 - The stylesheet loses the hall page's two extra toasts, the Help chip's own ask and the disabled answer's rules: 10 hex
   colours fewer, 265.
 - Rolling back: nothing is stored.

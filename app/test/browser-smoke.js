@@ -381,6 +381,21 @@ const FALLBACK_CLOSED = (id) => `(() => { const d = document.getElementById('${i
 const FALLBACK_SHOWN = JSON.stringify({ fixed: true, inView: true, backdrop: true, focused: '', rest: true });
 const shownWith = (focused) => FALLBACK_SHOWN.replace('"focused":""', '"focused":' + JSON.stringify(focused));
 const closedTo = (focused) => JSON.stringify({ backdrops: 0, hidden: 0, focused });
+/**
+ * A dialog opened through AGM.openDialog's own, closed and opened again in one task (`close`, then `reopen`, statements
+ * run in the page), as a quick hand can between two frames: <dialog>'s own close() and a form's method="dialog" send
+ * their close event in a later task, so here it comes after the new opening, every time. Close events from before the
+ * step have come first (a frame passes before it). Answers {shut: FALLBACK_CLOSED's just after the close, heard: whether
+ * the late close event came, open: FALLBACK_OPEN's once it has, backdrops: how many are on the page then}.
+ */
+const RACED = (id, close, reopen) => `(async () => { const d = document.getElementById('${id}');
+  await new Promise((r) => { requestAnimationFrame(() => r()); });
+  ${close}
+  const shut = ${FALLBACK_CLOSED(id)};
+  const late = new Promise((r) => { d.addEventListener('close', () => r(true), { once: true }); setTimeout(() => r(false), 3000); });
+  ${reopen}
+  const heard = await late;
+  return JSON.stringify({ shut, heard, open: ${FALLBACK_OPEN(id)}, backdrops: document.querySelectorAll('.agm-backdrop').length }); })()`;
 const NO_RESOLVERS = `(() => { delete Promise.withResolvers; globalThis.__resolversAtStart = typeof Promise.withResolvers; return globalThis.__resolversAtStart; })();`;
 /**
  * pdf.js's worker on a tab opened with NO_RESOLVERS as its workerInit: each one running, what it began with and has now,
@@ -1449,6 +1464,16 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const floorMade = await floor.until(`[...document.querySelectorAll('.hall-row')].some((r) => r.textContent.includes('Floor hall')) && ${FALLBACK_CLOSED('hallDialog')}`, 5000);
     report(floorHas === JSON.stringify({ floor: '', showModal: 'undefined', popover: 'undefined', wakeLock: false, idle: 'undefined', requestSubmit: 'undefined' }) && floorOpened === shownWith('hallName') && floorEscaped === closedTo('newHallBtn') && floorAgain === shownWith('hallName') && floorMade === closedTo('newHallBtn'),
       `at the floor, without showModal(): New hall opens through AGM.openDialog's own (${floorOpened}), Escape closes it with the focus back (${floorEscaped}), and Enter in its name makes the hall and closes it (${floorMade})`);
+    // Escape and New hall again in one task: the close event Escape's close() sends comes after the new opening, and ends
+    // nothing — the dialog stays open above its one backdrop with the focus in it — so Enter in its name makes the hall
+    // and gives the focus back to New hall.
+    const quick = JSON.parse(await floor.eval(RACED('hallDialog', `const b = document.getElementById('newHallBtn'); b.focus(); b.click();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));`, 'b.focus(); b.click();')) || 'null');
+    await floor.eval(`(() => { const i = document.getElementById('hallName'); i.value = 'Quick hall'; i.focus(); })()`);
+    await key(floor, 'Enter', 13, '\r');
+    const quickMade = await floor.until(`[...document.querySelectorAll('.hall-row')].some((r) => r.textContent.includes('Quick hall')) && ${FALLBACK_CLOSED('hallDialog')}`, 5000);
+    report(!!quick && quick.shut === closedTo('newHallBtn') && quick.heard === true && quick.open === shownWith('hallName') && quick.backdrops === 1 && quickMade === closedTo('newHallBtn'),
+      `at the floor, New hall opened again before the browser's close event comes: the late event ends nothing (${JSON.stringify(quick)}), and Enter makes the hall with the focus back on New hall (${quickMade})`);
     const floorIdle = await floor.eval(`new Promise((r) => { const t0 = performance.now(); AGM.idle((d) => r(JSON.stringify({ slice: d.timeRemaining() <= 8, soon: performance.now() - t0 < 1000 }))); })`);
     const floorAwake = await floor.eval(`new Promise((r) => { AGM.awake((s) => r(JSON.stringify(s))); })`);
     report(floorIdle === JSON.stringify({ slice: true, soon: true }) && floorAwake === JSON.stringify({ held: false, why: 'settings', words: 'This device may sleep: set its screen to stay on in its own settings (Auto-Lock or Screen timeout).' }),
@@ -1469,6 +1494,11 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const openHelp = `(() => { const b = document.getElementById('helpBtn'); b.focus(); b.click(); })()`;
     await floorPad.eval(openHelp);
     const padHelp = await floorPad.until(FALLBACK_OPEN('helpDialog'), 3000);
+    // Its Close and Help tapped again in one task (a tap moves no focus, as on an iPad): Close is the form's own
+    // method="dialog", which the browser closes, its close event after the new opening. That opening ends as the new one
+    // begins — one backdrop, the heading focused, the late event ending nothing — and the focus left in the closed dialog
+    // is no opener: the category's close below gives it back to Help.
+    const padRaced = JSON.parse(await floorPad.eval(RACED('helpDialog', `document.querySelector('#helpForm button[value="cancel"]').click();`, `document.getElementById('helpBtn').click();`)) || 'null');
     await floorPad.eval(`document.querySelector('#helpCats button[data-cat="Sound"]').click()`);
     const padHelpClosed = await floorPad.until(`${FALLBACK_CLOSED('helpDialog')}`, 3000);
     await floorPad.until(`document.getElementById('helpBtn').dataset.state === 'open'`, 5000);
@@ -1476,6 +1506,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const padAsk = await floorPad.until(`(() => { const a = document.querySelector('#helpBtn + .agm-ask'); return a && JSON.stringify({ focused: document.activeElement.textContent, fixed: getComputedStyle(a).position === 'fixed' }); })()`, 3000);
     await key(floorPad, 'Escape', 27);
     const padAskGone = await floorPad.until(`!document.querySelector('.agm-ask') && document.activeElement.id === 'helpBtn' && 'kept'`, 3000);
+    report(!!padRaced && !!padRaced.shut && padRaced.heard === true && padRaced.open === shownWith('helpTitle') && padRaced.backdrops === 1,
+      `the hall page at the floor: Help's Close (the browser's own) and Help again in one task: the closed opening ends as the new one begins, and the late close event ends nothing (${JSON.stringify(padRaced)})`);
     report(padHelp === shownWith('helpTitle') && padHelpClosed === closedTo('helpBtn') && padAsk === JSON.stringify({ focused: 'Keep it open', fixed: true }) && padAskGone === 'kept' && floorPad.problems.length === 0,
       `the hall page at the floor: Help opens through AGM.openDialog's own (${padHelp}), a category sends it and closes it (${padHelpClosed}), and the chip's ask opens in place, Keep it open focused, Escape keeping the request (${padAsk}; ${padAskGone})`);
     floorPad.close();

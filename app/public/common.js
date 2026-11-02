@@ -117,7 +117,7 @@
   // address) and their submit event's `submitter` (which came with it), so each page's dialog code runs one way on every
   // device.
   const FOCUSABLE = 'button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])';
-  const shown = [];            // the dialogs open here, the newest last: {dlg, opener, backdrop}
+  const shown = [];            // the openings not ended yet, the newest last: {dlg, opener, backdrop}
   const adopted = new WeakSet();
   let hiddenHere = [];         // what this file marked aria-hidden for the newest open dialog
 
@@ -141,15 +141,22 @@
     if (!dlg.hasAttribute('tabindex')) dlg.setAttribute('tabindex', '-1');
     dlg.focus();
   }
-  /** A dialog opened here has closed (by close(), its form, Escape): its backdrop goes and the focus goes back. */
-  function closedHere(dlg) {
-    const at = shown.findIndex((s) => s.dlg === dlg);
-    if (at < 0) return;
-    const [was] = shown.splice(at, 1);
+  /** The opening of `dlg` here that has not ended yet, if any. */
+  const openingOf = (dlg) => shown.find((s) => s.dlg === dlg);
+  /**
+   * An opening has ended (by close(), its form, Escape): its backdrop goes and the focus goes back. Each opening ends once,
+   * and only its own end ends it: a later opening of the same dialog is another, which an earlier one's end never touches.
+   * Answers whether it ended now.
+   */
+  function ended(was) {
+    const at = shown.indexOf(was);
+    if (at < 0) return false;
+    shown.splice(at, 1);
     was.backdrop.remove();
-    dlg.classList.remove('agm-dialog-open');
+    was.dlg.classList.remove('agm-dialog-open');
     hideAllBut(shown.length ? shown[shown.length - 1].dlg : null);
     if (at === shown.length && was.opener && was.opener.isConnected && typeof was.opener.focus === 'function') was.opener.focus();
+    return true;
   }
   /** Once per dialog opened here: its close() ends what this file began, and a browser without <dialog> gets its parts. */
   function adopt(dlg) {
@@ -158,15 +165,19 @@
     const own = typeof dlg.close === 'function' ? dlg.close.bind(dlg) : null;   // the browser's, where it has <dialog>
     dlg.close = (value) => {
       if (!dlg.hasAttribute('open')) return;
-      if (own) own(value);
+      const was = openingOf(dlg);
+      if (own) own(value);   // the browser's close event comes in a later task
       else {
         if (value !== undefined) dlg.returnValue = String(value);
         dlg.removeAttribute('open');
-        dlg.dispatchEvent(new Event('close'));
       }
-      closedHere(dlg);
+      ended(was);
+      if (!own) dlg.dispatchEvent(new Event('close'));
     };
-    dlg.addEventListener('close', () => closedHere(dlg));   // closed by the browser itself: a form's method="dialog"
+    // Closed by the browser itself (a form's method="dialog"), the opening ends at its close event. The browser's close
+    // event comes in a later task, so one that finds the dialog open again is an earlier opening's, already ended (by
+    // close(), or by the openDialog that opened it again), and ends nothing.
+    dlg.addEventListener('close', () => { if (!dlg.hasAttribute('open')) ended(openingOf(dlg)); });
     if (own) return;
     if (!('returnValue' in dlg)) dlg.returnValue = '';
     if (!('open' in dlg)) Object.defineProperty(dlg, 'open', { configurable: true, get: () => dlg.hasAttribute('open') });
@@ -208,7 +219,11 @@
     if (dlg.hasAttribute('open')) return;
     adopt(dlg);
     hearKeys();
-    const opener = document.activeElement;
+    let opener = document.activeElement;
+    // Closed by the browser itself with its close event still to come: that opening ends here, as its event would end it,
+    // before this one begins. A focus left inside the closed dialog, or on none, is no opener: where that opening gave the
+    // focus back is, as it would be had its event come first.
+    if (ended(openingOf(dlg)) && (!opener || opener === document.body || dlg.contains(opener))) opener = document.activeElement;
     const backdrop = document.createElement('div');
     backdrop.className = 'agm-backdrop';
     dlg.parentNode.insertBefore(backdrop, dlg);
