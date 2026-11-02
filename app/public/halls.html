@@ -8,6 +8,7 @@
   <script src="/theme-init.js"></script>
 </head>
 <body class="acct-page">
+  <a class="skip-link" href="#boardTitle">Skip to the halls</a>
   <header class="acct-bar">
     <a class="acct-brand" href="/halls.html"><span class="brand-mark small">AG</span> AGMessage</a>
     <nav class="acct-nav" aria-label="Account">
@@ -24,11 +25,11 @@
   <main class="board">
     <section class="help-strip" id="helpStrip" aria-live="polite" hidden>
       <h2>Needs help</h2>
-      <ul id="helpList"></ul>
+      <ul id="helpList" aria-label="Open help requests"></ul>
     </section>
 
     <section class="board-head">
-      <h1 id="boardTitle">Your halls</h1>
+      <h1 id="boardTitle" tabindex="-1">Your halls</h1>
       <div class="board-tools">
         <span class="link-state" id="linkState" title="Live connection to AGMessage"></span>
         <button class="btn small" id="networkBtn" type="button" hidden>Show network</button>
@@ -89,6 +90,8 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="/common.js"></script>
   <script src="/outbox.js"></script>
+  <script src="/catalog.js"></script>
+  <script src="/menus.js"></script>
   <script src="/reconnect.js"></script>
   <script src="/halls.js"></script>
 </body>

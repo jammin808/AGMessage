@@ -8,6 +8,7 @@
   <script src="/theme-init.js"></script>
 </head>
 <body class="acct-page">
+  <a class="skip-link" id="skipLink" href="#peopleHead">Skip to the accounts</a>
   <header class="acct-bar">
     <a class="acct-brand" href="/halls.html"><span class="brand-mark small">AG</span> AGMessage</a>
     <nav class="acct-nav" aria-label="Account">
@@ -25,7 +26,7 @@
 
     <section id="peoplePane" role="tabpanel" aria-labelledby="tabPeople">
       <div class="board-head">
-        <h1>People</h1>
+        <h1 id="peopleHead" tabindex="-1">People</h1>
         <button class="btn primary small" id="newUserBtn" type="button">Add a person</button>
       </div>
       <div class="table-wrap">
@@ -38,7 +39,7 @@
 
     <section id="auditPane" role="tabpanel" aria-labelledby="tabAudit" hidden>
       <div class="board-head">
-        <h1>Audit log</h1>
+        <h1 id="auditHead" tabindex="-1">Audit log</h1>
         <div class="board-tools">
           <span class="chain-state" id="chainState"></span>
           <button class="btn small" id="verifyBtn" type="button">Check the log</button>
@@ -49,7 +50,8 @@
       <p class="hint" id="auditKey"></p>
       <!-- The archives the check names (each split off at an archive point, signed), and any this log's chain no longer reaches: each checked on its own. -->
       <ul class="audit-archives" id="auditArchives" hidden></ul>
-      <ol class="audit-list" id="auditList"></ol>
+      <p class="audit-filter" id="auditFilter" role="status" hidden><span id="auditFilterWords"></span> <button class="btn ghost small" id="auditShowAll" type="button">Show all</button></p>
+      <ol class="audit-list" id="auditList" aria-label="Audit log entries, newest first"></ol>
     </section>
   </main>
 
@@ -74,10 +76,10 @@
       <p class="error" id="userError" role="alert" hidden></p>
       <div class="row spread">
         <div class="row" id="userDanger">
-          <button class="btn small" id="resetBtn" type="button">New one-time password</button>
-          <button class="btn small" id="signOutAllBtn" type="button">Sign out everywhere</button>
-          <button class="btn small" id="disableBtn" type="button">Turn off</button>
-          <button class="btn small danger" id="removeBtn" type="button">Remove</button>
+          <button class="btn small" id="resetBtn" type="button">New one-time password…</button>
+          <button class="btn small" id="signOutAllBtn" type="button">Sign out everywhere…</button>
+          <button class="btn small" id="disableBtn" type="button">Turn off…</button>
+          <button class="btn small danger" id="removeBtn" type="button">Remove…</button>
         </div>
         <div class="row end"><button class="btn ghost" type="button" value="cancel">Cancel</button><button class="btn primary" value="save" id="userSave">Save</button></div>
       </div>
@@ -94,6 +96,8 @@
   </dialog>
 
   <script src="/common.js"></script>
+  <script src="/catalog.js"></script>
+  <script src="/menus.js"></script>
   <script src="/audit-export.js"></script>
   <script src="/users.js"></script>
 </body>

@@ -1,6 +1,7 @@
-// Admin 0.2: AI minutes, role invites, closing a hall, the AI key and the show network.
-// Shares admin.js's globals (socket, currentRoom, escapeHtml) — loaded after it.
-/* global socket, currentRoom */
+// The admin page's other parts: AI minutes, role invites, the AI key, the show network's links, HTTPS, Health and the
+// audit log there. Shares admin.js's globals (socket, currentRoom, the page's acts ADMIN and their runners ADMIN_RUN) —
+// loaded after it. A link's acts are the catalogue's (kind link); nothing here opens a native dialog.
+/* global socket, currentRoom, ADMIN, ADMIN_RUN, ADMIN_DRAWERS, ADMIN_OBJECTS, adminFactsChanged, say, watchRoom */
 (function () {
   'use strict';
   if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): nothing asked, nothing polled
@@ -10,17 +11,27 @@
 
   function panel(which) {
     $('roomTools').hidden = !which;
-    for (const p of ['invitesPanel', 'minutesPanel', 'closePanel']) $(p).hidden = p !== which;
+    for (const p of ['invitesPanel', 'minutesPanel']) $(p).hidden = p !== which;
   }
 
-  /** The settings and health, read; with a patch, changed first (an act: through the outbox, never sent late). */
-  function loadSettings(patch) {
+  // A field of the Stagewatch form that a person typed in, or that Use this address filled, keeps its words until they
+  // are saved: the settings read every 5 s fill only a field nobody has changed (and none while it has the focus).
+  const edited = new Set();
+  for (const id of ['swUrl', 'swFp']) $(id).addEventListener('input', () => edited.add(id));
+  const fill = (id, value) => { if (!edited.has(id) && document.activeElement !== $(id)) $(id).value = value; };
+
+  /**
+   * The settings and health, read; with a patch, changed first (an act: through the outbox, never sent late), and
+   * `saved(s)` told when the server took it.
+   */
+  function loadSettings(patch, saved) {
     const answered = (s) => {
       if (!s || !s.ok) return;
       $('aiModel').textContent = s.model;
       $('aiStatus').textContent = s.aiKeySet ? (s.aiFromEnv ? 'on (key from ANTHROPIC_API_KEY)' : 'on') : 'off — no key';
-      document.querySelectorAll('.ai-btn').forEach((b) => { b.disabled = !s.aiKeySet; });
-      $('swUrl').value = s.stagewatchUrl || '';
+      adminFactsChanged({ ai: !!s.aiKeySet });
+      fill('swUrl', s.stagewatchUrl || '');
+      stagewatch = { url: s.stagewatchUrl || '', changed: !!(s.tls && s.tls.link && s.tls.link.changed), keySet: !!s.stagewatchKeySet, fingerprint: s.stagewatchFingerprint || '' };
       $('swKey').placeholder = s.stagewatchKeySet ? '•••••• (saved — type to replace)' : 'Stagewatch node key (swk_…)';
       const clock = s.health && s.health.clock;
       $('swStatus').textContent = s.stagewatchUrl ? 'Stagewatch: ' + s.stage + (clock && clock.apart ? ' · CLOCKS APART (' + (clock.offsetMs / 1000).toFixed(1) + ' s)' : '') : '';
@@ -37,8 +48,9 @@
       renderHealth(s.health);
       renderAudit(s.health);
       renderPeers(s.peers || []);
+      drawLinks();
     };
-    if (patch) AGM.outbox.now('admin:settings', patch, (s) => { if (s && !s.ok && s.error) alert(s.error); answered(s); });
+    if (patch) AGM.outbox.now('admin:settings', patch, (s) => { if (s && !s.ok && s.error) say(s.error, true); if (s && s.ok && saved) saved(s); answered(s); });
     else socket.emit('admin:settings', null, answered);
   }
 
@@ -50,9 +62,8 @@
     $('tlsRenew').hidden = !t.on;
     $('requireHttps').checked = !!t.requireHttps;
     $('requireHttps').disabled = !t.on;
-    if (document.activeElement !== $('swFp')) $('swFp').value = typed || '';
+    fill('swFp', typed || '');
     const l = t.link || {};
-    $('swAccept').hidden = !l.changed;
     $('swTls').textContent = !l.on ? 'Link to Stagewatch: plain HTTP (it announces no certificate)'
       : l.problem ? '⚠ ' + l.problem
       : 'Link to Stagewatch: encrypted ✓ — certificate ' + pretty(l.fp).slice(0, 23) + '… ' + (l.pinned ? '(pinned)' : '(pinned once Stagewatch accepts the key)');
@@ -189,9 +200,9 @@
   // The archive points in the live log, newest first, each with what a split there would move or why it would not; a
   // split a stop left part way is offered as Finish the split. The word typed is the confirmation.
   let splitAt = 0;
-  const say = (mark, text) => { $('splitState').dataset.mark = mark; $('splitState').textContent = text; };
+  const splitSay = (mark, text) => { $('splitState').dataset.mark = mark; $('splitState').textContent = text; };
   async function openSplit() {
-    say('', '');
+    splitSay('', '');
     $('splitWord').value = '';
     splitAt = 0;
     const ul = $('splitList');
@@ -220,11 +231,11 @@
     if (!r.points.length) ul.textContent = 'No archive point in the live log yet: archiving an event writes one.';
   }
   async function postSplit(seq) {
-    say('', 'Splitting… the files before the point are moved into the archive and signed.');
+    splitSay('', 'Splitting… the files before the point are moved into the archive and signed.');
     const r = await fetch('/api/audit/split', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seq }) }).then((x) => x.json()).catch(() => ({ ok: false, error: 'No answer from the server.' }));
     // A split that waits (a file held, or its entry not on disk yet) is △ with its words, never ✓ and never "Not split".
-    if (!r.ok && !r.waits) { say('broken', '✕ ' + (r.error || 'Not split.')); return; }
-    say(r.waits ? 'unvouched' : 'intact', r.waits ? '△ ' + (r.words || r.error) : r.words);
+    if (!r.ok && !r.waits) { splitSay('broken', '✕ ' + (r.error || 'Not split.')); return; }
+    splitSay(r.waits ? 'unvouched' : 'intact', r.waits ? '△ ' + (r.words || r.error) : r.words);
     setTimeout(() => loadSettings(), 300);
   }
   let shown = null;   // the check the dialog was drawn from: its digest goes with the Accept
@@ -277,74 +288,183 @@
     $('acceptToken').focus();
   }
 
-  function renderPeers(peers) {
-    const ul = $('peerList');
-    ul.textContent = '';
-    if (!peers.length) { const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'Listening for Stagewatch, Patterns and presenter PCs on this network (UDP 9928)…'; ul.appendChild(li); return; }
-    const LABEL = { main: '⏱ Stagewatch', agent: '🖥 Presenter PC (Stagewatch Slides)', patterns: '🎛 Patterns', playmap: '🎞 PlayMap', messenger: '💬 AGMessage' };
-    for (const p of peers) {
-      const li = document.createElement('li');
-      const dot = p.status === 'live' ? '🟢' : '🟠';
-      li.textContent = dot + ' ' + (LABEL[p.t] || p.t) + ' — ' + (p.name || p.host || '') + ' (' + p.address + (p.status === 'live' ? '' : ', not heard for ' + p.age + ' s') + ')';
-      const http = p.ports && p.ports.http;
-      if (p.t === 'main' && http) {
-        const b = document.createElement('button');
-        b.className = 'btn ghost small'; b.type = 'button'; b.textContent = 'Use';
-        b.onclick = () => { $('swUrl').value = p.address + ':' + http; $('swKey').focus(); };
-        li.appendChild(b);
-      }
-      // Patterns and PlayMap: link with the node's own token (sealed here), optionally for one hall.
-      if (p.t === 'patterns' || p.t === 'playmap') {
-        const b = document.createElement('button');
-        b.className = 'btn ghost small'; b.type = 'button'; b.textContent = linkedIds.has(p.id) ? 'Linked — change' : 'Link…';
-        b.onclick = () => linkNode(p);
-        li.appendChild(b);
-      }
+  // ---------------------------------------------------------------- the show network's links (kind link)
+  // The default Stagewatch (once it has an address), each show system heard on the network, and each Patterns or PlayMap
+  // linked: one row each, its acts the catalogue's, drawn in place by its key so a redraw every 5 s keeps the focus and an
+  // open menu's opener.
+  let stagewatch = { url: '', changed: false, keySet: false, fingerprint: '' };
+  let heard = [];        // what discovery hears now
+  let linked = [];       // nodes:list's linked Patterns and PlayMap
+  const LABEL = { main: '⏱ Stagewatch', agent: '🖥 Presenter PC (Stagewatch Slides)', patterns: '🎛 Patterns', playmap: '🎞 PlayMap', messenger: '💬 AGMessage' };
+  const isNode = (t) => t === 'patterns' || t === 'playmap';
+  /** A link as the catalogue reads it, by its row's key: 'stagewatch', 'heard:<id>' or 'node:<id>'. */
+  function linkObject(key) {
+    if (key === 'stagewatch') return stagewatch.url ? { t: 'main', name: 'Stagewatch', url: stagewatch.url, changed: stagewatch.changed, keySet: stagewatch.keySet, fingerprint: stagewatch.fingerprint } : null;
+    const [where, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+    const l = linked.find((x) => x.id === id) || null;
+    const asLinked = l ? { id: l.id, t: l.t, name: l.name, hall: l.hall || '', linked: true, certificateWaits: !!l.certificateWaits, certificateChanged: !!l.certificateChanged, desk: !!l.desk, commands: l.commands || [] } : null;
+    if (where === 'node') return asLinked;
+    const p = heard.find((x) => x.id === id);
+    if (!p) return null;
+    const port = p.ports && (p.ports.http || p.ports.https);
+    const url = port ? p.address + ':' + port : '';
+    return Object.assign({ id: p.id, t: p.t, name: p.name || p.host || p.t, hall: '' }, asLinked || {}, { heard: true, url: p.t === 'main' ? url : '' });
+  }
+  /** One row of a list, kept by its key: its words and its bar drawn again in place. */
+  function linkRow(ul, key, words) {
+    let li = ul.querySelector(':scope > li[data-key="' + CSS.escape(key) + '"]');
+    if (!li) {
+      li = document.createElement('li');
+      li.className = 'link-row';
+      li.dataset.key = key;
+      const w = document.createElement('span'); w.className = 'link-words';
+      const bar = document.createElement('span'); bar.className = 'obj-bar';
+      li.append(w, bar);
       ul.appendChild(li);
     }
+    const w = li.querySelector('.link-words');
+    if (w.textContent !== words) w.textContent = words;
+    return li;
+  }
+  /** Drop the rows of a list whose keys are not in `keep`, and the words that stood for an empty list once it has rows. */
+  function prune(ul, keep) {
+    for (const li of ul.querySelectorAll(':scope > li')) if (li.dataset.key ? !keep.has(li.dataset.key) : keep.size > 0) li.remove();
+  }
+  function emptyLine(ul, words) {
+    const li = document.createElement('li'); li.className = 'muted'; li.textContent = words; ul.appendChild(li);
+  }
+  /** Every link's bar, as the facts and the links are now. */
+  function drawLinks() {
+    const sw = $('swLink');
+    sw.hidden = !stagewatch.url;
+    for (const li of document.querySelectorAll('.link-list > li.link-row[data-key]')) {
+      const o = linkObject(li.dataset.key);
+      if (o && !li.hidden) ADMIN.draw(li.querySelector('.obj-bar'), 'link', o, { more: 'Actions for ' + o.name, words: true, cls: 'btn ghost small', keysOn: li });
+    }
+  }
+  ADMIN_DRAWERS.push(drawLinks);
+
+  function renderPeers(peers) {
+    heard = peers;
+    const ul = $('peerList');
+    const keep = new Set(peers.map((p) => 'heard:' + p.id));
+    prune(ul, keep);
+    if (!peers.length) { if (!ul.querySelector('li')) emptyLine(ul, 'Listening for Stagewatch, Patterns and presenter PCs on this network (UDP 9928)…'); return; }
+    for (const p of peers) {
+      const dot = p.status === 'live' ? '🟢' : '🟠';
+      linkRow(ul, 'heard:' + p.id, dot + ' ' + (LABEL[p.t] || p.t) + ' — ' + (p.name || p.host || '') + ' (' + p.address + (p.status === 'live' ? '' : ', not heard for ' + p.age + ' s') + ')' + (isNode(p.t) && linked.some((l) => l.id === p.id) ? ' · linked' : ''));
+    }
+    drawLinks();
+    ADMIN.refresh();
   }
 
   // ---------------------------------------------------------------- Patterns and PlayMap links
-  let linkedIds = new Set();
   function loadNodes() {
     socket.emit('nodes:list', {}, (r) => {
       if (!r || !r.ok) return;
-      linkedIds = new Set(r.linked.map((l) => l.id));
+      linked = r.linked;
       const ul = $('nodeLinks');
-      ul.textContent = '';
-      if (!r.linked.length) { const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'No Patterns or PlayMap linked. Link one from the list above when AGMessage hears it.'; ul.appendChild(li); }
+      prune(ul, new Set(r.linked.map((l) => 'node:' + l.id)));
+      if (!r.linked.length && !ul.querySelector('li')) emptyLine(ul, 'No Patterns or PlayMap linked. Link one from the list above when AGMessage hears it.');
       for (const l of r.linked) {
-        const li = document.createElement('li');
         const mark = { green: '✓', amber: '△', red: '✕', grey: '○' }[l.light] || '○';
-        li.textContent = mark + ' ' + (l.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' “' + l.name + '” — ' + l.status + (l.problem ? ' (' + l.problem + ')' : '') + (l.headline ? ': ' + l.headline : '') + (l.hall ? ' · hall ' + l.hall : '') + ' · ' + l.commands.length + ' verbs';
-        // A certificate that waits (changed, or never confirmed) is confirmed by typing the start of the fingerprint the
-        // node shows on its own screen; this page is never told the fingerprint, so it cannot be copied from here.
-        if (l.certificateWaits) {
-          const acc = document.createElement('button');
-          acc.className = 'btn ghost small'; acc.type = 'button'; acc.textContent = l.certificateChanged ? 'Accept new certificate…' : 'Confirm certificate…';
-          acc.onclick = () => {
-            const typed = prompt((l.certificateChanged ? l.name + '\'s certificate changed. Only accept it if you know why (a renewal, a reinstall, a new laptop). ' : '')
-              + 'Type the first 16 or more characters of the certificate fingerprint ' + l.name + ' shows on its own screen.', '');
-            if (typeof typed !== 'string' || !typed.trim()) return;
-            AGM.outbox.now('nodes:acceptCertificate', { id: l.id, fingerprint: typed.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not accepted.'); loadNodes(); });
-          };
-          li.appendChild(acc);
-        }
-        const b = document.createElement('button');
-        b.className = 'btn ghost small'; b.type = 'button'; b.textContent = 'Unlink';
-        b.onclick = () => { if (confirm('Unlink ' + l.name + '? Its token and its certificate pin are forgotten.')) AGM.outbox.now('nodes:unlink', { id: l.id }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not unlinked.'); loadNodes(); }); };
-        li.appendChild(b);
-        ul.appendChild(li);
+        linkRow(ul, 'node:' + l.id, mark + ' ' + (l.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' “' + l.name + '” — ' + l.status + (l.problem ? ' (' + l.problem + ')' : '') + (l.headline ? ': ' + l.headline : '') + (l.hall ? ' · hall ' + l.hall : '') + ' · ' + l.commands.length + ' verbs'
+          + (l.certificateWaits ? ' · ' + (l.certificateChanged ? 'its certificate changed: confirm it' : 'its certificate waits to be confirmed') : ''));
       }
+      renderPeers(heard);
     });
   }
-  function linkNode(p) {
-    const token = prompt('The pairing token of ' + (p.name || p.t) + ' (' + (p.t === 'playmap' ? 'PlayMap: node settings → Network' : 'Patterns: Remote page → TRUST') + '). Leave empty to keep the saved one.', '');
-    if (typeof token !== 'string') return;   // cancelled
-    const hall = prompt('For one hall? Type its code (e.g. K7P2QX), or leave empty for every hall.', '') || '';
+  const linkSaid = (words) => (r) => { if (!r || !r.ok) say((r && r.error) || words, true); loadNodes(); };
+  Object.assign(ADMIN_RUN, {
+    'link.use': (o) => { $('swUrl').value = o.url; edited.add('swUrl'); $('swKey').focus(); },
+    // The default Stagewatch's form, asked in place: what it saves is what the page's own form then shows.
+    'link.configure': (o, c) => {
+      const v = c.values || {};
+      const patch = { stagewatchUrl: v.url || '', stagewatchFingerprint: v.fingerprint || '' };
+      if (v.key) patch.stagewatchKey = v.key;
+      loadSettings(patch, () => { edited.clear(); say('Stagewatch is set up: the link is refused until it accepts the key.'); });
+      setTimeout(() => loadSettings(), 1500);
+    },
+    'link.copy': (o, c) => AGM.copy(o.url, { said: 'Copied ' + o.name + '\'s address.', anchor: c.anchor, say }),
     // The token goes to another machine only over HTTPS to a certificate a person confirmed (or one pinned before).
-    const fingerprint = prompt('Its certificate: type the first 16 or more characters of the fingerprint ' + (p.name || p.t) + ' shows on its own screen. Leave empty when it runs on this laptop, or its certificate is confirmed already.', '') || '';
-    AGM.outbox.now('nodes:link', { id: p.id, token, hall: hall.trim(), fingerprint: fingerprint.trim() }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not linked.'); loadNodes(); });
+    'link.setup': (o, c) => {
+      const v = c.values || {};
+      AGM.outbox.now('nodes:link', { id: o.id, token: v.token || '', hall: v.hall || '', fingerprint: v.fingerprint || '' }, (r) => {
+        if (r && r.ok) say(o.name + (o.linked ? ' is set up.' : ' is linked.'));
+        linkSaid('Not linked.')(r);
+      });
+    },
+    'link.confirm': (o, c) => {
+      const fp = (c.values && c.values.fingerprint) || '';
+      if (!fp) { say('Type the start of its fingerprint to confirm it.', true); return; }
+      AGM.outbox.now('nodes:acceptCertificate', { id: o.id, fingerprint: fp }, (r) => { if (r && r.ok) say(o.name + '\'s certificate is confirmed.'); linkSaid('Not accepted.')(r); });
+    },
+    'link.unlink': (o) => AGM.outbox.now('nodes:unlink', { id: o.id }, (r) => { if (r && r.ok) say(o.name + ' is unlinked.'); linkSaid('Not unlinked.')(r); }),
+    'link.propose': (o, c) => {
+      const line = (c.values && c.values.line) || '';
+      AGM.outbox.now('nodes:command', { id: o.id, line, mode: 'propose' }, (r) => {
+        if (!r) { say('No answer.', true); return; }
+        if (!r.ok) { say(r.error, true); return; }
+        say('▲ Proposed to the show desk (' + r.proposal.id + ', ' + r.risk + ' risk) — a person approves it in Stagewatch.');
+      });
+    },
+    'link.accept': () => AGM.outbox.now('admin:acceptCertificate', undefined, (r) => { if (!r || !r.ok) say((r && r.error) || 'Not accepted.', true); else say('Stagewatch\'s new certificate is accepted.'); setTimeout(() => loadSettings(), 800); }),
+  });
+  const linkSpec = (ul) => ({ kind: 'link', find: (el) => { const li = el.closest('li.link-row[data-key]'); return li && ul.contains(li) ? li : null; }, get: linkObject, label: 'Link actions', gone: 'That link is gone.', header: (o) => o.name });
+  for (const ul of [$('swLinkList'), $('peerList'), $('nodeLinks')]) { ADMIN.bind(ul, linkSpec(ul)); AGM.roving(ul, { item: 'li.link-row[data-key]' }); }
+  ADMIN_OBJECTS.link = linkObject;
+
+  function showInvites(on) {
+    const box = $('inviteLinks');
+    box.textContent = '';
+    if (!on) { box.textContent = 'Open: anyone with the code can join in any seat.'; return; }
+    socket.emit('admin:invites', { roomCode: currentRoom.code }, (res) => {
+      if (!res || !res.ok) return;
+      for (const role of ['board', 'research']) {
+        const url = location.origin + res.invites[role];
+        const row = document.createElement('div');
+        row.className = 'invite-row';
+        const lab = document.createElement('strong'); lab.textContent = role === 'board' ? 'On stage link' : 'Backstage link';
+        const code = document.createElement('code'); code.textContent = url;
+        const copy = document.createElement('button'); copy.className = 'btn ghost small'; copy.type = 'button'; copy.textContent = '📋 Copy';
+        copy.onclick = () => AGM.copy(url, { said: 'Copied the ' + lab.textContent + '.', anchor: copy, say });
+        row.append(lab, code, copy);
+        box.appendChild(row);
+      }
+      const tip = document.createElement('p'); tip.className = 'hint';
+      tip.textContent = 'Send each link only to that group. If you open the tunnel, these links work from anywhere — replace localhost with the public address.';
+      box.appendChild(tip);
+    });
+  }
+
+  // Roles & invites and ✨ Minutes open their panel under the watched hall's header (the hall is watched first).
+  Object.assign(ADMIN_RUN, {
+    'adminRoom.invites': (o) => watching(o, () => {
+      panel('invitesPanel');
+      socket.emit('admin:listRooms', (res) => {
+        const r = res && res.rooms && res.rooms.find((x) => x.code === currentRoom.code);
+        $('lockRoles').checked = !!(r && r.locked);
+        showInvites(r && r.locked);
+      });
+    }),
+    // A draft is a read whose answer can take longer than an act's 5 s: asked with a plain emit, never sent late
+    // (the catalogue refuses it while the page is not connected).
+    'adminRoom.minutes': (o) => watching(o, () => {
+      panel('minutesPanel');
+      $('minutesBody').textContent = 'Claude is reading the conversation…';
+      socket.emit('admin:summary', { roomCode: currentRoom.code }, (res) => {
+        if (!res || !res.ok) { $('minutesBody').textContent = (res && res.error) || 'No minutes.'; lastMinutes = ''; return; }
+        const parts = [res.headline || ''];
+        const add = (title, list) => { if (list && list.length) parts.push('\n' + title + ':\n' + list.map((x) => '• ' + x).join('\n')); };
+        add('Decisions', res.decisions); add('Open questions', res.open); add('Action items', res.actions);
+        lastMinutes = parts.join('\n').trim();
+        $('minutesBody').textContent = lastMinutes;
+      });
+    }),
+  });
+  /** Run `then` once the hall `o` is the one this page watches. */
+  function watching(o, then) {
+    if (currentRoom && currentRoom.code === o.code) then(); else watchRoom(o.code, then);
   }
 
   function wire() {
@@ -372,15 +492,15 @@
       $('auditLine').textContent = r.head === 'saved' ? 'Accepted: written in the log (entry ' + r.entry + ').' : (r.words || 'Not accepted yet.');
       setTimeout(() => loadSettings(), 300);
     });
-    $('ctxCopy').onclick = () => { const t = $('ctxToken').textContent; if (navigator.clipboard && t && t !== '—') navigator.clipboard.writeText(t); };
-    $('signKeyCopy').onclick = () => { const t = $('signKeyText').textContent; if (navigator.clipboard && t && t !== '—') navigator.clipboard.writeText(t); };
+    $('ctxCopy').onclick = () => { const t = $('ctxToken').textContent; if (t && t !== '—') AGM.copy(t, { said: 'Copied the context token.', anchor: $('ctxCopy'), say }); };
+    $('signKeyCopy').onclick = () => { const t = $('signKeyText').textContent; if (t && t !== '—') AGM.copy(t, { said: 'Copied the signing key.', anchor: $('signKeyCopy'), say }); };
     $('auditSplitBtn').onclick = () => { openSplit(); };
     $('splitCancel').onclick = () => { $('splitDialog').close(); };
     $('splitFinish').onclick = () => { const t = /entry (\d+)$/.exec($('splitFinish').textContent); if (t) postSplit(Number(t[1])); };
     $('splitForm').addEventListener('submit', (ev) => {
       ev.preventDefault();
-      if (!splitAt) { say('broken', 'Choose the archive point to split at.'); return; }
-      if ($('splitWord').value.trim().toLowerCase() !== 'split') { say('broken', 'Type the word split to split there.'); return; }
+      if (!splitAt) { splitSay('broken', 'Choose the archive point to split at.'); return; }
+      if ($('splitWord').value.trim().toLowerCase() !== 'split') { splitSay('broken', 'Type the word split to split there.'); return; }
       postSplit(splitAt);
     });
     $('auditExportBtn').onclick = () => {
@@ -390,85 +510,32 @@
     $('ctxNew').onclick = () => loadSettings({ newContextToken: true });
     $('requireHttps').onchange = () => loadSettings({ requireHttps: $('requireHttps').checked });
     $('remoteAdmin').onchange = () => loadSettings({ remoteAdmin: $('remoteAdmin').checked });
-    $('swAccept').onclick = () => {
-      if (!confirm('Accept Stagewatch\'s new certificate? Only do this if you know why it changed (a reinstall, a new certificate made on purpose).')) return;
-      AGM.outbox.now('admin:acceptCertificate', undefined, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not accepted.'); setTimeout(() => loadSettings(), 800); });
-    };
     $('tlsRenew').onclick = () => {
-      if (!confirm('Make a new certificate? Every device and app that trusted the old one will need to trust the new one.')) return;
-      AGM.outbox.now('admin:renewCertificate', undefined, (r) => { if (!r || !r.ok) alert((r && r.error) || 'No new certificate.'); loadSettings(); });
+      const btn = $('tlsRenew');
+      AGM.ask(btn, { title: 'Make a new certificate?', words: 'Every device and app that trusted the old one will need to trust the new one.', yes: 'New certificate', no: 'Keep this one', danger: true }, { opener: btn }).then((a) => {
+        if (!a.yes) return;
+        AGM.outbox.now('admin:renewCertificate', undefined, (r) => { if (!r || !r.ok) say((r && r.error) || 'No new certificate.', true); else say('A new certificate is in use.'); loadSettings(); });
+      });
     };
     $('aiKeySave').onclick = () => { loadSettings({ aiKey: $('aiKeyInput').value.trim() }); $('aiKeyInput').value = ''; };
     $('swSave').onclick = () => {
       const patch = { stagewatchUrl: $('swUrl').value.trim(), stagewatchFingerprint: $('swFp').value.trim() };
       if ($('swKey').value.trim()) patch.stagewatchKey = $('swKey').value.trim();
-      loadSettings(patch); $('swKey').value = '';
+      loadSettings(patch, () => { edited.clear(); }); $('swKey').value = '';
       setTimeout(() => loadSettings(), 1500);
     };
 
-    $('invitesBtn').onclick = () => {
-      if (!currentRoom) return;
-      panel('invitesPanel');
-      socket.emit('admin:listRooms', (res) => {
-        const r = res && res.rooms && res.rooms.find((x) => x.code === currentRoom.code);
-        $('lockRoles').checked = !!(r && r.locked);
-        showInvites(r && r.locked);
-      });
-    };
+    $('closeInvitesBtn').onclick = () => panel(null);
     $('lockRoles').onchange = () => {
-      AGM.outbox.now('admin:lockRoles', { roomCode: currentRoom.code, on: $('lockRoles').checked }, (res) => { if (!res || !res.ok) alert((res && res.error) || 'Not changed.'); showInvites(res && res.locked); });
-    };
-    function showInvites(on) {
-      const box = $('inviteLinks');
-      box.textContent = '';
-      if (!on) { box.textContent = 'Open: anyone with the code can join in any seat.'; return; }
-      socket.emit('admin:invites', { roomCode: currentRoom.code }, (res) => {
-        if (!res || !res.ok) return;
-        for (const role of ['board', 'research']) {
-          const url = location.origin + res.invites[role];
-          const row = document.createElement('div');
-          row.className = 'invite-row';
-          const lab = document.createElement('strong'); lab.textContent = role === 'board' ? 'On stage link' : 'Backstage link';
-          const code = document.createElement('code'); code.textContent = url;
-          const copy = document.createElement('button'); copy.className = 'btn ghost small'; copy.type = 'button'; copy.textContent = '📋 Copy';
-          copy.onclick = () => navigator.clipboard && navigator.clipboard.writeText(url).then(() => { copy.textContent = '✓ Copied'; setTimeout(() => { copy.textContent = '📋 Copy'; }, 1500); });
-          row.append(lab, code, copy);
-          box.appendChild(row);
-        }
-        const tip = document.createElement('p'); tip.className = 'hint';
-        tip.textContent = 'Send each link only to that group. If you open the tunnel, these links work from anywhere — replace localhost with the public address.';
-        box.appendChild(tip);
-      });
-    }
-
-    $('minutesBtn').onclick = () => {
-      if (!currentRoom) return;
-      panel('minutesPanel');
-      $('minutesBody').textContent = 'Claude is reading the conversation…';
-      socket.emit('admin:summary', { roomCode: currentRoom.code }, (res) => {
-        if (!res || !res.ok) { $('minutesBody').textContent = (res && res.error) || 'No minutes.'; lastMinutes = ''; return; }
-        const parts = [res.headline || ''];
-        const add = (title, list) => { if (list && list.length) parts.push('\n' + title + ':\n' + list.map((x) => '• ' + x).join('\n')); };
-        add('Decisions', res.decisions); add('Open questions', res.open); add('Action items', res.actions);
-        lastMinutes = parts.join('\n').trim();
-        $('minutesBody').textContent = lastMinutes;
-      });
+      AGM.outbox.now('admin:lockRoles', { roomCode: currentRoom.code, on: $('lockRoles').checked }, (res) => { if (!res || !res.ok) say((res && res.error) || 'Not changed.', true); showInvites(res && res.locked); });
     };
     $('postMinutesBtn').onclick = () => {
       if (!lastMinutes || !currentRoom) return;
-      AGM.outbox.now('admin:postSummary', { roomCode: currentRoom.code, text: '📝 Minutes so far (AI draft, posted by the admin)\n\n' + lastMinutes }, (r) => { if (!r || !r.ok) alert((r && r.error) || 'Not posted.'); else panel(null); });
+      AGM.outbox.now('admin:postSummary', { roomCode: currentRoom.code, text: '📝 Minutes so far (AI draft, posted by the admin)\n\n' + lastMinutes }, (r) => { if (!r || !r.ok) say((r && r.error) || 'Not posted.', true); else { say('The minutes are posted, pinned.'); panel(null); } });
     };
     $('closeMinutesBtn').onclick = () => panel(null);
 
-    $('closeRoomBtn').onclick = () => { if (currentRoom) { $('closeCode').textContent = currentRoom.code; panel('closePanel'); } };
-    $('cancelCloseBtn').onclick = () => panel(null);
-    $('confirmCloseBtn').onclick = () => {
-      AGM.outbox.now('admin:deleteRoom', { roomCode: currentRoom.code, purgeFiles: $('purgeFiles').checked }, (res) => {
-        if (!res || !res.ok) { alert((res && res.error) || 'Not closed.'); return; }
-        panel(null);
-        location.reload();
-      });
-    };
+
   }
   const t = setInterval(() => { wire(); if (wired) clearInterval(t); }, 300);
 })();

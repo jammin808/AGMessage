@@ -119,13 +119,15 @@ export default [
   // The pages: browser globals, one script scope per page, and HTML only from escaped parts. Every page holds the page
   // floor (Safari 14.1, Chrome 84; docs/DEVICES.md): a feature newer than it is reached through its helper, which probes
   // for it (`window.requestIdleCallback` behind AGM.idle is a member, not the bare global), and no page reads the user
-  // agent, so a fallback is chosen by what the browser has, never by what it calls itself.
+  // agent, so a fallback is chosen by what the browser has, never by what it calls itself. No page opens a native alert,
+  // confirm or prompt: it pauses the page's scripts, and a page paused 20 s drops its socket (measured; the plan's 5-§16.1);
+  // a question is asked in place (AGM.ask) and words go to the page's toast.
   {
     files: ['app/public/**/*.js'],
     languageOptions: { sourceType: 'script', globals: { ...globals.browser, io: 'readonly', pdfjsLib: 'readonly', mammoth: 'readonly', XLSX: 'readonly', AGM: 'writable' } },
-    rules: { 'agm/no-unescaped-html': 'error', ...pageFloor },
+    rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor },
   },
-  { files: ['app/public/**/*.mjs'], languageOptions: { sourceType: 'module', globals: { ...globals.browser } }, rules: { 'agm/no-unescaped-html': 'error', ...pageFloor } },
+  { files: ['app/public/**/*.mjs'], languageOptions: { sourceType: 'module', globals: { ...globals.browser } }, rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor } },
   // The first script of every page with people says the floor's words below it, so it parses there: ES5 only (a newer
   // syntax is a parse error), `var` with it.
   { files: ['app/public/theme-init.js'], languageOptions: { ecmaVersion: 5 }, rules: { 'no-var': 'off', 'prefer-const': 'off' } },

@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStagewatch } = require('./helpers');
+const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStagewatch, fakeNode } = require('./helpers');
 
 function loadCatalog() {
   const ctx = vm.createContext({});
@@ -135,7 +135,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'display:rotate': (o) => ({ id: o.id }),
     'display:remove': (o) => ({ id: o.id }),
   };
-  const sent = new Set(Object.values(C.KINDS).flat().filter((e) => e.verb !== 'local' && !e.verb.startsWith('http:')).map((e) => e.verb));
+  const sent = new Set(['msg', 'file', 'screen'].flatMap((k) => C.KINDS[k]).filter((e) => e.verb !== 'local' && !e.verb.startsWith('http:')).map((e) => e.verb));
   assert.deepEqual([...sent].filter((v) => !PAYLOADS[v]), [], 'every verb an act sends has its refusal case');
 
   // A refusal for the rate is not the verb's: asked again once the rate allows.
@@ -221,4 +221,143 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   // The admin's support view is unseated: it is told no forwardable of its own.
   const view = await open(root);
   assert.equal((await emit(view, 'join', { roomCode: hallA, name: 'Ana', role: 'research', adminView: true })).forwardable, false);
+});
+
+// The admin page, the halls board and the Accounts page (kinds adminRoom, person, adminMsg, link, tunnel; hall, help;
+// account, audit): each act hidden from a seat by its rights, sent as that seat — its socket, or its HTTP sign-in — is
+// refused with words, and changes nothing. Each seat's facts are read from the server's own answers, as its page reads
+// them (/api/admin/me, /api/halls and the board, /api/auth/me).
+test('every act of the admin page, the halls board and the Accounts page hidden by rights is refused as that seat, with words, and changes nothing', async (t) => {
+  const node = await fakeNode({ commands: [{ verb: 'CUE <n>', risk: 'low' }] });
+  const srv = await startServer();
+  const { base } = srv;
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await node.close(); });
+  const open = async (cookie) => { const s = await connect(base, cookie); sockets.push(s); return s; };
+  const root = (await api(base, 'POST', '/api/setup', { username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
+  const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: root })).body.code;
+  const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
+  const account = async (username, role, halls, password, extra = {}) => {
+    const made = await api(base, 'POST', '/api/users', { username, name: username.toUpperCase(), role, halls, password, ...extra }, { cookie: root });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    return (await api(base, 'POST', '/api/auth/login', { username, password })).cookie;
+  };
+  const sid = await account('sid', 'staff', [hallA], 'cable ties and gaffer');
+  const vic = await account('vic', 'viewer', [hallA, hallB], 'only looking at screens');
+  const mia = await account('mia', 'manager', [], 'running order on the wall');               // audit.read; no users.manage, no audit.export
+  const kim = await account('kim', 'manager', [], 'mixing desk on stage left', { grant: ['users.manage'] });   // may manage accounts, not an admin's
+
+  // The objects, as the pages read them: a hall and its people and feed (the admin's own answers), a linked Patterns.
+  const ctl = await open(root);
+  const guest = await open();
+  assert.ok((await emit(guest, 'join', { roomCode: hallA, name: 'Gus', role: 'research' })).ok);
+  assert.ok((await emit(guest, 'message', { type: 'text', text: 'Capex is on slide 14' })).ok);
+  assert.ok((await emit(guest, 'message', { type: 'help', category: 'Sound', text: 'mic 3 is dead' })).ok);
+  assert.ok((await emit(ctl, 'nodes:link', { id: 'patterns01', t: 'patterns', url: node.url, name: 'Patterns FOH', token: 'node-token' })).ok);
+  await until(async () => ((await emit(ctl, 'nodes:list', {})).linked || []).some((l) => l.commands.length), 8000, 'the node read');
+  // The guest may forward into Hall B: No longer forward into ▸ is there to be refused.
+  const gusId = (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms.find((r) => r.code === hallA).users[0].socketId;
+  assert.ok((await emit(ctl, 'admin:linkRoom', { socketId: gusId, targetRoom: hallB })).ok);
+  const rooms = (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms;
+  const watched = await emit(ctl, 'admin:watchRoom', { roomCode: hallA });
+  const listed = (await emit(ctl, 'nodes:list', {})).linked;
+  const nodeObj = { id: listed[0].id, t: listed[0].t, name: listed[0].name, hall: listed[0].hall || '', linked: true, certificateWaits: !!listed[0].certificateWaits, desk: !!listed[0].desk, commands: listed[0].commands };
+  const hallObj = (r, w) => ({ code: r.code, name: r.name, hall: r.name || r.code, watched: w });
+  const objects = {
+    adminRoom: rooms.map((r) => hallObj(r, false)).concat([hallObj(rooms.find((r) => r.code === hallA), true)]),
+    person: watched.users.map((u) => ({ ...u, hall: 'Hall A' })),
+    adminMsg: watched.messages.filter((m) => m.type !== 'system').map((m) => ({ ...m, hall: 'Hall A' })),
+    // A node over plain HTTP on this laptop waits for no certificate, and a default Stagewatch whose certificate changed
+    // needs a TLS peer: those two states are the page's to draw, and the acts they show are refused by right alike.
+    link: [nodeObj, { ...nodeObj, certificateWaits: true, certificateChanged: true }, { t: 'main', name: 'Stagewatch', url: '127.0.0.1:9', changed: true }],
+    tunnel: [{ running: false, url: '', checking: false, checkedAgo: null }, { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: null }],
+  };
+
+  // Each seat of a page: its socket (or none), its HTTP cookie, and its facts from the server's answers.
+  const me = async (cookie) => (await api(base, 'GET', '/api/admin/me', undefined, { cookie })).body;
+  const adminSeat = async (cookie) => ({ s: await open(cookie), cookie, f: C.adminFacts({ ...(await me(cookie)), ai: true, halls: rooms, connected: true }) });
+  const boardSeat = async (cookie) => {
+    const s = await open(cookie);
+    const halls = (await api(base, 'GET', '/api/halls', undefined, { cookie })).body;
+    const board = await emit(s, 'board:watch', {});
+    return { s, cookie, f: C.boardFacts({ canManageHalls: halls.canManageHalls, canDrive: board.board.canDrive, connected: true }), board: board.board };
+  };
+  const accountSeat = async (cookie) => ({ cookie, f: C.accountFacts({ account: (await api(base, 'GET', '/api/auth/me', undefined, { cookie })).body.account, admin: (await me(cookie)).admin }) });
+  const seats = {
+    admin: { staff: await adminSeat(sid), codeGuest: await adminSeat(undefined) },
+    board: { viewer: await boardSeat(vic) },
+    accounts: { staff: await accountSeat(sid), manager: await accountSeat(mia), usersManager: await accountSeat(kim) },
+  };
+  assert.deepEqual([seats.admin.staff.f.admin, seats.admin.codeGuest.f.admin, seats.board.viewer.f.manageHalls, seats.board.viewer.f.canDrive], [false, false, false, false]);
+  assert.deepEqual(Object.fromEntries(Object.entries(seats.accounts).map(([k, v]) => [k, [v.f.manageUsers, v.f.auditRead, v.f.auditExport, v.f.theAdmin]])),
+    { staff: [false, false, false, false], manager: [false, true, false, false], usersManager: [true, true, false, false] }, 'the Accounts page\'s rights, from /api/auth/me and /api/admin/me');
+  objects.hall = seats.board.viewer.board.halls.map((h) => ({ code: h.code, name: h.name || h.code }));
+  objects.help = seats.board.viewer.board.help.map((x) => ({ code: x.code, id: x.id, state: x.state, canRespond: !!x.canRespond, hall: x.hallName || x.code, category: x.category }));
+  assert.deepEqual(objects.help.map((x) => x.canRespond), [false], 'a Viewer answers no help request: the board says so');
+  const users = (await api(base, 'GET', '/api/users', undefined, { cookie: root })).body.users;
+  const kimsView = (await api(base, 'GET', '/api/users', undefined, { cookie: kim })).body.users;
+  objects.account = users.map((u) => ({ id: u.id, name: u.name, username: u.username, disabled: !!u.disabled, locked: (kimsView.find((x) => x.id === u.id) || {}).locked || '', self: false }));
+  const entries = (await api(base, 'GET', '/api/audit?limit=300', undefined, { cookie: root })).body.entries;
+  objects.audit = [entries[0], { ...entries[0], seq: 2, action: 'audit.archive' }];
+
+  // Each verb's smallest payload, naming the object; a verb with no row here fails the test.
+  const PAYLOADS = {
+    'admin:watchRoom': (o) => ({ roomCode: o.code }), 'admin:summary': (o) => ({ roomCode: o.code }), 'admin:invites': (o) => ({ roomCode: o.code }),
+    'admin:resetRoom': (o) => ({ roomCode: o.code }), 'admin:deleteRoom': (o) => ({ roomCode: o.code, purgeFiles: true }),
+    'admin:setRole': (o) => ({ roomCode: hallA, socketId: o.socketId, role: 'observer' }), 'admin:linkRoom': (o) => ({ socketId: o.socketId, targetRoom: hallB }),
+    'admin:unlinkRoom': (o) => ({ socketId: o.socketId, targetRoom: o.linkedRooms[0] }), 'admin:settings': () => ({ stagewatchUrl: 'http://127.0.0.1:9' }),
+    'admin:kick': (o) => ({ socketId: o.socketId }), 'admin:deleteMessage': (o) => ({ roomCode: hallA, messageId: o.id }),
+    'nodes:link': (o) => ({ id: o.id, token: 'not-the-token' }), 'nodes:unlink': (o) => ({ id: o.id }), 'nodes:acceptCertificate': (o) => ({ id: o.id, fingerprint: '0123456789abcdef' }),
+    'nodes:command': (o) => ({ id: o.id, line: 'CUE 1', mode: 'propose' }),
+    'admin:acceptCertificate': null, 'admin:tunnelStart': null, 'admin:tunnelStop': null, 'admin:tunnelStatus': null,   // the ack alone
+    'hall:settings': (o) => ({ code: o.code }), 'nodes:list': () => ({}),
+    'help:respond': (o, e) => ({ code: o.code, messageId: o.id, state: e.id === 'help.respond' ? 'coming' : 'resolved' }),
+  };
+  const BODIES = { 'account.edit': { name: 'Renamed by a seat that may not' }, 'account.disable': { disabled: true }, 'audit.split': { seq: 2 } };
+  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel'], board: ['hall', 'help'], accounts: ['account', 'audit'] };
+  const verbsOf = Object.values(KINDS).flat().flatMap((k) => C.KINDS[k]).filter((e) => e.verb !== 'local');
+  assert.deepEqual([...new Set(verbsOf.filter((e) => !e.verb.startsWith('http:') && !(e.verb in PAYLOADS)).map((e) => e.verb))], [], 'every socket verb an act sends has its refusal case');
+  const say = (s, verb, payload) => new Promise((resolve) => { if (payload === null) s.emit(verb, resolve); else s.emit(verb, payload, resolve); });
+  const refusal = async (s, verb, payload) => {
+    for (let i = 0; i < 20; i++) {
+      const r = await say(s, verb, payload);
+      if (!(r && r.busy)) return r;
+      await wait(300);
+    }
+    return { busy: true };
+  };
+  const refused = new Map();
+  const wrong = [];
+  for (const [page, kinds] of Object.entries(KINDS)) {
+    for (const [name, seat] of Object.entries(seats[page])) {
+      for (const kind of kinds) {
+        for (const o of objects[kind]) {
+          for (const e of C.KINDS[kind]) {
+            if (e.verb === 'local' || !e.fits(seat.f, o) || e.may(seat.f, o)) continue;
+            let r;
+            if (e.verb.startsWith('http:')) {
+              const [method, route] = e.verb.slice(5).split(' ');
+              const res = await api(base, method, route.replace(':id', encodeURIComponent(o.id || '')), BODIES[e.id] || (method === 'GET' ? undefined : {}), { cookie: seat.cookie });
+              r = { status: res.status, ...(res.body && typeof res.body === 'object' ? res.body : { ok: true }) };
+              if (res.status < 400) wrong.push(page + ' · ' + name + ' · ' + e.id + ': answered ' + res.status);
+            } else r = await refusal(seat.s, e.verb, PAYLOADS[e.verb] ? PAYLOADS[e.verb](o, e) : null);
+            if (!r || r.ok !== false || typeof r.error !== 'string' || !r.error || r.busy) wrong.push(page + ' · ' + name + ' · ' + e.id + ': ' + JSON.stringify(r).slice(0, 160));
+            refused.set(e.verb, (refused.get(e.verb) || 0) + 1);
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual(wrong, [], 'each hidden act is refused with words');
+  assert.deepEqual([...new Set(verbsOf.map((e) => e.verb))].filter((v) => !refused.get(v)), [], 'every verb is sent as a seat it is hidden from: ' + JSON.stringify(Object.fromEntries(refused)));
+  // And nothing changed: the halls, their people and messages, the link, the accounts, the log unsplit.
+  const roomsAfter = (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms;
+  assert.deepEqual(roomsAfter.map((r) => [r.code, r.name, r.messageCount, r.users.map((u) => [u.name, u.role, (u.linkedRooms || []).length])]), rooms.map((r) => [r.code, r.name, r.messageCount, r.users.map((u) => [u.name, u.role, (u.linkedRooms || []).length])]));
+  assert.deepEqual((await emit(ctl, 'nodes:list', {})).linked.map((l) => l.id), ['patterns01'], 'the node still linked');
+  assert.deepEqual(roomsAfter.find((r) => r.code === hallA).users.map((u) => u.linkedRooms), [[hallB]], 'the guest still forwards into Hall B');
+  assert.equal((await emit(ctl, 'admin:settings', null)).stagewatchUrl, '', 'no Stagewatch was set');
+  const usersAfter = (await api(base, 'GET', '/api/users', undefined, { cookie: root })).body.users;
+  assert.deepEqual(usersAfter.map((u) => [u.username, u.name, !!u.disabled]), users.map((u) => [u.username, u.name, !!u.disabled]));
+  assert.ok(guest.connected, 'the guest was not logged out');
+  assert.deepEqual((await api(base, 'GET', '/api/audit/split', undefined, { cookie: root })).body.unfinished || null, null, 'no split was begun');
 });

@@ -8,7 +8,19 @@
   <script src="/theme-init.js"></script>
 </head>
 <body class="admin-page">
-  <button id="themeBtn" class="theme-toggle" type="button" title="Toggle dark mode">🌙</button>
+  <a class="skip-link" href="#hallsHere">Skip to the halls</a>
+  <!-- The header: the theme and Logout are ordinary buttons in its row, so nothing is drawn over them at any width. -->
+  <header class="app-header admin-header">
+    <div class="app-title">
+      <strong>AGMessage Admin</strong>
+      <span id="adminStatus" class="muted admin-status" hidden>connected</span>
+    </div>
+    <div class="app-meta">
+      <button id="newSessionBtn" class="btn primary small" type="button" hidden>New hall</button>
+      <button id="themeBtn" class="btn ghost small" type="button" title="Switch to dark mode">🌙</button>
+      <button id="logoutBtn" class="btn ghost small" type="button" hidden>Logout</button>
+    </div>
+  </header>
 
   <!-- LOGIN PANEL -->
   <main id="loginPanel" class="join-card admin-login" hidden>
@@ -33,26 +45,18 @@
 
   <!-- DASHBOARD -->
   <div id="dashboard" hidden>
-    <header class="app-header">
-      <div class="app-title">
-        <strong>AGMessage Admin</strong>
-        <span id="adminStatus" class="muted" style="font-size:.85rem">connected</span>
-      </div>
-      <div class="app-meta">
-        <button id="newSessionBtn" class="btn primary small">New hall</button>
-        <button id="logoutBtn" class="btn ghost small">Logout</button>
-      </div>
-    </header>
     <p class="conn-strip" id="connStrip" role="status" hidden></p>
 
     <div class="admin-body">
       <aside class="admin-sidebar">
-        <h3>Halls</h3>
-        <ul id="roomList" class="room-list"></ul>
+        <h3 id="hallsHere" tabindex="-1">Halls</h3>
+        <ul id="roomList" class="room-list" aria-labelledby="hallsHere"></ul>
         <p id="noRooms" class="hint">No halls yet. Choose New hall to make one.</p>
       </aside>
 
       <main class="admin-main">
+        <!-- The watched hall: its code, its people and messages, and its ⋯ (the catalogue's adminRoom), destructive acts
+             last in it and asked in place. -->
         <section class="admin-room-header" id="roomHeader" hidden>
           <div>
             <div id="watchedRoomName" class="watched-room-name muted" hidden></div>
@@ -60,29 +64,21 @@
             <h2 class="room-code-big" id="watchedRoomCode">—</h2>
           </div>
           <div class="admin-room-stats">
-            <div><strong id="userCount">0</strong><br><small>users</small></div>
+            <div><strong id="userCount">0</strong><br><small>people</small></div>
             <div><strong id="msgCount">0</strong><br><small>messages</small></div>
           </div>
-          <button id="exportBtn" class="btn ghost small" type="button" title="Open transcript in a new tab">Export transcript</button>
-          <button id="resetRoomBtn" class="btn ghost small admin-reset-btn" type="button">Clear messages…</button>
-          <button id="minutesBtn" class="btn ghost small ai-btn" type="button" title="Claude lists decisions, open questions and action items so far. You read it first; post it to the room only if you want.">✨ Minutes</button>
-          <button id="invitesBtn" class="btn ghost small" type="button" title="Lock the On stage and Backstage seats to invite links">🔒 Roles &amp; invites</button>
-          <button id="closeRoomBtn" class="btn ghost small admin-reset-btn" type="button" title="Close this hall: everyone leaves, its saved history is deleted">Close hall…</button>
+          <div class="obj-bar" id="roomActs"></div>
         </section>
 
         <section class="admin-tools" id="roomTools" hidden>
           <div id="invitesPanel" hidden>
             <label class="admin-inline"><input type="checkbox" id="lockRoles" /> On stage and Backstage seats need an invite link (anyone else joins as an observer)</label>
             <div id="inviteLinks" class="invite-links"></div>
+            <div class="row end"><button id="closeInvitesBtn" class="btn ghost small" type="button">Close</button></div>
           </div>
           <div id="minutesPanel" hidden>
             <div id="minutesBody" class="minutes-body"></div>
             <div class="row end"><button id="postMinutesBtn" class="btn primary small" type="button">Post to the room (pinned)</button><button id="closeMinutesBtn" class="btn ghost small" type="button">Close</button></div>
-          </div>
-          <div id="closePanel" hidden>
-            <p><strong>Close hall <span id="closeCode"></span>?</strong> Everyone is disconnected and the saved history is deleted. Export the transcript first if you need it.</p>
-            <label class="admin-inline"><input type="checkbox" id="purgeFiles" checked /> Also delete the files shared only in this hall</label>
-            <div class="row end"><button id="confirmCloseBtn" class="btn primary small admin-reset-btn" type="button">Close and delete</button><button id="cancelCloseBtn" class="btn ghost small" type="button">Cancel</button></div>
           </div>
         </section>
 
@@ -91,7 +87,7 @@
           <table class="admin-users">
             <thead>
               <tr>
-                <th>Name</th><th>Role</th><th>May forward to</th><th>Actions</th>
+                <th scope="col">Name</th><th scope="col">Seat</th><th scope="col">May forward to</th><th scope="col"><span class="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody id="usersTbody"></tbody>
@@ -117,13 +113,14 @@
             <input id="swUrl" placeholder="Stagewatch address (e.g. 192.168.1.20)" size="28" />
             <input id="swKey" type="password" placeholder="Stagewatch node key (swk_…)" autocomplete="off" size="28" />
             <button id="swSave" class="btn small" type="button">Link</button>
-            <span id="swStatus" class="muted"></span>
           </div>
           <div class="row">
             <input id="swFp" placeholder="Stagewatch certificate fingerprint (optional: sha256:…)" size="58" autocomplete="off" />
-            <button id="swAccept" class="btn danger small" type="button" hidden>Accept the new certificate</button>
           </div>
-          <p id="swTls" class="hint"></p>
+          <!-- The default Stagewatch's link, once it has an address: its state, and its acts (the catalogue's link). -->
+          <ul id="swLinkList" class="peer-list link-list" aria-label="The default Stagewatch">
+            <li class="link-row" id="swLink" data-key="stagewatch" hidden><span class="link-words"><span id="swStatus"></span> <span id="swTls" class="hint"></span></span><span class="obj-bar"></span></li>
+          </ul>
           <p id="deskLine" class="hint"></p>
           <h3>🔒 Encrypted connections</h3>
           <p class="hint">This AGMessage has its own certificate and serves HTTPS on the same port as HTTP. Browsers warn about it until it's trusted once on each device — <a href="/tls" target="_blank" rel="noopener">how to trust it</a>. Check the fingerprint matches before trusting it.</p>
@@ -131,10 +128,10 @@
             <button id="tlsRenew" class="btn ghost small" type="button">New certificate</button></p>
           <label class="row"><input id="requireHttps" type="checkbox" /> Require HTTPS from other devices (plain HTTP keeps working on this laptop, and for the Cloudflare tunnel)</label>
           <p id="swContext" class="hint" hidden></p>
-          <ul id="peerList" class="peer-list"></ul>
+          <ul id="peerList" class="peer-list link-list" aria-label="Heard on the network"></ul>
           <h4>Linked Patterns and PlayMap</h4>
           <p class="hint">AGMessage reads what each linked one is doing every 5 s and shows it on the halls board; crews with the right propose the verbs it lists to the show desk, where a person approves them. Its pairing token is full control of it, so AGMessage sends it only to this laptop or over HTTPS to a certificate you confirmed by typing the first 16 or more characters of the fingerprint the node shows on its own screen.</p>
-          <ul id="nodeLinks" class="peer-list"></ul>
+          <ul id="nodeLinks" class="peer-list link-list" aria-label="Linked Patterns and PlayMap"></ul>
           <h3>👥 Accounts and access</h3>
           <p class="hint"><span id="acctCount">—</span> · <a href="/users.html">Manage people, roles and halls</a> · <a href="/users.html#audit">Audit log</a></p>
           <label class="row"><input id="remoteAdmin" type="checkbox" /> Let accounts with admin rights sign in through the Cloudflare tunnel (off: admins sign in on the venue network only)</label>
@@ -157,14 +154,15 @@
 
         <!-- Cloudflare tunnel control: lets remote users (off-LAN) join via a
              public URL the admin can spin up and tear down from the dashboard. -->
-        <section class="admin-tunnel-section" id="tunnelSection">
+        <section class="admin-tunnel-section" id="tunnelSection" data-key="tunnel">
           <header class="admin-tunnel-header">
             <h3>🌐 Remote access (Cloudflare tunnel)</h3>
-            <label class="admin-toggle" title="Turn the public tunnel on or off">
+            <label class="admin-toggle" title="Turn the internet link on, or off (asked first)">
               <input type="checkbox" id="tunnelToggle" />
               <span class="admin-toggle-track"><span class="admin-toggle-thumb"></span></span>
               <span class="admin-toggle-label" id="tunnelToggleLabel">Off</span>
             </label>
+            <span class="obj-bar" id="tunnelActs"></span>
           </header>
 
           <div class="admin-tunnel-body">
@@ -181,7 +179,6 @@
               <p class="admin-tunnel-url-label"><strong>Public URL — share with remote users:</strong></p>
               <div class="admin-tunnel-url-row">
                 <code id="tunnelUrl" class="admin-tunnel-url">—</code>
-                <button id="tunnelCopyBtn" class="btn ghost small" type="button">📋 Copy</button>
               </div>
               <p class="hint">The URL stays live until you toggle this off (or stop the server).
                  Anyone with the URL <em>and</em> a room's guest code can join.</p>
@@ -195,8 +192,7 @@
             <div class="admin-tunnel-state" id="tunnelLink">
               <p class="hint" id="tunnelPlaces"></p>
               <p id="tunnelCheckLine" role="status"></p>
-              <p class="row"><button id="tunnelCheckBtn" class="btn ghost small" type="button" disabled>Check again</button>
-                <span class="hint" id="tunnelCheckWhy">The internet link is off.</span></p>
+              <p class="hint" id="tunnelCheckWhy">The internet link is off.</p>
             </div>
 
             <details class="admin-tunnel-instructions">
@@ -271,6 +267,8 @@
   </dialog>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/common.js"></script>
+  <script src="/catalog.js"></script>
+  <script src="/menus.js"></script>
   <script src="/outbox.js"></script>
   <script src="/reconnect.js"></script>
   <script src="/admin.js"></script>

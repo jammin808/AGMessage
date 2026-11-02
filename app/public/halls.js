@@ -17,6 +17,17 @@
   let live = {};           // code -> the board's live row (stage, last, help, displays, people)
   let helps = [];          // open help requests across the halls this account sees
   let canManageHalls = false;
+  let canDrive = false;    // the board's: Show network lists a node this account may drive
+
+  // The acts on a hall's row and on a help request are the catalogue's (catalog.js: kinds hall, help), drawn by AGM.acts:
+  // the bar, the ⋯, right-click, Shift+F10 and the keys alike. This page binds only what each act does (RUN).
+  let F = AGM.catalog.boardFacts({});
+  const RUN = {};
+  const A = AGM.acts({ facts: () => F, run: RUN, say: (words, bad) => AGM.toast(words, bad) });
+  function factsChanged() {
+    F = AGM.catalog.boardFacts({ canManageHalls, canDrive, connected: !!(socket && socket.connected) });
+    render();
+  }
 
   // ---------------------------------------------------------------- first paint
   async function load() {
@@ -33,7 +44,7 @@
     $('adminLink').hidden = !r.isAdmin;
     $('newHallBtn').hidden = !canManageHalls;
     $('boardTitle').textContent = me.rights.allHalls ? 'Every hall' : (halls.length === 1 ? 'Your hall' : 'Your halls');
-    render();
+    factsChanged();
   }
 
   // ---------------------------------------------------------------- the board
@@ -61,12 +72,24 @@
     return 'idle';
   }
 
+  /** The rows, each kept by its code and drawn again in place, so a frame every second keeps the focus and an open menu. */
   function render() {
     const list = $('hallList');
     $('emptyNote').hidden = halls.length > 0;
-    list.textContent = '';
-    for (const h of halls) list.appendChild(row(h, live[h.code] || {}));
+    const keep = new Map([...list.querySelectorAll(':scope > li[data-key]')].map((li) => [li.dataset.key, li]));
+    halls.forEach((h, i) => {
+      const li = row(h, live[h.code] || {}, keep.get(h.code));
+      keep.delete(h.code);
+      if (list.children[i] !== li) list.insertBefore(li, list.children[i] || null);
+    });
+    for (const li of keep.values()) li.remove();
     renderHelp();
+    A.refresh();
+  }
+  /** A hall as the catalogue reads it: its code and its name. */
+  function hallObject(code) {
+    const h = halls.find((x) => x.code === code);
+    return h ? { code: h.code, name: h.name || h.code } : null;
   }
 
   // The way into a hall, as this account may use it: backstage where it may post, read only where it may not (the
@@ -76,41 +99,55 @@
     return '/app.html?' + new URLSearchParams({ code, as: 'account', role: h && h.can.post ? 'research' : 'observer' }).toString();
   }
 
-  function row(h, l) {
-    const li = document.createElement('li');
-    li.className = 'hall-row';
-    li.dataset.code = h.code;
+  /** Set a part's markup only when it changed, so nothing in it is drawn again for nothing. */
+  const put = (el, partHtml) => { if (el.innerHTML !== partHtml) el.innerHTML = partHtml; };
+  function row(h, l, had) {
+    let li = had;
+    if (!li) {
+      li = document.createElement('li');
+      li.className = 'hall-row';
+      li.dataset.code = h.code;
+      li.dataset.key = h.code;
+      // The hall's name is the row's one link: its ::after covers the row, so a click, a middle click or a Ctrl+click
+      // anywhere on it is the link's, and a screen reader reads it as the link it is.
+      const open = document.createElement('a');
+      open.className = 'hall-open';
+      open.dataset.objectLink = '1';
+      const clock = document.createElement('div'); clock.className = 'hall-clock';
+      const last = document.createElement('div'); last.className = 'hall-last';
+      const meta = document.createElement('div'); meta.className = 'hall-meta';
+      const bar = document.createElement('span'); bar.className = 'obj-bar';
+      li.append(open, clock, last, meta, bar);
+    }
+    const [open, clock, last, meta, bar] = li.children;
     const st = l.stage || null;
     const state = stageState(st);
     li.dataset.state = state;
     const helpOpen = helps.filter((x) => x.code === h.code).length;
     const timeHtml = st && st.text ? esc(st.text) : '--:--';
     const titleHtml = st && st.title ? esc(st.title) : '';
-    const displaysHtml = (l.displays || []).map((d) => '<span class="disp-chip" data-ok="' + esc(d.state) + '" title="' + esc(d.words) + '">' + esc(d.mark) + ' ' + esc(d.name) + '</span>').join('');
-    li.innerHTML =
-      '<a class="hall-open" href="' + esc(hallHref(h.code)) + '">' +
-        '<span class="hall-name">' + esc(h.name || h.code) + '</span>' +
-        '<span class="hall-code" title="Crew without an account join with this code">' + esc(h.code) + '</span>' +
-      '</a>' +
-      '<div class="hall-clock" title="' + esc(STATE[state].words) + '">' +
-        '<span class="hall-time" style="' + (st && st.color && !['stale', 'checking', 'refused', 'refusedView', 'certificate'].includes(state) ? 'color:' + esc(st.color) : '') + '">' + timeHtml + '</span>' +
-        '<span class="hall-state"><span aria-hidden="true">' + esc(STATE[state].mark) + '</span> ' + esc(STATE[state].words) + (titleHtml ? ' — ' + titleHtml : '') + '</span>' +
-      '</div>' +
-      '<div class="hall-last">' + (l.last ? '<strong>' + esc(l.last.name) + '</strong> ' + esc(l.last.text) + ' <time>' + esc(AGM.ago(l.last.at)) + '</time>' : '<span class="muted">No messages yet</span>') + '</div>' +
-      '<div class="hall-meta">' +
-        (canManageHalls ? '<button type="button" class="btn ghost small hall-setup" data-code="' + esc(h.code) + '">Set up</button>' : '') +
-        '<span title="People in the hall now">' + esc(String(l.people ?? h.people)) + ' in</span>' +
-        (helpOpen ? '<span class="help-count" title="Open help requests">■ ' + esc(String(helpOpen)) + (helpOpen === 1 ? ' needs help' : ' need help') + '</span>' : '') +
-        displaysHtml + nodesHtml(l.nodes) +
-      '</div>';
+    // A chip's state is its words as well as its mark: in its title for a pointer, beside its name for a screen reader.
+    const displaysHtml = (l.displays || []).map((d) => '<span class="disp-chip" data-ok="' + esc(d.state) + '" title="' + esc(d.words) + '">' + esc(d.mark) + ' ' + esc(d.name) + '<span class="sr-only">: ' + esc(d.words) + '</span></span>').join('');
+    const href = hallHref(h.code);
+    if (open.getAttribute('href') !== href) open.setAttribute('href', href);
+    put(open, '<span class="hall-name">' + esc(h.name || h.code) + '</span>' +
+      '<span class="hall-code" title="Crew without an account join with this code">' + esc(h.code) + '</span>');
+    // An unlinked hall says so quietly, with no clock to read.
+    put(clock, state === 'none'
+      ? '<span class="hall-state"><span aria-hidden="true">○</span> No Stagewatch linked</span>'
+      : '<span class="hall-time" style="' + (st && st.color && !['stale', 'checking', 'refused', 'refusedView', 'certificate'].includes(state) ? 'color:' + esc(st.color) : '') + '">' + timeHtml + '</span>' +
+        '<span class="hall-state"><span aria-hidden="true">' + esc(STATE[state].mark) + '</span> ' + esc(STATE[state].words) + (titleHtml ? ' — ' + titleHtml : '') + '</span>');
+    clock.title = STATE[state].words;
+    clock.dataset.none = state === 'none' ? '1' : '';
+    put(last, l.last ? '<strong>' + esc(l.last.name) + '</strong> ' + esc(l.last.text) + ' <time>' + esc(AGM.ago(l.last.at)) + '</time>' : '<span class="muted">No messages yet</span>');
+    put(meta, '<span title="People in the hall now">' + esc(String(l.people ?? h.people)) + ' in</span>' +
+      (helpOpen ? '<span class="help-count" title="Open help requests">■ ' + esc(String(helpOpen)) + (helpOpen === 1 ? ' needs help' : ' need help') + '</span>' : '') +
+      displaysHtml + nodesHtml(l.nodes));
+    A.draw(bar, 'hall', hallObject(h.code), { more: 'Actions for ' + (h.name || h.code), keysOn: li });
     return li;
   }
 
   // ---------------------------------------------------------------- a hall's set-up: its name and its own Stagewatch
-  document.addEventListener('click', (e) => {
-    const b = e.target.closest('.hall-setup');
-    if (b) openSetup(b.dataset.code);
-  });
   let setupCode = '';
   function openSetup(code) {
     if (!socket) return;
@@ -160,7 +197,7 @@
   const LIGHT_MARK = { green: '✓', amber: '△', red: '✕', grey: '○' };
   /** A linked Patterns or PlayMap as a chip: its light in a shape and its name; its headline on hover. */
   function nodesHtml(list) {
-    return (list || []).map((n) => '<span class="node-chip" data-light="' + esc(n.light) + '" title="' + esc((n.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' — ' + (n.headline || n.status)) + '">' + esc(LIGHT_MARK[n.light] || '○') + ' ' + esc(n.name) + '</span>').join('');
+    return (list || []).map((n) => { const words = (n.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' — ' + (n.headline || n.status); return '<span class="node-chip" data-light="' + esc(n.light) + '" title="' + esc(words) + '">' + esc(LIGHT_MARK[n.light] || '○') + ' ' + esc(n.name) + '<span class="sr-only">: ' + esc(words) + '</span></span>'; }).join('');
   }
 
   // ---------------------------------------------------------------- the show network: Patterns and PlayMap, and their verbs
@@ -223,33 +260,50 @@
   $('networkBtn').addEventListener('click', openNetwork);
   $('networkClose').addEventListener('click', () => $('networkDialog').close());
 
+  /** A help request as the catalogue reads it, by its key ('<hall>|<id>'): its hall, id, state and whether this account answers it. */
+  function helpObject(key) {
+    const x = helps.find((h) => h.code + '|' + h.id === key);
+    return x ? { code: x.code, id: x.id, state: x.state, canRespond: !!x.canRespond, hall: x.hallName || x.code, category: x.category } : null;
+  }
+  /** The open help requests, each kept by its key and drawn again in place: its words, its answers and its ⋯. */
   function renderHelp() {
     const strip = $('helpStrip');
     strip.hidden = helps.length === 0;
     const ul = $('helpList');
-    ul.textContent = '';
-    for (const x of helps) {
-      const li = document.createElement('li');
-      li.className = 'help-item';
-      li.dataset.state = x.state;
-      li.innerHTML =
-        '<span class="help-where">' + esc(x.hallName || x.code) + '</span>' +
-        '<span class="help-what"><strong>' + esc(x.category) + '</strong> ' + esc(x.text) + '</span>' +
-        '<span class="help-who">' + esc(x.from) + ' · ' + esc(AGM.ago(x.at)) + (heldWords(x) ? ' · ' + esc(heldWords(x)) : '') + (x.by ? ' · ' + esc(x.by) + (x.state === 'coming' ? ' is on the way' : '') : '') + '</span>';
-      const open = document.createElement('a');
-      open.className = 'btn small';
-      open.href = hallHref(x.code);
-      open.textContent = 'Open hall';
-      li.appendChild(open);
-      if (x.canRespond) {
-        const held = heldAnswers.get(x.code + '|' + x.id);
-        if (x.state === 'open') li.appendChild(button((held === 'coming' ? '◷ ' : '') + 'On my way', () => respond(x, 'coming')));
-        li.appendChild(button((held === 'resolved' ? '◷ ' : '') + 'Resolved', () => respond(x, 'resolved')));
+    const keep = new Map([...ul.querySelectorAll(':scope > li[data-key]')].map((li) => [li.dataset.key, li]));
+    helps.forEach((x, i) => {
+      const key = x.code + '|' + x.id;
+      let li = keep.get(key);
+      keep.delete(key);
+      if (!li) {
+        li = document.createElement('li');
+        li.className = 'help-item';
+        li.dataset.key = key;
+        const where = document.createElement('span'); where.className = 'help-where';
+        const what = document.createElement('span'); what.className = 'help-what';
+        const who = document.createElement('span'); who.className = 'help-who';
+        const open = document.createElement('a'); open.className = 'btn small help-open'; open.dataset.objectLink = '1'; open.textContent = 'Open its hall';
+        const held = document.createElement('span'); held.className = 'help-held'; held.hidden = true;
+        const bar = document.createElement('span'); bar.className = 'obj-bar';
+        li.append(where, what, who, open, held, bar);
       }
-      ul.appendChild(li);
-    }
+      const [where, what, who, open, held, bar] = li.children;
+      li.dataset.state = x.state;
+      if (where.textContent !== (x.hallName || x.code)) where.textContent = x.hallName || x.code;
+      put(what, '<strong>' + esc(x.category) + '</strong> ' + esc(x.text));
+      const whoWords = x.from + ' · ' + AGM.ago(x.at) + (heldWords(x) ? ' · ' + heldWords(x) : '') + (x.by ? ' · ' + x.by + (x.state === 'coming' ? ' is on the way' : '') : '');
+      if (who.textContent !== whoWords) who.textContent = whoWords;
+      const href = hallHref(x.code);
+      if (open.getAttribute('href') !== href) open.setAttribute('href', href);
+      // An answer held by the outbox until the server has it says so beside the answers.
+      const mine = heldAnswers.get(key);
+      held.hidden = !mine;
+      held.textContent = mine ? '◷ ' + (mine === 'coming' ? 'On my way' : 'Resolved') + ': sent when the connection is back' : '';
+      A.draw(bar, 'help', helpObject(key), { more: 'Actions for this help request', words: true, cls: 'btn small primary', keysOn: li });
+      if (ul.children[i] !== li) ul.insertBefore(li, ul.children[i] || null);
+    });
+    for (const li of keep.values()) li.remove();
   }
-  function button(text, onclick) { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn small primary'; b.textContent = text; b.onclick = onclick; return b; }
   /** "written 14:02 · sent 14:06 (offline)" for a help request its page held before sending it, else ''. */
   function heldWords(x) {
     if (!Number.isInteger(x.held) || x.held <= 0) return '';
@@ -258,10 +312,23 @@
   }
   // An answer to a help request is held by the outbox until the server has it (its button marked ◷ meanwhile).
   const heldAnswers = new Map();   // '<hall>|<id>' -> the state this person's held answer says
-  function respond(x, state) {
-    if (!socket) return;
-    AGM.outbox.hold('help:respond', { code: x.code, messageId: x.id, state });
-  }
+  Object.assign(RUN, {
+    'help.respond': (o) => AGM.outbox.hold('help:respond', { code: o.code, messageId: o.id, state: 'coming' }),
+    'help.resolve': (o) => AGM.outbox.hold('help:respond', { code: o.code, messageId: o.id, state: 'resolved' }),
+    'help.open': (o) => { location.href = hallHref(o.code); },
+    'hall.open': (o) => { location.href = hallHref(o.code); },
+    'hall.tab': (o) => { window.open(hallHref(o.code), '_blank', 'noopener'); },
+    'hall.copy': (o, c) => AGM.copy(new URL(hallHref(o.code), location.href).href, { said: 'Copied the link to ' + o.name + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
+    'hall.code': (o, c) => AGM.copy(o.code, { said: 'Copied ' + o.name + '\'s guest code, ' + o.code + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
+    'hall.setup': (o) => openSetup(o.code),
+    'hall.network': () => openNetwork(),
+  });
+  A.bind($('hallList'), { kind: 'hall', find: (el) => el.closest('#hallList > li[data-key]'), get: hallObject, label: 'Hall actions', gone: 'That hall is gone.', header: (o) => o.name + ' · ' + o.code });
+  A.bind($('helpList'), { kind: 'help', find: (el) => el.closest('#helpList > li[data-key]'), get: helpObject, label: 'Help request actions', gone: 'That help request is gone: it was resolved or removed.', header: (o) => o.category + ' · ' + o.hall });
+  AGM.roving($('hallList'), { item: 'li[data-key]' });
+  AGM.roving($('helpList'), { item: 'li[data-key]' });
+  // What this page's acts read, by name: its facts and its objects (the browser smoke reads them to hold the doors to the catalogue).
+  AGM.page = Object.freeze({ facts: () => F, object: (kind, key) => (kind === 'hall' ? hallObject(key) : kind === 'help' ? helpObject(key) : null) });
   function drawHeld(item) {
     if (item.verb !== 'help:respond') return;
     const k = item.args.code + '|' + item.args.messageId;
@@ -282,11 +349,12 @@
     const ls = $('linkState');
     socket.on('connect', () => {
       ls.dataset.ok = '1'; ls.textContent = '● Live';
+      factsChanged();
       socket.emit('board:watch', {}, (r) => {
         if (r && r.ok) { applyBoard(r.board); AGM.outbox.ready({ scope: 'board', who: me ? me.username : '' }); } else if (r && r.error) AGM.toast(r.error, true);
       });
     });
-    socket.on('disconnect', () => { ls.dataset.ok = '0'; ls.textContent = '○ Reconnecting'; });
+    socket.on('disconnect', () => { ls.dataset.ok = '0'; ls.textContent = '○ Reconnecting'; factsChanged(); });
     socket.on('board', applyBoard);
     socket.on('nodes:changed', () => { if ($('networkDialog').open) openNetwork(); });
     socket.on('account:changed', ({ words } = {}) => { AGM.toast(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1200); });
@@ -299,9 +367,10 @@
     // Show network opens nodes:list, which lists the nodes this account may drive: offered only when there is one (a
     // hall's crew still sees its nodes' lights on the hall's row).
     $('networkBtn').hidden = !b.canDrive;
+    canDrive = !!b.canDrive;
     const known = new Set(halls.map((h) => h.code));
     if ((b.halls || []).some((r) => !known.has(r.code)) || (b.halls || []).length !== halls.length) { load(); return; }
-    render();
+    factsChanged();
   }
   // Each Stagewatch sends a frame about every second while it runs, and the board is pushed on every change, so the clock
   // shown is Stagewatch's own words (a calm "12 MIN" stays "12 MIN"), never a guess made here.

@@ -38,12 +38,19 @@ halls (or "every hall, including new ones"). The rights, as the server checks th
 
 Rules that keep rights from growing by themselves: deny by default; only an admin makes an admin or hands out
 `users.manage`, `settings.manage` or `audit.export`, and only an admin changes, resets, signs out, turns back on or
-removes an account that holds one of them (the Accounts page shows such a person as "Admin only" to anyone else); an account that is not an
+removes an account that holds one of them (on the Accounts page such a person's Edit is disabled for anyone else, with the server's reason); an account that is not an
 admin manages only accounts within its own rights and halls, and hands out only those — it cannot make a richer account,
 widen one, or reset a richer one's password (the page offers only what it holds, names only the halls it holds — a
-person's other halls are a count — and shows a richer person as "Locked"); nobody changes their own role, rights or
-halls, nor turns themselves off or removes themselves (on one's own row the page offers the name, a new one-time
-password and Sign out everywhere); the last admin who can sign in stays one. A code guest's rights come from where they joined: backstage posts, shares files and sends to Stagewatch; on
+person's other halls are a count — and offers nothing on a richer person's row but its Edit, disabled with the reason,
+which its button, its menu and the toast when it is chosen each say); nobody changes their own role, rights or
+halls, nor turns themselves off or removes themselves (on one's own row the page offers Edit for the name, a new
+one-time password and Sign out everywhere); the last admin who can sign in stays one. An account's acts are on its row:
+Edit… as its button, and on its ⋯, right-click and Shift+F10 (from the catalogue's `account` rows) Edit…, New one-time
+password…, Sign out everywhere…, Turn off… (or Turn on) and Remove…, each asked in place before it runs (Turn on asks
+nothing); each goes over HTTP, and an answer not back in 5 s, the editor's Save included, says "No answer — check the
+connection." The answer that comes later is still the act's, said as late, and the list is read again: a new one-time
+password that comes late is shown all the same (the old one has stopped working by then), and a Save is held, never sent
+twice, until it is answered. A code guest's rights come from where they joined: backstage posts, shares files and sends to Stagewatch; on
 stage posts; an observer reads; a role the join page does not offer is refused ("Choose On stage,
 Backstage or Observer."), never seated as another. A browser signed in to an account is that account in every hall, a
 one-time password not yet changed included: its code join is refused ("You are signed in as Ana: open the room from your
@@ -195,6 +202,13 @@ hold: another computer or Windows account, or a run without its key), `audit.unk
 keyed with a key of its own and marked in the key folder, so the next run says "written here while this machine had no
 machine key"). The entries not under this laptop's key are a span, and what this laptop says of them comes from what it
 holds, never from what the entries claim.
+
+**An entry's menu.** Each entry of Accounts → Audit log has its ⋯, right-click and Shift+F10 (the catalogue's `audit`
+rows, `audit.read`): Copy this row (its mark's shape first; a row holds no secret, by rule), Only this actor and Only this
+target (the list kept to that actor's or that target's entries, said above it with how many are shown; Show all brings
+the rest back), then Check the log, Export the log… (`audit.export` with `audit.read`) and, on an `audit.archive` entry
+and for the admin alone, Split the log here…, asked in place with the word **split** typed, as on Admin → Health, and
+run as long as the split takes ("Splitting…" meanwhile), then the log read again.
 
 **The four marks.** **Accounts → Audit log → Check the log** reads every file, oldest first, as one chain and answers
 with one mark, each drawn with its shape:

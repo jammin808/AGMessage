@@ -473,7 +473,7 @@ const NEW_MARK = (text) => `(() => {
 })()`;
 // ---------------------------------------------------------------- an object's doors (catalog.js, menus.js)
 /** A key on a tab, as a keyboard sends it: its down, its character (for one that has one) and its up. */
-const KEY_CODES = { F10: 121, Escape: 27, Enter: 13, Delete: 46, ArrowDown: 40, p: 80, d: 68, e: 69, f: 70 };
+const KEY_CODES = { F10: 121, Escape: 27, Enter: 13, Delete: 46, ArrowDown: 40, Tab: 9, p: 80, d: 68, e: 69, f: 70 };
 async function press(tab, key, { shift = false } = {}) {
   const vk = KEY_CODES[key];
   const k = { key, code: key.length === 1 ? 'Key' + key.toUpperCase() : key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers: shift ? 8 : 0 };
@@ -506,9 +506,9 @@ const NO_MENU = `!document.querySelector('.agm-menu')`;
  * the key's menu has the focus on its first enabled item, and Escape gives the focus back; each inline act is in the
  * menu under its own name. `sel` is an expression for the object's element, `obj` one for the catalogue's object.
  */
-async function doorsOf(tab, kind, sel, obj) {
-  const out = { want: await tab.eval(`JSON.stringify(AGM.catalog.ids(${codeLiteral(kind)}, F, ${obj}))`) };
-  const at = await tab.eval(`(() => { const n = ${sel}; n.scrollIntoView({ block: 'center' }); const h = n.querySelector('.from, .name, .screen-line strong') || n; const q = h.getBoundingClientRect(); return { x: Math.round(q.left + Math.min(6, q.width / 2)), y: Math.round(q.top + q.height / 2) }; })()`);
+async function doorsOf(tab, kind, sel, obj, { facts = 'F', bar = '.msg-acts > .msg-act, .file-acts > .msg-act, .screen-acts > .msg-act', focus = sel, hit = '.from, .name, .screen-line strong' } = {}) {
+  const out = { want: await tab.eval(`JSON.stringify(AGM.catalog.ids(${codeLiteral(kind)}, ${facts}, ${obj}))`) };
+  const at = await tab.eval(`(() => { const n = ${sel}; n.scrollIntoView({ block: 'center' }); const h = n.querySelector(${codeLiteral(hit)}) || n; const q = h.getBoundingClientRect(); return { x: Math.round(q.left + Math.min(6, q.width / 2)), y: Math.round(q.top + q.height / 2) }; })()`);
   out.hit = await tab.eval(`(() => { const h = document.elementFromPoint(${at.x}, ${at.y}); return h ? h.tagName + '.' + h.className + ' in ' + (${sel}).contains(h) : 'nothing'; })()`);
   await rightClick(tab, at);
   out.right = await tab.until(MENU_IDS, 3000);
@@ -520,7 +520,7 @@ async function doorsOf(tab, kind, sel, obj) {
   out.dots = await tab.until(MENU_IDS, 3000);
   out.inline = await tab.eval(`(async () => {
     const n = ${sel}; const menu = document.querySelector('.agm-menu:not(.agm-sub)'); const rows = [];
-    for (const b of n.querySelectorAll('.msg-acts > .msg-act, .file-acts > .msg-act, .screen-acts > .msg-act')) {
+    for (const b of n.querySelectorAll(${codeLiteral(bar)})) {
       const id = b.dataset.action;
       let row = menu.querySelector(':scope > .agm-mi[data-action="' + id + '"]');
       const fold = row ? null : [...menu.querySelectorAll(':scope > .agm-mi[data-children]')].find((r) => r.dataset.children.split(' ').includes(id));
@@ -537,13 +537,55 @@ async function doorsOf(tab, kind, sel, obj) {
   out.dotsHit = await tab.eval(`(() => { const h = document.elementFromPoint(${dotsNow.x}, ${dotsNow.y}); return h ? h.tagName + '.' + h.className : 'nothing'; })()`);
   await leftClick(tab, dotsNow);
   out.dotsBack = !!(await tab.until(`${NO_MENU} && document.activeElement === ${sel}.querySelector('.obj-more')`, 3000));
-  await tab.eval(`${sel}.focus()`);
+  await tab.eval(`${focus}.focus()`);
   await press(tab, 'F10', { shift: true });
   out.key = await tab.until(MENU_IDS, 3000);
   out.keyFirst = await tab.eval(`(() => { const first = [...document.querySelectorAll('.agm-menu:not(.agm-sub) > .agm-mi')].find((b) => b.getAttribute('aria-disabled') !== 'true'); return !!first && document.activeElement === first; })()`);
   await press(tab, 'Escape');
-  out.keyBack = !!(await tab.until(`${NO_MENU} && document.activeElement === ${sel}`, 3000));
+  out.keyBack = !!(await tab.until(`${NO_MENU} && document.activeElement === ${focus}`, 3000));
   return out;
+}
+/** The doors of the objects on the pages that list them (the admin page, the halls board, the Accounts page): their facts and objects from AGM.page, their bars `.obj-bar`. */
+const PAGE_DOORS_HALLS = { facts: 'AGM.page.facts()', bar: '.obj-bar > [data-action]' };
+/**
+ * The bars of a page that lists objects, read as drawn (INK first): how many acts and ⋯ are shown, whether the pointer is
+ * coarse, their smallest side, the lowest ink of the icon-only ones and of the ones with words on what they sit on, and
+ * the lowest opacity among them (null where there are none of a sort).
+ */
+const BARS_READ = `(() => { const vis = (b) => b.getClientRects().length > 0;
+  const read = [...document.querySelectorAll('.obj-bar > [data-action], .obj-bar > .obj-more')].filter(vis).map((b) => { const r = b.getBoundingClientRect(); const k = __ink(b); return { size: Math.min(r.width, r.height), ratio: k.ratio, opacity: k.opacity, words: !!b.querySelector('.act-words') }; });
+  const low = (xs, f) => (xs.length ? Math.round(Math.min(...xs.map(f)) * 100) / 100 : null);
+  return JSON.stringify({ n: read.length, coarse: matchMedia('(pointer: coarse)').matches, size: low(read, (x) => x.size), icons: low(read.filter((x) => !x.words), (x) => x.ratio), words: low(read.filter((x) => x.words), (x) => x.ratio), opacity: low(read, (x) => x.opacity) }); })()`;
+/** A page's bars, and the menu of the object `sel` opened by its ⋯, in both themes; the page's theme put back after. */
+async function barsInThemes(tab, sel) {
+  await tab.eval(INK);
+  const was = await tab.eval(`document.documentElement.dataset.theme || ''`);
+  const out = {};
+  for (const theme of ['light', 'dark']) {
+    await tab.eval(`document.documentElement.dataset.theme = ${codeLiteral(theme)}`);
+    await sleep(200);   // the buttons' colour transitions end
+    const bars = JSON.parse(await tab.eval(BARS_READ));
+    await tab.eval(`(${sel}).querySelector('.obj-more').click()`);
+    await tab.until(`!!document.querySelector('.agm-menu .agm-mi .mi-label')`, 3000);
+    const menu = await tab.eval(`(() => { const m = document.querySelector('.agm-menu'); return m ? +__ink(m.querySelector('.agm-mi .mi-label')).ratio.toFixed(2) : 0; })()`);
+    await press(tab, 'Escape');
+    await tab.until(NO_MENU, 3000);
+    out[theme] = { ...bars, menu };
+  }
+  await tab.eval(`(() => { const t = ${codeLiteral(was)}; if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; })()`);
+  return out;
+}
+/** A page's bars read well: shown, 24 px or more (44 px under a finger), icons 3:1, words 4.5:1, none faded, its menu's words 4.5:1. */
+const barsOk = (t) => t.n > 0 && t.size >= (t.coarse ? 44 : 24) && (t.icons === null || t.icons >= 3) && (t.words === null || t.words >= 4.5) && t.opacity === 1 && (t.menu === undefined || t.menu >= 4.5);
+/** A page that lists objects on a phone (390 × 844, a touch screen), its bars read once `ready` holds. */
+async function barsUnderAFinger(edge, url, ready) {
+  const ph = await edge.tab(url, { metrics: PHONE });
+  const shown = await ph.until(ready, 15000);
+  await ph.eval(INK);
+  const read = shown ? JSON.parse(await ph.eval(BARS_READ)) : { n: 0 };
+  read.problems = ph.problems.slice(0, 3);
+  ph.close();
+  return read;
 }
 /** Whether an object's doors are in step: every door the catalogue's set, focus where it belongs, the bar in the menu. */
 const doorsInStep = (d) => !!d.want && d.want !== '[]' && d.right === d.want && d.dots === d.want && d.key === d.want && d.rightClosed && d.dotsStill && d.dotsBack && d.keyFirst && d.keyBack &&
@@ -1092,7 +1134,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         await admin.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 409, responseHeaders: [{ name: 'content-type', value: 'application/json' }], body: Buffer.from(JSON.stringify({ ok: false, error: 'an export is being made for Ana since 14:02: try again when it ends' })).toString('base64') });
         return;
       }
-      const b = await admin.send('Fetch.getResponseBody', { requestId: p.requestId });
+      // Only an answer is cut: a request paused before its answer, or one whose body cannot be read, goes on as it is (and
+      // the step's own check then says the stream was not cut).
+      const b = p.responseStatusCode === undefined ? null : await admin.send('Fetch.getResponseBody', { requestId: p.requestId });
+      if (!b || !b.result) { await admin.send('Fetch.continueRequest', { requestId: p.requestId }); return; }
       const full = Buffer.from(b.result.body, b.result.base64Encoded ? 'base64' : 'utf8');
       const headers = (p.responseHeaders || []).filter((x) => !/^(content-length|transfer-encoding)$/i.test(x.name));
       await admin.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: headers, body: full.subarray(0, full.length - 40).toString('base64') });
@@ -1222,6 +1267,53 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const twoGone = await emit(closer, 'admin:deleteRoom', { roomCode: twoAsks, purgeFiles: false });
     closer.close();
     report(!!(twoGone && twoGone.ok && (await signin.until(`!document.querySelector('.hall-row[data-code="${twoAsks}"]')`))), 'the hall made for the count goes again');
+    // The halls board acts from the catalogue (kinds hall, help): a hall's row opens its menu by a right-click on its
+    // name (its one link, whose menu is AGMessage's), its ⋯ and Shift+F10 alike; a help request's answers are its bar.
+    const HALL_ROW = `document.querySelector('.hall-row[data-code="${obHall}"]')`;
+    const HELP_ITEM = `[...document.querySelectorAll('#helpList > li[data-key]')].find((li) => li.textContent.includes('mic 4 crackles'))`;
+    const boardDoors = {
+      hall: await doorsOf(signin, 'hall', HALL_ROW, `AGM.page.object('hall', '${obHall}')`, { ...PAGE_DOORS_HALLS, hit: '.hall-name' }),
+      help: await doorsOf(signin, 'help', HELP_ITEM, `AGM.page.object('help', (${HELP_ITEM}).dataset.key)`, { ...PAGE_DOORS_HALLS, hit: '.help-what' }),
+    };
+    for (const [what, d] of Object.entries(boardDoors)) report(doorsInStep(d), `the halls board's ${what}: right-click = ⋯ = Shift+F10 = the catalogue's set, the bar in it (${d.want}; ${d.right} / ${d.dots} / ${d.key}; ${d.inline}; hit ${d.hit})`);
+    report(boardDoors.hall.want === JSON.stringify(['hall.open', 'hall.tab', 'hall.copy', 'hall.code', 'hall.setup']) && boardDoors.help.want === JSON.stringify(['help.respond', 'help.resolve', 'help.open']),
+      `a hall's row offers Open, Open in a new tab, Copy link, Copy guest code and Set up…, and a help request its two answers and its hall (${boardDoors.hall.want}; ${boardDoors.help.want})`);
+    // The hall's name is the row's one link: its ::after covers the row, so the row's other parts are the link's to a
+    // pointer; a middle click on the name opens the hall in a tab of its own.
+    const oneLink = await signin.eval(`(() => { const r = ${HALL_ROW}; const at = (sel) => { const q = r.querySelector(sel).getBoundingClientRect(); const h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return h ? (h.closest('a') === r.querySelector('a.hall-open') ? 'link' : h.closest('.obj-more') ? 'more' : h.tagName) : 'nothing'; };
+      return JSON.stringify({ links: r.querySelectorAll('a[href]').length, clock: at('.hall-clock'), last: at('.hall-last'), more: at('.obj-more'), href: r.querySelector('a.hall-open').getAttribute('href') }); })()`);
+    const tabsBefore = new Set(((await edge.browserSend('Target.getTargets')).result || { targetInfos: [] }).targetInfos.map((x) => x.targetId));
+    const nameAt = await middleOf(signin, `${HALL_ROW}.querySelector('.hall-name')`);
+    for (const type of ['mousePressed', 'mouseReleased']) await signin.send('Input.dispatchMouseEvent', { type, x: nameAt.x, y: nameAt.y, button: 'middle', buttons: type === 'mousePressed' ? 4 : 0, clickCount: 1 });
+    let tabOpened = null;
+    for (let i = 0; i < 40 && !tabOpened; i++) {
+      tabOpened = (((await edge.browserSend('Target.getTargets')).result || { targetInfos: [] }).targetInfos).find((x) => x.type === 'page' && !tabsBefore.has(x.targetId)) || null;
+      if (!tabOpened) await sleep(100);
+    }
+    if (tabOpened) await edge.browserSend('Target.closeTarget', { targetId: tabOpened.targetId });
+    const stayed = await signin.eval(`location.pathname`);
+    report(JSON.stringify(JSON.parse(oneLink).links) === '1' && JSON.parse(oneLink).clock === 'link' && JSON.parse(oneLink).last === 'link' && JSON.parse(oneLink).more === 'more' && !!tabOpened && stayed === '/halls.html',
+      `a hall's name is its row's one link, covering the row but its ⋯, and a middle click on it opens a tab of its own (${oneLink}; opened ${tabOpened ? tabOpened.url : 'nothing'})`);
+    // A board frame while a hall's menu is open (a new message in that hall) draws the row again in place: the menu stays
+    // open on the same ⋯, with the same items in the same order.
+    await signin.eval(`(${HALL_ROW}).querySelector('.obj-more').click()`);
+    const openIds = await signin.until(MENU_IDS, 3000);
+    const poster = await connect(base);
+    await emit(poster, 'join', { roomCode: obHall, name: 'Rex', role: 'research' });
+    await emit(poster, 'message', { type: 'text', text: 'Frame while a menu is open' });
+    const framed = await signin.until(`(${HALL_ROW}).querySelector('.hall-last').textContent.includes('Frame while a menu is open') && ${MENU_IDS}`, 5000);
+    const stillOn = await signin.eval(`(${HALL_ROW}).querySelector('.obj-more').getAttribute('aria-expanded')`);
+    await press(signin, 'Escape');
+    poster.close();
+    report(!!openIds && framed === openIds && stillOn === 'true', `a hall's menu stays open, its items in order, while a board frame redraws its row (${openIds} → ${framed}; ⋯ expanded ${stillOn})`);
+    const skipBoard = await signin.eval(`(async () => { const s = document.querySelector('.skip-link'); s.focus(); const shown = s.getBoundingClientRect().top >= 0; s.click(); await new Promise((r) => setTimeout(r, 50)); return JSON.stringify({ words: s.textContent, shown, to: document.activeElement.id }); })()`);
+    report(skipBoard === JSON.stringify({ words: 'Skip to the halls', shown: true, to: 'boardTitle' }), `the halls board's skip link takes the focus to the halls (${skipBoard})`);
+    // The rows are one tab stop: ↓ moves to the next hall, and Enter on a focused hall would open it (its key).
+    const roving = await signin.eval(`(() => { const rows = [...document.querySelectorAll('#hallList > li[data-key]')]; return JSON.stringify({ stops: rows.filter((r) => r.tabIndex === 0).length, inner: rows.slice(1).every((r) => [...r.querySelectorAll('a, button')].every((c) => c.tabIndex === -1)), keys: rows[0].getAttribute('aria-keyshortcuts') }); })()`);
+    await signin.eval(`document.querySelector('#hallList > li[data-key]').focus()`);
+    await press(signin, 'ArrowDown');
+    const moved = await signin.eval(`document.activeElement === document.querySelectorAll('#hallList > li[data-key]')[1] && document.activeElement.tabIndex === 0`);
+    report(roving === JSON.stringify({ stops: 1, inner: true, keys: 'Enter' }) && moved === true, `the halls are one tab stop, ↓ moves to the next, Enter opens the focused one (${roving}; moved ${moved})`);
     await sleep(600);
     await signin.shot(path.join(OUT, 'halls.png'));
     const users = await edge.tab(`${base}/users.html`);
@@ -1256,6 +1348,54 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await users.eval(`document.getElementById('userSave').click()`);
     const selfSaved = await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — nothing changed.' && !document.getElementById('userDialog').open`, 5000);
     report(selfForm === JSON.stringify({ name: true, role: true, every: true, halls: true, rights: true, off: true, remove: true }) && !!selfSaved, `one's own row: a Save is taken; role, halls, rights, Turn off and Remove are not offered (${selfForm}${selfSaved ? '' : '; ' + (await users.eval(`document.getElementById('userError').textContent`))})`);
+    // The Accounts page acts from the catalogue (kinds account, audit): an account's row and an entry of the audit log
+    // open the same menu by right-click, ⋯ and Shift+F10; an account's Edit is its bar.
+    const KIM_ROW = `[...document.querySelectorAll('#userRows > tr[data-key]')].find((tr) => tr.textContent.includes('kim'))`;
+    const accountDoors = await doorsOf(users, 'account', KIM_ROW, `AGM.page.object('account', (${KIM_ROW}).dataset.key)`, { ...PAGE_DOORS_HALLS, hit: 'td strong' });
+    report(doorsInStep(accountDoors) && accountDoors.want === JSON.stringify(['account.edit', 'account.password', 'account.signout', 'account.disable', 'account.remove']),
+      `an account's row: right-click = ⋯ = Shift+F10 = Edit…, New one-time password…, Sign out everywhere…, Turn off…, Remove…, Edit in its bar (${accountDoors.want}; ${accountDoors.right} / ${accountDoors.dots} / ${accountDoors.key}; ${accountDoors.inline})`);
+    // Remove…, asked in place inside the page and answered "Keep it": the account stays.
+    await users.eval(`(${KIM_ROW}).querySelector('.obj-more').click()`);
+    await users.until(`!!document.querySelector('.agm-menu [data-action="account.remove"]')`, 3000);
+    await users.eval(`document.querySelector('.agm-menu [data-action="account.remove"]').click()`);
+    const accountRemoveAsk = await users.until(`(() => { const a = document.querySelector('.agm-ask'); return a && a.querySelector('.agm-ask-title').textContent + ' | ' + a.querySelector('[data-answer=yes]').textContent + ' | ' + a.querySelector('[data-answer=no]').textContent; })()`, 3000);
+    await users.eval(`document.querySelector('.agm-ask [data-answer=no]').click()`);
+    const kimStays = await users.until(`!document.querySelector('.agm-ask') && !!(${KIM_ROW})`, 3000);
+    report(accountRemoveAsk === 'Remove Kim Tech\'s account? | Remove | Keep it' && !!kimStays, `Remove… asks in place, named for the account, and "Keep it" keeps it (${accountRemoveAsk})`);
+    const skipUsers = await users.eval(`(async () => { const s = document.querySelector('.skip-link'); s.focus(); const shown = s.getBoundingClientRect().top >= 0; s.click(); await new Promise((r) => setTimeout(r, 50)); return JSON.stringify({ words: s.textContent, shown, to: document.activeElement.id }); })()`);
+    report(skipUsers === JSON.stringify({ words: 'Skip to the accounts', shown: true, to: 'peopleHead' }), `the Accounts page's skip link takes the focus to the accounts (${skipUsers})`);
+    // An entry of the audit log: its doors; Only this actor keeps the list to that actor's entries, said above it, and
+    // Show all brings the rest back.
+    await users.eval(`document.getElementById('tabAudit').click()`);
+    await users.until(`document.querySelectorAll('#auditList > li[data-key] .obj-more').length > 2`);
+    const ROW = `document.querySelector('#auditList > li[data-key]:not([hidden])')`;
+    const auditDoors = await doorsOf(users, 'audit', ROW, `AGM.page.object('audit', (${ROW}).dataset.key)`, { ...PAGE_DOORS_HALLS, hit: 'time' });
+    report(doorsInStep(auditDoors) && JSON.parse(auditDoors.want).includes('audit.copy') && JSON.parse(auditDoors.want).includes('audit.export'),
+      `an entry of the audit log: right-click = ⋯ = Shift+F10 = the catalogue's set (${auditDoors.want}; ${auditDoors.right} / ${auditDoors.dots} / ${auditDoors.key})`);
+    const actorOf = await users.eval(`(${ROW}).querySelector('.audit-actor').textContent`);
+    await users.eval(`(${ROW}).querySelector('.obj-more').click()`);
+    await users.until(`!!document.querySelector('.agm-menu [data-action="audit.actor"]')`, 3000);
+    await users.eval(`document.querySelector('.agm-menu [data-action="audit.actor"]').click()`);
+    const kept = await users.until(`(() => { const rows = [...document.querySelectorAll('#auditList > li[data-key]')]; const shown = rows.filter((r) => !r.hidden); return !document.getElementById('auditFilter').hidden && shown.length > 0 && JSON.stringify({ words: document.getElementById('auditFilterWords').textContent, all: shown.every((r) => r.querySelector('.audit-actor').textContent === ${codeLiteral(actorOf)}), hidden: rows.length - shown.length, menuAll: AGM.catalog.ids('audit', AGM.page.facts(), AGM.page.object('audit', shown[0].dataset.key)).includes('audit.all') }); })()`, 3000);
+    await users.eval(`document.getElementById('auditShowAll').click()`);
+    const allBack = await users.until(`document.getElementById('auditFilter').hidden && [...document.querySelectorAll('#auditList > li[data-key]')].every((r) => !r.hidden)`, 3000);
+    const keptOk = kept && JSON.parse(kept);
+    report(!!keptOk && keptOk.all && keptOk.hidden > 0 && keptOk.menuAll && keptOk.words.startsWith('Only entries by ' + actorOf + ' · ') && /· \d+ of \d+ shown$/.test(keptOk.words) && !!allBack,
+      `Only this actor keeps the log to ${actorOf}'s entries and says so; Show all brings the rest back (${kept})`);
+    await users.eval(`document.getElementById('tabPeople').click()`);
+    // The halls board and the Accounts page in both themes: every bar's acts and ⋯ 24 px or more with a mouse, their icons
+    // 3:1 or more and their words 4.5:1 or more on what they sit on, none faded, an open menu's words 4.5:1 or more; and on
+    // a phone, under a finger, the same acts and ⋯ 44 px or more.
+    await users.until(`!!(${KIM_ROW}) && !!(${KIM_ROW}).querySelector('.obj-more')`);
+    const boardInk = await barsInThemes(signin, HALL_ROW);
+    const usersInk = await barsInThemes(users, KIM_ROW);
+    report(barsOk(boardInk.light) && barsOk(boardInk.dark) && barsOk(usersInk.light) && barsOk(usersInk.dark),
+      `the halls board and the Accounts page read in both themes: bars 24 px or more, icons 3:1, words 4.5:1, none faded, menus 4.5:1 (${JSON.stringify({ halls: boardInk, accounts: usersInk })})`);
+    const fingers = {
+      halls: await barsUnderAFinger(edge, base + '/halls.html', `document.querySelectorAll('#hallList .obj-bar > .obj-more').length > 0`),
+      accounts: await barsUnderAFinger(edge, base + '/users.html', `document.querySelectorAll('#userRows .obj-bar > .obj-more').length > 0`),
+    };
+    report(Object.values(fingers).every((t) => t.coarse && barsOk(t) && t.problems.length === 0), `on a phone, under a finger, the halls board's and the Accounts page's acts and ⋯ are 44 px or more (${JSON.stringify(fingers)})`);
     // The page floor (docs/DEVICES.md). At it, without showModal(), the popover API, the Wake Lock and requestIdleCallback
     // (as Safari before 15.4 is): the halls board's New hall opens through AGM.openDialog's own, fixed in view above its
     // backdrop with the focus in it and the rest of the page hidden from a screen reader; Escape closes it and gives the
@@ -1428,7 +1568,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const dimmed = await screen.until(`document.getElementById('cdTime').textContent === '--:--'`, 10000);
     const marked = await signin.until(`(() => { const r = document.querySelector('.hall-row[data-code="${code}"]'); return !!r && r.dataset.state === 'refused' && r.querySelector('.hall-state').textContent.includes('✕ Stagewatch refused the key'); })()`, 8000);
     const noSend = await research.until(`!CAN_STAGE`, 5000);
-    await signin.eval(`document.querySelector('.hall-setup[data-code="${code}"]').click()`);
+    // Set up… is on the hall row's ⋯ (the catalogue's hall.setup).
+    await signin.eval(`document.querySelector('.hall-row[data-code="${code}"] .obj-more').click()`);
+    await signin.until(`!!document.querySelector('.agm-menu [data-action="hall.setup"]')`, 3000);
+    await signin.eval(`document.querySelector('.agm-menu [data-action="hall.setup"]').click()`);
     const said = await signin.until(`document.getElementById('setupDialog').open && document.getElementById('setupStatus').textContent`, 5000);
     await signin.shot(path.join(OUT, 'halls-key-refused.png'));
     await signin.eval(`document.getElementById('setupDialog').close()`);
@@ -1936,8 +2079,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const adminDeck = JSON.parse(await admin.eval(`JSON.stringify({
       tagline: document.querySelector('#loginPanel .tagline').textContent, newHall: document.getElementById('newSessionBtn').textContent,
       halls: document.querySelector('.admin-sidebar h3').textContent, none: document.getElementById('noRooms').textContent,
-      code: document.querySelector('#roomHeader span.muted').textContent, clear: document.getElementById('resetRoomBtn').textContent,
-      close: document.getElementById('closeRoomBtn').textContent, closing: document.querySelector('#closePanel p strong').firstChild.textContent,
+      code: document.querySelector('#roomHeader span.muted').textContent, clear: AGM.catalog.entry('adminRoom', 'adminRoom.clear').label,
+      close: AGM.catalog.entry('adminRoom', 'adminRoom.remove').label, closing: AGM.catalog.entry('adminRoom', 'adminRoom.remove').confirm(ADMIN_F, roomObject('${code}')).title.slice(0, 11),
       people: document.querySelector('#usersSection h3').textContent, forward: document.querySelectorAll('.admin-users th')[2].textContent,
       local: document.querySelector('#tunnelOffState p').textContent.trim().split('\\n')[0], empty: [...document.querySelectorAll('#adminEmpty p')].map((p) => p.textContent) })`));
     report(JSON.stringify(adminDeck) === JSON.stringify({
@@ -1952,10 +2095,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const select = document.querySelector('#usersTbody .role-select');
       return tags.length > 0 && select && JSON.stringify({ choices: [...select.options].map((o) => o.value + '=' + o.textContent), account: document.querySelector('#usersTbody .role-fixed').textContent,
         tags: tags.every((t) => ['On stage', 'Backstage', 'Observer'].includes(t)) ? 'seats' : tags,
-        lock: document.querySelector('#invitesPanel label').textContent.trim(), lockTitle: document.getElementById('invitesBtn').title });
+        lock: document.querySelector('#invitesPanel label').textContent.trim(), lockTitle: AGM.catalog.entry('adminRoom', 'adminRoom.invites').label });
     })()`);
     report(adminSeats === JSON.stringify({ choices: ['board=On stage', 'research=Backstage', 'observer=Observer'], account: 'Backstage', tags: 'seats',
-      lock: 'On stage and Backstage seats need an invite link (anyone else joins as an observer)', lockTitle: 'Lock the On stage and Backstage seats to invite links' }),
+      lock: 'On stage and Backstage seats need an invite link (anyone else joins as an observer)', lockTitle: 'Roles & invites' }),
       `the admin page names each seat as every page does: On stage, Backstage, Observer (${adminSeats})`);
     // The show desk's line, drawn as the admin page draws it when Stagewatch keeps a desk: its next reading of the settings
     // is answered as though one did.
@@ -1986,6 +2129,108 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(adminPlanted === JSON.stringify(['End session']), `the word check reads a button in a row the admin page builds, and no name, history or message there (${adminPlanted})`);
     await readOldWords('the admin page, watching a hall', admin);
     await admin.shot(path.join(OUT, 'admin-room.png'));
+    // The admin page acts from the catalogue (kinds adminRoom, person, adminMsg, tunnel): a hall in the list, the watched
+    // hall's header, a person's row, a message of the live feed and the internet link's card each open the same menu by
+    // right-click, ⋯ and Shift+F10, the focus where it belongs, each inline act in the menu under its own name.
+    const PAGE_DOORS = PAGE_DOORS_HALLS;
+    await admin.eval(`(() => { window.__otherHall = [...document.querySelectorAll('#roomList > li[data-key]')].find((li) => li.dataset.key !== '${code}'); window.__guestRow = [...document.querySelectorAll('#usersTbody > tr[data-key]')].find((tr) => tr.querySelector('.role-select')); window.__feedMsg = [...document.querySelectorAll('#adminFeed > .admin-msg[data-key]')].find((d) => d.querySelector('.admin-msg-body p')); return !!(window.__otherHall && window.__guestRow && window.__feedMsg); })()`);
+    const adminDoors = {
+      hall: await doorsOf(admin, 'adminRoom', 'window.__otherHall', `AGM.page.object('adminRoom', window.__otherHall.dataset.key)`, { ...PAGE_DOORS, hit: '.room-pick' }),
+      header: await doorsOf(admin, 'adminRoom', `document.getElementById('roomHeader')`, `AGM.page.object('adminRoom', '${code}')`, { ...PAGE_DOORS, hit: '.room-code-big', focus: `document.querySelector('#roomActs .obj-more')` }),
+      person: await doorsOf(admin, 'person', 'window.__guestRow', `AGM.page.object('person', window.__guestRow.dataset.key)`, { ...PAGE_DOORS, hit: 'td strong' }),
+      message: await doorsOf(admin, 'adminMsg', 'window.__feedMsg', `AGM.page.object('adminMsg', window.__feedMsg.dataset.key)`, { ...PAGE_DOORS, hit: '.admin-msg-head strong' }),
+      tunnel: await doorsOf(admin, 'tunnel', `document.getElementById('tunnelSection')`, `AGM.page.object('tunnel')`, { ...PAGE_DOORS, hit: 'h3', focus: `document.querySelector('#tunnelActs .obj-more')` }),
+    };
+    for (const [what, d] of Object.entries(adminDoors)) report(doorsInStep(d), `the admin page's ${what}: right-click = ⋯ = Shift+F10 = the catalogue's set, the bar in it (${d.want}; ${d.right} / ${d.dots} / ${d.key}; ${d.inline}; hit ${d.hit})`);
+    report(JSON.parse(adminDoors.hall.want).includes('adminRoom.watch') && !JSON.parse(adminDoors.header.want).includes('adminRoom.watch') && JSON.parse(adminDoors.person.want).includes('person.seat') && JSON.parse(adminDoors.message.want).includes('adminMsg.delete'),
+      `the admin page's menus: Watch for a hall not watched and none in the watched one's header, a code guest's Seat, a message's Delete for everyone (${adminDoors.hall.want}; ${adminDoors.header.want})`);
+    // Asks in place, never a native dialog: Delete for everyone…, Close hall… (its files' tick) and Log out…, each named
+    // for its object and answered "no" (Escape, or its safe button), so nothing changes.
+    const askOn = async (sel, id) => {
+      await admin.eval(`(${sel}).querySelector('.obj-more').click()`);
+      await admin.until(`!!document.querySelector('.agm-menu [data-action="${id}"]')`, 3000);
+      await admin.eval(`document.querySelector('.agm-menu [data-action="${id}"]').click()`);
+      return admin.until(`(() => { const a = document.querySelector('.agm-ask'); return a && JSON.stringify({ title: a.querySelector('.agm-ask-title').textContent, words: (a.querySelector('.agm-ask-words') || {}).textContent || '', ticks: [...a.querySelectorAll('input[type=checkbox]')].map((c) => c.checked), yes: a.querySelector('[data-answer=yes]').textContent, no: a.querySelector('[data-answer=no]').textContent, focus: document.activeElement === a.querySelector('[data-answer=no]') }); })()`, 3000);
+    };
+    const feedBefore = await admin.eval(`currentRoom.messages.length`);
+    const delAsk = JSON.parse(await askOn('window.__feedMsg', 'adminMsg.delete'));
+    await press(admin, 'Escape');
+    const delNo = await admin.until(`!document.querySelector('.agm-ask') && document.activeElement === window.__feedMsg.querySelector('.obj-more') && currentRoom.messages.length === ${feedBefore}`, 3000);
+    const closeAsk = JSON.parse(await askOn(`document.getElementById('roomHeader')`, 'adminRoom.remove'));
+    await admin.eval(`document.querySelector('.agm-ask [data-answer=no]').click()`);
+    const closeNo = await admin.until(`!document.querySelector('.agm-ask') && !document.getElementById('roomHeader').hidden && !!roomObject('${code}')`, 3000);
+    const kickAsk = JSON.parse(await askOn('window.__guestRow', 'person.kick'));
+    await press(admin, 'Escape');
+    const kickNo = await admin.until(`!document.querySelector('.agm-ask') && window.__guestRow.isConnected`, 3000);
+    report(delAsk.title === 'Delete this message for everyone in Smoke AGM?' && delAsk.yes === 'Delete for everyone' && delAsk.no === 'Keep it' && delAsk.focus && !!delNo
+      && closeAsk.title === 'Close hall Smoke AGM?' && JSON.stringify(closeAsk.ticks) === '[true]' && closeAsk.yes === 'Close and delete' && !!closeNo
+      && /^Log .+ out of Smoke AGM\?$/.test(kickAsk.title) && / can join again with the code\.$/.test(kickAsk.words) && !!kickNo,
+      `the admin page asks in place, named for the object, the safe answer focused, and "no" changes nothing: ${delAsk.title} / ${closeAsk.title} (${closeAsk.ticks}) / ${kickAsk.title} ${kickAsk.words}`);
+    // Let them forward into ▸: every other hall, ticked where the guest may forward now; a tick lets them (a chip in the
+    // row), and the chip's × takes it back. The picker of 0.5.1 is gone: this is the person's menu.
+    await admin.eval(`window.__guestRow.querySelector('.obj-more').click()`);
+    await admin.until(`!!document.querySelector('.agm-menu [data-action="person.forward"]')`, 3000);
+    await admin.eval(`document.querySelector('.agm-menu [data-action="person.forward"]').click()`);
+    const halls = await admin.until(`(() => { const rows = [...document.querySelectorAll('.agm-sub .agm-mi[data-value]')]; return rows.length > 0 && JSON.stringify(rows.map((r) => [r.dataset.value, r.getAttribute('role'), r.getAttribute('aria-checked')])); })()`, 5000);
+    const firstHall = halls ? JSON.parse(halls)[0][0] : '';
+    await admin.eval(`document.querySelector('.agm-sub .agm-mi[data-value="${firstHall}"]').click()`);
+    const chip = await admin.until(`(() => { const b = window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]'); return !!b && b.getAttribute('aria-label'); })()`, 5000);
+    // Linked, the guest's menu offers No longer forward into ▸ with that hall, and the hall reads ticked under Let them
+    // forward into ▸; unticked there, it is taken back (No longer forward into's own act).
+    await admin.eval(`window.__guestRow.querySelector('.obj-more').click()`);
+    await admin.until(`!!document.querySelector('.agm-menu [data-action="person.forward"]')`, 3000);
+    const unforward = await admin.eval(`!!document.querySelector('.agm-menu [data-action="person.unforward"]')`);
+    await admin.eval(`document.querySelector('.agm-menu [data-action="person.forward"]').click()`);
+    const ticked = await admin.until(`(() => { const r = document.querySelector('.agm-sub .agm-mi[data-value="${firstHall}"]'); return !!r && r.getAttribute('aria-checked') === 'true'; })()`, 5000);
+    await admin.eval(`document.querySelector('.agm-sub .agm-mi[data-value="${firstHall}"]').click()`);
+    const untickedGone = await admin.until(`!window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]')`, 5000);
+    // Ticked again, and the chip's × takes it back as well.
+    await admin.eval(`window.__guestRow.querySelector('.obj-more').click()`);
+    await admin.until(`!!document.querySelector('.agm-menu [data-action="person.forward"]')`, 3000);
+    await admin.eval(`document.querySelector('.agm-menu [data-action="person.forward"]').click()`);
+    await admin.until(`!!document.querySelector('.agm-sub .agm-mi[data-value="${firstHall}"]')`, 5000);
+    await admin.eval(`document.querySelector('.agm-sub .agm-mi[data-value="${firstHall}"]').click()`);
+    await admin.until(`!!window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]')`, 5000);
+    await admin.eval(`window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]').click()`);
+    const chipGone = await admin.until(`!window.__guestRow.querySelector('.unlink-room[data-room="${firstHall}"]')`, 5000);
+    report(!!halls && JSON.parse(halls).every(([hallCode, role, checked]) => hallCode !== code && role === 'menuitemcheckbox' && checked === 'false') && /^Stop .+ forwarding into .+$/.test(chip || '') && unforward && !!ticked && !!untickedGone && !!chipGone,
+      `Let them forward into ▸ lists every other hall as a tick; ticked, the guest may forward there (its chip: "${chip}") and No longer forward into ▸ is offered; unticking it, or the chip's ×, takes it back (${halls}; ${JSON.stringify({ unforward, ticked: !!ticked, unticked: !!untickedGone })})`);
+    // The header: the theme and Logout are ordinary buttons in its row, and nothing covers Logout at 1440, 1024 or 390 px.
+    const covered = [];
+    for (const [w, h] of [[1440, 900], [1024, 768], [390, 844]]) {
+      await admin.resize(w, h);
+      await sleep(250);
+      covered.push(await admin.eval(`(() => { window.scrollTo(0, 0); return ['logoutBtn', 'themeBtn', 'newSessionBtn'].map((id) => { const b = document.getElementById(id); const q = b.getBoundingClientRect(); const hit = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return id + (q.width > 0 && hit && b.contains(hit) ? '' : ' covered by ' + (hit ? hit.id || hit.className : 'nothing')); }).join(', ') + ' @' + innerWidth + (document.documentElement.scrollWidth > innerWidth ? ' (wider than the screen)' : ''); })()`));
+    }
+    await admin.resize(1400, 900);
+    report(covered.every((c) => !/covered|wider/.test(c)) && covered.length === 3, `the admin's Logout, theme and New hall are never covered (${covered.join('; ')})`);
+    // The skip link: the page's first focusable control, and it takes the focus to the halls.
+    const skipAdmin = await admin.eval(`(async () => { const s = document.querySelector('.skip-link'); const first = [...document.querySelectorAll('a[href], button, input, select, textarea, [tabindex="0"]')].find((n) => !n.disabled && n.getClientRects().length);
+      s.focus(); const shown = s.getBoundingClientRect().top >= 0; s.click(); await new Promise((r) => setTimeout(r, 50)); return JSON.stringify({ first: first === s, words: s.textContent, shown, to: document.activeElement.id }); })()`);
+    report(skipAdmin === JSON.stringify({ first: true, words: 'Skip to the halls', shown: true, to: 'hallsHere' }), `the admin page's first Tab is "Skip to the halls", shown when focused, and it moves the focus there (${skipAdmin})`);
+    // The admin page in both themes, and under a finger on a phone, as the other pages are.
+    const adminInk = await barsInThemes(admin, 'window.__guestRow');
+    const adminFinger = await barsUnderAFinger(edge, base + '/admin.html', `document.querySelectorAll('#roomList .obj-bar > .obj-more').length > 0`);
+    report(barsOk(adminInk.light) && barsOk(adminInk.dark) && adminFinger.coarse && barsOk(adminFinger) && adminFinger.problems.length === 0,
+      `the admin page reads in both themes (bars 24 px or more, icons 3:1, words 4.5:1, none faded, menus 4.5:1) and its acts and ⋯ are 44 px under a finger (${JSON.stringify({ ...adminInk, finger: adminFinger })})`);
+    // A disabled act sends nothing: Check again on the internet link while it is off is shown, says why on its button, in
+    // its menu and when chosen there or on the button, and the page emits nothing for it (its emits counted).
+    const CHECK_ACT = `document.querySelector('#tunnelActs [data-action="tunnel.check"]')`;
+    await admin.eval(`(() => { window.__acts = []; const e0 = socket.emit; window.__emitWas = e0; socket.emit = function (ev, ...a) { window.__acts.push(ev); return e0.call(this, ev, ...a); }; })()`);
+    const checkBtn = await admin.eval(`(() => { const b = ${CHECK_ACT}; return b ? JSON.stringify({ disabled: b.getAttribute('aria-disabled'), title: b.title }) : ''; })()`);
+    await admin.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; (${CHECK_ACT}).click(); })()`);
+    const checkSaid = await admin.until(`(document.getElementById('agmToast') || {}).textContent`, 3000);
+    await admin.eval(`document.querySelector('#tunnelActs .obj-more').click()`);
+    await admin.until(`!!document.querySelector('.agm-menu [data-action="tunnel.check"]')`, 3000);
+    const checkItem = await admin.eval(`(() => { const m = document.querySelector('.agm-menu [data-action="tunnel.check"]'); return JSON.stringify({ disabled: m.getAttribute('aria-disabled'), why: m.querySelector('.mi-why').textContent }); })()`);
+    await admin.eval(`(() => { document.getElementById('agmToast').textContent = ''; document.querySelector('.agm-menu [data-action="tunnel.check"]').click(); })()`);
+    const checkItemSaid = await admin.until(`(document.getElementById('agmToast') || {}).textContent`, 3000);
+    await sleep(500);
+    if (await admin.eval(`!!document.querySelector('.agm-menu')`)) await press(admin, 'Escape');
+    const checkSent = await admin.eval(`(() => { socket.emit = window.__emitWas; return JSON.stringify(window.__acts.filter((ev) => ev !== 'admin:settings')); })()`);
+    const offWords = 'The internet link is off.';
+    report(checkBtn === JSON.stringify({ disabled: 'true', title: offWords }) && checkSaid === offWords && checkItem === JSON.stringify({ disabled: 'true', why: offWords }) && checkItemSaid === offWords && checkSent === '[]',
+      `a disabled act says why on its button, in its menu and when chosen, and sends nothing: Check again on an internet link that is off (${checkBtn}; ${checkItem}; said "${checkSaid}" and "${checkItemSaid}"; sent ${checkSent})`);
     await research.eval(`Promise.all([new Promise((r) => socket.emit('message', { type: 'help', category: 'Sound', text: 'radio mic 3 dead' }, r)), new Promise((r) => socket.emit('message', { type: 'action', text: 'Ready for Q&A?', options: ['Yes', 'No'] }, r))])`);
     // On stage, what is written stays in the room: no message offers ↗, a text, a file or a question, and nothing that
     // is not hidden is drawn for it; the Board's composer has no file or question door.
@@ -2028,6 +2273,30 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const netButtons = await signin.until(`(() => { const c = document.querySelector('#networkDialog[open] #networkList .node-card'); return c ? JSON.stringify([...c.querySelectorAll('button')].map((x) => x.textContent)) : ''; })()`);
     await signin.eval(`document.getElementById('networkDialog').close()`);
     report(netButtons === JSON.stringify(['Propose']), `Show network only proposes a node's verbs to the show desk — nothing drives it directly (${netButtons})`);
+    // On the admin page, the linked Patterns is a link of the catalogue's (its doors in step), set up through one form of
+    // three fields asked in place — its pairing token (a password field, nothing kept by the browser), the hall from a pick
+    // list, its certificate's fingerprint — held open 30 s while the page's socket stays connected (a native prompt would
+    // pause the page, and the server drops a page silent for 18 s), then saved.
+    const NODE_ROW = `document.querySelector('#nodeLinks > li[data-key="node:smokepat"]')`;
+    await admin.until(`!!(${NODE_ROW}) && !!(${NODE_ROW}).querySelector('.obj-more')`, 15000);
+    const linkDoors = await doorsOf(admin, 'link', NODE_ROW, `AGM.page.object('link', 'node:smokepat')`, { ...PAGE_DOORS_HALLS, hit: '.link-words' });
+    report(doorsInStep(linkDoors) && JSON.parse(linkDoors.want).includes('link.setup') && JSON.parse(linkDoors.want).includes('link.unlink'),
+      `a linked Patterns on the admin page: right-click = ⋯ = Shift+F10 = the catalogue's set, its bar in it (${linkDoors.want}; ${linkDoors.right} / ${linkDoors.dots} / ${linkDoors.key}; ${linkDoors.inline})`);
+    const sock0 = await admin.eval(`(() => { window.__drops = 0; socket.on('disconnect', () => { window.__drops++; }); return socket.id; })()`);
+    await admin.eval(`(${NODE_ROW}).querySelector('.obj-more').click()`);
+    await admin.until(`!!document.querySelector('.agm-menu [data-action="link.setup"]')`, 3000);
+    await admin.eval(`document.querySelector('.agm-menu [data-action="link.setup"]').click()`);
+    const linkForm = await admin.until(`(() => { const a = document.querySelector('.agm-ask'); return a && JSON.stringify({ title: a.querySelector('.agm-ask-title').textContent,
+      fields: [...a.querySelectorAll('input, select')].map((i) => i.name + ':' + (i.tagName === 'SELECT' ? 'select' : i.type) + (i.tagName === 'INPUT' ? ':' + i.autocomplete : '')),
+      hall: a.querySelector('select').value, halls: a.querySelector('select').options.length, focus: document.activeElement === a.querySelector('input[name="token"]') }); })()`, 3000);
+    await sleep(30_000);
+    const linkHeld = await admin.eval(`JSON.stringify({ open: !!document.querySelector('.agm-ask'), same: socket.id === ${codeLiteral(sock0)}, connected: socket.connected, drops: window.__drops })`);
+    await admin.eval(`(() => { const a = document.querySelector('.agm-ask'); a.querySelector('input[name="token"]').value = 'node-token'; a.querySelector('[data-answer="yes"]').click(); })()`);
+    const linkSaved = await admin.until(`(document.getElementById('agmToast') || {}).textContent === 'Smoke Patterns is set up.' && !document.querySelector('.agm-ask')`, 10000);
+    const lf = linkForm && JSON.parse(linkForm);
+    report(!!lf && lf.title === 'Set up Smoke Patterns' && JSON.stringify(lf.fields) === JSON.stringify(['token:password:off', 'hall:select', 'fingerprint:text:off']) && lf.hall === code && lf.halls >= 2 && lf.focus
+      && linkHeld === JSON.stringify({ open: true, same: true, connected: true, drops: 0 }) && !!linkSaved,
+      `a node is set up through one form of three fields, held open 30 s with the page's socket connected throughout, then saved (${linkForm}; ${linkHeld})`);
     // The admin page signed this browser in with the host's admin token: from here its pages are judged by the accounts
     // they sign in with alone (the pages already open keep their connections).
     await signin.send('Network.deleteCookies', { name: 'agm_admin', url: base + '/' });
@@ -2229,9 +2498,29 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const broken2 = await admin2.until(`(() => { const l = document.getElementById('auditLine'); const f = document.querySelector('#auditFindings li'); return !document.getElementById('dashboard').hidden && l.dataset.mark === 'broken' && f && f.dataset.mark === 'broken' && document.getElementById('auditAcceptRow').hidden && document.getElementById('auditWhere').hidden && l.textContent + ' | ' + f.textContent; })()`, 20000);
     report(/^Audit log: ✕ keyed \(key [0-9a-f]{16}\) · 1 to see to \| ✕ Broken at line 2 of audit\.jsonl: entry 2 was changed after it was written$/.test(broken2 || ''), `a line changed while it was stopped reads ✕ on Health, with nothing to accept (${broken2})`);
     // A project manager reads the audit log (audit.read) and is offered no Export (audit.export is the admin's).
-    await audit2.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', password: 'the green room kettle' }) }).then(() => fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'mia', name: 'Mia Manager', role: 'manager', password: 'running order on the wall' }) })).then(() => fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'mia', password: 'running order on the wall' }) })).then(() => { location.href = '/users.html'; })`);
+    await audit2.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', password: 'the green room kettle' }) }).then(() => fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'mia', name: 'Mia Manager', role: 'manager', grant: ['users.manage'], password: 'running order on the wall' }) })).then(() => fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'mia', password: 'running order on the wall' }) })).then(() => { location.href = '/users.html?as=mia#audit'; })`);
     const miaAudit = await audit2.until(`location.pathname === '/users.html' && /Mia Manager/.test(document.getElementById('who').textContent) && !document.getElementById('auditPane').hidden && document.querySelectorAll('#auditList .audit-row').length > 0 && String(document.getElementById('exportBtn').hidden)`, 20000);
     report(miaAudit === 'true', `a project manager reads the audit log and is offered no Export (Export hidden: ${miaAudit})`);
+    // A row this manager may not change (an admin's): its Edit is shown, disabled, and says why on its button, in its menu
+    // (a second line a touch screen reads) and in the toast when it is chosen; nothing opens.
+    await audit2.eval(`document.getElementById('tabPeople').click()`);
+    const ANA_ROW = `[...document.querySelectorAll('#userRows > tr[data-key]')].find((tr) => tr.querySelector('td .muted').textContent.split(' ')[0] === 'ana')`;
+    await audit2.until(`!!(${ANA_ROW}) && !!(${ANA_ROW}).querySelector('[data-action="account.edit"]')`);
+    const lockedWhy = await audit2.eval(`AGM.api('GET', '/api/users').then((r) => r.users.find((u) => u.username === 'ana').locked)`);
+    await audit2.eval(`(() => { window.__asked = []; const f0 = window.fetch; window.fetch = function (u, ...a) { window.__asked.push(String(u)); return f0.call(this, u, ...a); }; })()`);
+    const lockedBtn = await audit2.eval(`(() => { const b = (${ANA_ROW}).querySelector('[data-action="account.edit"]'); return JSON.stringify({ disabled: b.getAttribute('aria-disabled'), title: b.title, focusable: b.tabIndex >= -1 && !b.disabled }); })()`);
+    await audit2.eval(`(${ANA_ROW}).querySelector('[data-action="account.edit"]').click()`);
+    const lockedToast = await audit2.until(`(document.getElementById('agmToast') || {}).textContent || ''`, 3000);
+    await audit2.eval(`(${ANA_ROW}).querySelector('.obj-more').click()`);
+    const lockedMenu = await audit2.until(`(() => { const m = document.querySelector('.agm-menu [data-action="account.edit"]'); return m && JSON.stringify({ ids: [...document.querySelectorAll('.agm-menu:not(.agm-sub) > .agm-mi')].map((b) => b.dataset.action), why: m.querySelector('.mi-why').textContent, shown: !m.querySelector('.mi-why').hidden, disabled: m.getAttribute('aria-disabled') }); })()`, 3000);
+    await audit2.eval(`(() => { document.getElementById('agmToast').textContent = ''; document.querySelector('.agm-menu [data-action="account.edit"]').click(); })()`);
+    const lockedItemSaid = await audit2.until(`(document.getElementById('agmToast') || {}).textContent || ''`, 3000);
+    if (await audit2.eval(`!!document.querySelector('.agm-menu')`)) await press(audit2, 'Escape');
+    const noEditor = await audit2.eval(`!document.getElementById('userDialog').open`);
+    const lockedAsked = await audit2.eval(`JSON.stringify(window.__asked)`);
+    report(typeof lockedWhy === 'string' && lockedWhy.length > 0 && lockedBtn === JSON.stringify({ disabled: 'true', title: lockedWhy, focusable: true }) && lockedToast === lockedWhy
+      && lockedMenu === JSON.stringify({ ids: ['account.edit'], why: lockedWhy, shown: true, disabled: 'true' }) && lockedItemSaid === lockedWhy && noEditor === true && lockedAsked === '[]',
+      `a locked account row's Edit says why — on its button, in its menu and when chosen in either — opens nothing and asks the server nothing ("${lockedWhy}"; ${lockedMenu}; asked ${lockedAsked})`);
 
     // The audit log carried across events, on a third AGMessage whose log holds an event's archive point at entry 9: the
     // token at the laptop splits it from Health (the point listed, the word typed), Health then names where the check
@@ -2394,10 +2683,11 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await card.until('document.readyState === "complete"');
       await card.eval(`fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: '${TOKEN}' }) }).then(() => location.reload())`);
       const places = await card.until(`(() => { const t = document.getElementById('tunnelPlaces').textContent; return /^Internet link: 2 of 2 places · 2 networks · refused today: \\d+ full$/.test(t) && t; })()`, 15000);
-      const offWhy = await card.until(`!document.getElementById('dashboard').hidden && document.getElementById('tunnelCheckBtn').disabled + ' ' + document.getElementById('tunnelCheckWhy').textContent`);
+      const CHECK_BTN = `document.querySelector('#tunnelActs [data-action="tunnel.check"]')`;
+      const offWhy = await card.until(`!document.getElementById('dashboard').hidden && !!${CHECK_BTN} && (${CHECK_BTN}.getAttribute('aria-disabled') === 'true') + ' ' + document.getElementById('tunnelCheckWhy').textContent`);
       await card.eval(`document.getElementById('tunnelToggle').click()`);
       const checked = await card.until(`(() => { const line = document.getElementById('tunnelCheckLine').textContent; const why = document.getElementById('tunnelCheckWhy').textContent;
-        return /^Checked \\d{1,2}:\\d\\d(\\s?[AP]M)? · round trip \\d+ ms \\(max \\d+ ms\\)$/.test(line) && /^Checked \\d+ s ago\\.$/.test(why) && document.getElementById('tunnelCheckBtn').disabled
+        return /^Checked \\d{1,2}:\\d\\d(\\s?[AP]M)? · round trip \\d+ ms \\(max \\d+ ms\\)$/.test(line) && /^Checked \\d+ s ago\\.$/.test(why) && ${CHECK_BTN}.getAttribute('aria-disabled') === 'true' && document.getElementById('tunnelToggle').checked && document.getElementById('tunnelToggleLabel').textContent === 'On'
           && /^https:\\/\\/agm-test-link-\\d+\\.trycloudflare\\.com$/.test(document.getElementById('tunnelUrl').textContent) && line + ' | ' + why; })()`, 20000);
       report(!!places && offWhy === 'true The internet link is off.' && !!checked && linkAsked.length === 5,
         `the admin page's tunnel card reads "${places}" ("${offWhy}"), and with the tunnel turned on its link is checked from the laptop: "${checked}" (${linkAsked.length} tries)`);

@@ -102,7 +102,9 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   of this machine to that Stagewatch, so they never lock this machine out of it.
 - A Patterns or PlayMap pairing token is full control of that node: it goes only to a loopback address, or over TLS to
   a certificate that is pinned or that a person confirmed by typing at least 16 characters of its fingerprint from the
-  node's own screen; AGMessage never drives a node with it — lines are proposed to the show desk (Show Bus §11).
+  node's own screen; AGMessage never drives a node with it — lines are proposed to the show desk (Show Bus §11). On the
+  admin page it is typed into a password field of a form asked in place, which the browser keeps nothing of
+  (`autocomplete="off"`), never into a native prompt.
 - Security-relevant actions (sign-ins, permission changes, the admin's room controls, the proposals Stagewatch's show
   desk takes, the lines sent straight to the speaker's screen, what kind of thing a display was told to show) are
   written to an audit log chained with a key (HMAC-SHA256 under a key derived from the machine key) that shows

@@ -16,7 +16,12 @@
 //
 // AGM.menu.door(container, find) is the one place a page hears `contextmenu` (and Shift+F10 or the menu key): a
 // right-click, the keys and the object's ⋯ open the same menu. The browser keeps its own menu in a field, on a text
-// selection inside the object, on a link, and always with Shift+right-click.
+// selection inside the object, on a link (but an object's own link, which takes the object's menu), and always with
+// Shift+right-click.
+//
+// AGM.roving(list, {item}) makes a list's objects one tab stop, moved through with the arrows, Home and End. AGM.acts
+// is a page's runner of the catalogue's acts: what each act does is the page's (its runners), and the rest — the bar, the
+// ⋯, a key, right-click and Shift+F10, the ask before an act, an open menu kept in step — is the same on every page.
 //
 // AGM.ask(anchor, spec) is a non-modal role=dialog anchored to the object, labelled by its title, naming the object and
 // what follows; its buttons are verbs, the focus starts on the safe one (or the first field), and Escape, a tap outside it
@@ -400,7 +405,8 @@
     container.addEventListener('contextmenu', (e) => {
       if (e.shiftKey) return;   // Shift+right-click: the browser's own menu, always
       const t = e.target;
-      if (!t || !t.closest || t.closest(FIELD) || t.closest('a[href]')) return;
+      // A link keeps the browser's menu, but an object's own link (a hall's name: `data-object-link`) takes the object's.
+      if (!t || !t.closest || t.closest(FIELD) || t.closest('a[href]:not([data-object-link])')) return;
       const obj = find(t);
       if (!obj) return;
       const sel = window.getSelection ? window.getSelection() : null;
@@ -420,9 +426,11 @@
 
   // ---------------------------------------------------------------- an ask in place
   /**
-   * Ask in place before an act: `spec` {title, words, fields: [{name, label, value, max}], yes, no, danger}. The answer:
-   * {yes: true, values} or {yes: false}. When it closes the focus goes back to `opts.opener` (the object a key was pressed
-   * on, or the button that opened it), else to the anchor it is placed by, else to `opts.refocus()`.
+   * Ask in place before an act: `spec` {title, words, fields: [{name, label, value, max, type, options, hint}], yes, no,
+   * danger}, a field's `type` 'text' (the default), 'password', 'checkbox' (its value true or false) or 'select' (its
+   * `options` [{value, label}]). The answer: {yes: true, values} or {yes: false}. When it closes the focus goes back to
+   * `opts.opener` (the object a key was pressed on, or the button that opened it), else to the anchor it is placed by,
+   * else to `opts.refocus()`.
    */
   function ask(anchor, spec, opts) {
     if (asking) asking.finish(false, false);
@@ -445,17 +453,35 @@
     }
     const inputs = [];
     for (const f of s.fields || []) {
-      const lab = make('label', 'agm-ask-field');
+      const type = f.type === 'checkbox' || f.type === 'select' || f.type === 'password' ? f.type : 'text';
+      const lab = make('label', type === 'checkbox' ? 'agm-ask-field agm-ask-check' : 'agm-ask-field');
       const span = make('span', '', f.label || f.name);
-      const input = make('input');
+      let input;
+      if (type === 'select') {
+        input = make('select');
+        for (const opt of f.options || []) { const o = make('option', '', opt.label); o.value = String(opt.value); input.appendChild(o); }
+        if (f.value !== undefined) input.value = String(f.value);
+      } else {
+        input = make('input');
+        input.type = type;
+        if (type === 'checkbox') input.checked = !!f.value;
+        else {
+          // Nothing typed here is kept by the browser or checked against a dictionary: a token, a fingerprint, a name.
+          input.autocomplete = 'off';
+          input.spellcheck = false;
+          input.setAttribute('autocapitalize', 'none');
+          if (f.max) input.maxLength = f.max;
+          if (f.value !== undefined) input.value = String(f.value);
+        }
+      }
       input.name = f.name;
-      input.autocomplete = 'off';
-      if (f.max) input.maxLength = f.max;
-      if (f.value !== undefined) input.value = String(f.value);
-      lab.append(span, input);
+      if (type === 'checkbox') lab.append(input, span); else lab.append(span, input);
+      if (f.hint) { const h = make('small', 'hint', f.hint); h.id = id + '-h' + inputs.length; input.setAttribute('aria-describedby', h.id); lab.appendChild(h); }
       box.appendChild(lab);
       inputs.push(input);
     }
+    // The focus starts in the first field that is typed into or chosen, else on the safe answer.
+    const firstField = inputs.find((i) => i.type !== 'checkbox') || null;
     const acts = make('div', 'agm-ask-acts');
     const no = make('button', 'btn', s.no || 'Cancel');
     no.type = 'button';
@@ -479,7 +505,7 @@
           else if (typeof o.refocus === 'function') o.refocus();
         }
         const values = {};
-        for (const i of inputs) values[i.name] = i.value.trim();
+        for (const i of inputs) values[i.name] = i.type === 'checkbox' ? i.checked : i.value.trim();
         resolve(said ? { yes: true, values } : { yes: false });
       };
       const outside = (e) => { if (!box.contains(e.target)) finish(false, false); };
@@ -488,19 +514,262 @@
       yes.addEventListener('click', () => finish(true, true));
       box.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false, true); return; }
-        if (e.key === 'Enter' && e.target.tagName === 'INPUT' && !e.isComposing) { e.preventDefault(); finish(true, true); }
+        // Enter in a typed field answers yes; on a tick or a choice it does what it does there, never yes.
+        if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox' && !e.isComposing) { e.preventDefault(); finish(true, true); }
       });
       box.addEventListener('focusout', (e) => { const to = e.relatedTarget; if (to && !box.contains(to)) finish(false, false); });
       document.addEventListener('pointerdown', outside, true);
       mount(box, anchor);
       place(box, anchor ? { anchor } : { x: 16, y: 16 });
-      (inputs[0] || no).focus();
-      if (inputs[0] && typeof inputs[0].select === 'function') inputs[0].select();
+      (firstField || no).focus();
+      if (firstField && firstField.tagName === 'INPUT' && typeof firstField.select === 'function') firstField.select();
     });
   }
   ask.isOpen = () => !!asking;
   /** Answer the open ask "no" (its object is gone, or the page left the hall). */
   ask.close = () => { if (asking) asking.finish(false, false); };
 
-  Object.assign(window.AGM = window.AGM || {}, { menu, ask });
+  // ---------------------------------------------------------------- a list, one tab stop
+  const CONTROL = 'a[href], button, input, select, textarea, [tabindex]';
+  /**
+   * AGM.roving(list, {item}): the objects of `list` that match `item` are one tab stop. The current one (the first, until
+   * the focus has been in another) takes Tab; ↑ and ↓ move between them, Home and End to the first and the last; on a
+   * focused object Tab goes on into its own controls, and the controls of the others are left out of the tab order, so a
+   * list of a hundred rows is passed in one Tab. Rows drawn again keep the current one by its `data-key`. Returns
+   * {refresh()}.
+   */
+  function roving(list, { item }) {
+    let current = '';   // the current object's data-key
+    const all = () => [...list.querySelectorAll(item)];
+    const keyOf = (el) => el.dataset.key || '';
+    function apply() {
+      const objs = all();
+      if (!objs.length) return;
+      const cur = objs.find((el) => current && keyOf(el) === current) || objs[0];
+      for (const el of objs) {
+        const on = el === cur;
+        if (el.getAttribute('tabindex') !== (on ? '0' : '-1')) el.setAttribute('tabindex', on ? '0' : '-1');
+        for (const c of el.querySelectorAll(CONTROL)) {
+          if (on && c.dataset.roving) { c.removeAttribute('tabindex'); delete c.dataset.roving; }
+          else if (!on && !c.dataset.roving && c.getAttribute('tabindex') !== '-1') { c.setAttribute('tabindex', '-1'); c.dataset.roving = '1'; }
+        }
+      }
+    }
+    list.addEventListener('focusin', (e) => {
+      const el = e.target.closest && e.target.closest(item);
+      if (!el || !list.contains(el) || keyOf(el) === current) return;
+      current = keyOf(el);
+      apply();
+    });
+    list.addEventListener('keydown', (e) => {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !e.target.matches || !e.target.matches(item)) return;
+      const objs = all();
+      const at = objs.indexOf(e.target);
+      const to = e.key === 'ArrowDown' ? at + 1 : e.key === 'ArrowUp' ? at - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? objs.length - 1 : null;
+      if (to === null || at < 0) return;
+      e.preventDefault();
+      const next = objs[Math.max(0, Math.min(objs.length - 1, to))];
+      current = keyOf(next);
+      apply();
+      next.focus();
+    });
+    // Rows drawn or drawn again: the tab order is set once the list has settled, in the same task.
+    new MutationObserver(apply).observe(list, { childList: true, subtree: true });
+    apply();
+    return { refresh: apply };
+  }
+
+  // ---------------------------------------------------------------- a page's acts
+  const moreName = (name) => name + ' (or right-click, or Shift+F10)';
+  /** One act of an object's bar drawn into its button: its icon (and, with `words`, its label beside it), named by its label. */
+  function drawAct(b, item, words) {
+    b.dataset.action = item.id;
+    b.setAttribute('aria-label', item.label);
+    b.title = item.disabled || item.label;
+    if (item.disabled) b.setAttribute('aria-disabled', 'true'); else b.removeAttribute('aria-disabled');
+    b.textContent = '';
+    if (item.icon) { const i = make('span', '', item.icon); i.setAttribute('aria-hidden', 'true'); b.appendChild(i); }
+    if (words || !item.icon) b.appendChild(make('span', 'act-words', item.label));
+  }
+  /** The ⋯ of an object: the door to its whole list on every device, a touch screen's included. */
+  function moreButton(name) {
+    const b = make('button', 'obj-more', '⋯');
+    b.type = 'button';
+    b.dataset.more = '1';
+    b.setAttribute('aria-haspopup', 'menu');
+    b.setAttribute('aria-expanded', 'false');
+    b.setAttribute('aria-label', name);
+    b.title = moreName(name);
+    return b;
+  }
+  /**
+   * AGM.acts({facts, run, say}): a page's acts on the catalogue's objects, in one place. `facts()` the page's facts now
+   * (catalog.js), `run` its runners by id (each `(o, ctx)`), `say(words, bad)` its toast. An act runs only where the
+   * catalogue shows it to this page and it is ready, else its words are said and nothing is sent; one that asks first
+   * asks in place. Returns {act, open, draw, bind, refresh, isOpenOn}.
+   */
+  function acts({ facts, run, say }) {
+    const C = window.AGM.catalog;
+    let openOn = null;   // the open menu: {kind, key, get, header, handle, gone}
+    let askOn = null;    // the object an open ask is about: {get, gone}
+    const drawn = new WeakMap();
+
+    function act(kind, id, o, ctx) {
+      const c = ctx || {};
+      const F = facts();
+      const e = C.entry(kind, id);
+      if (!e || !run[id] || !C.shown(kind, F, o).some((x) => x.id === id)) { say(C.WORDS.gone, true); return; }
+      const r = C.ready(kind, id, F, o);
+      if (r !== true) { say(r, true); return; }
+      const spec = e.confirm ? e.confirm(F, o) : null;
+      if (!spec) { run[id](o, c); return; }
+      const asked = { get: c.get || (() => o), gone: c.gone || C.WORDS.gone };
+      askOn = asked;
+      ask(c.anchor || c.node || null, spec, { opener: c.opener || null, refocus: c.refocus }).then((a) => {
+        if (askOn === asked) askOn = null;
+        const now = asked.get();
+        if (a.yes && now) run[id](now, Object.assign({}, c, { values: a.values }));
+      });
+    }
+
+    /**
+     * Open an object's menu at `at` ({x, y}, or {anchor}). `get()` reads the object as it is now (null: it is gone);
+     * `node` is its element and `more` its ⋯. False when it offers nothing here (the browser's own menu then stays).
+     */
+    function open(kind, get, { node, more, at, opener, label, header, gone, submenu, refocus }) {
+      const o = get();
+      if (!o) return false;
+      const list = C.items(kind, facts(), o);
+      if (!list.length) return false;
+      const anchor = more || node;
+      const from = opener || anchor;
+      const words = gone || C.WORDS.gone;
+      const head = header || (() => undefined);
+      const handle = menu(list, at || { anchor }, {
+        label, header: head(o), opener: from, goneWords: C.WORDS.gone,
+        onPick: (id, value, item) => { const now = get(); if (now) act(kind, id, now, { anchor, node, value, item, opener: from, get, gone: words, refocus }); else say(words, true); },
+        onDisabled: (w) => say(w, true),
+        submenu: (item) => C.submenu(kind, item.id, facts(), get() || o) || (submenu ? submenu(item, get() || o) : []),
+        values: (item) => (item.id ? C.submenu(kind, item.id, facts(), get() || o) : null),
+        refocus: refocus || (() => {}),
+        onClose: () => { if (openOn && openOn.handle === handle) openOn = null; },
+      });
+      openOn = { kind, key: node ? node.dataset.key || '' : '', get, header: head, handle, gone: words };
+      return true;
+    }
+
+    /** The open menu and an open ask say what their object says now; their object gone, they close and say so. */
+    function refresh() {
+      if (askOn && !askOn.get()) { const w = askOn.gone; askOn = null; ask.close(); say(w, true); }
+      if (!openOn) return;
+      const o = openOn.get();
+      if (!o) { const w = openOn.gone; openOn.handle.close(); openOn = null; ask.close(); say(w, true); return; }
+      openOn.handle.update(C.items(openOn.kind, facts(), o), openOn.header(o));
+    }
+
+    /**
+     * Draw an object's bar into `bar`: its inline acts (`cls` their class, `words` their labels beside their icons) and its
+     * ⋯ named `more` (none when it has no menu). A button that offers the same act again is drawn again in place, and the
+     * ⋯ is kept while there is a menu, so a redraw never takes the focus, or an open menu's opener, away.
+     */
+    function draw(bar, kind, o, { more = 'More actions', words = false, cls = 'msg-act', keysOn = null } = {}) {
+      const F = facts();
+      const inl = C.inline(kind, F, o);
+      const hasMenu = C.items(kind, F, o).length > 0;
+      const sig = JSON.stringify([inl.map((i) => [i.id, i.label, i.icon, i.disabled]), hasMenu, more, words]);
+      if (keysOn) {
+        const keys = C.shown(kind, F, o).filter((e) => e.key).map((e) => e.key);
+        if (keys.length) keysOn.setAttribute('aria-keyshortcuts', keys.join(' ')); else keysOn.removeAttribute('aria-keyshortcuts');
+      }
+      if (drawn.get(bar) === sig) return;
+      drawn.set(bar, sig);
+      const had = [...bar.querySelectorAll(':scope > [data-action]')];
+      let dots = bar.querySelector(':scope > .obj-more');
+      if (had.length === inl.length && had.every((b, n) => b.dataset.action === inl[n].id)) inl.forEach((i, n) => drawAct(had[n], i, words));
+      else {
+        had.forEach((b) => b.remove());
+        for (const i of inl) { const b = make('button', cls); b.type = 'button'; drawAct(b, i, words); bar.insertBefore(b, dots); }
+      }
+      if (hasMenu && !dots) { dots = moreButton(more); bar.appendChild(dots); }
+      else if (!hasMenu && dots) dots.remove();
+      else if (dots) { dots.setAttribute('aria-label', more); dots.title = moreName(more); }
+    }
+
+    /**
+     * The doors of a kind's objects in `container`: a click on an act or the ⋯, a single key on the focused object, and
+     * right-click, Shift+F10 and the menu key (menu.door). `spec.find(el)` answers the object's element under `el`
+     * (`[data-key]`), or null; `spec.get(key)` the object as it is now, or null; `label`, `header(o)`, `gone` (the words
+     * when it went), `submenu(item, o)` (values the catalogue does not hold, asked when a submenu opens), `refocus(o)`.
+     */
+    function bind(container, spec) {
+      const getter = (node) => { const key = node.dataset.key; return () => spec.get(key); };
+      const doorOf = (node) => {
+        const more = node.querySelector('.obj-more');
+        const refocus = () => { const back = spec.refocus && spec.refocus(spec.get(node.dataset.key)); if (back && back.focus) back.focus(); };
+        return {
+          el: node, more,
+          // The focus goes back where it was in the object (the object itself, or a control of its), or to the ⋯ pressed.
+          open: (at, by) => open(spec.kind, getter(node), { node, more, at, opener: by || (node.contains(document.activeElement) ? document.activeElement : node), label: spec.label, header: spec.header, gone: spec.gone, submenu: spec.submenu, refocus }),
+        };
+      };
+      const withSub = (node, id) => { const d = doorOf(node); if (d.open({ anchor: d.more || node }) && menu.current()) menu.current().expand(id); };
+      container.addEventListener('click', (e) => {
+        const el = e.target.closest && e.target.closest('[data-action], [data-more]');
+        if (!el || !container.contains(el)) return;
+        const node = spec.find(el);
+        const o = node && spec.get(node.dataset.key);
+        if (!o) return;
+        e.preventDefault();
+        const more = node.querySelector('.obj-more');
+        if (el.dataset.more) {
+          if (openOn && openOn.kind === spec.kind && openOn.key === node.dataset.key) { menu.close(); return; }
+          doorOf(node).open({ anchor: el }, el);
+          return;
+        }
+        const entry = C.entry(spec.kind, el.dataset.action);
+        if (entry && entry.submenu && el.dataset.value === undefined) { withSub(node, entry.id); return; }
+        act(spec.kind, el.dataset.action, o, { anchor: more || el, node, value: el.dataset.value, opener: el, get: getter(node), gone: spec.gone });
+      });
+      container.addEventListener('keydown', (e) => {
+        if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
+        const node = e.target;
+        if (!node || !node.matches || !node.dataset.key || spec.find(node) !== node) return;
+        const o = spec.get(node.dataset.key);
+        const entry = o && C.byKey(spec.kind, facts(), o, e.key);
+        if (!entry) return;
+        e.preventDefault();
+        if (entry.submenu) { withSub(node, entry.id); return; }
+        act(spec.kind, entry.id, o, { anchor: node.querySelector('.obj-more') || node, node, opener: node, get: getter(node), gone: spec.gone });
+      });
+      menu.door(container, (t) => { const node = spec.find(t); return node && spec.get(node.dataset.key) ? doorOf(node) : null; });
+    }
+
+    return { act, open, draw, bind, refresh, isOpenOn: (kind, key) => !!openOn && openOn.kind === kind && openOn.key === key };
+  }
+
+  /**
+   * Words to the clipboard: the clipboard API where the page is a secure context, else the browser's copy of a selection
+   * (a page served over plain http on the venue network has no clipboard API), else a field in place to copy from by
+   * hand. `say(words)` is told when it is copied; the focus goes back where it was.
+   */
+  async function copy(text, { said = 'Copied.', anchor = null, say = () => {} } = {}) {
+    try {
+      if (window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') { await navigator.clipboard.writeText(text); say(said); return; }
+    } catch { /* refused (no permission, not focused): the selection's copy below */ }
+    const host = (anchor && anchor.closest && anchor.closest('dialog[open]')) || document.body;
+    const back = document.activeElement && document.activeElement !== document.body ? document.activeElement : anchor;
+    const t = make('textarea', 'copy-source');
+    t.value = text;
+    t.setAttribute('readonly', '');
+    host.appendChild(t);
+    t.select();
+    let copied;
+    try { copied = document.execCommand('copy'); } catch { copied = false; }
+    t.remove();
+    if (back && back.isConnected && typeof back.focus === 'function') back.focus();
+    if (copied) { say(said); return; }
+    ask(anchor || null, { title: 'Copy it from here', words: 'This browser would not copy it by itself: select it and copy.', fields: [{ name: 'text', label: 'To copy', value: text }], yes: 'Done', no: 'Close' });
+  }
+
+  Object.assign(window.AGM = window.AGM || {}, { menu, ask, roving, acts, copy });
 })();

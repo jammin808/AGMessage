@@ -34,6 +34,7 @@
     linkKey: 'Stagewatch has not accepted this AGMessage\'s key yet — nothing is queued; try again in a moment.',
     linkRefused: 'Stagewatch refused this AGMessage\'s key — nothing can be sent until an admin enters a node key it lists (Halls → Set up).',
     linkCert: 'Stagewatch\'s certificate changed — nothing can be sent until an admin accepts it (Halls → Set up, or Admin → Show network).',
+    noAi: 'AI drafts are off: no Anthropic API key — add one under ✨ AI drafts.',
   });
   /** The support view's words (R8): every door the person has, drawn, and none of them acts. */
   const supportWords = (name) => 'This is ' + name + '\'s view — act from your own page.';
@@ -62,6 +63,34 @@
    * page says which wait: a message from backstage waits for this person until their 👍, a reply to it, or an answer).
    */
   const respondsHere = (f, o) => f.waiting.priority.includes(o.id) || (!o.priority && newestPlain(f) === o.id);
+  /** A hall as an ask names it: its name, else its code. */
+  const hallOf = (o) => String(o.hall || o.name || o.code || 'this hall');
+  /** The seats the admin moves a code guest between, in the words every page uses (the value is the server's). */
+  const SEATS = Object.freeze([['board', 'On stage'], ['research', 'Backstage'], ['observer', 'Observer']]);
+  const seatOf = (role) => (role === 'director' ? 'board' : role);
+  /** A Patterns or PlayMap: the links a pairing token drives. */
+  const isNode = (o) => o.t === 'patterns' || o.t === 'playmap';
+  /** A verb's own words, without its placeholders: what a line to propose starts with. */
+  const verbStem = (v) => String(v || '').split(/\s+/).filter((w) => !/^[<[{(]/.test(w)).join(' ') + ' ';
+  /**
+   * The halls a node may be linked for: every hall, then each listed; the hall it is linked for now stays a choice (and
+   * chosen) when the page does not list it (closed since, or the list not read yet), so a Save never moves it quietly.
+   */
+  function hallChoices(f, now) {
+    const listed = (f.halls || []).map((h) => ({ value: h.code, label: (h.name || h.code) + ' · ' + h.code }));
+    const kept = now && !listed.some((h) => h.value === now) ? [{ value: now, label: now + ' · not listed here now' }] : [];
+    return [{ value: '', label: 'Every hall' }].concat(listed, kept);
+  }
+  /** Why the internet link cannot be checked now, or '': off, no address yet, a check running, or one within a minute. */
+  function tunnelWhy(o) {
+    if (!o.running) return 'The internet link is off.';
+    if (!o.url) return 'Waiting for Cloudflare to give the address.';
+    if (o.checking) return 'Checking the internet link…';
+    if (Number.isFinite(o.checkedAgo) && o.checkedAgo <= 60) return 'Checked ' + Math.max(0, Math.round(o.checkedAgo)) + ' s ago.';
+    return '';
+  }
+  /** Who an audit row's actor is, as the filter keeps it: its kind and its id. */
+  const actorKey = (o) => (o.actor ? String(o.actor.t || '') + ':' + String(o.actor.id || o.actor.name || '') : '');
 
   const KINDS = {
     // A message: in the feed, and its copy in the pinned strip (one delegated handler for both, no clone).
@@ -153,6 +182,172 @@
         may: (f) => f.screensManage, fits: () => true,
         confirm: (f, o) => ({ title: 'Remove ' + o.name + '?', words: 'Its link stops working on every screen that has it open.', yes: 'Remove', no: 'Keep it', danger: true }) },
     ],
+
+    // ------------------------------------------------------------ the admin page (adminFacts)
+    // A hall in the admin page's list, and the hall it watches (its header): `code`, `name`, `watched`. Every act here is
+    // the admin page's: whom it admits (`admin`), which every admin:* verb checks again.
+    adminRoom: [
+      { id: 'adminRoom.watch', label: 'Watch', icon: '👀', key: 'Enter', group: '3_keep', inline: () => 1, verb: 'admin:watchRoom', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => !o.watched },
+      { id: 'adminRoom.transcript', label: 'Transcript', icon: '📜', group: '3_keep', verb: 'local', mode: 'local',
+        may: (f) => f.admin, fits: () => true },
+      { id: 'adminRoom.minutes', label: 'Minutes', icon: '✨', group: '3_keep', verb: 'admin:summary', mode: 'now',
+        may: (f) => f.admin, fits: () => true, ready: (f) => f.ai || WORDS.noAi },
+      { id: 'adminRoom.invites', label: 'Roles & invites', icon: '🔒', group: '4_manage', verb: 'admin:invites', mode: 'now',
+        may: (f) => f.admin, fits: () => true },
+      { id: 'adminRoom.clear', label: 'Clear messages…', icon: '🧹', group: '9_danger', verb: 'admin:resetRoom', mode: 'now',
+        may: (f) => f.admin, fits: () => true,
+        confirm: (f, o) => ({ title: 'Clear every message in ' + hallOf(o) + '?', words: 'Files used nowhere else go too. Everyone stays in the hall. This cannot be undone.', yes: 'Clear messages', no: 'Keep them', danger: true }) },
+      { id: 'adminRoom.remove', label: 'Close hall…', icon: '🗑', group: '9_danger', verb: 'admin:deleteRoom', mode: 'now',
+        may: (f) => f.admin, fits: () => true,
+        confirm: (f, o) => ({ title: 'Close hall ' + hallOf(o) + '?', words: 'Everyone in it is sent out and its saved history is deleted. Open its transcript first if you need it.',
+          fields: [{ name: 'purge', type: 'checkbox', label: 'Also delete the files shared only in this hall', value: true }], yes: 'Close and delete', no: 'Keep it open', danger: true }) },
+    ],
+    // A person in the watched hall (the admin page's half; the hall page's comes with its People panel): `socketId`,
+    // `name`, `role`, `account` (signs in with an account: its seat follows its rights), `linkedRooms`, `hall` (its name).
+    person: [
+      { id: 'person.seat', label: 'Seat', icon: '💺', group: '4_manage', verb: 'admin:setRole', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => !o.account,
+        submenu: (f, o) => SEATS.map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: seatOf(o.role) === value })) },
+      // Let them forward into ▸ ticks a hall (admin:linkRoom); a hall unticked there, or a chip's ×, is No longer forward
+      // into ▸ (admin:unlinkRoom), an act of its own: one verb for one act, each refused by the server alike. `linkedNames`
+      // names the halls by code, as the page knows them.
+      { id: 'person.forward', label: 'Let them forward into', icon: '➦', group: '4_manage', verb: 'admin:linkRoom', mode: 'now',
+        may: (f) => f.admin, fits: () => true, submenu: () => null },
+      { id: 'person.unforward', label: 'No longer forward into', icon: '🚫', group: '4_manage', verb: 'admin:unlinkRoom', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => Array.isArray(o.linkedRooms) && o.linkedRooms.length > 0,
+        submenu: (f, o) => o.linkedRooms.map((code) => ({ value: code, label: (o.linkedNames && o.linkedNames[code]) || code })) },
+      { id: 'person.view', label: 'Open their view', icon: '🪟', group: '4_manage', verb: 'local', mode: 'local',
+        may: (f) => f.admin, fits: () => true },
+      { id: 'person.kick', label: 'Log out…', icon: '⏏', group: '9_danger', verb: 'admin:kick', mode: 'now',
+        may: (f) => f.admin, fits: () => true,
+        confirm: (f, o) => ({ title: 'Log ' + o.name + ' out of ' + hallOf(o) + '?',
+          words: 'Every page ' + o.name + ' has open here closes. ' + (o.account
+            ? o.name + '\'s account still has ' + hallOf(o) + ' and can open it again. To keep ' + o.name + ' out, take ' + hallOf(o) + ' off the account on the Accounts page.'
+            : o.name + ' can join again with the code.'),
+          yes: 'Log out', no: 'Keep ' + o.name + ' in', danger: true }) },
+    ],
+    // A message in the admin page's live feed: `id`, `type`, `text`, `from`, `hall` (its name).
+    adminMsg: [
+      { id: 'adminMsg.copy', label: 'Copy text', icon: '📋', group: '3_keep', verb: 'local', mode: 'local',
+        may: (f) => f.admin, fits: (f, o) => typeof o.text === 'string' && o.text.length > 0 },
+      { id: 'adminMsg.delete', label: 'Delete for everyone…', icon: '🗑', key: 'Delete', group: '9_danger', verb: 'admin:deleteMessage', mode: 'now',
+        may: (f) => f.admin, fits: () => true,
+        confirm: (f, o) => ({ title: 'Delete this message for everyone in ' + hallOf(o) + '?', words: (snippet(o) ? '“' + snippet(o) + '” ' : 'It ') + 'goes from every page in the hall now. This cannot be undone.', yes: 'Delete for everyone', no: 'Keep it', danger: true }) },
+    ],
+    // A link to another show system: the default Stagewatch (`t: 'main'`, `changed` when its certificate changed), one
+    // heard on the network (`heard`), and a Patterns or PlayMap, heard or linked (`linked`, `certificateWaits`,
+    // `certificateChanged`, `desk`, `commands`). Linking one hands it a pairing token: the admin's alone.
+    link: [
+      { id: 'link.propose', label: 'Propose…', icon: '📨', group: '2_send', verb: 'nodes:command', mode: 'now',
+        may: (f) => f.canDrive, fits: (f, o) => isNode(o) && !!o.linked && Array.isArray(o.commands) && o.commands.length > 0,
+        ready: (f, o) => o.desk || o.name + '\'s lines go to the show desk, and its Stagewatch keeps none now — nothing can be proposed.',
+        confirm: (f, o) => ({ title: 'Propose a line to ' + o.name, words: 'A person approves it at the show desk in Stagewatch, then ' + o.name + ' runs it. It lists: ' + o.commands.slice(0, 6).map((c) => c.verb).join(', ') + (o.commands.length > 6 ? ', …' : '') + '.',
+          fields: [{ name: 'line', label: 'The line', value: verbStem(o.commands[0].verb), max: 400 }], yes: 'Propose', no: 'Cancel' }) },
+      { id: 'link.use', label: 'Use this address', icon: '📥', group: '3_keep', inline: () => 1, verb: 'local', mode: 'local',
+        may: (f) => f.admin, fits: (f, o) => o.t === 'main' && !!o.heard && !!o.url },
+      { id: 'link.copy', label: 'Copy address', icon: '📋', group: '3_keep', verb: 'local', mode: 'local',
+        may: (f) => f.admin, fits: (f, o) => typeof o.url === 'string' && o.url.length > 0 },
+      // The default Stagewatch's address, node key and certificate: the admin page's settings, asked in one form.
+      { id: 'link.configure', label: 'Set up…', icon: '⚙', group: '4_manage', verb: 'admin:settings', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => o.t === 'main' && !o.heard,
+        confirm: (f, o) => ({ title: 'Set up Stagewatch',
+          words: 'The Stagewatch every hall without one of its own sends to. Its node key is kept sealed; the link is refused until Stagewatch accepts it.',
+          fields: [
+            { name: 'url', label: 'Its address (for example 10.0.4.21:9924)', value: o.url || '', max: 300 },
+            { name: 'key', type: 'password', label: 'Its node key (swk_…)', hint: o.keySet ? 'Leave it empty to keep the saved one.' : '', max: 200 },
+            { name: 'fingerprint', label: 'Its certificate: the first 16 or more characters of the fingerprint Stagewatch shows', value: o.fingerprint || '', hint: 'Leave it empty when Stagewatch runs on this laptop or speaks plain HTTP.', max: 100 },
+          ],
+          yes: 'Save', no: 'Cancel' }) },
+      { id: 'link.setup', label: (f, o) => (o.linked ? 'Set up…' : 'Link…'), icon: '⚙', group: '4_manage', inline: () => 2, verb: 'nodes:link', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => isNode(o),
+        confirm: (f, o) => ({ title: (o.linked ? 'Set up ' : 'Link ') + o.name,
+          words: 'Its pairing token is full control of it: AGMessage keeps it sealed and sends it only to this laptop, or over HTTPS to a certificate you confirm here.',
+          fields: [
+            { name: 'token', type: 'password', label: 'Its pairing token (' + (o.t === 'playmap' ? 'PlayMap: node settings → Network' : 'Patterns: Remote page → TRUST') + ')', hint: o.linked ? 'Leave it empty to keep the saved one.' : '', max: 200 },
+            { name: 'hall', type: 'select', label: 'For', value: o.hall || '', options: hallChoices(f, o.hall) },
+            { name: 'fingerprint', label: 'Its certificate: the first 16 or more characters of the fingerprint ' + o.name + ' shows on its own screen', hint: 'Leave it empty when it runs on this laptop, or its certificate is confirmed already.', max: 100 },
+          ],
+          yes: o.linked ? 'Save' : 'Link', no: 'Cancel' }) },
+      { id: 'link.accept', label: 'Accept certificate…', icon: '🔏', group: '4_manage', inline: () => 1, verb: 'admin:acceptCertificate', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => o.t === 'main' && !o.heard && !!o.changed,
+        confirm: () => ({ title: 'Accept Stagewatch\'s new certificate?', words: 'Only do this if you know why it changed (a reinstall, a new certificate made on purpose). Until then the link is refused.', yes: 'Accept it', no: 'Keep refusing', danger: true }) },
+      { id: 'link.confirm', label: 'Confirm fingerprint…', icon: '🔑', group: '4_manage', inline: () => 1, verb: 'nodes:acceptCertificate', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => isNode(o) && !!o.linked && !!o.certificateWaits,
+        confirm: (f, o) => ({ title: 'Confirm ' + o.name + '\'s certificate', words: (o.certificateChanged ? o.name + '\'s certificate changed. Only accept it if you know why (a renewal, a reinstall, a new laptop). ' : '')
+          + 'Type the first 16 or more characters of the fingerprint ' + o.name + ' shows on its own screen.', fields: [{ name: 'fingerprint', label: 'Fingerprint', max: 100 }], yes: 'Confirm', no: 'Cancel' }) },
+      { id: 'link.unlink', label: 'Unlink…', icon: '⛓', group: '9_danger', verb: 'nodes:unlink', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => isNode(o) && !!o.linked,
+        confirm: (f, o) => ({ title: 'Unlink ' + o.name + '?', words: 'Its token and its certificate pin are forgotten: linking it again takes its token again.', yes: 'Unlink', no: 'Keep it linked', danger: true }) },
+    ],
+    // The internet link (the admin page's tunnel card): `running`, `url`, `checking`, `checkedAgo` (seconds since its
+    // newest check, or null).
+    tunnel: [
+      { id: 'tunnel.check', label: 'Check again', icon: '🔄', group: '3_keep', inline: () => 1, verb: 'admin:tunnelStatus', mode: 'now',
+        may: (f) => f.admin, fits: () => true, ready: (f, o) => tunnelWhy(o) || true },
+      { id: 'tunnel.copy', label: 'Copy address', icon: '📋', group: '3_keep', inline: () => 2, verb: 'local', mode: 'local',
+        may: (f) => f.admin, fits: (f, o) => !!o.running && typeof o.url === 'string' && o.url.length > 0 },
+      { id: 'tunnel.on', label: 'Turn on', icon: '🌐', group: '4_manage', verb: 'admin:tunnelStart', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => !o.running },
+      { id: 'tunnel.off', label: 'Turn off…', icon: '⏹', group: '9_danger', verb: 'admin:tunnelStop', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => !!o.running,
+        confirm: () => ({ title: 'Turn the internet link off?', words: 'Every phone and laptop joined through it is cut off now, and its address stops working. A new one is given when it is turned on again.', yes: 'Turn it off', no: 'Keep it on', danger: true }) },
+    ],
+
+    // ------------------------------------------------------------ the halls board (boardFacts)
+    // A hall's row: `code`, `name`. Its name is the row's one link, which opens it.
+    hall: [
+      { id: 'hall.open', label: 'Open', icon: '🚪', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+      { id: 'hall.tab', label: 'Open in a new tab', icon: '🗗', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+      { id: 'hall.copy', label: 'Copy link', icon: '🔗', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+      { id: 'hall.code', label: 'Copy guest code', icon: '🔢', group: '3_keep', verb: 'local', mode: 'local',
+        may: (f, o) => typeof o.code === 'string' && o.code.length > 0, fits: () => true },
+      { id: 'hall.setup', label: 'Set up…', icon: '⚙', group: '4_manage', verb: 'hall:settings', mode: 'now', may: (f) => f.manageHalls, fits: () => true },
+      { id: 'hall.network', label: 'Show network…', icon: '📡', group: '4_manage', verb: 'nodes:list', mode: 'now', may: (f) => f.canDrive, fits: () => true },
+    ],
+    // An open help request on the board: `code`, `id`, `state`, `canRespond` (the board's fact: the server's own rule).
+    help: [
+      { id: 'help.respond', label: 'On my way', icon: '▷', group: '1_respond', inline: () => 1, verb: 'help:respond', mode: 'hold',
+        may: (f, o) => !!o.canRespond, fits: (f, o) => o.state === 'open' },
+      { id: 'help.resolve', label: 'Resolved', icon: '🏁', group: '1_respond', inline: () => 2, verb: 'help:respond', mode: 'hold',
+        may: (f, o) => !!o.canRespond, fits: (f, o) => o.state !== 'resolved' },
+      { id: 'help.open', label: 'Open its hall', icon: '🚪', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+    ],
+
+    // ------------------------------------------------------------ the Accounts page (accountFacts)
+    // A person's account: `id`, `name`, `disabled`, `locked` (why this viewer may not change it, or ''), `self`.
+    account: [
+      { id: 'account.edit', label: 'Edit…', icon: '🖊', key: 'Enter', group: '4_manage', inline: () => 1, verb: 'http:PATCH /api/users/:id', mode: 'now',
+        may: (f) => f.manageUsers, fits: () => true, ready: (f, o) => o.locked || true },
+      { id: 'account.password', label: 'New one-time password…', icon: '🔐', group: '4_manage', verb: 'http:POST /api/users/:id/password', mode: 'now',
+        may: (f, o) => f.manageUsers && !o.locked, fits: () => true,
+        confirm: (f, o) => ({ title: 'Give ' + o.name + ' a new one-time password?', words: o.name + ' is signed out everywhere and the old password stops working. The new one is shown once, here.', yes: 'New password', no: 'Cancel' }) },
+      { id: 'account.signout', label: 'Sign out everywhere…', icon: '📴', group: '4_manage', verb: 'http:POST /api/users/:id/signout', mode: 'now',
+        may: (f, o) => f.manageUsers && !o.locked, fits: () => true,
+        confirm: (f, o) => ({ title: 'Sign ' + o.name + ' out everywhere?', words: 'Every page ' + o.name + ' has open closes, on every device. ' + o.name + ' can sign in again with their password.', yes: 'Sign out', no: 'Cancel' }) },
+      { id: 'account.disable', label: (f, o) => (o.disabled ? 'Turn on' : 'Turn off…'), icon: '⏻', group: '9_danger', verb: 'http:PATCH /api/users/:id', mode: 'now',
+        may: (f, o) => f.manageUsers && !o.locked, fits: (f, o) => !o.self,
+        confirm: (f, o) => (o.disabled ? null : { title: 'Turn ' + o.name + '\'s account off?', words: o.name + ' is signed out everywhere and cannot sign in until it is turned on again. Their messages stay.', yes: 'Turn off', no: 'Keep it on', danger: true }) },
+      { id: 'account.remove', label: 'Remove…', icon: '🗑', group: '9_danger', verb: 'http:DELETE /api/users/:id', mode: 'now',
+        may: (f, o) => f.manageUsers && !o.locked, fits: (f, o) => !o.self,
+        confirm: (f, o) => ({ title: 'Remove ' + o.name + '\'s account?', words: 'Their messages stay; they can no longer sign in. This cannot be undone.', yes: 'Remove', no: 'Keep it', danger: true }) },
+    ],
+    // An entry of the audit log: `seq`, `action`, `actor` {t, id, name}, `target`, `mark` (no actor: a line that is not a
+    // whole entry). The rows hold no secret, by rule.
+    audit: [
+      { id: 'audit.copy', label: 'Copy this row', icon: '📋', group: '3_keep', verb: 'local', mode: 'local', may: (f) => f.auditRead, fits: () => true },
+      { id: 'audit.actor', label: 'Only this actor', icon: '👤', group: '3_keep', verb: 'local', mode: 'local',
+        may: (f) => f.auditRead, fits: (f, o) => !!o.actor && !(f.filter && f.filter.by === 'actor' && f.filter.value === actorKey(o)) },
+      { id: 'audit.target', label: 'Only this target', icon: '🎯', group: '3_keep', verb: 'local', mode: 'local',
+        may: (f) => f.auditRead, fits: (f, o) => typeof o.target === 'string' && o.target.length > 0 && !(f.filter && f.filter.by === 'target' && f.filter.value === o.target) },
+      { id: 'audit.all', label: 'Show all', icon: '☰', group: '3_keep', verb: 'local', mode: 'local', may: (f) => f.auditRead, fits: (f) => !!f.filter },
+      { id: 'audit.check', label: 'Check the log', icon: '🔍', group: '4_manage', verb: 'http:GET /api/audit/verify', mode: 'now', may: (f) => f.auditRead, fits: () => true },
+      { id: 'audit.export', label: 'Export the log…', icon: '📤', group: '4_manage', verb: 'http:POST /api/audit/export', mode: 'now', may: (f) => f.auditExport, fits: () => true },
+      { id: 'audit.split', label: 'Split the log here…', icon: '✂', group: '4_manage', verb: 'http:POST /api/audit/split', mode: 'now',
+        may: (f) => f.theAdmin, fits: (f, o) => o.action === 'audit.archive' && Number.isSafeInteger(o.seq),
+        confirm: (f, o) => ({ title: 'Split the audit log at entry ' + o.seq + '?', words: 'The entries before it move, whole files, into a signed archive in this laptop\'s data folder. Nothing is deleted: the check then starts at entry ' + o.seq + ' and names the archive, and every export still carries it.',
+          fields: [{ name: 'word', label: 'Type the word split to split there', max: 10 }], yes: 'Split', no: 'Cancel' }) },
+    ],
   };
   for (const kind of Object.keys(KINDS)) {
     for (const e of KINDS[kind]) Object.freeze(e);
@@ -211,6 +406,36 @@
     });
   }
 
+  /**
+   * The admin page's facts (/api/admin/me's answer): whom its gate admits (`ok`: the laptop's token, or an account that
+   * may manage settings), "the admin" (`admin`: the token, or an account whose role is admin), whether AI drafts are on,
+   * the halls a node may be linked for, and whether the page is connected now. Pure.
+   */
+  function adminFacts(s) {
+    const halls = Array.isArray(s.halls) ? s.halls.filter((h) => h && typeof h.code === 'string').map((h) => Object.freeze({ code: h.code, name: typeof h.name === 'string' ? h.name : '' })) : [];
+    // The socket the gate admits is the server's admin (isAdmin), whom mayDriveNode lets drive every node: `canDrive`.
+    return Object.freeze({ page: 'admin', admin: !!s.ok, theAdmin: !!s.admin, canDrive: !!s.ok, ai: !!s.ai, halls: Object.freeze(halls), connected: !!s.connected, support: '' });
+  }
+  /** The halls board's facts (/api/halls's answer and the board's): who may set halls up and drive the show network. Pure. */
+  function boardFacts(s) {
+    return Object.freeze({ page: 'halls', manageHalls: !!s.canManageHalls, canDrive: !!s.canDrive, connected: !!s.connected, support: '' });
+  }
+  /**
+   * The Accounts page's facts (/api/auth/me's account and /api/admin/me's `admin`): its rights, read by the server's
+   * names, and the audit list's filter (`{by: 'actor' | 'target', value}` or null), the page's own view of the list. The
+   * page has no socket: an act goes over HTTP when it is made, so it is never refused for a connection. Pure.
+   */
+  function accountFacts(s) {
+    const caps = s.account && s.account.rights && Array.isArray(s.account.rights.caps) ? s.account.rights.caps : [];
+    const filter = s.filter && (s.filter.by === 'actor' || s.filter.by === 'target') && typeof s.filter.value === 'string' ? Object.freeze({ by: s.filter.by, value: s.filter.value }) : null;
+    return Object.freeze({
+      page: 'accounts', uid: s.account && typeof s.account.id === 'string' ? s.account.id : '',
+      manageUsers: caps.includes('users.manage'), auditRead: caps.includes('audit.read'),
+      auditExport: caps.includes('audit.read') && caps.includes('audit.export'), theAdmin: !!s.admin,
+      filter, connected: true, support: '',
+    });
+  }
+
   const call = (v, f, o) => (typeof v === 'function' ? v(f, o) : v);
   const kindOf = (kind) => { if (!has(KINDS, kind)) throw new Error('No catalogue kind ' + kind); return KINDS[kind]; };
   const entry = (kind, id) => kindOf(kind).find((e) => e.id === id) || null;
@@ -238,7 +463,7 @@
     return {
       id: e.id, label: call(inFold && e.short ? e.short : e.label, f, o), icon: e.icon || '', key: e.key || '', group: e.group,
       disabled: r === true ? '' : r, held: r === true && e.mode === 'hold' && !f.connected && !f.support ? WORDS.held : '',
-      submenu: typeof e.submenu === 'function', asks: !!e.confirm,
+      submenu: typeof e.submenu === 'function', asks: !!(e.confirm && e.confirm(f, o)),
     };
   }
 
@@ -292,6 +517,6 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, KINDS, supportWords, stageWhy, facts, entry, shown, ready, items, ids, inline, submenu, byKey });
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, KINDS, supportWords, stageWhy, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey });
   Object.assign(root.AGM = root.AGM || {}, { catalog });
 })(typeof window !== 'undefined' ? window : globalThis);

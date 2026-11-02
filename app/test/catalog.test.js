@@ -26,16 +26,25 @@ const all = () => KINDS.flatMap((k) => C.KINDS[k].map((e) => ({ kind: k, e })));
 /** The socket verbs the server registers (the fuzz's own read) and the HTTP routes it mounts, as `METHOD /path`. */
 const SOCKET_VERBS = new Set(handlerFiles().flatMap((f) => [...fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1])));
 const ROUTES = new Set(['server.js', 'lib/http-accounts.js'].flatMap((f) => [...fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/\bapp\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)].map((m) => m[1].toUpperCase() + ' ' + m[2])));
-/** The verbs §16.7 names for the kinds landed so far (msg, file, screen): each must be some entry's. A unit that adds an act adds its verb. */
-const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:propose', 'stage:send', 'display:take', 'forward', 'pin', 'delete', 'display:identify', 'display:update', 'display:rotate', 'display:remove'];
+/** The verbs §16.7 names for the kinds landed so far: each must be some entry's. A unit that adds an act adds its verb. */
+const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:propose', 'stage:send', 'display:take', 'forward', 'pin', 'delete', 'display:identify', 'display:update', 'display:rotate', 'display:remove',
+  // the admin page, the halls board and the Accounts page (adminRoom, person, adminMsg, link, tunnel, hall, help, account, audit)
+  'admin:watchRoom', 'admin:summary', 'admin:invites', 'admin:resetRoom', 'admin:deleteRoom', 'admin:setRole', 'admin:linkRoom', 'admin:unlinkRoom', 'admin:kick', 'admin:deleteMessage',
+  'admin:settings', 'nodes:link', 'nodes:unlink', 'nodes:acceptCertificate', 'nodes:command', 'admin:acceptCertificate', 'admin:tunnelStart', 'admin:tunnelStop', 'admin:tunnelStatus',
+  'hall:settings', 'nodes:list', 'http:PATCH /api/users/:id', 'http:POST /api/users/:id/password', 'http:POST /api/users/:id/signout', 'http:DELETE /api/users/:id',
+  'http:GET /api/audit/verify', 'http:POST /api/audit/export', 'http:POST /api/audit/split'];
 /** The status marks the pages draw (the marks table of the plan's §15.6): no act's icon is one, so a mark has one meaning. */
 const MARKS = ['✓', '◐', '◇', '▭', '○', '⊘', '◷', '△', '✕', '■', '▶', '●', '▲', 'i'];
 /** The action icons kept to one act each (§15.6): ↩ is Reply, ↗ is Send to and Send back, ⤴ is Show again. */
 const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack'], '⤴': ['show'] };
-/** Acts of different names that are one act, and so share an icon: 🗑 takes a thing away for good. */
-const ONE_ACT = [['delete', 'remove']];
-/** Acts that open a dialog of their own (Stagewatch's, the Screens console) and so end their label with "…" as an ask does. */
-const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens']);
+/**
+ * Acts of different names that are one act, and so share an icon: 🗑 takes a thing away for good; ✨ is an AI draft a
+ * person reads before anything is sent (a reply, the minutes); ▷ and 🏁 answer a help request, on a message or on the
+ * halls board; ⚙ sets a link up (a node's, or the default Stagewatch's).
+ */
+const ONE_ACT = [['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure']];
+/** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export) and so end their label with "…" as an ask does. */
+const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'hall.setup', 'hall.network', 'account.edit', 'audit.export']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
 const NAMED_KEYS = ['Enter', 'Delete'];
 
@@ -80,15 +89,97 @@ const OBJECTS = {
 };
 const ids = (kind, f, o) => plain(C.ids(kind, f, o));
 
+// ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
+const HALLS = [{ code: 'K7P2QX', name: 'Hall 2' }, { code: 'M3N4PQ', name: 'Legal' }];
+const caps = (...c) => ({ rights: { caps: c } });
+const PAGE = {
+  // The admin page: the token or an admin account ("the admin"), a manager given settings.manage (the page, not the
+  // split), with AI drafts off, not connected, and a socket the page's gate does not admit.
+  admin: C.adminFacts({ ok: true, admin: true, ai: true, halls: HALLS, connected: true }),
+  adminNoAi: C.adminFacts({ ok: true, admin: true, ai: false, halls: HALLS, connected: true }),
+  manager: C.adminFacts({ ok: true, admin: false, ai: true, halls: HALLS, connected: true }),
+  adminOffline: C.adminFacts({ ok: true, admin: true, ai: true, halls: HALLS, connected: false }),
+  notAdmin: C.adminFacts({ connected: true }),
+  // The halls board: a manager who sets halls up and drives the show network, and a hall's crew.
+  board: C.boardFacts({ canManageHalls: true, canDrive: true, connected: true }),
+  boardCrew: C.boardFacts({ connected: true }),
+  // The Accounts page: an admin, a manager (users.manage, audit.read), one who reads the log alone, and the admin with the
+  // log kept to Ana's entries.
+  accountsAdmin: C.accountFacts({ account: { id: 'a-root', ...caps('users.manage', 'audit.read', 'audit.export') }, admin: true }),
+  accountsManager: C.accountFacts({ account: { id: 'a-mia', ...caps('users.manage', 'audit.read') }, admin: false }),
+  auditor: C.accountFacts({ account: { id: 'a-aud', ...caps('audit.read') } }),
+  filtered: C.accountFacts({ account: { id: 'a-root', ...caps('users.manage', 'audit.read', 'audit.export') }, admin: true, filter: { by: 'actor', value: 'account:a-ana' } }),
+};
+const ENTRY = { seq: 12, at, action: 'user.update', actor: { t: 'account', id: 'a-ana', name: 'Ana' }, target: 'kim', words: 'role → tech', mark: 'intact' };
+const PAGE_OBJECTS = {
+  adminRoom: { listed: { code: 'K7P2QX', name: 'Hall 2', hall: 'Hall 2', watched: false }, watched: { code: 'K7P2QX', name: 'Hall 2', hall: 'Hall 2', watched: true } },
+  person: {
+    guest: { socketId: 's-kim', uid: 'u-kim', name: 'Kim', role: 'research', account: false, linkedRooms: [], hall: 'Hall 2' },
+    account: { socketId: 's-ana', uid: 'a-ana', name: 'Ana', role: 'research', account: true, linkedRooms: ['M3N4PQ'], hall: 'Hall 2' },
+  },
+  adminMsg: {
+    text: { id: 'm1', type: 'text', text: 'Capex is on slide 14', from: from(ANA, 'research', 'Ana'), at, hall: 'Hall 2' },
+    file: { id: 'm2', type: 'file', filename: 'capex.pdf', from: from(ANA, 'research', 'Ana'), at, hall: 'Hall 2' },
+  },
+  link: {
+    stagewatch: { t: 'main', name: 'Stagewatch', url: '10.0.4.21:9924', changed: false },
+    stagewatchChanged: { t: 'main', name: 'Stagewatch', url: '10.0.4.21:9924', changed: true },
+    heardStagewatch: { id: 'sw2', t: 'main', name: 'Hall 3 FOH', url: '10.0.4.22:9924', heard: true, hall: '' },
+    heardNode: { id: 'p1', t: 'patterns', name: 'Patterns FOH', url: '', heard: true, hall: '' },
+    node: { id: 'p1', t: 'patterns', name: 'Patterns FOH', hall: '', linked: true, certificateWaits: false, certificateChanged: false, desk: true, commands: [{ verb: 'CUE <n>' }, { verb: 'BLACKOUT' }] },
+    nodeWaits: { id: 'p2', t: 'playmap', name: 'PlayMap 1', hall: 'K7P2QX', linked: true, certificateWaits: true, certificateChanged: true, desk: false, commands: [{ verb: 'PLAY <clip>' }] },
+    nodeQuiet: { id: 'p3', t: 'patterns', name: 'Patterns 2', hall: '', linked: true, certificateWaits: false, desk: true, commands: [] },
+    heardAgent: { id: 'a1', t: 'agent', name: 'Lectern PC', url: '', heard: true, hall: '' },
+  },
+  tunnel: {
+    off: { running: false, url: '', checking: false, checkedAgo: null },
+    starting: { running: true, url: '', checking: false, checkedAgo: null },
+    checking: { running: true, url: 'https://a-b.trycloudflare.com', checking: true, checkedAgo: null },
+    justChecked: { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: 20.4 },
+    on: { running: true, url: 'https://a-b.trycloudflare.com', checking: false, checkedAgo: 90 },
+  },
+  hall: { row: { code: 'K7P2QX', name: 'Hall 2' } },
+  help: {
+    open: { code: 'K7P2QX', id: 'h1', state: 'open', canRespond: true, hall: 'Hall 2', category: 'Sound' },
+    coming: { code: 'K7P2QX', id: 'h2', state: 'coming', canRespond: true, hall: 'Hall 2', category: 'Vision' },
+    notTheirs: { code: 'M3N4PQ', id: 'h3', state: 'open', canRespond: false, hall: 'Legal', category: 'Presenter' },
+  },
+  account: {
+    other: { id: 'a-kim', name: 'Kim Tech', username: 'kim', disabled: false, locked: '', self: false },
+    off: { id: 'a-kim', name: 'Kim Tech', username: 'kim', disabled: true, locked: '', self: false },
+    locked: { id: 'a-root', name: 'Root Admin', username: 'root', disabled: false, locked: 'Only an admin may change an admin\'s account.', self: false },
+    self: { id: 'a-root', name: 'Root Admin', username: 'root', disabled: false, locked: '', self: true },
+  },
+  audit: {
+    entry: ENTRY,
+    archive: { seq: 9, at, action: 'audit.archive', actor: { t: 'admin', id: 'host', name: 'AGMessage laptop' }, target: 'event:2026-10-31', words: 'an archive point', mark: 'intact' },
+    noTarget: { seq: 13, at, action: 'login', actor: { t: 'account', id: 'a-ana', name: 'Ana' }, target: '', words: 'signed in', mark: 'intact' },
+    bad: { line: 7, file: 'audit.jsonl', mark: 'broken', words: 'line 7 of audit.jsonl is not a whole entry' },
+  },
+};
+/** The seats an act's words are read for, per kind: the hall page's for its kinds, each other page's own. */
+const KIND_SEATS = {
+  msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
+  adminRoom: [PAGE.admin, PAGE.adminNoAi], person: [PAGE.admin], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin],
+  hall: [PAGE.board], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
+};
+/** Every seat of a kind with every object of it ([f, o] pairs): messages, a file where it is listed and where it is open, a screen, and the other pages' objects. */
+function pairsOf(kind) {
+  const objs = PAGE_OBJECTS[kind] ? Object.values(PAGE_OBJECTS[kind])
+    : kind === 'file' ? ['list', 'preview'].map((where) => Object.assign({}, OBJECTS.anaFile, { where }))
+      : kind === 'screen' ? [SCREEN] : Object.values(OBJECTS);
+  return KIND_SEATS[kind].flatMap((f) => objs.map((o) => [f, o]));
+}
+
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'hall', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
     const keys = new Set();
     let last = -1;
     for (const e of list) {
-      assert.ok(/^[a-z]+\.[a-z][A-Za-z]*$/.test(e.id) && e.id.split('.')[0] === kind, e.id + ': shaped kind.verb, in its kind');
+      assert.ok(/^[a-z][A-Za-z]*\.[a-z][A-Za-z]*$/.test(e.id) && e.id.split('.')[0] === kind, e.id + ': shaped kind.verb, in its kind');
       assert.ok(!seen.has(e.id), e.id + ': unique');
       seen.add(e.id);
       const g = C.GROUPS.indexOf(e.group);
@@ -156,16 +247,27 @@ test('the verbs: each is one the server registers, a route it mounts, or local; 
 });
 
 test('one word for one act: "…" for an act that asks first or opens a dialog, "screen" only for a screen or the speaker\'s screen', () => {
-  for (const { e } of all()) {
-    for (const [f, o] of Object.values(OBJECTS).flatMap((x) => [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple].map((f2) => [f2, x]))) {
+  const read = new Set();
+  for (const { kind, e } of all()) {
+    for (const [f, o] of pairsOf(kind)) {
       const label = typeof e.label === 'function' ? e.label(f, o) : e.label;
       assert.ok(typeof label === 'string' && label.length > 0, e.id + ': a label for every object');
-      assert.equal(label.endsWith('…'), !!e.confirm || OPENS_DIALOG.has(e.id), e.id + ': "' + label + '" ends with "…" exactly when it asks first or opens a dialog');
+      // What an act asks is read of an object it fits: the ask names it.
+      if (!e.fits(f, o)) continue;
+      read.add(e.id);
+      const asks = !!(e.confirm && e.confirm(f, o));
+      assert.equal(label.endsWith('…'), asks || OPENS_DIALOG.has(e.id), e.id + ': "' + label + '" ends with "…" exactly when it asks first or opens a dialog');
+      if (asks) {
+        const a = plain(e.confirm(f, o));
+        assert.ok(typeof a.title === 'string' && a.title.length > 0 && typeof a.yes === 'string' && typeof a.no === 'string', e.id + ': an ask has its title and its two verbs');
+        assert.equal(!!a.danger, e.group === '9_danger' || e.id === 'link.accept', e.id + ': an ask is a danger exactly when its act is (and a certificate accepted)');
+      }
       if (/screen/i.test(label)) assert.ok(e.verb.startsWith('display:') || (e.verb.startsWith('stage:') && /speaker's screen/i.test(label)), e.id + ': "' + label + '" says screen and acts on one');
       if (e.verb === 'page:push') assert.match(label, /\bShow\b/, e.id + ': an act that puts something on people\'s pages says Show');
       if (e.short) assert.ok(e.fold, e.id + ': a short label is a fold\'s');
     }
   }
+  assert.deepEqual(all().map(({ e }) => e.id).filter((id) => !read.has(id)), [], 'every act\'s words are read on an object it fits');
 });
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
@@ -365,4 +467,157 @@ test('a single key on the focused object: R E F P D, Enter, Delete or Backspace,
   assert.deepEqual(['Enter', 'd'].map((k) => key('research', OBJECTS.anaFile, k)), ['msg.look', 'msg.download']);
   assert.equal(key('observer', OBJECTS.anaText, 'p'), null, 'a key runs only what the seat is shown');
   assert.equal(key('board', OBJECTS.anaFile, 'd'), null, 'On stage downloads nothing, by key either');
+});
+
+// ---------------------------------------------------------------- the admin page, the halls board, the Accounts page
+test('the other pages\' facts: read from the server\'s answers, and nothing a page could name for itself', () => {
+  assert.deepEqual(plain(C.adminFacts({ ok: 1, admin: 0, ai: 'yes', halls: [{ code: 'K7P2QX', name: 'Hall 2', extra: 1 }, { name: 'no code' }, null], connected: true, role: 'admin' })),
+    { page: 'admin', admin: true, theAdmin: false, canDrive: true, ai: true, halls: [{ code: 'K7P2QX', name: 'Hall 2' }], connected: true, support: '' }, 'the gate\'s answer, "the admin", the drive right it carries, AI, the halls by code and name');
+  assert.deepEqual(plain(C.adminFacts({})), { page: 'admin', admin: false, theAdmin: false, canDrive: false, ai: false, halls: [], connected: false, support: '' }, 'nothing told: no right');
+  assert.deepEqual(plain(C.boardFacts({ canManageHalls: true, canDrive: 1, connected: true, isAdmin: true })), { page: 'halls', manageHalls: true, canDrive: true, connected: true, support: '' });
+  assert.deepEqual(plain(C.accountFacts({ account: { id: 'a-1', rights: { caps: ['users.manage', 'audit.read', 'audit.export'] } }, admin: true, filter: { by: 'actor', value: 'account:a-2', words: 'x' } })),
+    { page: 'accounts', uid: 'a-1', manageUsers: true, auditRead: true, auditExport: true, theAdmin: true, filter: { by: 'actor', value: 'account:a-2' }, connected: true, support: '' });
+  assert.deepEqual([C.accountFacts({ account: { rights: { caps: ['audit.export'] } } }).auditExport, C.accountFacts({ filter: { by: 'role', value: 'x' } }).filter, C.accountFacts({}).connected],
+    [false, null, true], 'an export reads every entry (audit.read as well); a filter of no known kind is none; HTTP has no connection to lose');
+});
+
+test('the other pages\' matrix: what each seat is shown on each object of the admin page, the halls board and the Accounts page', () => {
+  const O = PAGE_OBJECTS;
+  const M = [
+    // A hall: Watch, its transcript, the minutes and its seats' lock; clearing and closing it last. Watched, no Watch.
+    ['adminRoom', 'admin', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'admin', O.adminRoom.watched, ['adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'manager', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'notAdmin', O.adminRoom.listed, []],
+    // A person: a code guest's seat is the admin's to set; an account's follows its rights (no Seat).
+    ['person', 'admin', O.person.guest, ['person.seat', 'person.forward', 'person.view', 'person.kick']],
+    ['person', 'admin', O.person.account, ['person.forward', 'person.unforward', 'person.view', 'person.kick']],
+    ['person', 'notAdmin', O.person.guest, []],
+    ['adminMsg', 'admin', O.adminMsg.text, ['adminMsg.copy', 'adminMsg.delete']],
+    ['adminMsg', 'admin', O.adminMsg.file, ['adminMsg.delete']],
+    ['adminMsg', 'notAdmin', O.adminMsg.text, []],
+    // The links: the default Stagewatch (set up in one form, its certificate accepted only when it changed), one heard (its
+    // address used), a Patterns or PlayMap heard (linked with its token) and linked (proposed to, set up, confirmed,
+    // unlinked); a presenter PC heard is no link.
+    ['link', 'admin', O.link.stagewatch, ['link.copy', 'link.configure']],
+    ['link', 'admin', O.link.stagewatchChanged, ['link.copy', 'link.configure', 'link.accept']],
+    ['link', 'admin', O.link.heardStagewatch, ['link.use', 'link.copy']],
+    ['link', 'admin', O.link.heardNode, ['link.setup']],
+    ['link', 'admin', O.link.node, ['link.propose', 'link.setup', 'link.unlink']],
+    ['link', 'admin', O.link.nodeWaits, ['link.propose', 'link.setup', 'link.confirm', 'link.unlink']],
+    ['link', 'admin', O.link.nodeQuiet, ['link.setup', 'link.unlink']],
+    ['link', 'admin', O.link.heardAgent, []],
+    ['link', 'notAdmin', O.link.node, []],
+    ['tunnel', 'admin', O.tunnel.off, ['tunnel.check', 'tunnel.on']],
+    ['tunnel', 'admin', O.tunnel.on, ['tunnel.check', 'tunnel.copy', 'tunnel.off']],
+    ['tunnel', 'admin', O.tunnel.starting, ['tunnel.check', 'tunnel.off']],
+    ['tunnel', 'notAdmin', O.tunnel.on, []],
+    // A hall's row: opened (here or in a tab) and its code copied by everyone it is listed for; set up and the show
+    // network by right.
+    ['hall', 'board', O.hall.row, ['hall.open', 'hall.tab', 'hall.copy', 'hall.code', 'hall.setup', 'hall.network']],
+    ['hall', 'boardCrew', O.hall.row, ['hall.open', 'hall.tab', 'hall.copy', 'hall.code']],
+    ['help', 'board', O.help.open, ['help.respond', 'help.resolve', 'help.open']],
+    ['help', 'board', O.help.coming, ['help.resolve', 'help.open']],
+    ['help', 'boardCrew', O.help.notTheirs, ['help.open']],
+    // An account: Edit, a new one-time password and Sign out everywhere; Turn off and Remove last, never on one's own;
+    // a locked row keeps Edit alone (disabled, with its reason); one who reads only the log is shown none.
+    ['account', 'accountsAdmin', O.account.other, ['account.edit', 'account.password', 'account.signout', 'account.disable', 'account.remove']],
+    ['account', 'accountsAdmin', O.account.self, ['account.edit', 'account.password', 'account.signout']],
+    ['account', 'accountsManager', O.account.locked, ['account.edit']],
+    ['account', 'auditor', O.account.other, []],
+    // An entry of the log: copied, the list kept to its actor or its target, the whole log checked and exported; split
+    // at an archive point by the admin alone; a manager exports nothing (audit.export is the admin's).
+    ['audit', 'accountsAdmin', O.audit.entry, ['audit.copy', 'audit.actor', 'audit.target', 'audit.check', 'audit.export']],
+    ['audit', 'accountsAdmin', O.audit.archive, ['audit.copy', 'audit.actor', 'audit.target', 'audit.check', 'audit.export', 'audit.split']],
+    ['audit', 'accountsManager', O.audit.archive, ['audit.copy', 'audit.actor', 'audit.target', 'audit.check']],
+    ['audit', 'auditor', O.audit.noTarget, ['audit.copy', 'audit.actor', 'audit.check']],
+    ['audit', 'auditor', O.audit.bad, ['audit.copy', 'audit.check']],
+    ['audit', 'filtered', O.audit.entry, ['audit.copy', 'audit.target', 'audit.all', 'audit.check', 'audit.export']],
+    ['audit', 'accountsManager', O.audit.entry, ['audit.copy', 'audit.actor', 'audit.target', 'audit.check']],
+  ];
+  for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, PAGE[seat], o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
+  // Every act of these kinds is shown to some seat: none passes the matrix by its absence.
+  const kinds = ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'hall', 'help', 'account', 'audit'];
+  const shownSomewhere = new Set(M.flatMap((r) => r[3]));
+  for (const k of kinds) for (const e of C.KINDS[k]) assert.ok(shownSomewhere.has(e.id), e.id + ' is shown to some seat in the matrix');
+  // Every act a seat is shown is one its rights allow: the admin page's acts need its gate, the split "the admin".
+  for (const k of ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel']) for (const o of Object.values(PAGE_OBJECTS[k])) assert.deepEqual(ids(k, PAGE.notAdmin, o), [], k + ': nothing to a page the admin page\'s gate does not admit');
+});
+
+test('the other pages: what may be done but not now is shown, disabled, with the words why', () => {
+  const O = PAGE_OBJECTS;
+  const why = (kind, seat, o) => Object.fromEntries(plain(C.items(kind, PAGE[seat], o)).filter((i) => !i.sep).map((i) => [i.id, i.disabled]));
+  // Check again: off, waiting for its address, a check running, and one in the last minute each say why; after it, ready.
+  assert.deepEqual([O.tunnel.off, O.tunnel.starting, O.tunnel.checking, O.tunnel.justChecked, O.tunnel.on].map((o) => C.ready('tunnel', 'tunnel.check', PAGE.admin, o)),
+    ['The internet link is off.', 'Waiting for Cloudflare to give the address.', 'Checking the internet link…', 'Checked 20 s ago.', true]);
+  // A locked account: Edit shown, disabled with the server's words, so they can be read on a touch screen too.
+  assert.deepEqual(why('account', 'accountsManager', O.account.locked), { 'account.edit': 'Only an admin may change an admin\'s account.' });
+  // The minutes with no AI key, and a line to a node whose Stagewatch keeps no show desk.
+  assert.equal(why('adminRoom', 'adminNoAi', O.adminRoom.listed)['adminRoom.minutes'], C.WORDS.noAi);
+  assert.equal(why('link', 'admin', O.link.nodeWaits)['link.propose'], 'PlayMap 1\'s lines go to the show desk, and its Stagewatch keeps none now — nothing can be proposed.');
+  // Not connected: an act on something says so; one that sends nothing (the transcript, a copy) goes on.
+  assert.deepEqual(why('adminRoom', 'adminOffline', O.adminRoom.listed), {
+    'adminRoom.watch': C.WORDS.offline, 'adminRoom.transcript': '', 'adminRoom.minutes': C.WORDS.offline, 'adminRoom.invites': C.WORDS.offline, 'adminRoom.clear': C.WORDS.offline, 'adminRoom.remove': C.WORDS.offline,
+  });
+  assert.deepEqual(why('adminMsg', 'adminOffline', O.adminMsg.text), { 'adminMsg.copy': '', 'adminMsg.delete': C.WORDS.offline });
+  // The Accounts page has no socket: nothing there is refused for a connection.
+  assert.deepEqual(Object.values(why('account', 'accountsAdmin', O.account.other)).filter(Boolean), []);
+});
+
+test('the other pages: the inline bar, the asks and their words, the caps and the keys', () => {
+  const O = PAGE_OBJECTS;
+  const bar = (kind, seat, o) => plain(C.inline(kind, PAGE[seat], o)).map((i) => i.id);
+  assert.deepEqual(bar('adminRoom', 'admin', O.adminRoom.listed), ['adminRoom.watch'], 'a hall in the list: Watch');
+  assert.deepEqual(bar('adminRoom', 'admin', O.adminRoom.watched), [], 'the watched hall\'s header: only ⋯');
+  assert.deepEqual(bar('person', 'admin', O.person.guest), [], 'a person\'s row keeps its Seat select, and a ⋯');
+  assert.deepEqual(bar('link', 'admin', O.link.heardStagewatch), ['link.use']);
+  assert.deepEqual(bar('link', 'admin', O.link.nodeWaits), ['link.confirm', 'link.setup']);
+  assert.deepEqual(bar('link', 'admin', O.link.stagewatchChanged), ['link.accept']);
+  assert.deepEqual(bar('tunnel', 'admin', O.tunnel.on), ['tunnel.check', 'tunnel.copy']);
+  assert.deepEqual(bar('hall', 'board', O.hall.row), [], 'a hall\'s row opens by its name, its one link');
+  assert.deepEqual(bar('help', 'board', O.help.open), ['help.respond', 'help.resolve'], 'a help request: its two answers');
+  assert.deepEqual(bar('account', 'accountsAdmin', O.account.other), ['account.edit']);
+  assert.deepEqual(bar('audit', 'accountsAdmin', O.audit.entry), [], 'an entry: only ⋯');
+  for (const kind of Object.keys(PAGE_OBJECTS)) {
+    for (const [f, o] of [...pairsOf(kind), ...Object.values(PAGE).map((p) => [p, Object.values(PAGE_OBJECTS[kind])[0]])]) {
+      const items = plain(C.items(kind, f, o)).filter((i) => !i.sep);
+      assert.ok(items.length <= 12 && items.filter((i) => i.group === '9_danger').length <= 2, kind + ': at most 12 items and 2 dangers');
+      const menu = ids(kind, f, o);
+      assert.ok(plain(C.inline(kind, f, o)).every((i) => menu.includes(i.id)), kind + ': the bar is in the menu');
+    }
+  }
+  // The asks name the object and what follows, and their buttons are verbs; a node is linked in one form of three
+  // fields, its pairing token a password field kept out of the browser's memory.
+  const ask = (kind, id, seat, o) => plain(C.entry(kind, id).confirm(PAGE[seat], o));
+  assert.deepEqual(ask('adminRoom', 'adminRoom.clear', 'admin', O.adminRoom.listed), { title: 'Clear every message in Hall 2?', words: 'Files used nowhere else go too. Everyone stays in the hall. This cannot be undone.', yes: 'Clear messages', no: 'Keep them', danger: true });
+  assert.deepEqual(ask('adminRoom', 'adminRoom.remove', 'admin', O.adminRoom.listed).fields, [{ name: 'purge', type: 'checkbox', label: 'Also delete the files shared only in this hall', value: true }]);
+  assert.deepEqual(ask('adminMsg', 'adminMsg.delete', 'admin', O.adminMsg.text), { title: 'Delete this message for everyone in Hall 2?', words: '“Capex is on slide 14” goes from every page in the hall now. This cannot be undone.', yes: 'Delete for everyone', no: 'Keep it', danger: true });
+  assert.deepEqual([ask('person', 'person.kick', 'admin', O.person.guest).words, ask('person', 'person.kick', 'admin', O.person.account).words, ask('person', 'person.kick', 'admin', O.person.guest).no],
+    ['Every page Kim has open here closes. Kim can join again with the code.', 'Every page Ana has open here closes. Ana\'s account still has Hall 2 and can open it again. To keep Ana out, take Hall 2 off the account on the Accounts page.', 'Keep Kim in'], 'Log out says, by case, whether they can come back');
+  const form = ask('link', 'link.setup', 'admin', O.link.nodeWaits);
+  assert.deepEqual(form.fields.map((x) => [x.name, x.type || 'text']), [['token', 'password'], ['hall', 'select'], ['fingerprint', 'text']], 'one form of three fields');
+  assert.deepEqual(form.fields[1].options, [{ value: '', label: 'Every hall' }, { value: 'K7P2QX', label: 'Hall 2 · K7P2QX' }, { value: 'M3N4PQ', label: 'Legal · M3N4PQ' }], 'the hall from a pick list of the halls');
+  assert.equal(form.fields[1].value, 'K7P2QX', 'a linked node\'s hall chosen');
+  // A node linked for a hall the page does not list (closed since, or the list not read yet) keeps it, chosen: a Save
+  // never moves it to every hall unasked.
+  const closed = ask('link', 'link.setup', 'admin', { ...O.link.nodeWaits, hall: 'Z9Z9Z9' });
+  assert.deepEqual([closed.fields[1].value, closed.fields[1].options.slice(-1)[0]], ['Z9Z9Z9', { value: 'Z9Z9Z9', label: 'Z9Z9Z9 · not listed here now' }]);
+  const unread = plain(C.entry('link', 'link.setup').confirm(C.adminFacts({ ok: true, connected: true }), O.link.nodeWaits)).fields[1];
+  assert.deepEqual([unread.value, unread.options.map((x) => x.value)], ['K7P2QX', ['', 'K7P2QX']], 'before the halls are read, the linked hall is still the choice');
+  // The default Stagewatch is set up in one form of three fields: its address, its node key (a password field, never
+  // filled), its certificate's fingerprint.
+  const sw = ask('link', 'link.configure', 'admin', { ...O.link.stagewatch, keySet: true, fingerprint: 'sha256:ab12' });
+  assert.deepEqual(sw.fields.map((x) => [x.name, x.type || 'text', x.value === undefined ? null : x.value]), [['url', 'text', '10.0.4.21:9924'], ['key', 'password', null], ['fingerprint', 'text', 'sha256:ab12']]);
+  assert.equal(sw.fields[1].hint, 'Leave it empty to keep the saved one.');
+  // No longer forward into ▸: the halls the person may forward into now, by name.
+  assert.deepEqual(plain(C.submenu('person', 'person.unforward', PAGE.admin, { ...O.person.account, linkedNames: { M3N4PQ: 'Legal · M3N4PQ' } })), [{ value: 'M3N4PQ', label: 'Legal · M3N4PQ' }]);
+  // Propose… is the drive right's (mayDriveNode admits the admin page's socket for every node).
+  assert.deepEqual([C.entry('link', 'link.propose').may(PAGE.admin, O.link.node), C.entry('link', 'link.propose').may(PAGE.notAdmin, O.link.node)], [true, false]);
+  assert.deepEqual([ask('account', 'account.disable', 'accountsAdmin', O.account.off), C.entry('account', 'account.disable').label(PAGE.accountsAdmin, O.account.off)], [null, 'Turn on'], 'turning an account on asks nothing');
+  assert.deepEqual(ask('audit', 'audit.split', 'accountsAdmin', O.audit.archive).fields, [{ name: 'word', label: 'Type the word split to split there', max: 10 }]);
+  // The keys: Enter opens a hall, an account and a help request's hall, and watches a hall; Delete deletes a message.
+  const key = (kind, seat, o, k) => { const e = C.byKey(kind, PAGE[seat], o, k); return e ? e.id : null; };
+  assert.deepEqual([key('hall', 'boardCrew', O.hall.row, 'Enter'), key('account', 'accountsAdmin', O.account.other, 'Enter'), key('help', 'board', O.help.open, 'Enter'),
+    key('adminRoom', 'admin', O.adminRoom.listed, 'Enter'), key('adminMsg', 'admin', O.adminMsg.text, 'Backspace'), key('adminRoom', 'admin', O.adminRoom.watched, 'Enter')],
+    ['hall.open', 'account.edit', 'help.open', 'adminRoom.watch', 'adminMsg.delete', null]);
 });

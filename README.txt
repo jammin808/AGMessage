@@ -229,8 +229,8 @@ If the laptop is lost, the exports you kept are what is left to check.
   laptop's clock), nor anything about someone who could change AGMessage on
   the laptop or holds its machine.key.
 
-Menus and keys in a hall
-------------------------
+Menus and keys
+--------------
 A message keeps two buttons on its row: Reply, and the one you use most
 (Ask the operator, Send now or Show on screens). Everything else you may
 do with it is in its ⋯ button, and right-click or Shift+F10 (or the menu
@@ -242,9 +242,26 @@ On a message with the focus (click it first):
   R reply, E react, F send to another hall, P pin (the note at the bottom
   offers Undo for 10 seconds), D download a file, Enter look at a file,
   Delete or Backspace delete your own (it asks first).
-Shift+right-click opens the browser's own menu (Copy, spelling). Nothing
-on the hall page opens a browser pop-up: what cannot be undone asks in
-place, beside what it acts on, and Escape answers no.
+Shift+right-click opens the browser's own menu (Copy, spelling). No page
+opens a browser pop-up: what cannot be undone asks in place, beside what
+it acts on, and Escape answers no.
+
+The other pages work the same way. On the admin page each hall, person,
+message of the live feed, linked Patterns or PlayMap, the Stagewatch
+link and the internet link's card has its ⋯ (Close hall..., Clear
+messages..., Log out..., Delete for everyone..., Set up..., Turn off...
+and the rest ask first). Linking a Patterns or PlayMap is one small
+form: its pairing token, the hall from a list, and the start of its
+certificate's fingerprint. On the halls board a hall's name opens it (a
+middle click opens a new tab), and its ⋯ has Open in a new tab, Copy
+link, Copy guest code and Set up...; a help request's ⋯ has On my way,
+Resolved and Open its hall. On the Accounts page each account's ⋯ has
+Edit..., a new one-time password, Sign out everywhere, Turn off and
+Remove; a row you may not change says why on its Edit. Each audit log
+entry's ⋯ copies it, or keeps the list to its actor or its target (Show
+all brings the rest back). The first Tab on each page is a "Skip to ..."
+link, and each list is one Tab stop: the arrow keys move between its
+rows.
 
 Screens (projector PC, lectern monitor, foyer TV)
 -------------------------------------------------

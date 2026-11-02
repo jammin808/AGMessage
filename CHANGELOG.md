@@ -1228,6 +1228,92 @@ dialogs on a message's and a screen's acts)
   (which offer is the catalogue's) and the panel's own Pin button: 11 hex colours fewer, 281.
 - Rolling back: nothing is stored but the browser's `agm.moved`; 0.5.1's page ignores `forwardable`.
 
+**The admin page, the halls board and the Accounts page act from the catalogue, and no page uses a native dialog** (the
+plan's Part 5, unit 3b; the owner's ask that right-click menus and the buttons be in step; the measured cause is unit
+3a's, the plan's §16.1: a native dialog left open 20 s dropped the page's socket; the tree before it had 30 native
+dialogs on these pages — the admin page's 29, three of them the prompts that linked a Patterns or PlayMap, and the
+Accounts page's one — and the theme toggle drawn over the admin's Logout at every width)
+- Every act of these three pages on a thing is an entry of the catalogue, drawn by the one runner every page now shares
+  (`AGM.acts` in `app/public/menus.js`): the thing's bar, its ⋯, right-click, Shift+F10 (or the menu key) and its key
+  open the same list, absent where the seat may never do it and disabled, with its reason on a second line, where it
+  cannot now. On the admin page: a hall in the list and the watched hall's header (kind `adminRoom`: Watch, Transcript,
+  ✨ Minutes, Roles & invites, then Clear messages… and Close hall… last); a person (`person`: Seat ▸ for a code guest,
+  Let them forward into ▸ — every other hall, ticked where they may now — No longer forward into ▸ — the halls they may
+  forward into now, which an unticked hall and a chip's × are doors to — Open their view, then Log out…); a message of
+  the live feed (`adminMsg`: Copy text, then Delete for everyone…); the default Stagewatch, each show system heard and
+  each Patterns or PlayMap linked (`link`: Propose… (the drive right's), Use this address, Copy address, Set up… — the
+  default Stagewatch's address, node key and fingerprint in one form, as on the page — Link… or Set up… for a node,
+  Accept certificate… or Confirm fingerprint…, then Unlink…); and the internet link's card (`tunnel`: Check again, Copy
+  address, Turn on, then Turn off…). On the halls board: a hall's row (`hall`: Open, Open in a new tab, Copy link, Copy
+  guest code, Set up…, Show network…) and an open help request (`help`: On my way and Resolved as its bar, and Open its
+  hall). On the Accounts page: an account (`account`: Edit… as its bar, New one-time password…, Sign out everywhere…,
+  then Turn off… or Turn on, and Remove…) and an entry of the audit log (`audit`: Copy this row — its mark with it —
+  Only this actor, Only this target, Show all, then Check the log, Export the log… and, on an archive point and for the
+  admin alone, Split the log here…).
+- No page opens a native `alert`, `confirm` or `prompt`. A question is asked in place, named for its object, its buttons
+  verbs, the safe one focused and Escape its "no": Clear every message in Hall 2? [Clear messages] [Keep them]; Close
+  hall Hall 2? with its tick for the files shared only there [Close and delete] [Keep it open] (it was a panel of its
+  own); Delete this message for everyone in Hall 2? [Delete for everyone] [Keep it]; Log Kim out of Hall 2?, saying by
+  case whether Kim can come back (a code guest with the code; an account still has the hall, and how to keep it out);
+  Turn the internet link off? (the toggle asks too, and shows the link on until it is off); a new certificate, a
+  Stagewatch certificate accepted, an account's new one-time password, signing it out everywhere, turning it off or
+  removing it. New hall's name is a field in place. A Patterns or PlayMap is linked or set up through one form of three
+  fields — its pairing token (a password field the browser keeps nothing of), the hall from a pick list of the halls
+  (it was a typed code; a hall it is linked for that the page does not list stays chosen, "· not listed here now", so a
+  Save never moves it to every hall), its certificate's fingerprint — and a node's certificate is confirmed through one
+  field. A refusal or a result is said in the page's toast. The admin's page stays connected while a form is open. A
+  code guest's Seat select shows the seat the server keeps until it answers (a choice made offline, or refused, puts it
+  back). The default Stagewatch's address and fingerprint fields keep what a person typed, or what Use this address
+  put there, until it is saved: the settings read every 5 s no longer write over them.
+- The admin page's header holds New hall, the theme and Logout as ordinary buttons in its row: nothing is drawn over
+  Logout at any width (the theme toggle was fixed over it). The people's table names its column Seat. The watched hall's
+  header keeps its code, people and messages, and the rest of its acts are on its ⋯; Roles & invites and ✨ Minutes open
+  under it (watching the hall first when it is another). The linked-hall picker, the Close panel and the destructive
+  button style go.
+- The halls board: a hall's name is its row's one link, covering the row (a click, a middle click or a Ctrl+click
+  anywhere on it opens the hall, and a screen reader reads a link), its ⋯ above it; its right-click is AGMessage's menu,
+  which offers Open in a new tab. A hall with no Stagewatch says "○ No Stagewatch linked" quietly, without the dark
+  "--:--" box. Set up is on the row's ⋯. Rows and help requests are drawn again in place, so a frame every second keeps
+  the focus and an open menu. The row's chips sit above its link, so a screen chip's and a node's state words are read
+  on hover, and each says them to a screen reader beside its name.
+- The Accounts page: a row the viewer may not change keeps Edit, disabled with the server's reason, readable on its
+  button, in its menu (on a touch screen too) and in the toast when it is chosen (it was a disabled "Locked" button
+  whose reason only a mouse could read). An act's answer not back in 5 s, the editor's Save included, says "No answer —
+  check the connection." (in the editor when it is open), and the answer that comes later is still the act's, said as
+  late: a new one-time password that comes late is shown all the same, and a Save is held, never sent twice, until it is
+  answered. Split the log here… runs as long as the split takes, saying "Splitting…" meanwhile, then what it moved and
+  the log read again. The audit log can be kept to one actor's or one target's entries, said above it with how many are
+  shown, and Show all brings the rest back.
+- Each of these pages has a skip link as its first Tab ("Skip to the halls", "Skip to the accounts", or "Skip to the
+  audit log" for one who reads only that), and its lists are one tab stop each (`AGM.roving`): ↑ and ↓ between the
+  halls, the people, the messages of the admin's live feed, the links, the help requests, the accounts and the entries,
+  Home and End, Tab into the one with the focus. Under a finger, the text buttons of these bars are 44 px, as the icon
+  buttons and the ⋯ were.
+- The fences (`docs/ANALYSIS.md` §3.6): ESLint's `no-alert` on every page script and page module, with a test that a
+  planted `alert`, `confirm` or `prompt` fails the lint; `test/catalog.test.js` holds the nine new kinds to the rules
+  (their verbs among the required ones, the HTTP routes the Accounts page sends included) and asserts each page's facts,
+  39 seat-and-object sets, the disabled reasons (Check again's four, a locked account, the minutes with no key, a node
+  whose Stagewatch keeps no desk, not connected), the bars, the asks and their words (a node's hall kept when it is not
+  listed), the caps and the keys; every act's words are read on an object it fits. `test/menus.test.js` sends every act
+  of these pages each seat is not offered — as a Staff account and a code guest on the admin page, a Viewer on the halls
+  board, and on the Accounts page a Staff account, a manager and a manager who may manage accounts but not an admin's —
+  29 verbs and routes in all, and holds each refused with words and nothing changed (a guest's forwarding and the
+  default Stagewatch included). The smoke: right-click, ⋯ and Shift+F10 open the catalogue's set on a hall in the admin
+  list and the watched hall's header, a person, a message of the feed, the internet link's card, a linked Patterns, a
+  hall's row and a help request on the board, an account and an entry of the log; the asks named and answered "no" with
+  nothing changed; Logout, the theme and New hall not covered at 1440, 1024 and 390 px; the skip links; the halls one
+  tab stop with ↓; a hall's menu kept open, in order, through a board frame that redraws its row; Let them forward into
+  ▸'s ticks, No longer forward into ▸ offered once linked, an untick and a chip's × each taking it back; a hall's name
+  its row's one link and a middle click opening a tab; the log kept to one actor and back; a locked row's reason on its
+  button, in its menu and in the toast, and no request made for it; Check again on an internet link that is off saying
+  why on its button and in its menu and sending nothing (the page's emits counted); the three pages in both themes
+  (their bars 24 px or more, icons at 3:1, words at 4.5:1, none faded, their menus' words at 4.5:1) and on a phone
+  (their acts and ⋯ 44 px under a finger); a Patterns set up through the one form held open 30 s with the admin page's
+  socket connected throughout. A step of the export's smoke that read an answer's body no longer stops the whole run
+  when the request it paused has none.
+- The stylesheet loses the linked-hall picker and the destructive button's rules: 6 hex colours fewer, 275.
+- Rolling back: nothing is stored.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

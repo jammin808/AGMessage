@@ -47,8 +47,11 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   message keeps two acts on its row: ↩ Reply and the one the seat uses most (Ask the operator, Send now or Show on
   screens). What a seat may not do is not offered; what it cannot do now is greyed with the reason. Keys on a message
   with the focus: R reply, E react, F send to, P pin (with Undo), D download, Enter look, Delete delete. What reaches
-  other people for good asks in place, naming what it acts on: nothing on the hall page opens a browser dialog, which
-  would pause the page and drop its connection. Shift+right-click keeps the browser's own menu.
+  other people for good asks in place, naming what it acts on: no page opens a browser dialog, which would pause the
+  page and drop its connection. Shift+right-click keeps the browser's own menu. The admin page, the halls board and the
+  Accounts page act the same way: a hall, a person, a message of the live feed, a linked Patterns or PlayMap, the
+  internet link, a help request, an account and an entry of the audit log each have their ⋯, right-click and
+  Shift+F10, and each of these pages has a skip link and lists that are one Tab stop (↑ and ↓ between their rows).
 - **The Board.** People On stage read, reply, answer the backstage team's questions, send 🔥 Priority and ask for help,
   and mark their own help request sorted; what they write stays in their room, where the backstage team reads it. They
   never share files, ask questions, forward anything into another room or answer other people's help requests: the

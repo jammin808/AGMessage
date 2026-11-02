@@ -66,3 +66,19 @@ test('the page floor in the lint: a bare requestIdleCallback or cancelIdleCallba
     assert.deepEqual(await found(code, 'app/public/theme-init.js'), ['parse'], 'newer syntax does not parse in theme-init.js: ' + code.trim());
   }
 });
+
+// No page opens a native dialog (eslint.config.mjs's `no-alert` on every page script and page module): alert, confirm and
+// prompt pause the page's scripts, and a page paused 20 s drops its socket. A question is asked in place (AGM.ask).
+test('no native dialog in the lint: alert, confirm and prompt are refused on every page script and page module, however they are reached', async () => {
+  const repo = path.join(__dirname, '..', '..');
+  const eslint = new ESLint({ cwd: repo });
+  const found = async (code, file) => (await eslint.lintText(code, { filePath: path.join(repo, file) }))[0].messages.map((m) => m.ruleId || (m.fatal ? 'parse' : m.message));
+  for (const file of ['app/public/admin.js', 'app/public/admin-plus.js', 'app/public/users.js', 'app/public/halls.js', 'app/public/app.js', 'app/public/planted.js']) {
+    for (const code of ['alert(\'Not saved.\');\n', 'if (confirm(\'Remove it?\')) AGM.x = 1;\n', 'AGM.x = prompt(\'Its name\');\n', 'window.alert(\'x\');\n', 'AGM.x = window.confirm(\'y\');\n']) {
+      assert.deepEqual(await found(code, file), ['no-alert'], file + ': ' + code.trim());
+    }
+  }
+  assert.deepEqual(await found('export const ask = () => window.prompt(\'x\');\n', 'app/public/planted.mjs'), ['no-alert'], 'and on a page module');
+  assert.deepEqual(await found('AGM.ask(null, { title: \'Remove it?\' });\nAGM.toast(\'Not saved.\', true);\n', 'app/public/planted.js'), [], 'an ask in place and a toast pass');
+  assert.deepEqual(await found('(function () { const confirm = [1]; AGM.x = confirm.length; })();\n', 'app/public/planted.js'), [], 'a value named confirm is no dialog');
+});
