@@ -62,7 +62,10 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   included: a forward from it is refused before the message is read or the rate taken, in the same words for a code
   that names a hall and one that does not; only a repeat of the person's own earlier forward into that hall is answered
   first, with what it did. A file is forwarded only from a seat that may share files where it is, and a file or a
-  question never into a room where the forwarder sits On stage.
+  question never into a room where the forwarder sits On stage. A seat On stage answers no one else's help request:
+  from an On stage page only its own request's Resolved is taken, whatever hall the request names, before any right is
+  read, and an account answers a hall's help requests only where it does not sit On stage, from the halls board too, its
+  own request's Resolved excepted.
 - A connection refused for its rate says when to try again (`retryMs`, read from that address's own bucket, with a
   random spread) and nothing else: no address and no count; the page waits it out. A page that comes back in a
   restart's first 30 s naming a change its hall holds is not announced again: that is the "joined" words only, and its

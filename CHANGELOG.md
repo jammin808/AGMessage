@@ -1129,6 +1129,31 @@ another hall, through the admin's link too, were each accepted)
   ↗ and a Viewer's page does not.
 - Rolling back: nothing is stored; 0.5.1 gives On stage seats files, questions and forwards again.
 
+**An On stage seat answers only its own help request** (the plan's Part 7, unit G2; the owner's answer B1, "they don't
+need to answer other people's help requests other than interact with the usual chat"; the tree before it took an On
+stage guest's On my way on someone else's request, the new test's first step)
+- Help requests are answered by the backstage team. An On stage page marks its own request resolved (It's sorted on its
+  Help button, or Resolved on the request) and nothing else: On my way or Resolved on someone else's request, and On my
+  way on its own, are refused with "Help requests are answered by the backstage team.", whatever hall the request's code
+  names, before any right is read, and for the admin seated On stage too. The request and its hall are left as they
+  were. The same person's backstage page in that hall, the backstage team and the admin's pages in no hall answer as
+  before, and the Board's own Resolved said again is done already, never refused.
+- The hall page On stage draws no On my way or Resolved on someone else's request, and Resolved alone on its own.
+- An account answers a hall's help requests as its crew only where it may post and does not sit On stage
+  (`rbac.answersHelp`), its own request's Resolved excepted, and the halls board's On my way and Resolved (`canRespond`)
+  read the same. Accounts are not seated On stage yet, so this changes nothing until they are; from then a Board account
+  answers none of its hall's requests from any page, the halls board included.
+- `test/onstage.test.js`, end to end: an On stage guest refused On my way and Resolved on a backstage guest's request,
+  with no code, its own hall's and another hall's where the same person sits backstage, each request still open and
+  neither hall's number moved; the admin On stage from the token refused the same, while the token's page in no hall
+  answers from the board; a backstage guest answering both, on the Board's request too; the Board's On my way on its own
+  refused, its Resolved stored as its own and answered `already` when said again; its own request in another hall
+  refused from the On stage page as from any page outside that hall, and answered from its backstage page there.
+  `test/accounts.test.js`: `answersHelp` true only where the account may post and is seated backstage. The smoke: an On
+  stage page draws no On my way or Resolved on a backstage request and Resolved alone on its own, whose press marks it
+  resolved by the Board member, and a backstage page draws both on the Board's request.
+- Rolling back: nothing is stored; 0.5.1 lets On stage seats answer anyone's help request again.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

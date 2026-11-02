@@ -75,15 +75,21 @@ token and shares no file ("On stage seats send messages, not files."), asks no q
 from the backstage team."), and sends nothing into another room, text included ("Messages from On stage stay in this
 room."): what it writes is in its room's feed, which everyone in that room reads, and the forward picker offers it no
 room, whatever halls the person is in and whatever link the admin gave them. Screens, a hall's set-up, the show network
-and drafts are not driven from that page ("Do that from a backstage page."; "Drafting is for the backstage team."). The
-server refuses each by the seat (`rbac.SEAT_LIMITS`), whatever the page sends. The limit is the page's, not the
-person's: it is read first, before any right, so the admin who joins a hall On stage from the token is held to it there,
-while its admin verbs answer as from any of its pages and its other pages are not limited; a guest seated On stage in one
-hall and backstage in another keeps backstage's rights on that page. When the admin moves a guest's seat, the page is
-held to its new seat at once: an upload token it holds ends with the move, is refused at its next use in the new seat's
-words ("On stage seats send messages, not files.", "Observers can read but not post.") and is gone, and the page's join
-after its reload takes a new one where the seat shares files. Accounts are seated by their rights
-(backstage, or an observer without `hall.post`), so the limit reaches an account when accounts are given On stage seats.
+and drafts are not driven from that page ("Do that from a backstage page."; "Drafting is for the backstage team."). Help
+requests are answered by the backstage team: an On stage page marks its own request resolved and nothing else, so On my
+way or Resolved on someone else's, and On my way on its own, are refused ("Help requests are answered by the backstage
+team."), whatever hall the request names, and the page draws neither. The server refuses each by the seat
+(`rbac.SEAT_LIMITS`, and for help `help:respond`'s On stage rule, read before any right), whatever the page sends. The
+limit is the page's, not the person's: it is read first, before any right, so the admin who joins a hall On stage from
+the token is held to it there, while its admin verbs answer as from any of its pages and its other pages are not
+limited; a guest seated On stage in one hall and backstage in another keeps backstage's rights on that page. When the
+admin moves a guest's seat, the page is held to its new seat at once: an upload token it holds ends with the move, is
+refused at its next use in the new seat's words ("On stage seats send messages, not files.", "Observers can read but not
+post.") and is gone, and the page's join after its reload takes a new one where the seat shares files. Accounts are
+seated by their rights (backstage, or an observer without `hall.post`), so the limit reaches an account when accounts
+are given On stage seats. An account answers a hall's help requests, from its hall page or the halls board, only where
+it may post and does not sit On stage (`rbac.answersHelp`, which the halls board's On my way and Resolved read too): a
+Board member of a hall will answer none of that hall's requests from any page, its own Resolved excepted.
 
 Forwarding keeps two rules of the room a message comes from: a file moves only from a seat that may share files there
 ("Files are moved by the backstage team."), and a file or a question goes only into a room where the forwarder sits

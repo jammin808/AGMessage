@@ -66,7 +66,9 @@ Every day of the event
 - On stage: read, reply, answer the backstage team's questions, send
   Priority and ask for Help. On stage seats cannot share files, ask
   questions or send to other rooms: what they write stays in their room,
-  where the backstage team reads it.
+  where the backstage team reads it. Help requests are answered by the
+  backstage team: On stage, you mark your own request sorted, and have no
+  "On my way" or "Resolved" on anyone else's.
 - A browser signed in to an account opens its halls from the halls board,
   never with a code: a code link opened there says so and offers "Open your
   halls" or "Sign out". To join as a guest on that device, sign out first.
@@ -76,8 +78,8 @@ Every day of the event
   categories and sends nothing. Help then says what happened: "Help
   asked", "Ana is on the way", then "Resolved" for 30 seconds. Tap it to
   say "It's sorted" or "Cancel request" ("Keep it open" changes nothing).
-  A request stays red on the board until someone presses "On my way", and
-  on the board until it is resolved.
+  A request stays red on the board until someone backstage presses "On
+  my way", and on the board until it is resolved.
 - New messages: a hall page you have scrolled up stays where you left it;
   "↓ 3 new" at the bottom says how many came and takes you there. A "New"
   line sits above the first message that came since you last touched the

@@ -37,6 +37,9 @@ const onStage = () => document.body.dataset.role === 'board';
 // A forward is offered where the server would take it from this page: never On stage, never a help request, and a file
 // only from a page given an upload token (the server's sign that this seat shares files here, which a file's forward needs).
 const offersForward = (m) => m.type !== 'help' && !onStage() && (m.type !== 'file' || !!UPLOAD_TOKEN);
+// Help requests are answered by the backstage team: On stage, a page marks its own request resolved and answers no one
+// else's, On my way included, as the server refuses (owner answer B1); an observer answers none.
+const mayAnswerHelp = (m, state) => !readOnly() && (!onStage() || (state === 'resolved' && isMine(m)));
 
 // ---------------- UI sync state (declared early to avoid TDZ traps) ----------------
 // These are accessed by pushUserState / setStageCollapsed / setZoom / applyTheme,
@@ -894,7 +897,7 @@ function renderHelpBody(msg) {
   line.dataset.state = h.state;
   line.textContent = (h.state === 'resolved' ? '✓ ' : h.state === 'coming' ? '▶ ' : '■ ') + HELP_WORDS[h.state] + (h.by ? ' — ' + h.by : '') + (h.at && h.state !== 'open' ? ' at ' + formatTime(h.at) : '');
   wrap.appendChild(line);
-  if (h.state !== 'resolved' && document.body.dataset.role !== 'observer') {
+  if (h.state !== 'resolved' && mayAnswerHelp(msg, 'resolved')) {
     const row = document.createElement('div');
     row.className = 'help-actions';
     const act = (label, state) => {
@@ -905,7 +908,7 @@ function renderHelpBody(msg) {
       b.onclick = () => AGM.outbox.hold('help:respond', { code: ROOM, messageId: msg.id, state });
       row.appendChild(b);
     };
-    if (h.state === 'open') act('On my way', 'coming');
+    if (h.state === 'open' && mayAnswerHelp(msg, 'coming')) act('On my way', 'coming');
     act('Resolved', 'resolved');
     wrap.appendChild(row);
   }

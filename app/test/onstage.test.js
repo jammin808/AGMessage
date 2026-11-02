@@ -12,6 +12,7 @@ const BACKSTAGE = 'Do that from a backstage page.';
 const NO_FILES = 'On stage seats send messages, not files.';
 const NO_ASKING = 'Questions for the Board come from the backstage team.';
 const FILES_BACKSTAGE = 'Files are moved by the backstage team.';
+const HELP_BACKSTAGE = 'Help requests are answered by the backstage team.';
 
 test('an On stage seat chats, answers and asks for help; it shares no file, asks no question and forwards nothing', async (t) => {
   const srv = await startServer();
@@ -199,5 +200,59 @@ test('an On stage seat chats, answers and asks for help; it shares no file, asks
     const listed = await emit(desk, 'display:list', { code: hallA });
     assert.deepEqual([listed.ok, listed.code], [true, hallA]);
     await until(async () => (await emit(desk, 'nodes:list', {})).ok, 3000, 'the show network listed off stage');
+  });
+
+  await t.test('an On stage seat answers only its own help request: it marks it resolved, and no one else\'s, whatever hall it names', async () => {
+    const helpOf = async (code, id) => { const h = (await messagesOf(code)).find((m) => m.id === id).help; return [h.state, h.by]; };
+    // Ana asks in A and Kim in B, where Bea sits backstage on her other page. Bea's On stage page answers neither, On my
+    // way or Resolved, with no code, with A's, or with B's.
+    const anaAsks = await emit(ana.s, 'message', { type: 'help', category: 'Vision', text: 'Screen 2 is dark' });
+    const kim = await guest(hallB, 'Kim', 'research');
+    const kimAsks = await emit(kim.s, 'message', { type: 'help', category: 'Sound', text: 'Radio mic 3 has no signal' });
+    assert.ok(anaAsks.ok && kimAsks.ok);
+    const [seqA, seqB] = [await seqOf(ana), await seqOf(lis)];
+    for (const state of ['coming', 'resolved']) {
+      assert.deepEqual(await emit(bea.s, 'help:respond', { messageId: anaAsks.id, state }), { ok: false, error: HELP_BACKSTAGE }, state + ' in its own hall');
+      assert.deepEqual(await emit(bea.s, 'help:respond', { code: hallA, messageId: anaAsks.id, state }), { ok: false, error: HELP_BACKSTAGE }, state + ', naming its own hall');
+      assert.deepEqual(await emit(bea.s, 'help:respond', { code: hallB, messageId: kimAsks.id, state }), { ok: false, error: HELP_BACKSTAGE }, state + ', naming a hall where the same person sits backstage');
+    }
+    assert.deepEqual([await helpOf(hallA, anaAsks.id), await helpOf(hallB, kimAsks.id)], [['open', ''], ['open', '']], 'neither request moved');
+    assert.deepEqual([await seqOf(ana), await seqOf(lis)], [seqA, seqB], 'and neither hall took a change');
+
+    // The admin seated On stage is held to it on that page; the same token's page in no hall answers from the board.
+    const token = (await api(base, 'POST', '/api/admin/login', { token: TOKEN })).cookie;
+    const host = await open(token);
+    assert.equal((await emit(host, 'join', { roomCode: hallA, name: 'Stage Host', role: 'board' })).role, 'board');
+    const [hostSeqA, hostSeqB] = [await seqOf(ana), await seqOf(lis)];
+    assert.deepEqual(await emit(host, 'help:respond', { messageId: anaAsks.id, state: 'coming' }), { ok: false, error: HELP_BACKSTAGE });
+    assert.deepEqual(await emit(host, 'help:respond', { code: hallB, messageId: kimAsks.id, state: 'resolved' }), { ok: false, error: HELP_BACKSTAGE });
+    assert.deepEqual([await helpOf(hallA, anaAsks.id), await helpOf(hallB, kimAsks.id)], [['open', ''], ['open', '']], 'the admin On stage moved neither request');
+    assert.deepEqual([await seqOf(ana), await seqOf(lis)], [hostSeqA, hostSeqB], 'and neither hall took a change from it');
+    const desk = await open(token);
+    assert.deepEqual(await emit(desk, 'help:respond', { code: hallB, messageId: kimAsks.id, state: 'coming' }), { ok: true });
+    assert.deepEqual(await helpOf(hallB, kimAsks.id), ['coming', 'Admin']);
+
+    // A backstage guest still answers both, on Ana's request and on the Board's own.
+    const jo = await guest(hallA, 'Jo', 'research');
+    assert.deepEqual(await emit(jo.s, 'help:respond', { messageId: anaAsks.id, state: 'coming' }), { ok: true });
+    assert.deepEqual(await helpOf(hallA, anaAsks.id), ['coming', 'Jo']);
+    assert.deepEqual(await emit(jo.s, 'help:respond', { messageId: anaAsks.id, state: 'resolved' }), { ok: true });
+    assert.deepEqual(await helpOf(hallA, anaAsks.id), ['resolved', 'Jo']);
+
+    // Bea's own request: On my way is not hers to say, even on her own; Resolved is, and said again it is done already.
+    const beaAsks = await emit(bea.s, 'message', { type: 'help', category: 'Presenter', text: 'Need water at the lectern' });
+    assert.ok(beaAsks.ok);
+    assert.deepEqual(await emit(bea.s, 'help:respond', { messageId: beaAsks.id, state: 'coming' }), { ok: false, error: HELP_BACKSTAGE }, 'not On my way, even on her own');
+    assert.deepEqual(await helpOf(hallA, beaAsks.id), ['open', '']);
+    assert.deepEqual(await emit(jo.s, 'help:respond', { messageId: beaAsks.id, state: 'coming' }), { ok: true });
+    assert.deepEqual(await emit(bea.s, 'help:respond', { code: hallA, messageId: beaAsks.id, state: 'resolved' }), { ok: true });
+    assert.deepEqual(await helpOf(hallA, beaAsks.id), ['resolved', 'Bea']);
+    assert.deepEqual(await emit(bea.s, 'help:respond', { messageId: beaAsks.id, state: 'resolved' }), { ok: true, already: true });
+    // Her own request in B is her B page's to mark: from the On stage page it is refused as any page outside B is.
+    const beaAsksB = await emit(beaB.s, 'message', { type: 'help', category: 'Sound', text: 'Feedback on the lectern mic' });
+    assert.ok(beaAsksB.ok);
+    assert.deepEqual(await emit(bea.s, 'help:respond', { code: hallB, messageId: beaAsksB.id, state: 'resolved' }), { ok: false, error: 'Only people in that hall can answer its help requests.' });
+    assert.deepEqual(await helpOf(hallB, beaAsksB.id), ['open', '']);
+    assert.deepEqual(await emit(beaB.s, 'help:respond', { messageId: beaAsksB.id, state: 'coming' }), { ok: true }, 'backstage, she answers');
   });
 });

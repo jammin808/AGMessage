@@ -1570,6 +1570,21 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         composer: Array.from(document.querySelectorAll('#directorCompose button, #directorCompose input')).filter(shown).map((b) => b.id || (b.classList.contains('send-btn') ? 'send' : b.outerHTML)) });
     })()`);
     report(boardForward === JSON.stringify({ forward: 0, composer: ['directorInput', 'dirPriorityBtn', 'send'] }), `an On stage page offers no forward on any message, and its composer holds the words, 🔥 and Send (${boardForward})`);
+    // Help requests are answered by the backstage team: an On stage page draws no On my way or Resolved on someone else's
+    // request and only Resolved on its own, which it marks; a backstage page draws both on the Board's. Someone else is
+    // Cy, on a socket of her own: the smoke's pages share this browser's one identity, so each is the same person.
+    const cy = await connect(base);
+    await emit(cy, 'join', { roomCode: code, name: 'Cy', role: 'research' });
+    await emit(cy, 'message', { type: 'help', category: 'Vision', text: 'screen 2 is dark' });
+    await board.eval(`new Promise((r) => socket.emit('message', { type: 'help', category: 'Presenter', text: 'water at the lectern' }, r))`);
+    const HELP_DOORS = (text) => `(() => { const m = allMessages.find((x) => x.type === 'help' && x.text === ${codeLiteral(text)}); const n = m && messagesById.get(m.id);
+      return n ? JSON.stringify([...n.querySelectorAll('.help-actions button')].filter((b) => getComputedStyle(b).display !== 'none' && !b.closest('[hidden]')).map((b) => b.textContent)) : null; })()`;
+    const helpDoors = JSON.stringify({ others: await board.until(HELP_DOORS('screen 2 is dark')), own: await board.until(HELP_DOORS('water at the lectern')), backstage: await research.until(HELP_DOORS('water at the lectern')) });
+    await board.eval(`(() => { const m = allMessages.find((x) => x.type === 'help' && x.text === 'water at the lectern'); [...messagesById.get(m.id).querySelectorAll('.help-actions button')].find((b) => b.textContent === 'Resolved').click(); })()`);
+    const ownResolved = await research.until(`(() => { const m = allMessages.find((x) => x.type === 'help' && x.text === 'water at the lectern'); return m && m.help.state === 'resolved' && JSON.stringify([m.help.state, m.help.by, ${HELP_DOORS('water at the lectern')}]); })()`);
+    report(helpDoors === JSON.stringify({ others: '[]', own: '["Resolved"]', backstage: '["On my way","Resolved"]' }) && ownResolved === JSON.stringify(['resolved', 'Chair', '[]']),
+      `an On stage page answers only its own help request: no On my way or Resolved on another's, Resolved alone on its own, which it marks (${helpDoors}; ${ownResolved})`);
+    cy.close();
     // A file is forwarded from a page that may share files here: backstage offers ↗ on it (a Viewer, below, does not).
     report(!!(await research.until(`Array.from(document.querySelectorAll('.msg[data-type="file"] .fwd-btn')).some((b) => !b.hidden && !b.closest('[hidden]'))`)), 'a backstage page offers a file\'s forward');
     // A page opened before its hall had a Stagewatch offers 🖥 once it has one (the server's answer, asked again when the

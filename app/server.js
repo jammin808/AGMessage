@@ -1701,14 +1701,20 @@ io.on('connection', (socket) => {
   });
 
   // ----- Help requests: someone says they are on the way, then that it is resolved. From the hall, or from the board.
+  // Help requests are answered by the backstage team (owner answer B1): an On stage page marks its own request resolved
+  // and nothing else, whatever hall its code names, before any right is read; an account answers as a hall's crew only
+  // where it does not sit On stage (rbac.answersHelp), from any page, its own request's Resolved excepted.
   socket.on('help:respond', ({ code, messageId, state } = {}, ack) => {
     ack = ok(ack);
     if (!chatter.take()) return limited(ack);
     const r = store.get(guard.str(code || (room && room.code)).toUpperCase());
     const m = r && r.byId.get(messageId);
     if (!m || m.type !== 'help') return ack({ ok: false, error: 'That help request is gone.' });
+    const resolvesOwn = (uid) => state === 'resolved' && !!uid && !!m.from && m.from.uid === uid;
+    if (onStage() && !resolvesOwn(me.uid)) return ack({ ok: false, error: 'Help requests are answered by the backstage team.' });
+    const acct = socket.data.account;
     const inRoom = room && room.code === r.code && allowed('hall.post');
-    const byAccount = socket.data.account && rbac.can(socket.data.account, 'hall.post', r.code);
+    const byAccount = !!acct && (rbac.answersHelp(acct, r.code) || (rbac.can(acct, 'hall.post', r.code) && resolvesOwn(acct.id)));
     if (!(inRoom || byAccount || socket.data.isAdmin)) return ack({ ok: false, error: 'Only people in that hall can answer its help requests.' });
     if (state !== 'coming' && state !== 'resolved') return ack({ ok: false, error: 'Say "on my way" or "resolved".' });
     const by = (me && room && room.code === r.code) ? me.name : socket.data.account ? socket.data.account.name : 'Admin';
@@ -2199,7 +2205,8 @@ function boardFor(socket, shared = new Map()) {
     nodes: links.map(nodeChip),
     canDrive: Array.from(peerLinks.values()).some((l) => mayDriveNode(socket, l)),   // what nodes:list would list: Show network
     halls: rooms.map((r) => ({ ...hallParts(r, shared).row, nodes: links.filter((l) => l.hall === r.code).map(nodeChip) })),
-    help: rooms.flatMap((r) => hallParts(r, shared).help.map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.can(a, 'hall.post', r.code))) }))),
+    // Offered as help:respond's account branch answers: never in a hall where the account sits On stage.
+    help: rooms.flatMap((r) => hallParts(r, shared).help.map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.answersHelp(a, r.code))) }))),
   };
 }
 /** Every watcher's board, each hall's row built once for all of them; a board that faults holds back no other watcher's. */

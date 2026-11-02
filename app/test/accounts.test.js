@@ -45,6 +45,21 @@ test('rbac: an On stage seat allows reading and writing messages and nothing els
   assert.ok(Object.isFrozen(rbac.SEAT_LIMITS) && Object.isFrozen(rbac.SEAT_LIMITS.board) && Object.isFrozen(rbac.LINKED_CAPS), 'no caller widens a limit');
 });
 
+test('rbac: an account answers a hall\'s help requests as its crew only where it may post and does not sit On stage', () => {
+  const staff = { id: 'a1', role: 'staff', halls: ['HALL01'] };
+  assert.equal(rbac.answersHelp(staff, 'HALL01'), true, 'crew in its own hall');
+  assert.equal(rbac.answersHelp(staff, 'HALL02'), false, 'not in a hall it is not in');
+  assert.equal(rbac.answersHelp({ role: 'viewer', halls: ['HALL01'] }, 'HALL01'), false, 'a Viewer reads only');
+  assert.equal(rbac.answersHelp({ role: 'tech', halls: ['HALL01'], revoke: ['hall.post'] }, 'HALL01'), false, 'without hall.post, none');
+  assert.equal(rbac.answersHelp({ role: 'manager' }, 'ANYHALL'), true, 'a project manager is every hall\'s crew');
+  assert.equal(rbac.answersHelp({ role: 'admin', disabled: true }, 'HALL01'), false, 'a turned-off account answers nothing');
+  assert.equal(rbac.answersHelp(null, 'HALL01'), false);
+  // It is the account's seat in that hall that decides, beside the right: crew wherever roomRoleFor seats it backstage.
+  for (const a of [staff, { role: 'viewer', halls: ['HALL01'] }, { role: 'manager' }]) {
+    assert.equal(rbac.answersHelp(a, 'HALL01'), rbac.can(a, 'hall.post', 'HALL01') && rbac.roomRoleFor(a, 'HALL01') === 'research');
+  }
+});
+
 test('rbac: rights never escalate', () => {
   const admin = { id: 'a1', role: 'admin' };
   const manager = { id: 'a2', role: 'manager', grant: ['users.manage'] };

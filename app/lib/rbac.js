@@ -174,10 +174,17 @@ const LINKED_CAPS = Object.freeze(['hall.view', 'hall.post', 'hall.files']);
 /** The room view an account joins a hall with: crew (can post) or observer (read only). */
 const roomRoleFor = (account, hall) => (can(account, 'hall.post', hall) ? 'research' : 'observer');
 
+/**
+ * Whether an account answers a hall's help requests as its crew (On my way, Resolved): it may post there and does not
+ * sit On stage there, so a Board member answers none of that hall's, from any page (owner answer B1). help:respond's
+ * account branch and the halls board's canRespond both read it, so the board never offers what the verb refuses.
+ */
+const answersHelp = (account, hall) => can(account, 'hall.post', hall) && roomRoleFor(account, hall) !== 'board';
+
 /** What a page needs to know about an account's rights (no secrets). */
 function rightsView(account) {
   const e = effective(account);
   return { role: account ? account.role : '', roleLabel: account && isRole(account.role) ? ROLES[account.role].label : '', caps: Array.from(e.caps).sort(), allHalls: e.allHalls, halls: Array.from(e.halls).sort() };
 }
 
-module.exports = { CAPS, ROLES, HALL_SCOPED, ADMIN_ONLY, SEAT_LIMITS, LINKED_CAPS, isCap, isRole, effective, can, seesHall, holdsAdminOnly, mayChange, giveable, seatAllows, roomRoleFor, rightsView };
+module.exports = { CAPS, ROLES, HALL_SCOPED, ADMIN_ONLY, SEAT_LIMITS, LINKED_CAPS, isCap, isRole, effective, can, seesHall, holdsAdminOnly, mayChange, giveable, seatAllows, roomRoleFor, answersHelp, rightsView };
