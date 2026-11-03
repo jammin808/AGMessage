@@ -16,6 +16,7 @@ const { PassThrough } = require('stream');
 const { spawn, spawnSync } = require('child_process');
 const h = require('./helpers');
 const zipmod = require('../lib/zip');
+const busyLine = require('../lib/busy');
 
 const ROOT = path.join(__dirname, '..', '..');
 const R = require(path.join(ROOT, 'tools', 'readings.js'));
@@ -79,7 +80,9 @@ test('the register: R1-R13 as the plan\'s U7 table names them (R3 retired, R3′
     assert.ok(x.pass === 'recorded' || l.text.includes(x.pass), l.id + '\'s pass is in the plan\'s line');
   }
   // What this build cannot take names the unit whose code it measures; what it stands in for, the unit that ends it.
-  for (const id of ['R1', 'R3′', 'R6', 'R9', 'R11']) assert.match(R.READINGS.find((x) => x.id === id).needs.join(' '), /U\d+ \(#\d+\)/, id);
+  for (const id of ['R3′', 'R6', 'R9', 'R11']) assert.match(R.READINGS.find((x) => x.id === id).needs.join(' '), /U\d+ \(#\d+\)/, id);
+  // R1 waited for U8 (#36), the stop at loopback with the proof, which is built: the lane takes it now.
+  assert.equal(R.READINGS.find((x) => x.id === 'R1').needs, undefined, 'R1 waits for no unit');
   for (const id of ['R4', 'R5', 'R7', 'R8', 'R12', 'R13']) assert.match(R.READINGS.find((x) => x.id === id).later.join(' '), /U\d+ \(#\d+\)/, id);
 });
 
@@ -113,7 +116,8 @@ test('a reading that waits for a later unit is held to it: once that unit\'s cod
       }
     }
   }
-  assert.ok(named >= 15, 'every unit a reading waits for is asked');
+  // R1's U8, R3′'s and R9's left with U8 (#36): 13 units named across the readings that still wait.
+  assert.ok(named >= 13, 'every unit a reading waits for is asked');
 });
 
 test('nothing measured is nothing met: every reading not run with why (or retired), every lab line not run, Defender not asked', () => {
@@ -127,9 +131,10 @@ test('nothing measured is nothing met: every reading not run with why (or retire
   const j = R.judge({ v: 1, readings: { R5: { error: 'Get-AuthenticodeSignature: no such file' }, R13: { skipped: 'no published release was named to read (none)' } } });
   assert.match(byId(j, 'R5').words, /failed on the runner: Get-AuthenticodeSignature: no such file/);
   assert.equal(byId(j, 'R13').words, 'no published release was named to read (none)');
-  assert.match(byId(j, 'R1').words, /^needs U8 \(#36\)/, 'a reading of a later unit names it');
+  assert.match(byId(j, 'R11').words, /^needs U17 \(#74\)/, 'a reading of a later unit names it');
   // Even with a record, a reading whose unit has not landed is not judged.
-  assert.equal(byId(R.judge(raw({ R1: { rounds: [100] }, R11: { runs: 10 } })), 'R1').state, 'not run');
+  assert.equal(byId(R.judge(raw({ 'R3′': { runs: 10 }, R11: { runs: 10 } })), 'R11').state, 'not run');
+  assert.match(byId(R.judge(raw({ 'R3′': { runs: 10 } })), 'R3′').words, /^needs U12 \(#72\)/);
 });
 
 test('Defender: on only when real-time monitoring and scanning on access came on, in its Normal mode, with C:\\ and D:\\ no longer excluded, and were still so at the end', () => {
@@ -302,6 +307,79 @@ test('R12 and R13: Task Scheduler\'s restarts and GitHub\'s answer recorded; the
   assert.deepEqual([x.state, x.words], ['missed', 'GitHub\'s answer was not read from the SYSTEM task (ENOTFOUND)']);
 });
 
+test('R1 judged: the largest hall\'s slowest page back against 1.5 s, as R2 and R10 judge theirs, each size\'s median and slowest said, a stop that did not save or a round that did not finish said', () => {
+  const round = (pageBackMs, extra = {}) => ({ stopMs: 300, saved: true, healthMs: 900, startHealthMs: 600, pageBackMs, tries: 2, ...extra });
+  const sizes = (large) => ({ sizes: [{ name: 'empty', halls: 1, messages: 0, firstMs: 500, rounds: [round(700), round(800), round(750)] }, { name: 'large', halls: 20, messages: 10000, firstMs: 3000, rounds: large }] });
+  let x = byId(R.judge(raw({ R1: sizes([round(1200), round(1500), round(1400)]) })), 'R1');
+  assert.equal(x.state, 'met', 'the slowest, 1.5 s, is the mark\'s; the median is said');
+  assert.equal(x.words, 'at an empty hall: page back median 750 ms, slowest 800 ms over 3 rounds; at 20 halls × 10,000: page back median 1.40 s, slowest 1.50 s over 3 rounds; every stop saved (the slowest ≤ 1.5 s at the largest)');
+  assert.deepEqual(x.facts.sizes.map((z) => [z.pageBackMedianMs, z.pageBackSlowestMs]), [[750, 800], [1400, 1500]]);
+  x = byId(R.judge(raw({ R1: sizes([round(1200), round(1600), round(1400)]) })), 'R1');
+  assert.equal(x.state, 'missed', 'one round over the mark misses it, whatever the median');
+  assert.match(x.words, /median 1\.40 s, slowest 1\.60 s over 3 rounds; every stop saved \(the slowest over 1\.5 s at the largest\)$/);
+  x = byId(R.judge(raw({ R1: sizes([round(1600), round(1700), round(900, { saved: false })]) })), 'R1');
+  assert.equal(x.state, 'missed');
+  assert.match(x.words, /median 1\.60 s, slowest 1\.70 s over 3 rounds; 1 stop did not say it saved \(the slowest over 1\.5 s at the largest\)$/);
+  x = byId(R.judge(raw({ R1: sizes([round(1000), { error: 'the page was not back within 60 s', stopMs: 400, saved: true, pageBackMs: null }]) })), 'R1');
+  assert.equal(x.state, 'met', 'a round that did not finish is said beside those that did');
+  assert.match(x.words, /over 1 round; every stop saved; 1 round did not finish/);
+  x = byId(R.judge(raw({ R1: { sizes: [{ name: 'empty', halls: 1, messages: 0, rounds: [round(700)] }, { name: 'large', halls: 20, messages: 10000, error: 'the bundle did not serve: …', rounds: [] }] } })), 'R1');
+  assert.equal(x.state, 'not run', 'no page back at the largest hall: the mark is not judged');
+  assert.match(x.words, /at 20 halls × 10,000: no page back \(the bundle did not serve: …\).*: no page came back at the largest real hall$/);
+  assert.equal(byId(R.judge(raw({ R1: { rounds: [100] } })), 'R1').state, 'not run', 'a record of another shape');
+  assert.equal(byId(R.judge(raw({ R1: { skipped: 'the lane\'s own bound of 20 min was reached before it began' } })), 'R1').words, 'the lane\'s own bound of 20 min was reached before it began');
+});
+
+test('R1 as the lane takes it, on this machine with this checkout: halls seeded, a page seated, the stop at loopback with the proof, the next start, the page back at its own pace; no token kept', async () => {
+  const work = tmp('agm-r1-');
+  const port = await h.freePort();
+  // The hall page's pace, read from the page's own OPTIONS, so a change to the pages' pace moves the reading with it:
+  // from 0.5 s doubling to 2 s, each ±50 %.
+  const page = /const OPTIONS = Object\.freeze\(\{ reconnectionDelay: (\d+), reconnectionDelayMax: (\d+), randomizationFactor: ([\d.]+) \}\);/.exec(fs.readFileSync(path.join(h.ROOT, 'public', 'reconnect.js'), 'utf8'));
+  assert.ok(page, 'reconnect.js names its OPTIONS on one line');
+  assert.deepEqual(T.PAGE_PACE, { delayMs: Number(page[1]), maxMs: Number(page[2]), jitter: Number(page[3]) }, 'the reading\'s pace is the hall page\'s');
+  for (let tries = 0; tries < 6; tries++) {
+    for (let i = 0; i < 20; i++) {
+      const base = Math.min(500 * 2 ** tries, 2000);
+      const w = T.paceMs(tries);
+      assert.ok(w >= base / 2 && w <= Math.min(base * 1.5, 2000), tries + ': ' + w);
+    }
+  }
+  const codes = T.seedHalls(path.join(work, 'seed'), { halls: 2, messages: 3, at: 1_800_000_000_000 });
+  assert.deepEqual(codes, ['GAP001', 'GAP002']);
+  const snap = JSON.parse(fs.readFileSync(path.join(work, 'seed', 'rooms', 'GAP002.json'), 'utf8'));
+  assert.deepEqual([snap.code, snap.seq, snap.messages.length, snap.messages[2].seq, snap.messages[2].at], ['GAP002', 3, 3, 3, 1_800_000_000_000]);
+  // By default its newest message is from before the busy line's window: a hall between shows, so the stop the reading
+  // asks is the upgrade's own and needs no reason typed.
+  const before = Date.now();
+  T.seedHalls(path.join(work, 'quiet'), { halls: 1, messages: 2 });
+  const quiet = JSON.parse(fs.readFileSync(path.join(work, 'quiet', 'rooms', 'GAP001.json'), 'utf8'));
+  assert.ok(T.R1_QUIET_MS > busyLine.WINDOW_MS && quiet.messages[1].at <= before - T.R1_QUIET_MS + 1000, String(quiet.messages[1].at));
+  assert.deepEqual(T.R1_SIZES, [{ name: 'empty', halls: 1, messages: 0 }, { name: 'large', halls: 20, messages: 10000 }], 'the plan\'s two folders');
+  try {
+    const r = await T.takeR1({ node: process.execPath, app: h.ROOT, work, port }, { sizes: [{ name: 'empty', halls: 1, messages: 0 }, { name: 'large', halls: 3, messages: 400 }], rounds: 2, startMs: 30000 });
+    assert.deepEqual(r.sizes.map((z) => [z.name, z.rounds.length, z.error]), [['empty', 2, undefined], ['large', 2, undefined]], JSON.stringify(r));
+    for (const z of r.sizes) {
+      assert.ok(Number.isFinite(z.firstMs), z.name + ' served first');
+      for (const x of z.rounds) {
+        assert.equal(x.error, undefined, JSON.stringify(x));
+        assert.equal(x.saved, true, 'each stop saved and said so in last-stop.json');
+        assert.equal(x.code, 0, 'and its watchdog ended with 0, as stopped');
+        assert.ok(x.stopMs >= 0 && x.healthMs >= 0 && x.pageBackMs >= x.stopMs && x.tries >= 1, JSON.stringify(x));
+      }
+    }
+    const judged = byId(R.judge(raw({ R1: r })), 'R1');
+    assert.ok(['met', 'missed'].includes(judged.state), judged.words);
+    assert.match(judged.words, /^at an empty hall: page back median .+; at 3 halls × 400: page back median .+; every stop saved/);
+    // The token made for the reading is in no part of the record, and no 16 hex characters are either.
+    assert.doesNotMatch(JSON.stringify(r), /[0-9a-f]{16}/);
+    // Each stop was the machine's at loopback, not a signal: the server said so as it stopped.
+    const log = fs.readFileSync(path.join(work, 'r1', 'large', 'data', 'logs', 'server.log'), 'utf8');
+    assert.equal((log.match(/Stopping for an upgrade, asked at loopback by the readings lane\./g) || []).length, 2, log.slice(-2000));
+    assert.equal((log.match(/Stopping for a stop, asked at loopback by the readings lane\./g) || []).length, 1, 'and the lane\'s own stop at its end');
+  } finally { fs.rmSync(work, { recursive: true, force: true }); }
+});
+
 test('R12 as the lane takes it: each exit its own task and folder, so a restart the exit-1 task still has queued is never counted as a start after exit 0', async () => {
   const dir = tmp('agm-r12-');
   const timers = [];
@@ -362,7 +440,7 @@ test('the notes: each miss with its fallback, then what was met, open and not ru
   assert.match(n, /\*\*Missed their mark:\*\*\n- R10: the slowest of 1 round 5\.40 s \(extracted, then run once\): over 5 s\. Mark: recorded\. So: over 5 s: an upgrade runs its checks with the installed `node\.exe`\.\n/);
   assert.match(n, /\*\*Met or recorded:\*\* R4 \(/);
   assert.match(n, /\*\*Open:\*\* R2 \(/);
-  assert.match(n, /\*\*Not run:\*\* R1 \(needs U8 \(#36\)/);
+  assert.match(n, /\*\*Not run:\*\* R1 \(not taken by this lane\); R3′ \(needs U12 \(#72\)/);
   assert.match(n, /Lab 1 not run; Lab 2 not run; Lab 3 not run; Lab 4 2026-11-20, build 0\.6\.0\+41: node\.exe/);
   assert.ok(!n.includes('R3 ('), 'a retired reading is not listed as not run');
   const none = R.notes(null, '');

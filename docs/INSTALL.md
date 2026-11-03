@@ -162,8 +162,8 @@ watchdog and the server read it, and these rules, before either writes anything 
 
 ## A stop, and the start after it
 
-- **A stop saves, then says so.** A stop (the watchdog's, Ctrl+C, the console closed; the installed node's own stop at
-  loopback once the plan's U8 brings it) saves the audit log's waiting entries and the head that covers them first, then
+- **A stop saves, then says so.** A stop (the watchdog's, Ctrl+C, the console closed, or this PC's own stop at
+  loopback with a proof of the token, below) saves the audit log's waiting entries and the head that covers them first, then
   every store's write lane, then each hall that changed since its last snapshot, and no other (`server.js` `saveAll`,
   `lib/store.js` `compactDirty`), then the day's peaks once more when those snapshots raised its longest. A hall that did
   not change is never rewritten, at a stop or a start: the plan's bench (not the show laptop) measured the rewrite of
@@ -185,6 +185,66 @@ watchdog and the server read it, and these rules, before either writes anything 
   is stale. Health's `lastStop` and "This laptop"'s Last stop say which it was, and how many halls were told. A temporary
   file of a save a stop cut short (`<file>.<pid>.tmp`, in `data\` and `data\rooms\`) whose process has ended is removed
   then too; a copy refused at the lock reads and removes nothing.
+
+## The busy line, and the stop at loopback
+
+Both channels (the plan's Part 6, unit U8, with the owner's answer 39, "busy as proposed, and a busy server stopped only
+with a typed reason"). The machine's commands that ask it (the upgrade's stop and check, Stop AGMessage…, Go back) are
+the installer's units'; what they will ask is built and tested here, against the server and against programs that are
+not it.
+
+- **The busy line** (`lib/busy.js`) is one line of counts, and nothing else: no name, code, token or path. `active`, the
+  pages active in the last 10 minutes, a page being a person in a hall (the hall's code and the uid its join gave them,
+  so the same person back on a new socket is the same page): one whose seat gave input (an answer, a reaction, a take, a
+  help request, an ask of the AI: a verb of `busy.INPUT`, heard before its handler runs, so one refused counts too), or
+  whose message the hall holds from the window, whoever sent it (a seat, the admin's support view, the minutes, a show
+  system) and whether or not the server restarted since, the system's own lines never; `takes`, the screens whose take
+  changed in them (`takenAt`, kept in `displays.json`); `help`, the help requests raised in them; `countdowns`, the
+  Stagewatch countdowns running now (as the power request reads them); `seats`, the pages seated now that are not
+  active; `screens`, the screens a browser holds now; `sockets`, every socket open. **Busy** is activity, not presence:
+  a message or other input, a take or a help request in the last 10 minutes, or a countdown running. A full hall that
+  only reads, and screens that hold their take, are not busy. A page counts from its newest input or message for 10
+  minutes, open or closed since; input that left no message (a reaction, a pin) is held in memory, at most 10,000 pages,
+  the oldest let go first, and a restart forgets it, while messages, takes and help requests are kept across it.
+- **At loopback, for the machine** (`lib/machinewire.js`; answered only on this PC, `guard.isHostMachine`; never to a
+  browser, a request with an Origin or a Sec-Fetch-* header, which the machine never sends; and only while the admin
+  token is 16 characters or more, since a hello lets any program on this PC test guesses at the token offline: a shorter
+  one, which only `ADMIN_TOKEN` can give, is refused on every route with why):
+  - `GET /api/machine/hello?c=<challenge>` answers a fresh nonce, the build, and the server's proof that it holds the
+    token: HMAC-SHA256 under the token over `"agmessage machine server\n"`, the nonce and the machine's challenge.
+  - `GET /api/machine/busy`, `POST /api/machine/stop {reason, by, force}` and `POST /api/machine/events` (no body) each
+    carry the nonce (`X-AGM-Nonce`) and the machine's proof (`X-AGM-Proof`): HMAC-SHA256 under the token over
+    `"agmessage machine\n"`, the nonce, the method, the path and the body's SHA-256, a line each. A nonce is good for one
+    request within 30 s of its hello; a request with no proof, or a nonce not issued, used or older, is refused (a
+    nonce's refusal says `again`, and the machine asks once more from a fresh hello, never a third time); a proof that
+    does not match is refused, written as a wrong token is (`login.token.fail`) and counted toward the token's lockout
+    (five a minute). The machine holds the token as the server does: lower case, its line's end trimmed.
+  - **The token never crosses the socket.** The machine asks for a hello and checks the server's proof before it sends
+    anything else: a program that took the port during a restart is sent nothing after the hello, learns nothing, and
+    stops nothing. A hello it read earlier and gives back proves nothing, since the machine's challenge is new each time.
+  - **A server that does not answer within 5 s reads as busy**; so does one that does not prove it, or answers no line.
+    The 5 s are the whole answer's, from the request to its last byte: a program that answers a byte at a time reads
+    busy at 5 s too. Nothing listening is not busy: nothing runs.
+  - The machine reads the token from `token\admin-token`, which the watchdog writes (above).
+  - The machine's half is built and tested here (`hello`, `ask`, `busy`, `stop`, `nudge` in `lib/machinewire.js`, which
+    reading R1 drives). The machine's own commands (`machine.js`, the installed node's unit, U12) require Node's built-ins
+    only, so they carry their own copy of that half, held to the same vectors as `test/busy.test.js`'s (the two proofs'
+    words, the nonce's and challenge's shapes, the stop's body).
+- **The stop** (`reason` one of `stop`, `upgrade`, `back`; `by`, who asked; `force`, the reason a person typed) saves as
+  every stop does (above), and ends with code 0, which the watchdog and the task read as stopped. A busy server is not
+  stopped without a typed reason: it answers "Not stopped: AGMessage is busy (3 pages active, a countdown running). Type
+  a reason to stop it anyway.", and with one it stops and writes `server.stop.forced` (who asked, why, what was live, the
+  words typed). Its window and `server.log` say "Stopping for an upgrade, asked at loopback by LAPTOP\ana". A stop
+  asked while one is under way is answered with what is being done (`already`) and says and writes nothing more. The
+  machine event naming who asked (`machine.stop`) is the control tasks' unit's; until it lands the nudge to read the
+  machine's events is answered and reads none.
+- **On the data folder's pipe**, once it serves, the copy that holds the folder answers whoever connects with the busy
+  line and ends the connection: a read, never a command (nothing machine-level writes the pipe). A pipe's default access
+  lets Everyone and the anonymous account read it (reading R7), and whatever took its name first answers in its place,
+  so the line read there chooses words and nothing else. A second copy refused at the folder says what it read: "It
+  says it is busy: 1 page active, a countdown running." or "It says it is idle: nothing in the last 10 minutes; 4 seats
+  and 2 screens open." A copy refused at the port alone cannot name that pipe (it is named after the other copy's
+  folder), so the port's words stay as they are.
 
 ## Sleep, the power request and the lid
 
@@ -383,7 +443,14 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
   the server's instances. R7 also connects to the pipe through SMB at the runner's own names (`\\localhost\pipe\…`,
   `\\<name>\pipe\…`): a network logon, as a remote client's would be, but not a second machine. R12 runs two tasks, each with a folder of its own: one
   whose action exits 1, measured and removed, then one whose action exits 0, so a restart the first still has queued
-  is never counted for the second. R2 lays the newest release's payload whole, then this build over it, file by file,
+  is never counted for the second. R1 seeds a folder per size (an empty hall; 20 halls of 10,000 messages), starts the
+  bundle's watchdog on it once, unmeasured, then in each round seats a page (Socket.IO over its WebSocket, naming the
+  build the hello named), stops the server at loopback with the proof of a token it made for the reading (never kept),
+  starts the watchdog again the moment the old one has ended, as an upgrade's start is, and times the page back from the
+  stop to its rejoin answered, trying again at the hall page's own pace (from 0.5 s, doubling to 2 s, each ±50 %, read
+  from `public/reconnect.js` by its test); each round also records the watchdog's code and whether `last-stop.json`
+  says the stop saved. The seeded messages are from before the busy line's window (11 minutes before), so the stop is
+  the upgrade's own, needing no reason typed. R2 lays the newest release's payload whole, then this build over it, file by file,
   each inflated to a name of its own beside the one it replaces and renamed over it; R10 inflates `node.exe` alone into
   `%TEMP%` and runs it once, and a round counts only when it ran to exit 0. Every stand-in task and the firewall rule
   are removed at the end. A reading whose unit is not built yet reads "not run", naming the unit; that unit adds its step
@@ -403,16 +470,16 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
 
 | Reading | What | Mark | A miss means | This build's lane | Measured |
 |---|---|---|---|---|---|
-| R1 | `gap.js` (the stop at loopback with the proof, not SIGUSR2) at an empty hall and at 20 × 10,000 | the default page back ≤ 1.5 s at the largest real hall | handoff is revisited (U.10) | not run: needs U8 (#36), the stop at loopback with the proof | not measured |
+| R1 | `gap.js` (the stop at loopback with the proof, not SIGUSR2) at an empty hall and at 20 × 10,000 | the default page back ≤ 1.5 s at the largest real hall | handoff is revisited (U.10) | taken with the bundle's own watchdog (a portable folder seeded per size): a start that settles the folder, then 3 rounds of a page seated, the stop at loopback with the proof of a token made for the reading, the next start at once and the page back at the hall page's own pace; the slowest round at the largest hall judged, as R2's and R10's are, its median said | not measured |
 | R2 | lay about 5,120 files and 188 MB over the previous payload, Defender on | ≤ 6 s together with R9 (a screen's "lost") | version folders (U.10) | taken: the zip laid on an empty folder, then 3 rounds of the newest release's payload laid whole and this build laid over it (over its own when that release's zip could not be had, said so), the slowest round judged; its mark waits for R9 | 2026-11-02, build 0.6.0-dev.74+583f341: ✕ missed: 5179 files, 181 MB laid over v0.5.1's payload, the slowest of 3 rounds 18.5 s: over 6 s alone, before R9's backup |
 | R3 | retired: it was B-service's (shawl's stop under `NT SERVICE\AGMessage`), which is not the shape (U.5) | — | — | — | — |
-| R3′ | the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog's give-up and a configuration refusal end the task with 0, and it stays stopped | 10 of 10 | the release notes name the failing case; a stop that does not save is said on "This laptop" | not run: needs U8 (#36) and U12 (#72) | not measured |
+| R3′ | the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog's give-up and a configuration refusal end the task with 0, and it stays stopped | 10 of 10 | the release notes name the failing case; a stop that does not save is said on "This laptop" | not run: needs U12 (#72), the server task (the stop at loopback with the proof is built: R1 takes it) | not measured |
 | R4 | under the task: `LOCALAPPDATA`, `os.homedir()`, UDP 9928 broadcast heard, a quick tunnel's URL returned with nothing written in the account's profile, a rule by program, protocol and port matching `node.exe` under the task, `whoami /priv` from the server's process, `schtasks /showsid` | `SeImpersonatePrivilege` absent, and the server serves with `SeChangeNotifyPrivilege` alone | the privilege list U12 sets is widened by the one privilege the reading names, with its reason | taken under the stand-in server task (U12, #72, puts its own task in its place): the token's privileges and groups (read by the task's action, which the server inherits), the task's SID, `LOCALAPPDATA` and the home folder, health answering with this bundle's build, UDP 9928 heard from this machine, a quick tunnel and the profile before and after, a rule by program, protocol and port made and read back; a client on another machine is the show laptop's | 2026-11-02, build 0.6.0-dev.74+583f341: ✓ met: the token holds SeChangeNotifyPrivilege alone, and the server served under it in 792 ms (0.6.0-dev.74+583f341). Beside it: the task's SID in the token; UDP 9928 heard yes (from this machine); a quick tunnel's address returned; files written or changed in the account's profile 0; a rule by program, protocol and port made and read back (TCP, 3124, LocalSubnet; no client on another machine to show it matching) |
 | R5 | `Get-AuthenticodeSignature` on `node.exe`, `cloudflared.exe` and the installer | the first two Valid; the installer recorded | `README.txt` names the file Windows does not trust | taken for `node.exe` and `cloudflared.exe`; the installer once U13 (#73) builds it | 2026-11-02, build 0.6.0-dev.74+583f341: ✓ met: node.exe Valid (CN=OpenJS Foundation, O=OpenJS Foundation, L=San Francisco, S=California, C=US), cloudflared.exe Valid (CN="Cloudflare, Inc.", O="Cloudflare, Inc.", L=San Francisco, S=California, C=US, SERIALNUMBER=4710875, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US); the installer not built yet (U13, #73) |
 | R6 | over-the-shoulder elevation: U.5.1's two readings of the account that started Setup; the user's own export (U14) run through `ExecAsOriginalUser` into the laptop's admin's inbox; an elevated read of another account's `%LOCALAPPDATA%\AGMessage` | both readings name the standard account | the admin page asks the person to choose, as U.5.1 says | not run: needs U13 (#73) and U14 (#75) | not measured |
 | R7 | the folder pipe's access list as libuv makes it (`CreateNamedPipeW(…, NULL)`, `crit-dl/pipe.c:596-599`) under the task's token, and whether a remote client reaches it | recorded | nothing machine-level writes the pipe any more (U8); the busy line's readers are named | taken: the stand-in server's folder pipe, who may read and write it, and whether a client reaches it through SMB at the runner's own names (a network logon on one machine; a second machine is the show laptop's) | 2026-11-02, build 0.6.0-dev.74+583f341: ✓ recorded: read: Everyone, Anonymous, SYSTEM, LOCAL SERVICE, Administrators; write: SYSTEM, LOCAL SERVICE, Administrators (1 pipe); through SMB at this machine's own names (a network logon; no second machine): \\localhost connected, \\runnervmhao91 connected |
 | R8 | `icacls C:\` and `icacls %ProgramData%` (may a standard account create `C:\node_modules` or `%ProgramData%\AGMessage`?); `schtasks /query /xml` of each task as a standard account: readable or not, and no secret in it | recorded | U11 and U12's order already assume the worst | taken: both access lists, read by SID (`icacls /save`); the tasks' definitions as a standard account once U12 (#72) and U17 (#74) make them | 2026-11-02, build 0.6.0-dev.74+583f341: ✓ recorded: C:\: a standard account may create a folder (Authenticated Users); C:\ProgramData: a standard account may create a folder (Users); the tasks' definitions as a standard account wait for U12 (#72) and U17 (#74) |
-| R9 | the upgrade backup's time at an empty hall and at 20 × 10,000 | recorded, beside R2 | as R2 | not run: needs U8 (#36) and U12 (#72), the upgrade's stop and its backup | not measured |
+| R9 | the upgrade backup's time at an empty hall and at 20 × 10,000 | recorded, beside R2 | as R2 | not run: needs U12 (#72), the upgrade's stop and its backup | not measured |
 | R10 | extracting `node.exe` to `%TEMP%` for each machine command, Defender on | recorded | over 5 s: an upgrade runs its checks with the installed `node.exe` | taken: 5 rounds, each extracted from the zip and run once, the slowest judged against 5 s; a round that did not run to exit 0 is said, and measured no command | 2026-11-02, build 0.6.0-dev.74+583f341: ✓ recorded: the slowest of 5 rounds 2.73 s (extracted, then run once): within 5 s |
 | R11 | a control task whose descriptor gives one standard account read and execute: that account runs it with `schtasks /run`; a second standard account is refused; the task runs as SYSTEM with `--for` that account's SID | 10 of 10 | the Start menu's acts fall back to an administrator's approval, and the release notes say so | not run: needs U17 (#74) | not measured |
 | R12 | RestartOnFailure on the server task: does a non-zero exit of the action start it again, and does exit 0 leave it stopped | recorded | U.5's second cost reads as measured | taken under two stand-ins with the server task's settings (U12, #72, puts its own task in their place), one whose action exits 1, then one whose action exits 0; a non-zero exit not started again, or a 0 started again, is the miss | 2026-11-02, build 0.6.0-dev.74+583f341: ✕ missed: a non-zero exit was not started again within 150.7 s; exit 0 left it stopped within 90.5 s |

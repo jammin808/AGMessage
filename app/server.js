@@ -65,6 +65,8 @@ const power = require('./lib/power');
 const dataformat = require('./lib/dataformat');
 const laststop = require('./lib/laststop');
 const tunnelend = require('./lib/tunnelend');
+const busy = require('./lib/busy');
+const machinewire = require('./lib/machinewire');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
 const { BUILD, parseBuild, compareBuilds } = require('./lib/version');
@@ -640,11 +642,6 @@ function hallsNow() {
     if (!d.content || d.content.kind === 'holding') continue;
     if (Array.from(d.live.reports.values()).some((x) => x.seq === d.seq && x.ok)) takes.set(d.hall, (takes.get(d.hall) || 0) + 1);
   }
-  const counting = (link) => {
-    const v = link.view;
-    if (!link.base || !v || v.stale || (link.status !== 'connected' && link.status !== 'viewing')) return false;
-    return v.state === 'running' || (v.state === 'expired' && Number.isFinite(v.seconds) && v.seconds < 0);
-  };
   const halls = [];
   const following = [];   // the halls that follow the default Stagewatch
   for (const r of store.rooms.values()) {
@@ -661,6 +658,50 @@ function hallsNow() {
 }
 /** The power request follows the halls, once this copy serves and until it stops. */
 function keepAwake() { if (serving && !shuttingDown) powerRequest.want(hallsNow()); }
+/**
+ * Whether a Stagewatch's countdown counts now, as it says (a link connected, its frame not gone quiet): running, or past
+ * zero and counting on into overtime.
+ */
+function counting(link) {
+  const v = link.view;
+  if (!link.base || !v || v.stale || (link.status !== 'connected' && link.status !== 'viewing')) return false;
+  return v.state === 'running' || (v.state === 'expired' && Number.isFinite(v.seconds) && v.seconds < 0);
+}
+
+// ---------------------------------------------------------------- the busy line (lib/busy.js)
+// What is live, in counts, read before this copy is stopped: by the machine at loopback (GET /api/machine/busy, and the
+// stop, which a busy server takes only with a typed reason) and on the data folder's pipe, where a second copy started on
+// the same folder reads it for its words. A page is a person's in a hall (busy.pageKey: the hall's code and the uid its
+// join gave it), active when it sent a verb of busy.INPUT from its seat (heard in guardHandlers, before its handler
+// runs, refused or not) or when its message is one the hall holds from the window, which a restart keeps; a screen's
+// take changed when it was given one (`takenAt`, kept in displays.json).
+const activity = new busy.Activity();
+/** The page a socket is seated as, or '' for one in no seat (the admin's own page and its support view, a screen). */
+const seatedPage = (socket) => (socket.data && socket.data.seat && socket.data.userRoom ? busy.pageKey(socket.data.userRoom, socket.data.uid) : '');
+/**
+ * The busy line now: the pages active in the window (input from a seat, or a message the halls hold from it), the
+ * screens whose take changed in it, the help requests raised in it, the countdowns running, the seats and screens open
+ * and quiet, and every socket.
+ */
+function busyNow(now = Date.now()) {
+  const since = now - busy.WINDOW_MS;
+  let takes = 0, screens = 0;
+  for (const d of displays.list.values()) {
+    if (Number.isFinite(d.takenAt) && d.takenAt > since) takes++;
+    if (Displays.screens(d) > 0) screens++;
+  }
+  const active = new Set(activity.keys(now));
+  let help = 0;
+  for (const r of store.rooms.values()) {
+    const said = busy.fromMessages(r.code, r.messages, since);
+    for (const k of said.pages) active.add(k);
+    help += said.help;
+  }
+  const countdowns = allLinks().filter(counting).length;
+  let seats = 0;
+  for (const s of io.sockets.sockets.values()) { const page = seatedPage(s); if (page && !active.has(page)) seats++; }
+  return busy.line({ active: active.size, takes, help, countdowns, seats, screens, sockets: io.sockets.sockets.size });
+}
 
 // Role-level events for the show network's context: never names, never content. Each keeps the Stagewatch link of the
 // halls it happened in (none: the whole node's), so a link's own context carries only its halls' events; the tag never
@@ -887,6 +928,92 @@ ${cert ? `<p>This AGMessage encrypts its pages with its own certificate. Browser
     : '<p>HTTPS is turned off on this AGMessage.</p>'}
 </main></body></html>`);
 });
+// ---------------------------------------------------------------- this PC's machine, at loopback (lib/machinewire.js)
+// The machine's requests: answered only on this PC (guard.isHostMachine), never a browser's (an Origin or Sec-Fetch-*
+// header, which the machine never sends: a page open on this PC asks nothing here and cannot flood the nonces), and only
+// while the token is 16 characters or more (a hello is an HMAC under the token over words its asker knows, which a
+// short token would let anyone on this PC test guesses against, outside the lockout). Each but the hello only with a
+// nonce this copy issued within its time and not yet used, and the machine's proof of the token over it, the method, the
+// path and the body, compared in constant time (machinewire.judge). A wrong proof counts toward the token's lockout as a
+// wrong token does, and is written as one. The body is read as bytes, at most BODY_MAX, so the proof is checked over what
+// came before any of it is parsed. The hello answers the server's own proof first, so the machine sends nothing to a
+// program that took this port without the token.
+const machineNonces = new machinewire.Nonces();
+const machineBody = express.raw({ type: () => true, limit: machinewire.BODY_MAX });
+const OFF_HOST = 'Only this PC\'s own requests, at loopback, are answered here.';
+const FROM_BROWSER = 'A browser\'s request is never this PC\'s machine\'s: nothing is answered here to a page.';
+/** Why a request to /api/machine/* is not answered at all ('' when it may be judged): off this PC, a browser's, a short token. */
+function machineClosed(req) {
+  if (!guard.isHostMachine(req)) return OFF_HOST;
+  if (machinewire.fromBrowser(req.headers)) return FROM_BROWSER;
+  return machinewire.weakToken(ADMIN_TOKEN);
+}
+app.get(machinewire.PATHS.hello, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const closed = machineClosed(req);
+  if (closed) return res.status(403).json({ ok: false, error: closed });
+  const challenge = typeof req.query.c === 'string' ? req.query.c : '';
+  if (!machinewire.NONCE.test(challenge)) return res.status(400).json({ ok: false, error: 'The hello carries the machine\'s challenge (c), 32 hex characters.' });
+  const nonce = machineNonces.issue(Date.now());
+  res.json({ ok: true, nonce, build: BUILD.full, proof: machinewire.serverProof(ADMIN_TOKEN, nonce, challenge) });
+});
+/** The machine's request judged: true when it may go on; else it is answered with why, and a wrong proof is counted. */
+function machineAsked(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  const closed = machineClosed(req);
+  if (closed) { res.status(403).json({ ok: false, error: closed }); return false; }
+  if (adminLockout.locked('host')) { res.status(429).json({ ok: false, error: 'Too many wrong tokens — wait a minute.' }); return false; }
+  const v = machinewire.judge({
+    token: ADMIN_TOKEN, nonces: machineNonces, nonce: req.get(machinewire.NONCE_HEADER), proof: req.get(machinewire.PROOF_HEADER),
+    method: req.method, path: req.originalUrl, body: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), now: Date.now(),
+  });
+  if (!v.ok) {
+    if (v.wrong) {
+      adminLockout.fail('host');
+      audit.write(HOST_ACTOR, 'login.token.fail', 'host', 'a wrong proof of the admin token (at ' + req.path + ')', guard.clientIp(req));
+    }
+    res.status(v.status).json({ ok: false, error: v.error, ...(v.again ? { again: true } : {}) });
+    return false;
+  }
+  adminLockout.ok('host');
+  return true;
+}
+// How live this copy is (lib/busy.js), and in words.
+app.get(machinewire.PATHS.busy, machineBody, (req, res) => {
+  if (!machineAsked(req, res)) return;
+  const line = busyNow();
+  res.json({ ok: true, busy: busy.isBusy(line), line, words: busy.words(line) });
+});
+// The stop: saved as every stop is (`shutdown`, which runs to its end in one go), with code 0, once its answer has gone. A
+// busy copy stops only when a person typed a reason (`force`), and that is written (`server.stop.forced`: who asked, why,
+// what was live, the words typed); a copy that is not busy needs none. A stop asked while one is under way (another
+// stop at loopback, or Ctrl+C's) is answered with what is being done, `already`, and neither says nor writes anything.
+let machineStopping = null;
+app.post(machinewire.PATHS.stop, machineBody, (req, res) => {
+  if (!machineAsked(req, res)) return;
+  const ask = machinewire.readStop(req.body);
+  if (ask.error) return res.status(400).json({ ok: false, error: ask.error });
+  if (machineStopping || shuttingDown) return res.json({ ...(machineStopping || { ok: true, stopping: true, forced: false, line: busyNow() }), already: true });
+  const line = busyNow();
+  const forced = busy.isBusy(line);
+  if (forced && !ask.force) return res.status(409).json({ ok: false, busy: true, line, error: 'Not stopped: AGMessage is busy (' + busy.words(line) + '). Type a reason to stop it anyway.' });
+  const why = machinewire.STOP_WORDS[ask.reason];
+  if (forced) audit.write(HOST_ACTOR, 'server.stop.forced', ask.by, 'stopped while busy (' + busy.words(line) + ') for ' + why + ': ' + ask.force, guard.clientIp(req));
+  console.log('\n  Stopping for ' + why + ', asked at loopback by ' + ask.by + (forced ? ' while busy (' + busy.words(line) + '), with a reason typed' : '') + '.');
+  let gone = false;
+  const go = () => { if (!gone) { gone = true; shutdown(resilience.EXIT.STOP); } };
+  res.once('finish', go);
+  res.once('close', go);
+  machineStopping = { ok: true, stopping: true, forced, line };
+  res.json(machineStopping);
+});
+// The machine's events are to be read: the nudge carries nothing. This copy keeps none to read, and says so.
+app.post(machinewire.PATHS.events, machineBody, (req, res) => {
+  if (!machineAsked(req, res)) return;
+  if (Buffer.isBuffer(req.body) && req.body.length) return res.status(400).json({ ok: false, error: 'The nudge carries nothing.' });
+  res.json({ ok: true, read: 0, words: 'Heard. This AGMessage keeps no machine events to read.' });
+});
+
 app.use(express.json({ limit: '256kb' }));
 const web = mountAccounts(app, {
   accounts, sessions, audit, settings, isEncrypted, isLoopback,
@@ -1306,6 +1433,8 @@ function guardHandlers(socket) {
         noteFault('socket', String(event).slice(0, 40), e);
         if (ack) { try { ack({ ok: false, error: 'That request could not be handled.' }); } catch { /* the client has gone */ } }
       };
+      // Input on a seated page makes this copy busy for the window (lib/busy.js), whatever its handler answers.
+      if (busy.INPUT.has(event)) { const page = seatedPage(socket); if (page) activity.note(page, Date.now()); }
       try {
         const r = fn(...clean);
         if (r && typeof r.then === 'function') r.then(undefined, refuse);
@@ -3695,13 +3824,22 @@ front.on('error', (e) => {
 // It is held under two names when they differ: 0.5.1's (the folder's path as given), so a 0.5.1 copy and this one refuse
 // each other, and the folder's own (resilience.placeId, its real path), so two paths to one folder are one folder. A
 // folder not made yet (this copy makes it once it holds it) is held by its path as given.
+//
+// Once this copy serves, each hold answers whoever connects with the busy line (lib/busy.js), one line of counts, and
+// ends the connection: a read, never a command. A second copy refused at the folder reads it for its words. Anyone may
+// connect to a pipe, and whatever took its name first answers in its place, so what is read there chooses words and
+// nothing else.
 const folderHolds = [];
 function holdDataFolder(then) {
   const legacy = crypto.createHash('sha256').update(process.platform === 'win32' ? path.resolve(DATA_DIR).toLowerCase() : path.resolve(DATA_DIR)).digest('hex').slice(0, 16);
   const own = resilience.placeId(DATA_DIR, undefined, { absentOk: true });
   const ids = own === legacy ? [legacy] : [legacy, own];
-  const refuse = () => {
-    console.error('\n  AGMessage is already running on this data folder (' + DATA_DIR + '). ' + (RUNS === 'task' ? 'AGMessage tries again once it is free.' : 'Use that window, or give this copy a folder of its own.') + '\n');
+  // The copy that holds the folder, as its busy line says (`text`, read from its pipe), in words: busy with what, idle
+  // with what is open, or nothing when it said no line (0.5.1, which answers none, or a copy still starting).
+  const refuse = (text) => {
+    const l = busy.read(text);
+    const says = l ? ' It says it is ' + (busy.isBusy(l) ? 'busy: ' : 'idle: ') + busy.words(l) + '.' : '';
+    console.error('\n  AGMessage is already running on this data folder (' + DATA_DIR + ').' + says + ' ' + (RUNS === 'task' ? 'AGMessage tries again once it is free.' : 'Use that window, or give this copy a folder of its own.') + '\n');
     process.exit(RUNS === 'task' ? resilience.EXIT.HELD : resilience.EXIT.CONFIG);
   };
   const holdOne = (i) => {
@@ -3710,14 +3848,19 @@ function holdDataFolder(then) {
     let done = false;
     const next = () => { if (!done) { done = true; holdOne(i + 1); } };
     const unchecked = (e) => { console.warn('  [folder] could not hold the data folder (' + (e.code || e.message) + '): a second copy on it is not refused'); next(); };
-    const hold = net.createServer((c) => { c.on('error', () => { /* a second copy that asked and went: nothing to answer */ }); c.end(); });
+    const hold = net.createServer((c) => {
+      c.on('error', () => { /* a second copy that asked and went: nothing to answer */ });
+      let said = '';
+      try { if (serving) said = JSON.stringify(busyNow()) + '\n'; } catch { said = ''; /* no line this time: the connection still ends */ }
+      c.end(said);
+    });
     hold.unref();
     hold.once('error', (e) => {
       if (e.code !== 'EADDRINUSE') return unchecked(e);
-      if (process.platform === 'win32') return refuse();
-      const probe = net.connect(where);
-      probe.once('connect', () => { probe.destroy(); refuse(); });
-      probe.once('error', () => {
+      // Held: on Windows a pipe's name is held only while its copy runs; elsewhere a socket file nobody answers is a killed
+      // copy's leftover, taken over. Either way what the holder answers is read once, for the words.
+      machinewire.askPipe(where).then(({ connected, text }) => {
+        if (connected || process.platform === 'win32') { refuse(text); return; }
         hold.once('error', unchecked);
         fs.unlink(where, () => { hold.listen(where, () => { folderHolds.push(hold); keepHolding(hold); next(); }); });
       });

@@ -66,6 +66,27 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   right token is taken while that lock holds, so guessing at the laptop is bounded only by the token until the first
   admin exists: the watchdog's is 64 random bits, and a token a portable copy is given by `ADMIN_TOKEN` is as strong as
   it is long and random (the papers ask for 16 or more random letters and digits).
+- This PC's own requests to its server (how busy it is, the stop, the nudge to read the machine's events) go to
+  `/api/machine/*` at loopback and carry a proof of the token, never the token (`lib/machinewire.js`). Each is answered
+  only on this PC (`guard.isHostMachine`), only with a nonce the server issued within 30 s and not used before, and only
+  for an HMAC-SHA256 under the token over that nonce, the method, the path and the body's digest, compared in constant
+  time; a wrong proof is written and counted toward the token's lockout as a wrong token is. The machine first asks for
+  the server's own proof, under the token, over a fresh nonce and a challenge the machine made for that hello, and sends
+  nothing more to a program that cannot give it: one that took the port during a restart, or gives back a hello it read
+  earlier, is asked nothing, learns nothing and stops nothing. The two proofs begin with different words, so neither
+  stands for the other. A busy server is stopped only with a reason a person typed, written as `server.stop.forced`.
+  What the hello gives any program on this PC: an HMAC under the token over a nonce and a challenge the asker knows, so
+  the asker can test guesses at the token offline, at any speed, outside the lockout. The watchdog's 64 random bits
+  hold against that; a token a person chose is only as strong as it is long and random, so `/api/machine/*` answers
+  nothing while the token is shorter than 16 characters, saying why. A browser's request (an Origin or a Sec-Fetch-*
+  header, which the machine never sends) is answered nothing either, so a page open on this PC can neither ask nor flood
+  the nonces the machine needs; any program on this PC could still flood them, and the machine reads a stop it could
+  not ask as not done, never as done. The machine's wait is for the whole answer: a program on the port that answers a
+  byte at a time reads busy at 5 s, never holding the machine longer.
+- The busy line (`lib/busy.js`) is counts only, never a name, code, token or path, so whoever reads it learns how many and
+  nothing more. The data folder's pipe answers it to anyone who connects, as a read: a pipe's default access lets Everyone
+  and the anonymous account read it, and whatever took its name first answers in its place, so what is read there only
+  chooses the words a second copy says. Nothing writes the pipe, and nothing is decided on it.
 - What the console says is kept by the watchdog in `data/logs/server.log` (`lib/serverlog.js`), read by the Windows
   account AGMessage runs as (mode 0600 where the system honours it), bounded at two files of 2 MB. It never holds the
   admin token: the Token line goes to the console alone, and every line is searched for the token by value and written

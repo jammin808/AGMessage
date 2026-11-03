@@ -46,7 +46,6 @@ const READINGS = [
     what: '`gap.js` (the stop at loopback with the proof, not SIGUSR2) at an empty hall and at 20 × 10,000',
     mark: 'the default page back ≤ 1.5 s at the largest real hall',
     miss: 'handoff is revisited (U.10)',
-    needs: ['U8 (#36): the stop at loopback with the proof'],
   },
   {
     id: 'R2',
@@ -67,7 +66,7 @@ const READINGS = [
     what: 'the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog\'s give-up and a configuration refusal end the task with 0, and it stays stopped',
     mark: '10 of 10',
     miss: 'the release notes name the failing case; a stop that does not save is said on "This laptop"',
-    needs: ['U8 (#36): the stop at loopback with the proof', 'U12 (#72): the server task'],
+    needs: ['U12 (#72): the server task'],
   },
   {
     id: 'R4',
@@ -110,7 +109,7 @@ const READINGS = [
     mark: 'recorded, beside R2',
     miss: 'as R2',
     defender: true,
-    needs: ['U8 (#36) and U12 (#72): the upgrade\'s stop and its backup'],
+    needs: ['U12 (#72): the upgrade\'s stop and its backup'],
   },
   {
     id: 'R10',
@@ -346,6 +345,36 @@ function measured(raw, id) {
 
 const verdict = (state, words, facts = {}) => ({ state, words, facts });
 
+const median = (list) => { const x = [...list].sort((a, b) => a - b); const m = Math.floor(x.length / 2); return x.length % 2 ? x[m] : (x[m - 1] + x[m]) / 2; };
+
+/**
+ * R1: the gap an upgrade makes (the stop at loopback with the proof, then the next start at once), at an empty hall and
+ * at the largest real hall (20 × 10,000): the default page back, from the stop's request to its rejoin answered, at the
+ * hall page's own pace. The mark is the slowest of the largest hall's rounds, ≤ 1.5 s, as R2 and R10 judge theirs, its
+ * median said beside it; a round whose stop did not save, or that did not finish, is said too.
+ */
+function judgeR1(r) {
+  const sizes = (Array.isArray(r.sizes) ? r.sizes : []).filter((x) => x && typeof x.name === 'string');
+  const backs = (x) => (Array.isArray(x.rounds) ? x.rounds : []).filter((y) => y && isMs(y.pageBackMs)).map((y) => y.pageBackMs);
+  const sizeWords = (x) => {
+    const b = backs(x);
+    const where = x.name === 'large' ? 'at ' + (x.halls || '?') + ' halls × ' + (Number.isFinite(x.messages) ? x.messages.toLocaleString('en-GB') : '?') : 'at an empty hall';
+    if (!b.length) return where + ': no page back (' + String(x.error || ((x.rounds || []).find((y) => y && y.error) || {}).error || 'no round').slice(0, 200) + ')';
+    return where + ': page back median ' + ms(median(b)) + ', slowest ' + ms(slowest(b)) + ' over ' + rounds(b.length);
+  };
+  const all = sizes.flatMap((x) => (Array.isArray(x.rounds) ? x.rounds : []));
+  const unsaved = all.filter((y) => y && y.saved !== true && !y.error).length;
+  const failed = all.filter((y) => y && y.error).length;
+  const notes = (unsaved ? '; ' + unsaved + ' stop' + (unsaved === 1 ? '' : 's') + ' did not say it saved' : '; every stop saved') + (failed ? '; ' + failed + ' round' + (failed === 1 ? '' : 's') + ' did not finish' : '');
+  const large = sizes.find((x) => x.name === 'large');
+  const lb = large ? backs(large) : [];
+  const facts = { sizes: sizes.map((x) => ({ name: x.name, halls: x.halls, messages: x.messages, firstMs: x.firstMs, rounds: x.rounds || [], pageBackMedianMs: backs(x).length ? median(backs(x)) : null, pageBackSlowestMs: backs(x).length ? slowest(backs(x)) : null })) };
+  const what = sizes.map(sizeWords).join('; ') + notes;
+  if (!lb.length) return verdict('not run', (what || 'no size was taken') + ': no page came back at the largest real hall', facts);
+  const worst = slowest(lb);
+  return verdict(worst <= 1500 ? 'met' : 'missed', what + (worst <= 1500 ? ' (the slowest ≤ 1.5 s at the largest)' : ' (the slowest over 1.5 s at the largest)'), facts);
+}
+
 /**
  * R2: every round laid over the previous payload (the newest release published, or this build's own when none could be
  * had, said so), the slowest against 6 s, with R9's backup when there is one.
@@ -519,7 +548,7 @@ function judgeR13(r) {
   return verdict('recorded', 'read in ' + ms(r.ms) + ': ' + (r.tag || 'the release') + ' ' + imm + ', ' + digests + ' of ' + assets.length + ' assets with a SHA-256 digest; with no network, the words wait for U18 (#77)', facts);
 }
 
-const JUDGES = { R2: judgeR2, R4: judgeR4, R5: judgeR5, R7: judgeR7, R8: judgeR8, R10: judgeR10, R12: judgeR12, R13: judgeR13 };
+const JUDGES = { R1: judgeR1, R2: judgeR2, R4: judgeR4, R5: judgeR5, R7: judgeR7, R8: judgeR8, R10: judgeR10, R12: judgeR12, R13: judgeR13 };
 
 /**
  * Every reading's verdict on what the lane measured (`raw`, tools/readings-take.js's record; anything else reads as

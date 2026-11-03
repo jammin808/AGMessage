@@ -2266,6 +2266,93 @@ is measured on the show laptop, where lab 6 takes an upgrade during a rehearsal)
 - Rolling back: 0.5.1 serves its files cached for 5 minutes and sends no build; a 0.6.0 page on it names its build and
   hears none in the answers, so it never reloads by itself. Reload each page and screen by hand after going back.
 
+**How busy AGMessage is, and a stop that saves, asked at loopback with a proof of the token** (the plan's Part 6, unit
+U8, read with Part 2's S.2 as its §0.8 C4 says; the owner's answer 39, "busy as proposed, and a busy server stopped only
+with a typed reason"; the tree's tests. Nothing is measured on the show laptop: reading R1 takes the stop on the
+Windows runner, and R3′ waits for the server task)
+- **The busy line** (`lib/busy.js`, pure): one line of counts and nothing else — `active` (pages active in the last 10
+  minutes), `takes` (screens whose take changed in them), `help` (help requests raised in them), `countdowns`
+  (Stagewatch countdowns running now), `seats` and `screens` (open and quiet, counted apart) and `sockets`. Busy is
+  activity, not presence: a message or other input, a take or a help request in the window, or a countdown running; a
+  full hall that only reads and screens holding their take are not busy. A page is a person in a hall (the hall's code
+  and the uid its join gave them, so the same person back on a new socket is one page), active when its seat sent a
+  verb of `busy.INPUT` (an answer, a reaction, a take, a help request, an ask of the AI), heard before its handler runs,
+  or when the hall holds a message of theirs from the window: whoever sent it (a seat, the admin's support view, the
+  minutes, a show system; the system's own lines never) and across a restart, since the hall keeps its messages. Input
+  that left no message is held in memory, at most 10,000 pages, the oldest let go first. A page counts for 10 minutes
+  from its newest input or message, open or closed since. A screen's take records when it changed (`takenAt`, beside
+  `updatedAt`, which a screen made also sets). 0.5.1 had no way to say whether a show was running.
+- **At loopback, for this PC's machine** (`lib/machinewire.js`, both halves): `GET /api/machine/hello?c=<challenge>`
+  answers a fresh nonce, the build and the server's proof of the admin token, HMAC-SHA256 over `"agmessage machine
+  server\n"`, the nonce and the machine's challenge; `GET /api/machine/busy`, `POST /api/machine/stop {reason, by,
+  force}` and `POST /api/machine/events` each carry the nonce and the machine's proof, HMAC-SHA256 over `"agmessage
+  machine\n"`, the nonce, the method, the path and the body's SHA-256. Each is answered only on this PC
+  (`guard.isHostMachine`), only for a nonce issued within 30 s and not used before (256 held at most, the oldest let
+  go), and only for a proof that compares in constant time; one with no proof, or a nonce not issued, used or 31 s old,
+  is refused; a wrong proof is refused, written as `login.token.fail` and counted toward the token's lockout, which the
+  token sign-in shares. The machine checks the server's proof before it sends anything else, so a program that took
+  the port during a restart, or gives back a hello it read earlier, is sent nothing after the hello; the token never
+  crosses the socket. A browser's request (an Origin or a Sec-Fetch-* header, which the machine never sends) is
+  answered nothing, so a page open on the laptop can neither ask nor flood the nonces; and nothing is answered while
+  the admin token is shorter than 16 characters, saying why, since a hello lets any program on the PC test guesses at
+  the token offline (only an `ADMIN_TOKEN` chosen by hand can be that short). A nonce's refusal says `again`, and the
+  machine asks once more from a fresh hello, never a third time. The machine holds the token as the server does (lower
+  case, its line's end trimmed). A server that has not answered whole within 5 s reads as busy (the time is the whole
+  answer's, so one that answers a byte at a time does too), as does one that does not prove it or answers no line;
+  nothing listening is not busy. The nudge to read the machine's events carries nothing and reads none
+  until the control tasks' unit gives the server events to read. In 0.5.1 a stop was a signal or the watchdog's IPC,
+  nothing outside the watchdog could ask one, and the folder's pipe ended every connection.
+- **The stop** (`reason` one of `stop`, `upgrade`, `back`, any other word refused; `by`, who asked; `force`, the reason a
+  person typed) saves as every stop does and ends with code 0, which the watchdog reads as stopped. A busy server
+  answers "Not stopped: AGMessage is busy (3 pages active, a countdown running). Type a reason to stop it anyway."; with a
+  typed reason it stops and writes `server.stop.forced` (who asked, why, what was live, the words typed). The window
+  and `server.log` say "Stopping for an upgrade, asked at loopback by LAPTOP\ana". A stop asked while one is under way
+  is answered with what is being done (`already`), and says and writes nothing more.
+- **The data folder's pipe** answers the busy line to whoever connects, once its copy serves, and ends the connection:
+  a read, never a command. Its default access lets anyone on the PC read it and whatever took its name first answers in
+  its place, so the line chooses words and nothing else. A second copy refused at the folder says it: "AGMessage is
+  already running on this data folder (…). It says it is busy: 1 page active, a countdown running." or "It says it is
+  idle: nothing in the last 10 minutes; 4 seats and 2 screens open." A copy refused at the port alone keeps its words:
+  it cannot name the other copy's pipe (Part 2's S.2).
+- **Reading R1 is taken** (`tools/readings-take.js` `takeR1`, `tools/readings.js` `judgeR1`): a portable folder seeded
+  per size (an empty hall; 20 halls of 10,000 messages), the bundle's watchdog started once to settle it, then 3 rounds of
+  a page seated, the stop at loopback with the proof of a token made for the reading (never kept), the next start at
+  once and the page back at the hall page's own pace (0.5 s doubling to 2 s, each ±50 %, held to `public/reconnect.js`
+  by its test), each round with the watchdog's code and whether `last-stop.json` says it saved; the seeded messages are
+  from before the busy line's window, so the stop is the upgrade's own; the mark is the largest hall's slowest page
+  back, ≤ 1.5 s, as R2 and R10 judge theirs, its median said beside it. R3′ and R9 now wait for U12 (#72) alone.
+- Tests: `test/busy.test.js`: the line (its keys a fence, counts only, read by type from another program, busy from
+  activity and never presence, its words) and its window (a page by its hall and person, 10,000 held, the oldest let
+  go); a hall's messages from the window (each sender's page, help counted, the system's lines never, read back only to
+  the window's edge); every socket verb a handler registers is input or a page's own read and not both, and every verb
+  a page holds for its person is input; the two proofs bound to every part and neither standing for the other; the
+  token as the machine reads it, the 16-character floor and a browser's headers; the nonces (once, 30 s, 256 held); the
+  stop's body (an unknown key or word refused); a program that answers a byte at a time, on the port and on the pipe,
+  let go at the time; a nonce's refusal asked again once and never twice, a wrong proof never again.
+  End to end: refused off this PC (a forwarded request, another name, the tunnel's header) for all four; the hello's
+  proof checks with the token; no proof six times, then a right one answered; a nonce used, then one 31 s old (the test's
+  clock), refused; an idle seat and a screen not busy, then input, a help request, a take and a countdown each counted;
+  the folder's pipe answering the same line, and a second copy's words busy and then idle once the window is over; five
+  wrong proofs written and counted, the sixth right one refused by the lockout, as the token sign-in is, and answered a
+  minute on; a browser's request refused on all four; a busy stop refused without a reason, then saved and ended with 0
+  with one `server.stop.forced` row; a quiet stop with none, two asked at once saying, saving and recording one stop; a
+  message from the admin's support view and the minutes busy, and still busy after a restart within the window (Ana
+  back on a new socket the same page), a stop without a reason refused; a server with a 12-character token answering
+  the machine nothing, with why, its sign-in as it was; programs on the port that are not the server (a wrong proof, a hello read earlier and given back, one
+  that answers no line, one that never answers) each sent only the hello, and no byte the machine sent, to them or to
+  the server through a relay that kept every byte, holding the token (searched by value). `test/readings.test.js`: R1
+  judged on the slowest round (one round over the mark misses it), its pace read from the hall page's, its seeds from
+  before the window, and taken on this machine against this checkout (each stop saved, the watchdog ended with 0, no
+  token in the record). Moved on purpose: `test/readings.test.js`'s register (R1 waits for nothing; R3′ and R9 for U12 alone; the
+  readings that still wait name 13 units) and its notes; `test/modules.test.js`'s pure set gains `lib/busy.js`.
+- The papers: `README.md`, `README.txt` (the folder held; a token chosen by hand), `SECURITY.md` (what a hello gives a
+  program on the PC), `docs/ACCOUNTS.md` (the audit log's `server.stop.forced` and the machine's `login.token.fail`; the
+  token's floor), `docs/DESIGN.md`, `docs/INSTALL.md` (The busy line, and the stop at loopback; R1's row),
+  `docs/NODES.md`, `docs/ANALYSIS.md` (the pure set, the two bounds, the waits) and the plan's note at Part 6's U8 (the
+  wire as built, which U12, U17 and U18 speak).
+- Rolling back: 0.5.1 has no `/api/machine/*` (a machine asking it reads it as not proven, so busy), its pipe answers
+  nothing, and it ignores `takenAt` in `displays.json`.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

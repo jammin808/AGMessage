@@ -12,6 +12,9 @@
  *            own when not, said so), round by round: each file inflated to a name of its own beside it, then renamed
  *            over the earlier one
  *       R10  node.exe extracted from the bundle into %TEMP% and run once, round by round, with its exit code
+ *       R1   the gap an upgrade makes, at an empty hall and at 20 halls × 10,000 messages: the bundle's watchdog
+ *            serving, a page seated, the stop at loopback with the proof of a token made for the reading, the next start
+ *            at once, and the page back at the hall page's own pace, round by round
  *       R5   Windows' verdict on node.exe's and cloudflared.exe's signatures (Get-AuthenticodeSignature)
  *       R8   the access lists of C:\ and %ProgramData% (icacls /save: SIDs, never localised names)
  *       R4   a stand-in for U12's server task at \AGMessage\Server: LocalService, its own SID (Unrestricted), only
@@ -31,7 +34,8 @@
  *     \AGMessage\Server task it did not make, before anything is made or removed. Exit 0 once the record is written, 2
  *     when it cannot be, 64 for a word it does not know, a run off Windows or a machine it refuses.
  *   node readings-take.js probe-server <dir> | probe-exit <dir> | probe-release <dir>
- *       what a stand-in task runs, from the copy the lane makes of this file (it requires Node's own modules only)
+ *       what a stand-in task runs, from the copy the lane makes of this file: what a probe runs requires Node's own
+ *       modules only (R1's step alone, run from the checkout, asks its server through app/lib/machinewire.js)
  *
  * Invariants: every program is run by its absolute path, never a bare name, with an argument array and no shell; no
  * secret is written to the record (the admin token the stand-in server makes is taken out of any output kept, by value
@@ -642,6 +646,184 @@ async function takeR12(L, { node, self, dir, cwd }, { nonZeroMs = 150000, zeroMs
   return { tasks: [RESTART_TASKS.nonZero, RESTART_TASKS.zero], nonZero, zero };
 }
 
+// ---------------------------------------------------------------- R1: the gap, as an upgrade makes it
+
+/** R1's folders: an empty hall, and the largest real hall the plan names, 20 halls of 10,000 messages. */
+const R1_SIZES = [{ name: 'empty', halls: 1, messages: 0 }, { name: 'large', halls: 20, messages: 10000 }];
+const R1_ROUNDS = 3;
+/** The hall page's reconnection pace (public/reconnect.js OPTIONS): from 0.5 s, doubling to 2 s at most, each ±50 %. */
+const PAGE_PACE = { delayMs: 500, maxMs: 2000, jitter: 0.5 };
+/** How long before the reading its seeded messages were written: past the busy line's 10 minutes (app/lib/busy.js). */
+const R1_QUIET_MS = 11 * 60_000;
+
+/**
+ * A data folder seeded with `halls` halls of `messages` messages each, every hall's snapshot written whole as the store
+ * writes one (data/rooms/<CODE>.json), its log empty: the halls' codes, in order. The newest message is written at `at`,
+ * by default 11 minutes ago, before the busy line's window, so the folder is a large hall between shows and the stop
+ * the reading asks is the upgrade's own, needing no reason typed.
+ */
+function seedHalls(dataDir, { halls, messages, at = Date.now() - R1_QUIET_MS }) {
+  const rooms = path.join(dataDir, 'rooms');
+  fs.mkdirSync(rooms, { recursive: true });
+  const codes = [];
+  for (let h = 1; h <= halls; h++) {
+    const code = 'GAP' + String(h).padStart(3, '0');
+    const list = [];
+    for (let i = 1; i <= messages; i++) list.push({ id: 'g' + h + 'm' + i, type: 'text', text: 'Seeded message ' + i + ' of ' + messages + ' in hall ' + h + ', as long as a line typed backstage', at: at - (messages - i) * 1000, seq: i, from: { uid: 'useed' + h, name: 'Seed', role: 'research' } });
+    fs.writeFileSync(path.join(rooms, code + '.json'), JSON.stringify({ code, name: 'Gap ' + h, createdAt: at, seq: messages, settings: {}, messages: list, savedAt: at, gone: [] }));
+    codes.push(code);
+  }
+  return codes;
+}
+
+/**
+ * A page as the hall page connects: Socket.IO 4 over its WebSocket transport (Engine.IO 4), naming `build` as a page
+ * names the build that served it. Resolves {emit(event, arg) → the server's answer or null, closed, close()} once the
+ * server took it, or null when it did not within `ms` (refused, nothing listening, or silent).
+ */
+function pageSocket(port, { build, ms = 10000 }) {
+  return new Promise((resolve) => {
+    let ws;
+    try { ws = new WebSocket('ws://127.0.0.1:' + port + '/socket.io/?EIO=4&transport=websocket'); } catch { resolve(null); return; }
+    const acks = new Map();
+    let next = 0;
+    let ended;
+    const closed = new Promise((r) => { ended = r; });
+    const timer = setTimeout(() => { resolve(null); ws.close(); }, ms);
+    const page = {
+      emit: (event, arg) => new Promise((r) => { const id = next++; acks.set(id, r); ws.send('42' + id + JSON.stringify([event, arg])); }),
+      closed,
+      close: () => ws.close(),
+    };
+    ws.addEventListener('message', (e) => {
+      const t = String(e.data);
+      if (t === '2') ws.send('3');                                           // the server's ping, answered
+      else if (t[0] === '0') ws.send('40' + JSON.stringify({ build }));       // open: into the namespace, naming the build
+      else if (t.startsWith('40')) { clearTimeout(timer); resolve(page); }   // taken
+      else if (t.startsWith('44')) { clearTimeout(timer); resolve(null); ws.close(); }   // refused
+      else {
+        const m = /^43(\d+)(\[[\s\S]*)$/.exec(t);
+        const answer = m && acks.get(Number(m[1]));
+        if (!answer) return;
+        acks.delete(Number(m[1]));
+        try { answer(JSON.parse(m[2])[0]); } catch { answer(null); /* an answer that is not JSON: none */ }
+      }
+    });
+    ws.addEventListener('error', () => { /* the close that follows says it */ });
+    ws.addEventListener('close', () => {
+      clearTimeout(timer);
+      resolve(null);
+      for (const answer of acks.values()) answer(null);
+      acks.clear();
+      ended();
+    });
+  });
+}
+
+/** The page's next wait before it tries again, at its pace: `tries` made so far (crypto's chance for the ±50 %). */
+function paceMs(tries, pace = PAGE_PACE) {
+  const base = Math.min(pace.delayMs * 2 ** tries, pace.maxMs);
+  const deviation = Math.floor((crypto.randomInt(1000) / 1000) * pace.jitter * base);
+  return Math.min(crypto.randomInt(2) ? base + deviation : base - deviation, pace.maxMs);
+}
+
+/** The bundle's watchdog, started as a person's window starts it: {child, exited (its code), tail()}. */
+function startWatchdog(node, supervise, env) {
+  const child = childProcess.spawn(node, [supervise], { cwd: path.dirname(path.dirname(supervise)), env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  let tail = '';
+  const keep = (c) => { tail = keepTail(tail, c.toString('utf8')); };
+  child.stdout.on('data', keep);
+  child.stderr.on('data', keep);
+  const exited = new Promise((resolve) => { child.once('exit', (code) => resolve(code)); child.once('error', () => resolve(null)); });
+  return { child, exited, tail: () => tail };
+}
+/** A watchdog ended: stopped at loopback with the proof, or ended outright when that is not answered within 10 s. */
+async function endWatchdog(w, wire, port, token) {
+  if (!w || w.child.exitCode !== null || w.child.signalCode !== null) return;
+  await wire.stop({ port, token, reason: 'stop', by: 'the readings lane', force: 'the reading ended' });
+  if ((await Promise.race([w.exited.then(() => true), sleep(10000).then(() => false)]))) return;
+  w.child.kill();
+  await Promise.race([w.exited, sleep(5000)]);
+}
+
+/**
+ * One gap: a page seated in the hall `code`, the stop at loopback with the proof (reason "upgrade"), the watchdog's end,
+ * the next watchdog started at once, as an upgrade's start is, and the page back at its own pace: rejoined, with what it
+ * missed (`since`). Times from the stop's request: {stopMs (the watchdog gone), code (the watchdog's exit code), healthMs
+ * (health answers), pageBackMs (the rejoin answered), tries, saved (data/last-stop.json says so)}, or {error}; and the
+ * watchdog now running.
+ */
+async function gapRound({ node, supervise, env, port, token, wire, code, dataDir, startMs }, w) {
+  const hello = await wire.hello({ port, token });
+  if (!hello.ok) return { result: { error: 'the server did not prove it holds the token: ' + hello.words }, watchdog: w };
+  const page = await pageSocket(port, { build: hello.build });
+  if (!page) return { result: { error: 'the page did not connect' }, watchdog: w };
+  const first = await page.emit('join', { roomCode: code, name: 'Gap reader', role: 'observer' });
+  if (!first || !first.ok) { page.close(); return { result: { error: 'the page was not seated (' + String(first && first.error || 'no answer').slice(0, 120) + ')' }, watchdog: w }; }
+  const t0 = now();
+  const asked = await wire.stop({ port, token, reason: 'upgrade', by: 'the readings lane' });
+  if (!asked.ok || asked.status !== 200) { page.close(); return { result: { error: 'the stop was not taken: ' + (asked.words || JSON.stringify(asked.json || {}).slice(0, 200)) }, watchdog: w }; }
+  const ended = await Promise.race([w.exited, sleep(15000).then(() => undefined)]);
+  const stopMs = Math.round(now() - t0);
+  if (ended === undefined) { page.close(); return { result: { error: 'the watchdog had not ended 15 s after the stop', stopMs }, watchdog: w }; }
+  let saved;
+  try { saved = readJson(path.join(dataDir, 'last-stop.json')).saved === true; } catch { saved = false; /* no record: the stop did not save */ }
+  const next = startWatchdog(node, supervise, env);
+  const t1 = now();
+  const health = waitHealth(port, { ms: startMs, every: 50 }).then((h) => ({ ...h, fromStopMs: Math.round(now() - t0), fromStartMs: Math.round(now() - t1) }));
+  await page.closed;
+  let tries = 0;
+  let back = null;
+  while (!back && now() - t0 < startMs) {
+    await sleep(paceMs(tries));
+    tries++;
+    const again = await pageSocket(port, { build: hello.build, ms: 5000 });
+    if (!again) continue;
+    const answer = await again.emit('join', { roomCode: code, name: 'Gap reader', role: 'observer', uid: first.identity, since: first.seq });
+    if (answer && answer.ok) back = Math.round(now() - t0);
+    again.close();
+  }
+  const h = await health;
+  return { result: { stopMs, code: ended, saved, healthMs: h.ok ? h.fromStopMs : null, startHealthMs: h.ok ? h.fromStartMs : null, pageBackMs: back, tries, ...(back === null ? { error: 'the page was not back within ' + startMs / 1000 + ' s' } : {}) }, watchdog: next };
+}
+
+/**
+ * R1: the gap an upgrade makes, at each of `sizes` (a folder seeded per size), with the bundle's own server and watchdog
+ * (under `app`) on `port`, asked as the machine asks (app/lib/machinewire.js of this checkout, the commit the bundle was
+ * built from): a start that settles the folder (not measured), then `rounds` gaps, each a page seated, the stop at
+ * loopback with the proof of a token made for this reading (never kept), and the next start. Run only from the checkout,
+ * never from the copy the stand-in tasks run. {port, sizes: [{name, halls, messages, firstMs, rounds: [gapRound's result]}]}.
+ */
+async function takeR1({ node, app, work, port }, { sizes = R1_SIZES, rounds = R1_ROUNDS, startMs = 60000 } = {}) {
+  const wire = require('../app/lib/machinewire.js');
+  const supervise = path.join(app, 'supervise.js');
+  const token = crypto.randomBytes(8).toString('hex');
+  const out = { port, sizes: [] };
+  for (const size of sizes) {
+    const dir = path.join(work, 'r1', size.name);
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    const dataDir = path.join(dir, 'data');
+    const code = seedHalls(dataDir, size)[0];
+    const env = { ...process.env, AGM_DATA_DIR: dataDir, AGM_UPLOAD_DIR: path.join(dir, 'uploads'), AGM_KEY_DIR: path.join(dir, 'keys'), PORT: String(port), ADMIN_TOKEN: token };
+    for (const k of ['AGM_OPEN', 'AGM_RUNS', 'AGM_TOKEN_DIR', 'AGM_CHILD']) delete env[k];
+    const rec = { name: size.name, halls: size.halls, messages: size.messages, firstMs: null, rounds: [] };
+    out.sizes.push(rec);
+    let w = startWatchdog(node, supervise, env);
+    try {
+      const first = await waitHealth(port, { ms: startMs });
+      if (!first.ok) { rec.error = 'the bundle did not serve: ' + withoutSecrets(w.tail(), token).slice(-600); continue; }
+      rec.firstMs = first.ms;
+      for (let i = 0; i < rounds; i++) {
+        const r = await gapRound({ node, supervise, env, port, token, wire, code, dataDir, startMs }, w);
+        w = r.watchdog;
+        rec.rounds.push(r.result);
+        if (r.result.error) { rec.rounds[rec.rounds.length - 1].words = withoutSecrets(w.tail(), token).slice(-600); break; }
+      }
+    } finally { await endWatchdog(w, wire, port, token); }
+  }
+  return out;
+}
+
 async function take(o) {
   if (process.platform !== 'win32') { console.error('readings-take: the readings are Windows\'; nothing was taken'); return 64; }
   const work = path.resolve(o.work);
@@ -737,6 +919,11 @@ async function take(o) {
     needsPayload();
     const files = L.ps(SCRIPTS.signatures, { AGM_READ_PATHS: [node, path.join(root, 'bin', 'cloudflared.exe')].join('|') });
     return { files: Array.isArray(files) ? files : [files], installer: null };
+  });
+
+  await reading('R1', () => {
+    needsPayload();
+    return takeR1({ node, app: path.join(root, 'app'), work, port: o.port });
   });
 
   await reading('R8', () => {
@@ -859,5 +1046,6 @@ module.exports = {
   zipEntries, memberParts, topFolder, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, SCRIPTS, lane, system32,
   snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeExit, parseArgs, main, TRYCF,
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
+  seedHalls, pageSocket, paceMs, takeR1, R1_SIZES, R1_QUIET_MS, PAGE_PACE,
   SERVER_TASK, STAND_IN, RESTART_TASKS, WORK_MARK, BUDGET_MS,
 };

@@ -53,7 +53,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   health reads the server's true delay and how busy it is, and keeps the peaks of each show day for 14 days, through a
   restart or a shutdown, so one look after a show says how it ran. A start that cannot run says why and stops, never
   looping: a folder it cannot make or read, a second copy on the same folder or port (whose server has written nothing;
-  its watchdog logs the refusal). A key, certificate or settings file it cannot read is never made again or saved over:
+  its watchdog logs the refusal; on the same folder it says how busy the running copy says it is). This PC's own
+  commands ask the server at loopback how busy it is (a message or other input, a take or a help request in the last 10
+  minutes, a restart between them or not, or a countdown running; open seats and screens never) and stop it, saved, with a proof of the admin token that never
+  crosses the socket: a busy server stops only with a reason a person typed, which the audit log keeps. A key, certificate or settings file it cannot read is never made again or saved over:
   the copy says what it goes without this run, refuses a setting changed meanwhile with why, and serves on, and a laptop
   out of file handles loses a connection, not the server. What the window says is kept in `data/logs/server.log`
   (rotated at 2 MB, two files at most, never the admin token), with the server's own words in the watchdog's line for a

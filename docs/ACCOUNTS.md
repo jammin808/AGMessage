@@ -133,8 +133,10 @@ judged first: a wrong one is refused, counted toward the token's lockout (5 a mi
 wrong admin token (at setup)"; while the lock holds a wrong one is refused and not written again, and the right one is
 still taken, so nobody else at the laptop keeps its person out by typing wrong tokens. That leaves guessing at the
 laptop unbounded until the first admin exists: the watchdog's token is 64 random bits, and a portable copy given its
-token by `ADMIN_TOKEN` is as strong as that token, so the papers ask for 16 or more random letters and digits. The
-`setup` row says which way the token came. There is one first admin, even when two requests arrive at
+token by `ADMIN_TOKEN` is as strong as that token, so the papers ask for 16 or more random letters and digits. This
+PC's machine at loopback is answered only for a token of 16 characters or more: its hello is an HMAC under the token
+over words its asker knows, so any program on the PC could test guesses at a shorter one offline, outside the lockout
+(`SECURITY.md`). The `setup` row says which way the token came. There is one first admin, even when two requests arrive at
 once. The admin then adds everyone else on the Accounts page (Halls → Accounts); each new person gets a **one-time
 password**, shown once, which they replace at their first sign-in (two saves at once still make one account). The host
 laptop's admin token still opens the admin page there; that sign-in lasts a day and survives a watchdog restart, which
@@ -197,9 +199,13 @@ the desk's number, never the words), every line Stagewatch takes for the speaker
 commands to Patterns and PlayMap, the internet link (`tunnel.on`: who turned it on and its end, once cloudflared gave
 its address; `tunnel.until`: its end moved; `tunnel.off`: who turned it off, or kept it off with only its end left; and
 system rows, `tunnel.again`: turned on again by a start inside its end, and `tunnel.ended`: turned off at its end; never
-its address), and a start by another build than the one that last wrote the data folder
+its address), a start by another build than the one that last wrote the data folder
 (`server.upgraded`, a system row: from which build to which, older or newer, and the copy of the folder kept when its
-format moved; `data/format.json`, `lib/dataformat.js`).
+format moved; `data/format.json`, `lib/dataformat.js`), a busy server stopped by this PC's machine with a reason a
+person typed (`server.stop.forced`, the laptop's token holder's row: who asked, for what, what was live in counts and
+the words typed; a stop of a server that is not busy writes none), and a wrong proof of the admin token at loopback
+(`login.token.fail` "a wrong proof of the admin token (at /api/machine/busy)", counted toward the token's lockout as a
+wrong token is; `lib/machinewire.js`).
 
 **Chained with a key.** Each line carries the hash of the line before it, from a fixed first hash, and its own
 HMAC-SHA256 under a key derived from this machine's key (`machine.key`, outside the data folder: `lib/secretbox.js`).

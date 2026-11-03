@@ -47,8 +47,11 @@ First time on a new laptop
    start to choose one. A token you choose is 16 or more random letters
    and digits, never a word or a name: until the first admin account is
    made, anyone signed in to this laptop may try tokens there without
-   limit. A new token is made each time the window is started; a
-   restart inside it keeps the same one.
+   limit, and any program on this laptop can test guesses at it against
+   what AGMessage answers this laptop's own commands. A shorter token
+   still signs in, but those commands (how busy it is, the stop) are
+   then refused with why. A new token is made each time the window is
+   started; a restart inside it keeps the same one.
 
 4. Halls -> Accounts: add everyone who works the event. Pick a role
    (Project manager, Senior tech, Tech, Staff, Viewer) and their halls.
@@ -598,7 +601,12 @@ Troubleshooting
 - "AGMessage is already running on this data folder": a second copy of
   this folder was started while the first runs. It stops before it
   touches anything; use the window that is already open. (A second copy
-  on another port needs a folder of its own.)
+  on another port needs a folder of its own.) The line goes on with what
+  the running copy says of itself: "It says it is busy: 2 pages active,
+  a countdown running." (someone wrote, a take or a help request in the
+  last 10 minutes, or a countdown runs) or "It says it is idle: nothing
+  in the last 10 minutes; 4 seats and 2 screens open." Close that window
+  only when nobody needs it.
 
 - "◷ Waiting — it goes when the connection is back" on a message: the page
   is not connected. Leave it: it is sent by itself when the connection is

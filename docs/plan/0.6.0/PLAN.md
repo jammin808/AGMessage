@@ -741,7 +741,7 @@ part's text stands in its place), **Read with** (the owner's answers are registe
 | 5-§11. Units (adds to the list) | **Amended by** Part 0 §0.6 governs the order and the cut line; unit 31 cannot slip (Part 0 §0.8 C3). |
 | 6-Owner's answers (2026-10-27) | **Read with** Part 0 §0.4.9. |
 | 6-U.5.1 The laptop's admin (answer 38) | **Amended by** 3-K.9 (the `token` right also adopts accounts held aside, #80). |
-| 6-U.7 Units | **Amended by** Part 0 §0.6 (the global build order; U18 before U16, §0.8 C2); 2-S.2 on U8's busy line (§0.8 C4); 3-K.9 (#80: U2's `/api/setup` takes the typed token in both channels; U12's `keys\stores\`; U14 carries `stores\` and verifies that no account is held aside; U15's claim, pin and finish, and Archive this event… refused while accounts are held aside; U17's `token` row). |
+| 6-U.7 Units | **Amended by** Part 0 §0.6 (the global build order; U18 before U16, §0.8 C2); 2-S.2 on U8's busy line (§0.8 C4); #36 as built (U8's note: the hello's challenge, the stop's `force`, the wire U12, U17 and U18 speak); 3-K.9 (#80: U2's `/api/setup` takes the typed token in both channels; U12's `keys\stores\`; U14 carries `stores\` and verifies that no account is held aside; U15's claim, pin and finish, and Archive this event… refused while accounts are held aside; U17's `token` row). |
 | 6-U.8 Tests | **Amended by** 3-K.13 (U15's row gains the claim, the pin and a `.partial` no claim names). |
 | 6-U.9 Papers | **Amended by** 3-K.14 (`docs/INSTALL.md` names `keys\stores\` and the import's carrying it). |
 | 7-§11. Units (adds to the list) | **Amended by** Part 0 §0.6 governs the order; 20a lands before stage 25 and T after it (Part 0 §0.8 C1); 20b and 20d must land (Part 0 §0.2). |
@@ -11211,6 +11211,7 @@ Each is one commit, `AGMessage 0.6.0, unit Un: <what landed>`. Every reader is n
        third given nothing.
 8. **[#36]** **unit U8: the busy line, and a stop that saves, at loopback with a proof of the token.**
    - *Read with 2-S.2 (Part 0 §0.8 C4): only the folder-held words read the busy line; a copy refused at the port cannot name the folder pipe (`app/server.js:2453-2454`).*
+   - *As built (#36), the wire U12, U17 and U18 speak, which `docs/INSTALL.md` (The busy line, and the stop at loopback) governs: the hello carries the machine's own challenge (`?c=`, 32 hex characters; a hello without one is refused) and the server's proof covers it after the nonce, a line apart, so a hello read earlier proves nothing; the stop's body is `{reason, by, force}`, `reason` one of `stop`, `upgrade` and `back` (any other word refused) and `force` the reason a person typed; a stop asked while one is under way answers `already`; a nonce's refusal says `again`, and the machine asks once more; no browser's request (an Origin or a Sec-Fetch-* header) is answered, nor any while the token is shorter than 16 characters; a page is active by its seat's input or a message its hall holds from the window (answer 39's "a message"), so a restart keeps it; the machine's wait is for the whole answer; the nudge reads nothing until U17. U12's `machine.js` (Node's built-ins only) carries its own copy of the machine's half, held to `app/test/busy.test.js`'s vectors.*
    - **The busy line.** One line of counts:
      - pages active in the last 10 minutes;
      - takes changed and help requests in that window;

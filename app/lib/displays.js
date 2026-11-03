@@ -151,11 +151,14 @@ class Displays {
     return d;
   }
 
-  /** Put a content on a display (already cleaned): the next seq, which the display confirms when it shows it. */
+  /**
+   * Put a content on a display (already cleaned): the next seq, which the display confirms when it shows it. `takenAt` is
+   * when its take last changed (the busy line's takes; a screen made, renamed or given a new link has none of its own).
+   */
   take(id, content, by = '') {
     const d = this.get(id);
     if (!d) return null;
-    d.content = content; d.seq += 1; d.updatedAt = Date.now(); d.updatedBy = by;
+    d.content = content; d.seq += 1; d.updatedAt = Date.now(); d.takenAt = d.updatedAt; d.updatedBy = by;
     this.save();
     return d;
   }
