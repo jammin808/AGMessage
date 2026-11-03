@@ -142,6 +142,13 @@ const ROLES = ['board', 'research', 'observer'];
 // The seats in the lines the server writes into a hall, in the words every page shows for them.
 const SEAT = Object.freeze({ board: 'On stage', research: 'Backstage', observer: 'Observer' });
 const JOINED = Object.freeze({ board: 'joined On stage', research: 'joined Backstage', observer: 'joined as an observer' });
+// A side room has no stage: its backstage seat is a Member's, and no seat there is On stage.
+const SEAT_SIDE = Object.freeze({ research: 'Member', observer: 'Observer' });
+const JOINED_SIDE = Object.freeze({ research: 'joined as a Member', observer: 'joined as an observer' });
+/** A seat in a room's words: a Main room's (On stage, Backstage, Observer), or a side room's (Member, Observer). */
+const seatWords = (room, role) => (store.isMain(room) ? SEAT[role] : SEAT_SIDE[role]) || SEAT[role];
+const joinedWords = (room, role) => (store.isMain(room) ? JOINED[role] : JOINED_SIDE[role]) || JOINED[role];
+const ON_STAGE_IN_MAIN = 'On stage seats are in the hall\'s Main room.';
 // What may be forwarded into another hall: messages that stand on their own there (allow-list; a new type is refused).
 const FORWARDABLE = new Set(['text', 'file', 'action']);
 // What one person's pages keep in step (their own devices, and the admin's support view of them): each key a page
@@ -823,14 +830,16 @@ function holdsSeat(room, uid, name, role) {
   return !!s && s.name === name && s.role === role;
 }
 /** The code-guest seats (board, research) a room holds now: on a page still there, in a drop's grace, or saved before the
- *  restart and not yet taken up while the boot's first seconds last. One seat per person, a page's before a drop's. */
+ *  restart and not yet taken up while the boot's first seconds last. One seat per person, a page's before a drop's. The
+ *  laptop's token admin's own page holds none: it is admitted to every room whatever its code or lock (`join`). */
 function seatsNow(room) {
   const seats = {};
   const here = new Set();
   for (const [sid, u] of room.users) {
-    if (!io.sockets.sockets.has(sid)) continue;
+    const s = io.sockets.sockets.get(sid);
+    if (!s) continue;
     here.add(u.uid);
-    if (!u.acct && u.role !== 'observer' && !seats[u.uid]) seats[u.uid] = { name: u.name, role: u.role };
+    if (!u.acct && !s.data.isAdmin && u.role !== 'observer' && !seats[u.uid]) seats[u.uid] = { name: u.name, role: u.role };
   }
   const prefix = room.code + '|';
   for (const [k, p] of pendingLeaves) {
@@ -1211,13 +1220,20 @@ app.post('/api/rooms', (req, res) => {
   audit.write(w ? web.actorOf(w) : HOST_ACTOR, 'hall.create', room.code, room.name || '(no name)', guard.clientIp(req));
   res.json({ code: room.code, name: room.name });
 });
+// A guest's code looked up: the room it opens now (a live code, switched on), named with its hall and whether it is the
+// hall's Main room, so the join page offers that room's seats. A code that is switched off, an earlier code of a room, a
+// key and a code no room has are one answer, and each counts against the lookup's lock: none can be told from another.
 app.get('/api/rooms/:code', (req, res) => {
   const key = guard.limitKey(guard.clientIp(req));
   if (!lookupAllowed(key)) return res.status(429).json({ error: 'Too many attempts — wait a minute.' });
   const code = String(req.params.code || '').toUpperCase();
-  const room = RoomStore.validCode(code) ? store.get(code) : null;
-  if (!room) lookupLock.fail(key);
-  res.json({ code, exists: !!room, name: room ? room.name || '' : '', locked: !!(room && room.settings.lockRoles) });
+  const room = RoomStore.validCode(code) ? store.byCode(code) : null;
+  if (!room || !store.codeOn(room)) {
+    lookupLock.fail(key);
+    return res.json({ code, exists: false, name: '', locked: false });
+  }
+  const hall = store.get(room.hall);
+  res.json({ code, exists: true, name: room.name || '', locked: !!room.settings.lockRoles, hallName: (hall && hall.name) || '', main: store.isMain(room) });
 });
 
 // The halls a signed-in account may see, for its account area (live detail follows on the socket).
@@ -1225,9 +1241,12 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const a = req.agm.account;
   // Posting and sharing files are asked in each hall's Main room (rbac.canIn); its screens and its Stagewatch are the hall's.
+  // Each row's guest code only for an account that may know it (codeFor), with whether it admits guests now.
+  const who = { isAdmin: isAdminReq(req), account: a };
   const halls = Array.from(store.rooms.values()).filter((r) => rbac.seesHall(a, r.code)).map((r) => ({
     code: r.code, name: r.name || '', people: board.peopleIn(r), messages: r.messages.length, locked: !!r.settings.lockRoles,
     can: { post: rbac.canIn(a, 'hall.post', store.scopeOf(r)), files: rbac.canIn(a, 'hall.files', store.scopeOf(r)), displays: rbac.can(a, 'display.control', r.code), stage: rbac.can(a, 'stage.send', r.code) },
+    guestCode: codeFor(who, r), codeOn: store.codeOn(r),
   })).sort((x, y) => (x.name || x.code).localeCompare(y.name || y.code));
   res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: rbac.can(a, 'users.manage') && !web.adminBlocked(req, a), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req) });
 });
@@ -1240,22 +1259,113 @@ function newRoom(name) {
   return store.create(code, guard.cleanText(name, 80));
 }
 /**
- * A side room of the hall `hall` (its key), named `name` (cleaned by the caller), under a key no room has: its first
- * snapshot written at once, its guest code off (lib/store.js createIn). Null when the hall holds SIDE_MAX rooms beside
- * its Main room already, or is no hall.
+ * A side room of the hall `hall` (its key), named `name` (cleaned by the caller), under a key no room has, with a guest
+ * code of its own (`newGuestCode`): its first snapshot written at once, its guest code off (lib/store.js createIn). Null
+ * when the hall holds SIDE_MAX rooms beside its Main room already, or is no hall.
  */
 function newSideRoom(hall, name) {
   let key;
   do { key = makeRoomKey(); } while (keyHeld(key));
-  return store.createIn(hall, key, name);
+  return store.createIn(hall, key, name, { guestCode: newGuestCode() });
 }
 /**
- * Whether a new hall or room may not take `key`: a room has it, side rooms included, or something still names it that
- * would open the new one to whoever held the one before — an account's halls, On stage halls or rooms (one a page saved
- * back after its hall closed, one a room that comes back at the next start keeps), a node linked for a hall.
+ * A guest code no room holds: 6 characters, never a room's key, a live code or an earlier one (store.codeHeld), nor a key
+ * something still names (keyHeld). A side room's, as it is made; any room's, at New code.
+ */
+function newGuestCode() {
+  let code;
+  do { code = makeRoomCode(); } while (keyHeld(code));
+  return code;
+}
+/**
+ * Whether a new hall or room, or a new guest code, may not take `key`: a room has it, side rooms included; it is a room's
+ * guest code, live or earlier (a hall's key is its code until New code, so the two are never shared); or something still
+ * names it that would open the new one to whoever held the one before — an account's halls, On stage halls or rooms (one
+ * a page saved back after its hall closed, one a room that comes back at the next start keeps), a node linked for a hall.
  */
 function keyHeld(key) {
-  return store.hasRoom(key) || accounts.names(key) || Object.values(settings.peerLinks || {}).some((l) => !!l && l.hall === key);
+  return store.codeHeld(key) || accounts.names(key) || Object.values(settings.peerLinks || {}).some((l) => !!l && l.hall === key);
+}
+/**
+ * The guest code of `room` as `who` may be told it, or '' (plan 1-§2.3: the chips, /api/halls, the halls board, the join's
+ * answer, the admin's lists). `who`: `isAdmin` (the laptop's token, or an account that manages settings), `account`,
+ * `onStage` (the page asking sits On stage: a Board tablet is handed no code, the admin's included) and `joinedWith` (the
+ * code a guest's page typed). The admin is told every room's; an account by its rights there (rbac.mayKnowCode); a guest
+ * only the code it joined with while that code is still the room's (a code renewed since is not handed to it).
+ */
+function codeFor(who, room) {
+  const code = store.guestCodeOf(room);
+  if (!code || who.onStage) return '';
+  if (who.isAdmin) return code;
+  if (who.account) return rbac.mayKnowCode(who.account, store.scopeOf(room)) ? code : '';
+  return who.joinedWith === code ? code : '';
+}
+/** One told no code: no admin, no account, typed none. */
+const TOLD_NONE = Object.freeze({ isAdmin: false, account: null, onStage: false, joinedWith: '' });
+/**
+ * Who a page's socket is when it is told a room's guest code (codeFor): the admin, its account, whether it sits On stage,
+ * and the code a guest's page typed (a page signed in with an account typed none: it names its room by its key). A socket
+ * in no room (the halls board, the admin page) sits nowhere. The admin's support view is told what the person's own page
+ * is told (plan R8: it draws exactly the person's doors), read from that person's page in the room, by its name; with no
+ * page of theirs there, nothing.
+ */
+function askerOf(s) {
+  const d = s.data || {};
+  if (d.adminView) {
+    const r = store.room(d.userRoom);
+    for (const [sid, u] of r ? r.users : []) {
+      const p = u.name === d.userName ? io.sockets.sockets.get(sid) : null;
+      if (p && !p.data.adminView) return askerOf(p);
+    }
+    return TOLD_NONE;
+  }
+  return { isAdmin: !!d.isAdmin, account: d.account || null, onStage: d.seat === 'board', joinedWith: d.account ? '' : d.joinedAs || '' };
+}
+/**
+ * A room's guest pages now, connected, by their sockets: a code guest's page. An account's page is none, nor is the
+ * laptop's token admin's own (it has no account, joins by a code like a guest, and is a member of every room).
+ */
+function guestSocketsOf(room) {
+  const out = [];
+  for (const [sid, u] of room.users) {
+    const s = u.acct ? null : io.sockets.sockets.get(sid);
+    if (s && !s.data.isAdmin) out.push([sid, s]);
+  }
+  return out;
+}
+/** How many guest pages are in a room now (guestSocketsOf). */
+function guestPagesOf(room) { return guestSocketsOf(room).length; }
+/**
+ * A room's guest code switched off with its guests sent out, in one meta op: `settings` and no saved seat (every seat a
+ * guest held goes, saved ones included; the pages that stay, an account's and the token admin's, hold none: seatsNow).
+ * Then each guest page is taken out of the room before it is told why (`kicked`) and closed, so no close writes a seat op
+ * of its own, and a page in a drop's grace comes back to no seat: only a code that admits seats it again. Answers how
+ * many pages were sent out, or null when the op was refused (nothing changed, nobody sent out).
+ */
+function sendGuestsOut(room, settings, reason) {
+  const out = guestSocketsOf(room);
+  if (!apply(room, { o: 'meta', settings: { ...settings, seats: {} } })) return null;
+  for (const [sid] of out) room.users.delete(sid);
+  const prefix = room.code + '|';
+  for (const [k, p] of pendingLeaves) if (k.startsWith(prefix) && p.guest) p.role = null;
+  for (const [, s] of out) {
+    s.emit('kicked', { reason });
+    s.disconnect(true);
+  }
+  return out.length;
+}
+/**
+ * A room's guest code changed (switched on or off, renewed): each page in it, and each admin page watching it, is told the
+ * code as that page may know it (codeFor: '' to one that may not, so a renewed code reaches nobody it is not for) and
+ * whether it admits guests now, the newest only (`guestCode`); the halls board is drawn again.
+ */
+function codeChanged(room) {
+  const codeOn = store.codeOn(room);
+  for (const sid of io.sockets.adapter.rooms.get(room.code) || []) {
+    const s = io.sockets.sockets.get(sid);
+    if (s) s.emit('guestCode', { guestCode: codeFor(askerOf(s), room), codeOn });
+  }
+  boardDirty();
 }
 /**
  * Why a room of `hall` may not be called `name`: another room of the hall has that name in any case, its Main room's
@@ -1634,10 +1744,17 @@ io.on('connection', (socket) => {
     if (!acct && !ROLES.includes(cleanRole)) return ack({ ok: false, error: 'Choose On stage, Backstage or Observer.' });
     const cleanName = acct ? acct.name : guard.cleanText(name, 40);
     if (!code || !cleanName) return ack({ ok: false, error: 'Missing room code or name' });
-    // An account and the admin's support view name a room by its key, a hall's Main room or a side room; a guest's code
-    // names a hall, never a side room, whose key is an address and no code a guest may type.
-    const r = !RoomStore.validCode(code) ? null : acct || isAdminView ? store.room(code) : store.get(code);
-    if (!r) { joinLock.fail(network); return ack({ ok: false, error: 'Room not found' }); }
+    // An account and the admin's support view name a room by its key, a hall's Main room or a side room. A guest names it
+    // by its guest code: the room's live code, or an earlier one of it (`retired`); a key is an address, never a code a
+    // guest types (a hall's key is its code only until New code).
+    // The laptop's token admin has no account, so its own page joins as a guest does; it is a member of every room (plan
+    // 1-§0.3): a code admits it whether it is on or off, live or earlier, a key does too, and its misses spend no lock.
+    const tokenPage = !acct && !isAdminView && !!socket.data.isAdmin;
+    const valid = RoomStore.validCode(code);
+    const live = valid && !acct && !isAdminView ? store.byCode(code) : null;
+    const earlier = valid && !acct && !isAdminView && !live ? store.byRetired(code) : null;
+    const r = !valid ? null : acct || isAdminView ? store.room(code) : live || earlier || (tokenPage ? store.room(code) : null);
+    if (!r) { if (!tokenPage) joinLock.fail(network); return ack({ ok: false, error: 'Room not found' }); }
 
     // The same page joining again on its own socket (it saw a gap in the room's numbers and is catching up) is still
     // seated: it keeps its role and the admin's links, nobody is told it joined, and a lock ticked since does not unseat it.
@@ -1660,10 +1777,22 @@ io.on('connection', (socket) => {
     } else {
       id = guard.checkIdentity(SECRET, uid);
       if (!id) { identity = guard.newIdentity(SECRET); id = guard.checkIdentity(SECRET, identity); }
+      // The code admits: the room's live code while it is switched on. A code switched off or an earlier one admits only a
+      // person who holds a seat there (a drop's grace, a restart's first seconds), so "Turn off" keeps who is in and New
+      // code keeps whoever reconnects. Anyone else is told what a wrong code is told; an earlier code spends no lock, so
+      // a hall full of phones coming back on the old code behind one address is not locked out.
+      // The admin's support view (the laptop's token has no account) names the room by its key, and seats nobody; the token
+      // admin's own page is admitted (tokenPage).
+      if (!isAdminView && !tokenPage && !((live && store.codeOn(r)) || seated(id) || holdsSeat(r, id, cleanName, cleanRole))) {
+        if (!earlier) joinLock.fail(network);
+        return ack({ ok: false, error: 'Room not found' });
+      }
+      // A side room has no stage: its seats are a Member's (backstage) and an observer's. Not code guessing: no lock.
+      if (!isAdminView && !store.isMain(r) && cleanRole === 'board') return ack({ ok: false, error: ON_STAGE_IN_MAIN });
       // Seated already: the role stays. Otherwise, in a locked room, board and research seats need the admin's invite link
-      // (or a seat this person already holds there).
+      // (made with the room's guest code, so a renewed code voids it) or a seat this person already holds there.
       if (seated(id)) cleanRole = me.role;
-      else if (r.settings.lockRoles && cleanRole !== 'observer' && !socket.data.isAdmin && !guard.checkInvite(SECRET, code, cleanRole, invite) && !holdsSeat(r, id, cleanName, cleanRole)) {
+      else if (r.settings.lockRoles && cleanRole !== 'observer' && !socket.data.isAdmin && !guard.checkInvite(SECRET, store.guestCodeOf(r), cleanRole, invite) && !holdsSeat(r, id, cleanName, cleanRole)) {
         cleanRole = 'observer';
         note = 'This room needs an invite link for that seat — you joined as an observer.';
       }
@@ -1692,14 +1821,18 @@ io.on('connection', (socket) => {
     socket.data.seat = isAdminView ? '' : me.role;
     socket.data.userName = cleanName;
     socket.data.uid = id;
-    socket.data.userRoom = code;
-    socket.join(code);
+    // The room by its key, whatever the page named it by: its pages, seats and people are the room's.
+    socket.data.userRoom = r.code;
+    // What the page named its room by: an account's page and the support view its key, a guest's the guest code it typed.
+    // A verb that names its own room so is read as the room it sits in (help:respond), and a guest is told that code alone.
+    socket.data.joinedAs = code;
+    socket.join(r.code);
 
     // A page back after the restart this process booted from names the last change it holds, and this hall has it: the
     // restart line already says what happened, so it is not announced again. Presence words only: no right reads it.
     let returning = stillSeated || (Date.now() - BOOT_AT < BOOT_SEAT_MS && Number.isInteger(since) && since >= 0 && since <= r.seq);
     if (!isAdminView) {
-      const k = code + '|' + id;
+      const k = r.code + '|' + id;
       if (pendingLeaves.has(k)) { clearTimeout(pendingLeaves.get(k).timer); pendingLeaves.delete(k); returning = true; }
       // The same person on another device or tab stays in (and this one is not announced again); only a socket that
       // has already gone is cleared.
@@ -1709,8 +1842,8 @@ io.on('connection', (socket) => {
         else r.users.delete(sid);
       }
       r.users.set(socket.id, me);
-      trackJoin(id, code);
-      joinBurst.add(code, performance.now());
+      trackJoin(id, r.code);
+      joinBurst.add(r.code, performance.now());
     }
 
     if (uploadToken) uploadTokens.delete(uploadToken);
@@ -1718,7 +1851,7 @@ io.on('connection', (socket) => {
     if (allowed('hall.files')) {
       uploadToken = crypto.randomBytes(18).toString('base64url');
       // Checked again at use, and ended by admin:setRole's move to a seat that shares no file (found by `sid`).
-      uploadTokens.set(uploadToken, { room: code, uid: id, sid: socket.id, bucket: uploadBucket, key: socket.data.key, may: () => allowed('hall.files'), seat: () => socket.data.seat, revoked: false });
+      uploadTokens.set(uploadToken, { room: r.code, uid: id, sid: socket.id, bucket: uploadBucket, key: socket.data.key, may: () => allowed('hall.files'), seat: () => socket.data.seat, revoked: false });
     }
 
     // The admin entering a side room it is not given reads it: one row for a page's first join, never for a resume (a
@@ -1743,17 +1876,24 @@ io.on('connection', (socket) => {
       // Whether a message here could be sent to another hall (the forward picker would list one): a fact the page's
       // ↗ Send to reads, false On stage, where nothing leaves the room. The support view is unseated: it has none.
       forwardable: !isAdminView && forwardTargets(null).rooms.length > 0,
+      // Whether this is the hall's Main room: a side room's seats are a Member's and an observer's, said so on its page.
+      main: store.isMain(r),
+      // The room's guest code for its code chip, only for one who may know it ('' else: codeFor; the support view the
+      // person's), whether it admits guests now, and whether this page may switch it and renew it: the admin's own page,
+      // not On stage, that names the room by its key (room:update's own checks); never the support view, which acts on
+      // nothing (R8).
+      guestCode: codeFor(askerOf(socket), r), codeOn: store.codeOn(r), setsCode: !!socket.data.isAdmin && !isAdminView && !onStage() && code === r.code,
       // The build serving now: a page on another build reloads itself at a quiet moment (public/reconnect.js).
       build: BUILD.full,
     });
 
     if (!isAdminView) {
       if (!acct) syncSeats(r);
-      if (!returning) systemMessage(r, `${cleanName} ${JOINED[cleanRole]}`);
+      if (!returning) systemMessage(r, `${cleanName} ${joinedWords(r, cleanRole)}`);
       emitUsers(r);
       boardDirty();
     } else {
-      io.in(code).fetchSockets().then((peers) => {
+      io.in(r.code).fetchSockets().then((peers) => {
         for (const p of peers) if (p.id !== socket.id && p.data.userName === cleanName && !p.data.adminView) p.emit('userState:request');
       }).catch(() => {});
     }
@@ -2377,7 +2517,10 @@ io.on('connection', (socket) => {
   socket.on('help:respond', ({ code, messageId, state } = {}, ack) => {
     ack = ok(ack);
     if (!chatter.take()) return limited(ack);
-    const r = store.get(guard.str(code || (room && room.code)).toUpperCase());
+    // The hall page names its own room as it joined it (a guest by the code it typed, which is not the room's key once the
+    // code is renewed); the halls board names a hall by its key.
+    const named = guard.str(code).toUpperCase();
+    const r = store.get(!named || (room && named === socket.data.joinedAs) ? (room ? room.code : '') : named);
     const m = r && r.byId.get(messageId);
     if (!m || m.type !== 'help') return ack({ ok: false, error: 'That help request is gone.' });
     const resolvesOwn = (uid) => state === 'resolved' && !!uid && !!m.from && m.from.uid === uid;
@@ -2479,9 +2622,11 @@ io.on('connection', (socket) => {
   socket.on('admin:listRooms', (ack) => {
     if (!admin(ack)) return;
     socket.data.adminPage = true;
-    // Each hall's row as before, and its side rooms beside it, in the order they were made, each by its key.
-    const row = (r) => ({ name: r.name || '', createdAt: r.createdAt, users: roomUserSummary(r, { links: true }), messageCount: r.messages.length, locked: !!r.settings.lockRoles });
-    ok(ack)({ ok: true, rooms: Array.from(store.rooms.values()).map((r) => ({ code: r.code, ...row(r), side: store.roomsOf(r.code).slice(1).map((x) => ({ key: x.code, ...row(x) })) })) });
+    // Each hall's row as before, and its side rooms beside it, in the order they were made, each by its key; each with its
+    // guest code (the admin is told every one), whether it admits guests and the guest pages in it now, and a hall whose
+    // code is still its key (`codeIsKey`: never renewed, so anyone its address reaches reads its code) said so.
+    const row = (r) => ({ name: r.name || '', createdAt: r.createdAt, users: roomUserSummary(r, { links: true }), messageCount: r.messages.length, locked: !!r.settings.lockRoles, guestCode: store.guestCodeOf(r), codeOn: store.codeOn(r), guests: guestPagesOf(r) });
+    ok(ack)({ ok: true, rooms: Array.from(store.rooms.values()).map((r) => ({ code: r.code, ...row(r), side: store.roomsOf(r.code).slice(1).map((x) => ({ key: x.code, ...row(x) })), codeIsKey: store.guestCodeOf(r) === r.code })) });
   });
   socket.on('admin:watchRoom', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
@@ -2492,7 +2637,7 @@ io.on('connection', (socket) => {
     if (socket.data.watching && socket.data.watching !== roomCode) socket.leave(socket.data.watching);
     socket.join(roomCode);
     socket.data.watching = roomCode;
-    ok(ack)({ ok: true, code: roomCode, name: r.name || '', messages: r.messages, users: roomUserSummary(r, { links: true }), locked: !!r.settings.lockRoles });
+    ok(ack)({ ok: true, code: roomCode, name: r.name || '', messages: r.messages, users: roomUserSummary(r, { links: true }), locked: !!r.settings.lockRoles, guestCode: store.guestCodeOf(r), codeOn: store.codeOn(r), main: store.isMain(r) });
   });
   socket.on('admin:createRoom', (arg, ack) => {
     if (typeof arg === 'function') { ack = arg; arg = {}; }
@@ -2605,6 +2750,7 @@ io.on('connection', (socket) => {
     const r = store.room(roomCode);
     const target = r && r.users.get(socketId);
     if (!target) return ok(ack)({ ok: false, error: 'User not in room' });
+    if (role === 'board' && !store.isMain(r)) return ok(ack)({ ok: false, error: ON_STAGE_IN_MAIN });
     // An account's role in a hall follows its rights, which are set on the Accounts page: a role set here would change
     // nothing the server checks, and would be undone at the page's next join.
     if (target.acct) return ok(ack)({ ok: false, error: target.name + ' signs in with an account: change their rights on the Accounts page.' });
@@ -2622,7 +2768,7 @@ io.on('connection', (socket) => {
     for (const t of uploadTokens.values()) if (moved.has(t.sid) && !t.may()) t.revoked = true;
     emitUsers(r);
     syncSeats(r);
-    systemMessage(r, `The admin moved ${target.name} from ${SEAT[prev]} to ${SEAT[role]}.`);
+    systemMessage(r, `The admin moved ${target.name} from ${seatWords(r, prev)} to ${seatWords(r, role)}.`);
     if (from.length) auditRoom('seat.role', r.code, target.name + ': ' + from.join(', ') + ' → ' + role);
     ok(ack)({ ok: true });
   });
@@ -2637,13 +2783,15 @@ io.on('connection', (socket) => {
     const changed = on ? !r.settings.lockRoles || !seatsSaved(r, seats) : !!r.settings.lockRoles;
     if (!apply(r, { o: 'meta', settings: { lockRoles: !!on, seats } })) return ok(ack)(OP_REFUSED);
     if (changed) auditRoom('room.lock', r.code, on ? 'roles locked (' + plural(Object.keys(seats).length, 'seat') + ' kept)' : 'roles unlocked');
-    ok(ack)({ ok: true, locked: !!on, invites: on ? invitesFor(r.code) : null });
+    ok(ack)({ ok: true, locked: !!on, invites: on ? invitesFor(r) : null, codeOn: store.codeOn(r) });
   });
   socket.on('admin:invites', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
-    // A hall's invite links: a guest joins a hall by its code, never a side room, so a side room has none to give.
-    if (!store.has(roomCode)) return ok(ack)({ ok: false, error: 'Room not found' });
-    ok(ack)({ ok: true, invites: invitesFor(roomCode) });
+    // A room's invite links, made with its guest code (a side room's a Member's alone), and whether that code admits now:
+    // a link to a code switched off admits nobody new until it is on.
+    const r = store.room(roomCode);
+    if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
+    ok(ack)({ ok: true, invites: invitesFor(r), codeOn: store.codeOn(r) });
   });
   socket.on('admin:linkRoom', ({ socketId, targetRoom } = {}, ack) => {
     if (!admin(ack)) return;
@@ -2893,7 +3041,7 @@ io.on('connection', (socket) => {
       if (now) announce();
       else {
         if (pendingLeaves.has(k)) clearTimeout(pendingLeaves.get(k).timer);
-        pendingLeaves.set(k, { timer: setTimeout(announce, LEAVE_GRACE_MS), name: u.name, role: holdSeat ? u.role : null, guest: !u.acct });
+        pendingLeaves.set(k, { timer: setTimeout(announce, LEAVE_GRACE_MS), name: u.name, role: holdSeat ? u.role : null, guest: !u.acct && !socket.data.isAdmin });
       }
     }
     if (store.hasRoom(r.code)) syncSeats(r);
@@ -3001,7 +3149,9 @@ function boardFor(socket, shared = new Map()) {
   return {
     nodes: links.map(nodeChip),
     canDrive: Array.from(peerLinks.values()).some((l) => mayDriveNode(socket, l)),   // what nodes:list would list: Show network
-    halls: rooms.map((r) => ({ ...hallParts(r, shared).row, nodes: links.filter((l) => l.hall === r.code).map(nodeChip) })),
+    // Each hall's guest code only for a watcher who may know it (codeFor; a board's socket sits in no room), with whether it
+    // admits guests now: a chip that follows Code off and New code as they happen.
+    halls: rooms.map((r) => ({ ...hallParts(r, shared).row, nodes: links.filter((l) => l.hall === r.code).map(nodeChip), guestCode: codeFor(askerOf(socket), r), codeOn: store.codeOn(r) })),
     // Offered as help:respond's account branch answers, in the request's room (a hall's Main room here): never in a
     // hall where the account sits On stage.
     help: rooms.flatMap((r) => hallParts(r, shared).help.map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.answersHelp(a, store.scopeOf(r)))) }))),
@@ -3046,9 +3196,15 @@ function sweepSessions() {
 }
 setInterval(sweepSessions, SESSION_SWEEP_MS).unref();
 
-function invitesFor(code) {
+/**
+ * A room's invite links, made with its guest code (a renewed code voids the links made with the one before): On stage and
+ * backstage in a hall's Main room, a Member's in a side room, which has no stage. None for a room with no code.
+ */
+function invitesFor(room) {
+  const code = store.guestCodeOf(room);
   const out = {};
-  for (const role of ['board', 'research']) out[role] = `/?code=${code}&role=${role}&invite=${guard.makeInvite(SECRET, code, role)}`;
+  if (!code) return out;
+  for (const role of store.isMain(room) ? ['board', 'research'] : ['research']) out[role] = `/?code=${code}&role=${role}&invite=${guard.makeInvite(SECRET, code, role)}`;
   return out;
 }
 
@@ -4263,7 +4419,7 @@ function firstWrites() {
 // by its socket's id alone (`sendTo`, over io's open sockets, read by the gate's module and never handed in), never a
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
-  store, apply, systemMessage, buildMessage, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, settings, linkFor, stagePayload, io,
+  store, apply, systemMessage, buildMessage, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, settings, linkFor, stagePayload, io,
 });
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.

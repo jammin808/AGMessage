@@ -703,7 +703,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'buildMessage', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'settings', 'linkFor', 'stagePayload', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'buildMessage', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'linkFor', 'stagePayload', 'io']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -916,6 +916,9 @@ test('(j) a planted take that names a room or a broadcast, a right asked of rbac
     ["ctx.systemMessage(conn.room(), 'x');", 'takes systemMessage from ctx, which the takes context does not hold: a take makes no room or room\'s op'],
     ["const { newSideRoom } = ctx;\nnewSideRoom(hall, 'Legal');", 'takes newSideRoom from ctx, which the takes context does not hold: a take makes no room or room\'s op'],
     ["ctx.renameRoom(conn.room(), 'Legal');", 'takes renameRoom from ctx, which the takes context does not hold: a take makes no room or room\'s op'],
+    ["ctx.sendGuestsOut(conn.room(), 'Out.');", 'takes sendGuestsOut from ctx, which the takes context does not hold: a take makes no room or room\'s op'],
+    ['const { codeChanged } = ctx;\ncodeChanged(conn.room());', 'takes codeChanged from ctx, which the takes context does not hold: a take makes no room or room\'s op'],
+    ['store.setGuestCode(conn.room(), code);', store],
   ]) assert.deepEqual(takes(line), ['lib/handlers/takes.js:3: ' + words], line);
   assert.deepEqual(run(ROOMS, "const { store, apply, systemMessage } = ctx;\nstore.commit(room, op);\nconst r = conn.socket;"), [], 'the rooms module is given the room\'s op');
   // The review's plant: a take that makes a system line, an op and a commit, and joins another hall's room.
@@ -1459,10 +1462,11 @@ const ANY_ROOM = {
     'a file any room holds is in use: a hall\'s reset or deletion never removes one a side room still holds',
     'the admin\'s transcript of any room',
     'health\'s sideRooms: every room but the halls',
-    'a new hall\'s or side room\'s key is no room\'s, side rooms included',
+    'the support view is told a room\'s guest code as the person\'s own page in it is, Main or side',
     'a room\'s name is one no other room of its hall has, its Main room\'s (the hall\'s) included, made, renamed or set up',
     '"This laptop"\'s Pages row names the room a hall page on another build is in, a side room by its hall\'s name and its own',
-    'an account and the admin\'s support view join a room by its key (a guest\'s code names a hall)',
+    'an account and the admin\'s support view join a room by its key, Main or side (a guest names it by its guest code)',
+    'and the laptop\'s token admin\'s own page by its key too: it is a member of every room',
     'a page\'s room is still here, Main or side',
     'the forward picker: the rooms this person sits in or is linked to that are still here',
     'and this person\'s rights in each',
@@ -1479,6 +1483,7 @@ const ANY_ROOM = {
     'the admin\'s removal of a message in any room',
     'the admin\'s change of a seat in any room',
     'the admin\'s lock of any room\'s seats',
+    'the admin\'s invite links of any room, made with its guest code',
     'the admin\'s link of a person into any room',
     'and the room that person is in',
     'the admin\'s unlink, in the room that person is in',

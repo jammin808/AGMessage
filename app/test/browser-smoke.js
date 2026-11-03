@@ -938,8 +938,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const writes = seat !== 'observer';
       const sendOk = writes ? light.send.length === 1 && light.send[0].w >= 44 && light.send[0].h >= 44 && light.send[0].label === 'Send to Phone hall' && light.send[0].word === 'none' && light.send[0].mark !== 'none' : light.send.length === 0;
       // The doors that are not buttons by look (the code chip, a sender's name, the composer's ⋯): 44 px under a finger too;
-      // a seat that writes has the code chip at least, and in the full view the composer's ⋯.
-      const doorsOk = light.doors.every((d) => d.size >= 44) && (!writes || light.doors.some((d) => d.door === 'roomChip') && (!light.full || light.doors.some((d) => /compose-more/.test(d.door))));
+      // a guest's page has the code chip it typed (On stage none: a Board tablet is handed no code), and a seat that writes
+      // in the full view the composer's ⋯.
+      const chipOk = light.doors.some((d) => d.door === 'roomChip') === (seat !== 'board');
+      const doorsOk = light.doors.every((d) => d.size >= 44) && chipOk && (!writes || !light.full || light.doors.some((d) => /compose-more/.test(d.door)));
       report(light.fits && dark.fits && Array.isArray(dialogs) && dialogs.length === 3 && dialogs.every((d) => d.buttons > 0 && d.missed.length === 0) && (dialogs[0].via === 'Help') === writes &&
         sendOk && light.coarse && light.header >= 44 && doorsOk,
         `the hall page fits a 390 px phone as ${seat}: no wider than the screen (${light.width}), every dialog's buttons on the screen and reached by a tap, Send a 44 px button named for where it sends, the header's controls and the doors (the code chip, a sender's name, the composer's ⋯) 44 px under a finger (${JSON.stringify({ dialogs, send: light.send, header: light.header, doors: light.doors })})`);
@@ -1297,19 +1299,61 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const signin = await edge.tab(`${base}/`);
     report(!!(await signin.until(`!document.getElementById('setupPane').hidden`)), 'sign-in page offers the first admin when there are no accounts');
     await readOldWords('the sign-in and join page', signin);
-    // A code no room has: the join form's words, from the lookup's answer (given here, so no miss is counted against this
-    // address's code lock, which later legs join through).
-    const joinDeck = await signin.eval(`(async () => {
+    // The join page asks for the code first: once six characters are still (half a second, or Enter, or leaving the field)
+    // it names the room the code opens and offers that room's seats only — a hall's Main room Backstage and Observer (On
+    // stage only from an On stage invite link), a side room Member and Observer — with none chosen on a first visit; a code
+    // no room has is said at the field; and each value is looked up once, a corrected sixth character once more. The
+    // lookups are answered here (a stand-in for /api/rooms/), so no miss counts against this address's code lock, which
+    // later legs join through.
+    await signin.eval(`(() => { try { localStorage.removeItem('agm.role'); } catch { /* none kept */ } })()`);
+    const codeFirst = await signin.eval(`(async () => {
       const real = AGM.api;
-      AGM.api = async (method, url, ...rest) => (url.startsWith('/api/rooms/') ? { status: 200, exists: false } : real(method, url, ...rest));
+      const asked = [];
+      const rooms = { K7P2QX: { exists: true, name: 'Hall 2', hallName: 'Hall 2', main: true, locked: false }, LGL234: { exists: true, name: 'Legal', hallName: 'Hall 2', main: false, locked: false } };
+      AGM.api = async (method, url, ...rest) => {
+        if (!url.startsWith('/api/rooms/')) return real(method, url, ...rest);
+        const c = url.slice('/api/rooms/'.length);
+        asked.push(c);
+        return { status: 200, code: c, ...(rooms[c] || { exists: false, name: '', locked: false }) };
+      };
+      const tick = (ms) => new Promise((r) => { setTimeout(r, ms); });
+      const code = document.getElementById('code');
+      const type = (v) => { code.value = v; code.dispatchEvent(new Event('input', { bubbles: true })); };
+      const shown = (id) => (document.getElementById(id).hidden ? '' : document.getElementById(id).textContent);
+      const state = () => ({ line: shown('roomLine'), miss: shown('codeError'), hint: shown('seatHint'), chosen: (document.querySelector('input[name="role"]:checked') || {}).value || '',
+        seats: document.getElementById('seatSet').hidden ? [] : [...document.querySelectorAll('#seatSet .role-option')].filter((o) => !o.hidden).map((o) => o.querySelector('strong').textContent) });
       try {
-        document.getElementById('name').value = 'Wes'; document.getElementById('code').value = 'ZZZ234';
-        document.getElementById('joinForm').requestSubmit();
-        for (let i = 0; i < 40 && !document.getElementById('error').textContent; i++) await new Promise((r) => { setTimeout(r, 25); });
-        return JSON.stringify({ hint: document.getElementById('codeHint').textContent, refused: document.getElementById('error').textContent });
-      } finally { AGM.api = real; document.getElementById('name').value = ''; document.getElementById('code').value = ''; }
+        type('K7P2Q'); await tick(700); const five = state();
+        type('K7P2QY'); await tick(150); const typing = { ...state(), asked: asked.length };
+        await tick(650); const wrong = state();
+        type('K7P2QX'); await tick(800); const main = state();
+        code.dispatchEvent(new Event('change', { bubbles: true })); await tick(100);
+        type('LGL234'); code.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await tick(150); const side = state();
+        return JSON.stringify({ hint: document.getElementById('codeHint').textContent, attrs: [code.autocomplete, code.getAttribute('enterkeyhint'), getComputedStyle(code).fontSize], five, typing, wrong, main, side, asked });
+      } finally { AGM.api = real; code.value = ''; document.getElementById('seatSet').hidden = true; }
     })()`);
-    report(joinDeck === JSON.stringify({ hint: 'The 6-character code for your room.', refused: 'No room has that code. Check it with whoever gave it to you.' }), `the join form asks for the code of a room, and says so when no room has it (${joinDeck})`);
+    const none = { line: '', miss: '', hint: '', chosen: '', seats: [] };
+    report(codeFirst === JSON.stringify({
+      hint: 'A room\'s 6-character code.', attrs: ['off', 'go', '16px'], five: none, typing: { ...none, asked: 0 },
+      wrong: { ...none, miss: 'No hall or room has that code. Check it with whoever gave it to you.' },
+      main: { line: 'Hall 2', miss: '', hint: 'On stage seats come with an invite link from the backstage team.', chosen: '', seats: ['Backstage', 'Observer'] },
+      side: { line: 'Legal · Hall 2', miss: '', hint: '', chosen: '', seats: ['Member', 'Observer'] },
+      asked: ['K7P2QY', 'K7P2QX', 'LGL234'],
+    }), `the join page asks for the code first and looks it up once it is still, once per value: it names the room, offers that room's seats only (no On stage without an invite link), none chosen on a first visit, and says a wrong code at the field (${codeFirst})`);
+    // From an On stage invite link, On stage is offered and chosen; a remembered On stage seat, with no link, falls back to
+    // Observer with the words that say how On stage seats are given. Both look up a real hall's code (no miss).
+    const seatsOn = (tab) => tab.until(`(() => { const s = document.getElementById('seatSet'); return !s.hidden && JSON.stringify({ line: document.getElementById('roomLine').textContent, seats: [...s.querySelectorAll('.role-option')].filter((o) => !o.hidden).map((o) => o.querySelector('strong').textContent), chosen: (document.querySelector('input[name="role"]:checked') || {}).value || '', hint: document.getElementById('seatHint').hidden ? '' : document.getElementById('seatHint').textContent }); })()`, 8000);
+    const invitedTab = await edge.tab(`${base}/?code=${code}&role=board&invite=smoke-invite`);
+    const invited = await seatsOn(invitedTab);
+    invitedTab.close();
+    await signin.eval(`(() => { try { localStorage.setItem('agm.role', 'board'); } catch { /* none kept */ } })()`);
+    const rememberedTab = await edge.tab(`${base}/?code=${code}`);
+    const remembered = await seatsOn(rememberedTab);
+    rememberedTab.close();
+    await signin.eval(`(() => { try { localStorage.removeItem('agm.role'); } catch { /* none kept */ } })()`);
+    report(invited === JSON.stringify({ line: 'Smoke AGM', seats: ['On stage', 'Backstage', 'Observer'], chosen: 'board', hint: '' })
+      && remembered === JSON.stringify({ line: 'Smoke AGM', seats: ['Backstage', 'Observer'], chosen: 'observer', hint: 'On stage seats come with an invite link from the backstage team.' }),
+    `On stage is offered from an On stage invite link alone, and a remembered On stage seat falls back to Observer, said (${invited}; ${remembered})`);
     // The first admin is made with the laptop's token: a wrong one is refused in place, the token field chosen again,
     // and nothing is made, though this browser holds the token's sign-in (the admin tab's), since a token typed is always
     // judged; the right one makes it.
@@ -2302,6 +2346,28 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       if (/^Copied the join link/.test(t)) return 'copied'; return a && a.querySelector('input').value === location.origin + '/?code=' + ROOM && 'field'; })()`, 3000);
     if (joinLink === 'field') await press(research, 'Escape');
     report(selfInStep(codeDoors) && codeDoors.want === '["code.code","code.copy"]' && !!joinLink, `the code chip opens its menu by a click, a right-click and Shift+F10 alike, and Copy join link copies the join page's link with the code (${JSON.stringify({ want: codeDoors.want, joinLink })}${selfInStep(codeDoors) ? '' : '; ' + JSON.stringify(codeDoors)})`);
+    // The admin's own page: the code chip adds Turn the code off… and New code…. Turn off asks which way (the guests in
+    // stay, or are sent out), its safe answer focused; chosen to keep them, every page's chip says "(off)" as the server
+    // tells it, the guest's too; Turn the code on asks nothing and puts it back.
+    const adminCodeDoors = await selfDoors(hallView, 'code', `document.getElementById('roomChip')`, 'codeObject()');
+    const chipAct = async (id) => {
+      await hallView.eval(`document.getElementById('roomChip').click()`);
+      await hallView.until(`!!document.querySelector('.agm-menu [data-action="${id}"]')`, 3000);
+      const words = await hallView.eval(`document.querySelector('.agm-menu [data-action="${id}"] .mi-label').textContent`);
+      await hallView.eval(`document.querySelector('.agm-menu [data-action="${id}"]').click()`);
+      return words;
+    };
+    const toggleOffWords = await chipAct('code.toggle');
+    const offAsk = await hallView.until(`(() => { const a = document.querySelector('.agm-ask'); return a && JSON.stringify({ title: a.querySelector('.agm-ask-title').textContent, answers: [...a.querySelectorAll('[data-answer]')].map((b) => b.dataset.answer + ':' + b.textContent), focus: document.activeElement === a.querySelector('[data-answer=no]') }); })()`, 3000);
+    await hallView.eval(`document.querySelector('.agm-ask [data-answer=keep]').click()`);
+    const chipsOff = [await hallView.until(`document.getElementById('roomChip').textContent === ROOM + ' (off)' && document.getElementById('roomChip').textContent`, 5000),
+      await research.until(`document.getElementById('roomChip').textContent === ROOM + ' (off)' && document.getElementById('roomChip').textContent`, 5000)];
+    const onWords = await chipAct('code.toggle');
+    const chipsOn = [await hallView.until(`document.getElementById('roomChip').textContent === ROOM && 'on'`, 5000), await research.until(`document.getElementById('roomChip').textContent === ROOM && 'on'`, 5000)];
+    report(selfInStep(adminCodeDoors) && adminCodeDoors.want === '["code.code","code.copy","code.toggle","code.new"]' && toggleOffWords === 'Turn the code off…' && onWords === 'Turn the code on'
+      && offAsk === JSON.stringify({ title: 'Turn off the guest code of Smoke AGM?', answers: ['keep:Turn off', 'out:Turn off and send them out', 'no:Keep it on'], focus: true })
+      && JSON.stringify(chipsOff) === JSON.stringify([code + ' (off)', code + ' (off)']) && JSON.stringify(chipsOn) === '["on","on"]',
+    `the admin's code chip adds Turn the code off… and New code…; off asks which way, keeps the guests and every page's chip says "(off)", and on asks nothing (${JSON.stringify({ want: adminCodeDoors.want, toggleOffWords, offAsk, chipsOff, onWords, chipsOn })}${selfInStep(adminCodeDoors) ? '' : '; ' + JSON.stringify(adminCodeDoors)})`);
 
     // The skip link: the first Tab of a fresh page; Enter takes the focus to the message box, or, for an observer (who
     // has none), to the newest message. An observer reads a question's options as words, with no button.
@@ -2552,7 +2618,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // Its row's name says its hall to a screen reader, which hears the list flat: "Legal, a room of Smoke AGM …".
     const sideRowName = await admin.eval(`window.__sideRow.querySelector('.room-pick').textContent`);
     const sideDoors = await doorsOf(admin, 'adminRoom', 'window.__sideRow', `AGM.page.object('adminRoom', '${sideKey}')`, { ...PAGE_DOORS, hit: '.room-pick' });
-    report(sideCreateAsk === 'New room in Smoke AGM' && /^[A-Z2-9]{8}$/.test(sideKey || '') && /^Legal, a room of Smoke AGM0 people/.test(sideRowName || '') && doorsInStep(sideDoors) && sideDoors.want === JSON.stringify(['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']) && JSON.parse(adminDoors.header.want).includes('adminRoom.create'),
+    report(sideCreateAsk === 'New room in Smoke AGM' && /^[A-Z2-9]{8}$/.test(sideKey || '') && /^Legal, a room of Smoke AGM0 people · 0 messages · code [A-Z2-9]{6} off$/.test(sideRowName || '') && doorsInStep(sideDoors) && sideDoors.want === JSON.stringify(['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']) && JSON.parse(adminDoors.header.want).includes('adminRoom.create'),
       `New room in this hall… makes a room, listed under its hall and named with it, whose row opens the catalogue's set by right-click, ⋯ and Shift+F10 (${sideCreateAsk}; ${sideKey}; "${sideRowName}"; ${sideDoors.want}; ${sideDoors.right} / ${sideDoors.dots} / ${sideDoors.key}; ${sideDoors.inline})`);
     await admin.eval(`window.__sideRow.querySelector('.obj-more').click()`);
     await admin.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.rename"]')`, 3000);
@@ -2562,8 +2628,34 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const roomRenamed = await admin.until(`window.__sideRow.isConnected && window.__sideRow.querySelector('.room-name').textContent === 'Lawyers' && (document.getElementById('agmToast') || {}).textContent`, 5000);
     await admin.eval(`window.__sideRow.querySelector('.room-pick').click()`);
     const sideWatched = await admin.until(`(() => { const n = document.getElementById('watchedRoomName').textContent; return currentRoom && currentRoom.code === '${sideKey}' && n === 'Smoke AGM › Lawyers' && JSON.stringify([n, document.getElementById('watchedKeyWord').textContent, document.getElementById('watchedRoomCode').textContent]); })()`, 5000);
+    // Its guest code is the admin's: off at birth. New code… asks, and the row and the header name the new one; Turn the code
+    // on asks nothing, and the header says guests join with it.
+    const sideCodeBefore = await admin.eval(`roomObject('${sideKey}').guestCode`);
+    const sideAct = async (id) => {
+      await admin.eval(`window.__sideRow.querySelector('.obj-more').click()`);
+      await admin.until(`!!document.querySelector('.agm-menu [data-action="${id}"]')`, 3000);
+      await admin.eval(`document.querySelector('.agm-menu [data-action="${id}"]').click()`);
+    };
+    await sideAct('adminRoom.newCode');
+    const newCodeAsk = await admin.until(`(() => { const a = document.querySelector('.agm-ask'); return a && a.querySelector('.agm-ask-title').textContent; })()`, 3000);
+    await admin.eval(`document.querySelector('.agm-ask [data-answer=yes]').click()`);
+    const renewedSide = await admin.until(`(() => { const o = roomObject('${sideKey}'); return !!o && o.guestCode !== '${sideCodeBefore}' && currentRoom.guestCode === o.guestCode && document.getElementById('watchedCodeNote').textContent === 'Guest code ' + o.guestCode + ': off. The admin and the accounts given this room go in.' && o.guestCode; })()`, 5000);
+    await sideAct('adminRoom.codeToggle');
+    const sideOn = await admin.until(`(() => { const o = roomObject('${sideKey}'); return !!o && o.on && document.getElementById('watchedCodeNote').textContent === 'Guest code ' + o.guestCode + ': guests join with it.' && window.__sideRow.querySelector('.room-pick').textContent; })()`, 5000);
+    report(/^[A-Z2-9]{6}$/.test(sideCodeBefore || '') && newCodeAsk === 'New guest code for Smoke AGM › Lawyers?' && /^[A-Z2-9]{6}$/.test(renewedSide || '') && renewedSide !== sideCodeBefore && (sideOn || '').endsWith(' · code ' + renewedSide),
+      `a side room's code: New code… asks and renews it, the row and the header say the new one, and Turn the code on switches it with no ask (${sideCodeBefore} → ${renewedSide}; ${newCodeAsk}; "${sideOn}")`);
     await admin.eval(`watchRoom('${code}')`);
     await admin.until(`currentRoom && currentRoom.code === '${code}' && document.getElementById('watchedKeyWord').textContent === 'Code'`, 5000);
+    const residual = await admin.until(`document.getElementById('watchedCodeNote').textContent`, 3000);
+    // Its row in the list is marked too, the whole words in its title.
+    const residualRow = await admin.eval(`(() => { const p = document.querySelector('#roomList > li[data-key="${code}"] .room-pick'); return JSON.stringify([(p.querySelector('.code-is-key') || {}).textContent || '', p.title]); })()`);
+    const RESIDUAL_WORDS = 'This hall\'s code is also its address: anyone with an account in it can read it. Choose New code to separate them.';
+    report(residual === RESIDUAL_WORDS && residualRow === JSON.stringify(['code is its address', RESIDUAL_WORDS]),
+      `a hall whose code is still its address says so where its code is shown, and its row in the list is marked (${residual}; ${residualRow})`);
+    // The admin page's rollback line names what 0.5.1 would lose of the codes (plan 1-§1.8).
+    const rollbackLine = await admin.eval(`document.getElementById('rollbackLine').textContent`);
+    report(/^Do not go back to 0\.5\.1 during a show\./.test(rollbackLine) && rollbackLine.includes('a hall\'s code switched off admits guests again') && rollbackLine.includes('a hall\'s New code is lost'),
+      `the admin page says what going back to 0.5.1 loses of the codes (${rollbackLine})`);
     const sideRemoveAsk = JSON.parse(await askOn('window.__sideRow', 'adminRoom.remove'));
     await admin.eval(`document.querySelector('.agm-ask [data-answer=yes]').click()`);
     const sideRemoved = await admin.until(`!document.querySelector('#roomList > li[data-key="${sideKey}"]') && currentRoom && currentRoom.code === '${code}' && !document.getElementById('roomHeader').hidden && (document.getElementById('agmToast') || {}).textContent`, 5000);

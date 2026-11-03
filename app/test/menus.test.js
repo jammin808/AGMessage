@@ -45,6 +45,8 @@ const ON_STAGE_WORDS = {
   'display:remove': 'Do that from a backstage page.',
   forward: 'Messages from On stage stay in this room.',
   delete: 'Only the author can delete this message',
+  // A room's guest code is the admin's to switch and renew, whatever the seat: refused as every seat but the admin is.
+  'room:update': 'Not admin',
 };
 
 test('every act hidden from a seat by its rights is refused by the server as that seat, with words, and changes nothing', async (t) => {
@@ -131,7 +133,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   const people = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallA })).users.map((u) => ({ id: 'person:' + u.uid, uid: u.uid, name: u.name, role: u.role }));
   const objects = {
     msg: messages, file: [fileOf('list'), fileOf('preview')], screen: [screen],
-    compose: ['director', 'text', 'action', 'file'].map(composer), chip: [{ id: 'stage', live: true, text: '04:30', words: 'Live from Stagewatch' }], code: [{ id: 'code', code: hallA }], person: people,
+    compose: ['director', 'text', 'action', 'file'].map(composer), chip: [{ id: 'stage', live: true, text: '04:30', words: 'Live from Stagewatch' }], code: [{ id: 'code', code: hallA, on: true, hall: 'Hall A' }], person: people,
   };
   assert.ok(people.length >= 7, 'the room\'s people, as the join lists them');
 
@@ -153,6 +155,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'display:rotate': (o) => ({ id: o.id }),
     'display:remove': (o) => ({ id: o.id }),
     message: () => ({ type: 'text', text: 'From a seat that may not post' }),
+    'room:update': (o, e) => (e.id === 'code.new' ? { code: hallA, newCode: true } : { code: hallA, codeOn: false, keepGuests: false }),
   };
   // The acts the hall page draws: each that fits some seat's facts and some object here (a kind's rows another page draws
   // never fit this one).
@@ -222,7 +225,7 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-2)], [true, [hallB], ['forwardable', 'build']]);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-6)], [true, [hallB], ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build']]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board');
@@ -289,8 +292,9 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   const watched = await emit(ctl, 'admin:watchRoom', { roomCode: hallA });
   const listed = (await emit(ctl, 'nodes:list', {})).linked;
   const nodeObj = { id: listed[0].id, t: listed[0].t, name: listed[0].name, hall: listed[0].hall || '', linked: true, certificateWaits: !!listed[0].certificateWaits, desk: !!listed[0].desk, commands: listed[0].commands };
-  const hallObj = (r, w) => ({ code: r.code, name: r.name, hall: r.name || r.code, main: true, watched: w });
-  const sideObj = (h, x) => ({ code: x.key, name: x.name, hall: (h.name || h.code) + ' › ' + x.name, main: false, watched: false });
+  const codeOf = (r, h) => ({ guestCode: r.guestCode, on: r.codeOn, guests: r.guests, codeIsKey: !!h.codeIsKey && r === h });
+  const hallObj = (r, w) => ({ code: r.code, name: r.name, hall: r.name || r.code, main: true, watched: w, ...codeOf(r, r) });
+  const sideObj = (h, x) => ({ code: x.key, name: x.name, hall: (h.name || h.code) + ' › ' + x.name, main: false, watched: false, ...codeOf(x, h) });
   const objects = {
     adminRoom: rooms.map((r) => hallObj(r, false)).concat([hallObj(rooms.find((r) => r.code === hallA), true)], rooms.flatMap((h) => h.side.map((x) => sideObj(h, x)))),
     person: watched.users.map((u) => ({ ...u, hall: 'Hall A' })),
@@ -320,7 +324,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   assert.deepEqual([seats.admin.staff.f.admin, seats.admin.codeGuest.f.admin, seats.board.viewer.f.manageHalls, seats.board.viewer.f.canDrive], [false, false, false, false]);
   assert.deepEqual(Object.fromEntries(Object.entries(seats.accounts).map(([k, v]) => [k, [v.f.manageUsers, v.f.auditRead, v.f.auditExport, v.f.theAdmin]])),
     { staff: [false, false, false, false], manager: [false, true, false, false], usersManager: [true, true, false, false] }, 'the Accounts page\'s rights, from /api/auth/me and /api/admin/me');
-  objects.hall = seats.board.viewer.board.halls.map((h) => ({ code: h.code, name: h.name || h.code }));
+  objects.hall = seats.board.viewer.board.halls.map((h) => ({ code: h.code, name: h.name || h.code, guestCode: h.guestCode }));
   objects.help = seats.board.viewer.board.help.map((x) => ({ code: x.code, id: x.id, state: x.state, canRespond: !!x.canRespond, hall: x.hallName || x.code, category: x.category }));
   assert.deepEqual(objects.help.map((x) => x.canRespond), [false], 'a Viewer answers no help request: the board says so');
   const users = (await api(base, 'GET', '/api/users', undefined, { cookie: root })).body.users;
@@ -341,7 +345,8 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     'admin:acceptCertificate': null, 'admin:tunnelStart': null, 'admin:tunnelStop': null, 'admin:tunnelStatus': null, 'admin:laptop': null,   // the ack alone
     'admin:tunnelUntil': () => ({ until: '23:30' }),
     'hall:settings': (o) => ({ code: o.code }), 'nodes:list': () => ({}),
-    'room:create': (o) => ({ hall: o.code, name: 'Media' }), 'room:update': (o) => ({ code: o.code, name: 'Renamed by a seat that may not' }),
+    'room:create': (o) => ({ hall: o.code, name: 'Media' }),
+    'room:update': (o, e) => (e.id === 'adminRoom.newCode' ? { code: o.code, newCode: true } : e.id === 'adminRoom.codeToggle' ? { code: o.code, codeOn: !o.on, ...(o.on ? { keepGuests: false } : {}) } : { code: o.code, name: 'Renamed by a seat that may not' }),
     'help:respond': (o, e) => ({ code: o.code, messageId: o.id, state: e.id === 'help.respond' ? 'coming' : 'resolved' }),
   };
   const BODIES = { 'account.edit': { name: 'Renamed by a seat that may not' }, 'account.disable': { disabled: true }, 'audit.split': { seq: 2 } };
@@ -385,6 +390,8 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   const roomsAfter = (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms;
   assert.deepEqual(roomsAfter.map((r) => [r.code, r.name, r.messageCount, r.users.map((u) => [u.name, u.role, (u.linkedRooms || []).length])]), rooms.map((r) => [r.code, r.name, r.messageCount, r.users.map((u) => [u.name, u.role, (u.linkedRooms || []).length])]));
   assert.deepEqual(roomsAfter.map((r) => r.side.map((x) => [x.key, x.name, x.messageCount])), rooms.map((r) => r.side.map((x) => [x.key, x.name, x.messageCount])), 'no room made, renamed, cleared or removed');
+  const codes = (list) => list.flatMap((r) => [r, ...r.side]).map((x) => [x.guestCode, x.codeOn]);
+  assert.deepEqual(codes(roomsAfter), codes(rooms), 'no guest code switched or renewed');
   assert.equal(rooms.find((r) => r.code === hallA).side.length, 1, 'the side room was read');
   assert.deepEqual((await emit(ctl, 'nodes:list', {})).linked.map((l) => l.id), ['patterns01'], 'the node still linked');
   assert.deepEqual(roomsAfter.find((r) => r.code === hallA).users.map((u) => u.linkedRooms), [[hallB]], 'the guest still forwards into Hall B');

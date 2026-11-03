@@ -37,8 +37,11 @@ const readOnly = () => document.body.dataset.role === 'observer';
 // page (the join's answer, the screens it may drive, the link's state, whether it is connected), kept current by its
 // events, and every button, menu and key on a message, a file, a screen, a person, the composer and the header's chips is
 // drawn from the catalogue's entries for them. A page binds only what each act does: RUN, by the entry's id.
-const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false };
+const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false };
 let F = AGM.catalog.facts(pageFacts);
+// Whether this page's room is its hall's Main room (the join's `main`; a hall until it answers): its seat words follow it
+// (roleLabel).
+let MAIN = true;
 const RUN = {};
 
 // ---------------- UI sync state (declared early to avoid TDZ traps) ----------------
@@ -52,12 +55,12 @@ let _applyingRemote = false;
 if (!ROOM || (!NAME && !AS_ACCOUNT)) location.href = '/';
 
 document.body.dataset.role = ROLE;
+// The code chip shows the room's guest code as the server tells this page it (the join's answer, and each change of it),
+// and nothing until then: the address's code is how the page names its room (an account's, its key), not a code it is told.
 const _roomChip = document.getElementById('roomChip');
-_roomChip.textContent = ROOM;
-_roomChip.hidden = !F.mayKnowCode;
+_roomChip.hidden = true;
 document.getElementById('whoami').textContent = AS_ACCOUNT ? '' : `${NAME} · ${roleLabel(ROLE)}`;
 document.querySelectorAll('a[href="/"].btn').forEach((a) => { a.href = HOME; if (AS_ACCOUNT) a.textContent = 'All halls'; });
-document.title = `AGMessage · ${ROOM}`;
 
 // ---------------- Theme (dark mode) ----------------
 const themeBtn = document.getElementById('themeBtn');
@@ -148,10 +151,12 @@ function rejoin() {
       location.replace(location.pathname + '?' + q.toString());
       return;
     }
+    // A side room's backstage seat is a Member's: its seat words follow the room's kind before anything is drawn with them.
+    MAIN = res.main !== false;
     if (res.account) {
       NAME = res.account.name;
       document.getElementById('whoami').textContent = `${res.account.name} · ${res.account.roleLabel}`;
-    }
+    } else if (!AS_ACCOUNT) document.getElementById('whoami').textContent = `${NAME} · ${roleLabel(res.role || ROLE)}`;
     if (res.identity) { IDENTITY = res.identity; try { localStorage.setItem('agm.id', IDENTITY); } catch { /* private mode: identity lives for this tab only */ } }
     MY_UID = res.uid || MY_UID;
     UPLOAD_TOKEN = res.uploadToken || '';
@@ -160,7 +165,9 @@ function rejoin() {
     STAGE_KEY = stageKey(res.stage);
     AI_ON = !!res.ai;
     // The catalogue's facts from this answer, before anything is drawn with them; `connected` once the outbox is ready.
-    factsChanged({ role: res.role || ROLE, uid: MY_UID, account: res.account || null, uploadToken: UPLOAD_TOKEN, canSendToStage: CAN_STAGE, canPropose: CAN_PROPOSE, ai: AI_ON, stage: res.stage || null, forwardable: !!res.forwardable, name: NAME });
+    factsChanged({ role: res.role || ROLE, uid: MY_UID, account: res.account || null, uploadToken: UPLOAD_TOKEN, canSendToStage: CAN_STAGE, canPropose: CAN_PROPOSE, ai: AI_ON, stage: res.stage || null, forwardable: !!res.forwardable, name: NAME,
+      guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode });
+    drawChips();
     drawAiButtons();
     if (res.note) AGM.toast(res.note);
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
@@ -255,6 +262,7 @@ let ROOM_NAME = '';
 function setRoomTitle(name) {
   if (!name) return;
   ROOM_NAME = name;
+  document.title = 'AGMessage · ' + name;
   const chip = document.getElementById('roomChip');
   if (chip) chip.title = name;
   const titleStrong = document.querySelector('.app-title strong');
@@ -496,8 +504,8 @@ function renderStage(v) {
 // A chip with acts for this seat is a button that opens its menu (a click, Enter or Space, a right-click, Shift+F10 or the
 // menu key); one without stays words, so nothing is drawn as a button that does nothing.
 const stageChipEl = document.getElementById('stageChip');
-/** The code chip's object: the room's guest code. */
-const codeObject = () => ({ id: 'code', code: ROOM });
+/** The code chip's object: the room's guest code as this page is told it, whether it admits guests, and the room's name. */
+const codeObject = () => ({ id: 'code', code: pageFacts.guestCode, on: !!pageFacts.codeOn, hall: ROOM_NAME || 'this room' });
 const CHIPS = {
   roomChip: { kind: 'code', get: codeObject, label: 'Guest code actions', header: (o) => 'Guest code ' + o.code + (ROOM_NAME ? ' · ' + ROOM_NAME : '') },
   stageChip: { kind: 'chip', get: () => stageNow, label: 'Countdown actions', header: (o) => o.words },
@@ -513,6 +521,9 @@ function chipIsDoor(el, on) {
 /** The chips as the page stands: shown and a door where this seat has acts on them; out of the hall, neither. */
 function drawChips() {
   _roomChip.hidden = outOf || !F.mayKnowCode;
+  // Its code, and "(off)" while it admits nobody new.
+  const words = pageFacts.guestCode + (pageFacts.codeOn ? '' : ' (off)');
+  if (_roomChip.textContent !== words) _roomChip.textContent = words;
   if (outOf) stageChipEl.hidden = true;
   chipIsDoor(_roomChip, !outOf && !_roomChip.hidden && AGM.catalog.items('code', F, codeObject()).length > 0);
   chipIsDoor(stageChipEl, !outOf && !!stageNow && AGM.catalog.items('chip', F, stageNow).length > 0);
@@ -539,6 +550,24 @@ Object.assign(RUN, {
   'chip.screens': () => Screens.countdown(),
   'code.code': (o, { anchor }) => copyText(o.code, 'Copied the guest code, ' + o.code + '.', anchor),
   'code.copy': (o, { anchor }) => copyText(new URL('/?code=' + encodeURIComponent(o.code), location.href).href, 'Copied the join link: it opens the join page with this code.', anchor),
+  // The admin switches the room's code and renews it from here, naming the room by its key (the address it opened);
+  // what the room's pages are told comes back as each page's `guestCode` (below).
+  'code.toggle': (o, c) => AGM.outbox.now('room:update', o.on ? { code: ROOM, codeOn: false, keepGuests: c.choice !== 'out' } : { code: ROOM, codeOn: true }, (r) => {
+    if (!r || !r.ok) { AGM.toast((r && r.error) || 'Not changed.', true); return; }
+    AGM.toast(r.codeOn ? 'The guest code is on: guests join with ' + o.code + '.'
+      : Number.isInteger(r.sentOut) ? 'The guest code is off: ' + r.sentOut + (r.sentOut === 1 ? ' guest page was' : ' guest pages were') + ' sent out.'
+        : 'The guest code is off: the guests in stay, and nobody new joins with it.');
+  }),
+  'code.new': () => AGM.outbox.now('room:update', { code: ROOM, newCode: true }, (r) => {
+    if (!r || !r.ok) { AGM.toast((r && r.error) || 'No new code.', true); return; }
+    AGM.toast('The new guest code is ' + r.guestCode + '.');
+  }),
+});
+// The room's guest code changed (switched, renewed): this page is told it as it may know it ('' when it may not).
+socket.on('guestCode', ({ guestCode, codeOn } = {}) => {
+  factsChanged({ guestCode: typeof guestCode === 'string' ? guestCode : '', codeOn: !!codeOn });
+  drawChips();
+  refreshOpenMenu();
 });
 drawChips();
 
@@ -816,13 +845,15 @@ function act(kind, id, o, ctx) {
   if (!e || !run || !AGM.catalog.shown(kind, F, o).some((x) => x.id === id)) { AGM.toast(AGM.catalog.WORDS.gone, true); return; }
   const r = AGM.catalog.ready(kind, id, F, o);
   if (r !== true) { AGM.toast(r, true); return; }
-  if (e.confirm) {
+  // An act asks first where its row says so for this object (Turn the code off… asks, Turn the code on does not).
+  const spec = e.confirm ? e.confirm(F, o) : null;
+  if (spec) {
     // The ask is about this object: should it go meanwhile, the ask goes with it (refreshOpenMenu).
     const asked = { kind, get: () => objectNow(kind, o) };
     askOn = asked;
-    AGM.ask(c.anchor || c.node || null, e.confirm(F, o), { opener: c.opener || null, refocus: () => refocusNear(kind, o) }).then((a) => {
+    AGM.ask(c.anchor || c.node || null, spec, { opener: c.opener || null, refocus: () => refocusNear(kind, o) }).then((a) => {
       if (askOn === asked) askOn = null;
-      if (a.yes) run(o, Object.assign({}, c, { values: a.values }));
+      if (a.yes) run(o, Object.assign({}, c, { values: a.values, choice: a.choice }));
     });
     return;
   }
@@ -2544,10 +2575,11 @@ skipLink.addEventListener('click', (e) => {
 drawSkip();
 
 // ---------------- Helpers ----------------
+/** A seat in the words every page uses: a hall's Main room's (On stage, Backstage, Observer), a side room's backstage
+ *  seat a Member's (MAIN, from the join's answer). 'director' is a legacy alias kept for old persisted history. */
 function roleLabel(role) {
-  // 'director' is a legacy alias kept for old persisted history
   return role === 'board' || role === 'director' ? 'On stage' :
-         role === 'research' ? 'Backstage' :
+         role === 'research' ? (MAIN ? 'Backstage' : 'Member') :
          role === 'observer' ? 'Observer' : role;
 }
 function formatTime(ts) {

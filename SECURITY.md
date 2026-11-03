@@ -71,6 +71,23 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   room is made under a key a room, an account or a node's link still names, so a hall made later is never open to the
   accounts that held one before it under the same code; a Patterns or PlayMap linked for a hall that has been closed
   proposes to no show desk.
+- Room keys and guest codes are two things. A guest joins by a room's guest code alone, each room its own: a side room's
+  is made with it and is never its key, and a hall's Main room's is its key until the admin renews it (New code), so a
+  0.5.1 hall keeps the code its guests know. A code is one room's (no live code, earlier code or key shared). The admin
+  alone switches a code on or off and renews it, never from an On stage page; a side room's is off until switched on. A
+  code switched off, an earlier code, a key and a code no room has are one answer to the lookup and to a join, and each
+  but an earlier code counts against the lookup's and the join's locks; an earlier code admits only a person already
+  seated in that room, without spending the lock, and the invite links made with it stop (an invite is a MAC of the code
+  and the seat). A code is told only to those who may know it (the admin, `halls.manage`, an account whose own rights
+  there hold what the code gives, a guest the code it typed; never a page seated On stage, a Viewer or a Staff account in
+  a Main room), on each page as it changes, and is never in an op, the ring, a resume, an audit row (`room.code` names
+  the room by its key) or a console line. The residual: until New code a hall's key is its code, so its code is wherever
+  its key is: its pages' address, the halls board's and `/api/halls`' rows and links, which every account that sees the
+  hall reads (Staff and Viewers too, whom `mayKnowCode` otherwise leaves out), and the audit rows that name the hall by its
+  key, as in 0.5.1. The admin page says so where it shows the code and marks each such hall in its list; New code ends it.
+  The laptop's token admin, which has no account, joins by a code as a guest does and is a member of every room: a code
+  admits its own page whether on or off, and it is never counted or sent out as a guest page. The admin's support view is
+  told only what the person's own page is told.
 - The laptop's admin token is said only where a person sits: the watchdog that makes it says it in its console window,
   never into output that is kept (a redirect, a log, a task's capture), and a server under its watchdog never prints it.
   The installed node writes it into a token folder of its own, which its admin and the accounts it gives `token` read,

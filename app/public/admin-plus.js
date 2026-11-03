@@ -488,17 +488,27 @@
   ADMIN_DRAWERS.push(drawLaptop);
   ADMIN_OBJECTS.laptop = laptopObject;
 
+  /**
+   * The watched room's invite links, made with its guest code: On stage and Backstage in a hall's Main room, a Member's
+   * in a side room (no seat there is On stage); said where its code is off, since a link then admits nobody new.
+   */
   function showInvites(on) {
     const box = $('inviteLinks');
     box.textContent = '';
-    if (!on) { box.textContent = 'Open: anyone with the code can join in any seat.'; return; }
+    const main = !currentRoom || currentRoom.main !== false;
+    if (!on) { box.textContent = main ? 'Open: anyone with the code can join in any seat.' : 'Open: anyone with the code can join as a Member or an Observer.'; return; }
     socket.emit('admin:invites', { roomCode: currentRoom.code }, (res) => {
       if (!res || !res.ok) return;
-      for (const role of ['board', 'research']) {
+      if (!res.codeOn) {
+        const off = document.createElement('p'); off.className = 'hint';
+        off.textContent = 'This room\'s guest code is off: these links admit nobody new until it is on.';
+        box.appendChild(off);
+      }
+      for (const role of ['board', 'research'].filter((x) => res.invites[x])) {
         const url = location.origin + res.invites[role];
         const row = document.createElement('div');
         row.className = 'invite-row';
-        const lab = document.createElement('strong'); lab.textContent = role === 'board' ? 'On stage link' : 'Backstage link';
+        const lab = document.createElement('strong'); lab.textContent = role === 'board' ? 'On stage link' : main ? 'Backstage link' : 'Member link';
         const code = document.createElement('code'); code.textContent = url;
         const copy = document.createElement('button'); copy.className = 'btn ghost small'; copy.type = 'button'; copy.textContent = '📋 Copy';
         copy.onclick = () => AGM.copy(url, { said: 'Copied the ' + lab.textContent + '.', anchor: copy, say });
@@ -516,8 +526,10 @@
     'adminRoom.invites': (o) => watching(o, () => {
       panel('invitesPanel');
       socket.emit('admin:listRooms', (res) => {
-        const r = res && res.rooms && res.rooms.find((x) => x.code === currentRoom.code);
+        const rooms = (res && res.rooms) || [];
+        const r = rooms.flatMap((x) => [x, ...(x.side || [])]).find((x) => (x.code || x.key) === currentRoom.code);
         $('lockRoles').checked = !!(r && r.locked);
+        $('lockWords').textContent = currentRoom.main === false ? 'Member seats need an invite link (anyone else joins as an observer)' : 'On stage and Backstage seats need an invite link (anyone else joins as an observer)';
         showInvites(r && r.locked);
       });
     }),

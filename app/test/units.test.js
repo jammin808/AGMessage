@@ -316,7 +316,9 @@ test('store: the newest 500 tombstones are kept, in memory and in the snapshot; 
 });
 
 // ---------------------------------------------------------------- a start and a stop write only the dirty halls
-const { COMPACT_EVERY, SNAPSHOT_FIELDS } = require('../lib/store');
+const { COMPACT_EVERY, SNAPSHOT_FIELDS, SNAPSHOT_OPTIONAL } = require('../lib/store');
+/** The fields every snapshot writes: SNAPSHOT_FIELDS but the ones a room writes only when it holds them (its guest codes). */
+const ALWAYS = Object.keys(SNAPSHOT_FIELDS).filter((f) => !SNAPSHOT_OPTIONAL.includes(f));
 
 test('store: a start and a stop write only the dirty halls: a line in the log, an op the log refused, a change made without an op, or no whole snapshot', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
@@ -397,7 +399,9 @@ test('store: the fence on the snapshot: every field it writes has its row, with 
   const a = new RoomStore(dir);
   const r = a.create('ABC234', 'T');
   const fields = () => Object.keys(JSON.parse(fs.readFileSync(path.join(dir, 'ABC234.json'), 'utf8')));
-  assert.deepEqual(fields(), Object.keys(SNAPSHOT_FIELDS), 'a field written to the snapshot is a row of SNAPSHOT_FIELDS first, and a row is a field written');
+  assert.deepEqual(fields(), ALWAYS, 'a field written to the snapshot is a row of SNAPSHOT_FIELDS first, and a hall never renewed writes 0.5.1\'s fields alone');
+  assert.deepEqual([...SNAPSHOT_OPTIONAL], ['guestCode', 'retired']);
+  assert.deepEqual(Object.keys(SNAPSHOT_FIELDS).slice(-2), [...SNAPSHOT_OPTIONAL], 'the fields written only when held come last, so a hall never renewed is 0.5.1\'s shape');
   for (const [field, change] of Object.entries(SNAPSHOT_FIELDS)) assert.ok(typeof change === 'string' && /\bop\b|markDirty|create\(\)|the snapshot itself/.test(change), field + ' says what marks it: ' + change);
   // Each op kind marks its hall dirty, and its snapshot then holds the change.
   const ops = [
@@ -414,6 +418,24 @@ test('store: the fence on the snapshot: every field it writes has its row, with 
     const j = JSON.parse(fs.readFileSync(path.join(dir, 'ABC234.json'), 'utf8'));
     assert.ok(held(j) && j.seq === r.seq, op.o + ' is in the snapshot');
   }
+  // A guest code renewed is no op: its snapshot is written at once, every row a field written, and nothing is left dirty;
+  // one the disk refuses is taken back whole (its snapshot is the one place a code is kept): the code before it still
+  // admits, the new one does not, and the hall is left as it was, not dirty.
+  const before = a.snapshots;
+  assert.equal(a.setGuestCode(r, 'NEWC23'), 'ABC234');
+  assert.deepEqual([fields(), a.dirtyCodes(), a.snapshots], [Object.keys(SNAPSHOT_FIELDS), [], before + 1]);
+  const rename = fs.renameSync;
+  const refused = (from, to) => { if (String(to).endsWith('ABC234.json')) throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }); return rename.call(fs, from, to); };
+  fs.renameSync = refused;
+  try { assert.equal(a.setGuestCode(r, 'NEWC34'), false, 'refused by the disk'); } finally { fs.renameSync = rename; }
+  assert.deepEqual([a.guestCodeOf(r), r.retired, a.byCode('NEWC23'), a.byCode('NEWC34'), a.codeHeld('NEWC34'), a.dirtyCodes()], ['NEWC23', ['ABC234'], r, null, false, []], 'nothing changed');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'ABC234.json'), 'utf8')).guestCode, 'NEWC23');
+  a.markDirty(r);
+  fs.renameSync = refused;
+  try { assert.equal(a.setGuestCode(r, 'NEWC34'), false); } finally { fs.renameSync = rename; }
+  assert.deepEqual(a.dirtyCodes(), ['ABC234'], 'a hall dirty before the refused renewal stays dirty');
+  assert.equal(a.compactDirty(), 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'ABC234.json'), 'utf8')).retired, ['ABC234']);
   // The source half: the fields an op writes are written by no file but the store (a change made elsewhere would go
   // unmarked). A hall's settings, messages or tombstones, reached through any name and however deep, assigned, counted,
   // deleted, merged into or changed by a call; its name or change number through the names the server gives a hall. A
@@ -421,7 +443,7 @@ test('store: the fence on the snapshot: every field it writes has its row, with 
   // the smoke start (test/snapshot-preload.js), holds each hall a start or a stop leaves unwritten to the store's copy.
   const ROOT = path.join(__dirname, '..');
   const NAME = String.raw`[A-Za-z_$][\w$]*`;
-  const FIELD = String.raw`\b${NAME}\.(?:settings|messages|gone)\b`;
+  const FIELD = String.raw`\b${NAME}\.(?:settings|messages|gone|guestCode|retired)\b`;
   const CHAIN = String.raw`(?:\.${NAME}|\[[^\]\n]*\])*`;
   const fieldWritten = new RegExp([   // eslint-disable-line security/detect-non-literal-regexp -- built from this test's own literal parts
     String.raw`${FIELD}${CHAIN}\s*(?:[-+*/%&|^]?=(?!=)|\+\+|--)`,
@@ -434,7 +456,7 @@ test('store: the fence on the snapshot: every field it writes has its row, with 
   const nameWritten = nameWrittenBy(HALL);
   // A file whose short name is not a hall: lib/displays.js's `r` is a screen's take result, numbered by its own `seq`.
   const NOT_A_HALL = { 'lib/displays.js': ['r'] };
-  assert.deepEqual(Object.keys(SNAPSHOT_FIELDS).filter((f) => !['code', 'createdAt', 'savedAt'].includes(f)), ['name', 'seq', 'settings', 'messages', 'gone'], 'the fields a change makes, as the patterns name them');
+  assert.deepEqual(Object.keys(SNAPSHOT_FIELDS).filter((f) => !['code', 'createdAt', 'savedAt'].includes(f)), ['name', 'seq', 'settings', 'messages', 'gone', 'guestCode', 'retired'], 'the fields a change makes, as the patterns name them');
   const files = ['server.js', ...require('./helpers').filesUnder('lib', /\.js$/)].filter((f) => f !== 'lib/store.js');
   assert.ok(files.includes('lib/board.js') && files.length > 20);
   for (const f of files) {
@@ -445,7 +467,7 @@ test('store: the fence on the snapshot: every field it writes has its row, with 
   }
   assert.match(fs.readFileSync(path.join(ROOT, 'lib/displays.js'), 'utf8'), /\br\.seq = seq;/, 'the one exception is still there to need its row');
   const writes = ['r.settings.lockRoles = true', 'r.name = x', 'h.messages.push(m)', 'dst.settings = {}', 'room.settings.seats[uid] = s', 'delete room.settings.codeOff',
-    'Object.assign(room.settings, x)', 'hall.seq++', 'src.gone.clear()', 'x.messages.length = 0', 'room.settings.n += 1'];
+    'Object.assign(room.settings, x)', 'hall.seq++', 'src.gone.clear()', 'x.messages.length = 0', 'room.settings.n += 1', 'room.guestCode = code', 'r.retired.push(code)'];
   for (const w of writes) assert.ok(fieldWritten.test(w) || nameWritten.test(w), 'the fence reads a change: ' + w);
   for (const r of ['r.settings.x === 1', 'r.settings.x >= 1', 'Object.assign({}, r.settings)', 'r.messages.slice().sort()', 'const n = r.messages.length', 'user.name = x']) {
     assert.ok(!fieldWritten.test(r) && !nameWritten.test(r), 'a read is no change: ' + r);
@@ -518,10 +540,10 @@ test('store: a side room is kept beside its hall as <HALL>.<KEY>, and reloads un
   // Its snapshot holds the fields a hall's does, its key as its code; its hall is named by its file, never in a field,
   // and the hall's snapshot names none of its rooms.
   const snap = (f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-  assert.deepEqual(Object.keys(snap('HALL01.LGQ4MZP8.json')), Object.keys(SNAPSHOT_FIELDS));
+  assert.deepEqual(Object.keys(snap('HALL01.LGQ4MZP8.json')), ALWAYS);
   assert.equal(snap('HALL01.LGQ4MZP8.json').code, 'LGQ4MZP8');
   assert.ok(a.compact('HALL01'));
-  assert.deepEqual(Object.keys(snap('HALL01.json')), Object.keys(SNAPSHOT_FIELDS), 'a hall\'s snapshot is the shape a hall without rooms writes');
+  assert.deepEqual(Object.keys(snap('HALL01.json')), ALWAYS, 'a hall\'s snapshot is the shape a hall without rooms writes');
   assert.ok(!/LGQ4MZP8|MDR7VX2C/.test(fs.readFileSync(path.join(dir, 'HALL01.json'), 'utf8')));
 
   const b = new RoomStore(dir);
@@ -735,6 +757,53 @@ test('store: a hall holds SIDE_MAX side rooms at a start: one more on disk is sa
     assert.deepEqual(lines, ['  Not loaded: room ' + extra + ' of hall HALL01 — the hall holds ' + SIDE_MAX + ' rooms beside it already (its files are kept as HALL01.' + extra + ')']);
     assert.ok(fs.existsSync(path.join(dir, 'HALL01.' + extra + '.json')), 'its file kept');
   }
+});
+
+test('store: each room\'s guest code, indexed: a hall\'s is its key until renewed, a side room\'s its own; a renewal keeps the codes before it, the newest three; a code is one room\'s, a duplicate refused; read back at a start, where a code two rooms claim admits nobody in the second, said by its room and never by the code', () => {
+  const { RETIRED_KEEP } = require('../lib/store');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const hall = a.create('HALL01', 'Hall 1');
+  const legal = a.createIn('HALL01', 'LGQ4MZP8', 'Legal', { guestCode: 'K3TW9A' });
+  assert.deepEqual([a.guestCodeOf(hall), a.guestCodeOf(legal), a.guestCodeOf(null)], ['HALL01', 'K3TW9A', '']);
+  assert.deepEqual([a.byCode('HALL01'), a.byCode('K3TW9A'), a.byCode('LGQ4MZP8'), a.byCode('NOPE23'), a.byCode(7), a.byRetired('HALL01')], [hall, legal, null, null, null, null], 'a key of a side room is no code');
+  assert.deepEqual([a.codeOn(hall), a.codeOn(legal), a.codeOn(null)], [true, false, false], 'a hall\'s code on until switched off, a side room\'s off until switched on');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'HALL01.LGQ4MZP8.json'), 'utf8')).guestCode, 'K3TW9A', 'written with its first snapshot');
+  // The index refuses a duplicate: a code a room holds (live, earlier) or a key, the room's own key, and what is no code.
+  for (const code of ['K3TW9A', 'HALL01', 'LGQ4MZP8', 'MDR7VX2C', 'abc', 7]) assert.equal(a.createIn('HALL01', 'MDR7VX2C', 'Media', { guestCode: code }), null, String(code));
+  for (const code of ['K3TW9A', 'LGQ4MZP8', 'HALL01', 'no']) assert.equal(a.setGuestCode(hall, code), null, String(code));
+  assert.equal(a.setGuestCode({ ...hall }, 'NEW009'), null, 'a room the store does not hold');
+  // Renewed: the code before kept (its room by byRetired), the newest RETIRED_KEEP, and never issued again.
+  assert.equal(a.setGuestCode(hall, 'NEW001'), 'HALL01');
+  assert.deepEqual([a.byCode('HALL01'), a.byRetired('HALL01'), a.byCode('NEW001'), a.guestCodeOf(hall)], [null, hall, hall, 'NEW001']);
+  assert.equal(a.setGuestCode(legal, 'HALL01'), null, 'a code kept from before is taken');
+  for (const c of ['NEW002', 'NEW003', 'NEW004']) a.setGuestCode(hall, c);
+  assert.equal(RETIRED_KEEP, 3);
+  assert.deepEqual([hall.retired, a.byRetired('HALL01'), a.codeHeld('HALL01'), a.codeHeld('NEW001'), a.codeHeld('ZZZ234')], [['NEW001', 'NEW002', 'NEW003'], null, true, true, false], 'the oldest goes; a hall\'s key stays held as a key');
+  assert.equal(a.setGuestCode(legal, 'SIDE01'), 'K3TW9A');
+  a.commit(legal, { o: 'meta', settings: { codeOff: false } });
+  assert.equal(a.codeOn(legal), true);
+  // Read back at a start, with what a hand on the folder left: a third room claiming Legal's code and a hall claiming the
+  // hall's, a hall whose code is its own key, a code that is no code, earlier codes with no codes among them.
+  const lay = (stem, o) => fs.writeFileSync(path.join(dir, stem + '.json'), JSON.stringify({ name: stem, createdAt: 1, seq: 0, settings: {}, messages: [], ...o }));
+  lay('HALL01.ZZZZ2345', { code: 'ZZZZ2345', guestCode: 'SIDE01' });
+  lay('HALL03', { code: 'HALL03', guestCode: 'NEW004' });
+  lay('HALL04', { code: 'HALL04', guestCode: 'HALL04', retired: ['OLD001', 7, 'x y', 'OLD001'] });
+  lay('HALL05', { code: 'HALL05', guestCode: 'not a code' });
+  const b = new RoomStore(dir);
+  const lines = said(() => b.loadAll(null, { compact: false }));
+  assert.deepEqual([b.byCode('NEW004'), b.byRetired('NEW001'), b.byCode('SIDE01'), b.byRetired('K3TW9A'), b.codeOn(b.room('LGQ4MZP8'))].map((r) => (r === true || r === false ? r : r && r.code)), ['HALL01', 'HALL01', 'LGQ4MZP8', 'LGQ4MZP8', true]);
+  assert.deepEqual([b.guestCodeOf(b.get('HALL04')), b.byCode('HALL04') && b.byCode('HALL04').code, b.get('HALL04').retired, b.byRetired('OLD001').code], ['HALL04', 'HALL04', ['OLD001'], 'HALL04'], 'a code that is its key reads as none: the key is its code');
+  assert.deepEqual([b.guestCodeOf(b.get('HALL05')), b.byCode('HALL05').code], ['HALL05', 'HALL05'], 'a code that is no code reads as none');
+  assert.deepEqual([b.byCode('HALL03'), b.guestCodeOf(b.get('HALL03'))], [null, 'NEW004'], 'the second claimant of a code is reached by no code');
+  assert.deepEqual(lines.sort(), [
+    '  Room HALL03: its guest code is another room\'s, so it admits nobody here (New code gives it one of its own)',
+    '  Room ZZZZ2345 of hall HALL01: its guest code is another room\'s, so it admits nobody here (New code gives it one of its own)',
+  ]);
+  assert.ok(!lines.join('\n').includes('SIDE01') && !lines.join('\n').includes('NEW004'), 'the console names the room, never the code');
+  // A room removed takes its codes with it.
+  b.remove('LGQ4MZP8');
+  assert.deepEqual([b.byCode('SIDE01') && b.byCode('SIDE01').code, b.byRetired('K3TW9A')], ['ZZZZ2345', null], 'the code goes with its room, and the room that claimed it after holds it now');
 });
 
 // ---------------------------------------------------------------- compaction trusts the snapshot it wrote
@@ -1164,11 +1233,12 @@ test('the contexts: ctx holds every part and io, takesCtx the same parts but tho
   };
   const store = { kind: 'store' }, settings = { roomSends: [] };
   const linkFor = () => null, apply = () => null, systemMessage = () => null, newSideRoom = () => null, renameRoom = () => null, roomNameRefused = () => '';
-  const { ctx, takesCtx } = gate.contexts({ store, apply, systemMessage, newSideRoom, renameRoom, roomNameRefused, settings, linkFor, io });
+  const newGuestCode = () => 'K3TW9A', sendGuestsOut = () => 0, codeChanged = () => null;
+  const { ctx, takesCtx } = gate.contexts({ store, apply, systemMessage, newSideRoom, renameRoom, roomNameRefused, newGuestCode, sendGuestsOut, codeChanged, settings, linkFor, io });
   assert.ok(Object.isFrozen(ctx) && Object.isFrozen(takesCtx));
-  assert.deepStrictEqual(Object.keys(ctx), ['store', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'settings', 'linkFor', 'io']);
-  assert.deepStrictEqual(Object.keys(takesCtx), ['store', 'roomNameRefused', 'settings', 'linkFor', 'sendTo'], 'no io, apply, systemMessage, newSideRoom or renameRoom: a take makes no room or room\'s op and sends to no room');
-  assert.deepStrictEqual([...gate.ROOM_SENDS], ['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom']);
+  assert.deepStrictEqual(Object.keys(ctx), ['store', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'sendGuestsOut', 'codeChanged', 'settings', 'linkFor', 'io']);
+  assert.deepStrictEqual(Object.keys(takesCtx), ['store', 'roomNameRefused', 'newGuestCode', 'settings', 'linkFor', 'sendTo'], 'no io, apply, systemMessage, newSideRoom, renameRoom, sendGuestsOut or codeChanged: a take makes no room or room\'s op and sends to no room');
+  assert.deepStrictEqual([...gate.ROOM_SENDS], ['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'sendGuestsOut', 'codeChanged']);
   assert.ok(Object.isFrozen(gate.ROOM_SENDS));
   assert.ok(ctx.store === store && takesCtx.store === store && takesCtx.settings === settings && ctx.io === io && ctx.apply === apply, 'the parts themselves, not copies');
   assert.throws(() => { ctx.io = null; }, TypeError, 'a handler module cannot replace a part');

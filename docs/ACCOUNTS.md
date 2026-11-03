@@ -4,8 +4,9 @@ AGMessage has two ways in, and both are first-class:
 
 - **An account** — a username and a password — for the people who work the venue: crew in the operating rooms,
   project managers, senior techs, admins. They see their halls on the halls board and open any of them as themselves.
-- **A code** — a room's 6-character guest code — for presenters, board members and guests. They pick a name
-  and where they are (on stage, backstage, observer), exactly as before 0.5.
+- **A code** — a room's 6-character guest code, each room its own — for presenters, board members and guests. They type
+  the code first, and the join page names the room it opens and offers its seats: Backstage and Observer in a hall's
+  Main room (On stage only from an On stage invite link), Member and Observer in its other rooms; then a name.
 
 ## Roles
 
@@ -49,8 +50,8 @@ room it is not given included, and is seated backstage there, since it may post 
 
 **Who sets rooms up.** Making a room beside a hall (`room:create`), renaming a room (`room:update`: a hall's Main room
 renamed is the hall renamed) and reading a room's settings (`room:settings`) are `halls.manage`'s and the admin's, as a
-hall's Set up is, never from an On stage seat; clearing a room, removing it and, as they land, its guest code and who may
-send into it are the admin's alone (owner question 5). A hall holds at most 20 rooms beside its Main room. A room's key
+hall's Set up is, never from an On stage seat; clearing a room, removing it, its guest code (switched on or off, renewed)
+and, as it lands, who may send into it are the admin's alone (owner question 5), never from an On stage page either. A hall holds at most 20 rooms beside its Main room. A room's key
 (8 characters) is an address, never a code a guest types: a hall's verbs (its screens, its Stagewatch, its show network,
 its Set up) refuse it, and nothing that lists halls lists it. No two rooms of a hall share a name, in any case, its Main
 room's included, whether a room is made or renamed or the hall is set up. A room removed is taken out of every account's
@@ -136,7 +137,44 @@ room it comes from leaves none, it says that rule in the same words. A guest sea
 backstage in one room forwards into it as backstage, whichever page joined first; with no seat there, the admin's link
 posts and shares files (`rbac.LINKED_CAPS`).
 
-**Who is told a hall's code.** A code lets anyone in as a guest (backstage in an unlocked hall, an observer in a locked
+**Each room's guest code.** A hall's Main room's code is its key until the admin renews it, so a hall of 0.5.1 keeps the
+code its guests know with nothing written; a room beside a hall gets a code of its own as it is made, never its key (an
+address no join takes from a guest). A code is one room's: no live code, earlier code or key is shared, and of two rooms
+on disk claiming one code the first by key holds it and the other's admits nobody (said on the console by the room, never
+by the code). Whether a code admits is the room's setting: a Main room's is on until switched off, a side room's off
+until switched on, so a new room is for the admin and the accounts given it. **Switched off**, a code admits nobody new:
+"Turn off" keeps the guests in (one whose Wi-Fi drops comes back within the grace, and a locked room's seats outlive a
+restart's first seconds), "Turn off and send them out" closes each guest page in the room ("This room is for signed-in
+accounts now.") and forgets the seats it held (one meta op clears the saved seats with the switch); accounts stay either
+way. **New code** gives the room a new code: the guests in stay, the code before it joins the room's earlier codes (the
+newest three), which admit only a person already seated there and spend no lock (a hall of phones coming back on it
+behind one address is not locked out), and the invite links, made with the code, stop. A code switched off, an earlier
+code, a room's key and a code no room has are one answer to the lookup ("No hall or room has that code.") and to a join
+("Room not found"); each but the earlier code counts against the lookup's and the join's locks. A code is never in an op,
+the ring, a resume or an audit row: switching it is one meta op its pages hear (whether it is on, never the code) and
+`room.code` row ("code off (3 guest pages kept)", "code off (3 guest pages sent home)", "code on", "a new code was
+issued"); a renewal is the store's alone, written with the room's snapshot at once, and one the disk refuses is taken back
+whole and refused ("No new code was made: it could not be saved. The code stays as it was."). **The residual:** until New
+code, a Main room's key is its code, so its code is wherever its key is: its pages' address, the halls board's and
+`/api/halls`' rows and links (read by every account that sees the hall, Staff and Viewers included), and the audit rows
+that name the hall by its key (`room.code`, `hall.*`), as in 0.5.1. The admin page says so where the code is shown and
+marks each such hall in its list ("code is its address"; "This hall's code is also its address: anyone with an account
+in it can read it. Choose New code to separate them."). The laptop's token admin has no account, so its own page joins by
+a code: it is a member of every room, admitted whether the code is on or off (or by the room's key), never counted or sent
+out as a guest page, and its misses spend no lock. A side room's Member is called so on every page, and no seat there is
+On stage.
+
+**Who is told a code** (`mayKnowCode`): the admin; those who set halls up (`halls.manage`: they hand codes out); an
+account whose own rights in that room already hold what the code gives (seeing, posting and sharing files there, and in a
+Main room also the speaker's screen of its hall: a Tech in its halls, a Staff account in a room it is given); and a guest,
+the code it typed while it is still the room's. Never a page seated On stage (a Board tablet is handed no code), a
+Viewer, a Staff account in a Main room or an account of every hall in a side room it is not given. It decides the code
+chip on the hall page (the join's answer, then each change), `/api/halls` and the halls board's chip (with "(off)" while
+it admits nobody new), the admin's list, and a room's settings. The admin's support view is told what the person's own
+page is told, and may switch nothing from it. Staff and Viewers are no longer shown a hall's code, as
+they were in 0.5.1 (owner question 8: "Right").
+
+**Who is told a hall's code, elsewhere.** A code lets anyone in as a guest (backstage in an unlocked hall, an observer in a locked
 one), so it goes only to those who may open that hall: the halls board, the show network's list and the Accounts page
 name only the halls an account reaches (an account that does not reach every hall sees another person's other halls as
 a count); a screen's link only shows, and its connection is never told its hall's code (Identify on a hall with no name
@@ -226,7 +264,8 @@ control that changes nothing), a hall's rooms (`room.create`: "Legal in Hall 2 (
 renamed, "name → Media"; a hall's Main room renamed is `hall.update`, as its Set up writes it), the admin's reads of a
 side room its account is not given (`room.read`, once each: a page entered, never a resume; a watch begun; a transcript;
 a person's view opened; the AI asked for its minutes, its messages handed to it whatever it answers; the laptop's token is given none, so its reads always write one; never
-what was read),
+what was read), a room's guest code switched or renewed (`room.code`, by the room's key: "code on", "code off (3 guest
+pages kept)", "code off (3 guest pages sent home)", "a new code was issued"; never the code),
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and

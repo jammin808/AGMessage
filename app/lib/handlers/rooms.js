@@ -15,20 +15,30 @@
  *
  * Setting rooms up (owner question 5, plan 1-§2.4): making a side room, renaming a room and reading a room's settings
  * are `halls.manage`'s and the admin's (`conn.canManageHall`, which an On stage seat never passes), as a hall's set-up
- * is; a room's guest code, who may send into it, resetting and removing it are the admin's alone (the admin page's
- * verbs, and `room:update`'s other settings as the units that bring them land). A room is named by its key; a hall,
- * whose key is its Main room's, by its own. Every change is one audit row, written before it is answered, naming the room
- * by its name and its hall's, never a code; a change that changes nothing writes none.
+ * is; a room's guest code (switched on or off, renewed: `room:update`'s `codeOn` and `newCode`), who may send into it,
+ * resetting and removing it are the admin's alone (`conn.admin`), never from an On stage page. A room is named by its
+ * key; a hall, whose key is its Main room's, by its own. Every change is one audit row, written before it is answered,
+ * naming the room by its name and its hall's, never a code; a change that changes nothing writes none and is answered
+ * `already`.
  */
 const { str, cleanText } = require('../guard');
 
 /**
- * What `room:update` reads: the room's key, the settings it changes (each read by its type) and the client id every act
- * from a page carries (public/outbox.js), which a repeat needs nothing of: the same name again is answered as done. Any
- * other key is refused, never ignored (fail closed).
+ * What `room:update` reads: the room's key, one change, each read by its type, and the client id every act from a page
+ * carries (public/outbox.js), which a repeat needs nothing of: a change already made is answered as done. The changes:
+ * its name (`name`), whether its guest code admits guests (`codeOn`, with `keepGuests` as it is switched off: whether the
+ * guest pages in it stay, true unless it says false), or a new guest code (`newCode: true`). Any other key is refused,
+ * never ignored (fail closed), and so are two changes in one.
  */
-const UPDATES = Object.freeze(['code', 'name', 'cid']);
+const UPDATES = Object.freeze(['code', 'name', 'codeOn', 'keepGuests', 'newCode', 'cid']);
+const CHANGES = Object.freeze(['name', 'codeOn', 'newCode']);
 const NO_RIGHT = 'Your account may not set halls up.';
+const BACKSTAGE = 'Do that from a backstage page.';
+const OP_REFUSED = 'That change could not be made: nothing was saved.';
+/** What a guest page sent out as its room's code is switched off is told. */
+const FOR_ACCOUNTS = 'This room is for signed-in accounts now.';
+/** "3 guest pages", "1 guest page": a count of pages, never who. */
+const pages = (n) => n + ' guest page' + (n === 1 ? '' : 's');
 
 const isRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 /** A key a client named, as the store keys rooms: upper case, or '' for anything that is no string. */
@@ -50,7 +60,7 @@ const made = new Map();
  * @param {object} ctx    the server's context, frozen (lib/gate.js `contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused } = ctx;
+  const { store, apply, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged } = ctx;
 
   /** A hall as a refusal names it: its name, or "This hall" when it has none. */
   const hallSaid = (hall) => hall.name || 'This hall';
@@ -90,29 +100,78 @@ function register(socket, conn, ctx) {
     answer(res);
   });
 
-  // A room's settings changed: its name, here. A hall's Main room renamed is the hall renamed (its screens and the halls
-  // board say so), written as the hall's set-up writes it; a side room's is its own row. The same name again is
-  // answered as done (`already`), with no row. A setting this verb does not change is refused with words.
+  // A room's settings changed: its name, or its guest code switched on or off or renewed. A hall's Main room renamed is
+  // the hall renamed (its screens and the halls board say so), written as the hall's set-up writes it; a side room's is
+  // its own row. The guest code is the admin's alone, and never from an On stage page. A change already made is answered
+  // as done (`already`), with no row. A setting this verb does not change is refused with words, as are two at once.
   socket.on('room:update', (args, ack) => {
     if (!conn.gate(ack, { joined: false, bucket: conn.writes })) return;
     const answer = conn.ok(ack);
-    if (!conn.canManageHall()) return answer({ ok: false, error: NO_RIGHT });
     const a = isRecord(args) ? args : {};
-    if (Object.keys(a).some((k) => !UPDATES.includes(k))) return answer({ ok: false, error: 'A room\'s name is the one setting changed here.' });
+    const asked = CHANGES.filter((k) => Object.hasOwn(a, k));
+    if (asked.includes('codeOn') || asked.includes('newCode') || Object.hasOwn(a, 'keepGuests')) {
+      if (!conn.admin(ack)) return;
+      // The admin passes canManageHall wherever it does not sit On stage.
+      if (!conn.canManageHall()) return answer({ ok: false, error: BACKSTAGE });
+    } else if (!conn.canManageHall()) return answer({ ok: false, error: NO_RIGHT });
+    if (Object.keys(a).some((k) => !UPDATES.includes(k))) return answer({ ok: false, error: 'A room\'s name and its guest code are the settings changed here.' });
+    if (asked.length > 1) return answer({ ok: false, error: 'One change at a time: the name, the code on or off, or a new code.' });
     const room = store.room(keyOf(a.code));
     if (!room) return answer({ ok: false, error: 'No such room.' });
+    if (asked[0] === 'codeOn') return switchCode(room, a.codeOn, a.keepGuests, answer);
+    if (asked[0] === 'newCode') return renewCode(room, a.newCode, answer);
+    if (Object.hasOwn(a, 'keepGuests')) return answer({ ok: false, error: 'Whether the guests stay is said as the code is switched off.' });
     const name = cleanText(a.name, 80);
     if (!name) return answer({ ok: false, error: 'Type its new name.' });
     if (name === room.name) return answer({ ok: true, already: true, name });
     const taken = roomNameRefused(store.get(room.hall), name, room);
     if (taken) return answer({ ok: false, error: taken });
-    if (!renameRoom(room, name)) return answer({ ok: false, error: 'That change could not be made: nothing was saved.' });
+    if (!renameRoom(room, name)) return answer({ ok: false, error: OP_REFUSED });
     write(store.isMain(room) ? 'hall.update' : 'room.update', room.code, 'name → ' + name);
     answer({ ok: true, name });
   });
 
-  // A room's settings, read: its name, its hall and whether it is the hall's Main room, and its hall's rooms in the order
-  // they were made (Main first), each by name and key. For those who set rooms up; a read, from memory.
+  /**
+   * The guest code switched on (the same code admits again) or off (`room.settings.codeOff`, one meta op its pages hear,
+   * the code itself never in it). Off, the guest pages in the room stay (`keepGuests`, true unless false: a seated guest
+   * whose Wi-Fi drops comes back within the grace, and a newcomer is refused), or are sent out with the seats they held
+   * (`keepGuests: false`: the op clears the saved seats too, and each guest page is told why and closed). An account's
+   * pages stay either way. One `room.code` row, counting the guest pages and never naming the code.
+   */
+  function switchCode(room, on, keepGuests, answer) {
+    if (typeof on !== 'boolean') return answer({ ok: false, error: 'Say whether the code is on (true) or off (false).' });
+    if (keepGuests !== undefined && (on || typeof keepGuests !== 'boolean')) return answer({ ok: false, error: 'Whether the guests stay is said as the code is switched off: true or false.' });
+    const keep = keepGuests !== false;
+    const now = guestPagesOf(room);
+    const seats = Object.keys(room.settings.seats || {}).length;
+    // Already so: on and on, or off and off with nothing to send out (no guest page, no saved seat).
+    if (store.codeOn(room) === on && (on || keep || (!now && !seats))) return answer({ ok: true, already: true, codeOn: on });
+    // Sent out, the switch and the seats that go are the one op sendGuestsOut commits before it closes a page.
+    const out = on || keep ? 0 : sendGuestsOut(room, { codeOff: true }, FOR_ACCOUNTS);
+    if (out === null || ((on || keep) && !apply(room, { o: 'meta', settings: { codeOff: !on } }))) return answer({ ok: false, error: OP_REFUSED });
+    write('room.code', room.code, on ? 'code on' : keep ? 'code off (' + pages(now) + ' kept)' : 'code off (' + pages(out) + ' sent home)');
+    codeChanged(room);
+    answer({ ok: true, codeOn: on, ...(on ? {} : keep ? { kept: now } : { sentOut: out }) });
+  }
+
+  /**
+   * A new guest code (`store.setGuestCode`, its snapshot written at once and never an op): the one before it admits only a
+   * person already seated there, the invites made with it stop, and the guests in the room stay. The admin is answered
+   * the new code; each page in the room is told it as that page may know it (`codeChanged`). One `room.code` row, which
+   * names no code. A renewal the disk refuses changes nothing, and is answered so: the code stays as it was.
+   */
+  function renewCode(room, asked, answer) {
+    if (asked !== true) return answer({ ok: false, error: 'Ask for a new code with newCode: true.' });
+    const before = store.setGuestCode(room, newGuestCode());
+    if (before === false) return answer({ ok: false, error: 'No new code was made: it could not be saved. The code stays as it was.' });
+    if (before === null) return answer({ ok: false, error: 'No new code was made: try again.' });
+    write('room.code', room.code, 'a new code was issued');
+    codeChanged(room);
+    answer({ ok: true, guestCode: store.guestCodeOf(room), codeOn: store.codeOn(room) });
+  }
+
+  // A room's settings, read: its name, its hall and whether it is the hall's Main room, its hall's rooms in the order they
+  // were made (Main first), each by name and key, and its guest code. For those who set rooms up; a read, from memory.
   socket.on('room:settings', (args, ack) => {
     if (!conn.gate(ack, { joined: false, bucket: conn.chatter })) return;
     const answer = conn.ok(ack);
@@ -120,9 +179,11 @@ function register(socket, conn, ctx) {
     const room = store.room(keyOf((isRecord(args) ? args : {}).code));
     if (!room) return answer({ ok: false, error: 'No such room.' });
     const hall = store.get(room.hall);
+    // Those who set rooms up hand codes out: they are told the guest code, and whether it admits guests.
     answer({
       ok: true, key: room.code, name: room.name || '', main: store.isMain(room), hall: hall.code, hallName: hall.name || '',
       rooms: store.roomsOf(hall.code).map((r) => ({ key: r.code, name: r.name || '', main: store.isMain(r) })),
+      guestCode: store.guestCodeOf(room), codeOn: store.codeOn(room),
     });
   });
 }

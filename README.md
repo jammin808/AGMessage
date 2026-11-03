@@ -9,14 +9,24 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   its speaker's screen. The admin makes rooms of its own beside it (Legal, Media) on the admin page, each with its own
   messages and people, listed under its hall, watched, renamed, cleared and removed there; the admin's reads of a room it
   is not given are in the audit log. (A project manager's right to set halls up covers making and renaming rooms too,
-  but no page other than the admin's offers it yet.) A room's guest code is off: it is for the admin and the accounts
-  given it. The **halls board** shows every hall an account may see — countdown, who is in, the
+  but no page other than the admin's offers it yet.) **Each room has its own guest code**, switched on or off and renewed
+  by the admin (the admin page's room ⋯, or the code chip on the admin's own hall page): a side room's starts off, so it
+  is for the admin and the accounts given it until the admin switches it on; switched off, the guests already in stay (or
+  are sent out, with their seats), and nobody new joins with it; **New code** gives a room a new one, the one before it
+  then admitting only a person already seated there, and the invite links made with it stop. Until a hall's code is
+  renewed it is also the hall's address, which anyone with an account in it can read; the admin page says so where the
+  code is shown and in its list. The laptop's token admin's own hall page gets in whether a code is on or off, and is
+  never sent out with the guests. The **halls board** shows every hall an account may see — countdown, who is in, the
   last message, open help requests, its screens and its Patterns / PlayMap — live. **Help requests** go in two taps
   (Help, then Sound, Vision, Lighting, Stage, Presenter, IT / network or Something else) and stay red until someone is
   on the way and on the board until resolved. The asker's Help button says what happened ("■ Help asked", "▶ Ana is on
   the way", "✓ Resolved"), and a tap on it marks the request sorted or cancels it.
 - **Accounts and codes.** Crew, project managers and admins sign in as themselves (a signed-in browser opens its halls,
-  never a guest's seat); presenters and guests join with a hall's 6-character code. Roles (admin, project manager,
+  never a guest's seat); presenters and guests join with a room's 6-character code, typed first: the join page names the
+  room it opens ("Legal · Hall 2") and offers that room's seats only — On stage only from an On stage invite link,
+  Backstage and Observer in a hall's Main room, Member and Observer in its other rooms. A code is shown only to those who
+  may know it (the admin, those who set halls up, an account whose rights already hold what the code gives, a guest the
+  code it typed; never On stage, a Viewer or a Staff account in a Main room). Roles (admin, project manager,
   senior tech, tech, staff, viewer), halls per person, and single rights an admin can add or remove. An **audit log**
   chained with a key, of every sign-in, change of rights, room control and screen take, and every proposal Stagewatch's
   show desk takes — never a message's text or a file's name. Its records live outside the data folder, so a cut or a log
@@ -74,7 +84,8 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   renews it. The installed node's next start says why the start before was refused.
 - **Right-click.** Every act on a message, on a file in the panel, on a screen, on a person (a sender's name, a row of
   People: @ Mention), on the composer's Send (✨ Draft a reply, 🔥 Priority, Attach a file…, Cancel the reply) and on the
-  header's code and countdown chips (Copy guest code, Copy join link; Speaker's screen…, Show the countdown on screens)
+  header's code and countdown chips (Copy guest code, Copy join link, and for the admin Turn the code off… or on and New
+  code…; Speaker's screen…, Show the countdown on screens)
   is on its ⋯ (a chip is its own), its right-click and Shift+F10 (or the menu key) — one list, drawn from one
   catalogue, so the buttons and the menus never disagree. A message keeps two acts on its row: ↩ Reply and the one the
   seat uses most (Ask the operator, Send now or Show on screens). What a seat may not do is not offered; what it cannot

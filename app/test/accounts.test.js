@@ -78,6 +78,27 @@ test('rbac: an account answers a room\'s help requests as its crew only where it
   assert.equal(rbac.answersHelp(board, main('HALL01')), false, 'a Board member answers none of its hall\'s');
 });
 
+test('rbac: who is told a room\'s guest code: those who set halls up, and an account whose own rights there hold what the code gives a guest; never On stage, a Viewer, a Staff account in a Main room, nor every hall\'s account in a side room it is not given', () => {
+  const HALL = main('HALL01');
+  const LEGAL = side('LGQ4MZP8', 'HALL01');
+  const tech = { role: 'tech', halls: ['HALL01'] };
+  const staff = { role: 'staff', halls: ['HALL01'] };
+  const cases = [
+    // A Main room's code gives a guest backstage: seeing, posting, sharing files and the speaker's screen of its hall.
+    [tech, HALL, true], [staff, HALL, false], [{ role: 'viewer', halls: ['HALL01'] }, HALL, false], [{ role: 'tech', halls: ['HALL02'] }, HALL, false],
+    [{ ...tech, revoke: ['stage.send'] }, HALL, false], [{ ...staff, grant: ['stage.send'] }, HALL, true],
+    // Those who set halls up hand codes out, every room's; a senior tech of every hall is told a hall's, not a side room's.
+    [{ role: 'manager' }, HALL, true], [{ role: 'manager' }, LEGAL, true], [{ role: 'senior' }, HALL, true], [{ role: 'senior' }, LEGAL, false],
+    // A side room's gives a Member: seeing, posting, sharing files there, by the room the account is given.
+    [{ ...staff, rooms: ['LGQ4MZP8'] }, LEGAL, true], [staff, LEGAL, false], [{ role: 'viewer', rooms: ['LGQ4MZP8'] }, LEGAL, false], [{ role: 'admin' }, LEGAL, true],
+    // On stage in the hall's Main room: a Board account's tablet is handed no code, its rights whatever they are.
+    [{ ...tech, board: ['HALL01'] }, HALL, false], [{ role: 'manager', board: ['HALL01'] }, HALL, false], [{ ...tech, board: ['HALL01'], rooms: ['LGQ4MZP8'] }, LEGAL, true],
+    // Fail closed: no account, one turned off, a scope that is none.
+    [null, HALL, false], [{ ...tech, disabled: true }, HALL, false], [tech, 'HALL01', false], [tech, { code: 'HALL01' }, false],
+  ];
+  for (const [account, scope, told] of cases) assert.equal(rbac.mayKnowCode(account, scope), told, JSON.stringify([account, scope]));
+});
+
 test('rbac: a room\'s rights are asked in the room (canIn), behind a fence: can() refuses them with a hall, a side room is reached only by its own members and the admin role', () => {
   const tech = { id: 'a1', role: 'tech', halls: ['HALL01'] };
   const manager = { id: 'a2', role: 'manager' };

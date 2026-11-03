@@ -822,7 +822,7 @@
       ask(c.anchor || c.node || null, spec, { opener: c.opener || null, refocus: c.refocus }).then((a) => {
         if (askOn === asked) askOn = null;
         const now = asked.get();
-        if (a.yes && now) run[id](now, Object.assign({}, c, { values: a.values }));
+        if (a.yes && now) run[id](now, Object.assign({}, c, { values: a.values, choice: a.choice }));
       });
     }
 

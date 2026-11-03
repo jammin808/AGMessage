@@ -1378,10 +1378,13 @@ test('rooms are made, renamed, reset and removed by those who set halls up; a si
   assert.deepEqual(listed.find((r) => r.code === hallA).side.map((x) => [x.key, x.name, x.messageCount, x.locked, x.users]), [[LEGAL, 'Legal', 0, false, []], [MEDIA, 'Media', 0, false, []]]);
   assert.deepEqual(listed.find((r) => r.code === hallC).side.map((x) => x.name), Array.from({ length: 20 }, (_, i) => 'Room ' + (i + 1)));
   // A room's settings, for those who set halls up.
+  const legalCode = listed.find((r) => r.code === hallA).side[0].guestCode;
   assert.deepEqual(await emit(patPage, 'room:settings', { code: LEGAL }), {
     ok: true, key: LEGAL, name: 'Legal', main: false, hall: hallA, hallName: 'Hall A',
     rooms: [{ key: hallA, name: 'Hall A', main: true }, { key: LEGAL, name: 'Legal', main: false }, { key: MEDIA, name: 'Media', main: false }],
+    guestCode: legalCode, codeOn: false,
   });
+  assert.match(legalCode, /^[A-Z2-9]{6}$/, 'those who set rooms up are told a room\'s guest code');
   assert.deepEqual(await emit(tomPage, 'room:settings', { code: LEGAL }), NO_RIGHT);
   assert.deepEqual(await emit(patPage, 'room:settings', { code: 'NOROOM12' }), { ok: false, error: 'No such room.' });
 
@@ -1420,7 +1423,9 @@ test('rooms are made, renamed, reset and removed by those who set halls up; a si
   // Renamed by those who set halls up: a side room's name is its own row; the same name again is done, with none; a
   // hall's Main room renamed is the hall renamed, on its screens too, written as its set-up writes it.
   assert.deepEqual(await emit(tomPage, 'room:update', { code: LEGAL, name: 'Lawyers' }), NO_RIGHT);
-  assert.deepEqual(await emit(patPage, 'room:update', { code: LEGAL, codeOn: true }), { ok: false, error: 'A room\'s name is the one setting changed here.' });
+  // A room's guest code is the admin's alone (owner question 5): switched or renewed, a project manager is refused.
+  assert.deepEqual(await emit(patPage, 'room:update', { code: LEGAL, codeOn: true }), { ok: false, error: 'Not admin' });
+  assert.deepEqual(await emit(patPage, 'room:update', { code: LEGAL, pinned: true }), { ok: false, error: 'A room\'s name and its guest code are the settings changed here.' });
   assert.deepEqual(await emit(patPage, 'room:update', { code: LEGAL, name: '' }), { ok: false, error: 'Type its new name.' });
   assert.deepEqual(await emit(patPage, 'room:update', { code: 'NOROOM12', name: 'x' }), { ok: false, error: 'No such room.' });
   assert.deepEqual(await emit(patPage, 'room:update', { code: MEDIA, name: 'legal' }), { ok: false, error: 'Hall A has a room named legal already.' });

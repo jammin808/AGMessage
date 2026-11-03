@@ -76,9 +76,34 @@
   const hallOf = (o) => String(o.hall || o.name || o.code || 'this hall');
   /** A room of the admin's list that is a hall (its Main room): every room is, but a side room (`main: false`). */
   const isHall = (o) => o.main !== false;
-  /** The seats the admin moves a code guest between, in the words every page uses (the value is the server's). */
+  /** The seats the admin moves a code guest between, in the words every page uses (the value is the server's): a hall's
+   *  Main room's, and a side room's, which has no stage and whose backstage seat is a Member's. */
   const SEATS = Object.freeze([['board', 'On stage'], ['research', 'Backstage'], ['observer', 'Observer']]);
+  const SEATS_SIDE = Object.freeze([['research', 'Member'], ['observer', 'Observer']]);
   const seatOf = (role) => (role === 'director' ? 'board' : role);
+  /**
+   * The ask before a room's guest code is switched off (the design's three-way choice): the guest pages in with it stay
+   * (a guest whose connection drops comes back within a few seconds, and nobody new joins with it), or are sent out with
+   * their seats; accounts stay either way. `o.guests`, the guest pages in now, where the page knows it.
+   */
+  const codeOffAsk = (o) => ({
+    title: 'Turn off the guest code of ' + hallOf(o) + '?',
+    words: [
+      ...(Number.isInteger(o.guests) ? [o.guests === 1 ? '1 guest page is in with the code.' : o.guests + ' guest pages are in with the code.'] : []),
+      'Turn off: nobody new joins with it, and a guest already in comes back within a few seconds of a dropped connection. Turn off and send them out: every guest page closes, and its seat goes. Accounts stay either way.',
+    ],
+    choices: [{ answer: 'keep', label: 'Turn off' }, { answer: 'out', label: 'Turn off and send them out', danger: true }],
+    no: 'Keep it on',
+  });
+  /** The ask before a room's guest code is renewed: who it leaves in, who needs the new one, what stops. */
+  const newCodeAsk = (o) => ({
+    title: 'New guest code for ' + hallOf(o) + '?',
+    words: [
+      'Guests in the room now stay. Anyone joining or reconnecting after a long break needs the new code, and the invite links made with this one stop working.',
+      ...(o.codeIsKey ? ['This hall\'s code is also its address: the new code separates them.'] : []),
+    ],
+    yes: 'Make a new code', no: 'Keep this code',
+  });
   /** A Patterns or PlayMap: the links a pairing token drives. */
   const isNode = (o) => o.t === 'patterns' || o.t === 'playmap';
   /** A verb's own words, without its placeholders: what a line to propose starts with. */
@@ -227,20 +252,27 @@
         may: (f) => f.canScreens, fits: (f) => full(f), ready: (f) => f.stageWhy || (f.screens > 0 || WORDS.noScreens) },
     ],
 
-    // The code chip: the room's guest code (`code`), for a seat that may know it.
+    // The code chip: the room's guest code (`code`, and `on`: whether it admits guests), for a page the server tells it
+    // (`mayKnowCode`); switched on or off and renewed by the admin, on a page that names the room by its key (`setsCode`).
     code: [
       { id: 'code.code', label: 'Copy guest code', icon: '🔢', group: '3_keep', verb: 'local', mode: 'local',
         may: (f, o) => f.mayKnowCode && typeof o.code === 'string' && o.code.length > 0, fits: () => true },
       { id: 'code.copy', label: 'Copy join link', icon: '🔗', group: '3_keep', verb: 'local', mode: 'local',
         may: (f, o) => f.mayKnowCode && typeof o.code === 'string' && o.code.length > 0, fits: () => true },
+      { id: 'code.toggle', label: (f, o) => (o.on ? 'Turn the code off…' : 'Turn the code on'), icon: '🚦', group: '4_manage', verb: 'room:update', mode: 'now',
+        may: (f) => f.setsCode, fits: () => true, confirm: (f, o) => (o.on ? codeOffAsk(o) : null) },
+      { id: 'code.new', label: 'New code…', icon: '🎲', group: '4_manage', verb: 'room:update', mode: 'now',
+        may: (f) => f.setsCode, fits: () => true, confirm: (f, o) => newCodeAsk(o) },
     ],
 
     // ------------------------------------------------------------ the admin page (adminFacts)
     // A room in the admin page's list, and the room it watches (its header): a hall (its Main room) or one of its side
     // rooms beside it (`main: false`), with `code` (its key), `name`, `hall` (as an ask names it: a side room as "Hall 2
-    // › Legal") and `watched`. Every act here is the admin page's: whom it admits (`admin`), which every admin:* verb
-    // checks again, and which passes room:create's and room:update's own check (halls.manage, or the admin). A hall's
-    // invite links are a hall's (a side room's come with its guest code), and a room is made in a hall.
+    // › Legal"), `watched`, and its guest code: `on` (whether it admits guests), `guests` (the guest pages in now) and
+    // `codeIsKey` (a hall whose code is still its address). Every act here is the admin page's: whom it admits (`admin`),
+    // which every admin:* verb checks again, and which passes room:create's and room:update's own check (halls.manage, or
+    // the admin; a room's code, the admin's alone). A room's invite links are made with its guest code (a side room's a
+    // Member's alone), and a room is made in a hall.
     adminRoom: [
       { id: 'adminRoom.watch', label: 'Watch', icon: '👀', key: 'Enter', group: '3_keep', inline: () => 1, verb: 'admin:watchRoom', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => !o.watched },
@@ -249,11 +281,15 @@
       { id: 'adminRoom.minutes', label: 'Minutes', icon: '✨', group: '3_keep', verb: 'admin:summary', mode: 'now',
         may: (f) => f.admin, fits: () => true, ready: (f) => f.ai || WORDS.noAi },
       { id: 'adminRoom.invites', label: 'Roles & invites', icon: '🔒', group: '4_manage', verb: 'admin:invites', mode: 'now',
-        may: (f) => f.admin, fits: (f, o) => isHall(o) },
+        may: (f) => f.admin, fits: () => true },
       { id: 'adminRoom.create', label: 'New room in this hall…', icon: '➕', group: '4_manage', verb: 'room:create', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => isHall(o),
         confirm: (f, o) => ({ title: 'New room in ' + hallOf(o), words: 'A room of its own beside the hall\'s Main room (Legal, Media), with its own messages and people. Its guest code is off: the admin, and the accounts given it, go in.',
           fields: [{ name: 'name', label: 'Room name (for example Legal)', max: 80 }], yes: 'Make the room', no: 'Cancel' }) },
+      { id: 'adminRoom.codeToggle', label: (f, o) => (o.on ? 'Turn the code off…' : 'Turn the code on'), icon: '🚦', group: '4_manage', verb: 'room:update', mode: 'now',
+        may: (f) => f.admin, fits: () => true, confirm: (f, o) => (o.on ? codeOffAsk(o) : null) },
+      { id: 'adminRoom.newCode', label: 'New code…', icon: '🎲', group: '4_manage', verb: 'room:update', mode: 'now',
+        may: (f) => f.admin, fits: () => true, confirm: (f, o) => newCodeAsk(o) },
       { id: 'adminRoom.rename', label: 'Rename…', icon: '🏷', group: '4_manage', verb: 'room:update', mode: 'now',
         may: (f) => f.admin, fits: () => true,
         confirm: (f, o) => ({ title: 'Rename ' + hallOf(o), words: isHall(o) ? 'The hall\'s new name, on every page, screen and the halls board. Its code stays.' : 'The room\'s new name, on its pages. Its people and messages stay.',
@@ -271,15 +307,16 @@
     ],
     // A person: on the hall page, a row of its People panel and a message's sender (`uid`, `name`, `role`); on the admin
     // page, a person in the watched hall (`socketId`, `name`, `role`, `account`: signs in with an account, so its seat
-    // follows its rights, `linkedRooms`, `hall`: its name). Each page draws its own half: the hall page's acts are a
-    // seat's in its room, the admin page's the admin's, run on its own socket.
+    // follows its rights, `linkedRooms`, `hall`: its name, `main`: false in a side room, whose seats are a Member's and an
+    // observer's). Each page draws its own half: the hall page's acts are a seat's in its room, the admin page's the
+    // admin's, run on its own socket.
     person: [
       // @ Mention puts the person's name in this page's composer, to be sent with what follows it.
       { id: 'person.mention', label: 'Mention', icon: '@', group: '1_respond', verb: 'local', mode: 'local',
         may: (f) => f.post, fits: (f, o) => onHall(f) && full(f) && typeof o.name === 'string' && o.name.length > 0 && o.uid !== f.uid },
       { id: 'person.seat', label: 'Seat', icon: '💺', group: '4_manage', verb: 'admin:setRole', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => onAdmin(f) && !o.account,
-        submenu: (f, o) => SEATS.map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: seatOf(o.role) === value })) },
+        submenu: (f, o) => (o.main === false ? SEATS_SIDE : SEATS).map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: seatOf(o.role) === value })) },
       // Let them forward into ▸ ticks a hall (admin:linkRoom); a hall unticked there, or a chip's ×, is No longer forward
       // into ▸ (admin:unlinkRoom), an act of its own: one verb for one act, each refused by the server alike. `linkedNames`
       // names the halls by code, as the page knows them.
@@ -387,13 +424,14 @@
     ],
 
     // ------------------------------------------------------------ the halls board (boardFacts)
-    // A hall's row: `code`, `name`. Its name is the row's one link, which opens it.
+    // A hall's row: `code` (its key), `name`, and `guestCode`: the code its guests type, as the server tells this watcher
+    // ('' to one that may not know it). Its name is the row's one link, which opens it.
     hall: [
       { id: 'hall.open', label: 'Open', icon: '🚪', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
       { id: 'hall.tab', label: 'Open in a new tab', icon: '🗗', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
       { id: 'hall.copy', label: 'Copy link', icon: '🔗', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
       { id: 'hall.code', label: 'Copy guest code', icon: '🔢', group: '3_keep', verb: 'local', mode: 'local',
-        may: (f, o) => typeof o.code === 'string' && o.code.length > 0, fits: () => true },
+        may: (f, o) => typeof o.guestCode === 'string' && o.guestCode.length > 0, fits: () => true },
       { id: 'hall.setup', label: 'Set up…', icon: '⚙', group: '4_manage', verb: 'hall:settings', mode: 'now', may: (f) => f.manageHalls, fits: () => true },
       { id: 'hall.network', label: 'Show network…', icon: '📡', group: '4_manage', verb: 'nodes:list', mode: 'now', may: (f) => f.canDrive, fits: () => true },
     ],
@@ -493,7 +531,9 @@
       ai: !!s.ai,
       canScreens: !!screens, screensManage: !!(screens && screens.manage), screens: screens && Array.isArray(screens.displays) ? screens.displays.length : 0,
       forwardable: !!s.forwardable,
-      mayKnowCode: post,                      // the room's guest code: a seat that posts (an observer's page shows none)
+      // The room's guest code: the server tells it only to a page that may know it ('' else), and lets the admin switch it
+      // and renew it from a page that names the room by its key.
+      mayKnowCode: typeof s.guestCode === 'string' && s.guestCode.length > 0, setsCode: !!s.setsCode,
       connected: !!s.connected,
       support: s.adminView ? String(s.name || 'this person') : '',
     });

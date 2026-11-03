@@ -48,7 +48,7 @@ const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack'], '⤴': [
  * person reads before anything is sent (a reply, the minutes); ▷ and 🏁 answer a help request, on a message or on the
  * halls board; ⚙ sets a link up (a node's, or the default Stagewatch's).
  */
-const ONE_ACT = [['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure']];
+const ONE_ACT = [['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode']];
 /** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export) and so end their label with "…" as an ask does. */
 const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'compose.attach', 'hall.setup', 'hall.network', 'account.edit', 'audit.export']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
@@ -60,25 +60,29 @@ const ANA = 'u-ana', CHAIR = 'u-chair', CY = 'u-cy', OBS = 'u-obs';
 const live = { status: 'connected', desk: true, key: 'ok' };
 const screens = (n, manage = false) => ({ manage, displays: Array.from({ length: n }, (_, i) => ({ id: 'd' + i })) });
 const seat = (o) => C.facts({ connected: true, ai: true, stage: live, ...o });
+// The guest code each seat's join answer carries (the server's codeFor): a guest the code it typed, an account whose rights
+// cover what the code gives, the admin (who may switch it and renew it, setsCode); none On stage, to a Viewer or to Staff.
+const GC = 'K7P2QX';
 const SEATS = {
-  research: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true }),
-  researchAlone: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: false, ai: false }),
-  researchNoDesk: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: false, forwardable: true }),
-  researchLinkDown: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, stage: { status: 'reconnecting', desk: true, key: 'ok' } }),
-  researchOffline: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, connected: false }),
-  board: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false }),
+  research: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, guestCode: GC, codeOn: true }),
+  researchAlone: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: false, ai: false, guestCode: GC, codeOn: true }),
+  researchNoDesk: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: false, forwardable: true, guestCode: GC, codeOn: true }),
+  researchLinkDown: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, stage: { status: 'reconnecting', desk: true, key: 'ok' }, guestCode: GC, codeOn: true }),
+  researchOffline: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, connected: false, guestCode: GC, codeOn: true }),
+  board: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, guestCode: '', codeOn: true }),
   // The Board in the simple view: two plain messages and one 🔥 wait for its answer.
   boardSimple: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] } }),
-  observer: seat({ role: 'observer', uid: OBS, uploadToken: null, forwardable: false }),
-  observerElsewhere: seat({ role: 'observer', uid: OBS, uploadToken: null, forwardable: true }),
-  viewer: seat({ role: 'observer', uid: 'a-vic', uploadToken: null, forwardable: false, account: { role: 'viewer' } }),
+  observer: seat({ role: 'observer', uid: OBS, uploadToken: null, forwardable: false, guestCode: GC, codeOn: true }),
+  observerElsewhere: seat({ role: 'observer', uid: OBS, uploadToken: null, forwardable: true, guestCode: GC, codeOn: true }),
+  viewer: seat({ role: 'observer', uid: 'a-vic', uploadToken: null, forwardable: false, account: { role: 'viewer' }, guestCode: '', codeOn: true }),
   // A Viewer account granted hall.post sits backstage, and its page still holds no file's link.
   viewerPost: seat({ role: 'research', uid: 'a-vic', uploadToken: 't', forwardable: false, ai: false, account: { role: 'viewer' } }),
-  staff: seat({ role: 'research', uid: 'a-sid', uploadToken: 't', canSendToStage: false, canPropose: false, forwardable: true }),
-  tech: seat({ role: 'research', uid: 'a-tia', uploadToken: 't', canSendToStage: true, canPropose: false, forwardable: false, screens: screens(1) }),
-  techNoScreens: seat({ role: 'research', uid: 'a-tia', uploadToken: 't', canSendToStage: true, canPropose: false, forwardable: false, screens: screens(0) }),
-  admin: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, screens: screens(2, true) }),
-  support: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, adminView: true, name: 'Kim' }),
+  staff: seat({ role: 'research', uid: 'a-sid', uploadToken: 't', canSendToStage: false, canPropose: false, forwardable: true, guestCode: '', codeOn: true }),
+  tech: seat({ role: 'research', uid: 'a-tia', uploadToken: 't', canSendToStage: true, canPropose: false, forwardable: false, screens: screens(1), guestCode: GC, codeOn: true }),
+  techNoScreens: seat({ role: 'research', uid: 'a-tia', uploadToken: 't', canSendToStage: true, canPropose: false, forwardable: false, screens: screens(0), guestCode: GC, codeOn: true }),
+  admin: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, screens: screens(2, true), guestCode: GC, codeOn: true, setsCode: true }),
+  adminOffline: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, screens: screens(2, true), guestCode: GC, codeOn: true, setsCode: true, connected: false }),
+  support: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, adminView: true, name: 'Kim', guestCode: GC, codeOn: true, setsCode: true }),
 };
 const from = (uid, role, name) => ({ uid, role, name });
 const OBJECTS = {
@@ -106,8 +110,9 @@ const COMPOSE = {
   directorReplying: { id: 'compose:director', form: 'director', room: '', file: '', replying: 'Ana', priority: false },
 };
 const STAGE = { id: 'stage', live: true, text: '04:30', words: 'Live from Stagewatch: Keynote' };
-const CODE = { id: 'code', code: 'K7P2QX' };
-const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], code: [CODE] };
+const CODE = { id: 'code', code: 'K7P2QX', on: true, hall: 'Hall 2' };
+const CODE_OFF = { id: 'code', code: 'K7P2QX', on: false, hall: 'Hall 2' };
+const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], code: [CODE, CODE_OFF] };
 
 // ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
 const HALLS = [{ code: 'K7P2QX', name: 'Hall 2' }, { code: 'M3N4PQ', name: 'Legal' }];
@@ -133,9 +138,12 @@ const PAGE = {
 const ENTRY = { seq: 12, at, action: 'user.update', actor: { t: 'account', id: 'a-ana', name: 'Ana' }, target: 'kim', words: 'role → tech', mark: 'intact' };
 const PAGE_OBJECTS = {
   adminRoom: {
-    listed: { code: 'K7P2QX', name: 'Hall 2', hall: 'Hall 2', main: true, watched: false }, watched: { code: 'K7P2QX', name: 'Hall 2', hall: 'Hall 2', main: true, watched: true },
-    // A side room beside Hall 2, by its key, in the list and watched.
-    side: { code: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2 › Legal', main: false, watched: false }, sideWatched: { code: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2 › Legal', main: false, watched: true },
+    // A hall whose code is still its key, three guest pages in with it; watched.
+    listed: { code: 'K7P2QX', name: 'Hall 2', hall: 'Hall 2', main: true, watched: false, guestCode: 'K7P2QX', on: true, guests: 3, codeIsKey: true },
+    watched: { code: 'K7P2QX', name: 'Hall 2', hall: 'Hall 2', main: true, watched: true, guestCode: 'K7P2QX', on: true, guests: 3, codeIsKey: true },
+    // A side room beside Hall 2, by its key, its code off, in the list and watched.
+    side: { code: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2 › Legal', main: false, watched: false, guestCode: 'K3TW9A', on: false, guests: 0, codeIsKey: false },
+    sideWatched: { code: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2 › Legal', main: false, watched: true, guestCode: 'K3TW9A', on: false, guests: 0, codeIsKey: false },
   },
   person: {
     guest: { socketId: 's-kim', uid: 'u-kim', name: 'Kim', role: 'research', account: false, linkedRooms: [], hall: 'Hall 2' },
@@ -170,7 +178,8 @@ const PAGE_OBJECTS = {
     reading: { addresses: ['http://192.168.1.20:3023'], reading: true },
     none: { addresses: [], reading: false },
   },
-  hall: { row: { code: 'K7P2QX', name: 'Hall 2' } },
+  // A hall's row as the board's watcher reads it: its guest code told, or not (a Staff account's, a Viewer's).
+  hall: { row: { code: 'K7P2QX', name: 'Hall 2', guestCode: 'K7P2QX' }, untold: { code: 'K7P2QX', name: 'Hall 2', guestCode: '' } },
   help: {
     open: { code: 'K7P2QX', id: 'h1', state: 'open', canRespond: true, hall: 'Hall 2', category: 'Sound' },
     coming: { code: 'K7P2QX', id: 'h2', state: 'coming', canRespond: true, hall: 'Hall 2', category: 'Vision' },
@@ -192,7 +201,7 @@ const PAGE_OBJECTS = {
 /** The seats an act's words are read for, per kind: the hall page's for its kinds, each other page's own. */
 const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
-  compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple], chip: [SEATS.admin, SEATS.researchNoDesk], code: [SEATS.admin, SEATS.board],
+  compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple], chip: [SEATS.admin, SEATS.researchNoDesk], code: [SEATS.admin, SEATS.board, SEATS.research],
   adminRoom: [PAGE.admin, PAGE.adminNoAi], person: [PAGE.admin, SEATS.research, SEATS.board], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
   hall: [PAGE.board], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
@@ -292,7 +301,9 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
       assert.equal(label.endsWith('…'), asks || OPENS_DIALOG.has(e.id), e.id + ': "' + label + '" ends with "…" exactly when it asks first or opens a dialog');
       if (asks) {
         const a = plain(e.confirm(f, o));
-        assert.ok(typeof a.title === 'string' && a.title.length > 0 && typeof a.yes === 'string' && typeof a.no === 'string', e.id + ': an ask has its title and its two verbs');
+        // Its verbs: yes and no, or more than one way to say yes (`choices`, each an answer and its words) and no.
+        const verbs = Array.isArray(a.choices) ? a.choices.length > 1 && a.choices.every((c) => typeof c.answer === 'string' && typeof c.label === 'string' && c.label.length > 0) && !('yes' in a) : typeof a.yes === 'string';
+        assert.ok(typeof a.title === 'string' && a.title.length > 0 && verbs && typeof a.no === 'string', e.id + ': an ask has its title and its verbs');
         assert.equal(!!a.danger, e.group === '9_danger' || e.id === 'link.accept', e.id + ': an ask is a danger exactly when its act is (and a certificate accepted)');
       }
       if (/screen/i.test(label)) assert.ok(e.verb.startsWith('display:') || (e.verb.startsWith('stage:') && /speaker's screen/i.test(label)), e.id + ': "' + label + '" says screen and acts on one');
@@ -305,8 +316,11 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, mayKnowCode: true, connected: true, support: '' });
-  assert.equal(C.facts({ role: 'observer' }).mayKnowCode, false, 'an observer\'s page shows no guest code');
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, mayKnowCode: false, setsCode: false, connected: true, support: '' });
+  // The guest code is the server's to tell (codeFor), whatever the seat: an observer guest is told the code it typed, a
+  // backstage account whose rights do not cover it is told none; switching it is the admin's (setsCode), read by type.
+  assert.deepEqual([C.facts({ role: 'observer', guestCode: 'K7P2QX' }).mayKnowCode, C.facts({ role: 'research', guestCode: '' }).mayKnowCode, C.facts({ role: 'research', guestCode: 7 }).mayKnowCode], [true, false, false]);
+  assert.deepEqual([C.facts({ setsCode: true }).setsCode, C.facts({ setsCode: 'yes' }).setsCode, C.facts({}).setsCode], [true, true, false]);
   assert.equal(C.facts({ role: 'nonsense' }).role, 'observer', 'an unknown seat reads as the one with no rights');
   assert.deepEqual(['observer', 'board', 'research'].map((role) => { const x = C.facts({ role }); return [x.post, x.ask, x.respondHelp]; }), [[false, false, false], [true, false, false], [true, true, true]],
     'a question and an answer to others\' help come from backstage');
@@ -532,11 +546,16 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
     ['chip', 'staff', STAGE, []],
     ['chip', 'board', STAGE, []],
     ['chip', 'observer', STAGE, []],
-    // The code chip: copied by a seat that posts; an observer's page shows no code.
+    // The code chip: copied by a page the server tells the code (a guest the code it typed, an observer's too; an account
+    // whose rights cover it), never On stage, a Viewer's or a Staff account's; switched and renewed by the admin.
     ['code', 'research', CODE, ['code.code', 'code.copy']],
-    ['code', 'board', CODE, ['code.code', 'code.copy']],
-    ['code', 'observer', CODE, []],
+    ['code', 'observer', CODE, ['code.code', 'code.copy']],
+    ['code', 'tech', CODE, ['code.code', 'code.copy']],
+    ['code', 'board', CODE, []],
     ['code', 'viewer', CODE, []],
+    ['code', 'staff', CODE, []],
+    ['code', 'admin', CODE, ['code.code', 'code.copy', 'code.toggle', 'code.new']],
+    ['code', 'admin', CODE_OFF, ['code.code', 'code.copy', 'code.toggle', 'code.new']],
     // A person: mentioned by a seat that posts, never oneself; the hall page's admin account is shown the hall page's half
     // only (the admin's rows are the admin page's, run on its socket).
     ['person', 'research', PERSON, ['person.mention']],
@@ -575,6 +594,18 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
   const pri = (o) => plain(C.items('compose', SEATS.research, o)).find((i) => i.id === 'compose.priority');
   assert.deepEqual([pri(COMPOSE.text).role, pri(COMPOSE.text).checked, pri(COMPOSE.replying).checked], ['menuitemcheckbox', false, true]);
   assert.equal(plain(C.items('code', SEATS.research, CODE)).find((i) => i.id === 'code.code').role, undefined, 'an act that is no toggle is a plain item');
+  // The admin's two acts on the code: Turn the code off… asks the three-way choice (the guests stay, or are sent out),
+  // Turn the code on asks nothing, New code… says who stays and what stops; each refused offline, and none in the support
+  // view.
+  const codeItems = (f, o) => plain(C.items('code', f, o)).filter((i) => !i.sep).map((i) => [i.id, i.label, i.asks, i.disabled]);
+  assert.deepEqual(codeItems(SEATS.admin, CODE).slice(2), [['code.toggle', 'Turn the code off…', true, ''], ['code.new', 'New code…', true, '']]);
+  assert.deepEqual(codeItems(SEATS.admin, CODE_OFF)[2], ['code.toggle', 'Turn the code on', false, '']);
+  assert.deepEqual(codeItems(SEATS.adminOffline, CODE).map((x) => x[3]), ['', '', C.WORDS.offline, C.WORDS.offline]);
+  assert.deepEqual(plain(C.entry('code', 'code.toggle').confirm(SEATS.admin, CODE)), {
+    title: 'Turn off the guest code of Hall 2?',
+    words: ['Turn off: nobody new joins with it, and a guest already in comes back within a few seconds of a dropped connection. Turn off and send them out: every guest page closes, and its seat goes. Accounts stay either way.'],
+    choices: [{ answer: 'keep', label: 'Turn off' }, { answer: 'out', label: 'Turn off and send them out', danger: true }], no: 'Keep it on' });
+  assert.deepEqual(plain(C.entry('code', 'code.new').confirm(SEATS.admin, CODE)), { title: 'New guest code for Hall 2?', words: ['Guests in the room now stay. Anyone joining or reconnecting after a long break needs the new code, and the invite links made with this one stop working.'], yes: 'Make a new code', no: 'Keep this code' });
 
   // The caps, on the richest seat of each kind.
   for (const [kind, o] of [['compose', COMPOSE.replying], ['chip', STAGE], ['code', CODE], ['person', PERSON]]) {
@@ -600,11 +631,12 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
   const M = [
     // A hall: Watch, its transcript, the minutes and its seats' lock, a room made in it, its name; clearing and closing it
     // last. Watched, no Watch. A side room: the same but its seats' lock (its guest code's) and a room made in it.
-    ['adminRoom', 'admin', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.create', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
-    ['adminRoom', 'admin', O.adminRoom.watched, ['adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.create', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
-    ['adminRoom', 'manager', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.create', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
-    ['adminRoom', 'admin', O.adminRoom.side, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
-    ['adminRoom', 'admin', O.adminRoom.sideWatched, ['adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'admin', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.create', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'admin', O.adminRoom.watched, ['adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.create', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'manager', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.create', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    // A side room's invites are a Member's, made with its own code; no room is made in a room.
+    ['adminRoom', 'admin', O.adminRoom.side, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'admin', O.adminRoom.sideWatched, ['adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
     ['adminRoom', 'notAdmin', O.adminRoom.listed, []],
     ['adminRoom', 'notAdmin', O.adminRoom.side, []],
     // A person: a code guest's seat is the admin's to set; an account's follows its rights (no Seat).
@@ -635,10 +667,11 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['laptop', 'admin', O.laptop.two, ['laptop.refresh', 'laptop.copy']],
     ['laptop', 'admin', O.laptop.none, ['laptop.refresh']],
     ['laptop', 'notAdmin', O.laptop.two, []],
-    // A hall's row: opened (here or in a tab) and its code copied by everyone it is listed for; set up and the show
-    // network by right.
+    // A hall's row: opened (here or in a tab) by everyone it is listed for, its guest code copied where the server told it;
+    // set up and the show network by right.
     ['hall', 'board', O.hall.row, ['hall.open', 'hall.tab', 'hall.copy', 'hall.code', 'hall.setup', 'hall.network']],
     ['hall', 'boardCrew', O.hall.row, ['hall.open', 'hall.tab', 'hall.copy', 'hall.code']],
+    ['hall', 'boardCrew', O.hall.untold, ['hall.open', 'hall.tab', 'hall.copy']],
     ['help', 'board', O.help.open, ['help.respond', 'help.resolve', 'help.open']],
     ['help', 'board', O.help.coming, ['help.resolve', 'help.open']],
     ['help', 'boardCrew', O.help.notTheirs, ['help.open']],
@@ -684,7 +717,8 @@ test('the other pages: what may be done but not now is shown, disabled, with the
   // Not connected: an act on something says so; one that sends nothing (the transcript, a copy) goes on.
   assert.deepEqual(why('adminRoom', 'adminOffline', O.adminRoom.listed), {
     'adminRoom.watch': C.WORDS.offline, 'adminRoom.transcript': '', 'adminRoom.minutes': C.WORDS.offline, 'adminRoom.invites': C.WORDS.offline,
-    'adminRoom.create': C.WORDS.offline, 'adminRoom.rename': C.WORDS.offline, 'adminRoom.clear': C.WORDS.offline, 'adminRoom.remove': C.WORDS.offline,
+    'adminRoom.create': C.WORDS.offline, 'adminRoom.codeToggle': C.WORDS.offline, 'adminRoom.newCode': C.WORDS.offline,
+    'adminRoom.rename': C.WORDS.offline, 'adminRoom.clear': C.WORDS.offline, 'adminRoom.remove': C.WORDS.offline,
   });
   assert.deepEqual(why('adminMsg', 'adminOffline', O.adminMsg.text), { 'adminMsg.copy': '', 'adminMsg.delete': C.WORDS.offline });
   // "This laptop": Refresh while Windows is read says so, and offline says so too; a copy sends nothing, so it goes on.
@@ -738,6 +772,18 @@ test('the other pages: the inline bar, the asks and their words, the caps and th
     fields: [{ name: 'name', label: 'Room name (for example Legal)', max: 80 }], yes: 'Make the room', no: 'Cancel' });
   assert.deepEqual([ask('adminRoom', 'adminRoom.rename', 'admin', O.adminRoom.listed).fields, ask('adminRoom', 'adminRoom.rename', 'admin', O.adminRoom.side).fields],
     [[{ name: 'name', label: 'Hall name', value: 'Hall 2', max: 80 }], [{ name: 'name', label: 'Room name', value: 'Legal', max: 80 }]]);
+  // A room's guest code: Turn the code off… names the guest pages in with it and asks which way (they stay, or go); a code
+  // that is off is turned on with no ask; New code… says who stays and what stops, and, for a hall whose code is its
+  // address, that the new code separates them.
+  assert.deepEqual([label('adminRoom.codeToggle', O.adminRoom.listed), label('adminRoom.codeToggle', O.adminRoom.side), C.entry('adminRoom', 'adminRoom.codeToggle').confirm(PAGE.admin, O.adminRoom.side)], ['Turn the code off…', 'Turn the code on', null]);
+  assert.deepEqual(ask('adminRoom', 'adminRoom.codeToggle', 'admin', O.adminRoom.listed), {
+    title: 'Turn off the guest code of Hall 2?',
+    words: ['3 guest pages are in with the code.', 'Turn off: nobody new joins with it, and a guest already in comes back within a few seconds of a dropped connection. Turn off and send them out: every guest page closes, and its seat goes. Accounts stay either way.'],
+    choices: [{ answer: 'keep', label: 'Turn off' }, { answer: 'out', label: 'Turn off and send them out', danger: true }], no: 'Keep it on' });
+  assert.equal(ask('adminRoom', 'adminRoom.codeToggle', 'admin', { ...O.adminRoom.listed, guests: 1 }).words[0], '1 guest page is in with the code.');
+  assert.deepEqual([ask('adminRoom', 'adminRoom.newCode', 'admin', O.adminRoom.listed).words, ask('adminRoom', 'adminRoom.newCode', 'admin', O.adminRoom.side).title], [[
+    'Guests in the room now stay. Anyone joining or reconnecting after a long break needs the new code, and the invite links made with this one stop working.',
+    'This hall\'s code is also its address: the new code separates them.'], 'New guest code for Hall 2 › Legal?']);
   assert.deepEqual([ask('adminRoom', 'adminRoom.rename', 'admin', O.adminRoom.side).title, ask('adminRoom', 'adminRoom.rename', 'admin', O.adminRoom.side).words],
     ['Rename Hall 2 › Legal', 'The room\'s new name, on its pages. Its people and messages stay.']);
   assert.deepEqual(ask('adminMsg', 'adminMsg.delete', 'admin', O.adminMsg.text), { title: 'Delete this message for everyone in Hall 2?', words: '“Capex is on slide 14” goes from every page in the hall now. This cannot be undone.', yes: 'Delete for everyone', no: 'Keep it', danger: true });
@@ -760,6 +806,11 @@ test('the other pages: the inline bar, the asks and their words, the caps and th
   assert.equal(sw.fields[1].hint, 'Leave it empty to keep the saved one.');
   // No longer forward into ▸: the halls the person may forward into now, by name.
   assert.deepEqual(plain(C.submenu('person', 'person.unforward', PAGE.admin, { ...O.person.account, linkedNames: { M3N4PQ: 'Legal · M3N4PQ' } })), [{ value: 'M3N4PQ', label: 'Legal · M3N4PQ' }]);
+  // Seat ▸: a hall's Main room's three seats; a side room's two, its backstage seat a Member's (no seat there is On stage).
+  const seats = (o) => plain(C.submenu('person', 'person.seat', PAGE.admin, o)).map((v) => [v.value, v.label, v.checked]);
+  assert.deepEqual(seats(O.person.guest), [['board', 'On stage', false], ['research', 'Backstage', true], ['observer', 'Observer', false]]);
+  assert.deepEqual(seats({ ...O.person.guest, main: true }), seats(O.person.guest));
+  assert.deepEqual(seats({ ...O.person.guest, main: false }), [['research', 'Member', true], ['observer', 'Observer', false]]);
   // Propose… is the drive right's (mayDriveNode admits the admin page's socket for every node).
   assert.deepEqual([C.entry('link', 'link.propose').may(PAGE.admin, O.link.node), C.entry('link', 'link.propose').may(PAGE.notAdmin, O.link.node)], [true, false]);
   assert.deepEqual([ask('account', 'account.disable', 'accountsAdmin', O.account.off), C.entry('account', 'account.disable').label(PAGE.accountsAdmin, O.account.off)], [null, 'Turn on'], 'turning an account on asks nothing');

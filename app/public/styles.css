@@ -120,6 +120,10 @@ button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .role-label strong { display: block; }
 .role-label small { color: var(--muted); }
 
+/* The join page's code: typed first, monospace, at 16 px so a phone does not zoom on it; the room it opens named under it */
+.code-input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-md); letter-spacing: .15em; text-transform: uppercase; font-weight: 600; }
+.error.code-error { margin: calc(-1 * var(--sp-2)) 0 var(--sp-3); }
+.join-room { margin: calc(-1 * var(--sp-2)) 0 var(--sp-4); font-weight: 600; color: var(--c-ink); }
 .code-row { display: flex; gap: .5rem; }
 .code-row input { text-transform: uppercase; letter-spacing: 2px; font-weight: 600; }
 .hint { color: var(--muted); font-size: .85rem; display: block; margin-top: .3rem; }
@@ -1101,9 +1105,6 @@ html[data-theme="dark"] .user-view-card > header { background: linear-gradient(1
   text-align: center;
 }
 body.is-admin-view { padding-top: 0; }   /* iframes stack the banner above the page */
-
-/* Observers don't see the room code at all */
-body[data-role="observer"] #roomChip { display: none !important; }
 
 /* ====================================================================
    THREADING / MENTIONS / REACTIONS / LAZY PDF

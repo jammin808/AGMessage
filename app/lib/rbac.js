@@ -28,7 +28,7 @@ const CAPS = Object.freeze({
   'display.manage': 'Create, rename, move and revoke screens',
   'stage.send': 'Send to Stagewatch: the speaker\'s screen, or to the operator to pass on',
   'nodes.control': 'Propose commands to Patterns and PlayMap (to the show desk)',
-  'halls.manage': 'Create halls and their rooms, and set them up (names, Stagewatch link, holding image, codes)',
+  'halls.manage': 'Create halls and their rooms, set them up (names, Stagewatch link, holding image) and hand out their guest codes',
   'users.manage': 'Create accounts and set their roles, halls and rights',
   'settings.manage': 'App settings: AI key, HTTPS, the tunnel, the show network',
   'audit.read': 'Read the audit log',
@@ -268,6 +268,21 @@ function roomRoleFor(account, scope) {
  */
 const answersHelp = (account, scope) => canIn(account, 'hall.post', scope) && roomRoleFor(account, scope) !== 'board';
 
+/**
+ * Whether an account is told a room's guest code (the code guests type, plan 1-§2.3): it sets halls up (`halls.manage`:
+ * it hands codes out), or its own rights in that room already hold what the code gives a guest there (a side room's
+ * Member: seeing, posting, sharing files; a Main room's backstage seat: those and the speaker's screen of its hall), and
+ * in either case it does not sit On stage there (a Board account's tablet is not handed the code). So a Viewer, a Staff
+ * account in a Main room and an account of every hall that is not given a side room are told none. A scope that is not
+ * one answers no.
+ */
+function mayKnowCode(account, scope) {
+  const s = readScope(scope);
+  if (!s || !account || account.disabled || roomRoleFor(account, s) === 'board') return false;
+  if (can(account, 'halls.manage')) return true;
+  return (s.main ? GUEST_CAPS.research : GUEST_CAPS_SIDE.research).every((cap) => canIn(account, cap, s));
+}
+
 /** What a page needs to know about an account's rights (no secrets). */
 function rightsView(account) {
   const e = effective(account);
@@ -276,5 +291,5 @@ function rightsView(account) {
 
 module.exports = {
   CAPS, ROLES, HALL_SCOPED, ROOM_SCOPED, ADMIN_ONLY, SEAT_LIMITS, LINKED_CAPS, GUEST_CAPS, GUEST_CAPS_SIDE, isCap, isRole, effective,
-  can, canIn, seesHall, seesRoom, holdsAdminOnly, mayChange, giveable, seatAllows, guestCaps, roomRoleFor, answersHelp, rightsView,
+  can, canIn, seesHall, seesRoom, holdsAdminOnly, mayChange, giveable, seatAllows, guestCaps, roomRoleFor, answersHelp, mayKnowCode, rightsView,
 };

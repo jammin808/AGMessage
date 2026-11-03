@@ -70,31 +70,41 @@
       <p class="error" id="signOutError" role="alert" hidden></p>
     </div>
 
-    <!-- A room's code: presenters, guests, anyone without an account. -->
+    <!-- A room's code: presenters, guests, anyone without an account. The code first: once it is still, the page names the
+         room it opens and offers that room's seats only. -->
     <form id="joinForm" class="entry-pane" role="tabpanel" aria-labelledby="tabCode" autocomplete="off" hidden>
+      <label class="field">
+        <span>Code</span>
+        <input id="code" name="code" class="code-input" maxlength="6" placeholder="e.g. K7P2QX" autocomplete="off" enterkeyhint="go"
+               autocapitalize="characters" spellcheck="false" aria-describedby="codeHint" />
+        <small class="hint" id="codeHint">A room's 6-character code.</small>
+      </label>
+      <p class="error code-error" id="codeError" role="alert" hidden></p>
+      <p class="join-room" id="roomLine" role="status" hidden></p>
+
       <label class="field">
         <span>Your name</span>
         <input id="name" name="name" maxlength="40" required placeholder="e.g. Sarah Chen" />
       </label>
 
-      <fieldset class="field role-fieldset">
-        <legend>Where you are</legend>
-        <div class="role-grid" role="radiogroup" aria-label="Where you are">
-          <label class="role-option">
+      <fieldset class="field role-fieldset" id="seatSet" hidden>
+        <legend>Your seat</legend>
+        <div class="role-grid" role="radiogroup" aria-label="Your seat">
+          <label class="role-option" data-seat="board">
             <input type="radio" name="role" value="board" />
             <span class="role-label">
               <strong>On stage</strong>
               <small>Presenter or board member — large cards, tap to answer</small>
             </span>
           </label>
-          <label class="role-option">
-            <input type="radio" name="role" value="research" checked />
+          <label class="role-option" data-seat="research">
+            <input type="radio" name="role" value="research" />
             <span class="role-label">
-              <strong>Backstage</strong>
-              <small>Crew or the backstage team — messages, files, action prompts</small>
+              <strong id="researchWord">Backstage</strong>
+              <small id="researchWhat">Crew or the backstage team — messages, files, action prompts</small>
             </span>
           </label>
-          <label class="role-option">
+          <label class="role-option" data-seat="observer">
             <input type="radio" name="role" value="observer" />
             <span class="role-label">
               <strong>Observer</strong>
@@ -102,14 +112,8 @@
             </span>
           </label>
         </div>
+        <small class="hint" id="seatHint" hidden></small>
       </fieldset>
-
-      <label class="field">
-        <span>Code</span>
-        <input id="code" name="code" maxlength="6" placeholder="e.g. K7P2QX"
-               autocapitalize="characters" spellcheck="false" />
-        <small class="hint" id="codeHint">The 6-character code for your room.</small>
-      </label>
 
       <button class="btn primary big" type="submit">Join</button>
       <p class="error" id="error" role="alert" hidden></p>

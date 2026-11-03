@@ -24,6 +24,17 @@
  * neither is said and left on disk. A hall's stem has no dot and a side room's has one, so 0.5.1, which loads only
  * stems CODE_RE takes, reads the halls and leaves the side rooms' files as they are.
  *
+ * Guest codes. A room's key is its address (a hall's is its Main room's), and the code guests type is its guest code
+ * (`guestCodeOf`): a side room's own (`guestCode`, given as it is made), a Main room's own once it was renewed and its key
+ * until then, so a hall of 0.5.1 keeps the code its guests know with nothing written. A renewed code moves the one before
+ * it into `retired` (the newest RETIRED_KEEP), which admits only a person already seated there. Both are the store's
+ * alone: a code is changed by `setGuestCode`, never by an op, so it reaches no op log, ring or resuming page, and is
+ * written by the snapshot it takes at once. The codes are indexed (`codes`, `retiredCodes`: a code to the key of its
+ * room), rebuilt at a load and at every change; a code is one room's: a live code, a retired one and a key are never
+ * shared, and of two rooms on disk claiming one code (a file edited by hand) the first, by key, holds it and the other's
+ * admits nobody, said on the console by its room, never by the code. Whether a code admits guests is its room's setting
+ * (`codeOn`): a Main room's is on until switched off, a side room's off until switched on.
+ *
  * Ops: {o:'add', m} {o:'upd', id, f} {o:'del', id} {o:'reset'} {o:'meta', name}
  *
  * A send is said once. A message a page sent with its client id (`cid`) is indexed by who sent it and that id
@@ -54,6 +65,7 @@ const CODE_RE = /^[A-Z0-9]{4,12}$/;
 const SIDE_RE = /^([A-Z0-9]{4,12})\.([A-Z0-9]{4,12})$/;
 const SIDE_MAX = 20;        // side rooms per hall: a bound, not a governor (each is a switcher button and its files)
 const GONE_KEEP = 500;      // tombstones kept per room, the newest
+const RETIRED_KEEP = 3;     // a room's earlier guest codes kept, the newest: each admits only a person seated there
 
 /**
  * Every field a snapshot holds, and the change that makes it differ from the snapshot on disk, which makes its room dirty:
@@ -70,7 +82,12 @@ const SNAPSHOT_FIELDS = Object.freeze({
   messages: 'an add, upd, del or reset op; a message moved to today\'s words as it loads (the load\'s onMigrate) calls markDirty',
   savedAt: 'the snapshot itself: each one writes it',
   gone: 'a del or reset op',
+  // Written only when the room has one: a hall that was never renewed writes 0.5.1's shape, byte for byte.
+  guestCode: 'setGuestCode, which calls markDirty and writes the snapshot at once; a side room\'s first, made with it, in the first snapshot createIn() writes at once',
+  retired: 'setGuestCode, which calls markDirty and writes the snapshot at once',
 });
+/** The snapshot fields a room writes only when it holds them (SNAPSHOT_FIELDS' last rows). */
+const SNAPSHOT_OPTIONAL = Object.freeze(['guestCode', 'retired']);
 
 /** A message's key in `byCid`: who sent it and its client id, or '' when it has none. */
 const cidKey = (m) => (m && typeof m.cid === 'string' && m.cid && m.from && typeof m.from.uid === 'string' && m.from.uid ? m.from.uid + ':' + m.cid : '');
@@ -95,6 +112,10 @@ class RoomStore {
     // Each hall's side rooms, in the order they were made (`roomsOf`), so a hall's rooms are read without a walk of every
     // side room of every hall; kept with `side`, which holds the same rooms by key.
     this.sideByHall = new Map();
+    // The guest codes: each live code, and each earlier one a room keeps (`retired`), to the key of its room. Rebuilt at a
+    // load and at every change (`_index`); read through `byCode`, `byRetired` and `codeHeld`.
+    this.codes = new Map();
+    this.retiredCodes = new Map();
     this.lastError = null;  // the last append or snapshot that failed, until every room is on disk again
     this.snapshots = 0;      // snapshots written this run (health)
     // What the last load found on disk, which a stop that saved never leaves: the rooms whose log held lines, and the
@@ -143,6 +164,7 @@ class RoomStore {
       else if (this._sidesOf(hall).length >= SIDE_MAX) console.warn('  Not loaded: room ' + key + ' of hall ' + hall + ' — the hall holds ' + SIDE_MAX + ' rooms beside it already (its files are kept as ' + stem + ')');
       else if (this._load(key, hall, onMigrate, compact)) n++;
     }
+    this._index(true);
     return n;
   }
 
@@ -152,7 +174,7 @@ class RoomStore {
     try {
       const { data, whole } = readJsonWhole(this._at(stem, '.json'));
       if (!data) throw new Error('snapshot and its backup are both unreadable');
-      const room = this._blank(code, typeof data.name === 'string' ? data.name : '', data.createdAt || Date.now(), { hall });
+      const room = this._blank(code, typeof data.name === 'string' ? data.name : '', data.createdAt || Date.now(), { hall, ...readCodes(data, code) });
       room.messages = Array.isArray(data.messages) ? data.messages.filter((m) => m && typeof m.id === 'string') : [];
       room.seq = Number.isInteger(data.seq) ? data.seq : room.messages.length;
       room.settings = data.settings && typeof data.settings === 'object' ? data.settings : {};
@@ -177,9 +199,9 @@ class RoomStore {
     }
   }
 
-  _blank(code, name, createdAt, { hall = code } = {}) {
+  _blank(code, name, createdAt, { hall = code, guestCode = '', retired = [] } = {}) {
     return {
-      code, hall, name, createdAt, messages: [], byId: new Map(), byCid: new Map(), gone: new Map(), goneKeys: new Map(), seq: 0, ring: [],
+      code, hall, name, createdAt, guestCode, retired, messages: [], byId: new Map(), byCid: new Map(), gone: new Map(), goneKeys: new Map(), seq: 0, ring: [],
       users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false, ragged: false, snapKb: null, snapWhole: false, marked: false,
     };
   }
@@ -225,6 +247,68 @@ class RoomStore {
    * Main room; null for no room, so a right asked of a room that is gone answers no.
    */
   scopeOf(room) { return room ? Object.freeze({ code: room.code, hall: room.hall, main: this.isMain(room) }) : null; }
+
+  /** The code a room's guests type: a side room's own, a Main room's own once renewed and its key until then; '' for none. */
+  guestCodeOf(room) { return room ? room.guestCode || (this.isMain(room) ? room.code : '') : ''; }
+  /** Whether a room's guest code admits guests: a Main room's unless switched off, a side room's only once switched on. */
+  codeOn(room) { return !!room && (this.isMain(room) ? room.settings.codeOff !== true : room.settings.codeOff === false); }
+  /** The room whose guest code this is, live (on or off), or null. */
+  byCode(code) { const key = typeof code === 'string' ? this.codes.get(code) : undefined; return key === undefined ? null : this.room(key) || null; }
+  /** The room that kept this as an earlier guest code (it admits only a person seated there), or null. */
+  byRetired(code) { const key = typeof code === 'string' ? this.retiredCodes.get(code) : undefined; return key === undefined ? null : this.room(key) || null; }
+  /** Whether a code is taken: a room's key, a live guest code or an earlier one. A new key or code is none of them. */
+  codeHeld(code) { return this.hasRoom(code) || this.codes.has(code) || this.retiredCodes.has(code); }
+
+  /**
+   * A room's guest code renewed: `code` becomes its live code and the one before it joins its earlier codes (the newest
+   * RETIRED_KEEP), which admit only a person seated there; the index follows, and the snapshot is written at once. Never an
+   * op: the code reaches no op log, ring or resuming page, so the snapshot is the one place it is kept, and a renewal holds
+   * only once that is written: one the disk refuses is taken back whole (the code, the codes before it, the index, the
+   * room's mark), so the code before it still admits and nothing answered names a code a restart would not bring back.
+   * Answers the code before it ('' when it had none); null when refused: no such room, or a code that is no code or is
+   * taken (`codeHeld`); false when the disk refused its snapshot, with nothing changed.
+   */
+  setGuestCode(room, code) {
+    if (!room || this.room(room.code) !== room || !RoomStore.validCode(code) || this.codeHeld(code)) return null;
+    const before = this.guestCodeOf(room);
+    const was = { guestCode: room.guestCode, retired: room.retired, marked: room.marked };
+    room.retired = [...room.retired.filter((c) => c !== before), ...(before ? [before] : [])].slice(-RETIRED_KEEP);
+    room.guestCode = code;
+    this._index();
+    this.markDirty(room);
+    if (this.compact(room.code)) return before;
+    Object.assign(room, was);
+    this._index();
+    return false;
+  }
+
+  /**
+   * The codes indexed again from the rooms: every live code first, then every earlier one, each room in the order of its
+   * key (the halls, then the side rooms by their file's name), so which of two rooms claiming one code holds it is the same
+   * at every start. A code a room claims that another holds is left out (it admits nobody); at a load (`say`) the room is
+   * named on the console, never its code.
+   */
+  _index(say = false) {
+    const codes = new Map();
+    const retired = new Map();
+    const byKey = (a, b) => (a.code < b.code ? -1 : 1);
+    const order = [...[...this.rooms.values()].sort(byKey), ...[...this.side.values()].sort((a, b) => (RoomStore.stemOf(a) < RoomStore.stemOf(b) ? -1 : 1))];
+    const taken = (room, what) => { if (say) console.warn('  Room ' + room.code + (this.isMain(room) ? '' : ' of hall ' + room.hall) + ': ' + what + ' is another room\'s, so it admits nobody here (New code gives it one of its own)'); };
+    for (const room of order) {
+      const code = this.guestCodeOf(room);
+      if (!code) continue;
+      if (codes.has(code) || this.side.has(code) || (code !== room.code && this.rooms.has(code))) taken(room, 'its guest code');
+      else codes.set(code, room.code);
+    }
+    for (const room of order) {
+      for (const code of room.retired) {
+        if (codes.has(code) || retired.has(code) || (code !== room.code && this.hasRoom(code))) { if (codes.get(code) !== room.code && retired.get(code) !== room.code) taken(room, 'an earlier guest code of it'); }
+        else retired.set(code, room.code);
+      }
+    }
+    this.codes = codes;
+    this.retiredCodes = retired;
+  }
 
   /** A hall's side rooms in the order they were made (the index's own list: never handed out to be changed). */
   _sidesOf(hall) { return this.sideByHall.get(hall) || []; }
@@ -282,24 +366,30 @@ class RoomStore {
     this._bury(room, readTomb({ id: m.id, seq, uid: m.from && m.from.uid, cid: key ? m.cid : '' }));
   }
 
+  /** Make a hall: its key is its guest code until it is renewed (`setGuestCode`), and its first snapshot is written at once. */
   create(code, name) {
     const room = this._blank(code, name || '', Date.now());
     this.rooms.set(code, room);
+    this._index();
     this.compact(code);
     return room;
   }
 
   /**
-   * Make a side room of `hall` under `key`: its first snapshot is written at once, as a hall's is, its guest code off
-   * (`codeOff`) unless `settings` says otherwise, so a new room is for accounts until it is switched on. Null when
-   * refused: no such hall, a key that is no key or that a room has already, or a hall with SIDE_MAX side rooms.
+   * Make a side room of `hall` under `key`, with its own guest code (`guestCode`, a code no room holds, never its key):
+   * its first snapshot is written at once, as a hall's is, its guest code off (`codeOff`) unless `settings` says
+   * otherwise, so a new room is for accounts until it is switched on. Null when refused: no such hall, a key that is no
+   * key or that a room has already, a guest code that is no code or is taken (`codeHeld`), or a hall with SIDE_MAX side
+   * rooms.
    */
-  createIn(hall, key, name, { settings = {} } = {}) {
+  createIn(hall, key, name, { guestCode = '', settings = {} } = {}) {
     if (!this.rooms.has(hall) || !RoomStore.validCode(key) || this.hasRoom(key)) return null;
+    if (guestCode !== '' && (!RoomStore.validCode(guestCode) || guestCode === key || this.codeHeld(guestCode))) return null;
     if (this._sidesOf(hall).length >= SIDE_MAX) return null;
-    const room = this._blank(key, name || '', Date.now(), { hall });
+    const room = this._blank(key, name || '', Date.now(), { hall, guestCode });
     room.settings = { codeOff: true, ...(settings && typeof settings === 'object' ? settings : {}) };
     this._keepSide(room);
+    this._index();
     this.compact(key);
     return room;
   }
@@ -385,9 +475,15 @@ class RoomStore {
     return room.ring.filter((op) => op.s > since);
   }
 
-  /** What a snapshot of the room holds, its fields in SNAPSHOT_FIELDS' order: the object compact() writes. */
+  /**
+   * What a snapshot of the room holds, its fields in SNAPSHOT_FIELDS' order: the object compact() writes. Its guest code
+   * and its earlier ones only when it has them, so a hall never renewed is written as 0.5.1 wrote it.
+   */
   snapshotOf(room, savedAt = Date.now()) {
-    return { code: room.code, name: room.name || '', createdAt: room.createdAt, seq: room.seq, settings: room.settings, messages: room.messages, savedAt, gone: Array.from(room.gone.values()) };
+    const snap = { code: room.code, name: room.name || '', createdAt: room.createdAt, seq: room.seq, settings: room.settings, messages: room.messages, savedAt, gone: Array.from(room.gone.values()) };
+    if (room.guestCode) snap.guestCode = room.guestCode;
+    if (room.retired.length) snap.retired = room.retired.slice();
+    return snap;
   }
 
   /**
@@ -463,6 +559,7 @@ class RoomStore {
     if (this.rooms.has(key)) return this.removeHall(key);
     const room = this.side.get(key);
     const kept = room ? this._drop(room) : this._unlink(key);
+    this._index();
     const back = room && loadsAgain(kept) ? [room.code] : [];
     return { rooms: room ? [room] : [], kept, again: back.length, back };
   }
@@ -476,6 +573,7 @@ class RoomStore {
     const rooms = this.roomsOf(hall);
     const sides = rooms.slice(1).map((r) => [r.code, this._drop(r)]);
     const main = rooms.length ? this._drop(rooms[0]) : this._unlink(hall);
+    this._index();
     const back = loadsAgain(main) ? [hall, ...sides.filter(([, kept]) => loadsAgain(kept)).map(([code]) => code)] : [];
     return { rooms, kept: [...sides.flatMap(([, kept]) => kept), ...main], again: back.length, back };
   }
@@ -508,4 +606,15 @@ class RoomStore {
 /** Whether a room's files that stay (`_unlink`) load it again at the next start: they start at its backup or its snapshot. */
 function loadsAgain(kept) { return kept.some((f) => !f.endsWith('.log')); }
 
-module.exports = { RoomStore, GONE_KEEP, COMPACT_EVERY, SNAPSHOT_FIELDS, CODE_RE, SIDE_RE, SIDE_MAX };
+/**
+ * A room's guest code and its earlier ones as a snapshot holds them, read only where each is a code (CODE_RE) and is not
+ * the room's key (an address, never a code its guests type): `{guestCode, retired}`, '' and [] for none. A snapshot
+ * without them (0.5.1's, a hall never renewed) reads as none, and a hall's code is then its key.
+ */
+function readCodes(data, key) {
+  const guestCode = typeof data.guestCode === 'string' && CODE_RE.test(data.guestCode) && data.guestCode !== key ? data.guestCode : '';
+  const listed = Array.isArray(data.retired) ? data.retired.filter((c) => typeof c === 'string' && CODE_RE.test(c) && c !== guestCode) : [];
+  return { guestCode, retired: [...new Set(listed)].slice(-RETIRED_KEEP) };
+}
+
+module.exports = { RoomStore, GONE_KEEP, COMPACT_EVERY, SNAPSHOT_FIELDS, SNAPSHOT_OPTIONAL, RETIRED_KEEP, CODE_RE, SIDE_RE, SIDE_MAX };

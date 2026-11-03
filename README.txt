@@ -8,7 +8,7 @@ installing Node.js or anything else. Extract the zip (right-click it,
 Extract All), double-click the launcher in the extracted folder, and share
 the URL with your team. Messages, files, help requests and screens for
 every hall of the event; crew sign in with their own accounts, presenters
-and guests join with a hall's code.
+and guests join with a room's code.
 
 The build this copy is (e.g. 0.5.0+17.abc1234) is in the zip's name, the
 black window's first lines, and the admin page. The window's banner also
@@ -65,10 +65,40 @@ First time on a new laptop
    A hall can have rooms of its own beside its Main room (Legal, Media):
    on the admin page, a hall's ⋯ -> New room in this hall..., then its
    name. Each room is listed under its hall, with Watch, Rename...,
-   Clear messages... and Remove room... in its ⋯. A room's guest code is
-   off: it is for the admin and the accounts given it. When the admin
-   enters, watches, prints or summarises a room their account is not
-   given, the audit log says so (room.read).
+   Clear messages... and Remove room... in its ⋯. Each room has its own
+   guest code. A new room's is off: it is for the admin and the accounts
+   given it until you choose "Turn the code on" in its ⋯. Guests in a
+   room other than the Main room sit as a Member (messages and files) or
+   an Observer; On stage seats are in the hall's Main room. When the
+   admin enters, watches, prints or summarises a room their account is
+   not given, the audit log says so (room.read).
+
+   A room's code, in its ⋯ on the admin page (or the code in the header
+   of your own hall page, signed in as the admin):
+   - "Turn the code off..." asks which way: "Turn off" keeps the guests
+     already in (one whose Wi-Fi drops comes back within a few seconds)
+     and lets nobody new join with it; "Turn off and send them out"
+     closes every guest page in the room and forgets their seats.
+     Accounts stay either way. "Turn the code on" lets it admit again.
+   - "New code..." gives the room a new code. Guests in the room stay;
+     anyone joining, or coming back after a long break, needs the new
+     one. The code before it admits only people already seated there,
+     and the invite links made with it stop working: hand out the new
+     links from Roles & invites.
+   - A hall's code is also its address until you choose New code: anyone
+     with an account in the hall can read it from their browser's address
+     bar, from the halls board's link to it, or in the audit log. The
+     admin page says so beside the code and marks the hall in its list
+     ("code is its address"). New code separates them.
+   - Signed in with the token at the laptop, your own hall page joins by
+     a code and gets in whether the code is on or off; it is never sent
+     out with the guests.
+   Each switch and each new code is an audit row (room.code), which never
+   holds the code. A code is shown only to the admin, to project managers
+   (who hand codes out), to accounts whose rights already give what the
+   code gives (a Tech in their halls; a Staff account in a room it is
+   given), and to guests the code they typed. Staff and Viewer accounts
+   are not shown a hall's code, and On stage pages show none.
 
 6. In the black window you will see a line like:
 
@@ -82,9 +112,14 @@ Every day of the event
 - Crew: open the LAN URL, sign in. The halls board shows every hall you
   can see: its countdown, who is in, the last message, open help requests
   and its screens. Click a hall to open it.
-- Presenters and guests: open the LAN URL, choose "Join with a code", type
-  the hall's code, a name, and where you are (on stage, backstage,
-  observer).
+- Presenters and guests: open the LAN URL, choose "Join with a code" and
+  type the room's code first. Once it is typed the page names the room
+  ("Hall 2", or "Legal · Hall 2") and offers its seats: Backstage or
+  Observer in a hall's Main room (On stage only from an On stage invite
+  link), Member or Observer in its other rooms. Then your name and your
+  seat. A code that opens nothing says so under it: "No hall or room has
+  that code." A code switched off, or replaced by New code, reads the
+  same, except for someone already seated there.
 - On stage: read, reply, answer the backstage team's questions, send
   Priority and ask for Help. On stage seats cannot share files, ask
   questions or send to other rooms: what they write stays in their room,
@@ -159,7 +194,12 @@ run the show on the build you rehearsed.
   with the losses "Going back to 0.5.1" names below. It opens each hall
   but none of a hall's other rooms (their files stay, and 0.6 opens them
   again), and its reset or removal of any hall can delete a file only
-  one of those rooms holds. Do not go back to 0.5.1 during a show.
+  one of those rooms holds. A hall's code switched off admits guests
+  again under 0.5.1 (back on 0.6 it is off again), and a hall's New code
+  is lost: under 0.5.1, and after it, the hall's old code (its address)
+  admits again and the new one does not (choose New code again). Do not
+  go back to 0.5.1 during a show. The admin page says so too, under its
+  build line.
 
 Windows Firewall, a new folder, a standard account, a Public network
 ---------------------------------------------------------------------
@@ -187,8 +227,8 @@ One word for each thing, on every page:
              "meeting" or "session".
   room       Where a hall's people write to each other, named as the hall
              is: "Hall 2".
-  code       The 6 characters a guest types to join a room; on the admin
-             page, the guest code.
+  code       The 6 characters a guest types to join a room, each room its
+             own; on the admin page, the guest code.
   seat       Where a person sits: On stage, Backstage or Observer (the join
              page asks where you are).
   the Board  Everyone seated On stage: presenters and board members.
@@ -346,7 +386,9 @@ message, and each person under People, opens a small menu: Mention puts
 "@Kim " in your message box. The ⋯ beside Send holds Draft a reply,
 Priority, Attach a file..., Remove the file and Cancel the reply (Escape
 in the message box or on Send does that too). The guest code in the header copies
-the code or the join link; the countdown there, for the backstage team,
+the code or the join link, and for the admin turns it off or on or makes
+a new one; it shows "(off)" while it admits nobody new, and nothing for a
+page that may not know it. The countdown there, for the backstage team,
 opens the speaker's screen box or shows the countdown on the hall's
 screens. The first Tab is "Skip to message box" ("Skip to messages" for
 an observer). The messages are one Tab stop: the arrow keys move between

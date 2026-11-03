@@ -64,6 +64,7 @@
             <div id="watchedRoomName" class="watched-room-name muted" hidden></div>
             <span class="muted" id="watchedKeyWord" style="font-size:.8rem; letter-spacing:.06em">Code</span>
             <h2 class="room-code-big" id="watchedRoomCode">—</h2>
+            <p class="hint watched-code-note" id="watchedCodeNote" hidden></p>
           </div>
           <div class="admin-room-stats">
             <div><strong id="userCount">0</strong><br><small>people</small></div>
@@ -74,7 +75,7 @@
 
         <section class="admin-tools" id="roomTools" hidden>
           <div id="invitesPanel" hidden>
-            <label class="admin-inline"><input type="checkbox" id="lockRoles" /> On stage and Backstage seats need an invite link (anyone else joins as an observer)</label>
+            <label class="admin-inline"><input type="checkbox" id="lockRoles" /> <span id="lockWords">On stage and Backstage seats need an invite link (anyone else joins as an observer)</span></label>
             <div id="inviteLinks" class="invite-links"></div>
             <div class="row end"><button id="closeInvitesBtn" class="btn ghost small" type="button">Close</button></div>
           </div>
@@ -138,6 +139,7 @@
           <p class="hint"><span id="acctCount">—</span> · <a href="/users.html">Manage people, roles and halls</a> · <a href="/users.html#audit">Audit log</a></p>
           <label class="row"><input id="remoteAdmin" type="checkbox" /> Let accounts with admin rights sign in through the Cloudflare tunnel (off: admins sign in on the venue network only)</label>
           <p class="hint" id="buildLine"></p>
+          <p class="hint" id="rollbackLine">Do not go back to 0.5.1 during a show. Under 0.5.1 a hall's code switched off admits guests again, a hall's New code is lost (its address admits again, the new code does not), a hall's other rooms do not open (their files stay), its reset or removal of any hall can delete a file only one of those rooms holds, and its check reads the audit log as broken.</p>
           <h3>🩺 Health</h3>
           <p id="healthLine" class="hint">—</p>
           <div id="auditHealth" class="audit-health">

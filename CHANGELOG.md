@@ -2706,6 +2706,134 @@ rooms and the pages' room switcher are the units that follow)
 - Rolling back: 0.5.1 loads the halls and leaves the side rooms' files as they are (unit 4); their `room.*` rows read as
   any other row. A hall's accounts pruned stay pruned.
 
+**Each room has its own guest code, switched on or off, and renewed** (the plan's Part 1, unit 7, its §1.2, §1.3, §1.5,
+§2.2, §2.3, §2.7, §3.1, §3.3 and §7.1, with Part 5's code-first join page (§15.4) and its `code` and `adminRoom` rows,
+Part 7's "no code On stage" (§0.1), Part 4's join page offering On stage only from an invite link (§5.9.2.1; the server's
+own rule in an open hall is a later unit's), and owner questions 5 and 8, "Defaults" and "Right": the admin alone
+switches codes, and codes are shown only by `mayKnowCode`; the tree's tests, end to end and pure. The Accounts page's
+rooms and the pages' room switcher are the units that follow)
+- **A room's guest code is its own.** A side room's is made with it, 6 characters no room holds (no room's key, live code
+  or earlier code: `newGuestCode`), never its key; a hall's Main room's is its key until it is renewed, so a hall of 0.5.1
+  keeps the code its guests know with nothing written. The store indexes every code (`byCode`, `byRetired`): a code is
+  one room's, a duplicate is refused, and of two rooms on disk claiming one code (a file edited by hand) the first by key
+  holds it and the other's admits nobody, said on the console by the room, never by the code. A new hall or room is
+  made under no code either.
+- **Switched on or off by the admin** (`room:update {code, codeOn, keepGuests}`; never from an On stage page, and refused
+  to a project manager, "Not admin": owner question 5). A side room's code is off until switched on, so a new room is
+  for the admin and the accounts given it; a Main room's is on until switched off. Off, nobody new joins with it: "Turn
+  off" keeps the guest pages in (a guest whose Wi-Fi drops comes back within the grace, and a locked room's seats outlive
+  a restart's first seconds); "Turn off and send them out" closes each guest page in the room ("This room is for
+  signed-in accounts now.") and forgets the seats it held, saved ones included; accounts stay either way, and so does the
+  laptop's token admin's own page, which is no guest page. Each switch is one meta op its pages hear (whether the code is
+  on, never the code): sent out, the switch and the seats that go are that one op, each guest page taken out of the room
+  before it is closed, so no close writes a seat of its own. A switch already made is answered `already`.
+- **Renewed by the admin** (`room:update {code, newCode: true}`, New code…): a new code at once, written with the room's
+  snapshot and never an op, so no op log, ring or resume holds it. The guests in stay; the code before it joins the
+  room's earlier codes (the newest three, kept in its snapshot), which admit only a person already seated there and spend
+  no lock (a hall of phones coming back on it behind one venue address is not locked out); the invite links made with it
+  stop, since an invite is made with the room's code. A renewed hall's key is an address only. The new code outlives a
+  restart: a renewal holds only once its snapshot is written (the snapshot is the one place a code is kept), and one the
+  disk refuses is taken back whole and answered so ("No new code was made: it could not be saved. The code stays as it
+  was."). A hall's snapshot gains `guestCode` and `retired` only once renewed; one never renewed is written as 0.5.1
+  wrote it, byte for byte.
+- **The lookup and the join by code.** `GET /api/rooms/:code` answers the room a live code opens, switched on: its name,
+  whether its seats are locked, and appended its hall's name and whether it is the hall's Main room (`hallName`, `main`).
+  A code switched off, an earlier code, a room's key and a code no room has are one answer, `{code, exists: false, name:
+  '', locked: false}`, and each counts against the lookup's lock; a guest's join with any of them is "Room not found", the
+  join's lock spent for all but an earlier code. A guest joins a side room by its code as a Member (backstage: messages
+  and files, no stage) or an observer; On stage there is refused ("On stage seats are in the hall's Main room."), and the
+  admin's seat move refuses it too, and its picker and Seat ▸ offer a side room's two seats alone; a side room says "Kim
+  joined as a Member", and its pages (the header, People, a sender's seat) and the admin page's people rows call the seat
+  Member, from the join's answer's `main`, appended (whether the room is its hall's Main room). A room's pages, seats and
+  people are its key's, whatever code the page typed; the join's answer keeps the code it was sent. The laptop's token
+  admin, which has no account and joins by a code as a guest does, is a member of every room: a code admits its own page
+  whether it is on or off, live or earlier, a room's key does too, its misses spend no lock, and it holds no saved seat.
+- **Invites per room.** `admin:invites` answers any room, its links made with its guest code: On stage and Backstage in a
+  hall's Main room, a Member's in a side room, with whether the code admits now. The admin page's Roles & invites is on a
+  side room too ("Member seats need an invite link"), and says when the code is off that the links admit nobody new.
+- **Who is told a code** (`mayKnowCode`): the admin; those who set halls up (they hand codes out); an account whose own
+  rights in that room already hold what the code gives a guest (a Tech in its halls; a Staff account in a side room it is
+  given); a guest, the code it typed while it is still the room's. Never a page seated On stage (a Board tablet is handed
+  no code), a Viewer, or a Staff account in a hall's Main room: **Staff and Viewers are no longer shown a hall's code**,
+  as they were in 0.5.1 (owner question 8). It decides the join's answer (`guestCode`, `codeOn`, and `setsCode`: the
+  admin, on a page that names the room by its key), each page's `guestCode` event as the code is switched or renewed,
+  `/api/halls`' and the halls board's `guestCode` and `codeOn` per watcher, and a room's settings. The admin's room list
+  carries each room's `guestCode`, `codeOn`, its guest pages now (`guests`) and, for a hall, whether its code is still its
+  key (`codeIsKey`). A code is in no audit row, no console line and no frame to a page that may not know it, but for the
+  residual that follows. The admin's support view is told what the person's own page is told (none to a Staff account's
+  view, a Tech's the code, a guest's the code it typed), and never `setsCode`: it draws the person's doors, and acts on
+  nothing.
+- **The residual, said:** until New code a hall's code is its key, so wherever its key appears its code does: its pages'
+  address, the halls board's and `/api/halls`' rows and links (`code`, which every account that sees the hall reads,
+  Staff and Viewers included), and the audit rows that name the hall by its key (`room.code`, `hall.*`), as in 0.5.1. The
+  admin page says so beside the watched hall's code and marks each such hall in its list ("code is its address"; "This
+  hall's code is also its address: anyone with an account in it can read it. Choose New code to separate them."). Halls
+  made now start the same way; a side room never has it.
+- **The pages.** The hall page's code chip shows the code the server tells it (no longer the page's address), "(off)"
+  while it admits nobody new, and nothing where the page may not know it; an observer guest now sees the code it typed;
+  the page's title names the room. On the admin's own hall page it adds Turn the code off… (the three-way ask: Turn off,
+  Turn off and send them out, Keep it on) or Turn the code on, and New code… (`code.toggle`, `code.new`). The admin page's
+  room ⋯ gains the same two (`adminRoom.codeToggle`, `adminRoom.newCode`), its rows and the watched room's header show the
+  code ("· code K3TW9A off" on a side room), and a hall's row its guest code. The halls board's chip and Copy guest code
+  follow the server's `guestCode`, live. An ask with more than one way to say yes hands its runner the one chosen
+  (`choice`), and the hall page asks first only where a row's ask is made for that object, as the other pages do (Turn
+  the code on asks nothing). `halls.manage`'s words read "Create halls and their rooms, set them up (names, Stagewatch link, holding
+  image) and hand out their guest codes".
+- **The join page asks for the code first.** Once six characters are still for half a second, or on Enter, or on leaving
+  the field, the code is looked up, once for each value (a corrected sixth character once more), and the page names the
+  room ("Legal · Hall 2") and offers its seats only: Backstage and Observer in a hall's Main room, On stage only from an
+  On stage invite link (with "On stage seats come with an invite link from the backstage team."), Member and Observer in
+  a side room. No seat is chosen on a first visit; the remembered one and an invite's are, and a remembered On stage seat
+  without the link falls back to Observer. A wrong code is said at the field ("No hall or room has that code. Check it
+  with whoever gave it to you."). The field is `autocomplete=off`, `enterkeyhint=go`, monospace at 16 px.
+- `help:respond` from a hall page reads the code the page joined with as its own room, so a guest whose code was renewed
+  still marks its own request sorted.
+- Tests: `test/codes.test.js` (new), end to end: a side room's code off at birth and refused word for word as a wrong
+  code and a key are; the code acts' refusals by type and right ("Not admin" to a project manager); switched on, the
+  lookup's answer, On stage refused, a Member's seat and its line, the admin's seat move refused; Turn off keeping two
+  guest pages, a newcomer refused, a dropped guest back within the grace and not in another seat; Turn off and send them
+  out (each told, closed, no seat to come back to, the account's page staying) and the meta ops a resume reads; one row
+  each, none with the code. New code on a locked hall: the guest in stays and is told no code, the key a wrong code now,
+  the old invites seating an observer with the new code and nobody with the old, the seat holder back on the old code,
+  a dozen earlier-code joins spending no lock, and after a restart the snapshot's `guestCode` and `retired` and the new
+  code admitting. A code switched off counting against the lookup's lock (twelve misses) and the join's (ten), as a wrong
+  one does. Who is told a code: the join's answer for a Tech, Staff, a Viewer, On stage, an observer guest and a side
+  room's guest; the board and `/api/halls` for five accounts; New code told to each page as it may know it; no op, resume,
+  audit row or frame to a page that may not know it carrying the new code. The laptop's token admin's own page in a
+  locked side room: by its key, seated and told the code, not counted among the guest pages, staying through Turn off and
+  send them out, back by the code and by the key while it is off, and a dozen misses spending no lock; that send-out with
+  two seated guests and an observer one meta op, `{codeOff: true, seats: {}}`, and its repeat `already`; the side room's
+  invites a Member's alone, made with its code, a Member seated by the link and an observer without. The support view of
+  a Tech, a Staff account, a guest and nobody: the person's code or none, never `setsCode`, and New code told to each as
+  the person's page hears it. `test/units.test.js`: the store's index, its refusals, renewals and their newest three, a
+  load with two rooms claiming one code, a code that is its key or no code, and a removal; the snapshot fence with its two
+  optional fields, a renewal written at once or, refused by the disk, taken back whole (the code before it still the
+  room's, the hall not left dirty, one dirty before it still dirty); `ROOM_SENDS` with `sendGuestsOut` and
+  `codeChanged`. `test/accounts.test.js`: `rbac.mayKnowCode`.
+  `test/halls.test.js`: `room:settings` with the code, a project manager refused a code act (on purpose). The support
+  view of the laptop's token still names a side room by its key. `test/catalog.test.js`: the hall page's facts from the
+  server's `guestCode` and `setsCode`, the code chip's rows by seat (On stage, a Viewer and Staff none; the admin's four),
+  `adminRoom`'s code rows and their asks, `hall.code` only where told, an ask's `choices`, Seat ▸ by the room's kind.
+  `test/menus.test.js`: each code act refused to every seat it is hidden from ("Not admin", the On stage seat's too),
+  nothing switched or renewed; the join's answer's last fields (`main`, `guestCode`, `codeOn`, `setsCode`, then `build`).
+  `test/inputs.test.js`: `codeOn`, `newCode` and `keepGuests` null and by type. `test/modules.test.js`: the server's
+  context's new parts, (j) refusing a take that takes `sendGuestsOut` or `codeChanged` or renews a code, and (l) each
+  any-room call with its reason (the support view's person, the token admin's page by a key, a room's invites). The browser
+  smoke: the join page's code first (the room named once still, its seats only, On stage only from an invite link,
+  none chosen on a first visit, a wrong code at the field, one lookup per value) and a remembered On stage falling back to
+  Observer; the admin's code chip (its four acts in step, the three-way ask, every page's chip "(off)" and back); a side
+  room's New code… and Turn the code on on the admin page, and the hall's residual note and its row's mark; the admin
+  page's rollback line; the phone pass's code chip (none On stage, the observer's its own).
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md` (each room's code; who is told it; the audit list),
+  `SECURITY.md` (room keys and guest codes), `docs/DESIGN.md` (fail closed: a side room's code), `docs/ANALYSIS.md` (the
+  code acts' ids, the fuzz's keys, the snapshot's optional fields, `ROOM_SENDS`), `CLAUDE.md`.
+- Rolling back to 0.5.1 (do not, during a show): a hall's code switched off admits guests again under 0.5.1, and back on
+  0.6 it is off again (`codeOff` stays in its settings); a hall's New code is lost, since 0.5.1's snapshot drops
+  `guestCode`, so under 0.5.1 and after it the hall's key admits again and the new code does not (choose New code
+  again). Side rooms and their codes are 0.6's alone. The admin page says so under its build line ("Do not go back to
+  0.5.1 during a show."), with the other losses of going back: a hall's other rooms not opened, a file only one of them
+  holds removable by a reset, the audit log read as broken.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

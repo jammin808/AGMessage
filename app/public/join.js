@@ -100,39 +100,111 @@
   });
 
   // ---------------------------------------------------------------- join with a code
+  // The code first. Once six characters have been still for half a second, or on Enter, or on leaving the field, the
+  // code is looked up, once for each value (each miss counts against the lookup's lock for everyone behind this address,
+  // so a lookup on every key would let a corrected typo count), and the page names the room it opens ("Legal · Hall 2")
+  // and offers that room's seats only: a hall's Main room On stage (only from an On stage invite link), Backstage and
+  // Observer; a side room Member and Observer. No seat is chosen on a first visit; the seat remembered here, or an
+  // invite's, is.
   const nameInput = $('name');
   const codeInput = $('code');
+  const STILL_MS = 500;
+  const MISS = 'No hall or room has that code. Check it with whoever gave it to you.';
+  let remembered = '';
   try {
     nameInput.value = localStorage.getItem('agm.name') || '';
-    const savedRole = localStorage.getItem('agm.role');
-    const r = savedRole && document.querySelector(`input[name="role"][value="${savedRole.replace(/[^a-z]/g, '')}"]`);
-    if (r) r.checked = true;
+    remembered = (localStorage.getItem('agm.role') || '').replace(/[^a-z]/g, '');
   } catch { /* storage blocked: nothing remembered */ }
-
-  if (params.get('code')) codeInput.value = params.get('code').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  // Invite links (?code=…&role=board&invite=…) from the admin: pick that role and carry the invite through.
+  // Invite links (?code=…&role=…&invite=…) from the admin: that seat, and the invite carried through. On stage is offered
+  // only from an On stage invite link.
   const invite = params.get('invite') || '';
-  if (invite && params.get('role')) {
-    const r = document.querySelector(`input[name="role"][value="${params.get('role').replace(/[^a-z]/g, '')}"]`);
-    if (r) r.checked = true;
+  const invited = invite ? (params.get('role') || '').replace(/[^a-z]/g, '') : '';
+  const boardOffered = invited === 'board';
+  const cleanCode = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (params.get('code')) codeInput.value = cleanCode(params.get('code')).slice(0, 6);
+
+  const lookups = new Map();   // a code -> its lookup's answer (a promise), so no value is looked up twice
+  let room = null;             // the answer for the code in the field, once it opens a room
+  let stillTimer = null;
+  /** The code's answer: asked once per value; {exists, name, hallName, main, locked} or {status: 429}. */
+  function lookup(code) {
+    if (!lookups.has(code)) lookups.set(code, AGM.api('GET', '/api/rooms/' + encodeURIComponent(code)));
+    return lookups.get(code);
   }
-  codeInput.addEventListener('input', () => { codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
+  /** The code in the field looked up now (a code that is not six characters yet is none), and the page drawn from it. */
+  async function settle() {
+    clearTimeout(stillTimer);
+    const code = codeInput.value;
+    if (code.length !== 6) { drawRoom(null, ''); return null; }
+    const data = await lookup(code);
+    if (codeInput.value !== code) return null;   // typed on meanwhile: the newer value is drawn when it is still
+    if (data.status === 429) { lookups.delete(code); drawRoom(null, 'Too many attempts — wait a minute.'); return null; }
+    drawRoom(data.exists ? data : null, data.exists ? '' : MISS);
+    return data.exists ? data : null;
+  }
+  /** The room line and its seats, or the words of a miss at the field (and no seat to choose). */
+  function drawRoom(data, miss) {
+    room = data;
+    fail('codeError', miss);
+    const line = $('roomLine');
+    line.hidden = !data;
+    line.textContent = !data ? '' : data.main ? data.name || 'A hall with no name' : (data.name || 'A room with no name') + ' · ' + (data.hallName || 'a hall with no name');
+    $('seatSet').hidden = !data;
+    if (!data) return;
+    const main = data.main !== false;
+    const offered = { board: main && boardOffered, research: true, observer: true };
+    for (const opt of document.querySelectorAll('#seatSet .role-option')) {
+      const seat = opt.dataset.seat;
+      opt.hidden = !offered[seat];
+      if (!offered[seat]) opt.querySelector('input').checked = false;
+    }
+    $('researchWord').textContent = main ? 'Backstage' : 'Member';
+    $('researchWhat').textContent = main ? 'Crew or the backstage team — messages, files, action prompts' : 'Messages and files in this room';
+    // On stage is given, never chosen: said where it is not offered in a hall's Main room. A remembered On stage seat
+    // falls back to Observer, never to Backstage, which downloads, shows and sends to the speaker's screen.
+    const hint = $('seatHint');
+    hint.textContent = main && !boardOffered ? 'On stage seats come with an invite link from the backstage team.' : '';
+    hint.hidden = !hint.textContent;
+    if (!document.querySelector('input[name="role"]:checked')) {
+      const want = invited || remembered;
+      const pick = want === 'board' && !offered.board ? 'observer' : offered[want] ? want : '';
+      if (pick) document.querySelector('input[name="role"][value="' + pick + '"]').checked = true;
+    }
+  }
+  codeInput.addEventListener('input', () => {
+    const clean = cleanCode(codeInput.value).slice(0, 6);
+    if (codeInput.value !== clean) codeInput.value = clean;
+    clearTimeout(stillTimer);
+    if (room || !$('codeError').hidden) drawRoom(null, '');
+    if (clean.length === 6) stillTimer = setTimeout(settle, STILL_MS);
+  });
+  codeInput.addEventListener('change', settle);
+  codeInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault();
+    settle().then((data) => { if (data) nameInput.focus(); });
+  });
+  // A code that came with the link is still already.
+  if (codeInput.value.length === 6) settle();
 
   $('joinForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     fail('error', '');
     const name = nameInput.value.trim();
-    const role = document.querySelector('input[name="role"]:checked')?.value || 'observer';
     const code = codeInput.value.trim().toUpperCase();
-    if (!name) return fail('error', 'Type your name.');
     if (code.length !== 6) return fail('error', 'The code has 6 characters.');
-    const data = await AGM.api('GET', '/api/rooms/' + encodeURIComponent(code));
-    if (data.status === 429) return fail('error', 'Too many attempts — wait a minute.');
-    if (!data.exists) return fail('error', 'No room has that code. Check it with whoever gave it to you.');
-    if (data.locked && role !== 'observer' && !invite) return fail('error', 'This one uses invite links for on-stage and backstage seats. Use the link you were sent, or join as an observer.');
+    const data = await settle();
+    if (!data) { codeInput.focus(); return undefined; }
+    if (!name) return fail('error', 'Type your name.');
+    const picked = document.querySelector('input[name="role"]:checked');
+    const role = picked ? picked.value : '';
+    if (!role) return fail('error', 'Choose your seat.');
+    if (role === 'board' && !invite) return fail('error', 'On stage seats need the invite link you were sent. Join Backstage or as an Observer, or ask the backstage team.');
+    if (data.locked && role !== 'observer' && !invite) return fail('error', 'This room gives its ' + (data.main ? 'On stage and Backstage' : 'Member') + ' seats by invite link. Use the link you were sent, or join as an observer.');
     try { localStorage.setItem('agm.name', name); localStorage.setItem('agm.role', role); } catch { /* storage blocked: not remembered */ }
     const qs = new URLSearchParams({ code, name, role });
     if (invite) qs.set('invite', invite);
     location.href = '/app.html?' + qs.toString();
+    return undefined;
   });
 })();

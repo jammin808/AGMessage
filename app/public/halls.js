@@ -86,10 +86,19 @@
     renderHelp();
     A.refresh();
   }
-  /** A hall as the catalogue reads it: its code and its name. */
+  /** A hall as the catalogue reads it: its key, its name, and its guest code as the server tells this account ('' else). */
   function hallObject(code) {
     const h = halls.find((x) => x.code === code);
-    return h ? { code: h.code, name: h.name || h.code } : null;
+    return h ? { code: h.code, name: h.name || h.code, guestCode: codeOf(h).guestCode } : null;
+  }
+  /**
+   * A hall's guest code and whether it admits guests: the board's live row (each switch and New code reach it), else the
+   * first paint's (/api/halls); '' when this account may not know it.
+   */
+  function codeOf(h) {
+    const l = live[h.code];
+    const from = l && typeof l.guestCode === 'string' ? l : h;
+    return { guestCode: typeof from.guestCode === 'string' ? from.guestCode : '', on: !!from.codeOn };
   }
 
   // The way into a hall, as this account may use it: backstage where it may post, read only where it may not (the
@@ -130,8 +139,10 @@
     const displaysHtml = (l.displays || []).map((d) => '<span class="disp-chip" data-ok="' + esc(d.state) + '" title="' + esc(d.words) + '">' + esc(d.mark) + ' ' + esc(d.name) + '<span class="sr-only">: ' + esc(d.words) + '</span></span>').join('');
     const href = hallHref(h.code);
     if (open.getAttribute('href') !== href) open.setAttribute('href', href);
+    // The guest code, only where this account may know it, and "(off)" while it admits nobody new.
+    const code = codeOf(h);
     put(open, '<span class="hall-name">' + esc(h.name || h.code) + '</span>' +
-      '<span class="hall-code" title="Crew without an account join with this code">' + esc(h.code) + '</span>');
+      (code.guestCode ? '<span class="hall-code" title="' + (code.on ? 'Guests without an account join with this code' : 'This code is off: nobody new joins with it') + '">' + esc(code.guestCode) + (code.on ? '' : ' (off)') + '</span>' : ''));
     // An unlinked hall says so quietly, with no clock to read.
     put(clock, state === 'none'
       ? '<span class="hall-state"><span aria-hidden="true">○</span> No Stagewatch linked</span>'
@@ -319,11 +330,11 @@
     'hall.open': (o) => { location.href = hallHref(o.code); },
     'hall.tab': (o) => { window.open(hallHref(o.code), '_blank', 'noopener'); },
     'hall.copy': (o, c) => AGM.copy(new URL(hallHref(o.code), location.href).href, { said: 'Copied the link to ' + o.name + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
-    'hall.code': (o, c) => AGM.copy(o.code, { said: 'Copied ' + o.name + '\'s guest code, ' + o.code + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
+    'hall.code': (o, c) => AGM.copy(o.guestCode, { said: 'Copied ' + o.name + '\'s guest code, ' + o.guestCode + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
     'hall.setup': (o) => openSetup(o.code),
     'hall.network': () => openNetwork(),
   });
-  A.bind($('hallList'), { kind: 'hall', find: (el) => el.closest('#hallList > li[data-key]'), get: hallObject, label: 'Hall actions', gone: 'That hall is gone.', header: (o) => o.name + ' · ' + o.code });
+  A.bind($('hallList'), { kind: 'hall', find: (el) => el.closest('#hallList > li[data-key]'), get: hallObject, label: 'Hall actions', gone: 'That hall is gone.', header: (o) => o.name + (o.guestCode ? ' · ' + o.guestCode : '') });
   A.bind($('helpList'), { kind: 'help', find: (el) => el.closest('#helpList > li[data-key]'), get: helpObject, label: 'Help request actions', gone: 'That help request is gone: it was resolved or removed.', header: (o) => o.category + ' · ' + o.hall });
   AGM.roving($('hallList'), { item: 'li[data-key]' });
   AGM.roving($('helpList'), { item: 'li[data-key]' });
@@ -398,7 +409,7 @@
     const r = await AGM.api('POST', '/api/rooms', { name: $('hallName').value.trim() });
     if (!r.code) { AGM.toast(r.error || 'Not created.', true); return; }
     $('hallDialog').close();
-    AGM.toast('Created ' + (r.name || r.code) + ' — code ' + r.code + '.');
+    AGM.toast('Created ' + (r.name || r.code) + ' — guest code ' + r.code + '.');
     load();
   });
 

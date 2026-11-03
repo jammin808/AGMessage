@@ -146,6 +146,8 @@ function showDashboard() {
     ADMIN.refresh();
   });
   socket.on('actionUpdate', () => { /* admin doesn't need to render */ });
+  // The watched room's guest code was switched or renewed (here or in another tab): its header, and the list.
+  socket.on('guestCode', ({ guestCode, codeOn } = {}) => { codeNow(typeof guestCode === 'string' ? guestCode : '', !!codeOn); refreshRooms(); });
   // Another admin tab closed the hall this one is watching: show what is left.
   socket.on('roomClosed', ({ code } = {}) => { if (currentRoom && currentRoom.code === code) location.reload(); else refreshRooms(); });
   socket.on('pinUpdate', () => { /* same */ });
@@ -178,15 +180,24 @@ function roomAt(code) {
 }
 /**
  * A room as the catalogue reads it: its key, its name, whether it is a hall (its Main room) or a side room beside one,
- * how an ask names it (a side room by its hall's name and its own, "Hall 2 › Legal") and whether this page watches it.
+ * how an ask names it (a side room by its hall's name and its own, "Hall 2 › Legal"), whether this page watches it, and
+ * its guest code (`on`: whether it admits guests, `guests`: the guest pages in it now, `codeIsKey`: a hall whose code is
+ * still its address).
  */
 function roomObject(code) {
   const at = roomAt(code);
   if (!at) return null;
   const main = at.room === at.hall;
   const named = main ? at.room.name || code : (at.hall.name || at.hall.code) + ' › ' + (at.room.name || code);
-  return { code, name: at.room.name || '', hall: named, main, watched: !!currentRoom && currentRoom.code === code };
+  return {
+    code, name: at.room.name || '', hall: named, main, watched: !!currentRoom && currentRoom.code === code,
+    guestCode: at.room.guestCode || '', on: !!at.room.codeOn, guests: Number.isInteger(at.room.guests) ? at.room.guests : null, codeIsKey: main && !!at.hall.codeIsKey,
+  };
 }
+/** What a hall whose code is still its address says (the residual: its key is its code until New code). */
+const RESIDUAL = 'This hall\'s code is also its address: anyone with an account in it can read it. Choose New code to separate them.';
+/** A room's guest code as its row says it: the code, and "off" while it admits nobody new. */
+const codeWords = (r) => (r.guestCode ? 'code ' + r.guestCode + (r.codeOn ? '' : ' off') : 'no code');
 /** A room's ⋯ as a screen reader names it. */
 const actionsOf = (o) => (o.main ? 'Hall actions' : 'Room actions');
 /**
@@ -221,11 +232,16 @@ function renderRoomList(rooms) {
     if (watched) { delete pick.dataset.action; pick.setAttribute('aria-current', 'true'); } else { pick.dataset.action = 'adminRoom.watch'; pick.removeAttribute('aria-current'); }
     // A hall by its name and its code; a side room by its name, under its hall (its key is an address, said when watched),
     // its hall said in its name to a screen reader too, which hears the rows as a list and not as set in.
+    // A hall by its guest code (its key until New code), a side room's after its counts; each "off" while it admits nobody new,
+    // and a hall whose code is still its address marked so (the residual, plan 1-§2.3), its whole words in the row's title.
     const counts = `<small>${r.users.length} ${r.users.length === 1 ? 'person' : 'people'}` +
-      ` · ${escapeHtml(String(r.messageCount))} message${r.messageCount === 1 ? '' : 's'}</small>`;
+      ` · ${escapeHtml(String(r.messageCount))} message${r.messageCount === 1 ? '' : 's'}` + (side ? ' · ' + escapeHtml(codeWords(r)) : r.codeOn ? '' : ' · code off') +
+      (!side && r.codeIsKey ? ' · <span class="code-is-key">code is its address</span>' : '') + '</small>';
+    const residual = !side && r.codeIsKey ? RESIDUAL : '';
+    if (pick.title !== residual) pick.title = residual;
     const pickHtml = side
       ? `<span class="room-name">${escapeHtml(r.name || key)}</span><span class="sr-only">, a room of ${escapeHtml(hall.name || hall.code)}</span>` + counts
-      : (r.name ? `<span class="room-name">${escapeHtml(r.name)}</span>` : '') + `<strong>${escapeHtml(key)}</strong>` + counts;
+      : (r.name ? `<span class="room-name">${escapeHtml(r.name)}</span>` : '') + `<strong>${escapeHtml(r.guestCode || key)}</strong>` + counts;
     if (pick.innerHTML !== pickHtml) pick.innerHTML = pickHtml;
     // Moved only when out of place: a row taken out and put back would lose the focus.
     if (list.children[i] !== li) list.insertBefore(li, list.children[i] || null);
@@ -242,7 +258,7 @@ function createNewRoom() {
     if (!a.yes) return;
     AGM.outbox.now('admin:createRoom', { name: a.values.name }, (res) => {
       if (!res?.ok) { say(res?.error || 'Not created.', true); return; }
-      say('Created ' + (res.name || res.code) + ' — code ' + res.code + '.');
+      say('Created ' + (res.name || res.code) + ' — guest code ' + res.code + '.');
       watchRoom(res.code);
     });
   });
@@ -253,7 +269,10 @@ function watchRoom(code, then) {
   socket.emit('admin:watchRoom', { roomCode: code }, (res) => {
     if (!res?.ok) { say(res?.error || 'Not watched.', true); return; }
     const listed = roomObject(code);
-    currentRoom = { code, name: res.name || '', title: listed ? (listed.main ? listed.name : listed.hall) : res.name || '', main: !listed || listed.main, messages: res.messages || [], users: res.users || [] };
+    currentRoom = {
+      code, name: res.name || '', title: listed ? (listed.main ? listed.name : listed.hall) : res.name || '', main: res.main !== false, messages: res.messages || [], users: res.users || [],
+      guestCode: res.guestCode || '', codeOn: !!res.codeOn,
+    };
     const head = document.getElementById('roomHeader');
     head.hidden = false;
     head.dataset.key = code;
@@ -271,13 +290,31 @@ function watchRoom(code, then) {
   });
 }
 
-/** The watched room's header: its name (a side room by its hall's name and its own), and its code, or its key. */
+/**
+ * The watched room's header: its name (a side room by its hall's name and its own); a hall by its guest code, a side room
+ * by its key (an address) with its guest code under it; whether the code admits guests; and a hall whose code is still
+ * its address said so (the residual: anyone with an account in it reads its code from its address until New code).
+ */
 function drawWatched() {
-  document.getElementById('watchedRoomCode').textContent = currentRoom.code;
-  document.getElementById('watchedKeyWord').textContent = currentRoom.main ? 'Code' : 'Room key';
+  const r = currentRoom;
+  document.getElementById('watchedRoomCode').textContent = r.main ? r.guestCode || r.code : r.code;
+  document.getElementById('watchedKeyWord').textContent = r.main ? 'Code' : 'Room key';
   const nameEl = document.getElementById('watchedRoomName');
-  nameEl.textContent = currentRoom.title;
-  nameEl.hidden = !currentRoom.title;
+  nameEl.textContent = r.title;
+  nameEl.hidden = !r.title;
+  const said = [];
+  if (!r.main) said.push('Guest code ' + (r.guestCode || '—') + (r.codeOn ? ': guests join with it.' : ': off. The admin and the accounts given this room go in.'));
+  else if (!r.codeOn) said.push('The code is off: guests already in stay, and nobody new joins with it.');
+  if (r.main && r.guestCode === r.code) said.push(RESIDUAL);
+  const note = document.getElementById('watchedCodeNote');
+  note.textContent = said.join(' ');
+  note.hidden = !said.length;
+}
+/** The watched room's guest code as the server says it now (a switch or New code, from this page or another). */
+function codeNow(guestCode, codeOn) {
+  if (!currentRoom) return;
+  Object.assign(currentRoom, { guestCode, codeOn });
+  drawWatched();
 }
 /** The watched room named as its settings say now (room:settings: its name, its hall's, whether it is the Main room). */
 function nameWatched(code) {
@@ -295,7 +332,7 @@ function personObject(sid) {
   if (!u) return null;
   const linkedNames = {};
   for (const rm of u.linkedRooms || []) { const nm = roomNameForCode(rm); linkedNames[rm] = nm ? nm + ' · ' + rm : rm; }
-  return { ...u, hall: hallName(), linkedNames };
+  return { ...u, hall: hallName(), linkedNames, main: watchedIsMain() };
 }
 const hallName = () => (currentRoom ? currentRoom.title || roomNameForCode(currentRoom.code) || currentRoom.code : '');
 /** The people, drawn in place by their page's id: Name, Seat (a code guest's select; an account's follows its rights), May forward to, and the ⋯. */
@@ -481,13 +518,16 @@ function escapeHtml(s) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 }
-/** The seat picker's options, the person's own selected. */
+/** Whether the watched room is a hall's Main room (a side room has no stage: no seat there is On stage). */
+function watchedIsMain() { return !currentRoom || currentRoom.main !== false; }
+/** The seat picker's options, the person's own selected: On stage only in a hall's Main room. */
 function roleOptionsHtml(current) {
-  return ['board', 'research', 'observer'].map((r) => '<option value="' + r + '"' + (r === current ? ' selected' : '') + '>' + escapeHtml(seatWord(r)) + '</option>').join('');
+  return (watchedIsMain() ? ['board', 'research', 'observer'] : ['research', 'observer']).map((r) => '<option value="' + r + '"' + (r === current ? ' selected' : '') + '>' + escapeHtml(seatWord(r)) + '</option>').join('');
 }
-/** A seat in the words every page uses for it; the role word stays the value the server reads. */
+/** A seat in the words every page uses for it, in the watched room's kind (a side room's backstage seat a Member's); the
+ *  role word stays the value the server reads. */
 function seatWord(role) {
-  return role === 'board' || role === 'director' ? 'On stage' : role === 'research' ? 'Backstage' : role === 'observer' ? 'Observer' : role;
+  return role === 'board' || role === 'director' ? 'On stage' : role === 'research' ? (watchedIsMain() ? 'Backstage' : 'Member') : role === 'observer' ? 'Observer' : role;
 }
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -570,6 +610,22 @@ Object.assign(ADMIN_RUN, {
   'adminRoom.create': (o, c) => AGM.outbox.now('room:create', { hall: o.code, name: (c.values && c.values.name) || '' }, (res) => {
     if (!res || !res.ok) { say((res && res.error) || 'Not made.', true); return; }
     say('Made ' + res.name + ' in ' + o.hall + ': its guest code is off.');
+    refreshRooms();
+  }),
+  // The guest code switched on, or off with the guest pages in it kept or sent out (the ask's choice): said with what it did.
+  'adminRoom.codeToggle': (o, c) => AGM.outbox.now('room:update', o.on ? { code: o.code, codeOn: false, keepGuests: c.choice !== 'out' } : { code: o.code, codeOn: true }, (res) => {
+    if (!res || !res.ok) { say((res && res.error) || 'Not changed.', true); return; }
+    const n = (k) => k + (k === 1 ? ' guest page' : ' guest pages');
+    say(res.codeOn ? 'The guest code of ' + o.hall + ' is on.'
+      : Number.isInteger(res.sentOut) ? 'The guest code of ' + o.hall + ' is off: ' + n(res.sentOut) + ' sent out.'
+        : 'The guest code of ' + o.hall + ' is off' + (Number.isInteger(res.kept) ? ': ' + n(res.kept) + ' stay.' : '.'));
+    if (currentRoom && currentRoom.code === o.code) codeNow(currentRoom.guestCode, res.codeOn);
+    refreshRooms();
+  }),
+  'adminRoom.newCode': (o) => AGM.outbox.now('room:update', { code: o.code, newCode: true }, (res) => {
+    if (!res || !res.ok) { say((res && res.error) || 'No new code.', true); return; }
+    say('The new guest code of ' + o.hall + ' is ' + res.guestCode + '.');
+    if (currentRoom && currentRoom.code === o.code) codeNow(res.guestCode, res.codeOn);
     refreshRooms();
   }),
   'adminRoom.rename': (o, c) => AGM.outbox.now('room:update', { code: o.code, name: (c.values && c.values.name) || '' }, (res) => {
