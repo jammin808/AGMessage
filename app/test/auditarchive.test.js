@@ -781,7 +781,7 @@ test('the archive alone: Check on the laptop reads ✓ with its MACs checked; th
   assert.equal((await onPage(dir, { fp: FP })).text, '✓ Signed by the key you expected and whole; the laptop said ✓ when it split this archive off.');
   // The README's three commands work inside it, unchanged.
   if (process.platform !== 'win32') {
-    const sh = (cmd) => require('child_process').execFileSync('sh', ['-c', cmd], { cwd: dir, encoding: 'utf8' });
+    const sh = (cmd) => require('child_process').execFileSync('/bin/sh', ['-c', cmd], { cwd: dir, encoding: 'utf8' });
     assert.equal(sh('openssl pkey -pubin -in signing-key.pem -outform DER | sha256sum').split(' ')[0], FP);
     assert.match(sh('openssl pkeyutl -verify -pubin -inkey signing-key.pem -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig'), /Signature Verified Successfully/);
     assert.match(sh('sha256sum -c SHA256SUMS'), /archive\.json: OK/);

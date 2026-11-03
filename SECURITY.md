@@ -95,6 +95,24 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   counts) and Windows' words for why reach "This laptop" and health. It keeps off idle sleep only: it cannot keep a lid
   that is closed from sleeping. The sleeps the watchdog records are times and counts, never a hall, a name or an
   address.
+- AGMessage loads only what it ships. A `require()` that `app\node_modules` cannot answer makes Node walk every folder
+  above it up to the drive's root, where an account that may make `C:\node_modules` (reading R8 says whether a standard
+  one may on the show laptop) would have its module loaded into AGMessage, with its keys. The server asks for nothing
+  there: ws's native helpers are never asked for (`WS_NO_BUFFER_UTIL`, `WS_NO_UTF_8_VALIDATE`, set by the server before
+  its first `require` and by the watchdog for it), and `supports-color`, which `debug` looks for, ships in
+  `app\node_modules`. A fence starts the watchdog and its server under a resolve hook, with modules planted where that
+  walk ends, and fails on anything loaded from outside `app`, anything the portable folder does not ship, a development
+  package, or a module asked for that `app` cannot answer; what a run does not reach is read from the source, every
+  ask of the shipped scripts followed through each file it reaches, and held to the same.
+- AGMessage runs only what it names by its absolute path: its own `bin\cloudflared.exe` beside `app` (a copy without it
+  has no internet link, and says so, rather than run one found elsewhere), `explorer.exe` and `powershell.exe` under a
+  `SystemRoot` named from its drive, and `reg.exe` in the installer's `{sys}`; never a bare name, which Windows looks for
+  in the current folder and on `PATH` first, whatever the argument array. A fence reads every call in `app` that starts
+  a program, however `child_process` and its functions are reached or named, and holds each to `process.execPath`, a
+  full path, or a register row naming where its full path is made, with no shell; `child_process` handed on where the
+  fence cannot follow it fails. The machine's own commands (`launch.js`, and `machine.js` once it is made) require
+  Node's built-ins only, and reach `require` no other way, so a planted package never runs as the person at the PC or,
+  for `machine.js`, as SYSTEM.
 - A seat On stage holds messages and nothing else, on the server, for the admin seated there too: it is given no upload
   token, and an upload token is checked again when it is used, against the seat its page holds then; the admin's move of
   a page to a seat that shares no file ends its token in the same tick, so that page uploads nothing more with the one it

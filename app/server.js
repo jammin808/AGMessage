@@ -18,6 +18,13 @@
  */
 'use strict';
 
+// The server loads only what it ships. ws asks for its optional native helpers (bufferutil, utf-8-validate) unless these
+// say not to, and a require that app\node_modules cannot answer walks every folder above app\ up to the drive's root,
+// where a module any account may plant (C:\node_modules) would be loaded into AGMessage. Set before the first require,
+// so a server started without its watchdog (which sets them for its child too) never asks.
+process.env.WS_NO_BUFFER_UTIL = '1';
+process.env.WS_NO_UTF_8_VALIDATE = '1';
+
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -2377,10 +2384,13 @@ io.on('connection', (socket) => {
   // away), kept in the settings, so a start before then turns it on again; Tunnel until… moves the end, Turn off forgets
   // it. One already on keeps its end. With settings that could not be read it still turns on, its end held for this run
   // only and the answer saying so (`notKept`): the one act that keeps a setting it cannot save, since what it does is the
-  // link itself, which never waited on the settings.
+  // link itself, which never waited on the settings. A copy without its own cloudflared is refused with why before any
+  // end is kept or forgotten.
   socket.on('admin:tunnelStart', (ack) => {
     if (!admin(ack)) return;
     if (tunnelProc) return ok(ack)({ ...startTunnel(), ...tunnelEndFacts(), notKept: tunnelNotKept() });
+    const missing = noCloudflared();
+    if (missing) return ok(ack)(tunnelRefused(missing));
     const now = Date.now();
     const kept = tunnelend.keptEnd(settings.tunnelUntil, now);
     const until = kept.on ? kept.until : tunnelend.defaultEnd(now, readings.dayEnds);
@@ -3136,7 +3146,7 @@ setInterval(() => {
 }, 1000).unref();
 
 // ---------------------------------------------------------------- Cloudflare tunnel (admin-only)
-let tunnelProc = null, tunnelUrl = null, tunnelError = null, cfLogfile = null, cfLogPoll = null;
+let tunnelProc = null, tunnelUrl = null, tunnelError = null;
 let tunnelUp = false;          // the address is taken as reachable: cloudflared said its connection is registered, or the wait for it ran out
 let tunnelCheck = null;        // the newest check of the link: {at, ok, p50Ms, maxMs, words}
 let tunnelChecking = false;    // one check at a time
@@ -3296,11 +3306,27 @@ async function checkTunnel() {
   return found;
 }
 const startCheck = () => { checkTunnel().catch((e) => console.error('  [tunnel] the link\'s check failed: ' + (e && e.message))); };
-function resolveCloudflaredBin() {
-  const fname = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
-  const bundled = path.join(__dirname, '..', 'bin', fname);
-  try { if (fs.existsSync(bundled)) return bundled; } catch { /* ignore */ }
-  return 'cloudflared';
+/** This copy's own cloudflared, by its absolute path (lib/startup.js cloudflaredFile): bin beside app, never a bare name. */
+const CLOUDFLARED = startup.cloudflaredFile({ programDir: path.dirname(__dirname) });
+/** Why the link has no cloudflared, with the way to put it back that fits how this copy runs (lib/startup.js noCloudflaredWords). */
+const NO_CLOUDFLARED = startup.noCloudflaredWords({ runs: RUNS });
+/**
+ * Why this copy's own cloudflared cannot be run now, in words, or '' when it is there: looked for as each start of the link
+ * is asked, so one taken away since (an antivirus may remove it) is said before anything is run or kept, never looked for
+ * elsewhere.
+ */
+function noCloudflared() {
+  if (!CLOUDFLARED) return NO_CLOUDFLARED;
+  try {
+    const st = fs.statSync(CLOUDFLARED, { throwIfNoEntry: false });
+    return st && st.isFile() ? '' : NO_CLOUDFLARED;
+  } catch (e) { return 'Could not start cloudflared: ' + (e.code || e.message); }   // a folder in the way, or no right to read it
+}
+/** A start of the link refused before anything ran (`words`, why): said on the admin page's card and "This laptop", the link off. */
+function tunnelRefused(words) {
+  tunnelError = words; tunnelUrl = null; tunnelUp = false; tunnelCheck = null; tunnelAgain = null;
+  broadcastTunnelStatus();
+  return { ok: false, error: words };
 }
 /**
  * cloudflared started for this laptop's port; `again`, when a start turns the tunnel on again inside its kept end, else
@@ -3310,18 +3336,18 @@ function resolveCloudflaredBin() {
  */
 function startTunnel(again = null, by = null) {
   if (tunnelProc) return { ok: true, running: true, url: tunnelUrl };
+  const missing = noCloudflared();
+  if (missing) return tunnelRefused(missing);
   tunnelError = null; tunnelUrl = null; tunnelUp = false; tunnelCheck = null; tunnelAgain = again;
+  // In AGMessage's own data folder (one server per folder), not a guessable name in the shared temp folder; this start's
+  // own, read by its own poll, both let go wherever its cloudflared ends (release, below).
+  const logfile = path.join(DATA_DIR, 'cloudflared.log');
   let proc;
   try {
-    // In AGMessage's own data folder (one server per folder), not a guessable name in the shared temp folder.
-    cfLogfile = path.join(DATA_DIR, 'cloudflared.log');
-    try { fs.unlinkSync(cfLogfile); } catch { /* none left from an earlier run */ }
-    proc = spawn(resolveCloudflaredBin(), ['tunnel', '--url', `http://localhost:${PORT}`, '--no-autoupdate', '--logfile', cfLogfile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    try { fs.unlinkSync(logfile); } catch { /* none left from an earlier run */ }
+    proc = spawn(CLOUDFLARED, ['tunnel', '--url', `http://localhost:${PORT}`, '--no-autoupdate', '--logfile', logfile], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   } catch (e) {
-    tunnelError = 'Could not start cloudflared: ' + e.message;
-    tunnelAgain = null;
-    broadcastTunnelStatus();
-    return { ok: false, error: tunnelError };
+    return tunnelRefused(e && e.code === 'ENOENT' ? NO_CLOUDFLARED : 'Could not start cloudflared: ' + e.message);
   }
   tunnelProc = proc;
   let buf = '';
@@ -3344,12 +3370,12 @@ function startTunnel(again = null, by = null) {
   if (proc.stdout) proc.stdout.on('data', sniff);
   if (proc.stderr) proc.stderr.on('data', sniff);
   let logFileSize = 0;
-  cfLogPoll = setInterval(() => {
-    if (!cfLogfile || (tunnelUrl && tunnelUp)) return;
+  let logPoll = setInterval(() => {
+    if (tunnelUrl && tunnelUp) return;
     // One open handle, then its own size: what is read is the file that was opened (no check-then-open race).
     let fd = null;
     try {
-      fd = fs.openSync(cfLogfile, 'r');
+      fd = fs.openSync(logfile, 'r');
       const size = fs.fstatSync(fd).size;
       if (size > logFileSize) {
         const b = Buffer.alloc(Math.min(size - logFileSize, 1 << 20));
@@ -3385,14 +3411,23 @@ function startTunnel(again = null, by = null) {
     }
     broadcastTunnelStatus();
   };
+  /**
+   * This start's log poll stopped and its log file removed, once: at its cloudflared's exit, and at an error, since one
+   * that could not be run (its file gone between the look and the run) says 'error' and never 'exit'.
+   */
+  const release = () => {
+    if (!logPoll) return;
+    clearInterval(logPoll); logPoll = null;
+    try { fs.unlinkSync(logfile); } catch { /* never made, or already gone */ }
+  };
   proc.on('error', (err) => {
-    tunnelError = err && err.code === 'ENOENT' ? 'cloudflared not found — re-extract the bundle (bin/cloudflared.exe).' : 'cloudflared error: ' + (err && err.message);
+    release();
+    tunnelError = err && err.code === 'ENOENT' ? NO_CLOUDFLARED : 'cloudflared error: ' + (err && err.message);
     if (tunnelProc === proc) gone(tunnelError);
     else broadcastTunnelStatus();
   });
   proc.on('exit', (code, signal) => {
-    if (cfLogPoll) { clearInterval(cfLogPoll); cfLogPoll = null; }
-    if (cfLogfile) { try { fs.unlinkSync(cfLogfile); } catch { /* ignore */ } cfLogfile = null; }
+    release();
     if (tunnelProc === proc) {
       if (code !== 0 && code !== null && !tunnelError) tunnelError = 'cloudflared exited (code ' + code + (signal ? ', signal ' + signal : '') + ').';
       gone(tunnelError || 'cloudflared ended (' + (signal ? 'signal ' + signal : 'code ' + code) + ').');

@@ -12,6 +12,10 @@
  *   taskTokenProblem, tokenLine    where the admin token is said: the installed node's watchdog takes no secret from its
  *                                  environment and writes the token into a folder of its own; the banner's Token line
  *                                  holds the token only on a console, where a person sits
+ *   isFullPath                     a path that names its folder or file whole: from the root, or on Windows from a
+ *                                  drive or a network share, never one the current folder or drive completes
+ *   cloudflaredFile, noCloudflaredWords  the internet link's cloudflared, by its absolute path: the one this copy ships,
+ *                                  and, without it, why in words, with the way back for how this copy runs
  */
 const http = require('http');
 const path = require('path');
@@ -19,6 +23,28 @@ const { cleanText } = require('./guard');
 
 /** A Windows folder named from its drive: SystemRoot is never taken relative to wherever this copy runs. */
 const DRIVE_PATH = /^[A-Za-z]:\\/;
+
+/**
+ * The cloudflared this copy runs for its internet link: the one it ships, in bin beside app (`programDir`, the folder app
+ * is in), by its absolute path; null when `programDir` is not a full path (isFullPath) (pure). Never a bare name, which
+ * Windows looks for in the current folder and on PATH first: a copy without its own cloudflared has no internet link,
+ * and says so, rather than run a cloudflared another account left there.
+ */
+function cloudflaredFile({ programDir, platform = process.platform }) {
+  if (!isFullPath(programDir, platform)) return null;
+  return platform === 'win32' ? path.win32.join(programDir, 'bin', 'cloudflared.exe') : path.posix.join(programDir, 'bin', 'cloudflared');
+}
+
+/**
+ * Why the internet link has no cloudflared, in words (pure): this copy's own is not there (or its folder is no full path
+ * to look in), with the way to put it back that fits how it runs (`runs`, channelOf's): the portable folder extracted
+ * again, the installed node repaired by its installer.
+ */
+function noCloudflaredWords({ runs, platform = process.platform }) {
+  const file = platform === 'win32' ? 'bin\\cloudflared.exe' : 'bin/cloudflared';
+  const back = runs === 'task' ? 'repair AGMessage by running its installer again' : 're-extract the portable folder';
+  return 'cloudflared not found in this copy (' + file + '): ' + back + '. AGMessage runs only its own cloudflared, never one from elsewhere on this PC.';
+}
 
 /**
  * Whether this start opens the browser: {open: true, file, args, options, url}, or {open: false, say} where `say` is the
@@ -142,9 +168,12 @@ const TASK_FOLDERS = Object.freeze([['AGM_DATA_DIR', 'data'], ['AGM_UPLOAD_DIR',
 /**
  * Whether `dir` is a full path: from a drive (C:\…) or a share (\\host\…) on Windows, from / elsewhere (pure). A Windows
  * device or long-path prefix (\\?\, \\.\) is not taken: it names the same folders by another spelling, which the check
- * against the program's folder would not see.
+ * against the program's folder would not see. Nor is one the current folder or drive completes (a relative path,
+ * `\server.js` from the current drive's root, `C:server.js` on a drive's current folder): a program named by one is
+ * whatever stands there.
  */
-function isFullPath(dir, platform) {
+function isFullPath(dir, platform = process.platform) {
+  if (typeof dir !== 'string') return false;
   if (platform !== 'win32') return dir.startsWith('/');
   if (/^[\\/]{2}[?.][\\/]/.test(dir)) return false;
   return /^[A-Za-z]:[\\/]/.test(dir) || /^[\\/]{2}[^\\/]/.test(dir);
@@ -238,4 +267,4 @@ function tokenLine({ tty, runs, token, file }) {
   return '    Token: not shown here, since this output is not a window a person reads and may be kept. Start AGMessage in its own window to see it, or set ADMIN_TOKEN, 16 or more random letters and digits, before it starts.';
 }
 
-module.exports = { openerPlan, openBrowser, readPortHolder, portHolderWords, holderOf, channelOf, CHANNELS, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE, TASK_SECRETS };
+module.exports = { openerPlan, openBrowser, isFullPath, cloudflaredFile, noCloudflaredWords, readPortHolder, portHolderWords, holderOf, channelOf, CHANNELS, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE, TASK_SECRETS };

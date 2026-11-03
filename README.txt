@@ -433,7 +433,11 @@ Before doors, with the tunnel on:
 
 Accounts with admin rights cannot sign in through the tunnel unless an
 admin allows it (Admin -> Accounts and access). The bundle ships
-cloudflared.exe in bin\.
+cloudflared.exe in bin\, and AGMessage runs only that one, never a
+cloudflared found elsewhere on the PC. If it is missing (an antivirus may
+remove it), the card says "cloudflared not found in this copy
+(bin\cloudflared.exe): re-extract the portable folder. ..." and the link
+stays off: download the zip again and Extract All.
 
 For a show with remote people, a named Cloudflare Tunnel is better: it
 keeps one address across restarts, so nobody needs a new one mid-show.

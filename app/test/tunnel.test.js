@@ -13,7 +13,7 @@ const os = require('os');
 const path = require('path');
 const WebSocket = require('ws');
 const { io } = require('socket.io-client');
-const { TOKEN, startServer, stopServer, api, connect, emit, wait, until } = require('./helpers');
+const { ROOT, TOKEN, startServer, stopServer, api, connect, emit, wait, until } = require('./helpers');
 const readings = require('../lib/peaks');
 const tunnelend = require('../lib/tunnelend');
 
@@ -346,6 +346,64 @@ test('a cloudflared that never says its connection is registered still has its l
   assert.ok(Date.now() - began >= 1400, 'at the wait\'s end: ' + (Date.now() - began) + ' ms');
   const done = heard.find((s) => s.check);
   assert.deepEqual([done.check.ok, done.checking, link.asked.length], [true, false, 5]);
+});
+
+test('cloudflared is run by its absolute path, this copy\'s own in bin beside app, never by a bare name', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-runs-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const runs = path.join(dir, 'runs.txt');
+  const { ctl, heard } = await linkServer(t, { AGM_TEST_TUNNEL_RUNS: runs });
+  assert.equal((await ask(ctl, 'admin:tunnelStart')).ok, true);
+  await until(() => heard.some((s) => s.url), 4000, 'the address');
+  // Whether or not this checkout has a bin folder: the server asks for that file and no other (a bare name was its fallback).
+  const own = path.join(fs.realpathSync(path.join(ROOT, '..')), 'bin', process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared');
+  assert.deepEqual(fs.readFileSync(runs, 'utf8').split('\n').filter(Boolean), [own]);
+  assert.ok(path.isAbsolute(own));
+});
+
+/** Lines of a file a stand-in writes, or none when it has written nothing. */
+const linesOf = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean) : []);
+const NOT_FOUND = /^cloudflared not found in this copy \(bin[\\/]cloudflared(\.exe)?\): re-extract the portable folder\. AGMessage runs only its own cloudflared, never one from elsewhere on this PC\.$/;
+
+test('a copy without its own cloudflared refuses Turn on with why, runs nothing, keeps no end and leaves nothing polling', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-gone-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const runs = path.join(dir, 'runs.txt');
+  const logs = path.join(dir, 'logs.txt');
+  const { ctl, heard } = await linkServer(t, { AGM_TEST_TUNNEL_GONE: 'look', AGM_TEST_TUNNEL_RUNS: runs, AGM_TEST_TUNNEL_LOGS: logs });
+  const off = await ask(ctl, 'admin:tunnelStart');
+  assert.equal(off.ok, false);
+  assert.match(off.error, NOT_FOUND);
+  const st = await ask(ctl, 'admin:tunnelStatus');
+  assert.deepEqual([st.running, st.url, st.error, st.until, st.untilWords, st.notKept], [false, null, off.error, null, '', ''], 'off, with why, and no end kept');
+  assert.ok(heard.some((s) => s.error === off.error && !s.running), 'the card heard it');
+  assert.deepEqual(await linkRow(ctl), ['off: ' + off.error, 'warn'], '"This laptop" says it');
+  // Asked again: refused the same, and still nothing run, kept or read.
+  assert.deepEqual(await ask(ctl, 'admin:tunnelStart'), off);
+  await wait(1300);
+  assert.deepEqual([linesOf(runs), linesOf(logs)], [[], []], 'no cloudflared run, and no read of its log');
+  assert.equal((await ask(ctl, 'admin:tunnelStatus')).until, null);
+});
+
+test('a cloudflared gone between the look and the run (its run says error, never exit) ends its log\'s poll; Turn on again and Turn off leave none polling', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-gone-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const runs = path.join(dir, 'runs.txt');
+  const logs = path.join(dir, 'logs.txt');
+  const { ctl } = await linkServer(t, { AGM_TEST_TUNNEL_GONE: 'run', AGM_TEST_TUNNEL_RUNS: runs, AGM_TEST_TUNNEL_LOGS: logs });
+  for (let i = 1; i <= 3; i++) {
+    assert.equal((await ask(ctl, 'admin:tunnelStart')).ok, true, 'started: its file was there when looked for');
+    await until(async () => !(await ask(ctl, 'admin:tunnelStatus')).running, 4000, 'the run\'s error read');
+    const st = await ask(ctl, 'admin:tunnelStatus');
+    assert.match(st.error, NOT_FOUND);
+    assert.deepEqual([st.url, st.until], [null, null], 'no address, and the end Turn on kept forgotten: nothing was on');
+    assert.equal(linesOf(runs).length, i);
+  }
+  await ask(ctl, 'admin:tunnelStop');
+  // A poll left behind would open cloudflared.log every 500 ms; none may, after three runs that failed and a Turn off.
+  const before = linesOf(logs).length;
+  await wait(1300);
+  assert.deepEqual([before, linesOf(logs).length], [0, 0], 'no read of cloudflared\'s log left running');
 });
 
 // ---------------------------------------------------------------- the tunnel's end, kept across a restart

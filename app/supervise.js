@@ -41,11 +41,12 @@ const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
 const { SupervisorPolicy, BeatClock, asleepWords, EXIT, writeFileAtomic } = require('./lib/resilience');
-const { channelOf, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE } = require('./lib/startup');
+const { channelOf, isFullPath, taskTokenProblem, tokenLine, TOKEN_FILE, TOKEN_HERE } = require('./lib/startup');
 const { ServerLog, Lines, redact } = require('./lib/serverlog');
 const dataformat = require('./lib/dataformat');
 const { BUILD } = require('./lib/version');
 
+// The server it runs: server.js beside this file, or AGM_CHILD (a test's stand-in server), by its full path only.
 const CHILD = process.env.AGM_CHILD || path.join(__dirname, 'server.js');
 const DATA_DIR = process.env.AGM_DATA_DIR || path.join(__dirname, 'data');
 const HANG_MS = Number(process.env.AGM_HANG_MS) || 10_000;
@@ -59,6 +60,8 @@ function cannotStart(words) {
   console.error('\n  AGMessage cannot start: ' + words + '\n');
   process.exit(EXIT.CONFIG);
 }
+// A path the current folder or drive completes would run whatever server.js stood there in AGMessage's place.
+if (!isFullPath(CHILD)) cannotStart('AGM_CHILD (' + CHILD + ') is not a full path, and AGMessage runs its server only by its full path. Remove AGM_CHILD, or name the file by its full path.');
 const channel = channelOf(process.env, { programDir: path.dirname(__dirname) });
 if (channel.problem) cannotStart(channel.problem);
 const tokenProblem = taskTokenProblem(process.env, { programDir: path.dirname(__dirname) });
@@ -74,7 +77,9 @@ if (formatRefused) cannotStart(formatRefused);
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {
   cannotStart('the data folder ' + DATA_DIR + ' cannot be made (' + (e.code || e.message) + '). Choose a folder this Windows account can write to (AGM_DATA_DIR), or fix that one\'s permissions.');
 }
-const env = { ...process.env, AGM_SUPERVISED: '1', AGM_TEED: '1', AGM_DATA_DIR: DATA_DIR };
+// ws's optional native helpers are never asked for in the server (server.js sets the same before its first require): a
+// require app\node_modules cannot answer walks up to the drive's root, where any account may plant a module.
+const env = { ...process.env, AGM_SUPERVISED: '1', AGM_TEED: '1', AGM_DATA_DIR: DATA_DIR, WS_NO_BUFFER_UTIL: '1', WS_NO_UTF_8_VALIDATE: '1' };
 if (!env.ADMIN_TOKEN) env.ADMIN_TOKEN = crypto.randomBytes(8).toString('hex');
 // The console kept: every line this watchdog and its server say, but the Token line, searched for the token by value.
 const serverLog = new ServerLog(path.join(DATA_DIR, 'logs', 'server.log'), {

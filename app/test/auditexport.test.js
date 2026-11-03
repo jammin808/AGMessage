@@ -288,19 +288,19 @@ test('the formats: unzip -tq, and README.txt\'s three commands word for word (Op
     c.stderr.on('data', (d) => { out += d; });
     c.on('close', (code) => resolve({ code, out }));
   });
-  const t = await run('unzip', ['-tq', zipFile]);
+  const t = await run('/usr/bin/unzip', ['-tq', zipFile]);
   assert.equal(t.code, 0, t.out);
   assert.match(t.out, /No errors detected/);
   const readme = fs.readFileSync(path.join(dir, 'README.txt'), 'utf8').split('\n').map((l) => l.trim());
   const commands = readme.filter((l) => /^(openssl pkey |openssl pkeyutl |sha256sum -c )/.test(l));
   assert.equal(commands.length, 3);
-  const [key, sig, sums] = await Promise.all(commands.map((c) => run('sh', ['-c', c], dir)));
+  const [key, sig, sums] = await Promise.all(commands.map((c) => run('/bin/sh', ['-c', c], dir)));
   assert.deepEqual([key.code, key.out], [0, FP + '  -\n'], 'the key\'s fingerprint, to compare with your record');
   assert.deepEqual([sig.code, sig.out.trim()], [0, 'Signature Verified Successfully']);
   assert.equal(sums.code, 0, sums.out);
   assert.equal(sums.out.split('\n').filter((l) => / OK$/.test(l)).length, 7);
   flip(path.join(dir, 'SHA256SUMS'), 3);
-  assert.notEqual((await run('sh', ['-c', commands[1]], dir)).code, 0, 'one byte changed: the signature fails');
+  assert.notEqual((await run('/bin/sh', ['-c', commands[1]], dir)).code, 0, 'one byte changed: the signature fails');
 });
 
 // ---------------------------------------------------------------- the verifier

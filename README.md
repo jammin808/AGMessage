@@ -107,7 +107,9 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 - **AI drafts (optional, Claude).** Answers for the backstage team from the thread and the document on stage, buttons
   for action prompts, the minutes — always a draft a person edits and sends. Everything else works offline.
 - **Secure by default.** Encrypted connections (HTTPS on the same port, `/tls` to trust it), pinned links between show
-  systems, sealed keys, a strict Content-Security-Policy, uploads checked by content, rate limits and lockouts.
+  systems, sealed keys, a strict Content-Security-Policy, uploads checked by content, rate limits and lockouts. It
+  loads only what it ships (never a module from a folder above `app`, where another account may have planted one) and
+  runs only what it names by its absolute path: its own `bin\cloudflared.exe`, and Windows' programs under `SystemRoot`.
   [SECURITY.md](SECURITY.md) · [docs/DESIGN.md](docs/DESIGN.md)
 
 ## Run it
@@ -143,6 +145,10 @@ npm test          # the tests alone (a real server on a throwaway data folder fo
 npm run smoke     # the browser smoke: Edge, Chrome or Chromium (AGM_BROWSER=<path>)
 npm run audit     # the shipped packages' advisories and registry signatures, and the vendored libraries' advisories
 ```
+
+A checkout runs the same programs a portable copy does, by the same paths: the internet link runs only `bin/cloudflared`
+(`bin\cloudflared.exe` on Windows, which `fetch-runtime.ps1` puts there) beside `app`, never a cloudflared on `PATH`,
+and without it Turn on is refused, saying cloudflared was not found.
 
 The analyzers are fences: ESLint with the security rules, a banned-call list and a rule that refuses unescaped values on
 their way into a page's HTML ([docs/ANALYSIS.md](docs/ANALYSIS.md)). CI runs them, the tests on Linux (Node 24 and 26)

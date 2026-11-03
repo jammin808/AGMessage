@@ -36,11 +36,21 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
 ## Constraints that bite
 
 - **The fences** (`docs/ANALYSIS.md`, `eslint.config.mjs`, `app/eslint-rules/`, `tools/scan-secrets.js`,
-  `test/resilience.test.js`, `test/modules.test.js`) apply to tests too: no empty catch without its reason, no unused
-  bindings, no `Math.random` (use `node:crypto`), no shell (`spawn` with an argument array), no
+  `test/resilience.test.js`, `test/modules.test.js`, `test/loads.test.js`) apply to tests too: no empty catch without
+  its reason, no unused bindings, no `Math.random` (use `node:crypto`), no shell (`spawn` with an argument array), no
   `rejectUnauthorized: false` outside the pin probe, no `process.exit` in `lib/`, no value into `innerHTML` that is not
   a literal, escaped, a count or a name ending in `Html`. Synchronous file calls per file are capped by a test. A
   silenced rule says why on its line.
+- **Only what it ships, only by its path.** The server loads nothing from outside `app` and asks for nothing
+  `app\node_modules` cannot answer (Node would walk up to the drive's root, `C:\node_modules`): a new dependency that
+  looks for an optional module is given it, or told not to, as ws's helpers are (`WS_NO_BUFFER_UTIL`,
+  `WS_NO_UTF_8_VALIDATE`, set before `server.js`'s first `require`), and a package's ask `app` leaves unanswered is a row of
+  `test/loads.test.js`'s `NEVER_ASKED` with why it is never made. Every call in `app` that starts a program, tests
+  included, names it by `process.execPath`, a full path written out, or an expression that is a row of
+  `test/loads.test.js`'s register (`RUNS`, with where its full path is made; `HANDED` for `child_process` or one of its
+  functions passed on as a value), never a bare name and never a shell; `child_process` is reached by `require` or
+  `import` with its name written out. `launch.js` and `machine.js` require `node:` built-ins only, by a plain
+  `require`.
 - **Client input** reaches a socket handler through `guardHandlers` (a throw refuses that request, never the process)
   and is read by type: `guard.str`, never `String()` on a client value. `test/inputs.test.js` reads the event names
   from `handlerFiles()` (`server.js` and each module in `lib/handlers/`) and sends each every shape, so a new handler is
@@ -174,6 +184,7 @@ held by it, its notes saying each reading that missed its mark.
 | The browser libraries the pages load (pdf.js 4.10.38's legacy build, mammoth, SheetJS), byte for byte as published, and their list: each file's package, version, build, licence, copyright, source and SHA-256, its floor, what it bundles and the advisories assessed against each | `app/public/vendor/`, `app/public/vendor/VENDOR.json` (held to the folder by `app/test/vendor.test.js`) |
 | Their licences and notices, shipped at the portable folder's top, with the advisories against their versions and each one's assessment; the SBOM's vendored components, read from the bundle that ships; the vendored libraries' advisory audit | `THIRD-PARTY-NOTICES.md`, `licenses/<package>/`, `tools/vendor-sbom.js`, `tools/vendor-audit.js` |
 | The page floor: its probe and its words below it, the helpers for what a browser above it may lack (a dialog without `showModal()`, the wake lock's words by cause, idle work), the stylesheet's fallbacks, the device matrix and the walk; beside them in `common.js`, every page's one toast (`AGM.toast`) | `app/public/theme-init.js`, `app/public/common.js` (`AGM.openDialog`, `AGM.awake`, `AGM.idle`, `AGM.toast`), `app/test/pagefloor.test.js`, `docs/DEVICES.md` |
+| What AGMessage loads and runs: only what it ships (the watchdog and its server, and the server alone, under a resolve hook with modules planted where Node's walk ends; what no run reaches read from the source, every ask of the shipped scripts followed through each file it reaches, but the asks `NEVER_ASKED` names and the requires made at run time `MADE_AT_RUN_TIME` names; nothing outside `app`, nothing unshipped or development-only, nothing asked that `app` cannot answer; ws's helpers switched off before the first `require`, `supports-color` shipped), only by its absolute path (every call in `app` that starts a program, read with ESLint's parser and its scopes however `child_process` and its functions are reached or named, held to `process.execPath`, a full path or a register row `RUNS` / `HANDED` with where its path is made, fork's `execPath` too and no shell, a named wrapper's program judged at each of its calls; each place a path is made held to a full path or nothing, `isFullPath`), cloudflared this copy's own (`cloudflaredFile`), looked for as the link is asked to start and, missing, Turn on refused with why for how the copy runs (`noCloudflared`, `noCloudflaredWords`), each start's log poll let go wherever its cloudflared ends; and the machine's commands on `node:` built-ins only, reaching `require` no other way | `app/test/loads.test.js`, `app/test/resolve-preload.js`, `app/lib/startup.js` (`cloudflaredFile`, `noCloudflaredWords`, `isFullPath`), `app/server.js` (its first lines, `CLOUDFLARED`, `noCloudflared`, `tunnelRefused`), `app/supervise.js` (its child's environment, `AGM_CHILD`), `app/test/tunnel-preload.js` (`AGM_TEST_TUNNEL_RUNS`, `AGM_TEST_TUNNEL_GONE`, `AGM_TEST_TUNNEL_LOGS`), `app/test/tunnel.test.js` |
 | The house lint rule | `app/eslint-rules/no-unescaped-html.js` |
 | The module fence: the server's layers (the pure core, no cycle, one composition root), the wire's words closed both ways and the op table's two halves in step; the one list of the files that register socket verbs, and of the page scripts, that the fences read | `app/test/modules.test.js`, `app/test/helpers.js` (`handlerFiles()`, `pageScripts()`) |
 | The portable build | `tools/fetch-runtime.ps1`, `tools/build-portable.ps1`, `start-agmessage.bat`, `make-shareable-copy.bat` |

@@ -86,13 +86,16 @@ const KEY = 'swk_smoke_node_key_00001';   // secret-scan: fixture — a fake nod
 let failures = 0;
 const report = (ok, what) => { console.log((ok ? 'OK   ' : 'FAIL ') + what); if (!ok) failures++; };
 
-/** A Chromium the smoke can drive over DevTools: AGM_BROWSER, then Edge (Windows), then Chrome or Chromium (Linux, macOS). */
+/**
+ * A Chromium the smoke can drive over DevTools: AGM_BROWSER, then Edge (Windows), then Chrome or Chromium (Linux, macOS),
+ * each by its full path: a bare name or a relative one (an install folder's variable unset) is never run.
+ */
 function browserPath() {
   const c = [process.env.AGM_BROWSER, process.env.AGM_EDGE, process.env.STAGEWATCH_EDGE,
     path.join(process.env['ProgramFiles(x86)'] || '', 'Microsoft/Edge/Application/msedge.exe'),
     path.join(process.env.ProgramFiles || '', 'Microsoft/Edge/Application/msedge.exe'),
     '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/microsoft-edge',
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].filter(Boolean);
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].filter((p) => p && path.isAbsolute(p));
   return c.find((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } });
 }
 const freePort = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });

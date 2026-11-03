@@ -22,6 +22,7 @@ left out, and the defects the fences found.*
 | Dependency review | — | Security · on a pull request | a new dependency with a moderate or worse advisory |
 | The .bat files | `npm test` (`test/startbat.test.js`) | CI · Linux (read as text), Windows (run by cmd) | delayed expansion, a bare program name, the install record read outside the 64-bit view, the preflight after anything started, code 0 and 3 sharing words, a line ending that is not CRLF; on Windows, a missing `node\node.exe` not said or not exit 2, a clean copy made into a folder that exists |
 | The module fence | `npm test` (`test/modules.test.js`; health's lane counts in `test/server.test.js`) | CI · Linux (Node 24, 26), Windows | a breach of the server's layers (a pure module that requires anything but the pure core, names an I/O built-in, reads `process.` or imports at run time; a require of `server.js`; a cycle; a require of the HTTP domain or a handler module from anywhere but `server.js`; a require of a file that is not there); a wire's word left open (a page send no handler file registers, a verb no page sends, an event no page hears or a listener for one never sent, each exception a row with its reason); a verb registered where or how the fuzz does not read it; the op table out of step (the hall page's against `lib/ops.js`'s, a change to a message of a field outside it, or an op given to `apply()` written so it cannot be read); a write lane made that `saveLanes()` does not name once (§3.5) |
+| What AGMessage loads and runs | `npm test` (`test/loads.test.js`, with `test/resolve-preload.js`) | CI · Linux (Node 24, 26), Windows | a module the watchdog or its server loads from outside `app`, one the portable folder does not ship or the lockfile lists for development only, one asked for that `app` cannot answer, a planted module run; the same of what the shipped scripts' source asks for, followed through every file it reaches, but an ask the register names as never made and a require whose name is made at run time with its row; a call in `app` that starts a program by a bare or relative name, or by an expression the register does not hold, fork's `execPath` named so, a shell; `child_process`, or a function of it that starts one, handed on where no row says, or `child_process` named where the fence does not follow it; a `launch.js` or `machine.js` require that is not a `node:` built-in, or `require` reached another way (§3.7) |
 | The stylesheet's tokens | `npm test` (`test/resilience.test.js`) | CI · Linux (Node 24, 26), Windows | a second `:root` or dark token block; more hex colours outside the two than the count (275, only going down); an opacity between 0 and 1 anywhere in `styles.css`, as a number, a percentage or a filter's `opacity()`, or one written so the guard cannot read it (`var()`, `calc()`) (§3.4) |
 | The page floor (Safari 14.1, Chrome 84; `docs/DEVICES.md`) | `npm run lint`, `npm test` (`test/lint-rules.test.js`, `test/resilience.test.js`, `test/pagefloor.test.js`) | CI · analyze, Linux (Node 24, 26), Windows | a bare `requestIdleCallback` or `cancelIdleCallback`, a `requestSubmit()` not behind its probe, or a read of the user agent however it is reached (`window.navigator.userAgent`, `userAgentData`, a computed key, a destructuring), in a page script; a syntax newer than ES5 in `theme-init.js`; a `.showModal(` outside `common.js`'s `AGM.openDialog`, or a hall page or admin page that does not load `common.js` before its own script; a feature of `styles.css` above the floor without its fallback; a page with people that does not load `theme-init.js` first, a screen's page that does, or a script of a page with people that does not stop below the floor before it first asks the server anything or opens a socket (but the four named that only define at load); below the floor, a form that is sent |
 | The bundle start | — | CI · package | the extracted zip's own Node and watchdog not answering `/api/health` with the stamped build within 30 s |
@@ -88,10 +89,13 @@ The banned calls, each with its reason in the config:
 | `process.exit` in `lib/` | a library never ends the process; `server.js` and `supervise.js` decide, and exit codes carry intent |
 
 Programs are run by their absolute path, never a bare name, which cmd looks for in the current folder first and Node's
-`spawn` on `PATH`: the browser opener spawns `%SystemRoot%\explorer.exe` with an argument array and no shell, inside the
-`child_process` fence (`lib/startup.js`), and runs nothing when `SystemRoot` does not name a folder from its drive; the
-.bat files run `reg.exe`, `timeout.exe`, `robocopy.exe` and `powershell.exe` from `%SystemRoot%\System32`.
-`test/startbat.test.js` holds the .bat files to it, with CRLF and ASCII throughout.
+`spawn` (libuv) in the current folder and then on `PATH`, an argument array or not: the browser opener spawns
+`%SystemRoot%\explorer.exe` with an argument array and no shell, inside the `child_process` fence (`lib/startup.js`),
+and runs nothing when `SystemRoot` does not name a folder from its drive; "This laptop" and the power request run
+`powershell.exe` the same way, Show the admin token `reg.exe` in the installer's `{sys}`, and the internet link this
+copy's own `bin\cloudflared.exe`; the .bat files run `reg.exe`, `timeout.exe`, `robocopy.exe` and `powershell.exe` from
+`%SystemRoot%\System32`. `test/startbat.test.js` holds the .bat files to it, with CRLF and ASCII throughout, and
+`test/loads.test.js` every call in `app` that starts a program (§3.7).
 
 ### 3.3 `agm/no-unescaped-html` (the house rule, `app/eslint-rules/`)
 
@@ -153,10 +157,10 @@ and it is renamed once it reaches its bound. `supervise.js` goes down from 3 to 
 (`watchdog.json`, a give-up or the installed node's refused start) goes through `lib/resilience.js`'s atomic writer, as
 its token file does. `server.js` stays at 15: "This laptop"'s read of Windows is one `execFile` with its own `timeout`,
 so it starts no timer in a handler file either, and the child is ended by a stop. `lib/laptop.js` runs `powershell.exe`
-by its absolute path only (the fence the plan's U11 brings names it); its tests hold the path, the fixed script (one
-line, no double quote, `powercfg.exe` by its absolute path, each part on a line of its own, the firewall last, the
-firewall's own object asked, the NetSecurity cmdlets only under Constrained Language Mode, each module imported by its
-manifest's path under `$PSHOME` before the part that uses it) and an
+by its absolute path only (§3.7's fence holds it, `plan.file` in its register); its tests hold the path, the fixed
+script (one line, no double quote, `powercfg.exe` by its absolute path, each part on a line of its own, the firewall
+last, the firewall's own object asked, the NetSecurity cmdlets only under Constrained Language Mode, each module imported
+by its manifest's path under `$PSHOME` before the part that uses it) and an
 environment of named Windows folders only (`PASSED`), no secret, `PATH` or module path of the account's; on Windows (the
 CI job) a test runs the script itself and holds its answer to its shape, saying when each part's line came. Every
 PowerShell AGMessage runs (that script, the lane's in `tools/readings-take.js`, `tools/*.ps1`) names its functions,
@@ -185,11 +189,18 @@ real watchdog is held by the plan's proxies, both processes frozen and thawed (S
 board's frame is flushed (a page, a screen, a Stagewatch frame mark it) and in health's 5 s window, which is also where
 a child that has not answered within 30 s is read as failed and one that failed is asked again a minute after; its one
 clock is handed to it, so those bounds are held on a fake clock. `lib/power.js` runs `powershell.exe` by its absolute
-path only, through `lib/laptop.js` `powershellPlan`, the one plan "This laptop"'s read also uses (the fence the plan's
-U11 brings names it), at 0 synchronous calls; its tests hold the path, the environment of named Windows folders, the
+path only, through `lib/laptop.js` `powershellPlan`, the one plan "This laptop"'s read also uses (§3.7's fence holds
+it, `p.file` in its register), at 0 synchronous calls; its tests hold the path, the environment of named Windows folders, the
 fixed script (one line, no double quote, Constrained Language Mode said before `Add-Type`, held only when the call
 returned non-zero, then a wait on its input), and its answer read by type; on Windows (the CI job) a test runs the
 script itself.
+
+Running only what it names by its absolute path (the plan's U11) leaves `server.js` at 15. Its look for its own
+cloudflared stays one synchronous call, now a `statSync` of `bin/cloudflared(.exe)` beside `app` as the link is asked to
+start (Turn on, or a start inside the link's kept end), where it was an `existsSync` followed, when there was none, by
+the bare name `cloudflared`: a copy without it is refused with why before anything runs or an end is kept. The look
+cannot be left to the spawn: a program that is not there says `error` and `close` and never `exit`, and every Turn on
+then left its log's 500 ms poll running for the life of the process, which the spawn's `error` now also ends (§3.7).
 
 The audit log's export adds `lib/auditexport.js` and `lib/zip.js`, and the verifier `verify/verify-audit.js`, each at 0
 synchronous calls (the guard names them, so a file that drops out of its list fails it): the export reads, digests and
@@ -466,6 +477,100 @@ role and number, the skip link, the roving feed with ↑ from the empty message 
 question as words, a ⋯ pressed again under its ask answering it no, a page out of its hall offering no chip, the
 support view's Help sending nothing, and Help at the floor. Escape lands as far as its order's steps exist (a menu, an
 ask, a reply, back to the message box); the take layer's step comes with unit 18 and the simple view's with 20a.
+
+### 3.7 What AGMessage loads and what it runs (`test/loads.test.js`, `test/resolve-preload.js`; the plan's U11)
+
+**Only what it ships.** A `require()` that `app\node_modules` cannot answer makes Node walk every folder above the asking
+file to the drive's root, then its global folders (`NODE_PATH`, the account's `.node_modules`, the runtime's
+`lib\node`), and load the first it finds. The plan measured it: a `supports-color` and a `bufferutil` planted in a
+`node_modules` three folders above the app were loaded by the server's own requires, and a portable folder under
+`C:\Tools` walks to `C:\node_modules`, which any authenticated account may be able to make (reading R8). The fence
+starts the watchdog and its server, and then the server alone, under a resolve hook (`test/resolve-preload.js`,
+preloaded into both processes: Node's `module.registerHooks`, in-thread and synchronous, which only reads each
+resolution) with a `supports-color`, a `bufferutil` and a `utf-8-validate` planted where Node looks once `app` has no
+answer (`NODE_PATH`, which Node reads only after its walk, as a `C:\node_modules` is reached only at the walk's end),
+and asks a page, health, the admin page and a socket over WebSocket of them. Each resolution is judged by
+`loadProblems`: a module Node has built in passes; one answered nowhere fails (the walk went to the root, where a
+planted module would load); one loaded from outside `app` fails; one in `app` that the portable folder does not ship
+(`tools/build-portable.ps1`'s files and folders: a test file, a lint rule) fails; one of a package the lockfile does
+not list, or lists for development only (`dev`: `npm ci --omit=dev` leaves it out of the portable folder, so a checkout
+would pass where the show laptop walks) fails. The run also holds that no planted module ran, that both processes ran
+under the hook (so the fence is not vacuous), that the watchdog starts its server with ws's two switches, and that the
+server alone, started without them, sets them itself before its first `require` (read from the source by ESLint's
+parser). A control run shows the hook seeing the walk: ws asked for without its switch loads the planted `bufferutil`
+(named, its full path outside `app`), with no plant the same ask is named as answered nowhere, and with its switch
+nothing is asked. Each kind of judgement is planted (a test file, a development package, a package not in the lockfile,
+a URL that is no file). On the tree before U11 the fence named four loads from the plant: `bufferutil` for each of the
+three copies of ws (`WS_NO_BUFFER_UTIL` unset) and `supports-color` for `debug` (not shipped, and in a checkout without
+it as a development package either).
+
+A run judges only what it reaches, and a run with TLS, the Show Bus, AI drafts and uploads off or unused does not reach
+every require: a lazy one, or one inside a package on a path the run never takes. So the source is read too: every ask
+of the shipped server-side scripts (`server.js`, `supervise.js`, `launch.js`, `machine.js` once it is there, `lib/` and
+`verify/`), a `require` with its name written out, an import, followed through each file it reaches as Node resolves it
+from the asking file (`createRequire`), the whole graph of about 590 files, read with ESLint's parser (a package's own
+inline configuration ignored, so a require in a comment, as express's `require('ejs')` in its documentation, is no ask).
+Each ask is a row in the hook's shape and judged by the same `loadProblems`, but those a register names: `NEVER_ASKED`,
+the asks a package writes out that `app` does not answer and that AGMessage never makes (ws's `bufferutil` and
+`utf-8-validate`, asked for only without their switches, which the runs above hold), and `MADE_AT_RUN_TIME`, each
+require whose name is made at run time, which no reading can judge (express's view engine, `require(mod)` in
+`lib/view.js`, reached only by `res.render`: the test also holds that no shipped script renders or sets up an engine).
+A row whose ask has gone fails, and so does a require made at run time without its row. Without `supports-color` the
+reading names `debug`'s ask; a planted tree shows an ask followed, one in a comment ignored, a name made at run time kept
+apart and an ask nothing answers named. The SDK's zod helpers, which ask for a `zod` `app` does not have, are no file the
+server reaches.
+
+**Only what it names by its absolute path.** An argument array keeps a shell out, not the search: libuv looks for a bare
+name in the current folder and then on `PATH`. The fence reads every script of `app` AGMessage writes (its top
+folder's and every folder below but `node_modules`, the data and upload folders and the vendored libraries: the
+server, the watchdog, the machine's commands, `lib/`, `verify/`, the pages, the lint rule and the tests) with ESLint's
+own parser and its scope analysis, and finds each call that starts a program: `spawn`, `spawnSync`, `execFile`,
+`execFileSync`, `fork`, `exec` and `execSync` (the last two banned by the lint already). `child_process` is followed as
+it is required (`require('child_process')`, `node:` or not, a template with nothing in it, or `X.require(…)`, as
+`module.require` and a `Module`'s), awaited from an `import()`, or imported (its default, its namespace, its named
+functions by any local name), and through every name it is then given (a declaration, a default, an assignment, the
+rest of a destructuring), followed until none is added. A function that starts a program is one of those read off it by
+a name written out (`cp.spawn`, `cp['spawn']`) or destructured from it by any local name, any name one of these is given
+(a declaration, a default, an assignment, `this.x =`), and any name of a function's own that is one of theirs (a
+parameter called `spawn`). A regular expression's `.exec` and a method of that name on anything else are not theirs.
+Each call names its program by `process.execPath`, by a full path written out (from the root, a drive or a network
+share), or by an expression the register (`RUNS`) holds for that file, with where its full path is made; anything else
+fails, a bare or relative name written out and a template with something in it included. Its options written in place
+are read too: `fork`'s `execPath` is judged as its program, and a `shell` that is not `false` fails (a shell is
+`cmd.exe` by `ComSpec`, else by its bare name). A program that is a parameter of a function of the file with a name,
+a function only ever called, is judged at each call of that function instead (the export README's commands, run by
+`run('/bin/sh', …)` and `run('/usr/bin/unzip', …)`, so a later `run('unzip', …)` fails); one handed on as a value needs
+a row. Anything that holds `child_process` or one of those functions as a value where the fence does not read its calls
+(passed, returned, put in an object or on a member other than `this.x`, put on the exports, destructured into a member
+or by a key made at run time, read by a name made at run time, an `import()` not awaited, called through `.call`) is
+named in `HANDED` with whose calls it becomes, or fails; and `child_process` handed to a call the fence does not follow
+(a `require` given another name, `require.call`, `createRequire`'s) or re-exported fails, so nothing reached through
+it goes unread (a name made at run time, as `require(name)`, is outside any reading of the source, as it is for the
+module fence). A row whose call or handing has gone fails, so the register cannot grow stale. The register today: the
+server's `CLOUDFLARED` (`lib/startup.js` `cloudflaredFile`: `bin` beside the folder `app` is in, by `isFullPath` a
+folder named from its drive or a network share, else none) and its `spawn` handed to `openBrowser`; the watchdog's
+`CHILD` (`fork`: this `node.exe` on `server.js` beside it, or on a test's stand-in `AGM_CHILD`, which a start refuses
+with code 3 unless it is a full path by `isFullPath`, so on Windows never `\server.js` from the current drive's root or
+`C:server.js` on a drive's current folder, before anything runs or is written); `launch.js`'s
+`path.win32.join(sys, 'reg.exe')`; `lib/laptop.js` and `lib/power.js`'s `powershellPlan` file; `lib/startup.js`'s
+`openerPlan` file; and the tests' own (the smoke's browser, the two preloads handing on the server's calls and the
+tunnel's stand-in for a cloudflared that is not there, the readings' `icacls.exe` and `cmd.exe` for the .bat files). A
+second test holds each place a path is made to give a full path or run nothing, across a `SystemRoot` named from its
+drive, relative, from the root, from a drive with no folder, empty or unset, on Windows and off it: `cloudflaredFile`,
+`openerPlan`, `windowsPlan`, the power request's `plan` (whose options, handed to the call by name, hold no `shell` and
+no `execPath`), `adminName`'s `reg.exe` and `isFullPath` itself. On the tree before U11 the fence named
+`resolveCloudflaredBin()`, whose fallback was the bare `cloudflared`; the plant shows each shape it reads failing it.
+`tools/` is outside `app` and outside this fence: `tools/scan-secrets.js` runs `git` by its name, on a developer's
+machine and CI.
+
+**The machine's own commands require Node's built-ins only.** `launch.js` (and `machine.js`, which the plan's U12
+makes and the fence reads once it is there) is a console the person at the PC runs, and `machine.js` runs elevated or
+as SYSTEM: neither requires anything but a `node:` module, written out, nor loads code around `require` (an import,
+`createRequire`, `dlopen`, `binding`, `linkedBinding`, `Module._load`, any `.require`, as `module.require` and a
+`Module`'s) or reaches `require` itself as a value (given another name, `require.call`, `require.resolve`, its cache),
+but `require.main`, which loads nothing. A planted relative file, package, built-in without `node:`, computed name,
+import, `createRequire`, `dlopen`, `module.require`, a `Module`'s `require`, `require` given another name,
+`require.call` and `require.resolve` each fail it.
 
 ## 4. Considered and not adopted
 

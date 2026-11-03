@@ -2035,6 +2035,88 @@ code and its tests, with cloudflared and its address stood in for; nothing in it
 - Rolling back: 0.5.1 ignores `tunnelUntil` in the settings and the new fields, and its tunnel ends with every restart
   again.
 
+**AGMessage loads only what it ships, and runs only what it names by its absolute path** (the plan's Part 6, unit U11:
+the module walk the plan measured, a `supports-color` and a `bufferutil` planted in a `node_modules` three folders above
+the app and loaded by the server's own requires, and the fallback that ran cloudflared by its bare name; the code and its
+tests, on Linux: whether a standard account may make `C:\node_modules` on the show laptop is reading R8's, not measured)
+- **Nothing is looked for above `app`.** A `require()` that `app\node_modules` cannot answer makes Node walk every folder
+  above the asking file up to the drive's root (`C:\node_modules`, which any signed-in account may be able to make), then
+  its global folders, and load the first it finds: inside AGMessage, with its keys. The server asked for two such
+  modules at every start, four times over. ws asks for its native helpers (`bufferutil`, and on older Node `utf-8-validate`) unless told
+  not to: the server sets `WS_NO_BUFFER_UTIL=1` and `WS_NO_UTF_8_VALIDATE=1` before its first `require`, and the watchdog
+  starts it with both, so neither is ever asked for. `debug` (under Express and Socket.IO) asks for `supports-color`:
+  `supports-color` 8.1.1 (MIT, CommonJS, the last major that is; with `has-flag` 4.0.0, MIT) is now one of AGMessage's
+  own packages, shipped in `app\node_modules` with its licence file, so `debug` finds it there and looks no further.
+  Nothing else changes: `debug` only picks its colours from it, and only when `DEBUG` is set.
+- **cloudflared is this copy's own.** The internet link runs `bin\cloudflared.exe` beside `app`, by its absolute path
+  (`lib/startup.js` `cloudflaredFile`), and nothing else. A copy without it fell back to the bare name `cloudflared`,
+  which Windows looks for in the current folder and on `PATH` first; it now has no link. It is looked for as the link is
+  asked to start: Turn on is refused, `ok: false` with why, before anything runs and before any end is kept or
+  forgotten, and the tunnel card and "This laptop" say "cloudflared not found in this copy (bin\cloudflared.exe):
+  re-extract the portable folder. AGMessage runs only its own cloudflared, never one from elsewhere on this PC." (the
+  installed node's words say "repair AGMessage by running its installer again" instead, `noCloudflaredWords`); a start
+  inside the link's kept end says it could not turn it on again, with the same words, and keeps the end. A cloudflared
+  taken away between the look and the run (an antivirus) says `error` and never `exit`, and its log's 500 ms poll used
+  to run on for the life of the process, one more at every Turn on, Turn off stopping none: each start's poll and log
+  file are now its own and let go at its cloudflared's `error` as at its `exit`. The browser opener (`explorer.exe`), "This laptop" and
+  the power request (`powershell.exe`) and Show the admin token (`reg.exe`) were already run by their absolute paths
+  under `SystemRoot` or the installer's `{sys}`; the fence below now holds each of them, and `machine.js`'s programs as
+  unit U12 (#72) makes them. The watchdog runs its server by its full path only: `AGM_CHILD` (a test's stand-in
+  server) that is not one (by `isFullPath`: on Windows from a drive or a network share, never `\server.js` from the
+  current drive's root nor `C:server.js` on a drive's current folder) stops the start with code 3 and "AGMessage cannot
+  start: AGM_CHILD (server.js) is not a full path, and AGMessage runs its server only by its full path. …", before
+  anything runs or is written, rather than run whatever `server.js` the current folder holds.
+- **The fences** (`test/loads.test.js`, `docs/ANALYSIS.md` §3.7):
+  - *Only what it ships.* The watchdog and its server, and the server started alone, run under a resolve hook
+    (`test/resolve-preload.js`, Node's `module.registerHooks`, which only reads each resolution) with a `supports-color`,
+    a `bufferutil` and a `utf-8-validate` planted where Node looks once `app` has no answer (`NODE_PATH`, which Node
+    reads only after its walk up every folder), and a page, health, the admin page and a socket over WebSocket are asked
+    of them. Nothing they load is outside `app`, a file the portable folder does not ship, or a package the lockfile does
+    not list or lists for development only; nothing they ask for is answered nowhere in `app`; no planted module runs; the
+    server is started with the switches by its watchdog and sets them itself, before its first `require`, when started
+    alone. ws asked for without its switch is shown loading the planted `bufferutil`, and asking for it with no plant is
+    named as the walk to the drive's root, so the hook is seen to see the walk. Before this unit the fence found four
+    modules loaded from the plant: `bufferutil` for each of the three copies of ws, and `supports-color` for `debug`.
+    What a run does not reach is read from the source: every ask of the shipped server-side scripts, followed through
+    each of the about 590 files it reaches as Node resolves it from the asking file (a lazy require included, one in a
+    comment not), is judged the same way, but the asks a register names as never made (ws's two helpers, switched off)
+    and each require whose name is made at run time, with its row (express's view engine, reached only by `res.render`,
+    which no shipped script calls).
+  - *Only what it names by its absolute path.* Every call in `app` that starts a program (`spawn`, `spawnSync`,
+    `execFile`, `execFileSync`, `fork`, and `exec` and `execSync`, which the lint already bans), read from the source
+    with ESLint's own parser and its scopes, names its program by `process.execPath`, by a full path written out, or by
+    a name the fence's register holds with where its full path is made. `child_process` is followed as it is required
+    (`node:` or not, in place, or by `module.require`), awaited from an `import()` or imported, and through every name
+    it is given (a declaration, a default, an assignment, a destructuring's rest); its functions through every name they
+    are given (destructured by any local name, read by a name in brackets, a default, `this.x`, a parameter called
+    `spawn`). `fork`'s `execPath` is judged as its program, and a `shell` fails. A program that is a parameter of a named
+    function only ever called is judged at each call of it. `child_process` or one of its functions handed on as a
+    value (passed, returned, put in an object or on another's member, on the exports, read by a name made at run time)
+    is named in the register with whose calls it becomes, and `child_process` named where none of these takes it (a
+    `require` given another name, `require.call`, a re-export) fails. A call the register does not hold, a bare or
+    relative name written out, and a row whose call has gone each fail it.
+    Each place a path is made is held to give a full path or run nothing: `cloudflaredFile` (a folder named from its
+    drive or a network share, else none), `openerPlan`, `windowsPlan` and the power request's plan (a `SystemRoot` named
+    from its drive, else nothing run, and nothing off Windows) and `adminName` (`reg.exe` only in a `--sys` named from
+    its drive). The tests are held too: the export's and the archive's README commands now run `/bin/sh` and
+    `/usr/bin/unzip`, and the smoke runs a browser only by a full path.
+  - *The machine's own commands require Node's built-ins only.* `launch.js`, and `machine.js` once unit U12 makes it,
+    require only `node:` modules, each written out, and load no code around `require` (an import, `createRequire`,
+    `dlopen`, `binding`). A planted relative file, package, built-in without `node:`, computed name, import,
+    `createRequire` and `dlopen` each fail it, and so does `require` reached another way (`module.require`, a
+    `Module`'s, `require` given another name, `require.call`, `require.resolve`); `require.main` loads nothing and
+    passes.
+- `server.js`'s synchronous file calls stay at 15: the look for its own cloudflared is a `statSync` where it was an
+  `existsSync`, and it cannot be left to the spawn, whose missing program says `error` and never `exit`.
+- Tests: a copy without its cloudflared (Turn on refused with the words, nothing run, no end kept, no read of its log),
+  and one whose cloudflared went between the look and the run (three Turn ons and a Turn off leave no poll), with the
+  tunnel's stand-in answering the look (`AGM_TEST_TUNNEL_GONE`) and counting the reads of cloudflared's log
+  (`AGM_TEST_TUNNEL_LOGS`); each shape the fences follow, planted.
+- The papers: `README.md`, `README.txt` (Remote participants), `SECURITY.md`, `THIRD-PARTY-NOTICES.md`,
+  `docs/DESIGN.md`, `docs/INSTALL.md` and `docs/ANALYSIS.md` (§3.2, §3.4 and the new §3.7).
+- Rolling back: 0.5.1 runs the bare `cloudflared` again where `bin` has none, and its server asks for the two modules
+  again, from above `app`.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

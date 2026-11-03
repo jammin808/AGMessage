@@ -97,6 +97,20 @@ Node starts in a job object that ends it with its parent: read in libuv's source
 before a restart stops working. For a show with remote people, a named Cloudflare Tunnel run beside AGMessage keeps one
 address across restarts. Not measured: whether the task's boot start comes before the network on the show laptop.
 
+## It loads only what it ships, and runs only what it names
+
+The installed node's code sits under Program Files, where no other account can change it, but a module that
+`app\node_modules` cannot answer is looked for in every folder above it up to the drive's root (`C:\node_modules`), and
+reading R8 says whether a standard account may make that folder on the show laptop. The server asks for nothing there:
+ws's native helpers are switched off by the server before its first `require` and by the watchdog for it
+(`WS_NO_BUFFER_UTIL`, `WS_NO_UTF_8_VALIDATE`), and `supports-color`, which `debug` looks for, ships in
+`app\node_modules`. It runs its own `bin\cloudflared.exe` beside `app`, and Windows' programs from a `SystemRoot` named
+from its drive or the installer's `{sys}`, each by its absolute path; never a bare name, which Windows looks for in the
+current folder (the task's working folder) and on `PATH` first. A node without its cloudflared has no internet link:
+Turn on is refused with "cloudflared not found in this copy (bin\cloudflared.exe): repair AGMessage by running its
+installer again. …" before anything runs or an end is kept (the portable copy's words say to re-extract the folder).
+`docs/ANALYSIS.md` §3.7 has the fences that hold both.
+
 ## A port already in use
 
 The installed node reads `http://127.0.0.1:<PORT>/api/health` once, within a second, sending no token. Only the
@@ -242,8 +256,10 @@ log), so the token is never in it (`supervise.js`, `lib/startup.js` `taskTokenPr
   `reg.exe` by its absolute path in the `--sys` folder, run from there; without `--sys` the words name no one),
   "AGMessage has no admin token on this PC yet: …" before the node has served, and never what a file that holds no token
   holds. It exits 0 when it printed the token, 2 when it did not, and 64 for a word it does not know. The source fence
-  that holds every program `app/` runs to its absolute path (the plan's U11) names this `reg.exe` beside `launch.js`'s
-  `schtasks.exe`.
+  that holds every program `app/` runs to its absolute path (`test/loads.test.js`, `docs/ANALYSIS.md` §3.7) holds this
+  `reg.exe` (`path.win32.join(sys, 'reg.exe')`, run only for a `--sys` named from its drive), and `launch.js`'s
+  `schtasks.exe` and `machine.js`'s programs join it as U12 (#72) and U17 (#74) make them; `launch.js` requires Node's
+  built-ins only, by `node:`, which the same fence holds.
 - **The first admin account** is made with the token, as on every AGMessage: `/api/setup` takes it typed, or the
   token's sign-in made by this run, at the laptop, and never loopback alone (`docs/ACCOUNTS.md`, The first admin).
 
