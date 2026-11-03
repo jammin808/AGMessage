@@ -166,6 +166,20 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   cannot read. `typing`, which took a word from anyone who may post and sent it on to the whole hall, and which no page
   sent or heard, is gone. Every verb, in `server.js` or a handler module, is sent every argument shape a client can,
   and the same test fails on a verb registered anywhere else or in a form that read does not see.
+- A new verb registers in a handler module (`app/lib/handlers/`) and passes one gate before it reads anything a client
+  named (`app/lib/gate.js`): seated in a room that is still here, then a token from its rate, then the admin, then its
+  rights, in that order and in the words the server already answers with. A request refused for a lookup (a stale
+  reference, another hall's code) has spent its token, so the refusal is never a free oracle. A verb written without its
+  gate first, with its rate unnamed or with an option the gate does not take fails the build, and the gate refuses such a
+  request whole at run time rather than let it through with a step left out; a gate handed anything but the verb's own
+  acknowledgement, or a rate that is not the connection's, fails the build too. A handler module requires no built-in,
+  package, store or link, and names no run-time import, process or global object, so it reaches a store, a link or the
+  disk only through what the server hands it. A take on people's pages is handed no room broadcast and nothing that
+  makes a room's op (`io`, `apply`, `systemMessage` are not in its context), reaches a page by its socket's id alone (a
+  hall's key given as an id reaches nobody, which a test holds on a real Socket.IO server), joins its socket to no room
+  and reads the hall's rooms through their readers only. No handler module asks a right of the rights table directly,
+  or writes the settings, and `server.js` takes no new verb. These are read from the source as written: a module that
+  hands its store or its settings to a function of its own is past what the fences follow.
 - A send's client id (`cid`, 16 random bytes from the browser's `getRandomValues`) is not a credential and names
   nothing: it only lets the server answer a repeat of a person's own send with what that send became, keyed by the
   identity the server issued, so one person's id is never another's. A message held for sending (written while the page

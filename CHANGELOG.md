@@ -2458,6 +2458,79 @@ shows changes: the rooms are made, given and joined in the units that follow)
   removed by a reset or a deletion of any hall, since it scans only the halls it loads: do not go back to 0.5.1 during
   a show.
 
+**New socket verbs register from handler modules, through a connection context, a server context and one gate** (the
+plan's Part 5, unit 30; the tree's tests. No verb moves and none is added: what a page sends, and what it is answered,
+are as before)
+- **One gate** (`app/lib/gate.js`, pure): a verb in a handler module passes `conn.gate(ack, {joined, bucket, admin,
+  may})` first. It reads, in this order and each only once the one before it passed: the socket seated in a room ("Not
+  joined") that is still here ("Room gone"); a token of the verb's bucket ("Slow down a little.", with `busy`, so the
+  outbox sends a held write again shortly); the admin ("Not admin"); its rights, in turn ("Observers can read but not
+  post."; a file "Your account may not share files here.", or "On stage seats send messages, not files." from a seat On
+  stage). Nothing a client names is looked up before a token is taken, so a request refused at its admin or its right
+  has spent its token, as a message's already does, and a refused lookup (a stale reference, another hall's code) is
+  never a free oracle. An option the gate does not take, a bucket not named (`bucket: null` says there is none), a
+  bucket it cannot take from and a right it has no words for each throw before anything is read: the socket's guard
+  answers the request as refused, and no verb is let through with a step left out.
+- `server.js`'s own `need`, `mayPost` and `admin` are the gate's steps alone, and `limited` says its bucket's words, so
+  the 57 verbs registered there answer in the gate's words, as before, each in its own order (a message takes its bucket
+  before its right, `help:respond` its `chatter` token first).
+- **`conn`**, frozen, is what a handler module is given of the connection: the socket, its room and its person read when
+  asked (functions, so no verb holds a room its page has left), `ok`, `limited`, the `writes` and `chatter` buckets,
+  `need`, `mayPost`, `allowed`, `admin`, `actor`, `canManageHall` and the gate, made after each helper it holds.
+- **`ctx`**, frozen, is the server's: the room store, `apply`, `systemMessage`, `buildMessage`, `removeUnused`,
+  `fileNamesOf`, the audit log, the accounts, `boardDirty`, `settings` (to read), `linkFor`, `stagePayload` and `io`. It
+  is built once, last in `server.js`, after every part it names exists and before the copy holds its port; a part not
+  built yet stops the start rather than reach a verb as nothing. **`takesCtx`** is the same but the parts that make a
+  room's op or send to a room (`io`, `apply`, `systemMessage`), and with `sendTo(socketIds, event, payload)`, which sends
+  to each socket open now named by its id, one at a time and once each, and answers how many it reached: a hall's key
+  given as an id reaches nobody, where a broadcast would reach the whole hall, and only a list names sockets. The open
+  sockets are read from `io` by `lib/gate.js` itself, never handed in by the server, so the server's `takesCtx` is the
+  one the tests hold.
+- `app/lib/handlers/rooms.js` and `app/lib/handlers/takes.js` each give the connection one `register(socket, conn,
+  ctx)`, called after its own verbs on every page's socket but a screen's (the hall page's, the admin page's, the halls
+  board's): the rooms module with `ctx`, the takes module with `takesCtx`. Neither registers a verb yet; the room verbs
+  and the takes on people's pages of the units that follow register there, and the verbs already in `server.js` stay
+  there until a unit rewrites one, and none is added there.
+- **The fences** (`test/modules.test.js`, `docs/ANALYSIS.md` §3.5), each read as code (a word in a comment or a string
+  is none) and shown failing on a planted breach of each kind:
+  - (d) a handler module requires only the pure core (`lib/gate.js` joins it), guard's pure helpers by name (`str`,
+    `cleanText`, `mac`, `Bucket`), `lib/ids.js` and, for the takes module alone, the pages' pure vocabulary by name;
+    never a built-in, a package, a store or an edge (`lib/resilience.js` included); it reaches nothing past a literal
+    require (no `import()`, `require` handed on or given a name, `process`, module loader or global object), makes
+    (`new`) nothing it requires, however it is named, and reads its context once, destructured as its `register`'s first
+    statement, so that line is its list of what it reaches;
+  - (i) every listener in a handler module but Socket.IO's own `disconnect` is written in place and starts with its one
+    gate, `if (!conn.gate(ack, {…})) return;`, handed the listener's own acknowledgement (so a refusal answers the
+    sender), its options written out and the gate's own, naming one of the connection's buckets (`conn.writes`,
+    `conn.chatter`, or one taken from `conn` by its name) or saying `bucket: null` with why on its line or the line
+    before; no gate stands outside a verb, and none is passed twice;
+  - (j) the takes module names no `io`, `.to(`, `.in(`, `.broadcast`, `.nsp`, `.server`, `.except(`, `socket.join(` or
+    `socket.leave(`, nor a member by a string, reads the room store only through its readers, never takes the store or
+    the socket under another name and asks its context for no `apply` or `systemMessage`; no handler module asks a right
+    of `rbac.can` under any name rbac is bound to (or takes `can` from it), names `sendTo` but to call it, or writes into
+    `settings` (an assignment, `++`, `delete`, `Object.assign`, `Reflect.set`, a method that is not a read, such as
+    `push` or `splice`, a hand-off through `.call` or `.apply`, or settings or a part of it taken under another name);
+  - `server.js` registers only the verbs it held when the handler modules came, a list that only shrinks, so a new verb
+    written there fails the build;
+  - the source read holds `conn` to its helpers, each made before it in the connection, its buckets to the
+    connection's, the two modules to being registered once each after it, and `ctx` to its parts, each declared before
+    it, built before the port is held and handed nothing else;
+  - (f), the wire's words, reads a take's `sendTo(ids, 'event', …)` as an event the server sends, so one no page hears
+    fails it, as an emit does.
+- Tests: `test/units.test.js`: the gate's order on a socket's facts, recorded as they are read (each step's words, what
+  it read to say them, the token taken or not), a request refused after its bucket spending its token until the next is
+  refused at the bucket before its right is read, and every malformed option refused before anything is read; the
+  contexts frozen with the parts themselves, `takesCtx` without `io`, `apply` or `systemMessage`, `sendTo` given a
+  hall's key reaching nobody where the broadcast reaches the hall, a socket's id reached once, a socket gone reached no
+  more, a string or a set never read as ids, and a context with a part not built, or an `io` whose open sockets cannot be
+  read, refused; and the same on a real Socket.IO server with two pages seated in a hall, as `server.js` builds it.
+  `test/modules.test.js`: (d), (i), (j), the verbs of `server.js`, the contexts' source read and (f)'s `sendTo`. Every
+  other suite unchanged.
+- The papers: `CLAUDE.md` (the client input rule's second place, the gate's row, the module fence's), `SECURITY.md` (the
+  gate's order, what a handler module and a take reach), `docs/ANALYSIS.md` (the fences (d), (g), (i), (j)),
+  `docs/DESIGN.md` (the modules row).
+- Rolling back: nothing is stored or sent differently.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

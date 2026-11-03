@@ -56,6 +56,9 @@ const stagelines = require('./lib/stagelines');
 const peerlinks = require('./lib/peerlinks');
 const deskresults = require('./lib/deskresults');
 const ops = require('./lib/ops');
+const { gateOf, contexts, WORDS: GATE_WORDS } = require('./lib/gate');
+const roomVerbs = require('./lib/handlers/rooms');
+const takeVerbs = require('./lib/handlers/takes');
 const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
 const readings = require('./lib/peaks');
@@ -1512,8 +1515,9 @@ io.on('connection', (socket) => {
   const uploadBucket = new guard.Bucket(0.5, 4);   // files from this connection, whichever hall or token
   let uploadToken = null;
   const ok = (ack) => (typeof ack === 'function' ? ack : () => {});
-  // `busy` says the refusal is the rate's, not the request's: the outbox keeps a held send and sends it again shortly.
-  const limited = (ack) => { ok(ack)({ ok: false, error: 'Slow down a little.', busy: true }); };
+  // `busy` says the refusal is the rate's, not the request's: the outbox keeps a held send and sends it again shortly. Its
+  // words are the gate's bucket step's (lib/gate.js), so a verb here and a verb in a handler module say one thing.
+  const limited = (ack) => { ok(ack)({ ok: false, error: GATE_WORDS.slow, busy: true }); };
   // The socket's seat: set at join, changed by admin:setRole, never by the page. The admin's support view is unseated
   // (adminView), so it is never On stage. A seat is keyed on the socket: the same person keeps their rights on a page
   // where they sit backstage, and is limited only on the page where they sit On stage.
@@ -1531,6 +1535,11 @@ io.on('connection', (socket) => {
   };
   // Who an audit row names for what this socket does: the admin token, the account, or a code guest by the name they joined with.
   const actor = () => socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
+  // The one gate (lib/gate.js): seated in a room that is still here, then a token of the verb's bucket, then the admin,
+  // then the verb's rights, each step read only once the one before it passed, each refused in its words. `need`,
+  // `mayPost` and `admin` below are its steps alone, so the verbs written here answer in the gate's words, and a verb in a
+  // handler module (lib/handlers/) passes it whole, first (conn.gate).
+  const gate = gateOf({ joined: () => !!room && !!me, here: () => store.hasRoom(room.code), isAdmin: () => !!socket.data.isAdmin, allowed, onStage });
 
   socket.on('join', (args, ack) => {
     ack = ok(ack);
@@ -1675,18 +1684,13 @@ io.on('connection', (socket) => {
   const sideRoomStage = () => !!room && !store.isMain(room);
   const SIDE_STAGE = 'This room sends nothing to the speaker\'s screen: send it from the hall\'s Main room.';
   const SIDE_HELP = 'Help requests are asked from the hall\'s Main room, where its crew answers them.';
-  const need = (ack) => {
-    if (!room || !me) { ok(ack)({ ok: false, error: 'Not joined' }); return false; }
-    if (!store.hasRoom(room.code)) { ok(ack)({ ok: false, error: 'Room gone' }); return false; }
-    return true;
-  };
+  // Seated in a room that is still here ("Not joined", "Room gone"): the gate's first step alone. A verb written here takes
+  // its bucket after it, in its own line.
+  const need = (ack) => gate(ack, { bucket: null });
   // Posting, answering a prompt, pinning and reacting change what everyone in the hall sees: they need hall.post.
-  // Someone who may only read (an observer, a Viewer account) is refused, and nothing reaches the hall.
-  const mayPost = (ack) => {
-    if (allowed('hall.post')) return true;
-    ok(ack)({ ok: false, error: 'Observers can read but not post.' });
-    return false;
-  };
+  // Someone who may only read (an observer, a Viewer account) is refused, and nothing reaches the hall: the gate's right
+  // alone, read wherever the verb reads it.
+  const mayPost = (ack) => gate(ack, { joined: false, bucket: null, may: 'hall.post' });
   // A question (an action prompt) is asked of the Board by the backstage team: an On stage seat answers, never asks.
   const mayAsk = () => allowed('hall.post') && !onStage();
   // Screens, a hall's set-up and the show network are driven from a backstage page: On stage, each is refused first,
@@ -2376,7 +2380,8 @@ io.on('connection', (socket) => {
   });
 
   // ----- ADMIN — only with a valid admin cookie
-  const admin = (ack) => { if (!socket.data.isAdmin) { ok(ack)({ ok: false, error: 'Not admin' }); return false; } return true; };
+  // The admin: the gate's admin step alone, from no room and with no bucket, as every admin verb written here asks it.
+  const admin = (ack) => gate(ack, { joined: false, bucket: null, admin: true });
   // Each room control that changes something is one audit row, written before it is acknowledged, and one that changes
   // nothing writes none: which room (by its code) and what changed, in words that name people and halls — never a
   // message's text, a file's name or a token.
@@ -2738,6 +2743,16 @@ io.on('connection', (socket) => {
     if (tunnelUrl && tunnelUp && !tunnelChecking && (!tunnelCheck || Date.now() - tunnelCheck.at > TUNNEL_CHECK_EVERY_MS)) startCheck();
     ok(ack)({ ok: true, ...tunnelStatus() });
   });
+
+  // What a handler module (lib/handlers/) is given of this connection, frozen: its room and its person read when asked
+  // (so no verb holds a room its page has left), its answers, its two buckets, its rights' questions and the one gate. The
+  // modules' verbs register after every verb above, on every page's socket but a screen's (a screen's returned at the
+  // top): the hall page's, the admin page's and the halls board's. The rooms module is given the server's context, the
+  // takes module the takes context, which holds nothing that makes a room's op or sends to a room (`ctx`, at the end of
+  // this file).
+  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, admin, actor, canManageHall, gate });
+  roomVerbs.register(socket, conn, ctx);
+  takeVerbs.register(socket, conn, takesCtx);
 
   function leaveRoom(now, holdSeat = false) {
     if (!room || !me || socket.data.adminView) return;
@@ -4107,6 +4122,16 @@ function firstWrites() {
   if (swept.removed.length) console.log('  Removed ' + plural(swept.removed.length, 'temporary file') + ' a stop cut short left in ' + DATA_DIR);
   for (const [name, why] of swept.failed) console.error('  [save] ' + name + ', left by a stop cut short, could not be removed (' + why + ')');
 }
+
+// The server's contexts for the handler modules (lib/gate.js `contexts`), built once, last, after every part they name
+// exists, and before this copy holds its port, so the first connection reads them whole: the stores and their named
+// effects, `settings` to read (a handler module never writes it: test/modules.test.js (j)), the Stagewatch a hall follows
+// and its frame, and `io` for the rooms module. The takes module's holds no io, apply or systemMessage: it reaches a page
+// by its socket's id alone (`sendTo`, over io's open sockets, read by the gate's module and never handed in), never a
+// room's op or a room's broadcast.
+const { ctx, takesCtx } = contexts({
+  store, apply, systemMessage, buildMessage, removeUnused, fileNamesOf, audit, accounts, boardDirty, settings, linkFor, stagePayload, io,
+});
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.
 if (RUNS === 'task') {

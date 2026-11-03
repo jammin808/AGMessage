@@ -10,6 +10,7 @@ const os = require('os');
 const path = require('path');
 const { ROOT, filesUnder, handlerFiles, pageScripts } = require('./helpers');
 const ops = require('../lib/ops');
+const gateLib = require('../lib/gate');
 
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const sourcesOf = (files) => new Map(files.map((f) => [f, read(f)]));
@@ -18,7 +19,7 @@ const serverCode = () => ['server.js', 'supervise.js', ...filesUnder('lib', /\.[
 
 // ---------------------------------------------------------------- (a)-(c) the server's layers
 /** The pure core: functions of what they are given, their clocks default arguments. They require only each other. */
-const PURE = ['lib/board.js', 'lib/busy.js', 'lib/context.js', 'lib/deskresults.js', 'lib/latest.js', 'lib/ops.js', 'lib/rbac.js', 'lib/stagelines.js', 'lib/tunnelend.js'];
+const PURE = ['lib/board.js', 'lib/busy.js', 'lib/context.js', 'lib/deskresults.js', 'lib/gate.js', 'lib/latest.js', 'lib/ops.js', 'lib/rbac.js', 'lib/stagelines.js', 'lib/tunnelend.js'];
 /** What reaches a disk, a network, the machine or another process: a pure module names none of them. */
 const IO_BUILTINS = ['fs', 'net', 'http', 'https', 'dgram', 'tls', 'os', 'dns', 'child_process', 'ws'];
 /** Only the composition root, server.js, requires these: the HTTP domain and the handler modules. */
@@ -155,6 +156,789 @@ test('(a)-(c) a planted breach of each layer rule fails it', () => {
   assert.deepEqual(run(add('lib/store.js', "require('./nothere');")), ['lib/store.js requires ./nothere, which is not in the tree']);
 });
 
+// ---------------------------------------------------------------- (d), (i), (j) the handler modules
+/** A handler module: a file directly in lib/handlers/ (plan 5-§14.2). */
+const HANDLER_MODULE = /^lib\/handlers\/[^/]+\.js$/;
+/**
+ * What every handler module may require besides the pure core, each file with the names it may take from it (null:
+ * any), and why. Nothing else: no built-in (fs, child_process), no package, no store or edge (lib/resilience.js
+ * included): a store or a link reaches a handler module only through its context.
+ */
+const HANDLER_MAY = {
+  'lib/guard.js': { names: ['str', 'cleanText', 'mac', 'Bucket'], why: 'its pure helpers, by name: guard reads the server secret once, at server.js\'s first require of it, and a handler module reaches none of what touches a disk' },
+  'lib/ids.js': { names: null, why: 'ids made from node:crypto, nothing kept' },
+};
+/** A store or an edge one handler module requires by name, for the pure functions it holds, with why. */
+const HANDLER_ROWS = {
+  'lib/handlers/takes.js': {
+    'lib/pages.js': { names: ['cleanPage', 'describePage', 'canShow', 'cleanSnippet'], why: 'the pages\' pure vocabulary, kept where it is tested; the store itself reaches the module through its context' },
+  },
+};
+
+/**
+ * `src` with its comments blanked and, unless `strings` is false, the words of its strings and templates blanked too
+ * (their quotes, and a template's `${…}` code, kept): the same length, line for line, so an index or a line of it is the
+ * source's. A regular expression literal is read as code, as every read here does.
+ */
+function blank(src, { strings = true } = {}) {
+  const out = src.split('');
+  const fill = (from, to) => { for (let k = from; k < to; k++) if (out[k] !== '\n') out[k] = ' '; };
+  const quoted = (open) => {
+    const q = src[open];
+    let from = open + 1, j = open + 1;
+    for (; j < src.length; j++) {
+      if (src[j] === '\\') { j++; continue; }
+      if (src[j] === q || (q !== '`' && src[j] === '\n')) break;
+      if (q === '`' && src[j] === '$' && src[j + 1] === '{') {
+        if (strings) fill(from, j);
+        const g = groupAt(src, j + 1);
+        if (!g) return src.length;
+        const inner = blank(src.slice(j + 2, g.end), { strings });
+        for (let k = 0; k < inner.length; k++) out[j + 2 + k] = inner[k];
+        j = g.end;
+        from = j + 1;
+      }
+    }
+    if (strings) fill(from, Math.min(j, src.length));
+    return j + 1;
+  };
+  for (let i = 0; i < src.length;) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '/') { const n = src.indexOf('\n', i); const end = n < 0 ? src.length : n; fill(i, end); i = end; }
+    else if (c === '/' && src[i + 1] === '*') { const n = src.indexOf('*/', i + 2); const end = n < 0 ? src.length : n + 2; fill(i, end); i = end; }
+    else if (c === "'" || c === '"' || c === '`') i = quoted(i);
+    else i++;
+  }
+  return out.join('');
+}
+const lineAt = (src, i) => src.slice(0, i).split('\n').length;
+
+/** A destructuring's entries (`a`, `b: c`, `d = 1`, `...e`): the names it takes and the names it binds, or null. */
+const IDENT = /^[A-Za-z_$][\w$]*$/;
+function destructured(inner) {
+  const takes = [], binds = [];
+  for (const raw of inner.split(',').map((e) => e.trim()).filter(Boolean)) {
+    if (raw.startsWith('...')) {
+      const name = raw.slice(3).trim();
+      if (!IDENT.test(name)) return null;
+      takes.push('...');
+      binds.push(name);
+      continue;
+    }
+    const [key, bind = key] = raw.split('=')[0].split(':').map((e) => e.trim());
+    if (!IDENT.test(key) || !IDENT.test(bind)) return null;
+    takes.push(key);
+    binds.push(bind);
+  }
+  return { takes, binds };
+}
+/** A declaration's binding from a require: a name (`const x = require(…)`) or a destructuring (`const { a } = require(…)`). */
+const REQUIRE_DECL = /\b(?:const|let|var)(?:\s+([A-Za-z_$][\w$]*)|\s*\{([^{}]*)\})\s*=\s*require\(\s*(['"])([^'"]+)\3\s*\)/g;
+/** A declaration from a name, or from one member of it: `const B = guard.Bucket`, `const r = roles`, `const { X } = m`. */
+const NAME_DECL = /\b(?:const|let|var)(?:\s+([A-Za-z_$][\w$]*)|\s*\{([^{}]*)\})\s*=\s*([A-Za-z_$][\w$]*)/g;
+/** The member a declaration from a name takes, read after it (`.Bucket` of `= guard.Bucket`), or null. */
+const memberAfter = (code, i) => { const m = /^\s*\??\.\s*([A-Za-z_$][\w$]*)/.exec(code.slice(i)); return m ? m[1] : null; };
+/**
+ * What a source requires and how, read as code with its strings kept: each require's spec with the names it takes (null:
+ * the module whole), the names bound to that module whole (`whole`, followed through `const r = roles`) and the names
+ * taken from one of those later (`via`: `const { can } = roles`, `const may = roles.can`, each with where); and every
+ * name bound to anything it requires, followed through the names given each other (`bound`).
+ */
+function requireBindings(src) {
+  const code = blank(src, { strings: false });
+  const decls = [];
+  const bound = new Set();
+  for (const m of code.matchAll(REQUIRE_DECL)) {
+    const d = m[2] === undefined ? null : destructured(m[2]);
+    decls.push({ spec: m[4], at: m.index, end: m.index + m[0].length, takes: m[1] ? null : d ? d.takes : ['an unread destructuring'], whole: new Set(m[1] ? [m[1]] : []), via: [] });
+    for (const n of m[1] ? [m[1]] : d ? d.binds : []) bound.add(n);
+  }
+  // A require outside a declaration (`require('../guard').str(x)`) takes its module whole.
+  const loose = [...code.matchAll(/\brequire\(\s*(['"])([^'"]+)\1\s*\)/g)]
+    .filter((m) => !decls.some((d) => m.index >= d.at && m.index < d.end))
+    .map((m) => ({ spec: m[2], at: m.index, end: m.index + m[0].length, takes: null, whole: new Set(), via: [] }));
+  const requires = [...decls, ...loose];
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const m of code.matchAll(NAME_DECL)) {
+      const d = m[2] === undefined ? null : destructured(m[2]);
+      const binds = m[1] ? [m[1]] : d ? d.binds : [];
+      const member = memberAfter(code, m.index + m[0].length);
+      if (bound.has(m[3])) for (const n of binds) if (!bound.has(n)) { bound.add(n); grew = true; }
+      for (const r of requires) {
+        if (!r.whole.has(m[3])) continue;
+        const taken = member ? [member] : d ? d.takes : [];
+        if (!member && m[1] && !r.whole.has(m[1])) { r.whole.add(m[1]); grew = true; }
+        for (const k of taken) if (!r.via.some((v) => v.name === k && v.at === m.index)) { r.via.push({ name: k, at: m.index }); grew = true; }
+      }
+    }
+  }
+  return { requires, bound };
+}
+
+/**
+ * What reaches a module, the machine or another process without a literal require: none of it is named in a handler
+ * module (read as code), so what it requires is what (d) reads. `module.exports` is its own.
+ */
+const HANDLER_NEVER = [
+  [/\bimport\s*\(/g, 'imports at run time: a handler module requires by a literal path'],
+  [/\brequire\b(?!\s*\(\s*['"])/g, 'names require other than to require a literal path'],
+  [/(?<![.\w$])process\b/g, 'names process: the server hands a handler module what it reads of the machine'],
+  [/(?<![.\w$])module\s*\.\s*(?!exports\b)/g, 'names module other than for its exports'],
+  [/(?<![.\w$])(?:globalThis|global)\b/g, 'names the global object, where what it requires cannot be read'],
+];
+
+/**
+ * (d) What a handler module in `sources` (file → source) requires beyond what the plan's row allows, reaches without a
+ * literal require, or makes of what it requires (`new`). `has` says what else is in the tree. Sorted.
+ */
+function requireProblems(sources, { pure = PURE, may = HANDLER_MAY, rows = HANDLER_ROWS, has = (f) => sources.has(f) } = {}) {
+  const problems = [];
+  for (const [file, src] of sources) {
+    if (!HANDLER_MODULE.test(file)) continue;
+    const { requires, bound } = requireBindings(src);
+    const code = blank(src);
+    for (const r of requires) {
+      const where = file + ':' + lineAt(src, r.at) + ': ';
+      if (!/^\.\.?(\/|$)/.test(r.spec)) { problems.push(where + 'requires ' + r.spec + ': a handler module requires no built-in and no package'); continue; }
+      const to = resolve(file, r.spec, has);
+      if (!to || pure.includes(to)) continue;   // a file not there is the layers' (a)-(c) to say
+      const row = Object.hasOwn(may, to) ? may[to] : rows[file] && Object.hasOwn(rows[file], to) ? rows[file][to] : null;
+      if (!row) { problems.push(where + 'requires ' + to + ': a store, a link or an edge reaches a handler module only through its context'); continue; }
+      if (!row.names) continue;
+      if (!r.takes) problems.push(where + 'takes ' + to + ' whole: it takes ' + row.names.join(', ') + ' by name (const { … } = require(…))');
+      else for (const n of r.takes) if (!row.names.includes(n)) problems.push(where + 'takes ' + n + ' from ' + to + ', which is not among its pure helpers (' + row.names.join(', ') + ')');
+    }
+    for (const [re, words] of HANDLER_NEVER) for (const m of code.matchAll(re)) problems.push(file + ':' + lineAt(src, m.index) + ': ' + words);
+    for (const m of code.matchAll(/\bnew\s+[\s(]*([A-Za-z_$][\w$]*)/g)) {
+      if (m[1] === 'require' || bound.has(m[1])) problems.push(file + ':' + lineAt(src, m.index) + ': makes what it requires (new ' + m[1] + '): it is given the server\'s, through its context');
+    }
+  }
+  return problems.sort();
+}
+
+/**
+ * (d) A handler module's context read anywhere but once: `register(socket, conn, ctx)` names it, and its first statement,
+ * `const { … } = ctx;` (no rest), is then the one other place it is named, so that line is the module's list of what it
+ * reaches of the server (plan 5-§14.2, as lib/http-accounts.js does). A module that reads nothing of it names it only
+ * as register's. Sorted.
+ */
+function contextProblems(sources) {
+  const problems = [];
+  for (const [file, src] of sources) {
+    if (!HANDLER_MODULE.test(file)) continue;
+    const code = blank(src);
+    const head = /\bfunction\s+register\s*\(/.exec(code);
+    const params = head ? groupAt(code, head.index + head[0].length - 1) : null;
+    if (!params || params.entries.join(',') !== 'socket,conn,ctx') { problems.push(file + ': gives no function register(socket, conn, ctx)'); continue; }
+    const named = namedAt(code, 'ctx').filter((i) => i > params.end);
+    if (!named.length) continue;
+    let open = params.end + 1;
+    while (/\s/.test(code[open] || '')) open++;
+    const rest = code.slice(open + 1);
+    const first = rest.trimStart();
+    const line = /^const\s*\{([^{}]*)\}\s*=\s*ctx\s*;/.exec(first);
+    const d = line ? destructured(line[1]) : null;
+    const at = open + 1 + (rest.length - first.length);
+    const ok = code[open] === '{' && d && !d.takes.includes('...') && named.length === 1 && named[0] > at && named[0] < at + line[0].length;
+    if (!ok) problems.push(file + ':' + lineAt(src, named.find((i) => !(line && i > at && i < at + line[0].length)) ?? named[0]) + ': reads ctx other than once, destructured as register\'s first statement (const { … } = ctx;, no rest): that line is the module\'s list of what it reaches');
+  }
+  return problems.sort();
+}
+
+/** The block body of the function written at `at` (an arrow or a function expression): where its `{` opens, or -1. */
+function bodyOpen(src, at) {
+  let i = at;
+  const spaces = () => { while (/\s/.test(src[i] || '')) i++; };
+  const name = () => { const from = i; while (/[\w$]/.test(src[i] || '')) i++; return src.slice(from, i); };
+  const word = (w) => src.startsWith(w, i) && !/[\w$]/.test(src[i + w.length] || '');
+  if (word('async')) { i += 5; spaces(); }
+  if (word('function')) { i += 8; spaces(); name(); spaces(); }
+  if (src[i] === '(') { const g = groupAt(src, i); if (!g) return -1; i = g.end + 1; }
+  else if (!IDENT.test(name())) return -1;
+  spaces();
+  if (src.startsWith('=>', i)) { i += 2; spaces(); }
+  return src[i] === '{' ? i : -1;
+}
+/**
+ * The parameters of the function written at `at` (an arrow or a function expression), each as written (`args`,
+ * `{ id } = {}`, `ack`), or null when they cannot be read.
+ */
+function paramsAt(src, at) {
+  let i = at;
+  const spaces = () => { while (/\s/.test(src[i] || '')) i++; };
+  const name = () => { const from = i; while (/[\w$]/.test(src[i] || '')) i++; return src.slice(from, i); };
+  const word = (w) => src.startsWith(w, i) && !/[\w$]/.test(src[i + w.length] || '');
+  if (word('async')) { i += 5; spaces(); }
+  if (word('function')) { i += 8; spaces(); name(); spaces(); }
+  if (src[i] === '(') { const g = groupAt(src, i); return g ? g.entries : null; }
+  const one = name();
+  return IDENT.test(one) ? [one] : null;
+}
+const GATE_CALL = /\bconn\s*\.\s*gate\s*\(/g;
+const GATE_FIRST = /^if\s*\(\s*!\s*conn\s*\.\s*gate\s*\(/;
+/** The connection's buckets (conn.writes, conn.chatter: server.js's conn, held by the contexts' source read). */
+const CONN_BUCKETS = ['writes', 'chatter'];
+/** A reason in a comment: two words at least. */
+const REASON = /\/\/\s*\S+\s+\S|\/\*\s*\S+\s+\S/;
+/** The names a source takes from `conn` as themselves (`const { writes, gate } = conn`): a rename is not one. */
+function takenFromConn(code) {
+  const names = new Set();
+  for (const m of code.matchAll(/\b(?:const|let|var)\s*\{([^{}]*)\}\s*=\s*conn\b/g)) {
+    const d = destructured(m[1]);
+    if (d) d.takes.forEach((k, i) => { if (d.binds[i] === k) names.add(k); });
+  }
+  return names;
+}
+
+/**
+ * (i) Each listener a handler module adds (`socket.on(`, but Socket.IO's own `disconnect` and `disconnecting`, which no
+ * page sends and which carry no acknowledgement) whose first statement is not its one gate call,
+ * `if (!conn.gate(ack, {…})) return;`, answering the listener's own last argument (its acknowledgement, by name), or
+ * whose gate does not name one of the connection's buckets (`conn.writes`, or `writes` taken from conn as itself) or say
+ * `bucket: null` with why on its line or the line before, takes an option the gate does not, or is passed more than
+ * once; and a gate call outside a verb. Sorted.
+ */
+function gateProblems(sources, options = gateLib.OPTIONS) {
+  const problems = [];
+  for (const [file, src] of sources) {
+    if (!HANDLER_MODULE.test(file)) continue;
+    const code = blank(src);
+    const fromConn = takenFromConn(code);
+    const listeners = [...code.matchAll(/\bsocket\s*\.\s*on\s*\(/g)].map((m) => {
+      const call = groupAt(src, m.index + m[0].length - 1);
+      const verb = call && call.entries[0] ? call.entries[0] : '(unread)';
+      return { m, call, verb, own: /^'[^']+'$/.test(verb) && SERVER_OWN.includes(verb.slice(1, -1)) };
+    });
+    const verbs = listeners.filter((l) => !l.own);
+    const gates = (code.match(GATE_CALL) || []).length;
+    if (gates !== verbs.length) problems.push(file + ': ' + gates + ' gate calls for ' + verbs.length + ' verbs: each verb passes one, first, and none stands outside a verb');
+    for (const { m, call, verb } of verbs) {
+      const where = file + ':' + lineAt(src, m.index) + ': ' + verb + ' ';
+      const open = call && call.entries.length === 2 ? bodyOpen(src, call.at[1]) : -1;
+      const body = open >= 0 ? groupAt(src, open) : null;
+      if (!body) { problems.push(where + 'is not a listener written in place with a block body: its gate cannot be read'); continue; }
+      const inBody = (code.slice(open, body.end).match(GATE_CALL) || []).length;
+      if (inBody > 1) problems.push(where + 'passes the gate ' + inBody + ' times: once, first');
+      const rest = src.slice(open + 1, body.end);
+      const first = afterComments(rest);
+      const head = GATE_FIRST.exec(first);
+      if (!head) { problems.push(where + 'does not start with its gate: if (!conn.gate(ack, { bucket: … })) return;'); continue; }
+      const paren = open + 1 + (rest.length - first.length) + head[0].length - 1;
+      const g = groupAt(src, paren);
+      if (!g || !/^\s*\)\s*return\b/.test(src.slice(g.end + 1))) { problems.push(where + 'does not return when its gate refuses: if (!conn.gate(ack, { bucket: … })) return;'); continue; }
+      // The refusal answers the sender: the gate is handed the listener's own acknowledgement, its last argument.
+      const params = paramsAt(src, call.at[1]);
+      const ack = params && params.length ? params[params.length - 1] : null;
+      if (!ack || !IDENT.test(ack)) problems.push(where + 'takes no acknowledgement its gate could answer: its last argument is the ack, by name (args, ack)');
+      else if (g.entries[0] !== ack) problems.push(where + 'gives its gate ' + (g.entries[0] || 'nothing') + ' to answer, not its acknowledgement: if (!conn.gate(' + ack + ', { bucket: … })) return;');
+      const opts = g.entries[1] && g.entries[1].startsWith('{') ? groupAt(src, g.at[1]) : null;
+      if (!opts || opts.end !== g.at[1] + g.entries[1].length - 1 || g.entries.length !== 2) { problems.push(where + 'gives its gate options it does not write out: (ack, { bucket: … })'); continue; }
+      const keys = opts.entries.map(keyOf);
+      const odd = keys.find((k) => !('key' in k));
+      if (odd) { problems.push(where + 'gives its gate ' + odd.unread); continue; }
+      for (const k of keys) if (!options.includes(k.key)) problems.push(where + 'gives its gate an option it does not take: ' + k.key);
+      const i = keys.findIndex((k) => k.key === 'bucket');
+      if (i < 0 || keys[i].value === null) { problems.push(where + 'names no bucket: bucket: conn.writes, or bucket: null with why'); continue; }
+      const value = keys[i].value;
+      if (value === 'null') {
+        const at = opts.at[i];
+        const lines = src.split('\n');
+        const n = lineAt(src, at) - 1;
+        if (!REASON.test(lines[n]) && !(n > 0 && /^\s*\/[/*]/.test(lines[n - 1]) && REASON.test(lines[n - 1]))) problems.push(where + 'says bucket: null without why: a comment on its line, or the line before');
+      } else if (!CONN_BUCKETS.some((b) => value.replace(/\s+/g, '') === 'conn.' + b || (value === b && fromConn.has(b)))) {
+        problems.push(where + 'gives its gate a bucket that is not the connection\'s: bucket: ' + value + ' (conn.writes, conn.chatter, or one taken from conn by its name)');
+      }
+    }
+  }
+  return problems.sort();
+}
+
+/** The takes module reaches a page by its socket's id alone (takesCtx.sendTo): none of these names a room or a broadcast. */
+const TAKES_NEVER = [
+  ['io', /\bio\b/g],
+  ['.to(', /\.\s*to\s*\(/g],
+  ['.in(', /\.\s*in\s*\(/g],
+  ['.broadcast', /\.\s*broadcast\b/g],
+  ['.nsp', /\.\s*nsp\b/g],
+  ['.server', /\.\s*server\b/g],
+  ['.except(', /\.\s*except\s*\(/g],
+  ['socket.join(', /\bsocket\s*\.\s*join\s*\(/g],
+  ['socket.leave(', /\bsocket\s*\.\s*leave\s*\(/g],
+  ['a member named by a string', /[\w$)\]]\s*\[\s*['"`]/g],
+];
+/**
+ * The room store's readers, the one way the takes module reaches it: a take reads who is in a room and writes none
+ * (lib/store.js: the halls' `get` and `has`, the any-room readers `room`, `hasRoom`, `allRooms`, `roomsOf`, and
+ * `isMain`). A unit whose take reads another adds it here, with why.
+ */
+const TAKES_STORE_READS = ['get', 'has', 'room', 'hasRoom', 'allRooms', 'roomsOf', 'isMain'];
+/**
+ * What a call on a path into settings may be: a read, which returns what it reads or a copy and changes nothing.
+ * Anything else (`push`, `splice`, `sort`, `set`, `add`, `delete`, a method named by an expression) may write it.
+ */
+const SETTINGS_READS = [
+  'at', 'concat', 'entries', 'every', 'filter', 'find', 'findIndex', 'findLast', 'findLastIndex', 'flat', 'flatMap', 'forEach', 'get', 'has',
+  'includes', 'indexOf', 'join', 'keys', 'lastIndexOf', 'map', 'reduce', 'reduceRight', 'slice', 'some', 'toReversed', 'toSorted', 'toSpliced',
+  'values', 'with', 'endsWith', 'startsWith', 'toLowerCase', 'toUpperCase', 'trim', 'toString',
+];
+/** A read of a part that is a count, never an object a write could go through. */
+const COUNTS = ['length', 'size'];
+/** The operators that assign: `=`, and each compound one. */
+const ASSIGNS = ['=', '+=', '-=', '*=', '/=', '%=', '**=', '<<=', '>>=', '>>>=', '&=', '|=', '^=', '&&=', '||=', '??='];
+/** Before a path that writes settings through a call: Object's and Reflect's writers. */
+const WRITERS = /\b(?:Object\s*\.\s*(?:assign|defineProperty|defineProperties|setPrototypeOf)|Reflect\s*\.\s*(?:set|defineProperty|deleteProperty))\s*\(\s*$/;
+/** Before a path handed to a function as its `this` or its first argument, where what the function does to it cannot be read. */
+const handedAsThis = (before) => /\.\s*(?:call|apply)\s*\(\s*$/.test(before) || /\.\s*(?:call|apply)\s*\(\s*[\w$.]+\s*,\s*$/.test(before);
+
+/** Each index in `code` where `name` stands as a whole word (not part of a longer name). */
+function namedAt(code, name) {
+  const at = [];
+  for (let i = code.indexOf(name); i >= 0; i = code.indexOf(name, i + 1)) {
+    if (/[\w$]/.test(code[i - 1] || '') || /[\w$]/.test(code[i + name.length] || '')) continue;
+    at.push(i);
+  }
+  return at;
+}
+/**
+ * Each place `name` stands in `code` (comments and strings blanked), read as a path: the names before it (`root`: `ctx`
+ * for `ctx.settings`, '' for none), its members after it (`.x`, `?.x`, `[k]`, each a name or '[]'), and the code before
+ * the path and after it.
+ */
+function pathsOf(code, name) {
+  return namedAt(code, name).map((index) => {
+    let start = index;
+    for (;;) {
+      let k = start;
+      while (k > 0 && /\s/.test(code[k - 1])) k--;
+      if (code[k - 1] !== '.' || code[k - 2] === '.') break;
+      k -= code[k - 2] === '?' ? 2 : 1;
+      while (k > 0 && /\s/.test(code[k - 1])) k--;
+      const end = k;
+      while (k > 0 && /[\w$]/.test(code[k - 1])) k--;
+      if (k === end) break;
+      start = k;
+    }
+    const members = [];
+    let i = index + name.length;
+    for (;;) {
+      let k = i;
+      while (/\s/.test(code[k] || '')) k++;
+      if (code[k] === '[') { const close = code.indexOf(']', k); if (close < 0) break; i = close + 1; members.push('[]'); continue; }
+      if (code.startsWith('?.', k) && code[k + 2] !== '[' && code[k + 2] !== '(') k += 2;
+      else if (code[k] === '.' && code[k + 1] !== '.') k += 1;
+      else break;
+      while (/\s/.test(code[k] || '')) k++;
+      const from = k;
+      while (/[\w$]/.test(code[k] || '')) k++;
+      if (k === from) break;
+      i = k;
+      members.push(code.slice(from, k));
+    }
+    const root = code.slice(start, index).replace(/\s+/g, '').replace(/\??\.$/, '');
+    return { index, root, members, before: code.slice(0, start).trimEnd(), after: code.slice(i).trimStart() };
+  });
+}
+/** A path called (`x.y(`, `x.y?.(`). */
+const called = (p) => p.after.startsWith('(') || p.after.startsWith('?.(');
+/** A path given to a binding of another name: `const s = x`, `y = x.a;`, `const { a } = x;`, or `{ x: s }` in a destructuring. */
+const takenUnderAnotherName = (p) => (/(?:^|[^=!<>+\-*/%&|^?])=$/.test(p.before) && /^(?:[;,)\]}]|$)/.test(p.after))
+  || (!p.members.length && /\b(?:const|let|var)\s*\{[^{}]*$/.test(p.before) && p.after.startsWith(':'));
+/** The rest of a destructuring of ctx, read from just after one of its entries: `, pages } = ctx`, `} = ctx`. */
+const closesOnCtx = (after) => /^\}\s*=\s*ctx\b/.test(after) || /^,[^{}]*\}\s*=\s*ctx\b/.test(after);
+/** An entry of a destructuring: a bare name with a declaration's `{` open before it. */
+const inDestructuring = (p) => !p.root && !p.members.length && /\b(?:const|let|var)\s*\{[^{}]*$/.test(p.before);
+/** A bare name that is an entry of a destructuring of ctx as itself: `const { store, pages } = ctx;`. */
+const takenFromCtx = (p) => inDestructuring(p) && closesOnCtx(p.after);
+
+/**
+ * Each write into settings in `code` (comments and strings blanked), as [index, words]: a path into it (`settings.x`,
+ * `settings[k]`, `ctx.settings.x`) assigned, counted, deleted or called by a method that is not a read
+ * (`settings.roomSends.push(…)`), settings given to Object's or Reflect's writers or handed to a function as its `this`,
+ * and settings, or a part of it, taken under another name, where a write through that name could not be read.
+ */
+function settingsWrites(code) {
+  const found = [];
+  for (const p of pathsOf(code, 'settings')) {
+    const { members, before, after } = p;
+    const op = ASSIGNS.filter((o) => after.startsWith(o)).sort((x, y) => y.length - x.length)[0];
+    const last = members[members.length - 1];
+    if (members.length && op && !after.startsWith('==') && !after.startsWith('=>')) found.push([p.index, 'assigns into settings']);
+    else if (members.length && (after.startsWith('++') || after.startsWith('--') || before.endsWith('++') || before.endsWith('--'))) found.push([p.index, 'counts in settings']);
+    else if (/\bdelete$/.test(before)) found.push([p.index, 'deletes from settings']);
+    else if (WRITERS.test(before)) found.push([p.index, 'writes settings through Object or Reflect']);
+    else if (handedAsThis(before)) found.push([p.index, 'hands settings to a function as its this, where what it writes cannot be read']);
+    else if (members.length && called(p) && !SETTINGS_READS.includes(last)) found.push([p.index, 'calls ' + (last === '[]' ? 'a method named by an expression' : last) + ' on settings, which may write it (a read: ' + SETTINGS_READS.slice(0, 4).join(', ') + ', …)']);
+    else if (takenUnderAnotherName(p) && !COUNTS.includes(last)) found.push([p.index, 'takes ' + (members.length ? 'a part of settings' : 'settings') + ' under another name, where its writes cannot be read']);
+  }
+  return found;
+}
+/**
+ * (j) The takes module naming a room or a broadcast, joining its socket to a room, reaching the room store but through
+ * its readers, or taking the store or the socket under another name; and any handler module asking a right of rbac
+ * (`rbac.can(`, under any name rbac is bound to, or `can` taken from it) instead of its connection, naming `sendTo` but
+ * to call it (so (f) reads each take's event), or writing into settings. Read as code: a word in a comment or a string
+ * is not the code's. Sorted.
+ */
+function narrowProblems(sources) {
+  const problems = new Set();
+  for (const [file, src] of sources) {
+    if (!HANDLER_MODULE.test(file)) continue;
+    const { requires } = requireBindings(src);
+    const code = blank(src);
+    const at = (i, words) => problems.add(file + ':' + lineAt(src, i) + ': ' + words);
+    if (file === 'lib/handlers/takes.js') {
+      for (const [name, re] of TAKES_NEVER) for (const m of code.matchAll(re)) at(m.index, 'names ' + name + ': a take reaches a page by its socket\'s id alone (ctx.sendTo), never a room or a broadcast');
+      for (const p of pathsOf(code, 'store')) {
+        if (p.root && p.root !== 'ctx') continue;   // another object's member named store
+        if (p.members.length) { if (p.members.length > 1 || !TAKES_STORE_READS.includes(p.members[0]) || !called(p)) at(p.index, 'reaches the room store other than through its readers (store.room(…), …): a take writes no room'); }
+        else if (!takenFromCtx(p)) at(p.index, 'takes the room store under another name, or hands it on, where its writes cannot be read');
+      }
+      for (const p of pathsOf(code, 'socket')) {
+        if ((!p.root || p.root === 'conn') && !p.members.length && takenUnderAnotherName(p)) at(p.index, 'takes the socket under another name, where its rooms and broadcasts cannot be read');
+      }
+      // What the takes context does not hold is not asked of it (io is named nowhere, above): it would be undefined.
+      for (const name of gateLib.ROOM_SENDS.filter((n) => n !== 'io')) {
+        for (const p of pathsOf(code, name)) if (p.root === 'ctx' || (inDestructuring(p) && closesOnCtx(p.after.replace(/^:\s*[\w$]+/, '').trimStart()))) {
+          at(p.index, 'takes ' + name + ' from ctx, which the takes context does not hold: a take makes no room\'s op');
+        }
+      }
+    }
+    // A right is asked of the connection: of rbac under no name it is bound to, nor by its can taken out of it.
+    for (const r of requires) {
+      if (!/(^|\/)rbac(\.js)?$/.test(r.spec)) continue;
+      if (r.takes && r.takes.includes('can')) at(r.at, 'takes can from rbac: its connection answers a right');
+      for (const v of r.via) if (v.name === 'can') at(v.at, 'takes can from rbac: its connection answers a right');
+      // (its can taken under another name, `const may = roles.can`, is said once, as taken, above)
+      for (const n of r.whole) for (const p of pathsOf(code, n)) if (!p.root && ['can', '[]'].includes(p.members[0]) && !(p.members.length === 1 && takenUnderAnotherName(p))) at(p.index, 'asks a right of rbac: its connection answers it (conn.allowed, conn.mayPost, conn.canManageHall)');
+      if (!r.takes && !r.whole.size && /^\s*(?:\??\.\s*can\b|\[)/.test(code.slice(r.end))) at(r.at, 'asks a right of rbac: its connection answers it (conn.allowed, conn.mayPost, conn.canManageHall)');
+    }
+    for (const m of code.matchAll(/\brbac\s*(?:\??\.\s*can\b|\[)/g)) at(m.index, 'asks a right of rbac: its connection answers it (conn.allowed, conn.mayPost, conn.canManageHall)');
+    // A take's event is read where sendTo is called: it is named only to be called, or taken from ctx as itself.
+    for (const p of pathsOf(code, 'sendTo')) if (!(called(p) && !p.members.length) && !takenFromCtx(p)) at(p.index, 'names sendTo other than to call it: (f) reads a take\'s event where sendTo is called');
+    for (const [i, words] of settingsWrites(code)) at(i, words + ': a handler module reads settings and never writes them');
+  }
+  return [...problems].sort();
+}
+
+/**
+ * The verbs server.js registers, read as the fuzz reads them (`socket.on('verb'`): the ones it held when the handler
+ * modules came (plan 5-§14.2), a list that only shrinks. A new verb registers in a handler module (lib/handlers/),
+ * behind its gate; one written here leaves this list when a unit rewrites it into a module.
+ */
+const SERVER_VERBS = [
+  'actionResponse', 'admin:acceptCertificate', 'admin:createRoom', 'admin:deleteMessage', 'admin:deleteRoom', 'admin:invites', 'admin:kick',
+  'admin:laptop', 'admin:linkRoom', 'admin:listRooms', 'admin:lockRoles', 'admin:postSummary', 'admin:renewCertificate', 'admin:resetRoom',
+  'admin:setRole', 'admin:settings', 'admin:summary', 'admin:tunnelStart', 'admin:tunnelStatus', 'admin:tunnelStop', 'admin:tunnelUntil',
+  'admin:unlinkRoom', 'admin:watchRoom', 'ai:draft', 'ai:options', 'board:watch', 'delete', 'disconnect', 'display:create',
+  'display:hallHolding', 'display:identify', 'display:list', 'display:remove', 'display:rotate', 'display:shown', 'display:take',
+  'display:update', 'forward', 'hall:acceptCertificate', 'hall:configure', 'hall:settings', 'help:respond', 'join', 'message', 'myRooms',
+  'nodes:acceptCertificate', 'nodes:command', 'nodes:link', 'nodes:list', 'nodes:unlink', 'pin', 'react', 'seen', 'stage:propose',
+  'stage:send', 'stage:targets', 'userState:push', 'userState:requestPeers',
+];
+/** A verb server.js registers that it did not hold (a new one: a handler module's), or a row it registers no more. Sorted. */
+function serverVerbProblems(src, held = SERVER_VERBS) {
+  const verbs = new Set([...src.matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1]));
+  return [
+    ...[...verbs].filter((v) => !held.includes(v)).map((v) => 'server.js registers ' + v + ': a new verb registers in a handler module (lib/handlers/), behind its gate'),
+    ...held.filter((v) => !verbs.has(v)).map((v) => v + ' is no longer registered in server.js: its row in SERVER_VERBS goes'),
+  ].sort();
+}
+
+test('(d), (i), (j) the handler modules: narrow requires, the context read once, one gate first in each verb, no room or broadcast from takes, no right asked of rbac, no settings written; and no new verb in server.js', () => {
+  const sources = sourcesOf(serverCode());
+  const has = (f) => sources.has(f) || onDisk(f);
+  const modules = [...sources.keys()].filter((f) => HANDLER_MODULE.test(f)).sort();
+  assert.deepEqual(modules, handlerFiles().slice(1), 'the fences read the handler files\' modules');
+  assert.deepEqual(modules, ['lib/handlers/rooms.js', 'lib/handlers/takes.js']);
+  assert.deepEqual(requireProblems(sources, { has }), []);
+  assert.deepEqual(contextProblems(sources), []);
+  assert.deepEqual(gateProblems(sources), []);
+  assert.deepEqual(narrowProblems(sources), []);
+  assert.deepEqual(serverVerbProblems(sources.get('server.js')), []);
+  // What the rows allow is there: guard's helpers by those names, and the gate's options are the ones (i) reads.
+  const guard = require('../lib/guard');
+  for (const n of HANDLER_MAY['lib/guard.js'].names) assert.equal(typeof guard[n], 'function', 'guard.' + n);
+  assert.deepEqual([...gateLib.OPTIONS], ['joined', 'bucket', 'admin', 'may']);
+  // Each module is server.js's alone to require, and gives the connection one register(socket, conn, ctx).
+  for (const m of [require('../lib/handlers/rooms'), require('../lib/handlers/takes')]) assert.deepEqual(Object.keys(m), ['register']);
+});
+
+test('(d), (i), (j) the contexts: conn made in the connection after each helper it holds, ctx and takesCtx built once and last from the parts alone, the modules registered on every page\'s socket but a screen\'s', () => {
+  const server = read('server.js');
+  // The connection's function, from its first line to the first line at the top level after it (its close, `});`).
+  const at = server.indexOf("io.on('connection', (socket) => {");
+  const end = server.indexOf('\n});\n', at);
+  assert.ok(at > 0 && end > at, 'the connection is read');
+  const inClosure = (i) => i > at && i < end;
+  const once = (text) => { const i = server.indexOf(text); assert.ok(i > 0 && server.indexOf(text, i + 1) < 0, text + ' once'); return i; };
+  // conn: frozen, its room and person read when asked, each helper it holds made before it in the connection.
+  const made = once('const conn = Object.freeze(');
+  assert.ok(inClosure(made), 'conn is made in the connection');
+  const conn = groupAt(server, made + 'const conn = Object.freeze('.length);
+  const keys = conn.entries.map(keyOf);
+  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'admin', 'actor', 'canManageHall', 'gate']);
+  assert.deepEqual(keys.filter((k) => k.value !== null).map((k) => [k.key, k.value]), [['room', '() => room'], ['me', '() => me']]);
+  for (const { key } of keys.filter((k) => k.value === null && k.key !== 'socket')) {
+    const decl = server.indexOf('  const ' + key + ' = ', at);
+    assert.ok(inClosure(decl) && decl < made, key + ' is made in the connection before conn holds it');
+  }
+  // The buckets (i) accepts are the ones conn holds, each a bucket of the connection's own.
+  for (const b of CONN_BUCKETS) assert.ok(keys.some((k) => k.key === b) && inClosure(server.indexOf('  const ' + b + ' = new guard.Bucket(', at)), b);
+  // The three of today's helpers that are the gate's steps alone answer in its words, and limited in its bucket's.
+  assert.ok(server.includes('const need = (ack) => gate(ack, { bucket: null });'));
+  assert.ok(server.includes("const mayPost = (ack) => gate(ack, { joined: false, bucket: null, may: 'hall.post' });"));
+  assert.ok(server.includes('const admin = (ack) => gate(ack, { joined: false, bucket: null, admin: true });'));
+  assert.ok(server.includes('const limited = (ack) => { ok(ack)({ ok: false, error: GATE_WORDS.slow, busy: true }); };'));
+  assert.ok(once("const { gateOf, contexts, WORDS: GATE_WORDS } = require('./lib/gate');"));
+  // The modules, each registered once, after conn, on a socket that is not a screen's.
+  const rooms = once('roomVerbs.register(socket, conn, ctx);');
+  const takes = once('takeVerbs.register(socket, conn, takesCtx);');
+  const screen = once('if (displayToken) { serveDisplay(socket, displayToken); return; }');
+  assert.ok(inClosure(rooms) && inClosure(takes) && inClosure(screen) && screen < made && made < rooms && rooms < takes);
+  assert.ok(once("const roomVerbs = require('./lib/handlers/rooms');") && once("const takeVerbs = require('./lib/handlers/takes');"));
+  // ctx and takesCtx: built once, outside the connection, from the parts alone (the sockets sendTo reaches are read from
+  // io by lib/gate.js, never handed in), after each part they name is declared, before the port is held.
+  const built = once('const { ctx, takesCtx } = contexts(');
+  const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
+  assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
+  const parts = groupAt(server, call.at[0]).entries.map(keyOf);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'buildMessage', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'settings', 'linkFor', 'stagePayload', 'io']);
+  assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
+  const declared = new Map();
+  for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
+  for (const { key } of parts) assert.ok(declared.has(key) && declared.get(key) < built, key + ' is declared at the top level before the contexts are built');
+  assert.ok(built > end && built < server.indexOf('holdDataFolder(() => front.listen('), 'built after the connection is written and before this copy holds its port');
+  // The io they are given is the server's own Socket.IO server, the one every page's socket connects to.
+  assert.ok(once('const io = new Server(') < built);
+});
+
+test('(d) a planted handler module that requires past its row, or makes what it requires, fails it', () => {
+  const tree = ['lib/board.js', 'lib/rbac.js', 'lib/guard.js', 'lib/ids.js', 'lib/store.js', 'lib/resilience.js', 'lib/pages.js'];
+  const has = (f) => tree.includes(f);
+  const pure = ['lib/board.js', 'lib/rbac.js'];
+  const base = ["const rbac = require('../rbac');", "const { str, cleanText: clean } = require('../guard');", "const ids = require('../ids');", "const board = require('../board.js');", 'const seen = new Map(); const later = new Set();'].join('\n');
+  const run = (f, line, p = pure) => requireProblems(new Map([[f, base + '\n' + line]]), { pure: p, has });
+  const rooms = (line) => run('lib/handlers/rooms.js', line);
+  assert.deepEqual(rooms(''), [], 'the planted module passes: the pure core, guard\'s helpers by name (one renamed), ids, and a Map of its own');
+  assert.deepEqual(rooms("const fs = require('fs');"), ['lib/handlers/rooms.js:6: requires fs: a handler module requires no built-in and no package']);
+  assert.deepEqual(rooms("const { spawn } = require('node:child_process');"), ['lib/handlers/rooms.js:6: requires node:child_process: a handler module requires no built-in and no package']);
+  assert.deepEqual(rooms("const { Server } = require('socket.io');"), ['lib/handlers/rooms.js:6: requires socket.io: a handler module requires no built-in and no package']);
+  assert.deepEqual(rooms("const { RoomStore } = require('../store');"), ['lib/handlers/rooms.js:6: requires lib/store.js: a store, a link or an edge reaches a handler module only through its context']);
+  assert.deepEqual(rooms("const { writeFileAtomic } = require('../resilience');"), ['lib/handlers/rooms.js:6: requires lib/resilience.js: a store, a link or an edge reaches a handler module only through its context']);
+  // guard by its pure helpers' names, never whole, and never what reads or makes the secret.
+  assert.deepEqual(rooms("const guard = require('../guard');"), ['lib/handlers/rooms.js:6: takes lib/guard.js whole: it takes str, cleanText, mac, Bucket by name (const { … } = require(…))']);
+  assert.deepEqual(rooms("const ok = require('../guard').str(x);"), ['lib/handlers/rooms.js:6: takes lib/guard.js whole: it takes str, cleanText, mac, Bucket by name (const { … } = require(…))']);
+  assert.deepEqual(rooms("const { readSecret, mac } = require('../guard');"), ['lib/handlers/rooms.js:6: takes readSecret from lib/guard.js, which is not among its pure helpers (str, cleanText, mac, Bucket)']);
+  assert.deepEqual(rooms("const { ...all } = require('../guard');"), ['lib/handlers/rooms.js:6: takes ... from lib/guard.js, which is not among its pure helpers (str, cleanText, mac, Bucket)']);
+  // The one row: the takes module takes the pages' pure vocabulary by name; no other module requires the store.
+  assert.deepEqual(run('lib/handlers/takes.js', "const { cleanPage, canShow } = require('../pages');"), []);
+  assert.deepEqual(run('lib/handlers/takes.js', "const { PagesStore } = require('../pages');"), ['lib/handlers/takes.js:6: takes PagesStore from lib/pages.js, which is not among its pure helpers (cleanPage, describePage, canShow, cleanSnippet)']);
+  assert.deepEqual(rooms("const { cleanPage } = require('../pages');"), ['lib/handlers/rooms.js:6: requires lib/pages.js: a store, a link or an edge reaches a handler module only through its context']);
+  // Nothing it requires is made in it, however it is reached; a word in a comment or a string is not code.
+  assert.deepEqual(rooms("const { Bucket } = require('../guard');\nconst b = new Bucket(5, 15);"), ['lib/handlers/rooms.js:7: makes what it requires (new Bucket): it is given the server\'s, through its context']);
+  assert.deepEqual(rooms('const t = new ids.Thing();'), ['lib/handlers/rooms.js:6: makes what it requires (new ids): it is given the server\'s, through its context']);
+  assert.deepEqual(rooms("const { Bucket } = require('../guard');\nconst B = Bucket;\nconst b = new (B)(1, 2);"), ['lib/handlers/rooms.js:8: makes what it requires (new B): it is given the server\'s, through its context']);
+  assert.deepEqual(rooms("const x = new (require('../board').Board)();"), ['lib/handlers/rooms.js:6: makes what it requires (new require): it is given the server\'s, through its context']);
+  assert.deepEqual(rooms("// new board.Thing() is never made here\nconst words = 'new board.Thing()';"), []);
+  // Nothing is reached without a literal require: an import at run time, require by a path not written out or handed on,
+  // the process, the module's loader, the global object. Its own exports, and a word in a comment or a string, pass.
+  for (const [line, words] of [
+    ["const fs = await import('node:fs');", 'imports at run time: a handler module requires by a literal path'],
+    ['const fs = require(name);', 'names require other than to require a literal path'],
+    ["const load = require; load('fs');", 'names require other than to require a literal path'],
+    ["const fs = require.call(null, 'fs');", 'names require other than to require a literal path'],
+    ["const fs = process.binding('fs');", 'names process: the server hands a handler module what it reads of the machine'],
+    ['const { env } = process;', 'names process: the server hands a handler module what it reads of the machine'],
+    ["const fs = module.constructor._load('fs');", 'names module other than for its exports'],
+    ["const p = globalThis.process;", 'names the global object, where what it requires cannot be read'],
+  ]) assert.deepEqual(rooms(line), ['lib/handlers/rooms.js:6: ' + words], line);
+  assert.deepEqual(rooms("module.exports = { register };\n// import('fs'), process.binding, require(x)\nconst words = 'process.env and import(x)';\nconst x = args.process;"), []);
+  // The pure core is the pure set the fence is given: a file outside it is a store or an edge.
+  assert.deepEqual(run('lib/handlers/rooms.js', '', ['lib/rbac.js']), ['lib/handlers/rooms.js:4: requires lib/board.js: a store, a link or an edge reaches a handler module only through its context']);
+  // A file that is not a module directly in lib/handlers/ is not read as one.
+  assert.deepEqual(requireProblems(new Map([['lib/handlers/parts/x.js', "require('fs');"], ['lib/store.js', "require('fs');"]]), { pure, has }), []);
+});
+
+test('(d) a planted handler module that reads its context anywhere but once, destructured as register\'s first statement, fails it', () => {
+  const run = (body, head = 'function register(socket, conn, ctx) {') => contextProblems(new Map([['lib/handlers/rooms.js', ['\'use strict\';', head, ...body, '}', 'module.exports = { register };'].join('\n')]]));
+  const VERB = "  socket.on('a', (args, ack) => { if (!conn.gate(ack, { bucket: conn.writes })) return; store.room(conn.room().code); });";
+  const read = 'reads ctx other than once, destructured as register\'s first statement (const { … } = ctx;, no rest): that line is the module\'s list of what it reaches';
+  assert.deepEqual(run(['  const { store, audit: log } = ctx;', VERB]), [], 'the module\'s list of what it reaches, its first statement');
+  assert.deepEqual(run(['  // what it reaches of the server, read once', '  const {', '    store,', '    audit,', '  } = ctx;', VERB]), [], 'over lines, a comment before it');
+  assert.deepEqual(run(['  // no verb reads the server yet: ctx is named only as register\'s']), []);
+  assert.deepEqual(run([VERB.replace('store.room', 'ctx.store.room')]), ['lib/handlers/rooms.js:3: ' + read]);
+  assert.deepEqual(run(['  const x = 1;', '  const { store } = ctx;', VERB]), ['lib/handlers/rooms.js:4: ' + read], 'not its first statement');
+  assert.deepEqual(run(['  const { store } = ctx;', '  const { audit } = ctx;', VERB]), ['lib/handlers/rooms.js:4: ' + read], 'read twice');
+  assert.deepEqual(run(['  const { store } = ctx;', VERB.replace('store.room(', 'ctx.store.room(')]), ['lib/handlers/rooms.js:4: ' + read], 'read again in a verb');
+  assert.deepEqual(run(['  const { ...all } = ctx;', VERB]), ['lib/handlers/rooms.js:3: ' + read], 'a rest takes it whole');
+  assert.deepEqual(run(['  const parts = ctx;', VERB]), ['lib/handlers/rooms.js:3: ' + read]);
+  assert.deepEqual(run(['  const { store } = ctx;'], 'function register(socket, conn, context) {'), ['lib/handlers/rooms.js: gives no function register(socket, conn, ctx)']);
+  assert.deepEqual(run([], 'function wire(socket, conn, ctx) {'), ['lib/handlers/rooms.js: gives no function register(socket, conn, ctx)']);
+});
+
+test('server.js registers no new verb: a planted one fails it, and a verb gone from it takes its row with it', () => {
+  const src = "socket.on('join', (a, ack) => {});\nsocket.on('message', (a, ack) => {});";
+  assert.deepEqual(serverVerbProblems(src, ['join', 'message']), []);
+  assert.deepEqual(serverVerbProblems(src + "\nsocket.on('room:create', (a, ack) => {});", ['join', 'message']), ['server.js registers room:create: a new verb registers in a handler module (lib/handlers/), behind its gate']);
+  assert.deepEqual(serverVerbProblems(src, ['join', 'message', 'pin']), ['pin is no longer registered in server.js: its row in SERVER_VERBS goes']);
+  assert.deepEqual([...SERVER_VERBS].sort(), SERVER_VERBS, 'the list is sorted, once each');
+  assert.equal(new Set(SERVER_VERBS).size, SERVER_VERBS.length);
+});
+
+test('(i) a planted verb that does not pass its one gate first, or does not name its bucket, fails it', () => {
+  const verb = (name, first, rest = '      ack({ ok: true });') => ['    socket.on(\'' + name + '\', (args, ack) => {', '      ' + first, rest, '    });'].join('\n');
+  const GATED = 'if (!conn.gate(ack, { bucket: conn.writes, may: \'hall.post\' })) return;';
+  const READ = 'if (!conn.gate(ack, { joined: true, bucket: null })) return;   // a read of its own room, from memory';
+  const mod = (...verbs) => ['function register(socket, conn, ctx) {', ...verbs, '}'].join('\n');
+  const run = (src, f = 'lib/handlers/rooms.js') => gateProblems(new Map([[f, src]]));
+  assert.deepEqual(run(mod(verb('room:create', GATED), verb('history:before', READ))), [], 'the planted module passes');
+  assert.deepEqual(run(mod(verb('a', 'if (!conn.gate(ack, { bucket: null })) return;', '      // the join answered this page already, so it spends nothing\n      ack({ ok: true });'))), ['lib/handlers/rooms.js:2: \'a\' says bucket: null without why: a comment on its line, or the line before']);
+  assert.deepEqual(run(mod(verb('a', '// the join answered this page already, so it spends nothing\n      if (!conn.gate(ack, { bucket: null })) return;'))), [], 'a reason on the line before');
+  assert.deepEqual(run(mod(verb('a', 'if (!conn.gate(ack, {\n        joined: false,\n        bucket: null,   // read from the admin page, from no room\n        admin: true,\n      })) return;'))), [], 'options over lines, the reason on the bucket\'s');
+  // Each listener is held: an async one, a function expression, and destructured arguments with defaults.
+  assert.deepEqual(run(mod("    socket.on('a', async ({ id } = {}, ack) => {\n      " + GATED + '\n    });', "    socket.on('b', function (args, ack) {\n      /* first, always */ " + GATED + '\n    });')), []);
+
+  // No gate, a gate not first, a gate twice, a gate outside a verb.
+  assert.deepEqual(run(mod(verb('room:create', 'ack({ ok: true });', ''), verb('history:before', READ))), ['lib/handlers/rooms.js: 1 gate calls for 2 verbs: each verb passes one, first, and none stands outside a verb', 'lib/handlers/rooms.js:2: \'room:create\' does not start with its gate: if (!conn.gate(ack, { bucket: … })) return;']);
+  assert.deepEqual(run(mod(verb('a', 'const id = guard.str(args.id);', '      ' + GATED))), ['lib/handlers/rooms.js:2: \'a\' does not start with its gate: if (!conn.gate(ack, { bucket: … })) return;']);
+  assert.deepEqual(run(mod(verb('a', GATED, '      ' + GATED))), ['lib/handlers/rooms.js: 2 gate calls for 1 verbs: each verb passes one, first, and none stands outside a verb', 'lib/handlers/rooms.js:2: \'a\' passes the gate 2 times: once, first']);
+  assert.deepEqual(run(mod('    conn.gate(null, { bucket: null });   // asked of nobody', verb('a', GATED))), ['lib/handlers/rooms.js: 2 gate calls for 1 verbs: each verb passes one, first, and none stands outside a verb']);
+  assert.deepEqual(run(mod(verb('a', 'const { gate } = conn;', '      if (!gate(ack, { bucket: conn.writes })) return;'))), ['lib/handlers/rooms.js: 0 gate calls for 1 verbs: each verb passes one, first, and none stands outside a verb', 'lib/handlers/rooms.js:2: \'a\' does not start with its gate: if (!conn.gate(ack, { bucket: … })) return;']);
+  assert.deepEqual(run(mod(verb('a', 'if (!conn.gate(ack, { bucket: conn.writes })) ack({ ok: false });'))), ['lib/handlers/rooms.js:2: \'a\' does not return when its gate refuses: if (!conn.gate(ack, { bucket: … })) return;']);
+  assert.deepEqual(run(mod("    socket.on('a', onCreate);\n    function onCreate(args, ack) { " + GATED + ' }')), ['lib/handlers/rooms.js:2: \'a\' is not a listener written in place with a block body: its gate cannot be read']);
+  assert.deepEqual(run(mod("    socket.on('a', (args, ack) => conn.gate(ack, { bucket: conn.writes }) && ack({ ok: true }));")), ['lib/handlers/rooms.js:2: \'a\' is not a listener written in place with a block body: its gate cannot be read']);
+  // A gate in a comment or a string is none.
+  assert.deepEqual(run(mod(verb('a', "// if (!conn.gate(ack, { bucket: conn.writes })) return;\n      const why = 'conn.gate(ack, x)';", ''))), ['lib/handlers/rooms.js: 0 gate calls for 1 verbs: each verb passes one, first, and none stands outside a verb', 'lib/handlers/rooms.js:2: \'a\' does not start with its gate: if (!conn.gate(ack, { bucket: … })) return;']);
+
+  // Its refusal answers the sender: the gate is handed the listener's own acknowledgement, its last argument by name.
+  const notAck = (given, ack = 'ack') => 'lib/handlers/rooms.js:2: \'a\' gives its gate ' + given + ' to answer, not its acknowledgement: if (!conn.gate(' + ack + ', { bucket: … })) return;';
+  assert.deepEqual(run(mod(verb('a', 'if (!conn.gate(null, { bucket: conn.writes })) return;'))), [notAck('null')]);
+  assert.deepEqual(run(mod(verb('a', 'if (!conn.gate(args, { bucket: conn.writes })) return;'))), [notAck('args')]);
+  assert.deepEqual(run(mod(verb('a', 'if (!conn.gate(() => {}, { bucket: conn.writes })) return;'))), [notAck('() => {}')]);
+  assert.deepEqual(run(mod("    socket.on('a', (args, reply) => {\n      if (!conn.gate(ack, { bucket: conn.writes })) return;\n    });")), [notAck('ack', 'reply')]);
+  assert.deepEqual(run(mod("    socket.on('a', (args, reply) => {\n      if (!conn.gate(reply, { bucket: conn.writes })) return;\n    });")), [], 'its acknowledgement under the name it is given');
+  assert.deepEqual(run(mod("    socket.on('a', async ack => {\n      if (!conn.gate(ack, { bucket: conn.writes })) return;\n    });")), [], 'a verb with no arguments but its acknowledgement');
+  assert.deepEqual(run(mod("    socket.on('a', ({ id }, { ok } = {}) => {\n      if (!conn.gate(ok, { bucket: conn.writes })) return;\n    });")), ['lib/handlers/rooms.js:2: \'a\' takes no acknowledgement its gate could answer: its last argument is the ack, by name (args, ack)']);
+  assert.deepEqual(run(mod("    socket.on('a', () => {\n      if (!conn.gate(ack, { bucket: conn.writes })) return;\n    });")), ['lib/handlers/rooms.js:2: \'a\' takes no acknowledgement its gate could answer: its last argument is the ack, by name (args, ack)']);
+  // Socket.IO's own events are no verbs: no page sends them and they carry no acknowledgement, so they pass no gate,
+  // and a gate in one stands outside a verb.
+  const LEFT = "    socket.on('disconnect', (reason) => {\n      forget(conn.socket.id);\n    });";
+  assert.deepEqual(run(mod(verb('a', GATED), LEFT)), [], 'a page that left, forgotten');
+  assert.deepEqual(run(mod(verb('a', GATED), LEFT.replace('forget(', 'if (!conn.gate(reason, { bucket: null })) return;   // never asked\n      forget('))), ['lib/handlers/rooms.js: 2 gate calls for 1 verbs: each verb passes one, first, and none stands outside a verb']);
+
+  // Its options: written out, the gate's own, its bucket one of the connection's.
+  const gated = (opts, before = '') => run(mod(before, verb('a', 'if (!conn.gate(ack, ' + opts + ')) return;')).replace('{\n\n', '{\n'));
+  const notConns = (value) => ['lib/handlers/rooms.js:2: \'a\' gives its gate a bucket that is not the connection\'s: bucket: ' + value + ' (conn.writes, conn.chatter, or one taken from conn by its name)'];
+  assert.deepEqual(gated("{ may: 'hall.post' }"), ['lib/handlers/rooms.js:2: \'a\' names no bucket: bucket: conn.writes, or bucket: null with why']);
+  assert.deepEqual(gated('{ bucket }'), ['lib/handlers/rooms.js:2: \'a\' names no bucket: bucket: conn.writes, or bucket: null with why']);
+  assert.deepEqual(gated('{ bucket: undefined }'), notConns('undefined'));
+  assert.deepEqual(gated('{ bucket: pick(conn) }'), notConns('pick(conn)'));
+  assert.deepEqual(gated('{ bucket: free }'), notConns('free'), 'a bucket of the module\'s own, however it takes');
+  assert.deepEqual(gated('{ bucket: conn.uploads }'), notConns('conn.uploads'));
+  assert.deepEqual(gated('{ bucket: chatter }'), notConns('chatter'), 'a name not taken from conn');
+  assert.deepEqual(gated('{ bucket: conn . chatter }'), [], 'conn.chatter, however it is spaced');
+  const takes = (line) => run(mod('  ' + line, verb('a', 'if (!conn.gate(ack, { bucket: chatter })) return;')));
+  assert.deepEqual(takes('const { chatter, gate } = conn;'), [], 'a bucket the module took from conn by its name');
+  assert.deepEqual(takes('const { writes: chatter } = conn;').map((p) => p.replace(':3:', ':2:')), notConns('chatter'), 'a bucket renamed is not read as the one its name says');
+  assert.deepEqual(takes('const { chatter } = other;').map((p) => p.replace(':3:', ':2:')), notConns('chatter'));
+  assert.deepEqual(gated('{ bucket: conn.writes, addmin: true }'), ['lib/handlers/rooms.js:2: \'a\' gives its gate an option it does not take: addmin']);
+  assert.deepEqual(gated('{ ...WRITE, admin: true }'), ['lib/handlers/rooms.js:2: \'a\' gives its gate a spread (...WRITE)']);
+  assert.deepEqual(gated('WRITE'), ['lib/handlers/rooms.js:2: \'a\' gives its gate options it does not write out: (ack, { bucket: … })']);
+  assert.deepEqual(gated('{ bucket: conn.writes }, extra'), ['lib/handlers/rooms.js:2: \'a\' gives its gate options it does not write out: (ack, { bucket: … })']);
+  // Only a module directly in lib/handlers/ is read as one.
+  assert.deepEqual(run(mod(verb('a', 'ack({});')), 'server.js'), []);
+});
+
+test('(j) a planted take that names a room or a broadcast, a right asked of rbac and a write into settings each fail it', () => {
+  const run = (f, line) => narrowProblems(new Map([[f, "const rbac = require('../rbac');\nfunction register(socket, conn, ctx) {\n" + line + '\n}']]));
+  const takes = (line) => run('lib/handlers/takes.js', line);
+  const ROOMS = 'lib/handlers/rooms.js';
+  const never = 'a take reaches a page by its socket\'s id alone (ctx.sendTo), never a room or a broadcast';
+  assert.deepEqual(takes("const { sendTo, settings } = ctx;\nsendTo([id], 'clock', { show: settings.clock });"), [], 'a take sent to a socket by its id, settings read');
+  assert.deepEqual(takes("ctx.io.to(code).emit('page:push', x);"), ['lib/handlers/takes.js:3: names .to(: ' + never, 'lib/handlers/takes.js:3: names io: ' + never]);
+  for (const [line, name] of [
+    ["conn.socket.broadcast.emit('x', 1);", '.broadcast'], ["socket.in(code).emit('x', 1);", '.in('], ['const all = conn.socket.nsp;', '.nsp'],
+    ['const s = socket.server;', '.server'], ["socket.except(code).emit('x', 1);", '.except('], ["socket['to'](code);", 'a member named by a string'],
+    ['const { io } = ctx;', 'io'],
+  ]) assert.deepEqual(takes(line), ['lib/handlers/takes.js:3: names ' + name + ': ' + never], line);
+  assert.deepEqual(takes("// never io.to(code), never socket.broadcast\nconst words = 'io.to(';"), [], 'a comment and a string are not code');
+  // eslint-disable-next-line no-template-curly-in-string -- the planted source holds a template's ${…} on purpose
+  assert.deepEqual(takes('const words = `io.to( ${ctx.io.name}`;'), ['lib/handlers/takes.js:3: names io: ' + never], 'a template\'s words are not code, and its ${…} is');
+  assert.deepEqual(run(ROOMS, "ctx.io.to(room.code).emit('roomMeta', { name });"), [], 'the rooms module broadcasts to a room');
+  // A right is asked of the connection, never of rbac, in any module.
+  const right = 'asks a right of rbac: its connection answers it (conn.allowed, conn.mayPost, conn.canManageHall)';
+  assert.deepEqual(run(ROOMS, "if (!rbac.can(account, 'hall.post')) return;"), ['lib/handlers/rooms.js:3: ' + right]);
+  assert.deepEqual(run(ROOMS, "if (!rbac['can'](account, 'hall.post')) return;"), ['lib/handlers/rooms.js:3: ' + right]);
+  assert.deepEqual(narrowProblems(new Map([[ROOMS, "const { can, seesHall } = require('../rbac');"]])), ['lib/handlers/rooms.js:1: takes can from rbac: its connection answers a right']);
+  assert.deepEqual(run(ROOMS, "const named = rbac.ROLES[role].label;\nif (!conn.allowed('hall.post')) return;"), [], 'rbac\'s words read, the right asked of the connection');
+  // Settings are read, never written, however the write is spelt.
+  const reads = 'a handler module reads settings and never writes them';
+  for (const [line, words] of [
+    ['settings.roomSends = [];', 'assigns into settings'], ['ctx.settings.roomSends = list;', 'assigns into settings'], ["settings['a'] = 1;", 'assigns into settings'],
+    ['settings.n += 1;', 'assigns into settings'], ['settings.list ??= [];', 'assigns into settings'], ['settings.n++;', 'counts in settings'], ['--ctx.settings.n;', 'counts in settings'],
+    ['delete settings.roomSends;', 'deletes from settings'], ['Object.assign(settings, patch);', 'writes settings through Object or Reflect'],
+    ["Reflect.set(ctx.settings, 'x', 1);", 'writes settings through Object or Reflect'], ['const { settings: s } = ctx;', 'takes settings under another name, where its writes cannot be read'],
+    ['const s = ctx.settings;', 'takes settings under another name, where its writes cannot be read'],
+  ]) assert.deepEqual(run(ROOMS, line), ['lib/handlers/rooms.js:3: ' + words + ': ' + reads], line);
+  assert.deepEqual(run(ROOMS, "const { settings } = ctx;\nif (settings.x === 1 || settings.y !== 2 || settings.n <= 3 || settings.m >= 4) go(settings.roomSends.length);\nconst sends = settings.roomSends.slice();\n// settings.roomSends = []"), [], 'settings read, compared and copied');
+  // A write through a method, a method named by an expression, a hand-off as `this`, and a part taken under another name.
+  for (const [line, words] of [
+    ['settings.roomSends.push(code);', 'calls push on settings, which may write it (a read: at, concat, entries, every, …)'],
+    ['settings.roomSends.splice(0);', 'calls splice on settings, which may write it (a read: at, concat, entries, every, …)'],
+    ['ctx.settings.roomSends?.sort();', 'calls sort on settings, which may write it (a read: at, concat, entries, every, …)'],
+    ['settings.seen.set(code, 1);', 'calls set on settings, which may write it (a read: at, concat, entries, every, …)'],
+    ['settings.reset();', 'calls reset on settings, which may write it (a read: at, concat, entries, every, …)'],
+    ["settings.roomSends['push'](code);", 'calls a method named by an expression on settings, which may write it (a read: at, concat, entries, every, …)'],
+    ['Array.prototype.push.call(settings.roomSends, code);', 'hands settings to a function as its this, where what it writes cannot be read'],
+    ['[].push.apply(settings.roomSends, codes);', 'hands settings to a function as its this, where what it writes cannot be read'],
+    ['const sends = settings.roomSends;', 'takes a part of settings under another name, where its writes cannot be read'],
+    ['let sends; sends = ctx.settings.roomSends;', 'takes a part of settings under another name, where its writes cannot be read'],
+    ['const { roomSends } = settings;', 'takes settings under another name, where its writes cannot be read'],
+  ]) assert.deepEqual(run(ROOMS, line), ['lib/handlers/rooms.js:3: ' + words + ': ' + reads], line);
+  assert.deepEqual(run(ROOMS, "const n = settings.roomSends.length;\nif (settings.roomSends.includes(code) && settings.roomSends.some(ok)) go(settings.roomSends.map(nameOf).join(', '), settings.seen.get(code));"), [], 'settings read through its reads, and a count taken');
+
+  // A take reads the room store through its readers and never under another name; it joins its socket to no room; it
+  // asks nothing of ctx that the takes context does not hold.
+  const store = 'reaches the room store other than through its readers (store.room(…), …): a take writes no room';
+  assert.deepEqual(takes("const { store, audit: log } = ctx;\nconst seated = [...store.room(code).users.keys()];\nif (!store.hasRoom(code) || !store.isMain(store.get(code))) return;\nconst x = other.store.commit(1);"), [], 'the store read through its readers; another object\'s store is not it');
+  for (const [line, words] of [
+    ['store.commit(conn.room(), op);', store], ['ctx.store.commit(conn.room(), op);', store], ['store.remove(code);', store], ['store.rooms.get(code);', store],
+    ['const reader = store.room;', store], ['store.room = null;', store],
+    ['const s = ctx.store;', 'takes the room store under another name, or hands it on, where its writes cannot be read'],
+    ['const { store: rooms } = ctx;', 'takes the room store under another name, or hands it on, where its writes cannot be read'],
+    ['helper(store);', 'takes the room store under another name, or hands it on, where its writes cannot be read'],
+    ["conn.socket.join('ABC234');", 'names socket.join(: ' + never], ['socket.leave(code);', 'names socket.leave(: ' + never],
+    ['const s = conn.socket;', 'takes the socket under another name, where its rooms and broadcasts cannot be read'],
+    ['const { socket: s } = conn;', 'takes the socket under another name, where its rooms and broadcasts cannot be read'],
+    ['const { apply } = ctx;', 'takes apply from ctx, which the takes context does not hold: a take makes no room\'s op'],
+    ['const { audit, systemMessage: say } = ctx;', 'takes systemMessage from ctx, which the takes context does not hold: a take makes no room\'s op'],
+    ["ctx.systemMessage(conn.room(), 'x');", 'takes systemMessage from ctx, which the takes context does not hold: a take makes no room\'s op'],
+  ]) assert.deepEqual(takes(line), ['lib/handlers/takes.js:3: ' + words], line);
+  assert.deepEqual(run(ROOMS, "const { store, apply, systemMessage } = ctx;\nstore.commit(room, op);\nconst r = conn.socket;"), [], 'the rooms module is given the room\'s op');
+  // The review's plant: a take that makes a system line, an op and a commit, and joins another hall's room.
+  assert.deepEqual(takes("const { apply, systemMessage, store } = ctx;\nsystemMessage(conn.room(), 'x'); apply(conn.room(), { o: 'add', m: {} }); store.commit(conn.room(), {}); conn.socket.join('ABC234');"), [
+    'lib/handlers/takes.js:3: takes apply from ctx, which the takes context does not hold: a take makes no room\'s op',
+    'lib/handlers/takes.js:3: takes systemMessage from ctx, which the takes context does not hold: a take makes no room\'s op',
+    'lib/handlers/takes.js:4: names socket.join(: ' + never,
+    'lib/handlers/takes.js:4: ' + store,
+  ]);
+
+  // rbac asked under any name it is bound to, or its can taken out of it however.
+  const mod = (lines) => narrowProblems(new Map([[ROOMS, lines.join('\n')]]));
+  assert.deepEqual(mod(["const roles = require('../rbac');", "if (!roles.can(account, 'hall.post')) return;"]), ['lib/handlers/rooms.js:2: ' + right]);
+  assert.deepEqual(mod(["const roles = require('../rbac');", 'const r = roles;', "if (!r?.can(account, 'hall.post')) return;"]), ['lib/handlers/rooms.js:3: ' + right]);
+  assert.deepEqual(mod(["const roles = require('../rbac');", 'const { can: may } = roles;']), ['lib/handlers/rooms.js:2: takes can from rbac: its connection answers a right']);
+  assert.deepEqual(mod(["const roles = require('../rbac.js');", 'const may = roles.can;']), ['lib/handlers/rooms.js:2: takes can from rbac: its connection answers a right']);
+  assert.deepEqual(mod(["if (!require('../rbac').can(account, 'hall.post')) return;"]), ['lib/handlers/rooms.js:1: ' + right]);
+  assert.deepEqual(mod(["const roles = require('../rbac');", 'const label = roles.ROLES[role].label;', 'const { seesHall } = roles;']), [], 'rbac\'s words and its other questions read');
+
+  // sendTo is named only to be called (so (f) reads each take's event), or taken from ctx as itself.
+  const send = 'names sendTo other than to call it: (f) reads a take\'s event where sendTo is called';
+  assert.deepEqual(takes("const { sendTo, settings } = ctx;\nsendTo([id], 'clock', {});\nctx.sendTo([id], 'clock', {});"), []);
+  for (const line of ['const { sendTo: send } = ctx;', 'const send = ctx.sendTo;', "sendTo.call(null, [id], 'clock', {});", 'later(sendTo);']) assert.deepEqual(takes(line), ['lib/handlers/takes.js:3: ' + send], line);
+});
+
 // ---------------------------------------------------------------- (f) the wire's words, closed both ways
 /** Socket.IO's own events: a page hears these from its client library, and the server's are not verbs a page sends. */
 const CLIENT_OWN = ['connect', 'connect_error', 'disconnect'];
@@ -201,6 +985,18 @@ function wireWords(handlers, pages) {
     }
     for (const e of literal(/\.emit\(\s*(['"])([^'"]+)\1/g, src)) note(emits, e, file);
     for (const m of src.matchAll(/\.emit\(\s*(?![\s'"])([^,)]+)/g)) note(computed, m[1].trim(), file);
+    // A take sent to people's pages by their sockets' ids (lib/gate.js `sendTo(socketIds, event, payload)`): its event is
+    // the call's second argument, read as code (a mention in a comment is none). (j) holds sendTo to being named only to
+    // be called, so no take is sent under another name.
+    const code = blank(src, { strings: false });
+    for (const m of code.matchAll(/\bsendTo\s*\(/g)) {
+      const call = groupAt(code, m.index + m[0].length - 1);
+      const ev = call && call.entries[1];
+      const lit = ev ? /^(['"])([^'"]+)\1$/.exec(ev) : null;
+      if (!ev) unread.push(file + ' sends to pages by their ids in a form the fence does not read: ' + code.slice(m.index, m.index + 60).split('\n')[0]);
+      else if (lit) note(emits, lit[2], file);
+      else note(computed, ev, file);
+    }
   }
   for (const [file, src] of pages) {
     for (const v of literal(/socket\.emit\(\s*(['"])([^'"]+)\1/g, src)) note(sends, v, file);
@@ -305,6 +1101,14 @@ test('(f) a planted word left open, in either direction, fails it', () => {
   assert.deepEqual(run({ ...roomCreate, pages: { 'public/halls.js': "AGM.outbox.hold('room:create', {});", 'public/catalog.js': "{ id: 'msg.send', verb: 'room:send' }" } }), []);
   assert.deepEqual(run({ ...roomCreate, pages: { 'public/halls.js': "AGM.outbox.hold('room:create', {}); AGM.outbox.hold('room:send', {});", 'public/catalog.js': "{ id: 'msg.copy', verb: 'local' }, { id: 'account.edit', verb: 'http:PATCH /api/users/:id' }" } }), [], 'a local act and an HTTP route are no socket sends');
   assert.deepEqual(run({ ...roomCreate, pages: { 'public/halls.js': "AGM.outbox.now('room:create', {}); const row = { verb: 'room:send' };" } }), ["lib/handlers/rooms.js registers 'room:send', which no page sends"]);
+
+  // A take sent to pages by their ids is an event the server sends: heard by a page, or open; named by an expression, unread.
+  const take = (line) => ({ handlers: { 'lib/handlers/takes.js': "socket.on('join', f);\n" + line } });
+  assert.deepEqual(run(take("ctx.sendTo([s.id], 'roomMeta', { name }); // sendTo(ids, ev, x) in a comment is none")), []);
+  assert.deepEqual(run(take("const n = sendTo(ids, 'clock', { show: 'off' });")), ["lib/handlers/takes.js sends 'clock', which no page hears"]);
+  assert.deepEqual(run(take('sendTo(ids, ev, payload);')), ['lib/handlers/takes.js sends an event named by `ev`, which the fence cannot read']);
+  assert.deepEqual(run(take('sendTo(ids);')), ['lib/handlers/takes.js sends to pages by their ids in a form the fence does not read: sendTo(ids);']);
+  assert.deepEqual(run({ ...take("sendTo([id], 'clock', {});"), ...plus('pages', 'public/app.js', "socket.on('clock', f);") }), [], 'heard by the hall page');
 
   // A page that names an event by an expression is read through its row: a carrier whose callers name the verbs, and
   // listeners made from a table, each with the events it names. A row whose expression has gone goes.

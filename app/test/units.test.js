@@ -1053,6 +1053,194 @@ test('op table: each change is committed, then sent under the event the table na
   assert.deepEqual(ops.eventsOf({ o: 'nothing', s: 1 }, t.room), [], 'a kind the table does not hold sends nothing');
 });
 
+// ---------------------------------------------------------------- the one gate, and the handler modules' contexts
+const gate = require('../lib/gate');
+/**
+ * A socket's facts for the gate, each read recorded in order, and a real bucket with no refill (rate 0), so every token
+ * taken stays taken and is counted.
+ */
+function gateRig({ joined = true, here = true, admin = false, rights = ['hall.post', 'hall.files'], onStage = false, burst = 3 } = {}) {
+  const read = [];
+  const bucket = new guard.Bucket(0, burst);
+  const pass = gate.gateOf({
+    joined: () => { read.push('joined'); return joined; },
+    here: () => { read.push('here'); return here; },
+    isAdmin: () => { read.push('admin'); return admin; },
+    allowed: (right) => { read.push('may ' + right); return rights.includes(right); },
+    onStage: () => { read.push('onStage'); return onStage; },
+  });
+  /** One request: whether it passed, the one answer it was given (none when it passed), and what it read. */
+  const ask = (opts) => {
+    read.length = 0;
+    const answers = [];
+    const passed = pass((r) => answers.push(r), opts);
+    return { passed, answers, read: [...read] };
+  };
+  return { bucket, ask, tokens: () => bucket.level() };
+}
+
+test('the gate: joined, its room still here, its bucket, the admin, its rights, in that order, each refused in today\'s words', () => {
+  const every = (t) => ({ joined: true, bucket: t.bucket, admin: true, may: ['hall.post', 'hall.files'] });
+  const refused = (error, read, extra = {}) => ({ passed: false, answers: [{ ok: false, error, ...extra }], read });
+  // Each step refused in turn: its words, and what of the socket it read to say them. A step after it is never read.
+  let t = gateRig({ joined: false, admin: true });
+  assert.deepStrictEqual(t.ask(every(t)), refused('Not joined', ['joined']));
+  assert.equal(t.tokens(), 3, 'refused before its bucket: no token taken');
+  t = gateRig({ here: false, admin: true });
+  assert.deepStrictEqual(t.ask(every(t)), refused('Room gone', ['joined', 'here']));
+  assert.equal(t.tokens(), 3);
+  t = gateRig({ admin: true, burst: 0 });
+  assert.deepStrictEqual(t.ask(every(t)), refused('Slow down a little.', ['joined', 'here'], { busy: true }), 'nothing past the bucket is read: neither the admin nor a right');
+  t = gateRig({ admin: false });
+  assert.deepStrictEqual(t.ask(every(t)), refused('Not admin', ['joined', 'here', 'admin']));
+  assert.equal(t.tokens(), 2, 'refused after its bucket: its token is spent');
+  t = gateRig({ admin: true, rights: [] });
+  assert.deepStrictEqual(t.ask(every(t)), refused('Observers can read but not post.', ['joined', 'here', 'admin', 'may hall.post']), 'its rights read in turn, the first refused');
+  t = gateRig({ admin: true, rights: ['hall.post'] });
+  assert.deepStrictEqual(t.ask(every(t)), refused('Your account may not share files here.', ['joined', 'here', 'admin', 'may hall.post', 'may hall.files', 'onStage']));
+  assert.equal(t.tokens(), 2);
+  t = gateRig({ admin: true, rights: ['hall.post'], onStage: true });
+  assert.deepStrictEqual(t.ask(every(t)).answers, [{ ok: false, error: 'On stage seats send messages, not files.' }], 'a seat On stage is refused a file in its own words');
+  t = gateRig({ admin: true });
+  assert.deepStrictEqual(t.ask(every(t)), { passed: true, answers: [], read: ['joined', 'here', 'admin', 'may hall.post', 'may hall.files'] }, 'passed: answered nothing, every step read once');
+  assert.equal(t.tokens(), 2);
+  // A step left out is not read: from no room, with no bucket, not the admin's, no right.
+  t = gateRig({ joined: false, here: false });
+  assert.deepStrictEqual(t.ask({ joined: false, bucket: null }), { passed: true, answers: [], read: [] });
+  assert.deepStrictEqual(t.ask({ joined: false, bucket: null, may: 'hall.post' }), { passed: true, answers: [], read: ['may hall.post'] });
+  assert.equal(t.tokens(), 3, 'bucket: null takes no token');
+  // Today's words, the ones server.js's own need, limited and admin said, and the rights' words.
+  assert.deepStrictEqual({ ...gate.WORDS }, { joined: 'Not joined', gone: 'Room gone', slow: 'Slow down a little.', admin: 'Not admin' });
+  assert.deepStrictEqual(Object.keys(gate.RIGHTS), ['hall.post', 'hall.files']);
+  assert.ok(Object.isFrozen(gate.WORDS) && Object.isFrozen(gate.RIGHTS) && Object.isFrozen(gate.RIGHTS['hall.files']) && Object.isFrozen(gate.OPTIONS));
+});
+
+test('the gate: a request refused after its bucket has spent its token, so nothing a client names is looked up for free', () => {
+  const t = gateRig({ admin: false, rights: [], burst: 2 });
+  const lookup = { joined: false, bucket: t.bucket, may: 'hall.post' };
+  // Two refused at their right (a stale reference, another hall's code: the lookup a right stands for) spend both tokens…
+  assert.deepStrictEqual(t.ask(lookup).answers, [{ ok: false, error: 'Observers can read but not post.' }]);
+  assert.deepStrictEqual(t.ask({ joined: false, bucket: t.bucket, admin: true }).answers, [{ ok: false, error: 'Not admin' }]);
+  assert.equal(t.tokens(), 0);
+  // …and the third is refused at the bucket, before its right is read.
+  assert.deepStrictEqual(t.ask(lookup), { passed: false, answers: [{ ok: false, error: 'Slow down a little.', busy: true }], read: [] });
+  // An answer that is not a function is not called; the request is refused all the same.
+  const g = gate.gateOf({ joined: () => false, here: () => true, isAdmin: () => true, allowed: () => true, onStage: () => false });
+  for (const ack of [undefined, null, 'ack', {}]) assert.equal(g(ack, { bucket: null }), false);
+  assert.deepStrictEqual(gate.refusal({ bucket: null }, { joined: () => true, here: () => true }), null, 'a refusal of nothing is null');
+});
+
+test('the gate: options it does not take, a bucket not named and a right it has no words for are refused whole, before anything is read', () => {
+  const t = gateRig({ admin: true });
+  const throws = (opts, words) => {
+    assert.throws(() => t.ask(opts), (e) => e instanceof TypeError && words.test(e.message), JSON.stringify(opts));
+    assert.equal(t.tokens(), 3, 'no token taken');
+  };
+  for (const opts of [undefined, null, [], 'joined', 7]) throws(opts, /its options as an object/);
+  throws({}, /names its bucket, or says bucket: null/);
+  throws({ joined: true }, /names its bucket/);
+  throws({ bucket: t.bucket, addmin: true }, /takes no option addmin: it takes joined, bucket, admin, may/);
+  throws({ bucket: undefined }, /bucket is one it can take a token from, or null/);
+  throws({ bucket: {} }, /one it can take a token from/);
+  throws({ bucket: 'writes' }, /one it can take a token from/);
+  throws({ bucket: t.bucket, joined: 'yes' }, /joined and admin are true or false/);
+  throws({ bucket: t.bucket, admin: 1 }, /true or false/);
+  throws({ bucket: t.bucket, may: 'hall.view' }, /no words for the right hall\.view: it reads hall\.post, hall\.files/);
+  throws({ bucket: t.bucket, may: ['hall.post', 7] }, /no words for the right given as a number/);
+  throws({ bucket: t.bucket, may: { 'hall.post': true } }, /a right, or a list of rights/);
+  // A throw reaches no answer: the socket's guard (server.js guardHandlers) answers the request as refused.
+  assert.deepStrictEqual(t.ask({ bucket: t.bucket }).read, ['joined', 'here'], 'and a gate written whole still reads');
+});
+
+test('the contexts: ctx holds every part and io, takesCtx the same parts but those that make a room\'s op or send to a room, and sendTo, both frozen; sendTo given a hall\'s key reaches nobody', () => {
+  // Three pages' sockets, two of them in hall ABC234, as Socket.IO keeps them: the open ones by id (io.sockets.sockets),
+  // and each hall a room of its sockets' ids (every socket is in a room of its own id too).
+  const got = [];
+  const sockets = new Map(['sA', 'sB', 'sC'].map((id) => [id, { id, emit: (event, payload) => got.push([id, event, payload]) }]));
+  const halls = new Map([['ABC234', ['sA', 'sB']]]);
+  const io = {
+    sockets: { sockets },
+    to: (ids) => ({ emit: (event, payload) => { for (const id of ids) for (const s of halls.get(id) || [id]) if (sockets.has(s)) sockets.get(s).emit(event, payload); } }),
+  };
+  const store = { kind: 'store' }, settings = { roomSends: [] };
+  const linkFor = () => null, apply = () => null, systemMessage = () => null;
+  const { ctx, takesCtx } = gate.contexts({ store, apply, systemMessage, settings, linkFor, io });
+  assert.ok(Object.isFrozen(ctx) && Object.isFrozen(takesCtx));
+  assert.deepStrictEqual(Object.keys(ctx), ['store', 'apply', 'systemMessage', 'settings', 'linkFor', 'io']);
+  assert.deepStrictEqual(Object.keys(takesCtx), ['store', 'settings', 'linkFor', 'sendTo'], 'no io, apply or systemMessage: a take makes no room\'s op and sends to no room');
+  assert.deepStrictEqual([...gate.ROOM_SENDS], ['io', 'apply', 'systemMessage']);
+  assert.ok(Object.isFrozen(gate.ROOM_SENDS));
+  assert.ok(ctx.store === store && takesCtx.store === store && takesCtx.settings === settings && ctx.io === io && ctx.apply === apply, 'the parts themselves, not copies');
+  assert.throws(() => { ctx.io = null; }, TypeError, 'a handler module cannot replace a part');
+  assert.ok(!Object.isFrozen(settings), 'settings is not frozen by its context: the fence (j) holds the modules to reading it');
+  // What the takes context leaves out: a hall's key given to a broadcast as an id reaches the whole hall.
+  io.to(['ABC234']).emit('page:push', { n: 1 });
+  assert.deepStrictEqual(got.map((x) => x[0]), ['sA', 'sB']);
+  got.length = 0;
+  // sendTo: the same key reaches nobody; a socket's id reaches that socket, once however often it is named.
+  assert.equal(takesCtx.sendTo(['ABC234'], 'page:push', { n: 2 }), 0);
+  assert.deepStrictEqual(got, []);
+  assert.equal(takesCtx.sendTo(['sB', 'sB', 'gone', 'ABC234', 7, null], 'clock', { show: 'off' }), 1);
+  assert.deepStrictEqual(got, [['sB', 'clock', { show: 'off' }]]);
+  assert.equal(takesCtx.sendTo(['sA', 'sC'], 'clock', { show: 'time' }), 2);
+  assert.deepStrictEqual(got.slice(1).map((x) => x[0]), ['sA', 'sC']);
+  got.length = 0;
+  // The sockets open now, read as each take is sent: a socket gone since is reached no more.
+  sockets.delete('sC');
+  assert.equal(takesCtx.sendTo(['sA', 'sC'], 'clock', {}), 1);
+  got.length = 0;
+  // Only a list names sockets: a string is never read a character at a time, and nothing else is read as one.
+  for (const ids of ['sA', 'ABC234', new Set(['sA']), undefined, null, { 0: 'sA', length: 1 }]) assert.equal(takesCtx.sendTo(ids, 'clock', {}), 0);
+  assert.deepStrictEqual(got, []);
+  // A context the server does not hold whole does not start: a part not built yet, no io, an io whose open sockets
+  // cannot be read by id, a part in sendTo's place.
+  assert.throws(() => gate.contexts({ store, apply: undefined, io }), /name apply, which the server has not built: they are built last/);
+  assert.throws(() => gate.contexts({ store }), /holds io, for the rooms module/);
+  for (const bad of [null, {}, { sockets: {} }, { sockets: { sockets: [] } }]) assert.throws(() => gate.contexts({ store, io: bad }), /each socket open by its id: io\.sockets\.sockets/);
+  assert.throws(() => gate.contexts({ store, io, sendTo: () => 0 }), /sendTo is the takes context's own/);
+  assert.throws(() => gate.contexts(null), /the server's parts, named/);
+});
+
+test('the contexts on a real Socket.IO server, as server.js builds them: a hall\'s key given to sendTo reaches no page, a page\'s socket id reaches that page', async () => {
+  const http = require('http');
+  const { Server } = require('socket.io');
+  const { connect, until } = require('./helpers');
+  const front = http.createServer();
+  const io = new Server(front);
+  // Each page joins hall ABC234's room, as the server's join does.
+  io.on('connection', (socket) => { socket.join('ABC234'); });
+  await new Promise((resolve) => front.listen(0, '127.0.0.1', resolve));
+  const pages = [];
+  try {
+    for (let i = 0; i < 2; i++) pages.push(await connect('http://127.0.0.1:' + front.address().port));
+    const [a, b] = pages;
+    await until(() => io.sockets.sockets.has(a.id) && io.sockets.sockets.has(b.id), 3000, 'both pages open');
+    const heard = new Map(pages.map((p) => [p, []]));
+    for (const p of pages) p.on('page:take', (v) => heard.get(p).push(v));
+    // server.js hands contexts() its parts and nothing else: the sockets sendTo reaches are io's open ones.
+    const { takesCtx } = gate.contexts({ settings: {}, io });
+    // The hall's key reaches no page. Each page is then reached by its socket's id, and nothing came before it: one
+    // socket's events arrive in the order they were sent.
+    assert.equal(takesCtx.sendTo(['ABC234'], 'page:take', { seq: 1 }), 0);
+    assert.equal(takesCtx.sendTo([b.id], 'page:take', { seq: 2 }), 1);
+    assert.equal(takesCtx.sendTo([a.id, a.id], 'page:take', { seq: 3 }), 1);
+    await until(() => heard.get(a).length && heard.get(b).length, 3000, 'each page\'s take');
+    assert.deepStrictEqual(heard.get(b), [{ seq: 2 }], 'the page named by its id, and nothing the hall\'s key sent');
+    assert.deepStrictEqual(heard.get(a), [{ seq: 3 }], 'once, however often it is named');
+    // Where a room broadcast, which the takes context leaves out, reaches the whole hall by the same key.
+    io.to('ABC234').emit('page:take', { seq: 4 });
+    await until(() => heard.get(a).length === 2 && heard.get(b).length === 2, 3000, 'the broadcast at both pages');
+    // A page gone is reached no more.
+    const gone = a.id;
+    a.close();
+    await until(() => !io.sockets.sockets.has(gone), 3000, 'the closed page gone from the open sockets');
+    assert.equal(takesCtx.sendTo([gone, b.id], 'page:take', { seq: 5 }), 1);
+  } finally {
+    for (const p of pages) p.close();
+    await new Promise((resolve) => io.close(resolve));
+  }
+});
+
 // ---------------------------------------------------------------- latest wins: one primitive for every state frame
 const { Latest } = require('../lib/latest');
 /** Timers on a clock that moves only when told: `tick(ms)` fires each timer due by then, in order, each at its own time. */
