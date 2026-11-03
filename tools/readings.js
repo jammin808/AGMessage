@@ -67,7 +67,7 @@ const READINGS = [
     what: 'the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog\'s give-up and a configuration refusal end the task with 0, and it stays stopped',
     mark: '10 of 10',
     miss: 'the release notes name the failing case; a stop that does not save is said on "This laptop"',
-    needs: ['U4 (#34): `last-stop.json`', 'U8 (#36): the stop at loopback with the proof', 'U12 (#72): the server task'],
+    needs: ['U8 (#36): the stop at loopback with the proof', 'U12 (#72): the server task'],
   },
   {
     id: 'R4',

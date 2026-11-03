@@ -136,7 +136,7 @@ test('the watchdog keeps its server\'s console in data/logs/server.log, bounded 
   const older = read(path.join(logs, 'server.1.log'));
   assert.ok(Buffer.byteLength(now) <= 800 && Buffer.byteLength(older) <= 800 && older.length > 0, 'rotated at its bound: ' + [now.length, older.length]);
   const kept = said(older + now);
-  for (const line of [/^ {2}AGMessage \S+ is running$/, /^ {4}URL: {3}http:\/\/localhost:\d+\/admin$/, /^ {2}Audit log: {3}keyed/, /^ {2}Saving rooms…$/]) assert.ok(kept.some((l) => line.test(l)), line + ' kept:\n' + kept.join('\n'));
+  for (const line of [/^ {2}AGMessage \S+ is running$/, /^ {4}URL: {3}http:\/\/localhost:\d+\/admin$/, /^ {2}Audit log: {3}keyed/, /^ {2}Saving…$/, /^ {2}Saved: the audit log, every store and /]) assert.ok(kept.some((l) => line.test(l)), line + ' kept:\n' + kept.join('\n'));
   // The console has the Token line with the token, once; the log has neither, nor the line that marks its place.
   assert.equal(w.out().split('\n').filter((l) => l === '    Token: ' + h.TOKEN).length, 1, 'the console shows the token where a person sits');
   for (const file of fs.readdirSync(logs)) {
@@ -160,7 +160,8 @@ test('a console that goes away ends no watchdog: its server still stops as asked
   w.p.stderr.destroy();
   w.p.send({ t: 'stop' });
   assert.equal(await w.done, 0, 'stopped as asked, not ended by its console');
-  assert.ok(spoken(read(path.join(f.AGM_DATA_DIR, 'logs', 'server.log'))).includes('  Saving rooms…'), 'the stop\'s lines are kept');
+  const stopLines = spoken(read(path.join(f.AGM_DATA_DIR, 'logs', 'server.log')));
+  assert.ok(stopLines.includes('  Saving…') && stopLines.some((l) => l.startsWith('  Saved: the audit log, every store and ')), 'the stop\'s lines are kept, the one that says it saved last:\n' + stopLines.join('\n'));
 });
 
 test('a log that cannot be written stops nothing: the watchdog says so once, on its console, and its server serves', async (t) => {
@@ -333,7 +334,7 @@ test('the admin page\'s answer: the LAN addresses and the port, as the banner sa
   // Off Windows nothing is run, so the read is done at once; on Windows its powershell.exe may still be reading.
   if (process.platform !== 'win32') assert.deepEqual([l.reading, typeof l.at], [false, 'number']);
   // The rights given are a row only where there is an install record (a Windows runner's read may find none).
-  assert.deepEqual(l.facts.map((r) => r.id).filter((id) => id !== 'grants'), ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'asleep', 'awake', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin']);
+  assert.deepEqual(l.facts.map((r) => r.id).filter((id) => id !== 'grants'), ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'asleep', 'awake', 'stop', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin']);
   if (process.platform !== 'win32') assert.equal(l.facts[l.facts.length - 1].id, 'grants');
   assert.ok(l.facts.every((r) => typeof r.label === 'string' && r.label && typeof r.words === 'string' && r.words && typeof r.from === 'string' && r.from), 'each row says where it was read');
   assert.deepEqual(rowsOf(l, ['format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel']), {
@@ -348,6 +349,9 @@ test('the admin page\'s answer: the LAN addresses and the port, as the banner sa
     asleep: ['none recorded: no watchdog runs this server, so a sleep goes unseen', 'off'],
     awake: ['not asked: no hall is live', 'off'],
   });
+  // A folder this start began had no stop before it to save.
+  assert.deepEqual(rowsOf(l, ['stop']), { stop: ['none: this start began the data folder', ''] });
+  assert.equal(row(l, 'stop').from, 'the record the stop before this start writes last (' + path.join(srv.dataDir, 'last-stop.json') + '), read at this start');
   assert.match(row(l, 'build').words, /^\S+ · the portable folder$/);
   const off = 'unknown (AGMessage is not running on Windows)';
   if (process.platform !== 'win32') for (const id of ['network', 'firewall', 'sleep', 'lid', 'task', 'admin', 'grants']) assert.deepEqual([row(l, id).words, row(l, id).mark], [off, ''], id);
@@ -735,4 +739,26 @@ test('what AGMessage knows, row by row: each with its mark, its words and where 
   assert.equal(laptop.facts({ ...all, tunnel: AGAIN }, w).find((x) => x.id === 'tunnel').from, 'cloudflared, turned on from this page, and again by a start before its end (kept in the settings)');
   const grantsNone = laptop.windowsFacts({ text: JSON.stringify({ ...ANSWER, lidAc: 9, record: { admin: '', adminName: '', grants: [] } }), why: '' });
   assert.deepEqual(r(laptop.facts(k, grantsNone).slice(-4)), { lid: ['action 9', 'warn'], task: ['Running · last result 0x0 at 2026-11-02 13:02 UTC', 'ok'], admin: ['not named in the install record', ''], grants: ['none given', ''] });
+});
+
+test('the last stop\'s row: saved, with when and by which build; or not, with why and the halls told AGMessage restarted; none for a folder this start began', () => {
+  const s = (o) => { const x = laptop.stopRow({ state: 'none', saved: false, at: null, build: '', unsaved: [], code: '', said: 0, left: '', fresh: false, file: '/d/last-stop.json', ...o }); return [x.id, x.label, x.words, x.mark]; };
+  const at = Date.UTC(2026, 10, 3, 20, 31, 5);
+  assert.deepEqual(s({ state: 'saved', saved: true, at, build: '0.6.0+41' }), ['stop', 'Last stop', 'saved at 2026-11-03 20:31 UTC by 0.6.0+41: the audit log, every store and each hall that changed, so no hall says AGMessage restarted', 'ok']);
+  assert.deepEqual(s({ fresh: true }), ['stop', 'Last stop', 'none: this start began the data folder', '']);
+  assert.deepEqual(s({ said: 3 }), ['stop', 'Last stop', 'not saved: AGMessage ended without its stop (a crash, the watchdog\'s kill of a hang, Windows shutting down or restarting, a power cut), or the build before it kept no record · so 3 halls say AGMessage restarted', 'warn']);
+  assert.deepEqual(s({ state: 'unsaved', at, build: '0.6.0+41', unsaved: ['peaks', '2 halls'], said: 1 }), ['stop', 'Last stop', 'not saved at 2026-11-03 20:31 UTC by 0.6.0+41: peaks, 2 halls could not be written · so 1 hall says AGMessage restarted', 'warn']);
+  assert.deepEqual(s({ state: 'unread', code: 'EACCES' }), ['stop', 'Last stop', 'not known to have saved: its record could not be read (EACCES)', 'warn']);
+  // A record the folder does not bear out (lib/laststop.js `judge`, or one an earlier start took).
+  assert.deepEqual(s({ state: 'stale', at, build: '0.6.0+41', code: 'a hall\'s log written after it', said: 2 }), ['stop', 'Last stop', 'not known to have saved: the record of a stop at 2026-11-03 20:31 UTC by 0.6.0+41 is not the stop before this start (a hall\'s log written after it), so a copy ran on the folder after it · so 2 halls say AGMessage restarted', 'warn']);
+  // A record this start could not move aside, whichever it said: warned, with what the next start makes of it.
+  assert.deepEqual(s({ state: 'saved', saved: true, at, build: '0.6.0+41', left: 'EBUSY' }), ['stop', 'Last stop', 'saved at 2026-11-03 20:31 UTC by 0.6.0+41: the audit log, every store and each hall that changed, so no hall says AGMessage restarted · its record could not be moved aside (EBUSY): the next start reads it as taken', 'warn']);
+  assert.deepEqual(s({ said: 1, left: 'EBUSY; last-stop.seen.json EBUSY' })[2], 'not saved: AGMessage ended without its stop (a crash, the watchdog\'s kill of a hang, Windows shutting down or restarting, a power cut), or the build before it kept no record · so 1 hall says AGMessage restarted · its record could not be moved aside (EBUSY; last-stop.seen.json EBUSY): the next start reads it again, as stale once a hall has changed');
+  assert.equal(laptop.stopRow({ state: 'none', saved: false, unsaved: [], said: 0, file: '/d/last-stop.json' }).from, 'the record the stop before this start writes last (/d/last-stop.json), read at this start');
+  // After the power request, before the watchdog's line.
+  const w = laptop.windowsFacts({ text: '', why: 'not read' });
+  const k = { build: 'b', runs: 'portable', addresses: [], port: 1, node: '/n', https: { on: false, off: 'x', file: '/k' }, sealed: { total: 0 }, screens: { total: 0 }, stagewatch: { total: 0 }, tunnel: { running: false }, power: { state: 'off' }, before: 'w', without: [] };
+  const ids = laptop.facts({ ...k, stop: { state: 'saved', saved: true, unsaved: [], said: 0, file: '/d' } }, w).map((x) => x.id);
+  assert.deepEqual(ids.slice(ids.indexOf('stop') - 1, ids.indexOf('stop') + 2), ['awake', 'stop', 'before']);
+  assert.ok(!laptop.facts(k, w).some((x) => x.id === 'stop'), 'none before this copy holds its folder');
 });

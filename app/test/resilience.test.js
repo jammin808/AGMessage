@@ -558,6 +558,7 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
     'lib/store.js': { max: 10, why: 'durability: a change is appended to its log (the system\'s file cache) before the ack, or kept for the next snapshot when the disk refuses it; snapshots every 500 ops' },
     'lib/resilience.js': { max: 13, why: 'the atomic writer itself, and the temporary file of a write that failed removed so a full disk is not kept full; a file read with why it was not (readText), every store\'s read; a file made only where none is (publishOnce: its link, which refuses one there, and its temporary file removed); a folder\'s real path, read once per place at start (placeId)' },
     'lib/secretbox.js': { max: 3, why: 'the machine key, read once, or made once and published whole' },
+    'lib/laststop.js': { max: 4, why: 'once a start, after the hold: the last stop\'s record moved aside (or removed where it cannot be), and the data and rooms folders listed for the temporary files a stop cut short left, each removed; the record itself goes through lib/resilience.js\'s atomic writer, at the stop' },
     'lib/serverlog.js': { max: 4, why: 'the watchdog\'s process alone, never the server\'s: a console line appended to server.log as it is said, so a line said just before the watchdog ends is on disk; its folder made and its size read once, and a rename when it reaches its bound' },
     'lib/version.js': { max: 8, why: 'the version and its stamp (or the checkout\'s commit), read once at startup' },
     'lib/dataformat.js': { max: 8, why: 'the data folder\'s format, once a start: read through to tell a new folder from a 0.5 one, and a folder of a lower format copied whole into backups/ (a copy a stop left part way removed, its size and the disk\'s free space read, its folder made, a partial copy made, renamed whole, or removed when it failed, the watchdog\'s beat sent while it runs) before anything else is written in it, never on a request' },
@@ -891,14 +892,17 @@ test('a restart announces nobody: a 3-page hall back after a restart writes no "
   const pages = [await page('Ana', 'research'), await page('Ben', 'board'), await page('Cy', 'observer')];
   await h.until(() => pages[0].seq >= 3, 3000, 'Ana has heard the others join');   // each join is a numbered line
   const joinedLines = (history) => history.filter((m) => m.type === 'system' && / joined /.test(m.text)).map((m) => m.text);
-  /** The lines after the newest restart's own line ("— AGMessage restarted · 7 messages kept —"), which says what happened. */
-  const afterRestore = (history) => history.slice(history.map((m) => m.type === 'system' && /^— AGMessage restarted · \d+ messages? kept —$/.test(m.text)).lastIndexOf(true) + 1);
+  /** The lines the hall gained after the stop, which left it at change `seq`. */
+  const after = (history, seq) => history.filter((m) => m.seq > seq);
+  const restartLine = (m) => m.type === 'system' && /^— AGMessage restarted · \d+ messages? kept —$/.test(m.text);
 
   sockets.splice(0).forEach((s) => s.close());   // the restart drops every page at once
+  const stoppedAt = pages[0].seq;   // Ana has heard every line the hall holds
   srv = await h.restartServer(srv);
   const heard = [];
   const watcher = await join(srv.base, { name: 'Wes', role: 'observer' });   // a newcomer in the boot window, with no since
-  watcher.s.on('system', (m) => heard.push(m.text));
+  let newest = watcher.res.seq;
+  watcher.s.on('system', (m) => { heard.push(m.text); if (m.seq > newest) newest = m.seq; });
   for (const p of pages) {
     const { res } = await join(srv.base, { name: p.name, role: p.role, uid: p.uid, since: p.seq });
     assert.deepEqual([res.ok, res.role, res.uid], [true, p.role, p.uid.split('.')[0]], p.name + ' comes back as itself');
@@ -908,22 +912,24 @@ test('a restart announces nobody: a 3-page hall back after a restart writes no "
   const minus = await join(srv.base, { name: 'Fay', role: 'observer', since: -1 });
   assert.ok(beyond.res.ok && minus.res.ok);
   const reader = await join(srv.base, { name: 'Gus', role: 'observer' });
-  const history = afterRestore(reader.res.history);
+  const history = after(reader.res.history, stoppedAt);
+  assert.ok(!reader.res.history.some(restartLine), 'a stop that saved: no hall says AGMessage restarted');
   assert.deepEqual(joinedLines(history), ['Wes joined as an observer', 'Eve joined as an observer', 'Fay joined as an observer'],
-    'after the restart line only those who were not back from it are announced: ' + JSON.stringify(history.map((m) => m.text)));
+    'after the restart only those who were not back from it are announced: ' + JSON.stringify(history.map((m) => m.text)));
   await h.until(() => heard.includes('Gus joined as an observer'), 3000, 'the newcomer\'s line reached the hall');
   assert.ok(!heard.some((x) => /^(Ana|Ben|Cy) joined/.test(x)), 'no page in the hall was told the three came back: ' + JSON.stringify(heard));
   const people = reader.res.users.map((u) => u.name).sort();
   assert.deepEqual(people.filter((n) => ['Ana', 'Ben', 'Cy'].includes(n)), ['Ana', 'Ben', 'Cy'], 'the people list has them all the same');
 
-  // Past the boot's first seconds a page that comes back is announced as any join is: the restart line is long past.
+  // Past the boot's first seconds a page that comes back is announced as any join is.
   sockets.splice(0).forEach((s) => s.close());
+  const stoppedAgainAt = newest;   // Wes heard every line after his own
   srv = await h.restartServer(srv, { AGM_BOOT_SEAT_MS: '1000' });
   await h.wait(1100);
   const late = await join(srv.base, { name: 'Ana', role: 'research', uid: pages[0].uid, since: pages[0].seq });
   assert.ok(late.res.ok);
   const lateReader = await join(srv.base, { name: 'Hal', role: 'observer' });
-  assert.deepEqual(joinedLines(afterRestore(lateReader.res.history)), ['Ana joined Backstage'], 'announced after the window');
+  assert.deepEqual(joinedLines(after(lateReader.res.history, stoppedAgainAt)), ['Ana joined Backstage'], 'announced after the window');
 });
 
 // ---------------------------------------------------------------- one server per data folder

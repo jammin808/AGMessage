@@ -63,6 +63,7 @@ const startup = require('./lib/startup');
 const laptop = require('./lib/laptop');
 const power = require('./lib/power');
 const dataformat = require('./lib/dataformat');
+const laststop = require('./lib/laststop');
 const tunnelend = require('./lib/tunnelend');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
@@ -289,13 +290,33 @@ function savePeaks() {
 const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['deskResults', deskLane], ['peaks', peaksLane], ['auditHead', audit.headLane]];
 /**
  * Write the audit entries still waiting and the head that covers them first, then every lane, now (shutdown, a crash);
- * what still cannot be written is named on the console. The audit's last appends are timed as they reach the disk, so the
- * peaks are asked for after it.
+ * what still cannot be written is named on the console, and returned in words ([] when everything was written). The
+ * audit's last appends are timed as they reach the disk, so the peaks are asked for after it.
  */
 function flushLanes() {
-  if (!audit.flush()) console.error('  [audit] ' + audit.unwritten + ' entries could not be written: ' + audit.lastError);
+  const unwritten = [];
+  if (!audit.flush()) { console.error('  [audit] ' + audit.unwritten + ' entries could not be written: ' + audit.lastError); unwritten.push('the audit log'); }
   savePeaks();
-  for (const [name, lane] of saveLanes()) if (!lane.flushSync()) console.error('  [save] ' + name + ' could not be written: ' + lane.lastError);
+  for (const [name, lane] of saveLanes()) if (!lane.flushSync()) { console.error('  [save] ' + name + ' could not be written: ' + lane.lastError); unwritten.push(name); }
+  return unwritten;
+}
+/**
+ * Everything this copy holds, saved in the stop's order (a stop, a crash): the audit log and the lanes first, small and
+ * the ones a show cannot do without, then the snapshot of each hall that changed since its last one, and of no other, so
+ * a stop at the largest hall's size still ends inside the watchdog's wait, then the peaks once more when those snapshots
+ * raised the day's longest (`onCompact`, after the peaks' lane was written). Returns {unsaved, halls}: what could not be
+ * saved, in words (a count of halls, never a code; [] when everything was), and how many halls were written.
+ */
+function saveAll() {
+  const unsaved = flushLanes();
+  const halls = store.compactDirty();
+  const left = store.dirtyCodes().length;
+  if (left) unsaved.push(plural(left, 'hall'));
+  if (savePeaks() && !peaksLane.flushSync() && !unsaved.includes('peaks')) {
+    console.error('  [save] peaks could not be written: ' + peaksLane.lastError);
+    unsaved.push('peaks');
+  }
+  return { unsaved, halls };
 }
 
 // ---------------------------------------------------------------- encrypted connections (Show Bus 1.2 §10)
@@ -347,6 +368,13 @@ const lastCrash = resilience.readJsonWithBak(CRASH_PATH);
 // How the watchdog ended before this start, as it recorded it (supervise.js `record`: a give-up, or the installed node's
 // start refused as configured, `refused`); marked seen by `firstWrites`.
 const watchdogBefore = resilience.readJsonWithBak(path.join(DATA_DIR, 'watchdog.json'));
+// How the copy before this one stopped (lib/laststop.js `take`: its record read and moved aside by `firstWrites`, once
+// this copy holds the folder, and read against what the load found, `judge`; until then none), the snapshots this start
+// wrote (the dirty halls', and no other), and the halls this start said AGMessage restarted in (each, after a stop that
+// did not save; none after one that did).
+let stopBefore = { ...laststop.readRecord('', 'ENOENT'), left: '' };
+let bootSnapshots = 0;
+let restartSaid = 0;
 // The sampler's timer fires every LOOP_RESOLUTION_MS, so an idle loop reads that much delay: it is taken off each window.
 const LOOP_RESOLUTION_MS = 10;
 const loopDelay = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS });
@@ -464,7 +492,8 @@ function healthFacts() {
       writes: settingsLane.writes, coalesced: settingsLane.coalesced, error: settingsLane.lastError,
       stores: {
         ...Object.fromEntries(saveLanes().map(([name, l]) => [name, { writes: l.writes, error: l.lastError, failures: l.failures }])),
-        rooms: { error: store.lastError, unsaved: store.unsaved().length },
+        // The snapshots written this run, and at its start: only the halls that changed are written at a start and a stop.
+        rooms: { error: store.lastError, unsaved: store.unsaved().length, snapshots: store.snapshots, atStart: bootSnapshots },
         audit: auditFacts(),
       },
       // Every write lane this process made, in any file, then the distinct lanes `saveLanes()` names: the two are equal,
@@ -492,7 +521,18 @@ function healthFacts() {
     sleeps: { watched: SUPERVISED, list: peaks.sleeps() },
     // The power request a live show holds (lib/power.js): its state, how many halls are live, and why it is not held.
     power: powerRequest.view(),
+    // How the copy before this start stopped (data/last-stop.json, lib/laststop.js): whether it saved, and when not, why
+    // (no record, one not read, or what that stop could not save), and the halls this start said AGMessage restarted in.
+    lastStop: stopFacts(),
   };
+}
+/**
+ * Health's `lastStop`: the record of the stop before this start, read by type and against the folder, the halls told
+ * AGMessage restarted, and why the record is still where the next start reads it ('' when it was moved aside).
+ */
+function stopFacts() {
+  const { state, saved, at, build, unsaved, code, left } = stopBefore;
+  return { state, saved, at, build, unsaved, code, said: restartSaid, left };
 }
 /** Health's `format`: the folder's format now, and what this start found of it (null until it holds the folder). */
 function formatFacts() {
@@ -574,6 +614,7 @@ function laptopFacts() {
       tunnel: { running: !!tunnelProc, url: tunnelUrl || '', error: tunnelError || '', until: link.untilWords, again: link.againWords, notKept: link.notKept },
       sleeps: { watched: SUPERVISED, list: peaks.sleeps(), today: peaks.sleptOn(Date.now()) },
       power: powerRequest.view(),
+      stop: serving ? { ...stopFacts(), fresh: !!formatNow && !formatNow.was, file: path.join(DATA_DIR, laststop.FILE) } : null,
       before: beforeWords(), without, format: formatNow ? { ...formatFacts(), build: BUILD.full, dir: DATA_DIR } : null,
     }, laptopRead.windows),
   };
@@ -637,10 +678,12 @@ audit.onPut = (ms) => { peaks.auditPut(ms, Date.now()); };
 // with its words, in either channel: a copy that served without its halls would make new ones over them.
 let restored = 0;
 try {
+  // A message moved to today's words is a change no op made: its room is marked, so the start writes it once.
   restored = store.loadAll((room) => {
     for (const m of room.messages) {
-      if (m.from && m.from.role === 'director') m.from.role = 'board';   // legacy role name
-      if (m.forwardedFrom) delete m.forwardedFrom.roomCode;   // a forward names its hall, never its code (an earlier build kept it)
+      if (m.from && m.from.role === 'director') { m.from.role = 'board'; store.markDirty(room); }   // legacy role name
+      // A forward names its hall, never its code (an earlier build kept it).
+      if (m.forwardedFrom && Object.hasOwn(m.forwardedFrom, 'roomCode')) { delete m.forwardedFrom.roomCode; store.markDirty(room); }
     }
   }, { compact: false });
 } catch (e) {
@@ -3449,7 +3492,12 @@ function stopTunnel() {
 
 // ---------------------------------------------------------------- lifecycle
 let shuttingDown = false;
-/** A stop: the rooms, lanes and audit entries saved, then gone. Before this copy holds its folder there is nothing of its own to save, and it writes nothing. */
+/**
+ * A stop: the audit log, the lanes and the halls that changed saved (`saveAll`), then its record written last
+ * (data/last-stop.json, lib/laststop.js), saying it saved only when all of them were: the next start writes "AGMessage
+ * restarted" in each hall only after a stop that did not. Then gone. Before this copy holds its folder there is nothing
+ * of its own to save, and it writes nothing.
+ */
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -3457,9 +3505,14 @@ function shutdown(code = 0) {
   if (laptopRead.child) { try { laptopRead.child.kill('SIGKILL'); } catch { /* it has ended */ } }   // a read of Windows ends with the server
   powerRequest.end();   // and so does the power request
   if (serving) {
-    console.log('\n  Saving rooms…');
-    store.compactAll();
-    flushLanes();
+    console.log('\n  Saving…');
+    const { unsaved, halls } = saveAll();
+    let rec = null;
+    try { rec = laststop.record(DATA_DIR, { at: Date.now(), build: BUILD.full, unsaved }); } catch (e) {
+      console.error('  [save] ' + laststop.FILE + ' could not be written (' + (e.code || e.message) + '): the next start says AGMessage restarted in each hall');
+    }
+    if (rec && rec.saved) console.log('  Saved: the audit log, every store and ' + (halls ? plural(halls, 'hall') + ' that changed' : 'no hall, none having changed') + '.');
+    else if (unsaved.length) console.error('  Not saved: ' + unsaved.join(', ') + '. The next start says AGMessage restarted in each hall.');
   }
   leaveShowNetwork();
   releaseDataFolder();
@@ -3509,8 +3562,8 @@ process.on('uncaughtException', (e) => {
   try { powerRequest.end(); } catch { /* its input closes as this process ends, which ends it too */ }
   // cloudflared ends with this copy, its end kept: the restart turns the tunnel on again rather than leave this one beside it.
   if (tunnelProc) { try { tunnelProc.kill('SIGTERM'); } catch { /* it has ended */ } }
-  try { store.compactAll(); } catch { /* best effort */ }
-  try { flushLanes(); } catch { /* best effort: a lane that cannot write has said so on the console */ }
+  // Saved in the stop's order, but with no record of a stop: a crash is not one, so the restart says AGMessage restarted.
+  try { saveAll(); } catch { /* best effort: what could not be written has said so on the console */ }
   try {
     resilience.writeFileAtomic(CRASH_PATH, JSON.stringify({ at: Date.now(), message: String(e && e.message ? e.message : e).slice(0, 500), stack: String(e && e.stack ? e.stack : '').slice(0, 4000) }));
     fs.appendFileSync(path.join(DATA_DIR, 'crash.log'), new Date().toISOString() + ' ' + String(e && e.stack ? e.stack : e) + '\n');
@@ -3768,6 +3821,14 @@ function firstWrites() {
   }
   if (settingsDue) saveSettings();
   if (watchdogBefore) { try { fs.renameSync(path.join(DATA_DIR, 'watchdog.json'), path.join(DATA_DIR, 'watchdog.seen.json')); } catch { /* shown once anyway */ } }
+  // How the copy before this one stopped, its record moved aside now, so a crash or a kill of this one is never read as
+  // a stop that saved; and the temporary files a stop cut short left (a process no longer running), removed.
+  stopBefore = laststop.judge(laststop.take(DATA_DIR), store.found);
+  if (stopBefore.state === 'stale') console.error('  [save] ' + laststop.FILE + ' says the stop before saved, but ' + stopBefore.code + ': each hall says AGMessage restarted');
+  if (stopBefore.left) console.error('  [save] ' + laststop.FILE + ' could not be moved aside or removed (' + stopBefore.left + '): the next start reads it as taken by this one' + (stopBefore.left.includes(laststop.SEEN) ? ' only once a hall has changed' : ''));
+  const swept = laststop.sweep([DATA_DIR, ROOMS_DIR]);
+  if (swept.removed.length) console.log('  Removed ' + plural(swept.removed.length, 'temporary file') + ' a stop cut short left in ' + DATA_DIR);
+  for (const [name, why] of swept.failed) console.error('  [save] ' + name + ', left by a stop cut short, could not be removed (' + why + ')');
 }
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.
@@ -3778,15 +3839,19 @@ if (RUNS === 'task') {
 
 holdDataFolder(() => front.listen(PORT, HOST, () => {
   // This copy holds the folder and the port: now it writes. Its folders, keys and secret are made where there are none,
-  // each replayed log is folded into a fresh snapshot (a torn last line cut before anything is appended after it), each
-  // hall says AGMessage restarted, the audit log is opened (and given what waited for it), and the show desk's loop may
-  // run (and save what it reports), as may the peaks' saves (from the next 5 s window).
+  // each dirty hall's snapshot is written (a replayed log folded in, a torn last line cut before anything is appended
+  // after it), and no other; after a stop that did not save (a crash, a kill, Windows ending it, a power cut, or no record
+  // of one) each hall says AGMessage restarted; the audit log is opened (and given what waited for it), and the show
+  // desk's loop may run (and save what it reports), as may the peaks' saves (from the next 5 s window).
   listening = true;
   serving = true;
   firstWrites();
-  store.compactAll();
-  for (const room of store.rooms.values()) {
-    store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— AGMessage restarted · ' + plural(room.messages.length, 'message') + ' kept —', at: Date.now() } });
+  bootSnapshots = store.compactDirty();
+  if (!stopBefore.saved) {
+    for (const room of store.rooms.values()) {
+      store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— AGMessage restarted · ' + plural(room.messages.length, 'message') + ' kept —', at: Date.now() } });
+      restartSaid++;
+    }
   }
   audit.open();
   const upgraded = dataformat.rowWords(formatNow, BUILD.full);

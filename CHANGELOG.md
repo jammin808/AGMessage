@@ -2117,6 +2117,87 @@ tests, on Linux: whether a standard account may make `C:\node_modules` on the sh
 - Rolling back: 0.5.1 runs the bare `cloudflared` again where `bin` has none, and its server asks for the two modules
   again, from above `app`.
 
+**A restart rewrites only the halls that changed, a stop saves first and says it saved, and "AGMessage restarted" only
+after a stop that did not save** (the plan's Part 6, unit U4, with the owner's answer 41, "only after a stop that did not
+save cleanly"; the tree's tests and the admin and hall pages in Chromium. The times below are the plan's bench, not rerun
+here; nothing is measured on the show laptop, where reading R3′ and lab 5 take the stop)
+- A stop and a start write only the halls that changed. 0.5.1 rewrote every hall's snapshot at a stop and again at the
+  start after it (the plan's bench: 1.2 s at 200,000 messages and 5.8 s at 1,000,000 each time, where writing only the
+  halls whose log held changes took 1 ms), and at 1,000,000 the watchdog's 4 s wait ended every stop in the middle of
+  it, before the settings and the other stores were saved, leaving a 2.7 MB temporary file per hall that nothing
+  removed. The store now knows a dirty hall (`dirty`): a line in its log, an op its log refused, a change made without
+  an op (`markDirty`: a message moved to today's words as it loads), or no snapshot on disk it knows whole (one a start
+  found torn and read from its `.bak`). A start and a stop write those (`compactDirty`), and no other. Every line of a
+  log counts toward the 500 a hall is snapshotted at, the lines a start replays, finds already in the snapshot or finds
+  torn included, so a log stays bounded across restarts even where a start cannot write its snapshot.
+- A stop saves in order, then says so: the audit log's waiting entries and the head that covers them first, then every
+  store's write lane (the settings, the accounts and sign-ins, the screens, the show desk's results, the peaks), then the
+  dirty halls (0.5.1 wrote every hall first and the lanes after), then the peaks once more when those halls' snapshots
+  raised the day's longest, which their timing marks after the peaks' lane was written. Then it writes
+  `data/last-stop.json` last (`{at, build, saved}`), `saved` true only when every one of them was written; when one was
+  not, the record says which (`unsaved`: a store's name, "the audit log", a count of halls, never a hall's code) and the
+  console says "Not saved: … The next start says AGMessage restarted in each hall."; when all were, "Saved: the audit
+  log, every store and 1 hall that changed.". A crash saves in the same order and writes no record: it is not a stop.
+  The record is written once, after the lanes, through the atomic writer: it is no store.
+- "— AGMessage restarted · 412 messages kept —" only after a stop that did not save. 0.5.1 wrote the line into every
+  hall at every start, so a planned restart, or an upgrade between two sessions of a show, put it on the Board's
+  screens. A start that holds the folder reads the record and moves it aside to `last-stop.seen.json`, so a crash or a
+  kill after it is never read as that stop; one it can neither move nor remove (another program holds it) is said, and
+  kept as the one seen too (a new file, which a hold on the record does not stop), so the next start reads it as taken
+  (`stale`). It fails closed: a record that says it saved is read against what the start found in the folder, where a
+  stop that saved leaves every hall's log empty and no snapshot newer than itself, so a log with lines or a newer
+  snapshot means a copy ran on the folder after that stop and the record is `stale` (a record that names no time is not
+  one). The line goes into each hall only when there was no record (a crash, the watchdog's kill of a hang, Windows
+  ending it, a power cut, a folder 0.5 last ran), it could not be read, it says the stop did not save, or it is stale.
+  Health's detail gains `lastStop {state, saved, at, build, unsaved, code, said, left}` at its end (`state` one of
+  `saved`, `unsaved`, `none`, `unread`, `stale`; `left`, why the record is still where the next start reads it), and
+  `saves.stores.rooms` its `snapshots` (this run) and `atStart` (this start). The admin page's "This laptop" gains Last
+  stop: "saved at 2026-11-03 20:31 UTC by 0.6.0+41: …" ✓, or not saved, or not known to have saved, with why and how
+  many halls were told AGMessage restarted △, or none for a data folder the start began; a record that could not be
+  moved aside is said there too △. Reading R3′ no longer waits for this unit (it waits for U8 and U12).
+- What a stop cut short left: once it holds the folder, a start removes each atomic save's temporary file
+  (`<file>.<pid>.tmp`) in `data/` and `data/rooms/` whose process has ended, and says how many; a running process's (its
+  watchdog's, its own) is kept, and a copy refused at the lock removes nothing.
+- The AI's SDK is required at the first draft asked with a key, never as the server starts: no start loads it, and a
+  server whose AI drafts are off never does.
+- `lib/laststop.js` (the record, `take`, `judge`, `sweep`) joins the synchronous-call caps at 4, with its reason;
+  `server.js` stays at 15 and `lib/store.js` within its 10. A fence holds every field a hall's snapshot writes to a row
+  of `SNAPSHOT_FIELDS` (`lib/store.js`) naming the change that marks the hall dirty (an op, or `markDirty`), in two
+  halves. The source half (`test/units.test.js`) reads `server.js` and `lib/` for a hall's settings, messages or
+  tombstones written beside the store through any name and however deep (assigned, counted, deleted, merged into,
+  changed by a mutating call), and its name or change number through the names the server gives a hall. The runtime
+  half (`test/snapshot-preload.js`, `snapshotOf`) is loaded into every server the end-to-end tests start without
+  preloads of their own, whose `stopServer` fails on what it finds, into the stop's own tests and into the smoke's
+  servers: each hall a start or a stop leaves unwritten is held to the fields the store last wrote or loaded, so a
+  message changed in place, which no pattern reads, is caught where a test drives it. The plan's unit 7 adds its guest
+  code and retired codes there, written only by a snapshot, with `markDirty`, and the test that a New code survives a
+  stop and a start.
+- Tests: `test/laststop.test.js`: the record read by type (only `saved: true` with its time is a stop that saved), moved
+  aside once, removed where it cannot be moved, kept as the one seen where it can be neither (the next take reads it as
+  taken), and read against the folder (`judge`); the sweep (a file a write of ours names, its process ended, only, with
+  a pid no process can have); end to end, the stop's saves recorded in order by `test/stop-preload.js`: the audit log,
+  then every lane, then the one hall of three that changed, then the record, last; the start after it writes no hall
+  and no hall gains the line; after a kill each of the three does, once, only the two whose logs held lines are written,
+  and a second kill is still no stop that saved; a stop whose peaks could not be written (`test/busy-preload.js`)
+  records `unsaved: ["peaks"]`, and the next start writes the line; a hall written after a stop that saved (its
+  snapshot newer), then the log a killed 0.5.1 leaves, each read as stale, the line written once each time, and the
+  stop between them writing the peaks again after the hall, its snapshot the day's longest on disk; a dead copy's
+  temporary files kept by a copy refused at the lock and removed by the next that holds it, a running one's and others
+  kept, and a hall moved to today's words written once at the start. `test/units.test.js`: only dirty halls written, a
+  snapshot that fails leaving its hall dirty, a torn one dirty; five starts after kills that never reach 500 lines in
+  the log; the fence's two halves, the runtime half finding a message changed in place, a setting, a name and a change a
+  load made unmarked, and nothing the store was told of; the SDK not loaded until a draft with a key.
+  `test/laptop.test.js`: the Last stop row. Moved on purpose: `test/server.test.js`'s restart (a stop that saved: no
+  line; then a kill: the log replayed and the line once), `test/resilience.test.js`'s "a restart announces nobody"
+  (bounded by the hall's change number, no longer by the restart's line), the stop's console lines, and the smoke's
+  restart (no line after a stop that saved), whose "This laptop" now draws Last stop.
+- The papers: `README.md`, `README.txt` (the saved rooms; pages back by themselves), `SECURITY.md`, `docs/DESIGN.md`
+  (Recover, don't stop), `docs/INSTALL.md` (A stop, and the start after it; R3′), `docs/NODES.md` (health) and
+  `docs/ANALYSIS.md` (§3.4).
+- Rolling back: 0.5.1 ignores `last-stop.json` and `last-stop.seen.json`, rewrites every hall at each start and stop
+  again, and writes its restart line at every start. A record a 0.6.0 stop left is read again by the next 0.6.0 start,
+  as stale, when 0.5.1 ran on the folder in between: each hall then says AGMessage restarted.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

@@ -208,8 +208,10 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   hold values sealed with the old one (`settings.json`, `displays.json`) cannot be read: none of them can be ruled out.
 - Nothing is written before a copy holds its data folder and its port: a copy refused at either has made no folder, key,
   certificate, secret or setting (its watchdog adds its line saying the start was refused, and why, to `watchdog.log` and to the console it keeps in `logs/server.log`; the installed node's watchdog records a start refused as configured in `watchdog.json`, never a portable copy's, which may be refused by another copy's folder), so a second
-  start can never write a key or a certificate into a folder another copy runs on. A `settings.json` that cannot be read
-  (EBUSY, EACCES) is never written over, nor taken from its `.bak`, which is a save behind: that run makes no context
+  start can never write a key or a certificate into a folder another copy runs on. Nor does it remove or move anything
+  there: the last stop's record is moved aside, and an atomic save's temporary file left by a stop cut short is removed
+  (only one named for a process that has ended), by the copy that holds the folder alone. A `settings.json` that cannot
+  be read (EBUSY, EACCES) is never written over, nor taken from its `.bak`, which is a save behind: that run makes no context
   token, refuses a setting changed with why, and goes without the links and keys the file holds. The installed node's folders are each a full path outside the program's folder, checked before any write.
   Its port held, or its folder's pipe taken by another account, ends its start with code 75, which its watchdog tries
   again and never counts as a crash, so squatting either during a restart cannot hold the node down for good.

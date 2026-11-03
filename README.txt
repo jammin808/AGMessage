@@ -675,6 +675,18 @@ Troubleshooting
   Health line and put in the room's next snapshot; until that snapshot
   lands, a crash of AGMessage can lose it.
 
+- When AGMessage stops (Ctrl+C, the window closed, its watchdog), it
+  saves the audit log and its settings first, then each room that changed
+  since its last snapshot, and only those, so a large event still stops in
+  time. Then it writes app\data\last-stop.json to say it saved. The next
+  start rewrites no room and adds nothing to any room's history. After a
+  stop that did not save (AGMessage crashed or was ended, the laptop was
+  switched off or Windows restarted it, or an older AGMessage ran on the
+  folder after it), every room reads "— AGMessage restarted · 412
+  messages kept —", once; Admin -> This laptop says which it was under
+  Last stop. A file ending .tmp that a stop cut short leaves in app\data
+  is removed by the next start.
+
 What's new in 0.5
 -----------------
 Halls, accounts and screens
@@ -761,7 +773,8 @@ Reliability and speed
     every page waits until it wakes.
   - Open pages come back by themselves: after a drop (from half a second,
     and at once when a phone is woken or the Wi-Fi is back), after a restart
-    (nobody is announced again: the hall reads "AGMessage restarted"), and
+    (nobody is announced again; after a stop that did not save, the hall
+    reads "AGMessage restarted"), and
     after AGMessage refused them at a busy moment, at the pace it gives
     ("Busy — trying again in 3 s."). A page down for 2 seconds says
     "Reconnecting…".

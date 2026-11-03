@@ -100,9 +100,15 @@ function browserPath() {
 }
 const freePort = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 
+// The runtime half of the fence on a hall's snapshot (test/snapshot-preload.js), beside any preload a server is given:
+// what it finds is appended to `<data folder>-snapshots.txt` as each server ends, and reported once all have stopped.
+const SNAPSHOT_PRELOAD = '--require "' + path.join(__dirname, 'snapshot-preload.js').split(path.sep).join('/') + '"';
 async function startServer(port, dataDir, env = {}) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '', TZ: SERVER_TZ, ...env },
+    env: {
+      ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', ANTHROPIC_API_KEY: '', TZ: SERVER_TZ, ...env,
+      NODE_OPTIONS: [env.NODE_OPTIONS || process.env.NODE_OPTIONS, SNAPSHOT_PRELOAD].filter(Boolean).join(' '), AGM_TEST_SNAPSHOTS: dataDir + '-snapshots.txt',
+    },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   if (child.channel) child.channel.unref();
@@ -2425,7 +2431,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     for (const [what, d] of Object.entries(adminDoors)) report(doorsInStep(d), `the admin page's ${what}: right-click = ⋯ = Shift+F10 = the catalogue's set, the bar in it (${d.want}; ${d.right} / ${d.dots} / ${d.key}; ${d.inline}; hit ${d.hit})`);
     // "This laptop": every fact with its words and where it was read, in the server's order; Windows' facts read on
     // Windows and unknown with why elsewhere; Refresh reads Windows again and says when.
-    const LAPTOP_ROWS = ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin'];
+    const LAPTOP_ROWS = ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'stop', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin'];
     const laptopRows = await admin.until(`(() => {
       const rows = [...document.querySelectorAll('#laptopFacts > li[data-fact]')];
       if (!rows.length) return false;
@@ -2924,7 +2930,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       report(stillWaiting && hiddenStays && !!shown && shown.ms < 3000 && shown.conn === JSON.stringify({ strip: '', dot: '● Connected', words: '' }),
         `a page shown again while its backoff waits (15 s or more) comes back at once, and the join's answer clears the strip and the dot's words (${shownBack})`);
       const announced = await rae.eval(`JSON.stringify(allMessages.filter((m) => m.type === 'system' && / joined /.test(m.text)).map((m) => m.text).concat(allMessages.filter((m) => m.type === 'system' && /^— AGMessage restarted · \\d+ messages? kept —$/.test(m.text)).length))`);
-      report(announced === JSON.stringify(['Rae joined Backstage', 1]), `the restart announces nobody: the page is announced once, at its first join, and the restart's own line says what happened (${announced})`);
+      report(announced === JSON.stringify(['Rae joined Backstage', 0]), `the restart announces nobody: the page is announced once, at its first join, and a stop that saved writes no restart line (${announced})`);
       await rae.shot(path.join(OUT, 'back-by-itself.png'));
       const backProblems = rae.problems.filter((p) => !/WebSocket connection to|ERR_CONNECTION_REFUSED|net::ERR_/.test(p));
       report(backProblems.length === 0, `a page that came back: no script errors or CSP violations, the stopped server's refused connections aside${backProblems.length ? ' — ' + backProblems.slice(0, 3).join(' | ') : ''}`);
@@ -3082,13 +3088,16 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     if (sw) await sw.close();
     if (patterns) await patterns.close();
     edge.close();
-    try { server.send({ t: 'stop' }); } catch { server.kill(); }   // as the watchdog stops it: saved first
+    await stopServer(server);   // as the watchdog stops it: saved first
     if (server2) await stopServer(server2);
     if (server3) await stopServer(server3);
     if (server4) await stopServer(server4);
     if (server5) await stopServer(server5);
     if (link5) link5.close();
-    setTimeout(() => { for (const d of [dataDir, dataDir2, dataDir3, dataDir4, dataDir5]) if (d) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ } } }, 1000);
+    const dirs = [dataDir, dataDir2, dataDir3, dataDir4, dataDir5].filter(Boolean);
+    const beside = dirs.flatMap((d) => { try { return fs.readFileSync(d + '-snapshots.txt', 'utf8').split('\n').filter(Boolean); } catch { return []; /* the fence found nothing */ } });
+    report(beside.length === 0, `every hall a start or a stop left unwritten holds what the store last wrote or loaded: nothing changed beside the store, which a stop would lose (${beside.join(', ') || 'none'})`);
+    setTimeout(() => { for (const d of dirs) { for (const f of [d, d + '-snapshots.txt']) { try { fs.rmSync(f, { recursive: true, force: true }); } catch { /* ignore */ } } } }, 1000);
   }
   console.log(failures === 0 ? `ALL OK (screenshots in ${OUT})` : `${failures} FAILED`);
   setTimeout(() => process.exit(failures ? 1 : 0), 1500);

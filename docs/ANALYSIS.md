@@ -202,6 +202,25 @@ the bare name `cloudflared`: a copy without it is refused with why before anythi
 cannot be left to the spawn: a program that is not there says `error` and `close` and never `exit`, and every Turn on
 then left its log's 500 ms poll running for the life of the process, which the spawn's `error` now also ends (§3.7).
 
+A restart that rewrites only the halls that changed (the plan's U4) adds `lib/laststop.js` at 4, with its reason: once
+a start, after the hold, the last stop's record moved aside to `last-stop.seen.json` (or removed where it cannot be
+moved), and the data and rooms folders listed for the temporary files a stop cut short left (`<file>.<pid>.tmp`), each
+removed whose process has ended; the record itself is written at the stop through the atomic writer, and read at the
+start through `readText`, so neither is a call of its own. `lib/store.js` keeps its cap: the lines of a log are counted
+as the start reads them, and a hall's dirtiness is known from what the store holds (a line in its log, an op the log
+refused, a change marked, no whole snapshot), with no call of its own. `server.js` stays at 15. Beside it a fence
+(`test/units.test.js`) holds every field a hall's snapshot writes to a row of `SNAPSHOT_FIELDS` (`lib/store.js`), which
+names the change that marks the hall dirty (an op, or `markDirty` for a change no op makes), in two halves. The source
+half reads `server.js` and `lib/` for a hall's settings, messages or tombstones written beside the store, reached through
+any name and however deep (assigned, counted, deleted, merged into with `Object.assign`, or changed by a mutating call),
+and for its name or change number written through the names the server gives a hall (`room`, `hall`, `r`, `h`, `dst`,
+`src`; `lib/displays.js`'s `r`, a screen's take result, is the one row of its exceptions). A message changed in place,
+taken from `byId`, is no pattern's: the runtime half (`test/snapshot-preload.js`) is loaded into every server the
+end-to-end tests start without preloads of their own (`test/helpers.js`, whose `stopServer` fails on what it found), into
+the stop's own tests and into the smoke's servers, and holds each hall a start or a stop leaves unwritten to the fields
+the store last wrote or loaded, naming the hall and the field that differ. A change on a path no test drives is still
+the source half's alone.
+
 The audit log's export adds `lib/auditexport.js` and `lib/zip.js`, and the verifier `verify/verify-audit.js`, each at 0
 synchronous calls (the guard names them, so a file that drops out of its list fails it): the export reads, digests and
 streams on the thread pool and in slices, and the verifier on another computer reads through `fs.promises` only. Its

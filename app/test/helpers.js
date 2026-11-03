@@ -11,6 +11,10 @@ const { io } = require('socket.io-client');
 const ROOT = path.join(__dirname, '..');
 const TOKEN = 'testadmintoken01';
 
+// The runtime half of the fence on a hall's snapshot (test/snapshot-preload.js): loaded into every server started here
+// whose test names no preloads of its own (NODE_OPTIONS), and read by stopServer.
+const SNAPSHOT_PRELOAD = '--require "' + path.join(__dirname, 'snapshot-preload.js').split(path.sep).join('/') + '"';
+
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
@@ -30,10 +34,15 @@ async function startServer(env = {}) {
 async function startOnce(env) {
   const dataDir = env.AGM_DATA_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
   const port = env.PORT ? Number(env.PORT) : await freePort();
+  const fence = dataDir + '-snapshots.txt';
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', AGM_UPLOAD_DIR: dataDir + '-uploads', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', ...env },
+    env: {
+      ...process.env, PORT: String(port), HOST: '127.0.0.1', AGM_DATA_DIR: dataDir, AGM_KEY_DIR: dataDir + '-keys', AGM_UPLOAD_DIR: dataDir + '-uploads', ADMIN_TOKEN: TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '',
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, SNAPSHOT_PRELOAD].filter(Boolean).join(' '), AGM_TEST_SNAPSHOTS: fence, ...env,
+    },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
+  child.snapshotFence = env.AGM_TEST_SNAPSHOTS || fence;
   if (child.channel) child.channel.unref();   // the channel carries the stop; it keeps no test run alive
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
@@ -52,13 +61,27 @@ async function startOnce(env) {
 const PORT_TAKEN = /already in use|is using port|already running on port/i;
 /**
  * Stop a server as the watchdog does: asked over IPC, so it saves first on every platform (on Windows a signal sent to a
- * child ends it at once, unsaved). One that has not gone in 3 s is ended.
+ * child ends it at once, unsaved). One that has not gone in 3 s is ended. Rejects when the runtime half of the snapshot
+ * fence (test/snapshot-preload.js) found a hall changed beside the store, which a stop leaves unwritten.
  */
-const stopServer = (child) => new Promise((resolve) => {
-  if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }
-  child.once('exit', resolve);
+const stopServer = (child) => new Promise((resolve, reject) => {
+  let settled = false;
+  const done = () => {
+    if (settled) return;
+    settled = true;
+    let found = '';
+    if (child.snapshotFence) {
+      try { found = fs.readFileSync(child.snapshotFence, 'utf8'); fs.rmSync(child.snapshotFence, { force: true }); } catch (e) {
+        if (e.code !== 'ENOENT') { reject(e); return; }   // ENOENT: the fence found nothing
+      }
+    }
+    if (found.trim()) reject(new Error('a hall changed beside the store (an op, or markDirty: lib/store.js SNAPSHOT_FIELDS), so a stop left it unwritten: ' + found.trim().split('\n').join(', ')));
+    else resolve();
+  };
+  if (child.exitCode !== null || child.signalCode !== null) { done(); return; }
+  child.once('exit', done);
   try { child.send({ t: 'stop' }); } catch { child.kill('SIGTERM'); }
-  setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } resolve(); }, 3000);
+  setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } done(); }, 3000);
 });
 
 /** fetch with JSON in and out; returns {status, body, cookie, headers}. */

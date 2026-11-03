@@ -315,6 +315,170 @@ test('store: the newest 500 tombstones are kept, in memory and in the snapshot; 
   assert.deepEqual(Array.from(c.get('BAD234').gone.values()), [{ id: 'ok' }]);
 });
 
+// ---------------------------------------------------------------- a start and a stop write only the dirty halls
+const { COMPACT_EVERY, SNAPSHOT_FIELDS } = require('../lib/store');
+
+test('store: a start and a stop write only the dirty halls: a line in the log, an op the log refused, a change made without an op, or no whole snapshot', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const say = (store, room, id) => store.commit(room, { o: 'add', m: { id, type: 'text', text: id, at: 1 } });
+  const a = new RoomStore(dir);
+  const [r1, r2, r3] = ['ABC234', 'DEF234', 'GHJ234'].map((c) => a.create(c, c));
+  assert.deepEqual([a.dirtyCodes(), a.snapshots], [[], 3], 'each made with its snapshot, clean');
+  say(a, r1, 'm1');
+  assert.deepEqual(a.dirtyCodes(), ['ABC234']);
+  assert.equal(a.compactDirty(), 1, 'one written');
+  assert.deepEqual([a.dirtyCodes(), a.compactDirty(), a.snapshots], [[], 0, 4], 'and none the second time');
+  // A change made without an op is marked, and written once.
+  r2.name = 'moved';
+  a.markDirty(r2);
+  assert.deepEqual(a.dirtyCodes(), ['DEF234']);
+  assert.equal(a.compactDirty(), 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'DEF234.json'), 'utf8')).name, 'moved');
+  assert.deepEqual(a.dirtyCodes(), []);
+  // A snapshot that fails leaves its hall dirty, for the next one; compact() says whether it wrote.
+  say(a, r3, 'm2');
+  const rename = fs.renameSync;
+  fs.renameSync = (from, to) => { if (String(to).endsWith('GHJ234.json')) throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' }); return rename.call(fs, from, to); };
+  try { assert.equal(a.compactDirty(), 0); assert.equal(a.compact('GHJ234'), false); } finally { fs.renameSync = rename; }
+  assert.deepEqual(a.dirtyCodes(), ['GHJ234'], 'still dirty');
+  assert.equal(a.compact('NOHALL'), false);
+  say(a, r1, 'm3');   // in the log only, as at a crash
+
+  // A load: a hall whose log holds lines is dirty, one whose snapshot holds everything is not, and only the dirty are written.
+  const b = new RoomStore(dir);
+  b.loadAll(null, { compact: false });
+  assert.deepEqual([b.dirtyCodes().sort(), b.get('ABC234').logCount, b.get('DEF234').logCount], [['ABC234', 'GHJ234'], 1, 0]);
+  const json = (c) => fs.readFileSync(path.join(dir, c + '.json'), 'utf8');
+  const clean = json('DEF234');
+  assert.equal(b.compactDirty(), 2);
+  assert.equal(json('DEF234'), clean, 'a clean hall is not written');
+  const c = new RoomStore(dir);
+  assert.equal(c.loadAll(), 3);
+  assert.deepEqual([c.dirtyCodes(), c.snapshots], [[], 0], 'a start after a stop that saved writes no hall');
+  // A snapshot torn on disk (the load fell back to the .bak) is dirty: it is written again.
+  fs.writeFileSync(path.join(dir, 'DEF234.json'), '{"code":"DEF2');
+  const d = new RoomStore(dir);
+  d.loadAll(null, { compact: false });
+  assert.deepEqual(d.dirtyCodes(), ['DEF234']);
+});
+
+test('store: every line of a log counts toward its snapshot, the lines a start replays included, so a log stays bounded across restarts', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const log = path.join(dir, 'ABC234.log');
+  const lines = () => fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
+  let n = 0;
+  let s = new RoomStore(dir);
+  s.create('ABC234', 'T');
+  // Five runs, each killed after 300 changes (no stop, no snapshot): each start counts the lines it found, so the log is
+  // folded into its snapshot at COMPACT_EVERY lines whatever the restarts between, and never holds more.
+  let most = 0;
+  for (let run = 0; run < 5; run++) {
+    s = new RoomStore(dir);
+    s.loadAll(null, { compact: false });
+    const room = s.get('ABC234');
+    assert.equal(room.logCount, lines(), 'a start counts every line it found');
+    for (let i = 0; i < 300; i++) { s.commit(room, { o: 'add', m: { id: 'm' + n++, type: 'text', text: 'x', at: 1 } }); most = Math.max(most, lines()); }
+    assert.equal(room.messages.length, n);
+  }
+  assert.equal(COMPACT_EVERY, 500);
+  assert.ok(most < COMPACT_EVERY, 'the log never held ' + COMPACT_EVERY + ' lines: at most ' + most);
+  // A line the snapshot already holds (a stop cut between the snapshot and the log's truncation) and a torn one count too.
+  s = new RoomStore(dir);
+  s.loadAll();   // the log folded in
+  const seq = s.get('ABC234').seq;
+  fs.writeFileSync(log, JSON.stringify({ o: 'add', m: { id: 'old', type: 'text', text: 'x', at: 1 }, s: seq }) + '\n{"o":"add","m":{"id":"to');
+  const t = new RoomStore(dir);
+  t.loadAll(null, { compact: false });
+  assert.deepEqual([t.get('ABC234').logCount, t.get('ABC234').messages.length, t.dirtyCodes()], [2, n, ['ABC234']]);
+});
+
+test('store: the fence on the snapshot: every field it writes has its row, with the change that marks its hall dirty', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const r = a.create('ABC234', 'T');
+  const fields = () => Object.keys(JSON.parse(fs.readFileSync(path.join(dir, 'ABC234.json'), 'utf8')));
+  assert.deepEqual(fields(), Object.keys(SNAPSHOT_FIELDS), 'a field written to the snapshot is a row of SNAPSHOT_FIELDS first, and a row is a field written');
+  for (const [field, change] of Object.entries(SNAPSHOT_FIELDS)) assert.ok(typeof change === 'string' && /\bop\b|markDirty|create\(\)|the snapshot itself/.test(change), field + ' says what marks it: ' + change);
+  // Each op kind marks its hall dirty, and its snapshot then holds the change.
+  const ops = [
+    [{ o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } }, (j) => j.messages.length === 1],
+    [{ o: 'upd', id: 'm1', f: { pinned: true } }, (j) => j.messages[0].pinned === true],
+    [{ o: 'meta', name: 'Renamed', settings: { lock: true } }, (j) => j.name === 'Renamed' && j.settings.lock === true],
+    [{ o: 'del', id: 'm1' }, (j) => !j.messages.length && j.gone.length === 1],
+    [{ o: 'reset' }, (j) => !j.messages.length],
+  ];
+  for (const [op, held] of ops) {
+    a.commit(r, op);
+    assert.deepEqual(a.dirtyCodes(), ['ABC234'], op.o + ' marks the hall dirty');
+    assert.equal(a.compactDirty(), 1);
+    const j = JSON.parse(fs.readFileSync(path.join(dir, 'ABC234.json'), 'utf8'));
+    assert.ok(held(j) && j.seq === r.seq, op.o + ' is in the snapshot');
+  }
+  // The source half: the fields an op writes are written by no file but the store (a change made elsewhere would go
+  // unmarked). A hall's settings, messages or tombstones, reached through any name and however deep, assigned, counted,
+  // deleted, merged into or changed by a call; its name or change number through the names the server gives a hall. A
+  // message changed in place (one taken from `byId`) is no pattern's: the runtime half below, on every server the tests and
+  // the smoke start (test/snapshot-preload.js), holds each hall a start or a stop leaves unwritten to the store's copy.
+  const ROOT = path.join(__dirname, '..');
+  const NAME = String.raw`[A-Za-z_$][\w$]*`;
+  const FIELD = String.raw`\b${NAME}\.(?:settings|messages|gone)\b`;
+  const CHAIN = String.raw`(?:\.${NAME}|\[[^\]\n]*\])*`;
+  const fieldWritten = new RegExp([   // eslint-disable-line security/detect-non-literal-regexp -- built from this test's own literal parts
+    String.raw`${FIELD}${CHAIN}\s*(?:[-+*/%&|^]?=(?!=)|\+\+|--)`,
+    String.raw`\bdelete\s+${FIELD}`,
+    String.raw`${FIELD}${CHAIN}\.(?:push|splice|pop|shift|unshift|sort|reverse|set|delete|clear|fill|copyWithin)\(`,
+    String.raw`\bObject\.(?:assign|defineProperty|defineProperties)\(\s*${FIELD}`,
+  ].join('|'));
+  const HALL = ['room', 'hall', 'r', 'h', 'dst', 'src'];   // what server.js and lib/ call a hall
+  const nameWrittenBy = (names) => new RegExp(String.raw`\b(?:${names.join('|')})\.(?:name|seq)\s*(?:[-+*/]?=(?!=)|\+\+|--)`);   // eslint-disable-line security/detect-non-literal-regexp -- this test's own names
+  const nameWritten = nameWrittenBy(HALL);
+  // A file whose short name is not a hall: lib/displays.js's `r` is a screen's take result, numbered by its own `seq`.
+  const NOT_A_HALL = { 'lib/displays.js': ['r'] };
+  assert.deepEqual(Object.keys(SNAPSHOT_FIELDS).filter((f) => !['code', 'createdAt', 'savedAt'].includes(f)), ['name', 'seq', 'settings', 'messages', 'gone'], 'the fields a change makes, as the patterns name them');
+  const files = ['server.js', ...require('./helpers').filesUnder('lib', /\.js$/)].filter((f) => f !== 'lib/store.js');
+  assert.ok(files.includes('lib/board.js') && files.length > 20);
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    assert.doesNotMatch(src, fieldWritten, f + ' changes a hall\'s snapshot field: through an op, or markDirty');
+    const names = HALL.filter((n) => !(NOT_A_HALL[f] || []).includes(n));
+    assert.doesNotMatch(src, nameWrittenBy(names), f + ' changes a hall\'s name or change number: through an op');
+  }
+  assert.match(fs.readFileSync(path.join(ROOT, 'lib/displays.js'), 'utf8'), /\br\.seq = seq;/, 'the one exception is still there to need its row');
+  const writes = ['r.settings.lockRoles = true', 'r.name = x', 'h.messages.push(m)', 'dst.settings = {}', 'room.settings.seats[uid] = s', 'delete room.settings.codeOff',
+    'Object.assign(room.settings, x)', 'hall.seq++', 'src.gone.clear()', 'x.messages.length = 0', 'room.settings.n += 1'];
+  for (const w of writes) assert.ok(fieldWritten.test(w) || nameWritten.test(w), 'the fence reads a change: ' + w);
+  for (const r of ['r.settings.x === 1', 'r.settings.x >= 1', 'Object.assign({}, r.settings)', 'r.messages.slice().sort()', 'const n = r.messages.length', 'user.name = x']) {
+    assert.ok(!fieldWritten.test(r) && !nameWritten.test(r), 'a read is no change: ' + r);
+  }
+});
+
+test('store: the fence\'s runtime half finds each field of a hall changed beside the store, which a start and a stop leave unwritten, and nothing the store was told of', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const out = path.join(dir, 'found.txt');
+  const rooms = path.join(dir, 'rooms');
+  const at = (f) => JSON.stringify(path.join(__dirname, ...f));
+  // In a process of its own, as a server under test loads it; what it found is written as that process exits.
+  const script = [
+    'require(' + at(['snapshot-preload.js']) + ');',
+    'const { RoomStore } = require(' + at(['..', 'lib', 'store.js']) + ');',
+    'const a = new RoomStore(' + JSON.stringify(rooms) + ');',
+    'const [one, two, three, four, five] = ["ABC234", "DEF234", "GHJ234", "KLM234", "NPQ234"].map((c) => a.create(c, c));',
+    'a.commit(one, { o: "add", m: { id: "m1", type: "text", text: "x", at: 1 } });',
+    'a.compactDirty();',
+    // Beside the store: a message changed in place, a setting written, a name; none marked, none written by the stop.
+    'one.byId.get("m1").pinned = true; two.settings.lockRoles = true; three.name = "moved";',
+    // Told: an op, and a change marked.
+    'a.commit(four, { o: "meta", name: "renamed" }); five.settings.x = 1; a.markDirty(five);',
+    'a.compactDirty();',
+    // A start: what the load's onMigrate changes without marking it is beside the store too; marked, it is written.
+    'const b = new RoomStore(' + JSON.stringify(rooms) + ');',
+    'b.loadAll((room) => { if (room.code === "KLM234") room.settings.y = 2; if (room.code === "NPQ234") { room.name = "then"; b.markDirty(room); } }, { compact: false });',
+    'b.compactDirty();',
+  ].join('\n');
+  require('child_process').execFileSync(process.execPath, ['-e', script], { env: { ...process.env, AGM_TEST_SNAPSHOTS: out } });
+  assert.deepEqual(fs.readFileSync(out, 'utf8').split('\n').filter(Boolean).sort(), ['ABC234 messages', 'DEF234 settings', 'GHJ234 name', 'KLM234 settings']);
+});
+
 // ---------------------------------------------------------------- compaction trusts the snapshot it wrote
 const resilience = require('../lib/resilience');
 /** Run `fn`, counting the times `file` is read whole (fs.readFileSync); gives back that count. */
@@ -1140,6 +1304,26 @@ test('ai: thread text is compact and labelled', () => {
   ]).split('\n');
   assert.equal(held[0], '[14:06, written 14:02 and sent when the connection was back] Ana (research) asked for help (Sound): radio mic 3');
   assert.equal(held[1], '[14:06] Chair (board): Thanks');
+});
+
+test('ai: the SDK is required at the first draft asked with a key, never as the server loads lib/ai.js, so a start goes without its cost', () => {
+  // In a process of its own, whose module cache this file's other tests have not touched. The draft is asked of a closed
+  // port, and the process ends before anything is sent.
+  const script = [
+    'const sep = require("path").sep;',
+    'const sdk = () => Object.keys(require.cache).some((k) => k.includes(sep + "@anthropic-ai" + sep));',
+    'const ai = require(' + JSON.stringify(path.join(__dirname, '..', 'lib', 'ai.js')) + ');',
+    'const said = [sdk()];',
+    'ai.draftReply("", { messages: [] }).then((r) => {',
+    '  said.push(sdk(), r.error);',
+    '  ai.draftReply("a-key-for-the-load-test", { messages: [] }).catch(() => {});',
+    '  said.push(sdk());',
+    '  process.stdout.write(JSON.stringify(said));',
+    '  process.exit(0);',
+    '});',
+  ].join('\n');
+  const out = require('child_process').execFileSync(process.execPath, ['-e', script], { env: { ...process.env, ANTHROPIC_BASE_URL: 'http://127.0.0.1:9' }, encoding: 'utf8' });
+  assert.deepEqual(JSON.parse(out), [false, false, 'Add an Anthropic API key in Admin → AI (or set ANTHROPIC_API_KEY).', true]);
 });
 
 test('ai: what each prompt asks the model says the Board and the backstage team, the words a draft the Board reads uses', async (t) => {

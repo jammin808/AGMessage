@@ -386,7 +386,9 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const health = async () => (await fetch(base + '/api/health')).json();
     const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });
     const h = await health();
-    assert.deepEqual(Object.keys(h).slice(-14), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format', 'sleeps', 'power'], 'appended at the end of the detail');
+    assert.deepEqual(Object.keys(h).slice(-15), ['elu', 'rssMb', 'maxSocketsPerAddress', 'tunnelSockets', 'largestHall', 'latest', 'peaks', 'showDay', 'tunnel', 'refused', 'acceptErrors', 'format', 'sleeps', 'power', 'lastStop'], 'appended at the end of the detail');
+    // A new folder: no stop before this start, and no hall told AGMessage restarted.
+    assert.deepEqual(h.lastStop, { state: 'none', saved: false, at: null, build: '', unsaved: [], code: '', said: 0, left: '' });
     assert.deepEqual(h.sleeps, { watched: false, list: [] }, 'no watchdog runs a server started alone: none recorded');
     assert.deepEqual(Object.keys(h.power), ['state', 'live', 'why', 'since', 'what']);
     assert.ok(h.power.live >= 1, 'pages are seated in a hall: it is live');
@@ -589,22 +591,46 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     }
   });
 
-  await t.test('history survives a restart (log replay)', async () => {
+  await t.test('history survives a restart: a stop that saved says so and no hall says AGMessage restarted; after a kill the log is replayed and each hall says it, once', async () => {
     sockets.forEach((s) => s.close());
     await stop(child);
+    // The stop's record, written last: it saved.
+    const rec = JSON.parse(fs.readFileSync(path.join(dataDir, 'last-stop.json'), 'utf8'));
+    assert.deepEqual([Object.keys(rec), typeof rec.at, typeof rec.build, rec.saved], [['at', 'build', 'saved'], 'number', 'string', true]);
     child = await startServer(dataDir, port);
     const s = await connect(base); sockets.push(s);
     const j = await emit(s, 'join', { roomCode: code, name: 'Chair', role: 'board', uid: jb.identity });
     assert.ok(j.ok);
     assert.equal(j.uid, jb.uid, 'same person after restart');
-    // The restart's own line, after every message the hall kept, counts them.
-    const at = j.history.findIndex((m) => m.type === 'system' && /restarted/.test(m.text));
-    assert.ok(at > 0, JSON.stringify(j.history.map((m) => m.text)));
-    assert.equal(j.history[at].text, '— AGMessage restarted · ' + at + ' messages kept —');
+    const restartLines = (history) => history.map((m, i) => [m, i]).filter(([m]) => m.type === 'system' && /restarted/.test(m.text));
+    assert.deepEqual(restartLines(j.history), [], 'a stop that saved: no restart line: ' + JSON.stringify(j.history.map((m) => m.text)));
     assert.ok(j.history.some((m) => m.text === 'Capex is on slide 14'));
     assert.ok(j.history.some((m) => m.text === 'while you were away'));
     assert.ok(!j.history.some((m) => m.text === 'delete me'));
-    assert.ok(j.seq > seqAfterHello);
+    assert.ok(j.seq >= seqAfterHello);
+    // Moved aside at the start, so a kill of this copy is never read as the stop that saved; health says which it was.
+    assert.deepEqual([fs.existsSync(path.join(dataDir, 'last-stop.json')), JSON.parse(fs.readFileSync(path.join(dataDir, 'last-stop.seen.json'), 'utf8'))], [false, rec]);
+    const clean = await (await fetch(base + '/api/health')).json();
+    assert.deepEqual(clean.lastStop, { state: 'saved', saved: true, at: rec.at, build: rec.build, unsaved: [], code: '', said: 0, left: '' });
+    assert.equal(clean.saves.stores.rooms.atStart, 0, 'the stop wrote every hall that changed: the start writes none');
+
+    // A kill: no stop, no record. The log is replayed, and each hall says AGMessage restarted, once, counting what it kept.
+    assert.ok((await emit(s, 'message', { type: 'text', text: 'after a stop that saved' })).ok);
+    s.close();
+    child.kill('SIGKILL');
+    await new Promise((resolve) => { child.once('exit', resolve); });
+    child = await startServer(dataDir, port);
+    const s2 = await connect(base); sockets.push(s2);
+    const k = await emit(s2, 'join', { roomCode: code, name: 'Chair', role: 'board', uid: jb.identity });
+    assert.ok(k.ok);
+    const lines = restartLines(k.history);
+    assert.equal(lines.length, 1, JSON.stringify(k.history.map((m) => m.text)));
+    const at = lines[0][1];
+    assert.equal(lines[0][0].text, '— AGMessage restarted · ' + at + ' messages kept —');
+    assert.equal(k.history[at - 1].text, 'after a stop that saved', 'replayed from the log, before the restart line');
+    const killed = await (await fetch(base + '/api/health')).json();
+    assert.deepEqual(killed.lastStop, { state: 'none', saved: false, at: null, build: '', unsaved: [], code: '', said: killed.rooms, left: '' });
+    assert.ok(killed.saves.stores.rooms.atStart >= 1, 'the hall whose log was replayed is written at the start');
   });
 
   await t.test('a show day\'s peaks outlive a restart: on disk in peaks.json, and health counts on from them', async () => {

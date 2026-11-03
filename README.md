@@ -37,10 +37,13 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   last few seconds (what AGMessage has taken is in the system's file cache at once, and on the disk once the system
   writes it back). A change the disk will not take (a full disk, a log another program holds) is kept in memory, named
   on the admin page's health and put in the hall's next snapshot; until that snapshot lands, a crash of AGMessage can
-  lose it. A watchdog restarts the server after a crash or a hang, and tells a hang from a sleep: a wake from the laptop's
-  sleep is recorded ("asleep from … to …"), never killed or counted as a crash, and while a hall is live (a page open in
-  it, a screen showing a take, its countdown running) the server asks Windows to keep the laptop from its idle sleep
-  (the lid and the power button stay the power plan's). Every open page comes back by itself, without a
+  lose it. A stop saves the audit log and the settings first, then only the halls that changed, and records that it
+  saved; the start after it rewrites nothing, and a hall reads "AGMessage restarted" only after a stop that did not save
+  (a crash, the laptop switched off), as the admin page's This laptop says. A watchdog restarts the server after a crash
+  or a hang, and tells a hang from a sleep: a wake from the laptop's sleep is recorded ("asleep from … to …"), never
+  killed or counted as a crash, and while a hall is live (a page open in it, a screen showing a take, its countdown
+  running) the server asks Windows to keep the laptop from its idle sleep (the lid and the power button stay the power
+  plan's). Every open page comes back by itself, without a
   reload: after a drop (at once when a phone is woken or the Wi-Fi is back), after a restart (announcing nobody), and
   after a refusal at a busy moment, at the pace the server gives ("Busy — trying again in 3 s."). The admin page's
   health reads the server's true delay and how busy it is, and keeps the peaks of each show day for 14 days, through a

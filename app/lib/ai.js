@@ -13,15 +13,21 @@
  * same rule as Patterns' Eye: the facts are evidence, unknown stays unknown, propose — a person sends. Everything except
  * these drafts works offline; with no key or no internet the app says so and carries on.
  */
-const Anthropic = require('@anthropic-ai/sdk');
-
 const MODEL = 'claude-opus-5-5';
 
 let client = null;
 let clientKey = '';
+/**
+ * The client for this key, or null without one. The SDK is required here, at the first draft asked with a key, never at a
+ * start: a server that drafts nothing (no key, or drafts not asked for) never loads it, and starts without its cost.
+ */
 function getClient(apiKey) {
   if (!apiKey) return null;
-  if (!client || clientKey !== apiKey) { client = new Anthropic({ apiKey }); clientKey = apiKey; }
+  if (!client || clientKey !== apiKey) {
+    const Anthropic = require('@anthropic-ai/sdk');
+    client = new Anthropic({ apiKey });
+    clientKey = apiKey;
+  }
   return client;
 }
 

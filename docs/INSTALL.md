@@ -37,8 +37,9 @@ Windows Vista", https://learn.microsoft.com/en-us/windows/win32/services/interac
   records nothing.
 - **"This laptop"** on the admin page, each fact with where it was read: the build and how it runs, the LAN addresses,
   HTTPS and why it is off, how many sealed values open (never which), the screens confirmed, the Stagewatch links, the
-  internet link and its end, before this start (the watchdog's line for the run it restarted, or its record of a refused start or a
-  give-up), and what the start goes without. A read of them that fails (an adapter list the system refuses) is one row
+  internet link and its end, the last stop (saved, or not and why: A stop, and the start after it, below), before this
+  start (the watchdog's line for the run it restarted, or its record of a refused start or a give-up), and what the start
+  goes without. A read of them that fails (an adapter list the system refuses) is one row
   that says so; the rest of the admin page's answer is drawn. Windows' facts are read by one `powershell.exe`,
   `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` by that absolute path, run from System32 with a fixed
   script (`lib/laptop.js` `SCRIPT`: one line, nothing from a page in it); once the server serves and again at Refresh,
@@ -158,6 +159,32 @@ watchdog and the server read it, and these rules, before either writes anything 
 - **Codes the task reads** (from the watchdog, which ends only with these): 0 stopped, 3 cannot start as configured or
   gave up; anything else is a crash of the watchdog itself. What the task does with each (stays stopped on 0 and 3) is
   the installer's units', with the log that keeps these words.
+
+## A stop, and the start after it
+
+- **A stop saves, then says so.** A stop (the watchdog's, Ctrl+C, the console closed; the installed node's own stop at
+  loopback once the plan's U8 brings it) saves the audit log's waiting entries and the head that covers them first, then
+  every store's write lane, then each hall that changed since its last snapshot, and no other (`server.js` `saveAll`,
+  `lib/store.js` `compactDirty`), then the day's peaks once more when those snapshots raised its longest. A hall that did
+  not change is never rewritten, at a stop or a start: the plan's bench (not the show laptop) measured the rewrite of
+  every hall at 1.2 s at 200,000 messages and 5.8 s at 1,000,000, and at 1,000,000 the watchdog's 4 s wait ended every
+  stop inside it, before the lanes were saved. Then it writes `data\last-stop.json` last, `{at, build, saved}`, `saved`
+  true only when every one of them was written; when one was not, the record says which (`unsaved`: a store's name, "the
+  audit log", a count of halls, never a hall's code), and the console says "Not saved: …".
+- **The start after it.** Once it holds the folder, the start reads the record and moves it aside to
+  `last-stop.seen.json`, so a crash or a kill of this start is never read as the stop before it. Where it can be neither
+  moved nor removed (another program holds it), it is said on the console, in health's `lastStop.left` and on Last stop,
+  and kept as the one seen too, so the next start reads it as taken. A record that says it saved is then read against
+  the folder: a stop that saved leaves every hall's log empty and no snapshot newer than itself, so a log with lines, or a
+  newer snapshot, means a copy ran on the folder after that stop (0.5.1 rolled back to, which keeps no record and writes
+  every hall at its start, then a crash or a kill), and the record is stale. The start writes only the halls that hold
+  what their snapshot does not (a log a crash left, a snapshot it found torn), and writes "— AGMessage restarted · N
+  messages kept —" into each hall only after a stop that did not save: no record (a crash, the watchdog's kill of a
+  hang, Windows ending the task at a shutdown or a restart, which is the installed node's unsaved end, lab 5; a power
+  cut; a folder 0.5 last ran, which kept none), one that could not be read, one that says it did not save, or one that
+  is stale. Health's `lastStop` and "This laptop"'s Last stop say which it was, and how many halls were told. A temporary
+  file of a save a stop cut short (`<file>.<pid>.tmp`, in `data\` and `data\rooms\`) whose process has ended is removed
+  then too; a copy refused at the lock reads and removes nothing.
 
 ## Sleep, the power request and the lid
 
@@ -370,7 +397,7 @@ a reading: the installer's life cycle in CI, when it lands, is a gate, as every 
 | R1 | `gap.js` (the stop at loopback with the proof, not SIGUSR2) at an empty hall and at 20 × 10,000 | the default page back ≤ 1.5 s at the largest real hall | handoff is revisited (U.10) | not run: needs U8 (#36), the stop at loopback with the proof | not measured |
 | R2 | lay about 5,120 files and 188 MB over the previous payload, Defender on | ≤ 6 s together with R9 (a screen's "lost") | version folders (U.10) | taken: the zip laid on an empty folder, then 3 rounds of the newest release's payload laid whole and this build laid over it (over its own when that release's zip could not be had, said so), the slowest round judged; its mark waits for R9 | 2026-11-02, build 0.6.0-dev.74+583f341: ✕ missed: 5179 files, 181 MB laid over v0.5.1's payload, the slowest of 3 rounds 18.5 s: over 6 s alone, before R9's backup |
 | R3 | retired: it was B-service's (shawl's stop under `NT SERVICE\AGMessage`), which is not the shape (U.5) | — | — | — | — |
-| R3′ | the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog's give-up and a configuration refusal end the task with 0, and it stays stopped | 10 of 10 | the release notes name the failing case; a stop that does not save is said on "This laptop" | not run: needs U4 (#34), U8 (#36) and U12 (#72) | not measured |
+| R3′ | the task: a stop at loopback with the proof saves and `last-stop.json` says so; the watchdog's give-up and a configuration refusal end the task with 0, and it stays stopped | 10 of 10 | the release notes name the failing case; a stop that does not save is said on "This laptop" | not run: needs U8 (#36) and U12 (#72) | not measured |
 | R4 | under the task: `LOCALAPPDATA`, `os.homedir()`, UDP 9928 broadcast heard, a quick tunnel's URL returned with nothing written in the account's profile, a rule by program, protocol and port matching `node.exe` under the task, `whoami /priv` from the server's process, `schtasks /showsid` | `SeImpersonatePrivilege` absent, and the server serves with `SeChangeNotifyPrivilege` alone | the privilege list U12 sets is widened by the one privilege the reading names, with its reason | taken under the stand-in server task (U12, #72, puts its own task in its place): the token's privileges and groups (read by the task's action, which the server inherits), the task's SID, `LOCALAPPDATA` and the home folder, health answering with this bundle's build, UDP 9928 heard from this machine, a quick tunnel and the profile before and after, a rule by program, protocol and port made and read back; a client on another machine is the show laptop's | 2026-11-02, build 0.6.0-dev.74+583f341: ✓ met: the token holds SeChangeNotifyPrivilege alone, and the server served under it in 792 ms (0.6.0-dev.74+583f341). Beside it: the task's SID in the token; UDP 9928 heard yes (from this machine); a quick tunnel's address returned; files written or changed in the account's profile 0; a rule by program, protocol and port made and read back (TCP, 3124, LocalSubnet; no client on another machine to show it matching) |
 | R5 | `Get-AuthenticodeSignature` on `node.exe`, `cloudflared.exe` and the installer | the first two Valid; the installer recorded | `README.txt` names the file Windows does not trust | taken for `node.exe` and `cloudflared.exe`; the installer once U13 (#73) builds it | 2026-11-02, build 0.6.0-dev.74+583f341: ✓ met: node.exe Valid (CN=OpenJS Foundation, O=OpenJS Foundation, L=San Francisco, S=California, C=US), cloudflared.exe Valid (CN="Cloudflare, Inc.", O="Cloudflare, Inc.", L=San Francisco, S=California, C=US, SERIALNUMBER=4710875, OID.2.5.4.15=Private Organization, OID.1.3.6.1.4.1.311.60.2.1.2=Delaware, OID.1.3.6.1.4.1.311.60.2.1.3=US); the installer not built yet (U13, #73) |
 | R6 | over-the-shoulder elevation: U.5.1's two readings of the account that started Setup; the user's own export (U14) run through `ExecAsOriginalUser` into the laptop's admin's inbox; an elevated read of another account's `%LOCALAPPDATA%\AGMessage` | both readings name the standard account | the admin page asks the person to choose, as U.5.1 says | not run: needs U13 (#73) and U14 (#75) | not measured |

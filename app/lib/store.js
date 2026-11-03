@@ -2,9 +2,12 @@
 /**
  * Room store: every change is an operation with a per-room sequence number, appended to an
  * append-only log (data/rooms/<CODE>.log, one JSON line per op) — O(1) per change instead of
- * rewriting the whole room — and compacted into the snapshot (<CODE>.json) every N ops, at boot
- * and at shutdown. A torn last line (power cut mid-write, or a disk that took only part of it) is skipped, never
- * fatal, and the next append starts on a line of its own, so the op after it is never lost with it.
+ * rewriting the whole room — and compacted into the snapshot (<CODE>.json) every N ops, and at a start and a stop only
+ * when the room is dirty: it holds what its snapshot on disk does not (`dirty`). Every line of a log counts toward the
+ * N its room is compacted at, the lines a start replays (or finds already in the snapshot) included, so a log stays
+ * bounded however many restarts come between two snapshots. A torn last line (power cut mid-write, or a disk that took
+ * only part of it) is skipped, never fatal, and the next append starts on a line of its own, so the op after it is
+ * never lost with it.
  *
  * Recent ops stay in memory (a ring per room), so a client that drops off for a moment resumes
  * with just what it missed (`opsSince(seq)`) instead of reloading the whole history — the game
@@ -38,6 +41,23 @@ const COMPACT_EVERY = 500;  // ops between snapshots
 const CODE_RE = /^[A-Z0-9]{4,12}$/;
 const GONE_KEEP = 500;      // tombstones kept per room, the newest
 
+/**
+ * Every field a snapshot holds, and the change that makes it differ from the snapshot on disk, which makes its room dirty:
+ * an op, committed now or replayed from the log at a start, is a line of the log and counts toward `logCount`; a change
+ * made without one calls `markDirty`. A start and a stop write only the dirty rooms, so a field the snapshot writes is a
+ * row here first, with the change that marks it (test/units.test.js holds the snapshot's fields to these rows).
+ */
+const SNAPSHOT_FIELDS = Object.freeze({
+  code: 'made with the room, whose first snapshot create() writes at once; never changed',
+  name: 'a meta op',
+  createdAt: 'made with the room, whose first snapshot create() writes at once; never changed',
+  seq: 'every op',
+  settings: 'a meta op',
+  messages: 'an add, upd, del or reset op; a message moved to today\'s words as it loads (the load\'s onMigrate) calls markDirty',
+  savedAt: 'the snapshot itself: each one writes it',
+  gone: 'a del or reset op',
+});
+
 /** A message's key in `byCid`: who sent it and its client id, or '' when it has none. */
 const cidKey = (m) => (m && typeof m.cid === 'string' && m.cid && m.from && typeof m.from.uid === 'string' && m.from.uid ? m.from.uid + ':' + m.cid : '');
 /** A tombstone as a snapshot keeps it, or null for a shape no snapshot of ours writes. */
@@ -58,6 +78,10 @@ class RoomStore {
     if (make) fs.mkdirSync(dir, { recursive: true });
     this.rooms = new Map();
     this.lastError = null;   // the last append or snapshot that failed, until every room is on disk again
+    this.snapshots = 0;      // snapshots written this run (health)
+    // What the last load found on disk, which a stop that saved never leaves: the rooms whose log held lines, and the
+    // newest snapshot's `savedAt` (lib/laststop.js `judge` reads a stop's record against them).
+    this.found = { lines: 0, newest: 0 };
     // Told of each snapshot written: (ms it took — the stall a commit waits — the room's message count). Health's peaks.
     this.onCompact = null;
   }
@@ -67,12 +91,14 @@ class RoomStore {
   file(code, ext) { return path.join(this.dir, code + ext); }
 
   /**
-   * Load every room: snapshot + replay of its log. Returns the number loaded. With `compact: false` nothing is written
-   * (a server that does not yet own its port must not touch the files another copy may be appending to); the caller
-   * compacts once it does.
+   * Load every room: snapshot + replay of its log. Returns the number loaded. Each dirty room is then compacted (a log
+   * replayed, a snapshot that fell back to its .bak, a room `onMigrate` changed and marked); a clean one is not written.
+   * With `compact: false` nothing is written (a server that does not yet own its port must not touch the files another
+   * copy may be appending to); the caller compacts the dirty rooms once it does (`compactDirty`).
    */
   loadAll(onMigrate, { compact = true } = {}) {
     let n = 0;
+    this.found = { lines: 0, newest: 0 };
     // A room whose snapshot was lost mid-rename still has its .bak: both name the room. A folder not made yet holds none;
     // one that cannot be read throws, with its code.
     let names = [];
@@ -96,9 +122,11 @@ class RoomStore {
         // A snapshot written before tombstones were kept has no `gone`: the room loads with none.
         for (const t of Array.isArray(data.gone) ? data.gone : []) { const tomb = readTomb(t); if (tomb) this._bury(room, tomb); }
         this._replay(room);
+        if (room.logCount) this.found.lines++;
+        if (Number.isFinite(data.savedAt) && data.savedAt > this.found.newest) this.found.newest = data.savedAt;
         if (onMigrate) onMigrate(room);
         this.rooms.set(code, room);
-        if (compact) this.compact(code);   // fold the replayed log into a fresh snapshot
+        if (compact && this.dirty(room)) this.compact(code);   // fold the replayed log into a fresh snapshot
         n++;
       } catch (e) {
         console.warn('  Failed to load room', code, e.message);
@@ -110,7 +138,7 @@ class RoomStore {
   _blank(code, name, createdAt) {
     return {
       code, name, createdAt, messages: [], byId: new Map(), byCid: new Map(), gone: new Map(), goneKeys: new Map(), seq: 0, ring: [],
-      users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false, ragged: false, snapKb: null, snapWhole: false,
+      users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false, ragged: false, snapKb: null, snapWhole: false, marked: false,
     };
   }
 
@@ -121,6 +149,9 @@ class RoomStore {
     room.ragged = text.length > 0 && !text.endsWith('\n');   // a torn last line: the next append ends it first
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
+      // Every line is a line of the log, replayed or not (one the snapshot holds already, a torn one): each counts toward
+      // the compaction that empties it, and makes the room dirty.
+      room.logCount++;
       let op;
       try { op = JSON.parse(line); } catch { continue; }   // torn write: skip
       if (!op || typeof op.s !== 'number' || op.s <= room.seq) continue;
@@ -261,17 +292,43 @@ class RoomStore {
     return room.ring.filter((op) => op.s > since);
   }
 
+  /** What a snapshot of the room holds, its fields in SNAPSHOT_FIELDS' order: the object compact() writes. */
+  snapshotOf(room, savedAt = Date.now()) {
+    return { code: room.code, name: room.name || '', createdAt: room.createdAt, seq: room.seq, settings: room.settings, messages: room.messages, savedAt, gone: Array.from(room.gone.values()) };
+  }
+
   /**
-   * Write the snapshot atomically and truncate the log. The snapshot's size is kept as `room.snapKb` (null until the
-   * first one this run), so health reads a hall's size with no file call of its own. The snapshot it replaces is kept as
-   * .bak unread when the store knows it whole (`snapWhole`), and read first otherwise; once the new one is in place the
-   * store knows it whole. A snapshot that failed leaves `snapWhole` as it was: the file on disk is still the one before.
+   * Whether the room holds what its snapshot on disk does not: a line in its log (an op committed since its snapshot, or
+   * one a start found there), an op its log refused (`unsaved`), a change made without an op (`markDirty`), or no
+   * snapshot on disk it knows whole (one never written, or one a start found torn and fell back to the .bak for).
+   */
+  dirty(room) { return room.logCount > 0 || room.unsaved || room.marked || !room.snapWhole; }
+
+  /** A change to the room made without an op (SNAPSHOT_FIELDS): its next compaction at a start or a stop writes it. */
+  markDirty(room) { room.marked = true; }
+
+  /** Codes of the dirty rooms. */
+  dirtyCodes() { return Array.from(this.rooms.values()).filter((r) => this.dirty(r)).map((r) => r.code); }
+
+  /** Write the snapshot of each dirty room, and of no other (a start, a stop). Returns how many were written. */
+  compactDirty() {
+    let n = 0;
+    for (const room of this.rooms.values()) if (this.dirty(room) && this.compact(room.code)) n++;
+    return n;
+  }
+
+  /**
+   * Write the snapshot atomically and truncate the log; true when it was written. The snapshot's size is kept as
+   * `room.snapKb` (null until the first one this run), so health reads a hall's size with no file call of its own. The
+   * snapshot it replaces is kept as .bak unread when the store knows it whole (`snapWhole`), and read first otherwise;
+   * once the new one is in place the store knows it whole, and the room is clean. A snapshot that failed leaves
+   * `snapWhole` as it was (the file on disk is still the one before), and the room dirty.
    */
   compact(code) {
     const room = this.rooms.get(code);
-    if (!room) return;
+    if (!room) return false;
     const t0 = performance.now();
-    const out = { code: room.code, name: room.name || '', createdAt: room.createdAt, seq: room.seq, settings: room.settings, messages: room.messages, savedAt: Date.now(), gone: Array.from(room.gone.values()) };
+    const out = this.snapshotOf(room);
     try {
       const bytes = writeFileAtomic(this.file(code, '.json'), JSON.stringify(out), { keepBak: true, knownWhole: room.snapWhole });
       room.snapWhole = true;
@@ -281,19 +338,20 @@ class RoomStore {
       room.logCount = 0;
       room.unsaved = false;
       room.ragged = false;
+      room.marked = false;
+      this.snapshots++;
       if (!this.unsaved().length) this.lastError = null;
     } catch (e) {
       this.lastError = e.message;   // the log still holds what the snapshot did not
       console.error('  snapshot failed for', code, e.message);
-      return;
+      return false;
     }
     if (this.onCompact) {
       // The snapshot is written whatever its timing's reader does: a throw there never reaches the commit that asked for it.
       try { this.onCompact(performance.now() - t0, room.messages.length); } catch (e) { console.error('  a snapshot\'s time could not be noted for', code, e.message); }
     }
+    return true;
   }
-
-  compactAll() { for (const code of this.rooms.keys()) this.compact(code); }
 
   _closeLog(room) {
     if (room.logFd !== null) { try { fs.closeSync(room.logFd); } catch { /* already closed: nothing to release */ } room.logFd = null; }
@@ -311,4 +369,4 @@ class RoomStore {
   }
 }
 
-module.exports = { RoomStore, GONE_KEEP };
+module.exports = { RoomStore, GONE_KEEP, COMPACT_EVERY, SNAPSHOT_FIELDS };

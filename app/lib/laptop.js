@@ -16,6 +16,8 @@
  *                  among them the sleeps the watchdog recorded and the power request a live show holds (lib/power.js),
  *                  with what makes the halls live (liveWords, hallsWords: the power request's words too)
  *   formatRow      the data folder's row: its format, and what this start found of it (lib/dataformat.js)
+ *   stopRow        the last stop's row: saved, or not and why, as the record it wrote last says and the folder bears
+ *                  out (lib/laststop.js)
  *
  * The laptop's admin and the rights given are read from the install record (HKLM\SOFTWARE\AGMessage: `Admin`,
  * `AdminName`, and under `Grants` one value per account's SID, its rights as a comma-separated list), the names each
@@ -339,6 +341,30 @@ function powerRow(pw) {
 }
 
 /**
+ * The last stop's row (`s`: health's `lastStop`, {state, saved, at, build, unsaved, code, said, left}, with `fresh`, a
+ * data folder this start began, and `file`, the record's path): saved, with when and by which build; or not, with why,
+ * and the halls this start therefore said AGMessage restarted in; none for a folder this start began; and, whichever it
+ * was, a record this start could not move aside, with why (pure).
+ */
+function stopRow(s) {
+  const FROM = 'the record the stop before this start writes last (' + s.file + '), read at this start';
+  const when = (s.at ? ' at ' + new Date(s.at).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : '') + (s.build ? ' by ' + s.build : '');
+  const said = s.said ? ' · so ' + (s.said === 1 ? '1 hall says' : s.said + ' halls say') + ' AGMessage restarted' : '';
+  // Kept as the one seen, the next start reads it as taken; where that could not be written either, as stale once a hall
+  // has changed (lib/laststop.js `take`, `judge`).
+  const left = !s.left ? '' : ' · its record could not be moved aside (' + s.left + '): the next start reads it ' + (s.left.includes('seen') ? 'again, as stale once a hall has changed' : 'as taken');
+  const words = (() => {
+    if (s.saved) return ['saved' + when + ': the audit log, every store and each hall that changed, so no hall says AGMessage restarted', 'ok'];
+    if (s.state === 'none' && s.fresh) return ['none: this start began the data folder', ''];
+    if (s.state === 'unsaved') return ['not saved' + when + ': ' + (s.unsaved.length ? s.unsaved.join(', ') : 'something') + ' could not be written' + said, 'warn'];
+    if (s.state === 'unread') return ['not known to have saved: its record could not be read (' + s.code + ')' + said, 'warn'];
+    if (s.state === 'stale') return ['not known to have saved: the record of a stop' + when + ' is not the stop before this start (' + s.code + '), so a copy ran on the folder after it' + said, 'warn'];
+    return ['not saved: AGMessage ended without its stop (a crash, the watchdog\'s kill of a hang, Windows shutting down or restarting, a power cut), or the build before it kept no record' + said, 'warn'];
+  })();
+  return row('stop', 'Last stop', words[0] + left, left ? 'warn' : words[1], FROM);
+}
+
+/**
  * The internet link's row (`t`: {running, url, error, until, again, notKept}, its end and the start that turned it on
  * again in words by the laptop's clock, '' when none): on until its end, and when a start turned it on again, that its
  * address is new; off with an end still kept (cloudflared ended, or a start could not turn it on again), that a start
@@ -361,7 +387,7 @@ function tunnelRow(t) {
  * The panel's rows, from what this server knows (`k`) and what Windows said (`w`, windowsFacts's), in the panel's order
  * (pure). `k`: {build, runs, addresses, port, https: {on, fingerprint, validTo, off, renewal, file}, sealed: {total, open,
  * keyWords}, screens: {total, shown, offline}, stagewatch: {total, connected}, tunnel: tunnelRow's, sleeps:
- * sleepsRow's, power: powerRow's, before, without: [words], node, format: formatRow's, or none}.
+ * sleepsRow's, power: powerRow's, stop: stopRow's, before, without: [words], node, format: formatRow's, or none}.
  */
 function facts(k, w) {
   const rows = [];
@@ -387,6 +413,7 @@ function facts(k, w) {
   rows.push(tunnelRow(k.tunnel));
   if (k.sleeps) rows.push(sleepsRow(k.sleeps));
   if (k.power) rows.push(powerRow(k.power));
+  if (k.stop) rows.push(stopRow(k.stop));
   if (k.before) rows.push(row('before', 'Before this start', k.before, 'warn', 'the watchdog'));
   if (k.without.length) rows.push(row('without', 'Goes without', k.without.join(' · '), 'warn', 'this start\'s reads of its keys and settings'));
 
@@ -432,4 +459,4 @@ function facts(k, w) {
   return Object.freeze(rows);
 }
 
-module.exports = { powershellPlan, windowsPlan, hallsWords, liveWords, readWindows, windowsFacts, facts, formatRow, reach, SCRIPT, WINDOWS_MS, PASSED, RULES_MAX, LISTED_MAX };
+module.exports = { powershellPlan, windowsPlan, hallsWords, liveWords, readWindows, windowsFacts, facts, formatRow, stopRow, reach, SCRIPT, WINDOWS_MS, PASSED, RULES_MAX, LISTED_MAX };
