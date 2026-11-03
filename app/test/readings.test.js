@@ -523,12 +523,16 @@ test('record: a run\'s verdicts written into docs/INSTALL.md\'s Measured column,
     const j = R.judge(raw({ R2: { files: 5122, bytes: 197_000_000, rounds: [3000], over: 'v0.5.1' }, R4: R4_SERVED, R10: { rounds: [{ extractMs: 5100, runMs: 300, totalMs: 5400, code: 0 }] }, R13: { status: 0, failure: 'a | b', assets: [] } }));
     const r = R.recordInstall(doc, j);
     assert.deepEqual(r.changed, ['R2', 'R4', 'R10', 'R13'], 'the readings this run took');
-    const rows = Object.fromEntries(r.text.split('\n').filter((l) => /^\| (R\d|Lab \d)/.test(l)).map((l) => { const c = l.split(/(?<!\\)\|/).slice(1, -1).map((x) => x.trim()); return [c[0], c[c.length - 1]]; }));
+    const measured = (text) => Object.fromEntries(text.split('\n').filter((l) => /^\| (R\d|Lab \d)/.test(l)).map((l) => { const c = l.split(/(?<!\\)\|/).slice(1, -1).map((x) => x.trim()); return [c[0], c[c.length - 1]]; }));
+    const rows = measured(r.text);
+    const was = measured(doc);
     assert.match(rows.R10, /^2026-11-02, build 0\.6\.0-dev\.40\+abc1234: ✕ missed: the slowest of 1 round 5\.40 s/);
     assert.match(rows.R4, /^2026-11-02, build 0\.6\.0-dev\.40\+abc1234: ✓ met: the token holds SeChangeNotifyPrivilege alone/);
     assert.match(rows.R2, /^2026-11-02, build 0\.6\.0-dev\.40\+abc1234: △ open: /);
     assert.match(rows.R13, /\(a \\\| b\)$/, 'a pipe in the words is escaped, so the row keeps its cells');
-    assert.deepEqual([rows.R1, rows.R3, rows['Lab 1']], ['not measured', '—', 'not run'], 'what the run did not take, R3 and the lab lines are kept');
+    // What the run did not take keeps its cell as the paper held it (a reading an earlier run recorded keeps that record).
+    assert.deepEqual([rows.R1, rows.R3, rows['Lab 1']], [was.R1, was.R3, was['Lab 1']], 'what the run did not take, R3 and the lab lines are kept');
+    assert.deepEqual([was.R3, was['Lab 1']], ['—', 'not run'], 'R3 retired, the lab lines not run');
     assert.deepEqual(paperProblems(r.text), [], 'the paper still holds to the register');
     assert.equal(R.recordInstall(r.text, j).text, r.text, 'recording the same run again changes nothing');
     assert.equal(R.recordInstall(doc.replace(/\n/g, '\r\n'), j).text, r.text.replace(/\n/g, '\r\n'), 'a paper with CRLF keeps it');
