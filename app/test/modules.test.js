@@ -12,7 +12,8 @@ const { ROOT, filesUnder, handlerFiles, pageScripts } = require('./helpers');
 const ops = require('../lib/ops');
 const gateLib = require('../lib/gate');
 
-const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
+// A source as LF: a Windows checkout writes CR LF, and the fences match lines and closes by \n.
+const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
 const sourcesOf = (files) => new Map(files.map((f) => [f, read(f)]));
 /** The files the shipped server is made of: its two processes' entry points, lib/ and the audit log's verifier. */
 const serverCode = () => ['server.js', 'supervise.js', ...filesUnder('lib', /\.[cm]?js$/), ...filesUnder('verify', /\.[cm]?js$/)];
