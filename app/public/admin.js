@@ -105,7 +105,7 @@ function showDashboard() {
   dashboard.hidden = false;
   for (const id of ['newSessionBtn', 'logoutBtn', 'adminStatus']) document.getElementById(id).hidden = false;
   // Back by itself (reconnect.js): a refusal is tried again at the server's pace, its wait said in the strip.
-  socket = io({ ...AGM.reconnect.OPTIONS });
+  socket = io({ auth: AGM.reconnect.auth(), ...AGM.reconnect.OPTIONS });
   AGM.reconnect.attach(socket, { strip: document.getElementById('connStrip') });
   // The admin's acts go through the outbox (outbox.js) as acts on something: refused at once while the page is not
   // connected, "No answer" when the server says nothing in 5 s, never sent late.

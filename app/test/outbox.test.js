@@ -371,12 +371,15 @@ test('outbox now: refused at once while not joined, "No answer" after 5 s, sent 
   t.ob.now('pin', { messageId: 'm1', pinned: true }, say);
   assert.deepEqual(answers.pop(), { ok: false, error: 'Not connected — AGMessage is reconnecting.', offline: true });
   assert.equal(t.s.sent.length, 0, 'never sent late');
+  assert.equal(t.ob.acting(), 0, 'refused at once: no act out');
   t.join();
   t.ob.now('pin', { messageId: 'm1', pinned: true }, say);
   assert.equal(t.s.sent[0].verb, 'pin');
   assert.match(t.s.sent[0].args[0].cid, CID);
+  assert.equal(t.ob.acting(), 1, 'out, waiting on its answer (a page waits for it before it reloads onto a new build)');
   t.c.advance(5000);
   assert.deepEqual(answers.pop(), { ok: false, error: 'No answer — check the connection.' });
+  assert.equal(t.ob.acting(), 0, 'its "No answer" said: no longer waited on');
   // The server's own answer after that is given too, once, marked late: what it did is said, never left at "No answer".
   t.s.sent[0].ack({ ok: true });
   assert.deepEqual(answers.pop(), { ok: true, late: true });
@@ -393,7 +396,9 @@ test('outbox now: refused at once while not joined, "No answer" after 5 s, sent 
   // An answer in time is given once, and the 5 s pass with nothing more.
   t.s.sent.length = 0;
   t.ob.now('pin', { messageId: 'm1', pinned: false }, say);
+  assert.equal(t.ob.acting(), 1);
   t.s.sent[0].ack({ ok: true });
+  assert.equal(t.ob.acting(), 0, 'answered');
   t.c.advance(6000);
   assert.deepEqual(answers.splice(0), [{ ok: true }]);
 
@@ -402,6 +407,7 @@ test('outbox now: refused at once while not joined, "No answer" after 5 s, sent 
     t.ob.now(verb, args, say);
     t.s.drop();
     if (!again) assert.deepEqual(answers.pop(), { ok: false, error: 'The connection dropped before AGMessage answered — check it was done before trying again.' }, verb);
+    assert.equal(t.ob.acting(), again ? 1 : 0, verb + ': ' + (again ? 'still waited on, to be sent again' : 'said dropped: no longer waited on'));
     t.join();
     assert.equal(t.s.sent.length, again ? 2 : 1, verb + ': ' + (again ? 'sent again' : 'never sent twice'));
     if (again) {
@@ -409,6 +415,7 @@ test('outbox now: refused at once while not joined, "No answer" after 5 s, sent 
       t.s.sent[1].ack({ ok: true, already: true });
       assert.deepEqual(answers.pop(), { ok: true, already: true });
     }
+    assert.equal(t.ob.acting(), 0, verb);
   }
   // A verb that takes no arguments is sent none; a value that is not an object goes as it is.
   t.s.sent.length = 0;

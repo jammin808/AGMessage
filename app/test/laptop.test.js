@@ -334,15 +334,15 @@ test('the admin page\'s answer: the LAN addresses and the port, as the banner sa
   // Off Windows nothing is run, so the read is done at once; on Windows its powershell.exe may still be reading.
   if (process.platform !== 'win32') assert.deepEqual([l.reading, typeof l.at], [false, 'number']);
   // The rights given are a row only where there is an install record (a Windows runner's read may find none).
-  assert.deepEqual(l.facts.map((r) => r.id).filter((id) => id !== 'grants'), ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'asleep', 'awake', 'stop', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin']);
+  assert.deepEqual(l.facts.map((r) => r.id).filter((id) => id !== 'grants'), ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'pages', 'stagewatch', 'tunnel', 'asleep', 'awake', 'stop', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin']);
   if (process.platform !== 'win32') assert.equal(l.facts[l.facts.length - 1].id, 'grants');
   assert.ok(l.facts.every((r) => typeof r.label === 'string' && r.label && typeof r.words === 'string' && r.words && typeof r.from === 'string' && r.from), 'each row says where it was read');
-  assert.deepEqual(rowsOf(l, ['format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel']), {
+  assert.deepEqual(rowsOf(l, ['format', 'addresses', 'https', 'sealed', 'screens', 'pages', 'stagewatch', 'tunnel']), {
     format: ['format 2 · begun by this build', ''],
     addresses: [`http://192.0.2.10:${srv.port} · http://198.51.100.7:${srv.port}`, ''],
     https: ['off: AGM_TLS=0 turned it off for this run', 'off'],
     sealed: ['1 of 1 open', 'ok'],   // the context token, made for the answer's own contextToken
-    screens: ['none in any hall', ''], stagewatch: ['not linked', 'off'], tunnel: ['off', 'off'],
+    screens: ['none in any hall', ''], pages: ['every open page and screen is on this build', 'ok'], stagewatch: ['not linked', 'off'], tunnel: ['off', 'off'],
   });
   // No watchdog runs a server started alone, and no hall is live: neither a sleep recorded nor a power request asked.
   assert.deepEqual(rowsOf(l, ['asleep', 'awake']), {
@@ -739,6 +739,44 @@ test('what AGMessage knows, row by row: each with its mark, its words and where 
   assert.equal(laptop.facts({ ...all, tunnel: AGAIN }, w).find((x) => x.id === 'tunnel').from, 'cloudflared, turned on from this page, and again by a start before its end (kept in the settings)');
   const grantsNone = laptop.windowsFacts({ text: JSON.stringify({ ...ANSWER, lidAc: 9, record: { admin: '', adminName: '', grants: [] } }), why: '' });
   assert.deepEqual(r(laptop.facts(k, grantsNone).slice(-4)), { lid: ['action 9', 'warn'], task: ['Running · last result 0x0 at 2026-11-02 13:02 UTC', 'ok'], admin: ['not named in the install record', ''], grants: ['none given', ''] });
+});
+
+test('the pages row: every page on this build, or each on another by the build it named: 0.5 screens to reload by hand, 0.5 pages told at a time of day and then said told, and each other build with when each kind reloads, LISTED_MAX builds at most', () => {
+  const p = (o) => ({ kind: 'hall', build: '0.6.0+40.abc1234', newer: -1, where: '', hall: 'Hall 1', who: 'Ana', ...o });
+  const said = (pages, oldAt) => { const x = laptop.pagesRow(pages, oldAt); return [x.id, x.label, x.words, x.mark]; };
+  assert.deepEqual(said([]), ['pages', 'Pages', 'every open page and screen is on this build', 'ok']);
+  assert.equal(laptop.pagesRow([]).from, 'the build each open page and screen named as it connected (a 0.5 page or screen names none)');
+  // 0.5's: screens by name, to reload by hand; its pages by kind, told to reload once no 0.5 file can still be fresh in
+  // a browser (the time of day it comes), then said told.
+  const old = [p({ kind: 'screen', build: null, newer: null, where: 'Foyer', who: '' }), p({ kind: 'screen', build: null, newer: null, where: 'Lectern', hall: '', who: '' }), p({ build: null, newer: null }), p({ kind: 'halls', build: null, newer: null, who: 'Sam' })];
+  assert.deepEqual(said(old, '14:05'),
+    ['pages', 'Pages', '4 on another build · 0.5 screens: Foyer in Hall 1, Lectern: reload each once by hand, since a 0.5 screen does not reload by itself · 0.5 pages: 1 hall page (Hall 1: Ana), 1 halls board (Sam): each is told to reload at 14:05, once no 0.5 script can still be in its browser\'s cache', 'warn']);
+  assert.equal(said(old, '')[2], '4 on another build · 0.5 screens: Foyer in Hall 1, Lectern: reload each once by hand, since a 0.5 screen does not reload by itself · 0.5 pages: 1 hall page (Hall 1: Ana), 1 halls board (Sam): each was told to reload; reload by hand one that stays listed');
+  assert.equal(said(old)[2], said(old, '')[2], 'no time given: the time has come');
+  // Another build's: older or newer by MAJOR.MINOR.BUILD, each kind at its own moment; one that is not a build, said so.
+  assert.deepEqual(said([p({}), p({ who: 'Ben' }), p({ kind: 'screen', where: 'Foyer', who: '' }), p({ kind: 'admin', who: 'the laptop\'s token' }), p({ kind: 'halls', build: '0.6.1+50.abc1234', newer: 1, who: 'Sam' }), p({ kind: 'page', build: '', newer: null, who: '' })])[2],
+    '6 on another build · on 0.6.0+40.abc1234 (an older build): 1 screen (Foyer in Hall 1) reloads at its next take, 2 hall pages (Hall 1: Ana, Hall 1: Ben) each reloads at a quiet moment, 1 admin page (the laptop\'s token) reloads once its admin agrees · on 0.6.1+50.abc1234 (a newer build): 1 halls board (Sam) reloads at a quiet moment · on a build it did not name: 1 page not yet in a hall');
+  // A name that comes more than once is said once, with how many; past LISTED_MAX the rest are counted.
+  const crowd = Array.from({ length: laptop.LISTED_MAX + 3 }, (_, i) => p({ kind: 'screen', build: null, newer: null, where: 'S' + i, hall: '' }));
+  assert.ok(said(crowd)[2].includes('S' + (laptop.LISTED_MAX - 1) + ' and 3 more: reload each'), said(crowd)[2]);
+  assert.ok(said([p({ build: null }), p({ build: null })])[2].includes('2 hall pages (Hall 1: Ana ×2)'));
+  // A build is the page's own word: past LISTED_MAX builds, the rest are counted, so the row is bounded however many a
+  // client names.
+  const many = Array.from({ length: laptop.LISTED_MAX + 4 }, (_, i) => p({ build: '0.0.1+' + (i + 1) + '.abc1234', who: 'P' + i }));
+  many.push(p({ build: '0.0.1+' + (laptop.LISTED_MAX + 4) + '.abc1234', who: 'Again' }));
+  const w = said(many)[2];
+  assert.equal(w.split(' · ').length, 1 + laptop.LISTED_MAX + 1, 'the count, LISTED_MAX builds and the rest');
+  assert.ok(w.startsWith((laptop.LISTED_MAX + 5) + ' on another build · on 0.0.1+1.abc1234 (an older build): 1 hall page (Hall 1: P0)'), w);
+  assert.ok(w.endsWith(' · on 4 more builds: 5 pages or screens'), w);
+  assert.ok(said([...many.slice(0, laptop.LISTED_MAX), p({ build: '0.0.2+1.abc1234' })])[2].endsWith(' · on 1 more build: 1 page or screen'));
+  // In the panel, after the screens.
+  const win = laptop.windowsFacts({ text: '', why: 'not read' });
+  const k = { build: 'b', runs: 'portable', addresses: [], port: 1, node: '/n', https: { on: false, off: 'x', file: '/k' }, sealed: { total: 0 }, screens: { total: 0 }, stagewatch: { total: 0 }, tunnel: { running: false }, before: '', without: [] };
+  const rows = laptop.facts({ ...k, pages: { list: [], oldAt: '14:05' } }, win);
+  const ids = rows.map((x) => x.id);
+  assert.deepEqual(ids.slice(ids.indexOf('screens'), ids.indexOf('screens') + 3), ['screens', 'pages', 'stagewatch']);
+  assert.equal(laptop.facts({ ...k, pages: { list: old, oldAt: '14:05' } }, win).find((x) => x.id === 'pages').words, said(old, '14:05')[2], 'the time of day passed on');
+  assert.ok(!laptop.facts(k, win).some((x) => x.id === 'pages'), 'none where the server names no pages');
 });
 
 test('the last stop\'s row: saved, with when and by which build; or not, with why and the halls told AGMessage restarted; none for a folder this start began', () => {

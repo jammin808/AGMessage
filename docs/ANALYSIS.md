@@ -145,8 +145,8 @@ its folder, and the audit log makes its folder at its first write, not when it i
 The admin token said only where a person sits moves one timer and no cap. `supervise.js` stays at 3: the installed node's
 token file, written once each time its server serves and asks for its banner's Token line, never on a request, goes
 through `lib/resilience.js`'s atomic writer (whose `makeDir: false` never makes a folder another program makes), so it is
-written whole and that file's count does not move either. `server.js` starts 15 timers: the Token line's wait, 2 s for
-the watchdog to say it, once a start, which keeps no process alive (`unref`). `launch.js`, the installed node's
+written whole and that file's count does not move either. Of the timers `server.js` starts (below), one is the Token
+line's wait, 2 s for the watchdog to say it, once a start, which keeps no process alive (`unref`). `launch.js`, the installed node's
 commands for the person at the PC, is under the server's ESLint block (strict mode) and the coverage gate, and requires
 Node's own modules only.
 
@@ -273,8 +273,9 @@ stylesheet are not. No cap moved.
 
 The guard counts timers too, the plan's fence (o): every `setTimeout(` and `setInterval(` that a handler file
 (`handlerFiles()`: `server.js` and each module in `lib/handlers/`) starts, bare or as a member, a space before its
-bracket or not, each with its reason in a list the count must equal. `server.js` starts 15 (health's 5 s tick, the
-boot's seats, the uploads' sweep, a tunnel socket's wait to join a room, a drop's grace, three let-go-after-telling
+bracket or not, each with its reason in a list the count must equal. `server.js` starts 16 (health's 5 s tick, the
+boot's seats, the uploads' sweep, 0.5.1's pages told to reload once none of 0.5.1's files can still be fresh in a
+browser, a tunnel socket's wait to join a room, a drop's grace, three let-go-after-telling
 timers, the sign-in sweep, the show desk's loop, the Stagewatch contexts, the tunnel's log and its 30 s, which also
 checks a link whose cloudflared never said it was registered, the watchdog's heartbeat, the banner's Token line's 2 s
 wait for the watchdog). The internet link's check
@@ -328,19 +329,24 @@ through the config itself, so a change to the config cannot drop a rule unseen. 
 `theme-init.js` and `common.js` as a page runs them (the floor's mark, words and held forms; `AGM.awake`'s causes;
 `AGM.idle`'s timer and slice), and holds every page with people to load `theme-init.js` first, a screen's page to load
 none, and every script of theirs to stop below the floor before it first asks the server anything or opens a socket,
-but the six that only define at load (`common.js`, `outbox.js`, `reconnect.js`, `audit-export.js`, `catalog.js` and `menus.js`), each named with its reason. The smoke takes the features away in Chromium: at the floor
+but the six that only define at load (`common.js`, `outbox.js`, `reconnect.js`, `audit-export.js`, `catalog.js` and `menus.js`), each named with its reason
+(`/build.js` and Socket.IO's client are the server's answers, not files of `public/`). The smoke takes the features away in Chromium: at the floor
 (no `showModal()`, popover API, Wake Lock, `requestIdleCallback` or `requestSubmit()`), with no `<dialog>` at all, and
 below it (no `WeakRef`, every fetch, request, WebSocket and beacon counted: none).
 
 Beside it, `test/reconnect.test.js` fences the pages' sockets: every page script that opens one (`io(`) opens it at the
-reconnection's pace, `AGM.reconnect.OPTIONS`, and attaches each socket it opens to `AGM.reconnect`, and every page that
-loads it loads `reconnect.js` first. The four that do are named (the hall page, the halls board, the admin page and the
-screen), so a fifth page with a socket, or one that drops out, fails it; `reconnect.js` opens none of its own. A page
-left out would stay dead after a refusal. The watchdog's first restart after 0.5 s is held by a test only the
-test-windows job runs (on Windows a killed process's port and named pipe are the system's to free): a server bound as
-the show laptop's is (every address) with a page connected from the machine's network address, killed 20 times in a
-row, each start 0.5 s later finding both free. It is skipped elsewhere with that reason, as the `.bat` files' tests
-are; the step is set back to 2 s if it fails there, and no release is built before that job is green.
+reconnection's pace, `AGM.reconnect.OPTIONS`, names the build that served it as it connects (`auth:
+AGM.reconnect.auth(`), and attaches each socket it opens to `AGM.reconnect`, and every page that loads it loads
+`/build.js` and `reconnect.js` first. The four that do are named (the hall page, the halls board, the admin page and the
+screen), so a fifth page with a socket, or one that drops out, fails it; `reconnect.js` opens none of its own; and each
+of the four hears the build in the answer it reads it from. A page left out would stay dead after a refusal, and one
+that named no build would be read as 0.5.1's and never reload onto a new build. The tests' own sockets name this
+checkout's build (`test/helpers.js` `connect`; `build: null` is a 0.5.1 page). The watchdog's first restart after 0.5 s
+is held by a test only the test-windows job runs (on Windows a killed process's port and named pipe are the system's to
+free): a server bound as the show laptop's is (every address) with a page connected from the machine's network address,
+killed 20 times in a row, each start 0.5 s later finding both free. It is skipped elsewhere with that reason, as the
+`.bat` files' tests are; the step is set back to 2 s if it fails there, and no release is built before that job is
+green.
 
 ### 3.5 The module fence (`test/modules.test.js`)
 

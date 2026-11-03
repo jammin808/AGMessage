@@ -48,6 +48,8 @@
       $('remoteAdmin').checked = !!s.remoteAdmin;
       $('acctCount').textContent = s.accounts ? s.accounts + ' account' + (s.accounts === 1 ? '' : 's') : 'No accounts yet — make the first admin on the start page, with the token';
       $('buildLine').textContent = s.build ? 'This is AGMessage ' + s.build + '.' : '';
+      AGM.reconnect.build.heard(s.build);
+      drawBuild();
       renderHealth(s.health);
       renderAudit(s.health);
       renderLaptop(s.laptop);
@@ -57,6 +59,26 @@
     if (patch) AGM.outbox.now('admin:settings', patch, (s) => { if (s && !s.ok && s.error) say(s.error, true); if (s && s.ok && saved) saved(s); answered(s); });
     else socket.emit('admin:settings', null, answered);
   }
+
+  /**
+   * On another build than its server's, the admin page reloads only when its admin agrees (Reload this page): it may hold
+   * a form half filled, which a reload would lose. The words name both builds whichever is newer (a Go back runs an older
+   * one), and say so when this tab reloaded for that build already and did not come back on it. A reload goes only while
+   * the page is connected: one asked of a server it cannot reach would leave a browser's error page in its place.
+   */
+  function drawBuild() {
+    const st = AGM.reconnect.build.state();
+    $('buildStrip').hidden = !st.stale || st.reloading;
+    if (!st.stale) return;
+    const words = 'AGMessage now runs ' + st.server + ', and this page is still on ' + st.mine + '. ' +
+      (st.tried ? 'Reloading did not bring it over: reload it again, or from the browser without its cache (Ctrl+F5).' : 'Reload it when nothing you are typing here would be lost.');
+    // Said once: the settings come every 5 s, and a status region says again whatever is written into it.
+    if ($('buildWords').textContent !== words) $('buildWords').textContent = words;
+  }
+  $('buildReload').addEventListener('click', () => {
+    if (!socket || !socket.connected) { AGM.toast(AGM.catalog.WORDS.offline, true); return; }
+    if (!AGM.reconnect.build.reload(true)) drawBuild();
+  });
 
   function pretty(fp) { return fp ? fp.replace(/^sha256:/, '').match(/../g).join(':').toUpperCase() : '—'; }
   function renderTls(t, typed) {

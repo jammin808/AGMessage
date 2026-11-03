@@ -244,7 +244,8 @@ test('the floor\'s fences: every page with people loads theme-init.js first and 
     const scripts = [...read(f).matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
     if (f === 'display.html') { assert.ok(!scripts.includes('/theme-init.js'), 'a screen\'s page never shows the floor\'s words to an audience'); continue; }
     assert.equal(scripts[0], '/theme-init.js', f + ': theme-init.js is its first script, so the floor is read before anything else runs');
-    for (const s of scripts.slice(1)) if (!s.startsWith('/vendor/') && s !== '/socket.io/socket.io.js') own.add(s.slice(1));
+    // Socket.IO's client and the build that serves the page (/build.js) are the server's answers, not files of public/.
+    for (const s of scripts.slice(1)) if (!s.startsWith('/vendor/') && s !== '/socket.io/socket.io.js' && s !== '/build.js') own.add(s.slice(1));
   }
   const stops = [];
   for (const f of [...own].sort()) {

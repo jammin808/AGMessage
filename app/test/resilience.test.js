@@ -586,6 +586,7 @@ test('guard rails: the timers the handler files start are counted, each with its
       'health: the loop\'s delay, how busy it is, the sockets and the day\'s peaks, every 5 s',
       'the boot\'s saved seats let go once its first seconds are over, once',
       'uploads nobody posted removed once past their wait',
+      '0.5.1\'s pages told to reload once none of 0.5.1\'s files can still be fresh in a browser\'s cache, once a start',
       'a tunnel socket that has not joined a room within its wait let go, one per such socket',
       'a page that dropped is announced as gone only once the Wi-Fi grace is over, one per page',
       'a screen link not in use: told, then let go a moment later',

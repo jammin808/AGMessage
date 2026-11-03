@@ -217,11 +217,12 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   const anaA = await open();
   const first = await join(anaA, hallA, 'Ana', 'research');
   assert.deepEqual([first.forwardable, await rooms(anaA)], [false, []]);
-  // The same person backstage in B too: from A, B takes a message; the answer's last key says so.
+  // The same person backstage in B too: from A, B takes a message; the answer says so, appended before the build that
+  // closes it (the build serving now, which a page on another build reloads for).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).pop()], [true, [hallB], 'forwardable']);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-2)], [true, [hallB], ['forwardable', 'build']]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board');

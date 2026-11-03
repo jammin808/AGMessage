@@ -343,7 +343,7 @@
   function connect() {
     if (typeof io !== 'function') return;
     // Back by itself (reconnect.js): a refusal is tried again at the server's pace, its wait said in the strip.
-    socket = io({ transports: ['websocket', 'polling'], ...AGM.reconnect.OPTIONS });
+    socket = io({ transports: ['websocket', 'polling'], auth: AGM.reconnect.auth(), ...AGM.reconnect.OPTIONS });
     AGM.reconnect.attach(socket, { strip: $('connStrip') });
     AGM.outbox.attach(socket, { onChange: drawHeld });
     const ls = $('linkState');
@@ -351,9 +351,16 @@
       ls.dataset.ok = '1'; ls.textContent = '● Live';
       factsChanged();
       socket.emit('board:watch', {}, (r) => {
-        if (r && r.ok) { applyBoard(r.board); AGM.outbox.ready({ scope: 'board', who: me ? me.username : '' }); } else if (r && r.error) AGM.toast(r.error, true);
+        if (r && r.ok) { applyBoard(r.board); AGM.outbox.ready({ scope: 'board', who: me ? me.username : '' }); AGM.reconnect.build.heard(r.build); } else if (r && r.error) AGM.toast(r.error, true);
       });
     });
+    // On another build than its server's, the board reloads itself (reconnect.js) at a quiet moment: connected and
+    // watching, no answer held and no act waiting on its answer, no dialog, menu or ask open, and untouched for a few
+    // seconds (or not shown).
+    AGM.reconnect.build.when((t) => AGM.reconnect.QUIET.halls({
+      ...t, online: AGM.outbox.online, held: AGM.outbox.items().length > 0 || AGM.outbox.acting() > 0,
+      dialog: !!document.querySelector('dialog[open]') || AGM.menu.isOpen() || AGM.ask.isOpen(),
+    }), { stays: (words) => AGM.toast(words) });
     socket.on('disconnect', () => { ls.dataset.ok = '0'; ls.textContent = '○ Reconnecting'; factsChanged(); });
     socket.on('board', applyBoard);
     socket.on('nodes:changed', () => { if ($('networkDialog').open) openNetwork(); });

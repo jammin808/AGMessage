@@ -2431,13 +2431,14 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     for (const [what, d] of Object.entries(adminDoors)) report(doorsInStep(d), `the admin page's ${what}: right-click = ⋯ = Shift+F10 = the catalogue's set, the bar in it (${d.want}; ${d.right} / ${d.dots} / ${d.key}; ${d.inline}; hit ${d.hit})`);
     // "This laptop": every fact with its words and where it was read, in the server's order; Windows' facts read on
     // Windows and unknown with why elsewhere; Refresh reads Windows again and says when.
-    const LAPTOP_ROWS = ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'stagewatch', 'tunnel', 'stop', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin'];
+    const LAPTOP_ROWS = ['build', 'format', 'addresses', 'https', 'sealed', 'screens', 'pages', 'stagewatch', 'tunnel', 'stop', 'network', 'firewall', 'sleep', 'lid', 'task', 'admin'];
     const laptopRows = await admin.until(`(() => {
       const rows = [...document.querySelectorAll('#laptopFacts > li[data-fact]')];
       if (!rows.length) return false;
       return JSON.stringify({ ids: rows.map((r) => r.dataset.fact), said: rows.every((r) => r.querySelector('strong').textContent.endsWith(': ') && r.querySelector('.lf-words').textContent.length > 0 && /^ · read from \\S/.test(r.querySelector('.lf-from').textContent)),
         marks: rows.every((r) => (r.querySelector('.lf-mark').textContent === '') === (r.dataset.state === '')), elsewhere: ${process.platform === 'win32'} || rows.filter((r) => ['network', 'sleep', 'lid', 'task', 'admin'].includes(r.dataset.fact)).every((r) => r.querySelector('.lf-words').textContent === 'unknown (AGMessage is not running on Windows)'),
-        folder: rows.filter((r) => r.dataset.fact === 'format').map((r) => r.querySelector('.lf-words').textContent).join('') });
+        folder: rows.filter((r) => r.dataset.fact === 'format').map((r) => r.querySelector('.lf-words').textContent).join(''),
+        pages: rows.filter((r) => r.dataset.fact === 'pages').map((r) => r.querySelector('.lf-words').textContent).join('') });
     })()`, 8000);
     const laptopRead = JSON.parse(laptopRows || '{}');
     await admin.eval(`(() => { document.getElementById('laptopRead').textContent = ''; document.querySelector('#laptopActs [data-action="laptop.refresh"]').click(); })()`);
@@ -2446,6 +2447,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await admin.shot(path.join(OUT, 'admin-laptop.png'));
     report(LAPTOP_ROWS.every((id) => (laptopRead.ids || []).includes(id)) && laptopRead.said && laptopRead.marks && laptopRead.elsewhere && /^format 2 · /.test(laptopRead.folder || '') && !!refreshed,
       `the admin page's "This laptop" says each fact, its mark beside its shape, and where it was read, and Refresh reads Windows again (${laptopRows}; "${refreshed}")`);
+    // Every page and screen open in this browser names the build that serves it, so none is listed on another.
+    report(laptopRead.pages === 'every open page and screen is on this build', `"This laptop"'s Pages: every page this browser opened, and each screen, named the build that serves it ("${laptopRead.pages}")`);
     report(JSON.parse(adminDoors.hall.want).includes('adminRoom.watch') && !JSON.parse(adminDoors.header.want).includes('adminRoom.watch') && JSON.parse(adminDoors.person.want).includes('person.seat') && JSON.parse(adminDoors.message.want).includes('adminMsg.delete'),
       `the admin page's menus: Watch for a hall not watched and none in the watched one's header, a code guest's Seat, a message's Delete for everyone (${adminDoors.hall.want}; ${adminDoors.header.want})`);
     // Asks in place, never a native dialog: Delete for everyone…, Close hall… (its files' tick) and Log out…, each named
@@ -3057,6 +3060,59 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       card.close();
       tia.close();
       taken.forEach((s) => s.close());
+    }
+
+    // A page on another build reloads itself at a quiet moment (reconnect.js), each from what the server serves now: a
+    // hall page and a halls board told another build hold while something is written and unsent, then reload untouched;
+    // the admin page says so and reloads when its admin presses Reload this page; a screen keeps its take and reloads at
+    // the next, which the page it loads draws. Each page names the build /build.js says, as health says it.
+    {
+      const serverBuild = (await (await fetch(base + '/api/health')).json()).build;
+      const OTHER = '0.6.0-dev.99+abcdef1';
+      const STATE = `JSON.stringify({ before: window.__before === 1, reloadedFor: sessionStorage.getItem('agm.reloadedFor'), ...AGM.reconnect.build.state() })`;
+      // This browser signed in as Ana Admin again (the run signed it in and out as others since): her hall page, the
+      // halls board and the admin page. The first admin page's socket makes and takes the screen.
+      await admin.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'ana', password: 'the green room kettle' }) }).then((r) => r.status)`);
+      const hall = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
+      const board = await edge.tab(`${base}/halls.html`);
+      const adminB = await edge.tab(`${base}/admin.html`);
+      const madeB = await admin.eval(`new Promise((r) => socket.emit('display:create', { code: '${code}', name: 'Side screen' }, r))`);
+      const side = await edge.tab(`${base}${madeB.display.path}`);
+      await hall.until('typeof joined !== "undefined" && joined');
+      await board.until(`document.getElementById('linkState').dataset.ok === '1'`);
+      await adminB.until(`!document.getElementById('dashboard').hidden && document.getElementById('buildLine').textContent.length > 0`);
+      await side.until(`document.body.dataset.kind === 'holding'`);
+      const named = await Promise.all([hall, board, adminB, side].map((t) => t.eval(`AGM.build === ${JSON.stringify(serverBuild)} && !AGM.reconnect.build.state().stale`)));
+      // Told another build: the hall page holds while its composer has words; the board while an answer is held (an
+      // open dialog, here); the admin page says so; the screen has heard nothing new until its next take.
+      await hall.eval(`(() => { window.__before = 1; document.getElementById('textInput').value = 'not sent yet'; AGM.reconnect.build.heard(${JSON.stringify(OTHER)}); })()`);
+      await board.eval(`(() => { window.__before = 1; AGM.openDialog(document.getElementById('passwordDialog')); AGM.reconnect.build.heard(${JSON.stringify(OTHER)}); })()`);
+      await adminB.eval(`(() => { window.__before = 1; window.AGM.build = ${JSON.stringify(OTHER)}; })()`);
+      await side.eval(`(() => { window.__before = 1; window.AGM.build = ${JSON.stringify(OTHER)}; })()`);
+      const strip = await adminB.until(`!document.getElementById('buildStrip').hidden && document.getElementById('buildWords').textContent`, 8000);
+      await sleep(8000);   // past the 5 s untouched and a check after it
+      const held = await Promise.all([hall, board, adminB, side].map((t) => t.eval(STATE)));
+      await hall.eval(`document.getElementById('textInput').value = ''`);
+      await board.eval(`document.getElementById('passwordDialog').close()`);
+      await adminB.eval(`document.getElementById('buildReload').click()`);
+      await admin.eval(`new Promise((r) => socket.emit('display:take', { id: '${madeB.display.id}', content: { kind: 'message', text: 'Doors in five', tone: 'info' } }, r))`);
+      const back = await Promise.all([hall, board, adminB].map((t) => t.until(`window.__before === undefined && typeof AGM !== 'undefined' && AGM.reconnect && AGM.reconnect.build.state().server === ${JSON.stringify(serverBuild)} && ${STATE}`, 20000)));
+      const drawn = await side.until(`window.__before === undefined && document.body.dataset.kind === 'message' && document.getElementById('messageText').textContent.includes('Doors in five') && ${STATE}`, 20000);
+      const confirmed = await admin.until(`new Promise((r) => socket.emit('display:list', { code: '${code}' }, (x) => r(!!x && Array.isArray(x.displays) && x.displays.some((d) => d.name === 'Side screen' && d.state === 'shown'))))`, 10000);
+      const heldOk = held.map((h) => JSON.parse(h || '{}'));
+      const backOk = back.map((b) => JSON.parse(b || '{}'));
+      const drawnOk = JSON.parse(drawn || '{}');
+      report(named.every((x) => x === true), `each page names the build that serves it (/build.js, ${serverBuild}) and is on it: hall page, halls board, admin page, screen (${JSON.stringify(named)})`);
+      report(heldOk.every((h) => h.before && h.stale && !h.reloading) && strip === 'AGMessage now runs ' + serverBuild + ', and this page is still on ' + OTHER + '. Reload it when nothing you are typing here would be lost.',
+        `told another build, nothing reloads while it is not quiet: the hall page with words in its composer, the board with a dialog open, the admin page until its admin agrees ("${strip}"), the screen until its next take (${held.join(' | ')})`);
+      report(backOk.every((b) => !b.before && !b.stale && b.mine === serverBuild) && backOk[0].reloadedFor === OTHER && backOk[1].reloadedFor === OTHER && backOk[2].reloadedFor === serverBuild
+        && !drawnOk.before && drawnOk.reloadedFor === serverBuild && drawnOk.mine === serverBuild && !!confirmed,
+        `once quiet, each reloaded once onto the build that serves (the hall page and the board as their composer emptied and their dialog closed, the admin page at Reload this page) and the screen at its next take, which the page it loaded drew and confirmed (${back.join(' | ')} | ${drawn})`);
+      for (const [name, t] of [['the hall page reloaded for a build', hall], ['the halls board reloaded for a build', board], ['the admin page reloaded for a build', adminB], ['the screen reloaded for a build', side]]) {
+        const p = t.problems.filter((x) => !/WebSocket connection to|ERR_CONNECTION_REFUSED|net::ERR_ABORTED/.test(x));
+        report(p.length === 0, `${name}: no script errors or CSP violations${p.length ? ' — ' + p.slice(0, 3).join(' | ') : ''}`);
+        t.close();
+      }
     }
 
     // Oli's page, untouched since "First new" arrived 30 s or more ago and every message since: its New divider is

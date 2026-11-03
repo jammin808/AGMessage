@@ -316,6 +316,15 @@ log), so the token is never in it (`supervise.js`, `lib/startup.js` `taskTokenPr
   (health's `format`, "This laptop"'s Data folder row, the log's "Data folder:" line), and a marker whose build changed
   is one `server.upgraded` audit row. The upgrade's own backup at its stop (`data\backups\upgrade-<build>-<time>\`) is
   the installer's units', beside these.
+- **The pages after an upgrade** (both channels). The pages, their scripts and styles are served `no-cache` with their
+  ETag, so a browser checks each with the server at every load (a 304 while unchanged) and a reload brings the build
+  that serves. An open page on another build reloads itself at a quiet moment of its own: a hall page and the halls
+  board once nothing is written and unsent and no dialog is open, a screen at its next take, the admin page when its
+  admin presses Reload this page; each only while it is connected. 0.5.1's hall pages, halls boards and admin pages
+  are told to reload 5 minutes after the first start of 0.6, once none of 0.5.1's files (cached for 5 minutes) can
+  still be fresh in a browser; 0.5.1's screens cannot be, and "This laptop"'s Pages row names each as a 0.5 screen.
+  Before doors after an upgrade, that row should read "every open page and screen is on this build": reload by hand
+  each screen it names.
 
 ## A portable copy on a PC where AGMessage is installed
 

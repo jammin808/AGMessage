@@ -18,6 +18,8 @@
  *   formatRow      the data folder's row: its format, and what this start found of it (lib/dataformat.js)
  *   stopRow        the last stop's row: saved, or not and why, as the record it wrote last says and the folder bears
  *                  out (lib/laststop.js)
+ *   pagesRow       the pages and screens open on another build than this one, by the build each named as it connected:
+ *                  0.5's (none named) and each other build's, with when each kind reloads
  *
  * The laptop's admin and the rights given are read from the install record (HKLM\SOFTWARE\AGMessage: `Admin`,
  * `AdminName`, and under `Grants` one value per account's SID, its rights as a comma-separated list), the names each
@@ -364,6 +366,69 @@ function stopRow(s) {
   return row('stop', 'Last stop', words[0] + left, left ? 'warn' : words[1], FROM);
 }
 
+/** A page by kind, one and many. */
+const PAGE_NOUNS = { screen: ['screen', 'screens'], hall: ['hall page', 'hall pages'], halls: ['halls board', 'halls boards'], admin: ['admin page', 'admin pages'], page: ['page not yet in a hall', 'pages not yet in a hall'] };
+/** When a page on another build reloads itself (public/reconnect.js): a page not yet in a hall says when it is in one. */
+const PAGE_WHEN = { screen: 'at its next take', hall: 'at a quiet moment', halls: 'at a quiet moment', admin: 'once its admin agrees', page: '' };
+/** Names, each once with how many times it came (×2), LISTED_MAX at most and the rest counted. */
+function namesOf(list) {
+  const counts = new Map();
+  for (const n of list) if (n) counts.set(n, (counts.get(n) || 0) + 1);
+  const said = [...counts].map(([n, c]) => (c > 1 ? n + ' ×' + c : n));
+  return said.slice(0, LISTED_MAX).join(', ') + (said.length > LISTED_MAX ? ' and ' + (said.length - LISTED_MAX) + ' more' : '');
+}
+/** A page's name in the row: a screen by its name and hall, a hall page by its hall and person, a board or admin page by its account. */
+const pageName = (p) => (p.kind === 'screen' ? (p.where || 'a screen') + (p.hall ? ' in ' + p.hall : '') : p.kind === 'hall' ? (p.hall || 'a hall') + ': ' + (p.who || 'someone') : p.who);
+/** "2 hall pages (Hall 1: Ana, Hall 1: Ben)", and when they reload (`when`), from the pages of one kind. */
+function kindWords(kind, items, when) {
+  const names = namesOf(items.map(pageName));
+  return items.length + ' ' + PAGE_NOUNS[kind][items.length === 1 ? 0 : 1] + (names ? ' (' + names + ')' : '') + (when ? (items.length === 1 ? ' ' : ' each ') + when : '');
+}
+/**
+ * The pages row (pure): every open page on this build, or those that are not, by the build each named as it connected
+ * (`pages`: [{kind, build, newer, where, hall, who}]: `build` null for a page that named none, 0.5.1's, and '' for one
+ * that named something that is not a build; `newer` the build's order against this one, 1, -1, 0 or null). 0.5 screens
+ * are named to be reloaded by hand, since they never reload themselves; 0.5 pages are told to reload once none of 0.5's
+ * files can still be fresh in a browser (`oldAt`, the time of day that comes, by the laptop's clock; '' once it has come
+ * and each was told); a page of another build reloads itself, each kind at its own moment, LISTED_MAX builds said and
+ * the rest counted. △ while any page is on another build.
+ */
+function pagesRow(pages, oldAt = '') {
+  const FROM = 'the build each open page and screen named as it connected (a 0.5 page or screen names none)';
+  if (!pages.length) return row('pages', 'Pages', 'every open page and screen is on this build', 'ok', FROM);
+  const groups = new Map();
+  for (const p of pages) {
+    const k = p.build === null ? 'old' : p.build;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(p);
+  }
+  const said = [];
+  const others = [];
+  for (const [k, list] of groups) {
+    const by = (kind) => list.filter((p) => p.kind === kind);
+    const kinds = Object.keys(PAGE_NOUNS).filter((kind) => by(kind).length);
+    if (k === 'old') {
+      if (by('screen').length) said.push('0.5 screens: ' + namesOf(by('screen').map(pageName)) + ': reload each once by hand, since a 0.5 screen does not reload by itself');
+      const rest = kinds.filter((kind) => kind !== 'screen');
+      if (rest.length) said.push('0.5 pages: ' + rest.map((kind) => kindWords(kind, by(kind), '')).join(', ') + ': '
+        + (oldAt ? 'each is told to reload at ' + oldAt + ', once no 0.5 script can still be in its browser\'s cache' : 'each was told to reload; reload by hand one that stays listed'));
+      continue;
+    }
+    others.push(list);
+    if (others.length > LISTED_MAX) continue;
+    const newer = list[0].newer;
+    const label = !k ? 'a build it did not name' : k + (newer === 1 ? ' (a newer build)' : newer === -1 ? ' (an older build)' : '');
+    said.push('on ' + label + ': ' + kinds.map((kind) => kindWords(kind, by(kind), PAGE_WHEN[kind] ? 'reloads ' + PAGE_WHEN[kind] : '')).join(', '));
+  }
+  // One segment a build, LISTED_MAX at most: a page names its own build, so the row is bounded whatever they name.
+  const unsaid = others.slice(LISTED_MAX);
+  if (unsaid.length) {
+    const n = unsaid.reduce((sum, list) => sum + list.length, 0);
+    said.push('on ' + unsaid.length + ' more build' + (unsaid.length === 1 ? '' : 's') + ': ' + n + ' page' + (n === 1 ? '' : 's') + ' or screen' + (n === 1 ? '' : 's'));
+  }
+  return row('pages', 'Pages', pages.length + ' on another build · ' + said.join(' · '), 'warn', FROM);
+}
+
 /**
  * The internet link's row (`t`: {running, url, error, until, again, notKept}, its end and the start that turned it on
  * again in words by the laptop's clock, '' when none): on until its end, and when a start turned it on again, that its
@@ -387,7 +452,8 @@ function tunnelRow(t) {
  * The panel's rows, from what this server knows (`k`) and what Windows said (`w`, windowsFacts's), in the panel's order
  * (pure). `k`: {build, runs, addresses, port, https: {on, fingerprint, validTo, off, renewal, file}, sealed: {total, open,
  * keyWords}, screens: {total, shown, offline}, stagewatch: {total, connected}, tunnel: tunnelRow's, sleeps:
- * sleepsRow's, power: powerRow's, stop: stopRow's, before, without: [words], node, format: formatRow's, or none}.
+ * sleepsRow's, power: powerRow's, stop: stopRow's, pages: {list, oldAt} (pagesRow's), before, without: [words], node,
+ * format: formatRow's, or none}.
  */
 function facts(k, w) {
   const rows = [];
@@ -407,6 +473,7 @@ function facts(k, w) {
   const sc = k.screens;
   rows.push(!sc.total ? row('screens', 'Screens', 'none in any hall', '', 'each screen\'s own confirmation of its newest take')
     : row('screens', 'Screens', sc.shown + ' of ' + sc.total + ' confirmed what they show' + (sc.offline ? ' · ' + sc.offline + ' offline' : ''), sc.shown === sc.total ? 'ok' : 'warn', 'each screen\'s own confirmation of its newest take'));
+  if (k.pages) rows.push(pagesRow(k.pages.list, k.pages.oldAt));
   const sw = k.stagewatch;
   rows.push(!sw.total ? row('stagewatch', 'Stagewatch', 'not linked', 'off', 'the Stagewatch links this AGMessage keeps')
     : row('stagewatch', 'Stagewatch', sw.connected === sw.total ? (sw.total === 1 ? 'connected' : 'all ' + sw.total + ' links connected') : sw.connected + ' of ' + sw.total + ' links connected', sw.connected === sw.total ? 'ok' : 'warn', 'the Stagewatch links this AGMessage keeps'));
@@ -459,4 +526,4 @@ function facts(k, w) {
   return Object.freeze(rows);
 }
 
-module.exports = { powershellPlan, windowsPlan, hallsWords, liveWords, readWindows, windowsFacts, facts, formatRow, stopRow, reach, SCRIPT, WINDOWS_MS, PASSED, RULES_MAX, LISTED_MAX };
+module.exports = { powershellPlan, windowsPlan, hallsWords, liveWords, readWindows, windowsFacts, facts, formatRow, stopRow, pagesRow, reach, SCRIPT, WINDOWS_MS, PASSED, RULES_MAX, LISTED_MAX };

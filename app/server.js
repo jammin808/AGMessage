@@ -67,7 +67,7 @@ const laststop = require('./lib/laststop');
 const tunnelend = require('./lib/tunnelend');
 const { monitorEventLoopDelay } = require('perf_hooks');
 
-const { BUILD } = require('./lib/version');
+const { BUILD, parseBuild, compareBuilds } = require('./lib/version');
 const VERSION = BUILD.version;
 // The channel this copy runs in (AGM_RUNS: the portable folder, or the installed node's task) and, for the task, its three
 // folders: checked before anything is read or written. One that cannot be used stops the start with code 3 and its words.
@@ -610,6 +610,7 @@ function laptopFacts() {
       https: { on: !!cert, fingerprint: cert ? cert.fp : '', validTo: cert ? cert.validTo : '', off: httpsOff(), renewal: renewalWords(), file: path.join(secretbox.keyDir(), 'tls.json') },
       sealed: { total: sealed.length, open: key.state === 'key' ? sealed.filter(([, v]) => !!secretbox.open(v)).length : 0, keyWords: key.state === 'key' ? '' : key.state === 'absent' ? 'this laptop has no machine key' : 'this run has no machine key (' + key.code + ')' },
       screens: { total: displays.list.size, shown, offline },
+      pages: pagesFacts(),
       stagewatch: { total: linked, connected },
       tunnel: { running: !!tunnelProc, url: tunnelUrl || '', error: tunnelError || '', until: link.untilWords, again: link.againWords, notKept: link.notKept },
       sleeps: { watched: SUPERVISED, list: peaks.sleeps(), today: peaks.sleptOn(Date.now()) },
@@ -908,7 +909,14 @@ function isAdminReq(req) {
   return !!(w && !w.account.mustChange && rbac.can(w.account, 'settings.manage') && !web.adminBlocked(req, w.account));
 }
 app.get('/admin', (_req, res) => res.redirect('/admin.html'));
-app.use(express.static(PUBLIC_DIR, { index: 'index.html', maxAge: '5m' }));
+// The build that serves the pages, as a script each page with a socket loads before its own: the page names it as it
+// connects (AGM.reconnect.auth) and holds it against the build each answer carries.
+const BUILD_JS = 'window.AGM = window.AGM || {};\nwindow.AGM.build = ' + JSON.stringify(BUILD.full) + ';\n';
+// The pages, their scripts and their styles are checked with this server at every load (no-cache, their ETag: a 304 when
+// unchanged), never taken from a browser's cache unasked: a page that reloads for a new build gets that build's, whole.
+const CHECKED = (res) => res.setHeader('Cache-Control', 'no-cache');
+app.get('/build.js', (_req, res) => { CHECKED(res); res.type('application/javascript').send(BUILD_JS); });
+app.use(express.static(PUBLIC_DIR, { index: 'index.html', cacheControl: false, setHeaders: CHECKED }));
 
 // Uploads: only allow-listed names, served so they can't run script (sandbox CSP, nosniff, attachment for office files).
 app.get('/uploads/:name', (req, res) => {
@@ -1183,11 +1191,73 @@ const CONNECT_REFUSED = {
 function noteRefused(lane, why, now = Date.now()) {
   if (refusals.note(lane, why, now) && lane === 'tunnel') peaks.tunnelRefused(why, now);
 }
+
+// ---------------------------------------------------------------- pages on another build
+// Each page names the build that served it as it connects (its handshake's `build`: /build.js, AGM.reconnect.auth), and
+// every answer a page reads its server's build from carries this one (a hall's join, the halls board's watch, the admin
+// page's settings, a screen's state): a page on another build reloads itself at a quiet moment it names
+// (public/reconnect.js). A page's build is its own word: no right hangs on it, and it is read only to list the pages on
+// another build ("This laptop") and to reach 0.5.1's pages, which name none.
+/** The build a page named as it connected: null when it named none (0.5.1's pages and screens); '' when it named something that is not a build. */
+function announcedBuild(auth) {
+  const b = auth && typeof auth === 'object' ? auth.build : undefined;
+  if (b === undefined) return null;
+  return typeof b === 'string' && parseBuild(b) ? b : '';
+}
+/**
+ * What a 0.5.1 page is told so it loads this build's scripts: its hall page, its halls board and its admin page each
+ * reload on account:changed. A 0.5.1 screen has no such path: it keeps working on its own protocol, listed as a 0.5 screen.
+ */
+const UPDATED = Object.freeze({ what: 'build', words: 'AGMessage was updated — reloading.' });
+// 0.5.1 served its pages, scripts and styles fresh for 5 minutes (maxAge), and a browser's reload asks the server again
+// only for the page itself: a 0.5.1 page told sooner could reload into this build's page with 0.5.1's scripts taken from
+// its cache again, and name no build again. Every answer 0.5.1 gave came before this process started, so OLD_CACHE_MS
+// after it none can be fresh in any browser: a 0.5.1 page is told only from then on (each open then at once, each later
+// one as it connects), once a socket, and its reload loads this build whole, so it is never told again.
+const OLD_CACHE_MS = Math.max(1000, Number(process.env.AGM_OLD_CACHE_MS) || 5 * 60_000);
+const OLD_CACHE_AT = BOOT_AT + OLD_CACHE_MS;
+let oldCacheOver = false;
+/** A screen's socket (its link in the handshake), known or not: it has no reload path to be told of. */
+const screenSocket = (s) => !!(s.data.display || (s.handshake.auth && s.handshake.auth.display));
+/** Tell a 0.5.1 page (no build named; not a screen) to reload, once: true when told now. */
+function tellOld(socket) {
+  if (socket.data.build !== null || socket.data.toldOld || screenSocket(socket)) return false;
+  socket.data.toldOld = true;
+  socket.emit('account:changed', UPDATED);
+  return true;
+}
+setTimeout(() => {
+  oldCacheOver = true;
+  for (const s of io.sockets.sockets.values()) tellOld(s);
+}, OLD_CACHE_MS).unref();
+/** The Pages row's facts: every open page on another build, and while 0.5.1's files may still be fresh, when they are not. */
+const pagesFacts = () => ({ list: pagesElsewhere(), oldAt: oldCacheOver ? '' : tunnelend.clockOf(OLD_CACHE_AT) });
+const PAGE_KINDS = ['screen', 'hall', 'halls', 'admin', 'page'];
+/**
+ * Every open page that is not on this build, as "This laptop" lists it (lib/laptop.js pagesRow): what it is (a screen, a
+ * hall page, a halls board, the admin page, or a page that has not yet said which), where (its screen, its hall) and who
+ * (a hall page's person, a board's or admin page's account), and the build it named (null: none, a 0.5 page).
+ */
+function pagesElsewhere() {
+  const out = [];
+  for (const s of io.sockets.sockets.values()) {
+    const d = s.data || {};
+    if (d.build === BUILD.full) continue;
+    const kind = d.display ? 'screen' : d.userRoom ? 'hall' : boardSockets.has(s) ? 'halls' : d.adminPage ? 'admin' : 'page';
+    const screen = d.display ? displays.get(d.display) : null;
+    const hall = store.get(screen ? screen.hall : d.userRoom || '');
+    const who = kind === 'hall' ? d.userName || '' : d.account ? d.account.name || d.account.username : d.adminSid ? 'the laptop\'s token' : '';
+    const build = typeof d.build === 'string' ? d.build : null;
+    out.push({ kind, build, newer: build ? compareBuilds(build, BUILD.full) : null, where: screen ? screen.name || '' : '', hall: hall ? hall.name || '' : '', who: String(who || '') });
+  }
+  return out.sort((a, b) => PAGE_KINDS.indexOf(a.kind) - PAGE_KINDS.indexOf(b.kind));
+}
+
 io.use((socket, next) => {
   const ip = guard.clientIp({ socket: socket.conn, headers: socket.handshake.headers, conn: socket.conn });
   const key = guard.limitKey(ip);
   const lane = guard.laneOf(ip);
-  Object.assign(socket.data, { ip, key, lane });
+  Object.assign(socket.data, { ip, key, lane, build: announcedBuild(socket.handshake.auth) });
   socket.data.viaTunnel = web.throughTunnel({ headers: socket.handshake.headers });
   if (settings.requireHttps && cert && !(socket.request && (isEncrypted(socket.request) || isLoopback(socket.request))))
     return next(refusal('This AGMessage requires HTTPS — open it with https:// (see /tls).', { retry: false }));
@@ -1254,6 +1324,8 @@ io.on('connection', (socket) => {
   // listened to on this socket (fail closed).
   const displayToken = socket.handshake.auth && typeof socket.handshake.auth.display === 'string' ? socket.handshake.auth.display : '';
   if (displayToken) { serveDisplay(socket, displayToken); return; }
+  // A 0.5.1 page connecting once none of 0.5.1's files can still be fresh in its browser: told to reload now.
+  if (oldCacheOver) tellOld(socket);
   let room = null;
   let me = null;   // {uid, name, role}
   // Who this is: the host's admin token, a signed-in account (both from the handshake's cookies), or nobody yet — a
@@ -1428,6 +1500,8 @@ io.on('connection', (socket) => {
       // Whether a message here could be sent to another hall (the forward picker would list one): a fact the page's
       // ↗ Send to reads, false On stage, where nothing leaves the room. The support view is unseated: it has none.
       forwardable: !isAdminView && forwardTargets(null).rooms.length > 0,
+      // The build serving now: a page on another build reloads itself at a quiet moment (public/reconnect.js).
+      build: BUILD.full,
     });
 
     if (!isAdminView) {
@@ -2038,7 +2112,7 @@ io.on('connection', (socket) => {
     ack = ok(ack);
     if (!(socket.data.account || socket.data.isAdmin)) return ack({ ok: false, error: 'Sign in first.' });
     boardSockets.add(socket);
-    ack({ ok: true, board: boardFor(socket) });
+    ack({ ok: true, board: boardFor(socket), build: BUILD.full });
   });
 
   // ----- Help requests: someone says they are on the way, then that it is resolved. From the hall, or from the board.
@@ -2149,6 +2223,7 @@ io.on('connection', (socket) => {
 
   socket.on('admin:listRooms', (ack) => {
     if (!admin(ack)) return;
+    socket.data.adminPage = true;
     ok(ack)({ ok: true, rooms: Array.from(store.rooms.values()).map((r) => ({ code: r.code, name: r.name || '', createdAt: r.createdAt, users: roomUserSummary(r, { links: true }), messageCount: r.messages.length, locked: !!r.settings.lockRoles })) });
   });
   socket.on('admin:watchRoom', ({ roomCode } = {}, ack) => {
@@ -2346,6 +2421,7 @@ io.on('connection', (socket) => {
   socket.on('admin:settings', (patch, ack) => {
     if (typeof patch === 'function') { ack = patch; patch = null; }
     if (!admin(ack)) return;
+    socket.data.adminPage = true;
     // A change while the settings could not be read is refused, as is a key typed while this run has no machine key, with
     // the reason, before anything is taken: nothing would be saved, and the answer never says it was.
     if (patch && typeof patch === 'object' && Object.keys(patch).length && settingsUnsaved()) return ok(ack)({ ok: false, error: settingsUnsaved() });
@@ -2537,6 +2613,7 @@ function displayState(d) {
   return {
     id: d.id, name: d.name, hallName: (store.get(d.hall) || {}).name || '', seq: d.seq, content: d.content,
     holding: displays.hallHolding(d.hall), stage: stagePayload(linkFor(d.hall)), now: Date.now(), tz: TIME_ZONE,
+    build: BUILD.full,
   };
 }
 // A screen page's own key (display.js makes one per page load): its reconnections are the same screen.

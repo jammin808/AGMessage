@@ -223,7 +223,7 @@
   const screenKey = window.crypto && crypto.getRandomValues ? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('') : '';
   // Back by itself (reconnect.js), in silence: a screen the audience sees never says "Busy". It keeps its last take and
   // its stale-clock rule meanwhile; only a refusal for good (HTTPS required) is said.
-  const socket = io({ transports: ['websocket', 'polling'], auth: { display: token, screen: screenKey }, ...AGM.reconnect.OPTIONS });
+  const socket = io({ transports: ['websocket', 'polling'], auth: AGM.reconnect.auth({ display: token, screen: screenKey }), ...AGM.reconnect.OPTIONS });
   AGM.reconnect.attach(socket, { onChange: (st) => { if (st.refused) notice(st.refused); } });
   socket.on('connect', () => {
     linkUp = true;
@@ -236,7 +236,11 @@
     // A blip is not news; six seconds of silence is (the Show Bus' stale mark).
     lostTimer = setTimeout(() => { linkUp = false; $('linkDot').dataset.state = 'lost'; if (document.body.dataset.kind === 'countdown') renderCountdown(); }, 6000);
   });
+  // On another build than its server's, a screen reloads itself between takes (reconnect.js): at a take it has not drawn,
+  // in its place, so no take on the air is cut; the page it loads draws that take. Until then it shows what it shows.
   socket.on('display:state', (s) => {
+    const between = AGM.reconnect.QUIET.screen({ seq: s && s.seq, drawn: state ? renderedSeq : 0 });
+    if (AGM.reconnect.build.heard(s && s.build) && between && AGM.reconnect.build.reload()) return;
     state = s;
     stage = s.stage;
     offset = Number.isFinite(s.now) ? s.now - Date.now() : 0;

@@ -46,6 +46,8 @@
   <!-- DASHBOARD -->
   <div id="dashboard" hidden>
     <p class="conn-strip" id="connStrip" role="status" hidden></p>
+    <!-- On another build than the server's: this page reloads when the admin agrees (admin-plus.js drawBuild). -->
+    <div class="conn-strip" id="buildStrip" hidden><span id="buildWords" role="status"></span> <button id="buildReload" class="btn small" type="button">Reload this page</button></div>
 
     <div class="admin-body">
       <aside class="admin-sidebar">
@@ -286,6 +288,7 @@
     </form>
   </dialog>
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/build.js"></script>
   <script src="/common.js"></script>
   <script src="/catalog.js"></script>
   <script src="/menus.js"></script>

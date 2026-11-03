@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const net = require('net');
 const { io } = require('socket.io-client');
+const { BUILD } = require('../lib/version');
 
 const ROOT = path.join(__dirname, '..');
 const TOKEN = 'testadmintoken01';
@@ -96,8 +97,14 @@ async function api(base, method, url, body, { cookie, headers = {} } = {}) {
   return { status: r.status, body: json, cookie: set ? set.split(';')[0] : '', headers: r.headers };
 }
 
-const connect = (base, cookie) => new Promise((resolve, reject) => {
-  const s = io(base, { transports: ['websocket'], forceNew: true, reconnection: false, extraHeaders: cookie ? { cookie } : {} });
+/**
+ * A page's socket: it names the build that served it as this checkout's pages do (public/reconnect.js auth), unless
+ * `build` says otherwise; `build: null` is a 0.5.1 page, which names none. `on` ({event: fn}) is heard from the first
+ * packet, as a page's listeners are: one added once this resolves misses what the server sends with the connection.
+ */
+const connect = (base, cookie, { build = BUILD.full, on = {} } = {}) => new Promise((resolve, reject) => {
+  const s = io(base, { transports: ['websocket'], forceNew: true, reconnection: false, extraHeaders: cookie ? { cookie } : {}, auth: build === null ? {} : { build } });
+  for (const [event, fn] of Object.entries(on)) s.on(event, fn);
   s.once('connect', () => resolve(s));
   s.once('connect_error', reject);
 });

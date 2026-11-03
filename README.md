@@ -45,7 +45,11 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   running) the server asks Windows to keep the laptop from its idle sleep (the lid and the power button stay the power
   plan's). Every open page comes back by itself, without a
   reload: after a drop (at once when a phone is woken or the Wi-Fi is back), after a restart (announcing nobody), and
-  after a refusal at a busy moment, at the pace the server gives ("Busy — trying again in 3 s."). The admin page's
+  after a refusal at a busy moment, at the pace the server gives ("Busy — trying again in 3 s."). After an upgrade
+  each page reloads onto the new build by itself at a quiet moment of its own (a hall page with nothing typed and
+  unsent and no dialog open, a screen between takes, the admin page when its admin agrees), its scripts checked with
+  the server at every load; 0.5's pages are told to reload 5 minutes after the start, and 0.5's screens are named on
+  the admin page to reload by hand. The admin page's
   health reads the server's true delay and how busy it is, and keeps the peaks of each show day for 14 days, through a
   restart or a shutdown, so one look after a show says how it ran. A start that cannot run says why and stops, never
   looping: a folder it cannot make or read, a second copy on the same folder or port (whose server has written nothing;
@@ -128,12 +132,13 @@ window: a file missing beside the .bat, or who holds the port. Full instructions
 One scheme for every build (`app/lib/version.js`): `app/package.json` names the version, CI stamps the build number and
 commit. A release reads `0.5.0+17.abc1234`, a CI development build `0.5.0-dev.17+abc1234`, a local copy
 `0.5.0-dev+abc1234`. The console window, `/api/health`, the admin page and the Show Bus hello say which build runs; the
-zip is named by it. "Newer" is MAJOR.MINOR.BUILD (the stamp's `installVersion`, `0.6.41`; a local copy has none). A tag
-`vX.Y.Z` publishes a release only when it names `app/package.json`'s version and that version is above every release
-already published and every other version tagged, so among releases SemVer and MAJOR.MINOR.BUILD agree. The data folder says which build and format
-last wrote it (`data/format.json`): a folder of a higher format is refused, a 0.5 folder is copied into `data/backups/`
-before it is moved, and a newer build before this one is said on the admin page (README.txt, Upgrading). Changes:
-[CHANGELOG.md](CHANGELOG.md).
+zip is named by it. Each open page names the build that served it (`/build.js`), and the admin page's This laptop lists
+any page or screen on another. "Newer" is MAJOR.MINOR.BUILD (the stamp's `installVersion`, `0.6.41`; a local copy has
+none). A tag `vX.Y.Z` publishes a release only when it names `app/package.json`'s version and that version is above
+every release already published and every other version tagged, so among releases SemVer and MAJOR.MINOR.BUILD agree.
+The data folder says which build and format last wrote it (`data/format.json`): a folder of a higher format is refused,
+a 0.5 folder is copied into `data/backups/` before it is moved, and a newer build before this one is said on the admin
+page (README.txt, Upgrading). Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## Develop
 

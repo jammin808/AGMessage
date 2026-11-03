@@ -45,6 +45,12 @@ again or back online, and after AGMessage refused it at a busy moment, at the wa
 wait lifts (Require HTTPS, from a plain address) is said on it. A browser that vanished without closing counts until
 AGMessage notices (within about 18 seconds).
 
+After an upgrade a screen comes over to the new build by itself, between takes: it keeps showing its take until the
+next one, and at that take it reloads instead of drawing it, so no take on the air is cut and the page it loads draws
+that take and confirms it. A screen that holds one take all show (a clock, the countdown) is on the old build until its
+next take; Admin → This laptop's Pages names it. A screen 0.5 opened has no way to reload itself: it keeps working, is
+named there as a 0.5 screen, and is reloaded by hand once (or opened again from its link) before doors.
+
 A screen keeps one PDF open and draws each page off screen before it swaps it in: stepping through a deck never blanks
 the slide, and a rename or a reconnect leaves the picture alone. A slide the browser had to clear (its graphics reset)
 is drawn again, never taken as still on screen. A file taken earlier that is still loading never paints over the one

@@ -114,6 +114,16 @@ run the show on the build you rehearsed.
    certificate and the audit log's key are in that account's
    %LOCALAPPDATA%\AGMessage, not in the folder.
 5. Windows Firewall asks about the new folder's node.exe (below).
+6. Pages left open come over to the new version by themselves: a hall
+   page and the halls board reload once nothing typed is waiting to be
+   sent and no dialog is open, a screen at its next take (never in the
+   middle of one), and the admin page when you press "Reload this
+   page". Pages from 0.5 are told to reload 5 minutes after the new
+   version starts. A screen from 0.5 cannot: reload each screen once
+   by hand before doors (F5 on its browser, or open its link again).
+   Admin -> This laptop's "Pages" line names every page and screen
+   still on another version; it reads "every open page and screen is
+   on this build" when all are over.
 
 - The data folder says which build and format last wrote it
   (app\data\format.json). The first start of 0.6 on a 0.5 folder copies
@@ -777,7 +787,8 @@ Reliability and speed
     reads "AGMessage restarted"), and
     after AGMessage refused them at a busy moment, at the pace it gives
     ("Busy — trying again in 3 s."). A page down for 2 seconds says
-    "Reconnecting…".
+    "Reconnecting…". After an upgrade each page reloads onto the new
+    version by itself at a quiet moment (see Upgrading).
   - The admin page's Health line reads the server's delay ("loop delay p95":
     how long work waits for the server, its own 10 ms measuring tick taken
     off) and how busy it is ("busy N %"), then today's peaks: the

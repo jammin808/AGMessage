@@ -128,6 +128,10 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   random spread) and nothing else: no address and no count; the page waits it out. A page that comes back in a
   restart's first 30 s naming a change its hall holds is not announced again: that is the "joined" words only, and its
   seat, role and rights are decided as at any join, and the people list shows it.
+- A page names the build that served it as it connects (its handshake's `build`): the page's own word, read by type (a
+  build as AGMessage composes one; anything else is no build it named), only to list the pages on another build on the
+  admin page's "This laptop" and to tell a 0.5.1 page, which names none, to reload. No right, seat or limit hangs on it.
+  `/build.js` names the build that serves the pages, which `/api/health` already says to anyone who asks.
 - One person's pages relay to each other only the settings a page applies, each read by its type and rebuilt; the
   admin's support view acts only on what the admin page that frames it sends (its parent, from this origin).
 - What a hall page offers on a message, a file or a screen is drawn from one catalogue of acts (`app/public/catalog.js`),

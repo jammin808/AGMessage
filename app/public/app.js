@@ -102,7 +102,7 @@ if (ROLE === 'research') document.getElementById('researchCompose').hidden = fal
 // The socket comes back by itself (reconnect.js): after a refusal at the server's pace, after a drop, and at once when the
 // page is shown again or the browser is back online. The page is back once its join is answered: the strip says
 // "Reconnecting…" after 2 s without it, the dot's words after 5 s, and both go at the answer.
-const socket = io({ transports: ['websocket', 'polling'], ...AGM.reconnect.OPTIONS });
+const socket = io({ transports: ['websocket', 'polling'], auth: AGM.reconnect.auth(), ...AGM.reconnect.OPTIONS });
 const connDot = document.getElementById('connDot');
 const connWords = document.getElementById('connWords');
 const connection = AGM.reconnect.attach(socket, { join: true, down: true, strip: document.getElementById('connStrip'), onChange: drawConnection });
@@ -194,8 +194,24 @@ function rejoin() {
     // holds for this hall is sent now, a reload's included, and a reload's send already among the drawn is done.
     AGM.outbox.ready({ scope: 'hall|' + ROOM, who: MY_UID, has: (cid) => allMessages.some((m) => m.cid === cid && !!m.from && m.from.uid === MY_UID) });
     factsChanged({ connected: AGM.outbox.online });
+    // The build serving now: on another, this page reloads itself at a quiet moment (below).
+    AGM.reconnect.build.heard(res.build);
   });
 }
+/**
+ * On another build than its server's, this page reloads itself (reconnect.js) at a quiet moment: connected and in its
+ * hall, nothing written and not sent (the outbox holding nothing and waiting on no act's answer, every composer empty, no
+ * file chosen), no dialog, menu or ask open, no document on its stage, and untouched for a few seconds (or not shown).
+ */
+const COMPOSER_FIELDS = ['directorInput', 'textInput', 'actionText', 'actionOptionInput', 'fileCaption'];
+function hallQuiet(t) {
+  return AGM.reconnect.QUIET.hall({
+    ...t, online: AGM.outbox.online, out: outOf, held: AGM.outbox.items().length > 0 || AGM.outbox.acting() > 0, document: currentDocMsgId !== null,
+    draft: !!pendingFile || COMPOSER_FIELDS.some((id) => { const el = document.getElementById(id); return !!el && el.value.trim() !== ''; }),
+    dialog: !!document.querySelector('dialog[open]') || AGM.menu.isOpen() || AGM.ask.isOpen(),
+  });
+}
+AGM.reconnect.build.when(hallQuiet, { stays: (words) => AGM.toast(words) });
 // Down: an act on something is refused at once (it would otherwise be sent late), and every door says so.
 socket.on('disconnect', () => factsChanged({ connected: false }));
 

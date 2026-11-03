@@ -17,6 +17,9 @@
 // the dot's words; both go once it is back. A page the server sent away, or that closed its own socket, is not brought
 // back and says nothing of reconnecting. It touches no DOM but the strip it is given; the screen page (/d/) gives none,
 // so it retries in silence.
+//
+// Back on another build (AGM.reconnect.build): a page names the build that served it as it connects (auth()), and one
+// whose server's answers carry another reloads itself at a quiet moment of its kind (QUIET), once per build in a tab.
 (function () {
   'use strict';
   const OPTIONS = Object.freeze({ reconnectionDelay: 500, reconnectionDelayMax: 2000, randomizationFactor: 0.5 });
@@ -171,6 +174,114 @@
     };
   }
 
+  // ---------------------------------------------------------------- a page on another build
+  // The build that served the page (/build.js: AGM.build) is named as it connects (auth()), and each answer that carries
+  // the server's build (a hall's join, the halls board's watch, the admin page's settings, a screen's state) is heard: a
+  // page on another build reloads itself, its scripts and styles checked with the server as they load (no-cache), at the
+  // first quiet moment its kind names (QUIET), and the admin page when its admin agrees. A quiet moment is one at which
+  // the page is connected to its server, so a reload never lands on a server it cannot reach. Once per build in a tab
+  // by itself: a page that reloaded for a build and still is not on it (a script that did not load) stays as it is and
+  // says so, and so does a page that cannot keep that it reloaded (its storage blocked), so no page ever reloads again
+  // and again; a reload a person asks for is theirs, and goes. A page that does not know its own build compares nothing.
+  const CHECK_MS = 2000;
+  const IDLE_MS = 5000;
+  const RELOADED = 'agm.reloadedFor';
+  const UPDATED = Object.freeze({ stays: 'AGMessage now runs another build — reload this page when you can.' });
+  /**
+   * The quiet moments, by page, from what the page says of itself now (pure). A hall page: connected and in its hall
+   * (`online`), nothing written and not sent (`held`: the outbox holds a send or waits on an act's answer; `draft`: a
+   * composer holds words or a file), no dialog, menu or ask open, no document open on its stage, not sent out of its
+   * hall, and not touched for IDLE_MS (or not shown at all). The halls board: connected and watching (`online`), no
+   * answer held and no act waiting, no dialog, menu or ask, and not touched for IDLE_MS (or not shown). A screen (told
+   * in an answer, so connected): between takes, a take it has not drawn (`seq` against `drawn`, its last; none drawn yet).
+   */
+  const QUIET = Object.freeze({
+    hall: (f) => !!f.online && !f.out && !f.held && !f.draft && !f.dialog && !f.document && (f.hidden || f.idleMs >= IDLE_MS),
+    halls: (f) => !!f.online && !f.held && !f.dialog && (f.hidden || f.idleMs >= IDLE_MS),
+    screen: (f) => !f.drawn || f.seq !== f.drawn,
+  });
+
+  /**
+   * A page's builds on `env`: `mine()` (the page's own build, '' when it does not know it), `storage()` (sessionStorage,
+   * or a throw where it is blocked), `reload()`, `now()`, `hidden()`, `onTouch(fn)` (fn at each key, pointer or wheel),
+   * `setTimeout`, `clearTimeout`. Returns {heard(build), when(isQuiet, {stays}), reload(asked), state()}.
+   */
+  function builds(env) {
+    let server = '';
+    let isQuiet = null;
+    let onStays = null;
+    let timer = null;
+    let gone = false;
+    let stays = false;
+    let touched = 0;   // when the page was last touched: counted from when it names its quiet moment
+    const mine = () => { const m = env.mine(); return typeof m === 'string' ? m : ''; };
+    const stale = () => !!mine() && !!server && server !== mine();
+    /** Whether this tab reloaded for the server's build already (and so did not come back on it). */
+    const tried = () => { try { return !!server && env.storage().getItem(RELOADED) === server; } catch { return false; } };
+    const state = () => ({ mine: mine(), server, stale: stale(), reloading: gone, stays, tried: stale() && tried() });
+    /** The page stays on its build, and says so once (the page's `stays`). */
+    function stay() {
+      stays = true;
+      env.clearTimeout(timer);
+      timer = null;
+      if (onStays) onStays(UPDATED.stays);
+      return false;
+    }
+    /**
+     * Reload for the server's build. By itself (`asked` false), once in this tab: never where it did already for that
+     * build, or cannot keep that it did. Asked by a person (`asked`), whenever the page is on another build: a reload a
+     * person asks for cannot come back to itself unasked, so neither guard holds it.
+     */
+    function reload(asked) {
+      if (gone || !stale() || (stays && !asked)) return false;
+      try {
+        const s = env.storage();
+        if (s.getItem(RELOADED) === server && !asked) return stay();
+        s.setItem(RELOADED, server);
+      } catch {
+        if (!asked) return stay();   // storage blocked: a reload it could not count might come back to this, again and again
+      }
+      gone = true;
+      env.clearTimeout(timer);
+      timer = null;
+      env.reload();
+      return true;
+    }
+    function check() {
+      timer = null;
+      if (gone || stays || !stale() || !isQuiet) return;
+      if (isQuiet({ idleMs: env.now() - touched, hidden: env.hidden() }) && reload(false)) return;
+      if (!gone && !stays) timer = env.setTimeout(check, CHECK_MS);
+    }
+    return {
+      /**
+       * The server's build, from an answer: whether this page is on another (an answer without one changes nothing). A page
+       * that waits for a quiet moment is checked now and every CHECK_MS until it is one.
+       */
+      heard(build) {
+        if (typeof build !== 'string' || !build || build.length > 80) return stale();
+        // A build it has not heard before: a page that stayed on its build for the one before may reload for this one.
+        if (build !== server) { server = build; stays = false; }
+        if (!stale()) { env.clearTimeout(timer); timer = null; } else if (!timer) check();
+        return stale();
+      },
+      /**
+       * The page's quiet moment: `isQuiet({idleMs, hidden})` true when it is one; `opts.stays(words)` told once if the page
+       * must stay on its build. A page that names none reloads only by reload(), its person's or its own.
+       */
+      when(fn, opts) {
+        if (typeof fn !== 'function' || isQuiet) return;
+        isQuiet = fn;
+        if (opts && typeof opts.stays === 'function') onStays = opts.stays;
+        touched = env.now();
+        env.onTouch(() => { touched = env.now(); });
+        if (stale() && !timer) check();
+      },
+      reload,
+      state,
+    };
+  }
+
   const page = create({
     now: () => window.performance.now(),
     setTimeout: (fn, ms) => window.setTimeout(fn, ms),
@@ -180,6 +291,19 @@
       window.addEventListener('online', fn);
     },
   });
-  const reconnect = { OPTIONS, WORDS, DOWN_MS, DOT_MS, retryIn, dotName, create, attach: page.attach };
+  const ownBuild = () => (window.AGM && typeof window.AGM.build === 'string' ? window.AGM.build : '');
+  const build = builds({
+    mine: ownBuild,
+    storage: () => window.sessionStorage,
+    reload: () => window.location.reload(),
+    now: () => window.performance.now(),
+    hidden: () => document.visibilityState === 'hidden',
+    onTouch(fn) { for (const ev of ['keydown', 'pointerdown', 'wheel']) document.addEventListener(ev, fn, { capture: true, passive: true }); },
+    setTimeout: (fn, ms) => window.setTimeout(fn, ms),
+    clearTimeout: (t) => window.clearTimeout(t),
+  });
+  /** A socket's `auth`: what the page gives (a screen its link), and the build that served it. */
+  const auth = (extra) => Object.assign({}, extra, { build: ownBuild() });
+  const reconnect = { OPTIONS, WORDS, DOWN_MS, DOT_MS, CHECK_MS, IDLE_MS, RELOADED, UPDATED, QUIET, retryIn, dotName, create, builds, auth, build, attach: page.attach };
   Object.assign(window.AGM = window.AGM || {}, { reconnect });
 })();

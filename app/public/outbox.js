@@ -385,6 +385,8 @@
 
       /** The held sends, oldest first (each as the page was told of it). */
       items: () => queue.slice(),
+      /** How many acts (`now`) are out and not yet answered: each until its answer, its "No answer" or its drop's words. */
+      acting: () => nows.size,
       /** Whether a `now` act would be sent at once. */
       get online() { return isReady(); },
     };

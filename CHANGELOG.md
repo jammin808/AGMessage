@@ -2198,6 +2198,74 @@ here; nothing is measured on the show laptop, where reading R3′ and lab 5 take
   again, and writes its restart line at every start. A record a 0.6.0 stop left is read again by the next 0.6.0 start,
   as stale, when 0.5.1 ran on the folder in between: each hall then says AGMessage restarted.
 
+**A page on another build reloads itself at a quiet moment, and the first upgrade reaches 0.5.1's pages** (the plan's
+Part 6, unit U5; the tree's tests and the hall page, the halls board, the admin page and a screen in Chromium; nothing
+is measured on the show laptop, where lab 6 takes an upgrade during a rehearsal)
+- After an upgrade an open page kept the old build's scripts, and could take them again from its browser's cache for 5
+  minutes after it loaded them (`maxAge: '5m'`), so a reload did not always bring the new build. The pages, their
+  scripts and styles, the vendored libraries included, are now served `no-cache` with their ETag: the browser asks the
+  server at every load and is answered 304, nothing sent, while a file is unchanged.
+- Each page that opens a socket loads `/build.js` first, which names the build that serves it (`AGM.build`, as health
+  names it), and names that build as it connects (its handshake's `build`, `AGM.reconnect.auth()`). Every answer a page
+  reads its server's build from carries it: a hall's join, the halls board's watch, the admin page's settings and a
+  screen's state (`build`, at the end of each). A page on another build reloads itself (`AGM.reconnect.build`), each at
+  its own quiet moment, and only while it is connected to its server, so a reload never lands on a server it cannot
+  reach (a page that heard the build and went quiet after a drop waits until it is back): a hall page connected and in
+  its hall, with nothing written and not sent (the outbox holding nothing and waiting on no act's answer, every
+  composer empty, no file chosen), no dialog, menu or ask open, no document on its stage, untouched for 5 s (or not
+  shown); the halls board connected, with no answer held and no act waiting, no dialog, menu or ask open, untouched; a
+  screen between takes, at a take it has not drawn, so no take on the air is cut and the page it loads draws that take
+  and confirms it; the admin page only when its admin presses Reload this page, connected, in the strip that says
+  "AGMessage now runs …, and this page is still on …" (whichever is newer: a Go back runs an older build), since a form
+  half filled there would be lost. By itself a page reloads once per build in a tab: one that reloaded for a build and
+  is still not on it (a script that did not load), or cannot keep that it reloaded (its storage blocked), stays as it
+  is and says once "AGMessage now runs another build — reload this page when you can.", so no page reloads again and
+  again; the admin's Reload goes whenever it is pressed, its strip saying when this tab already reloaded and did not
+  come back on the build. A page that does not know its own build compares nothing. The outbox says how many acts are
+  out and not yet answered (`acting()`), which the quiet moments read.
+- 0.5.1's pages name no build. 0.5.1 served its files fresh for 5 minutes, and a browser's reload asks the server again
+  only for the page itself, so a 0.5.1 page told at once could reload into this build's page with 0.5.1's scripts from
+  its cache and name no build again. Every answer 0.5.1 gave came before the new start, so from 5 minutes after it no
+  0.5.1 file can be fresh in any browser: then every 0.5.1 hall page, halls board and admin page open is sent
+  `account:changed` with "AGMessage was updated — reloading.", on which 0.5.1 reloads, each tab whatever sign-in it
+  shares, and each that connects later is told as it connects; once a socket, and its reload loads this build whole.
+  A 0.5.1 screen has no reload path: its protocol keeps working, and it is named on the admin page as a 0.5 screen, to
+  reload by hand once before doors.
+- "This laptop" gains Pages, after Screens: "every open page and screen is on this build" ✓, or each that is not, by
+  the build it named and when it reloads △ ("0.5 screens: Foyer in Hall 1: reload each once by hand…", "0.5 pages: 2
+  hall pages (Hall 1: Ana, Hall 1: Ben): each is told to reload at 14:05, once no 0.5 script can still be in its
+  browser's cache", then "…: each was told to reload; reload by hand one that stays listed", "on 0.6.0+40.abc1234 (an
+  older build): 1 screen (Lectern in Hall 2) reloads at its next take"), at most 32 builds said and the rest counted,
+  since a build is the page's own word. No right hangs on it: it is read only for this row and to reach 0.5.1's pages.
+- Tests: `test/reconnect.test.js`: on the page's half, with the reload stubbed and the test's clock, a page on its
+  server's build does nothing; a hall page reloads only when quiet (held by a send in the outbox, words in a composer,
+  a dialog, a document on its stage, sent out of its hall, a touch under 5 s), once, and the board likewise; one that
+  heard the build while connected and is quiet only while its socket is down reloads only once it is back, the board
+  alike; the admin page only when its admin agrees, again when asked after a reload that did not bring the build, and
+  with its storage blocked; a screen at a take it has not drawn and never at its own take again; once per build in
+  a tab by itself (a reload that did not bring the build, storage blocked), and a newer build reloaded for; the page's
+  own instance names `AGM.build`. End to end: `/build.js` names health's build, `no-cache` with an ETag and a 304, and
+  so do a page, a script, the stylesheet and pdf.js; the join, the watch, the settings and a screen's state carry the
+  build; in the first 5 minutes no 0.5.1 page is told, and "This laptop" says the time they will be; with that wait
+  short (`AGM_OLD_CACHE_MS`, for tests), every 0.5.1 page open at its end is told then (two boards and two admin pages
+  under one sign-in, hall pages come back and fresh, a page not yet in a hall), a later one as it connects, each once
+  and none before it, a page that names a build and a screen never; "This laptop"'s Pages row, ✓ again once they have
+  gone. The fence: each page that opens a socket names its build (`auth: AGM.reconnect.auth(`), loads `/build.js`
+  before its own script and hears the build in its answer. `test/laptop.test.js`: the Pages row, pure, with the 0.5
+  pages' time and the builds bounded. `test/outbox.test.js`: `acting()` as acts go out, are answered, say No answer or
+  drop. The tests' own sockets name this checkout's build (`test/helpers.js` `connect`), `build: null` is a 0.5.1
+  page, and `on` hears an event from the socket's first packet, as a page's listeners do. Moved on purpose: `test/menus.test.js` reads the join's answer ending with `forwardable`, then `build`;
+  `test/laptop.test.js`'s panel rows gain Pages; `test/pagefloor.test.js` reads `/build.js` as the server's answer, not
+  a file; `test/resilience.test.js` counts the one timer that tells 0.5.1's pages. The smoke: each page names the build
+  that serves it; told another build, the hall page holds while its composer has words, the board while a dialog is
+  open, the admin page until Reload this page and a screen until its next take; once quiet each reloads once onto the
+  build that serves, and the screen draws and confirms the take it reloaded at; "This laptop" reads every page on this
+  build.
+- The papers: `README.md`, `README.txt` (Upgrading), `SECURITY.md`, `docs/DESIGN.md` (Back by itself),
+  `docs/DISPLAYS.md`, `docs/INSTALL.md`, `docs/ANALYSIS.md` (§3.4) and `app/README.md` (`AGM_OLD_CACHE_MS`).
+- Rolling back: 0.5.1 serves its files cached for 5 minutes and sends no build; a 0.6.0 page on it names its build and
+  hears none in the answers, so it never reloads by itself. Reload each page and screen by hand after going back.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and
