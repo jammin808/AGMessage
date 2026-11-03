@@ -170,7 +170,10 @@ test('the power request, as it is asked: a hall live, the script, how powershell
   assert.ok(!s.includes('"') && !s.includes('\n'), 'one line, single quotes only');
   assert.ok(s.includes('SetThreadExecutionState([uint32]2147483649)'), 'ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x1)');
   assert.ok(s.indexOf("$m -ne 'FullLanguage'") < s.indexOf('Add-Type'), 'Constrained Language Mode is said before Add-Type is asked');
-  assert.ok(s.indexOf("Tell 'held' $true") > s.indexOf('-eq 0') && s.trim().endsWith('[void][Console]::In.ReadToEnd()'), 'held only when the call returned non-zero, then it waits on its input');
+  assert.ok(s.indexOf("AgmTell 'held' $true") > s.indexOf('-eq 0') && s.trim().endsWith('[void][Console]::In.ReadToEnd()'), 'held only when the call returned non-zero, then it waits on its input');
+  // Windows' own Microsoft.PowerShell.Utility, by its manifest's path, before ConvertTo-Json or Add-Type is asked by name.
+  const used = s.indexOf("Import-Module ($PSHOME + '\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')");
+  assert.ok(used > 0 && used < s.indexOf('ConvertTo-Json') && used < s.indexOf('Add-Type'), 'the module by its path, first');
   assert.deepEqual(['{"v":1}', '{"held":true}', '{"held":1}', '{"refused":"no\\u0007"}', '{"failed":""}', '{"failed":7}', 'not json', '[]', 'null'].map(power.readLine),
     [{ v: true }, { held: true }, null, { refused: 'no' }, { failed: 'no reason given' }, null, null, null, null]);
 });

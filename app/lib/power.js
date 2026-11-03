@@ -33,19 +33,24 @@ const laptop = require('./laptop');
  * otherwise each line is written and flushed as it is said ({"v":1} first), then one of {"held":true} (only when the call
  * returned non-zero), {"refused": why} or {"failed": why}. Each line is JSON in ASCII: any other character is written
  * \uXXXX, so no code page changes Windows' words. The attribute's quotes are [char]34, so the script holds none.
+ * ConvertTo-Json and Add-Type are Microsoft.PowerShell.Utility's, imported first by its manifest's path under $PSHOME:
+ * a command found by name has PowerShell look through the modules on its module path before it loads one (on CI's runner
+ * that search held "This laptop"'s read 44 s), and the module is then Windows' own. The functions are named Agm… so no
+ * alias of Windows PowerShell's runs in their place (test/laptop.test.js holds every script AGMessage runs to it).
  */
 const SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop';
 $ProgressPreference = 'SilentlyContinue';
-function Ascii($j) { return (-join @(foreach ($c in $j.ToCharArray()) { if ([int]$c -gt 126) { '\u{0:x4}' -f [int]$c } else { [string]$c } })) };
-function Say($k, $v) { $h = @{}; $h[$k] = $v; return (Ascii (ConvertTo-Json -InputObject $h -Compress)) };
+Import-Module ($PSHOME + '\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1');
+function AgmAscii($j) { return (-join @(foreach ($c in $j.ToCharArray()) { if ([int]$c -gt 126) { '\u{0:x4}' -f [int]$c } else { [string]$c } })) };
+function AgmSay($k, $v) { $h = @{}; $h[$k] = $v; return (AgmAscii (ConvertTo-Json -InputObject $h -Compress)) };
 $m = [string]$ExecutionContext.SessionState.LanguageMode;
-if ($m -ne 'FullLanguage') { Say 'v' 1; Say 'refused' ('PowerShell runs in ' + $m + ' mode on this PC, which refuses Add-Type'); exit 0 };
-function Tell($k, $v) { [Console]::Out.WriteLine((Say $k $v)); [Console]::Out.Flush() };
-Tell 'v' 1;
-try { Add-Type -Namespace AGMessage -Name Power -MemberDefinition ('[DllImport(' + [char]34 + 'kernel32.dll' + [char]34 + ')] public static extern uint SetThreadExecutionState(uint flags);') } catch { Tell 'refused' ('Add-Type: ' + [string]$_.Exception.Message); exit 0 };
-if ([AGMessage.Power]::SetThreadExecutionState([uint32]2147483649) -eq 0) { Tell 'failed' 'SetThreadExecutionState returned 0'; exit 0 };
-Tell 'held' $true;
+if ($m -ne 'FullLanguage') { AgmSay 'v' 1; AgmSay 'refused' ('PowerShell runs in ' + $m + ' mode on this PC, which refuses Add-Type'); exit 0 };
+function AgmTell($k, $v) { [Console]::Out.WriteLine((AgmSay $k $v)); [Console]::Out.Flush() };
+AgmTell 'v' 1;
+try { Add-Type -Namespace AGMessage -Name Power -MemberDefinition ('[DllImport(' + [char]34 + 'kernel32.dll' + [char]34 + ')] public static extern uint SetThreadExecutionState(uint flags);') } catch { AgmTell 'refused' ('Add-Type: ' + [string]$_.Exception.Message); exit 0 };
+if ([AGMessage.Power]::SetThreadExecutionState([uint32]2147483649) -eq 0) { AgmTell 'failed' 'SetThreadExecutionState returned 0'; exit 0 };
+AgmTell 'held' $true;
 [void][Console]::In.ReadToEnd()
 `.trim().replace(/\s*\n\s*/g, ' ');
 

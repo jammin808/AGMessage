@@ -614,7 +614,7 @@ test('how Windows is asked: on Windows only, by its absolute path under a System
 test('every PowerShell AGMessage runs names its functions so that no alias of Windows PowerShell\'s runs in their place', () => {
   const root = path.join(__dirname, '..', '..');
   const lane = require('../../tools/readings-take');
-  const scripts = [['lib/laptop.js SCRIPT', laptop.SCRIPT], ...Object.entries(lane.SCRIPTS).map(([k, v]) => ['tools/readings-take.js SCRIPTS.' + k, v])];
+  const scripts = [['lib/laptop.js SCRIPT', laptop.SCRIPT], ['lib/power.js SCRIPT', require('../lib/power').SCRIPT], ...Object.entries(lane.SCRIPTS).map(([k, v]) => ['tools/readings-take.js SCRIPTS.' + k, v])];
   for (const f of fs.readdirSync(path.join(root, 'tools')).filter((n) => /\.ps1$/i.test(n))) scripts.push(['tools/' + f, fs.readFileSync(path.join(root, 'tools', f), 'utf8')]);
   const named = [];
   for (const [where, text] of scripts) {
@@ -624,7 +624,7 @@ test('every PowerShell AGMessage runs names its functions so that no alias of Wi
       assert.ok(/^Agm[A-Z]\w*$/.test(m[1]) || /^[A-Z][a-z]+-[A-Z]\w*$/.test(m[1]), where + ' names a function ' + m[1] + ': not Verb-Noun, nor Agm…');
     }
   }
-  assert.ok(named.some((n) => n.startsWith('lib/laptop.js SCRIPT: AgmPower')), 'the fence reads the script: ' + named);
+  assert.ok(named.some((n) => n.startsWith('lib/laptop.js SCRIPT: AgmPower')) && named.some((n) => n.startsWith('lib/power.js SCRIPT: AgmTell')), 'the fence reads the scripts: ' + named);
   // The rule refuses the names that ran Add-Content and their other forms.
   const refused = (text) => [...text.matchAll(/(?:^|[\s;{}(])(?:function|filter|workflow)\s+([^\s({]+)/gi)].map((m) => m[1]).filter((n) => !(/^Agm[A-Z]\w*$/.test(n) || /^[A-Z][a-z]+-[A-Z]\w*$/.test(n)));
   assert.deepEqual(refused("function Ac($sub, $set) { }; filter sc { $_ }; workflow h { }; function script:AgmX { }; function Read-Defender { }; function AgmSay($k) { }"), ['Ac', 'sc', 'h', 'script:AgmX']);

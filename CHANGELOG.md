@@ -1664,7 +1664,7 @@ it cannot read says unknown, with why)
   (`test/windows-preload.js`) read into the network, the firewall on it, sleep, the lid, the task, the laptop's admin and
   the rights given, none of them in the context; the plan, the script's order, the run, the answer's lines read by type
   (a line cut short passed over, no key but the parts' taken), every rule judged, the lists counted past 32, and every
-  row's words (pure); every PowerShell AGMessage runs (the script, the lane's, `tools/*.ps1`) naming its functions
+  row's words (pure); every PowerShell AGMessage runs (the script, the power request's, the lane's, `tools/*.ps1`) naming its functions
   Verb-Noun or `Agm…`, never a single word that Windows PowerShell keeps as an alias, which runs before a function of the
   same name (the script's `Ac` was Add-Content's alias: on CI's runner it wrote two files into System32 and read neither
   power setting); and, on Windows only (the Windows CI job), the script itself run, its answer in its own shape, each

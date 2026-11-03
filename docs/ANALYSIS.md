@@ -164,7 +164,7 @@ last, the firewall's own object asked, the NetSecurity cmdlets only under Constr
 by its manifest's path under `$PSHOME` before the part that uses it) and an
 environment of named Windows folders only (`PASSED`), no secret, `PATH` or module path of the account's; on Windows (the
 CI job) a test runs the script itself and holds its answer to its shape, saying when each part's line came. Every
-PowerShell AGMessage runs (that script, the lane's in `tools/readings-take.js`, `tools/*.ps1`) names its functions,
+PowerShell AGMessage runs (that script, the power request's in `lib/power.js`, the lane's in `tools/readings-take.js`, `tools/*.ps1`) names its functions,
 filters and workflows Verb-Noun or `Agm…` and makes none through the Function: drive (`test/laptop.test.js`): PowerShell
 runs an alias before a function of the same name, and Windows PowerShell's aliases are single words (`ac` is
 Add-Content).
