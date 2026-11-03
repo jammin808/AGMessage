@@ -470,7 +470,11 @@ test('the tunnel\'s end, read by type: inside it, past it, nothing kept, or one 
 
 test('the tunnel is kept on until its end: a start inside it turns it on again with a new address, said to the admin and audited; turned off, it stays off', { timeout: 60_000 }, async (t) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
-  const settingsOf = () => JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'));
+  // The settings as kept on disk: none yet ({}) until the settings lane's first save lands, a moment after the act that
+  // asks it, so a wait for a kept value reads on instead of ending at the first look.
+  const settingsOf = () => {
+    try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8')); } catch (e) { if (e.code === 'ENOENT') return {}; throw e; }
+  };
   const link = await standInLink(t);
   const ENV = { AGM_DATA_DIR: dataDir };
   let s = await serverWithLink(t, link, ENV);
