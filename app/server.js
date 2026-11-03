@@ -46,7 +46,7 @@ const secretbox = require('./lib/secretbox');
 const { buildContext, hallBrief } = require('./lib/context');
 const tlsmod = require('./lib/tls');
 const { Accounts, Sessions, TokenSessions } = require('./lib/accounts');
-const { AuditLog, keysFrom } = require('./lib/audit');
+const { AuditLog, keysFrom, wordsWithList } = require('./lib/audit');
 const { Exporter } = require('./lib/auditexport');
 const { Archiver } = require('./lib/auditarchive');
 const rbac = require('./lib/rbac');
@@ -134,6 +134,9 @@ const SUPERVISED = !!process.env.AGM_SUPERVISED;
 const TEED = process.env.AGM_TEED === '1';
 
 const makeRoomCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
+// A side room's key: an address, never a credential (no lookup or join takes one from a guest), 8 characters of the same
+// alphabet, so it passes the store's CODE_RE and is never the 6 a guest types.
+const makeRoomKey = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 8);
 const makeMessageId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 12);
 const ROLES = ['board', 'research', 'observer'];
 // The seats in the lines the server writes into a hall, in the words every page shows for them.
@@ -1158,6 +1161,9 @@ app.get('/api/admin/transcript/:code', (req, res) => {
   if (!isAdminReq(req)) return res.status(403).send('Forbidden');
   const room = store.room(String(req.params.code || '').toUpperCase());
   if (!room) return res.status(404).send('Room not found');
+  // Read by the laptop's token first, as a socket is: the token's reads are the laptop's, an account's its own.
+  const w = isValidAdminCookie(req) ? null : web.who(req);
+  readAsAdmin(w ? web.actorOf(w) : HOST_ACTOR, w ? w.account : null, room, (n) => 'transcript of ' + n, guard.clientIp(req));
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
   res.setHeader('Content-Disposition', 'inline; filename="transcript-' + room.code + '.html"');
@@ -1230,8 +1236,64 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
 // name is (no control, bidi override or isolate character), from the admin page's socket and the HTTP route alike.
 function newRoom(name) {
   let code;
-  do { code = makeRoomCode(); } while (store.hasRoom(code));   // a key no room has, side rooms included
+  do { code = makeRoomCode(); } while (keyHeld(code));
   return store.create(code, guard.cleanText(name, 80));
+}
+/**
+ * A side room of the hall `hall` (its key), named `name` (cleaned by the caller), under a key no room has: its first
+ * snapshot written at once, its guest code off (lib/store.js createIn). Null when the hall holds SIDE_MAX rooms beside
+ * its Main room already, or is no hall.
+ */
+function newSideRoom(hall, name) {
+  let key;
+  do { key = makeRoomKey(); } while (keyHeld(key));
+  return store.createIn(hall, key, name);
+}
+/**
+ * Whether a new hall or room may not take `key`: a room has it, side rooms included, or something still names it that
+ * would open the new one to whoever held the one before — an account's halls, On stage halls or rooms (one a page saved
+ * back after its hall closed, one a room that comes back at the next start keeps), a node linked for a hall.
+ */
+function keyHeld(key) {
+  return store.hasRoom(key) || accounts.names(key) || Object.values(settings.peerLinks || {}).some((l) => !!l && l.hall === key);
+}
+/**
+ * Why a room of `hall` may not be called `name`: another room of the hall has that name in any case, its Main room's
+ * (the hall's) included, so a hall's rooms are told apart by name wherever they are listed or picked. `except` is the
+ * room renamed. '' when it may. Made, renamed by the rooms module, and renamed by the hall's Set up, alike.
+ */
+function roomNameRefused(hall, name, except) {
+  const low = name.toLowerCase();
+  if (!store.roomsOf(hall.code).some((r) => r !== except && (r.name || '').toLowerCase() === low)) return '';
+  return (hall.name || 'This hall') + ' has a room named ' + name + ' already.';
+}
+/**
+ * A room's new name, said to its pages as one numbered change (a meta op) and to the halls board. A hall is its Main
+ * room: a Main room's name is its hall's, so its screens are told it too. Null when the op table refused it: nothing was
+ * saved or sent.
+ */
+function renameRoom(room, name) {
+  const op = apply(room, { o: 'meta', name });
+  if (op && store.isMain(room)) for (const d of displays.ofHall(room.code)) io.to('display:' + d.id).emit('display:state', displayState(d));
+  return op;
+}
+/** A room as a row and the AI name it: a side room by its name and its hall's ("Legal (Hall 2)"), a hall by its name. */
+function roomInHall(room) {
+  const hall = store.get(room.hall);
+  const hallName = (hall && hall.name) || 'a hall with no name';
+  return store.isMain(room) ? hallName : (room.name || 'a room with no name') + ' (' + hallName + ')';
+}
+/**
+ * The admin's read of a side room it is not given, one `room.read` row: a page entered (a join that names no last
+ * change it holds, so never a resume), a watch begun, a transcript, a person's view opened, the AI asked for its minutes
+ * (its messages handed over, whatever the AI answers). A room the reader's account lists among its own is read as a
+ * member reads it and writes none, and the laptop's token lists none; a hall's Main room is its crew's, as before, and
+ * writes none either. `words(name)` says what was done, the room named by `roomInHall`, never what was read.
+ */
+function readAsAdmin(actor, account, room, words, ip) {
+  if (!room || store.isMain(room)) return;
+  if (account && rbac.effective(account).rooms.has(room.code)) return;
+  audit.write(actor, 'room.read', room.code, words(roomInHall(room)), ip);
 }
 
 // ----- uploads (only from people in a room; content must match the name)
@@ -1659,6 +1721,11 @@ io.on('connection', (socket) => {
       uploadTokens.set(uploadToken, { room: code, uid: id, sid: socket.id, bucket: uploadBucket, key: socket.data.key, may: () => allowed('hall.files'), seat: () => socket.data.seat, revoked: false });
     }
 
+    // The admin entering a side room it is not given reads it: one row for a page's first join, never for a resume (a
+    // join that names the last change it holds) or a page catching up on its own socket.
+    if ((acct || isAdminView) && !stillSeated && !Number.isInteger(since)) {
+      readAsAdmin(actor(), socket.data.account, r, (n) => (isAdminView ? 'opened ' + cleanName + '\'s view of ' + n : 'entered ' + n + ' as the admin'), socket.data.ip);
+    }
     // Resume: just what they missed, when we still have it; otherwise the whole history.
     const ops = Number.isInteger(since) ? store.opsSince(r, since) : null;
     // A room shows its hall's countdown, as the frames sent to it do; a side room sends nothing to a Stagewatch.
@@ -2278,6 +2345,7 @@ io.on('connection', (socket) => {
     if (match.secrets.length) return ack({ ok: false, error: '“' + shown + '” carries a secret: set it on ' + link.node.name + ' itself — a proposal would keep it in the show desk\'s queue.' });
     // The show desk of the node's own hall, or none: a hall's proposals never go to another hall's show caller.
     const { link: desk, desk: hasDesk } = deskFor(link);
+    if (!desk) return ack({ ok: false, error: link.node.name + ' was linked for a hall that has been closed: link it again for a hall, or for every hall (Admin → Show network) — not proposed.' });
     if (!hasDesk) {
       const where = link.hall ? ((store.get(link.hall) || {}).name || link.hall) + '\'s Stagewatch' : 'The default Stagewatch';
       const held = desk.base && desk.key ? desk.keyHeld('proposed') : '';
@@ -2368,14 +2436,12 @@ io.on('connection', (socket) => {
     const same = typeof stagewatchUrl !== 'string' || (next ? prev.url === next.url && (prev.keySealed || '') === next.keySealed && (prev.fp || '') === next.fp : !prev.url);
     // Settings that could not be read are never saved over: a change of the hall's Stagewatch is refused, its name with it.
     if (!same && settingsUnsaved()) return ack({ ok: false, error: settingsUnsaved() });
+    // A name another room of the hall has is refused before anything is applied, the address with it.
+    const n = typeof name === 'string' ? guard.cleanText(name, 80) : '';
+    const taken = n && n !== r.name ? roomNameRefused(r, n, r) : '';
+    if (taken) return ack({ ok: false, error: taken });
     const changed = [];
-    if (typeof name === 'string') {
-      const n = guard.cleanText(name, 80);
-      if (n && n !== r.name && apply(r, { o: 'meta', name: n })) {
-        changed.push('name → ' + n);
-        for (const d of displays.ofHall(r.code)) io.to('display:' + d.id).emit('display:state', displayState(d));
-      }
-    }
+    if (n && n !== r.name && renameRoom(r, n)) changed.push('name → ' + n);
     if (!same) {
       if (!next && hallLinks.has(r.code)) forgetStagewatchPins(hallLinks.get(r.code));
       settings.hallStagewatch = { ...(settings.hallStagewatch || {}) };
@@ -2413,12 +2479,16 @@ io.on('connection', (socket) => {
   socket.on('admin:listRooms', (ack) => {
     if (!admin(ack)) return;
     socket.data.adminPage = true;
-    ok(ack)({ ok: true, rooms: Array.from(store.rooms.values()).map((r) => ({ code: r.code, name: r.name || '', createdAt: r.createdAt, users: roomUserSummary(r, { links: true }), messageCount: r.messages.length, locked: !!r.settings.lockRoles })) });
+    // Each hall's row as before, and its side rooms beside it, in the order they were made, each by its key.
+    const row = (r) => ({ name: r.name || '', createdAt: r.createdAt, users: roomUserSummary(r, { links: true }), messageCount: r.messages.length, locked: !!r.settings.lockRoles });
+    ok(ack)({ ok: true, rooms: Array.from(store.rooms.values()).map((r) => ({ code: r.code, ...row(r), side: store.roomsOf(r.code).slice(1).map((x) => ({ key: x.code, ...row(x) })) })) });
   });
   socket.on('admin:watchRoom', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
     const r = store.room(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
+    // A watch begun reads the room (one row for a side room the admin is not given); the room watched already, none.
+    if (socket.data.watching !== roomCode) readAsAdmin(socket.data.actor || HOST_ACTOR, socket.data.account, r, (n) => 'watched ' + n, socket.data.ip);
     if (socket.data.watching && socket.data.watching !== roomCode) socket.leave(socket.data.watching);
     socket.join(roomCode);
     socket.data.watching = roomCode;
@@ -2475,14 +2545,34 @@ io.on('connection', (socket) => {
       const kept = gone.kept.length ? ', the files of ' + plural(gone.kept.length, 'room') + ' held by another program and kept' + (gone.again ? ': it opens again at the next start' : '') : '';
       return { purge, row: (purge ? ', files removed' : '') + kept, answer: gone.kept.length ? { kept: gone.kept.length, keptWords: keptWords(gone, main ? 'the hall' : 'the room') } : {} };
     };
+    // The accounts that were given a room that goes, or the hall that goes (its halls, its On stage halls), are given it
+    // no more: a key no room has reaches nothing, so no page of theirs is ended and no account's row is written. A room
+    // whose files another program held comes back at the next start (`back`), and its accounts keep it, so it comes back
+    // with its members. Each row counts the accounts it changed.
+    const updated = (n) => (n ? ', ' + plural(n, 'account') + ' updated' : '');
+    const by = socket.data.actor || HOST_ACTOR;
     if (!main) {
       // The room alone: its hall's Stagewatch, screens and links stay the hall's.
-      const gone = said(store.remove(r.code));
-      audit.write(socket.data.actor || HOST_ACTOR, 'room.remove', r.code, (r.name || '(no name)') + ' (' + hallWords(r.hall) + ')' + gone.row, socket.data.ip);
+      const removed = store.remove(r.code);
+      const gone = said(removed);
+      const pruned = removed.back.includes(r.code) ? [] : accounts.prune({ rooms: [r.code] });
+      audit.write(by, 'room.remove', r.code, (r.name || '(no name)') + ' (' + hallWords(r.hall) + ')' + gone.row + updated(pruned.length), socket.data.ip);
       const purged = gone.purge ? await removeUnused(files) : 0;
       return ok(ack)({ ok: true, purged, ...gone.answer });
     }
-    const gone = said(store.removeHall(r.code));
+    const removed = store.removeHall(r.code);
+    const gone = said(removed);
+    const sides = rooms.slice(1);
+    // Each side room went first, and is written first, one row each by its key, as one removed alone is; then the hall.
+    const hallName = r.name || '(no name)';
+    const touched = new Set();
+    for (const x of sides) {
+      const comes = removed.back.includes(x.code);
+      const pruned = comes ? [] : accounts.prune({ rooms: [x.code] });
+      for (const id of pruned) touched.add(id);
+      audit.write(by, 'room.remove', x.code, (x.name || '(no name)') + ' (' + hallName + '), with its hall' + (comes ? ': it opens again at the next start' : '') + updated(pruned.length), socket.data.ip);
+    }
+    if (!removed.back.includes(r.code)) for (const id of accounts.prune({ halls: [r.code] })) touched.add(id);
     if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
     for (const d of displays.ofHall(r.code)) revokeDisplaySockets(d.id, 'This screen\'s hall was closed.');
     displays.removeHall(r.code);
@@ -2491,7 +2581,10 @@ io.on('connection', (socket) => {
     if (hallLinks.has(r.code)) forgetStagewatchPins(hallLinks.get(r.code));
     configureHallLink({ code: r.code });   // its own Stagewatch link, if it had one, stops
     boardDirty();
-    audit.write(socket.data.actor || HOST_ACTOR, 'hall.remove', r.code, (r.name || '(no name)') + (rooms.length > 1 ? ' with ' + plural(rooms.length - 1, 'other room') : '') + gone.row, socket.data.ip);
+    // What went, then its rooms by name and key, so the rows written about each can be read against it: as many as the
+    // row holds, the rest counted (each has its own room.remove row above). The accounts counted once each.
+    const head = hallName + (sides.length ? ' with ' + plural(sides.length, 'other room') : '') + gone.row + updated(touched.size);
+    audit.write(by, 'hall.remove', r.code, wordsWithList(head, sides.map((x) => (x.name || 'no name') + ' · ' + x.code)), socket.data.ip);
     const purged = gone.purge ? await removeUnused(files) : 0;
     ok(ack)({ ok: true, purged, ...gone.answer });
   });
@@ -2618,7 +2711,12 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const r = store.room(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
-    runAi(ack, (signal) => ai.summarise(aiKey(), { messages: r.messages, roomName: r.name }, signal));
+    // A side room's minutes name it with its hall ("Legal (Hall 2)"); its messages handed to the AI are a read of it,
+    // written as asked, since the AI's answer is not known yet.
+    runAi(ack, (signal) => {
+      readAsAdmin(socket.data.actor || HOST_ACTOR, socket.data.account, r, (n) => 'minutes of ' + n + ' asked of the AI', socket.data.ip);
+      return ai.summarise(aiKey(), { messages: r.messages, roomName: store.isMain(r) ? r.name : roomInHall(r) }, signal);
+    });
   });
   socket.on('admin:postSummary', ({ roomCode, text } = {}, ack) => {
     if (!admin(ack)) return;
@@ -3042,7 +3140,10 @@ function renderTranscriptHtml(room) {
     const cls = ['msg', 'type-' + m.type, m.priority ? 'priority' : ''].filter(Boolean).join(' ');
     rows.push('<article class="' + cls + '"><header><strong>' + who + '</strong><time>' + esc(fmt(m.at)) + '</time></header>' + extras + '<div class="body">' + content + '</div></article>');
   }
-  const title = room.name ? room.name + ' — transcript' : 'AGMessage transcript';
+  // A side room is named with its hall ("Legal (Hall 2)"), and by its key: an address, never a code a guest types.
+  const main = store.isMain(room);
+  const named = main ? room.name : roomInHall(room);
+  const title = named ? named + ' — transcript' : 'AGMessage transcript';
   return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>' +
     'body{font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;max-width:820px;margin:2rem auto;padding:0 1rem;color:#15202b}' +
     'h1{margin:.2rem 0}.meta{color:#6b7280;margin:.25rem 0 1.6rem}' +
@@ -3056,8 +3157,8 @@ function renderTranscriptHtml(room) {
     '.rx{font-size:.9rem;color:#374151;margin-top:.15rem}.prio{display:inline-block;background:#dc2626;color:#fff;padding:0 .35rem;border-radius:999px;font-size:.7rem;font-weight:700;margin-right:.3rem}' +
     '.pin{font-size:.8rem;color:#7a4d00;margin-right:.3rem}.fwd{font-size:.85rem;color:#6b7280;font-style:italic}' +
     '.sys{color:#6b7280;font-style:italic;text-align:center;margin:.25rem 0;font-size:.85rem}@media print{body{max-width:100%}.msg{break-inside:avoid;border-color:#aaa}}' +
-    '</style></head><body><h1>' + esc(room.name || 'AGMessage transcript') + '</h1>' +
-    '<p class="meta">Code <strong>' + esc(room.code) + '</strong> · Started ' + esc(fmt(room.createdAt)) + ' · ' + room.messages.length + ' entries · Generated ' + esc(fmt(Date.now())) + '</p>' +
+    '</style></head><body><h1>' + esc(named || 'AGMessage transcript') + '</h1>' +
+    '<p class="meta">' + (main ? 'Code' : 'Room key') + ' <strong>' + esc(room.code) + '</strong> · Started ' + esc(fmt(room.createdAt)) + ' · ' + room.messages.length + ' entries · Generated ' + esc(fmt(Date.now())) + '</p>' +
     rows.join('\n') + '<p class="meta" style="margin-top:2rem">— end of transcript —</p></body></html>';
 }
 
@@ -3185,8 +3286,17 @@ function nodesChanged() { for (const s of io.sockets.sockets.values()) if (s.dat
  * nodes.control in every hall — one hall's rights never move what every hall sees.
  */
 const mayDriveNode = (socket, link) => socket.data.isAdmin || !!(socket.data.account && rbac.can(socket.data.account, 'nodes.control', link.hall || undefined) && (link.hall || rbac.effective(socket.data.account).allHalls));
-/** The Stagewatch a node's proposals go to — its hall's (its own, else the default; the default for a node of every hall) — and whether it keeps a desk now. */
-const deskFor = (node) => { const l = linkFor(node.hall || ''); return { link: l, desk: !!(l.linked && l.desk && !l.deskRefusal) }; };
+/**
+ * The Stagewatch a node's proposals go to — its hall's (its own, else the default; the default for a node of every hall)
+ * — and whether it keeps a desk now. A node linked for a hall that has been closed goes to none (`link: null`): a hall's
+ * proposals never reach another hall's show caller, the default's included, so a link the admin has not moved fails
+ * closed until it is linked again for a hall or for every hall.
+ */
+const deskFor = (node) => {
+  if (node.hall && !store.has(node.hall)) return { link: null, desk: false };
+  const l = linkFor(node.hall || '');
+  return { link: l, desk: !!(l.linked && l.desk && !l.deskRefusal) };
+};
 
 // Stage sends waiting for the speaker: "<link>:<Stagewatch message id>" -> the AGMessage messages that show its state.
 // A Stagewatch numbers its own messages, from 1 again when it restarts: two halls' Stagewatches can both send message 12,
@@ -4153,7 +4263,7 @@ function firstWrites() {
 // by its socket's id alone (`sendTo`, over io's open sockets, read by the gate's module and never handed in), never a
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
-  store, apply, systemMessage, buildMessage, removeUnused, fileNamesOf, audit, accounts, boardDirty, settings, linkFor, stagePayload, io,
+  store, apply, systemMessage, buildMessage, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, settings, linkFor, stagePayload, io,
 });
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.

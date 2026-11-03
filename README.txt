@@ -62,6 +62,13 @@ First time on a new laptop
 5. Halls -> New hall: one per hall in use (e.g. "Hall 3", "Hall 4"). Each
    hall gets a 6-character code (e.g. K7P2QX) for the people who join
    without an account: presenters on stage, board members, guests.
+   A hall can have rooms of its own beside its Main room (Legal, Media):
+   on the admin page, a hall's ⋯ -> New room in this hall..., then its
+   name. Each room is listed under its hall, with Watch, Rename...,
+   Clear messages... and Remove room... in its ⋯. A room's guest code is
+   off: it is for the admin and the accounts given it. When the admin
+   enters, watches, prints or summarises a room their account is not
+   given, the audit log says so (room.read).
 
 6. In the black window you will see a line like:
 
@@ -348,9 +355,10 @@ back to the box. An observer reads a question's answers as words.
 
 The other pages work the same way. On the admin page each hall, person,
 message of the live feed, linked Patterns or PlayMap, the Stagewatch
-link and the internet link's card has its ⋯ (Close hall..., Clear
-messages..., Log out..., Delete for everyone..., Set up..., Turn off...
-and the rest ask first). Linking a Patterns or PlayMap is one small
+link and the internet link's card has its ⋯ (Close hall..., Remove
+room..., Clear messages..., Log out..., Delete for everyone..., Set
+up..., Turn off... and the rest ask first; New room in this hall... and
+Rename... ask for the name). Linking a Patterns or PlayMap is one small
 form: its pairing token, the hall from a list, and the start of its
 certificate's fingerprint. On the halls board a hall's name opens it (a
 middle click opens a new tab), and its ⋯ has Open in a new tab, Copy

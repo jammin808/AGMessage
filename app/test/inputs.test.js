@@ -87,12 +87,15 @@ test('client values are read by their type: a value String() cannot convert reac
     [ctl, 'display:take', { id: made.display.id, content: { kind: 'message', text: U } }], [ctl, 'display:create', { code: hall, name: U }],
     [ctl, 'admin:settings', { requireHttps: U, remoteAdmin: U, stagewatchUrl: U }], [ctl, 'nodes:link', { id: U, token: U }],
     [ctl, 'admin:tunnelUntil', { until: U }],
+    [ctl, 'room:create', { hall: U, name: U }], [ctl, 'room:create', { hall, name: U }], [ctl, 'room:update', { code: U, name: U }], [ctl, 'room:settings', { code: U }],
   ];
   for (const [s, ev, arg] of cases) {
     const r = await send(s, ev, arg);
     assert.notEqual(r, 'silence', ev + ' ' + JSON.stringify(arg) + ' is answered');
     if (ev === 'react') assert.deepEqual(r, { ok: false, error: 'Say whether to add the reaction or take it away.' }, 'a reaction\'s `on` that is no boolean is read, and refused');
     if (ev === 'admin:tunnelUntil') assert.deepEqual(r, { ok: false, error: 'Give the end as a time of day, HH:MM by this laptop\'s clock (for example 23:30).' }, 'an end that is no string is read, and refused');
+    // A room's hall, key and name that are no strings are read as none, and refused for it: no room is made or named.
+    if (ev.startsWith('room:')) assert.deepEqual(r, { ok: false, error: arg.hall === hall ? 'Name the room (for example Legal).' : ev === 'room:create' ? 'No such hall.' : 'No such room.' }, ev + ' ' + JSON.stringify(arg));
     await new Promise((resolve) => setTimeout(resolve, 250));   // under every per-socket rate limit
   }
   const health = await api(base, 'GET', '/api/health', undefined, { cookie: admin });

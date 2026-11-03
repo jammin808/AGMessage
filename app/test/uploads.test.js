@@ -169,10 +169,11 @@ test('a file a hall\'s side room holds is in use: the Main room\'s reset keeps i
   assert.equal(await served('legal.txt'), 404);
   assert.deepEqual(roomFiles(), [], 'no file of the hall or its room is left');
   assert.deepEqual([(await health()).rooms, (await health()).sideRooms], [0, 0]);
-  assert.deepEqual(audit('hall.remove'), [['HALLA1', 'Hall A with 1 other room, files removed']]);
+  assert.deepEqual(audit('hall.remove'), [['HALLA1', 'Hall A with 1 other room, files removed: Legal · LGQ4MZP8']]);
+  assert.deepEqual(audit('room.remove'), [['MDR7VX2C', 'Media (Hall A), files removed'], ['LGQ4MZP8', 'Legal (Hall A), with its hall']], 'its room\'s own row too');
 });
 
-test('a side room whose snapshot another program holds: gone from this run, said to the admin, in its row and on the console, its uploads kept, and back at the next start', async (t) => {
+test('a side room whose snapshot another program holds: gone from this run, said to the admin, in its row and on the console, its uploads and its accounts kept, and back at the next start; likewise a hall', async (t) => {
   const data = tmp('agm-side-');
   const uploads = tmp('agm-up-');
   const rooms = path.join(data, 'rooms');
@@ -182,9 +183,14 @@ test('a side room whose snapshot another program holds: gone from this run, said
   const room = (code, roomName, messages) => JSON.stringify({ code, name: roomName, createdAt: 1, seq: messages.length, settings: {}, messages, savedAt: 1, gone: [] });
   fs.writeFileSync(path.join(rooms, 'HALLA1.json'), room('HALLA1', 'Hall A', []));
   fs.writeFileSync(path.join(rooms, 'HALLA1.LGQ4MZP8.json'), room('LGQ4MZP8', 'Legal', [{ id: 'm1', type: 'file', url: '/uploads/' + upload, filename: 'legal.txt', at: 1, seq: 1, from: { uid: 'u1', name: 'Ana', role: 'research' } }]));
+  // An account given the hall and its room, as the store keeps them (no page gives an account a room yet).
+  const accountsFile = path.join(data, 'accounts.json');
+  fs.writeFileSync(accountsFile, JSON.stringify({ v: 1, users: [{ id: 'a1', username: 'tom', name: 'Tom', role: 'tech', hash: 'x', createdAt: 1, halls: ['HALLA1'], rooms: ['LGQ4MZP8'] }] }));
+  const tom = () => { const u = JSON.parse(fs.readFileSync(accountsFile, 'utf8')).users[0]; return { halls: u.halls, rooms: u.rooms }; };
   // test/busy-preload.js: the room's snapshot cannot be removed, as when an antivirus or a backup holds it.
   const preload = '--require "' + path.join(__dirname, 'busy-preload.js').split(path.sep).join('/') + '"';
-  let srv = await startServer({ AGM_DATA_DIR: data, AGM_UPLOAD_DIR: uploads, NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '), AGM_TEST_UNREMOVABLE: 'HALLA1.LGQ4MZP8.json' });
+  const holding = (file) => ({ AGM_DATA_DIR: data, AGM_UPLOAD_DIR: uploads, NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '), AGM_TEST_UNREMOVABLE: file });
+  let srv = await startServer(holding('HALLA1.LGQ4MZP8.json'));
   const sockets = [];
   t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const admin = (await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).cookie;
@@ -199,15 +205,38 @@ test('a side room whose snapshot another program holds: gone from this run, said
   assert.equal((await health()).sideRooms, 0, 'gone from this run');
   assert.equal((await fetch(srv.base + '/uploads/' + upload)).status, 200, 'its upload kept for it');
   assert.deepEqual(fs.readdirSync(rooms).filter((f) => f.startsWith('HALLA1.LGQ4MZP8')).sort(), ['HALLA1.LGQ4MZP8.json', 'HALLA1.LGQ4MZP8.log'], 'its backup went first; its snapshot held, it and its log stay, so it loads again whole');
-  const rows = fs.readFileSync(path.join(data, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action === 'room.remove');
-  assert.deepEqual(rows.map((e) => [e.target, e.words]), [['LGQ4MZP8', 'Legal (Hall A), the files of 1 room held by another program and kept: it opens again at the next start']]);
+  const rows = (action) => fs.readFileSync(path.join(data, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action === action).map((e) => [e.target, e.words]);
+  assert.deepEqual(rows('room.remove'), [['LGQ4MZP8', 'Legal (Hall A), the files of 1 room held by another program and kept: it opens again at the next start']], 'no account updated');
   assert.match(srv.out(), /Could not remove HALLA1\.LGQ4MZP8\.json \(EBUSY\): it and the files of its room after it stay on disk/);
+  // The account given the room keeps it: the room comes back with its members.
+  assert.deepEqual(tom(), { halls: ['HALLA1'], rooms: ['LGQ4MZP8'] });
   sockets.forEach((s) => s.close());
   sockets.length = 0;
   await stopServer(srv.child);
   srv = await startServer({ AGM_DATA_DIR: data, AGM_UPLOAD_DIR: uploads });
   const back = await api(srv.base, 'GET', '/api/health', undefined, { cookie: (await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).cookie });
   assert.equal(back.body.sideRooms, 1, 'back at the next start, as the admin was told');
+  assert.deepEqual(tom(), { halls: ['HALLA1'], rooms: ['LGQ4MZP8'] }, 'and given to the account that had it');
+
+  // The hall's own snapshot held: the hall comes back, its room does not (its files went). The account keeps the hall
+  // and is given the room no more, counted in the room's row and once in the hall's.
+  await stopServer(srv.child);
+  srv = await startServer(holding('HALLA1.json'));
+  const adm2 = await connect(srv.base, (await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).cookie);
+  sockets.push(adm2);
+  const hall = await emit(adm2, 'admin:deleteRoom', { roomCode: 'HALLA1', purgeFiles: true });
+  assert.deepEqual([hall.ok, hall.purged, hall.kept], [true, 0, 1], JSON.stringify(hall));
+  assert.deepEqual(rows('room.remove').slice(1), [['LGQ4MZP8', 'Legal (Hall A), with its hall, 1 account updated']]);
+  assert.deepEqual(rows('hall.remove'), [['HALLA1', 'Hall A with 1 other room, the files of 1 room held by another program and kept: it opens again at the next start, 1 account updated: Legal · LGQ4MZP8']]);
+  await until(() => tom().rooms.length === 0, 3000, 'the account saved');
+  assert.deepEqual(tom(), { halls: ['HALLA1'], rooms: [] });
+  assert.equal((await fetch(srv.base + '/uploads/' + upload)).status, 200, 'the hall\'s uploads kept for it');
+  sockets.forEach((s) => s.close());
+  sockets.length = 0;
+  await stopServer(srv.child);
+  srv = await startServer({ AGM_DATA_DIR: data, AGM_UPLOAD_DIR: uploads });
+  const after = await api(srv.base, 'GET', '/api/health', undefined, { cookie: (await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).cookie });
+  assert.deepEqual([after.body.rooms, after.body.sideRooms], [1, 0], 'the hall back, its room not');
 });
 
 test('a file nobody posted is removed after a while; a posted one stays', async (t) => {

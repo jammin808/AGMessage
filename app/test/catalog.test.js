@@ -32,6 +32,8 @@ const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:
   'message',
   // the admin page, the halls board and the Accounts page (adminRoom, person, adminMsg, link, tunnel, hall, help, account, audit)
   'admin:watchRoom', 'admin:summary', 'admin:invites', 'admin:resetRoom', 'admin:deleteRoom', 'admin:setRole', 'admin:linkRoom', 'admin:unlinkRoom', 'admin:kick', 'admin:deleteMessage',
+  // a hall's rooms made and renamed (adminRoom)
+  'room:create', 'room:update',
   'admin:settings', 'nodes:link', 'nodes:unlink', 'nodes:acceptCertificate', 'nodes:command', 'admin:acceptCertificate', 'admin:tunnelStart', 'admin:tunnelStop', 'admin:tunnelStatus', 'admin:tunnelUntil',
   // "This laptop" (laptop)
   'admin:laptop',
@@ -130,7 +132,11 @@ const PAGE = {
 };
 const ENTRY = { seq: 12, at, action: 'user.update', actor: { t: 'account', id: 'a-ana', name: 'Ana' }, target: 'kim', words: 'role → tech', mark: 'intact' };
 const PAGE_OBJECTS = {
-  adminRoom: { listed: { code: 'K7P2QX', name: 'Hall 2', hall: 'Hall 2', watched: false }, watched: { code: 'K7P2QX', name: 'Hall 2', hall: 'Hall 2', watched: true } },
+  adminRoom: {
+    listed: { code: 'K7P2QX', name: 'Hall 2', hall: 'Hall 2', main: true, watched: false }, watched: { code: 'K7P2QX', name: 'Hall 2', hall: 'Hall 2', main: true, watched: true },
+    // A side room beside Hall 2, by its key, in the list and watched.
+    side: { code: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2 › Legal', main: false, watched: false }, sideWatched: { code: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2 › Legal', main: false, watched: true },
+  },
   person: {
     guest: { socketId: 's-kim', uid: 'u-kim', name: 'Kim', role: 'research', account: false, linkedRooms: [], hall: 'Hall 2' },
     account: { socketId: 's-ana', uid: 'a-ana', name: 'Ana', role: 'research', account: true, linkedRooms: ['M3N4PQ'], hall: 'Hall 2' },
@@ -592,11 +598,15 @@ test('the other pages\' facts: read from the server\'s answers, and nothing a pa
 test('the other pages\' matrix: what each seat is shown on each object of the admin page, the halls board and the Accounts page', () => {
   const O = PAGE_OBJECTS;
   const M = [
-    // A hall: Watch, its transcript, the minutes and its seats' lock; clearing and closing it last. Watched, no Watch.
-    ['adminRoom', 'admin', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.clear', 'adminRoom.remove']],
-    ['adminRoom', 'admin', O.adminRoom.watched, ['adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.clear', 'adminRoom.remove']],
-    ['adminRoom', 'manager', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.clear', 'adminRoom.remove']],
+    // A hall: Watch, its transcript, the minutes and its seats' lock, a room made in it, its name; clearing and closing it
+    // last. Watched, no Watch. A side room: the same but its seats' lock (its guest code's) and a room made in it.
+    ['adminRoom', 'admin', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.create', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'admin', O.adminRoom.watched, ['adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.create', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'manager', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.create', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'admin', O.adminRoom.side, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'admin', O.adminRoom.sideWatched, ['adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
     ['adminRoom', 'notAdmin', O.adminRoom.listed, []],
+    ['adminRoom', 'notAdmin', O.adminRoom.side, []],
     // A person: a code guest's seat is the admin's to set; an account's follows its rights (no Seat).
     ['person', 'admin', O.person.guest, ['person.seat', 'person.forward', 'person.view', 'person.kick']],
     ['person', 'admin', O.person.account, ['person.forward', 'person.unforward', 'person.view', 'person.kick']],
@@ -673,7 +683,8 @@ test('the other pages: what may be done but not now is shown, disabled, with the
   assert.equal(why('link', 'admin', O.link.nodeWaits)['link.propose'], 'PlayMap 1\'s lines go to the show desk, and its Stagewatch keeps none now — nothing can be proposed.');
   // Not connected: an act on something says so; one that sends nothing (the transcript, a copy) goes on.
   assert.deepEqual(why('adminRoom', 'adminOffline', O.adminRoom.listed), {
-    'adminRoom.watch': C.WORDS.offline, 'adminRoom.transcript': '', 'adminRoom.minutes': C.WORDS.offline, 'adminRoom.invites': C.WORDS.offline, 'adminRoom.clear': C.WORDS.offline, 'adminRoom.remove': C.WORDS.offline,
+    'adminRoom.watch': C.WORDS.offline, 'adminRoom.transcript': '', 'adminRoom.minutes': C.WORDS.offline, 'adminRoom.invites': C.WORDS.offline,
+    'adminRoom.create': C.WORDS.offline, 'adminRoom.rename': C.WORDS.offline, 'adminRoom.clear': C.WORDS.offline, 'adminRoom.remove': C.WORDS.offline,
   });
   assert.deepEqual(why('adminMsg', 'adminOffline', O.adminMsg.text), { 'adminMsg.copy': '', 'adminMsg.delete': C.WORDS.offline });
   // "This laptop": Refresh while Windows is read says so, and offline says so too; a copy sends nothing, so it goes on.
@@ -688,6 +699,7 @@ test('the other pages: the inline bar, the asks and their words, the caps and th
   const bar = (kind, seat, o) => plain(C.inline(kind, PAGE[seat], o)).map((i) => i.id);
   assert.deepEqual(bar('adminRoom', 'admin', O.adminRoom.listed), ['adminRoom.watch'], 'a hall in the list: Watch');
   assert.deepEqual(bar('adminRoom', 'admin', O.adminRoom.watched), [], 'the watched hall\'s header: only ⋯');
+  assert.deepEqual([bar('adminRoom', 'admin', O.adminRoom.side), bar('adminRoom', 'admin', O.adminRoom.sideWatched)], [['adminRoom.watch'], []], 'a side room\'s row as a hall\'s');
   assert.deepEqual(bar('person', 'admin', O.person.guest), [], 'a person\'s row keeps its Seat select, and a ⋯');
   assert.deepEqual(bar('link', 'admin', O.link.heardStagewatch), ['link.use']);
   assert.deepEqual(bar('link', 'admin', O.link.nodeWaits), ['link.confirm', 'link.setup']);
@@ -713,6 +725,21 @@ test('the other pages: the inline bar, the asks and their words, the caps and th
   const ask = (kind, id, seat, o) => plain(C.entry(kind, id).confirm(PAGE[seat], o));
   assert.deepEqual(ask('adminRoom', 'adminRoom.clear', 'admin', O.adminRoom.listed), { title: 'Clear every message in Hall 2?', words: 'Files used nowhere else go too. Everyone stays in the hall. This cannot be undone.', yes: 'Clear messages', no: 'Keep them', danger: true });
   assert.deepEqual(ask('adminRoom', 'adminRoom.remove', 'admin', O.adminRoom.listed).fields, [{ name: 'purge', type: 'checkbox', label: 'Also delete the files shared only in this hall', value: true }]);
+  // A side room is named with its hall, and removed as a room: the hall and its other rooms stay.
+  const label = (id, o) => C.entry('adminRoom', id).label(PAGE.admin, o);
+  assert.deepEqual([label('adminRoom.remove', O.adminRoom.listed), label('adminRoom.remove', O.adminRoom.side)], ['Close hall…', 'Remove room…']);
+  assert.deepEqual(ask('adminRoom', 'adminRoom.clear', 'admin', O.adminRoom.side), { title: 'Clear every message in Hall 2 › Legal?', words: 'Files used nowhere else go too. Everyone stays in the room. This cannot be undone.', yes: 'Clear messages', no: 'Keep them', danger: true });
+  assert.deepEqual(ask('adminRoom', 'adminRoom.remove', 'admin', O.adminRoom.side), {
+    title: 'Remove room Hall 2 › Legal?', words: 'Everyone in it is sent out and its saved history is deleted; the hall and its other rooms stay. Open its transcript first if you need it.',
+    fields: [{ name: 'purge', type: 'checkbox', label: 'Also delete the files shared only in this room', value: true }], yes: 'Remove and delete', no: 'Keep it', danger: true });
+  // A room is made in a hall by its name, and a hall or a room renamed in place, its name as it is now filled in.
+  assert.deepEqual(ask('adminRoom', 'adminRoom.create', 'admin', O.adminRoom.listed), {
+    title: 'New room in Hall 2', words: 'A room of its own beside the hall\'s Main room (Legal, Media), with its own messages and people. Its guest code is off: the admin, and the accounts given it, go in.',
+    fields: [{ name: 'name', label: 'Room name (for example Legal)', max: 80 }], yes: 'Make the room', no: 'Cancel' });
+  assert.deepEqual([ask('adminRoom', 'adminRoom.rename', 'admin', O.adminRoom.listed).fields, ask('adminRoom', 'adminRoom.rename', 'admin', O.adminRoom.side).fields],
+    [[{ name: 'name', label: 'Hall name', value: 'Hall 2', max: 80 }], [{ name: 'name', label: 'Room name', value: 'Legal', max: 80 }]]);
+  assert.deepEqual([ask('adminRoom', 'adminRoom.rename', 'admin', O.adminRoom.side).title, ask('adminRoom', 'adminRoom.rename', 'admin', O.adminRoom.side).words],
+    ['Rename Hall 2 › Legal', 'The room\'s new name, on its pages. Its people and messages stay.']);
   assert.deepEqual(ask('adminMsg', 'adminMsg.delete', 'admin', O.adminMsg.text), { title: 'Delete this message for everyone in Hall 2?', words: '“Capex is on slide 14” goes from every page in the hall now. This cannot be undone.', yes: 'Delete for everyone', no: 'Keep it', danger: true });
   assert.deepEqual([ask('person', 'person.kick', 'admin', O.person.guest).words, ask('person', 'person.kick', 'admin', O.person.account).words, ask('person', 'person.kick', 'admin', O.person.guest).no],
     ['Every page Kim has open here closes. Kim can join again with the code.', 'Every page Ana has open here closes. Ana\'s account still has Hall 2 and can open it again. To keep Ana out, take Hall 2 off the account on the Accounts page.', 'Keep Kim in'], 'Log out says, by case, whether they can come back');

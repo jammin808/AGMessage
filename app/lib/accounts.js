@@ -265,6 +265,38 @@ class Accounts {
   remove(id) { const ok = this.users.delete(id); if (ok) this.save(); return ok; }
 
   /**
+   * Keys of halls and rooms that are gone, taken out of every account that names one: its halls and its On stage halls
+   * (`halls`, `board`) and its side rooms (`rooms`). A key no room has reaches nothing, so this changes no right that
+   * acts (no page is ended, no account's row is written). Saved through the lane once; returns the ids of the accounts it
+   * changed, so a removal that prunes in steps counts each account once.
+   */
+  prune({ halls = [], rooms = [] } = {}) {
+    const fields = [['halls', new Set(halls)], ['board', new Set(halls)], ['rooms', new Set(rooms)]];
+    const changed = [];
+    for (const a of this.users.values()) {
+      let touched = false;
+      for (const [field, gone] of fields) {
+        if (!Array.isArray(a[field]) || !a[field].some((k) => gone.has(k))) continue;
+        a[field] = a[field].filter((k) => !gone.has(k));
+        touched = true;
+      }
+      if (touched) changed.push(a.id);
+    }
+    if (changed.length) this.save();
+    return changed;
+  }
+
+  /**
+   * Whether an account names `code` among its halls, its On stage halls or its rooms: a new hall or room is made under
+   * none of those, so a key an account still holds (one a page saved back after its hall closed, one a room that comes
+   * back at the next start keeps) is never opened to it by another hall made later.
+   */
+  names(code) {
+    for (const a of this.users.values()) for (const f of ['halls', 'board', 'rooms']) if (Array.isArray(a[f]) && a[f].includes(code)) return true;
+    return false;
+  }
+
+  /**
    * Check a username and password: {account, rehash}, or {error, reason} — the same work and the same words for an
    * unknown name, a wrong password and a turned-off account, so the answer never says which names exist or that a
    * password was right; `reason` (unknown, wrong, disabled) is for the audit log only. {busy} or {abandoned} when the

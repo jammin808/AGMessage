@@ -600,7 +600,7 @@ function narrowProblems(sources) {
       // What the takes context does not hold is not asked of it (io is named nowhere, above): it would be undefined.
       for (const name of gateLib.ROOM_SENDS.filter((n) => n !== 'io')) {
         for (const p of pathsOf(code, name)) if (p.root === 'ctx' || (inDestructuring(p) && closesOnCtx(p.after.replace(/^:\s*[\w$]+/, '').trimStart()))) {
-          at(p.index, 'takes ' + name + ' from ctx, which the takes context does not hold: a take makes no room\'s op');
+          at(p.index, 'takes ' + name + ' from ctx, which the takes context does not hold: a take makes no room or room\'s op');
         }
       }
     }
@@ -703,7 +703,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'buildMessage', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'settings', 'linkFor', 'stagePayload', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'buildMessage', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'settings', 'linkFor', 'stagePayload', 'io']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -911,15 +911,17 @@ test('(j) a planted take that names a room or a broadcast, a right asked of rbac
     ["conn.socket.join('ABC234');", 'names socket.join(: ' + never], ['socket.leave(code);', 'names socket.leave(: ' + never],
     ['const s = conn.socket;', 'takes the socket under another name, where its rooms and broadcasts cannot be read'],
     ['const { socket: s } = conn;', 'takes the socket under another name, where its rooms and broadcasts cannot be read'],
-    ['const { apply } = ctx;', 'takes apply from ctx, which the takes context does not hold: a take makes no room\'s op'],
-    ['const { audit, systemMessage: say } = ctx;', 'takes systemMessage from ctx, which the takes context does not hold: a take makes no room\'s op'],
-    ["ctx.systemMessage(conn.room(), 'x');", 'takes systemMessage from ctx, which the takes context does not hold: a take makes no room\'s op'],
+    ['const { apply } = ctx;', 'takes apply from ctx, which the takes context does not hold: a take makes no room or room\'s op'],
+    ['const { audit, systemMessage: say } = ctx;', 'takes systemMessage from ctx, which the takes context does not hold: a take makes no room or room\'s op'],
+    ["ctx.systemMessage(conn.room(), 'x');", 'takes systemMessage from ctx, which the takes context does not hold: a take makes no room or room\'s op'],
+    ["const { newSideRoom } = ctx;\nnewSideRoom(hall, 'Legal');", 'takes newSideRoom from ctx, which the takes context does not hold: a take makes no room or room\'s op'],
+    ["ctx.renameRoom(conn.room(), 'Legal');", 'takes renameRoom from ctx, which the takes context does not hold: a take makes no room or room\'s op'],
   ]) assert.deepEqual(takes(line), ['lib/handlers/takes.js:3: ' + words], line);
   assert.deepEqual(run(ROOMS, "const { store, apply, systemMessage } = ctx;\nstore.commit(room, op);\nconst r = conn.socket;"), [], 'the rooms module is given the room\'s op');
   // The review's plant: a take that makes a system line, an op and a commit, and joins another hall's room.
   assert.deepEqual(takes("const { apply, systemMessage, store } = ctx;\nsystemMessage(conn.room(), 'x'); apply(conn.room(), { o: 'add', m: {} }); store.commit(conn.room(), {}); conn.socket.join('ABC234');"), [
-    'lib/handlers/takes.js:3: takes apply from ctx, which the takes context does not hold: a take makes no room\'s op',
-    'lib/handlers/takes.js:3: takes systemMessage from ctx, which the takes context does not hold: a take makes no room\'s op',
+    'lib/handlers/takes.js:3: takes apply from ctx, which the takes context does not hold: a take makes no room or room\'s op',
+    'lib/handlers/takes.js:3: takes systemMessage from ctx, which the takes context does not hold: a take makes no room or room\'s op',
     'lib/handlers/takes.js:4: names socket.join(: ' + never,
     'lib/handlers/takes.js:4: ' + store,
   ]);
@@ -1457,7 +1459,8 @@ const ANY_ROOM = {
     'a file any room holds is in use: a hall\'s reset or deletion never removes one a side room still holds',
     'the admin\'s transcript of any room',
     'health\'s sideRooms: every room but the halls',
-    'a new hall\'s key is no room\'s, side rooms included',
+    'a new hall\'s or side room\'s key is no room\'s, side rooms included',
+    'a room\'s name is one no other room of its hall has, its Main room\'s (the hall\'s) included, made, renamed or set up',
     '"This laptop"\'s Pages row names the room a hall page on another build is in, a side room by its hall\'s name and its own',
     'an account and the admin\'s support view join a room by its key (a guest\'s code names a hall)',
     'a page\'s room is still here, Main or side',
@@ -1468,6 +1471,7 @@ const ANY_ROOM = {
     'a send to the speaker\'s screen is written into the room it came from only while that room is still kept',
     'and a proposal to the show desk likewise',
     'an admin\'s link names its room by its name',
+    'the admin\'s room list: each hall\'s side rooms beside it',
     'the admin\'s watch of any room',
     'the admin\'s reset of any room',
     'the admin\'s removal of any room',
@@ -1486,6 +1490,12 @@ const ANY_ROOM = {
     'a hall that follows another Stagewatch tells every room it holds',
     'a Stagewatch\'s frame reaches every room of each hall that follows it',
     'after a stop that did not save, every room says AGMessage restarted',
+  ],
+  'lib/handlers/rooms.js': [
+    'a hall full of rooms says how many it holds',
+    'a room renamed by its key, Main or side',
+    'a room\'s settings read by its key, Main or side',
+    'and its hall\'s rooms, Main first',
   ],
 };
 /** A call to one of the store's any-room readers, however it is spaced. */

@@ -840,7 +840,7 @@
       const words = gone || C.WORDS.gone;
       const head = header || (() => undefined);
       const handle = menu(list, at || { anchor }, {
-        label, header: head(o), opener: from, goneWords: C.WORDS.gone,
+        label: typeof label === 'function' ? label(o) : label, header: head(o), opener: from, goneWords: C.WORDS.gone,
         onPick: (id, value, item) => { const now = get(); if (now) act(kind, id, now, { anchor, node, value, item, opener: from, get, gone: words, refocus }); else say(words, true); },
         onDisabled: (w) => say(w, true),
         submenu: (item) => C.submenu(kind, item.id, facts(), get() || o) || (submenu ? submenu(item, get() || o) : []),
@@ -892,7 +892,8 @@
     /**
      * The doors of a kind's objects in `container`: a click on an act or the ⋯, a single key on the focused object, and
      * right-click, Shift+F10 and the menu key (menu.door). `spec.find(el)` answers the object's element under `el`
-     * (`[data-key]`), or null; `spec.get(key)` the object as it is now, or null; `label`, `header(o)`, `gone` (the words
+     * (`[data-key]`), or null; `spec.get(key)` the object as it is now, or null; `label` (words, or the object's words:
+     * `label(o)`), `header(o)`, `gone` (the words
      * when it went), `submenu(item, o)` (values the catalogue does not hold, asked when a submenu opens), `refocus(o)`.
      */
     function bind(container, spec) {

@@ -62,6 +62,15 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   account of every hall's included. Asked of `rbac.can` by a hall's code, those three are refused whoever asks, so a
   check left on a room's key where a hall's was meant fails closed instead of letting every account of every hall in. A
   code guest's rights are its seat's, by the kind of room it sits in, from one table (`rbac.guestCaps`).
+- A hall's rooms are made and renamed by those who set halls up (`halls.manage`, the admin) and cleared and removed by
+  the admin, each one audit row. A side room's key is an address, never a credential: no lookup or join takes it from a
+  guest, and a hall's verbs (screens, Stagewatch, show network, Set up) refuse it. The admin's reads of a side room its
+  account is not given (entering it, a watch, a transcript, a person's view, the AI's minutes) are each a `room.read` row,
+  the laptop's token's always; never what was read. A room or hall removed is taken out of every account that named it
+  (one whose files another program held comes back at the next start, with the accounts given it), and no new hall or
+  room is made under a key a room, an account or a node's link still names, so a hall made later is never open to the
+  accounts that held one before it under the same code; a Patterns or PlayMap linked for a hall that has been closed
+  proposes to no show desk.
 - The laptop's admin token is said only where a person sits: the watchdog that makes it says it in its console window,
   never into output that is kept (a redirect, a log, a task's capture), and a server under its watchdog never prints it.
   The installed node writes it into a token folder of its own, which its admin and the accounts it gives `token` read,

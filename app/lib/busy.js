@@ -46,13 +46,13 @@ const INPUT = new Set([
   'admin:settings', 'admin:summary', 'admin:tunnelStart', 'admin:tunnelStop', 'admin:tunnelUntil', 'admin:unlinkRoom',
   'ai:draft', 'ai:options', 'delete', 'display:create', 'display:hallHolding', 'display:identify', 'display:remove',
   'display:rotate', 'display:take', 'display:update', 'forward', 'hall:acceptCertificate', 'hall:configure', 'help:respond',
-  'message', 'nodes:acceptCertificate', 'nodes:command', 'nodes:link', 'nodes:unlink', 'pin', 'react', 'stage:propose',
-  'stage:send',
+  'message', 'nodes:acceptCertificate', 'nodes:command', 'nodes:link', 'nodes:unlink', 'pin', 'react', 'room:create',
+  'room:update', 'stage:propose', 'stage:send',
 ]);
 const READS = new Set([
   'join', 'seen', 'myRooms', 'board:watch', 'userState:push', 'userState:requestPeers', 'stage:targets', 'display:list',
   'display:shown', 'hall:settings', 'nodes:list', 'admin:invites', 'admin:listRooms', 'admin:watchRoom', 'admin:laptop',
-  'admin:tunnelStatus', 'disconnect',
+  'admin:tunnelStatus', 'room:settings', 'disconnect',
 ]);
 
 /** A count as the line keeps it: a whole number from 0, anything else 0. */

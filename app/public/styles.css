@@ -1782,6 +1782,8 @@ h1[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 .room-list-item { display: flex; align-items: stretch; gap: var(--sp-1); }
 .room-list-item .room-pick { flex: 1 1 auto; min-width: 0; }
 .room-list-item:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; border-radius: var(--radius-sm); }
+/* A side room's row sits under its hall's, set in, its rule on the left the hall's own line down to it. */
+.room-list-item.side { margin-left: var(--sp-4); padding-left: var(--sp-2); border-left: 2px solid var(--border); }
 .admin-room-header .obj-bar { align-self: flex-start; }
 .person-row:focus-visible, .admin-msg:focus-visible, .link-row:focus-visible { outline: 2px solid var(--c-action); outline-offset: -2px; }
 .link-row { flex-wrap: wrap; justify-content: space-between; }

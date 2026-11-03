@@ -434,6 +434,30 @@ test('accounts: what an untouched editor sends back is no change; only a field t
   accounts.flush();
 });
 
+test('accounts: keys of halls and rooms that are gone pruned from every account that names one, once each, and a key still named known', () => {
+  const dir = tmp('agm-acc-');
+  const file = path.join(dir, 'accounts.json');
+  // As the store keeps them (no page gives an account rooms or On stage halls yet): written before the load.
+  const user = (id, username, more) => ({ id, username, name: username, role: 'tech', hash: 'x', createdAt: 1, ...more });
+  fs.writeFileSync(file, JSON.stringify({ v: 1, users: [
+    user('a1', 'tom', { halls: ['HALL01', 'HALL02'], rooms: ['LGQ4MZP8', 'PRS3SS45'], board: ['HALL02'] }),
+    user('a2', 'lou', { halls: ['HALL01'], rooms: ['LGQ4MZP8'] }),
+    user('a3', 'kim', { halls: ['HALL03'] }),
+  ] }));
+  const accounts = new acc.Accounts(file);
+  assert.deepEqual([accounts.names('HALL02'), accounts.names('PRS3SS45'), accounts.names('HALL09'), accounts.names('MDR7VX2C')], [true, true, false, false]);
+  // A side room: out of each account's rooms; the ids of the accounts changed, each once.
+  assert.deepEqual(accounts.prune({ rooms: ['LGQ4MZP8'] }), ['a1', 'a2']);
+  // A hall with its room: out of halls, On stage halls and rooms alike, an account changed in two fields counted once.
+  assert.deepEqual(accounts.prune({ halls: ['HALL02'], rooms: ['PRS3SS45'] }), ['a1']);
+  assert.deepEqual(accounts.prune({ halls: ['HALL09'] }), [], 'a key nobody names changes nobody');
+  assert.deepEqual(accounts.prune(), []);
+  accounts.flush();
+  const saved = Object.fromEntries(JSON.parse(fs.readFileSync(file, 'utf8')).users.map((u) => [u.username, [u.halls, u.rooms, u.board]]));
+  assert.deepStrictEqual(saved, { tom: [['HALL01'], [], []], lou: [['HALL01'], [], undefined], kim: [['HALL03'], undefined, undefined] }, 'saved through the lane');
+  assert.deepEqual([accounts.names('HALL02'), accounts.names('PRS3SS45'), accounts.names('HALL01')], [false, false, true]);
+});
+
 test('hashing: a check through the tunnel waits in a short queue of its own, leaves it when its request goes, and never holds the venue back', async () => {
   const stored = await acc.hashPassword('the green room kettle');
   const order = [];

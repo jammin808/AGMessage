@@ -2366,7 +2366,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       tagline: document.querySelector('#loginPanel .tagline').textContent, newHall: document.getElementById('newSessionBtn').textContent,
       halls: document.querySelector('.admin-sidebar h3').textContent, none: document.getElementById('noRooms').textContent,
       code: document.querySelector('#roomHeader span.muted').textContent, clear: AGM.catalog.entry('adminRoom', 'adminRoom.clear').label,
-      close: AGM.catalog.entry('adminRoom', 'adminRoom.remove').label, closing: AGM.catalog.entry('adminRoom', 'adminRoom.remove').confirm(ADMIN_F, roomObject('${code}')).title.slice(0, 11),
+      close: AGM.catalog.entry('adminRoom', 'adminRoom.remove').label(ADMIN_F, roomObject('${code}')), closing: AGM.catalog.entry('adminRoom', 'adminRoom.remove').confirm(ADMIN_F, roomObject('${code}')).title.slice(0, 11),
       people: document.querySelector('#usersSection h3').textContent, forward: document.querySelectorAll('.admin-users th')[2].textContent,
       local: document.querySelector('#tunnelOffState p').textContent.trim().split('\\n')[0], empty: [...document.querySelectorAll('#adminEmpty p')].map((p) => p.textContent) })`));
     report(JSON.stringify(adminDeck) === JSON.stringify({
@@ -2538,6 +2538,37 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const offWords = 'The internet link is off.';
     report(checkBtn === JSON.stringify({ disabled: 'true', title: offWords }) && checkSaid === offWords && checkItem === JSON.stringify({ disabled: 'true', why: offWords }) && checkItemSaid === offWords && checkSent === '[]',
       `a disabled act says why on its button, in its menu and when chosen, and sends nothing: Check again on an internet link that is off (${checkBtn}; ${checkItem}; said "${checkSaid}" and "${checkItemSaid}"; sent ${checkSent})`);
+    // A hall's rooms on the admin page: New room in this hall… from the watched hall's ⋯, asked in place, and the room is
+    // listed under its hall; its row opens the catalogue's set by right-click, ⋯ and Shift+F10 (no seats' lock and no room
+    // made in a room); Rename… names it again; watched, its header names it with its hall and by its key (room:settings);
+    // Remove room… takes it out of the list in place, the page and the hall as they were.
+    await admin.eval(`document.querySelector('#roomActs .obj-more').click()`);
+    await admin.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.create"]')`, 3000);
+    await admin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.create"]').click()`);
+    const sideCreateAsk = await admin.until(`(() => { const a = document.querySelector('.agm-ask'); const i = a && a.querySelector('input[name="name"]'); return !!i && document.activeElement === i && a.querySelector('.agm-ask-title').textContent; })()`, 3000);
+    await admin.eval(`(() => { document.querySelector('.agm-ask input[name="name"]').value = 'Legal'; document.querySelector('.agm-ask [data-answer=yes]').click(); })()`);
+    const sideKey = await admin.until(`(() => { const li = [...document.querySelectorAll('#roomList > li.side[data-key]')].find((x) => x.querySelector('.room-name').textContent === 'Legal'); return !!li && li.previousElementSibling && li.previousElementSibling.dataset.key === '${code}' && li.dataset.key; })()`, 5000);
+    await admin.eval(`window.__sideRow = document.querySelector('#roomList > li[data-key="${sideKey}"]')`);
+    // Its row's name says its hall to a screen reader, which hears the list flat: "Legal, a room of Smoke AGM …".
+    const sideRowName = await admin.eval(`window.__sideRow.querySelector('.room-pick').textContent`);
+    const sideDoors = await doorsOf(admin, 'adminRoom', 'window.__sideRow', `AGM.page.object('adminRoom', '${sideKey}')`, { ...PAGE_DOORS, hit: '.room-pick' });
+    report(sideCreateAsk === 'New room in Smoke AGM' && /^[A-Z2-9]{8}$/.test(sideKey || '') && /^Legal, a room of Smoke AGM0 people/.test(sideRowName || '') && doorsInStep(sideDoors) && sideDoors.want === JSON.stringify(['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']) && JSON.parse(adminDoors.header.want).includes('adminRoom.create'),
+      `New room in this hall… makes a room, listed under its hall and named with it, whose row opens the catalogue's set by right-click, ⋯ and Shift+F10 (${sideCreateAsk}; ${sideKey}; "${sideRowName}"; ${sideDoors.want}; ${sideDoors.right} / ${sideDoors.dots} / ${sideDoors.key}; ${sideDoors.inline})`);
+    await admin.eval(`window.__sideRow.querySelector('.obj-more').click()`);
+    await admin.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.rename"]')`, 3000);
+    await admin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.rename"]').click()`);
+    const sideRenameFilled = await admin.until(`(() => { const i = document.querySelector('.agm-ask input[name="name"]'); return !!i && i.value; })()`, 3000);
+    await admin.eval(`(() => { document.querySelector('.agm-ask input[name="name"]').value = 'Lawyers'; document.querySelector('.agm-ask [data-answer=yes]').click(); })()`);
+    const roomRenamed = await admin.until(`window.__sideRow.isConnected && window.__sideRow.querySelector('.room-name').textContent === 'Lawyers' && (document.getElementById('agmToast') || {}).textContent`, 5000);
+    await admin.eval(`window.__sideRow.querySelector('.room-pick').click()`);
+    const sideWatched = await admin.until(`(() => { const n = document.getElementById('watchedRoomName').textContent; return currentRoom && currentRoom.code === '${sideKey}' && n === 'Smoke AGM › Lawyers' && JSON.stringify([n, document.getElementById('watchedKeyWord').textContent, document.getElementById('watchedRoomCode').textContent]); })()`, 5000);
+    await admin.eval(`watchRoom('${code}')`);
+    await admin.until(`currentRoom && currentRoom.code === '${code}' && document.getElementById('watchedKeyWord').textContent === 'Code'`, 5000);
+    const sideRemoveAsk = JSON.parse(await askOn('window.__sideRow', 'adminRoom.remove'));
+    await admin.eval(`document.querySelector('.agm-ask [data-answer=yes]').click()`);
+    const sideRemoved = await admin.until(`!document.querySelector('#roomList > li[data-key="${sideKey}"]') && currentRoom && currentRoom.code === '${code}' && !document.getElementById('roomHeader').hidden && (document.getElementById('agmToast') || {}).textContent`, 5000);
+    report(sideRenameFilled === 'Legal' && roomRenamed === 'Renamed Lawyers.' && sideWatched === JSON.stringify(['Smoke AGM › Lawyers', 'Room key', sideKey]) && sideRemoveAsk.title === 'Remove room Smoke AGM › Lawyers?' && sideRemoveAsk.yes === 'Remove and delete' && sideRemoved === 'Removed Smoke AGM › Lawyers.',
+      `Rename… fills in the room's name and names it again; watched, the room is named with its hall, by its key; Remove room… takes it out of the list in place (${sideRenameFilled}; "${roomRenamed}"; ${sideWatched}; ${sideRemoveAsk.title}; "${sideRemoved}")`);
     await research.eval(`Promise.all([new Promise((r) => socket.emit('message', { type: 'help', category: 'Sound', text: 'radio mic 3 dead' }, r)), new Promise((r) => socket.emit('message', { type: 'action', text: 'Ready for Q&A?', options: ['Yes', 'No'] }, r))])`);
     // On stage, what is written stays in the room: no message offers ↗, a text, a file or a question, and nothing that
     // is not hidden is drawn for it; the Board's composer has no file or question door.

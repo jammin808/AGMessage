@@ -456,13 +456,15 @@ class RoomStore {
   /**
    * Remove a room and its files: a side room alone, a hall with its side rooms (`removeHall`). Returns the rooms removed,
    * the file of each whose files stay on disk because another program held it (`kept`, each said on the console:
-   * `_unlink`) and how many of the rooms removed load again at the next start for it (`again`).
+   * `_unlink`), and the keys of the rooms removed that load again at the next start for it (`back`) and how many
+   * (`again`): what names one of those (an account given it) is left to name it, since it comes back.
    */
   remove(key) {
     if (this.rooms.has(key)) return this.removeHall(key);
     const room = this.side.get(key);
     const kept = room ? this._drop(room) : this._unlink(key);
-    return { rooms: room ? [room] : [], kept, again: room && loadsAgain(kept) ? 1 : 0 };
+    const back = room && loadsAgain(kept) ? [room.code] : [];
+    return { rooms: room ? [room] : [], kept, again: back.length, back };
   }
 
   /**
@@ -472,9 +474,10 @@ class RoomStore {
    */
   removeHall(hall) {
     const rooms = this.roomsOf(hall);
-    const sides = rooms.slice(1).map((r) => this._drop(r));
+    const sides = rooms.slice(1).map((r) => [r.code, this._drop(r)]);
     const main = rooms.length ? this._drop(rooms[0]) : this._unlink(hall);
-    return { rooms, kept: [...sides.flat(), ...main], again: loadsAgain(main) ? 1 + sides.filter(loadsAgain).length : 0 };
+    const back = loadsAgain(main) ? [hall, ...sides.filter(([, kept]) => loadsAgain(kept)).map(([code]) => code)] : [];
+    return { rooms, kept: [...sides.flatMap(([, kept]) => kept), ...main], again: back.length, back };
   }
 
   /** Let a room go, its log closed, and remove its files; returns the files that stay (`_unlink`). */

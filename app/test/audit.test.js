@@ -66,6 +66,30 @@ const at = (file) => (p) => typeof p === 'string' && path.resolve(p) === path.re
 const restoreKeyDir = (was) => { if (was === undefined) delete process.env.AGM_KEY_DIR; else process.env.AGM_KEY_DIR = was; };
 
 // ---------------------------------------------------------------- the keyed chain
+test('an entry\'s words that end in a list hold as many names as fit, the rest counted, never a name cut part way', () => {
+  const { wordsWithList, WORDS_MAX } = audit;
+  assert.equal(WORDS_MAX, 300);
+  assert.equal(wordsWithList('Hall 2', []), 'Hall 2', 'no names, the head alone');
+  assert.equal(wordsWithList('Hall 2 with 2 other rooms', ['Legal · LGQ4MZP8', 'Media · MDR7VX2C']), 'Hall 2 with 2 other rooms: Legal · LGQ4MZP8, Media · MDR7VX2C');
+  const names = Array.from({ length: 20 }, (_, i) => 'Room ' + (i + 1) + ' · ' + 'ABCDEFGH');
+  const w = wordsWithList('Hall C with 20 other rooms', names);
+  assert.ok(w.length <= WORDS_MAX, w.length);
+  const m = /^Hall C with 20 other rooms: (.+) and (\d+) more$/.exec(w);
+  assert.ok(m, w);
+  const shown = m[1].split(', ');
+  assert.deepEqual(shown, names.slice(0, shown.length), 'whole names, in order');
+  assert.equal(shown.length + Number(m[2]), 20, 'the rest counted');
+  // One more name would not fit with its count beside it.
+  assert.ok(('Hall C with 20 other rooms: ' + names.slice(0, shown.length + 1).join(', ') + ' and ' + (19 - shown.length) + ' more').length > WORDS_MAX);
+  // A head that leaves no room for one name: the names counted alone.
+  const long = 'x'.repeat(280);
+  assert.equal(wordsWithList(long, names), long + ': 20 more');
+  // The last name fits without a count after it, where it would not with one.
+  const exact = 'y'.repeat(WORDS_MAX - 2 - names[0].length);
+  assert.equal(wordsWithList(exact, names.slice(0, 1)), exact + ': ' + names[0]);
+  assert.equal(wordsWithList(exact, names.slice(0, 2)), exact + ': 2 more');
+});
+
 test('keyed chain: each entry carries the log id, the key id and an HMAC under Ke; edits, a 0.5.1 forgery and relabels are found', async () => {
   const a = written(6);
   const ke = h.auditKeys()().entry;

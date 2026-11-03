@@ -58,6 +58,7 @@ const { WriteLane, writeFileAtomic, placeId } = require('./resilience');
 const rules = require('../verify/auditrules');
 
 const ROTATE_BYTES = 20 * 1024 * 1024;
+const WORDS_MAX = 300;   // an entry's words, in characters: a row written longer is cut at it
 const GENESIS = rules.GENESIS;
 const SLICE = 1000;        // lines checked between turns of the event loop
 const RECENT = 500;        // rows kept for the list
@@ -106,6 +107,24 @@ function sealRecord(rec, key) { return JSON.stringify({ ...rec, mac: hmac(key, J
 const keysFrom = (derive) => () => ({ entry: derive(LABELS.entry), head: derive(LABELS.head) });
 
 const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : v === undefined || v === null ? '' : String(v).slice(0, n));
+
+/**
+ * An entry's words that end in a list: `head`, then ': ' and the names joined with commas, as many as fit in an entry's
+ * words (WORDS_MAX), the rest counted ("…, Media · MDR7VX2C and 3 more"; "20 more" when not one fits), so a list is
+ * never cut part way through a name by the entry's own bound. No names, the head alone.
+ */
+function wordsWithList(head, names) {
+  if (!names.length) return head;
+  const room = WORDS_MAX - head.length - 2;
+  let out = '';
+  for (let i = 0; i < names.length; i++) {
+    const next = (out ? out + ', ' : '') + names[i];
+    const rest = names.length - i - 1;
+    if (next.length + (rest ? (' and ' + rest + ' more').length : 0) > room) return head + ': ' + (out ? out + ' and ' : '') + (names.length - i) + ' more';
+    out = next;
+  }
+  return head + ': ' + out;
+}
 /** A file's bytes, or why not: {buf, code} ('' when read). The one way this file reads a file. */
 const readOr = (f) => { try { return { buf: fs.readFileSync(f), code: '' }; } catch (e) { return { buf: null, code: e.code || 'EIO' }; } };
 const turn = () => new Promise((resolve) => { setImmediate(resolve); });
@@ -695,7 +714,7 @@ class AuditLog {
     const e = {
       seq: this.seq + 1, at: Date.now(),
       actor: { t: str(actor && actor.t, 12) || 'system', id: str(actor && actor.id, 40), name: str(actor && actor.name, 60) },
-      action: str(action, 40), target: str(target, 80), words: str(words, 300), ip: str(ip, 64), prev: this.last, l: this.l, k: this.kid,
+      action: str(action, 40), target: str(target, 80), words: str(words, WORDS_MAX), ip: str(ip, 64), prev: this.last, l: this.l, k: this.kid,
     };
     e.h = macOf(e, this.Ke);
     this.seq = e.seq; this.last = e.h;
@@ -1261,4 +1280,4 @@ class AuditLog {
   }
 }
 
-module.exports = { AuditLog, hashOf, macOf, kidOf, keysFrom, sealRecord, LABELS, SHAPE, GENESIS };
+module.exports = { AuditLog, hashOf, macOf, kidOf, keysFrom, sealRecord, wordsWithList, LABELS, SHAPE, GENESIS, WORDS_MAX };

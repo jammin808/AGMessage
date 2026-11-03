@@ -627,7 +627,7 @@ test('store: compactDirty, dirtyCodes, unsaved, remove and removeHall cover the 
   // A side room alone: its files go (its open log let go first), and nothing else's.
   sayIn(a, press, 'p1');
   assert.notEqual(press.logFd, null);
-  assert.deepEqual(a.remove('PRS3SS45'), { rooms: [press], kept: [], again: 0 });
+  assert.deepEqual(a.remove('PRS3SS45'), { rooms: [press], kept: [], again: 0, back: [] });
   assert.deepEqual([a.room('PRS3SS45'), a.roomsOf('HALL02')], [undefined, [other]]);
   assert.deepEqual(jsonFiles(dir), ['HALL01.LGQ4MZP8.json', 'HALL01.MDR7VX2C.json', 'HALL01.json', 'HALL02.json']);
   assert.equal(press.logFd, null, 'its log let go');
@@ -638,13 +638,13 @@ test('store: compactDirty, dirtyCodes, unsaved, remove and removeHall cover the 
   fs.unlinkSync = (f) => { if (/\.json$/.test(String(f))) order.push(path.basename(String(f))); return unlink.call(fs, f); };
   let gone;
   try { gone = a.removeHall('HALL01'); } finally { fs.unlinkSync = unlink; }
-  assert.deepEqual(gone, { rooms: [hall, legal, media], kept: [], again: 0 }, 'the rooms removed, Main first, every file gone');
+  assert.deepEqual(gone, { rooms: [hall, legal, media], kept: [], again: 0, back: [] }, 'the rooms removed, Main first, every file gone');
   assert.deepEqual(order, ['HALL01.LGQ4MZP8.json', 'HALL01.MDR7VX2C.json', 'HALL01.json']);
   assert.deepEqual([a.allRooms(), jsonFiles(dir)], [[other], ['HALL02.json']]);
   assert.ok(!fs.readdirSync(dir).some((f) => f.startsWith('HALL01')), 'no file of the hall is left: snapshots, logs and backups');
   // remove() of a hall is removeHall().
   const again = a.createIn('HALL02', 'PRS3SS45', 'Press');
-  assert.deepEqual(a.remove('HALL02'), { rooms: [other, again], kept: [], again: 0 });
+  assert.deepEqual(a.remove('HALL02'), { rooms: [other, again], kept: [], again: 0, back: [] });
   assert.deepEqual([a.allRooms(), fs.readdirSync(dir)], [[], []]);
   const c = new RoomStore(dir);
   assert.equal(c.loadAll(), 0, 'the next start loads cleanly');
@@ -690,7 +690,7 @@ test('store: a room whose file another program holds keeps its files from that o
   };
   // Its snapshot held: the room goes from memory, its files from that one on stay, and it loads again whole.
   const one = removing(() => a.remove('LGQ4MZP8'), { 'HALL01.LGQ4MZP8.json': 'EBUSY' });
-  assert.deepEqual(one.answer, { rooms: [legal], kept: ['HALL01.LGQ4MZP8.json'], again: 1 });
+  assert.deepEqual(one.answer, { rooms: [legal], kept: ['HALL01.LGQ4MZP8.json'], again: 1, back: ['LGQ4MZP8'] });
   assert.deepEqual(one.tried, ['HALL01.LGQ4MZP8.json.bak', 'HALL01.LGQ4MZP8.json'], 'its backup, then its snapshot, where it stops');
   assert.deepEqual(one.lines, ['  Could not remove HALL01.LGQ4MZP8.json (EBUSY): it and the files of its room after it stay on disk']);
   assert.deepEqual([a.room('LGQ4MZP8'), a.roomsOf('HALL01').length], [undefined, 1]);
@@ -699,18 +699,18 @@ test('store: a room whose file another program holds keeps its files from that o
   assert.deepEqual(b.room('LGQ4MZP8').messages.map((m) => m.id), ['LGQ4MZP8-1', 'LGQ4MZP8-2'], 'whole: its snapshot and its log');
   // Only its log held: its snapshot and backup gone, nothing of it loads again; the log stays, unused.
   const two = removing(() => a.remove('PRS3SS45'), { 'HALL02.PRS3SS45.log': 'EPERM' });
-  assert.deepEqual(two.answer, { rooms: [press], kept: ['HALL02.PRS3SS45.log'], again: 0 });
+  assert.deepEqual(two.answer, { rooms: [press], kept: ['HALL02.PRS3SS45.log'], again: 0, back: [] });
   assert.ok(fs.existsSync(path.join(dir, 'HALL02.PRS3SS45.log')) && !fs.existsSync(path.join(dir, 'HALL02.PRS3SS45.json')));
   // A hall whose side room's snapshot is held: the hall goes, so the room left on disk never loads again (it has no hall).
   const c = new RoomStore(dir);
   said(() => c.loadAll());
   const [hall, back] = [c.get('HALL01'), c.room('LGQ4MZP8')];
   const media = c.createIn('HALL01', 'MDR7VX2C', 'Media');
-  assert.deepEqual(removing(() => c.removeHall('HALL01'), { 'HALL01.LGQ4MZP8.json': 'EBUSY' }).answer, { rooms: [hall, back, media], kept: ['HALL01.LGQ4MZP8.json'], again: 0 });
+  assert.deepEqual(removing(() => c.removeHall('HALL01'), { 'HALL01.LGQ4MZP8.json': 'EBUSY' }).answer, { rooms: [hall, back, media], kept: ['HALL01.LGQ4MZP8.json'], again: 0, back: [] });
   // A hall whose own snapshot is held loads again, with each of its side rooms whose snapshot stayed beside it.
   const h3 = c.create('HALL03', 'Hall 3');
   const [s1, s2] = [c.createIn('HALL03', 'SIDE2345', 'One'), c.createIn('HALL03', 'SIDE6789', 'Two')];
-  assert.deepEqual(removing(() => c.remove('HALL03'), { 'HALL03.json': 'EBUSY', 'HALL03.SIDE2345.json': 'EBUSY' }).answer, { rooms: [h3, s1, s2], kept: ['HALL03.SIDE2345.json', 'HALL03.json'], again: 2 });
+  assert.deepEqual(removing(() => c.remove('HALL03'), { 'HALL03.json': 'EBUSY', 'HALL03.SIDE2345.json': 'EBUSY' }).answer, { rooms: [h3, s1, s2], kept: ['HALL03.SIDE2345.json', 'HALL03.json'], again: 2, back: ['HALL03', 'SIDE2345'] });
   const d = new RoomStore(dir);
   const lines = said(() => d.loadAll(null, { compact: false }));
   assert.deepEqual(d.allRooms().map((r) => r.code), ['HALL02', 'HALL03', 'SIDE2345']);
@@ -1163,12 +1163,12 @@ test('the contexts: ctx holds every part and io, takesCtx the same parts but tho
     to: (ids) => ({ emit: (event, payload) => { for (const id of ids) for (const s of halls.get(id) || [id]) if (sockets.has(s)) sockets.get(s).emit(event, payload); } }),
   };
   const store = { kind: 'store' }, settings = { roomSends: [] };
-  const linkFor = () => null, apply = () => null, systemMessage = () => null;
-  const { ctx, takesCtx } = gate.contexts({ store, apply, systemMessage, settings, linkFor, io });
+  const linkFor = () => null, apply = () => null, systemMessage = () => null, newSideRoom = () => null, renameRoom = () => null, roomNameRefused = () => '';
+  const { ctx, takesCtx } = gate.contexts({ store, apply, systemMessage, newSideRoom, renameRoom, roomNameRefused, settings, linkFor, io });
   assert.ok(Object.isFrozen(ctx) && Object.isFrozen(takesCtx));
-  assert.deepStrictEqual(Object.keys(ctx), ['store', 'apply', 'systemMessage', 'settings', 'linkFor', 'io']);
-  assert.deepStrictEqual(Object.keys(takesCtx), ['store', 'settings', 'linkFor', 'sendTo'], 'no io, apply or systemMessage: a take makes no room\'s op and sends to no room');
-  assert.deepStrictEqual([...gate.ROOM_SENDS], ['io', 'apply', 'systemMessage']);
+  assert.deepStrictEqual(Object.keys(ctx), ['store', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'settings', 'linkFor', 'io']);
+  assert.deepStrictEqual(Object.keys(takesCtx), ['store', 'roomNameRefused', 'settings', 'linkFor', 'sendTo'], 'no io, apply, systemMessage, newSideRoom or renameRoom: a take makes no room or room\'s op and sends to no room');
+  assert.deepStrictEqual([...gate.ROOM_SENDS], ['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom']);
   assert.ok(Object.isFrozen(gate.ROOM_SENDS));
   assert.ok(ctx.store === store && takesCtx.store === store && takesCtx.settings === settings && ctx.io === io && ctx.apply === apply, 'the parts themselves, not copies');
   assert.throws(() => { ctx.io = null; }, TypeError, 'a handler module cannot replace a part');

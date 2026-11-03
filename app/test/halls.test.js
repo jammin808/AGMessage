@@ -5,7 +5,8 @@
 // inside a hall: forwarding is posting where it lands, read-only people change nothing, the admin's room list, a rename
 // or a lock reaching open pages as one numbered change, and one person on two devices. Last, a side room beside a hall:
 // who reaches it by its key, and who, reading halls, never sees it; what it never sends to a Stagewatch, and what it
-// still counts for (the power request, the busy line); and the rights asked in it, room by room.
+// still counts for (the power request, the busy line); the rights asked in it, room by room; and a hall's rooms made,
+// renamed, reset and removed, the admin's reads of one audited, and a closed hall's node proposing nothing.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -18,7 +19,7 @@ const tlsmod = require('../lib/tls');
 const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
 const { io } = require('socket.io-client');
-const { startServer, restartServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, freePort, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, fakeNode, freePort, TOKEN } = require('./helpers');
 const wire = require('../lib/machinewire');
 
 // Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
@@ -1263,4 +1264,262 @@ test('a side room sends nothing to a Stagewatch and raises no help request, each
   srv = await restartServer(srv);
   const b = await wire.busy({ port: srv.port, token: TOKEN });
   assert.deepEqual([b.busy, b.line.active, b.line.sockets], [true, 1, 0], 'the side room\'s message: ' + JSON.stringify(b));
+});
+
+/** A stand-in for the AI's endpoint (the SDK's ANTHROPIC_BASE_URL): the minutes it answers, and every request's body kept. */
+async function fakeModel() {
+  const bodies = [];
+  const srv = http.createServer((req, res) => {
+    let b = '';
+    req.on('data', (d) => { b += d; });
+    req.on('end', () => {
+      bodies.push(b);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: 'x', stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ headline: 'Clause 4 agreed', decisions: [], open: [], actions: [] }) }], usage: { input_tokens: 1, output_tokens: 1 } }));
+    });
+  });
+  await new Promise((resolve) => { srv.listen(0, '127.0.0.1', resolve); });
+  return { url: 'http://127.0.0.1:' + srv.address().port, bodies, close: () => new Promise((resolve) => { srv.close(resolve); }) };
+}
+
+test('rooms are made, renamed, reset and removed by those who set halls up; a side room\'s key is never taken for a hall; the admin\'s reads of a room it is not given are audited once; a hall removed takes its rooms and its accounts\' keys, the next start loads cleanly, and its node proposes nothing', async (t) => {
+  const sw = await fakeStagewatch({ name: 'Default timer' });
+  const node = await fakeNode({ commands: [{ verb: 'CUE <n>', risk: 'low' }] });
+  const model = await fakeModel();
+  let srv = await startServer({ ANTHROPIC_API_KEY: 'a-key-for-the-fake-model', ANTHROPIC_BASE_URL: model.url });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await sw.close(); await node.close(); await model.close(); });
+  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  const PW = 'clipboard and coffee';
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
+  const [hallA, hallB, hallC] = [await hall('Hall A'), await hall('Hall B'), await hall('Hall C')];
+  for (const [username, role, extra] of [['pat', 'manager', {}], ['tom', 'tech', { halls: [hallA, hallB] }], ['lou', 'staff', { halls: [] }]]) {
+    assert.ok((await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: PW, ...extra }, { cookie: admin })).body.ok, username);
+  }
+  const signIn = async (username, password = PW) => {
+    let r;
+    for (let i = 0; i < 4; i++) {
+      r = await api(srv.base, 'POST', '/api/auth/login', { username, password });
+      if (r.status !== 429 || r.body.busy) break;
+      await wait(2100);
+    }
+    assert.equal(r.status, 200, username + ' signs in: ' + JSON.stringify(r.body));
+    return r.cookie;
+  };
+  const [pat, tom] = [await signIn('pat'), await signIn('tom')];
+  const ctl = await page(admin);
+  const patPage = await page(pat);
+  const tomPage = await page(tom);
+  // The audit log's rows of an action, as written (each on disk before its act is answered): target, words, who.
+  const rows = (action) => fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action === action).map((e) => [e.target, e.words, e.actor.name]);
+  // A request asked again while its bucket refills (`busy`), as a page's outbox would; a room made so.
+  const asked = async (s, verb, args) => { for (;;) { const r = await emit(s, verb, args); if (!r.busy) return r; await wait(250); } };
+  const make = (s, at, name) => asked(s, 'room:create', { hall: at, name });
+  const NO_RIGHT = { ok: false, error: 'Your account may not set halls up.' };
+
+  // Made by those who set halls up (a project manager, the admin): a tech of the hall and a code guest may not.
+  const gus = await page();
+  assert.ok((await emit(gus, 'join', { roomCode: hallA, name: 'Gus', role: 'research' })).ok);
+  for (const s of [tomPage, gus]) assert.deepEqual(await emit(s, 'room:create', { hall: hallA, name: 'Legal' }), NO_RIGHT);
+  assert.deepEqual(await emit(patPage, 'room:create', { hall: 'NOHALL', name: 'Legal' }), { ok: false, error: 'No such hall.' });
+  assert.deepEqual(await emit(patPage, 'room:create', { hall: hallA, name: ' \u202e ' }), { ok: false, error: 'Name the room (for example Legal).' });
+  const legal = await emit(patPage, 'room:create', { hall: hallA, name: 'Legal' });
+  assert.deepEqual([legal.ok, legal.name, legal.hall, /^[A-Z2-9]{8}$/.test(legal.key)], [true, 'Legal', hallA, true], JSON.stringify(legal));
+  const LEGAL = legal.key;
+  // Asked again with the client id its page gave it (the outbox sends it again after a drop while it was out), a create
+  // is answered with the room it made: one room, one row. The same id from another person is that person's own act, and
+  // an id that is not one is refused.
+  const media = await asked(ctl, 'room:create', { hall: hallA, name: 'Media', cid: 'c-make-media-01' });
+  assert.deepEqual([media.ok, media.name], [true, 'Media'], JSON.stringify(media));
+  assert.deepEqual(await asked(ctl, 'room:create', { hall: hallA, name: 'Media', cid: 'c-make-media-01' }), media, 'the repeat is answered as the first');
+  assert.deepEqual(await asked(patPage, 'room:create', { hall: hallA, name: 'Media', cid: 'c-make-media-01' }), { ok: false, error: 'Hall A has a room named Media already.' });
+  assert.deepEqual(await asked(ctl, 'room:create', { hall: hallA, name: 'Press', cid: { id: 1 } }), { ok: false, error: 'That act\'s id could not be read.' });
+  const MEDIA = media.key;
+  // Its first snapshot is on disk at once, beside its hall, its guest code off.
+  const snap = JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'rooms', hallA + '.' + LEGAL + '.json'), 'utf8'));
+  assert.deepEqual([snap.code, snap.name, snap.settings], [LEGAL, 'Legal', { codeOff: true }]);
+  // One name to a room in its hall, the Main room's (the hall's) included, in any case; a side room's key is no hall.
+  assert.deepEqual(await make(ctl, hallA, 'LEGAL'), { ok: false, error: 'Hall A has a room named LEGAL already.' });
+  assert.deepEqual(await make(ctl, hallA, 'hall a'), { ok: false, error: 'Hall A has a room named hall a already.' });
+  assert.deepEqual(await make(ctl, LEGAL, 'Press'), { ok: false, error: 'No such hall.' });
+  assert.deepEqual(rows('room.create'), [[LEGAL, 'Legal in Hall A (code off)', 'pat'], [MEDIA, 'Media in Hall A (code off)', 'ana']]);
+  // At most 20 beside a hall: the 21st is refused with words, and nothing is written for it.
+  for (let i = 1; i <= 20; i++) assert.ok((await make(ctl, hallC, 'Room ' + i)).ok, 'Room ' + i);
+  assert.deepEqual(await make(ctl, hallC, 'Room 21'), { ok: false, error: 'Hall C holds 20 rooms beside its Main room already: remove one to make another.' });
+  assert.equal(fs.readdirSync(path.join(srv.dataDir, 'rooms')).filter((f) => f.startsWith(hallC + '.') && f.endsWith('.json') && f.split('.').length === 3).length, 20, 'twenty rooms\' snapshots beside Hall C');
+  assert.equal(rows('room.create').length, 22);
+
+  // A side room's key is never taken for a hall: each hall's verb refuses it in its own words.
+  const screen = (await emit(ctl, 'display:create', { code: hallA, name: 'Lectern' })).display;
+  for (const [verb, args, error] of [
+    ['display:list', { code: LEGAL }, 'Your account may not drive this hall\'s screens.'],
+    ['display:create', { code: LEGAL, name: 'Side screen' }, 'Your account may not add screens to this hall.'],
+    ['display:update', { id: screen.id, hall: LEGAL }, 'No such screen or hall, or not yours to change.'],
+    ['display:hallHolding', { code: LEGAL, image: '' }, 'Your account may not set this hall\'s holding image.'],
+    ['nodes:link', { id: 'side01', t: 'patterns', url: '127.0.0.1:9', hall: LEGAL }, 'No such hall.'],
+    ['hall:settings', { code: LEGAL }, 'No such hall.'],
+    ['hall:configure', { code: LEGAL, name: 'Taken for a hall' }, 'No such hall.'],
+  ]) assert.deepEqual(await asked(ctl, verb, args), { ok: false, error }, verb);
+  // Nor is it listed where halls are: the halls board, /api/halls, the show network's halls, the context.
+  const board = (await emit(ctl, 'board:watch', {})).board;
+  const halls = (await api(srv.base, 'GET', '/api/halls', undefined, { cookie: pat })).body;
+  const nodesHalls = (await emit(ctl, 'nodes:list', {})).halls;
+  const context = (await api(srv.base, 'GET', '/api/context', undefined, { cookie: admin })).body;
+  const three = [hallA, hallB, hallC].sort();
+  assert.deepEqual([board.halls.map((h) => h.code).sort(), halls.halls.map((h) => h.code).sort(), nodesHalls.map((h) => h.code).sort()], [three, three, three]);
+  assert.match(context.items.find((i) => i.id === 'meetings').state, /^3 meetings/, 'the context counts halls');
+  const read = JSON.stringify([board, halls, nodesHalls, context]);
+  assert.ok(!read.includes(LEGAL) && !read.includes(MEDIA) && !/Legal|Media|Room 1\b/.test(read), 'no side room, by its key or its name: ' + read.slice(0, 200));
+  // The admin's room list holds each hall's rooms beside it, by key, in the order they were made; no row of its own.
+  const list = async () => (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms;
+  const listed = await list();
+  assert.deepEqual(listed.map((r) => r.code).sort(), three);
+  assert.deepEqual(listed.find((r) => r.code === hallA).side.map((x) => [x.key, x.name, x.messageCount, x.locked, x.users]), [[LEGAL, 'Legal', 0, false, []], [MEDIA, 'Media', 0, false, []]]);
+  assert.deepEqual(listed.find((r) => r.code === hallC).side.map((x) => x.name), Array.from({ length: 20 }, (_, i) => 'Room ' + (i + 1)));
+  // A room's settings, for those who set halls up.
+  assert.deepEqual(await emit(patPage, 'room:settings', { code: LEGAL }), {
+    ok: true, key: LEGAL, name: 'Legal', main: false, hall: hallA, hallName: 'Hall A',
+    rooms: [{ key: hallA, name: 'Hall A', main: true }, { key: LEGAL, name: 'Legal', main: false }, { key: MEDIA, name: 'Media', main: false }],
+  });
+  assert.deepEqual(await emit(tomPage, 'room:settings', { code: LEGAL }), NO_RIGHT);
+  assert.deepEqual(await emit(patPage, 'room:settings', { code: 'NOROOM12' }), { ok: false, error: 'No such room.' });
+
+  // The admin's reads of a room it is not given: a page entered (never a resume, nor a page catching up on its own
+  // socket), a watch begun (not the room watched already), a transcript, a person's view and the AI's minutes, each one
+  // row naming the room by its name and its hall's and never what was read. A hall's Main room writes none.
+  const anaLegal = await page(admin);
+  const entered = await emit(anaLegal, 'join', { roomCode: LEGAL, as: 'account' });
+  assert.ok(entered.ok);
+  assert.ok((await emit(anaLegal, 'message', { type: 'text', text: 'the contract, clause 4' })).ok);
+  assert.ok((await emit(anaLegal, 'join', { roomCode: LEGAL, as: 'account', since: entered.seq })).ok, 'a resume');
+  assert.ok((await emit(anaLegal, 'join', { roomCode: LEGAL, as: 'account' })).ok, 'the same page catching up');
+  assert.ok((await emit(await page(admin), 'join', { roomCode: hallA, as: 'account' })).ok, 'the Main room');
+  for (const code of [LEGAL, LEGAL, hallA, LEGAL]) assert.ok((await emit(ctl, 'admin:watchRoom', { roomCode: code })).ok);
+  const token = (await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).cookie;
+  for (const [cookie, code] of [[token, LEGAL], [admin, LEGAL], [token, hallA]]) assert.equal((await fetch(srv.base + '/api/admin/transcript/' + code, { headers: { cookie } })).status, 200);
+  const transcript = await (await fetch(srv.base + '/api/admin/transcript/' + LEGAL, { headers: { cookie: token } })).text();
+  assert.ok(transcript.includes('<h1>Legal (Hall A)</h1>') && transcript.includes('Room key <strong>' + LEGAL), 'the transcript names the room with its hall, by its key');
+  assert.ok((await emit(await page(token), 'join', { roomCode: LEGAL, name: 'Gwen', role: 'observer', adminView: true })).ok);
+  const minutes = await emit(ctl, 'admin:summary', { roomCode: LEGAL });
+  assert.deepEqual([minutes.ok, minutes.headline], [true, 'Clause 4 agreed'], JSON.stringify(minutes));
+  assert.match(JSON.parse(model.bodies.at(-1)).messages[0].content, /^Hall: Legal \(Hall A\)\n/, 'the minutes are asked of the room with its hall\'s name');
+  const reads = rows('room.read');
+  assert.deepEqual(reads, [
+    [LEGAL, 'entered Legal (Hall A) as the admin', 'ana'],
+    [LEGAL, 'watched Legal (Hall A)', 'ana'],
+    [LEGAL, 'watched Legal (Hall A)', 'ana'],
+    [LEGAL, 'transcript of Legal (Hall A)', 'AGMessage laptop'],
+    [LEGAL, 'transcript of Legal (Hall A)', 'ana'],
+    [LEGAL, 'transcript of Legal (Hall A)', 'AGMessage laptop'],
+    [LEGAL, 'opened Gwen\'s view of Legal (Hall A)', 'AGMessage laptop'],
+    [LEGAL, 'minutes of Legal (Hall A) asked of the AI', 'ana'],
+  ]);
+  assert.ok(!JSON.stringify(reads).includes('contract'), 'what was read is in no row');
+
+  // Renamed by those who set halls up: a side room's name is its own row; the same name again is done, with none; a
+  // hall's Main room renamed is the hall renamed, on its screens too, written as its set-up writes it.
+  assert.deepEqual(await emit(tomPage, 'room:update', { code: LEGAL, name: 'Lawyers' }), NO_RIGHT);
+  assert.deepEqual(await emit(patPage, 'room:update', { code: LEGAL, codeOn: true }), { ok: false, error: 'A room\'s name is the one setting changed here.' });
+  assert.deepEqual(await emit(patPage, 'room:update', { code: LEGAL, name: '' }), { ok: false, error: 'Type its new name.' });
+  assert.deepEqual(await emit(patPage, 'room:update', { code: 'NOROOM12', name: 'x' }), { ok: false, error: 'No such room.' });
+  assert.deepEqual(await emit(patPage, 'room:update', { code: MEDIA, name: 'legal' }), { ok: false, error: 'Hall A has a room named legal already.' });
+  // The hall's Set up holds the same rule, in the same words: a hall named as one of its rooms is refused, and nothing it
+  // was asked is applied.
+  assert.deepEqual(await asked(patPage, 'hall:configure', { code: hallA, name: 'MEDIA', stagewatchUrl: '' }), { ok: false, error: 'Hall A has a room named MEDIA already.' });
+  assert.equal((await emit(patPage, 'room:settings', { code: hallA })).name, 'Hall A');
+  const heard = once(anaLegal, 'roomMeta');
+  // As a page sends it: with the client id every act from the outbox carries.
+  assert.deepEqual(await emit(patPage, 'room:update', { code: LEGAL, name: 'Legal team', cid: 'c-1234567890ab' }), { ok: true, name: 'Legal team' });
+  assert.equal((await heard).name, 'Legal team', 'its pages hear the new name as one numbered change');
+  assert.deepEqual(await emit(patPage, 'room:update', { code: LEGAL, name: 'Legal team' }), { ok: true, already: true, name: 'Legal team' });
+  const scr = io(srv.base, { transports: ['websocket'], forceNew: true, reconnection: false, auth: { display: screen.path.slice(3) } });
+  sockets.push(scr);
+  await new Promise((resolve, reject) => { scr.once('connect', resolve); scr.once('connect_error', reject); });
+  const told = new Promise((resolve) => { scr.on('display:state', (st) => { if (st.hallName === 'Hall Alpha') resolve(st); }); });
+  assert.deepEqual(await emit(ctl, 'room:update', { code: hallA, name: 'Hall Alpha' }), { ok: true, name: 'Hall Alpha' });
+  await told;
+  assert.deepEqual(rows('room.update'), [[LEGAL, 'name → Legal team', 'pat']]);
+  assert.deepEqual(rows('hall.update'), [[hallA, 'name → Hall Alpha', 'ana']]);
+  assert.equal((await emit(ctl, 'board:watch', {})).board.halls.find((h) => h.code === hallA).name, 'Hall Alpha');
+
+  // Reset by the admin: the room's messages go, one row.
+  assert.ok((await emit(ctl, 'admin:resetRoom', { roomCode: LEGAL })).ok);
+  assert.deepEqual(rows('room.reset'), [[LEGAL, 'messages and documents cleared, 0 files removed', 'ana']]);
+  assert.deepEqual((await emit(ctl, 'admin:watchRoom', { roomCode: LEGAL })).messages.map((m) => m.text), ['— Messages cleared by the admin —']);
+
+  // The rooms and On stage halls accounts are given (no page gives them yet: written while the server is stopped, as the
+  // store keeps them), the admin's account given Legal among them.
+  const press = (await make(ctl, hallB, 'Press')).key;
+  assert.ok((await emit(ctl, 'admin:settings', { stagewatchUrl: sw.url, stagewatchKey: 'swk_default_node_key_0003' /* secret-scan: fixture */ })).ok);
+  assert.ok((await emit(ctl, 'nodes:link', { id: 'patb', t: 'patterns', url: node.url, name: 'Patterns B', token: 'node-token', hall: hallB })).ok);
+  sockets.forEach((s) => s.close());
+  sockets.length = 0;
+  await stopServer(srv.child);
+  const accountsFile = path.join(srv.dataDir, 'accounts.json');
+  const given = { tom: { rooms: [LEGAL, MEDIA, press], board: [hallB] }, lou: { rooms: [MEDIA] }, ana: { rooms: [LEGAL] } };
+  const store = JSON.parse(fs.readFileSync(accountsFile, 'utf8'));
+  for (const u of store.users) Object.assign(u, given[u.username] || {});
+  fs.writeFileSync(accountsFile, JSON.stringify(store));
+  srv = await startServer({ AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port) });
+  const ctl2 = await page(admin);
+  const readsBefore = rows('room.read').length;
+  // The admin's account given the room reads it as a member: no row. The laptop's token, which lists none, still writes one.
+  assert.ok((await emit(await page(admin), 'join', { roomCode: LEGAL, as: 'account' })).ok);
+  assert.ok((await emit(ctl2, 'admin:watchRoom', { roomCode: LEGAL })).ok);
+  assert.equal(rows('room.read').length, readsBefore);
+  assert.equal((await fetch(srv.base + '/api/admin/transcript/' + LEGAL, { headers: { cookie: token } })).status, 200);
+  assert.deepEqual(rows('room.read').slice(readsBefore), [[LEGAL, 'transcript of Legal team (Hall Alpha)', 'AGMessage laptop']]);
+
+  // A side room removed alone: the accounts given it are given it no more, counted in its row; nobody else changes.
+  const accounts = () => Object.fromEntries(JSON.parse(fs.readFileSync(accountsFile, 'utf8')).users.map((u) => [u.username, { halls: u.halls || [], ...(u.rooms ? { rooms: u.rooms } : {}), ...(u.board ? { board: u.board } : {}) }]));
+  assert.ok((await emit(ctl2, 'admin:deleteRoom', { roomCode: MEDIA })).ok);
+  assert.deepEqual(rows('room.remove'), [[MEDIA, 'Media (Hall Alpha), 2 accounts updated', 'ana']]);
+  await until(() => !JSON.stringify(accounts()).includes(MEDIA), 3000, 'the accounts saved');
+  assert.deepEqual([accounts().tom, accounts().lou, accounts().ana], [{ halls: [hallA, hallB], rooms: [LEGAL, press], board: [hallB] }, { halls: [], rooms: [] }, { halls: [], rooms: [LEGAL] }]);
+
+  // A node linked for Hall B proposes to the default Stagewatch's desk while Hall B is here, and to no desk once it is
+  // closed: a hall's proposals never reach another hall's show caller.
+  await until(() => sw.connected, 8000, 'the default Stagewatch linked');
+  await until(async () => { const n = (await emit(ctl2, 'nodes:list', {})).linked.find((x) => x.id === 'patb'); return n && n.status === 'live' && n.desk && n.commands.length; }, 8000, 'the node read, with a desk');
+  assert.ok((await emit(ctl2, 'nodes:command', { id: 'patb', line: 'CUE 1', mode: 'propose' })).ok);
+  const proposed = sw.proposals.size;
+  // Hall B removed: its room, its files and its accounts' keys go with it, its room's own row first, then the hall's
+  // naming its room by name and key, each account counted once.
+  const hallGone = await emit(ctl2, 'admin:deleteRoom', { roomCode: hallB, purgeFiles: true });
+  assert.ok(hallGone.ok, JSON.stringify(hallGone));
+  assert.deepEqual(rows('room.remove').slice(1), [[press, 'Press (Hall B), with its hall, 1 account updated', 'ana']]);
+  assert.deepEqual(rows('hall.remove'), [[hallB, 'Hall B with 1 other room, files removed, 1 account updated: Press · ' + press, 'ana']]);
+  assert.deepEqual(fs.readdirSync(path.join(srv.dataDir, 'rooms')).filter((f) => f.startsWith(hallB)), [], 'no file of the hall or its room is left');
+  await until(() => !JSON.stringify(accounts()).includes(hallB), 3000, 'the accounts saved');
+  assert.deepEqual(accounts().tom, { halls: [hallA], rooms: [LEGAL], board: [] });
+  assert.deepEqual(await emit(ctl2, 'nodes:command', { id: 'patb', line: 'CUE 2', mode: 'propose' }),
+    { ok: false, error: 'Patterns B was linked for a hall that has been closed: link it again for a hall, or for every hall (Admin → Show network) — not proposed.' });
+  assert.equal(sw.proposals.size, proposed, 'nothing reached the default Stagewatch\'s desk');
+  assert.equal((await emit(ctl2, 'nodes:list', {})).linked.find((x) => x.id === 'patb').desk, false);
+  // A hall made since is under no code a room, an account or a node's link still names: the node still proposes to no desk.
+  const hallD = await hall('Hall D');
+  assert.ok(/^[A-Z2-9]{6}$/.test(hallD) && hallD !== hallB, hallD);
+  assert.equal((await emit(ctl2, 'nodes:list', {})).linked.find((x) => x.id === 'patb').desk, false);
+
+  // A hall of 20 rooms removed: each room its own row by its key, then the hall's row naming as many as an audit row holds
+  // and counting the rest, never cut part way through a name.
+  const cRooms = listed.find((r) => r.code === hallC).side;
+  assert.ok((await emit(ctl2, 'admin:deleteRoom', { roomCode: hallC })).ok);
+  assert.deepEqual(rows('room.remove').slice(2), cRooms.map((x) => [x.key, x.name + ' (Hall C), with its hall', 'ana']));
+  const cRow = rows('hall.remove').find((r) => r[0] === hallC)[1];
+  assert.equal(cRow, 'Hall C with 20 other rooms: ' + cRooms.slice(0, 13).map((x) => x.name + ' · ' + x.key).join(', ') + ' and 7 more');
+  assert.ok(cRow.length <= 300, cRow.length);
+
+  // The next start loads cleanly: every room left, none said not loaded, the accounts as they were saved.
+  sockets.forEach((s) => s.close());
+  sockets.length = 0;
+  srv = await restartServer(srv);
+  assert.doesNotMatch(srv.out(), /Not loaded|Failed to load/, srv.out());
+  const health = (await api(srv.base, 'GET', '/api/health', undefined, { cookie: admin })).body;
+  assert.deepEqual([health.rooms, health.sideRooms], [2, 1], 'Hall A and Hall D, and Legal');
+  const ctl3 = await page(admin);
+  const after = await new Promise((r) => { ctl3.emit('admin:listRooms', r); });
+  assert.deepEqual(after.rooms.find((r) => r.code === hallA).side.map((x) => [x.key, x.name]), [[LEGAL, 'Legal team']]);
+  assert.deepEqual(accounts().tom, { halls: [hallA], rooms: [LEGAL], board: [] });
 });

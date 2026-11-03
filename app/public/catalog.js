@@ -72,8 +72,10 @@
    * page says which wait: a message from backstage waits for this person until their 👍, a reply to it, or an answer).
    */
   const respondsHere = (f, o) => f.waiting.priority.includes(o.id) || (!o.priority && newestPlain(f) === o.id);
-  /** A hall as an ask names it: its name, else its code. */
+  /** A hall as an ask names it: its name, else its code; a side room by its hall's name and its own ("Hall 2 › Legal"). */
   const hallOf = (o) => String(o.hall || o.name || o.code || 'this hall');
+  /** A room of the admin's list that is a hall (its Main room): every room is, but a side room (`main: false`). */
+  const isHall = (o) => o.main !== false;
   /** The seats the admin moves a code guest between, in the words every page uses (the value is the server's). */
   const SEATS = Object.freeze([['board', 'On stage'], ['research', 'Backstage'], ['observer', 'Observer']]);
   const seatOf = (role) => (role === 'director' ? 'board' : role);
@@ -234,8 +236,11 @@
     ],
 
     // ------------------------------------------------------------ the admin page (adminFacts)
-    // A hall in the admin page's list, and the hall it watches (its header): `code`, `name`, `watched`. Every act here is
-    // the admin page's: whom it admits (`admin`), which every admin:* verb checks again.
+    // A room in the admin page's list, and the room it watches (its header): a hall (its Main room) or one of its side
+    // rooms beside it (`main: false`), with `code` (its key), `name`, `hall` (as an ask names it: a side room as "Hall 2
+    // › Legal") and `watched`. Every act here is the admin page's: whom it admits (`admin`), which every admin:* verb
+    // checks again, and which passes room:create's and room:update's own check (halls.manage, or the admin). A hall's
+    // invite links are a hall's (a side room's come with its guest code), and a room is made in a hall.
     adminRoom: [
       { id: 'adminRoom.watch', label: 'Watch', icon: '👀', key: 'Enter', group: '3_keep', inline: () => 1, verb: 'admin:watchRoom', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => !o.watched },
@@ -244,14 +249,25 @@
       { id: 'adminRoom.minutes', label: 'Minutes', icon: '✨', group: '3_keep', verb: 'admin:summary', mode: 'now',
         may: (f) => f.admin, fits: () => true, ready: (f) => f.ai || WORDS.noAi },
       { id: 'adminRoom.invites', label: 'Roles & invites', icon: '🔒', group: '4_manage', verb: 'admin:invites', mode: 'now',
-        may: (f) => f.admin, fits: () => true },
+        may: (f) => f.admin, fits: (f, o) => isHall(o) },
+      { id: 'adminRoom.create', label: 'New room in this hall…', icon: '➕', group: '4_manage', verb: 'room:create', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => isHall(o),
+        confirm: (f, o) => ({ title: 'New room in ' + hallOf(o), words: 'A room of its own beside the hall\'s Main room (Legal, Media), with its own messages and people. Its guest code is off: the admin, and the accounts given it, go in.',
+          fields: [{ name: 'name', label: 'Room name (for example Legal)', max: 80 }], yes: 'Make the room', no: 'Cancel' }) },
+      { id: 'adminRoom.rename', label: 'Rename…', icon: '🏷', group: '4_manage', verb: 'room:update', mode: 'now',
+        may: (f) => f.admin, fits: () => true,
+        confirm: (f, o) => ({ title: 'Rename ' + hallOf(o), words: isHall(o) ? 'The hall\'s new name, on every page, screen and the halls board. Its code stays.' : 'The room\'s new name, on its pages. Its people and messages stay.',
+          fields: [{ name: 'name', label: isHall(o) ? 'Hall name' : 'Room name', value: o.name || '', max: 80 }], yes: 'Rename', no: 'Cancel' }) },
       { id: 'adminRoom.clear', label: 'Clear messages…', icon: '🧹', group: '9_danger', verb: 'admin:resetRoom', mode: 'now',
         may: (f) => f.admin, fits: () => true,
-        confirm: (f, o) => ({ title: 'Clear every message in ' + hallOf(o) + '?', words: 'Files used nowhere else go too. Everyone stays in the hall. This cannot be undone.', yes: 'Clear messages', no: 'Keep them', danger: true }) },
-      { id: 'adminRoom.remove', label: 'Close hall…', icon: '🗑', group: '9_danger', verb: 'admin:deleteRoom', mode: 'now',
+        confirm: (f, o) => ({ title: 'Clear every message in ' + hallOf(o) + '?', words: 'Files used nowhere else go too. Everyone stays in the ' + (isHall(o) ? 'hall' : 'room') + '. This cannot be undone.', yes: 'Clear messages', no: 'Keep them', danger: true }) },
+      { id: 'adminRoom.remove', label: (f, o) => (isHall(o) ? 'Close hall…' : 'Remove room…'), icon: '🗑', group: '9_danger', verb: 'admin:deleteRoom', mode: 'now',
         may: (f) => f.admin, fits: () => true,
-        confirm: (f, o) => ({ title: 'Close hall ' + hallOf(o) + '?', words: 'Everyone in it is sent out and its saved history is deleted. Open its transcript first if you need it.',
-          fields: [{ name: 'purge', type: 'checkbox', label: 'Also delete the files shared only in this hall', value: true }], yes: 'Close and delete', no: 'Keep it open', danger: true }) },
+        confirm: (f, o) => (isHall(o)
+          ? { title: 'Close hall ' + hallOf(o) + '?', words: 'Everyone in it, and in each of its rooms, is sent out and its saved history is deleted. Open its transcript first if you need it.',
+            fields: [{ name: 'purge', type: 'checkbox', label: 'Also delete the files shared only in this hall', value: true }], yes: 'Close and delete', no: 'Keep it open', danger: true }
+          : { title: 'Remove room ' + hallOf(o) + '?', words: 'Everyone in it is sent out and its saved history is deleted; the hall and its other rooms stay. Open its transcript first if you need it.',
+            fields: [{ name: 'purge', type: 'checkbox', label: 'Also delete the files shared only in this room', value: true }], yes: 'Remove and delete', no: 'Keep it', danger: true }) },
     ],
     // A person: on the hall page, a row of its People panel and a message's sender (`uid`, `name`, `role`); on the admin
     // page, a person in the watched hall (`socketId`, `name`, `role`, `account`: signs in with an account, so its seat

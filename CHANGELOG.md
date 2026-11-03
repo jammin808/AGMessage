@@ -2605,6 +2605,107 @@ the admin's; the seats and the admin's join that move are said below)
 - Rolling back: nothing is stored or sent differently. 0.5.1 ignores an account's `rooms` and `board`, which nothing
   writes yet.
 
+**A hall's rooms are made, renamed, reset and removed, and a side room is never taken for a hall** (the plan's Part 1,
+unit 6, its §1.6, §2.4, §2.5, §2.7, §7.4 and §8, with Part 5's handler module and catalogue rows, and owner question 5,
+"Defaults": making and renaming rooms is `halls.manage`'s, the rest the admin's; the tree's tests. A side room's guest
+code stays off, so the admin, and an account given the room by its accounts' file, go in: the codes, the Accounts page's
+rooms and the pages' room switcher are the units that follow)
+- **`room:create {hall, name}`** makes a side room (Legal, Media) beside a hall, for those who set halls up (`halls.manage`,
+  the admin; `conn.canManageHall`, which an On stage seat never passes): its key 8 characters of the codes' alphabet, an
+  address and never a guest's code, made where no room has it (`newSideRoom`), its first snapshot written at once with
+  its guest code off. Refused with words: a hall that is not here ("No such hall.", a side room's key included), no name
+  ("Name the room (for example Legal)."), a name another room of the hall has, its Main room's (the hall's) included, in
+  any case ("Hall 2 has a room named Legal already."), and a 21st room beside a hall ("Hall 2 holds 20 rooms beside its
+  Main room already: remove one to make another.", `lib/store.js` `SIDE_MAX`). One `room.create` row: "Legal in Hall 2
+  (code off)". Asked again with the client id its page gave it, a create is answered with the room it made, never
+  refused for the name that room now has (the newest 200 kept in memory, by who asked; `public/outbox.js` sends it again
+  after a drop while it was out, as it does a pin); an id that is not one is refused ("That act's id could not be read.").
+- **No two rooms of a hall share a name**, in any case, the Main room's (the hall's) included, held in one place
+  (`roomNameRefused`) for a room made, a room renamed and the hall's own Set up (`hall:configure`, which refuses such a
+  name in the same words and applies nothing else it was asked).
+- **`room:update {code, name}`** renames a room, for the same people: a side room's name is said to its pages as one
+  numbered change and written as `room.update` ("name → Media"); a hall's Main room renamed is the hall renamed, on its
+  screens and the halls board too, written as `hall.update` as the hall's Set up writes it (`renameRoom`, which
+  `hall:configure` now uses as well). The same name again is answered as done (`already`), with no row; a name another
+  room of the hall has, an empty one and a room that is not here are refused with words; any setting but the name (and
+  the client id every act from a page carries) is refused, never ignored: the codes and who may send in come with their
+  units.
+- `halls.manage`'s words on the Accounts page say it makes a hall's rooms too: "Create halls and their rooms, and set
+  them up (names, Stagewatch link, holding image, codes)".
+- **`room:settings {code}`** reads a room as those who set halls up see it: its key, name, hall, the hall's name, whether
+  it is the Main room, and the hall's rooms by name and key, Main first. The admin page names the room it watches from
+  it.
+- The three register from `lib/handlers/rooms.js` through the one gate, the first verbs there: `room:create` and
+  `room:update` take a token of the connection's writes, `room:settings` of its chatter, before anything a client names
+  is looked up. The server's context gains `newSideRoom`, `renameRoom` and `roomNameRefused`; `newSideRoom` makes a room
+  and `renameRoom` a room's op, so both are among the parts the takes module is never given (`lib/gate.js` `ROOM_SENDS`,
+  which the module fence's (j) reads). For the busy line, `room:create` and
+  `room:update` are a person's input and `room:settings` a page's read (`lib/busy.js`).
+- **The admin page lists each hall's rooms under it** (`admin:listRooms` appends `side: [{key, name, users,
+  messageCount, locked}]` to each hall's row, in the order they were made; a hall's row is as before), each with its own
+  row, ⋯, right-click and Shift+F10 from the catalogue's `adminRoom`: Watch, Transcript, ✨ Minutes, Rename…, Clear
+  messages… and Remove room… (a side room has no Roles & invites of its own yet, and no room is made in a room). A hall's
+  row and the watched hall's header gain New room in this hall… and Rename…, each asked in place. A side room's row says
+  its hall to a screen reader too ("Legal, a room of Hall 2"), which hears the list flat. Watched, a side room's
+  header reads "Hall 2 › Legal" with its room key; removed, it leaves the list in place, the page and the hall it watches
+  as they were. The transcript names a side room with its hall, by its key.
+- **The admin's reads of a room it is not given are audited** (`room.read`, once each): a page entered (a join that names
+  no last change it holds: never a resume, nor a page catching up on its own socket), "entered Legal (Hall 2) as the
+  admin"; a watch begun ("watched …"; the room watched already writes none); a transcript ("transcript of …"); a
+  person's view opened by the support view ("opened Gwen's view of …"); and the AI's minutes ("minutes of … asked of the
+  AI", written as the messages are handed over, whatever the AI answers; the minutes now name a side room with its hall,
+  "Legal (Hall 2)"). An admin account that is given the room reads it
+  as a member and writes none; the laptop's token is given no room and always writes one. A hall's Main room writes none,
+  as before. No row says what was read.
+- **A room removed takes its keys out of the accounts** (`accounts.prune`): a side room out of every account's `rooms`, a
+  hall out of every account's halls and On stage halls and each of its rooms out of their `rooms`, saved through the
+  accounts' lane, with no page ended and no row per account; each removal's row counts the accounts it changed ("2
+  accounts updated"). A room whose files another program held, which comes back at the next start (the store's `back`),
+  is left in its accounts, so it comes back with its members. And a new hall or room is made under no key a room, an
+  account or a node's link still names (`keyHeld`, `accounts.names`), so a code an account kept (a page's save of an
+  account read before its hall closed, which the Accounts page's own check of a new hall code, a later unit, refuses) is
+  never opened to it by a hall made later. 0.5.1 left a closed hall's code in its accounts' halls, so a hall made later
+  under the same code (a chance in a billion) would have been open to them.
+- **A hall removed writes each of its rooms' removal first**, one `room.remove` row each by its key ("Legal (Hall 2),
+  with its hall, 1 account updated"), as a room removed alone does, then its own `hall.remove` row, which names its rooms
+  by name and key after what went ("Hall 2 with 2 other rooms, files removed, 1 account updated: Legal · LGQ4MZP8, Media
+  · MDR7VX2C"), as many as an audit row holds, the rest counted and none cut part way (`lib/audit.js`
+  `wordsWithList`).
+- **A node linked for a hall that has been closed proposes nothing** (`deskFor` answers no desk): "Patterns B was linked
+  for a hall that has been closed: link it again for a hall, or for every hall (Admin → Show network) — not proposed.",
+  and its row in Show network reads no desk. 0.5.1 sent its proposals to the default Stagewatch's show desk, another
+  hall's show caller.
+- A side room's key is no hall's: the screens' verbs, `nodes:link`, `hall:settings` and `hall:configure` refuse it in
+  their own words, and the halls board, `/api/halls`, the show network's halls and the context never list it (tested).
+- Tests: `test/halls.test.js`, end to end: who makes a room (a project manager and the admin; a tech of the hall and a
+  code guest refused), its snapshot on disk at once with its code off, each refusal's words, a create asked again with
+  its client id answered as the first (one room, one row) and the same id from another person or a malformed one not, 20
+  beside a hall and the 21st refused with nothing written; a side room's key refused by seven hall verbs in their words
+  and listed by none of four hall readers; the admin's nested list; `room:settings` and its refusals; `room.read` once
+  per entry, watch, transcript, view and minutes (the AI stood in for, asked of "Legal (Hall A)"), none for a resume, a
+  page catching up, the room watched already, a Main room, or an admin account given the room, one for the laptop's
+  token after it is; renames (its page hearing `roomMeta`, `already`, a Main room's on its screen and the halls board)
+  and their rows, and the hall's Set up refusing a room's name with nothing applied; the reset's row; a side room removed
+  and then its hall, each pruning the accounts given them (written while stopped) and counted once in its row, the hall's
+  room written first, every file of the hall gone; the closed hall's node refused and nothing reaching the default desk,
+  nor once a hall is made after; a hall of 20 rooms removed, each room's row by its key and the hall's row naming 13 and
+  counting 7 within 300 characters; and the next start loading every room left with nothing said not loaded. `test/uploads.test.js`: a held side room's
+  account keeps it and it comes back with it; a held hall keeps its accounts' hall, its room (whose files went) pruned
+  and counted; `hall.remove`'s words name its room and its room has its own row, on purpose. `test/accounts.test.js`:
+  `prune` (each account once, by id) and `names`. `test/audit.test.js`: `wordsWithList` (whole names, the rest counted,
+  a head that leaves no room). `test/units.test.js`: the store's `back`, `ROOM_SENDS` with `newSideRoom`, the contexts.
+  `test/catalog.test.js`: `adminRoom`'s rows for a hall and a side room, listed and watched, their asks and words,
+  `room:create` and `room:update` required. `test/menus.test.js`: each refused as a seat they are hidden from, a side
+  room among the objects, nothing renamed or made. `test/inputs.test.js`: the three verbs' typed cases.
+  `test/modules.test.js`: the any-room calls of the rooms module, the name rule and the admin's list with their reasons,
+  the server's context's parts, (j) refusing a take that takes `newSideRoom` or `renameRoom`. The browser smoke: New room
+  in this hall… asked in place, the room's row named with its hall and its doors in step, Rename… filled in and saved,
+  the watched side room's header, Remove room… in place.
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md` (who sets rooms up; the audit list), `docs/DESIGN.md`,
+  `docs/NODES.md`, `docs/ANALYSIS.md`, `SECURITY.md`, `CLAUDE.md`.
+- Rolling back: 0.5.1 loads the halls and leaves the side rooms' files as they are (unit 4); their `room.*` rows read as
+  any other row. A hall's accounts pruned stay pruned.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

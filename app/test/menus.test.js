@@ -283,13 +283,16 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   // The guest may forward into Hall B: No longer forward into ▸ is there to be refused.
   const gusId = (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms.find((r) => r.code === hallA).users[0].socketId;
   assert.ok((await emit(ctl, 'admin:linkRoom', { socketId: gusId, targetRoom: hallB })).ok);
+  // A side room beside Hall A, as the admin page lists it under its hall.
+  assert.ok((await emit(ctl, 'room:create', { hall: hallA, name: 'Legal' })).ok);
   const rooms = (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms;
   const watched = await emit(ctl, 'admin:watchRoom', { roomCode: hallA });
   const listed = (await emit(ctl, 'nodes:list', {})).linked;
   const nodeObj = { id: listed[0].id, t: listed[0].t, name: listed[0].name, hall: listed[0].hall || '', linked: true, certificateWaits: !!listed[0].certificateWaits, desk: !!listed[0].desk, commands: listed[0].commands };
-  const hallObj = (r, w) => ({ code: r.code, name: r.name, hall: r.name || r.code, watched: w });
+  const hallObj = (r, w) => ({ code: r.code, name: r.name, hall: r.name || r.code, main: true, watched: w });
+  const sideObj = (h, x) => ({ code: x.key, name: x.name, hall: (h.name || h.code) + ' › ' + x.name, main: false, watched: false });
   const objects = {
-    adminRoom: rooms.map((r) => hallObj(r, false)).concat([hallObj(rooms.find((r) => r.code === hallA), true)]),
+    adminRoom: rooms.map((r) => hallObj(r, false)).concat([hallObj(rooms.find((r) => r.code === hallA), true)], rooms.flatMap((h) => h.side.map((x) => sideObj(h, x)))),
     person: watched.users.map((u) => ({ ...u, hall: 'Hall A' })),
     adminMsg: watched.messages.filter((m) => m.type !== 'system').map((m) => ({ ...m, hall: 'Hall A' })),
     // A node over plain HTTP on this laptop waits for no certificate, and a default Stagewatch whose certificate changed
@@ -338,6 +341,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     'admin:acceptCertificate': null, 'admin:tunnelStart': null, 'admin:tunnelStop': null, 'admin:tunnelStatus': null, 'admin:laptop': null,   // the ack alone
     'admin:tunnelUntil': () => ({ until: '23:30' }),
     'hall:settings': (o) => ({ code: o.code }), 'nodes:list': () => ({}),
+    'room:create': (o) => ({ hall: o.code, name: 'Media' }), 'room:update': (o) => ({ code: o.code, name: 'Renamed by a seat that may not' }),
     'help:respond': (o, e) => ({ code: o.code, messageId: o.id, state: e.id === 'help.respond' ? 'coming' : 'resolved' }),
   };
   const BODIES = { 'account.edit': { name: 'Renamed by a seat that may not' }, 'account.disable': { disabled: true }, 'audit.split': { seq: 2 } };
@@ -380,6 +384,8 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   // And nothing changed: the halls, their people and messages, the link, the accounts, the log unsplit.
   const roomsAfter = (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms;
   assert.deepEqual(roomsAfter.map((r) => [r.code, r.name, r.messageCount, r.users.map((u) => [u.name, u.role, (u.linkedRooms || []).length])]), rooms.map((r) => [r.code, r.name, r.messageCount, r.users.map((u) => [u.name, u.role, (u.linkedRooms || []).length])]));
+  assert.deepEqual(roomsAfter.map((r) => r.side.map((x) => [x.key, x.name, x.messageCount])), rooms.map((r) => r.side.map((x) => [x.key, x.name, x.messageCount])), 'no room made, renamed, cleared or removed');
+  assert.equal(rooms.find((r) => r.code === hallA).side.length, 1, 'the side room was read');
   assert.deepEqual((await emit(ctl, 'nodes:list', {})).linked.map((l) => l.id), ['patterns01'], 'the node still linked');
   assert.deepEqual(roomsAfter.find((r) => r.code === hallA).users.map((u) => u.linkedRooms), [[hallB]], 'the guest still forwards into Hall B');
   assert.equal((await emit(ctl, 'admin:settings', null)).stagewatchUrl, '', 'no Stagewatch was set');

@@ -38,8 +38,9 @@
     lost: 'Not sent — choose the file again',
   };
   // The `now` verbs the server answers a repeat of with what the first one did: a pin carries its state, a reaction with
-  // `on` sets one, a second delete answers `already`. Any other is never sent twice.
-  const REPEATS = new Set(['pin', 'react', 'delete']);
+  // `on` sets one, a second delete answers `already`, a room made is answered with that room by its cid. Any other is
+  // never sent twice.
+  const REPEATS = new Set(['pin', 'react', 'delete', 'room:create']);
   const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
   /** 16 random bytes as base64url, 22 characters, from getRandomValues: randomUUID exists only in a secure context. */

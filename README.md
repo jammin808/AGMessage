@@ -5,8 +5,12 @@ who look after every hall, the presenters and board members on stage — on any 
 network (or remotely through the built-in Cloudflare tunnel). One portable Windows folder, no install. Part of the
 show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Patterns and PlayMap.
 
-- **Halls.** Each hall has its own message room and, if it has one, its own Stagewatch: its countdown in the header,
-  sends to its speaker's screen. The **halls board** shows every hall an account may see — countdown, who is in, the
+- **Halls.** Each hall has its Main room and, if it has one, its own Stagewatch: its countdown in the header, sends to
+  its speaker's screen. The admin makes rooms of its own beside it (Legal, Media) on the admin page, each with its own
+  messages and people, listed under its hall, watched, renamed, cleared and removed there; the admin's reads of a room it
+  is not given are in the audit log. (A project manager's right to set halls up covers making and renaming rooms too,
+  but no page other than the admin's offers it yet.) A room's guest code is off: it is for the admin and the accounts
+  given it. The **halls board** shows every hall an account may see — countdown, who is in, the
   last message, open help requests, its screens and its Patterns / PlayMap — live. **Help requests** go in two taps
   (Help, then Sound, Vision, Lighting, Stage, Presenter, IT / network or Something else) and stay red until someone is
   on the way and on the board until resolved. The asker's Help button says what happened ("■ Help asked", "▶ Ana is on

@@ -30,7 +30,7 @@ halls (or "every hall, including new ones"). The rights, as the server checks th
 | `display.manage` | add, rename, move, re-link and remove screens; the hall's holding image |
 | `stage.send` | send to Stagewatch: the speaker's screen, or to the operator to pass on |
 | `nodes.control` | propose commands to Patterns and PlayMap (to the show desk; never sent to them directly) |
-| `halls.manage` | create halls and set them up (their own Stagewatch) |
+| `halls.manage` | create halls and set them up (their own Stagewatch); make rooms beside a hall and rename a room |
 | `users.manage` | create accounts and set roles, halls and rights |
 | `settings.manage` | app settings: AI key, HTTPS, the tunnel, the show network |
 | `audit.read` | read the audit log |
@@ -46,6 +46,18 @@ room); asked by a hall's code they are refused, so a check written against a roo
 account of every hall in. No page gives an account a room yet, so a side room is the admin's. An account that manages
 settings is the admin on its pages: it opens any hall or room by its key, a hall its own halls do not list and a side
 room it is not given included, and is seated backstage there, since it may post wherever it sits.
+
+**Who sets rooms up.** Making a room beside a hall (`room:create`), renaming a room (`room:update`: a hall's Main room
+renamed is the hall renamed) and reading a room's settings (`room:settings`) are `halls.manage`'s and the admin's, as a
+hall's Set up is, never from an On stage seat; clearing a room, removing it and, as they land, its guest code and who may
+send into it are the admin's alone (owner question 5). A hall holds at most 20 rooms beside its Main room. A room's key
+(8 characters) is an address, never a code a guest types: a hall's verbs (its screens, its Stagewatch, its show network,
+its Set up) refuse it, and nothing that lists halls lists it. No two rooms of a hall share a name, in any case, its Main
+room's included, whether a room is made or renamed or the hall is set up. A room removed is taken out of every account's
+rooms, and a hall removed out of every account's halls and On stage halls with its rooms (a room whose files another
+program held, which comes back at the next start, stays with the accounts given it); and no new hall or room is made under
+a key a room, an account or a node's link still names, so a hall made later under the same code is never open to an
+account that had the one before.
 
 Rules that keep rights from growing by themselves: deny by default; only an admin makes an admin or hands out
 `users.manage`, `settings.manage` or `audit.export`, and only an admin changes, resets, signs out, turns back on or
@@ -205,10 +217,16 @@ task, so either one there stops it with code 3.
 halls and their Stagewatch, the admin's room controls (a hall made from the admin page or over HTTP, its messages cleared
 with the files that left the disk, a message removed with whose it was and its kind, a guest's role, roles locked or
 unlocked with the seats kept, a guest let forward into another hall or no longer (that hall by its name, never its
-code), a person sent out, the AI's minutes posted, a hall removed (`hall.remove`, with how many other rooms went with it)
-or a hall's side room removed alone (`room.remove`, by its name and its hall's), each saying the files of any room
+code), a person sent out, the AI's minutes posted, a hall removed (`hall.remove`, with how many other rooms went with it,
+how many accounts were given it or its rooms no more, and its rooms by name and key, each of which has its own
+`room.remove` row first) or a hall's side room removed alone (`room.remove`, by its name and its hall's, and the accounts
+given it no more), each saying the files of any room
 another program held as they were removed, kept, and whether it opens again at the next start: one row for each change, none for a
-control that changes nothing),
+control that changes nothing), a hall's rooms (`room.create`: "Legal in Hall 2 (code off)"; `room.update`: a side room
+renamed, "name → Media"; a hall's Main room renamed is `hall.update`, as its Set up writes it), the admin's reads of a
+side room its account is not given (`room.read`, once each: a page entered, never a resume; a watch begun; a transcript;
+a person's view opened; the AI asked for its minutes, its messages handed to it whatever it answers; the laptop's token is given none, so its reads always write one; never
+what was read),
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and

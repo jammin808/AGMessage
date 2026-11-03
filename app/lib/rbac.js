@@ -28,7 +28,7 @@ const CAPS = Object.freeze({
   'display.manage': 'Create, rename, move and revoke screens',
   'stage.send': 'Send to Stagewatch: the speaker\'s screen, or to the operator to pass on',
   'nodes.control': 'Propose commands to Patterns and PlayMap (to the show desk)',
-  'halls.manage': 'Create halls and set them up (Stagewatch link, holding image, codes)',
+  'halls.manage': 'Create halls and their rooms, and set them up (names, Stagewatch link, holding image, codes)',
   'users.manage': 'Create accounts and set their roles, halls and rights',
   'settings.manage': 'App settings: AI key, HTTPS, the tunnel, the show network',
   'audit.read': 'Read the audit log',

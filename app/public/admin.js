@@ -45,10 +45,10 @@ function adminFactsChanged(patch) {
 }
 /** Every bar of the page from the catalogue, as the facts and objects are now. */
 function drawAdminBars() {
-  for (const li of document.querySelectorAll('#roomList > li[data-key]')) { const o = roomObject(li.dataset.key); if (o) ADMIN.draw(li.querySelector('.obj-bar'), 'adminRoom', o, { more: 'Hall actions', keysOn: li }); }
+  for (const li of document.querySelectorAll('#roomList > li[data-key]')) { const o = roomObject(li.dataset.key); if (o) ADMIN.draw(li.querySelector('.obj-bar'), 'adminRoom', o, { more: actionsOf(o), keysOn: li }); }
   const head = document.getElementById('roomHeader');
   const watched = currentRoom && roomObject(head.dataset.key || '');
-  if (watched) ADMIN.draw(document.getElementById('roomActs'), 'adminRoom', watched, { more: 'Hall actions', keysOn: head });
+  if (watched) ADMIN.draw(document.getElementById('roomActs'), 'adminRoom', watched, { more: actionsOf(watched), keysOn: head });
   for (const tr of document.querySelectorAll('#usersTbody > tr[data-key]')) { const o = personObject(tr.dataset.key); if (o) ADMIN.draw(tr.querySelector('.obj-bar'), 'person', o, { more: 'Actions for ' + o.name, keysOn: tr }); }
   for (const div of document.querySelectorAll('#adminFeed > .admin-msg[data-key]')) { const o = feedObject(div.dataset.key); if (o) ADMIN.draw(div.querySelector('.obj-bar'), 'adminMsg', o, { more: 'Message actions', keysOn: div }); }
   for (const draw of ADMIN_DRAWERS) draw();
@@ -165,26 +165,47 @@ function refreshRooms() {
   });
 }
 
-// ---------------- The halls: the list, and the watched hall's header (kind adminRoom) ----------------
-/** A hall as the catalogue reads it: its code, its name, whether this page watches it. */
-function roomObject(code) {
-  const r = (allRooms || []).find((x) => x && x.code === code);
-  if (!r) return null;
-  return { code: r.code, name: r.name || '', hall: r.name || r.code, watched: !!currentRoom && currentRoom.code === r.code };
+// ---------------- The halls and their rooms: the list, and the watched room's header (kind adminRoom) ----------------
+/** A room of the list by its key: a hall (its Main room) or one of its side rooms, with its hall; null when none is listed. */
+function roomAt(code) {
+  for (const h of allRooms || []) {
+    if (!h) continue;
+    if (h.code === code) return { room: h, hall: h };
+    const side = (h.side || []).find((x) => x && x.key === code);
+    if (side) return { room: side, hall: h };
+  }
+  return null;
 }
-/** The hall list, drawn in place: each hall's row kept by its code, so a redraw keeps the focus and an open menu's opener. */
+/**
+ * A room as the catalogue reads it: its key, its name, whether it is a hall (its Main room) or a side room beside one,
+ * how an ask names it (a side room by its hall's name and its own, "Hall 2 › Legal") and whether this page watches it.
+ */
+function roomObject(code) {
+  const at = roomAt(code);
+  if (!at) return null;
+  const main = at.room === at.hall;
+  const named = main ? at.room.name || code : (at.hall.name || at.hall.code) + ' › ' + (at.room.name || code);
+  return { code, name: at.room.name || '', hall: named, main, watched: !!currentRoom && currentRoom.code === code };
+}
+/** A room's ⋯ as a screen reader names it. */
+const actionsOf = (o) => (o.main ? 'Hall actions' : 'Room actions');
+/**
+ * The list, drawn in place: each hall's row, newest first, and under it its side rooms in the order they were made, each
+ * row kept by its key, so a redraw keeps the focus and an open menu's opener.
+ */
 function renderRoomList(rooms) {
   const list = document.getElementById('roomList');
   document.getElementById('noRooms').hidden = rooms.length > 0;
   rooms.sort((a, b) => b.createdAt - a.createdAt);
+  const rows = rooms.flatMap((h) => [{ key: h.code, r: h, side: false }, ...(h.side || []).map((x) => ({ key: x.key, r: x, side: true, hall: h }))]);
   const keep = new Map([...list.querySelectorAll(':scope > li[data-key]')].map((li) => [li.dataset.key, li]));
-  rooms.forEach((r, i) => {
-    let li = keep.get(r.code);
-    keep.delete(r.code);
+  rows.forEach(({ key, r, side, hall }, i) => {
+    let li = keep.get(key);
+    keep.delete(key);
     if (!li) {
       li = document.createElement('li');
       li.className = 'room-list-item';
-      li.dataset.key = r.code;
+      li.dataset.key = key;
       const pick = document.createElement('button');
       pick.type = 'button';
       pick.className = 'room-pick';
@@ -192,21 +213,25 @@ function renderRoomList(rooms) {
       bar.className = 'obj-bar';
       li.append(pick, bar);
     }
-    const watched = !!currentRoom && currentRoom.code === r.code;
+    li.classList.toggle('side', side);
+    const watched = !!currentRoom && currentRoom.code === key;
     li.classList.toggle('active', watched);
     const pick = li.querySelector('.room-pick');
-    // The row's own door is Watch (the catalogue's adminRoom.watch): the hall this page watches offers none.
+    // The row's own door is Watch (the catalogue's adminRoom.watch): the room this page watches offers none.
     if (watched) { delete pick.dataset.action; pick.setAttribute('aria-current', 'true'); } else { pick.dataset.action = 'adminRoom.watch'; pick.removeAttribute('aria-current'); }
-    const pickHtml = (r.name ? `<span class="room-name">${escapeHtml(r.name)}</span>` : '') +
-      `<strong>${escapeHtml(r.code)}</strong>` +
-      `<small>${r.users.length} ${r.users.length === 1 ? 'person' : 'people'}` +
+    // A hall by its name and its code; a side room by its name, under its hall (its key is an address, said when watched),
+    // its hall said in its name to a screen reader too, which hears the rows as a list and not as set in.
+    const counts = `<small>${r.users.length} ${r.users.length === 1 ? 'person' : 'people'}` +
       ` · ${escapeHtml(String(r.messageCount))} message${r.messageCount === 1 ? '' : 's'}</small>`;
+    const pickHtml = side
+      ? `<span class="room-name">${escapeHtml(r.name || key)}</span><span class="sr-only">, a room of ${escapeHtml(hall.name || hall.code)}</span>` + counts
+      : (r.name ? `<span class="room-name">${escapeHtml(r.name)}</span>` : '') + `<strong>${escapeHtml(key)}</strong>` + counts;
     if (pick.innerHTML !== pickHtml) pick.innerHTML = pickHtml;
     // Moved only when out of place: a row taken out and put back would lose the focus.
     if (list.children[i] !== li) list.insertBefore(li, list.children[i] || null);
   });
   for (const li of keep.values()) li.remove();
-  for (const li of list.children) ADMIN.draw(li.querySelector('.obj-bar'), 'adminRoom', roomObject(li.dataset.key), { more: 'Hall actions', keysOn: li });
+  for (const li of list.children) { const o = roomObject(li.dataset.key); if (o) ADMIN.draw(li.querySelector('.obj-bar'), 'adminRoom', o, { more: actionsOf(o), keysOn: li }); }
   ADMIN.refresh();
 }
 
@@ -223,11 +248,12 @@ function createNewRoom() {
   });
 }
 
-/** Watch a hall: its header, its people and its live feed; `then()` once they are drawn. */
+/** Watch a room (a hall, or a side room beside one): its header, its people and its live feed; `then()` once they are drawn. */
 function watchRoom(code, then) {
   socket.emit('admin:watchRoom', { roomCode: code }, (res) => {
     if (!res?.ok) { say(res?.error || 'Not watched.', true); return; }
-    currentRoom = { code, name: res.name || '', messages: res.messages || [], users: res.users || [] };
+    const listed = roomObject(code);
+    currentRoom = { code, name: res.name || '', title: listed ? (listed.main ? listed.name : listed.hall) : res.name || '', main: !listed || listed.main, messages: res.messages || [], users: res.users || [] };
     const head = document.getElementById('roomHeader');
     head.hidden = false;
     head.dataset.key = code;
@@ -235,15 +261,30 @@ function watchRoom(code, then) {
     document.getElementById('usersSection').hidden = false;
     document.getElementById('messagesSection').hidden = false;
     document.getElementById('adminEmpty').hidden = true;
-    document.getElementById('watchedRoomCode').textContent = code;
-    const nameEl = document.getElementById('watchedRoomName');
-    nameEl.textContent = currentRoom.name;
-    nameEl.hidden = !currentRoom.name;
+    drawWatched();
+    nameWatched(code);
     renderUsers(currentRoom.users);
     renderFeed(currentRoom.messages);
     updateCounts();
     refreshRooms();
     if (typeof then === 'function') then();
+  });
+}
+
+/** The watched room's header: its name (a side room by its hall's name and its own), and its code, or its key. */
+function drawWatched() {
+  document.getElementById('watchedRoomCode').textContent = currentRoom.code;
+  document.getElementById('watchedKeyWord').textContent = currentRoom.main ? 'Code' : 'Room key';
+  const nameEl = document.getElementById('watchedRoomName');
+  nameEl.textContent = currentRoom.title;
+  nameEl.hidden = !currentRoom.title;
+}
+/** The watched room named as its settings say now (room:settings: its name, its hall's, whether it is the Main room). */
+function nameWatched(code) {
+  socket.emit('room:settings', { code }, (s) => {
+    if (!s || !s.ok || !currentRoom || currentRoom.code !== code) return;
+    Object.assign(currentRoom, { name: s.name, main: s.main, title: s.main ? s.name : (s.hallName || s.hall) + ' › ' + s.name });
+    drawWatched();
   });
 }
 
@@ -256,7 +297,7 @@ function personObject(sid) {
   for (const rm of u.linkedRooms || []) { const nm = roomNameForCode(rm); linkedNames[rm] = nm ? nm + ' · ' + rm : rm; }
   return { ...u, hall: hallName(), linkedNames };
 }
-const hallName = () => (currentRoom ? currentRoom.name || roomNameForCode(currentRoom.code) || currentRoom.code : '');
+const hallName = () => (currentRoom ? currentRoom.title || roomNameForCode(currentRoom.code) || currentRoom.code : '');
 /** The people, drawn in place by their page's id: Name, Seat (a code guest's select; an account's follows its rights), May forward to, and the ⋯. */
 function renderUsers(users) {
   const tb = document.getElementById('usersTbody');
@@ -499,9 +540,11 @@ document.getElementById('userViewModal')?.addEventListener('click', (e) => {
   if (e.target.id === 'userViewModal') closeUserView();
 });
 
+/** A room's name as the list has it: a hall's, or a side room's with its hall's ("Hall 2 › Legal"); '' when unnamed or unlisted. */
 function roomNameForCode(code) {
-  const r = (allRooms || []).find((rr) => rr && rr.code === code);
-  return (r && r.name) || '';
+  const at = roomAt(code);
+  if (!at) return '';
+  return at.room === at.hall ? at.room.name || '' : (at.hall.name || at.hall.code) + ' › ' + (at.room.name || code);
 }
 
 // ---------------- What each act does (the catalogue's rows are in catalog.js) ----------------
@@ -514,10 +557,26 @@ Object.assign(ADMIN_RUN, {
     if (currentRoom && currentRoom.code === o.code) { currentRoom.messages = []; renderFeed(currentRoom.messages); updateCounts(); }
   }),
   // Closed: the page starts afresh on the list without it, once the admin has read what stayed on disk, if anything did.
+  // A side room this page does not watch goes from the list in place, the page and the watched room as they were.
   'adminRoom.remove': (o, c) => AGM.outbox.now('admin:deleteRoom', { roomCode: o.code, purgeFiles: !!(c.values && c.values.purge) }, (res) => {
-    if (!res || !res.ok) { say((res && res.error) || 'Not closed.', true); return; }
-    if (res.keptWords) { say('Closed. ' + res.keptWords, true); setTimeout(() => location.reload(), KEPT_READ_MS); return; }
-    location.reload();
+    if (!res || !res.ok) { say((res && res.error) || (o.main ? 'Not closed.' : 'Not removed.'), true); return; }
+    const inPlace = !o.main && !(currentRoom && currentRoom.code === o.code);
+    const after = inPlace ? refreshRooms : () => location.reload();
+    if (res.keptWords) { say((o.main ? 'Closed. ' : 'Removed. ') + res.keptWords, true); setTimeout(after, KEPT_READ_MS); return; }
+    if (inPlace) say('Removed ' + o.hall + '.');
+    after();
+  }),
+  // A room made in a hall: listed under it, its guest code off; this page goes on watching what it watched.
+  'adminRoom.create': (o, c) => AGM.outbox.now('room:create', { hall: o.code, name: (c.values && c.values.name) || '' }, (res) => {
+    if (!res || !res.ok) { say((res && res.error) || 'Not made.', true); return; }
+    say('Made ' + res.name + ' in ' + o.hall + ': its guest code is off.');
+    refreshRooms();
+  }),
+  'adminRoom.rename': (o, c) => AGM.outbox.now('room:update', { code: o.code, name: (c.values && c.values.name) || '' }, (res) => {
+    if (!res || !res.ok) { say((res && res.error) || 'Not renamed.', true); return; }
+    say(res.already ? 'It is called ' + res.name + ' already.' : 'Renamed ' + res.name + '.');
+    if (currentRoom && currentRoom.code === o.code) nameWatched(o.code);
+    refreshRooms();
   }),
   // The select shows the seat once the server has it; a refusal leaves it on the seat the server keeps.
   'person.seat': (o, c) => {
@@ -542,8 +601,8 @@ Object.assign(ADMIN_RUN, {
   'adminMsg.delete': (o) => AGM.outbox.now('admin:deleteMessage', { roomCode: currentRoom.code, messageId: o.id }, saidIfNot('Not deleted.')),
 });
 const objectSpec = (kind, sel, get, more, gone) => ({ kind, find: (el) => el.closest(sel), get, label: more, gone });
-ADMIN.bind(document.getElementById('roomList'), objectSpec('adminRoom', '#roomList > li[data-key]', roomObject, 'Hall actions', 'That hall is gone.'));
-ADMIN.bind(document.getElementById('roomHeader'), { ...objectSpec('adminRoom', '#roomHeader', roomObject, 'Hall actions', 'That hall is gone.'), header: (o) => o.hall });
+ADMIN.bind(document.getElementById('roomList'), objectSpec('adminRoom', '#roomList > li[data-key]', roomObject, actionsOf, 'That hall or room is gone.'));
+ADMIN.bind(document.getElementById('roomHeader'), { ...objectSpec('adminRoom', '#roomHeader', roomObject, actionsOf, 'That hall or room is gone.'), header: (o) => o.hall });
 ADMIN.bind(usersTbody, { ...objectSpec('person', '#usersTbody > tr[data-key]', personObject, 'Person actions', 'That person has left the hall.'), header: (o) => o.name + ' · ' + seatWord(o.role), submenu: (item, o) => (item.id === 'person.forward' ? forwardTargets(o) : []) });
 ADMIN.bind(document.getElementById('adminFeed'), { ...objectSpec('adminMsg', '#adminFeed > .admin-msg[data-key]', feedObject, 'Message actions', 'That message is gone.'), header: (o) => 'Message from ' + ((o.from && o.from.name) || 'someone') + ' · ' + formatTime(o.at) });
 AGM.roving(document.getElementById('roomList'), { item: 'li[data-key]' });

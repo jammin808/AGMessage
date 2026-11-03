@@ -5,13 +5,13 @@
  * the connection (server.js), after its own verbs, on every page's socket but a screen's: the admin's verbs among them
  * are sent from the admin page.
  *
- * A take reaches a page and nothing else: never a room's op, never a room's broadcast. So this module is given the takes
- * context, which holds none of the server's parts that make a room's op or send to a room (`io`, `apply`,
- * `systemMessage`: lib/gate.js `ROOM_SENDS`), and reaches a page through `ctx.sendTo(socketIds, event, payload)`, which
- * sends only to a socket open now named by its id (a hall's key given as one reaches nobody). It names none of the
- * server's broadcast paths nor the socket's own, joins its socket to no room, reads the room store only through its
- * readers (its `room`, `hasRoom`, `get`, …) and never takes the store or the socket under another name
- * (test/modules.test.js (j)).
+ * A take reaches a page and nothing else: never a room, a room's op or a room's broadcast. So this module is given the
+ * takes context, which holds none of the server's parts that make a room, a room's op or send to a room (`io`, `apply`,
+ * `systemMessage`, `newSideRoom`, `renameRoom`: lib/gate.js `ROOM_SENDS`), and reaches a page through
+ * `ctx.sendTo(socketIds, event, payload)`, which sends only to a socket open now named by its id (a hall's key given as
+ * one reaches nobody). It names none of the server's broadcast paths nor the socket's own, joins its socket to no room,
+ * reads the room store only through its readers (its `room`, `hasRoom`, `get`, …) and never takes the store or the
+ * socket under another name (test/modules.test.js (j)).
  *
  * Each verb is a literal listener on `socket` whose first statement is its one gate call,
  * `if (!conn.gate(ack, {…})) return;` (lib/gate.js), its `ack` the listener's own last argument, naming one of the
@@ -25,7 +25,7 @@
 /**
  * @param {object} socket a page's socket (never a screen's), its listeners guarded (server.js `guardHandlers`)
  * @param {object} conn   the connection's context, frozen
- * @param {object} ctx    the takes context, frozen: no io, apply or systemMessage (lib/gate.js `contexts`)
+ * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 // eslint-disable-next-line no-unused-vars -- the seam's three arguments, each read by the verbs registered here
 function register(socket, conn, ctx) {
