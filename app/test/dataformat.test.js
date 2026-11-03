@@ -143,6 +143,23 @@ test('settled: a new folder is marked; a 0.5 folder is copied whole first, then 
   assert.deepEqual(tree(old, { times: true }), higher, 'nothing written past a refusal');
 });
 
+
+test('a copy\'s beats are paced on the steady clock: a wall clock stepped back while it copies holds no beat back', (t) => {
+  // Each file the copy takes reads the steady clock 300 ms on and the wall clock an hour back: a beat at each one.
+  const old = tmp('agm-format-');
+  folder05(old);
+  let steady = performance.now();
+  let wall = Date.now();
+  t.mock.method(performance, 'now', () => (steady += 300));
+  t.mock.method(Date, 'now', () => (wall -= 3_600_000));
+  let beats = 0;
+  const r = dataformat.settle(old, { build: '0.6.0+41.abcdef1', now: NOW, beat: () => { beats++; } });
+  t.mock.restoreAll();
+  assert.equal(r.was, 1, 'a 0.5 folder, moved');
+  // What the copy took is the backup's tree: a file or a folder each.
+  const taken = (function count(d) { return fs.readdirSync(d, { withFileTypes: true }).reduce((n, e) => n + 1 + (e.isDirectory() ? count(path.join(d, e.name)) : 0), 0); })(path.join(old, ...r.backup.split('/')));
+  assert.ok(taken > 3 && beats >= taken, beats + ' beats for ' + taken + ' entries taken');
+});
 test('settled: a copy, a step or a marker that cannot be made leaves the folder as it was and stops the start with words; a copy a stop left part way is removed; the disk keeps its reserve; the watchdog hears a long copy', (t) => {
   const build = '0.6.0+41.abcdef1';
   // The copies' folder cannot be made: nothing changed.
@@ -178,14 +195,14 @@ test('settled: a copy, a step or a marker that cannot be made leaves the folder 
   assert.deepEqual(tree(s, { times: true }), roomy, 'no copy, no marker, no backups folder');
   assert.ok(dataformat.settle(s, { build, now: NOW, reserve: 0 }).backup, 'with room, copied');
 
-  // A long copy beats for the watchdog at most every BEAT_MS (a clock that moves 100 ms each time it is read).
+  // A long copy beats for the watchdog at most every BEAT_MS (a steady clock that moves 100 ms each time it is read).
   const l = tmp('agm-format-');
   folder05(l);
-  const clock = Date.now;
+  const clock = performance.now;
   let at = 0;
   let beats = 0;
-  Date.now = () => (at += 100);
-  try { dataformat.settle(l, { build, now: NOW, beat: () => { beats++; } }); } finally { Date.now = clock; }
+  performance.now = () => (at += 100);
+  try { dataformat.settle(l, { build, now: NOW, beat: () => { beats++; } }); } finally { performance.now = clock; }
   assert.ok(beats >= 2 && beats <= Math.floor(at / dataformat.BEAT_MS) + 1, beats + ' beats over ' + at + ' ms');
   let none = 0;
   dataformat.settle(tmp('agm-format-'), { build, now: NOW, beat: () => { none++; } });

@@ -219,8 +219,10 @@ function settle(dataDir, { build, now = Date.now(), steps = STEPS, reserve = 0, 
     return out;
   }
   out.was = from;
-  let last = 0;
-  const tick = () => { const t = Date.now(); if (t - last >= BEAT_MS) { last = t; beat(); } };
+  // Paced on the steady clock, as the watchdog judges the beats: a wall clock stepped back during a long copy never holds
+  // a beat back.
+  let last = -Infinity;
+  const tick = () => { const t = performance.now(); if (t - last >= BEAT_MS) { last = t; beat(); } };
   try {
     removePartials(dataDir);
     const need = sizeOf(dataDir);
