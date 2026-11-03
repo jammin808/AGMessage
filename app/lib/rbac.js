@@ -10,6 +10,14 @@
  * the audit log) do not. Three rules keep the rights from escalating: only an admin may make an admin or hand out
  * users.manage, settings.manage or audit.export; an account that is not an admin manages only accounts within its own
  * rights and halls, and hands out only those; and nobody changes their own role or rights.
+ *
+ * Rights in a room. Seeing, posting and sharing files (ROOM_SCOPED) are a room's: in a hall's Main room by the account's
+ * halls, as before, and in a side room (Legal, Media) only by the account's own `rooms`, or by the admin role, which is
+ * a member of every room. Only `canIn(account, cap, scope)` answers them, for a room named by its scope `{code, hall,
+ * main}` (the store's `scopeOf`); `can()` asked one of them with a hall's code refuses it, so a room's question asked of
+ * `can()` with a room's key fails closed, even for an account of every hall, whose halls never reach a side room. The
+ * no-scope question ("in any hall at all?") still answers. A code guest's rights are its seat's, by the kind of room it
+ * sits in (`guestCaps`).
  */
 
 const CAPS = Object.freeze({
@@ -28,6 +36,8 @@ const CAPS = Object.freeze({
 });
 
 const HALL_SCOPED = new Set(['hall.view', 'hall.post', 'hall.files', 'display.control', 'display.manage', 'stage.send', 'nodes.control']);
+// The rights a room holds, not its hall: what a person reads, writes and shares there. Answered by canIn alone.
+const ROOM_SCOPED = new Set(['hall.view', 'hall.post', 'hall.files']);
 // The rights only an admin hands out. An account holding one is admin-level: changed only by an admin, and kept off the
 // tunnel unless admins may sign in there. audit.export is one: an export carries every entry off the laptop.
 const ADMIN_ONLY = new Set(['users.manage', 'settings.manage', 'audit.export']);
@@ -56,15 +66,21 @@ const ROLES = Object.freeze({
 const isCap = (c) => typeof c === 'string' && Object.prototype.hasOwnProperty.call(CAPS, c);
 const isRole = (r) => typeof r === 'string' && Object.prototype.hasOwnProperty.call(ROLES, r);
 
-/** An account's effective rights: {caps:Set, allHalls, halls:Set}. Nothing for a missing or disabled account. */
+/** The keys a list an account holds names (its side rooms, its On stage halls); none when it is not a list. */
+const keysOf = (list) => new Set(Array.isArray(list) ? list.filter((k) => typeof k === 'string' && k !== '') : []);
+
+/**
+ * An account's effective rights: {caps:Set, allHalls, halls:Set, rooms:Set, board:Set}. `rooms`: the side rooms it is
+ * given; `board`: the halls in whose Main room it sits On stage. Nothing for a missing or disabled account.
+ */
 function effective(account) {
-  if (!account || account.disabled || !isRole(account.role)) return { caps: new Set(), allHalls: false, halls: new Set() };
+  if (!account || account.disabled || !isRole(account.role)) return { caps: new Set(), allHalls: false, halls: new Set(), rooms: new Set(), board: new Set() };
   const role = ROLES[account.role];
   const caps = new Set(role.caps);
   for (const c of Array.isArray(account.grant) ? account.grant : []) if (isCap(c)) caps.add(c);
   for (const c of Array.isArray(account.revoke) ? account.revoke : []) caps.delete(c);
   const allHalls = typeof account.allHalls === 'boolean' ? account.allHalls : role.allHalls;
-  return { caps, allHalls, halls: new Set(Array.isArray(account.halls) ? account.halls : []) };
+  return { caps, allHalls, halls: new Set(Array.isArray(account.halls) ? account.halls : []), rooms: keysOf(account.rooms), board: keysOf(account.board) };
 }
 
 /** Whether the account, enabled, would hold a right only an admin may hand out (users.manage, settings.manage, audit.export). */
@@ -74,18 +90,58 @@ function holdsAdminOnly(account) {
   return [...ADMIN_ONLY].some((c) => caps.has(c));
 }
 
-/** May this account do `cap` (in `hall`, for a hall-scoped capability)? */
-function can(account, cap, hall) {
+/** Whether a question names no hall: "in any hall at all?". */
+const noScope = (hall) => hall === undefined || hall === null || hall === '';
+
+/** May this account do `cap` in `hall` by its rights and halls (in any hall at all, when none is named)? */
+function hallCan(account, cap, hall) {
   if (!isCap(cap)) return false;
   const e = effective(account);
   if (!e.caps.has(cap)) return false;
   if (!HALL_SCOPED.has(cap)) return true;
-  if (hall === undefined || hall === null || hall === '') return e.allHalls || e.halls.size > 0;
-  return e.allHalls || e.halls.has(hall);
+  if (noScope(hall)) return e.allHalls || e.halls.size > 0;
+  return typeof hall === 'string' && (e.allHalls || e.halls.has(hall));
 }
 
-/** May the account see this hall at all? */
-const seesHall = (account, hall) => can(account, 'hall.view', hall);
+/**
+ * May this account do `cap` (in `hall`, for a hall-scoped capability)? The fence: a room's right (ROOM_SCOPED) asked with
+ * a hall is refused, whatever the account holds, since a room's key asked here would read as a hall an account of every
+ * hall reaches. Those are canIn's; asked with no hall ("in any hall at all?") they still answer.
+ */
+function can(account, cap, hall) {
+  if (ROOM_SCOPED.has(cap) && !noScope(hall)) return false;
+  return hallCan(account, cap, hall);
+}
+
+/** A room's scope read whole, or null: its key, its hall's, and whether it is that hall's Main room (its key the hall's). */
+function readScope(scope) {
+  if (!scope || typeof scope !== 'object') return null;
+  const { code, hall, main } = scope;
+  if (typeof code !== 'string' || !code || typeof hall !== 'string' || !hall || typeof main !== 'boolean') return null;
+  return main === (code === hall) ? { code, hall, main } : null;
+}
+/** A hall's Main room's scope, by the hall's key. */
+const mainScope = (hall) => ({ code: hall, hall, main: true });
+
+/**
+ * May this account do `cap` in the room `scope` names ({code, hall, main}: the store's scopeOf)? A hall's right (its
+ * screens, its Stagewatch, its show network) is its hall's, and every right in a Main room is its hall's, as before; in a
+ * side room, seeing, posting and sharing files need the room in the account's own `rooms`, or the admin role: an account
+ * of every hall reaches no side room by its halls. A scope that is not one (a string, a part missing, a Main room whose
+ * key is not its hall's) answers no.
+ */
+function canIn(account, cap, scope) {
+  const s = readScope(scope);
+  if (!s) return false;
+  if (!ROOM_SCOPED.has(cap) || s.main) return hallCan(account, cap, s.hall);
+  const e = effective(account);
+  return e.caps.has(cap) && (account.role === 'admin' || e.rooms.has(s.code));
+}
+
+/** May the account see this hall: its Main room, and its hall's own parts (its screens, its Stagewatch, its nodes)? */
+const seesHall = (account, hall) => hallCan(account, 'hall.view', hall);
+/** May the account see the room `scope` names (a hall's Main room by its halls, a side room by its own rooms)? */
+const seesRoom = (account, scope) => canIn(account, 'hall.view', scope);
 
 /**
  * Whether `actor` may make `change` to `target` (an account; null when creating). Returns null when allowed, else the
@@ -171,15 +227,46 @@ const seatAllows = (seat, cap) => !Object.prototype.hasOwnProperty.call(SEAT_LIM
 /** What the admin's link (admin:linkRoom) lets a guest do in a hall where it has no seat: post and share files. */
 const LINKED_CAPS = Object.freeze(['hall.view', 'hall.post', 'hall.files']);
 
-/** The room view an account joins a hall with: crew (can post) or observer (read only). */
-const roomRoleFor = (account, hall) => (can(account, 'hall.post', hall) ? 'research' : 'observer');
+/**
+ * What a code guest's seat holds, by the kind of room it sits in. In a hall's Main room (GUEST_CAPS): backstage posts,
+ * shares files and sends to Stagewatch; On stage posts (as its seat's limit, SEAT_LIMITS); an observer reads. In a side
+ * room (GUEST_CAPS_SIDE): a Member (backstage) posts and shares files and sends nothing to a Stagewatch; an observer
+ * reads; no seat there is On stage.
+ */
+const GUEST_CAPS = Object.freeze({
+  research: Object.freeze(['hall.view', 'hall.post', 'hall.files', 'stage.send']),
+  board: Object.freeze(['hall.view', 'hall.post']),
+  observer: Object.freeze(['hall.view']),
+});
+const GUEST_CAPS_SIDE = Object.freeze({
+  research: Object.freeze(['hall.view', 'hall.post', 'hall.files']),
+  observer: Object.freeze(['hall.view']),
+});
+const NO_CAPS = Object.freeze([]);
+/** A code guest's rights, by its seat and the kind of room it sits in (`'main'` or `'side'`); none for any other. */
+function guestCaps(role, kind) {
+  const table = kind === 'main' ? GUEST_CAPS : kind === 'side' ? GUEST_CAPS_SIDE : null;
+  return table && typeof role === 'string' && Object.hasOwn(table, role) ? table[role] : NO_CAPS;
+}
 
 /**
- * Whether an account answers a hall's help requests as its crew (On my way, Resolved): it may post there and does not
- * sit On stage there, so a Board member answers none of that hall's, from any page (owner answer B1). help:respond's
- * account branch and the halls board's canRespond both read it, so the board never offers what the verb refuses.
+ * The seat an account joins a room with, by its rights there: On stage (`board`) in a hall's Main room whose hall its
+ * `board` lists, where it may post; backstage (`research`) wherever else it may post; else an observer (read only). A
+ * hall's key given as a string is read as that hall's Main room.
  */
-const answersHelp = (account, hall) => can(account, 'hall.post', hall) && roomRoleFor(account, hall) !== 'board';
+function roomRoleFor(account, scope) {
+  const s = typeof scope === 'string' ? (scope ? mainScope(scope) : null) : readScope(scope);
+  if (!s || !canIn(account, 'hall.post', s)) return 'observer';
+  return s.main && effective(account).board.has(s.hall) ? 'board' : 'research';
+}
+
+/**
+ * Whether an account answers the help requests of the room `scope` names as its crew (On my way, Resolved): it may post
+ * there and does not sit On stage there, so a Board member answers none of that hall's, from any page (owner answer B1).
+ * help:respond's account branch and the halls board's canRespond both read it, so the board never offers what the verb
+ * refuses. A scope that is not one answers no.
+ */
+const answersHelp = (account, scope) => canIn(account, 'hall.post', scope) && roomRoleFor(account, scope) !== 'board';
 
 /** What a page needs to know about an account's rights (no secrets). */
 function rightsView(account) {
@@ -187,4 +274,7 @@ function rightsView(account) {
   return { role: account ? account.role : '', roleLabel: account && isRole(account.role) ? ROLES[account.role].label : '', caps: Array.from(e.caps).sort(), allHalls: e.allHalls, halls: Array.from(e.halls).sort() };
 }
 
-module.exports = { CAPS, ROLES, HALL_SCOPED, ADMIN_ONLY, SEAT_LIMITS, LINKED_CAPS, isCap, isRole, effective, can, seesHall, holdsAdminOnly, mayChange, giveable, seatAllows, roomRoleFor, answersHelp, rightsView };
+module.exports = {
+  CAPS, ROLES, HALL_SCOPED, ROOM_SCOPED, ADMIN_ONLY, SEAT_LIMITS, LINKED_CAPS, GUEST_CAPS, GUEST_CAPS_SIDE, isCap, isRole, effective,
+  can, canIn, seesHall, seesRoom, holdsAdminOnly, mayChange, giveable, seatAllows, guestCaps, roomRoleFor, answersHelp, rightsView,
+};

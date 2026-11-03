@@ -5,7 +5,7 @@
 // inside a hall: forwarding is posting where it lands, read-only people change nothing, the admin's room list, a rename
 // or a lock reaching open pages as one numbered change, and one person on two devices. Last, a side room beside a hall:
 // who reaches it by its key, and who, reading halls, never sees it; what it never sends to a Stagewatch, and what it
-// still counts for (the power request, the busy line).
+// still counts for (the power request, the busy line); and the rights asked in it, room by room.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -1005,7 +1005,7 @@ test('a locked hall\'s seats outlive the watchdog\'s restart for the pages back 
   assert.deepEqual({ lee: [lee2.j.role, /invite/.test(lee2.j.note)], sam: sam3.j.role, oz: oz3.j.role }, { lee: ['observer', true], sam: 'research', oz: 'board' });
 });
 
-test('a side room beside a hall: the admin and the support view reach it by its key, no other account, no guest\'s code and no hall reader does; its people and its hall\'s Stagewatch reach its pages', async (t) => {
+test('a side room beside a hall: the admin and the support view reach it by its key, no account it is not given, no guest\'s code and no hall reader does; its people and its hall\'s Stagewatch reach its pages', async (t) => {
   // No act makes a side room yet: the folder is laid out as the store keeps one, a hall and a room beside it.
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
   fs.mkdirSync(path.join(data, 'rooms'));
@@ -1072,7 +1072,7 @@ test('a side room beside a hall: the admin and the support view reach it by its 
   await wait(200);
   assert.ok(!mainHeard.includes('in Legal only'), 'the Main room never hears its side room: ' + JSON.stringify(mainHeard));
   // The admin's link: a guest in the Main room may then forward into it; an account, whose halls reach no side room, may not.
-  assert.deepEqual(await emit(anaMain, 'admin:linkRoom', { socketId: tomMain.id, targetRoom: SIDE }), { ok: false, error: 'tom signs in with an account, and an account\'s halls reach no side room.' });
+  assert.deepEqual(await emit(anaMain, 'admin:linkRoom', { socketId: tomMain.id, targetRoom: SIDE }), { ok: false, error: 'tom signs in with an account that may not post in that room: a side room is only for the accounts it is given to.' });
   const gus = await page();
   assert.ok((await emit(gus, 'join', { roomCode: 'HALLA1', name: 'Gus', role: 'research' })).ok);
   const fromGus = await emit(gus, 'message', { type: 'text', text: 'from the floor' });
@@ -1086,6 +1086,131 @@ test('a side room beside a hall: the admin and the support view reach it by its 
   assert.ok((await emit(anaMain, 'admin:lockRoles', { roomCode: SIDE, on: true })).locked);
   const health = (await api(srv.base, 'GET', '/api/health', undefined, { cookie: admin })).body;
   assert.deepEqual([health.rooms, health.sideRooms], [1, 1]);
+});
+
+test('rights in a room: an account given a side room joins it backstage, posts, shares files and is forwarded into there; every hall\'s accounts and its hall\'s own do not; a hall\'s On stage account is seated On stage, and from the side room forwards into its hall only what that seat may post; an account that manages settings joins any room by its key, seated backstage, and one that does not is refused; the admin\'s link follows the account\'s rights in the room', async (t) => {
+  // No act gives an account a room yet (the Accounts page does, later): its rooms and its On stage halls are written into
+  // the accounts' file while the server is stopped, as the store keeps them.
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  fs.mkdirSync(path.join(data, 'rooms'));
+  const room = (code, name) => JSON.stringify({ code, name, createdAt: 1, seq: 0, settings: {}, messages: [], savedAt: 1, gone: [] });
+  fs.writeFileSync(path.join(data, 'rooms', 'HALLA1.json'), room('HALLA1', 'Hall A'));
+  fs.writeFileSync(path.join(data, 'rooms', 'HALLA1.LGQ4MZP8.json'), room('LGQ4MZP8', 'Legal'));
+  const SIDE = 'LGQ4MZP8';
+  let srv = await startServer({ AGM_DATA_DIR: data });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  const PW = 'clipboard and coffee';
+  let admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  // Nia and Max are project managers of Hall B alone; Nia also manages settings, which makes her the admin on her pages.
+  for (const [username, role, extra] of [['lou', 'staff', { halls: [] }], ['tom', 'tech', { halls: ['HALLA1'] }], ['pat', 'manager', {}], ['kim', 'staff', { halls: ['HALLA1'] }],
+    ['nia', 'manager', { allHalls: false, halls: ['HALLB1'], grant: ['settings.manage'] }], ['max', 'manager', { allHalls: false, halls: ['HALLB1'] }]]) {
+    assert.ok((await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: PW, ...extra }, { cookie: admin })).body.ok, username);
+  }
+  await stopServer(srv.child);
+  const file = path.join(data, 'accounts.json');
+  const store = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const given = { lou: { rooms: [SIDE] }, tom: { rooms: [SIDE] }, kim: { rooms: [SIDE], board: ['HALLA1'] } };
+  for (const u of store.users) Object.assign(u, given[u.username] || {});
+  fs.writeFileSync(file, JSON.stringify(store));
+  srv = await startServer({ AGM_DATA_DIR: data, PORT: String(srv.port) });
+  // Every sign-in comes from one address, whose allowance is 5 at once, then one every 2 s: past it, a sign-in waits for
+  // its next one, as a person would, a few tries at most.
+  const signIn = async (username, password = PW) => {
+    let r;
+    for (let i = 0; i < 4; i++) {
+      r = await api(srv.base, 'POST', '/api/auth/login', { username, password });
+      if (r.status !== 429 || r.body.busy) break;
+      await wait(2100);
+    }
+    assert.equal(r.status, 200, username + ' signs in: ' + JSON.stringify(r.body));
+    return r.cookie;
+  };
+  admin = await signIn('ana', 'the green room kettle');
+  const [lou, tom, pat, kim, nia, max] = [await signIn('lou'), await signIn('tom'), await signIn('pat'), await signIn('kim'), await signIn('nia'), await signIn('max')];
+  const upload = async (token, name) => {
+    const f = new FormData();
+    f.append('file', new Blob(['clause 4, as agreed'], { type: 'text/plain' }), name);
+    return (await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': token }, body: f })).json();
+  };
+  // A message with these words, heard on a page (another page's join line may come first).
+  const hears = (s, text) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('no message "' + text + '"')), 4000);
+    const on = (m) => { if (m && m.text === text) { clearTimeout(timer); s.off('message', on); resolve(m); } };
+    s.on('message', on);
+  });
+
+  // Lou, given Legal and no hall, joins Legal backstage, with an upload token, and posts and shares a file there; Hall
+  // A's Main room, and the halls Lou reads, stay closed to Lou.
+  const louSide = await page(lou);
+  const inSide = await emit(louSide, 'join', { roomCode: SIDE, as: 'account' });
+  assert.deepEqual([inSide.ok, inSide.role, typeof inSide.uploadToken], [true, 'research', 'string']);
+  assert.ok((await emit(louSide, 'message', { type: 'text', text: 'Clause 4 agreed' })).ok);
+  const louFile = await upload(inSide.uploadToken, 'clause4.txt');
+  assert.equal(typeof louFile.url, 'string', JSON.stringify(louFile));
+  assert.ok((await emit(louSide, 'message', { type: 'file', url: louFile.url, filename: 'clause4.txt' })).ok);
+  assert.deepEqual(await emit(await page(lou), 'join', { roomCode: 'HALLA1', as: 'account' }), { ok: false, error: 'Your account has no access to this hall — ask an admin.' });
+  assert.deepEqual((await api(srv.base, 'GET', '/api/halls', undefined, { cookie: lou })).body.halls, []);
+  // Pat, a project manager of every hall, reaches Hall A and not its Legal room.
+  assert.deepEqual(await emit(await page(pat), 'join', { roomCode: SIDE, as: 'account' }), { ok: false, error: 'Your account has no access to this room — ask an admin.' });
+  const patMain = await page(pat);
+  assert.deepEqual([(await emit(patMain, 'join', { roomCode: 'HALLA1', as: 'account' })).role], ['research']);
+  // Hall A's rights in its Main room are 0.5.1's.
+  const hallRow = (await api(srv.base, 'GET', '/api/halls', undefined, { cookie: tom })).body.halls[0];
+  assert.deepEqual([hallRow.code, hallRow.can], ['HALLA1', { post: true, files: true, displays: true, stage: true }]);
+
+  // Tom, of Hall A and given its Legal room, sits in both: from the Main room the picker lists Legal and a forward lands
+  // there, where Lou hears it, by Tom's rights in Legal.
+  const tomMain = await page(tom);
+  assert.equal((await emit(tomMain, 'join', { roomCode: 'HALLA1', as: 'account' })).role, 'research');
+  assert.equal((await emit(await page(tom), 'join', { roomCode: SIDE, as: 'account' })).role, 'research');
+  const sent = await emit(tomMain, 'message', { type: 'text', text: 'for the lawyers' });
+  assert.deepEqual((await emit(tomMain, 'myRooms', { messageId: sent.id })).rooms, [{ code: SIDE, name: 'Legal' }]);
+  const heard = once(louSide, 'message');
+  assert.ok((await emit(tomMain, 'forward', { messageId: sent.id, targetRoom: SIDE })).ok);
+  assert.equal((await heard).text, 'for the lawyers');
+
+  // Kim, whose On stage halls name Hall A, is seated On stage in its Main room, and held to the seat's limit there.
+  const kimMain = await page(kim);
+  const kimJoin = await emit(kimMain, 'join', { roomCode: 'HALLA1', as: 'account' });
+  assert.deepEqual([kimJoin.ok, kimJoin.role, kimJoin.uploadToken, kimJoin.forwardable], [true, 'board', null, false]);
+  assert.deepEqual(await emit(kimMain, 'message', { type: 'file', url: '/uploads/x.pdf', filename: 'x.pdf' }), { ok: false, error: 'On stage seats send messages, not files.' });
+  // Kim is also given Legal, where she sits backstage and shares a file. Forwarding from there into Hall A posts where
+  // she would sit On stage, so that seat's limit holds: a text goes, a file does not, and the picker offers Hall A for
+  // the text alone.
+  const kimSide = await page(kim);
+  const kimInSide = await emit(kimSide, 'join', { roomCode: SIDE, as: 'account' });
+  assert.deepEqual([kimInSide.ok, kimInSide.role, typeof kimInSide.uploadToken, kimInSide.forwardable], [true, 'research', 'string', true]);
+  const kimFile = await upload(kimInSide.uploadToken, 'brief.txt');
+  const kimFileMsg = await emit(kimSide, 'message', { type: 'file', url: kimFile.url, filename: 'brief.txt' });
+  assert.ok(kimFileMsg.ok, JSON.stringify(kimFileMsg));
+  const kimText = await emit(kimSide, 'message', { type: 'text', text: 'Clause 4 is signed' });
+  assert.deepEqual(await emit(kimSide, 'myRooms', { messageId: kimFileMsg.id }), { ok: true, rooms: [] }, 'a file is not offered where her seat shares none');
+  assert.deepEqual(await emit(kimSide, 'myRooms', { messageId: kimText.id }), { ok: true, rooms: [{ code: 'HALLA1', name: 'Hall A' }] });
+  assert.deepEqual(await emit(kimSide, 'forward', { messageId: kimFileMsg.id, targetRoom: 'HALLA1' }), { ok: false, error: 'You may not share files in that hall.' });
+  const inMain = hears(tomMain, 'Clause 4 is signed');
+  assert.ok((await emit(kimSide, 'forward', { messageId: kimText.id, targetRoom: 'HALLA1' })).ok);
+  const copy = await inMain;
+  assert.deepEqual([copy.type, copy.from.name, copy.from.role, copy.forwardedFrom.roomName], ['text', 'kim', 'board', 'Legal'], 'posted as her seat there');
+
+  // An account that manages settings is the admin on its pages: it joins a hall its halls do not list and a side room it
+  // is not given, by their keys, seated backstage (it may post there, and does), never read-only. Without that right, the
+  // same project manager is refused both, in the words of each.
+  for (const code of ['HALLA1', SIDE]) {
+    const niaPage = await page(nia);
+    const j = await emit(niaPage, 'join', { roomCode: code, as: 'account' });
+    assert.deepEqual([j.ok, j.role, typeof j.uploadToken], [true, 'research', 'string'], code);
+    assert.ok((await emit(niaPage, 'message', { type: 'text', text: 'From the production office' })).ok, code);
+  }
+  assert.deepEqual(await emit(await page(max), 'join', { roomCode: 'HALLA1', as: 'account' }), { ok: false, error: 'Your account has no access to this hall — ask an admin.' });
+  assert.deepEqual(await emit(await page(max), 'join', { roomCode: SIDE, as: 'account' }), { ok: false, error: 'Your account has no access to this room — ask an admin.' });
+
+  // The admin's link of an account into a room follows its rights there: Tom may post in Legal, Pat may not.
+  const ana = await page(admin);
+  assert.ok((await emit(ana, 'join', { roomCode: 'HALLA1', as: 'account' })).ok);
+  assert.ok((await emit(ana, 'admin:linkRoom', { socketId: tomMain.id, targetRoom: SIDE })).ok);
+  assert.deepEqual(await emit(ana, 'admin:linkRoom', { socketId: patMain.id, targetRoom: SIDE }), { ok: false, error: 'pat signs in with an account that may not post in that room: a side room is only for the accounts it is given to.' });
 });
 
 test('a side room sends nothing to a Stagewatch and raises no help request, each refused with words and none sent to another Stagewatch; it shows its hall\'s countdown, and its pages and messages keep the laptop awake and busy', async (t) => {

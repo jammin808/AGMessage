@@ -677,7 +677,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   assert.ok(inClosure(made), 'conn is made in the connection');
   const conn = groupAt(server, made + 'const conn = Object.freeze('.length);
   const keys = conn.entries.map(keyOf);
-  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'admin', 'actor', 'canManageHall', 'gate']);
+  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'canIn', 'admin', 'actor', 'canManageHall', 'gate']);
   assert.deepEqual(keys.filter((k) => k.value !== null).map((k) => [k.key, k.value]), [['room', '() => room'], ['me', '() => me']]);
   for (const { key } of keys.filter((k) => k.value === null && k.key !== 'socket')) {
     const decl = server.indexOf('  const ' + key + ' = ', at);

@@ -1218,9 +1218,10 @@ app.get('/api/rooms/:code', (req, res) => {
 app.get('/api/halls', web.signedIn(), (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const a = req.agm.account;
+  // Posting and sharing files are asked in each hall's Main room (rbac.canIn); its screens and its Stagewatch are the hall's.
   const halls = Array.from(store.rooms.values()).filter((r) => rbac.seesHall(a, r.code)).map((r) => ({
     code: r.code, name: r.name || '', people: board.peopleIn(r), messages: r.messages.length, locked: !!r.settings.lockRoles,
-    can: { post: rbac.can(a, 'hall.post', r.code), files: rbac.can(a, 'hall.files', r.code), displays: rbac.can(a, 'display.control', r.code), stage: rbac.can(a, 'stage.send', r.code) },
+    can: { post: rbac.canIn(a, 'hall.post', store.scopeOf(r)), files: rbac.canIn(a, 'hall.files', store.scopeOf(r)), displays: rbac.can(a, 'display.control', r.code), stage: rbac.can(a, 'stage.send', r.code) },
   })).sort((x, y) => (x.name || x.code).localeCompare(y.name || y.code));
   res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: rbac.can(a, 'users.manage') && !web.adminBlocked(req, a), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req) });
 });
@@ -1522,16 +1523,23 @@ io.on('connection', (socket) => {
   // (adminView), so it is never On stage. A seat is keyed on the socket: the same person keeps their rights on a page
   // where they sit backstage, and is limited only on the page where they sit On stage.
   const onStage = () => !!me && socket.data.seat === 'board' && !socket.data.adminView;
-  // What this person may do in the room they are in: an account by its rights in that hall, a code guest by the role
-  // they joined with (backstage: post, files, the stage; On stage: post; observer: read), the admin everything. The
-  // seat's limit comes first (rbac.SEAT_LIMITS): On stage holds only messages, for the admin seated there too.
-  const GUEST_CAPS = { research: ['hall.view', 'hall.post', 'hall.files', 'stage.send'], board: ['hall.view', 'hall.post'], observer: ['hall.view'] };
+  // What this connection's rights allow in a room, by that room's own scope and never by a seat: the admin (the laptop's
+  // token, or an account that manages settings) every right; an account by its rights in that room (rbac.canIn: a hall's
+  // Main room by its halls, a side room by its own rooms or the admin role); a code guest none (its rights are its seat's,
+  // `allowed`, in the room it sits in). It reads no seat, so it answers for another room: what a verb may do in the room
+  // it sits in is asked of `allowed` (the gate's `may`), which reads the seat's limit first.
+  const canIn = (cap, r) => !!r && (!!socket.data.isAdmin || (!!socket.data.account && rbac.canIn(socket.data.account, cap, store.scopeOf(r))));
+  // The kind of room a code guest's seat is read by (rbac.guestCaps): a hall's Main room, or a side room.
+  const kindOf = (r) => (store.isMain(r) ? 'main' : 'side');
+  // What this person may do in the room they are in: an account by its rights in that room, a code guest by the role
+  // they joined with and the kind of room (rbac.guestCaps), the admin everything. The seat's limit comes first
+  // (rbac.SEAT_LIMITS): On stage holds only messages, for the admin seated there too.
   const allowed = (cap) => {
     if (onStage() && !rbac.seatAllows('board', cap)) return false;
     if (socket.data.isAdmin) return true;
     if (!me || !room) return false;
-    if (me.acct) return rbac.can(socket.data.account, cap, room.code);
-    return (GUEST_CAPS[me.role] || []).includes(cap);
+    if (me.acct) return canIn(cap, room);
+    return rbac.guestCaps(me.role, kindOf(room)).includes(cap);
   };
   // Who an audit row names for what this socket does: the admin token, the account, or a code guest by the name they joined with.
   const actor = () => socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
@@ -1577,10 +1585,16 @@ io.on('connection', (socket) => {
     let id, identity = null;
     let note = '';
     if (acct) {
-      // An account's halls reach a hall's Main room and no side room: a side room is the admin's.
-      if (store.isMain(r) ? !rbac.seesHall(acct, code) : !socket.data.isAdmin) return ack({ ok: false, error: 'Your account has no access to this ' + (store.isMain(r) ? 'hall' : 'room') + ' — ask an admin.' });
+      // The admin first; then the account's rights in that room (rbac.seesRoom): a hall's Main room by its halls, a side
+      // room only by its own rooms or the admin role, never by its halls, every hall's included. Not code guessing, so
+      // the lock is not spent.
+      if (!(socket.data.isAdmin || rbac.seesRoom(acct, store.scopeOf(r)))) return ack({ ok: false, error: 'Your account has no access to this ' + (store.isMain(r) ? 'hall' : 'room') + ' — ask an admin.' });
       id = acct.id;
-      cleanRole = rbac.roomRoleFor(acct, code);
+      // The seat is its rights' in that room (rbac.roomRoleFor). The admin may post wherever it sits (`allowed`), so its
+      // seat says so: backstage where its account's own rights would seat it an observer (a side room it is not given, a
+      // hall its halls do not list, a hall where they only read), On stage where its On stage halls seat it.
+      const seat = rbac.roomRoleFor(acct, store.scopeOf(r));
+      cleanRole = seat === 'observer' && socket.data.isAdmin ? 'research' : seat;
     } else {
       id = guard.checkIdentity(SECRET, uid);
       if (!id) { identity = guard.newIdentity(SECRET); id = guard.checkIdentity(SECRET, identity); }
@@ -1805,19 +1819,23 @@ io.on('connection', (socket) => {
     frames.seen.mark(room.code, new Set([me.uid]));
   });
 
-  // Forwarding posts in another hall, so the person's rights there decide, never the hall the message comes from: an
-  // account goes by its rights in that hall, which reach no side room; a code guest by their own seat there (a locked
-  // hall's observer seat included), the seat with the most rights when they hold more than one (backstage, then On
-  // stage, then observer, so the answer never depends on which page joined first), or, with no seat there, by the
-  // admin's link (LINKED_CAPS).
+  // Forwarding posts in another room, so the person's rights there decide, never the room the message comes from: an
+  // account goes by its rights in that room (a side room's only by its own rooms or the admin role) and by the seat it
+  // would sit there (rbac.roomRoleFor), whose limit it is held to; a code guest by their own seat there (a locked hall's
+  // observer seat included), the seat with the most rights when they hold more than one (backstage, then On stage, then
+  // observer, so the answer never depends on which page joined first), by the kind of room it is, or, with no seat
+  // there, by the admin's link (LINKED_CAPS).
   const SEAT_RANK = { research: 0, board: 1, observer: 2 };
   const rightsIn = (r) => {
     if (socket.data.isAdmin) return { role: me.role, may: () => true };
-    if (me.acct) return { role: rbac.roomRoleFor(socket.data.account, r.code), may: (cap) => store.isMain(r) && rbac.can(socket.data.account, cap, r.code) };
+    if (me.acct) {
+      const role = rbac.roomRoleFor(socket.data.account, store.scopeOf(r));
+      return { role, may: (cap) => canIn(cap, r) && rbac.seatAllows(role, cap) };
+    }
     const seats = Array.from(r.users.values()).filter((u) => u.uid === me.uid);
     const seat = seats.reduce((best, u) => (!best || SEAT_RANK[u.role] < SEAT_RANK[best.role] ? u : best), null);
     const linked = me.linkedRooms instanceof Set && me.linkedRooms.has(r.code);
-    const caps = seat ? GUEST_CAPS[seat.role] || [] : linked ? rbac.LINKED_CAPS : [];
+    const caps = seat ? rbac.guestCaps(seat.role, kindOf(r)) : linked ? rbac.LINKED_CAPS : [];
     return { role: seat ? seat.role : me.role, may: (cap) => caps.includes(cap) };
   };
   /**
@@ -2285,8 +2303,9 @@ io.on('connection', (socket) => {
 
   // ----- Help requests: someone says they are on the way, then that it is resolved. From the hall, or from the board.
   // Help requests are answered by the backstage team (owner answer B1): an On stage page marks its own request resolved
-  // and nothing else, whatever hall its code names, before any right is read; an account answers as a hall's crew only
-  // where it does not sit On stage (rbac.answersHelp), from any page, its own request's Resolved excepted.
+  // and nothing else, whatever hall its code names, before any right is read; an account answers as the crew of the
+  // request's room, or of its hall's Main room, only where it does not sit On stage there (rbac.answersHelp, by each
+  // room's scope), from any page, its own request's Resolved excepted.
   socket.on('help:respond', ({ code, messageId, state } = {}, ack) => {
     ack = ok(ack);
     if (!chatter.take()) return limited(ack);
@@ -2297,7 +2316,8 @@ io.on('connection', (socket) => {
     if (onStage() && !resolvesOwn(me.uid)) return ack({ ok: false, error: 'Help requests are answered by the backstage team.' });
     const acct = socket.data.account;
     const inRoom = room && room.code === r.code && allowed('hall.post');
-    const byAccount = !!acct && (rbac.answersHelp(acct, r.code) || (rbac.can(acct, 'hall.post', r.code) && resolvesOwn(acct.id)));
+    const crewOf = [store.scopeOf(r), store.scopeOf(store.get(r.hall))];
+    const byAccount = !!acct && (crewOf.some((scope) => rbac.answersHelp(acct, scope)) || (canIn('hall.post', r) && resolvesOwn(acct.id)));
     if (!(inRoom || byAccount || socket.data.isAdmin)) return ack({ ok: false, error: 'Only people in that hall can answer its help requests.' });
     if (state !== 'coming' && state !== 'resolved') return ack({ ok: false, error: 'Say "on my way" or "resolved".' });
     const by = (me && room && room.code === r.code) ? me.name : socket.data.account ? socket.data.account.name : 'Admin';
@@ -2536,14 +2556,16 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const target = io.sockets.sockets.get(socketId);
     const code = guard.str(targetRoom).toUpperCase();
-    if (!target || !store.hasRoom(code)) return ok(ack)({ ok: false, error: 'User or room not found' });
+    const dst = store.room(code);
+    if (!target || !dst) return ok(ack)({ ok: false, error: 'User or room not found' });
     const r = store.room(target.data.userRoom);
     const u = r && r.users.get(socketId);
     if (!u) return ok(ack)({ ok: false, error: 'User not in room' });
-    // A link lets a code guest forward into a hall; an account forwards by its own rights there, which reach no side
-    // room, so a link would give it nothing it may not already do.
-    if (u.acct && !store.has(code)) return ok(ack)({ ok: false, error: u.name + ' signs in with an account, and an account\'s halls reach no side room.' });
-    if (u.acct && !rbac.can(target.data.account, 'hall.post', code)) return ok(ack)({ ok: false, error: u.name + ' signs in with an account that may not post in that hall: give the account that hall on the Accounts page.' });
+    // A link lets a code guest forward into a room; an account forwards by its own rights there (rbac.canIn: a side room
+    // only by its own rooms or the admin role), so a link would give it nothing it may not already do.
+    if (u.acct && !rbac.canIn(target.data.account, 'hall.post', store.scopeOf(dst))) {
+      return ok(ack)({ ok: false, error: u.name + ' signs in with an account that may not post in that ' + (store.isMain(dst) ? 'hall: give the account that hall on the Accounts page.' : 'room: a side room is only for the accounts it is given to.') });
+    }
     let added = false;
     for (const [sid, seat] of seatsOf(r, u.uid)) {
       seat.linkedRooms = seat.linkedRooms || new Set();
@@ -2750,7 +2772,7 @@ io.on('connection', (socket) => {
   // top): the hall page's, the admin page's and the halls board's. The rooms module is given the server's context, the
   // takes module the takes context, which holds nothing that makes a room's op or sends to a room (`ctx`, at the end of
   // this file).
-  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, admin, actor, canManageHall, gate });
+  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, canIn, admin, actor, canManageHall, gate });
   roomVerbs.register(socket, conn, ctx);
   takeVerbs.register(socket, conn, takesCtx);
 
@@ -2882,8 +2904,9 @@ function boardFor(socket, shared = new Map()) {
     nodes: links.map(nodeChip),
     canDrive: Array.from(peerLinks.values()).some((l) => mayDriveNode(socket, l)),   // what nodes:list would list: Show network
     halls: rooms.map((r) => ({ ...hallParts(r, shared).row, nodes: links.filter((l) => l.hall === r.code).map(nodeChip) })),
-    // Offered as help:respond's account branch answers: never in a hall where the account sits On stage.
-    help: rooms.flatMap((r) => hallParts(r, shared).help.map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.answersHelp(a, r.code))) }))),
+    // Offered as help:respond's account branch answers, in the request's room (a hall's Main room here): never in a
+    // hall where the account sits On stage.
+    help: rooms.flatMap((r) => hallParts(r, shared).help.map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.answersHelp(a, store.scopeOf(r)))) }))),
   };
 }
 /** Every watcher's board, each hall's row built once for all of them; a board that faults holds back no other watcher's. */

@@ -220,6 +220,11 @@ class RoomStore {
   }
   /** Whether a room is its hall's Main room. */
   isMain(room) { return !!room && room.hall === room.code; }
+  /**
+   * The scope a room's rights are asked in (lib/rbac.js canIn): its key, its hall's key and whether it is that hall's
+   * Main room; null for no room, so a right asked of a room that is gone answers no.
+   */
+  scopeOf(room) { return room ? Object.freeze({ code: room.code, hall: room.hall, main: this.isMain(room) }) : null; }
 
   /** A hall's side rooms in the order they were made (the index's own list: never handed out to be changed). */
   _sidesOf(hall) { return this.sideByHall.get(hall) || []; }

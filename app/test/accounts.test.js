@@ -18,20 +18,28 @@ const { meter } = require('./audit-preload');
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 
 // ---------------------------------------------------------------- the permission model
+/** A hall's Main room's scope, and a side room's beside it, as the store's scopeOf gives them. */
+const main = (hall) => ({ code: hall, hall, main: true });
+const side = (key, hall) => ({ code: key, hall, main: false });
+
 test('rbac: roles, hall scope, grants and revokes, deny by default', () => {
   const tech = { id: 'a1', role: 'tech', halls: ['HALL01'] };
-  assert.ok(rbac.can(tech, 'hall.post', 'HALL01'));
-  assert.ok(!rbac.can(tech, 'hall.post', 'HALL03'), 'a tech is in their own halls only');
+  // A room's rights are asked in the room (canIn), its hall's of the hall (seesHall, can): never a room's of can().
+  assert.ok(rbac.canIn(tech, 'hall.post', main('HALL01')));
+  assert.ok(!rbac.canIn(tech, 'hall.post', main('HALL03')), 'a tech is in their own halls only');
+  assert.equal(rbac.can(tech, 'hall.post', 'HALL01'), false, 'the fence: a room\'s right asked of can() with a hall is refused');
   assert.ok(!rbac.can(tech, 'users.manage'));
   assert.ok(rbac.can({ role: 'manager' }, 'display.control', 'ANYHALL'), 'a project manager sees every hall');
-  assert.ok(rbac.can({ role: 'senior' }, 'hall.view', 'HALL09'), 'a senior tech sees every hall');
+  assert.ok(rbac.seesHall({ role: 'senior' }, 'HALL09'), 'a senior tech sees every hall');
   assert.ok(!rbac.can({ role: 'senior' }, 'halls.manage'));
   assert.ok(!rbac.can({ role: 'staff', halls: ['HALL01'] }, 'display.control', 'HALL01'), 'staff message, they do not drive screens');
   assert.ok(rbac.can({ role: 'staff', halls: ['HALL01'], grant: ['display.control'] }, 'display.control', 'HALL01'), 'a grant adds one right');
   assert.ok(!rbac.can({ role: 'tech', halls: ['HALL01'], revoke: ['stage.send'] }, 'stage.send', 'HALL01'), 'a revoke takes one away');
-  assert.ok(!rbac.can({ role: 'admin', disabled: true }, 'hall.view', 'HALL01'), 'a turned-off account can do nothing');
+  assert.ok(!rbac.canIn({ role: 'admin', disabled: true }, 'hall.view', main('HALL01')), 'a turned-off account can do nothing');
+  assert.ok(!rbac.seesHall({ role: 'admin', disabled: true }, 'HALL01'));
   assert.ok(!rbac.can({ role: 'admin' }, 'no.such.cap'), 'an unknown right is refused');
-  assert.ok(!rbac.can({ role: 'wizard' }, 'hall.view', 'HALL01'), 'an unknown role is refused');
+  assert.ok(!rbac.canIn({ role: 'wizard' }, 'hall.view', main('HALL01')), 'an unknown role is refused');
+  assert.ok(!rbac.seesHall({ role: 'wizard' }, 'HALL01'));
   assert.equal(rbac.roomRoleFor({ role: 'viewer', halls: ['H1H1'] }, 'H1H1'), 'observer');
   assert.equal(rbac.roomRoleFor({ role: 'tech', halls: ['H1H1'] }, 'H1H1'), 'research');
 });
@@ -46,19 +54,139 @@ test('rbac: an On stage seat allows reading and writing messages and nothing els
   assert.ok(Object.isFrozen(rbac.SEAT_LIMITS) && Object.isFrozen(rbac.SEAT_LIMITS.board) && Object.isFrozen(rbac.LINKED_CAPS), 'no caller widens a limit');
 });
 
-test('rbac: an account answers a hall\'s help requests as its crew only where it may post and does not sit On stage', () => {
+test('rbac: an account answers a room\'s help requests as its crew only where it may post and does not sit On stage', () => {
   const staff = { id: 'a1', role: 'staff', halls: ['HALL01'] };
-  assert.equal(rbac.answersHelp(staff, 'HALL01'), true, 'crew in its own hall');
-  assert.equal(rbac.answersHelp(staff, 'HALL02'), false, 'not in a hall it is not in');
-  assert.equal(rbac.answersHelp({ role: 'viewer', halls: ['HALL01'] }, 'HALL01'), false, 'a Viewer reads only');
-  assert.equal(rbac.answersHelp({ role: 'tech', halls: ['HALL01'], revoke: ['hall.post'] }, 'HALL01'), false, 'without hall.post, none');
-  assert.equal(rbac.answersHelp({ role: 'manager' }, 'ANYHALL'), true, 'a project manager is every hall\'s crew');
-  assert.equal(rbac.answersHelp({ role: 'admin', disabled: true }, 'HALL01'), false, 'a turned-off account answers nothing');
-  assert.equal(rbac.answersHelp(null, 'HALL01'), false);
-  // It is the account's seat in that hall that decides, beside the right: crew wherever roomRoleFor seats it backstage.
-  for (const a of [staff, { role: 'viewer', halls: ['HALL01'] }, { role: 'manager' }]) {
-    assert.equal(rbac.answersHelp(a, 'HALL01'), rbac.can(a, 'hall.post', 'HALL01') && rbac.roomRoleFor(a, 'HALL01') === 'research');
+  assert.equal(rbac.answersHelp(staff, main('HALL01')), true, 'crew in its own hall');
+  assert.equal(rbac.answersHelp(staff, main('HALL02')), false, 'not in a hall it is not in');
+  assert.equal(rbac.answersHelp({ role: 'viewer', halls: ['HALL01'] }, main('HALL01')), false, 'a Viewer reads only');
+  assert.equal(rbac.answersHelp({ role: 'tech', halls: ['HALL01'], revoke: ['hall.post'] }, main('HALL01')), false, 'without hall.post, none');
+  assert.equal(rbac.answersHelp({ role: 'manager' }, main('ANYHALL')), true, 'a project manager is every hall\'s crew');
+  assert.equal(rbac.answersHelp({ role: 'admin', disabled: true }, main('HALL01')), false, 'a turned-off account answers nothing');
+  assert.equal(rbac.answersHelp(null, main('HALL01')), false);
+  // A side room's crew is its own members': a project manager of every hall is none of them; the admin role is.
+  assert.equal(rbac.answersHelp({ role: 'manager' }, side('LGQ4MZP8', 'HALL01')), false, 'every hall reaches no side room');
+  assert.equal(rbac.answersHelp({ ...staff, rooms: ['LGQ4MZP8'] }, side('LGQ4MZP8', 'HALL01')), true, 'a member of the room');
+  assert.equal(rbac.answersHelp({ role: 'admin' }, side('LGQ4MZP8', 'HALL01')), true);
+  // A hall's key alone is no room's scope: the question fails closed, as can() does.
+  assert.equal(rbac.answersHelp({ role: 'manager' }, 'HALL01'), false, 'a string is no scope');
+  // It is the account's seat in that room that decides, beside the right: crew wherever roomRoleFor seats it backstage,
+  // never where its On stage halls seat it (a Board member of the hall).
+  const board = { role: 'staff', halls: ['HALL01'], board: ['HALL01'] };
+  for (const a of [staff, board, { role: 'viewer', halls: ['HALL01'] }, { role: 'manager' }]) {
+    assert.equal(rbac.answersHelp(a, main('HALL01')), rbac.canIn(a, 'hall.post', main('HALL01')) && rbac.roomRoleFor(a, main('HALL01')) === 'research');
   }
+  assert.equal(rbac.answersHelp(board, main('HALL01')), false, 'a Board member answers none of its hall\'s');
+});
+
+test('rbac: a room\'s rights are asked in the room (canIn), behind a fence: can() refuses them with a hall, a side room is reached only by its own members and the admin role', () => {
+  const tech = { id: 'a1', role: 'tech', halls: ['HALL01'] };
+  const manager = { id: 'a2', role: 'manager' };
+  const senior = { id: 'a3', role: 'senior' };
+  const allStaff = { id: 'a4', role: 'staff', allHalls: true };
+  const admin = { id: 'a5', role: 'admin' };
+  const viewer = { id: 'a6', role: 'viewer', halls: ['HALL01'] };
+  const LEGAL = side('LGQ4MZP8', 'HALL01');
+  const ROOM = [...rbac.ROOM_SCOPED];
+  assert.deepEqual(ROOM, ['hall.view', 'hall.post', 'hall.files']);
+  // The fence: a room's right asked of can() with a hall (or anything named in its place) is no, whoever asks, the admin
+  // and every hall's accounts included; the no-scope question ("in any hall at all?") still answers.
+  for (const a of [tech, manager, senior, allStaff, admin, viewer, { role: 'staff', halls: ['HALL01'] }]) {
+    for (const cap of ROOM) {
+      for (const where of ['HALL01', 'LGQ4MZP8', main('HALL01'), ['HALL01'], 7]) assert.equal(rbac.can(a, cap, where), false, a.role + ' ' + cap + ' ' + JSON.stringify(where));
+    }
+  }
+  assert.deepEqual([rbac.can(tech, 'hall.post'), rbac.can(tech, 'hall.post', ''), rbac.can(tech, 'hall.post', null), rbac.can(viewer, 'hall.post')], [true, true, true, false], 'in any hall at all');
+  assert.deepEqual([rbac.can({ role: 'tech', halls: [] }, 'hall.view'), rbac.can(allStaff, 'hall.files')], [false, true], 'no hall at all, and every hall');
+  // A hall's own rights are asked of the hall as before; a hall named by anything but its key answers no.
+  assert.deepEqual([rbac.can(tech, 'display.control', 'HALL01'), rbac.can(tech, 'display.control', 'HALL02'), rbac.can(manager, 'stage.send', 'ANYHALL')], [true, false, true]);
+  assert.deepEqual([rbac.can(manager, 'display.control', main('HALL01')), rbac.can(manager, 'stage.send', ['HALL01'])], [false, false], 'a hall is named by its key');
+
+  // In a Main room canIn answers as 0.5.1's can answered for its hall, for every role, right and hall.
+  const accounts = [tech, manager, senior, allStaff, admin, viewer, { role: 'staff', halls: ['HALL01', 'HALL02'] }, { role: 'tech', halls: ['HALL01'], revoke: ['hall.files'] },
+    { role: 'viewer', halls: ['HALL02'], grant: ['hall.post'] }, { role: 'manager', allHalls: false, halls: ['HALL02'] }, { role: 'admin', disabled: true }, { role: 'wizard' }, null];
+  for (const a of accounts) {
+    const e = rbac.effective(a);
+    for (const cap of Object.keys(rbac.CAPS)) {
+      for (const hall of ['HALL01', 'HALL02', 'HALL09']) {
+        const before = e.caps.has(cap) && (!rbac.HALL_SCOPED.has(cap) || e.allHalls || e.halls.has(hall));
+        assert.equal(rbac.canIn(a, cap, main(hall)), before, JSON.stringify(a) + ' ' + cap + ' ' + hall);
+      }
+    }
+  }
+  assert.deepEqual([rbac.seesHall(tech, 'HALL01'), rbac.seesHall(tech, 'HALL02'), rbac.seesHall(manager, 'HALL09'), rbac.seesHall(viewer, 'HALL01')], [true, false, true, true]);
+  assert.deepEqual([rbac.seesRoom(tech, main('HALL01')), rbac.seesRoom(tech, main('HALL02'))], [true, false], 'a Main room is seen as its hall is');
+
+  // A side room needs the room in the account's own rooms: every hall reaches none, its hall's members none, the halls
+  // list naming its key none (halls are halls).
+  for (const a of [manager, senior, allStaff, tech, { role: 'tech', halls: ['HALL01', 'LGQ4MZP8'] }]) {
+    for (const cap of ROOM) assert.equal(rbac.canIn(a, cap, LEGAL), false, a.role + ' ' + cap);
+    assert.equal(rbac.seesRoom(a, LEGAL), false);
+  }
+  const member = { role: 'staff', halls: [], rooms: ['LGQ4MZP8'] };
+  assert.deepEqual(ROOM.map((c) => rbac.canIn(member, c, LEGAL)), [true, true, true], 'a member of the room, whose hall it does not see');
+  assert.equal(rbac.seesHall(member, 'HALL01'), false, 'its hall\'s Main room is not given with it');
+  assert.deepEqual(ROOM.map((c) => rbac.canIn(member, c, side('MDR7VX2C', 'HALL01'))), [false, false, false], 'another room of the hall');
+  assert.deepEqual(ROOM.map((c) => rbac.canIn({ role: 'viewer', rooms: ['LGQ4MZP8'] }, c, LEGAL)), [true, false, false], 'its rights still decide: a Viewer reads');
+  assert.deepEqual(ROOM.map((c) => rbac.canIn({ ...member, revoke: ['hall.files'] }, c, LEGAL)), [true, true, false], 'a revoke takes one away there too');
+  assert.deepEqual(ROOM.map((c) => rbac.canIn({ ...member, disabled: true }, c, LEGAL)), [false, false, false], 'a turned-off account, none');
+  // The admin role is a member of every room, whatever its halls say; turned off, of none.
+  assert.deepEqual(ROOM.map((c) => rbac.canIn(admin, c, LEGAL)), [true, true, true]);
+  assert.deepEqual(ROOM.map((c) => rbac.canIn({ role: 'admin', allHalls: false, halls: [] }, c, LEGAL)), [true, true, true]);
+  assert.deepEqual(ROOM.map((c) => rbac.canIn({ role: 'admin', disabled: true }, c, LEGAL)), [false, false, false]);
+  // A hall's own rights in a side room are its hall's: its screens, its Stagewatch, its show network.
+  assert.deepEqual([rbac.canIn(tech, 'stage.send', LEGAL), rbac.canIn(tech, 'display.control', LEGAL), rbac.canIn(member, 'display.control', LEGAL), rbac.canIn({ ...member, role: 'tech' }, 'stage.send', LEGAL)], [true, true, false, false]);
+
+  // A scope is read whole: a key, a hall, and whether it is the hall's Main room, in agreement; anything else is no.
+  for (const bad of ['HALL01', null, undefined, 7, {}, { code: 'HALL01', hall: 'HALL01' }, { code: 'HALL01', hall: 'HALL01', main: 'true' }, { code: 'LGQ4MZP8', hall: 'HALL01', main: true },
+    { code: 'HALL01', hall: 'HALL01', main: false }, { code: '', hall: '', main: true }, { code: 7, hall: 7, main: true }, ['HALL01']]) {
+    assert.equal(rbac.canIn(admin, 'hall.view', bad), false, JSON.stringify(bad));
+    assert.equal(rbac.canIn(admin, 'stage.send', bad), false, JSON.stringify(bad));
+  }
+  // A frozen scope, as the store gives it, reads as any other.
+  assert.equal(rbac.canIn(member, 'hall.post', Object.freeze(side('LGQ4MZP8', 'HALL01'))), true);
+});
+
+test('rbac: an account\'s rooms and On stage halls: the seat it joins with (roomRoleFor), by the room\'s scope', () => {
+  // effective() reads both lists, strings only; none for a turned-off account.
+  const e = rbac.effective({ role: 'staff', halls: ['HALL01'], rooms: ['LGQ4MZP8', 7, '', null, 'MDR7VX2C'], board: ['HALL01', {}] });
+  assert.deepEqual([[...e.rooms], [...e.board]], [['LGQ4MZP8', 'MDR7VX2C'], ['HALL01']]);
+  assert.deepEqual([...rbac.effective({ role: 'staff', rooms: 'LGQ4MZP8', board: { HALL01: true } }).rooms], [], 'a list, or nothing');
+  const off = rbac.effective({ role: 'staff', rooms: ['LGQ4MZP8'], board: ['HALL01'], disabled: true });
+  assert.deepEqual([off.rooms.size, off.board.size], [0, 0]);
+  const LEGAL = side('LGQ4MZP8', 'HALL01');
+  const tech = { role: 'tech', halls: ['HALL01'], rooms: ['LGQ4MZP8'] };
+  assert.deepEqual([rbac.roomRoleFor(tech, main('HALL01')), rbac.roomRoleFor(tech, LEGAL), rbac.roomRoleFor(tech, main('HALL02'))], ['research', 'research', 'observer']);
+  assert.deepEqual([rbac.roomRoleFor({ role: 'manager' }, LEGAL), rbac.roomRoleFor({ role: 'admin' }, LEGAL)], ['observer', 'research'], 'every hall is no member of a side room; the admin role is');
+  assert.equal(rbac.roomRoleFor({ role: 'viewer', rooms: ['LGQ4MZP8'] }, LEGAL), 'observer', 'a member who may only read');
+  // A hall its board lists seats the account On stage in that hall's Main room, where it may post, and nowhere else.
+  const boardTech = { ...tech, board: ['HALL01'] };
+  assert.deepEqual([rbac.roomRoleFor(boardTech, main('HALL01')), rbac.roomRoleFor(boardTech, LEGAL)], ['board', 'research'], 'On stage is a Main room\'s seat');
+  assert.equal(rbac.roomRoleFor({ role: 'tech', halls: [], board: ['HALL01'] }, main('HALL01')), 'observer', 'a hall it does not reach seats it nowhere');
+  assert.equal(rbac.roomRoleFor({ role: 'viewer', halls: ['HALL01'], board: ['HALL01'] }, main('HALL01')), 'observer', 'nor where it may not post');
+  assert.equal(rbac.roomRoleFor({ role: 'manager', board: ['HALL01'] }, main('HALL01')), 'board', 'every hall\'s account, seated On stage in that one');
+  // A hall's key given as a string is read as that hall's Main room (0.5.1's callers); anything else seats an observer.
+  assert.deepEqual([rbac.roomRoleFor({ role: 'viewer', halls: ['H1H1'] }, 'H1H1'), rbac.roomRoleFor({ role: 'tech', halls: ['H1H1'] }, 'H1H1'), rbac.roomRoleFor(boardTech, 'HALL01')], ['observer', 'research', 'board']);
+  for (const bad of ['', null, undefined, {}, { code: 'LGQ4MZP8', hall: 'HALL01', main: true }]) assert.equal(rbac.roomRoleFor({ role: 'admin' }, bad), 'observer', JSON.stringify(bad));
+});
+
+test('rbac: a code guest\'s rights by its seat and the kind of room (guestCaps)', () => {
+  // A hall's Main room: as 0.5.1's server table, with unit G's On stage (view and post).
+  assert.deepEqual(Object.fromEntries(['research', 'board', 'observer'].map((r) => [r, [...rbac.guestCaps(r, 'main')]])), {
+    research: ['hall.view', 'hall.post', 'hall.files', 'stage.send'], board: ['hall.view', 'hall.post'], observer: ['hall.view'],
+  });
+  // A side room: a Member posts and shares files and sends nothing to a Stagewatch; no seat there is On stage.
+  assert.deepEqual(Object.fromEntries(['research', 'board', 'observer'].map((r) => [r, [...rbac.guestCaps(r, 'side')]])), {
+    research: ['hall.view', 'hall.post', 'hall.files'], board: [], observer: ['hall.view'],
+  });
+  assert.deepEqual([...rbac.guestCaps('research', 'side')], [...rbac.GUEST_CAPS_SIDE.research]);
+  // Fail closed: a seat or a kind not listed, or an object's own names, hold nothing.
+  for (const [role, kind] of [['director', 'main'], ['admin', 'main'], ['research', 'hall'], ['research', undefined], ['research', true], ['__proto__', 'main'], ['constructor', 'main'], ['toString', 'side'], [7, 'main'], [null, 'side']]) {
+    assert.deepEqual([...rbac.guestCaps(role, kind)], [], String(role) + ' ' + String(kind));
+  }
+  // Nobody widens a seat through the table it is handed.
+  for (const t of [rbac.GUEST_CAPS, rbac.GUEST_CAPS_SIDE, rbac.guestCaps('nobody', 'main'), ...Object.values(rbac.GUEST_CAPS), ...Object.values(rbac.GUEST_CAPS_SIDE)]) assert.ok(Object.isFrozen(t));
+  // A seat's base and its limit agree: On stage's rights are its seat's limit, in a hall's Main room.
+  assert.deepEqual([...rbac.guestCaps('board', 'main')], Object.keys(rbac.CAPS).filter((c) => rbac.seatAllows('board', c)));
 });
 
 test('rbac: rights never escalate', () => {

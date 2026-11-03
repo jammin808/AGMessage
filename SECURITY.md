@@ -56,6 +56,12 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   stored only as hashes, `HttpOnly`, `SameSite=Strict` and `Secure` over HTTPS; logins are rate limited and locked out.
   A browser signed in to an account is refused a code join, so an account never seats itself as a guest with rights
   its own do not hold; a join's role that the page does not offer is refused.
+- Rights are checked per room. Reading, writing and sharing files in a room are asked of that room, by its key, its
+  hall's and whether it is the hall's Main room (`app/lib/rbac.js` `canIn`): in a Main room by the account's halls, in
+  a side room (Legal, Media) only by the rooms the account is given, or by the admin role, never by its halls, an
+  account of every hall's included. Asked of `rbac.can` by a hall's code, those three are refused whoever asks, so a
+  check left on a room's key where a hall's was meant fails closed instead of letting every account of every hall in. A
+  code guest's rights are its seat's, by the kind of room it sits in, from one table (`rbac.guestCaps`).
 - The laptop's admin token is said only where a person sits: the watchdog that makes it says it in its console window,
   never into output that is kept (a redirect, a log, a task's capture), and a server under its watchdog never prints it.
   The installed node writes it into a token folder of its own, which its admin and the accounts it gives `token` read,

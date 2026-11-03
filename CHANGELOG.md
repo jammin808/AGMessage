@@ -2531,6 +2531,80 @@ are as before)
   `docs/DESIGN.md` (the modules row).
 - Rolling back: nothing is stored or sent differently.
 
+**Rights are checked per room, behind a fence** (the plan's Part 1, unit 5, its §2.1 and §2.3, with Part 5's
+`rbac.guestCaps` and `conn`'s rights question and Part 7's seat limit in `rightsIn`; the tree's tests. No page gives an
+account a room or an On stage hall yet, so in a hall's Main room every right is answered as in 0.5.1 and a side room is
+the admin's; the seats and the admin's join that move are said below)
+- **A room's rights are the room's** (`app/lib/rbac.js`): seeing, posting and sharing files (`ROOM_SCOPED`:
+  `hall.view`, `hall.post`, `hall.files`) are answered only by `rbac.canIn(account, right, scope)`, for a room named by
+  its scope, `{code, hall, main}` (`store.scopeOf(room)`: its key, its hall's, and whether it is that hall's Main room;
+  one not whole, a string included, answers no). In a hall's Main room they follow the account's halls, as before; in a
+  side room only the rooms the account is given (`effective`'s new `rooms`), never its halls, so an account of every
+  hall (a project manager, a senior tech, "every hall, including new ones") reaches no side room by that; the admin role
+  is a member of every room. A hall's own rights (its screens, its Stagewatch, its show network) stay the hall's in each
+  of its rooms. `seesHall(account, hall)` reads a hall's Main room and its hall's parts, `seesRoom(account, scope)` a
+  room.
+- **The fence:** `rbac.can()` asked one of those three rights with a hall named (a code, or anything in its place)
+  answers no, whoever asks, the admin's and every hall's accounts included, so a check left on a room's key where a
+  hall's was meant refuses instead of letting every account of every hall in. Asked with no hall ("in any hall at
+  all?"), they still answer, so the Accounts page's and the routes' own checks are unchanged.
+- **The seat an account joins with** (`rbac.roomRoleFor(account, scope)`): backstage where it may post, else an
+  observer, as before, and On stage in a hall's Main room whose hall its On stage halls name (`effective`'s new
+  `board`), where it may post; never On stage in a side room. A hall's key given as a string is read as its Main room.
+  Seated On stage, an account is held to the seat's limit as a guest is (no upload token, no file, nothing forwarded).
+  The join seats the admin (an account that manages settings, on its pages), which may post wherever it sits
+  (`allowed`), backstage wherever its account's own rights would make it an observer: in a side room it is not given,
+  in a hall its halls do not list, and in a hall where its own rights only read (a Viewer given settings.manage, seated
+  an observer before while the server took its posts), so its page is never read-only where its posts are taken.
+- **A code guest's rights** move from the connection into `rbac.guestCaps(role, kind)`, beside the account rights: a
+  hall's Main room's table as before (backstage posts, shares files and sends to Stagewatch; On stage posts; an observer
+  reads), and a side room's beside it (`GUEST_CAPS_SIDE`: a Member posts and shares files and sends nothing to
+  Stagewatch, an observer reads, no seat there is On stage). A seat or a kind the tables do not list holds nothing.
+- **Moved to the room:** a page's rights (`allowed`: an account by its rights in its room, a guest by its seat and the
+  kind of room); the join (the admin first, then the account's rights in that room, `seesRoom`; its seat by
+  `roomRoleFor`); the rights a forward and its picker read in another room (`rightsIn`: an account by its rights there,
+  held to the seat it would sit there, a guest by its seat there and the kind of room); `help:respond`'s account branch
+  (the crew of the request's room or of its hall's Main room, `answersHelp` by each scope, its own Resolved by its
+  right in the room); the halls board's `canRespond`; `/api/halls`' `can.post` and `can.files` (asked in each hall's
+  Main room, so their answers are 0.5.1's); `nodes:list`'s halls (`seesHall`); and the admin's link of an account into
+  a room (`admin:linkRoom`), refused where the account may not post in that room: "Tom signs in with an account that may
+  not post in that room: a side room is only for the accounts it is given to." (a hall's words are as before). An
+  account that manages settings (the admin, from its pages) joins any hall or room by its key, seated backstage, as
+  its watch and support view reached them already; before, a hall its own halls did not list refused its join.
+- **`conn.canIn(right, room)`**: a handler module's question of the connection's rights in another room, by that
+  room's scope and never by a seat (the admin, the laptop's token or an account that manages settings, every right; an
+  account by `rbac.canIn`; a code guest none), so no module asks `rbac.can`; what a verb may do in the room it sits in
+  is asked of `conn.allowed` (the gate's `may`), which reads the seat's limit first.
+- Tests: `test/accounts.test.js`: the fence for every role (accounts of their own halls and of every hall, a Viewer,
+  the admin) and room right (a hall's code, a room's key, a scope, a list, a number), the no-scope question still
+  answering, a hall's own rights still asked of the hall; `canIn` in a Main
+  room equal to 0.5.1's answer for every role, right and hall (grants, revokes, a turned-off account, an unknown role
+  and none); a side room reached by its members (their rights still deciding: a Viewer reads, a revoke takes away)
+  and the admin role, never by every hall's accounts, its hall's members or a halls list naming its key; a hall's own
+  rights there its hall's; a malformed scope refused even for the admin; `effective`'s `rooms` and `board` (strings in a
+  list only); `roomRoleFor` by scope (a Board hall seats `board` in its Main room only, never without the hall or
+  `hall.post`), and a string as a Main room; `guestCaps` for both kinds, an unknown seat, kind or an object's own name
+  holding nothing, every table frozen; `answersHelp` by scope (a side room's crew its members', a Board member none,
+  a string no scope). Moved on purpose: the old `:23-24` and `:27` to `canIn` and `seesHall`, the turned-off account's
+  and the unknown role's room rights to `canIn` and `seesHall` (asked of `can()` with a hall, the fence alone would
+  refuse them), and `answersHelp`'s cases to scopes. `test/halls.test.js`, end to end on a folder whose accounts' file gives Lou and Tom the side room and Kim
+  Hall A's On stage seat and the side room too: Lou joins the side room backstage with an upload token, posts and
+  shares a file, and is refused Hall A's Main room; a project manager of every hall is refused the side room; Hall A's
+  `/api/halls` rights as before; Tom's forward from the Main room lands in the side room, its picker listing it; Kim is
+  seated On stage, with no upload token and a file refused, and from the side room, where she sits backstage and shares
+  a file, forwards into Hall A only what her On stage seat there may post (a text, posted as `board`; the file refused,
+  "You may not share files in that hall.", and not offered by the picker); a project manager of Hall B alone who
+  manages settings joins Hall A and the side room by their keys, seated backstage with an upload token, and posts in
+  each, while the same manager without that right is refused both in their words; the admin's link of Tom into the side
+  room passes and of the project manager is refused with its words (and the side-room test's link of an account with no
+  room, and its title, moved to those words on purpose).
+  `test/modules.test.js`: `conn` holds `canIn`, made before it in the connection.
+- The papers: `CLAUDE.md` (the rights row, the seat's row, the gate's row), `SECURITY.md` (rights per room),
+  `docs/ACCOUNTS.md` (rights in a room; a guest's side-room seat; a forward's and On stage's rights by room),
+  `docs/DESIGN.md` (the server is the authority; fail closed), `docs/ANALYSIS.md` (the rights fence; (j)'s `canIn`).
+- Rolling back: nothing is stored or sent differently. 0.5.1 ignores an account's `rooms` and `board`, which nothing
+  writes yet.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

@@ -23,9 +23,9 @@ halls (or "every hall, including new ones"). The rights, as the server checks th
 
 | Right | Meaning |
 |---|---|
-| `hall.view` | see a hall: its messages, files, countdown and screens |
-| `hall.post` | send messages, replies, action prompts and help requests; answer a prompt, pin, react; forward into the hall |
-| `hall.files` | share files and push them to a hall, or forward one into it |
+| `hall.view` | see a hall: its messages, files, countdown and screens; in a side room (Legal, Media), only one the account is given |
+| `hall.post` | send messages, replies, action prompts and help requests; answer a prompt, pin, react; forward into the hall; in a side room, only one the account is given |
+| `hall.files` | share files and push them to a hall, or forward one into it; in a side room, only one the account is given |
 | `display.control` | change what a hall's screens show |
 | `display.manage` | add, rename, move, re-link and remove screens; the hall's holding image |
 | `stage.send` | send to Stagewatch: the speaker's screen, or to the operator to pass on |
@@ -35,6 +35,17 @@ halls (or "every hall, including new ones"). The rights, as the server checks th
 | `settings.manage` | app settings: AI key, HTTPS, the tunnel, the show network |
 | `audit.read` | read the audit log |
 | `audit.export` | export the whole audit log, signed, to check on another computer (with `audit.read`); admin-only, so an account holding it signs in through the tunnel only when admins may |
+
+**Rights in a room.** `hall.view`, `hall.post` and `hall.files` are a room's rights, asked of the room a person is in or
+acts on. In a hall's Main room they follow the account's halls, as they always have. In a hall's other rooms (Legal,
+Media) they follow only the rooms the account is given, never its halls: an account of every hall (a project manager, a
+senior tech, "every hall, including new ones") reaches no side room by that, and the admin role is a member of every
+room. A hall's own rights stay its hall's in each of its rooms: its screens, its Stagewatch, its show network. The
+server asks a room's rights of that room alone (`rbac.canIn`, by the room's key, its hall's and whether it is the Main
+room); asked by a hall's code they are refused, so a check written against a room's key fails closed rather than let an
+account of every hall in. No page gives an account a room yet, so a side room is the admin's. An account that manages
+settings is the admin on its pages: it opens any hall or room by its key, a hall its own halls do not list and a side
+room it is not given included, and is seated backstage there, since it may post wherever it sits.
 
 Rules that keep rights from growing by themselves: deny by default; only an admin makes an admin or hands out
 `users.manage`, `settings.manage` or `audit.export`, and only an admin changes, resets, signs out, turns back on or
@@ -51,7 +62,8 @@ nothing); each goes over HTTP, and an answer not back in 5 s, the editor's Save 
 connection." The answer that comes later is still the act's, said as late, and the list is read again: a new one-time
 password that comes late is shown all the same (the old one has stopped working by then), and a Save is held, never sent
 twice, until it is answered. A code guest's rights come from where they joined: backstage posts, shares files and sends to Stagewatch; on
-stage posts; an observer reads; a role the join page does not offer is refused ("Choose On stage,
+stage posts; an observer reads (in a side room, a Member posts and shares files and sends nothing to Stagewatch, and no
+seat there is On stage: `rbac.guestCaps`); a role the join page does not offer is refused ("Choose On stage,
 Backstage or Observer."), never seated as another. A browser signed in to an account is that account in every hall, a
 one-time password not yet changed included: its code join is refused ("You are signed in as Ana: open the room from your
 halls, or sign out to join with a code."), so an account never takes a guest's seat, and the rights that come with it,
@@ -64,7 +76,8 @@ prompt's options and its tally, and is offered nothing to press. What a page off
 its right-click and Shift+F10) is drawn from one catalogue of acts (`app/public/catalog.js`), each shown by rights that
 match a refusal the server words: hiding an act is never the check, and `test/menus.test.js` sends every act to each seat
 it is not offered, and each is refused. Forwarding a message posts it in the other hall, so the
-rights there decide: an account's rights in that hall (and `hall.files` for a file), a code guest's own seat there (a
+rights there decide: an account's rights in that room (and `hall.files` for a file), held to the seat it would sit
+there, a code guest's own seat there (a
 locked hall's observer seat stays an observer's), or, where the guest has no seat, the admin's link. The forward carries
 the role and the account mark a post there would carry, and Send to ▸ lists only the halls that would take that
 message (for a file, those where they may share files too); it is offered only where there is one (the join's
@@ -97,10 +110,12 @@ limited; a guest seated On stage in one hall and backstage in another keeps back
 admin moves a guest's seat, the page is held to its new seat at once: an upload token it holds ends with the move, is
 refused at its next use in the new seat's words ("On stage seats send messages, not files.", "Observers can read but not
 post.") and is gone, and the page's join after its reload takes a new one where the seat shares files. Accounts are
-seated by their rights (backstage, or an observer without `hall.post`), so the limit reaches an account when accounts
-are given On stage seats. An account answers a hall's help requests, from its hall page or the halls board, only where
-it may post and does not sit On stage (`rbac.answersHelp`, which the halls board's On my way and Resolved read too): a
-Board member of a hall will answer none of that hall's requests from any page, its own Resolved excepted.
+seated by their rights in the room (backstage, or an observer without `hall.post`), and On stage in a hall's Main room
+whose hall the account's On stage halls name, where it may post (`rbac.roomRoleFor`): the limit holds it there as it
+holds any seat. No page gives an account On stage halls yet. An account answers a room's help requests, from its hall
+page or the halls board, only where it may post and does not sit On stage (`rbac.answersHelp`, by the room, which the
+halls board's On my way and Resolved read too): a Board member of a hall will answer none of that hall's requests from
+any page, its own Resolved excepted.
 
 Forwarding keeps two rules of the room a message comes from: a file moves only from a seat that may share files there
 ("Files are moved by the backstage team."), and a file or a question goes only into a room where the forwarder sits
