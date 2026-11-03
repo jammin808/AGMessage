@@ -1,7 +1,9 @@
 // The account area: every hall this account may see, as a board — each hall's countdown from its Stagewatch, who is in,
-// its last message, open help requests and its displays — with the way into each. Project managers and senior techs see
-// every hall; techs and staff see theirs. The board is live over the socket ('board:watch'); /api/halls is its first
-// paint and its fallback.
+// its last message, open help requests and its screens — with the way into each: the hall's name opens its Main room,
+// and its side rooms this account may enter are room buttons on its row. Side rooms it is given in halls it does not see
+// are listed under Your rooms, by their hall's name. Project managers and senior techs see every hall; techs and staff
+// see theirs. The board is live over the socket ('board:watch'); /api/halls is its first paint and its fallback. A
+// hall's Set up holds its name, its own Stagewatch and its rooms (the catalogue's adminRoom, as the admin page's list).
 (function () {
   'use strict';
   if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): its words, and nothing else
@@ -17,7 +19,10 @@
   let live = {};           // code -> the board's live row (stage, last, help, displays, people)
   let helps = [];          // open help requests across the rooms this account reads, and its halls' side rooms' for their crew
   let canManageHalls = false;
+  let isAdmin = false;     // /api/halls's: the admin, who switches and renews a room's code and removes a room in Set up
+  let canManageUsers = false;   // /api/halls's: a room's Members… in Set up
   let canDrive = false;    // the board's: Show network lists a node this account may drive
+  let yourRooms = [];      // side rooms this account may enter in halls it does not see: the board's, else /api/halls's
 
   // The acts on a hall's row and on a help request are the catalogue's (catalog.js: kinds hall, help), drawn by AGM.acts:
   // the bar, the ⋯, right-click, Shift+F10 and the keys alike. This page binds only what each act does (RUN).
@@ -25,7 +30,7 @@
   const RUN = {};
   const A = AGM.acts({ facts: () => F, run: RUN, say: (words, bad) => AGM.toast(words, bad) });
   function factsChanged() {
-    F = AGM.catalog.boardFacts({ canManageHalls, canDrive, connected: !!(socket && socket.connected) });
+    F = AGM.catalog.boardFacts({ canManageHalls, isAdmin, canManageUsers, canDrive, connected: !!(socket && socket.connected) });
     render();
   }
 
@@ -38,6 +43,9 @@
     me = r.account;
     halls = r.halls;
     canManageHalls = r.canManageHalls;
+    isAdmin = r.isAdmin === true;
+    canManageUsers = r.canManageUsers === true;
+    yourRooms = Array.isArray(r.rooms) ? r.rooms : [];
     $('who').textContent = me.name + ' · ' + me.rights.roleLabel;
     $('pwUser').value = me.username;
     $('usersLink').hidden = !(r.canManageUsers || r.canAudit);
@@ -76,6 +84,10 @@
   function render() {
     const list = $('hallList');
     $('emptyNote').hidden = halls.length > 0;
+    // Its words follow Your rooms as each frame brings them (a room given while the page is open).
+    const empty = yourRooms.length ? 'No hall of your own: your rooms are below.' : 'No halls yet. An admin or project manager makes them, then gives you access.';
+    if ($('emptyNote').textContent !== empty) $('emptyNote').textContent = empty;
+    renderYourRooms();
     const keep = new Map([...list.querySelectorAll(':scope > li[data-key]')].map((li) => [li.dataset.key, li]));
     halls.forEach((h, i) => {
       const li = row(h, live[h.code] || {}, keep.get(h.code));
@@ -86,11 +98,27 @@
     renderHelp();
     A.refresh();
   }
-  /** A hall as the catalogue reads it: its key, its name, and its guest code as the server tells this account ('' else). */
+  /**
+   * A hall as the catalogue reads it: its key, its name, its guest code as the server tells this account ('' else), and
+   * the side rooms of it this account may enter (Rooms ▸).
+   */
   function hallObject(code) {
     const h = halls.find((x) => x.code === code);
-    return h ? { code: h.code, name: h.name || h.code, guestCode: codeOf(h).guestCode } : null;
+    return h ? { code: h.code, name: h.name || h.code, guestCode: codeOf(h).guestCode, rooms: roomsOf(h).map((r) => ({ key: r.key, name: r.name, people: r.people })) } : null;
   }
+  /**
+   * A hall's side rooms this account may enter, with how many are in each and the seat it would join with there: the
+   * board's live row (each room made, renamed, given or taken away reaches it), else the first paint's (/api/halls).
+   */
+  function roomsOf(h) {
+    const l = live[h.code];
+    const from = l && Array.isArray(l.rooms) ? l.rooms : Array.isArray(h.rooms) ? h.rooms : [];
+    return from.filter((r) => r && typeof r.key === 'string').map((r) => ({ key: r.key, name: typeof r.name === 'string' ? r.name : '', people: Number.isInteger(r.people) ? r.people : 0, seat: r.seat === 'observer' ? 'observer' : 'research' }));
+  }
+  /** The way into a side room, as the server would seat this account there (a Member's seat, or an observer's). */
+  const roomHref = (r) => '/app.html?' + new URLSearchParams({ code: r.key, as: 'account', role: r.seat }).toString();
+  /** A side room's button words: its name, and how many are in when anyone is ("Legal 2 in"). */
+  const roomWords = (r) => (r.name || 'A room') + (r.people ? ' ' + r.people + ' in' : '');
   /**
    * A hall's guest code and whether it admits guests: the board's live row (each switch and New code reach it), else the
    * first paint's (/api/halls); '' when this account may not know it.
@@ -126,10 +154,12 @@
       const clock = document.createElement('div'); clock.className = 'hall-clock';
       const last = document.createElement('div'); last.className = 'hall-last';
       const meta = document.createElement('div'); meta.className = 'hall-meta';
+      // The hall's side rooms this account may enter, each a real link above the row's own (a middle click opens a tab).
+      const rooms = document.createElement('div'); rooms.className = 'hall-rooms';
       const bar = document.createElement('span'); bar.className = 'obj-bar';
-      li.append(open, clock, last, meta, bar);
+      li.append(open, clock, last, meta, rooms, bar);
     }
-    const [open, clock, last, meta, bar] = li.children;
+    const [open, clock, last, meta, rooms, bar] = li.children;
     const st = l.stage || null;
     const state = stageState(st);
     li.dataset.state = state;
@@ -156,8 +186,57 @@
     put(meta, '<span title="People in the hall now">' + esc(String(l.people ?? h.people)) + ' in</span>' +
       (helpOpen ? '<span class="help-count" title="Open help requests">■ ' + esc(String(helpOpen)) + (helpOpen === 1 ? ' needs help' : ' need help') + '</span>' : '') +
       displaysHtml + nodesHtml(l.nodes));
+    drawRoomButtons(rooms, roomsOf(h), h.name || h.code);
     A.draw(bar, 'hall', hallObject(h.code), { more: 'Actions for ' + (h.name || h.code), keysOn: li });
     return li;
+  }
+  /** A row's room buttons, each kept by its key and changed in place, so a frame every second moves no focus. */
+  function drawRoomButtons(box, list, hallName) {
+    box.hidden = !list.length;
+    const keep = new Map([...box.querySelectorAll(':scope > a[data-key]')].map((a) => [a.dataset.key, a]));
+    list.forEach((r, i) => {
+      let a = keep.get(r.key);
+      keep.delete(r.key);
+      if (!a) { a = document.createElement('a'); a.className = 'room-btn'; a.dataset.key = r.key; }
+      const href = roomHref(r);
+      if (a.getAttribute('href') !== href) a.setAttribute('href', href);
+      if (a.textContent !== roomWords(r)) a.textContent = roomWords(r);
+      // Its name to a screen reader starts with the words it shows (WCAG 2.5.3), then says whose room it is.
+      const named = roomWords(r) + ', a room of ' + hallName + (r.seat === 'observer' ? ', to read' : '');
+      if (a.getAttribute('aria-label') !== named) a.setAttribute('aria-label', named);
+      if (box.children[i] !== a) box.insertBefore(a, box.children[i] || null);
+    });
+    for (const a of keep.values()) a.remove();
+  }
+  /**
+   * Your rooms: the side rooms this account may enter in halls it does not see, each by its name and its hall's (never
+   * the hall's key), how many are in, and its way in.
+   */
+  function renderYourRooms() {
+    const ul = $('yourRoomList');
+    $('yourRooms').hidden = yourRooms.length === 0;
+    const keep = new Map([...ul.querySelectorAll(':scope > li[data-key]')].map((li) => [li.dataset.key, li]));
+    yourRooms.forEach((x, i) => {
+      const r = { key: x.key, name: typeof x.name === 'string' ? x.name : '', people: Number.isInteger(x.people) ? x.people : 0, seat: x.seat === 'observer' ? 'observer' : 'research' };
+      let li = keep.get(r.key);
+      keep.delete(r.key);
+      if (!li) {
+        li = document.createElement('li');
+        li.className = 'your-room';
+        li.dataset.key = r.key;
+        const a = document.createElement('a'); a.className = 'your-room-open';
+        const where = document.createElement('span'); where.className = 'muted your-room-hall';
+        li.append(a, where);
+      }
+      const [a, where] = li.children;
+      const href = roomHref(r);
+      if (a.getAttribute('href') !== href) a.setAttribute('href', href);
+      if (a.textContent !== roomWords(r)) a.textContent = roomWords(r);
+      const hallWords = (typeof x.hallName === 'string' && x.hallName) || 'A hall with no name';
+      if (where.textContent !== hallWords) where.textContent = hallWords;
+      if (ul.children[i] !== li) ul.insertBefore(li, ul.children[i] || null);
+    });
+    for (const li of keep.values()) li.remove();
   }
 
   // ---------------------------------------------------------------- a hall's set-up: its name and its own Stagewatch
@@ -191,9 +270,130 @@
       }
       $('setupHeardWrap').hidden = !r.stagewatches.length;
       $('setupError').hidden = true;
-      AGM.openDialog($('setupDialog'));
+      readSetupRooms(code).then((rooms) => {
+        setupRooms = rooms.ok ? rooms : { hall: code, hallName: r.name || '', rooms: [], error: rooms.error };
+        setupSeen = roomsSeen(live[code]);
+        drawSetupRooms();
+        AGM.openDialog($('setupDialog'));
+      });
     });
   }
+
+  // ---------------------------------------------------------------- a hall's set-up: its rooms
+  // Each of the hall's rooms (room:settings: its Main room first, then the rooms beside it in the order they were made),
+  // with its guest code as this account may be told it, whether it admits guests and the guest pages in it; each act on
+  // one is the catalogue's adminRoom, drawn by its ⋯, right-click and Shift+F10, and done at once (Save is for the name
+  // and the Stagewatch above): a room made and renamed by those who set halls up, its code switched and renewed and the
+  // room removed by the admin, its accounts chosen with Members… by whoever manages accounts (or on the Accounts page).
+  // The list is read when Set up opens, again after an act made here, and again when a board frame shows this hall's code
+  // or the rooms of it this account may enter changed (`roomsSeen`): a room made, renamed or removed by another page in a
+  // hall whose side rooms this account is not given shows at the next of those, and an act on a row gone by then is
+  // refused by the server ("No such room."). A read refused, or not answered, is said in place of the list.
+  let setupRooms = null;   // room:settings' answer for the hall in Set up: {hall, hallName, rooms}, or with `error`
+  let setupSeen = '';      // what the board's row of that hall said of its code and rooms when the list was last read
+  function readSetupRooms(code) {
+    return new Promise((resolve) => {
+      if (!socket || !socket.connected) { resolve({ ok: false, error: 'Not connected.' }); return; }
+      socket.emit('room:settings', { code }, (r) => resolve(r && r.ok ? r : { ok: false, error: (r && r.error) || 'No answer.' }));
+    });
+  }
+  /** What a board row says of its hall's code and of the rooms of it this account may enter: their keys and names. */
+  const roomsSeen = (row) => (row ? JSON.stringify([row.guestCode, row.codeOn, (Array.isArray(row.rooms) ? row.rooms : []).map((r) => [r.key, r.name])]) : '');
+  /** A room of Set up as the catalogue reads it (as the admin page's list does), by its key. */
+  function setupRoomObject(key) {
+    const r = setupRooms && Array.isArray(setupRooms.rooms) ? setupRooms.rooms.find((x) => x.key === key) : null;
+    if (!r) return null;
+    const hallName = setupRooms.hallName || 'This hall';
+    return {
+      code: r.key, name: r.name || '', hall: r.main ? hallName : hallName + ' › ' + (r.name || r.key), main: !!r.main, watched: false,
+      guestCode: typeof r.guestCode === 'string' ? r.guestCode : '', on: !!r.codeOn, guests: Number.isInteger(r.guests) ? r.guests : null, codeIsKey: !!r.main && r.guestCode === r.key,
+    };
+  }
+  /**
+   * The hall of Set up as the catalogue reads its Main room: its row when the list holds it, else made from the hall's key
+   * and name (a read refused), so + Add room follows the facts and the hall, never a row that is missing.
+   */
+  function setupHallObject() {
+    if (!setupRooms) return null;
+    const main = Array.isArray(setupRooms.rooms) ? setupRooms.rooms.find((x) => x.main) : null;
+    if (main) return setupRoomObject(main.key);
+    const hallName = setupRooms.hallName || 'This hall';
+    return { code: setupRooms.hall, name: hallName, hall: hallName, main: true, watched: false, guestCode: '', on: false, guests: null, codeIsKey: false };
+  }
+  /** A room's code as its row says it: the code where this account is told it, and whether it admits guests now. */
+  const setupCodeWords = (o) => (o.guestCode ? 'code ' + o.guestCode + (o.on ? '' : ' (off)') : o.on ? 'code on' : 'code off')
+    + (o.guests ? ' · ' + o.guests + (o.guests === 1 ? ' guest page' : ' guest pages') + ' in' : '');
+  function drawSetupRooms() {
+    const ul = $('setupRooms');
+    const list = setupRooms && Array.isArray(setupRooms.rooms) ? setupRooms.rooms : [];
+    $('setupRoomsWords').textContent = (setupRooms && setupRooms.error ? 'The rooms could not be read: ' + setupRooms.error + ' ' : '')
+      + 'Done at once. Each room beside the Main room has its own messages, people and guest code, off until the admin turns it on. '
+      + (F.manageUsers ? 'Its members are chosen on the Accounts page, or with Members… on its ⋯ (Board members… on the Main room: who sits On stage).' : 'Its members are chosen on the Accounts page.');
+    const keep = new Map([...ul.querySelectorAll(':scope > li[data-key]')].map((li) => [li.dataset.key, li]));
+    list.forEach((r, i) => {
+      let li = keep.get(r.key);
+      keep.delete(r.key);
+      if (!li) {
+        li = document.createElement('li');
+        li.className = 'setup-room';
+        li.dataset.key = r.key;
+        const name = document.createElement('span'); name.className = 'setup-room-name';
+        const code = document.createElement('span'); code.className = 'muted setup-room-code';
+        const bar = document.createElement('span'); bar.className = 'obj-bar';
+        li.append(name, code, bar);
+      }
+      const o = setupRoomObject(r.key);
+      const [name, code, bar] = li.children;
+      const nameWords = o.main ? 'Main room' : o.name || 'A room';
+      if (name.textContent !== nameWords) name.textContent = nameWords;
+      if (code.textContent !== setupCodeWords(o)) code.textContent = setupCodeWords(o);
+      A.draw(bar, 'adminRoom', o, { more: (o.main ? 'Main room actions' : 'Actions for ' + (o.name || 'this room')), keysOn: li });
+      if (ul.children[i] !== li) ul.insertBefore(li, ul.children[i] || null);
+    });
+    for (const li of keep.values()) li.remove();
+    // + Add room is a door to the Main room's New room in this hall…: shown where that act is, by the facts and the hall.
+    const hall = setupHallObject();
+    $('setupAddRoom').hidden = !(hall && AGM.catalog.shown('adminRoom', F, hall).some((e) => e.id === 'adminRoom.create'));
+    A.refresh();
+  }
+  /**
+   * Set up's rooms read again and drawn in place (after an act made here, or a board frame that shows a change): the answer
+   * is the server's; a refusal keeps the rows drawn and says why above them.
+   */
+  function refreshSetupRooms() {
+    if (!setupRooms) return;
+    const code = setupRooms.hall;
+    readSetupRooms(code).then((r) => {
+      if (!setupRooms || setupRooms.hall !== code) return;
+      setupRooms = r.ok ? r : { ...setupRooms, error: r.error };
+      drawSetupRooms();
+    });
+  }
+  $('setupAddRoom').addEventListener('click', () => {
+    const o = setupHallObject();
+    if (o) A.act('adminRoom', 'adminRoom.create', o, { anchor: $('setupAddRoom'), opener: $('setupAddRoom'), get: () => (setupRooms && setupRooms.hall === o.code ? setupHallObject() : null), gone: 'That hall is gone.' });
+  });
+  /** A refusal said, or what was done, and Set up's rooms read again. */
+  const roomDone = (fail, done) => (res) => {
+    if (!res || !res.ok) { AGM.toast((res && res.error) || fail, true); return; }
+    done(res);
+    refreshSetupRooms();
+  };
+  Object.assign(RUN, {
+    'adminRoom.create': (o, c) => AGM.outbox.now('room:create', { hall: o.code, name: (c.values && c.values.name) || '' }, roomDone('Not made.', (res) => AGM.toast('Made ' + res.name + ' in ' + o.hall + ': its guest code is off.'))),
+    'adminRoom.rename': (o, c) => AGM.outbox.now('room:update', { code: o.code, name: (c.values && c.values.name) || '' }, roomDone('Not renamed.', (res) => AGM.toast(res.already ? 'It is called ' + res.name + ' already.' : 'Renamed ' + res.name + '.'))),
+    'adminRoom.codeToggle': (o, c) => AGM.outbox.now('room:update', o.on ? { code: o.code, codeOn: false, keepGuests: c.choice !== 'out' } : { code: o.code, codeOn: true }, roomDone('Not changed.', (res) => {
+      const n = (k) => k + (k === 1 ? ' guest page' : ' guest pages');
+      AGM.toast(res.codeOn ? 'The guest code of ' + o.hall + ' is on.'
+        : Number.isInteger(res.sentOut) ? 'The guest code of ' + o.hall + ' is off: ' + n(res.sentOut) + ' sent out.'
+          : 'The guest code of ' + o.hall + ' is off' + (Number.isInteger(res.kept) ? ': ' + n(res.kept) + ' stay.' : '.'));
+    })),
+    'adminRoom.newCode': (o) => AGM.outbox.now('room:update', { code: o.code, newCode: true }, roomDone('No new code.', (res) => AGM.toast('The new guest code of ' + o.hall + ' is ' + res.guestCode + '.'))),
+    'adminRoom.remove': (o, c) => AGM.outbox.now('admin:deleteRoom', { roomCode: o.code, purgeFiles: !!(c.values && c.values.purge) }, roomDone('Not removed.', (res) => AGM.toast(res.keptWords ? 'Removed. ' + res.keptWords : 'Removed ' + o.hall + '.', !!res.keptWords))),
+    'adminRoom.members': (o) => AGM.members.open({ code: o.code, name: o.name, hall: o.hall, main: o.main, hallName: (setupRooms && setupRooms.hallName) || o.hall }, { say: (w, bad) => AGM.toast(w, bad) }),
+  });
+  A.bind($('setupRooms'), { kind: 'adminRoom', find: (el) => el.closest('#setupRooms > li[data-key]'), get: setupRoomObject, label: (o) => (o.main ? 'Main room actions' : 'Room actions'), gone: 'That room is gone.', header: (o) => o.hall });
+  AGM.roving($('setupRooms'), { item: 'li[data-key]' });
   $('setupForm').addEventListener('submit', (e) => {
     e.preventDefault();
     const patch = { code: setupCode, name: $('setupName').value.trim(), stagewatchUrl: $('setupUrl').value.trim(), stagewatchFingerprint: $('setupFp').value.trim() };
@@ -343,6 +543,7 @@
     'hall.tab': (o) => { window.open(hallHref(o.code), '_blank', 'noopener'); },
     'hall.copy': (o, c) => AGM.copy(new URL(hallHref(o.code), location.href).href, { said: 'Copied the link to ' + o.name + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
     'hall.code': (o, c) => AGM.copy(o.guestCode, { said: 'Copied ' + o.name + '\'s guest code, ' + o.guestCode + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
+    'hall.rooms': (o, c) => { const h = halls.find((x) => x.code === o.code); const r = h && roomsOf(h).find((x) => x.key === c.value); if (r) location.href = roomHref(r); },
     'hall.setup': (o) => openSetup(o.code),
     'hall.network': () => openNetwork(),
   });
@@ -351,7 +552,7 @@
   AGM.roving($('hallList'), { item: 'li[data-key]' });
   AGM.roving($('helpList'), { item: 'li[data-key]' });
   // What this page's acts read, by name: its facts and its objects (the browser smoke reads them to hold the doors to the catalogue).
-  AGM.page = Object.freeze({ facts: () => F, object: (kind, key) => (kind === 'hall' ? hallObject(key) : kind === 'help' ? helpObject(key) : null) });
+  AGM.page = Object.freeze({ facts: () => F, object: (kind, key) => (kind === 'hall' ? hallObject(key) : kind === 'help' ? helpObject(key) : kind === 'adminRoom' ? setupRoomObject(key) : null) });
   function drawHeld(item) {
     if (item.verb !== 'help:respond') return;
     const k = item.args.code + '|' + item.args.messageId;
@@ -394,12 +595,17 @@
     live = {};
     for (const r of b.halls || []) live[r.code] = r;
     helps = b.help || [];
+    yourRooms = Array.isArray(b.yourRooms) ? b.yourRooms : [];
     // Show network opens nodes:list, which lists the nodes this account may drive: offered only when there is one (a
     // hall's crew still sees its nodes' lights on the hall's row).
     $('networkBtn').hidden = !b.canDrive;
     canDrive = !!b.canDrive;
     const known = new Set(halls.map((h) => h.code));
     if ((b.halls || []).some((r) => !known.has(r.code)) || (b.halls || []).length !== halls.length) { load(); return; }
+    if (setupRooms && $('setupDialog').open) {
+      const seen = roomsSeen(live[setupRooms.hall]);
+      if (seen !== setupSeen) { setupSeen = seen; refreshSetupRooms(); }
+    }
     factsChanged();
   }
   // Each Stagewatch sends a frame about every second while it runs, and the board is pushed on every change, so the clock

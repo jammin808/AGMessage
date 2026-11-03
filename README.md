@@ -11,16 +11,19 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   is not given are in the audit log. Every room of a hall shows the hall's countdown and sends to its speaker's screen
   and its show desk, by the rights of whoever sends (an account with Stagewatch rights in the hall; a room's guests
   never), the show desk's notices reach every room, and the AI drafts in a side room from that room alone, told which
-  room it is. (A project manager's right to set halls up covers making and renaming rooms too,
-  but no page other than the admin's offers it yet.) **Each room has its own guest code**, switched on or off and renewed
-  by the admin (the admin page's room ⋯, or the code chip on the admin's own hall page): a side room's starts off, so it
+  room it is. A hall's **Set up** on the halls board lists its rooms too, the Main room first, each with its code and its
+  ⋯: **+ Add room** and Rename… for those who set halls up, the code and Remove room… for the admin, done at once. **Each
+  room has its own guest code**, switched on or off and renewed by the admin (the admin page's room ⋯, Set up's, or the
+  code chip on the admin's own hall page): a side room's starts off, so it
   is for the admin and the accounts given it until the admin switches it on; switched off, the guests already in stay (or
   are sent out, with their seats), and nobody new joins with it; **New code** gives a room a new one, the one before it
   then admitting only a person already seated there, and the invite links made with it stop. Until a hall's code is
   renewed it is also the hall's address, which anyone with an account in it can read; the admin page says so where the
   code is shown and in its list. The laptop's token admin's own hall page gets in whether a code is on or off, and is
   never sent out with the guests. The **halls board** shows every hall an account may see — countdown, who is in, the
-  last message, open help requests, its screens and its Patterns / PlayMap — live. **Help requests** go in two taps
+  last message, open help requests, its screens and its Patterns / PlayMap — live; a hall's name opens its Main room, and
+  each of its side rooms the account may enter is a button on its row ("Legal 2 in"). Rooms an account is given in halls
+  it does not see are listed under **Your rooms**, by their hall's name. **Help requests** go in two taps
   (Help, then Sound, Vision, Lighting, Stage, Presenter, IT / network or Something else), from any room, and stay red
   until someone is on the way and on the board until resolved. A side room's request is on the board whole for those who
   read the room, and for the hall's crew without its words ("Hall 2 › Legal · Sound"), who answer it from there. The asker's Help button says what happened ("■ Help asked", "▶ Ana is on
@@ -36,8 +39,13 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   halls (it sits On stage in that hall's Main room, held to the seat there, and backstage everywhere else) and a **chat
   view** (by its seat, simple or full), each given only by someone who holds that room or hall themselves and never set
   on one's own account; a view changed alone reaches the account's open pages without closing them. Each signed-in
-  account's halls and the halls board list the rooms it may enter, with the seat it would take in each. No page sets
-  these three yet: the accounts route does (`POST` and `PATCH /api/users`). An **audit log**
+  account's halls and the halls board list the rooms it may enter, with the seat it would take in each. The **Accounts
+  page** sets all three: each hall's Main room ("Hall 2 — Main room and hall rights") with **On stage (Board member)**
+  beside it (a seat the account takes: it may send messages there, or the server refuses it in words) and its rooms set
+  in under it, Chat view beside the role, and the rights in three groups (In the room, Show,
+  Run AGMessage); its rows read "Hall 2 (Main, Legal) · On stage". A room's **Members…** (on Main, **Board members…**), on
+  the admin page and in Set up, ticks the accounts that go in, for whoever manages accounts: one save per account, each
+  said ("2 saved · Kim: why"), the accounts a person may not change shown and not offered. An **audit log**
   chained with a key, of every sign-in, change of rights, room control and screen take, and every proposal Stagewatch's
   show desk takes — never a message's text or a file's name. Its records live outside the data folder, so a cut or a log
   replaced while AGMessage is stopped is found; what this laptop cannot check reads △ until accepted at the laptop with

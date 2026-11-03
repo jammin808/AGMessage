@@ -31,7 +31,7 @@
       </div>
       <div class="table-wrap">
         <table class="acct-table">
-          <thead><tr><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Halls</th><th scope="col">Last signed in</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Halls and rooms</th><th scope="col">Last signed in</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
           <tbody id="userRows"></tbody>
         </table>
       </div>
@@ -62,19 +62,26 @@
         <label class="field"><span>Name</span><input id="uName" maxlength="40" required autocomplete="off" /></label>
         <label class="field"><span>Username</span><input id="uUser" maxlength="32" required autocapitalize="none" spellcheck="false" autocomplete="off" /></label>
       </div>
-      <label class="field"><span>Role</span><select id="uRole"></select><small class="hint" id="uRoleWords"></small></label>
+      <div class="form-grid">
+        <label class="field"><span>Role</span><select id="uRole"></select><small class="hint" id="uRoleWords"></small></label>
+        <label class="field"><span>Chat view</span><select id="uView"><option value="">By seat</option><option value="simple">Simple</option><option value="full">Full</option></select>
+          <small class="hint">By seat: Simple where they sit On stage, Full everywhere else.</small></label>
+      </div>
+      <!-- Each hall's Main room (the hall itself, with its rights) and its On stage seat, its side rooms set in under it; a
+           side room is given without its hall. -->
       <fieldset class="field">
-        <legend>Halls</legend>
-        <label class="check"><input type="checkbox" id="uAll" /> Every hall, including new ones</label>
-        <div class="check-grid" id="uHalls"></div>
+        <legend>Halls and rooms</legend>
+        <label class="check"><input type="checkbox" id="uAll" /> Every hall's Main room, including new ones (not their other rooms)</label>
+        <div class="hall-tree" id="uHalls"></div>
+        <small class="hint" id="uBoardWords" hidden>Reads only: On stage needs Send messages.</small>
       </fieldset>
       <fieldset class="field">
         <legend>Rights</legend>
         <p class="hint">Ticked by the role; change one to make an exception for this person.</p>
-        <div class="check-list" id="uCaps"></div>
+        <div class="cap-groups" id="uCaps"></div>
       </fieldset>
       <p class="error" id="userError" role="alert" hidden></p>
-      <div class="row spread">
+      <div class="row spread dialog-foot">
         <div class="row" id="userDanger">
           <button class="btn small" id="resetBtn" type="button">New one-time password…</button>
           <button class="btn small" id="signOutAllBtn" type="button">Sign out everywhere…</button>

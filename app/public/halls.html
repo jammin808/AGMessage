@@ -39,6 +39,12 @@
 
     <ol class="hall-list" id="hallList" aria-label="Halls"></ol>
     <p class="empty-note" id="emptyNote" hidden>No halls yet. An admin or project manager makes them, then gives you access.</p>
+
+    <!-- The side rooms this account is given in halls it does not see: each by its name and its hall's, never the hall's key. -->
+    <section class="your-rooms" id="yourRooms" aria-labelledby="yourRoomsTitle" hidden>
+      <h2 id="yourRoomsTitle">Your rooms</h2>
+      <ul class="your-room-list" id="yourRoomList"></ul>
+    </section>
   </main>
 
   <dialog id="passwordDialog" class="agm-dialog">
@@ -76,6 +82,14 @@
         <p class="hint" id="setupStatus"></p>
         <button class="btn small" type="button" id="setupAccept" hidden>Accept its new certificate</button>
       </fieldset>
+      <!-- The hall's rooms: its Main room, then each room beside it, each with its guest code and its ⋯ (the catalogue's
+           adminRoom). What is done here is done at once; Save is for the name and the Stagewatch above. -->
+      <fieldset class="field setup-rooms">
+        <legend>Rooms</legend>
+        <p class="hint" id="setupRoomsWords"></p>
+        <ul class="setup-room-list" id="setupRooms" aria-label="The hall's rooms"></ul>
+        <div class="row"><button class="btn small" type="button" id="setupAddRoom">+ Add room</button></div>
+      </fieldset>
       <p class="error" id="setupError" role="alert" hidden></p>
       <div class="row end"><button class="btn ghost" type="button" value="cancel">Cancel</button><button class="btn primary" value="save">Save</button></div>
     </form>
@@ -93,6 +107,7 @@
   <script src="/outbox.js"></script>
   <script src="/catalog.js"></script>
   <script src="/menus.js"></script>
+  <script src="/members.js"></script>
   <script src="/reconnect.js"></script>
   <script src="/halls.js"></script>
 </body>

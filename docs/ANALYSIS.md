@@ -464,7 +464,9 @@ time: an option it does not take, a bucket not named and a right it has no words
 the socket's guard refuses the request rather than let it through with a step left out (`test/units.test.js`). Its
 order, joined and the room still here, then the bucket, then the admin, then the rights, takes a token before anything a
 client named is looked up: a refused lookup has spent its token. `server.js`'s own `need`, `mayPost` and `admin` are its
-steps alone, and `limited` says its bucket's words, so the verbs written there answer in its words.
+steps alone, and `limited` says its bucket's words, so the verbs written there answer in its words. A module that lists
+rooms tells their guest codes as its page may be told them (`conn.codeTold`, the one rule every list reads, `codeFor`:
+`room:settings`); the fence holds `conn`'s parts by name, `codeTold` among them.
 
 These reads are of the code as written, comments and strings blanked: a module that hands its store, its settings or its
 socket to a function of its own, or mutates a room a reader returned, is past what a read of the source can follow. The
@@ -531,13 +533,16 @@ next), Copy text where the page has no clipboard API (the focus back on the ⋯)
 removed elsewhere, and a pinned copy that keeps the focus while another page's reaction redraws it.
 
 The admin page, the halls board and the Accounts page act from the same catalogue: kinds `adminRoom` (a hall in the
-admin list, a side room listed under its hall, and the watched room's header), `person` (the admin's half: a person's row), `adminMsg` (a message of the
+admin list, a side room listed under its hall, and the watched room's header; and a room of a hall's Set up on the halls
+board, where a hall's Main room has no Rename… or Close and the admin page's own acts are not drawn, its `fits` reading
+the facts' `page`), `person` (the admin's half: a person's row), `adminMsg` (a message of the
 admin's live feed), `link` (the default Stagewatch, a show system heard, a Patterns or PlayMap linked), `laptop` ("This
 laptop": Refresh, `admin:laptop`, and Copy LAN address ▸, one per address), `tunnel` (the
 internet link's card), `hall` (a row of the halls board), `help` (an open help request there), `account` and `audit` (an
 account, and an entry of the audit log). Each page reads its facts from the server's answers through the catalogue's
-`adminFacts()` (/api/admin/me: whom the admin page's gate admits, "the admin", AI drafts, the halls), `boardFacts()`
-(/api/halls and the board: who sets halls up and drives the show network) and `accountFacts()` (/api/auth/me's rights,
+`adminFacts()` (/api/admin/me: whom the admin page's gate admits, "the admin", who manages accounts, AI drafts, the
+halls), `boardFacts()` (/api/halls and the board: who sets halls up, the admin, who manages accounts and who drives the
+show network) and `accountFacts()` (/api/auth/me's rights,
 /api/admin/me's "the admin", and the audit list's filter); an object's own facts (a help request's `canRespond`, an
 account's `locked`) are the server's too. Every page binds only its runners: `AGM.acts` (`public/menus.js`) is the one
 runner of the bar, the ⋯, right-click, Shift+F10 and the keys for all three, and `AGM.roving` makes each list one tab
@@ -547,7 +552,10 @@ units name: Watch is `adminRoom.watch`, the hall's row's own door in the admin l
 Close hall… is `adminRoom.remove` (Remove room… on a side room); New room in this hall… is `adminRoom.create`
 (`room:create`, on a hall's row and header only) and Rename… `adminRoom.rename` (`room:update`, a hall's or a room's name
 asked in place); Roles & invites is `adminRoom.invites` on a side room too (a Member's link, made with its own guest code);
-a room's Turn the code off… / Turn the code on is `adminRoom.codeToggle` and New code… `adminRoom.newCode` (both
+a room's Members… (Board members… on a hall) is `adminRoom.members` (`http:PATCH /api/users/:id`, one per account, for
+whoever manages accounts; `public/members.js`, whose checklist, each tick's change and the words of a save are pure and
+held by `test/members.test.js`); a hall's Rooms ▸ is `hall.rooms` (its side rooms this watcher may enter, opened by key),
+beside Open Main; a room's Turn the code off… / Turn the code on is `adminRoom.codeToggle` and New code… `adminRoom.newCode` (both
 `room:update`, the admin's: off asks the three-way choice, `AGM.ask`'s `choices`, whose answer reaches the runner as
 `choice`; on asks nothing; New code says who stays and what stops); a person's Let them forward into ▸ is `person.forward` (`admin:linkRoom`), a hall per
 tick, and taking one back is `person.unforward` (`admin:unlinkRoom`), which an unticked hall and a chip's × run; the
@@ -555,11 +563,14 @@ default Stagewatch's Set up… is `link.configure` (`admin:settings`), a node's 
 right, `canDrive`, which the admin page's facts carry for the socket its gate admits; the internet link's Turn off… is
 `tunnel.off`, which the card's toggle asks for too, and its Tunnel until… is `tunnel.until` (`admin:tunnelUntil`, its end
 asked in place as a time of day, `AGM.ask`'s `time` field); a hall's Copy link is `hall.copy` and its guest code `hall.code`, shown
-only where the server told the watcher the code. `test/catalog.test.js` asserts the three facts' readings, 43 seat-and-object sets (a side room's, listed and watched, among them) and three of "This laptop" (none shown to a page
+only where the server told the watcher the code. `test/catalog.test.js` asserts the three facts' readings, 54 seat-and-object sets (a side room's, listed and watched, Members… to an admin who manages accounts, Set up's rooms to the admin, to one who sets halls up, to one who manages accounts and to a crew, none of the admin page's own acts there, and a hall's row with its rooms among them) and three of "This laptop" (none shown to a page
 the admin page's gate does not admit), the reasons of what is disabled (Check again's four, a locked account, the
 minutes with no key, a node whose Stagewatch keeps no desk, not connected), the bars, the asks' words, the caps and the
 keys, and reads every act's words on an object it fits. `test/menus.test.js`'s second test reads each seat's facts from
-the server's answers — a Staff account's and a code guest's sockets on the admin page, a Viewer on the halls board, and
+the server's answers — a Staff account's and a code guest's sockets on the admin page, a Viewer, a Board account and a
+project manager who sets halls up and is not the admin on the halls board (Set up's rooms included: the manager's code,
+New code…, Remove room… and Members…, a Members… sent as its own `PATCH` for an account; each seat's help requests its
+own board's), and
 on the Accounts page a Staff account, a manager and a manager who may manage accounts (but not an admin's) — and sends
 each act these pages hide from them, the routes by HTTP with the seat's sign-in: 31 verbs and routes, each refused with
 words, and the halls, the people and their forwarding, the link, the default Stagewatch, the accounts and the log as

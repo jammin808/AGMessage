@@ -176,20 +176,20 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | Each room's guest code: on, off and renewed by the store; who is told it | `app/lib/store.js`, `app/lib/handlers/rooms.js`, `app/lib/rbac.js` (`mayKnowCode`), `app/public/join.js`; test `codes` |
 | State frames, latest wins: the one primitive for the halls board, screens, people lists and seen receipts | `app/lib/latest.js` |
 | The op table: the event each change is sent under, and the hall page's table that draws a change missed or heard live | `app/lib/ops.js`, `app/public/app.js` (`UPD_EVENTS`) |
-| The action catalogue: every act a page offers on an object, as data, and what draws it (menus, asks in place, doors, roving lists); each page's runner | `app/public/catalog.js`, `app/public/menus.js`; runners in `app.js`, `admin.js`, `admin-plus.js`, `halls.js`, `users.js`; tests `catalog`, `menus` |
+| The action catalogue: every act a page offers on an object, as data, and what draws it (menus, asks in place, doors, roving lists); each page's runner | `app/public/catalog.js`, `app/public/menus.js`, `app/public/members.js` (Members…); runners in `app.js`, `admin.js`, `admin-plus.js`, `halls.js`, `users.js`; tests `catalog`, `menus`, `members` |
 | The outbox: every write a page makes, held or sent now, and the server's answer to a repeat | `app/public/outbox.js`, `app/lib/store.js`; test `outbox` |
 | Pages back by themselves: one reconnection pace, refusals' waits, a page on another build reloading at its quiet moment | `app/public/reconnect.js`, `/build.js` in `app/server.js`; test `reconnect` |
 | Identities, rate limits, lockouts, text cleaning, the per-network key and the tunnel's places | `app/lib/guard.js` |
 | Remote phones through the tunnel: the connection's gate, the link's check, the tunnel's end kept across a restart | `app/lib/tunnelend.js`, `app/lib/peaks.js`, `app/server.js`; test `tunnel` |
 | Rights and roles (pure), checked per room behind a fence; a code guest's rights; the escalation fence | `app/lib/rbac.js`; tests `accounts`, `halls` |
 | What a seat may do on its page, on the server (the seat read before any right; a Board account held to On stage where its halls seat it) | `app/server.js` (`allowed()`); test `onstage` |
-| Accounts (with their side rooms, On stage halls and chat view), password hashing, sessions, their routes; the Accounts page | `app/lib/accounts.js`, `app/lib/http-accounts.js`, `app/public/users.js`; test `accounts` |
+| Accounts (with their side rooms, On stage halls and chat view), password hashing, sessions, their routes; the Accounts page (its tree of halls and rooms) | `app/lib/accounts.js`, `app/lib/http-accounts.js`, `app/public/users.js`; test `accounts` |
 | The audit log, chained with a key; its check and Accept; its work counted in tests, never timed | `app/lib/audit.js`, `app/test/audit-preload.js` |
 | The audit log's rules that need no key, shared with a checker on another computer | `app/verify/auditrules.js` |
 | The audit log's signed export and the zip it streams | `app/lib/auditexport.js`, `app/lib/zip.js`, `app/public/audit-export.js` |
 | The audit log carried across events: a split at an archive point into a signed archive | `app/lib/auditarchive.js` |
 | The verifier on another computer: Node and the browser page | `app/verify/` |
-| The halls board and help requests | `app/lib/board.js`, `app/public/halls.js`; test `halls` |
+| The halls board and help requests; a hall's rooms on its row, Your rooms, and Set up's Rooms | `app/lib/board.js`, `app/public/halls.js`; test `halls` |
 | Uploads: a token per page's join, checked again at use | `app/server.js` (`/api/upload`), `app/lib/guard.js`; test `uploads` |
 | Screens (display URLs) | `app/lib/displays.js`, `app/public/display.*` |
 | Stagewatch links, peers, hello; what a send says (Stagewatch's grammar as the oracle) | `app/lib/nodes.js`, `app/lib/stagelines.js` |

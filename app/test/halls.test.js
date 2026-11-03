@@ -1586,11 +1586,17 @@ test('rooms are made, renamed, reset and removed by those who set halls up; a si
   assert.deepEqual(listed.map((r) => r.code).sort(), three);
   assert.deepEqual(listed.find((r) => r.code === hallA).side.map((x) => [x.key, x.name, x.messageCount, x.locked, x.users]), [[LEGAL, 'Legal', 0, false, []], [MEDIA, 'Media', 0, false, []]]);
   assert.deepEqual(listed.find((r) => r.code === hallC).side.map((x) => x.name), Array.from({ length: 20 }, (_, i) => 'Room ' + (i + 1)));
-  // A room's settings, for those who set halls up.
+  // A room's settings, for those who set halls up: each of the hall's rooms with its guest code (told to those who set
+  // halls up), whether it admits guests and the guest pages in it (Set up's Rooms draws them).
   const legalCode = listed.find((r) => r.code === hallA).side[0].guestCode;
+  const mediaCode = listed.find((r) => r.code === hallA).side[1].guestCode;
   assert.deepEqual(await emit(patPage, 'room:settings', { code: LEGAL }), {
     ok: true, key: LEGAL, name: 'Legal', main: false, hall: hallA, hallName: 'Hall A',
-    rooms: [{ key: hallA, name: 'Hall A', main: true }, { key: LEGAL, name: 'Legal', main: false }, { key: MEDIA, name: 'Media', main: false }],
+    rooms: [
+      { key: hallA, name: 'Hall A', main: true, guestCode: hallA, codeOn: true, guests: 1 },   // Gus's page, by count
+      { key: LEGAL, name: 'Legal', main: false, guestCode: legalCode, codeOn: false, guests: 0 },
+      { key: MEDIA, name: 'Media', main: false, guestCode: mediaCode, codeOn: false, guests: 0 },
+    ],
     guestCode: legalCode, codeOn: false,
   });
   assert.match(legalCode, /^[A-Z2-9]{6}$/, 'those who set rooms up are told a room\'s guest code');

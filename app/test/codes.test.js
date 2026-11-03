@@ -299,6 +299,37 @@ test('who is told a room\'s guest code: the admin, those who set halls up, an ac
   assert.equal((await emit(await page(pat), 'room:settings', { code: hallA })).guestCode, NEW);
 });
 
+test('a room\'s settings (Set up\'s Rooms) tell each of the hall\'s rooms with its code as that page may be told it, whether it admits guests and how many guest pages are in it: a project manager seated On stage in the hall is told none of its Main room\'s code, there or in its row', async (t) => {
+  const srv = await startServer();
+  t.after(() => stopServer(srv.child));
+  const { page, admin, account, hall, guest } = await showOf(srv, t);
+  const hallA = await hall('Hall A');
+  const ctl = await page(admin);
+  const LEGAL = (await emit(ctl, 'room:create', { hall: hallA, name: 'Legal' })).key;
+  assert.ok((await act(ctl, 'room:update', { code: LEGAL, codeOn: true })).ok);
+  const legalCode = (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms[0].side[0].guestCode;
+  // Hall A's code renewed, so its code is no longer its key (the residual ends): what is told of it is the code alone.
+  const NEW = (await act(ctl, 'room:update', { code: hallA, newCode: true })).guestCode;
+  assert.ok(typeof NEW === 'string' && NEW.length === 6 && NEW !== hallA);
+  // Two guest pages in Legal: counted, never named.
+  for (const name of ['Gus', 'Gil']) assert.ok((await guest(legalCode, name, 'research')).j.ok);
+  const rows = (s) => s.rooms.map((r) => [r.key, r.main, r.guestCode, r.codeOn, r.guests]);
+  const pat = await account('pat', 'manager');
+  const patSays = await emit(await page(pat), 'room:settings', { code: hallA });
+  assert.deepEqual([patSays.guestCode, rows(patSays)], [NEW, [[hallA, true, NEW, true, 0], [LEGAL, false, legalCode, true, 2]]], 'those who set halls up are told every room\'s code, its state and its guest pages');
+  // A project manager whose account sits On stage in Hall A's Main room: its own page is no Board tablet, but the rule
+  // every list reads holds here too, so Set up never hands it the code of the hall it sits On stage in.
+  const kai = await account('kai', 'manager', { board: [hallA] });
+  const kaiSays = await emit(await page(kai), 'room:settings', { code: hallA });
+  assert.deepEqual([kaiSays.ok, kaiSays.guestCode, rows(kaiSays)], [true, '', [[hallA, true, '', true, 0], [LEGAL, false, legalCode, true, 2]]]);
+  assert.ok(!JSON.stringify(kaiSays).includes(NEW), 'Hall A\'s code is nowhere in its answer');
+  assert.equal((await emit(await page(kai), 'room:settings', { code: LEGAL })).guestCode, legalCode, 'Legal\'s, where it does not sit On stage');
+  assert.ok(!JSON.stringify(kaiSays).includes('Gus') && !JSON.stringify(patSays).includes('Gil'), 'a count, never who');
+  // The halls board agrees: its row is told no code either.
+  const kaiRow = (await emit(await page(kai), 'board:watch', {})).board.halls.find((h) => h.code === hallA);
+  assert.deepEqual([kaiRow.guestCode, JSON.stringify(kaiRow).includes(NEW)], ['', false]);
+});
+
 test('the laptop\'s token admin\'s own page is a member of every room: a code admits it on or off, and so does a key, its misses spend no lock, and it is never a guest page (not counted, not sent out, no seat saved); a send-out with two seated guests is one meta op; a side room\'s invites are a Member\'s, made with its code', async (t) => {
   const srv = await startServer();
   t.after(() => stopServer(srv.child));

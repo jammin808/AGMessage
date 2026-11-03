@@ -49,7 +49,7 @@ const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack'], '⤴': [
  */
 const ONE_ACT = [['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode']];
 /** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export) and so end their label with "…" as an ask does. */
-const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'compose.attach', 'hall.setup', 'hall.network', 'account.edit', 'audit.export']);
+const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'compose.attach', 'hall.setup', 'hall.network', 'account.edit', 'audit.export', 'adminRoom.members']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
 const NAMED_KEYS = ['Enter', 'Delete', 'Escape'];
 
@@ -128,9 +128,14 @@ const PAGE = {
   manager: C.adminFacts({ ok: true, admin: false, ai: true, halls: HALLS, connected: true }),
   adminOffline: C.adminFacts({ ok: true, admin: true, ai: true, halls: HALLS, connected: false }),
   notAdmin: C.adminFacts({ connected: true }),
-  // The halls board: a manager who sets halls up and drives the show network, and a hall's crew.
+  // The admin page of an admin account, which manages accounts too: a room's Members….
+  adminUsers: C.adminFacts({ ok: true, admin: true, manageUsers: true, ai: true, halls: HALLS, connected: true }),
+  // The halls board: a manager who sets halls up and drives the show network, and a hall's crew; an admin account's
+  // (the admin, who manages accounts too: Set up's codes, removal and Members…), and one who manages accounts alone.
   board: C.boardFacts({ canManageHalls: true, canDrive: true, connected: true }),
   boardCrew: C.boardFacts({ connected: true }),
+  boardAdmin: C.boardFacts({ canManageHalls: true, isAdmin: true, canManageUsers: true, canDrive: true, connected: true }),
+  boardUsers: C.boardFacts({ canManageUsers: true, connected: true }),
   // The Accounts page: an admin, a manager (users.manage, audit.read), one who reads the log alone, and the admin with the
   // log kept to Ana's entries.
   accountsAdmin: C.accountFacts({ account: { id: 'a-root', ...caps('users.manage', 'audit.read', 'audit.export') }, admin: true }),
@@ -182,7 +187,9 @@ const PAGE_OBJECTS = {
     none: { addresses: [], reading: false },
   },
   // A hall's row as the board's watcher reads it: its guest code told, or not (a Staff account's, a Viewer's).
-  hall: { row: { code: 'K7P2QX', name: 'Hall 2', guestCode: 'K7P2QX' }, untold: { code: 'K7P2QX', name: 'Hall 2', guestCode: '' } },
+  hall: { row: { code: 'K7P2QX', name: 'Hall 2', guestCode: 'K7P2QX' }, untold: { code: 'K7P2QX', name: 'Hall 2', guestCode: '' },
+    // A hall with side rooms this watcher may enter: its room buttons, and Rooms ▸.
+    rooms: { code: 'K7P2QX', name: 'Hall 2', guestCode: 'K7P2QX', rooms: [{ key: 'LGQ4MZP8', name: 'Legal', people: 2 }, { key: 'MDQ4MZP8', name: 'Media', people: 0 }] } },
   // A help request on the board: its room's key, whether this watcher answers it and may open its room (a side room's
   // reaches the hall's crew who may not read it, to answer from the board), and a side room's name (`room`).
   help: {
@@ -209,7 +216,7 @@ const PAGE_OBJECTS = {
 const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
   compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple], chip: [SEATS.admin, SEATS.researchNoDesk], code: [SEATS.admin, SEATS.board, SEATS.research],
-  adminRoom: [PAGE.admin, PAGE.adminNoAi], person: [PAGE.admin, SEATS.research, SEATS.board], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
+  adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
   hall: [PAGE.board], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
 /** Every seat of a kind with every object of it ([f, o] pairs): messages, a file where it is listed and where it is open, a screen, and the other pages' objects. */
@@ -637,9 +644,12 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
 // ---------------------------------------------------------------- the admin page, the halls board, the Accounts page
 test('the other pages\' facts: read from the server\'s answers, and nothing a page could name for itself', () => {
   assert.deepEqual(plain(C.adminFacts({ ok: 1, admin: 0, ai: 'yes', halls: [{ code: 'K7P2QX', name: 'Hall 2', extra: 1 }, { name: 'no code' }, null], connected: true, role: 'admin' })),
-    { page: 'admin', admin: true, theAdmin: false, canDrive: true, ai: true, halls: [{ code: 'K7P2QX', name: 'Hall 2' }], connected: true, support: '' }, 'the gate\'s answer, "the admin", the drive right it carries, AI, the halls by code and name');
-  assert.deepEqual(plain(C.adminFacts({})), { page: 'admin', admin: false, theAdmin: false, canDrive: false, ai: false, halls: [], connected: false, support: '' }, 'nothing told: no right');
-  assert.deepEqual(plain(C.boardFacts({ canManageHalls: true, canDrive: 1, connected: true, isAdmin: true })), { page: 'halls', manageHalls: true, canDrive: true, connected: true, support: '' });
+    { page: 'admin', admin: true, theAdmin: false, manageUsers: false, canDrive: true, ai: true, halls: [{ code: 'K7P2QX', name: 'Hall 2' }], connected: true, support: '' }, 'the gate\'s answer, "the admin", the drive right it carries, AI, the halls by code and name');
+  assert.deepEqual(plain(C.adminFacts({})), { page: 'admin', admin: false, theAdmin: false, manageUsers: false, canDrive: false, ai: false, halls: [], connected: false, support: '' }, 'nothing told: no right');
+  // Members… is offered on the server's word that this account may manage accounts, a true and nothing like it.
+  assert.deepEqual([C.adminFacts({ ok: true, manageUsers: true }).manageUsers, C.adminFacts({ ok: true, manageUsers: 'yes' }).manageUsers, C.adminFacts({ ok: true, manageUsers: 1 }).manageUsers], [true, false, false]);
+  assert.deepEqual(plain(C.boardFacts({ canManageHalls: true, canDrive: 1, connected: true, isAdmin: true, canManageUsers: true })), { page: 'halls', manageHalls: true, admin: true, manageUsers: true, canDrive: true, connected: true, support: '' });
+  assert.deepEqual(plain(C.boardFacts({ canManageHalls: true, isAdmin: 'yes', canManageUsers: 1 })), { page: 'halls', manageHalls: true, admin: false, manageUsers: false, canDrive: false, connected: false, support: '' }, 'the admin and Members… only on a true');
   assert.deepEqual(plain(C.accountFacts({ account: { id: 'a-1', rights: { caps: ['users.manage', 'audit.read', 'audit.export'] } }, admin: true, filter: { by: 'actor', value: 'account:a-2', words: 'x' } })),
     { page: 'accounts', uid: 'a-1', manageUsers: true, auditRead: true, auditExport: true, theAdmin: true, filter: { by: 'actor', value: 'account:a-2' }, connected: true, support: '' });
   assert.deepEqual([C.accountFacts({ account: { rights: { caps: ['audit.export'] } } }).auditExport, C.accountFacts({ filter: { by: 'role', value: 'x' } }).filter, C.accountFacts({}).connected],
@@ -659,6 +669,19 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['adminRoom', 'admin', O.adminRoom.sideWatched, ['adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
     ['adminRoom', 'notAdmin', O.adminRoom.listed, []],
     ['adminRoom', 'notAdmin', O.adminRoom.side, []],
+    // An admin account, which manages accounts: Members… on a side room, Board members… on a hall, beside its code.
+    ['adminRoom', 'adminUsers', O.adminRoom.listed, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.create', 'adminRoom.members', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    ['adminRoom', 'adminUsers', O.adminRoom.side, ['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.members', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']],
+    // Set up's Rooms on the halls board: the hall's name is Set up's own and the hall is closed on the admin page, so its
+    // Main room has no Rename… or Close; none of the admin page's own acts. One who sets halls up makes and names rooms;
+    // the admin switches and renews codes and removes a room; one who manages accounts chooses members; a crew, nothing.
+    ['adminRoom', 'boardAdmin', O.adminRoom.listed, ['adminRoom.create', 'adminRoom.members', 'adminRoom.codeToggle', 'adminRoom.newCode']],
+    ['adminRoom', 'boardAdmin', O.adminRoom.side, ['adminRoom.members', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.remove']],
+    ['adminRoom', 'board', O.adminRoom.listed, ['adminRoom.create']],
+    ['adminRoom', 'board', O.adminRoom.side, ['adminRoom.rename']],
+    ['adminRoom', 'boardUsers', O.adminRoom.side, ['adminRoom.members']],
+    ['adminRoom', 'boardCrew', O.adminRoom.listed, []],
+    ['adminRoom', 'boardCrew', O.adminRoom.side, []],
     // A person: a code guest's seat is the admin's to set; an account's follows its rights (no Seat).
     ['person', 'admin', O.person.guest, ['person.seat', 'person.forward', 'person.view', 'person.kick']],
     ['person', 'admin', O.person.account, ['person.forward', 'person.unforward', 'person.view', 'person.kick']],
@@ -692,6 +715,9 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['hall', 'board', O.hall.row, ['hall.open', 'hall.tab', 'hall.copy', 'hall.code', 'hall.setup', 'hall.network']],
     ['hall', 'boardCrew', O.hall.row, ['hall.open', 'hall.tab', 'hall.copy', 'hall.code']],
     ['hall', 'boardCrew', O.hall.untold, ['hall.open', 'hall.tab', 'hall.copy']],
+    // With side rooms this watcher may enter: Rooms ▸ beside Open Main.
+    ['hall', 'board', O.hall.rooms, ['hall.open', 'hall.tab', 'hall.rooms', 'hall.copy', 'hall.code', 'hall.setup', 'hall.network']],
+    ['hall', 'boardCrew', O.hall.rooms, ['hall.open', 'hall.tab', 'hall.rooms', 'hall.copy', 'hall.code']],
     ['help', 'board', O.help.open, ['help.respond', 'help.resolve', 'help.open']],
     ['help', 'board', O.help.coming, ['help.resolve', 'help.open']],
     ['help', 'boardCrew', O.help.notTheirs, ['help.open']],
@@ -724,6 +750,10 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
   for (const k of kinds) for (const e of C.KINDS[k]) assert.ok(shownSomewhere.has(e.id), e.id + ' is shown to some seat in the matrix');
   // Every act a seat is shown is one its rights allow: the admin page's acts need its gate, the split "the admin".
   for (const k of ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop']) for (const o of Object.values(PAGE_OBJECTS[k])) assert.deepEqual(ids(k, PAGE.notAdmin, o), [], k + ': nothing to a page the admin page\'s gate does not admit');
+  // The admin page's own acts are never drawn in Set up, whoever looks: their runners are the admin page's.
+  for (const seat of ['board', 'boardCrew', 'boardAdmin', 'boardUsers']) for (const o of Object.values(PAGE_OBJECTS.adminRoom)) {
+    assert.deepEqual(ids('adminRoom', PAGE[seat], o).filter((id) => /\.(watch|transcript|minutes|invites|clear)$/.test(id)), [], seat);
+  }
 });
 
 test('the other pages: what may be done but not now is shown, disabled, with the words why', () => {
@@ -787,6 +817,12 @@ test('the other pages: the inline bar, the asks and their words, the caps and th
   // A side room is named with its hall, and removed as a room: the hall and its other rooms stay.
   const label = (id, o) => C.entry('adminRoom', id).label(PAGE.admin, o);
   assert.deepEqual([label('adminRoom.remove', O.adminRoom.listed), label('adminRoom.remove', O.adminRoom.side)], ['Close hall…', 'Remove room…']);
+  // Members… of a side room; on a hall, the accounts seated On stage in its Main room: Board members….
+  assert.deepEqual([label('adminRoom.members', O.adminRoom.side), label('adminRoom.members', O.adminRoom.listed)], ['Members…', 'Board members…']);
+  // A hall's row with side rooms opens its Main room by name, and its rooms from Rooms ▸, each with how many are in.
+  const hallLabel = (o) => C.entry('hall', 'hall.open').label(PAGE.board, o);
+  assert.deepEqual([hallLabel(O.hall.row), hallLabel(O.hall.rooms)], ['Open', 'Open Main']);
+  assert.deepEqual(plain(C.submenu('hall', 'hall.rooms', PAGE.board, O.hall.rooms)), [{ value: 'LGQ4MZP8', label: 'Legal · 2 in' }, { value: 'MDQ4MZP8', label: 'Media · 0 in' }]);
   assert.deepEqual(ask('adminRoom', 'adminRoom.clear', 'admin', O.adminRoom.side), { title: 'Clear every message in Hall 2 › Legal?', words: 'Files used nowhere else go too. Everyone stays in the room. This cannot be undone.', yes: 'Clear messages', no: 'Keep them', danger: true });
   assert.deepEqual(ask('adminRoom', 'adminRoom.remove', 'admin', O.adminRoom.side), {
     title: 'Remove room Hall 2 › Legal?', words: 'Everyone in it is sent out and its saved history is deleted; the hall and its other rooms stay. Open its transcript first if you need it.',

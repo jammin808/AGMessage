@@ -1,7 +1,9 @@
-// Accounts and the audit log. An admin (or anyone given users.manage) adds people with a role, their halls and any
-// exception to the role's rights; a new person gets a one-time password shown once. Someone who is not an admin is
-// offered only the rights and halls they hold themselves (the server's `giveable`). The audit log reads newest first,
-// each row with its mark, and checks its own chain on demand; a mark is always a shape beside its colour.
+// Accounts and the audit log. An admin (or anyone given users.manage) adds people with a role, their halls and rooms
+// (each hall's Main room with its On stage seat, its side rooms set in under it: a side room is given without its hall),
+// their chat view and any exception to the role's rights, drawn in three groups; a new person gets a one-time password
+// shown once. Someone who is not an admin is offered only the rights, halls and rooms they hold themselves (the server's
+// `giveable`, `giveableRooms`). The audit log reads newest first, each row with its mark, and checks its own chain on
+// demand; a mark is always a shape beside its colour.
 // The acts on an account and on an entry of the log are the catalogue's (catalog.js: kinds account, audit), drawn by
 // AGM.acts: the bar, the ⋯, right-click, Shift+F10 and the keys alike; this page binds only what each does (RUN), over
 // HTTP: an answer not back in 5 s is said ("No answer"), and the answer that comes later is still the act's, said as late
@@ -44,7 +46,7 @@
   // its returnValue 'cancel', and nothing is sent.
   for (const b of document.querySelectorAll('dialog button[value="cancel"]')) b.addEventListener('click', () => b.closest('dialog').close('cancel'));
 
-  let data = null;          // {users, roles, caps, halls, giveable}
+  let data = null;          // {users, roles, caps, halls, giveable, rooms, giveableRooms, capGroups}
   let editing = null;       // the account being edited, or null for a new one
   let meId = '';            // the signed-in account: on its own row only the name is the viewer's to change
   let saving = false;       // a save in flight: a second click or Enter sends nothing
@@ -87,13 +89,43 @@
   }
 
   const roleOf = (id) => data.roles.find((r) => r.id === id) || { label: id, caps: [], allHalls: false };
-  // What this viewer may hand out: a right, a hall, every hall (an admin: everything).
+  // What this viewer may hand out: a right, a hall (and its On stage seat), a side room, every hall (an admin: everything).
   const mayGive = {
     cap: (c) => data.giveable.admin || data.giveable.caps.includes(c),
     hall: (code) => data.giveable.allHalls || data.giveable.halls.includes(code),
+    room: (key) => !!data.giveableRooms && (data.giveableRooms.all || data.giveableRooms.rooms.includes(key)),
     allHalls: () => data.giveable.allHalls,
   };
   const hallName = (code) => { const h = data.halls.find((x) => x.code === code); return h ? (h.name || h.code) : code; };
+  const roomsListed = () => (Array.isArray(data.rooms) ? data.rooms : []);
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  const plural = (n, one) => n + ' ' + one + (n === 1 ? '' : 's');
+  /**
+   * Where an account goes, as its row says it: each hall with the rooms of it the account has and its On stage seat, where
+   * it takes it (the server's `rights.board`: it reaches the hall and may post there) ("Hall 2 (Main, Legal) · On
+   * stage"), by name; "Every hall" first for an account of every hall, with each hall it has
+   * more in; a side room of a hall this viewer does not reach under that hall's name; what this viewer is not told, counted.
+   */
+  function placesWords(u) {
+    const named = new Map(roomsListed().map((r) => [r.key, r]));
+    const groups = new Map();
+    const group = (key, name) => { if (!groups.has(key)) groups.set(key, { name, main: false, rooms: [], board: false }); return groups.get(key); };
+    for (const code of u.rights.halls) group(code, hallName(code)).main = true;
+    for (const k of u.rights.rooms || []) {
+      const r = named.get(k);
+      if (r) (r.hall ? group(r.hall, hallName(r.hall)) : group('apart:' + r.hallName, r.hallName || 'A hall with no name')).rooms.push(r.name || 'a room');
+    }
+    for (const code of u.rights.board || []) group(code, hallName(code)).board = true;
+    const all = u.rights.allHalls;
+    const parts = [...groups.values()].filter((g) => !all || g.rooms.length || g.board).sort(byName).map((g) => {
+      const inside = (g.main || all ? ['Main'] : []).concat(g.rooms);
+      return g.name + (inside.length ? ' (' + inside.join(', ') + ')' : '') + (g.board ? ' · On stage' : '');
+    });
+    if (all) parts.unshift('Every hall');
+    if (u.otherHalls) parts.push(plural(u.otherHalls, 'other hall'));
+    if (u.otherRooms) parts.push(plural(u.otherRooms, 'other room'));
+    return parts.join('; ') || 'None';
+  }
 
   /** An account as the catalogue reads it: its id, name, whether it is off, why this viewer may not change it, whether it is one's own. */
   function accountObject(id) {
@@ -116,9 +148,9 @@
         tr.lastElementChild.appendChild(bar);
       }
       tr.classList.toggle('off', !!u.disabled);
-      // A viewer that does not reach every hall is told only its own halls' codes: the rest of a person's are a count.
-      const listed = u.rights.halls.map(hallName).concat(u.otherHalls ? [u.otherHalls + ' other hall' + (u.otherHalls === 1 ? '' : 's')] : []);
-      const hallsWords = u.rights.allHalls ? 'Every hall' : (listed.join(', ') || 'None');
+      // A viewer that does not reach every hall is told only its own halls' codes, and one not given every room only its
+      // own rooms: the rest of a person's are a count.
+      const hallsWords = placesWords(u);
       const cellsHtml = [
         '<strong>' + esc(u.name) + '</strong><br><span class="muted">' + esc(u.username) + (u.disabled ? ' · turned off' : '') + (u.mustChange ? ' · one-time password' : '') + '</span>',
         esc(roleOf(u.role).label) + (u.grant.length || u.revoke.length ? ' <span class="muted" title="Rights changed for this person">(adjusted)</span>' : ''),
@@ -161,15 +193,9 @@
     for (const r of data.roles) { const o = document.createElement('option'); o.value = r.id; o.textContent = r.label; o.disabled = r.id === 'admin' && !data.giveable.admin; sel.appendChild(o); }
     sel.value = u ? u.role : 'staff';
     sel.disabled = self;
-    const hallsBox = $('uHalls');
-    hallsBox.textContent = '';
-    for (const h of data.halls) {
-      const l = document.createElement('label'); l.className = 'check';
-      const c = document.createElement('input'); c.type = 'checkbox'; c.value = h.code; c.disabled = self || !mayGive.hall(h.code); c.checked = (self || !c.disabled) && !!(u && u.halls.includes(h.code));
-      l.appendChild(c); l.appendChild(document.createTextNode(' ' + (h.name || h.code) + ' (' + h.code + ')'));
-      hallsBox.appendChild(l);
-    }
-    if (!data.halls.length) hallsBox.textContent = 'No halls yet.';
+    $('uView').value = u && (u.view === 'simple' || u.view === 'full') ? u.view : '';
+    $('uView').disabled = self;
+    drawTree(u, self);
     $('uAll').disabled = self || !mayGive.allHalls();
     $('uAll').checked = (self || !$('uAll').disabled) && (u ? u.rights.allHalls : roleOf(sel.value).allHalls);
     $('uAll').dataset.touched = u && u.allHalls !== null ? '1' : '';
@@ -182,43 +208,149 @@
     AGM.openDialog($('userDialog'));
   }
 
+  /**
+   * One tick of the tree: offered where this viewer may give it, and never on one's own row (shown as it is). It keeps
+   * whether it is offered and whether the account holds it, which an On stage seat's offer reads again (boardOffer).
+   */
+  function tick(cls, value, words, self, giveable, held) {
+    const l = document.createElement('label'); l.className = 'check';
+    const c = document.createElement('input'); c.type = 'checkbox'; c.className = cls; c.value = value;
+    c.disabled = self || !giveable;
+    c.checked = (self || !c.disabled) && held;
+    c.dataset.offered = c.disabled ? '' : '1';
+    c.dataset.held = held ? '1' : '';
+    l.append(c, document.createTextNode(' ' + words));
+    return l;
+  }
+  /**
+   * Halls and rooms: each hall this viewer is told of, by name, its Main room ("Hall 2 — Main room and hall rights") with
+   * its On stage seat beside it, and its side rooms set in under it; then the side rooms of halls this viewer does not
+   * reach (a manager's own rooms), under their hall's name with no hall to tick.
+   */
+  function drawTree(u, self) {
+    const box = $('uHalls');
+    box.textContent = '';
+    const holds = (field, k) => !!u && Array.isArray(u[field]) && u[field].includes(k);
+    const rooms = roomsListed();
+    const sideRooms = (list, parent) => {
+      if (!list.length) return;
+      const sub = document.createElement('div'); sub.className = 'tree-rooms';
+      for (const r of list) sub.appendChild(tick('t-room', r.key, r.name || 'A room', self, mayGive.room(r.key), holds('rooms', r.key)));
+      parent.appendChild(sub);
+    };
+    for (const h of data.halls.map((x) => ({ code: x.code, name: x.name || x.code })).sort(byName)) {
+      const block = document.createElement('div'); block.className = 'tree-hall'; block.dataset.hall = h.code;
+      const main = document.createElement('div'); main.className = 'tree-main';
+      const hall = tick('t-hall', h.code, h.name + ' — Main room and hall rights', self, mayGive.hall(h.code), holds('halls', h.code));
+      const code = document.createElement('span'); code.className = 'muted'; code.textContent = ' (' + h.code + ')';
+      hall.appendChild(code);
+      main.append(hall, tick('t-board', h.code, 'On stage (Board member)', self, mayGive.hall(h.code), holds('board', h.code)));
+      block.appendChild(main);
+      sideRooms(rooms.filter((r) => r.hall === h.code), block);
+      box.appendChild(block);
+    }
+    const apart = new Map();
+    for (const r of rooms) if (!data.halls.some((h) => h.code === r.hall)) { const k = r.hallName || 'A hall with no name'; if (!apart.has(k)) apart.set(k, []); apart.get(k).push(r); }
+    for (const [name, list] of [...apart.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const block = document.createElement('div'); block.className = 'tree-hall';
+      const head = document.createElement('p'); head.className = 'tree-apart'; head.textContent = name + ' — its rooms you hold';
+      block.appendChild(head);
+      sideRooms(list, block);
+      box.appendChild(block);
+    }
+    if (!box.children.length) box.textContent = 'No halls yet.';
+  }
+  // On stage is a seat in a hall's Main room, which the account takes only where it reaches the hall and may post there
+  // (the server refuses a seat given otherwise, in the words below): ticking it ticks the hall (unless every hall is), a
+  // hall unticked takes its On stage seat with it, every hall unticked (by the person, or by a role of named halls)
+  // ticks each hall whose seat is ticked, and while the rights ticked hold no Send messages a seat the account does not
+  // hold is not offered (one it holds can still be taken away). Only a person's own ticks move another; nothing moves on
+  // its own, so an untouched Save sends what the account holds.
+  const mateOf = (cls, code) => [...$('uHalls').querySelectorAll('input.' + cls)].find((x) => x.value === code);
+  $('uHalls').addEventListener('change', (e) => {
+    const c = e.target;
+    if (!c || !c.classList || $('uAll').checked) return;
+    if (c.classList.contains('t-board') && c.checked) { const h = mateOf('t-hall', c.value); if (h && !h.disabled) h.checked = true; }
+    if (c.classList.contains('t-hall') && !c.checked) { const b = mateOf('t-board', c.value); if (b && !b.disabled) b.checked = false; }
+  });
+  /** Every hall no longer reaches a hall: each hall whose On stage seat is ticked is ticked with it. */
+  function hallsForSeats() {
+    if ($('uAll').checked) return;
+    for (const b of $('uHalls').querySelectorAll('input.t-board:checked')) { const h = mateOf('t-hall', b.value); if (h && !h.disabled) h.checked = true; }
+  }
+  /** An On stage seat is offered while the rights ticked hold Send messages, or where the account holds it already. */
+  function boardOffer() {
+    const self = isSelf(editing);
+    const posts = !!$('uCaps').querySelector('input[value="hall.post"]:checked');
+    for (const c of $('uHalls').querySelectorAll('input.t-board')) {
+      const off = c.dataset.offered !== '1' || (!posts && c.dataset.held !== '1');
+      if (off && c.dataset.offered === '1') c.checked = false;
+      c.disabled = off;
+    }
+    $('uBoardWords').hidden = self || posts;
+  }
+  $('uCaps').addEventListener('change', boardOffer);
+
+  /** The rights in their groups (the server's `capGroups`: In the room, Show, Run AGMessage), each a group of ticks. */
   function renderCaps(u) {
     const role = roleOf($('uRole').value);
     $('uRoleWords').textContent = role.words || '';
     const box = $('uCaps');
     box.textContent = '';
-    for (const [cap, words] of Object.entries(data.caps)) {
-      const fromRole = role.caps.includes(cap);
-      const self = isSelf(editing);
-      const given = mayGive.cap(cap);
-      const on = (given || self) && (u ? (fromRole ? !u.revoke.includes(cap) : u.grant.includes(cap)) : fromRole);
-      const l = document.createElement('label'); l.className = 'check';
-      const c = document.createElement('input'); c.type = 'checkbox'; c.value = cap; c.checked = on; c.disabled = !given || self;
-      l.appendChild(c);
-      const t = document.createElement('span');
-      t.textContent = ' ' + words;
-      if (on !== fromRole) { const m = document.createElement('em'); m.className = 'muted'; m.textContent = on ? ' (added)' : ' (removed)'; t.appendChild(m); }
-      l.appendChild(t);
-      box.appendChild(l);
-    }
+    const groups = Array.isArray(data.capGroups) ? data.capGroups.filter((g) => g && Array.isArray(g.caps)) : [];
+    const grouped = new Set(groups.flatMap((g) => g.caps));
+    // A right the page is told of in no group is still drawn, last, so no right is ever left off the form.
+    const rest = Object.keys(data.caps).filter((c) => !grouped.has(c));
+    groups.concat(rest.length ? [{ id: 'other', label: 'Other', caps: rest }] : []).forEach((g, n) => {
+      const sec = document.createElement('div'); sec.className = 'cap-group'; sec.setAttribute('role', 'group');
+      const h = document.createElement('h3'); h.id = 'capGroup' + n; h.textContent = g.label;
+      sec.setAttribute('aria-labelledby', h.id);
+      sec.appendChild(h);
+      for (const cap of g.caps) {
+        if (!Object.prototype.hasOwnProperty.call(data.caps, cap)) continue;
+        const words = data.caps[cap];
+        const fromRole = role.caps.includes(cap);
+        const self = isSelf(editing);
+        const given = mayGive.cap(cap);
+        const on = (given || self) && (u ? (fromRole ? !u.revoke.includes(cap) : u.grant.includes(cap)) : fromRole);
+        const l = document.createElement('label'); l.className = 'check';
+        const c = document.createElement('input'); c.type = 'checkbox'; c.value = cap; c.checked = on; c.disabled = !given || self;
+        l.appendChild(c);
+        const t = document.createElement('span');
+        t.textContent = ' ' + words;
+        if (on !== fromRole) { const m = document.createElement('em'); m.className = 'muted'; m.textContent = on ? ' (added)' : ' (removed)'; t.appendChild(m); }
+        l.appendChild(t);
+        sec.appendChild(l);
+      }
+      box.appendChild(sec);
+    });
+    boardOffer();
   }
   $('uRole').addEventListener('change', () => {
     if (!$('uAll').dataset.touched) $('uAll').checked = !$('uAll').disabled && roleOf($('uRole').value).allHalls;
     renderCaps(editing && editing.role === $('uRole').value ? editing : null);
+    hallsForSeats();
   });
-  $('uAll').addEventListener('change', () => { $('uAll').dataset.touched = '1'; });
+  $('uAll').addEventListener('change', () => { $('uAll').dataset.touched = '1'; hallsForSeats(); });
 
-  /** The form as a change: role, halls, and the rights that differ from the role's (grant / revoke). */
+  /** The form as a change: role, halls, side rooms, On stage halls, chat view, and the rights that differ from the role's (grant / revoke). */
   function formChange() {
     if (isSelf(editing)) return { name: $('uName').value.trim() };
     const role = roleOf($('uRole').value);
     const caps = Array.from($('uCaps').querySelectorAll('input:checked')).map((c) => c.value);
-    // A hall the account holds that is not on the list (removed since) is not shown, so it is not the editor's to drop:
-    // it is sent back as it is, and an untouched Save stays no change — none of that person's pages reload.
-    const unlisted = editing ? editing.halls.filter((code) => !data.halls.some((h) => h.code === code)) : [];
+    const ticked = (cls) => Array.from($('uHalls').querySelectorAll('input.' + cls + ':checked')).map((c) => c.value);
+    // A hall, an On stage hall or a room the account holds that is not on the list (removed since) is not shown, so it is
+    // not the editor's to drop: it is sent back as it is, and an untouched Save stays no change — none of that person's
+    // pages reload.
+    const listedHall = (code) => data.halls.some((h) => h.code === code);
+    const listedRoom = (key) => roomsListed().some((r) => r.key === key);
+    const kept = (field, listed) => (editing && Array.isArray(editing[field]) ? editing[field].filter((k) => !listed(k)) : []);
     const change = {
       name: $('uName').value.trim(), role: role.id,
-      halls: Array.from($('uHalls').querySelectorAll('input:checked')).map((c) => c.value).concat(unlisted),
+      halls: ticked('t-hall').concat(kept('halls', listedHall)),
+      rooms: ticked('t-room').concat(kept('rooms', listedRoom)),
+      board: ticked('t-board').concat(kept('board', listedHall)),
+      view: $('uView').value,
       grant: caps.filter((c) => !role.caps.includes(c)),
       revoke: role.caps.filter((c) => !caps.includes(c)),
     };

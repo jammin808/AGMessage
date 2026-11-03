@@ -503,14 +503,16 @@
   /**
    * The doors of the objects in `container`: right-click (and a long press where the browser fires contextmenu for
    * one), Shift+F10 and the menu key. `find(target)` answers {el, more, open(at)} for the object under it, or null, and
-   * the browser's own menu stays. A key's menu is anchored at the object's ⋯ (`more`), a pointer's at the pointer.
+   * the browser's own menu stays. A key's menu is anchored at the object's ⋯ (`more`), a pointer's at the pointer. A
+   * field, and a link that is not an object's own (a hall's name: `data-object-link`), keep the browser's menu at every
+   * door alike: a link inside an object (a room button on a hall's row) never opens the object's menu by a key either.
    */
+  const KEEPS_BROWSERS = FIELD + ', a[href]:not([data-object-link])';
   menu.door = function door(container, find) {
     container.addEventListener('contextmenu', (e) => {
       if (e.shiftKey) return;   // Shift+right-click: the browser's own menu, always
       const t = e.target;
-      // A link keeps the browser's menu, but an object's own link (a hall's name: `data-object-link`) takes the object's.
-      if (!t || !t.closest || t.closest(FIELD) || t.closest('a[href]:not([data-object-link])')) return;
+      if (!t || !t.closest || t.closest(KEEPS_BROWSERS)) return;
       const obj = find(t);
       if (!obj) return;
       const sel = window.getSelection ? window.getSelection() : null;
@@ -521,7 +523,7 @@
     });
     container.addEventListener('keydown', (e) => {
       const isKey = (e.key === 'F10' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) || e.key === 'ContextMenu';
-      if (!isKey || !e.target || !e.target.closest || e.target.closest(FIELD)) return;
+      if (!isKey || !e.target || !e.target.closest || e.target.closest(KEEPS_BROWSERS)) return;
       const obj = find(e.target);
       if (!obj) return;
       if (obj.open({ anchor: obj.more || obj.el, keyboard: true })) e.preventDefault();

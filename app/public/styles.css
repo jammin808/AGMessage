@@ -1561,8 +1561,30 @@ html[data-theme="dark"] input, html[data-theme="dark"] textarea { background: va
 .disp-chip { border: 1px solid var(--border); border-radius: 999px; padding: .05rem .5rem; color: var(--ink); background: var(--card); }
 .disp-chip[data-ok="shown"] { border-color: var(--ok); }
 .disp-chip[data-ok="offline"], .disp-chip[data-ok="error"] { border-color: var(--danger); }
+/* A hall's side rooms this account may enter: real links under the hall's name (the row's first column, a line of its
+   own below the rest of the row), above the row's link; on a narrow screen, a line of their own across the row. */
+.hall-rooms { grid-column: 1; grid-row: 2; display: flex; flex-wrap: wrap; gap: var(--sp-2); position: relative; z-index: 1; }
+.room-btn { display: inline-flex; align-items: center; min-height: var(--target-min); padding: 0 var(--sp-3); border: 1px solid var(--c-border);
+  border-radius: var(--radius-pill); background: var(--c-surface-raised); color: var(--c-ink); font-size: var(--fs-sm); text-decoration: none; }
+.room-btn:hover { border-color: var(--c-action); color: var(--c-action); }
+.room-btn:focus-visible, .your-room-open:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+@media (pointer: coarse) { .room-btn { min-height: var(--target-touch); } }
+/* Your rooms: side rooms of halls this account does not see, by their hall's name. */
+.your-rooms { margin-top: var(--sp-6); }
+.your-rooms h2 { font-size: 1.1rem; margin: 0 0 var(--sp-2); }
+.your-room-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--c-border); }
+.your-room { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); padding: var(--sp-3) var(--sp-1); border-bottom: 1px solid var(--c-border); }
+.your-room-open { font-weight: 700; color: var(--c-ink); min-height: var(--target-min); display: inline-flex; align-items: center; }
+.your-room-hall { font-size: var(--fs-sm); }
+/* Set up's Rooms: each of the hall's rooms, its code and its ⋯. */
+.setup-room-list { list-style: none; margin: var(--sp-2) 0; padding: 0; }
+.setup-room { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); padding: var(--sp-1) 0; border-bottom: 1px solid var(--c-border); }
+.setup-room:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+.setup-room-name { font-weight: 600; }
+.setup-room-code { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; flex: 1 1 8rem; }
 @media (max-width: 820px) {
   .hall-row { grid-template-columns: 1fr auto auto; }
+  .hall-rooms { grid-column: 1 / -1; grid-row: auto; }
   .hall-last { grid-column: 1 / -1; }
   .hall-meta { grid-column: 1 / -1; justify-content: flex-start; }
   .hall-time { font-size: 1.7rem; }
@@ -1606,6 +1628,25 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .check { display: flex; align-items: flex-start; gap: .45rem; font-size: .92rem; margin: .25rem 0; cursor: pointer; }
 .check input { margin-top: .2rem; }
 .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0 .8rem; margin-top: .3rem; }
+/* A dialog's footer stays in sight as its form scrolls: Cancel and Save are always reachable. */
+/* It reaches the dialog's edges through its padding (1.2rem 1.3rem), so nothing scrolls by under it. */
+.agm-dialog .dialog-foot { position: sticky; bottom: -1.2rem; margin: var(--sp-3) -1.3rem -1.2rem; padding: var(--sp-3) 1.3rem;
+  background: var(--card); border-top: 1px solid var(--c-border); z-index: 1; }
+/* The Accounts page's halls and rooms: each hall's Main room with its On stage seat, its side rooms set in under it. */
+.hall-tree { display: grid; gap: var(--sp-1); margin-top: var(--sp-1); }
+.tree-hall { padding: var(--sp-1) 0; border-top: 1px solid var(--c-border); }
+.tree-hall:first-child { border-top: 0; }
+.tree-main { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 var(--sp-4); }
+.tree-main .check:first-child { flex: 1 1 16rem; }
+.tree-apart { font-size: .92rem; font-weight: 600; margin: .25rem 0; }
+.tree-rooms { padding-left: var(--sp-6); display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: 0 var(--sp-4); }
+/* The rights in their three groups. */
+.cap-group h3 { font-size: .8rem; font-weight: 600; color: var(--c-ink-muted); margin: var(--sp-2) 0 0; text-transform: uppercase; letter-spacing: .05em; }
+/* Members…: a checklist of accounts, each with why it is not offered when it is not. */
+.members-list { list-style: none; margin: var(--sp-2) 0; padding: 0; }
+.members-row { padding: var(--sp-1) 0; border-bottom: 1px solid var(--c-border); }
+.members-row .hint { display: block; margin-left: 1.6rem; }
+.members-said { min-height: 1.2em; font-size: var(--fs-sm); }
 .secret { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .08em; text-align: center; padding: .7rem; border: 2px dashed var(--border); border-radius: 10px; user-select: all; }
 
 /* Accounts and the audit log */
@@ -1785,6 +1826,8 @@ h1[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 .room-list-item:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; border-radius: var(--radius-sm); }
 /* A side room's row sits under its hall's, set in, its rule on the left the hall's own line down to it. */
 .room-list-item.side { margin-left: var(--sp-4); padding-left: var(--sp-2); border-left: 2px solid var(--border); }
+/* A side room's name on a line of its own, its counts and code under it, as a hall's are. */
+.room-list-item.side .room-name { display: block; font-weight: 600; }
 .admin-room-header .obj-bar { align-self: flex-start; }
 .person-row:focus-visible, .admin-msg:focus-visible, .link-row:focus-visible { outline: 2px solid var(--c-action); outline-offset: -2px; }
 .link-row { flex-wrap: wrap; justify-content: space-between; }

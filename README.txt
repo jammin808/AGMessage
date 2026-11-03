@@ -69,16 +69,41 @@ First time on a new laptop
    nobody sets them on their own account, and each change is an audit row
    (user.update). A chat view changed alone reaches the person's open
    pages without closing them; any other change reconnects them. The
-   halls board lists the rooms each person may enter. (The Accounts page
-   does not offer these three yet.)
+   halls board lists the rooms each person may enter.
+   On the Accounts page, Edit... shows "Halls and rooms": each hall's
+   Main room ("Hall 2 - Main room and hall rights") with "On stage
+   (Board member)" beside it, and its other rooms set in under it (tick
+   Legal alone for someone who goes into Legal and not the hall; ticking
+   On stage ticks the hall, unticking the hall takes On stage with it).
+   On stage is offered only to someone who may send messages (a Viewer
+   reads only: "Reads only: On stage needs Send messages.").
+   "Every hall's Main room" never reaches a hall's other rooms. Chat view
+   is beside the role, and the rights are in three groups: In the room,
+   Show, Run AGMessage. A row reads "Hall 2 (Main, Legal) · On stage".
+   To put several people into one room at once: the room's ⋯ ->
+   Members... (on the admin page, or in the hall's Set up; on a hall's
+   Main room, Board members... for who sits On stage: who goes into the
+   hall itself is chosen on the Accounts page), tick them, Save.
+   Each person is saved on their own and said: "2 saved · Kim: why not"
+   for one that could not be. Someone you may not change is shown and not
+   ticked; their open pages reload with the change. Members... is there
+   for anyone who manages accounts.
 
 5. Halls -> New hall: one per hall in use (e.g. "Hall 3", "Hall 4"). Each
    hall gets a 6-character code (e.g. K7P2QX) for the people who join
    without an account: presenters on stage, board members, guests.
    A hall can have rooms of its own beside its Main room (Legal, Media):
    on the admin page, a hall's ⋯ -> New room in this hall..., then its
-   name. Each room is listed under its hall, with Watch, Rename...,
-   Clear messages... and Remove room... in its ⋯. Each room has its own
+   name; or on the halls board, the hall's ⋯ -> Set up... -> + Add room
+   (a project manager can do this too). Each room is listed under its
+   hall, with Watch, Rename..., Clear messages... and Remove room... in
+   its ⋯; in Set up, every room's ⋯ has its code (the admin's), and each
+   room beside the Main room also Rename... and Remove room... (Remove
+   for the admin); the hall's own name is Set up's Name, and a hall is
+   closed on the admin page. What is done there is done at once. On the
+   halls board each room you may enter is a button on its hall's row,
+   and rooms you are given in a hall you do not see are under "Your
+   rooms". Each room has its own
    guest code. A new room's is off: it is for the admin and the accounts
    given it until you choose "Turn the code on" in its ⋯. Guests in a
    room other than the Main room sit as a Member (messages and files) or
@@ -91,8 +116,8 @@ First time on a new laptop
    admin enters, watches, prints or summarises a room their account is
    not given, the audit log says so (room.read).
 
-   A room's code, in its ⋯ on the admin page (or the code in the header
-   of your own hall page, signed in as the admin):
+   A room's code, in its ⋯ on the admin page or in its hall's Set up (or
+   the code in the header of your own hall page, signed in as the admin):
    - "Turn the code off..." asks which way: "Turn off" keeps the guests
      already in (one whose Wi-Fi drops comes back within a few seconds)
      and lets nobody new join with it; "Turn off and send them out"
@@ -426,9 +451,13 @@ room..., Clear messages..., Log out..., Delete for everyone..., Set
 up..., Turn off... and the rest ask first; New room in this hall... and
 Rename... ask for the name). Linking a Patterns or PlayMap is one small
 form: its pairing token, the hall from a list, and the start of its
-certificate's fingerprint. On the halls board a hall's name opens it (a
-middle click opens a new tab), and its ⋯ has Open in a new tab, Copy
-link, Copy guest code and Set up...; a help request's ⋯ has On my way,
+certificate's fingerprint. A room's ⋯ there also has Members... (Board
+members... on a hall) for whoever manages accounts, and a person's "Let
+them forward into" lists every other room, by its hall. On the halls
+board a hall's name opens its Main room (a middle click opens a new tab),
+each of its rooms you may enter is a button on its row, and its ⋯ has
+Open in a new tab, Rooms, Copy link, Copy guest code and Set up...; a
+help request's ⋯ has On my way,
 Resolved and Open its hall. On the Accounts page each account's ⋯ has
 Edit..., a new one-time password, Sign out everywhere, Turn off and
 Remove; a row you may not change says why on its Edit. Each audit log

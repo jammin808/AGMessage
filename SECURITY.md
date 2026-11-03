@@ -71,7 +71,13 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   route tells a viewer that is not the admin only the side rooms it holds, on its list and on each row, never a guest
   code; a hall's key in it only where the viewer reaches that hall. `/api/halls` and the halls board list the side rooms
   each watcher may enter, and those of a hall it does not see by that hall's name, never its key. A change of the chat
-  view alone is no right and closes no page; any other change of an account still ends every page it has open.
+  view alone is no right and closes no page; any other change of an account still ends every page it has open. The
+  Accounts page's halls-and-rooms tree and a room's Members… (on the admin page and in a hall's Set up) are pages over the
+  same routes: Members… is offered on the server's word that the account manages accounts (`manageUsers`,
+  `canManageUsers`), sends one `PATCH /api/users/:id` per account it changes, and each is judged by `rbac.mayChange` as
+  any other change; what the page offers or leaves off is never the check. An On stage seat given is one the account
+  takes (it reaches the hall and may post there, `rbac.unseatedOnStage`), refused in words otherwise, and a page is told
+  an account's On stage halls as the seats it takes (`rightsView`'s `board`).
 - A hall's rooms are made and renamed by those who set halls up (`halls.manage`, the admin) and cleared and removed by
   the admin, each one audit row. A side room's key is an address, never a credential: no lookup or join takes it from a
   guest, and a hall's verbs (screens, Stagewatch, show network, Set up) refuse it. The admin's reads of a side room its
@@ -90,8 +96,11 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   seated in that room, without spending the lock, and the invite links made with it stop (an invite is a MAC of the code
   and the seat). A code is told only to those who may know it (the admin, `halls.manage`, an account whose own rights
   there hold what the code gives, a guest the code it typed; never a page seated On stage, a Viewer or a Staff account in
-  a Main room), on each page as it changes, and is never in an op, the ring, a resume, an audit row (`room.code` names
-  the room by its key) or a console line. The residual: until New code a hall's key is its code, so its code is wherever
+  a Main room), on each page as it changes, by one rule wherever a code is listed (`codeFor`; a room's settings and the
+  rows of its hall's rooms in them by `conn.codeTold` too, so a hall's Set up never hands a project manager whose account
+  sits On stage there that hall's code once it is renewed; until then its key is its code, the residual below), and is
+  never in an op, the ring, a resume, an audit row (`room.code` names the room by its key) or a console line. The
+  residual: until New code a hall's key is its code, so its code is wherever
   its key is: its pages' address, the halls board's and `/api/halls`' rows and links, which every account that sees the
   hall reads (Staff and Viewers too, whom `mayKnowCode` otherwise leaves out), and the audit rows that name the hall by its
   key, as in 0.5.1. The admin page says so where it shows the code and marks each such hall in its list; New code ends it.

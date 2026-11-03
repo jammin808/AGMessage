@@ -1450,6 +1450,48 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(roving === JSON.stringify({ stops: 1, inner: true, keys: 'Enter' }) && moved === true, `the halls are one tab stop, ↓ moves to the next, Enter opens the focused one (${roving}; moved ${moved})`);
     await sleep(600);
     await signin.shot(path.join(OUT, 'halls.png'));
+    // A hall's Set up holds its rooms (kind adminRoom, as the admin page's list): the Main room and each room beside it,
+    // each with its code and its ⋯; + Add room is the Main room's New room in this hall…, and what is done there is done
+    // at once. Here the admin, who manages accounts and sets halls up: the Main room offers a room made in it, Board
+    // members… and its code; a room beside it its members, its code, Rename… and Remove room…. A room made there is a
+    // room button on the hall's row of the board, a real link into the room with the seat the server gives.
+    const SETUP_ROW = (key) => `document.querySelector('#setupRooms > li[data-key="${key}"]')`;
+    await signin.eval(`document.querySelector('.hall-row[data-code="${code}"] .obj-more').click()`);
+    await signin.until(`!!document.querySelector('.agm-menu [data-action="hall.setup"]')`, 3000);
+    await signin.eval(`document.querySelector('.agm-menu [data-action="hall.setup"]').click()`);
+    const setupMain = await signin.until(`document.getElementById('setupDialog').open && (() => { const li = ${SETUP_ROW(code)}; return li && JSON.stringify({ name: li.querySelector('.setup-room-name').textContent, code: li.querySelector('.setup-room-code').textContent.split(' · ')[0], add: !document.getElementById('setupAddRoom').hidden, words: document.getElementById('setupRoomsWords').textContent.includes('Its members are chosen on the Accounts page, or with Members… on its ⋯') }); })()`, 5000);
+    const mainSetupDoors = await doorsOf(signin, 'adminRoom', SETUP_ROW(code), `AGM.page.object('adminRoom', '${code}')`, { ...PAGE_DOORS_HALLS, hit: '.setup-room-name' });
+    await signin.eval(`document.getElementById('setupAddRoom').click()`);
+    const addAsk = await signin.until(`(() => { const a = document.querySelector('.agm-ask'); const i = a && a.querySelector('input[name="name"]'); return !!i && document.activeElement === i && a.querySelector('.agm-ask-title').textContent; })()`, 3000);
+    await signin.eval(`(() => { document.querySelector('.agm-ask input[name="name"]').value = 'Press'; document.querySelector('.agm-ask [data-answer=yes]').click(); })()`);
+    const pressKey = await signin.until(`(() => { const li = [...document.querySelectorAll('#setupRooms > li[data-key]')].find((x) => x.querySelector('.setup-room-name').textContent === 'Press'); return li && li.dataset.key; })()`, 5000);
+    const pressMade = await signin.eval(`JSON.stringify({ toast: (document.getElementById('agmToast') || {}).textContent, code: /^code [A-Z2-9]{6} \\(off\\)$/.test(${SETUP_ROW(pressKey)}.querySelector('.setup-room-code').textContent), order: [...document.querySelectorAll('#setupRooms > li[data-key]')].map((li) => li.dataset.key) })`);
+    const pressDoors = await doorsOf(signin, 'adminRoom', SETUP_ROW(pressKey), `AGM.page.object('adminRoom', '${pressKey}')`, { ...PAGE_DOORS_HALLS, hit: '.setup-room-name' });
+    // Turn the code on asks nothing, and the row says the code with no "(off)".
+    await signin.eval(`${SETUP_ROW(pressKey)}.querySelector('.obj-more').click()`);
+    await signin.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]')`, 3000);
+    await signin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]').click()`);
+    const pressOn = await signin.until(`(() => { const t = ${SETUP_ROW(pressKey)}.querySelector('.setup-room-code').textContent; return /^code [A-Z2-9]{6}$/.test(t) && (document.getElementById('agmToast') || {}).textContent; })()`, 5000);
+    await signin.eval(`${SETUP_ROW(pressKey)}.scrollIntoView({ block: 'center' })`);
+    await signin.shot(path.join(OUT, 'setup-rooms.png'));
+    await signin.eval(`document.getElementById('setupDialog').close()`);
+    const pressButton = await signin.until(`(() => { const a = document.querySelector('.hall-row[data-code="${code}"] .hall-rooms a.room-btn[data-key="${pressKey}"]'); const o = AGM.page.object('hall', '${code}'); return a && JSON.stringify({ words: a.textContent, href: a.getAttribute('href'), rooms: AGM.catalog.ids('hall', AGM.page.facts(), o).includes('hall.rooms'), open: AGM.catalog.entry('hall', 'hall.open').label(AGM.page.facts(), o), above: document.elementFromPoint(a.getBoundingClientRect().left + 4, a.getBoundingClientRect().top + a.getBoundingClientRect().height / 2) === a }); })()`, 5000);
+    await signin.shot(path.join(OUT, 'halls-rooms.png'));
+    const setupSeen = setupMain && JSON.parse(setupMain);
+    report(!!setupSeen && setupSeen.name === 'Main room' && setupSeen.code === 'code ' + code && setupSeen.add && setupSeen.words && doorsInStep(mainSetupDoors) && mainSetupDoors.want === JSON.stringify(['adminRoom.create', 'adminRoom.members', 'adminRoom.codeToggle', 'adminRoom.newCode']),
+      `Set up lists the hall's rooms, the Main room first with its code; its doors are New room in this hall…, Board members… and its code (${setupMain}; ${mainSetupDoors.want}; ${mainSetupDoors.right} / ${mainSetupDoors.dots} / ${mainSetupDoors.key})`);
+    report(addAsk === 'New room in Smoke AGM' && /^[A-Z2-9]{8}$/.test(pressKey || '') && pressMade === JSON.stringify({ toast: 'Made Press in Smoke AGM: its guest code is off.', code: true, order: [code, pressKey] })
+      && doorsInStep(pressDoors) && pressDoors.want === JSON.stringify(['adminRoom.members', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.remove']) && pressOn === 'The guest code of Smoke AGM › Press is on.',
+      `+ Add room makes a room in Set up, listed after the Main room with its code off; its doors are Members…, its code, Rename… and Remove room…, and Turn the code on switches it (${addAsk}; ${pressMade}; ${pressDoors.want}; "${pressOn}")`);
+    // A link inside a row that is not the row's own keeps the browser's menu at every door: Shift+F10 on the focused room
+    // button opens no menu of the hall's, as a right-click on it does not (the room's own menu is the switcher's unit's).
+    const roomButtonDoors = await signin.eval(`(() => { const a = document.querySelector('.hall-row[data-code="${code}"] .hall-rooms a.room-btn[data-key="${pressKey}"]'); a.focus();
+      const k = new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }); a.dispatchEvent(k); const byKey = !!document.querySelector('.agm-menu');
+      const c = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }); a.dispatchEvent(c);
+      return JSON.stringify({ byKey, byPointer: !!document.querySelector('.agm-menu'), kept: !k.defaultPrevented && !c.defaultPrevented }); })()`);
+    report(pressButton === JSON.stringify({ words: 'Press', href: `/app.html?code=${pressKey}&as=account&role=research`, rooms: true, open: 'Open Main', above: true })
+      && roomButtonDoors === JSON.stringify({ byKey: false, byPointer: false, kept: true }),
+      `the room is a room button on its hall's row, a link above the row's own whose Shift+F10 and right-click keep the browser's menu, and the row's ⋯ offers Open Main and Rooms ▸ (${pressButton}; ${roomButtonDoors})`);
     const users = await edge.tab(`${base}/users.html`);
     report(!!(await users.until(`document.querySelectorAll('#userRows tr').length === 1`)), 'the accounts page lists the admin');
     await readOldWords('the Accounts page', users);
@@ -1482,6 +1524,59 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await users.eval(`document.getElementById('userSave').click()`);
     const selfSaved = await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — nothing changed.' && !document.getElementById('userDialog').open`, 5000);
     report(selfForm === JSON.stringify({ name: true, role: true, every: true, halls: true, rights: true, off: true, remove: true }) && !!selfSaved, `one's own row: a Save is taken; role, halls, rights, Turn off and Remove are not offered (${selfForm}${selfSaved ? '' : '; ' + (await users.eval(`document.getElementById('userError').textContent`))})`);
+    // Halls and rooms: each hall's Main room with its On stage seat beside it and its side rooms set in under it; the chat
+    // view beside the role; the rights in three groups; the footer in sight as the form scrolls. Kim given Press, On stage
+    // in the hall and the simple view: the server keeps each, the row says so, and an untouched Save of all of it is still
+    // no change. On stage is a seat in the hall: a hall unticked takes it with it, and ticking it ticks the hall again.
+    const KIM_TR = `[...document.querySelectorAll('#userRows > tr[data-key]')].find((tr) => tr.textContent.includes('kim'))`;
+    const TREE = `document.querySelector('#uHalls .tree-hall[data-hall="${code}"]')`;
+    await users.until(`!document.getElementById('userDialog').open`);
+    await users.eval(`(${KIM_TR}).querySelector('button').click()`);
+    await users.until(`document.getElementById('userDialog').open && !!${TREE}`);
+    const tree = await users.eval(`(() => { const b = ${TREE}; return JSON.stringify({
+      hall: b.querySelector('input.t-hall').closest('label').textContent.trim(), board: b.querySelector('input.t-board').closest('label').textContent.trim(),
+      rooms: [...b.querySelectorAll('.tree-rooms input.t-room')].map((c) => c.closest('label').textContent.trim() + ':' + c.checked),
+      every: document.getElementById('uAll').closest('label').textContent.trim(), views: [...document.getElementById('uView').options].map((o) => o.textContent), view: document.getElementById('uView').value,
+      groups: [...document.querySelectorAll('#uCaps .cap-group')].map((g) => g.querySelector('h3').textContent + ':' + g.querySelectorAll('input').length),
+      foot: getComputedStyle(document.querySelector('#userDialog .dialog-foot')).position }); })()`);
+    await users.eval(`(() => { const b = ${TREE}; b.querySelector('input.t-room[value="${pressKey}"]').click(); b.querySelector('input.t-board').click(); document.getElementById('uView').value = 'simple';
+      const t = document.getElementById('agmToast'); if (t) t.textContent = ''; document.getElementById('userSave').click(); })()`);
+    const kimGiven = await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — their open pages reconnect with the new rights.' && !document.getElementById('userDialog').open`, 5000);
+    const kimNow = await users.eval(`AGM.api('GET', '/api/users').then((r) => { const k = r.users.find((u) => u.username === 'kim'); return JSON.stringify({ rooms: k.rooms, board: k.board, view: k.view }); })`);
+    const kimCell = await users.until(`(() => { const tr = ${KIM_TR}; return tr && tr.children[2].textContent.includes('Press') && tr.children[2].textContent; })()`, 5000);
+    await users.eval(`(${KIM_TR}).querySelector('button').click()`);
+    await users.until(`document.getElementById('userDialog').open && !!${TREE}`);
+    const kimShown = await users.eval(`(() => { const b = ${TREE}; return JSON.stringify([b.querySelector('input.t-room[value="${pressKey}"]').checked, b.querySelector('input.t-board').checked, document.getElementById('uView').value]); })()`);
+    const linkedTicks = await users.eval(`(() => { const b = ${TREE}; const h = b.querySelector('input.t-hall'); const st = b.querySelector('input.t-board'); h.click(); const off = [h.checked, st.checked]; st.click(); return JSON.stringify([off, [h.checked, st.checked]]); })()`);
+    await users.eval(`(() => { document.getElementById('agmToast').textContent = ''; document.getElementById('userSave').click(); })()`);
+    const kimUntouched = await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — nothing changed.' && !document.getElementById('userDialog').open`, 5000);
+    report(tree === JSON.stringify({ hall: `Smoke AGM — Main room and hall rights (${code})`, board: 'On stage (Board member)', rooms: ['Press:false'], every: 'Every hall\'s Main room, including new ones (not their other rooms)',
+      views: ['By seat', 'Simple', 'Full'], view: '', groups: ['In the room:3', 'Show:4', 'Run AGMessage:5'], foot: 'sticky' }),
+      `the Accounts page's editor: each hall's Main room with On stage beside it and its rooms under it, Chat view, the rights in three groups, the footer in sight (${tree})`);
+    report(!!kimGiven && kimNow === JSON.stringify({ rooms: [pressKey], board: [code], view: 'simple' }) && kimCell === 'GONE01 (Main); Smoke AGM (Main, Press) · On stage' && kimShown === JSON.stringify([true, true, 'simple'])
+      && linkedTicks === JSON.stringify([[false, false], [true, true]]) && !!kimUntouched,
+      `a room, an On stage seat and a chat view are given on the Accounts page, said on the row, and an untouched Save of them changes nothing; On stage goes and comes with its hall (${kimNow}; "${kimCell}"; ${kimShown}; ${linkedTicks})`);
+    // On stage is a seat the account takes: while the rights ticked hold no Send messages (a Viewer) a seat is not offered,
+    // with the server's words; a role that posts is offered it; unticking every hall ticks the hall of each seat ticked.
+    await users.until(`!document.getElementById('userDialog').open`);
+    await users.eval(`document.getElementById('newUserBtn').click()`);
+    await users.until(`document.getElementById('userDialog').open && !!${TREE}`);
+    const seatOffer = await users.eval(`(() => { const b = ${TREE}; const st = b.querySelector('input.t-board'); const h = b.querySelector('input.t-hall');
+      const role = document.getElementById('uRole'); const all = document.getElementById('uAll'); const words = document.getElementById('uBoardWords');
+      const pick = (v) => { role.value = v; role.dispatchEvent(new Event('change', { bubbles: true })); };
+      const every = (on) => { all.checked = on; all.dispatchEvent(new Event('change', { bubbles: true })); };
+      pick('viewer'); const viewer = [st.disabled, words.hidden, words.textContent];
+      pick('staff'); const staff = [st.disabled, words.hidden];
+      every(true); h.checked = false; st.click(); const before = [h.checked, st.checked];
+      every(false);
+      return JSON.stringify({ viewer, staff, hall: [before, h.checked] }); })()`);
+    await users.eval(`document.getElementById('userDialog').close('cancel')`);
+    report(seatOffer === JSON.stringify({ viewer: [true, false, 'Reads only: On stage needs Send messages.'], staff: [false, true], hall: [[false, true], true] }),
+      `the Accounts page offers an On stage seat only while the rights ticked send messages, with the server's words, and unticking every hall ticks the hall of a seat ticked (${seatOffer})`);
+    // Lou is given Press alone, in a hall Lou does not see: Lou's board lists it under Your rooms (below).
+    const louMade = await users.eval(`AGM.api('POST', '/api/users', { username: 'lou', name: 'Lou Legal', role: 'staff', halls: [], rooms: ['${pressKey}'], password: 'press desk by the door' }).then((r) => r.status)`);
+    await users.eval(`location.reload()`);
+    await users.until(`document.querySelectorAll('#userRows > tr[data-key]').length >= 3 && !!(${KIM_TR})`);
     // The Accounts page acts from the catalogue (kinds account, audit): an account's row and an entry of the audit log
     // open the same menu by right-click, ⋯ and Shift+F10; an account's Edit is its bar.
     const KIM_ROW = `[...document.querySelectorAll('#userRows > tr[data-key]')].find((tr) => tr.textContent.includes('kim'))`;
@@ -2629,7 +2724,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await admin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.create"]').click()`);
     const sideCreateAsk = await admin.until(`(() => { const a = document.querySelector('.agm-ask'); const i = a && a.querySelector('input[name="name"]'); return !!i && document.activeElement === i && a.querySelector('.agm-ask-title').textContent; })()`, 3000);
     await admin.eval(`(() => { document.querySelector('.agm-ask input[name="name"]').value = 'Legal'; document.querySelector('.agm-ask [data-answer=yes]').click(); })()`);
-    const sideKey = await admin.until(`(() => { const li = [...document.querySelectorAll('#roomList > li.side[data-key]')].find((x) => x.querySelector('.room-name').textContent === 'Legal'); return !!li && li.previousElementSibling && li.previousElementSibling.dataset.key === '${code}' && li.dataset.key; })()`, 5000);
+    // Under its hall: the hall's row is the nearest row above it that is not a side room (the hall's other rooms, Press
+    // made in its Set up among them, sit between).
+    const sideKey = await admin.until(`(() => { const li = [...document.querySelectorAll('#roomList > li.side[data-key]')].find((x) => x.querySelector('.room-name').textContent === 'Legal'); let h = li && li.previousElementSibling; while (h && h.classList.contains('side')) h = h.previousElementSibling; return !!li && !!h && h.dataset.key === '${code}' && li.dataset.key; })()`, 5000);
     await admin.eval(`window.__sideRow = document.querySelector('#roomList > li[data-key="${sideKey}"]')`);
     // Its row's name says its hall to a screen reader, which hears the list flat: "Legal, a room of Smoke AGM …".
     const sideRowName = await admin.eval(`window.__sideRow.querySelector('.room-pick').textContent`);
@@ -2677,6 +2774,44 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const sideRemoved = await admin.until(`!document.querySelector('#roomList > li[data-key="${sideKey}"]') && currentRoom && currentRoom.code === '${code}' && !document.getElementById('roomHeader').hidden && (document.getElementById('agmToast') || {}).textContent`, 5000);
     report(sideRenameFilled === 'Legal' && roomRenamed === 'Renamed Lawyers.' && sideWatched === JSON.stringify(['Smoke AGM › Lawyers', 'Room key', sideKey]) && sideRemoveAsk.title === 'Remove room Smoke AGM › Lawyers?' && sideRemoveAsk.yes === 'Remove and delete' && sideRemoved === 'Removed Smoke AGM › Lawyers.',
       `Rename… fills in the room's name and names it again; watched, the room is named with its hall, by its key; Remove room… takes it out of the list in place (${sideRenameFilled}; "${roomRenamed}"; ${sideWatched}; ${sideRemoveAsk.title}; "${sideRemoved}")`);
+    // Members… (an admin page opened by an account that manages accounts): Press's checklist names who holds it, one's own
+    // account and Zed shown; Kim taken out and Zed put in, while Zed's account is removed elsewhere: one PATCH each, each
+    // said ("1 saved · Zed Gone: No such account."), the dialog kept open with the list read again as the server holds it.
+    // Board members… on the hall: those seated On stage there. Let them forward into ▸ lists every other room by its hall.
+    const zedMade = await admin.eval(`fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'zed', name: 'Zed Gone', role: 'staff', halls: [], password: 'gone before the save' }) }).then((r) => r.json()).then((b) => b.user && b.user.id)`);
+    const adminM = await edge.tab(`${base}/admin.html`);
+    const PRESS_ROW = `document.querySelector('#roomList > li[data-key="${pressKey}"]')`;
+    const membersOffered = await adminM.until(`!!${PRESS_ROW} && ADMIN_F.manageUsers === true && JSON.stringify({ side: AGM.catalog.ids('adminRoom', ADMIN_F, roomObject('${pressKey}')).includes('adminRoom.members'), main: AGM.catalog.entry('adminRoom', 'adminRoom.members').label(ADMIN_F, roomObject('${code}')) })`, 8000);
+    const openMembers = async (row) => {
+      await adminM.eval(`${row}.querySelector('.obj-more').click()`);
+      await adminM.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.members"]')`, 3000);
+      await adminM.eval(`document.querySelector('.agm-menu [data-action="adminRoom.members"]').click()`);
+    };
+    const MEMBER_ROWS = `[...document.querySelectorAll('#membersList > li[data-key]')].map((li) => ({ name: li.querySelector('strong').textContent, ticked: li.querySelector('input').checked, off: li.querySelector('input').disabled, why: (li.querySelector('.members-why') || {}).textContent || '' }))`;
+    const memberOf = (name) => `${MEMBER_ROWS}.find((r) => r.name === '${name}')`;
+    await openMembers(PRESS_ROW);
+    const pressMembers = await adminM.until(`(() => { const d = document.getElementById('membersDialog'); return d && d.open && document.querySelectorAll('#membersList > li[data-key]').length >= 3 && JSON.stringify({ title: document.getElementById('membersTitle').textContent, ana: ${memberOf('Ana Admin')}, kim: ${memberOf('Kim Tech')}, lou: ${memberOf('Lou Legal')}, zed: ${memberOf('Zed Gone')} }); })()`, 5000);
+    await adminM.shot(path.join(OUT, 'members.png'));
+    await adminM.eval(`(() => { const box = (name) => [...document.querySelectorAll('#membersList > li[data-key]')].find((li) => li.querySelector('strong').textContent === name).querySelector('input'); box('Kim Tech').click(); box('Zed Gone').click(); })()`);
+    const zedGone = await adminM.eval(`fetch('/api/users/${zedMade}', { method: 'DELETE' }).then((r) => r.status)`);
+    adminM.expectFailure(/\/api\/users\/[^/]+$/);   // Zed's 404, removed before the Save, is this step's own
+    await adminM.eval(`document.getElementById('membersSave').click()`);
+    const membersSaid = await adminM.until(`(() => { const w = document.getElementById('membersSaid').textContent; return /saved/.test(w) && !${memberOf('Zed Gone')} && JSON.stringify({ said: w, open: document.getElementById('membersDialog').open, kim: ${memberOf('Kim Tech')}.ticked }); })()`, 8000);
+    const kimAfter = await adminM.eval(`fetch('/api/users').then((r) => r.json()).then((b) => JSON.stringify(b.users.find((u) => u.username === 'kim').rooms))`);
+    await adminM.eval(`document.querySelector('#membersDialog button[value="cancel"]').click()`);
+    await adminM.until(`!document.getElementById('membersDialog').open`, 3000);
+    await openMembers(`document.querySelector('#roomList > li[data-key="${code}"]')`);
+    const boardMembers = await adminM.until(`(() => { const d = document.getElementById('membersDialog'); return d && d.open && document.querySelectorAll('#membersList > li[data-key]').length >= 3 && JSON.stringify({ title: document.getElementById('membersTitle').textContent, kim: ${memberOf('Kim Tech')}.ticked, lou: ${memberOf('Lou Legal')}.why, louAdds: [...document.querySelectorAll('#membersList > li[data-key]')].find((li) => li.querySelector('strong').textContent === 'Lou Legal').querySelector('.members-adds').textContent }); })()`, 5000);
+    await adminM.eval(`document.querySelector('#membersDialog button[value="cancel"]').click()`);
+    const forwardRooms = await adminM.eval(`JSON.stringify((() => { const c = forwardChoices(allRooms, '${code}', ['${pressKey}']); return { home: c.some((x) => x.value === '${code}'), press: c.find((x) => x.value === '${pressKey}'), seps: c.filter((x) => x.sep).length, halls: allRooms.length }; })())`);
+    const fr = JSON.parse(forwardRooms);
+    report(membersOffered === JSON.stringify({ side: true, main: 'Board members…' }) && pressMembers === JSON.stringify({ title: 'Members of Smoke AGM › Press', ana: { name: 'Ana Admin', ticked: false, off: true, why: 'Your own account: another admin changes it.' },
+      kim: { name: 'Kim Tech', ticked: true, off: false, why: '' }, lou: { name: 'Lou Legal', ticked: true, off: false, why: '' }, zed: { name: 'Zed Gone', ticked: false, off: false, why: '' } }),
+      `Members… on a room lists the accounts, who holds it ticked, one's own account not offered; Board members… on a hall (${membersOffered}; ${pressMembers})`);
+    report(zedGone === 200 && membersSaid === JSON.stringify({ said: '1 saved · Zed Gone: No such account.', open: true, kim: false }) && kimAfter === '[]',
+      `Members… saves one account at a time and says each, a refused one by name; the list is read again as the server holds it (${membersSaid}; Kim's rooms ${kimAfter})`);
+    report(boardMembers === JSON.stringify({ title: 'Board members of Smoke AGM', kim: true, lou: '', louAdds: 'A tick gives Smoke AGM too.' }) && !fr.home && JSON.stringify(fr.press) === JSON.stringify({ value: pressKey, label: 'Smoke AGM › Press', role: 'menuitemcheckbox', checked: true }) && fr.seps === fr.halls - 1,
+      `Board members… lists who sits On stage in the hall, and says a tick gives the hall too to an account that does not reach it; Let them forward into ▸ lists every other room by its hall (${boardMembers}; ${forwardRooms})`);
     await research.eval(`Promise.all([new Promise((r) => socket.emit('message', { type: 'help', category: 'Sound', text: 'radio mic 3 dead' }, r)), new Promise((r) => socket.emit('message', { type: 'action', text: 'Ready for Q&A?', options: ['Yes', 'No'] }, r))])`);
     // On stage, what is written stays in the room: no message offers ↗, a text, a file or a question, and nothing that
     // is not hidden is drawn for it; the Board's composer has no file or question door.
@@ -2779,6 +2914,15 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const lostLine = await research.eval(`stageLineText({ ack: 'lost', receipt: 'applied' })`);
     report(/^✕ No longer followed/.test(lostLine || ''), `a stage send no longer followed says so (${lostLine})`);
 
+    // Lou, given Press alone: no hall on the board, Press under Your rooms by its hall's name, a link into the room with
+    // Lou's seat there, and the hall's key nowhere on the page.
+    const louIn = await signin.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'lou', password: 'press desk by the door' }) }).then((r) => r.status)`);
+    const louBoard = await edge.tab(`${base}/halls.html`);
+    const louRooms = await louBoard.until(`(() => { const li = document.querySelector('#yourRoomList > li[data-key]'); return !document.getElementById('yourRooms').hidden && li && JSON.stringify({ rows: document.querySelectorAll('.hall-row').length, words: li.querySelector('.your-room-open').textContent, hall: li.querySelector('.your-room-hall').textContent,
+      href: li.querySelector('a').getAttribute('href'), empty: document.getElementById('emptyNote').hidden ? '' : document.getElementById('emptyNote').textContent, key: document.documentElement.outerHTML.includes('${code}') }); })()`, 8000);
+    await louBoard.shot(path.join(OUT, 'your-rooms.png'));
+    report(louMade === 200 && louIn === 200 && louRooms === JSON.stringify({ rows: 0, words: 'Press', hall: 'Smoke AGM', href: `/app.html?code=${pressKey}&as=account&role=research`, empty: 'No hall of your own: your rooms are below.', key: false }),
+      `an account given a side room alone finds it under Your rooms, by its hall's name, never the hall's key (${louRooms})`);
     // A Staff account (messages and files, no Stagewatch) is seated backstage: while the hall's Stagewatch keeps a show
     // desk and its frames move, it is offered neither 📝 nor 🖥 — the server would refuse both.
     const sidIn = await signin.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sid', password: 'cable ties and gaffer' }) }).then((r) => r.status)`);
@@ -3268,7 +3412,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(Date.now() - helpResolvedAt >= 30_000 && JSON.stringify(restedChip) === JSON.stringify({ words: 'Help', state: '', red: false, said: '' }),
       `"✓ Resolved" goes after 30 s: ${Math.round((Date.now() - helpResolvedAt) / 1000)} s after It's sorted, Help reads Help again (${JSON.stringify(restedChip)})`);
 
-    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3], ['a phone as On stage', phones.board], ['a phone backstage', phones.research], ['a phone as an observer', phones.observer]];
+    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['the admin page with Members…', adminM], ['a halls board of rooms alone', louBoard], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3], ['a phone as On stage', phones.board], ['a phone backstage', phones.research], ['a phone as an observer', phones.observer]];
     // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).
     const hidden = [];
     for (const [name, tab] of tabs) if ((await tab.eval('document.visibilityState')) !== 'visible') hidden.push(name);

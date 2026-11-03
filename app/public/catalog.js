@@ -21,8 +21,9 @@
 // `msg.sendNow`; a help request's answers are two ids, `msg.helpRespond` (On my way) and `msg.helpResolve` (Resolved),
 // so each can be absent alone. In the simple view (`view: 'simple'`) no object has a menu: its acts are its buttons.
 // A kind drawn on more than one page (`person`: the hall page's People panel and a message's sender, and the admin
-// page's people rows) fits each page's rows only on that page (`page`, a fact of each page's facts), so a page never
-// draws a row whose runner is another page's, and no row is hidden by a right the server would not refuse.
+// page's people rows; `adminRoom`: the admin page's list of halls and rooms, and the rooms of a hall's Set up on the halls
+// board) fits each page's rows only on that page (`page`, a fact of each page's facts), so a page never draws a row whose
+// runner is another page's, and no row is hidden by a right the server would not refuse.
 // An entry with `checked` is a toggle, drawn as a menu item that is checked or not (🔥 Priority).
 (function (root) {
   'use strict';
@@ -66,6 +67,11 @@
   /** The page an object's row is drawn on: the hall page's facts say 'hall', the admin page's 'admin'. */
   const onHall = (f) => f.page === 'hall';
   const onAdmin = (f) => f.page === 'admin';
+  /**
+   * Who sets a hall's rooms up where a room is drawn: on the admin page, whom its gate admits (`admin`, which passes
+   * room:create's and room:update's own check); on the halls board, an account that sets halls up (`manageHalls`).
+   */
+  const setsUp = (f) => (onAdmin(f) ? f.admin : !!f.manageHalls);
   const newestPlain = (f) => (f.waiting.plain.length ? f.waiting.plain[f.waiting.plain.length - 1] : '');
   /**
    * The simple view's one response place for a message: each waiting 🔥 message, and the newest waiting plain one (the
@@ -76,6 +82,8 @@
   const hallOf = (o) => String(o.hall || o.name || o.code || 'this hall');
   /** A room of the admin's list that is a hall (its Main room): every room is, but a side room (`main: false`). */
   const isHall = (o) => o.main !== false;
+  /** A hall's row with side rooms this watcher may enter. */
+  const hasRooms = (o) => Array.isArray(o.rooms) && o.rooms.length > 0;
   /** The seats the admin moves a code guest between, in the words every page uses (the value is the server's): a hall's
    *  Main room's, and a side room's, which has no stage and whose backstage seat is a Member's. */
   const SEATS = Object.freeze([['board', 'On stage'], ['research', 'Backstage'], ['observer', 'Observer']]);
@@ -265,40 +273,49 @@
         may: (f) => f.setsCode, fits: () => true, confirm: (f, o) => newCodeAsk(o) },
     ],
 
-    // ------------------------------------------------------------ the admin page (adminFacts)
+    // ------------------------------------------------------------ the admin page (adminFacts) and Set up's Rooms (boardFacts)
     // A room in the admin page's list, and the room it watches (its header): a hall (its Main room) or one of its side
     // rooms beside it (`main: false`), with `code` (its key), `name`, `hall` (as an ask names it: a side room as "Hall 2
     // › Legal"), `watched`, and its guest code: `on` (whether it admits guests), `guests` (the guest pages in now) and
-    // `codeIsKey` (a hall whose code is still its address). Every act here is the admin page's: whom it admits (`admin`),
-    // which every admin:* verb checks again, and which passes room:create's and room:update's own check (halls.manage, or
-    // the admin; a room's code, the admin's alone). A room's invite links are made with its guest code (a side room's a
-    // Member's alone), and a room is made in a hall.
+    // `codeIsKey` (a hall whose code is still its address). The same room is a row of the halls board's Set up (its
+    // Rooms), where the hall's own name is Set up's Name and the hall is closed on the admin page: there a hall's Main room
+    // has no Rename… and no Close, and the admin page's own acts (Watch, Transcript, Minutes, Roles & invites, Clear) are
+    // not drawn. On the admin page every act but Members… is whom its gate admits (`admin`), which every admin:* verb
+    // checks again and which passes room:create's and room:update's own check; in Set up a room is made and renamed by
+    // one who sets halls up (`setsUp`), and its code switched, renewed and the room removed by the admin alone (`admin`,
+    // the halls board's /api/halls `isAdmin`). Members… (Board members… on a hall's Main room: the accounts seated On
+    // stage there) is for an account that manages accounts (`manageUsers`), whose saves are the Accounts routes'. A
+    // room's invite links are made with its guest code (a side room's a Member's alone), and a room is made in a hall.
     adminRoom: [
       { id: 'adminRoom.watch', label: 'Watch', icon: '👀', key: 'Enter', group: '3_keep', inline: () => 1, verb: 'admin:watchRoom', mode: 'now',
-        may: (f) => f.admin, fits: (f, o) => !o.watched },
+        may: (f) => f.admin, fits: (f, o) => onAdmin(f) && !o.watched },
       { id: 'adminRoom.transcript', label: 'Transcript', icon: '📜', group: '3_keep', verb: 'local', mode: 'local',
-        may: (f) => f.admin, fits: () => true },
+        may: (f) => f.admin, fits: (f) => onAdmin(f) },
       { id: 'adminRoom.minutes', label: 'Minutes', icon: '✨', group: '3_keep', verb: 'admin:summary', mode: 'now',
-        may: (f) => f.admin, fits: () => true, ready: (f) => f.ai || WORDS.noAi },
+        may: (f) => f.admin, fits: (f) => onAdmin(f), ready: (f) => f.ai || WORDS.noAi },
       { id: 'adminRoom.invites', label: 'Roles & invites', icon: '🔒', group: '4_manage', verb: 'admin:invites', mode: 'now',
-        may: (f) => f.admin, fits: () => true },
+        may: (f) => f.admin, fits: (f) => onAdmin(f) },
       { id: 'adminRoom.create', label: 'New room in this hall…', icon: '➕', group: '4_manage', verb: 'room:create', mode: 'now',
-        may: (f) => f.admin, fits: (f, o) => isHall(o),
+        may: (f) => setsUp(f), fits: (f, o) => isHall(o),
         confirm: (f, o) => ({ title: 'New room in ' + hallOf(o), words: 'A room of its own beside the hall\'s Main room (Legal, Media), with its own messages and people. Its guest code is off: the admin, and the accounts given it, go in.',
           fields: [{ name: 'name', label: 'Room name (for example Legal)', max: 80 }], yes: 'Make the room', no: 'Cancel' }) },
+      // Who is in a room by account: a checklist of the accounts this person may change, each saved by its own PATCH and
+      // said (public/members.js); in a hall's Main room, those seated On stage there.
+      { id: 'adminRoom.members', label: (f, o) => (isHall(o) ? 'Board members…' : 'Members…'), icon: '👥', group: '4_manage', verb: 'http:PATCH /api/users/:id', mode: 'now',
+        may: (f) => !!f.manageUsers, fits: () => true },
       { id: 'adminRoom.codeToggle', label: (f, o) => (o.on ? 'Turn the code off…' : 'Turn the code on'), icon: '🚦', group: '4_manage', verb: 'room:update', mode: 'now',
         may: (f) => f.admin, fits: () => true, confirm: (f, o) => (o.on ? codeOffAsk(o) : null) },
       { id: 'adminRoom.newCode', label: 'New code…', icon: '🎲', group: '4_manage', verb: 'room:update', mode: 'now',
         may: (f) => f.admin, fits: () => true, confirm: (f, o) => newCodeAsk(o) },
       { id: 'adminRoom.rename', label: 'Rename…', icon: '🏷', group: '4_manage', verb: 'room:update', mode: 'now',
-        may: (f) => f.admin, fits: () => true,
+        may: (f) => setsUp(f), fits: (f, o) => onAdmin(f) || !isHall(o),
         confirm: (f, o) => ({ title: 'Rename ' + hallOf(o), words: isHall(o) ? 'The hall\'s new name, on every page, screen and the halls board. Its code stays.' : 'The room\'s new name, on its pages. Its people and messages stay.',
           fields: [{ name: 'name', label: isHall(o) ? 'Hall name' : 'Room name', value: o.name || '', max: 80 }], yes: 'Rename', no: 'Cancel' }) },
       { id: 'adminRoom.clear', label: 'Clear messages…', icon: '🧹', group: '9_danger', verb: 'admin:resetRoom', mode: 'now',
-        may: (f) => f.admin, fits: () => true,
+        may: (f) => f.admin, fits: (f) => onAdmin(f),
         confirm: (f, o) => ({ title: 'Clear every message in ' + hallOf(o) + '?', words: 'Files used nowhere else go too. Everyone stays in the ' + (isHall(o) ? 'hall' : 'room') + '. This cannot be undone.', yes: 'Clear messages', no: 'Keep them', danger: true }) },
       { id: 'adminRoom.remove', label: (f, o) => (isHall(o) ? 'Close hall…' : 'Remove room…'), icon: '🗑', group: '9_danger', verb: 'admin:deleteRoom', mode: 'now',
-        may: (f) => f.admin, fits: () => true,
+        may: (f) => f.admin, fits: (f, o) => onAdmin(f) || !isHall(o),
         confirm: (f, o) => (isHall(o)
           ? { title: 'Close hall ' + hallOf(o) + '?', words: 'Everyone in it, and in each of its rooms, is sent out and its saved history is deleted. Open its transcript first if you need it.',
             fields: [{ name: 'purge', type: 'checkbox', label: 'Also delete the files shared only in this hall', value: true }], yes: 'Close and delete', no: 'Keep it open', danger: true }
@@ -317,9 +334,9 @@
       { id: 'person.seat', label: 'Seat', icon: '💺', group: '4_manage', verb: 'admin:setRole', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => onAdmin(f) && !o.account,
         submenu: (f, o) => (o.main === false ? SEATS_SIDE : SEATS).map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: seatOf(o.role) === value })) },
-      // Let them forward into ▸ ticks a hall (admin:linkRoom); a hall unticked there, or a chip's ×, is No longer forward
-      // into ▸ (admin:unlinkRoom), an act of its own: one verb for one act, each refused by the server alike. `linkedNames`
-      // names the halls by code, as the page knows them.
+      // Let them forward into ▸ ticks a room, every other room listed by its hall (admin:linkRoom); a room unticked there,
+      // or a chip's ×, is No longer forward into ▸ (admin:unlinkRoom), an act of its own: one verb for one act, each
+      // refused by the server alike. `linkedNames` names the rooms by key, as the page knows them.
       { id: 'person.forward', label: 'Let them forward into', icon: '➦', group: '4_manage', verb: 'admin:linkRoom', mode: 'now',
         may: (f) => f.admin, fits: (f) => onAdmin(f), submenu: () => null },
       { id: 'person.unforward', label: 'No longer forward into', icon: '🚫', group: '4_manage', verb: 'admin:unlinkRoom', mode: 'now',
@@ -424,11 +441,14 @@
     ],
 
     // ------------------------------------------------------------ the halls board (boardFacts)
-    // A hall's row: `code` (its key), `name`, and `guestCode`: the code its guests type, as the server tells this watcher
-    // ('' to one that may not know it). Its name is the row's one link, which opens it.
+    // A hall's row: `code` (its key), `name`, `guestCode`: the code its guests type, as the server tells this watcher ('' to
+    // one that may not know it), and `rooms`: its side rooms this watcher may enter, as the board lists them ({key, name,
+    // people}). Its name is the row's one link, which opens its Main room; its side rooms are its room buttons and Rooms ▸.
     hall: [
-      { id: 'hall.open', label: 'Open', icon: '🚪', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+      { id: 'hall.open', label: (f, o) => (hasRooms(o) ? 'Open Main' : 'Open'), icon: '🚪', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
       { id: 'hall.tab', label: 'Open in a new tab', icon: '🗗', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+      { id: 'hall.rooms', label: 'Rooms', icon: '🗂', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: (f, o) => hasRooms(o),
+        submenu: (f, o) => o.rooms.map((r) => ({ value: r.key, label: (r.name || 'A room') + ' · ' + r.people + ' in' })) },
       { id: 'hall.copy', label: 'Copy link', icon: '🔗', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
       { id: 'hall.code', label: 'Copy guest code', icon: '🔢', group: '3_keep', verb: 'local', mode: 'local',
         may: (f, o) => typeof o.guestCode === 'string' && o.guestCode.length > 0, fits: () => true },
@@ -544,17 +564,22 @@
 
   /**
    * The admin page's facts (/api/admin/me's answer): whom its gate admits (`ok`: the laptop's token, or an account that
-   * may manage settings), "the admin" (`admin`: the token, or an account whose role is admin), whether AI drafts are on,
-   * the halls a node may be linked for, and whether the page is connected now. Pure.
+   * may manage settings), "the admin" (`admin`: the token, or an account whose role is admin), whether this page's account
+   * may manage accounts (`manageUsers`: a room's Members…), whether AI drafts are on, the halls a node may be linked for,
+   * and whether the page is connected now. Pure.
    */
   function adminFacts(s) {
     const halls = Array.isArray(s.halls) ? s.halls.filter((h) => h && typeof h.code === 'string').map((h) => Object.freeze({ code: h.code, name: typeof h.name === 'string' ? h.name : '' })) : [];
     // The socket the gate admits is the server's admin (isAdmin), whom mayDriveNode lets drive every node: `canDrive`.
-    return Object.freeze({ page: 'admin', admin: !!s.ok, theAdmin: !!s.admin, canDrive: !!s.ok, ai: !!s.ai, halls: Object.freeze(halls), connected: !!s.connected, support: '' });
+    return Object.freeze({ page: 'admin', admin: !!s.ok, theAdmin: !!s.admin, manageUsers: s.manageUsers === true, canDrive: !!s.ok, ai: !!s.ai, halls: Object.freeze(halls), connected: !!s.connected, support: '' });
   }
-  /** The halls board's facts (/api/halls's answer and the board's): who may set halls up and drive the show network. Pure. */
+  /**
+   * The halls board's facts (/api/halls's answer and the board's): who may set halls up, the admin (`admin`, its
+   * `isAdmin`: a room's code and its removal in Set up), who may manage accounts (`manageUsers`, its `canManageUsers`: a
+   * room's Members…) and who may drive the show network. Pure.
+   */
   function boardFacts(s) {
-    return Object.freeze({ page: 'halls', manageHalls: !!s.canManageHalls, canDrive: !!s.canDrive, connected: !!s.connected, support: '' });
+    return Object.freeze({ page: 'halls', manageHalls: !!s.canManageHalls, admin: s.isAdmin === true, manageUsers: s.canManageUsers === true, canDrive: !!s.canDrive, connected: !!s.connected, support: '' });
   }
   /**
    * The Accounts page's facts (/api/auth/me's account and /api/admin/me's `admin`): its rights, read by the server's

@@ -36,6 +36,17 @@ const CAPS = Object.freeze({
   'audit.export': 'Export the whole audit log, signed, to check on another computer (an account with it signs in through the tunnel only when admins may)',
 });
 
+/**
+ * The rights as the Accounts page groups them, in CAPS's order within each: what a person does in a room, what it shows
+ * or sends to the show (screens, Stagewatch, the show network), and what runs AGMessage itself. Every right is in exactly
+ * one group (test/accounts.test.js), so a right added to CAPS is given its group in the same change.
+ */
+const CAP_GROUPS = Object.freeze([
+  Object.freeze({ id: 'room', label: 'In the room', caps: Object.freeze(['hall.view', 'hall.post', 'hall.files']) }),
+  Object.freeze({ id: 'show', label: 'Show', caps: Object.freeze(['display.control', 'display.manage', 'stage.send', 'nodes.control']) }),
+  Object.freeze({ id: 'run', label: 'Run AGMessage', caps: Object.freeze(['halls.manage', 'users.manage', 'settings.manage', 'audit.read', 'audit.export']) }),
+]);
+
 const HALL_SCOPED = new Set(['hall.view', 'hall.post', 'hall.files', 'display.control', 'display.manage', 'stage.send', 'nodes.control']);
 // The rights a room holds, not its hall: what a person reads, writes and shares there. Answered by canIn alone.
 const ROOM_SCOPED = new Set(['hall.view', 'hall.post', 'hall.files']);
@@ -317,16 +328,40 @@ function mayKnowCode(account, scope) {
   return (s.main ? GUEST_CAPS.research : GUEST_CAPS_SIDE.research).every((cap) => canIn(account, cap, s));
 }
 
-/** What a page needs to know about an account's rights (no secrets): with its side rooms and its On stage halls last. */
+/**
+ * The first hall a change newly seats an account On stage in (an entry of `change.board` the account does not hold
+ * already) where the account as changed, enabled, would not sit On stage (roomRoleFor), and why: it does not reach the
+ * hall (`'hall'`), or reaches it and may not post there (`'post'`); null when each one seats it. An entry already on the
+ * account passes, so a Save that sends its On stage halls back as they are is never refused for one a change of role or
+ * rights has since left reading only (it sits there as an observer, and rightsView's `board` leaves it out).
+ */
+function unseatedOnStage(target, change) {
+  if (!Array.isArray(change.board)) return null;
+  const after = { ...afterChange(target, change), disabled: false };
+  const held = new Set(target && Array.isArray(target.board) ? target.board : []);
+  const e = effective(after);
+  for (const k of keysAsStored(change.board)) {
+    if (!k || held.has(k) || roomRoleFor(after, k) === 'board') continue;
+    return { hall: k, why: e.allHalls || e.halls.has(k) ? 'post' : 'hall' };
+  }
+  return null;
+}
+
+/**
+ * What a page needs to know about an account's rights (no secrets): with its side rooms and its On stage halls last. Its
+ * On stage halls are those it sits On stage in (roomRoleFor: it reaches the hall and may post there), so a page that
+ * says "On stage" says the seat the account takes; an On stage hall kept on an account that reads only there is its
+ * stored `board` alone.
+ */
 function rightsView(account) {
   const e = effective(account);
   return {
     role: account ? account.role : '', roleLabel: account && isRole(account.role) ? ROLES[account.role].label : '', caps: Array.from(e.caps).sort(), allHalls: e.allHalls, halls: Array.from(e.halls).sort(),
-    rooms: Array.from(e.rooms).sort(), board: Array.from(e.board).sort(),
+    rooms: Array.from(e.rooms).sort(), board: Array.from(e.board).filter((h) => roomRoleFor(account, h) === 'board').sort(),
   };
 }
 
 module.exports = {
-  CAPS, ROLES, HALL_SCOPED, ROOM_SCOPED, ADMIN_ONLY, SEAT_LIMITS, LINKED_CAPS, GUEST_CAPS, GUEST_CAPS_SIDE, isCap, isRole, effective,
-  can, canIn, seesHall, seesRoom, holdsAdminOnly, mayChange, giveable, giveableRooms, seatAllows, guestCaps, roomRoleFor, answersHelp, mayKnowCode, rightsView,
+  CAPS, CAP_GROUPS, ROLES, HALL_SCOPED, ROOM_SCOPED, ADMIN_ONLY, SEAT_LIMITS, LINKED_CAPS, GUEST_CAPS, GUEST_CAPS_SIDE, isCap, isRole, effective,
+  can, canIn, seesHall, seesRoom, holdsAdminOnly, mayChange, unseatedOnStage, giveable, giveableRooms, seatAllows, guestCaps, roomRoleFor, answersHelp, mayKnowCode, rightsView,
 };

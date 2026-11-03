@@ -2951,8 +2951,8 @@ no help request, this unit undoes it)
 §3.2, §3.3, §6 (as Part 7 §0.1 replaces it: "How it is chosen" and "How it is changed" are unchanged), §7.2 and §7.3, with
 Part 7's additions to unit 9, the seat limit for accounts (7-§0.1, §17.1), and owner questions 2 ("Defaults": a side room
 is only for those it is given to, and for the admin) and B1 ("they don't need to answer other people's help requests");
-the tree's tests. The Accounts page's tree, the admin page's Members… and Set up's rooms are unit 10's, the room choice at
-sign-in and the switcher unit 11's: no page sets or draws these yet)
+the tree's tests. The Accounts page's tree, the admin page's Members… and Set up's rooms are unit 10's, below; the room
+choice at sign-in and the switcher unit 11's)
 - **Three fields of an account** (`lib/accounts.js`): `rooms`, the side rooms it is given; `board`, the halls in whose Main
   room it sits On stage; `view`, its chat view (`''` by its seat, `simple` or `full`). `POST /api/users` and `PATCH
   /api/users/:id` take them (`pick`), each list of keys stored upper case, once, 200 at most, compared as a set, so a Save
@@ -3053,6 +3053,96 @@ sign-in and the switcher unit 11's: no page sets or draws these yet)
 - Rolling back: 0.5.1 keeps an account's `rooms`, `board` and `view` through a load and a save, and ignores them: an
   account given a hall's On stage seat sits backstage there with every right it holds, and its side rooms do not open
   (0.5.1 loads none). Back on 0.6, each is read again. The admin page's rollback line and README.txt say so.
+
+**The Accounts page, the admin page and a hall's Set up show halls with their rooms** (the plan's Part 1, unit 10, its
+§7.2-§7.4, as Part 5 §0 amends them (§15.3's journeys, §15.4 page by page: the rights in three groups, a sticky footer,
+Members… for `users.manage`), with §16.7's `adminRoom` and `hall` rows and §16.10's unit 10 rows (Members…, Set up); Part
+7's Clock or countdown and On stage switches (20b, 20d), Part 4's On stage link (24) and Chat view on the admin page's
+people rows (20a) land with their units; the tree's tests)
+- **The Accounts page's editor** sets an account's halls and rooms in one tree, **Halls and rooms**: each hall this
+  person may give, by name, its Main room ("Hall 2 — Main room and hall rights") with **On stage (Board member)** beside
+  it and its side rooms set in under it, then the side rooms it holds of halls it does not reach, under their hall's
+  name. A side room is ticked without its hall (Legal alone); ticking On stage ticks its hall, unticking the hall takes
+  On stage with it, and unticking "Every hall's Main room, including new ones (not their other rooms)" (or a role of
+  named halls) ticks the hall of each seat ticked (a person's tick moves another; nothing moves by itself). While the
+  rights ticked hold no Send messages, a seat the account does not hold is not offered ("Reads only: On stage needs Send
+  messages."); one it holds can still be taken away. **Chat view** (By seat, Simple, Full) sits beside the role. What
+  this person may not give is shown and not offered, and one's own row stays all shown, nothing offered. A Save sends
+  back the rooms, On stage halls and halls the account holds that the page does not list (gone since) as they are, so an
+  untouched Save of all three is still "Saved — nothing changed." The **rights are in three groups**, In the room, Show
+  and Run AGMessage (`rbac.CAP_GROUPS`, the Accounts route's `capGroups`, every right in one), and the dialog's
+  **footer stays in sight** as the form scrolls (Cancel and Save are always reachable). A row reads where the account
+  goes: "Hall 2 (Main, Legal) · On stage", "Every hall" first for an account of every hall, with each hall it has more
+  in, and what this person is not told as a count ("1 other room").
+- **An On stage seat given is one the account takes** (`rbac.unseatedOnStage`, read by the Accounts routes'
+  `listsRefusal`): an On stage hall a change adds must be one the account, as changed, reaches and may post in, as the
+  join seats it; otherwise it is refused in words ("Reads only in Hall 2: On stage needs Send messages.", "On stage in
+  Hall 2 needs Hall 2 too: give its Main room with the seat."), from the Accounts page and from Board members… alike. One
+  the account holds already passes, so an untouched Save stays no change though a change of role has left it reading
+  only; a page is told an account's On stage halls as the seats it takes (`rightsView`'s `board`), so its row never says
+  "On stage" of an account that would sit there as an observer. Board members… reads a seat as the server judges it,
+  the account enabled (its role, grants and revokes, and its halls as stored, never its `rights`, which are none for a
+  turned-off account), so a turned-off Tech of the hall is offered the seat and given no hall by its tick.
+- **Members…** (the catalogue's `adminRoom.members`; on a hall's Main room, **Board members…**: who sits On stage there,
+  in place of Members…, since who goes into the hall itself, with its rights, is chosen on the Accounts page, as §7.2 says),
+  on the admin page's list and in a hall's Set up, for whoever manages accounts (`/api/admin/me`'s new `manageUsers` and
+  `/api/halls`' `canManageUsers`: the Accounts routes' own check, so the laptop's token, which is no account, is not
+  offered it): a checklist of the accounts, each ticked where it holds the room, one's own and those this person may not
+  change shown and not offered with why ("Your own account: another admin changes it.", the route's `locked`), an account
+  that only reads not offered an On stage seat ("Reads only: On stage needs Send messages."). Save sends one `PATCH
+  /api/users/:id` per account whose tick changed, its own list with the room put in or taken out, each judged by the
+  server alone, and says each: "2 saved · Kim: why". Something refused keeps the dialog open, read again as the server
+  holds it. An account seated On stage in a hall it does not reach is given the hall too, said on its row before the
+  Save ("A tick gives Hall 2 too."). No new verb: the saves are the Accounts page's routes (`public/members.js`).
+- **A hall's Set up lists its rooms**: the Main room first, then each room beside it, each with its guest code where this
+  account is told it, whether it admits guests, the guest pages in it, and its ⋯ from the catalogue's `adminRoom` rows,
+  done at once (Save is for the name and the Stagewatch above it). **+ Add room** (the Main room's New room in this
+  hall…) and a room's Rename… for those who set halls up; its code on or off (the guest-count ask) and New code… on
+  every room, and Remove room… on a room beside the Main room, for the admin; Members… for whoever manages accounts. The
+  hall's own name is Set up's form and the hall is closed on the admin page, so the Main room has no Rename… or Close
+  there, and the admin page's own acts (Watch, Transcript, Minutes, Roles & invites, Clear messages…) are not drawn. "Its
+  members are chosen on the Accounts page" is said there (or with Members…, for whoever manages accounts). The
+  catalogue's `adminRoom` rows read the facts' `page`; the halls board's facts carry the admin (`isAdmin`) and who
+  manages accounts. The list is read when Set up opens, after an act made there, and when a board frame shows the hall's
+  code or the rooms of it this account may enter changed; a read refused or unanswered is said above the list ("The rooms
+  could not be read: …"), and + Add room follows the facts and the hall, not a row that may be missing.
+- **`room:settings`** lists each of the hall's rooms with its guest code as that page may be told it (the connection's
+  new `codeTold`, the one rule every list reads), whether it admits guests and how many guest pages are in it (a count,
+  never who), and tells the asked room's code by the same rule: a project manager whose account sits On stage in a hall
+  is no longer told that hall's Main room's code there, as the halls board already did not tell it.
+- **The halls board**: each hall's side rooms the account may enter are buttons on its row ("Legal 2 in"), real links
+  into the room with the seat the server gives (a middle click opens a tab; the browser keeps its own menu on them until
+  the rooms' own menu lands), drawn from the board's live row so a room made, renamed, given or taken away shows at
+  once; the hall's name opens its Main room, and its ⋯ offers **Open Main** and **Rooms ▸** (`hall.rooms`, each room with
+  how many are in). Side rooms given in halls the account does not see are under **Your rooms**, by their hall's name and
+  never its key; an account with no hall of its own reads "No hall of your own: your rooms are below.", its words
+  following Your rooms as each frame brings them. A link inside an object that is not its own (a room button) keeps the
+  browser's menu at every door: Shift+F10 and the menu key on it, as right-click already did, open no menu of the hall's
+  (`public/menus.js`, `AGM.menu.door`).
+- **The admin page**: a person's Let them forward into ▸ lists every other room, grouped by hall ("Hall 2", "Hall 2 ›
+  Legal"), a line between halls, the room watched left out, and reads a person watched in a side room from its hall's
+  row. A side room's row in the list names it on a line of its own, its counts and code under it, as a hall's row does
+  (its name ran into its counts).
+- Tests: `test/members.test.js` (new, pure: the checklist's rows and their words, read from the route's roles and rows
+  as the server makes them, a turned-off account and a revoke or grant of Send messages among them, each tick's change,
+  the words of a save); `test/catalog.test.js`: the facts' `manageUsers` and `admin` (only on a true), `adminRoom` on both pages (an admin
+  who manages accounts; Set up's rows for the admin, one who sets halls up, one who manages accounts and a crew; none of
+  the admin page's own acts in Set up), `hall.rooms` and Open Main, Members…' labels and Rooms ▸'s submenu;
+  `test/menus.test.js`: Set up's rooms among the halls board's objects, each act hidden from a Viewer, a Board account
+  and a project manager who sets halls up (its code, New code…, Remove room… and Members…) refused with words, each
+  seat's help requests its own board's, Members… sent as its own `PATCH`, and no account given a room or a seat; `test/accounts.test.js`:
+  the three groups hold every right once in its order, the route's `capGroups`, `/api/admin/me`'s `manageUsers` per
+  sign-in, `unseatedOnStage` (a Viewer, a hall not reached, the rights as changed, one held already) and `rightsView`'s
+  seats, the route's two refusals and a seat kept through a change of role; `test/codes.test.js`: `room:settings`' rows
+  and their codes as told, a project manager On stage in the hall told none of its code once it is renewed; `test/halls.test.js`: `room:settings`' answer with its rows (moved on purpose: each row now
+  carries its code, its state and its guest pages); `test/modules.test.js`: `conn`'s parts with `codeTold` (moved on
+  purpose); `test/pagefloor.test.js`: `members.js` defines only. The smoke: Set up's rooms (their doors, + Add room, Turn
+  the code on) and the room button on the board, whose Shift+F10 and right-click open no menu of the hall's; the Accounts page's tree, Chat view, three groups and sticky footer, a
+  room, an On stage seat and a view given and said on the row, the linked ticks and an untouched Save; Members… on a room
+  and Board members… on a hall, a save with one refused, and the forward picker by room; Your rooms for an account given
+  a side room alone, the hall's key nowhere on its page.
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md` (the three groups, the tree, Members…, Set up's rooms, who is
+  told a code in a room's settings), `SECURITY.md`, `docs/ANALYSIS.md`, `CLAUDE.md`.
 
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a

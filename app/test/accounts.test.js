@@ -247,6 +247,16 @@ test('rbac: the rights and the roles say "screens", the word every page uses for
   ]);
 });
 
+test('rbac: the Accounts page\'s three groups of rights hold every right once, in the rights\' own order, and nothing else', () => {
+  assert.deepEqual(rbac.CAP_GROUPS.map((g) => [g.id, g.label]), [['room', 'In the room'], ['show', 'Show'], ['run', 'Run AGMessage']]);
+  const grouped = rbac.CAP_GROUPS.flatMap((g) => g.caps);
+  assert.deepEqual(grouped, Object.keys(rbac.CAPS), 'each right once, in CAPS\'s order, a new right given its group as it is added');
+  assert.deepEqual(rbac.CAP_GROUPS.map((g) => g.caps.length), [3, 4, 5]);
+  assert.ok(rbac.CAP_GROUPS[0].caps.every((c) => rbac.ROOM_SCOPED.has(c)), 'In the room: a room\'s own rights');
+  assert.ok(rbac.CAP_GROUPS[2].caps.every((c) => !rbac.HALL_SCOPED.has(c)), 'Run AGMessage: no hall\'s right');
+  assert.ok(Object.isFrozen(rbac.CAP_GROUPS) && rbac.CAP_GROUPS.every((g) => Object.isFrozen(g) && Object.isFrozen(g.caps)));
+});
+
 test('rbac: a holder of users.manage who is not an admin makes, widens and takes over nothing past its own rights and halls', () => {
   const lead = { id: 'a4', role: 'tech', halls: ['HALLA1'], grant: ['users.manage'] };
   const crew = { id: 'a5', role: 'tech', halls: ['HALLA1'] };
@@ -314,6 +324,22 @@ test('rbac: an account\'s side rooms, On stage halls and chat view: a side room 
   // A page is told an account's side rooms and On stage halls with its rights, last.
   const v = rbac.rightsView({ ...crew, rooms: [MEDIA, LEGAL], board: ['HALLA1'] });
   assert.deepEqual([Object.keys(v).slice(-2), v.rooms, v.board], [['rooms', 'board'], [LEGAL, MEDIA], ['HALLA1']]);
+  // An On stage seat given is one the account takes, as the join seats it (roomRoleFor): it reaches the hall and may post
+  // there, read with the account as changed and enabled; one it holds already passes, whatever its rights are now.
+  const vic = { id: 'a6', role: 'viewer', halls: ['HALLA1'] };
+  assert.deepEqual(rbac.unseatedOnStage(vic, { board: ['halla1'] }), { hall: 'HALLA1', why: 'post' }, 'a Viewer reads only there');
+  assert.deepEqual(rbac.unseatedOnStage(crew, { board: ['HALLA1', 'HALLB2'] }), { hall: 'HALLB2', why: 'hall' }, 'a hall it does not reach');
+  assert.equal(rbac.unseatedOnStage(crew, { board: ['HALLB2'], halls: ['HALLA1', 'HALLB2'] }), null, 'given with its hall');
+  assert.deepEqual(rbac.unseatedOnStage(crew, { board: ['HALLA1'], revoke: ['hall.post'] }), { hall: 'HALLA1', why: 'post' }, 'its rights as changed');
+  assert.equal(rbac.unseatedOnStage(vic, { role: 'staff', board: ['HALLA1'] }), null, 'a role that posts, in the same change');
+  assert.equal(rbac.unseatedOnStage({ ...vic, board: ['HALLA1'] }, { board: ['HALLA1'] }), null, 'one held already: an untouched Save');
+  assert.equal(rbac.unseatedOnStage({ ...crew, disabled: true }, { board: ['HALLA1'] }), null, 'read enabled');
+  assert.equal(rbac.unseatedOnStage(null, { halls: ['HALLA1'], board: ['HALLA1'] }), null, 'a new account, a Staff account by default');
+  assert.equal(rbac.unseatedOnStage(pm, { board: ['HALLB2'] }), null, 'every hall');
+  assert.equal(rbac.unseatedOnStage(vic, { view: 'simple' }), null, 'no seat given');
+  // A page is told the seats it takes: an On stage hall kept where it reads only, or does not reach, is no seat.
+  assert.deepEqual([rbac.rightsView({ ...vic, board: ['HALLA1'] }).board, rbac.rightsView({ ...crew, board: ['HALLA1', 'HALLB2'] }).board, rbac.rightsView({ ...crew, board: ['HALLA1'], disabled: true }).board],
+    [[], ['HALLA1'], []]);
 });
 
 test('accounts: side rooms, On stage halls and a chat view are kept as given, each read by type; an untouched save changes none', async () => {
@@ -1315,6 +1341,14 @@ test('a one-hall tech given users.manage manages only accounts within its own ri
   assert.match(row('pat').locked, /hold yourself/, 'the page shows the richer account locked');
   assert.equal(row('cam').locked, '');
   assert.deepEqual(view.giveable, { admin: false, caps: ['display.control', 'hall.files', 'hall.post', 'hall.view', 'stage.send'], allHalls: false, halls: [hallA] });
+  // The page groups the rights as the server does, and the admin page is told who may give rooms there (Members…): an
+  // account the Accounts routes let manage accounts, never one they refuse, nor the laptop's token, which is no account.
+  assert.deepEqual(view.capGroups, JSON.parse(JSON.stringify(rbac.CAP_GROUPS)));
+  const pat = (await api(base, 'POST', '/api/auth/login', { username: 'pat', password: 'clipboard and coffee' })).cookie;
+  const tokenAdmin = (await api(base, 'POST', '/api/admin/login', { token: TOKEN })).cookie;
+  const told = {};
+  for (const [who, cookie] of [['lee', lee], ['pat', pat], ['ana', admin], ['token', tokenAdmin], ['nobody', undefined]]) told[who] = (await api(base, 'GET', '/api/admin/me', undefined, { cookie })).body.manageUsers;
+  assert.deepEqual(told, { lee: true, pat: false, ana: true, token: false, nobody: false });
   // A hall's code is a guest's way in: the one-hall manager is told no code of a hall it does not hold — not on the list
   // it ticks halls from, not in another person's row (bob's hall B is a count on a Locked row), nowhere in the reply.
   assert.deepEqual(view.halls.map((h) => h.code), [hallA]);
@@ -1445,6 +1479,8 @@ test('an account is given side rooms, On stage halls and a chat view: each entry
     [{ rooms: [hallA] }, hallA + ' is a hall: its Main room comes with the hall.'],
     [{ board: ['NOHALL1'] }, 'No such hall: NOHALL1.'],
     [{ board: [LEGAL] }, 'No such hall: ' + LEGAL + '.'],
+    [{ role: 'viewer', halls: [hallA], board: [hallA] }, 'Reads only in Hall A: On stage needs Send messages.'],
+    [{ halls: [], board: [hallA] }, 'On stage in Hall A needs Hall A too: give its Main room with the seat.'],
     [{ view: 'tiny' }, VIEW_WORDS], [{ view: null }, VIEW_WORDS],
   ]) assert.deepEqual(await post({ username: 'eve', role: 'staff', ...body }).then((r) => [r.status, r.body]), [400, { ok: false, error }], JSON.stringify(body));
   assert.equal(await rowOf(srv.base, admin, 'eve'), undefined, 'none made');
@@ -1500,6 +1536,12 @@ test('an account is given side rooms, On stage halls and a chat view: each entry
   assert.deepEqual(await patch(row.id, untouched).then((r) => [r.status, r.body.changed]), [200, []]);
   assert.deepEqual(await patch(row.id, { ...untouched, rooms: [...row.rooms, 'GONE6789'] }).then((r) => [r.status, r.body.error]), [400, 'No such room: GONE6789.'], 'a new one is refused');
   assert.equal(wordsOf(srv.dataDir, 'user.update').length, updates, 'no row for a change that did not happen');
+  // A seat held passes a Save whatever the rights now: Kim made a Viewer keeps Hall A's On stage hall as stored, and the
+  // page is told no seat there (it would sit as an observer); a seat given now is refused, in words, until it can post.
+  assert.deepEqual(await patch(row.id, { ...untouched, role: 'viewer' }).then((r) => [r.status, r.body.changed, r.body.user.board, r.body.user.rights.board]), [200, ['role'], [hallA], []]);
+  assert.deepEqual(await patch(row.id, { board: [] }).then((r) => [r.status, r.body.changed]), [200, ['board']]);
+  assert.deepEqual(await patch(row.id, { board: [hallA] }).then((r) => [r.status, r.body.error]), [400, 'Reads only in Hall A: On stage needs Send messages.']);
+  assert.deepEqual(await patch(row.id, { role: 'tech', board: [hallA] }).then((r) => [r.status, r.body.changed, r.body.user.rights.board]), [200, ['role', 'board'], [hallA]], 'a role that posts, given with it');
 });
 
 test('a chat view changed alone is said to the account\'s pages in a room, live, as the view each draws now, and ends none; any other change still ends them', async (t) => {

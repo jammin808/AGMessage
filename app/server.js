@@ -1135,8 +1135,19 @@ app.post('/api/admin/logout', (req, res) => {
   res.json({ ok: true });
 });
 // `token`: this request is the laptop's token, signed in by this run (a sign-in read back from the file never counts).
-// `admin`, at the end: this request is "the admin" (the token, or an account whose role is admin), who may split the log.
-app.get('/api/admin/me', (req, res) => res.json({ ok: isAdminReq(req), local: guard.isHostMachine(req), accounts: accounts.size, token: guard.isHostMachine(req) && tokenSessions.mintedHere(readCookie(req, 'agm_admin')), admin: web.theAdminReq(req) }));
+// `admin`: this request is "the admin" (the token, or an account whose role is admin), who may split the log.
+// `manageUsers`, at the end: this request's account may manage accounts (mayManageUsers), so the admin page offers a room's
+// Members… only where its saves are taken.
+app.get('/api/admin/me', (req, res) => res.json({ ok: isAdminReq(req), local: guard.isHostMachine(req), accounts: accounts.size, token: guard.isHostMachine(req) && tokenSessions.mintedHere(readCookie(req, 'agm_admin')), admin: web.theAdminReq(req), manageUsers: mayManageUsers(req) }));
+/**
+ * Whether a request's account may manage accounts, as the Accounts routes judge it (signedIn('users.manage')): signed in,
+ * its own password chosen, holding users.manage, and not an admin right kept off the tunnel. The laptop's token is no
+ * account: it manages none.
+ */
+function mayManageUsers(req) {
+  const w = web.who(req);
+  return !!(w && !w.account.mustChange && rbac.can(w.account, 'users.manage') && !web.adminBlocked(req, w.account));
+}
 
 // Accept what the audit log found (lib/audit.js accept): the laptop's token, typed into the dialog at the laptop, and never
 // a sign-in, which is a record in the data folder anyone who can write it could add. A wrong token counts toward the
@@ -1258,7 +1269,7 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
   }
   halls.sort((x, y) => (x.name || x.code).localeCompare(y.name || y.code));
   rooms.sort((x, y) => x.hallName.localeCompare(y.hallName) || x.name.localeCompare(y.name));
-  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: rbac.can(a, 'users.manage') && !web.adminBlocked(req, a), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req), rooms });
+  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: mayManageUsers(req), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req), rooms });
 });
 
 // A hall's name is shown on every page, screen and board, and written in the audit log: it is cleaned as every typed
@@ -2590,6 +2601,8 @@ io.on('connection', (socket) => {
 
   // ----- A hall's own settings: its name and its own Stagewatch (halls.manage).
   const canManageHall = () => !onStage() && (socket.data.isAdmin || (socket.data.account && rbac.can(socket.data.account, 'halls.manage')));
+  // A room's guest code as this page may be told it, by the one rule every list reads (codeFor of its asker), or ''.
+  const codeTold = (r) => codeFor(askerOf(socket), r);
   socket.on('hall:settings', ({ code } = {}, ack) => {
     ack = ok(ack);
     if (!backstage(ack)) return;
@@ -3061,12 +3074,12 @@ io.on('connection', (socket) => {
   });
 
   // What a handler module (lib/handlers/) is given of this connection, frozen: its room and its person read when asked
-  // (so no verb holds a room its page has left), its answers, its two buckets, its rights' questions and the one gate. The
-  // modules' verbs register after every verb above, on every page's socket but a screen's (a screen's returned at the
-  // top): the hall page's, the admin page's and the halls board's. The rooms module is given the server's context, the
-  // takes module the takes context, which holds nothing that makes a room's op or sends to a room (`ctx`, at the end of
-  // this file).
-  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, canIn, admin, actor, canManageHall, gate });
+  // (so no verb holds a room its page has left), its answers, its two buckets, its rights' questions, the guest code it
+  // may be told of a room (`codeTold`) and the one gate. The modules' verbs register after every verb above, on every
+  // page's socket but a screen's (a screen's returned at the top): the hall page's, the admin page's and the halls
+  // board's. The rooms module is given the server's context, the takes module the takes context, which holds nothing
+  // that makes a room's op or sends to a room (`ctx`, at the end of this file).
+  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, canIn, admin, actor, canManageHall, codeTold, gate });
   roomVerbs.register(socket, conn, ctx);
   takeVerbs.register(socket, conn, takesCtx);
 

@@ -25,9 +25,10 @@ let allRooms = [];
 let currentRoom = null;
 
 // ---------------- The page's facts, and its acts ----------------
-// What the server told this page: whom its gate admits (/api/admin/me), "the admin", whether AI drafts are on, the halls
-// a node may be linked for, and whether it is connected now. A change redraws every bar and the open menu in place.
-const adminState = { ok: false, admin: false, ai: false, halls: [], connected: false };
+// What the server told this page: whom its gate admits (/api/admin/me), "the admin", whether its account may manage
+// accounts (a room's Members…), whether AI drafts are on, the halls a node may be linked for, and whether it is connected
+// now. A change redraws every bar and the open menu in place.
+const adminState = { ok: false, admin: false, manageUsers: false, ai: false, halls: [], connected: false };
 let ADMIN_F = AGM.catalog.adminFacts(adminState);
 const ADMIN_RUN = {};
 const say = (words, bad) => AGM.toast(words, bad);
@@ -61,7 +62,7 @@ const ADMIN_DRAWERS = [];
   // First, check if we're already logged in (cookie set) and on the host
   const me = await fetch('/api/admin/me').then((r) => r.json()).catch(() => ({}));
   // An admin account works from any device on the venue network; the host's token only on the host laptop.
-  if (me.ok) { adminState.ok = true; adminState.admin = !!me.admin; showDashboard(); return; }
+  if (me.ok) { adminState.ok = true; adminState.admin = !!me.admin; adminState.manageUsers = me.manageUsers === true; showDashboard(); return; }
   loginPanel.hidden = false;
   if (!me.local) {
     loginNotice.innerHTML =
@@ -425,7 +426,27 @@ function forwardInto(o, code, on) {
   const args = { socketId: o.socketId, targetRoom: code };
   if (on) AGM.outbox.now('admin:linkRoom', args, said); else AGM.outbox.now('admin:unlinkRoom', args, said);
 }
-/** Let them forward into ▸: every other hall, ticked where this person may forward into it now (asked as it opens). */
+/**
+ * Let them forward into ▸ (pure): every other room, grouped by hall, halls by name, each hall's Main room first and its side
+ * rooms after it in the order they were made ("Hall 2", "Hall 2 › Legal"), a line between halls; each ticked where the
+ * person may forward into it now (`linked`). The room watched is not offered: it is where they are.
+ */
+function forwardChoices(halls, home, linked) {
+  const now = new Set(linked || []);
+  const byName = (a, b) => (a.name || a.code).localeCompare(b.name || b.code);
+  const out = [];
+  for (const h of (halls || []).filter((x) => x && x.code).sort(byName)) {
+    const hallName = h.name || h.code;
+    const rooms = [{ key: h.code, label: h.name ? h.name + ' · ' + h.code : h.code }]
+      .concat((h.side || []).map((x) => ({ key: x.key, label: hallName + ' › ' + (x.name || x.key) })))
+      .filter((r) => r.key !== home);
+    if (!rooms.length) continue;
+    if (out.length) out.push({ sep: true });
+    for (const r of rooms) out.push({ value: r.key, label: r.label, role: 'menuitemcheckbox', checked: now.has(r.key) });
+  }
+  return out;
+}
+/** Let them forward into ▸: every other room, grouped by hall, ticked where this person may forward into it now (asked as it opens). */
 function forwardTargets(o) {
   return new Promise((resolve) => {
     if (!socket || !socket.connected) { resolve([{ id: '', label: AGM.catalog.WORDS.offline, disabled: AGM.catalog.WORDS.offline }]); return; }
@@ -433,13 +454,15 @@ function forwardTargets(o) {
       if (!res || !res.ok) { resolve([{ id: '', label: (res && res.error) || 'Could not list the halls.', disabled: (res && res.error) || 'Could not list the halls.' }]); return; }
       allRooms = res.rooms;
       const home = currentRoom ? currentRoom.code : '';
-      // The people as this answer has them, so a hall ticked here is one the person's own acts read as linked too.
-      const cur = res.rooms.find((r) => r.code === home);
+      // The people as this answer has them, so a room ticked here is one the person's own acts read as linked too. The
+      // watched room is a hall or a side room: its hall's row holds its people either way.
+      const at = roomAt(home);
+      const cur = at ? (at.room === at.hall ? res.rooms.find((r) => r.code === home) : (res.rooms.find((r) => r.code === at.hall.code) || { side: [] }).side.find((x) => x.key === home)) : null;
       if (cur && currentRoom) { currentRoom.users = cur.users; renderUsers(cur.users); }
-      const now = new Set(((cur || { users: [] }).users.find((u) => u.socketId === o.socketId) || { linkedRooms: [] }).linkedRooms || []);
-      const others = res.rooms.filter((r) => r && r.code && r.code !== home).sort((a, b) => (a.name || a.code).localeCompare(b.name || b.code));
-      if (!others.length) { const w = 'No other hall yet: make one with New hall.'; resolve([{ id: '', label: w, disabled: w }]); return; }
-      resolve(others.map((r) => ({ value: r.code, label: r.name ? r.name + ' · ' + r.code : r.code, role: 'menuitemcheckbox', checked: now.has(r.code) })));
+      const linked = ((cur || { users: [] }).users.find((u) => u.socketId === o.socketId) || { linkedRooms: [] }).linkedRooms;
+      const choices = forwardChoices(res.rooms, home, linked);
+      if (!choices.length) { const w = 'No other room yet: make a hall with New hall, or a room in it.'; resolve([{ id: '', label: w, disabled: w }]); return; }
+      resolve(choices);
     });
   });
 }
@@ -628,6 +651,11 @@ Object.assign(ADMIN_RUN, {
     if (currentRoom && currentRoom.code === o.code) codeNow(res.guestCode, res.codeOn);
     refreshRooms();
   }),
+  // Who is in the room by account (Board members… on a hall: its On stage seats): one save per account, each said.
+  'adminRoom.members': (o) => {
+    const at = roomAt(o.code);
+    AGM.members.open({ code: o.code, name: o.name, hall: o.hall, main: o.main, hallName: at ? at.hall.name || at.hall.code : o.hall }, { say, done: refreshRooms });
+  },
   'adminRoom.rename': (o, c) => AGM.outbox.now('room:update', { code: o.code, name: (c.values && c.values.name) || '' }, (res) => {
     if (!res || !res.ok) { say((res && res.error) || 'Not renamed.', true); return; }
     say(res.already ? 'It is called ' + res.name + ' already.' : 'Renamed ' + res.name + '.');

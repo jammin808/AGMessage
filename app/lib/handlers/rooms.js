@@ -171,7 +171,11 @@ function register(socket, conn, ctx) {
   }
 
   // A room's settings, read: its name, its hall and whether it is the hall's Main room, its hall's rooms in the order they
-  // were made (Main first), each by name and key, and its guest code. For those who set rooms up; a read, from memory.
+  // were made (Main first), each by name and key with its guest code, whether it admits guests and the guest pages in it
+  // now (a count, never who: what the admin's code-off ask says), and the asked room's guest code. For those who set rooms
+  // up (Set up's Rooms reads it); a read, from memory. A code is told as this page may be told it (`conn.codeTold`, the
+  // rule every list reads: those who set halls up hand codes out, but never one of a hall whose Main room their account
+  // sits On stage in), '' otherwise.
   socket.on('room:settings', (args, ack) => {
     if (!conn.gate(ack, { joined: false, bucket: conn.chatter })) return;
     const answer = conn.ok(ack);
@@ -179,11 +183,10 @@ function register(socket, conn, ctx) {
     const room = store.room(keyOf((isRecord(args) ? args : {}).code));
     if (!room) return answer({ ok: false, error: 'No such room.' });
     const hall = store.get(room.hall);
-    // Those who set rooms up hand codes out: they are told the guest code, and whether it admits guests.
     answer({
       ok: true, key: room.code, name: room.name || '', main: store.isMain(room), hall: hall.code, hallName: hall.name || '',
-      rooms: store.roomsOf(hall.code).map((r) => ({ key: r.code, name: r.name || '', main: store.isMain(r) })),
-      guestCode: store.guestCodeOf(room), codeOn: store.codeOn(room),
+      rooms: store.roomsOf(hall.code).map((r) => ({ key: r.code, name: r.name || '', main: store.isMain(r), guestCode: conn.codeTold(r), codeOn: store.codeOn(r), guests: guestPagesOf(r) })),
+      guestCode: conn.codeTold(room), codeOn: store.codeOn(room),
     });
   });
 }

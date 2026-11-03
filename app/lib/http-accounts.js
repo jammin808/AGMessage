@@ -206,7 +206,8 @@ function mountAccounts(app, o) {
    * Why the lists and the chat view a change sets may not be taken, or '': its halls, side rooms and On stage halls are
    * each a list of names (a value that is not a name is refused, never made into one), and an entry it adds that the
    * account does not hold already names a side room that is here (`rooms`) or a hall that is here (`board`), so a key
-   * typed wrong is said, never kept to open a room made later; an entry already on the account passes, so a Save that
+   * typed wrong is said, never kept to open a room made later, and an On stage hall it adds is one the account as changed
+   * would sit On stage in (it reaches the hall and may post there); an entry already on the account passes, so a Save that
    * sends its lists back as they are changes nothing. Its halls keep 0.5.1's rule: a hall's key is taken as given. The
    * chat view is '' (by the seat), 'simple' or 'full'.
    */
@@ -218,8 +219,17 @@ function mountAccounts(app, o) {
     }
     const held = (field) => new Set((target && Array.isArray(target[field]) ? target[field] : []));
     const added = (field) => (Array.isArray(change[field]) ? change[field].map((k) => k.toUpperCase()).filter((k) => !held(field).has(k)) : []);
-    const halls = new Set(hallNames().map((h) => h.code));
+    const named = hallNames();
+    const halls = new Set(named.map((h) => h.code));
     for (const k of added('board')) if (!halls.has(k)) return 'No such hall: ' + guard.cleanText(k, 40) + '.';
+    // An On stage seat given is one the account takes: it reaches the hall and may post there (rbac.unseatedOnStage, as
+    // the join seats it), so a page never says "On stage" of an account that would sit there as an observer.
+    const unseated = rbac.unseatedOnStage(target, change);
+    if (unseated) {
+      const h = named.find((x) => x.code === unseated.hall);
+      const hall = (h && h.name) || unseated.hall;
+      return unseated.why === 'hall' ? 'On stage in ' + hall + ' needs ' + hall + ' too: give its Main room with the seat.' : 'Reads only in ' + hall + ': On stage needs Send messages.';
+    }
     const rooms = sideRooms();
     for (const k of added('rooms')) {
       if (!rooms.has(k)) return halls.has(k) ? k + ' is a hall: its Main room comes with the hall.' : 'No such room: ' + guard.cleanText(k, 40) + '.';
@@ -254,7 +264,8 @@ function mountAccounts(app, o) {
       };
     });
     const rooms = roomNames().filter((r) => holds(r.key)).map((r) => ({ key: r.key, name: r.name, hall: reaches(r.hall) ? r.hall : '', hallName: r.hallName }));
-    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames().filter((h) => reaches(h.code)), giveable, rooms, giveableRooms });
+    // `capGroups`, last: the rights in the page's three groups (rbac.CAP_GROUPS), each by its rights' names.
+    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames().filter((h) => reaches(h.code)), giveable, rooms, giveableRooms, capGroups: rbac.CAP_GROUPS });
   });
 
   app.post('/api/users', signedIn('users.manage'), async (req, res) => {

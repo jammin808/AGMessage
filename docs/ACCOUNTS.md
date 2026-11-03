@@ -20,7 +20,11 @@ AGMessage has two ways in, and both are first-class:
 | Viewer | their halls | read only |
 
 An admin can make an exception for one person — tick or untick a single right on the Accounts page — and choose their
-halls (or "every hall, including new ones"). The rights, as the server checks them:
+halls (or "every hall's Main room, including new ones", which reaches no hall's other rooms). The page draws the rights in
+three groups (`rbac.CAP_GROUPS`, told by the Accounts route as `capGroups`): **In the room** (`hall.view`, `hall.post`,
+`hall.files`), **Show** (`display.control`, `display.manage`, `stage.send`, `nodes.control`) and **Run AGMessage**
+(`halls.manage`, `users.manage`, `settings.manage`, `audit.read`, `audit.export`); every right is in one group. The
+rights, as the server checks them:
 
 | Right | Meaning |
 |---|---|
@@ -51,7 +55,29 @@ may post wherever it sits.
 **An account's side rooms, On stage halls and chat view.** Beside its halls an account holds three fields: `rooms`, the
 side rooms it is given (by their keys); `board`, the halls in whose Main room it sits On stage; and `view`, its chat view
 (`''` by its seat, `simple` or `full`). They are set where its halls are, `POST /api/users` and `PATCH /api/users/:id`
-(`users.manage`, through `rbac.mayChange`); no page sets them yet. Each list is a list of keys, read by type (anything
+(`users.manage`, through `rbac.mayChange`). The Accounts page sets them: its editor's **Halls and rooms** lists each hall
+this person may give by name, its Main room ("Hall 2 — Main room and hall rights") with **On stage (Board member)**
+beside it and its side rooms set in under it, then any side room it holds of a hall it does not reach, under that hall's
+name; a side room is given without its hall (Legal alone), ticking On stage ticks the hall and unticking the hall takes On
+stage with it; **Chat view** (By seat, Simple, Full) sits beside the role. What the person may not give is shown and not
+offered, and one's own row is all shown, nothing offered. A Save sends the rooms, On stage halls and halls the account
+holds that the page does not list (gone since) back as they are, so an untouched Save is still "Saved — nothing
+changed." Each row reads where the account goes: "Hall 2 (Main, Legal) · On stage", "Every hall" first for an account of
+every hall, and what this viewer is not told as a count. A room's **Members…** (a hall's **Board members…**: who sits On
+stage in its Main room), on the admin page's list and in the hall's Set up, is the same change for many accounts at once,
+for whoever manages accounts (`/api/admin/me`'s `manageUsers` and `/api/halls`' `canManageUsers`, the routes' own check):
+a checklist of the accounts it may change, each saved by its own `PATCH /api/users/:id` and said ("2 saved · Kim: why"),
+a refused one drawn again as the server holds it; an account seated On stage in a hall it does not reach is given the
+hall too, which its row says before the Save, and one that only reads is not offered the seat. A hall's Main room's ⋯
+offers Board members… in place of Members…: who goes into the hall itself (its `halls`, with the hall's rights) is
+chosen on the Accounts page, as the plan's §7.2 says of Set up. **An On stage seat given is one the account takes**: it
+reaches the hall and may post there, as the join seats it (`rbac.unseatedOnStage`); otherwise the route refuses it in
+words ("Reads only in Hall 2: On stage needs Send messages.", "On stage in Hall 2 needs Hall 2 too: give its Main room
+with the seat."). The Accounts page offers no seat the account does not hold while the rights ticked hold no Send
+messages ("Reads only: On stage needs Send messages."), and unticking "Every hall's Main room" ticks the hall of each
+seat ticked. A seat kept on an account that a change of role or rights has since left reading only passes a Save as it
+is; it seats nobody (the account sits there as an observer), and its row does not say On stage (`rights.board` is the
+seats the account takes). Each list is a list of keys, read by type (anything
 else is refused, "An account's rooms are a list of their keys.", and never a 500), and an entry it adds that the account
 does not hold already names a side room that is here ("No such room: …"; a hall's key, "… is a hall: its Main room comes
 with the hall.") or a hall that is here ("No such hall: …"), so a key typed wrong is said and never kept to open a room
@@ -75,7 +101,12 @@ renamed is the hall renamed) and reading a room's settings (`room:settings`) are
 hall's Set up is, never from an On stage seat; clearing a room, removing it, its guest code (switched on or off, renewed)
 and, as it lands, who may send into it are the admin's alone (owner question 5), never from an On stage page either. A hall holds at most 20 rooms beside its Main room. A room's key
 (8 characters) is an address, never a code a guest types: a hall's verbs (its screens, its Stagewatch, its show network,
-its Set up) refuse it, and nothing that lists halls lists it. No two rooms of a hall share a name, in any case, its Main
+its Set up) refuse it, and nothing that lists halls lists it. A hall's Set up on the halls board lists its rooms, the Main
+room first (`room:settings`' `rooms`, each with its guest code as that page may be told it, `conn.codeTold`, whether it
+admits guests and how many guest pages are in it), each with its ⋯ from the catalogue's `adminRoom` rows: + Add room
+(the Main room's New room in this hall…) and Rename… for those who set halls up, the code and Remove room… for the admin,
+Members… for whoever manages accounts; the hall's own name and Stagewatch stay Set up's form, and the hall is closed on
+the admin page. No two rooms of a hall share a name, in any case, its Main
 room's included, whether a room is made or renamed or the hall is set up. A room removed is taken out of every account's
 rooms, and a hall removed out of every account's halls and On stage halls with its rooms (a room whose files another
 program held, which comes back at the next start, stays with the accounts given it); and no new hall or room is made under
@@ -204,8 +235,9 @@ Main room also the speaker's screen of its hall: a Tech in its halls, a Staff ac
 the code it typed while it is still the room's. Never a page seated On stage (a Board tablet is handed no code), a
 Viewer, a Staff account in a Main room or an account of every hall in a side room it is not given. It decides the code
 chip on the hall page (the join's answer, then each change), `/api/halls` and the halls board's chip (with "(off)" while
-it admits nobody new), the admin's list, and a room's settings. The admin's support view is told what the person's own
-page is told, and may switch nothing from it. Staff and Viewers are no longer shown a hall's code, as
+it admits nobody new), the admin's list, and a room's settings and each of its hall's rooms in them (Set up's Rooms),
+where a project manager whose account sits On stage in a hall is told none of that hall's Main room's code, as anywhere
+else. The admin's support view is told what the person's own page is told, and may switch nothing from it. Staff and Viewers are no longer shown a hall's code, as
 they were in 0.5.1 (owner question 8: "Right").
 
 **Who is told a hall's code, elsewhere.** A code lets anyone in as a guest (backstage in an unlocked hall, an observer in a locked

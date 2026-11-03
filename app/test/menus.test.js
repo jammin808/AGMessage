@@ -313,23 +313,29 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   // Each seat of a page: its socket (or none), its HTTP cookie, and its facts from the server's answers.
   const me = async (cookie) => (await api(base, 'GET', '/api/admin/me', undefined, { cookie })).body;
   const adminSeat = async (cookie) => ({ s: await open(cookie), cookie, f: C.adminFacts({ ...(await me(cookie)), ai: true, halls: rooms, connected: true }) });
+  // A halls board's help requests are its own (each with its own canRespond), so a seat's are read from its own board.
   const boardSeat = async (cookie) => {
     const s = await open(cookie);
     const halls = (await api(base, 'GET', '/api/halls', undefined, { cookie })).body;
     const board = await emit(s, 'board:watch', {});
-    return { s, cookie, f: C.boardFacts({ canManageHalls: halls.canManageHalls, canDrive: board.board.canDrive, connected: true }), board: board.board };
+    const help = board.board.help.map((x) => ({ code: x.code, id: x.id, state: x.state, canRespond: !!x.canRespond, canOpen: !!x.canOpen, hall: x.hallName || x.code, room: x.roomName || '', category: x.category }));
+    return { s, cookie, f: C.boardFacts({ canManageHalls: halls.canManageHalls, isAdmin: halls.isAdmin, canManageUsers: halls.canManageUsers, canDrive: board.board.canDrive, connected: true }), board: board.board, objects: { help } };
   };
   const accountSeat = async (cookie) => ({ cookie, f: C.accountFacts({ account: (await api(base, 'GET', '/api/auth/me', undefined, { cookie })).body.account, admin: (await me(cookie)).admin }) });
   const seats = {
     admin: { staff: await adminSeat(sid), codeGuest: await adminSeat(undefined) },
-    board: { viewer: await boardSeat(vic), boardAccount: await boardSeat(kib) },
+    // A project manager sets halls up and is not the admin: in Set up it makes and renames rooms, and its code, New code,
+    // Remove room… and Members… are hidden from it and refused.
+    board: { viewer: await boardSeat(vic), boardAccount: await boardSeat(kib), setsUp: await boardSeat(mia) },
     accounts: { staff: await accountSeat(sid), manager: await accountSeat(mia), usersManager: await accountSeat(kim) },
   };
   assert.deepEqual([seats.admin.staff.f.admin, seats.admin.codeGuest.f.admin, seats.board.viewer.f.manageHalls, seats.board.viewer.f.canDrive], [false, false, false, false]);
   assert.deepEqual(Object.fromEntries(Object.entries(seats.accounts).map(([k, v]) => [k, [v.f.manageUsers, v.f.auditRead, v.f.auditExport, v.f.theAdmin]])),
     { staff: [false, false, false, false], manager: [false, true, false, false], usersManager: [true, true, false, false] }, 'the Accounts page\'s rights, from /api/auth/me and /api/admin/me');
-  objects.hall = seats.board.viewer.board.halls.map((h) => ({ code: h.code, name: h.name || h.code, guestCode: h.guestCode }));
-  objects.help = seats.board.viewer.board.help.map((x) => ({ code: x.code, id: x.id, state: x.state, canRespond: !!x.canRespond, canOpen: !!x.canOpen, hall: x.hallName || x.code, room: x.roomName || '', category: x.category }));
+  objects.hall = seats.board.viewer.board.halls.map((h) => ({ code: h.code, name: h.name || h.code, guestCode: h.guestCode, rooms: h.rooms }));
+  assert.deepEqual([seats.board.viewer.f.admin, seats.board.viewer.f.manageUsers, seats.board.boardAccount.f.admin, seats.admin.staff.f.manageUsers], [false, false, false, false], 'no seat here sets codes in Set up or chooses members');
+  assert.deepEqual([seats.board.setsUp.f.manageHalls, seats.board.setsUp.f.admin, seats.board.setsUp.f.manageUsers], [true, false, false], 'one who sets halls up: not the admin, and manages no account');
+  objects.help = seats.board.viewer.objects.help;
   assert.deepEqual(objects.help.map((x) => [x.canRespond, x.canOpen]), [[false, true]], 'a Viewer answers no help request, and opens the hall it reads: the board says so');
   // A Board account of Hall A answers none of Hall A's either, from its halls board (owner answer B1): no On my way, no
   // Resolved, and the verb refused in the On stage words.
@@ -360,8 +366,13 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     'room:update': (o, e) => (e.id === 'adminRoom.newCode' ? { code: o.code, newCode: true } : e.id === 'adminRoom.codeToggle' ? { code: o.code, codeOn: !o.on, ...(o.on ? { keepGuests: false } : {}) } : { code: o.code, name: 'Renamed by a seat that may not' }),
     'help:respond': (o, e) => ({ code: o.code, messageId: o.id, state: e.id === 'help.respond' ? 'coming' : 'resolved' }),
   };
+  // Members… saves each account with its own PATCH: sent here for Sid, the side room put in his rooms (Board members… on
+  // a hall: the hall put in his On stage halls).
+  const sidId = users.find((u) => u.username === 'sid').id;
   const BODIES = { 'account.edit': { name: 'Renamed by a seat that may not' }, 'account.disable': { disabled: true }, 'audit.split': { seq: 2 } };
-  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop'], board: ['hall', 'help'], accounts: ['account', 'audit'] };
+  const HTTP = { 'adminRoom.members': (o) => ({ id: sidId, body: o.main ? { board: [o.code] } : { rooms: [o.code] } }) };
+  // The halls board draws a hall's rooms in its Set up (kind adminRoom, the same rooms as the admin page's).
+  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop'], board: ['hall', 'help', 'adminRoom'], accounts: ['account', 'audit'] };
   const verbsOf = Object.values(KINDS).flat().flatMap((k) => C.KINDS[k]).filter((e) => e.verb !== 'local');
   assert.deepEqual([...new Set(verbsOf.filter((e) => !e.verb.startsWith('http:') && !(e.verb in PAYLOADS)).map((e) => e.verb))], [], 'every socket verb an act sends has its refusal case');
   const say = (s, verb, payload) => new Promise((resolve) => { if (payload === null) s.emit(verb, resolve); else s.emit(verb, payload, resolve); });
@@ -378,13 +389,14 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   for (const [page, kinds] of Object.entries(KINDS)) {
     for (const [name, seat] of Object.entries(seats[page])) {
       for (const kind of kinds) {
-        for (const o of objects[kind]) {
+        for (const o of (seat.objects && seat.objects[kind]) || objects[kind]) {
           for (const e of C.KINDS[kind]) {
             if (e.verb === 'local' || !e.fits(seat.f, o) || e.may(seat.f, o)) continue;
             let r;
             if (e.verb.startsWith('http:')) {
               const [method, route] = e.verb.slice(5).split(' ');
-              const res = await api(base, method, route.replace(':id', encodeURIComponent(o.id || '')), BODIES[e.id] || (method === 'GET' ? undefined : {}), { cookie: seat.cookie });
+              const at = HTTP[e.id] ? HTTP[e.id](o) : { id: o.id || '', body: BODIES[e.id] || (method === 'GET' ? undefined : {}) };
+              const res = await api(base, method, route.replace(':id', encodeURIComponent(at.id)), at.body, { cookie: seat.cookie });
               r = { status: res.status, ...(res.body && typeof res.body === 'object' ? res.body : { ok: true }) };
               if (res.status < 400) wrong.push(page + ' · ' + name + ' · ' + e.id + ': answered ' + res.status);
             } else r = await refusal(seat.s, e.verb, PAYLOADS[e.verb] ? PAYLOADS[e.verb](o, e) : null);
@@ -408,7 +420,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   assert.deepEqual(roomsAfter.find((r) => r.code === hallA).users.map((u) => u.linkedRooms), [[hallB]], 'the guest still forwards into Hall B');
   assert.equal((await emit(ctl, 'admin:settings', null)).stagewatchUrl, '', 'no Stagewatch was set');
   const usersAfter = (await api(base, 'GET', '/api/users', undefined, { cookie: root })).body.users;
-  assert.deepEqual(usersAfter.map((u) => [u.username, u.name, !!u.disabled]), users.map((u) => [u.username, u.name, !!u.disabled]));
+  assert.deepEqual(usersAfter.map((u) => [u.username, u.name, !!u.disabled, u.rooms, u.board]), users.map((u) => [u.username, u.name, !!u.disabled, u.rooms, u.board]), 'no account given a room or an On stage seat');
   assert.ok(guest.connected, 'the guest was not logged out');
   assert.deepEqual((await api(base, 'GET', '/api/audit/split', undefined, { cookie: root })).body.unfinished || null, null, 'no split was begun');
 });
