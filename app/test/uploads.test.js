@@ -3,19 +3,21 @@
 // the tunnel: a re-join, more sockets or the next address refill nothing), a floor of free disk space below which files
 // pause before anything is written (so the room logs, the audit log and the saves always have room), files nobody posted
 // removed after a while, and files a reset or a deletion cleared removed from the disk — unless another hall or a
-// screen still shows them.
+// screen still shows them. A file is posted only in the room it was uploaded for, by who uploaded it, or again in a room
+// that holds it already; it reaches another room by a forward.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { io } = require('socket.io-client');
-const { startServer, stopServer, api, connect, emit, until, TOKEN } = require('./helpers');
+const { startServer, stopServer, restartServer, api, connect, emit, until, TOKEN } = require('./helpers');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const form = (name, bytes) => { const f = new FormData(); f.append('file', new Blob([bytes], { type: 'text/plain' }), name); return f; };
 const upload = (base, token, name = 'notes.txt', bytes = 'Capex was 4.2m') => fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': token }, body: form(name, bytes) });
 const files = (dir) => fs.readdirSync(dir).filter((f) => !f.startsWith('.')).sort();
+const OTHER_ROOM = 'That file belongs to another room — send it from there.';
 
 async function hallServer(t, env = {}) {
   const uploads = tmp('agm-up-');
@@ -89,12 +91,17 @@ test('below the free-space floor files pause before anything is written', async 
   assert.deepEqual(files(uploads), [], 'nothing reached the folder');
 });
 
-test('a reset or a deletion removes the hall\'s files from the disk, except those another hall or a screen still shows', async (t) => {
-  const { srv, uploads, admin, hall, guest } = await hallServer(t);
+test('a reset or a deletion removes the hall\'s files from the disk, except those another hall (shared there by a forward) or a screen still shows', async (t) => {
+  const { srv, uploads, admin, hall, guest, sockets } = await hallServer(t);
   const a = await hall('Hall A');
   const b = await hall('Hall B');
   const ga = await guest(a, 'Ana');
   const gb = await guest(b, 'Ben');
+  // Ana is in hall B too (one identity, two pages), so a message of hers in A may be forwarded there.
+  await guest(b, 'Ana', { join: { uid: ga.j.identity } });
+  const adm = await connect(srv.base, admin);
+  sockets.push(adm);
+  const filesIn = async (code) => (await emit(adm, 'admin:watchRoom', { roomCode: code })).messages.filter((m) => m.type === 'file');
   const put = async (name, bytes = 'text of ' + name) => {
     const url = (await (await upload(srv.base, ga.j.uploadToken, name, bytes)).json()).url;
     const m = await emit(ga.s, 'message', { type: 'file', url, filename: name });
@@ -105,9 +112,12 @@ test('a reset or a deletion removes the hall\'s files from the disk, except thos
   const own = await put('own.txt');
   const holding = await put('holding.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]));
   const deleted = await put('deleted.txt');
-  assert.ok((await emit(gb.s, 'message', { type: 'file', url: shared.url, filename: 'shared.txt' })).ok, 'hall B shares one of them');
-  const adm = await connect(srv.base, admin);
-  t.after(() => adm.close());
+  // Hall B shares one of them: its link posted there directly is hall A's file, refused; it crosses by Ana's forward.
+  assert.deepEqual(await emit(gb.s, 'message', { type: 'file', url: shared.url, filename: 'shared.txt' }), { ok: false, error: OTHER_ROOM });
+  assert.deepEqual(await filesIn(b), [], 'nothing posted in hall B');
+  const fwd = await emit(ga.s, 'forward', { messageId: shared.id, targetRoom: b });
+  assert.ok(fwd.ok, JSON.stringify(fwd));
+  assert.deepEqual((await filesIn(b)).map((m) => [m.id, m.url, m.from.name, m.forwardedFrom.roomName]), [[fwd.id, shared.url, 'Ana', 'Hall A']], 'hall B holds hall A\'s file by the forward');
   assert.ok((await emit(adm, 'display:hallHolding', { code: b, image: holding.url })).ok, 'hall B\'s screens hold on another');
   const onDisk = (u) => files(uploads).some((f) => u.url.endsWith(f));
 
@@ -121,6 +131,120 @@ test('a reset or a deletion removes the hall\'s files from the disk, except thos
   assert.equal((await fetch(srv.base + shared.url)).status, 200, 'the file hall B shares is still served');
   assert.equal((await fetch(srv.base + holding.url)).status, 200, 'and so is the one hall B\'s screens hold on');
   assert.ok(onDisk(shared) && onDisk(holding));
+});
+
+test('a file message is posted only in the room it was uploaded for, by the person who uploaded it, or again in a room that holds it already', async (t) => {
+  const { srv, admin, hall, guest, sockets } = await hallServer(t);
+  const a = await hall('Hall A');
+  const b = await hall('Hall B');
+  const ana = await guest(a, 'Ana');
+  const anaB = await guest(b, 'Ana', { join: { uid: ana.j.identity } });
+  const cy = await guest(a, 'Cy');
+  const adm = await connect(srv.base, admin);
+  sockets.push(adm);
+  const filesIn = async (code) => (await emit(adm, 'admin:watchRoom', { roomCode: code })).messages.filter((m) => m.type === 'file').map((m) => [m.url, m.from.name]);
+  const urlOf = async (token, name) => (await (await upload(srv.base, token, name)).json()).url;
+  const post = (s, url, name) => emit(s, 'message', { type: 'file', url, filename: name });
+
+  // An upload made for hall A, by Ana's page there: from her page in hall B it is another room's, and in hall A itself
+  // it is hers to post, not Cy's, until it is posted.
+  const forA = await urlOf(ana.j.uploadToken, 'agenda.txt');
+  assert.deepEqual(await post(anaB.s, forA, 'agenda.txt'), { ok: false, error: OTHER_ROOM });
+  assert.deepEqual(await post(cy.s, forA, 'agenda.txt'), { ok: false, error: 'Only the person who uploaded that file can post it.' });
+  assert.deepEqual([await filesIn(a), await filesIn(b)], [[], []], 'nothing posted in either hall');
+  assert.ok((await post(ana.s, forA, 'agenda.txt')).ok);
+  // Posted, it is hall A's: Cy posts it again there, and Ana's page in hall B still may not.
+  assert.ok((await post(cy.s, forA, 'agenda.txt')).ok);
+  assert.deepEqual(await post(anaB.s, forA, 'agenda.txt'), { ok: false, error: OTHER_ROOM });
+
+  // An upload made for hall B by her page there is refused in hall A, and taken in hall B.
+  const forB = await urlOf(anaB.j.uploadToken, 'notes.txt');
+  assert.deepEqual(await post(ana.s, forB, 'notes.txt'), { ok: false, error: OTHER_ROOM });
+  assert.ok((await post(anaB.s, forB, 'notes.txt')).ok);
+  assert.deepEqual(await filesIn(a), [[forA, 'Ana'], [forA, 'Cy']]);
+  assert.deepEqual(await filesIn(b), [[forB, 'Ana']]);
+
+  // A forward takes hall A's file into hall B, between halls Ana is in; from then on hall B holds it, and it is posted
+  // there again directly.
+  const first = (await emit(adm, 'admin:watchRoom', { roomCode: a })).messages.find((m) => m.type === 'file');
+  assert.ok((await emit(ana.s, 'forward', { messageId: first.id, targetRoom: b })).ok);
+  assert.ok((await post(anaB.s, forA, 'agenda.txt')).ok);
+  assert.deepEqual(await filesIn(b), [[forB, 'Ana'], [forA, 'Ana'], [forA, 'Ana']]);
+});
+
+test('an upload not yet posted when AGMessage restarts is uploaded again: its post is refused with reupload, and the new upload is posted under the same client id', async (t) => {
+  const uploads = tmp('agm-up-');
+  let srv = await startServer({ AGM_UPLOAD_DIR: uploads });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const admin = (await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).cookie;
+  const code = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: admin })).body.code;
+  const join = async (uid) => {
+    const s = await connect(srv.base); sockets.push(s);
+    const j = await emit(s, 'join', { roomCode: code, name: 'Ana', role: 'research', ...(uid ? { uid } : {}) });
+    assert.ok(j.ok, JSON.stringify(j));
+    return { s, j };
+  };
+  const before = await join();
+  const early = (await (await upload(srv.base, before.j.uploadToken, 'deck-notes.txt')).json()).url;
+  sockets.splice(0).forEach((s) => s.close());
+  srv = await restartServer(srv, { AGM_UPLOAD_DIR: uploads });
+  const after = await join(before.j.identity);
+  assert.equal((await fetch(srv.base + early)).status, 200, 'the file is still on the laptop');
+  assert.deepEqual(await emit(after.s, 'message', { type: 'file', url: early, filename: 'deck-notes.txt', cid: 'notes_once' }),
+    { ok: false, error: 'That upload has expired: choose the file again.', reupload: true });
+  const again = (await (await upload(srv.base, after.j.uploadToken, 'deck-notes.txt')).json()).url;
+  const sent = await emit(after.s, 'message', { type: 'file', url: again, filename: 'deck-notes.txt', cid: 'notes_once' });
+  assert.ok(sent.ok, JSON.stringify(sent));
+  const adm = await connect(srv.base, admin); sockets.push(adm);
+  const posted = (await emit(adm, 'admin:watchRoom', { roomCode: code })).messages.filter((m) => m.type === 'file');
+  assert.deepEqual(posted.map((m) => [m.id, m.url, m.cid]), [[sent.id, again, 'notes_once']], 'the refused post wrote nothing');
+});
+
+test('after a restart a posted file keeps to the rooms that hold it: its link is another room\'s elsewhere, and a file only a screen holds is chosen again', async (t) => {
+  const uploads = tmp('agm-up-');
+  let srv = await startServer({ AGM_UPLOAD_DIR: uploads });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const admin = (await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).cookie;
+  const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
+  const join = async (code, uid) => {
+    const s = await connect(srv.base); sockets.push(s);
+    const j = await emit(s, 'join', { roomCode: code, name: 'Ana', role: 'research', ...(uid ? { uid } : {}) });
+    assert.ok(j.ok, JSON.stringify(j));
+    return { s, j };
+  };
+  const post = (s, url, name) => emit(s, 'message', { type: 'file', url, filename: name });
+  const filesIn = async (code) => {
+    const adm = await connect(srv.base, admin); sockets.push(adm);
+    return (await emit(adm, 'admin:watchRoom', { roomCode: code })).messages.filter((m) => m.type === 'file').map((m) => m.url);
+  };
+  const one = await hall('Hall 1');
+  const two = await hall('Hall 2');
+  const ana = await join(one);
+  const urlOf = async (name, bytes) => (await (await upload(srv.base, ana.j.uploadToken, name, bytes)).json()).url;
+  // Before the restart: notes posted in hall 1; a picture posted there, made hall 1's holding image, and its message
+  // deleted, so a screen alone holds it.
+  const notes = await urlOf('notes.txt');
+  assert.ok((await post(ana.s, notes, 'notes.txt')).ok);
+  const poster = await urlOf('poster.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]));
+  const shown = await post(ana.s, poster, 'poster.png');
+  assert.ok(shown.ok, JSON.stringify(shown));
+  const adm = await connect(srv.base, admin); sockets.push(adm);
+  assert.ok((await emit(adm, 'display:hallHolding', { code: one, image: poster })).ok);
+  assert.ok((await emit(ana.s, 'delete', { messageId: shown.id })).ok);
+  sockets.splice(0).forEach((s) => s.close());
+  srv = await restartServer(srv, { AGM_UPLOAD_DIR: uploads });
+
+  // This run holds no record of either upload: hall 1's notes posted directly in hall 2 are hall 1's (no upload again
+  // would make them hall 2's), and posted again in hall 1 they are taken; the picture only a screen holds is not.
+  const inTwo = await join(two, ana.j.identity);
+  assert.deepEqual(await post(inTwo.s, notes, 'notes.txt'), { ok: false, error: OTHER_ROOM });
+  const inOne = await join(one, ana.j.identity);
+  assert.ok((await post(inOne.s, notes, 'notes.txt')).ok);
+  assert.equal((await fetch(srv.base + poster)).status, 200, 'the holding image is still on the laptop');
+  assert.deepEqual(await post(inOne.s, poster, 'poster.png'), { ok: false, error: 'That file is on a screen, not in a room: choose the file again.', reupload: true });
+  assert.deepEqual([await filesIn(one), await filesIn(two)], [[notes, notes], []], 'nothing refused was posted');
 });
 
 test('a file a hall\'s side room holds is in use: the Main room\'s reset keeps it; removing the room, then the hall, takes it and the room\'s files', async (t) => {

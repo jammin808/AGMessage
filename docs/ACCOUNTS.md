@@ -241,6 +241,13 @@ room it comes from leaves none, it says that rule in the same words. A guest sea
 backstage in one room forwards into it as backstage, whichever page joined first; with no seat there, the admin's link
 posts and shares files (`rbac.LINKED_CAPS`).
 
+A file message is posted only in the room its upload was made for, by the person who made it, or again in a room a
+message of which holds it already: the upload token a page is given at its join names its room and its person, and the
+upload keeps both. Another room's file is refused ("That file belongs to another room — send it from there."), and so is
+another person's upload not yet posted; a forward, between rooms the person is in and by the rules above, is how a file
+reaches another room. A file no room holds any more, only a screen or a hall's holding image, is chosen again to be
+posted, and an upload not yet posted when AGMessage restarts is uploaded again by the page that holds it.
+
 **Each room's guest code.** A hall's Main room's code is its key until the admin renews it, so a hall of 0.5.1 keeps the
 code its guests know with nothing written; a room beside a hall gets a code of its own as it is made, never its key (an
 address no join takes from a guest). A code is one room's: no live code, earlier code or key is shared, and of two rooms

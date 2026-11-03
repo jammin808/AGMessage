@@ -269,7 +269,16 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   it goes to by its code, takes from the sender's rate before the code is looked up, so whether a code names a hall is
   told no faster than a send goes.
 - Saved keys and tokens are sealed at rest (AES-256-GCM) with a machine key kept outside the app folder.
-- Uploads are allow-listed by type and checked by content; they are served so they cannot run script.
+- Uploads are allow-listed by type and checked by content; they are served so they cannot run script. A file message
+  is posted only in the room its upload was made for, by the person it was made by (the upload token's room and person,
+  kept with the upload for its hour in memory, `freshUploads`), or again in a room a message of which holds it already;
+  any other link is refused and nothing posted (another room's file or upload, another person's upload not yet posted,
+  a file only a screen or a hall's holding image holds, an upload this run holds no record of, made before a restart),
+  so a file message crosses rooms only by a forward between rooms the person is in, by the forward's own rules. A
+  file's link stays the capability to read it, for whoever holds it: provenance governs where a file is posted, not who
+  may open a link they were given. A screen's take and a hall's holding image are not held to it yet: whoever may drive
+  a hall's screens can show any upload's link there (the stage's source check, the plan's Part 4 unit 25, holds them to
+  the hall's own files).
 - Pages carry a strict Content-Security-Policy with no inline script.
 - Links to Stagewatch, Patterns and PlayMap pin each peer's certificate; keys travel in headers, never in a URL. A
   Stagewatch certificate is pinned only once Stagewatch accepted the link's key; the key goes in no request but the one

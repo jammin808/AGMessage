@@ -191,7 +191,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The verifier on another computer: Node and the browser page | `app/verify/` |
 | The halls board and help requests; a hall's rooms on its row, Your rooms, and Set up's Rooms | `app/lib/board.js`, `app/public/halls.js`; test `halls` |
 | The room choice and the switcher: an account with one room goes straight into it; a hall page names its room ("Hall 2 › Legal") and moves between its hall's rooms | `app/public/halls.js` (`waysIn`), `app/public/app.js` (the switcher), `app/server.js` (`switcherFor`, `frames.rooms`); test `halls` |
-| Uploads: a token per page's join, checked again at use | `app/server.js` (`/api/upload`), `app/lib/guard.js`; test `uploads` |
+| Uploads: a token per page's join, checked again at use; a file message posted only in the room it was made for, reaching another only by a forward | `app/server.js` (`/api/upload`, `fileRefusal`), `app/lib/guard.js`; test `uploads` |
 | Screens (display URLs) | `app/lib/displays.js`, `app/public/display.*` |
 | Stagewatch links, peers, hello; what a send says (Stagewatch's grammar as the oracle) | `app/lib/nodes.js`, `app/lib/stagelines.js` |
 | Patterns and PlayMap links; the context other show systems read | `app/lib/peerlinks.js`, `app/lib/context.js` |

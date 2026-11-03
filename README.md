@@ -28,7 +28,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   member On stage at once). **Rooms:** a hall page's header names its room ("Hall 2 › Legal") and, with two rooms or more,
   a **switcher** under it moves between the hall's rooms the person may enter, keeping what they wrote and had not sent;
   a room's right-click offers Open in a new tab, Copy link and Copy guest code. Moving between a hall's rooms writes no
-  "joined" or "left" line in either room; a second device or tab opened in another room is said there. **Help requests** go in two taps
+  "joined" or "left" line in either room; a second device or tab opened in another room is said there. A file is posted
+  only in the room it was uploaded for, by whoever uploaded it (or again in a room that already holds it): another
+  room's file posted by its link is refused ("That file belongs to another room — send it from there."); it goes there
+  by ↗ Send to, between rooms the person is in, or by choosing the file again there. **Help requests** go in two taps
   (Help, then Sound, Vision, Lighting, Stage, Presenter, IT / network or Something else), from any room, and stay red
   until someone is on the way and on the board until resolved. A side room's request is on the board whole for those who
   read the room, and for the hall's crew without its words ("Hall 2 › Legal · Sound"), who answer it from there. The asker's Help button says what happened ("■ Help asked", "▶ Ana is on

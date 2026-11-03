@@ -745,7 +745,17 @@ Troubleshooting
   back. "△ Not sent: ..." says why AGMessage refused it: Retry sends it
   again, Edit puts it back to change. "Not sent — choose the file again":
   the page was reloaded before the file was uploaded (or the laptop no
-  longer has it); choose the file again.
+  longer has it, or AGMessage restarted before it was sent); choose the
+  file again. A page that still holds the file uploads it again itself.
+  "That file belongs to another room — send it from there.": a file is
+  posted only in the room it was uploaded for (or again in a room that
+  already holds it). Open the room it is in and send it from there with
+  "↗ Send to" (you need to be in both rooms), or choose the file again
+  here. "Only the person who uploaded that file can post it.": it was
+  uploaded by someone else and not posted yet. "That file is on a
+  screen, not in a room: choose the file again.": no room holds that
+  file any more (only a screen or a hall's holding image shows it);
+  choose the file again to post it.
   "Not connected — AGMessage is reconnecting." on a pin, a reaction, a
   screen's take or an admin's act: it was not sent; do it again once the
   page is back. "No answer — check the connection.": AGMessage did not

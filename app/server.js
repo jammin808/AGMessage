@@ -896,8 +896,11 @@ const uploadTokens = new Map();    // token -> {room, uid, sid, bucket (the conn
 // use in the words of the seat its page holds then, and goes; a revoked one never uploads again, whatever seat follows.
 const UPLOAD_REFUSED = Object.freeze({ board: 'On stage seats send messages, not files.', observer: 'Observers can read but not post.' });
 const uploadBuckets = new guard.Buckets(0.5, 8, 5000);
-// Files uploaded in this run and not yet past their wait: one nobody posted by then is removed.
-const freshUploads = new Map();    // file name -> uploaded at
+// Files uploaded in this run and not yet past their wait: one nobody posted by then is removed. Each is kept with the room
+// its upload token was issued for and the person it was issued to (its provenance, read by `fileRefusal`): a file message
+// names an upload made for its room by the person who posts it, or one a message of that room already holds. The record is
+// this run's alone, so an upload not yet posted when the server stops is uploaded again after the restart.
+const freshUploads = new Map();    // file name -> {at, room (its key), uid}
 
 /**
  * What the admin is told when a room's files could not all be removed (lib/store.js `remove`'s `kept`: another program
@@ -908,13 +911,24 @@ function keptWords(gone, what) {
   return 'Another program (an antivirus or a backup) held the files of ' + plural(gone.kept.length, 'room') + ', which stay in the data folder'
     + (gone.again ? ': ' + what + ' opens again at the next start unless they are removed first, and its uploads are kept for it.' : ', unused.');
 }
+const uploadNamesOf = (urls) => new Set(urls.filter((u) => guard.validUploadUrl(u)).map((u) => u.slice(9)));
+/** Every upload a file message of any room of any hall points at, by its name. */
+function uploadsInRooms() {
+  const urls = [];
+  for (const r of store.allRooms()) for (const m of r.messages) if (m.type === 'file') urls.push(m.url);
+  return uploadNamesOf(urls);
+}
+/** Every upload a screen shows or a hall holds as its holding image, by its name. */
+function uploadsOnScreens() {
+  const urls = [];
+  for (const d of displays.list.values()) if (d.content) urls.push(d.content.url, d.content.image);
+  for (const code of Object.keys(displays.halls)) urls.push(displays.hallHolding(code));
+  return uploadNamesOf(urls);
+}
 /** Every upload something still points at: a message in any room of any hall, what a screen shows, a hall's holding image. */
 function uploadsInUse() {
-  const used = new Set();
-  const add = (u) => { if (guard.validUploadUrl(u)) used.add(u.slice(9)); };
-  for (const r of store.allRooms()) for (const m of r.messages) if (m.type === 'file') add(m.url);
-  for (const d of displays.list.values()) if (d.content) { add(d.content.url); add(d.content.image); }
-  for (const code of Object.keys(displays.halls)) add(displays.hallHolding(code));
+  const used = uploadsInRooms();
+  for (const f of uploadsOnScreens()) used.add(f);
   return used;
 }
 /** Remove those of `names` nothing points at any more (a reset, a deletion, a hall removed). Resolves to how many went. */
@@ -930,7 +944,7 @@ async function removeUnused(names) {
 }
 const fileNamesOf = (messages) => messages.filter((m) => m && m.type === 'file' && guard.validUploadUrl(m.url)).map((m) => m.url.slice(9));
 setInterval(() => {
-  const due = Array.from(freshUploads).filter(([, at]) => Date.now() - at >= UPLOAD_ORPHAN_MS).map(([f]) => f);
+  const due = Array.from(freshUploads).filter(([, up]) => Date.now() - up.at >= UPLOAD_ORPHAN_MS).map(([f]) => f);
   for (const f of due) freshUploads.delete(f);
   if (due.length) removeUnused(due).catch(() => { /* the next sweep tries the rest */ });
 }, Math.max(100, Math.min(60_000, UPLOAD_ORPHAN_MS))).unref();
@@ -1630,7 +1644,7 @@ app.post('/api/upload', async (req, res, next) => {
       try { fs.unlinkSync(stored); } catch { /* ignore */ }
       return res.status(400).json({ error: 'That file\'s contents don\'t match its type, so it wasn\'t shared.' });
     }
-    freshUploads.set(req.file.filename, Date.now());
+    freshUploads.set(req.file.filename, { at: Date.now(), room: req.agmUploader.room, uid: req.agmUploader.uid });
     res.json({ url: `/uploads/${req.file.filename}`, filename: String(req.file.originalname).slice(0, 120), mime: type.mime.split(';')[0], size: req.file.size });
   });
 });
@@ -2115,8 +2129,14 @@ io.on('connection', (socket) => {
     if (payload && payload.type === 'action' && !mayAsk()) return ok(ack)({ ok: false, error: ASKS_BACKSTAGE });
     // An upload that is no longer here (a send held past the wait an unposted upload is kept for) is uploaded again by
     // the page that holds the file, and sent with the same client id.
-    if (payload && payload.type === 'file' && guard.validUploadUrl(payload.url) && !fs.existsSync(path.join(UPLOAD_DIR, payload.url.slice(9)))) return ok(ack)({ ok: false, error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true });
-    const msg = buildMessage(me, payload, sent);
+    const upload = payload && payload.type === 'file' && guard.validUploadUrl(payload.url) ? payload.url : '';
+    if (upload && !fs.existsSync(path.join(UPLOAD_DIR, upload.slice(9)))) return ok(ack)({ ok: false, error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true });
+    // A file goes only into the room it was uploaded for (its provenance): another room's is refused with where it is,
+    // nothing posted; one no room holds and this run has no record of (a screen's alone, or one made before a restart) is
+    // uploaded again, as one that is no longer here.
+    const refused = upload ? fileRefusal(me, upload, room) : null;
+    if (refused) return ok(ack)({ ok: false, ...refused });
+    const msg = buildMessage(me, payload, { ...sent, room });
     if (!msg) return ok(ack)({ ok: false, error: 'Invalid message' });
     if (payload.replyTo && typeof payload.replyTo === 'string') {
       const parent = room.byId.get(payload.replyTo);
@@ -3494,20 +3514,53 @@ function readSend(payload, { held = false } = {}) {
   return out;
 }
 
-function buildMessage(user, payload, sent = {}) {
+// A file message's refusals, as the answer's fields beside `ok: false`. `reupload` has the page that still holds the
+// file upload it again for its room and send it under the same client id, by itself.
+const FILE_REFUSED = Object.freeze({
+  otherRoom: Object.freeze({ error: 'That file belongs to another room — send it from there.' }),
+  otherPerson: Object.freeze({ error: 'Only the person who uploaded that file can post it.' }),
+  onScreen: Object.freeze({ error: 'That file is on a screen, not in a room: choose the file again.', reupload: true }),
+  expired: Object.freeze({ error: 'That upload has expired: choose the file again.', reupload: true }),
+});
+/**
+ * Why `user` may not post the upload `url` in `room` (a file message's provenance), as a refusal of `FILE_REFUSED`, or
+ * null when they may: a file is posted in the room its upload was made for, by the person it was made by
+ * (`freshUploads`, this run's record), or again in a room a message of which already holds it. Any other file crosses
+ * rooms only by `forward`, between rooms the person is in and by its own checks. Refused: another room's upload or a
+ * file another room holds (`otherRoom`, "send it from there"), another person's upload not yet posted (`otherPerson`),
+ * a file only a screen or a hall's holding image holds (`onScreen`), or an upload this run holds no record of, made
+ * before a restart (`expired`); the last two with `reupload`.
+ */
+function fileRefusal(user, url, room) {
+  if (room.messages.some((m) => m.type === 'file' && m.url === url)) return null;
+  const name = url.slice(9);
+  const fresh = freshUploads.get(name);
+  if (fresh && fresh.room === room.code) return fresh.uid === user.uid ? null : FILE_REFUSED.otherPerson;
+  if (fresh || uploadsInRooms().has(name)) return FILE_REFUSED.otherRoom;
+  return uploadsOnScreens().has(name) ? FILE_REFUSED.onScreen : FILE_REFUSED.expired;
+}
+
+/**
+ * The message `user` posts in `room` from a page's `payload`, carrying its send's client id and wait (`cid`, `held`:
+ * readSend's); null when the payload is no message, and for a file whose provenance does not let it into `room`
+ * (`fileRefusal`, which a caller that answers with the reason asks first). Only a message or null comes back, so no
+ * caller can post a refusal, or spread one into a message of its own.
+ */
+function buildMessage(user, payload, { room, cid, held } = {}) {
   if (!payload || typeof payload !== 'object') return null;
   const base = {
     id: makeMessageId(), at: Date.now(), from: { uid: user.uid, name: user.name, role: user.role, ...(user.acct ? { acct: true } : {}) }, pinned: false, priority: !!payload.priority,
-    ...(sent.cid ? { cid: sent.cid } : {}), ...(sent.held ? { held: sent.held } : {}),
+    ...(cid ? { cid } : {}), ...(held ? { held } : {}),
   };
   if (payload.type === 'text') {
     const text = guard.str(payload.text).trim();
     return text ? { ...base, type: 'text', text: text.slice(0, 4000), ...(payload.aiDraft ? { aiDraft: true } : {}) } : null;
   }
   if (payload.type === 'file') {
-    if (!guard.validUploadUrl(payload.url)) return null;
+    if (!guard.validUploadUrl(payload.url) || !room) return null;
     const t = guard.UPLOAD_TYPES[guard.extOf(payload.url)];
     if (!t) return null;   // the message handler has checked that the upload is here
+    if (fileRefusal(user, payload.url, room)) return null;
     return {
       ...base, type: 'file', url: payload.url,
       filename: guard.cleanText(payload.filename, 120) || 'file',

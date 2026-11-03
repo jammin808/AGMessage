@@ -3309,6 +3309,46 @@ are unit 14's: until it lands a list is kept and shown, and nothing is sent betw
   leaving the list of the room it could send into.
 - The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `SECURITY.md`, `docs/ANALYSIS.md`, `CLAUDE.md`.
 
+**A file message is posted only in the room it was uploaded for** (the plan's Part 1, unit 13, its §4.3's provenance and
+§9's row 13; the file's name and kind read from the upload's record, which Part 4 §0 adds to it, are the stage
+addendum's unit 26's; the tree as the evidence: in 0.5.1 a file message took any upload's link that was on the laptop,
+so a person who held another hall's link could post that hall's file in their own)
+- **Each upload is kept with where it was made for**: the room its page's upload token was issued for, by key, and the
+  person it was issued to (`freshUploads`: `{at, room, uid}`, for the upload's hour, in memory only; the token was
+  already issued per page's join and checked at use).
+- **A file message names an upload made for its room by the person who posts it, or one a message of that room holds
+  already** (`buildMessage`'s provenance, `fileRefusal`): the uploader posts it, and once it is posted anyone who may
+  share files there may post it again. Anything else is refused and nothing is posted: an upload made for another room,
+  or a file another room holds, "That file belongs to another room — send it from there."; another person's upload not
+  yet posted, "Only the person who uploaded that file can post it."; a file no room holds and only a screen or a hall's
+  holding image shows (its message deleted, its record past), "That file is on a screen, not in a room: choose the file
+  again."; an upload this run holds no record of (one made before a restart and not yet posted), "That upload has
+  expired: choose the file again."; the last two with `reupload`, so the page that still holds the file uploads it again
+  for its room and sends it under the same client id by itself, as it does for a file the laptop no longer has (a page
+  reloaded since says "Not sent — choose the file again"). A file reaches another room only by a forward, between rooms
+  the person is in and by the forward's own rules (and, from unit 14, by Send into a room, audited). Reading a file is
+  unchanged: its link is the capability, for whoever holds it.
+- **`buildMessage` returns a message or null, never a refusal**: it builds nothing of a file its provenance refuses,
+  whoever calls it, and a caller that answers with the reason asks `fileRefusal` first, as the message handler does. A
+  refusal handed back in a message's place could be spread into a message of a caller's own (unit 14's copy into
+  another room takes `{…msg, id}`), which the op table would take, since an added message needs only its id.
+- Not in this unit, by the build order: the file's name taken from the upload's record instead of the page's (Part 4's
+  unit 26); a screen's take and a hall's holding image held to the hall's own files (`sourceOk`, Part 4's unit 25):
+  until then whoever may drive a hall's screens can show any upload's link there, as in 0.5.1; and the start's sweep of
+  the uploads nothing uses (unit 25 too): an upload a run before a restart never posted, now never posted at all, stays
+  in the uploads folder until then, as it did in 0.5.1, since the record that would have removed it within the hour is
+  that run's alone.
+- Tests: `test/uploads.test.js`: the reset test rewritten on purpose, hall B now holding hall A's file by Ana's forward
+  (its link posted there directly refused, nothing posted), the reset and deletion rules unchanged; an upload made for
+  hall A refused from the same person's page in hall B and from another person in hall A until it is posted, then taken
+  again from that person, still refused in hall B, an upload made for hall B refused in hall A, and once forwarded into
+  hall B, hall A's file posted there directly, each hall's file messages read back by the admin's watch; an upload not
+  yet posted when the server restarts refused with `reupload`, nothing posted, and the new upload posted under the same
+  client id; after a restart, which holds no record of either upload, hall 1's posted file refused in hall 2 as another
+  room's (no `reupload`: no upload again would make it hall 2's) and taken again in hall 1, and a picture only hall 1's
+  holding image holds (its message deleted) refused with the screen's words and `reupload`, nothing refused posted.
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `docs/DESIGN.md`, `SECURITY.md`, `CLAUDE.md`.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and
