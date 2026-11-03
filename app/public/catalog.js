@@ -435,13 +435,16 @@
       { id: 'hall.setup', label: 'Set up…', icon: '⚙', group: '4_manage', verb: 'hall:settings', mode: 'now', may: (f) => f.manageHalls, fits: () => true },
       { id: 'hall.network', label: 'Show network…', icon: '📡', group: '4_manage', verb: 'nodes:list', mode: 'now', may: (f) => f.canDrive, fits: () => true },
     ],
-    // An open help request on the board: `code`, `id`, `state`, `canRespond` (the board's fact: the server's own rule).
+    // An open help request on the board: `code` (its room's key), `id`, `state`, `room` (a side room's name, '' for a
+    // hall's Main room), and the board's facts, each the server's own rule: `canRespond`, and `canOpen` (whether this
+    // account may open its room: the hall's crew answer a side room's request they may not read from here).
     help: [
       { id: 'help.respond', label: 'On my way', icon: '▷', group: '1_respond', inline: () => 1, verb: 'help:respond', mode: 'hold',
         may: (f, o) => !!o.canRespond, fits: (f, o) => o.state === 'open' },
       { id: 'help.resolve', label: 'Resolved', icon: '🏁', group: '1_respond', inline: () => 2, verb: 'help:respond', mode: 'hold',
         may: (f, o) => !!o.canRespond, fits: (f, o) => o.state !== 'resolved' },
-      { id: 'help.open', label: 'Open its hall', icon: '🚪', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+      { id: 'help.open', label: (f, o) => (o.room ? 'Open its room' : 'Open its hall'), icon: '🚪', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local',
+        may: (f, o) => !!o.canOpen, fits: () => true },
     ],
 
     // ------------------------------------------------------------ the Accounts page (accountFacts)

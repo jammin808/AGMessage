@@ -8,7 +8,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 - **Halls.** Each hall has its Main room and, if it has one, its own Stagewatch: its countdown in the header, sends to
   its speaker's screen. The admin makes rooms of its own beside it (Legal, Media) on the admin page, each with its own
   messages and people, listed under its hall, watched, renamed, cleared and removed there; the admin's reads of a room it
-  is not given are in the audit log. (A project manager's right to set halls up covers making and renaming rooms too,
+  is not given are in the audit log. Every room of a hall shows the hall's countdown and sends to its speaker's screen
+  and its show desk, by the rights of whoever sends (an account with Stagewatch rights in the hall; a room's guests
+  never), the show desk's notices reach every room, and the AI drafts in a side room from that room alone, told which
+  room it is. (A project manager's right to set halls up covers making and renaming rooms too,
   but no page other than the admin's offers it yet.) **Each room has its own guest code**, switched on or off and renewed
   by the admin (the admin page's room ⋯, or the code chip on the admin's own hall page): a side room's starts off, so it
   is for the admin and the accounts given it until the admin switches it on; switched off, the guests already in stay (or
@@ -18,8 +21,9 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   code is shown and in its list. The laptop's token admin's own hall page gets in whether a code is on or off, and is
   never sent out with the guests. The **halls board** shows every hall an account may see — countdown, who is in, the
   last message, open help requests, its screens and its Patterns / PlayMap — live. **Help requests** go in two taps
-  (Help, then Sound, Vision, Lighting, Stage, Presenter, IT / network or Something else) and stay red until someone is
-  on the way and on the board until resolved. The asker's Help button says what happened ("■ Help asked", "▶ Ana is on
+  (Help, then Sound, Vision, Lighting, Stage, Presenter, IT / network or Something else), from any room, and stay red
+  until someone is on the way and on the board until resolved. A side room's request is on the board whole for those who
+  read the room, and for the hall's crew without its words ("Hall 2 › Legal · Sound"), who answer it from there. The asker's Help button says what happened ("■ Help asked", "▶ Ana is on
   the way", "✓ Resolved"), and a tap on it marks the request sorted or cancels it.
 - **Accounts and codes.** Crew, project managers and admins sign in as themselves (a signed-in browser opens its halls,
   never a guest's seat); presenters and guests join with a room's 6-character code, typed first: the join page names the

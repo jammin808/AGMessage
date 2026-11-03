@@ -1396,6 +1396,24 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     for (const [what, d] of Object.entries(boardDoors)) report(doorsInStep(d), `the halls board's ${what}: right-click = ⋯ = Shift+F10 = the catalogue's set, the bar in it (${d.want}; ${d.right} / ${d.dots} / ${d.key}; ${d.inline}; hit ${d.hit})`);
     report(boardDoors.hall.want === JSON.stringify(['hall.open', 'hall.tab', 'hall.copy', 'hall.code', 'hall.setup']) && boardDoors.help.want === JSON.stringify(['help.respond', 'help.resolve', 'help.open']),
       `a hall's row offers Open, Open in a new tab, Copy link, Copy guest code and Set up…, and a help request its two answers and its hall (${boardDoors.hall.want}; ${boardDoors.help.want})`);
+    // A help request in a hall's side room is on the board by its hall and its room ("Side asks › Legal"), counted on the
+    // hall's row, its way in the room's own (Open its room), and its doors as a Main room's. That hall goes again once read.
+    const helpHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Side asks' }) })).json()).code;
+    const helpAsker = await connect(base, cookie);
+    const helpRoom = await emit(helpAsker, 'room:create', { hall: helpHall, name: 'Legal' });
+    // The laptop's token admin's own page, which has no account, joins any room by its key.
+    const helpRoomIn = helpRoom && helpRoom.ok ? await emit(helpAsker, 'join', { roomCode: helpRoom.key, name: 'Ana', role: 'research' }) : null;
+    const helpInRoom = helpRoomIn && helpRoomIn.ok ? await emit(helpAsker, 'message', { type: 'help', category: 'Vision', text: 'the Legal screen is dark' }) : null;
+    const ROOM_HELP = `[...document.querySelectorAll('#helpList > li[data-key]')].find((li) => li.textContent.includes('the Legal screen is dark'))`;
+    const roomHelpSeen = (await signin.until(`(() => { const li = ${ROOM_HELP}; const c = document.querySelector('.hall-row[data-code="${helpHall}"] .help-count'); return li && c && JSON.stringify({ where: li.querySelector('.help-where').textContent, count: c.textContent, open: li.querySelector('.help-open').textContent, hidden: li.querySelector('.help-open').hidden, code: new URL(li.querySelector('.help-open').href).searchParams.get('code') }); })()`)) || 'not drawn';
+    const roomHelpDoors = roomHelpSeen === 'not drawn' ? { want: 'not drawn' } : await doorsOf(signin, 'help', ROOM_HELP, `AGM.page.object('help', (${ROOM_HELP}).dataset.key)`, { ...PAGE_DOORS_HALLS, hit: '.help-what' });
+    report(!!(helpInRoom && helpInRoom.ok) && roomHelpSeen === JSON.stringify({ where: 'Side asks › Legal', count: '■ 1 needs help', open: 'Open its room', hidden: false, code: helpRoom.key }) && doorsInStep(roomHelpDoors) && roomHelpDoors.want === JSON.stringify(['help.respond', 'help.resolve', 'help.open']),
+      `a side room's help request reads "Side asks › Legal" on the board, counted on its hall's row, opened by Open its room, its doors in step (${roomHelpSeen}; ${roomHelpDoors.want}; made ${JSON.stringify(helpRoom)}, joined ${JSON.stringify(helpRoomIn && { ok: helpRoomIn.ok, error: helpRoomIn.error })}, asked ${JSON.stringify(helpInRoom)})`);
+    helpAsker.close();
+    const helpCloser = await connect(base, cookie);
+    const helpHallGone = await emit(helpCloser, 'admin:deleteRoom', { roomCode: helpHall, purgeFiles: false });
+    helpCloser.close();
+    report(!!(helpHallGone && helpHallGone.ok && (await signin.until(`!document.querySelector('.hall-row[data-code="${helpHall}"]') && !(${ROOM_HELP})`))), 'the hall made for the side room\'s request goes again, its request with it');
     // The hall's name is the row's one link: its ::after covers the row, so the row's other parts are the link's to a
     // pointer; a middle click on the name opens the hall in a tab of its own.
     const oneLink = await signin.eval(`(() => { const r = ${HALL_ROW}; const at = (sel) => { const q = r.querySelector(sel).getBoundingClientRect(); const h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return h ? (h.closest('a') === r.querySelector('a.hall-open') ? 'link' : h.closest('.obj-more') ? 'more' : h.tagName) : 'nothing'; };

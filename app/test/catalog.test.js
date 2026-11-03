@@ -180,10 +180,14 @@ const PAGE_OBJECTS = {
   },
   // A hall's row as the board's watcher reads it: its guest code told, or not (a Staff account's, a Viewer's).
   hall: { row: { code: 'K7P2QX', name: 'Hall 2', guestCode: 'K7P2QX' }, untold: { code: 'K7P2QX', name: 'Hall 2', guestCode: '' } },
+  // A help request on the board: its room's key, whether this watcher answers it and may open its room (a side room's
+  // reaches the hall's crew who may not read it, to answer from the board), and a side room's name (`room`).
   help: {
-    open: { code: 'K7P2QX', id: 'h1', state: 'open', canRespond: true, hall: 'Hall 2', category: 'Sound' },
-    coming: { code: 'K7P2QX', id: 'h2', state: 'coming', canRespond: true, hall: 'Hall 2', category: 'Vision' },
-    notTheirs: { code: 'M3N4PQ', id: 'h3', state: 'open', canRespond: false, hall: 'Legal', category: 'Presenter' },
+    open: { code: 'K7P2QX', id: 'h1', state: 'open', canRespond: true, canOpen: true, hall: 'Hall 2', room: '', category: 'Sound' },
+    coming: { code: 'K7P2QX', id: 'h2', state: 'coming', canRespond: true, canOpen: true, hall: 'Hall 2', room: '', category: 'Vision' },
+    notTheirs: { code: 'M3N4PQ', id: 'h3', state: 'open', canRespond: false, canOpen: true, hall: 'Hall 3', room: '', category: 'Presenter' },
+    side: { code: 'LGQ4MZP8', id: 'h4', state: 'open', canRespond: true, canOpen: true, hall: 'Hall 2 › Legal', room: 'Legal', category: 'Sound' },
+    sideCrew: { code: 'LGQ4MZP8', id: 'h5', state: 'coming', canRespond: true, canOpen: false, hall: 'Hall 2 › Legal', room: 'Legal', category: 'Vision' },
   },
   account: {
     other: { id: 'a-kim', name: 'Kim Tech', username: 'kim', disabled: false, locked: '', self: false },
@@ -675,6 +679,9 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['help', 'board', O.help.open, ['help.respond', 'help.resolve', 'help.open']],
     ['help', 'board', O.help.coming, ['help.resolve', 'help.open']],
     ['help', 'boardCrew', O.help.notTheirs, ['help.open']],
+    // A side room's: opened where this account reads it; answered from the board alone by the hall's crew who may not read it.
+    ['help', 'boardCrew', O.help.side, ['help.respond', 'help.resolve', 'help.open']],
+    ['help', 'boardCrew', O.help.sideCrew, ['help.resolve']],
     // An account: Edit, a new one-time password and Sign out everywhere; Turn off and Remove last, never on one's own;
     // a locked row keeps Edit alone (disabled, with its reason); one who reads only the log is shown none.
     ['account', 'accountsAdmin', O.account.other, ['account.edit', 'account.password', 'account.signout', 'account.disable', 'account.remove']],
@@ -744,6 +751,8 @@ test('the other pages: the inline bar, the asks and their words, the caps and th
   assert.deepEqual(plain(C.submenu('laptop', 'laptop.copy', PAGE.admin, O.laptop.two)), [{ value: 'http://192.168.1.20:3023', label: 'http://192.168.1.20:3023' }, { value: 'http://10.0.4.7:3023', label: 'http://10.0.4.7:3023' }]);
   assert.deepEqual(bar('hall', 'board', O.hall.row), [], 'a hall\'s row opens by its name, its one link');
   assert.deepEqual(bar('help', 'board', O.help.open), ['help.respond', 'help.resolve'], 'a help request: its two answers');
+  // Its way in names what it opens: a hall's Main room, or a side room.
+  assert.deepEqual([O.help.open, O.help.side].map((o) => C.items('help', PAGE.board, o).find((e) => e.id === 'help.open').label), ['Open its hall', 'Open its room']);
   assert.deepEqual(bar('account', 'accountsAdmin', O.account.other), ['account.edit']);
   assert.deepEqual(bar('audit', 'accountsAdmin', O.audit.entry), [], 'an entry: only ⋯');
   for (const kind of Object.keys(PAGE_OBJECTS)) {

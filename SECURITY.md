@@ -176,7 +176,10 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   question never into a room where the forwarder sits On stage. A seat On stage answers no one else's help request:
   from an On stage page only its own request's Resolved is taken, whatever hall the request names, before any right is
   read, and an account answers a hall's help requests only where it does not sit On stage, from the halls board too, its
-  own request's Resolved excepted.
+  own request's Resolved excepted. A side room's help request reaches the halls board whole only for those who may read
+  that room; the hall's crew who may not are shown its category, who asked and its state, never its words. A request
+  names its hall's key (its Main room's address, and its guest code until New code) only to a watcher who sees the hall:
+  an account given a side room alone is told the hall's name, or that it has none, never its key.
 - A connection refused for its rate says when to try again (`retryMs`, read from that address's own bucket, with a
   random spread) and nothing else: no address and no count; the page waits it out. A page that comes back in a
   restart's first 30 s naming a change its hall holds is not announced again: that is the "joined" words only, and its

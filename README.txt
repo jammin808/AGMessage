@@ -69,7 +69,12 @@ First time on a new laptop
    guest code. A new room's is off: it is for the admin and the accounts
    given it until you choose "Turn the code on" in its ⋯. Guests in a
    room other than the Main room sit as a Member (messages and files) or
-   an Observer; On stage seats are in the hall's Main room. When the
+   an Observer; On stage seats are in the hall's Main room. Every room
+   shows the hall's countdown; from any room, an account with Stagewatch
+   rights in the hall sends to the hall's speaker's screen and asks its
+   show caller (a room's guests do not). Help works in every room: the
+   room sees the request, and the hall's crew see it on the halls board
+   ("Hall 2 › Legal") without its words and can answer it there. When the
    admin enters, watches, prints or summarises a room their account is
    not given, the audit log says so (room.read).
 
@@ -912,7 +917,8 @@ Show network (Stagewatch, Patterns, presenter PCs) - Show Bus 1.2
     team can press the notepad button on a message to PROPOSE it for the
     speaker's screen instead - the show caller approves it in Stagewatch, and
     the message shows waiting / approved / done. The show desk can also send
-    an approved notice ("Break in 5 minutes") to every open hall.
+    an approved notice ("Break in 5 minutes") to every open hall, into each
+    of its rooms.
   - A line for Stagewatch is counted as Stagewatch counts it (an emoji counts
     two) and cut where Stagewatch cuts it, never in half an emoji: 500
     characters sent straight to the speaker's screen, 200 for a role screen or

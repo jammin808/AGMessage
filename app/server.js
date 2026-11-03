@@ -1861,7 +1861,8 @@ io.on('connection', (socket) => {
     }
     // Resume: just what they missed, when we still have it; otherwise the whole history.
     const ops = Number.isInteger(since) ? store.opsSince(r, since) : null;
-    // A room shows its hall's countdown, as the frames sent to it do; a side room sends nothing to a Stagewatch.
+    // Every room of a hall follows its hall's Stagewatch: its countdown, and its sends and proposals by this seat's rights
+    // there (a side room's guest holds none; an account its stage.send in the hall), as the frames sent to it do.
     const sw = linkFor(r.hall);
     ack({
       ok: true, roomCode: code, roomName: r.name || '', role: cleanRole, name: cleanName, adminView: isAdminView,
@@ -1869,8 +1870,8 @@ io.on('connection', (socket) => {
       ...(ops ? { ops } : { history: r.messages }),
       users: roomUserSummary(r, { links: socket.data.isAdmin }),
       ai: !!aiKey(), stage: stagePayload(sw),
-      canSendToStage: !sideRoomStage() && !!(sw.base && sw.key && sw.keyState !== 'refused') && allowed('stage.send'),
-      canPropose: !sideRoomStage() && !!(sw.desk && sw.key && !sw.deskRefusal) && allowed('stage.send'),
+      canSendToStage: !!(sw.base && sw.key && sw.keyState !== 'refused') && allowed('stage.send'),
+      canPropose: !!(sw.desk && sw.key && !sw.deskRefusal) && allowed('stage.send'),
       account: acct ? { username: acct.username, name: acct.name, role: acct.role, roleLabel: rbac.ROLES[acct.role].label } : null,
       seen: seenFor(r),
       // Whether a message here could be sent to another hall (the forward picker would list one): a fact the page's
@@ -1899,12 +1900,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // A side room reaches no Stagewatch and no crew of its own: nothing it sends to the speaker's screen or the show desk,
-  // no destination it lists, no show facts in its drafts and no help request it raises would be followed or answered,
-  // so each is refused with these words (its page shows its hall's countdown all the same).
-  const sideRoomStage = () => !!room && !store.isMain(room);
-  const SIDE_STAGE = 'This room sends nothing to the speaker\'s screen: send it from the hall\'s Main room.';
-  const SIDE_HELP = 'Help requests are asked from the hall\'s Main room, where its crew answers them.';
   // Seated in a room that is still here ("Not joined", "Room gone"): the gate's first step alone. A verb written here takes
   // its bucket after it, in its own line.
   const need = (ack) => gate(ack, { bucket: null });
@@ -1939,7 +1934,6 @@ io.on('connection', (socket) => {
     if (!mayPost(ack)) return;
     if (payload && payload.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: onStage() ? 'On stage seats send messages, not files.' : 'Your account may not share files here.' });
     if (payload && payload.type === 'action' && !mayAsk()) return ok(ack)({ ok: false, error: ASKS_BACKSTAGE });
-    if (payload && payload.type === 'help' && sideRoomStage()) return ok(ack)({ ok: false, error: SIDE_HELP });
     // An upload that is no longer here (a send held past the wait an unposted upload is kept for) is uploaded again by
     // the page that holds the file, and sent with the same client id.
     if (payload && payload.type === 'file' && guard.validUploadUrl(payload.url) && !fs.existsSync(path.join(UPLOAD_DIR, payload.url.slice(9)))) return ok(ack)({ ok: false, error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true });
@@ -2151,14 +2145,17 @@ io.on('connection', (socket) => {
     finally { aiRunning--; socket.off('disconnect', onGone); }
   }
   const canDraft = () => me && !onStage() && (me.role === 'research' || socket.data.isAdmin);
+  // What a draft is told of where it is asked: the show facts of the room's hall (its Stagewatch and nodes, in every room
+  // of it), and, in a side room, which room it is, since nobody on stage reads it (lib/ai.js whereLine). The thread is
+  // this room's alone.
+  const draftFacts = () => ({ messages: room.messages, show: briefFor(room.hall), where: { main: store.isMain(room), room: room.name || '' } });
 
   socket.on('ai:draft', (args = {}, ack) => {
     if (!need(ack)) return;
     if (!canDraft()) return ok(ack)({ ok: false, error: 'Drafting is for the backstage team.' });
     const docText = typeof args.docText === 'string' ? args.docText.slice(0, 60_000) : '';
     runAi(ack, (signal) => ai.draftReply(aiKey(), {
-      show: sideRoomStage() ? null : briefFor(room.code),
-      messages: room.messages,
+      ...draftFacts(),
       question: typeof args.question === 'string' ? args.question.slice(0, 2000) : '',
       instruction: typeof args.instruction === 'string' ? args.instruction.slice(0, 500) : '',
       docName: typeof args.docName === 'string' ? args.docName.slice(0, 120) : '', docText,
@@ -2170,23 +2167,23 @@ io.on('connection', (socket) => {
     if (!canDraft()) return ok(ack)({ ok: false, error: 'For the backstage team.' });
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim().slice(0, 1000) : '';
     if (!prompt) return ok(ack)({ ok: false, error: 'Type the question first.' });
-    runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, messages: room.messages, show: sideRoomStage() ? null : briefFor(room.code) }, signal));
+    runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, ...draftFacts() }, signal));
   });
 
   // ----- Stagewatch: put an answer on the speaker's confidence monitor (research or admin)
   socket.on('stage:send', async (args = {}, ack) => {
     ack = ok(ack);
     if (!need(ack)) return;
-    if (sideRoomStage()) return ack({ ok: false, error: SIDE_STAGE });
     if (!allowed('stage.send')) return ack({ ok: false, error: 'The speaker\'s screen is for the backstage team.' });
     if (!writes.take()) return limited(ack);
     let text = typeof args.text === 'string' ? args.text : '';
     const source = typeof args.messageId === 'string' ? room.byId.get(args.messageId) : null;
     if (!text && source) text = source.text || '';
-    // The hall and the person who sent are read before Stagewatch answers: this socket may join another hall meanwhile,
-    // and the send's line, its row and the acknowledgement it follows stay with the hall it was sent from.
+    // The room and the person who sent are read before Stagewatch answers: this socket may join another room meanwhile,
+    // and the send's line, its row and the acknowledgement it follows stay with the room it was sent from. Every room of
+    // a hall sends to its hall's Stagewatch.
     const from = room, who = actor(), sender = me.name;
-    const link = linkFor(from.code);
+    const link = linkFor(from.hall);
     const r = await link.sendToStage(text, { urgency: args.urgency, ack: args.ack !== false });
     if (r.ok) {
       // What reached the speaker's screen: the line's words as sendToStage built them (cut on a code point, braces as
@@ -2216,8 +2213,7 @@ io.on('connection', (socket) => {
   socket.on('stage:targets', (_args, ack) => {
     ack = ok(ack);
     if (!need(ack)) return;
-    if (sideRoomStage()) return ack({ ok: false, error: SIDE_STAGE });
-    const link = linkFor(room.code);
+    const link = linkFor(room.hall);
     ack({
       ok: true, linked: link.linked, key: link.keyState, cert: !!(link.tlsState && link.tlsState.problem), title: (link.context && link.context.node && link.context.node.name) || '',
       canSend: !!(link.base && link.key && link.keyState !== 'refused') && allowed('stage.send'), canPropose: !!(link.desk && link.key && !link.deskRefusal) && allowed('stage.send'),
@@ -2229,7 +2225,6 @@ io.on('connection', (socket) => {
   socket.on('stage:propose', async (args = {}, ack) => {
     ack = ok(ack);
     if (!need(ack)) return;
-    if (sideRoomStage()) return ack({ ok: false, error: SIDE_STAGE });
     if (!allowed('stage.send')) return ack({ ok: false, error: 'Proposing to the stage is for the backstage team.' });
     if (!writes.take()) return limited(ack);
     let text = typeof args.text === 'string' ? args.text : '';
@@ -2237,15 +2232,15 @@ io.on('connection', (socket) => {
     if (!text && source) text = source.text || '';
     // Where in Stagewatch it goes (lib/stagelines.js): the speaker's screen, a role screen, a department this hall's
     // Stagewatch has named, or the operator alone — only a destination it offers, and only a line its parser takes.
-    const link = linkFor(room.code);
+    const link = linkFor(room.hall);
     const dest = typeof args.destination === 'string' && args.destination ? args.destination : 'speaker';
     if (!stagelines.destinations(link.departments).some((d) => d.id === dest)) return ack({ ok: false, error: 'This hall\'s Stagewatch offers no such destination.' });
     const built = stagelines.lineFor(dest, text, args.urgency);
     if (built.error) return ack({ ok: false, error: built.error });
     const parsed = stagelines.parse(built.line);
     if (parsed.error) return ack({ ok: false, error: 'Not a line Stagewatch takes: ' + parsed.error });
-    // The hall and the person who asked are read before the desk answers: this socket may join another hall meanwhile,
-    // and the proposal, its row and its system line stay with the hall it was made from.
+    // The room and the person who asked are read before the desk answers: this socket may join another room meanwhile,
+    // and the proposal, its row and its system line stay with the room it was made from.
     const from = room, who = actor(), asker = me.name;
     const r = await link.propose({
       from: { t: 'messenger', id: settings.nodeId, name: 'AGMessage' },
@@ -2509,18 +2504,19 @@ io.on('connection', (socket) => {
     ack({ ok: true, board: boardFor(socket), build: BUILD.full });
   });
 
-  // ----- Help requests: someone says they are on the way, then that it is resolved. From the hall, or from the board.
-  // Help requests are answered by the backstage team (owner answer B1): an On stage page marks its own request resolved
-  // and nothing else, whatever hall its code names, before any right is read; an account answers as the crew of the
-  // request's room, or of its hall's Main room, only where it does not sit On stage there (rbac.answersHelp, by each
-  // room's scope), from any page, its own request's Resolved excepted.
+  // ----- Help requests: someone says they are on the way, then that it is resolved. From the room, or from the board.
+  // A request lives in its room, a hall's Main room or a side room. Help requests are answered by the backstage team
+  // (owner answer B1): an On stage page marks its own request resolved and nothing else, whatever room its code names,
+  // before any right is read; an account answers as the crew of the request's room, or of its hall's Main room (the
+  // hall's crew answer a side room's request without reading the room), only where it does not sit On stage there
+  // (rbac.answersHelp, by each room's scope), from any page, its own request's Resolved excepted.
   socket.on('help:respond', ({ code, messageId, state } = {}, ack) => {
     ack = ok(ack);
     if (!chatter.take()) return limited(ack);
     // The hall page names its own room as it joined it (a guest by the code it typed, which is not the room's key once the
-    // code is renewed); the halls board names a hall by its key.
+    // code is renewed); the halls board names a request's room by its key, Main or side.
     const named = guard.str(code).toUpperCase();
-    const r = store.get(!named || (room && named === socket.data.joinedAs) ? (room ? room.code : '') : named);
+    const r = store.room(!named || (room && named === socket.data.joinedAs) ? (room ? room.code : '') : named);
     const m = r && r.byId.get(messageId);
     if (!m || m.type !== 'help') return ack({ ok: false, error: 'That help request is gone.' });
     const resolvesOwn = (uid) => state === 'resolved' && !!uid && !!m.from && m.from.uid === uid;
@@ -2536,7 +2532,7 @@ io.on('connection', (socket) => {
     if (m.help && m.help.state === state && m.help.by === by) return ack({ ok: true, already: true });
     if (m.help && m.help.state === 'resolved') return ack({ ok: false, error: 'Already resolved' + (m.help.by ? ' by ' + m.help.by : '') + '.' });
     if (!apply(r, { o: 'upd', id: m.id, f: { help: { state, by, at: Date.now() } } })) return ack(OP_REFUSED);
-    noteEvent('a help request was ' + (state === 'coming' ? 'answered' : 'resolved'), linkFor(r.code));
+    noteEvent('a help request was ' + (state === 'coming' ? 'answered' : 'resolved'), linkFor(r.hall));
     ack({ ok: true });
   });
 
@@ -3132,12 +3128,13 @@ const displaysOf = (code) => displays.ofHall(code).map((d) => { const st = Displ
 // ---------------------------------------------------------------- the halls board
 // Each watcher gets the halls it may see, recomputed when anything on them changes and sent at most every 300 ms
 // (`frames.board`: a slow phone gets the newest board, never a backlog). A hall's row is built once per send for every
-// watcher (`shared`); what differs per watcher — which halls, which links, whether it may answer — is added on top.
+// watcher (`shared`); what differs per watcher — which halls, which links, which help requests and whether it may answer
+// them — is added on top.
 const boardSockets = new Set();
 function boardDirty() { frames.board.mark('board'); }
 function hallParts(r, shared) {
   let p = shared.get(r.code);
-  if (!p) { p = { row: board.hallRow(r, { stage: stagePayload(linkFor(r.code)), displays: displaysOf(r.code) }), help: board.openHelp(r) }; shared.set(r.code, p); }
+  if (!p) { p = { row: board.hallRow(r, { stage: stagePayload(linkFor(r.code)), displays: displaysOf(r.code) }) }; shared.set(r.code, p); }
   return p;
 }
 function boardFor(socket, shared = new Map()) {
@@ -3152,10 +3149,42 @@ function boardFor(socket, shared = new Map()) {
     // Each hall's guest code only for a watcher who may know it (codeFor; a board's socket sits in no room), with whether it
     // admits guests now: a chip that follows Code off and New code as they happen.
     halls: rooms.map((r) => ({ ...hallParts(r, shared).row, nodes: links.filter((l) => l.hall === r.code).map(nodeChip), guestCode: codeFor(askerOf(socket), r), codeOn: store.codeOn(r) })),
-    // Offered as help:respond's account branch answers, in the request's room (a hall's Main room here): never in a
-    // hall where the account sits On stage.
-    help: rooms.flatMap((r) => hallParts(r, shared).help.map((h) => ({ ...h, canRespond: !!(socket.data.isAdmin || (a && rbac.answersHelp(a, store.scopeOf(r)))) }))),
+    help: helpFor(socket),
   };
+}
+/**
+ * The open help requests a watcher's board shows, each hall's rooms together, Main first. A request lives in its room: in
+ * full to a watcher who may read that room (a hall's Main room by its halls, a side room by its own rooms, or the admin),
+ * who may open it (`canOpen`); a side room's to the hall's crew who may not read it (who may answer its Main room's,
+ * rbac.answersHelp, never On stage there) without its words, `text` '', to answer from here; to nobody else. Each
+ * names its room (`code`, its key; `roomName`, '' for Main) and its hall by name (`hallName`); the hall's key (`hall`:
+ * its Main room's address, and its guest code until New code) only to a watcher who sees the hall, so one that reads a
+ * side room alone is told its hall's name, or that it has none, never its key. Each is offered as help:respond's
+ * account branch answers, by the request's room or its hall's Main room (`canRespond`). A room's open requests are read
+ * once per change (board.openHelp), whoever watches.
+ */
+function helpFor(socket) {
+  const a = socket.data.account;
+  const admin = !!socket.data.isAdmin;
+  const answers = (scope) => admin || (!!a && rbac.answersHelp(a, scope));
+  const items = [];
+  for (const hall of store.rooms.values()) {
+    const mainScope = store.scopeOf(hall);
+    const seesHall = admin || (!!a && rbac.seesHall(a, hall.code));
+    const where = seesHall ? { hall: hall.code, hallName: hall.name || hall.code } : { hallName: hall.name || 'A hall with no name' };
+    for (const r of store.roomsOf(hall.code)) {
+      const open = board.openHelp(r);
+      if (!open.length) continue;
+      const scope = store.isMain(r) ? mainScope : store.scopeOf(r);
+      const reads = admin || (!!a && rbac.seesRoom(a, scope));
+      if (!reads && !(scope !== mainScope && answers(mainScope))) continue;
+      const canRespond = answers(scope) || answers(mainScope);
+      for (const h of open) {
+        items.push({ ...h, text: reads ? h.text : '', ...where, roomName: scope === mainScope ? '' : r.name || r.code, canOpen: reads, canRespond });
+      }
+    }
+  }
+  return items;
 }
 /** Every watcher's board, each hall's row built once for all of them; a board that faults holds back no other watcher's. */
 function sendBoards() {
@@ -3470,7 +3499,7 @@ function trackStageSend(link, ref, code, ids, { ack = 'sent', by = '', at = 0, s
  *  so. One the speaker saw or acknowledged keeps what they did. */
 function loseStageSend(key, t) {
   stageSends.delete(key);
-  const room = store.get(t.code);
+  const room = store.room(t.code);
   if (!room) return;
   for (const id of t.ids) {
     const m = room.byId.get(id);
@@ -3493,7 +3522,7 @@ function followStageAck(link, view) {
   const ack = view.messageAck || 'sent';
   if (ack === t.ack && (view.messageAckBy || '') === t.by) return;
   t.ack = ack; t.by = view.messageAckBy || '';
-  const room = store.get(t.code);
+  const room = store.room(t.code);
   if (!room) return;
   for (const id of t.ids) {
     const m = room.byId.get(id);
@@ -3502,15 +3531,16 @@ function followStageAck(link, view) {
   if (ack === 'seen' || ack === 'done') noteEvent('the speaker ' + (ack === 'done' ? 'acknowledged' : 'saw') + ' a stage message', link);
 }
 
-// After a restart, keep following the sends the speaker has not acknowledged yet: the send's link, its Stagewatch's
-// address tag and the seq of its frames then live on the message (a send saved without them went to its hall's link).
-// One whose hall now follows another Stagewatch is left: its acknowledgement can only come from the one it went to.
-// This runs before any frame can arrive, and writes nothing (the data folder is not held yet).
-for (const room of store.rooms.values()) {
+// After a restart, keep following the sends the speaker has not acknowledged yet, from every room of every hall: the
+// send's link, its Stagewatch's address tag and the seq of its frames then live on the message (a send saved without
+// them went to its hall's link). One whose hall now follows another Stagewatch is left: its acknowledgement can only
+// come from the one it went to. This runs before any frame can arrive, and writes nothing (the data folder is not held
+// yet).
+for (const room of store.allRooms()) {
   for (const m of room.messages) {
     const st = m.stage;
     if (!st || !st.ref || !st.ack || st.ack === 'done' || st.ack === 'lost') continue;
-    const link = st.link ? allLinks().find((l) => l.id === st.link) : linkFor(room.code);
+    const link = st.link ? allLinks().find((l) => l.id === st.link) : linkFor(room.hall);
     if (!link || (st.sw && st.sw !== link.tag)) continue;
     const t = stageSends.get(link.id + ':' + st.ref);
     if (t && t.code === room.code && t.at === (st.at || 0)) t.ids.push(m.id);   // the send's record and its source message
@@ -3535,8 +3565,9 @@ function trackProposal(linkId, id, code, ids, state, { sw = '', line = '' } = {}
   proposals.set(key, { link: linkId, id, code, ids, state, sw, line, created: 0, gen: link ? link.generation : 0 });
   if (proposals.size > 200) proposals.delete(proposals.keys().next().value);
 }
-// After a restart, keep following the ones still open (their state, and the link they went to, live on the messages).
-for (const room of store.rooms.values()) {
+// After a restart, keep following the ones still open, from every room of every hall (their state, and the link they
+// went to, live on the messages).
+for (const room of store.allRooms()) {
   for (const m of room.messages) if (m.proposal && m.proposal.id && !FINAL.has(m.proposal.state)) {
     const linkId = m.proposal.link || 'default';
     const t = proposals.get(linkId + ':' + m.proposal.id);
@@ -3555,7 +3586,7 @@ function loseProposal(key, t, why) {
   showProposalState(t, { state: 'lost', words: 'Stagewatch no longer has this request (' + why + ') — ask again if it is still wanted', decidedBy: '' });
 }
 function showProposalState(t, p) {
-  const room = store.get(t.code);
+  const room = store.room(t.code);
   if (!room) return;
   for (const id of t.ids) {
     const m = room.byId.get(id);
@@ -3632,18 +3663,21 @@ async function tellResult(r, link) {
 
 /**
  * What AGMessage does when the show desk approves a proposal aimed at it. One verb: "notice <text>" — a notice shown
- * to everyone in every open meeting (e.g. "Break in 5 minutes"). Its own checks apply: length, and nothing to post
- * into when no meeting is open. Returns {ok, words}.
+ * to everyone in every open meeting (e.g. "Break in 5 minutes"), in every room of each (a Legal-only lawyer hears the
+ * break too). Its own checks apply: length, and nothing to post into when no meeting is open. A meeting is a hall, as
+ * the context counts them (Stagewatch's word): it is answered "shown in N meetings" by the halls with a room that took
+ * the line. Returns {ok, words}.
  */
 function runApproved(p) {
   const m = /^notice\s+(.+)$/i.exec(guard.str(p.line).trim());
   if (!m) return { ok: false, words: 'AGMessage only takes "notice <text>" — not "' + guard.str(p.line).slice(0, 60) + '"' };
   const text = m[1].replace(/^"(.*)"$/, '$1').replace(/\s+/g, ' ').trim().slice(0, 300);
   if (!text) return { ok: false, words: 'an empty notice' };
-  const rooms = Array.from(store.rooms.values());
+  const rooms = store.allRooms();
   if (!rooms.length) return { ok: false, words: 'no meeting is open to show it in' };
-  // The meetings it was shown in are the lines the op table took, never the meetings it was meant for.
-  const shown = rooms.filter((room) => systemMessage(room, '📣 From the show desk' + (p.decidedBy ? ' (approved by ' + p.decidedBy + ')' : '') + ': ' + text)).length;
+  // The meetings it was shown in are the halls of the lines the op table took, never the meetings it was meant for.
+  const took = rooms.filter((room) => systemMessage(room, '📣 From the show desk' + (p.decidedBy ? ' (approved by ' + p.decidedBy + ')' : '') + ': ' + text));
+  const shown = new Set(took.map((room) => room.hall)).size;
   if (!shown) return { ok: false, words: 'the notice could not be saved in any meeting' };
   noteEvent('the show desk posted a notice to the meetings');
   return { ok: true, words: 'shown in ' + shown + ' meeting' + (shown === 1 ? '' : 's') };

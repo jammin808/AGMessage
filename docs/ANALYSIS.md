@@ -414,10 +414,15 @@ the picker's rooms, the admin's room controls (watch, reset, remove, a message r
 the summary and its minutes) and the transcript, a state frame's room, uploads in use, the boot's seats and the restart
 line in every room, a hall's Stagewatch frames to every room it holds, a send to the speaker's screen or a proposal kept
 only while its room is, the power request's pages and the busy line's messages in every room, "This laptop"'s Pages row,
-health's `sideRooms`, a stop's halls left unwritten, and a new hall's key, unique among every room's. A hall's invite links
-stay a hall's (a guest's code names a hall). The 38 calls of `server.js` are the plan's 1-§3.5 and the readers of room
-state beside it; a unit that adds one moves the list with its words. A planted call without its row, a row without its
-call and `store.side` or `store.sideByHall` read past the store each fail it.
+health's `sideRooms`, a stop's halls left unwritten, and a new hall's key, unique among every room's. A side room follows
+its hall: a help request answered in its room by its key, Main or side; the halls board's help per room (whole to who
+reads the room, without its words to the hall's crew); the followers of a send and of a proposal, which write the
+speaker's acknowledgement, a send lost and a proposal's state into the room it came from; the restart's two loops, which
+follow the sends and the proposals of every room again; and the show desk's notice, posted into every room of every hall
+and counted by its halls. A hall's invite links stay a hall's (a guest's code names a hall). The 50 calls of `server.js`
+are the plan's 1-§3.5 and the readers of room state beside it; a unit that adds one moves the list with its words. A
+planted call without its row, a row without its call and `store.side` or `store.sideByHall` read past the store each fail
+it.
 
 The rights fence (`lib/rbac.js`, `test/accounts.test.js`) keeps a room's rights apart from a hall's, as (l) keeps the
 readers apart, and fails closed at run time rather than at build: seeing, posting and sharing files (`ROOM_SCOPED`) are

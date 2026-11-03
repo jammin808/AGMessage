@@ -2834,6 +2834,68 @@ rooms and the pages' room switcher are the units that follow)
   0.5.1 during a show."), with the other losses of going back: a hall's other rooms not opened, a file only one of them
   holds removable by a reset, the audit log read as broken.
 
+**A side room follows its hall** (the plan's Part 1, unit 8, its §2.5 (as Part 7 §0.1 amends it), §3.3 and §8 (as Part 4
+§5.12 amends it), §7.2's help, and owner question 7, "Defaults": AI drafts are available in rooms like Legal; the tree's
+tests, end to end and pure. Where the earlier lines of this entry say a side room sends nothing to a Stagewatch and raises
+no help request, this unit undoes it)
+- **Every room of a hall follows its hall's Stagewatch.** Legal shows the hall's countdown, as it did, and now sends to
+  it: the join's `canSendToStage` and `canPropose`, `stage:targets`, Send to the speaker's screen and a proposal to the
+  show desk read the hall's link (`linkFor(room.hall)`), never the default Stagewatch, and the seat's rights decide as
+  in a Main room: an account sends where it holds `stage.send` in the hall, a side room's guest (a Member) never, refused
+  in today's words. The stage chip in a side room is a door to Speaker's screen… wherever the seat may send. A send or a
+  proposal is written into the room it came from with the hall's link, and is followed there: the speaker's
+  acknowledgement, a send lost when its Stagewatch restarted and the operator's decision reach Legal's records, and a
+  restart follows again the sends and proposals of every room, not only the halls'. The recent events a hall's
+  Stagewatch is told (a send, a proposal, a help request answered) are its own, from whichever of its rooms they came;
+  a help request answered in a side room was told to the default Stagewatch before.
+- **Help in a side room.** A seat that may post there asks for help as in a Main room, and its Help button says what
+  happened. The request lives in its room: its pages hear it and its answers, and on the halls board it is shown whole to
+  whoever may read the room (the admin, an account given it), and to the hall's crew who may not (whoever answers the
+  Main room's help requests, never a Board member of that hall) with its category, who asked, its state and who is on the
+  way, never its words, to answer from the board. Nobody else sees it (a Viewer of the hall, an account seated On stage
+  there). Each request on the board names its room (`code`, its key; `roomName`, '' for Main) and its hall by name
+  (`hallName`); the hall's key (`hall`), which is its Main room's address and its guest code until New code, only to a
+  watcher who sees the hall: an account given a side room alone is told its hall's name, or "A hall with no name", never
+  its key. Each says whether this watcher may open its room (`canOpen`) and answer it (`canRespond`, as `help:respond`
+  answers); the strip reads "Hall 2 › Legal", a hall's row counts its rooms' requests, and Open its room is offered only
+  where the watcher may open it. `help:respond` takes a request in any room by its key. The board's row for a hall still counts
+  its Main room's requests in its own field (`help`), as before.
+- **The show desk's notice reaches every room of every hall**: a Legal-only lawyer hears "Break in 5 minutes" too. It is
+  still answered "shown in N meetings", N the halls with a room that took it, as Stagewatch counts meetings.
+- **The AI in a side room** is told its hall's Stagewatch and nodes, as a Main room's is (it was told none), and one line
+  more: "This chat is the hall's 'Legal' room, not its Main room: nobody on stage reads it." (`ai.draftReply` and
+  `ai.suggestOptions` take `where`, `lib/ai.js` `whereLine`). A draft reads only its own room's messages.
+- Tests: `test/halls.test.js`, end to end on a hall with its own Stagewatch beside a default one, and its Legal room: a
+  Member guest of Legal sees the hall's countdown and destinations and is refused a send and a proposal; a Staff account
+  given Legal is offered neither, nor is a Tech given Legal in no hall (a room given grants no `stage.send` in its hall),
+  refused both with nothing reaching either Stagewatch; a Tech of the hall given Legal sends and proposes from it to the
+  hall's Stagewatch alone, both written into Legal with the hall's link; a guest's help request in Legal heard whole on
+  Legal's pages; the halls board of the admin and of a Legal-only account showing it whole and openable, the Legal-only
+  account's board carrying no hall's key (no `hall`, nothing of the Main room's key or guest code anywhere in it), a
+  project manager's without its words and not openable, a Viewer's and a Board member's not at all; the project manager
+  answering it from the board and Legal hearing who is on the way, the Viewer and the Board member refused; the answer in
+  the hall's Stagewatch's context and not the default's; neither the request nor an action prompt asked in Legal in the
+  context posted to the hall's Stagewatch or in `GET /api/context` (the hall's help count its Main room's, none), where
+  a Main room's prompt is; the guest marking the request sorted from Legal's page by the code it joined with; the AI asked
+  in Legal (a draft and options) told the hall's Stagewatch, not the default, and the room's line, and asked in the Main
+  room told neither the line nor Legal's thread; the desk's notice in the Main room and in Legal, answered "shown in 1
+  meeting"; after a restart, the speaker's acknowledgement and the operator's decision reaching Legal's records; a hall
+  with no name added at that restart, whose Media room's request reaches the Legal-only account as "A hall with no name"
+  with no hall's key, and the admin with its key; and a second send from Legal lost when the hall's Stagewatch restarts
+  (its seq goes back), Legal's page told at once and its record read "lost" while the first keeps "done". Unit 4's test
+  of a side room's refusals is replaced, its power request and busy line kept as their own test. `test/units.test.js`: `whereLine`, its line, a room with no name, a name read by type and cut at 80, and no
+  line for a Main room or anything that does not say it is a side room. `test/catalog.test.js`: a side room's help
+  request, opened where it may be and answered alone where it may not, and Open its hall or Open its room by the room.
+  `test/menus.test.js`: the board's help objects with `canOpen` and `room`. `test/modules.test.js`: (l), the eight new
+  any-room reads with their reasons (a help request's room, the board's help, the followers of a send and a proposal,
+  the restart's two loops and the notice). The browser smoke: a side room's help request on the admin's halls board, read
+  "Side asks › Legal", counted on its hall's row, opened by Open its room (its link the room's key) and its doors in step,
+  and gone with its hall.
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md` (help in a side room, and the stage from it),
+  `docs/DESIGN.md` (fail closed: a side room no longer refuses the stage and help), `docs/NODES.md` (the notice in every
+  room, counted by halls), `docs/ANALYSIS.md` ((l): 50 calls, and this unit's readers), `SECURITY.md` (who sees a side
+  room's help request, and a hall's key only for who sees the hall), `CLAUDE.md`.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

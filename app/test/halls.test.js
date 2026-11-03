@@ -1214,46 +1214,248 @@ test('rights in a room: an account given a side room joins it backstage, posts, 
   assert.deepEqual(await emit(ana, 'admin:linkRoom', { socketId: patMain.id, targetRoom: SIDE }), { ok: false, error: 'pat signs in with an account that may not post in that room: a side room is only for the accounts it is given to.' });
 });
 
-test('a side room sends nothing to a Stagewatch and raises no help request, each refused with words and none sent to another Stagewatch; it shows its hall\'s countdown, and its pages and messages keep the laptop awake and busy', async (t) => {
+test('a side room follows its hall: its countdown, and its sends and proposals to the hall\'s Stagewatch by the seat\'s rights (a Member guest none, an account its stage.send), followed after a restart; a help request there seen whole by the room and without its words by the hall\'s crew, who answer it from the board, and by no one else; the desk\'s notice in every room, counted by halls; its drafts told their hall\'s show and the room', async (t) => {
+  // Hall A, its Legal room (its guest code on), and the accounts it is given to, written while the server is stopped (no
+  // act gives an account a room yet).
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  fs.mkdirSync(path.join(data, 'rooms'));
+  const SIDE = 'LGQ4MZP8';
+  const room = (code, name, extra = {}) => JSON.stringify({ code, name, createdAt: 1, seq: 0, settings: {}, messages: [], savedAt: 1, gone: [], ...extra });
+  fs.writeFileSync(path.join(data, 'rooms', 'HALLA1.json'), room('HALLA1', 'Hall A'));
+  fs.writeFileSync(path.join(data, 'rooms', 'HALLA1.' + SIDE + '.json'), room(SIDE, 'Legal', { settings: { codeOff: false }, guestCode: 'LEGAL2' }));
+  const swHall = await fakeStagewatch({ name: 'Hall A timer', messageId: 41 });
+  const swDef = await fakeStagewatch({ name: 'Default timer', messageId: 99 });
+  const model = await fakeModel();
+  const ENV = { ANTHROPIC_API_KEY: 'a-key-for-the-fake-model', ANTHROPIC_BASE_URL: model.url };
+  let srv = await startServer({ AGM_DATA_DIR: data, ...ENV });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await swHall.close(); await swDef.close(); await model.close(); });
+  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  const PW = 'clipboard and coffee';
+  let admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  // Tom, a tech of Hall A, Ted, a tech of no hall, and Lou, a Staff account of no hall, are given Legal; Pat manages every
+  // hall; Vic reads Hall A; Kim sits On stage in Hall A.
+  for (const [username, role, extra] of [['tom', 'tech', { halls: ['HALLA1'] }], ['ted', 'tech', { halls: [] }], ['lou', 'staff', { halls: [] }], ['pat', 'manager', {}], ['vic', 'viewer', { halls: ['HALLA1'] }], ['kim', 'staff', { halls: ['HALLA1'] }]]) {
+    assert.ok((await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: PW, ...extra }, { cookie: admin })).body.ok, username);
+  }
+  await stopServer(srv.child);
+  const file = path.join(data, 'accounts.json');
+  const given = { tom: { rooms: [SIDE] }, ted: { rooms: [SIDE] }, lou: { rooms: [SIDE] }, kim: { board: ['HALLA1'] } };
+  const giveRooms = (more) => {
+    const accounts = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const u of accounts.users) Object.assign(u, more[u.username] || {});
+    fs.writeFileSync(file, JSON.stringify(accounts));
+  };
+  giveRooms(given);
+  srv = await startServer({ AGM_DATA_DIR: data, PORT: String(srv.port), ...ENV });
+  const signIn = async (username, password = PW) => {
+    let r;
+    for (let i = 0; i < 4; i++) {
+      r = await api(srv.base, 'POST', '/api/auth/login', { username, password });
+      if (r.status !== 429 || r.body.busy) break;
+      await wait(2100);
+    }
+    assert.equal(r.status, 200, username + ' signs in: ' + JSON.stringify(r.body));
+    return r.cookie;
+  };
+  admin = await signIn('ana', 'the green room kettle');
+  const [tom, ted, lou, pat, vic, kim] = [await signIn('tom'), await signIn('ted'), await signIn('lou'), await signIn('pat'), await signIn('vic'), await signIn('kim')];
+  const ctl = await page(admin);
+  assert.ok((await emit(ctl, 'admin:settings', { stagewatchUrl: swDef.url, stagewatchKey: KEY_B })).ok);
+  assert.ok((await emit(ctl, 'hall:configure', { code: 'HALLA1', name: 'Hall A', stagewatchUrl: swHall.url, stagewatchKey: KEY_A })).ok);
+  await until(() => swHall.connected && swDef.connected, 8000, 'both Stagewatches linked');
+  // The hall's Main room may send and propose to its Stagewatch once its key is accepted and its show desk known.
+  const main = await page(admin);
+  await until(async () => { const j = await emit(main, 'join', { roomCode: 'HALLA1', as: 'account' }); return j.canSendToStage && j.canPropose && j.stage && j.stage.title === 'Hall A timer'; }, 15000, 'the Main room able to send and propose');
+  main.close();
+  const sends = () => [swHall, swDef].map((sw) => sw.requests.filter((r) => r.url.startsWith('/api/message/')).length);
+  const proposed = () => [swHall, swDef].map((sw) => sw.requests.filter((r) => r.method === 'POST' && r.url === '/api/proposals').length);
+
+  // A Member guest of Legal sees its hall's countdown and sends nothing to it: its seat holds no stage right.
+  const gus = await page();
+  const gusIn = await emit(gus, 'join', { roomCode: 'LEGAL2', name: 'Gus', role: 'research' });
+  assert.deepEqual([gusIn.ok, gusIn.role, gusIn.main, gusIn.stage && gusIn.stage.title, gusIn.canSendToStage, gusIn.canPropose], [true, 'research', false, 'Hall A timer', false, false]);
+  const gusTargets = await emit(gus, 'stage:targets', {});
+  assert.deepEqual([gusTargets.ok, gusTargets.title, gusTargets.canSend, gusTargets.canPropose], [true, 'Hall A timer', false, false], 'its hall\'s Stagewatch, and nothing it may send');
+  assert.deepEqual(await emit(gus, 'stage:send', { text: 'Five minutes' }), { ok: false, error: 'The speaker\'s screen is for the backstage team.' });
+  assert.deepEqual(await emit(gus, 'stage:propose', { text: 'Five minutes', destination: 'speaker' }), { ok: false, error: 'Proposing to the stage is for the backstage team.' });
+  // Lou, given Legal without a right to the stage, likewise; and Ted, a tech given Legal in no hall: an account sends to
+  // a hall's Stagewatch by its stage.send in that hall, which a room given to it does not grant.
+  const louIn = await emit(await page(lou), 'join', { roomCode: SIDE, as: 'account' });
+  assert.deepEqual([louIn.ok, louIn.role, louIn.canSendToStage, louIn.canPropose], [true, 'research', false, false]);
+  const tedSide = await page(ted);
+  const tedIn = await emit(tedSide, 'join', { roomCode: SIDE, as: 'account' });
+  assert.deepEqual([tedIn.ok, tedIn.role, tedIn.stage && tedIn.stage.title, tedIn.canSendToStage, tedIn.canPropose], [true, 'research', 'Hall A timer', false, false]);
+  const tedTargets = await emit(tedSide, 'stage:targets', {});
+  assert.deepEqual([tedTargets.ok, tedTargets.canSend, tedTargets.canPropose], [true, false, false]);
+  assert.deepEqual(await emit(tedSide, 'stage:send', { text: 'Five minutes' }), { ok: false, error: 'The speaker\'s screen is for the backstage team.' });
+  assert.deepEqual(await emit(tedSide, 'stage:propose', { text: 'Five minutes', destination: 'speaker' }), { ok: false, error: 'Proposing to the stage is for the backstage team.' });
+  await wait(200);
+  assert.deepEqual([sends(), proposed()], [[0, 0], [0, 0]], 'nothing reached either Stagewatch');
+
+  // Tom, given Legal and holding stage.send in Hall A, sends from Legal to Hall A's speaker's screen and proposes to its
+  // show desk; the default Stagewatch hears nothing, and both are written into Legal.
+  const tomSide = await page(tom);
+  const tomIn = await emit(tomSide, 'join', { roomCode: SIDE, as: 'account' });
+  assert.deepEqual([tomIn.ok, tomIn.role, tomIn.stage && tomIn.stage.title, tomIn.canSendToStage, tomIn.canPropose], [true, 'research', 'Hall A timer', true, true]);
+  const tomTargets = await emit(tomSide, 'stage:targets', {});
+  assert.deepEqual([tomTargets.ok, tomTargets.title, tomTargets.canSend, tomTargets.canPropose], [true, 'Hall A timer', true, true]);
+  const sent = await emit(tomSide, 'stage:send', { text: 'Clause 4 is signed' });
+  assert.deepEqual([sent.ok, sent.messageId], [true, 41], JSON.stringify(sent));
+  const asked = await emit(tomSide, 'stage:propose', { text: 'Thank the lawyers', destination: 'speaker' });
+  assert.ok(asked.ok, JSON.stringify(asked));
+  assert.deepEqual([sends(), proposed()], [[1, 0], [1, 0]], 'the hall\'s Stagewatch alone');
+  const legal = async (s) => (await emit(s, 'admin:watchRoom', { roomCode: SIDE })).messages;
+  const records = await legal(ctl);
+  const sendRecord = records.find((m) => m.stage && m.stage.ref === 41);
+  const askRecord = records.find((m) => m.proposal && m.proposal.id === asked.proposal.id);
+  assert.deepEqual([sendRecord && sendRecord.stage.link, sendRecord && sendRecord.stage.ack, askRecord && askRecord.proposal.link, askRecord && askRecord.proposal.state], ['hall:HALLA1', 'sent', 'hall:HALLA1', 'pending'], 'written into Legal, with the hall\'s link');
+
+  // A help request in Legal: Legal's pages hear it whole; the halls board shows it whole to whoever reads Legal (the admin,
+  // Lou), without its words to the hall's crew who do not (Pat), and to nobody else (Vic reads Hall A only; Kim sits On
+  // stage there). The hall's key, its Main room's address and guest code, goes only to a watcher who sees the hall: Lou's
+  // board names Hall A by its name alone.
+  const tomHears = once(tomSide, 'message');
+  const help = await emit(gus, 'message', { type: 'help', category: 'Sound', text: 'the lectern mic in Legal is dead' });
+  assert.ok(help.ok, JSON.stringify(help));
+  const heardHelp = await tomHears;
+  assert.deepEqual([heardHelp.type, heardHelp.text, heardHelp.help.state], ['help', 'the lectern mic in Legal is dead', 'open']);
+  const boardOf = async (cookie) => { const s = await page(cookie); return (await emit(s, 'board:watch', {})).board; };
+  const itemOf = (b) => b.help.find((h) => h.id === help.id);
+  const shape = (x) => x && [x.code, x.hall, x.hallName, x.roomName, x.category, x.from, x.state, x.text, x.canOpen, x.canRespond];
+  const whole = [SIDE, 'HALLA1', 'Hall A', 'Legal', 'Sound', 'Gus', 'open', 'the lectern mic in Legal is dead', true, true];
+  assert.deepEqual(shape(itemOf(await boardOf(admin))), whole, 'the admin');
+  const louBoard = await boardOf(lou);
+  assert.deepEqual(shape(itemOf(louBoard)), [SIDE, undefined, 'Hall A', 'Legal', 'Sound', 'Gus', 'open', 'the lectern mic in Legal is dead', true, true], 'Lou, who reads Legal and no hall');
+  assert.ok(!('hall' in itemOf(louBoard)), 'no hall key for Lou');
+  assert.ok(!JSON.stringify(louBoard).includes('HALLA1'), 'nothing of Main\'s key or guest code in Lou\'s board: ' + JSON.stringify(louBoard));
+  assert.deepEqual(shape(itemOf(await boardOf(pat))), [SIDE, 'HALLA1', 'Hall A', 'Legal', 'Sound', 'Gus', 'open', '', false, true], 'Pat, the hall\'s crew: no words, no way in');
+  assert.equal(itemOf(await boardOf(vic)), undefined, 'Vic, who reads Hall A alone');
+  assert.equal(itemOf(await boardOf(kim)), undefined, 'Kim, On stage in Hall A');
+  // The hall row's count is its Main room's; the board counts its rooms' requests by hall.
+  assert.equal((await boardOf(pat)).halls.find((h) => h.code === 'HALLA1').help, 0);
+  // Pat answers it from the board: Legal hears who is on the way. Vic and Kim may not.
+  const vicBoard = await page(vic);
+  assert.deepEqual(await emit(vicBoard, 'help:respond', { code: SIDE, messageId: help.id, state: 'coming' }), { ok: false, error: 'Only people in that hall can answer its help requests.' });
+  assert.deepEqual(await emit(await page(kim), 'help:respond', { code: SIDE, messageId: help.id, state: 'coming' }), { ok: false, error: 'Only people in that hall can answer its help requests.' });
+  const onWay = once(gus, 'helpUpdate');
+  assert.deepEqual(await emit(await page(pat), 'help:respond', { code: SIDE, messageId: help.id, state: 'coming' }), { ok: true });
+  assert.deepEqual([(await onWay).help.state, (await onWay).help.by], ['coming', 'pat']);
+  // Recorded in the events of the hall's Stagewatch's context, never the default's.
+  const helpEvent = (sw) => sw.requests.some((r) => r.url === '/api/peers/context' && r.body.includes('a help request was answered'));
+  await until(() => helpEvent(swHall), 12000, 'the answer in the hall\'s Stagewatch\'s context');
+  assert.equal(helpEvent(swDef), false, 'and not in the default\'s');
+
+  // Nothing of Legal's is in a context: neither its help request (the hall's count is its Main room's, none) nor an action
+  // prompt asked there, in what the hall's Stagewatch is posted or in GET /api/context; a prompt of the Main room is.
+  assert.ok((await emit(tomSide, 'message', { type: 'action', text: 'Sign the Legal annex?', options: ['Yes', 'No'] })).ok);
+  const anaMain = await page(admin);
+  assert.ok((await emit(anaMain, 'join', { roomCode: 'HALLA1', as: 'account' })).ok);
+  assert.ok((await emit(anaMain, 'message', { type: 'action', text: 'Ready for the vote?', options: ['Yes', 'No'] })).ok);
+  const posted = () => swHall.requests.filter((r) => r.url === '/api/peers/context').map((r) => r.body);
+  await until(() => posted().some((b) => b.includes('Ready for the vote?')), 8000, 'the Main room\'s prompt in the hall\'s Stagewatch\'s context');
+  const node = (await api(srv.base, 'GET', '/api/context', undefined, { cookie: admin })).body;
+  assert.ok(JSON.stringify(node).includes('Ready for the vote?'), 'the node\'s context has the Main room\'s prompt');
+  for (const [said, what] of [[posted().find((b) => b.includes('Ready for the vote?')), 'the hall\'s Stagewatch\'s context'], [JSON.stringify(node), 'GET /api/context']]) {
+    assert.ok(!said.includes('Sign the Legal annex') && !said.includes('lectern mic'), what + ' carries nothing of Legal: ' + said);
+    const ctx = JSON.parse(said);
+    assert.ok(!ctx.items.some((i) => i.id === 'help') && !/help request/.test(ctx.headline), what + ' counts no help: the hall\'s Main room has none open');
+  }
+
+  // Gus marks his own request sorted from Legal's page, which names the room by the code it joined with.
+  const sorted = once(tomSide, 'helpUpdate');
+  assert.deepEqual(await emit(gus, 'help:respond', { code: 'LEGAL2', messageId: help.id, state: 'resolved' }), { ok: true });
+  assert.deepEqual([(await sorted).help.state, (await sorted).help.by], ['resolved', 'Gus']);
+  assert.equal(itemOf(await boardOf(admin)), undefined, 'gone from the board');
+
+  // The AI, asked in Legal, is told its hall's Stagewatch and that this is Legal, which nobody on stage reads; asked in
+  // the Main room, nothing of the room.
+  const LINE = 'This chat is the hall\'s \'Legal\' room, not its Main room: nobody on stage reads it.';
+  const drafted = await emit(tomSide, 'ai:draft', { question: 'Is clause 4 signed?' });
+  assert.ok(drafted.ok, JSON.stringify(drafted));
+  const optioned = await emit(tomSide, 'ai:options', { prompt: 'Sign clause 5 now?' });
+  assert.ok(optioned.ok, JSON.stringify(optioned));
+  const tomMain = await page(tom);
+  assert.ok((await emit(tomMain, 'join', { roomCode: 'HALLA1', as: 'account' })).ok);
+  assert.ok((await emit(tomMain, 'ai:draft', { question: 'Is clause 4 signed?' })).ok);
+  const [legalDraft, legalOptions, mainDraft] = model.bodies.slice(-3).map((b) => JSON.parse(b).messages[0].content);
+  for (const [said, what] of [[legalDraft, 'Legal\'s draft'], [legalOptions, 'Legal\'s options']]) {
+    assert.ok(said.includes(LINE), what + ' names its room: ' + said.slice(0, 200));
+    assert.ok(said.includes('Hall A timer') && !said.includes('Default timer'), what + ' is told its hall\'s Stagewatch: ' + said);
+    assert.ok(said.includes('the lectern mic in Legal is dead'), what + ' reads Legal\'s thread');
+  }
+  assert.ok(mainDraft.includes('Hall A timer') && !mainDraft.includes(LINE) && !mainDraft.includes('the lectern mic in Legal is dead') && !mainDraft.includes('Sign the Legal annex'), 'the Main room\'s draft: its hall\'s show, no room line, nothing of Legal');
+
+  // The show desk's notice lands in every room of the hall, and is answered as shown in one meeting: a hall.
+  const ctx = await emit(ctl, 'admin:settings');
+  const notice = swHall.add({ line: 'notice Break in 5 minutes', state: 'approved', decidedBy: 'SM', from: { t: 'main', id: 'swdesk', name: 'Desk' }, target: { t: 'messenger', id: ctx.nodeId, name: 'AGMessage' } });
+  const tomHearsNotice = new Promise((resolve) => { tomSide.on('system', (m) => { if (/From the show desk/.test(m.text || '')) resolve(m.text); }); });
+  await until(() => swHall.proposals.get(notice).state === 'done', 20000, 'the notice reported');
+  assert.equal(swHall.proposals.get(notice).words, 'shown in 1 meeting');
+  assert.equal(await tomHearsNotice, '📣 From the show desk (approved by SM): Break in 5 minutes');
+  const noticed = async (code) => (await emit(ctl, 'admin:watchRoom', { roomCode: code })).messages.filter((m) => m.text === '📣 From the show desk (approved by SM): Break in 5 minutes').length;
+  assert.deepEqual([await noticed('HALLA1'), await noticed(SIDE)], [1, 1], 'in the Main room and in Legal');
+
+  // AGMessage restarts before the speaker acknowledges and before the operator decides: both are still followed in Legal.
+  // While it is stopped, a hall with no name is added beside Hall A, its Media room given to Lou as well.
+  sockets.forEach((s) => s.close());
+  sockets.length = 0;
+  await stopServer(srv.child);
+  const MEDIA = 'MDQ7KXR2';
+  fs.writeFileSync(path.join(data, 'rooms', 'HALLB2.json'), room('HALLB2', ''));
+  fs.writeFileSync(path.join(data, 'rooms', 'HALLB2.' + MEDIA + '.json'), room(MEDIA, 'Media', { settings: { codeOff: false }, guestCode: 'MEDIA3' }));
+  giveRooms({ lou: { rooms: [SIDE, MEDIA] } });
+  srv = await startServer({ AGM_DATA_DIR: data, PORT: String(srv.port), ...ENV });
+  await until(() => swHall.connected, 8000, 'linked again after the restart');
+  admin = await signIn('ana', 'the green room kettle');
+  const ctl2 = await page(admin);
+  await wait(400);
+  swHall.frame({ messageId: 41, messageAck: 'done', messageAckBy: 'Speaker A' });
+  swHall.approve(asked.proposal.id);
+  await until(async () => { const m = await legal(ctl2); return m.find((x) => x.stage && x.stage.ref === 41).stage.ack === 'done' && m.find((x) => x.proposal && x.proposal.id === asked.proposal.id).proposal.state === 'approved'; }, 10000, 'the speaker\'s acknowledgement and the operator\'s decision in Legal');
+  const after = await legal(ctl2);
+  assert.deepEqual([after.find((x) => x.stage && x.stage.ref === 41).stage.by, after.find((x) => x.proposal && x.proposal.id === asked.proposal.id).proposal.by], ['Speaker A', 'Show caller']);
+
+  // A help request in the nameless hall's Media room: Lou's board names its hall as one with no name, never by its key, and
+  // carries no hall's key at all; the admin, who sees the hall, is told its key.
+  const guest = await page();
+  assert.ok((await emit(guest, 'join', { roomCode: 'MEDIA3', name: 'Mo', role: 'research' })).ok);
+  const mediaHelp = await emit(guest, 'message', { type: 'help', category: 'Vision', text: 'the Media room projector is off' });
+  assert.ok(mediaHelp.ok, JSON.stringify(mediaHelp));
+  const mediaOf = (b) => b.help.find((h) => h.id === mediaHelp.id);
+  const louAgain = await boardOf(await signIn('lou'));
+  assert.deepEqual(shape(mediaOf(louAgain)), [MEDIA, undefined, 'A hall with no name', 'Media', 'Vision', 'Mo', 'open', 'the Media room projector is off', true, true]);
+  assert.ok(!/HALLA1|HALLB2/.test(JSON.stringify(louAgain)), 'no hall\'s key in Lou\'s board: ' + JSON.stringify(louAgain));
+  assert.deepEqual(shape(mediaOf(await boardOf(admin))), [MEDIA, 'HALLB2', 'HALLB2', 'Media', 'Vision', 'Mo', 'open', 'the Media room projector is off', true, true]);
+
+  // Tom sends from Legal again, and the hall's Stagewatch restarts before the speaker sees it (its seq goes back): the send
+  // can no longer be followed, and Legal's pages and records say so at once; the one acknowledged keeps its acknowledgement.
+  swHall.frame({ seq: 10, messageId: 0, messageAck: '', messageAckBy: '' });
+  const tomAgain = await page(await signIn('tom'));
+  assert.ok((await emit(tomAgain, 'join', { roomCode: SIDE, as: 'account' })).ok);
+  await wait(150);   // the frame of that seq is in before the send
+  const again = await emit(tomAgain, 'stage:send', { text: 'Clause 5 is signed' });
+  assert.deepEqual([again.ok, again.messageId], [true, 41], JSON.stringify(again));
+  const lost = new Promise((resolve) => { tomAgain.on('stageAck', (a) => { if (a.stage.ack === 'lost') resolve(a.stage); }); });
+  swHall.frame({ seq: 1 });
+  assert.ok(await Promise.race([lost, wait(3000)]), 'Legal told the send is lost');
+  const acks = (await legal(ctl2)).filter((x) => x.stage && x.stage.ref === 41).map((x) => [(/Clause \d/.exec(x.text) || [''])[0], x.stage.ack]);
+  assert.deepEqual(acks, [['Clause 4', 'done'], ['Clause 5', 'lost']], JSON.stringify(acks));
+});
+
+test('a side room\'s pages and messages keep the laptop awake and busy', async (t) => {
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
   fs.mkdirSync(path.join(data, 'rooms'));
   const room = (code, name) => JSON.stringify({ code, name, createdAt: 1, seq: 0, settings: {}, messages: [], savedAt: 1, gone: [] });
   fs.writeFileSync(path.join(data, 'rooms', 'HALLA1.json'), room('HALLA1', 'Hall A'));
   fs.writeFileSync(path.join(data, 'rooms', 'HALLA1.LGQ4MZP8.json'), room('LGQ4MZP8', 'Legal'));
   let srv = await startServer({ AGM_DATA_DIR: data });
-  const swHall = await fakeStagewatch({ name: 'Hall A timer' });
-  const swDef = await fakeStagewatch({ name: 'Default timer' });
   const sockets = [];
-  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await swHall.close(); await swDef.close(); });
-  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
   const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
-  const ctl = await page(admin);
-  assert.ok((await emit(ctl, 'admin:settings', { stagewatchUrl: swDef.url, stagewatchKey: KEY_B })).ok);
-  assert.ok((await emit(ctl, 'hall:configure', { code: 'HALLA1', name: 'Hall A', stagewatchUrl: swHall.url, stagewatchKey: KEY_A })).ok);
-  await until(() => swHall.connected && swDef.connected, 8000, 'both Stagewatches linked');
-  // The hall's Main room may send to its Stagewatch: what a side room is refused is the room's, never the link's.
-  const main = await page(admin);
-  await until(async () => { const j = await emit(main, 'join', { roomCode: 'HALLA1', as: 'account' }); return j.canSendToStage && j.stage && j.stage.title === 'Hall A timer'; }, 8000, 'the Main room able to send');
-  main.close();
-
-  const SIDE = 'LGQ4MZP8';
-  const SIDE_STAGE = 'This room sends nothing to the speaker\'s screen: send it from the hall\'s Main room.';
-  const ana = await page(admin);
-  const j = await emit(ana, 'join', { roomCode: SIDE, as: 'account' });
-  assert.deepEqual([j.ok, j.stage && j.stage.title, j.canSendToStage, j.canPropose], [true, 'Hall A timer', false, false], 'its hall\'s countdown, and nothing to send');
-  const heard = once(ana, 'stage');
-  swHall.frame({ text: '04:59', seconds: 299 });
-  assert.equal((await heard).title, 'Hall A timer', 'its hall\'s frames reach it');
-  const sends = () => [swHall, swDef].map((sw) => sw.requests.filter((r) => r.url.startsWith('/api/message/') || (r.method === 'POST' && r.url === '/api/proposals')).length);
-  assert.deepEqual(await emit(ana, 'stage:targets', {}), { ok: false, error: SIDE_STAGE });
-  assert.deepEqual(await emit(ana, 'stage:send', { text: 'Five minutes' }), { ok: false, error: SIDE_STAGE });
-  assert.deepEqual(await emit(ana, 'stage:propose', { text: 'Five minutes', destination: 'speaker' }), { ok: false, error: SIDE_STAGE });
-  assert.deepEqual(await emit(ana, 'message', { type: 'help', category: 'Sound', text: 'no signal' }), { ok: false, error: 'Help requests are asked from the hall\'s Main room, where its crew answers them.' });
-  await wait(200);
-  assert.deepEqual(sends(), [0, 0], 'nothing reached either Stagewatch');
-  const since = (await emit(ana, 'join', { roomCode: SIDE, as: 'account', since: j.seq })).ops;
-  assert.deepEqual(since.map((o) => [o.o, o.m.type, !!(o.m.stage || o.m.proposal)]), [['add', 'system', false]], 'nothing written in the room but its join line: ' + JSON.stringify(since));
-
+  const ana = await connect(srv.base, admin);
+  sockets.push(ana);
+  assert.ok((await emit(ana, 'join', { roomCode: 'LGQ4MZP8', as: 'account' })).ok);
   // A meeting in the side room alone is a live hall: its page is counted where the power request reads the halls.
   let power;
   await until(async () => { power = (await api(srv.base, 'GET', '/api/health', undefined, { cookie: admin })).body.power; return power.what.pages === 1; }, 5000, 'the side room\'s page counted: ' + JSON.stringify(power));

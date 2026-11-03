@@ -1822,6 +1822,16 @@ test('ai: thread text is compact and labelled', () => {
   assert.equal(held[1], '[14:06] Chair (board): Thanks');
 });
 
+test('ai: a draft in a hall\'s other room is told which room it is, and that nobody on stage reads it; a Main room\'s is told nothing', () => {
+  assert.equal(ai.whereLine({ main: false, room: 'Legal' }), 'This chat is the hall\'s \'Legal\' room, not its Main room: nobody on stage reads it.');
+  assert.equal(ai.whereLine({ main: false, room: '  Media \n team ' }), 'This chat is the hall\'s \'Media team\' room, not its Main room: nobody on stage reads it.', 'one line, its spaces folded');
+  assert.equal(ai.whereLine({ main: false, room: '' }), 'This chat is one of the hall\'s other rooms, not its Main room: nobody on stage reads it.', 'a room with no name');
+  assert.equal(ai.whereLine({ main: false, room: 7 }), 'This chat is one of the hall\'s other rooms, not its Main room: nobody on stage reads it.', 'a name read by its type');
+  // The Main room, and anything that does not say it is a side room, is the room the Board reads: no line.
+  for (const where of [{ main: true, room: 'Hall 2' }, undefined, null, 'Legal', {}, { main: 'false', room: 'Legal' }, { room: 'Legal' }]) assert.equal(ai.whereLine(where), '', JSON.stringify(where));
+  assert.equal(ai.whereLine({ main: false, room: 'x'.repeat(200) }).length, 'This chat is the hall\'s \'\' room, not its Main room: nobody on stage reads it.'.length + 80, 'a name cut at 80 characters');
+});
+
 test('ai: the SDK is required at the first draft asked with a key, never as the server loads lib/ai.js, so a start goes without its cost', () => {
   // In a process of its own, whose module cache this file's other tests have not touched. The draft is asked of a closed
   // port, and the process ends before anything is sent.

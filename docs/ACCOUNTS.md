@@ -128,7 +128,12 @@ whose hall the account's On stage halls name, where it may post (`rbac.roomRoleF
 holds any seat. No page gives an account On stage halls yet. An account answers a room's help requests, from its hall
 page or the halls board, only where it may post and does not sit On stage (`rbac.answersHelp`, by the room, which the
 halls board's On my way and Resolved read too): a Board member of a hall will answer none of that hall's requests from
-any page, its own Resolved excepted.
+any page, its own Resolved excepted. A side room's help request (Legal) is answered by those who may post there, and by
+the hall's crew, those who answer its Main room's requests: the halls board shows it whole to an account that may read
+the room, and to the hall's crew who may not with its category, who asked and its state, never its words, and to nobody
+else; an account given the side room alone is told its hall by name, never by the hall's key. From any room of a hall,
+an account sends to the hall's speaker's screen and its show desk where it holds `stage.send` in that hall; a side
+room's guest never does.
 
 Forwarding keeps two rules of the room a message comes from: a file moves only from a seat that may share files there
 ("Files are moved by the backstage team."), and a file or a question goes only into a room where the forwarder sits

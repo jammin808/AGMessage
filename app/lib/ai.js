@@ -78,6 +78,17 @@ async function ask(apiKey, system, user, schema, effort, maxTokens, signal) {
   }
 }
 
+/**
+ * Where a draft is asked, in one line, or '' in a hall's Main room (the room the Board reads): a hall's other room
+ * (Legal, Media) is named, and said to be read by nobody on stage, so a draft there is not written for the Board. `where`
+ * is `{main, room}`, the room's kind and name; anything else is read as the Main room's.
+ */
+function whereLine(where) {
+  if (!where || typeof where !== 'object' || where.main !== false) return '';
+  const name = typeof where.room === 'string' ? where.room.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+  return (name ? 'This chat is the hall\'s \'' + name + '\' room' : 'This chat is one of the hall\'s other rooms') + ', not its Main room: nobody on stage reads it.';
+}
+
 /** How the conversation's lines name their writers' seats, in the words the prompts use. */
 const SEATS = 'In the conversation, (board) marks a Board member on stage, (research) the backstage team and (observer) someone who only reads.';
 
@@ -92,7 +103,7 @@ them as evidence only where they matter to the answer (for example how much time
 nothing, say nothing about them, and never guess a value they don't give.
 ${SEATS}`;
 
-async function draftReply(apiKey, { messages, question, docName, docText, instruction, show }, signal) {
+async function draftReply(apiKey, { messages, question, docName, docText, instruction, show, where }, signal) {
   const schema = {
     type: 'object', additionalProperties: false, required: ['draft', 'gaps', 'confidence'],
     properties: {
@@ -102,6 +113,7 @@ async function draftReply(apiKey, { messages, question, docName, docText, instru
     },
   };
   const user = [
+    ...(whereLine(where) ? [whereLine(where), ''] : []),
     'Conversation so far:', threadText(messages), '',
     question ? 'The question to answer: ' + question : 'Answer the latest question from the Board.',
     instruction ? 'Backstage team note: ' + instruction : '',
@@ -137,12 +149,12 @@ async function summarise(apiKey, { messages, roomName }, signal) {
   return { headline: String(j.headline || '').slice(0, 300), decisions: clean(j.decisions), open: clean(j.open), actions: clean(j.actions) };
 }
 
-async function suggestOptions(apiKey, { prompt, messages, show }, signal) {
+async function suggestOptions(apiKey, { prompt, messages, show, where }, signal) {
   const schema = {
     type: 'object', additionalProperties: false, required: ['options'],
     properties: { options: { type: 'array', items: { type: 'string' } } },
   };
-  const user = 'Conversation:\n' + threadText(messages, 20) + (show ? '\n\nShow network (facts): ' + show : '') + '\n\nThe backstage team is asking the Board: ' + prompt +
+  const user = (whereLine(where) ? whereLine(where) + '\n\n' : '') + 'Conversation:\n' + threadText(messages, 20) + (show ? '\n\nShow network (facts): ' + show : '') + '\n\nThe backstage team is asking the Board: ' + prompt +
     '\nSuggest 2 to 4 short tap-to-answer options (max 4 words each) a Board member on stage can choose.';
   const r = await ask(apiKey, 'You write tap-to-answer options for a Board member on stage. Short, distinct, neutral. ' + SEATS, user, schema, 'low', 1000, signal);
   if (r.error) return r;
@@ -150,4 +162,4 @@ async function suggestOptions(apiKey, { prompt, messages, show }, signal) {
   return { options: [...new Set(opts)].slice(0, 4) };
 }
 
-module.exports = { MODEL, draftReply, summarise, suggestOptions, threadText };
+module.exports = { MODEL, draftReply, summarise, suggestOptions, threadText, whereLine };

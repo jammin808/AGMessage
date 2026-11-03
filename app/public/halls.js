@@ -15,7 +15,7 @@
   let me = null;
   let halls = [];          // from /api/halls: code, name, can{…}
   let live = {};           // code -> the board's live row (stage, last, help, displays, people)
-  let helps = [];          // open help requests across the halls this account sees
+  let helps = [];          // open help requests across the rooms this account reads, and its halls' side rooms' for their crew
   let canManageHalls = false;
   let canDrive = false;    // the board's: Show network lists a node this account may drive
 
@@ -102,10 +102,11 @@
   }
 
   // The way into a hall, as this account may use it: backstage where it may post, read only where it may not (the
-  // server seats it by its rights either way; the page is built for the role in its link).
+  // server seats it by its rights either way; the page is built for the role in its link). A side room, by its key: the
+  // server seats it there, and the page opens again with that seat once if it differs.
   function hallHref(code) {
     const h = halls.find((x) => x.code === code);
-    return '/app.html?' + new URLSearchParams({ code, as: 'account', role: h && h.can.post ? 'research' : 'observer' }).toString();
+    return '/app.html?' + new URLSearchParams({ code, as: 'account', role: !h || h.can.post ? 'research' : 'observer' }).toString();
   }
 
   /** Set a part's markup only when it changed, so nothing in it is drawn again for nothing. */
@@ -132,7 +133,8 @@
     const st = l.stage || null;
     const state = stageState(st);
     li.dataset.state = state;
-    const helpOpen = helps.filter((x) => x.code === h.code).length;
+    // Every open request of the hall's rooms this account is shown, its side rooms' too.
+    const helpOpen = helps.filter((x) => (x.hall || x.code) === h.code).length;
     const timeHtml = st && st.text ? esc(st.text) : '--:--';
     const titleHtml = st && st.title ? esc(st.title) : '';
     // A chip's state is its words as well as its mark: in its title for a pointer, beside its name for a screen reader.
@@ -271,10 +273,15 @@
   $('networkBtn').addEventListener('click', openNetwork);
   $('networkClose').addEventListener('click', () => $('networkDialog').close());
 
-  /** A help request as the catalogue reads it, by its key ('<hall>|<id>'): its hall, id, state and whether this account answers it. */
+  /** Where a help request is: its hall's name, and a side room's after it ("Hall 2 › Legal"). */
+  const whereOf = (x) => (x.hallName || x.hall || x.code) + (x.roomName ? ' › ' + x.roomName : '');
+  /**
+   * A help request as the catalogue reads it, by its key ('<room>|<id>'): its room's key, id, state, whether this account
+   * answers it and may open its room, where it is, and whether that is a side room (`room`, its name; '' for Main).
+   */
   function helpObject(key) {
     const x = helps.find((h) => h.code + '|' + h.id === key);
-    return x ? { code: x.code, id: x.id, state: x.state, canRespond: !!x.canRespond, hall: x.hallName || x.code, category: x.category } : null;
+    return x ? { code: x.code, id: x.id, state: x.state, canRespond: !!x.canRespond, canOpen: !!x.canOpen, hall: whereOf(x), room: x.roomName || '', category: x.category } : null;
   }
   /** The open help requests, each kept by its key and drawn again in place: its words, its answers and its ⋯. */
   function renderHelp() {
@@ -293,17 +300,22 @@
         const where = document.createElement('span'); where.className = 'help-where';
         const what = document.createElement('span'); what.className = 'help-what';
         const who = document.createElement('span'); who.className = 'help-who';
-        const open = document.createElement('a'); open.className = 'btn small help-open'; open.dataset.objectLink = '1'; open.textContent = 'Open its hall';
+        const open = document.createElement('a'); open.className = 'btn small help-open'; open.dataset.objectLink = '1';
         const held = document.createElement('span'); held.className = 'help-held'; held.hidden = true;
         const bar = document.createElement('span'); bar.className = 'obj-bar';
         li.append(where, what, who, open, held, bar);
       }
       const [where, what, who, open, held, bar] = li.children;
       li.dataset.state = x.state;
-      if (where.textContent !== (x.hallName || x.code)) where.textContent = x.hallName || x.code;
+      if (where.textContent !== whereOf(x)) where.textContent = whereOf(x);
+      // A side room's request reaches the hall's crew who may not read the room without its words: its category says what.
       put(what, '<strong>' + esc(x.category) + '</strong> ' + esc(x.text));
       const whoWords = x.from + ' · ' + AGM.ago(x.at) + (heldWords(x) ? ' · ' + heldWords(x) : '') + (x.by ? ' · ' + x.by + (x.state === 'coming' ? ' is on the way' : '') : '');
       if (who.textContent !== whoWords) who.textContent = whoWords;
+      // The way into its room, only where this account may open it (a side room's crew answer from here).
+      open.hidden = !x.canOpen;
+      const openWords = x.roomName ? 'Open its room' : 'Open its hall';
+      if (open.textContent !== openWords) open.textContent = openWords;
       const href = hallHref(x.code);
       if (open.getAttribute('href') !== href) open.setAttribute('href', href);
       // An answer held by the outbox until the server has it says so beside the answers.
@@ -322,7 +334,7 @@
     return 'written ' + t(x.at - x.held * 1000) + ' · sent ' + t(x.at) + ' (offline)';
   }
   // An answer to a help request is held by the outbox until the server has it (its button marked ◷ meanwhile).
-  const heldAnswers = new Map();   // '<hall>|<id>' -> the state this person's held answer says
+  const heldAnswers = new Map();   // '<room>|<id>' -> the state this person's held answer says
   Object.assign(RUN, {
     'help.respond': (o) => AGM.outbox.hold('help:respond', { code: o.code, messageId: o.id, state: 'coming' }),
     'help.resolve': (o) => AGM.outbox.hold('help:respond', { code: o.code, messageId: o.id, state: 'resolved' }),

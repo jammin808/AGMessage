@@ -325,8 +325,8 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   assert.deepEqual(Object.fromEntries(Object.entries(seats.accounts).map(([k, v]) => [k, [v.f.manageUsers, v.f.auditRead, v.f.auditExport, v.f.theAdmin]])),
     { staff: [false, false, false, false], manager: [false, true, false, false], usersManager: [true, true, false, false] }, 'the Accounts page\'s rights, from /api/auth/me and /api/admin/me');
   objects.hall = seats.board.viewer.board.halls.map((h) => ({ code: h.code, name: h.name || h.code, guestCode: h.guestCode }));
-  objects.help = seats.board.viewer.board.help.map((x) => ({ code: x.code, id: x.id, state: x.state, canRespond: !!x.canRespond, hall: x.hallName || x.code, category: x.category }));
-  assert.deepEqual(objects.help.map((x) => x.canRespond), [false], 'a Viewer answers no help request: the board says so');
+  objects.help = seats.board.viewer.board.help.map((x) => ({ code: x.code, id: x.id, state: x.state, canRespond: !!x.canRespond, canOpen: !!x.canOpen, hall: x.hallName || x.code, room: x.roomName || '', category: x.category }));
+  assert.deepEqual(objects.help.map((x) => [x.canRespond, x.canOpen]), [[false, true]], 'a Viewer answers no help request, and opens the hall it reads: the board says so');
   const users = (await api(base, 'GET', '/api/users', undefined, { cookie: root })).body.users;
   const kimsView = (await api(base, 'GET', '/api/users', undefined, { cookie: kim })).body.users;
   objects.account = users.map((u) => ({ id: u.id, name: u.name, username: u.username, disabled: !!u.disabled, locked: (kimsView.find((x) => x.id === u.id) || {}).locked || '', self: false }));
