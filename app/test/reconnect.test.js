@@ -70,12 +70,13 @@ function rig(opts = {}) {
   const win = page({});
   const c = clock();
   let wake = null;
-  const rc = win.AGM.reconnect.create({ now: c.now, setTimeout: c.setTimeout, clearTimeout: c.clearTimeout, onWake: (fn) => { wake = fn; } });
+  let park = null;
+  const rc = win.AGM.reconnect.create({ now: c.now, setTimeout: c.setTimeout, clearTimeout: c.clearTimeout, onWake: (fn) => { wake = fn; }, onPark: (leave, back) => { park = { leave, back }; } });
   const s = socket();
   const strip = { textContent: '', hidden: true };
   const told = [];
   const conn = rc.attach(s, { strip, onChange: (st) => told.push(st), ...opts });
-  return { win, c, s, strip, told, conn, wake: () => wake(), last: () => told[told.length - 1] };
+  return { win, c, s, strip, told, conn, wake: () => wake(), leave: () => park.leave(), back: () => park.back(), last: () => told[told.length - 1] };
 }
 const BUSY = (n) => 'Busy — trying again in ' + n + ' s.';
 const DOWN = 'Reconnecting… what you write waits here until we\'re back.';
@@ -281,6 +282,44 @@ test('reconnect: a page the server sent away, or that closed its own socket, is 
   }
 });
 
+test('reconnect: a page its tab leaves closes its socket, so the server hears it go then (a page the browser keeps is frozen with its connection open), and connects again when it is shown again; one with no connection of its own to close is left as it is', () => {
+  const t = rig({ join: true, down: true });
+  t.s.up(); t.conn.joined();
+  t.leave();
+  assert.deepEqual(t.s.calls, ['disconnect'], 'closed as its tab leaves it');
+  t.s.drop('io client disconnect');   // Socket.IO's word for a socket its page closed
+  t.leave();
+  assert.deepEqual(t.s.calls, ['disconnect'], 'closed once');
+  t.c.advance(10_000);
+  assert.deepEqual([t.last().stopped, t.strip.hidden], [true, true], 'kept by the browser, it says nothing of reconnecting');
+  t.back();
+  assert.deepEqual([t.s.calls, t.last().stopped], [['disconnect', 'connect'], false], 'shown again: it connects again');
+  t.back();
+  assert.deepEqual(t.s.calls, ['disconnect', 'connect'], 'once');
+  t.c.advance(2000);
+  assert.equal(t.strip.textContent, DOWN, 'not back in 2 s: said as after a drop');
+  t.s.up(); t.conn.joined();
+  assert.deepEqual([t.last().back, t.strip.hidden], [true, true], 'back at its join\'s answer');
+
+  // Shown again however it comes back (visibilitychange to visible, before the cache's pageshow): it connects again, once.
+  t.leave();
+  t.s.drop('io client disconnect');
+  t.wake();
+  t.back();
+  assert.deepEqual(t.s.calls, ['disconnect', 'connect', 'disconnect', 'connect']);
+
+  // A page the server sent away, one that closed its own socket, and one waiting out a refusal hold no connection to close:
+  // nothing is closed, and nothing opened again when the tab shows them.
+  for (const end of [(s) => { s.active = false; s.drop('io server disconnect'); }, (s) => { s.active = false; s.drop('io client disconnect'); }, (s) => { s.refused('Too many connections — wait a moment.', { retryMs: 3000 }); }]) {
+    const u = rig({ join: true, down: true });
+    u.s.up(); u.conn.joined();
+    end(u.s);
+    u.leave();
+    u.back();
+    assert.deepEqual(u.s.calls, [], 'nothing closed, nothing opened');
+  }
+});
+
 test('reconnect: a first load that cannot connect says so as a drop does', () => {
   const t = rig({ join: true, down: true });
   t.c.advance(2000);
@@ -310,6 +349,15 @@ test('reconnect: the page\'s own instance hears visibilitychange to visible and 
   assert.deepEqual(s.calls, ['disconnect', 'connect'], 'shown again');
   listeners.window.online();
   assert.deepEqual(s.calls, ['disconnect', 'connect', 'disconnect', 'connect'], 'online again');
+  // Its tab leaves it (pagehide): closed. Shown again by a load of its own (pageshow, not persisted): nothing; from the
+  // back-forward cache (persisted): connected again.
+  s.up();
+  listeners.window.pagehide({ persisted: true });
+  assert.deepEqual(s.calls.slice(4), ['disconnect'], 'left');
+  listeners.window.pageshow({ persisted: false });
+  assert.deepEqual(s.calls.slice(4), ['disconnect'], 'a load of its own: nothing');
+  listeners.window.pageshow({ persisted: true });
+  assert.deepEqual(s.calls.slice(4), ['disconnect', 'connect'], 'shown again from the cache');
 });
 
 // ---------------------------------------------------------------- a page on another build (the page's half)

@@ -23,7 +23,12 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   never sent out with the guests. The **halls board** shows every hall an account may see — countdown, who is in, the
   last message, open help requests, its screens and its Patterns / PlayMap — live; a hall's name opens its Main room, and
   each of its side rooms the account may enter is a button on its row ("Legal 2 in"). Rooms an account is given in halls
-  it does not see are listed under **Your rooms**, by their hall's name. **Help requests** go in two taps
+  it does not see are listed under **Your rooms**, by their hall's name. An account with one room alone, and nothing
+  else to do on the board, goes straight into it on sign-in; each room opens seated as the server seats it (a Board
+  member On stage at once). **Rooms:** a hall page's header names its room ("Hall 2 › Legal") and, with two rooms or more,
+  a **switcher** under it moves between the hall's rooms the person may enter, keeping what they wrote and had not sent;
+  a room's right-click offers Open in a new tab, Copy link and Copy guest code. Moving between a hall's rooms writes no
+  "joined" or "left" line in either room; a second device or tab opened in another room is said there. **Help requests** go in two taps
   (Help, then Sound, Vision, Lighting, Stage, Presenter, IT / network or Something else), from any room, and stay red
   until someone is on the way and on the board until resolved. A side room's request is on the board whole for those who
   read the room, and for the hall's crew without its words ("Hall 2 › Legal · Sound"), who answer it from there. The asker's Help button says what happened ("■ Help asked", "▶ Ana is on

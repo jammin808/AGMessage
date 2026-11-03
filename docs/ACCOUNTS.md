@@ -94,7 +94,16 @@ simple view On stage and the full view elsewhere) and stay open; any other chang
 with the rights it has now. `/api/halls` gives each hall's row the seat the account joins its Main room with (`seat`) and
 the hall's side rooms it may enter (`rooms`, each with its key, name, people, guest code where it may know it, whether the
 code admits and its seat there), and lists apart the side rooms it may enter in a hall it does not see, by that hall's
-name and never its key; the halls board does the same (`rooms` on each row, `yourRooms` apart).
+name and never its key; the halls board does the same (`rooms` on each row, `yourRooms` apart). Each way in carries that
+seat, so a Board account's hall opens On stage at once. An account that may enter one room alone, and has nothing else to
+do on the halls page (it sets no halls up, manages no accounts, reads no audit log, is not the admin, and is not a
+hall's crew answering the help of a side room of it the account is not given, which comes to it on the board), is taken
+straight into it there; the hall page's way back (`/halls.html?stay=1`) stays on the board. A hall page is told its hall
+(the join's `hall`, `hallName` and `rooms`): the hall's key only for an account that sees the hall, or the admin, never
+for one given a side room alone or a code guest; its name; and, for an account's page, the hall's rooms the account may
+enter, each with its seat there, which its switcher moves between, told again when a room is made, renamed or removed or
+the hall is renamed (`rooms:changed`). A code page (a guest's, and the laptop's token admin's own) and the support view
+move nowhere.
 
 **Who sets rooms up.** Making a room beside a hall (`room:create`), renaming a room (`room:update`: a hall's Main room
 renamed is the hall renamed) and reading a room's settings (`room:settings`) are `halls.manage`'s and the admin's, as a
@@ -153,6 +162,10 @@ the admin page's room list changes a code guest's role and refuses an account's 
 lets a code guest forward into a hall, and is refused for an account that may not post there. An account with a hall
 open on a laptop and a phone (or a guest with it open in two tabs) is one person there: listed, announced and counted
 once, "left" only when the last page closes, and the room list's role, link and logout reach every one of those pages.
+A move between a hall's rooms (the switcher: the page left goes, and the next joins another room of the hall within the
+8 s grace) writes no "joined" or "left" line in either room; a page still open in another room is no move, so a second
+device or tab in Legal is said there as it joins and as it leaves. A page its tab leaves closes its connection then, so
+the room it left lists the person no longer at once, even where the browser keeps that page to show again.
 A locked hall's invite is for people who join later: a code guest already seated there keeps the seat while another of
 their pages is open and for the few seconds before "left" (Wi-Fi drops, the page's reload after the admin changes their
 role), under the same name and role; after the admin logs them out it is gone. The seat also holds across the watchdog's

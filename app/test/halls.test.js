@@ -1743,3 +1743,129 @@ test('rooms are made, renamed, reset and removed by those who set halls up; a si
   assert.deepEqual(after.rooms.find((r) => r.code === hallA).side.map((x) => [x.key, x.name]), [[LEGAL, 'Legal team']]);
   assert.deepEqual(accounts().tom, { halls: [hallA], rooms: [LEGAL], board: [] });
 });
+
+test('the room choice and the switcher: a page is told its hall and the rooms its person may move between, each by the seat it would take; a code page moves nowhere; a move between rooms of one hall is said in neither, and leaving the hall is said where it was left; a second page in another room, or another person on the same socket, is said as it joins; each page hears its hall\'s rooms again when one is made, renamed or removed, or the hall renamed', async (t) => {
+  // A short grace, so "left" is said (or not) within the test; the rule is the same at the shipped 8 s.
+  const GRACE = 1500;
+  const srv = await startServer({ AGM_LEAVE_GRACE_MS: String(GRACE) });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  const PW = 'clipboard and coffee';
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const HALL = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
+  const ctl = await page(admin);
+  const asked = async (s, verb, args) => { for (;;) { const r = await emit(s, verb, args); if (!r.busy) return r; await wait(250); } };
+  const LEGAL = (await asked(ctl, 'room:create', { hall: HALL, name: 'Legal' })).key;
+  const MEDIA = (await asked(ctl, 'room:create', { hall: HALL, name: 'Media' })).key;
+  // Tom: Hall A's crew, given Legal. Lou: given Legal alone. Kim: Hall A's, seated On stage there, given Legal. Max: as
+  // Tom, for the moves. Ned: Hall A's crew, given both its side rooms.
+  for (const [username, role, extra] of [['tom', 'tech', { halls: [HALL], rooms: [LEGAL] }], ['lou', 'staff', { halls: [], rooms: [LEGAL] }], ['kim', 'staff', { halls: [HALL], board: [HALL], rooms: [LEGAL] }], ['max', 'tech', { halls: [HALL], rooms: [LEGAL] }], ['ned', 'tech', { halls: [HALL], rooms: [LEGAL, MEDIA] }]]) {
+    const made = await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: PW, ...extra }, { cookie: admin });
+    assert.equal(made.status, 200, username + ': ' + JSON.stringify(made.body));
+  }
+  const signIn = async (username, password = PW) => {
+    let r;
+    for (let i = 0; i < 4; i++) {
+      r = await api(srv.base, 'POST', '/api/auth/login', { username, password });
+      if (r.status !== 429 || r.body.busy) break;
+      await wait(2100);
+    }
+    assert.equal(r.status, 200, username + ' signs in: ' + JSON.stringify(r.body));
+    return r.cookie;
+  };
+  const [tom, lou, kim, max, ned] = [await signIn('tom'), await signIn('lou'), await signIn('kim'), await signIn('max'), await signIn('ned')];
+  // The halls page is where an account answers the help of a side room of its hall it is not given (helpFor): a reason to
+  // stay there (answersOnBoard), which the halls page reads before it takes an account with one room straight into it.
+  // Tom answers Media's from there; Ned is given every side room, Lou sees no hall, Kim sits On stage (her hall's crew
+  // answers its help), and the admin reads every room.
+  const onBoard = async (cookie) => { const b = (await api(srv.base, 'GET', '/api/halls', undefined, { cookie })).body; return [b.answersOnBoard, Object.keys(b).pop()]; };
+  assert.deepStrictEqual(await Promise.all([tom, ned, lou, kim, admin].map(onBoard)), [[true, 'answersOnBoard'], [false, 'answersOnBoard'], [false, 'answersOnBoard'], [false, 'answersOnBoard'], [false, 'answersOnBoard']]);
+  const hallOf = (j) => ({ ok: j.ok, hall: j.hall, hallName: j.hallName, rooms: j.rooms });
+  const room = (key, name, main, seat) => ({ key, name, main, seat });
+
+  // Each account's page is told its hall and the rooms of it its account may enter, the Main room first, each with the seat
+  // the account would join with there: Tom backstage in both; Kim On stage in the Main room and backstage in Legal.
+  const tomMain = await page(tom);
+  assert.deepStrictEqual(hallOf(await emit(tomMain, 'join', { roomCode: HALL, as: 'account' })),
+    { ok: true, hall: HALL, hallName: 'Hall A', rooms: [room(HALL, 'Hall A', true, 'research'), room(LEGAL, 'Legal', false, 'research')] });
+  const kimMain = await page(kim);
+  const kimIn = await emit(kimMain, 'join', { roomCode: HALL, as: 'account' });
+  assert.deepStrictEqual([kimIn.role, hallOf(kimIn)], ['board', { ok: true, hall: HALL, hallName: 'Hall A', rooms: [room(HALL, 'Hall A', true, 'board'), room(LEGAL, 'Legal', false, 'research')] }]);
+  // Lou, given Legal alone, is told the hall's name and never its key: its Main room's address, and its code until New code.
+  const louSide = await page(lou);
+  const louIn = await emit(louSide, 'join', { roomCode: LEGAL, as: 'account' });
+  assert.deepStrictEqual(hallOf(louIn), { ok: true, hall: '', hallName: 'Hall A', rooms: [room(LEGAL, 'Legal', false, 'research')] });
+  assert.ok(!JSON.stringify(louIn).includes(HALL), 'nothing in Lou\'s answer names the hall\'s key');
+  // The admin enters every room, seated backstage in each.
+  const anaMain = await page(admin);
+  assert.deepStrictEqual(hallOf(await emit(anaMain, 'join', { roomCode: HALL, as: 'account' })),
+    { ok: true, hall: HALL, hallName: 'Hall A', rooms: [room(HALL, 'Hall A', true, 'research'), room(LEGAL, 'Legal', false, 'research'), room(MEDIA, 'Media', false, 'research')] });
+  // A code guest moves nowhere, and is told the hall's name alone.
+  const gus = await page();
+  assert.deepStrictEqual(hallOf(await emit(gus, 'join', { roomCode: HALL, name: 'Gus', role: 'research' })), { ok: true, hall: '', hallName: 'Hall A', rooms: [] });
+
+  // Max moves Main → Legal → Main, each a page of its own opened as the last one closes (the server has heard it go, as a
+  // page its tab leaves closes its socket: reconnect.js), then Legal on that page's own socket: inside the grace each
+  // time, so no room says he joined or left. Leaving the hall (from Legal) is said there.
+  const said = (who) => async (key) => (await asked(ctl, 'admin:watchRoom', { roomCode: key })).messages.filter((m) => m.type === 'system' && m.text.startsWith(who + ' ')).map((m) => m.text);
+  const lines = said('max');
+  const inRoom = async (key, name) => (await asked(ctl, 'admin:watchRoom', { roomCode: key })).users.some((u) => u.name === name);
+  const join = async (key) => { const s = await page(max); const j = await emit(s, 'join', { roomCode: key, as: 'account' }); assert.ok(j.ok, JSON.stringify(j)); return s; };
+  const gone = async (s, key, name) => { s.close(); await until(async () => !(await inRoom(key, name)), 4000, name + ' gone from ' + key); };
+  const first = await join(HALL);
+  await gone(first, HALL, 'max');
+  const second = await join(LEGAL);
+  await gone(second, LEGAL, 'max');
+  const third = await join(HALL);
+  assert.ok((await emit(third, 'join', { roomCode: LEGAL, as: 'account' })).ok, 'the same page moves on its own socket');
+  await wait(GRACE + 800);
+  assert.deepStrictEqual([await lines(HALL), await lines(LEGAL)], [['max joined Backstage'], []], 'entering the hall is said once, in the room entered; the moves in neither room');
+  third.close();
+  await until(async () => (await lines(LEGAL)).length > 0, GRACE + 4000, 'Max\'s leaving said');
+  await wait(300);
+  assert.deepStrictEqual([await lines(HALL), await lines(LEGAL)], [['max joined Backstage'], ['max left']], 'leaving the hall is said in the room it was left from');
+
+  // A page still open in another room is no move: Tom, in the Main room above, opens Legal on a second page (another
+  // device, a tab of its own), and Legal's people are told he joined, and that he left as that page goes; the Main room
+  // hears neither.
+  const tomLines = said('tom');
+  const tomLegal = await page(tom);
+  assert.ok((await emit(tomLegal, 'join', { roomCode: LEGAL, as: 'account' })).ok);
+  await until(async () => (await tomLines(LEGAL)).length > 0, 4000, 'Tom\'s joining Legal said');
+  await gone(tomLegal, LEGAL, 'tom');
+  await until(async () => (await tomLines(LEGAL)).length > 1, GRACE + 4000, 'Tom\'s leaving Legal said');
+  assert.deepStrictEqual([await tomLines(HALL), await tomLines(LEGAL)], [['tom joined Backstage'], ['tom joined as a Member', 'tom left']]);
+
+  // A page that names another person as it joins another room of the hall on its own socket does not move: a guest seated
+  // in the Main room as Alice who joins Legal by its code as Mallory, with no identity (the server issues her one), is two
+  // people: Mallory is said to join Legal, and Alice to leave the Main room.
+  assert.ok((await asked(ctl, 'room:update', { code: LEGAL, codeOn: true })).ok);
+  const legalCode = (await asked(ctl, 'admin:watchRoom', { roomCode: LEGAL })).guestCode;
+  const two = await page();
+  const alice = await emit(two, 'join', { roomCode: HALL, name: 'Alice', role: 'research' });
+  const mallory = await emit(two, 'join', { roomCode: legalCode, name: 'Mallory', role: 'research' });
+  assert.ok(alice.ok && mallory.ok && alice.uid !== mallory.uid, JSON.stringify([alice.ok, mallory.ok, alice.uid === mallory.uid]));
+  await until(async () => (await said('Alice')(HALL)).length > 1 && (await said('Mallory')(LEGAL)).length > 0, GRACE + 4000, 'Alice\'s leaving and Mallory\'s joining said');
+  assert.deepStrictEqual([await said('Alice')(HALL), await said('Mallory')(LEGAL)], [['Alice joined Backstage', 'Alice left'], ['Mallory joined as a Member']]);
+
+  // Each page hears its hall's rooms again, as its join told them: a room made (the admin's switcher gains it; Lou's,
+  // given Legal alone, does not), a room renamed, the hall renamed, and a room removed. Lou is never told the hall's key.
+  const heard = (s) => { const got = []; s.on('rooms:changed', (f) => got.push(f)); return got; };
+  const [anaHeard, louHeard, gusHeard, tomHeard] = [heard(anaMain), heard(louSide), heard(gus), heard(tomMain)];
+  const last = (got) => got[got.length - 1];
+  const PRESS = (await asked(ctl, 'room:create', { hall: HALL, name: 'Press' })).key;
+  await until(() => anaHeard.length > 0 && louHeard.length > 0, 4000, 'the hall\'s pages told its rooms');
+  assert.deepStrictEqual(last(anaHeard).rooms.map((r) => r.name), ['Hall A', 'Legal', 'Media', 'Press']);
+  assert.deepStrictEqual(last(louHeard), { hall: '', hallName: 'Hall A', rooms: [room(LEGAL, 'Legal', false, 'research')] });
+  assert.ok((await asked(ctl, 'room:update', { code: LEGAL, name: 'Lawyers' })).ok);
+  await until(() => last(louHeard).rooms[0].name === 'Lawyers', 4000, 'Legal renamed');
+  assert.ok((await asked(ctl, 'hall:configure', { code: HALL, name: 'Hall Alpha' })).ok);
+  await until(() => last(louHeard).hallName === 'Hall Alpha' && last(gusHeard) && last(gusHeard).hallName === 'Hall Alpha', 4000, 'the hall renamed');
+  assert.deepStrictEqual(last(gusHeard), { hall: '', hallName: 'Hall Alpha', rooms: [] });
+  assert.deepStrictEqual(last(tomHeard), { hall: HALL, hallName: 'Hall Alpha', rooms: [room(HALL, 'Hall Alpha', true, 'research'), room(LEGAL, 'Lawyers', false, 'research')] });
+  assert.ok((await asked(ctl, 'admin:deleteRoom', { roomCode: PRESS })).ok);
+  await until(() => last(anaHeard).rooms.length === 3, 4000, 'Press removed');
+  assert.deepStrictEqual(last(anaHeard).rooms.map((r) => [r.key, r.name]), [[HALL, 'Hall Alpha'], [LEGAL, 'Lawyers'], [MEDIA, 'Media']]);
+  assert.ok(!JSON.stringify(louHeard).includes(HALL), 'no frame to Lou names the hall\'s key');
+});

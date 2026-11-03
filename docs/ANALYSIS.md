@@ -299,8 +299,8 @@ checks a link whose cloudflared never said it was registered, the watchdog's hea
 wait for the watchdog). The internet link's check
 starts none: each of its tries carries its own deadline (`AbortSignal.timeout`). A frame of state is never one
 of them: it is a `Latest` (`lib/latest.js`), whose timers are its own, and the halls board, the screens console, the
-people list and the seen receipts are the four, each named in `server.js` and in health's `latest` (the guard reads the
-names). A new tick of a handler file's own moves the list, with its words; one taken away moves it too. A planted source
+people list, the seen receipts and a hall's rooms (each page's switcher and header) are the five, each named in
+`server.js` and in health's `latest` (the guard reads the names). A new tick of a handler file's own moves the list, with its words; one taken away moves it too. A planted source
 holds the read to its rule: four forms are counted, and `clearTimeout(`, `resetTimeout(`, a destructured `setTimeout`
 and a `Latest` are not. A frame is sent through `sendEach`, each hall (and each board watcher) apart: one that faults
 while it is built is refused and counted in health's `handlerFaults`, as `guardHandlers` counts a handler's throw, and
@@ -358,7 +358,9 @@ AGM.reconnect.auth(`), and attaches each socket it opens to `AGM.reconnect`, and
 `/build.js` and `reconnect.js` first. The four that do are named (the hall page, the halls board, the admin page and the
 screen), so a fifth page with a socket, or one that drops out, fails it; `reconnect.js` opens none of its own; and each
 of the four hears the build in the answer it reads it from. A page left out would stay dead after a refusal, and one
-that named no build would be read as 0.5.1's and never reload onto a new build. The tests' own sockets name this
+that named no build would be read as 0.5.1's and never reload onto a new build; it would also keep its connection open
+in the browser's back-forward cache once its tab had left it, which `reconnect.js` closes then (`pagehide`) and opens
+again when the page is shown again (`pageshow`), each held by its test. The tests' own sockets name this
 checkout's build (`test/helpers.js` `connect`; `build: null` is a 0.5.1 page). The watchdog's first restart after 0.5 s
 is held by a test only the test-windows job runs (on Windows a killed process's port and named pipe are the system's to
 free): a server bound as the show laptop's is (every address) with a page connected from the machine's network address,
@@ -424,9 +426,12 @@ reads the room, without its words to the hall's crew); the followers of a send a
 speaker's acknowledgement, a send lost and a proposal's state into the room it came from; the restart's two loops, which
 follow the sends and the proposals of every room again; and the show desk's notice, posted into every room of every hall
 and counted by its halls. The rooms an account may enter are listed by its hall (`/api/halls` and the halls board, by
-`sideRoomsFor`), and every side room an account may be given by the Accounts route (`sideRoomNames`). A hall's invite
-links stay a hall's (a guest's code names a hall). The 52 calls of `server.js` are the plan's 1-§3.5 and the readers of
-room state beside it; a unit that adds one moves the list with its words. A
+`sideRoomsFor`; a hall page's switcher, by `switcherFor`, and told again to each page in any of the hall's rooms when one
+changes, `sendHallRooms`), and every side room an account may be given by the Accounts route (`sideRoomNames`); a
+move between rooms of a hall, read across its rooms (`movedWithinHall`); and whether the halls page is where an account
+answers a side room's help it is not given (`answersOnBoard`). A hall's invite links stay a hall's
+(a guest's code names a hall). The 56 calls of `server.js` are the plan's 1-§3.5 and the readers of room state beside
+it; a unit that adds one moves the list with its words. A
 planted call without its row, a row without its call and `store.side` or `store.sideByHall` read past the store each fail
 it.
 
@@ -563,7 +568,12 @@ default Stagewatch's Set up… is `link.configure` (`admin:settings`), a node's 
 right, `canDrive`, which the admin page's facts carry for the socket its gate admits; the internet link's Turn off… is
 `tunnel.off`, which the card's toggle asks for too, and its Tunnel until… is `tunnel.until` (`admin:tunnelUntil`, its end
 asked in place as a time of day, `AGM.ask`'s `time` field); a hall's Copy link is `hall.copy` and its guest code `hall.code`, shown
-only where the server told the watcher the code. `test/catalog.test.js` asserts the three facts' readings, 54 seat-and-object sets (a side room's, listed and watched, Members… to an admin who manages accounts, Set up's rooms to the admin, to one who sets halls up, to one who manages accounts and to a crew, none of the admin page's own acts there, and a hall's row with its rooms among them) and three of "This laptop" (none shown to a page
+only where the server told the watcher the code. A room (kind `room`: a room button on a hall's row, a room under Your
+rooms, a room of the hall page's switcher) is its own link, with no bar: `room.open` (Enter; not on the room the page is
+in), `room.tab`, `room.copy`, then, a group of their own, `room.code` (where the page is told the room's code: on the
+hall page its own room's alone) and `room.setup` (`hall:settings`, the hall's Set up, on the halls board for a hall the
+account sees, by `halls.manage`).
+`test/catalog.test.js` asserts the three facts' readings, 63 seat-and-object sets (a side room's, listed and watched, Members… to an admin who manages accounts, Set up's rooms to the admin, to one who sets halls up, to one who manages accounts and to a crew, none of the admin page's own acts there, a hall's row with its rooms, and a room on the halls board and on the hall page's switcher among them) and three of "This laptop" (none shown to a page
 the admin page's gate does not admit), the reasons of what is disabled (Check again's four, a locked account, the
 minutes with no key, a node whose Stagewatch keeps no desk, not connected), the bars, the asks' words, the caps and the
 keys, and reads every act's words on an object it fits. `test/menus.test.js`'s second test reads each seat's facts from

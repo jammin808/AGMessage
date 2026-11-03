@@ -423,6 +423,9 @@ const frames = {
     merge: (a, b) => { for (const uid of b) a.add(uid); return a; },
     flush: (rooms) => eachRoom('seen', rooms, (r, uids) => sendSeen(r, uids)),
   }),
+  // A hall's rooms, for the switcher and the header on each page in any of them (keyed by the hall): a room made,
+  // renamed or removed, or the hall renamed.
+  rooms: new Latest({ name: 'rooms', delayMs: 300, flush: (halls) => eachRoom('rooms', halls, (h) => sendHallRooms(h)) }),
 };
 /**
  * Each room of a frame's batch that is still here (a hall's key names its Main room), given to `send` with its value;
@@ -809,8 +812,24 @@ const trackJoin = (uid, code) => { if (!userRooms.has(uid)) userRooms.set(uid, n
 const trackLeave = (uid, code) => { const s = userRooms.get(uid); if (s) { s.delete(code); if (!s.size) userRooms.delete(uid); } };
 
 // Venue Wi-Fi drops people for a second: announce "left" only if they don't come straight back.
-const pendingLeaves = new Map();   // room|uid -> {timer, name, role, guest} (role null: the server sent them away, no seat held)
-const LEAVE_GRACE_MS = 8000;
+const pendingLeaves = new Map();   // room|uid -> {timer, name, role, guest, moved} (role null: the server sent them away, no seat held)
+const LEAVE_GRACE_MS = envNumber('AGM_LEAVE_GRACE_MS', 8000);
+/**
+ * Whether a join into `room` by the person `uid` named `name` is a move between rooms of its hall: that person left
+ * another of its rooms within the grace (the switcher, a page that opens another of them, as the page it leaves goes), so
+ * neither room says a line, and each such leave is marked `moved` and said nowhere when its grace ends. A page still
+ * open in another room is no move: a second device or tab in this room is said here as it joins, and its leave there as
+ * it leaves. A guest page moves the same way, by the codes it holds.
+ */
+function movedWithinHall(room, uid, name) {
+  let found = false;
+  for (const other of store.roomsOf(room.hall)) {
+    if (other === room) continue;
+    const p = pendingLeaves.get(other.code + '|' + uid);
+    if (p && p.name === name) { p.moved = true; found = true; }
+  }
+  return found;
+}
 // The watchdog's restart drops every page at once and starts with nobody seated: a locked room's code-guest seats (board
 // and research) are saved with the room (settings.seats: uid -> {name, role}, in its op log like a message: what every
 // page in the hall already reads in its people list), and for the boot's first seconds a page that comes back takes its
@@ -1259,8 +1278,13 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
   // address, and its guest code until New code.
   const who = { isAdmin: isAdminReq(req), account: a };
   const halls = [], rooms = [];
+  // Whether the board is where this account answers help it may not answer from a room: a side room of a hall it sees,
+  // not given it, whose requests come to the hall's crew it is (rbac.answersHelp in the Main room; helpFor), so the halls
+  // page is a reason to stay and never one it is taken past straight into its one room.
+  let answersOnBoard = false;
   for (const r of store.rooms.values()) {
     if (!rbac.seesHall(a, r.code)) { rooms.push(...sideRoomsApart(who, r)); continue; }
+    if (rbac.answersHelp(a, store.scopeOf(r)) && store.roomsOf(r.code).some((x) => !store.isMain(x) && !rbac.seesRoom(a, store.scopeOf(x)))) answersOnBoard = true;
     halls.push({
       code: r.code, name: r.name || '', people: board.peopleIn(r), messages: r.messages.length, locked: !!r.settings.lockRoles,
       can: { post: rbac.canIn(a, 'hall.post', store.scopeOf(r)), files: rbac.canIn(a, 'hall.files', store.scopeOf(r)), displays: rbac.can(a, 'display.control', r.code), stage: rbac.can(a, 'stage.send', r.code) },
@@ -1269,7 +1293,7 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
   }
   halls.sort((x, y) => (x.name || x.code).localeCompare(y.name || y.code));
   rooms.sort((x, y) => x.hallName.localeCompare(y.hallName) || x.name.localeCompare(y.name));
-  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: mayManageUsers(req), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req), rooms });
+  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: mayManageUsers(req), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req), rooms, answersOnBoard });
 });
 
 // A hall's name is shown on every page, screen and board, and written in the audit log: it is cleaned as every typed
@@ -1287,7 +1311,9 @@ function newRoom(name) {
 function newSideRoom(hall, name) {
   let key;
   do { key = makeRoomKey(); } while (keyHeld(key));
-  return store.createIn(hall, key, name, { guestCode: newGuestCode() });
+  const made = store.createIn(hall, key, name, { guestCode: newGuestCode() });
+  if (made) frames.rooms.mark(made.hall);
+  return made;
 }
 /**
  * A guest code no room holds: 6 characters, never a room's key, a live code or an earlier one (store.codeHeld), nor a key
@@ -1332,6 +1358,29 @@ const TOLD_NONE = Object.freeze({ isAdmin: false, account: null, onStage: false,
 function seatIn(who, room) {
   const seat = rbac.roomRoleFor(who.account, store.scopeOf(room));
   return seat === 'observer' && who.isAdmin ? 'research' : seat;
+}
+/**
+ * What a page in `room` is told of its hall: `hall`, the hall's key, for `who` ({isAdmin, account}) who sees the hall or
+ * is the admin, else '' (a side room's account that does not see its hall, a code guest: the key is the Main room's
+ * address, and its guest code until New code); `hallName`; and `rooms`, the hall's rooms this page may move between
+ * (switcherFor), for an account's own page (`page`) alone. The join's answer and the switcher's frame (`frames.rooms`).
+ */
+function hallFacts(who, room, { page }) {
+  const hall = store.get(room.hall);
+  if (!hall) return { hall: '', hallName: '', rooms: [] };
+  const sees = !!who.isAdmin || (!!who.account && rbac.seesHall(who.account, hall.code));
+  return { hall: sees ? hall.code : '', hallName: hall.name || '', rooms: page ? switcherFor(who, hall) : [] };
+}
+/**
+ * The rooms of `hall` an account's page may move between, as the join admits them (the admin every one; an account its
+ * hall's Main room by its halls, a side room only where it is given: rbac.seesRoom), the Main room first, each by its key
+ * (an address, never a guest code), its name (a Main room's is its hall's), whether it is the Main room, and the seat the
+ * account would join with there (seatIn), so its way in opens seated as the join will seat it.
+ */
+function switcherFor(who, hall) {
+  if (!who.account) return [];
+  return store.roomsOf(hall.code).filter((r) => who.isAdmin || rbac.seesRoom(who.account, store.scopeOf(r)))
+    .map((r) => ({ key: r.code, name: r.name || '', main: store.isMain(r), seat: seatIn(who, r) }));
 }
 /**
  * The side rooms of `hall` that `who` may enter, as the join admits it: the admin every one, an account the rooms it is
@@ -1442,6 +1491,7 @@ function roomNameRefused(hall, name, except) {
 function renameRoom(room, name) {
   const op = apply(room, { o: 'meta', name });
   if (op && store.isMain(room)) for (const d of displays.ofHall(room.code)) io.to('display:' + d.id).emit('display:state', displayState(d));
+  if (op) frames.rooms.mark(room.hall);
   return op;
 }
 /** A room as a row and the AI name it: a side room by its name and its hall's ("Legal (Hall 2)"), a hall by its name. */
@@ -1870,7 +1920,10 @@ io.on('connection', (socket) => {
 
     const stillSeated = seated(id);
     if (joinWait) { clearTimeout(joinWait); joinWait = null; }   // in a room: its place through the tunnel is kept
-    if (room && room !== r) leaveRoom(true);
+    // A page seated in a room that joins another room of its hall on its own socket, as the same person (its identity and
+    // its name), moves: said in neither room. Anyone else it now names is a person of their own, said as they join.
+    const moved = !!room && room !== r && room.hall === r.hall && !!me && me.uid === id && me.name === cleanName && !socket.data.adminView && !isAdminView;
+    if (room && room !== r) leaveRoom(true, false, moved);
     if (!stillSeated) me = { uid: id, name: cleanName, role: cleanRole, joinedAt: Date.now(), ...(acct ? { acct: acct.username } : {}) };
     room = r;
     socket.data.adminView = isAdminView;
@@ -1890,6 +1943,9 @@ io.on('connection', (socket) => {
     if (!isAdminView) {
       const k = r.code + '|' + id;
       if (pendingLeaves.has(k)) { clearTimeout(pendingLeaves.get(k).timer); pendingLeaves.delete(k); returning = true; }
+      // A move between rooms of the hall (on this socket, or from a page that left another of its rooms within the
+      // grace): announced in neither.
+      if (moved || movedWithinHall(r, id, cleanName)) returning = true;
       // The same person on another device or tab stays in (and this one is not announced again); only a socket that
       // has already gone is cleared.
       for (const [sid, u] of r.users) {
@@ -1943,6 +1999,10 @@ io.on('connection', (socket) => {
       guestCode: codeFor(askerOf(socket), r), codeOn: store.codeOn(r), setsCode: !!socket.data.isAdmin && !isAdminView && !onStage() && code === r.code,
       // The build serving now: a page on another build reloads itself at a quiet moment (public/reconnect.js).
       build: BUILD.full,
+      // The room's hall, as its header names it ("Hall 2 › Legal"; a Main room by the hall's name): its key only for one
+      // who sees the hall or is the admin (an account given a side room alone is told its name), and the rooms of it this
+      // page may move between, its switcher's (switcherFor: an account's page; none for a code page or the support view).
+      ...hallFacts(askerOf(socket), r, { page: !!acct && !isAdminView }),
     });
 
     if (!isAdminView) {
@@ -2758,8 +2818,9 @@ io.on('connection', (socket) => {
     const updated = (n) => (n ? ', ' + plural(n, 'account') + ' updated' : '');
     const by = socket.data.actor || HOST_ACTOR;
     if (!main) {
-      // The room alone: its hall's Stagewatch, screens and links stay the hall's.
+      // The room alone: its hall's Stagewatch, screens and links stay the hall's; its hall's pages' switchers lose it.
       const removed = store.remove(r.code);
+      frames.rooms.mark(r.hall);
       const gone = said(removed);
       const pruned = removed.back.includes(r.code) ? [] : accounts.prune({ rooms: [r.code] });
       audit.write(by, 'room.remove', r.code, (r.name || '(no name)') + ' (' + hallWords(r.hall) + ')' + gone.row + updated(pruned.length), socket.data.ip);
@@ -3083,7 +3144,12 @@ io.on('connection', (socket) => {
   roomVerbs.register(socket, conn, ctx);
   takeVerbs.register(socket, conn, takesCtx);
 
-  function leaveRoom(now, holdSeat = false) {
+  /**
+   * This page leaves its room: at once (`now`), or after the grace, so a page that drops and comes straight back is never
+   * said to have gone. "left" is not said for a move to another room of the hall (`moved`, a join on this socket; or a
+   * join there within the grace, movedWithinHall).
+   */
+  function leaveRoom(now, holdSeat = false, moved = false) {
     if (!room || !me || socket.data.adminView) return;
     const r = room, u = me;
     r.users.delete(socket.id);
@@ -3094,15 +3160,17 @@ io.on('connection', (socket) => {
       trackLeave(u.uid, r.code);
       const k = r.code + '|' + u.uid;
       const announce = () => {
+        const p = pendingLeaves.get(k);
         pendingLeaves.delete(k);
         if (!store.hasRoom(r.code) || Array.from(r.users.values()).some((x) => x.uid === u.uid)) return;
         syncSeats(r);
+        if (moved || (p && p.moved)) return;
         systemMessage(r, `${u.name} left`);
       };
       if (now) announce();
       else {
         if (pendingLeaves.has(k)) clearTimeout(pendingLeaves.get(k).timer);
-        pendingLeaves.set(k, { timer: setTimeout(announce, LEAVE_GRACE_MS), name: u.name, role: holdSeat ? u.role : null, guest: !u.acct && !socket.data.isAdmin });
+        pendingLeaves.set(k, { timer: setTimeout(announce, LEAVE_GRACE_MS), name: u.name, role: holdSeat ? u.role : null, guest: !u.acct && !socket.data.isAdmin, moved: false });
       }
     }
     if (store.hasRoom(r.code)) syncSeats(r);
@@ -3118,6 +3186,20 @@ io.on('connection', (socket) => {
 });
 
 function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : []; }
+/**
+ * Each page in a room of `hall` (its Main room), told its hall as its join was (hallFacts): its name, its key where the
+ * page may know it, and the rooms its switcher moves between. Computed per page, so a side room's account that does not
+ * see its hall is never handed its key; the admin's pages watching a room are not hall pages and are told nothing.
+ */
+function sendHallRooms(hall) {
+  for (const r of store.roomsOf(hall.code)) {
+    for (const sid of io.sockets.adapter.rooms.get(r.code) || []) {
+      const s = io.sockets.sockets.get(sid);
+      if (!s || s.data.userRoom !== r.code) continue;
+      s.emit('rooms:changed', hallFacts(askerOf(s), r, { page: !!s.data.account && !s.data.adminView }));
+    }
+  }
+}
 /** One frame to the hall with the newest receipt of each person in `uids`: `{seen: [{uid, name, role, seq}…]}`. */
 function sendSeen(room, uids) {
   const seen = room.seen ? Array.from(uids, (uid) => room.seen.get(uid)).filter(Boolean) : [];

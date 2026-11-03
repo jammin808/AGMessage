@@ -223,12 +223,12 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   const anaA = await open();
   const first = await join(anaA, hallA, 'Ana', 'research');
   assert.deepEqual([first.forwardable, await rooms(anaA)], [false, []]);
-  // The same person backstage in B too: from A, B takes a message; the answer says so, appended before the build that
-  // closes it (the build serving now, which a page on another build reloads for).
+  // The same person backstage in B too: from A, B takes a message; the answer says so, its keys appended at the end in
+  // the order they landed (the build serving now, which a page on another build reloads for; then the hall's facts).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-6)], [true, [hallB], ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build']]);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-9)], [true, [hallB], ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms']]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board');
@@ -333,6 +333,9 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   assert.deepEqual(Object.fromEntries(Object.entries(seats.accounts).map(([k, v]) => [k, [v.f.manageUsers, v.f.auditRead, v.f.auditExport, v.f.theAdmin]])),
     { staff: [false, false, false, false], manager: [false, true, false, false], usersManager: [true, true, false, false] }, 'the Accounts page\'s rights, from /api/auth/me and /api/admin/me');
   objects.hall = seats.board.viewer.board.halls.map((h) => ({ code: h.code, name: h.name || h.code, guestCode: h.guestCode, rooms: h.rooms }));
+  // A room button on Hall A's row, as the halls board draws it for an account given Legal (its hall's key for Set up).
+  const legalRow = rooms.find((r) => r.code === hallA).side[0];
+  objects.room = [{ key: legalRow.key, name: legalRow.name, hall: 'Hall A', href: '/app.html?code=' + legalRow.key + '&as=account&role=research', current: false, guestCode: '', hallKey: hallA }];
   assert.deepEqual([seats.board.viewer.f.admin, seats.board.viewer.f.manageUsers, seats.board.boardAccount.f.admin, seats.admin.staff.f.manageUsers], [false, false, false, false], 'no seat here sets codes in Set up or chooses members');
   assert.deepEqual([seats.board.setsUp.f.manageHalls, seats.board.setsUp.f.admin, seats.board.setsUp.f.manageUsers], [true, false, false], 'one who sets halls up: not the admin, and manages no account');
   objects.help = seats.board.viewer.objects.help;
@@ -361,7 +364,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     'nodes:command': (o) => ({ id: o.id, line: 'CUE 1', mode: 'propose' }),
     'admin:acceptCertificate': null, 'admin:tunnelStart': null, 'admin:tunnelStop': null, 'admin:tunnelStatus': null, 'admin:laptop': null,   // the ack alone
     'admin:tunnelUntil': () => ({ until: '23:30' }),
-    'hall:settings': (o) => ({ code: o.code }), 'nodes:list': () => ({}),
+    'hall:settings': (o) => ({ code: o.hallKey || o.code }), 'nodes:list': () => ({}),
     'room:create': (o) => ({ hall: o.code, name: 'Media' }),
     'room:update': (o, e) => (e.id === 'adminRoom.newCode' ? { code: o.code, newCode: true } : e.id === 'adminRoom.codeToggle' ? { code: o.code, codeOn: !o.on, ...(o.on ? { keepGuests: false } : {}) } : { code: o.code, name: 'Renamed by a seat that may not' }),
     'help:respond': (o, e) => ({ code: o.code, messageId: o.id, state: e.id === 'help.respond' ? 'coming' : 'resolved' }),
@@ -371,8 +374,9 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   const sidId = users.find((u) => u.username === 'sid').id;
   const BODIES = { 'account.edit': { name: 'Renamed by a seat that may not' }, 'account.disable': { disabled: true }, 'audit.split': { seq: 2 } };
   const HTTP = { 'adminRoom.members': (o) => ({ id: sidId, body: o.main ? { board: [o.code] } : { rooms: [o.code] } }) };
-  // The halls board draws a hall's rooms in its Set up (kind adminRoom, the same rooms as the admin page's).
-  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop'], board: ['hall', 'help', 'adminRoom'], accounts: ['account', 'audit'] };
+  // The halls board draws a hall's rooms in its Set up (kind adminRoom, the same rooms as the admin page's), and its room
+  // buttons (kind room: its hall's Set up from there).
+  const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop'], board: ['hall', 'room', 'help', 'adminRoom'], accounts: ['account', 'audit'] };
   const verbsOf = Object.values(KINDS).flat().flatMap((k) => C.KINDS[k]).filter((e) => e.verb !== 'local');
   assert.deepEqual([...new Set(verbsOf.filter((e) => !e.verb.startsWith('http:') && !(e.verb in PAYLOADS)).map((e) => e.verb))], [], 'every socket verb an act sends has its refusal case');
   const say = (s, verb, payload) => new Promise((resolve) => { if (payload === null) s.emit(verb, resolve); else s.emit(verb, payload, resolve); });

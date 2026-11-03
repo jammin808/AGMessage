@@ -174,7 +174,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The watchdog: the server's start and restart, its beat, a sleep told from a hang, the console tee | `app/supervise.js` |
 | Rooms: a hall is its Main room, its side rooms kept beside it (`data/rooms/<HALL>.<KEY>.*`); the op log, snapshots and atomic saves; the stop's order and its record | `app/lib/store.js`, `app/lib/resilience.js`, `app/lib/laststop.js`, `app/lib/handlers/rooms.js`; tests `units`, `laststop`, `halls` |
 | Each room's guest code: on, off and renewed by the store; who is told it | `app/lib/store.js`, `app/lib/handlers/rooms.js`, `app/lib/rbac.js` (`mayKnowCode`), `app/public/join.js`; test `codes` |
-| State frames, latest wins: the one primitive for the halls board, screens, people lists and seen receipts | `app/lib/latest.js` |
+| State frames, latest wins: the one primitive for the halls board, screens, people lists, seen receipts and a hall's rooms | `app/lib/latest.js` |
 | The op table: the event each change is sent under, and the hall page's table that draws a change missed or heard live | `app/lib/ops.js`, `app/public/app.js` (`UPD_EVENTS`) |
 | The action catalogue: every act a page offers on an object, as data, and what draws it (menus, asks in place, doors, roving lists); each page's runner | `app/public/catalog.js`, `app/public/menus.js`, `app/public/members.js` (Members…); runners in `app.js`, `admin.js`, `admin-plus.js`, `halls.js`, `users.js`; tests `catalog`, `menus`, `members` |
 | The outbox: every write a page makes, held or sent now, and the server's answer to a repeat | `app/public/outbox.js`, `app/lib/store.js`; test `outbox` |
@@ -190,6 +190,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The audit log carried across events: a split at an archive point into a signed archive | `app/lib/auditarchive.js` |
 | The verifier on another computer: Node and the browser page | `app/verify/` |
 | The halls board and help requests; a hall's rooms on its row, Your rooms, and Set up's Rooms | `app/lib/board.js`, `app/public/halls.js`; test `halls` |
+| The room choice and the switcher: an account with one room goes straight into it; a hall page names its room ("Hall 2 › Legal") and moves between its hall's rooms | `app/public/halls.js` (`waysIn`), `app/public/app.js` (the switcher), `app/server.js` (`switcherFor`, `frames.rooms`); test `halls` |
 | Uploads: a token per page's join, checked again at use | `app/server.js` (`/api/upload`), `app/lib/guard.js`; test `uploads` |
 | Screens (display URLs) | `app/lib/displays.js`, `app/public/display.*` |
 | Stagewatch links, peers, hello; what a send says (Stagewatch's grammar as the oracle) | `app/lib/nodes.js`, `app/lib/stagelines.js` |

@@ -12,6 +12,11 @@
 //              a page that is not connected when it is shown again (visibilitychange) or when the browser is back online
 //              starts afresh at once: Socket.IO's own connect() does nothing while it waits out its backoff, so the
 //              socket is closed and opened again. A refusal's wait is kept even then: the server's pace holds.
+//   another page in its tab
+//              a page its tab leaves (pagehide) closes its socket, so the server hears it go at once: a page the browser
+//              keeps to show again (its back-forward cache) is frozen with its connection open, and would otherwise sit
+//              in its room, on its People list and its board's count, until its pings went unanswered. Shown again from
+//              that cache (pageshow, or shown however it comes back), it connects again and joins as after a drop.
 //
 // While a page is not back (connected, and joined where the page joins) it says so: after DOWN_MS its strip, after DOT_MS
 // the dot's words; both go once it is back. A page the server sent away, or that closed its own socket, is not brought
@@ -62,8 +67,10 @@
   const dotName = (st) => (st.back ? WORDS.connected : st.connected ? WORDS.connecting : st.stopped ? WORDS.offline : WORDS.dot);
 
   /**
-   * Reconnects on `env`: `now()` (a monotonic count in ms), `setTimeout`, `clearTimeout`, and `onWake(fn)`, which calls fn
-   * each time the page is shown again or the browser is back online.
+   * Reconnects on `env`: `now()` (a monotonic count in ms), `setTimeout`, `clearTimeout`, `onWake(fn)`, which calls fn
+   * each time the page is shown again or the browser is back online, and `onPark(leave, back)` where the page has a tab to
+   * leave (none for a test that drives no tab): leave() as its tab leaves it, back() when the tab shows it again from its
+   * back-forward cache.
    */
   function create(env) {
     return {
@@ -156,7 +163,27 @@
           arm();
           tell();
         });
+        // Parked: the page closed its socket as its tab left it (a socket the server sent away, or the page closed, or one
+        // waiting out a refusal holds no connection to close), and opens it again when it is shown again.
+        let parked = false;
+        function unpark() {
+          if (!parked) return false;
+          parked = false;
+          st.stopped = false;
+          arm();   // not back until it connects (and joins): said in its time, as after a drop
+          socket.connect();
+          tell();
+          return true;
+        }
+        if (typeof env.onPark === 'function') {
+          env.onPark(() => {
+            if (parked || !socket.active) return;
+            parked = true;
+            socket.disconnect();
+          }, unpark);
+        }
         env.onWake(() => {
+          if (unpark()) return;
           if (st.stopped || socket.connected) return;
           if (busyTimer && env.now() < busyUntil) return;
           unbusy();
@@ -289,6 +316,10 @@
     onWake(fn) {
       document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') fn(); });
       window.addEventListener('online', fn);
+    },
+    onPark(leave, back) {
+      window.addEventListener('pagehide', leave);
+      window.addEventListener('pageshow', (e) => { if (e && e.persisted) back(); });
     },
   });
   const ownBuild = () => (window.AGM && typeof window.AGM.build === 'string' ? window.AGM.build : '');

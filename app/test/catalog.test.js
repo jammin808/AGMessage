@@ -49,7 +49,7 @@ const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack'], '⤴': [
  */
 const ONE_ACT = [['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode']];
 /** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export) and so end their label with "…" as an ask does. */
-const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'compose.attach', 'hall.setup', 'hall.network', 'account.edit', 'audit.export', 'adminRoom.members']);
+const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'compose.attach', 'hall.setup', 'hall.network', 'room.setup', 'account.edit', 'audit.export', 'adminRoom.members']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
 const NAMED_KEYS = ['Enter', 'Delete', 'Escape'];
 
@@ -190,6 +190,16 @@ const PAGE_OBJECTS = {
   hall: { row: { code: 'K7P2QX', name: 'Hall 2', guestCode: 'K7P2QX' }, untold: { code: 'K7P2QX', name: 'Hall 2', guestCode: '' },
     // A hall with side rooms this watcher may enter: its room buttons, and Rooms ▸.
     rooms: { code: 'K7P2QX', name: 'Hall 2', guestCode: 'K7P2QX', rooms: [{ key: 'LGQ4MZP8', name: 'Legal', people: 2 }, { key: 'MDQ4MZP8', name: 'Media', people: 0 }] } },
+  // A room this person may enter. On the halls board: a room button on its hall's row (its guest code told, or not) and
+  // a room under Your rooms (a hall not seen: no hall key, so no Set up). On the hall page's switcher: this room (its
+  // code as the page is told it) and another (the page is told no other room's code); none carries a hall key there.
+  room: {
+    button: { key: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2', href: '/app.html?code=LGQ4MZP8&as=account&role=research', current: false, guestCode: 'K3TW9A', hallKey: 'K7P2QX' },
+    untold: { key: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2', href: '/app.html?code=LGQ4MZP8&as=account&role=research', current: false, guestCode: '', hallKey: 'K7P2QX' },
+    yours: { key: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2', href: '/app.html?code=LGQ4MZP8&as=account&role=observer', current: false, guestCode: '', hallKey: '' },
+    here: { id: 'room:LGQ4MZP8', key: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2', title: 'Hall 2 › Legal', href: '/app.html?code=LGQ4MZP8&as=account&role=research', current: true, guestCode: 'K3TW9A', hallKey: '' },
+    there: { id: 'room:K7P2QX', key: 'K7P2QX', name: 'Main', hall: 'Hall 2', title: 'Hall 2', href: '/app.html?code=K7P2QX&as=account&role=board', current: false, guestCode: '', hallKey: '' },
+  },
   // A help request on the board: its room's key, whether this watcher answers it and may open its room (a side room's
   // reaches the hall's crew who may not read it, to answer from the board), and a side room's name (`room`).
   help: {
@@ -217,7 +227,7 @@ const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
   compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple], chip: [SEATS.admin, SEATS.researchNoDesk], code: [SEATS.admin, SEATS.board, SEATS.research],
   adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
-  hall: [PAGE.board], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
+  hall: [PAGE.board], room: [PAGE.board, SEATS.research], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
 /** Every seat of a kind with every object of it ([f, o] pairs): messages, a file where it is listed and where it is open, a screen, and the other pages' objects. */
 function pairsOf(kind) {
@@ -228,7 +238,7 @@ function pairsOf(kind) {
 }
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'code', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'code', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -718,6 +728,19 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     // With side rooms this watcher may enter: Rooms ▸ beside Open Main.
     ['hall', 'board', O.hall.rooms, ['hall.open', 'hall.tab', 'hall.rooms', 'hall.copy', 'hall.code', 'hall.setup', 'hall.network']],
     ['hall', 'boardCrew', O.hall.rooms, ['hall.open', 'hall.tab', 'hall.rooms', 'hall.copy', 'hall.code']],
+    // A room button: opened here or in a tab and its link copied by everyone it is listed for; its guest code copied where
+    // the server told it; its hall's Set up by one who sets halls up. Under Your rooms, a hall not seen: no Set up.
+    ['room', 'board', O.room.button, ['room.open', 'room.tab', 'room.copy', 'room.code', 'room.setup']],
+    ['room', 'boardCrew', O.room.button, ['room.open', 'room.tab', 'room.copy', 'room.code']],
+    ['room', 'boardCrew', O.room.untold, ['room.open', 'room.tab', 'room.copy']],
+    ['room', 'board', O.room.yours, ['room.open', 'room.tab', 'room.copy']],
+    // The hall page's switcher: this room is not opened again; its code copied where the page is told it (never On
+    // stage); another room opened. No Set up on the hall page, whatever the account holds; no menu in the simple view.
+    ['room', 'research', O.room.here, ['room.tab', 'room.copy', 'room.code']],
+    ['room', 'research', O.room.there, ['room.open', 'room.tab', 'room.copy']],
+    ['room', 'board', { ...O.room.here, guestCode: '' }, ['room.tab', 'room.copy']],
+    ['room', 'admin', O.room.there, ['room.open', 'room.tab', 'room.copy']],
+    ['room', 'boardSimple', O.room.there, []],
     ['help', 'board', O.help.open, ['help.respond', 'help.resolve', 'help.open']],
     ['help', 'board', O.help.coming, ['help.resolve', 'help.open']],
     ['help', 'boardCrew', O.help.notTheirs, ['help.open']],
@@ -745,7 +768,7 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
   const facts = (seat) => PAGE[seat] || SEATS[seat];
   for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, facts(seat), o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
   // Every act of these kinds is shown to some seat: none passes the matrix by its absence.
-  const kinds = ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'help', 'account', 'audit'];
+  const kinds = ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'];
   const shownSomewhere = new Set(M.flatMap((r) => r[3]));
   for (const k of kinds) for (const e of C.KINDS[k]) assert.ok(shownSomewhere.has(e.id), e.id + ' is shown to some seat in the matrix');
   // Every act a seat is shown is one its rights allow: the admin page's acts need its gate, the split "the admin".
@@ -796,6 +819,17 @@ test('the other pages: the inline bar, the asks and their words, the caps and th
   // Copy LAN address ▸: each address, as devices open it.
   assert.deepEqual(plain(C.submenu('laptop', 'laptop.copy', PAGE.admin, O.laptop.two)), [{ value: 'http://192.168.1.20:3023', label: 'http://192.168.1.20:3023' }, { value: 'http://10.0.4.7:3023', label: 'http://10.0.4.7:3023' }]);
   assert.deepEqual(bar('hall', 'board', O.hall.row), [], 'a hall\'s row opens by its name, its one link');
+  // A room is its own link: no bar, wherever it is drawn; Enter on it opens it, and nothing on the room this page is in.
+  for (const o of Object.values(O.room)) assert.deepEqual([bar('room', 'board', o), plain(C.inline('room', SEATS.research, o))], [[], []], 'a room has no bar of its own');
+  assert.deepEqual([(C.byKey('room', PAGE.board, O.room.button, 'Enter') || {}).id, (C.byKey('room', SEATS.research, O.room.there, 'Enter') || {}).id, C.byKey('room', SEATS.research, O.room.here, 'Enter')], ['room.open', 'room.open', null]);
+  // Its menu: its ways in, then what one hands out or sets up for it (Open · Open in a new tab · Copy link — Copy guest
+  // code · Set up…).
+  assert.deepEqual(plain(C.items('room', PAGE.board, O.room.button)).map((i) => (i.sep ? '—' : i.id)), ['room.open', 'room.tab', 'room.copy', '—', 'room.code', 'room.setup']);
+  // The support view draws the switcher's doors, every one disabled with whose view it is; offline, Set up says so and
+  // the local acts go on.
+  assert.deepEqual([...new Set(plain(C.items('room', SEATS.support, O.room.there)).filter((i) => !i.sep).map((i) => i.disabled))], [C.supportWords('Kim')]);
+  assert.deepEqual(Object.fromEntries(plain(C.items('room', C.boardFacts({ canManageHalls: true, connected: false }), O.room.button)).filter((i) => !i.sep).map((i) => [i.id, i.disabled])),
+    { 'room.open': '', 'room.tab': '', 'room.copy': '', 'room.code': '', 'room.setup': C.WORDS.offline });
   assert.deepEqual(bar('help', 'board', O.help.open), ['help.respond', 'help.resolve'], 'a help request: its two answers');
   // Its way in names what it opens: a hall's Main room, or a side room.
   assert.deepEqual([O.help.open, O.help.side].map((o) => C.items('help', PAGE.board, o).find((e) => e.id === 'help.open').label), ['Open its hall', 'Open its room']);

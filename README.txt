@@ -154,7 +154,19 @@ Every day of the event
 ----------------------
 - Crew: open the LAN URL, sign in. The halls board shows every hall you
   can see: its countdown, who is in, the last message, open help requests
-  and its screens. Click a hall to open it.
+  and its screens. Click a hall to open it. With one room alone (and
+  nothing else to do there: no halls to set up, no accounts, no audit
+  log, no help requests from rooms you are not given), signing in opens
+  that room straight away; "All halls" in its header still shows the
+  board.
+- Rooms: the hall page's header names the room ("Hall 2 › Legal"; the
+  hall's name alone in its Main room). With two rooms or more you may
+  enter, the row under it moves between them ("Main · Legal · Media", this
+  room marked): a tap opens the room, and what you typed and had not sent
+  waits in its box for when you come back. Right-click a room (or
+  Shift+F10) for Open in a new tab, Copy link and Copy guest code. Moving
+  between a hall's rooms writes no "joined" or "left" line in either
+  room; a second phone or tab opened in another room is said there.
 - Presenters and guests: open the LAN URL, choose "Join with a code" and
   type the room's code first. Once it is typed the page names the room
   ("Hall 2", or "Legal · Hall 2") and offers its seats: Backstage or

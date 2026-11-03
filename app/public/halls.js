@@ -4,6 +4,8 @@
 // are listed under Your rooms, by their hall's name. Project managers and senior techs see every hall; techs and staff
 // see theirs. The board is live over the socket ('board:watch'); /api/halls is its first paint and its fallback. A
 // hall's Set up holds its name, its own Stagewatch and its rooms (the catalogue's adminRoom, as the admin page's list).
+// An account that may enter one room alone, and has no other reason to be here, is taken straight into it; the hall
+// page's way back here says ?stay=1, so it never bounces.
 (function () {
   'use strict';
   if (document.documentElement.dataset.floor === 'old') return;   // below the page floor (theme-init.js): its words, and nothing else
@@ -23,6 +25,9 @@
   let canManageUsers = false;   // /api/halls's: a room's Members… in Set up
   let canDrive = false;    // the board's: Show network lists a node this account may drive
   let yourRooms = [];      // side rooms this account may enter in halls it does not see: the board's, else /api/halls's
+  // ?stay=1: the board is wanted (the hall page's All halls, its way back), so one room alone opens nothing by itself.
+  const STAY = new URLSearchParams(location.search).get('stay') === '1';
+  let arrived = false;     // the first paint has been read: only an arrival goes straight in, never a later read
 
   // The acts on a hall's row and on a help request are the catalogue's (catalog.js: kinds hall, help), drawn by AGM.acts:
   // the bar, the ⋯, right-click, Shift+F10 and the keys alike. This page binds only what each act does (RUN).
@@ -35,11 +40,12 @@
   }
 
   // ---------------------------------------------------------------- first paint
+  /** The first paint, and each read after: false when the page is leaving for another (signed out, or straight in). */
   async function load() {
     const r = await AGM.api('GET', '/api/halls');
-    if (r.status === 401) { location.replace('/?next=/halls.html'); return; }
-    if (r.mustChange) { location.replace('/'); return; }
-    if (!r.ok) { AGM.toast(r.error, true); return; }
+    if (r.status === 401) { location.replace('/?next=/halls.html'); return false; }
+    if (r.mustChange) { location.replace('/'); return false; }
+    if (!r.ok) { AGM.toast(r.error, true); return true; }
     me = r.account;
     halls = r.halls;
     canManageHalls = r.canManageHalls;
@@ -52,7 +58,19 @@
     $('adminLink').hidden = !r.isAdmin;
     $('newHallBtn').hidden = !canManageHalls;
     $('boardTitle').textContent = me.rights.allHalls ? 'Every hall' : (halls.length === 1 ? 'Your hall' : 'Your halls');
+    const first = !arrived;
+    arrived = true;
+    // Only one room set up for this account, and nothing else to do here (no halls to set up, no accounts, no audit log,
+    // not the admin, no help requests it answers from here alone: answersOnBoard): straight into it, seated as the server
+    // will seat it. The halls page stays in its history only where it is the question.
+    const ways = waysIn();
+    if (first && !STAY && ways.length === 1 && !(r.canManageHalls || r.canManageUsers || r.canAudit || r.isAdmin || r.answersOnBoard)) { location.replace(ways[0]); return false; }
     factsChanged();
+    return true;
+  }
+  /** Every room this account may enter, each by its way in: each hall's Main room, the side rooms on its row, and Your rooms. */
+  function waysIn() {
+    return halls.flatMap((h) => [hallHref(h.code), ...roomsOf(h).map(roomHref)]).concat(yourRooms.map((x) => roomHref(sideRoom(x))));
   }
 
   // ---------------------------------------------------------------- the board
@@ -113,8 +131,14 @@
   function roomsOf(h) {
     const l = live[h.code];
     const from = l && Array.isArray(l.rooms) ? l.rooms : Array.isArray(h.rooms) ? h.rooms : [];
-    return from.filter((r) => r && typeof r.key === 'string').map((r) => ({ key: r.key, name: typeof r.name === 'string' ? r.name : '', people: Number.isInteger(r.people) ? r.people : 0, seat: r.seat === 'observer' ? 'observer' : 'research' }));
+    return from.filter((r) => r && typeof r.key === 'string').map(sideRoom);
   }
+  /**
+   * A side room as the server lists it for this account, read by type: its key, its name, how many are in, its guest code
+   * where the server tells it ('' else), and the seat the account would join with there (a Member's, or an observer's).
+   */
+  const sideRoom = (r) => ({ key: r.key, name: typeof r.name === 'string' ? r.name : '', people: Number.isInteger(r.people) ? r.people : 0,
+    guestCode: typeof r.guestCode === 'string' ? r.guestCode : '', seat: r.seat === 'observer' ? 'observer' : 'research' });
   /** The way into a side room, as the server would seat this account there (a Member's seat, or an observer's). */
   const roomHref = (r) => '/app.html?' + new URLSearchParams({ code: r.key, as: 'account', role: r.seat }).toString();
   /** A side room's button words: its name, and how many are in when anyone is ("Legal 2 in"). */
@@ -129,12 +153,34 @@
     return { guestCode: typeof from.guestCode === 'string' ? from.guestCode : '', on: !!from.codeOn };
   }
 
-  // The way into a hall, as this account may use it: backstage where it may post, read only where it may not (the
-  // server seats it by its rights either way; the page is built for the role in its link). A side room, by its key: the
-  // server seats it there, and the page opens again with that seat once if it differs.
+  // The way into a hall's Main room, seated as the server will seat this account there (its `seat`: On stage where its
+  // On stage halls name the hall, backstage where it may post, read only where it may not), so the page opens built for
+  // that seat; the hall page opens again with the server's seat once should it ever differ.
+  const SEATS = ['board', 'research', 'observer'];
   function hallHref(code) {
     const h = halls.find((x) => x.code === code);
-    return '/app.html?' + new URLSearchParams({ code, as: 'account', role: !h || h.can.post ? 'research' : 'observer' }).toString();
+    const seat = h && SEATS.includes(h.seat) ? h.seat : !h || h.can.post ? 'research' : 'observer';
+    return '/app.html?' + new URLSearchParams({ code, as: 'account', role: seat }).toString();
+  }
+  /** The way into a room by its key: a hall's Main room, a side room on a hall's row or under Your rooms. */
+  function hrefOf(key) {
+    if (halls.some((h) => h.code === key)) return hallHref(key);
+    const side = halls.flatMap(roomsOf).concat(yourRooms.map(sideRoom)).find((r) => r.key === key);
+    return side ? roomHref(side) : '/app.html?' + new URLSearchParams({ code: key, as: 'account', role: 'research' }).toString();
+  }
+  /**
+   * A side room as the catalogue reads it (kind room), by its key: on a hall's row (its hall's key with it, for Set up),
+   * or under Your rooms (a hall this account does not see: no key, no Set up).
+   */
+  function roomObject(key) {
+    for (const h of halls) {
+      const r = roomsOf(h).find((x) => x.key === key);
+      if (r) return { key: r.key, name: r.name || 'A room', hall: h.name || h.code, href: roomHref(r), current: false, guestCode: r.guestCode, hallKey: h.code };
+    }
+    const x = yourRooms.find((y) => y && y.key === key);
+    if (!x) return null;
+    const r = sideRoom(x);
+    return { key: r.key, name: r.name || 'A room', hall: (typeof x.hallName === 'string' && x.hallName) || 'A hall with no name', href: roomHref(r), current: false, guestCode: r.guestCode, hallKey: '' };
   }
 
   /** Set a part's markup only when it changed, so nothing in it is drawn again for nothing. */
@@ -197,7 +243,8 @@
     list.forEach((r, i) => {
       let a = keep.get(r.key);
       keep.delete(r.key);
-      if (!a) { a = document.createElement('a'); a.className = 'room-btn'; a.dataset.key = r.key; }
+      // The room's own link: right-click, Shift+F10 and the menu key open its menu (kind room), not its hall row's.
+      if (!a) { a = document.createElement('a'); a.className = 'room-btn'; a.dataset.key = r.key; a.dataset.objectLink = '1'; }
       const href = roomHref(r);
       if (a.getAttribute('href') !== href) a.setAttribute('href', href);
       if (a.textContent !== roomWords(r)) a.textContent = roomWords(r);
@@ -217,14 +264,14 @@
     $('yourRooms').hidden = yourRooms.length === 0;
     const keep = new Map([...ul.querySelectorAll(':scope > li[data-key]')].map((li) => [li.dataset.key, li]));
     yourRooms.forEach((x, i) => {
-      const r = { key: x.key, name: typeof x.name === 'string' ? x.name : '', people: Number.isInteger(x.people) ? x.people : 0, seat: x.seat === 'observer' ? 'observer' : 'research' };
+      const r = sideRoom(x);
       let li = keep.get(r.key);
       keep.delete(r.key);
       if (!li) {
         li = document.createElement('li');
         li.className = 'your-room';
         li.dataset.key = r.key;
-        const a = document.createElement('a'); a.className = 'your-room-open';
+        const a = document.createElement('a'); a.className = 'your-room-open'; a.dataset.objectLink = '1';
         const where = document.createElement('span'); where.className = 'muted your-room-hall';
         li.append(a, where);
       }
@@ -516,7 +563,7 @@
       open.hidden = !x.canOpen;
       const openWords = x.roomName ? 'Open its room' : 'Open its hall';
       if (open.textContent !== openWords) open.textContent = openWords;
-      const href = hallHref(x.code);
+      const href = hrefOf(x.code);
       if (open.getAttribute('href') !== href) open.setAttribute('href', href);
       // An answer held by the outbox until the server has it says so beside the answers.
       const mine = heldAnswers.get(key);
@@ -538,21 +585,31 @@
   Object.assign(RUN, {
     'help.respond': (o) => AGM.outbox.hold('help:respond', { code: o.code, messageId: o.id, state: 'coming' }),
     'help.resolve': (o) => AGM.outbox.hold('help:respond', { code: o.code, messageId: o.id, state: 'resolved' }),
-    'help.open': (o) => { location.href = hallHref(o.code); },
+    'help.open': (o) => { location.href = hrefOf(o.code); },
     'hall.open': (o) => { location.href = hallHref(o.code); },
     'hall.tab': (o) => { window.open(hallHref(o.code), '_blank', 'noopener'); },
     'hall.copy': (o, c) => AGM.copy(new URL(hallHref(o.code), location.href).href, { said: 'Copied the link to ' + o.name + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
     'hall.code': (o, c) => AGM.copy(o.guestCode, { said: 'Copied ' + o.name + '\'s guest code, ' + o.guestCode + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
-    'hall.rooms': (o, c) => { const h = halls.find((x) => x.code === o.code); const r = h && roomsOf(h).find((x) => x.key === c.value); if (r) location.href = roomHref(r); },
+    'hall.rooms': (o, c) => { const r = roomObject(c.value); if (r && r.hallKey === o.code) location.href = r.href; },
     'hall.setup': (o) => openSetup(o.code),
     'hall.network': () => openNetwork(),
+    // A room: its button on a hall's row, or under Your rooms.
+    'room.open': (o) => { location.href = o.href; },
+    'room.tab': (o) => { window.open(o.href, '_blank', 'noopener'); },
+    'room.copy': (o, c) => AGM.copy(new URL(o.href, location.href).href, { said: 'Copied the link to ' + o.hall + ' › ' + o.name + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
+    'room.code': (o, c) => AGM.copy(o.guestCode, { said: 'Copied the guest code of ' + o.hall + ' › ' + o.name + ', ' + o.guestCode + '.', anchor: c.anchor, say: (w) => AGM.toast(w) }),
+    'room.setup': (o) => openSetup(o.hallKey),
   });
-  A.bind($('hallList'), { kind: 'hall', find: (el) => el.closest('#hallList > li[data-key]'), get: hallObject, label: 'Hall actions', gone: 'That hall is gone.', header: (o) => o.name + (o.guestCode ? ' · ' + o.guestCode : '') });
+  // A hall's row and its room buttons are two kinds: the row's doors leave its room buttons to the room's.
+  A.bind($('hallList'), { kind: 'hall', find: (el) => (el.closest('a.room-btn') ? null : el.closest('#hallList > li[data-key]')), get: hallObject, label: 'Hall actions', gone: 'That hall is gone.', header: (o) => o.name + (o.guestCode ? ' · ' + o.guestCode : '') });
+  const roomDoors = { kind: 'room', get: roomObject, label: (o) => 'Actions for ' + o.name, gone: 'That room is gone.', header: (o) => o.hall + ' › ' + o.name };
+  A.bind($('hallList'), { ...roomDoors, find: (el) => el.closest('#hallList a.room-btn[data-key]') });
+  A.bind($('yourRoomList'), { ...roomDoors, find: (el) => el.closest('#yourRoomList > li[data-key]') });
   A.bind($('helpList'), { kind: 'help', find: (el) => el.closest('#helpList > li[data-key]'), get: helpObject, label: 'Help request actions', gone: 'That help request is gone: it was resolved or removed.', header: (o) => o.category + ' · ' + o.hall });
   AGM.roving($('hallList'), { item: 'li[data-key]' });
   AGM.roving($('helpList'), { item: 'li[data-key]' });
   // What this page's acts read, by name: its facts and its objects (the browser smoke reads them to hold the doors to the catalogue).
-  AGM.page = Object.freeze({ facts: () => F, object: (kind, key) => (kind === 'hall' ? hallObject(key) : kind === 'help' ? helpObject(key) : kind === 'adminRoom' ? setupRoomObject(key) : null) });
+  AGM.page = Object.freeze({ facts: () => F, object: (kind, key) => (kind === 'hall' ? hallObject(key) : kind === 'help' ? helpObject(key) : kind === 'adminRoom' ? setupRoomObject(key) : kind === 'room' ? roomObject(key) : null) });
   function drawHeld(item) {
     if (item.verb !== 'help:respond') return;
     const k = item.args.code + '|' + item.args.messageId;
@@ -631,5 +688,6 @@
     load();
   });
 
-  load().then(connect);
+  // Live once the first paint stays: a page leaving for another opens no socket on its way out.
+  load().then((stays) => { if (stays !== false) connect(); });
 })();

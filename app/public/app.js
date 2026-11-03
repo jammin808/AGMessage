@@ -11,7 +11,9 @@ const ROOM = (qs.get('code') || '').toUpperCase();
 const AS_ACCOUNT = qs.get('as') === 'account';
 let NAME = AS_ACCOUNT ? '' : (qs.get('name') || '');
 const ROLE = qs.get('role') || 'observer';
-const HOME = AS_ACCOUNT ? '/halls.html' : '/';
+// An account's way back is its halls board, which stays (?stay=1): an account with one room alone is taken straight into
+// it from there, and going back must never bounce.
+const HOME = AS_ACCOUNT ? '/halls.html?stay=1' : '/';
 const ADMIN_VIEW = qs.get('adminView') === '1';
 // Identity: issued and signed by the server on first join, kept on this device, so nobody can
 // pick someone else's. MY_UID is the id inside it (what messages and reactions carry).
@@ -42,6 +44,10 @@ let F = AGM.catalog.facts(pageFacts);
 // Whether this page's room is its hall's Main room (the join's `main`; a hall until it answers): its seat words follow it
 // (roleLabel).
 let MAIN = true;
+// The room's hall as the server tells this page (the join's `hallName`, `rooms`, and each `rooms:changed`): its name, for
+// the header's title ("Hall 2 › Legal"), and the rooms of it this person may move between, the switcher's.
+let HALL_NAME = '';
+let ROOMS = [];
 const RUN = {};
 
 // ---------------- UI sync state (declared early to avoid TDZ traps) ----------------
@@ -153,6 +159,7 @@ function rejoin() {
     }
     // A side room's backstage seat is a Member's: its seat words follow the room's kind before anything is drawn with them.
     MAIN = res.main !== false;
+    hallTold(res);
     if (res.account) {
       NAME = res.account.name;
       document.getElementById('whoami').textContent = `${res.account.name} · ${res.account.roleLabel}`;
@@ -173,6 +180,8 @@ function rejoin() {
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
     if (readOnly()) { document.getElementById('directorCompose').hidden = true; document.getElementById('researchCompose').hidden = true; }
     drawSkip();
+    // What this person wrote here and had not sent when they moved to another room of the hall, back in its composer.
+    if (!joined) takeDraft();
     drawComposers();
     renderStage(res.stage);
     document.getElementById('helpBtn').hidden = (res.role || ROLE) === 'observer';
@@ -256,19 +265,143 @@ socket.on('linkedRoomsChanged', askForwardable);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') askForwardable(); });
 
 /** The room as the header names it (a hall's Main room by the hall's name; a rename arrives as a numbered change, like
- * everything else): the header, the code chip's title, and the name of Send (the catalogue's compose.send), which says
- * where a message goes (its word "Send" first, the word a person sees on it). */
+ * everything else): the header's title, the code chip's title, and the name of Send (the catalogue's compose.send), which
+ * says where a message goes (its word "Send" first, the word a person sees on it). */
 let ROOM_NAME = '';
 function setRoomTitle(name) {
   if (!name) return;
   ROOM_NAME = name;
-  document.title = 'AGMessage · ' + name;
   const chip = document.getElementById('roomChip');
   if (chip) chip.title = name;
-  const titleStrong = document.querySelector('.app-title strong');
-  if (titleStrong) titleStrong.textContent = name;
+  drawTitle();
   drawComposers();
   refreshOpenMenu();
+}
+
+// ---------------- The header's title and the room switcher (kind `room`) ----------------
+// A room switch is a page navigation: each page holds one room, one stream and one seat. The switcher's segments are real
+// links (a middle click opens a tab), each seated as the server will seat this person there, so the room opens built for
+// its seat. On a tap the title and the current mark move at once, before the navigation, and what this person wrote here
+// and has not sent is kept for this tab (sessionStorage), back in its composer when they come back to this room.
+const switcherEl = document.getElementById('roomSwitcher');
+/** A room as the header names it: a Main room by its hall's name, a side room by its hall's and its own. */
+const titleOf = (main, name) => (main ? name || HALL_NAME : (HALL_NAME || 'A hall with no name') + ' › ' + (name || 'A room'));
+/** The header's title and the tab's: this room's, or the room being moved to. */
+function drawTitle(words = ROOM_NAME ? titleOf(MAIN, ROOM_NAME) : '') {
+  if (!words) return;
+  document.title = 'AGMessage · ' + words;
+  const strong = document.querySelector('.app-title strong');
+  if (strong && strong.textContent !== words) strong.textContent = words;
+}
+/** The rooms the server lists for this page, read by type: each by its key, name, whether it is Main, and its seat. */
+function roomsFrom(list) {
+  return (Array.isArray(list) ? list : []).filter((r) => r && typeof r.key === 'string' && r.key.length > 0)
+    .map((r) => ({ key: r.key, name: typeof r.name === 'string' ? r.name : '', main: r.main === true, seat: ['board', 'research', 'observer'].includes(r.seat) ? r.seat : 'observer' }));
+}
+/** What the server told this page of its hall (the join's answer, a `rooms:changed`): the header and the switcher follow. */
+function hallTold(f) {
+  if (typeof f.hallName === 'string') HALL_NAME = f.hallName;
+  ROOMS = roomsFrom(f.rooms);
+  drawTitle();
+  drawSwitcher();
+}
+/** A room of the switcher as the catalogue reads it (kind room), by its key: this room's guest code where it is told it. */
+function switcherObject(key) {
+  const r = ROOMS.find((x) => x.key === key);
+  if (!r || outOf) return null;
+  const current = r.key === ROOM;
+  return { id: 'room:' + r.key, key: r.key, name: r.main ? 'Main' : r.name || 'A room', hall: HALL_NAME || 'A hall with no name', title: titleOf(r.main, r.name),
+    href: '/app.html?' + new URLSearchParams({ code: r.key, as: 'account', role: r.seat }).toString(), current, guestCode: current ? pageFacts.guestCode : '', hallKey: '' };
+}
+/** The switcher, with two rooms or more: each a segment kept by its key, `current` marked (this room, or the one tapped). */
+function drawSwitcher(current = ROOM) {
+  switcherEl.hidden = outOf || ROOMS.length < 2;
+  const keep = new Map([...switcherEl.querySelectorAll(':scope > a[data-key]')].map((a) => [a.dataset.key, a]));
+  ROOMS.forEach((r, i) => {
+    let a = keep.get(r.key);
+    keep.delete(r.key);
+    if (!a) { a = document.createElement('a'); a.className = 'room-seg'; a.dataset.key = r.key; a.dataset.objectLink = '1'; }
+    const o = switcherObject(r.key);
+    if (!o) return;
+    if (a.getAttribute('href') !== o.href) a.setAttribute('href', o.href);
+    if (a.textContent !== o.name) a.textContent = o.name;
+    if (a.title !== o.title) a.title = o.title;
+    if (r.key === current) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    if (switcherEl.children[i] !== a) switcherEl.insertBefore(a, switcherEl.children[i] || null);
+  });
+  for (const a of keep.values()) a.remove();
+}
+/** Moving to another room of the hall: this room's unsent words kept, the title and the mark the room's, before it opens. */
+function movingTo(o) {
+  keepDraft();
+  drawTitle(o.title);
+  drawSwitcher(o.key);
+}
+switcherEl.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('a.room-seg[data-key]');
+  // A click that opens a tab or a window leaves this page as it is.
+  if (!a || e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const o = switcherObject(a.dataset.key);
+  if (!o) { e.preventDefault(); return; }
+  if (o.current) { e.preventDefault(); return; }
+  movingTo(o);   // the link's own navigation follows
+});
+AGM.menu.door(switcherEl, (t) => {
+  const a = t.closest && t.closest('a.room-seg[data-key]');
+  if (!a || !switcherObject(a.dataset.key)) return null;
+  const get = () => switcherObject(a.dataset.key);
+  return { el: a, more: a, open: (at) => openObjectMenu('room', get, { node: a, more: a, at, opener: a, label: 'Actions for ' + get().name, header: (o) => o.title }) };
+});
+Object.assign(RUN, {
+  'room.open': (o) => { movingTo(o); location.assign(o.href); },
+  'room.tab': (o) => { window.open(o.href, '_blank', 'noopener'); },
+  'room.copy': (o, { anchor }) => copyText(new URL(o.href, location.href).href, 'Copied the link to ' + o.title + '.', anchor),
+  'room.code': (o, { anchor }) => copyText(o.guestCode, 'Copied the guest code of ' + o.title + ', ' + o.guestCode + '.', anchor),
+});
+socket.on('rooms:changed', (f) => { if (f && typeof f === 'object' && !outOf) { hallTold(f); refreshOpenMenu(); } });
+// A page the browser kept and shows again (Back, from its cache) draws its own room again, not the one it was left for,
+// and holds its words itself: what was kept of them for its next load is let go, so a send from here never comes back.
+window.addEventListener('pageshow', (e) => { if (e.persisted) { drawTitle(); drawSwitcher(); dropDraft(); } });
+
+/**
+ * Where this room's unsent words are kept for this tab while its person is in another room of the hall: by the room and
+ * the person (the join's uid), as the outbox keeps a held send, so another account signed in on this tab is never handed
+ * them. Nothing is kept before the join has said who this is.
+ */
+const draftKey = () => (MY_UID ? 'agm.draft|' + ROOM + '|' + MY_UID : '');
+/** This room's composers' unsent words, kept (a composer holding a send the outbox keeps already is not). */
+function keepDraft() {
+  const key = draftKey();
+  if (!key) return;
+  const kept = {};
+  for (const id of COMPOSER_FIELDS) {
+    const el = document.getElementById(id);
+    if (el && !el.readOnly && el.value.trim() !== '') kept[id] = el.value;
+  }
+  try {
+    if (Object.keys(kept).length) sessionStorage.setItem(key, JSON.stringify(kept)); else sessionStorage.removeItem(key);
+  } catch { /* storage blocked: the words stay with this page alone */ }
+}
+/** What was kept of this room's words, let go. */
+function dropDraft() {
+  const key = draftKey();
+  try { if (key) sessionStorage.removeItem(key); } catch { /* storage blocked: nothing was kept */ }
+}
+/** This room's words kept when its person moved away, back in their composers (an empty one only), and let go. */
+function takeDraft() {
+  const key = draftKey();
+  if (!key) return;
+  let raw, kept;
+  try {
+    raw = sessionStorage.getItem(key);
+    sessionStorage.removeItem(key);
+  } catch { return; /* storage blocked: nothing was kept */ }
+  try { kept = JSON.parse(raw || 'null'); } catch { return; /* a record that is not one: nothing comes back */ }
+  if (!kept || typeof kept !== 'object') return;
+  for (const id of COMPOSER_FIELDS) {
+    const el = document.getElementById(id);
+    if (el && typeof kept[id] === 'string' && el.value === '') el.value = el.maxLength > 0 ? kept[id].slice(0, el.maxLength) : kept[id];
+  }
 }
 
 // Every change carries the room's sequence number. A jump means we missed one: resume from what we have.
@@ -330,6 +463,7 @@ function outOfHall(words, to) {
   HelpChip.close(false);
   for (const id of ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn', 'skipLink']) document.getElementById(id).hidden = true;
   drawChips();
+  drawSwitcher();
   document.querySelector('.main-row').hidden = true;
   document.getElementById('outOfHall').hidden = false;
   if (socket.connected) socket.disconnect();
@@ -867,6 +1001,7 @@ function objectNow(kind, o) {
   if (kind === 'person') return personNow(o.uid);
   if (kind === 'compose') return composeObject(o.form);
   if (kind === 'chip') return stageNow;
+  if (kind === 'room') return switcherObject(o.key);
   return codeObject();
 }
 /**
@@ -914,7 +1049,7 @@ function openObjectMenu(kind, get, { node, more, at, opener, label, header }) {
   openOn.id = o.id;
   return true;
 }
-const GONE = { msg: 'That message is gone.', file: 'That file is gone.', screen: 'That screen is gone.' };
+const GONE = { msg: 'That message is gone.', file: 'That file is gone.', screen: 'That screen is gone.', room: 'That room is gone.' };
 const goneWords = (kind) => GONE[kind] || AGM.catalog.WORDS.gone;
 /** The open menu says what its object's items say now; its object gone, it closes and says so, and so does an ask. */
 function refreshOpenMenu() {

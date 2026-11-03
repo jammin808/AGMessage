@@ -70,7 +70,9 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   list of halls takes a key as given, as 0.5.1's did). The Accounts
   route tells a viewer that is not the admin only the side rooms it holds, on its list and on each row, never a guest
   code; a hall's key in it only where the viewer reaches that hall. `/api/halls` and the halls board list the side rooms
-  each watcher may enter, and those of a hall it does not see by that hall's name, never its key. A change of the chat
+  each watcher may enter, and those of a hall it does not see by that hall's name, never its key; so does a hall page,
+  told its hall by the join and again as its rooms change (`hall`, `hallName`, `rooms`: the key only for one who sees
+  the hall or is the admin, the rooms only for an account's own page, each one it may enter). A change of the chat
   view alone is no right and closes no page; any other change of an account still ends every page it has open. The
   Accounts page's halls-and-rooms tree and a room's Members… (on the admin page and in a hall's Set up) are pages over the
   same routes: Members… is offered on the server's word that the account manages accounts (`manageUsers`,
@@ -246,8 +248,10 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   identity the server issued, so one person's id is never another's. A message held for sending (written while the page
   was offline, or not yet answered) sits in that tab's `sessionStorage`, under the hall and the person, until it is sent,
   never beyond the tab; another person's held messages are dropped at the join, never sent as them, and being sent out
-  of a hall drops them all. A file's bytes waiting are held in memory only (the link of one already uploaded is kept
-  with its message). Nothing an act on something carries (a pin, a take, a setting, a node's token) is ever stored by
+  of a hall drops them all. The words a person wrote in a room and had not sent when the switcher moved them to
+  another room of its hall are kept the same way, in that tab's `sessionStorage` under the room and the person, until
+  they come back to that room, so another account signed in on the tab is never handed them. A file's bytes waiting are
+  held in memory only (the link of one already uploaded is kept with its message). Nothing an act on something carries (a pin, a take, a setting, a node's token) is ever stored by
   the page. A repeat is answered before the rate only for a send of that person's own: a forward, which names the hall
   it goes to by its code, takes from the sender's rate before the code is looked up, so whether a code names a hall is
   told no faster than a send goes.

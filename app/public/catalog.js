@@ -22,8 +22,10 @@
 // so each can be absent alone. In the simple view (`view: 'simple'`) no object has a menu: its acts are its buttons.
 // A kind drawn on more than one page (`person`: the hall page's People panel and a message's sender, and the admin
 // page's people rows; `adminRoom`: the admin page's list of halls and rooms, and the rooms of a hall's Set up on the halls
-// board) fits each page's rows only on that page (`page`, a fact of each page's facts), so a page never draws a row whose
-// runner is another page's, and no row is hidden by a right the server would not refuse.
+// board; `room`: the hall page's switcher, and the halls board's room buttons and Your rooms, its Set up… the board's alone,
+// by its facts and the room's hall key) fits each page's rows only on that page (`page`, a fact of each page's facts, or
+// what only that page's facts and objects carry), so a page never draws a row whose runner is another page's, and no row
+// is hidden by a right the server would not refuse.
 // An entry with `checked` is a toggle, drawn as a menu item that is checked or not (🔥 Priority).
 (function (root) {
   'use strict';
@@ -454,6 +456,21 @@
         may: (f, o) => typeof o.guestCode === 'string' && o.guestCode.length > 0, fits: () => true },
       { id: 'hall.setup', label: 'Set up…', icon: '⚙', group: '4_manage', verb: 'hall:settings', mode: 'now', may: (f) => f.manageHalls, fits: () => true },
       { id: 'hall.network', label: 'Show network…', icon: '📡', group: '4_manage', verb: 'nodes:list', mode: 'now', may: (f) => f.canDrive, fits: () => true },
+    ],
+    // A room of a hall this person may enter: a segment of the hall page's switcher, a room button on the halls board's
+    // hall row, a room under Your rooms. `key` (its key), `name` ('' for none), `hall` (its hall's name), `href` (its way
+    // in, seated as the server would seat this person there), `current` (the room this hall page is in), `guestCode` (its
+    // guest code where this page is told it, '' else: the hall page is told its own room's alone) and `hallKey` (its
+    // hall's key where this page may open the hall's Set up: the halls board's rows of halls this account sees, '' else).
+    // The room is its own link: a click, Enter or a middle click opens it, so it has no bar of its own. Its ways in come
+    // first; its guest code and its Set up, what one hands out or sets up for the room, after them.
+    room: [
+      { id: 'room.open', label: 'Open', icon: '🚪', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: (f, o) => !o.current },
+      { id: 'room.tab', label: 'Open in a new tab', icon: '🗗', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+      { id: 'room.copy', label: 'Copy link', icon: '🔗', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+      { id: 'room.code', label: 'Copy guest code', icon: '🔢', group: '4_manage', verb: 'local', mode: 'local',
+        may: (f, o) => typeof o.guestCode === 'string' && o.guestCode.length > 0, fits: () => true },
+      { id: 'room.setup', label: 'Set up…', icon: '⚙', group: '4_manage', verb: 'hall:settings', mode: 'now', may: (f) => !!f.manageHalls, fits: (f, o) => typeof o.hallKey === 'string' && o.hallKey.length > 0 },
     ],
     // An open help request on the board: `code` (its room's key), `id`, `state`, `room` (a side room's name, '' for a
     // hall's Main room), and the board's facts, each the server's own rule: `canRespond`, and `canOpen` (whether this

@@ -644,6 +644,27 @@ async function selfDoors(tab, kind, sel, obj) {
   return out;
 }
 const selfInStep = (d) => !!d.want && d.want !== '[]' && d.size >= 24 && d.right === d.want && d.click === d.want && d.key === d.want && d.rightClosed && d.clickBack && d.keyFirst && d.keyBack;
+/**
+ * The doors of an object that is a link of its own (a room: a click opens it, so it has no ⋯): a right-click on it and
+ * Shift+F10 on it focused each open the catalogue's set for it, never its row's; the key's menu has the focus on its first
+ * enabled item, and Escape gives it back. `facts` is the page's facts, as `doorsOf` reads them.
+ */
+async function ownLinkDoors(tab, kind, sel, obj, { facts = 'F' } = {}) {
+  const out = { want: await tab.eval(`JSON.stringify(AGM.catalog.ids(${codeLiteral(kind)}, ${facts}, ${obj}))`) };
+  out.size = await tab.eval(`(() => { const q = (${sel}).getBoundingClientRect(); return Math.round(Math.min(q.width, q.height) * 10) / 10; })()`);
+  await rightClick(tab, await middleOf(tab, sel));
+  out.right = await tab.until(MENU_IDS, 3000);
+  await press(tab, 'Escape');
+  out.rightClosed = !!(await tab.until(NO_MENU, 3000));
+  await tab.eval(`(${sel}).focus()`);
+  await press(tab, 'F10', { shift: true });
+  out.key = await tab.until(MENU_IDS, 3000);
+  out.keyFirst = await tab.eval(`(() => { const first = [...document.querySelectorAll('.agm-menu:not(.agm-sub) > .agm-mi')].find((b) => b.getAttribute('aria-disabled') !== 'true'); return !!first && document.activeElement === first; })()`);
+  await press(tab, 'Escape');
+  out.keyBack = !!(await tab.until(`${NO_MENU} && document.activeElement === (${sel})`, 3000));
+  return out;
+}
+const linkInStep = (d) => !!d.want && d.want !== '[]' && d.size >= 24 && d.right === d.want && d.key === d.want && d.rightClosed && d.keyFirst && d.keyBack;
 /** Whether an object's doors are in step: every door the catalogue's set, focus where it belongs, the bar in the menu. */
 const doorsInStep = (d) => !!d.want && d.want !== '[]' && d.right === d.want && d.dots === d.want && d.key === d.want && d.rightClosed && d.dotsStill && d.dotsBack && d.keyFirst && d.keyBack &&
   JSON.parse(d.inline).every(([, same]) => same);
@@ -1483,15 +1504,14 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(addAsk === 'New room in Smoke AGM' && /^[A-Z2-9]{8}$/.test(pressKey || '') && pressMade === JSON.stringify({ toast: 'Made Press in Smoke AGM: its guest code is off.', code: true, order: [code, pressKey] })
       && doorsInStep(pressDoors) && pressDoors.want === JSON.stringify(['adminRoom.members', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.remove']) && pressOn === 'The guest code of Smoke AGM › Press is on.',
       `+ Add room makes a room in Set up, listed after the Main room with its code off; its doors are Members…, its code, Rename… and Remove room…, and Turn the code on switches it (${addAsk}; ${pressMade}; ${pressDoors.want}; "${pressOn}")`);
-    // A link inside a row that is not the row's own keeps the browser's menu at every door: Shift+F10 on the focused room
-    // button opens no menu of the hall's, as a right-click on it does not (the room's own menu is the switcher's unit's).
-    const roomButtonDoors = await signin.eval(`(() => { const a = document.querySelector('.hall-row[data-code="${code}"] .hall-rooms a.room-btn[data-key="${pressKey}"]'); a.focus();
-      const k = new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }); a.dispatchEvent(k); const byKey = !!document.querySelector('.agm-menu');
-      const c = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }); a.dispatchEvent(c);
-      return JSON.stringify({ byKey, byPointer: !!document.querySelector('.agm-menu'), kept: !k.defaultPrevented && !c.defaultPrevented }); })()`);
+    // A room button is the room's own link, inside its hall's row: right-click and Shift+F10 on it open the room's menu
+    // (kind room), never its row's; for the admin, who sets halls up and is told every code: Open, Open in a new tab, Copy
+    // link, Copy guest code and Set up….
+    const PRESS_BUTTON = `document.querySelector('.hall-row[data-code="${code}"] .hall-rooms a.room-btn[data-key="${pressKey}"]')`;
+    const roomButtonDoors = await ownLinkDoors(signin, 'room', PRESS_BUTTON, `AGM.page.object('room', '${pressKey}')`, { facts: 'AGM.page.facts()' });
     report(pressButton === JSON.stringify({ words: 'Press', href: `/app.html?code=${pressKey}&as=account&role=research`, rooms: true, open: 'Open Main', above: true })
-      && roomButtonDoors === JSON.stringify({ byKey: false, byPointer: false, kept: true }),
-      `the room is a room button on its hall's row, a link above the row's own whose Shift+F10 and right-click keep the browser's menu, and the row's ⋯ offers Open Main and Rooms ▸ (${pressButton}; ${roomButtonDoors})`);
+      && linkInStep(roomButtonDoors) && roomButtonDoors.want === JSON.stringify(['room.open', 'room.tab', 'room.copy', 'room.code', 'room.setup']),
+      `the room is a room button on its hall's row, a link above the row's own whose right-click and Shift+F10 open the room's own menu, and the row's ⋯ offers Open Main and Rooms ▸ (${pressButton}; ${roomButtonDoors.want}; ${roomButtonDoors.right} / ${roomButtonDoors.key})`);
     const users = await edge.tab(`${base}/users.html`);
     report(!!(await users.until(`document.querySelectorAll('#userRows tr').length === 1`)), 'the accounts page lists the admin');
     await readOldWords('the Accounts page', users);
@@ -2882,7 +2902,14 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // they sign in with alone (the pages already open keep their connections).
     await signin.send('Network.deleteCookies', { name: 'agm_admin', url: base + '/' });
     const vicIn = await signin.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'vic', password: 'only looking at screens' }) }).then((r) => r.status)`);
-    const viewerBoard = await edge.tab(`${base}/halls.html`);
+    // Vic reads one hall and has nothing else to do on the halls page: it takes the Viewer straight into the hall, seated
+    // to read as the server seats it; the hall page's way back is the board that stays (?stay=1).
+    const vicStraight = await edge.tab(`${base}/halls.html`);
+    const HERE_OF = `{ code: new URLSearchParams(location.search).get('code'), role: new URLSearchParams(location.search).get('role'), back: [...document.querySelectorAll('header a.btn')].map((a) => a.getAttribute('href')) }`;
+    const HERE = `JSON.stringify(${HERE_OF})`;
+    const vicLanded = await vicStraight.until(`location.pathname === '/app.html' && typeof joined !== 'undefined' && joined && ${HERE}`, 10000);
+    report(vicLanded === JSON.stringify({ code, role: 'observer', back: ['/halls.html?stay=1'] }), `an account with one room and nothing else to do is taken straight into it, seated as the server seats it, its way back the board that stays (${vicLanded})`);
+    const viewerBoard = await edge.tab(`${base}/halls.html?stay=1`);
     const helpHref = await viewerBoard.until(`(() => { const a = document.querySelector('#helpStrip:not([hidden]) .help-item a'); return a ? a.getAttribute('href') : ''; })()`);
     report(made2 === 200 && vicIn === 200 && /role=observer/.test(helpHref || ''), `a Viewer's help strip opens the hall read only (${helpHref})`);
     const viewerNet = await viewerBoard.until(`Array.from(document.querySelectorAll('.node-chip')).some((c) => c.textContent.includes('Smoke Patterns')) && JSON.stringify({ chip: true, button: !document.getElementById('networkBtn').hidden })`);
@@ -2917,15 +2944,101 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // Lou, given Press alone: no hall on the board, Press under Your rooms by its hall's name, a link into the room with
     // Lou's seat there, and the hall's key nowhere on the page.
     const louIn = await signin.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'lou', password: 'press desk by the door' }) }).then((r) => r.status)`);
+    // Press is Lou's one room: the halls page goes straight into it. Its header names it by its hall's name and its own,
+    // with no switcher (one room), and nothing on it names the hall's key; its way back, All halls, stays on the board.
     const louBoard = await edge.tab(`${base}/halls.html`);
-    const louRooms = await louBoard.until(`(() => { const li = document.querySelector('#yourRoomList > li[data-key]'); return !document.getElementById('yourRooms').hidden && li && JSON.stringify({ rows: document.querySelectorAll('.hall-row').length, words: li.querySelector('.your-room-open').textContent, hall: li.querySelector('.your-room-hall').textContent,
-      href: li.querySelector('a').getAttribute('href'), empty: document.getElementById('emptyNote').hidden ? '' : document.getElementById('emptyNote').textContent, key: document.documentElement.outerHTML.includes('${code}') }); })()`, 8000);
+    const louLanded = await louBoard.until(`location.pathname === '/app.html' && typeof joined !== 'undefined' && joined && JSON.stringify({ ...${HERE_OF}, title: document.querySelector('.app-title strong').textContent, tab: document.title, switcher: document.getElementById('roomSwitcher').hidden, key: document.documentElement.outerHTML.includes('${code}') })`, 10000);
+    report(louLanded === JSON.stringify({ code: pressKey, role: 'research', back: ['/halls.html?stay=1'], title: 'Smoke AGM › Press', tab: 'AGMessage · Smoke AGM › Press', switcher: true, key: false }),
+      `an account given one side room alone is taken straight into it, its header "Smoke AGM › Press", no switcher, and the hall's key nowhere on it (${louLanded})`);
+    await louBoard.eval(`document.querySelector('header a.btn').click()`);
+    // Lou's page in Press closed its socket as its tab left it (reconnect.js), so the server heard it go then: within 6 s
+    // Press is listed with nobody in (a page the browser keeps with its socket open would be counted until its pings went
+    // unanswered, some 18 s).
+    const LOU_ROOM = `(() => { const li = document.querySelector('#yourRoomList > li[data-key]'); return !document.getElementById('yourRooms').hidden && li && JSON.stringify({ rows: document.querySelectorAll('.hall-row').length, words: li.querySelector('.your-room-open').textContent, hall: li.querySelector('.your-room-hall').textContent,
+      href: li.querySelector('a').getAttribute('href'), empty: document.getElementById('emptyNote').hidden ? '' : document.getElementById('emptyNote').textContent, key: document.documentElement.outerHTML.includes('${code}') }); })()`;
+    const louRooms = (await louBoard.until(`(() => { const v = ${LOU_ROOM}; return v && JSON.parse(v).words === 'Press' ? v : ''; })()`, 6000)) || await louBoard.eval(LOU_ROOM);
     await louBoard.shot(path.join(OUT, 'your-rooms.png'));
-    report(louMade === 200 && louIn === 200 && louRooms === JSON.stringify({ rows: 0, words: 'Press', hall: 'Smoke AGM', href: `/app.html?code=${pressKey}&as=account&role=research`, empty: 'No hall of your own: your rooms are below.', key: false }),
-      `an account given a side room alone finds it under Your rooms, by its hall's name, never the hall's key (${louRooms})`);
+    const louStays = await louBoard.eval(`location.pathname + location.search`);
+    report(louMade === 200 && louIn === 200 && louRooms === JSON.stringify({ rows: 0, words: 'Press', hall: 'Smoke AGM', href: `/app.html?code=${pressKey}&as=account&role=research`, empty: 'No hall of your own: your rooms are below.', key: false }) && louStays === '/halls.html?stay=1',
+      `All halls stays on the board (?stay=1), where an account given a side room alone finds it under Your rooms, by its hall's name, never the hall's key (${louRooms}; ${louStays})`);
+    // A room under Your rooms opens the room's menu by right-click and Shift+F10: Open, Open in a new tab, Copy link and
+    // Copy guest code (Lou's rights in Press hold what its code gives), and no Set up: a hall Lou does not see.
+    const louRoomDoors = await ownLinkDoors(louBoard, 'room', `document.querySelector('#yourRoomList > li[data-key="${pressKey}"] a')`, `AGM.page.object('room', '${pressKey}')`, { facts: 'AGM.page.facts()' });
+    report(linkInStep(louRoomDoors) && louRoomDoors.want === JSON.stringify(['room.open', 'room.tab', 'room.copy', 'room.code']), `a room under Your rooms: right-click = Shift+F10 = Open, Open in a new tab, Copy link, Copy guest code, and no Set up (${louRoomDoors.want}; ${louRoomDoors.right} / ${louRoomDoors.key})`);
+
+    // Kim, a Board account of Smoke AGM, is given Press again (Members… took it away above): two rooms, so the halls page
+    // is the question and lists both: the
+    // hall's link seated On stage, Press a room button seated backstage. The hall opens On stage at once (no second load
+    // for its seat), named "Smoke AGM", its switcher Main · Press with Main marked. A tap on Press moves the title and the
+    // mark before the page goes (read as it goes), keeps what Kim wrote and had not sent, and opens Press seated backstage;
+    // back on Main, the words are in the composer again.
+    // Every sign-in comes from this one address, whose allowance refills one every 2 s: one turned away waits its turn.
+    const kimIn = await signin.eval(`(async () => {
+      const send = (url, body, method = 'POST') => fetch(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const signIn = async (username, password) => { for (let i = 0; i < 5; i++) { const r = await send('/api/auth/login', { username, password }); if (r.status !== 429) return r.status; await new Promise((ok) => setTimeout(ok, 2100)); } return 429; };
+      const ana = await signIn('ana', 'the green room kettle');
+      const kim = (await (await fetch('/api/users')).json()).users.find((u) => u.username === 'kim');
+      const given = await send('/api/users/' + kim.id, { rooms: ['${pressKey}'] }, 'PATCH');
+      return ana === 200 && given.status === 200 ? signIn('kim', 'mixing desk on stage left') : 'ana ' + ana + ', given ' + given.status; })()`);
+    const LOADS = `(() => { if (location.pathname !== '/app.html') return;
+      try { sessionStorage.setItem('agm.smokeLoads', String(Number(sessionStorage.getItem('agm.smokeLoads') || 0) + 1)); } catch { /* none kept */ }
+      addEventListener('pagehide', () => { try { const c = document.querySelector('#roomSwitcher [aria-current="page"]'); sessionStorage.setItem('agm.smokeLeft', JSON.stringify({ title: document.querySelector('.app-title strong').textContent, tab: document.title, current: c ? c.textContent : '' })); } catch { /* none kept */ } }); })();`;
+    const kimTab = await edge.tab(`${base}/halls.html`, { init: LOADS });
+    const kimBoard = await kimTab.until(`location.pathname === '/halls.html' && document.getElementById('linkState').dataset.ok === '1' && (() => { const row = document.querySelector('.hall-row[data-code="${code}"]'); const a = row && row.querySelector('a.room-btn[data-key="${pressKey}"]');
+      return !!a && JSON.stringify({ rows: document.querySelectorAll('.hall-row').length, hall: row.querySelector('a.hall-open').getAttribute('href'), press: a.getAttribute('href') }); })()`, 10000);
+    report(kimIn === 200 && kimBoard === JSON.stringify({ rows: 1, hall: `/app.html?code=${code}&as=account&role=board`, press: `/app.html?code=${pressKey}&as=account&role=research` }),
+      `an account with two rooms stays on the halls page, which lists both: its hall seated On stage, its side room backstage (${kimIn}; ${kimBoard})`);
+    await kimTab.eval(`document.querySelector('.hall-row[data-code="${code}"] a.hall-open').click()`);
+    const SWITCHER = `JSON.stringify({ code: new URLSearchParams(location.search).get('code'), role: new URLSearchParams(location.search).get('role'), loads: sessionStorage.getItem('agm.smokeLoads'), title: document.querySelector('.app-title strong').textContent, tab: document.title,
+      shown: !document.getElementById('roomSwitcher').hidden, rooms: [...document.querySelectorAll('#roomSwitcher > a')].map((a) => a.textContent + (a.getAttribute('aria-current') === 'page' ? '*' : '')) })`;
+    const JOINED_HERE = (key) => `location.pathname === '/app.html' && new URLSearchParams(location.search).get('code') === '${key}' && typeof joined !== 'undefined' && joined`;
+    const kimMain = await kimTab.until(`${JOINED_HERE(code)} && ${SWITCHER}`, 10000);
+    report(kimMain === JSON.stringify({ code, role: 'board', loads: '1', title: 'Smoke AGM', tab: 'AGMessage · Smoke AGM', shown: true, rooms: ['Main*', 'Press'] }),
+      `a Board account opens its hall On stage at once, its header the hall's name and its switcher Main · Press, Main marked (${kimMain})`);
+    // What Main's people read of Kim, on a page that sits there (Ana's, backstage): whether she is listed, and the lines
+    // said of her. Entering the hall is said once, in the room she entered it by.
+    const KIM_IN_MAIN = `JSON.stringify({ listed: people.some((u) => u.name === 'Kim Tech'), lines: allMessages.filter((m) => m.type === 'system' && m.text.startsWith('Kim Tech ')).map((m) => m.text) })`;
+    const KIM_LINES = `JSON.stringify(allMessages.filter((m) => m.type === 'system' && m.text.startsWith('Kim Tech ')).map((m) => m.text))`;
+    const kimEntered = await research.until(`(() => { const v = ${KIM_IN_MAIN}; return JSON.parse(v).listed && JSON.parse(v).lines.length > 0 && v; })()`, 5000);
+    report(kimEntered === JSON.stringify({ listed: true, lines: ['Kim Tech joined On stage'] }), `Main's people see Kim come in, said once in the room she entered the hall by (${kimEntered})`);
+    const SEG = (key) => `document.querySelector('#roomSwitcher > a[data-key="${key}"]')`;
+    const segDoors = await ownLinkDoors(kimTab, 'room', SEG(pressKey), `switcherObject('${pressKey}')`);
+    const hereDoors = await ownLinkDoors(kimTab, 'room', SEG(code), `switcherObject('${code}')`);
+    report(linkInStep(segDoors) && segDoors.want === JSON.stringify(['room.open', 'room.tab', 'room.copy']) && linkInStep(hereDoors) && hereDoors.want === JSON.stringify(['room.tab', 'room.copy']),
+      `the switcher's rooms: right-click = Shift+F10 = Open, Open in a new tab, Copy link; this room's, no Open and (On stage) no code (${segDoors.want} ${segDoors.right} / ${segDoors.key}; ${hereDoors.want} ${hereDoors.right} / ${hereDoors.key})`);
+    await kimTab.eval(`document.getElementById('directorInput').value = 'Half a thought'`);
+    await leftClick(kimTab, await middleOf(kimTab, SEG(pressKey)));
+    const kimPress = await kimTab.until(`${JOINED_HERE(pressKey)} && JSON.stringify({ left: JSON.parse(sessionStorage.getItem('agm.smokeLeft')), here: JSON.parse(${SWITCHER}) })`, 10000);
+    report(kimPress === JSON.stringify({ left: { title: 'Smoke AGM › Press', tab: 'AGMessage · Smoke AGM › Press', current: 'Press' },
+      here: { code: pressKey, role: 'research', loads: '2', title: 'Smoke AGM › Press', tab: 'AGMessage · Smoke AGM › Press', shown: true, rooms: ['Main', 'Press*'] } }),
+      `a tap on the switcher moves the title and the mark before the page goes, and opens the room seated as the server seats it (${kimPress})`);
+    // The page Kim left closed its socket as the tab left it, so Main's People lose her at once, well inside the 8 s
+    // grace (a page the browser kept with its socket open would stay listed until its pings went unanswered, some 18 s);
+    // and the move is said in neither room: no "left" in Main, no "joined" in Press.
+    const kimGone = await research.until(`(() => { const v = ${KIM_IN_MAIN}; return !JSON.parse(v).listed && v; })()`, 4000);
+    await sleep(1500);
+    const pressSaid = await kimTab.eval(KIM_LINES);
+    report(kimGone === JSON.stringify({ listed: false, lines: ['Kim Tech joined On stage'] }) && pressSaid === '[]',
+      `a move by the switcher: the room left lists the person no longer at once, and neither room says a line (${kimGone}; Press: ${pressSaid})`);
+    await leftClick(kimTab, await middleOf(kimTab, SEG(code)));
+    const kimBack = await kimTab.until(`${JOINED_HERE(code)} && JSON.stringify({ draft: document.getElementById('directorInput').value, here: JSON.parse(${SWITCHER}) })`, 10000);
+    report(kimBack === JSON.stringify({ draft: 'Half a thought', here: { code, role: 'board', loads: '3', title: 'Smoke AGM', tab: 'AGMessage · Smoke AGM', shown: true, rooms: ['Main*', 'Press'] } }),
+      `back in Main by the switcher, what Kim wrote and had not sent is in the composer again (${kimBack})`);
+    // Back in Main: listed there again, and still no line in it but her entering the hall.
+    const kimReturned = await research.until(`(() => { const v = ${KIM_IN_MAIN}; return JSON.parse(v).listed && v; })()`, 4000);
+    await sleep(1500);
+    const kimMainSaid = await research.eval(KIM_LINES);
+    report(kimReturned === JSON.stringify({ listed: true, lines: ['Kim Tech joined On stage'] }) && kimMainSaid === JSON.stringify(['Kim Tech joined On stage']),
+      `back in Main by the switcher: listed again, and the move said in neither room (${kimReturned}; ${kimMainSaid})`);
+    await kimTab.shot(path.join(OUT, 'hall-switcher.png'));
     // A Staff account (messages and files, no Stagewatch) is seated backstage: while the hall's Stagewatch keeps a show
     // desk and its frames move, it is offered neither 📝 nor 🖥 — the server would refuse both.
     const sidIn = await signin.eval(`fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sid', password: 'cable ties and gaffer' }) }).then((r) => r.status)`);
+    // Sid reads one hall, and as its crew answers the help of Press, a room of it Sid is not given, from the halls page
+    // alone: a reason to stay there, so Sid is not taken straight into the hall (the page goes live only once it stays).
+    const sidBoard = await edge.tab(`${base}/halls.html`);
+    const sidStays = await sidBoard.until(`location.pathname === '/halls.html' && document.getElementById('linkState').dataset.ok === '1' && JSON.stringify({ at: location.pathname + location.search, rows: document.querySelectorAll('.hall-row').length })`, 10000);
+    report(sidStays === JSON.stringify({ at: '/halls.html', rows: 1 }), `an account with one room that answers help from the halls page alone (a side room of its hall it is not given) stays there (${sidStays})`);
     const staffHall = await edge.tab(`${base}/app.html?code=${code}&as=account&role=research`);
     const staffIn = await staffHall.until(`typeof joined !== 'undefined' && joined && document.getElementById('whoami').textContent.startsWith('Sid Staff') && !document.getElementById('stageChip').hidden`);
     sw.frame({ text: '04:58', seconds: 298 });
@@ -3412,7 +3525,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(Date.now() - helpResolvedAt >= 30_000 && JSON.stringify(restedChip) === JSON.stringify({ words: 'Help', state: '', red: false, said: '' }),
       `"✓ Resolved" goes after 30 s: ${Math.round((Date.now() - helpResolvedAt) / 1000)} s after It's sorted, Help reads Help again (${JSON.stringify(restedChip)})`);
 
-    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer\'s hall', viewerHall], ['the admin page with Members…', adminM], ['a halls board of rooms alone', louBoard], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3], ['a phone as On stage', phones.board], ['a phone backstage', phones.research], ['a phone as an observer', phones.observer]];
+    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer taken straight into its hall', vicStraight], ['a Viewer\'s hall', viewerHall], ['a Board account\'s halls board, hall and switcher', kimTab], ['a Staff account\'s halls board, which it answers help from', sidBoard], ['the admin page with Members…', adminM], ['a halls board of rooms alone', louBoard], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3], ['a phone as On stage', phones.board], ['a phone backstage', phones.research], ['a phone as an observer', phones.observer]];
     // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).
     const hidden = [];
     for (const [name, tab] of tabs) if ((await tab.eval('document.visibilityState')) !== 'visible') hidden.push(name);

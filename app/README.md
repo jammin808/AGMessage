@@ -21,7 +21,8 @@ browser on Windows once the first start serves, in the portable channel only (`A
 `/admin` when the audit log asks the person at the laptop. `AGM_KEY_DIR` moves the key folder (the machine key, the
 certificate and the audit log's records; the tests use a throwaway one), and the black window then names it.
 `AGM_SESSION_SWEEP_MS`, `AGM_OLD_CACHE_MS` (how long after a start 0.5.1's pages are told to reload; 5 minutes, 0.5.1's
-cache life) and `AGM_NODES=0` are for tests.
+cache life), `AGM_LEAVE_GRACE_MS` (how long a page that went may come back before "left" is said; 8 s) and
+`AGM_NODES=0` are for tests.
 
 What it does and how to run it at an event: [../README.md](../README.md) and the portable guide
 [../README.txt](../README.txt). Accounts and rights: [../docs/ACCOUNTS.md](../docs/ACCOUNTS.md). Screens:

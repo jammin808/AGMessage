@@ -1466,6 +1466,7 @@ const ANY_ROOM = {
     'the admin\'s transcript of any room',
     'health\'s sideRooms: every room but the halls',
     'the side rooms of a hall a person may enter, as /api/halls and the halls board list them',
+    'the halls page is where its crew answers the help of a side room of its hall it is not given: a reason to stay there',
     'every side room an account may be given, for the Accounts page',
     'the support view is told a room\'s guest code as the person\'s own page in it is, Main or side',
     'a room\'s name is one no other room of its hall has, its Main room\'s (the hall\'s) included, made, renamed or set up',
@@ -1508,6 +1509,9 @@ const ANY_ROOM = {
     'a proposal\'s state reaches its records, in the room it was made from',
     'the show desk\'s notice is posted into every room of every hall, and counted by its halls',
     'after a stop that did not save, every room says AGMessage restarted',
+    'a move between rooms of a hall: a person who left another of its rooms within the grace',
+    'the rooms of its hall a page may move between, its switcher\'s, Main first',
+    'a hall\'s rooms told again to each page in any of them, when one is made, renamed or removed',
   ],
   'lib/handlers/rooms.js': [
     'a hall full of rooms says how many it holds',

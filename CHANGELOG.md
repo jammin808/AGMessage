@@ -3144,6 +3144,87 @@ people rows (20a) land with their units; the tree's tests)
 - The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md` (the three groups, the tree, Members…, Set up's rooms, who is
   told a code in a room's settings), `SECURITY.md`, `docs/ANALYSIS.md`, `CLAUDE.md`.
 
+**The room choice at sign-in, and the room switcher** (the plan's Part 1, unit 11, its §3.2-§3.4 and §7.5's header, as
+Part 5 §0 amends §3.4 (no presence line between rooms of one hall; the title moves on the tap) with §15.4's switcher row
+and §16.7's `room` row; the dots on the switcher are unit 21's, and the header's one model at every width unit 31's)
+- **One room goes straight in.** The halls page counts every room an account may enter (each hall's Main room, the side
+  rooms on its rows, Your rooms): with exactly one, and nothing else to do there (it sets no halls up, manages no
+  accounts, reads no audit log, is not the admin, and answers no help requests from the board alone: `answersOnBoard`,
+  appended to `/api/halls`, true for a hall's crew with a side room of the hall it is not given, whose requests come to
+  it on the board), it opens that room at once, in place of itself (`location.replace`, so Back does not come round to
+  it again), and opens no socket on its way out. With more than one, the board is the question. The hall page's way back
+  (All halls, its Back after being sent out or refused) is `/halls.html?stay=1`, which never goes straight in; only the
+  page's first read does, never a later one.
+- **Each way in is seated as the server seats it.** A hall's link carries the seat `/api/halls` says the account joins
+  its Main room with (`seat`): a Board account's opens On stage (`role=board`) at once, where it opened backstage and
+  loaded a second time; a Viewer's reads. A help request's Open its room, and a side room's button, carry theirs. The
+  hall page's reload to the server's seat stays, as a safety net for an old link.
+- **The join tells a page its hall**, appended at the end of its answer: `hall` (the hall's key, for one who sees the
+  hall or is the admin, else `''`: an account given a side room alone, and a code guest, are never handed it, since it
+  is the Main room's address and its guest code until New code), `hallName`, and `rooms`, the rooms of the hall this
+  page may move between, as the join admits them (`[{key, name, main, seat}]`, the Main room first, each with the seat
+  the account would take there): an account's page only; none for a code page (a guest's, and the laptop's token
+  admin's own, which joins as a guest does) or the admin's support view. `main`, `guestCode` and `codeOn` were already
+  there. The same facts reach each page in any room of the hall again when one of its rooms is made, renamed or
+  removed, or the hall is renamed (`rooms:changed`, per page, through a new state frame, health's `latest.rooms`).
+- **The header** names the room: "Hall 2 › Legal" in a side room, the hall's name in its Main room, in the page's title
+  too ("AGMessage · Hall 2 › Legal"), following each rename. **The switcher**, a row of the header under it, shown with
+  two rooms or more: "Main · Legal · Media", each a real link seated as the server will seat this person there (a
+  middle click opens a tab), this room marked (filled, bold, `aria-current`), 44 px under a finger, scrolling sideways
+  rather than wrapping. A tap moves the title and the mark at once, before the next room opens, and keeps what this
+  person wrote in this room and has not sent (the composers' words, in the tab's `sessionStorage` by the room and the
+  person, as the outbox keeps a held send, so another account signed in on the tab is never handed them; never a file),
+  back in its composer when they come back to this room. A page shown again from the browser's cache draws its own room
+  again, and lets go of what it kept of its words, which it still holds.
+- **A room's menu** (the catalogue's `room`, the plan's §16.7 row): on a switcher's room, a room button on the halls
+  board and a room under Your rooms, by right-click, Shift+F10 and the menu key: Open (not on the room the page is in),
+  Open in a new tab, Copy link — then Copy guest code (where the page is told it: on the hall page, its own room's alone)
+  and on the halls board Set up… (the hall's, for those who set halls up; none under Your rooms, a hall not seen). The
+  room buttons kept the browser's menu until now. Mark as read is unit 21's.
+- **A move between rooms of one hall writes no presence line in either room.** A join by a person who left another
+  room of the hall within the grace (the page the switcher left) is not announced, and that leave is marked moved and
+  said nowhere when its grace ends (`movedWithinHall`, a leave's `moved`); a page that joins another room of its hall on
+  its own socket, as the same person (its identity and its name), moves too, while one that names another person there
+  is two people, each said. Main → Legal → Main within the grace writes no line in either room. A page still open in
+  another room is no move: a second device or tab in Legal is said there as it joins and as it leaves, so Legal's people
+  are told who came in and went. A guest moves the same way, by the codes it holds. The grace stays 8 s
+  (`AGM_LEAVE_GRACE_MS` sets it for a test).
+- **A page its tab leaves closes its socket** (`public/reconnect.js`, every page that attaches its socket there: the hall
+  page, the halls board, the admin page, a screen): the browser keeps a page it may show again (its back-forward cache)
+  frozen with its connection open, so the server held the person seated in the room they had left, on its People list
+  and its board's count, until the frozen page's pings went unanswered (some 18 s), and a move followed by leaving the
+  hall then said "left" in both rooms. Now the server hears the page go as its tab leaves it (`pagehide`), and the page
+  connects again and joins as after a drop when its tab shows it again (`pageshow` from that cache, or shown however it
+  comes back). A page the server sent away, one that closed its own socket and one waiting out a refusal hold no
+  connection to close, and are left as they are.
+- Tests: `test/halls.test.js` (new): `/api/halls`' `answersOnBoard` (a hall's crew with a side room it is not given;
+  not one given every side room, one that sees no hall, a Board member or the admin) at the answer's end; the join's
+  `hall`, `hallName` and `rooms` for a crew account of the hall given Legal, an account given Legal alone (no key
+  anywhere in its answer), a Board account (On stage in the Main room, backstage in Legal), the admin (every room) and a
+  code guest (none); Main → Legal → Main and a move on one socket, each page opened once the server has heard the last
+  one go, no line in either room, then leaving the hall said in Legal alone; a second page in Legal while the Main
+  room's is open, said in Legal as it joins and as it leaves; a guest's socket that joins Legal as another person,
+  Mallory said to join and Alice to leave; each page told its hall's rooms again on a room made, renamed and removed
+  and the hall renamed, Lou's frames never naming the hall's key. `test/reconnect.test.js`: a page its tab leaves closes
+  its socket once and connects again when shown again (from the cache, or by visibility, once), says it is down as after
+  a drop until it is back, and leaves a socket the server sent away, one its page closed and one waiting out a refusal
+  alone; the page's own instance hears `pagehide` and `pageshow` (persisted only). `test/catalog.test.js`: the `room`
+  kind, its matrix on the halls board and the hall page (no Open on the room the page is in, no Set up on the hall page
+  or under Your rooms, nothing in the simple view), its menu's two groups, no bar of its own, Enter, the support view
+  and offline. `test/menus.test.js`: a room button's Set up… refused for a Viewer and a Board account; the join's keys
+  appended in the order they landed (moved on purpose). `test/server.test.js` and `test/resilience.test.js`: health's
+  `latest` and the state frames gain `rooms` (moved on purpose). `test/modules.test.js`: (l)'s four readers with their
+  reasons. The smoke: a Viewer with one hall taken straight into it, observing, its way back `?stay=1`; Lou, given
+  Press alone, straight into "Smoke AGM › Press" with no switcher and the hall's key nowhere, All halls staying on the
+  board, Press there with nobody in within 6 s of Lou's page leaving, and Your rooms' menu; Kim, a Board account with
+  two rooms, kept on the board with both, her hall opened On stage without a second load, the switcher Main · Press,
+  its rooms' doors, a tap that moves the title and the mark before the page goes, Main's People losing her within 4 s
+  of the tap and no line said in Main or Press, her unsent words back after Press → Main and still no line in Main;
+  Sid, a Staff account with one hall whose crew answers Press's help from the board, staying on the halls page; the
+  admin's room button opening the room's own menu (moved on purpose: it kept the browser's).
+- The papers: `README.md`, `README.txt`, `app/README.md`, `docs/ACCOUNTS.md`, `docs/DESIGN.md`, `SECURITY.md`,
+  `docs/ANALYSIS.md`, `CLAUDE.md`.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and
