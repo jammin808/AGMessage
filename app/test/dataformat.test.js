@@ -414,28 +414,46 @@ test('a marker that cannot be written stops the start with code 3 and its words,
   assert.deepEqual(upgradedRows(f.AGM_DATA_DIR), []);
 });
 
-test('a copy that outlasts the watchdog\'s start window keeps its beat: the move is never taken for a hang, and the copy serves once it is whole', async (t) => {
+test('a copy that outlasts the watchdog\'s hang limit beats at each file it takes: the move is never taken for a hang, and the copy serves once it is whole', async (t) => {
   const base = tmp('agm-format-');
   const f = folders(base);
   folder05(f.AGM_DATA_DIR);
   for (let i = 0; i < 8; i++) write(path.join(f.AGM_DATA_DIR, 'notes', 'n' + i + '.txt'), 'x');
-  // Each file and folder the copy takes waits 350 ms (test/slowcopy-preload.js): about 16 of them, over 5 s, past the
-  // watchdog's 4 s for a first beat and its 3 s between beats.
+  // The server boots inside the watchdog's own start window (30 s), the bound on a boot, which nothing here bounds: a
+  // server that has not beaten by its end is rightly taken for hung, so no shorter one is set. The copy's first beat the
+  // watchdog hears ends that window, and from then on the copy keeps within the hang limit, 4 s here: past the longest
+  // silence a healthy server leaves, a freeze the watchdog did not see as late (its tick at most 1.5 s past due,
+  // AGM_LATE_MS) and the server's beat a second apart. Each file and folder the copy takes waits SLOW ms, more than
+  // BEAT_MS, before the copy's own filter runs (test/slowcopy-preload.js): so each one taken is one beat, which the
+  // preload counts as the server sends it and as the watchdog hears it, and the copy, 18 of them, holds the server's loop
+  // past the hang limit by construction.
+  const SLOW = 350;
+  const HANG = 4000;
+  assert.ok(SLOW > dataformat.BEAT_MS, 'each file the copy takes is one beat');
+  const copied = path.join(base, 'copied.log');
   const port = await h.freePort();
-  const all = { ...process.env, ...f, PORT: String(port), HOST: '127.0.0.1', ADMIN_TOKEN: h.TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', AGM_STARTUP_MS: '4000', AGM_HANG_MS: '3000', NODE_OPTIONS: preload('slowcopy-preload.js'), AGM_TEST_SLOW_COPY_MS: '350' };
-  const started = Date.now();
+  const all = { ...process.env, ...f, PORT: String(port), HOST: '127.0.0.1', ADMIN_TOKEN: h.TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '', AGM_HANG_MS: String(HANG), AGM_LATE_MS: '1500', NODE_OPTIONS: preload('slowcopy-preload.js'), AGM_TEST_SLOW_COPY_MS: String(SLOW), AGM_TEST_SLOW_COPY_LOG: copied };
   const p = spawn(process.execPath, [path.join(h.ROOT, 'supervise.js')], { env: all, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
   let out = '';
   p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { out += d; });
   const done = new Promise((resolve) => { p.once('exit', resolve); });
   t.after(async () => { if (p.exitCode === null && p.signalCode === null) { try { p.send({ t: 'stop' }); } catch { p.kill('SIGKILL'); } } await done; });
+  // Waited on until it serves the moved folder, or its watchdog ends: the deadline, past the start window and the copy,
+  // only ends a wait the watchdog's own judgement would already have ended.
   let hl = null;
-  for (const end = Date.now() + 30000; !hl && Date.now() < end;) {
+  for (const end = Date.now() + 60000; !hl && p.exitCode === null && p.signalCode === null && Date.now() < end;) {
     try { hl = (await h.api('http://127.0.0.1:' + port, 'GET', '/api/health')).body; } catch { await h.wait(100); }
     if (hl && !hl.format) { hl = null; await h.wait(100); }
   }
   assert.ok(hl, 'it serves:\n' + out);
-  assert.ok(Date.now() - started > 4000, 'the copy outlasted the start window (' + (Date.now() - started) + ' ms)');
+  const lines = fs.readFileSync(copied, 'utf8').split('\n').filter(Boolean);
+  const taken = lines.filter((l) => l.startsWith('took '));
+  assert.ok(taken.length * SLOW > HANG, 'the copy held the server\'s loop past the hang limit: ' + taken.length + ' taken, each after ' + SLOW + ' ms or more');
+  assert.deepEqual(taken, taken.map(() => 'took beat'), 'each file and folder the copy took told the watchdog the server lives');
+  // Heard while the copy still held the loop (between the first file it took and the last), not once it let go: a beat
+  // that waited for the loop would leave the copy silent to the watchdog however often it was sent.
+  const during = lines.slice(lines.indexOf(taken[0]), lines.lastIndexOf('took beat'));
+  assert.ok(during.includes('heard'), 'the watchdog heard the copy\'s beats while it ran:\n' + lines.join('\n'));
   assert.match(hl.format.backup, /^backups\/format-1-/);
   assert.equal(fs.readdirSync(path.join(f.AGM_DATA_DIR, ...hl.format.backup.split('/'), 'notes')).length, 8);
   assert.ok(!/no heartbeat|restarting/.test(out), 'never killed, never started again:\n' + out);

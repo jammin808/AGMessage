@@ -1762,16 +1762,19 @@ composed builds, which this unit's tests take again, and the code; the copy's ti
   line, health, row and one audit row and a restart writing none of them again, a newer and an older build before a
   stamped one (`test/stamp-preload.js`, new: the server runs as a CI build without a file in the tree), a marker that
   cannot be written stopping the start in both channels and the next start marking it, and a copy slowed past the
-  watchdog's start window (`test/slowcopy-preload.js`, new: each file the copy takes waits) served with no kill, which
-  without the beat is killed up the ladder. `test/version.test.js` holds the 21 pairs, the three orders'
-  disagreements, a build read back in each channel and refused in any other shape, the install version's MSI bounds,
-  the release order (0.6.0 after 0.6.1 refused though its build is newer, the same version, 0.10 above 0.9, a tag that
-  names no version, a higher version tagged and not yet released), `stamp-build.js`'s `installVersion`, `--released`,
-  `--tags` and a version past 255 refused, and the release job: its check before the attestation and the publish, one
-  job at a time. `test/server.test.js` holds `format` at the end of health's detail. The browser smoke reads the Data
-  folder row, and its folder from 0.5.1 now holds one `server.upgraded` row (keyed, ✓) after its first start, and none
-  after the next. The synchronous-call caps gain `lib/dataformat.js` at 8, with its reason; `server.js` stays at 15 and
-  `supervise.js` at 2 (the marker goes through the atomic writer and `lib/dataformat.js`).
+  watchdog's hang limit (`test/slowcopy-preload.js`, new: each file the copy takes waits, and each beat is counted as
+  the server sends it and as its watchdog hears it) served with no kill, its boot inside the watchdog's own start
+  window (30 s) and each file it took one beat the watchdog heard while the copy still held the loop: a beat not sent,
+  or not heard until the loop lets go, fails it, and beats too sparse are killed up the ladder. `test/version.test.js`
+  holds the 21 pairs, the three orders' disagreements, a build read back in each channel and refused in any other
+  shape, the install version's MSI bounds, the release order (0.6.0 after 0.6.1 refused though its build is newer, the
+  same version, 0.10 above 0.9, a tag that names no version, a higher version tagged and not yet released),
+  `stamp-build.js`'s `installVersion`, `--released`, `--tags` and a version past 255 refused, and the release job: its
+  check before the attestation and the publish, one job at a time. `test/server.test.js` holds `format` at the end of
+  health's detail. The browser smoke reads the Data folder row, and its folder from 0.5.1 now holds one
+  `server.upgraded` row (keyed, ✓) after its first start, and none after the next. The synchronous-call caps gain
+  `lib/dataformat.js` at 8, with its reason; `server.js` stays at 15 and `supervise.js` at 2 (the marker goes through
+  the atomic writer and `lib/dataformat.js`).
 - Rolling back: 0.5.1 never reads `format.json` or `data\backups\`, and leaves both as they are.
 
 **The Windows evidence lane, and the lab lines** (the plan's Part 6, unit U7, with the owner's answer 34, "Installer in
