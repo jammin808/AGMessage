@@ -81,7 +81,12 @@ const stopServer = (child) => new Promise((resolve, reject) => {
   };
   if (child.exitCode !== null || child.signalCode !== null) { done(); return; }
   child.once('exit', done);
-  try { child.send({ t: 'stop' }); } catch { child.kill('SIGTERM'); }
+  // Asked over IPC only while the channel is open, and a send the channel refuses (the server gone before its exit is
+  // read, as after a kill) is answered here: a send with no callback says it as an 'error' event nobody hears.
+  const end = () => { try { child.kill('SIGTERM'); } catch { /* gone */ } };
+  if (child.connected) {
+    try { child.send({ t: 'stop' }, (e) => { if (e) end(); }); } catch { end(); }
+  } else end();
   setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } done(); }, 3000);
 });
 
