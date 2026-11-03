@@ -150,12 +150,18 @@ const filesOf = (srv, code) => ({ json: read(path.join(srv.dataDir, 'rooms', cod
 /** The steps test/stop-preload.js recorded for one run. */
 const stepsOf = (file) => (read(file) || '').split('\n').filter(Boolean);
 const health = async (srv) => (await h.api(srv.base, 'GET', '/api/health')).body;
-/** A hall's history as a page joining it now reads it, and its "AGMessage restarted" lines. */
+/**
+ * A hall's history as a page joining it now reads it, and its "AGMessage restarted" lines; given once the page has heard
+ * its own "joined" line. The join is answered before that line is written, and a line reaches a page only once its hall's
+ * log holds it (lib/ops.js `applier`: commit, then send), so the line heard, not the answer, is what says the log holds it.
+ */
 async function historyOf(srv, code, name) {
-  const s = await h.connect(srv.base);
+  const heard = [];
+  const s = await h.connect(srv.base, undefined, { on: { system: (m) => { heard.push(m.text); } } });
   try {
     const j = await h.emit(s, 'join', { roomCode: code, name, role: 'observer' });
     assert.ok(j.ok, JSON.stringify(j));
+    await h.until(() => heard.includes(name + ' joined as an observer'), 6000, name + '\'s own joined line, heard');
     return { history: j.history, restarts: j.history.filter((m) => m.type === 'system' && /^— AGMessage restarted · \d+ messages? kept —$/.test(m.text)) };
   } finally { s.close(); }
 }
@@ -214,7 +220,8 @@ test('a stop saves the audit log, then the lanes, then only the halls that chang
   assert.deepEqual([read(path.join(srv.dataDir, laststop.FILE)), JSON.parse(read(path.join(srv.dataDir, laststop.SEEN)))], [null, rec]);
   for (const code of [A, B]) assert.deepEqual((await historyOf(srv, code, 'Obs ' + code)).restarts, [], code + ': no restart line');
 
-  // A kill: no record. Each hall says AGMessage restarted, once; only A and B, whose logs the joins above wrote, are written.
+  // A kill: no record. Each hall says AGMessage restarted, once; only A and B, whose logs the joins above wrote (each line
+  // heard by its page, so in its log before the kill), are written.
   await kill(srv);
   srv = await h.startServer({ ...run(3), AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port) });
   const killed = await health(srv);
