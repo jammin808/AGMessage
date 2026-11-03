@@ -1270,7 +1270,7 @@ test('the gate: options it does not take, a bucket not named and a right it has 
   assert.deepStrictEqual(t.ask({ bucket: t.bucket }).read, ['joined', 'here'], 'and a gate written whole still reads');
 });
 
-test('the contexts: ctx holds every part and io, takesCtx the same parts but those that make a room\'s op or send to a room, and sendTo, both frozen; sendTo given a hall\'s key reaches nobody', () => {
+test('the contexts: ctx holds every part and io, takesCtx the same parts but those that make a room\'s op, send to a room or set which rooms send into one, and sendTo, both frozen; sendTo given a hall\'s key reaches nobody', () => {
   // Three pages' sockets, two of them in hall ABC234, as Socket.IO keeps them: the open ones by id (io.sockets.sockets),
   // and each hall a room of its sockets' ids (every socket is in a room of its own id too).
   const got = [];
@@ -1282,12 +1282,12 @@ test('the contexts: ctx holds every part and io, takesCtx the same parts but tho
   };
   const store = { kind: 'store' }, settings = { roomSends: [] };
   const linkFor = () => null, apply = () => null, systemMessage = () => null, newSideRoom = () => null, renameRoom = () => null, roomNameRefused = () => '';
-  const newGuestCode = () => 'K3TW9A', sendGuestsOut = () => 0, codeChanged = () => null;
-  const { ctx, takesCtx } = gate.contexts({ store, apply, systemMessage, newSideRoom, renameRoom, roomNameRefused, newGuestCode, sendGuestsOut, codeChanged, settings, linkFor, io });
+  const newGuestCode = () => 'K3TW9A', sendGuestsOut = () => 0, codeChanged = () => null, sendersOf = () => [], setRoomSends = () => '';
+  const { ctx, takesCtx } = gate.contexts({ store, apply, systemMessage, newSideRoom, renameRoom, roomNameRefused, newGuestCode, sendGuestsOut, codeChanged, settings, sendersOf, setRoomSends, linkFor, io });
   assert.ok(Object.isFrozen(ctx) && Object.isFrozen(takesCtx));
-  assert.deepStrictEqual(Object.keys(ctx), ['store', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'sendGuestsOut', 'codeChanged', 'settings', 'linkFor', 'io']);
-  assert.deepStrictEqual(Object.keys(takesCtx), ['store', 'roomNameRefused', 'newGuestCode', 'settings', 'linkFor', 'sendTo'], 'no io, apply, systemMessage, newSideRoom, renameRoom, sendGuestsOut or codeChanged: a take makes no room or room\'s op and sends to no room');
-  assert.deepStrictEqual([...gate.ROOM_SENDS], ['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'sendGuestsOut', 'codeChanged']);
+  assert.deepStrictEqual(Object.keys(ctx), ['store', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'setRoomSends', 'linkFor', 'io']);
+  assert.deepStrictEqual(Object.keys(takesCtx), ['store', 'roomNameRefused', 'newGuestCode', 'settings', 'sendersOf', 'linkFor', 'sendTo'], 'no io, apply, systemMessage, newSideRoom, renameRoom, sendGuestsOut, codeChanged or setRoomSends: a take makes no room or room\'s op, sends to no room and sets no room\'s list; it may read one');
+  assert.deepStrictEqual([...gate.ROOM_SENDS], ['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'sendGuestsOut', 'codeChanged', 'setRoomSends']);
   assert.ok(Object.isFrozen(gate.ROOM_SENDS));
   assert.ok(ctx.store === store && takesCtx.store === store && takesCtx.settings === settings && ctx.io === io && ctx.apply === apply, 'the parts themselves, not copies');
   assert.throws(() => { ctx.io = null; }, TypeError, 'a handler module cannot replace a part');

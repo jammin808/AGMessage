@@ -1592,6 +1592,9 @@ html[data-theme="dark"] input, html[data-theme="dark"] textarea { background: va
 .setup-room:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
 .setup-room-name { font-weight: 600; }
 .setup-room-code { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; flex: 1 1 8rem; }
+/* The rooms that may send into a room: a line of its own under the room's name and code. */
+.setup-room-sends { flex: 1 1 100%; font-size: var(--fs-sm); }
+.setup-room-sends:empty { display: none; }
 @media (max-width: 820px) {
   .hall-row { grid-template-columns: 1fr auto auto; }
   .hall-rooms { grid-column: 1 / -1; grid-row: auto; }
@@ -1657,6 +1660,13 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .members-row { padding: var(--sp-1) 0; border-bottom: 1px solid var(--c-border); }
 .members-row .hint { display: block; margin-left: 1.6rem; }
 .members-said { min-height: 1.2em; font-size: var(--fs-sm); }
+/* May send in…: every hall's rooms, grouped by hall, each with its tick and its "↔ and send back" beside it. */
+.sends-list { display: grid; gap: var(--sp-2); margin: var(--sp-2) 0; }
+.sends-rooms { list-style: none; margin: 0; padding: 0; }
+.sends-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 var(--sp-4); padding: var(--sp-1) 0; border-bottom: 1px solid var(--c-border); }
+.sends-row:last-child { border-bottom: 0; }
+.sends-row > .check:first-child { flex: 1 1 12rem; }
+.sends-row .hint { align-self: center; }
 .secret { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .08em; text-align: center; padding: .7rem; border: 2px dashed var(--border); border-radius: 10px; user-select: all; }
 
 /* Accounts and the audit log */

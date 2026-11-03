@@ -372,6 +372,9 @@ test('settings.json that cannot be read is never written over: its .bak is not t
   const code = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall 1' }, { cookie: login.cookie })).body.code;
   assert.deepEqual(await h.emit(admin, 'hall:configure', { code, name: 'Renamed', stagewatchUrl: '10.0.0.9' }), { ok: false, error: NOT_SAVED }, 'a hall\'s Stagewatch refused');
   assert.equal((await h.emit(admin, 'hall:settings', { code })).name, 'Hall 1', 'and its name with it: the save is one');
+  const other = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: login.cookie })).body.code;
+  assert.deepEqual(await h.emit(admin, 'room:update', { code, sendFrom: [other], sendBack: [other] }), { ok: false, error: NOT_SAVED }, 'which rooms may send into a hall: refused');
+  assert.deepEqual([(await h.emit(admin, 'room:settings', { code })).sendFrom, (await h.emit(admin, 'room:settings', { code: other })).sendFrom], [[], []], 'and neither list was set');
   assert.deepEqual(await h.emit(admin, 'hall:configure', { code, name: 'Renamed', stagewatchUrl: '' }), { ok: true, changed: ['name → Renamed'] }, 'a change of no setting goes through');
   await h.wait(300);   // a lane's save would have landed by now
   await h.stopServer(srv.child);

@@ -1328,10 +1328,72 @@ function newGuestCode() {
  * Whether a new hall or room, or a new guest code, may not take `key`: a room has it, side rooms included; it is a room's
  * guest code, live or earlier (a hall's key is its code until New code, so the two are never shared); or something still
  * names it that would open the new one to whoever held the one before — an account's halls, On stage halls or rooms (one
- * a page saved back after its hall closed, one a room that comes back at the next start keeps), a node linked for a hall.
+ * a page saved back after its hall closed, one a room that comes back at the next start keeps), a node linked for a hall,
+ * a list of the rooms that may send into a room (as the room listed or as a room on it).
  */
 function keyHeld(key) {
-  return store.codeHeld(key) || accounts.names(key) || Object.values(settings.peerLinks || {}).some((l) => !!l && l.hall === key);
+  return store.codeHeld(key) || accounts.names(key) || Object.values(settings.peerLinks || {}).some((l) => !!l && l.hall === key) || sendsName(key);
+}
+
+// ---------------------------------------------------------------- which rooms may send into a room (plan 1-§4.1)
+// `settings.roomSends = {<TARGET key>: [<SOURCE key>, …]}`: for each room, the rooms whose people may send into it, by
+// key, never by guest code. A room with no list, and a folder with none at all, sends nothing in (fail closed): the
+// field is written only once the admin sets a list, and goes again with the last one. A list read from the file that is
+// not one of strings is read as none. `setRoomSends` is its one writer (the rooms module's `room:update {sendFrom}`, and
+// a room's removal through `forgetRoomSends`); `sendersOf` its one reader.
+const ROOM_SENDS_MAX = 50;
+/** A plain object: neither null nor a list. */
+function isRecord(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
+/** The keys on `key`'s list as saved: strings, each once, in the order set; none for a room with no list. */
+function sendersOf(key) {
+  const all = settings.roomSends;
+  const list = isRecord(all) && typeof key === 'string' && Object.hasOwn(all, key) ? all[key] : null;
+  return Array.isArray(list) ? [...new Set(list.filter((k) => typeof k === 'string' && k.length > 0))] : [];
+}
+/** Whether a list still names `key`, as the room it lists or a room on it (one whose room comes back at the next start). */
+function sendsName(key) {
+  if (!isRecord(settings.roomSends)) return false;
+  return Object.hasOwn(settings.roomSends, key) || Object.keys(settings.roomSends).some((t) => sendersOf(t).includes(key));
+}
+/**
+ * The lists set together and saved once: `next` is {<TARGET key>: [<SOURCE key>, …]}, an empty list taking that room's
+ * away. '' when they are set (or `next` names none), else why not, in words, with nothing changed: a list that is not
+ * one of keys, one longer than ROOM_SENDS_MAX once its repeats are gone (a list is never cut to fit), or settings this
+ * run could not read, which nothing is saved over. Which keys are rooms is the caller's to judge, with its own words.
+ */
+function setRoomSends(next) {
+  if (!isRecord(next)) return 'The lists are given by room.';
+  const lists = [];
+  for (const [target, list] of Object.entries(next)) {
+    if (!target || !Array.isArray(list) || list.some((k) => typeof k !== 'string' || !k)) return 'A list names rooms by their keys.';
+    const once = [...new Set(list)];
+    if (once.length > ROOM_SENDS_MAX) return 'At most ' + ROOM_SENDS_MAX + ' rooms may send into one room.';
+    lists.push([target, once]);
+  }
+  if (!lists.length) return '';
+  if (settingsUnsaved()) return settingsUnsaved();
+  const all = isRecord(settings.roomSends) ? { ...settings.roomSends } : {};
+  for (const [target, once] of lists) { if (once.length) all[target] = once; else delete all[target]; }
+  if (Object.keys(all).length) settings.roomSends = all; else delete settings.roomSends;
+  saveSettings();
+  return '';
+}
+/**
+ * The rooms of `keys`, gone, taken off every list, as a room listed and as a room on a list (plan 1-§1.6), in one save;
+ * a list that names none of them is left as it is, and nothing is written when none does. What could not be saved is
+ * said on the console: the room is gone either way, and a key no room has sends nothing.
+ */
+function forgetRoomSends(keys) {
+  if (!keys.length || !isRecord(settings.roomSends)) return;
+  const gone = new Set(keys);
+  const next = {};
+  for (const target of Object.keys(settings.roomSends)) {
+    const now = sendersOf(target);
+    if (gone.has(target)) next[target] = [];
+    else if (now.some((k) => gone.has(k))) next[target] = now.filter((k) => !gone.has(k));
+  }
+  const why = setRoomSends(next);
+  if (why) console.error('  [save] the rooms that may send into a room were not updated for a room removed: ' + why);
 }
 /**
  * The guest code of `room` as `who` may be told it, or '' (plan 1-§2.3: the chips, /api/halls, the halls board, the join's
@@ -2814,7 +2876,8 @@ io.on('connection', (socket) => {
     // The accounts that were given a room that goes, or the hall that goes (its halls, its On stage halls), are given it
     // no more: a key no room has reaches nothing, so no page of theirs is ended and no account's row is written. A room
     // whose files another program held comes back at the next start (`back`), and its accounts keep it, so it comes back
-    // with its members. Each row counts the accounts it changed.
+    // with its members. Each row counts the accounts it changed. Each room that goes is taken off every list of the rooms
+    // that may send into a room, as the room listed and as a room on a list, unless it comes back (forgetRoomSends).
     const updated = (n) => (n ? ', ' + plural(n, 'account') + ' updated' : '');
     const by = socket.data.actor || HOST_ACTOR;
     if (!main) {
@@ -2823,6 +2886,7 @@ io.on('connection', (socket) => {
       frames.rooms.mark(r.hall);
       const gone = said(removed);
       const pruned = removed.back.includes(r.code) ? [] : accounts.prune({ rooms: [r.code] });
+      if (!removed.back.includes(r.code)) forgetRoomSends([r.code]);
       audit.write(by, 'room.remove', r.code, (r.name || '(no name)') + ' (' + hallWords(r.hall) + ')' + gone.row + updated(pruned.length), socket.data.ip);
       const purged = gone.purge ? await removeUnused(files) : 0;
       return ok(ack)({ ok: true, purged, ...gone.answer });
@@ -2840,6 +2904,7 @@ io.on('connection', (socket) => {
       audit.write(by, 'room.remove', x.code, (x.name || '(no name)') + ' (' + hallName + '), with its hall' + (comes ? ': it opens again at the next start' : '') + updated(pruned.length), socket.data.ip);
     }
     if (!removed.back.includes(r.code)) for (const id of accounts.prune({ halls: [r.code] })) touched.add(id);
+    forgetRoomSends(rooms.map((x) => x.code).filter((k) => !removed.back.includes(k)));
     if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
     for (const d of displays.ofHall(r.code)) revokeDisplaySockets(d.id, 'This screen\'s hall was closed.');
     displays.removeHall(r.code);
@@ -4618,12 +4683,13 @@ function firstWrites() {
 
 // The server's contexts for the handler modules (lib/gate.js `contexts`), built once, last, after every part they name
 // exists, and before this copy holds its port, so the first connection reads them whole: the stores and their named
-// effects, `settings` to read (a handler module never writes it: test/modules.test.js (j)), the Stagewatch a hall follows
+// effects, `settings` to read (a handler module never writes it: test/modules.test.js (j)), the rooms that may send into a
+// room (`sendersOf`, read; `setRoomSends`, its one writer, the rooms module's alone), the Stagewatch a hall follows
 // and its frame, and `io` for the rooms module. The takes module's holds no io, apply or systemMessage: it reaches a page
 // by its socket's id alone (`sendTo`, over io's open sockets, read by the gate's module and never handed in), never a
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
-  store, apply, systemMessage, buildMessage, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, settings, linkFor, stagePayload, io,
+  store, apply, systemMessage, buildMessage, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, settings, sendersOf, setRoomSends, linkFor, stagePayload, io,
 });
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.

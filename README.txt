@@ -143,6 +143,21 @@ First time on a new laptop
    given), and to guests the code they typed. Staff and Viewer accounts
    are not shown a hall's code, and On stage pages show none.
 
+   Which rooms may send into a room: "May send in..." in a room's ⋯ (on
+   the admin page, or in its hall's Set up; the admin's alone, on a
+   hall's Main room too). It lists every hall's rooms by hall: tick each
+   room whose people may send messages and files into this one, and
+   "↔ and send back" beside it to let this room send into that one too.
+   A ↔ stays ticked beside every room this room sends into now, ticked
+   or not, so you can see it and take it away. Save sets both in one go
+   and says so ("Saved: 2 rooms may send into Hall 2 › Legal. It now
+   sends into Hall 3."). At most 50 rooms
+   may send into one room. A room with nothing ticked takes nothing in
+   from other rooms. Set up shows under each room which rooms may send
+   into it. A room removed, or a closed hall's rooms, leave every list.
+   Each change is one audit row (room.sendFrom), naming the rooms, never
+   a code. Going back to 0.5.1 keeps these lists in settings.json, unread.
+
 6. In the black window you will see a line like:
 
        LAN:  http://192.168.1.42:3023

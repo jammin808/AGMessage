@@ -3225,6 +3225,90 @@ and §16.7's `room` row; the dots on the switcher are unit 21's, and the header'
 - The papers: `README.md`, `README.txt`, `app/README.md`, `docs/ACCOUNTS.md`, `docs/DESIGN.md`, `SECURITY.md`,
   `docs/ANALYSIS.md`, `CLAUDE.md`.
 
+**Which rooms may send into a room** (the plan's Part 1, unit 12, its §4.1, with §1.6 (a room removed), §1.7 and §1.8 (a
+0.5.1 folder has none; 0.5.1 keeps it unread), §1.10 (the store and its bound), §2.7's `room.sendFrom` row and §7.2 and
+§7.4's pickers, as Part 5 §14.2 (`setRoomSends` in the server's context) and §16.7's `adminRoom` row (May send in…) and
+§16.10's unit 12 row place them; the owner's answer 5: the admin's alone. The sends themselves, `room:send` and its copy,
+are unit 14's: until it lands a list is kept and shown, and nothing is sent between rooms)
+- **A list per room**: the rooms, of any hall, whose people may send messages and files into it, kept in `settings.json`
+  by room key, never by guest code (`roomSends: {<room>: [<room>, …]}`). A room with no list takes nothing in from
+  another (fail closed); the field is written only once the admin sets a list, and goes again with the last one, so a
+  folder where none was set has none. Through the server's one writer (`setRoomSends`) and one reader (`sendersOf`), in
+  the rooms module's context; the takes module's context holds the reader alone (`setRoomSends` joins `ROOM_SENDS`).
+- **`room:update {code, sendFrom, sendBack}`**, the admin's alone and never from an On stage page, as the code is: each
+  key a room that is here, in any hall, and not the room itself (an unknown one refused in words, "No such room: ….
+  Nothing was saved.", never dropped), read by type (a list of strings, or it is refused in words), each once in any
+  case, at most 50 (a longer list is refused, never cut). `sendBack` ("↔ and send back") names every room this room
+  sends into, each a room here and not itself: given, this room is put on the list of each room it names and taken off
+  the list of every other room that names it now, each held to 50 too ("Media (Hall 2) has 50 already: this room cannot
+  send back into it."); a room it does not send into yet is added only beside a room the list names ("tick that room
+  too"), while one it sends into already may stay or go either way; not given, no other list changes. A room on the
+  list that is not open now (one whose files another program held, which comes back at the next start) keeps its place
+  through a save, which no picker could show, and counts toward the 50 ("this list names 49, and with the 2 not open now
+  that keep their places on it, 51"). The lists a change touches are saved together, and written in one `room.sendFrom`
+  row on the room's key, each room by its name and its hall's, never a key ("may send here: Main (Hall 2), Media (Hall 2);
+  it sends back into: Media (Hall 2)"; "it no longer sends into: …"; "2 rooms not open now"); a change that changes
+  nothing (the same rooms in another order) is answered `already` with no row, and a whole change is refused when the
+  settings could not be read (never saved over). The answer says the rooms on the list that are here and every room this
+  one sends into, by key, and for a change which it was let send into and which it no longer sends into (`into`,
+  `notInto`). A room's other settings' refusals name the list too ("A
+  room's name, its guest code and the rooms that may send into it are the settings changed here."; "One change at a
+  time: the name, the code on or off, a new code, or the rooms that may send in."), and what comes with one change is
+  refused beside any other, never ignored: `sendBack` beside anything but `sendFrom`, and `keepGuests` beside anything
+  but `codeOn` (a New code asked with it was made, `keepGuests` unread).
+- **Who is told the lists**: those who read a room's settings (`room:settings`, the admin and `halls.manage`). Each of
+  the hall's rooms carries its list (`sendFrom`: each room by key, name, whether it is a Main room and its hall's name),
+  and the asked room its list and every room of any hall it sends into (`sendBack`: those whose list names it, whether or
+  not they may send into it), appended; the admin, who alone
+  sets them, is told every hall's rooms by name (`everyHall`), the rooms a list may name. No page in a room is ever sent a
+  list, nor a key of another hall's room on one.
+- **A room removed leaves every list**, as the room listed and as a room on a list; a hall closed, with each of its rooms
+  (`forgetRoomSends`, one save, no row of its own: the room's `room.remove` and the hall's `hall.remove` say what went).
+  A room whose files another program held, which comes back at the next start, keeps its places; and no new hall or room
+  is made under a key a list still names (`keyHeld`), so a room made later never inherits a place on a list.
+- **May send in…** (the catalogue's `adminRoom.sendFrom`, ↘, between Members… and the code), on a room's ⋯, right-click
+  and Shift+F10 on the admin page's list and in a hall's Set up, a hall's Main room as any other, for the admin: a
+  dialog of every hall's rooms by hall, the room itself listed and not offered ("This room"), each ticked where it may
+  send in now, and beside each its **↔ and send back**, ticked where this room sends into that one now, whether or not
+  that one may send here: what the dialog draws, both ways, is what is kept, and a save takes away no ↔ it did not draw
+  unticked. A ↔ is offered beside a tick, and stays offered, as it is, beside a room this room sends into now (a tick
+  taken away leaves it, to keep or take away; a ↔ ticked beside a tick then taken away, where this room did not send,
+  goes with the tick). Save sends one `room:update` with every room ticked and every ↔ ticked, read afresh as the dialog
+  opens; nothing changed sends nothing ("Nothing changed."); the server's answer is said, each room this one now sends
+  into or no longer does by name ("Saved: 2 rooms may send into Hall 2 › Legal. It now sends into Hall 3. It no longer
+  sends into Hall 2 › Media."), its refusal in the dialog, which stays open. Set up says under each room which
+  rooms may send into it ("May send in: Legal · Hall 2, Main · Hall 3", the first three, the rest counted), read again
+  after a save (`public/sendfrom.js`, `AGM.sendFrom`: its rows, the change a Save sends and its words pure).
+- Tests: `test/sends.test.js` (new): the admin's alone (one who sets halls up and a member refused, the member told
+  nothing of the room's settings); each refusal by type and its words, with nothing saved, switched or renewed (a
+  `sendBack` beside a code switched, a `keepGuests` beside a list or a New code among them); an unknown key, the room
+  itself (in either list), 51 rooms, a ↔ added beside no tick; a list set once per key in any case, saved as set and told
+  by name; the same rooms in another order `already`, with no row; ↔ given, taken away and given again, each list as
+  saved after each; a Main room's list; the picker's own saves against the server (a room that may not send in, which
+  this one sends into, drawn unticked with its ↔ ticked; ticked with the ↔ as drawn, its list still names this room;
+  unticked again, the ↔ left, still kept and drawn so on reopening; the ↔ taken away, this room off its list and said by
+  name); the rows, never a key in their words; one who sets halls up told the lists and not every hall's
+  rooms; every frame and answer to a page in Legal and to a guest in another hall's Main room (and Legal's account's
+  halls board and `/api/halls`) holding no list and no key of a room of another hall on one; the lists kept across a
+  restart; a ↔ into a room whose own list holds 50 refused whole; a room removed, and then a hall with its rooms, taken off
+  every list until none is left and the field is gone; a room whose files another program held, removed: its places on
+  both lists kept, untold, through a save of the other list from its picker, counted toward the 50, and back on both at
+  the next start; and the picker's pure half (its rows, a ↔ drawn ticked beside a room not ticked, this room not
+  offered, the change a Save sends, a ↔ that would add a room beside no tick never sent, its words naming each room by
+  name, none without every hall's rooms).
+  `test/inputs.test.js`: `sendFrom` and `sendBack` in the shapes, and the list by type (refused in its words, no row, no
+  list set). `test/startrules.test.js`: a list refused with the settings unread, neither list set. `test/menus.test.js`:
+  May send in… sent as each seat it is hidden from, refused in words, and no room's list set. `test/catalog.test.js`: the
+  admin page's and Set up's matrices with May send in…, its offline reason, and its label's "…". `test/units.test.js`:
+  the contexts with `sendersOf` and `setRoomSends`, the takes context without the writer (moved on purpose).
+  `test/modules.test.js`: `ctx`'s parts and (l)'s rooms-module reasons (moved on purpose). `test/halls.test.js` and
+  `test/codes.test.js`: `room:settings`' answer and `room:update`'s refusals (moved on purpose: the lists, and words that
+  name them). `test/pagefloor.test.js`: `sendfrom.js` defines only. The smoke: May send in… in Set up (every hall's rooms,
+  the room not offered, ↔ only beside a tick, a save said and each row's line; opened again, both ways drawn, and the
+  room unticked keeping its ↔, offered) and on the admin page (both lists set in one save, read back), and a room removed
+  leaving the list of the room it could send into.
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `SECURITY.md`, `docs/ANALYSIS.md`, `CLAUDE.md`.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

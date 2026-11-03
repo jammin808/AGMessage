@@ -367,6 +367,16 @@
     const hallName = setupRooms.hallName || 'This hall';
     return { code: setupRooms.hall, name: hallName, hall: hallName, main: true, watched: false, guestCode: '', on: false, guests: null, codeIsKey: false };
   }
+  /**
+   * The rooms that may send into a room, as its row says them to whoever reads Set up ("May send in: Legal · Hall 2, Main ·
+   * Hall 3"), the first few by name and the rest counted; '' when none may. The admin changes them with May send in….
+   */
+  function setupSendsWords(r) {
+    const list = Array.isArray(r.sendFrom) ? r.sendFrom.filter((x) => x && typeof x.key === 'string') : [];
+    if (!list.length) return '';
+    const names = list.slice(0, 3).map((x) => (x.main ? 'Main' : x.name || 'a room') + ' · ' + (x.hallName || 'a hall with no name'));
+    return 'May send in: ' + names.join(', ') + (list.length > 3 ? ' and ' + (list.length - 3) + ' more' : '');
+  }
   /** A room's code as its row says it: the code where this account is told it, and whether it admits guests now. */
   const setupCodeWords = (o) => (o.guestCode ? 'code ' + o.guestCode + (o.on ? '' : ' (off)') : o.on ? 'code on' : 'code off')
     + (o.guests ? ' · ' + o.guests + (o.guests === 1 ? ' guest page' : ' guest pages') + ' in' : '');
@@ -387,13 +397,15 @@
         const name = document.createElement('span'); name.className = 'setup-room-name';
         const code = document.createElement('span'); code.className = 'muted setup-room-code';
         const bar = document.createElement('span'); bar.className = 'obj-bar';
-        li.append(name, code, bar);
+        const sends = document.createElement('span'); sends.className = 'muted setup-room-sends';
+        li.append(name, code, bar, sends);
       }
       const o = setupRoomObject(r.key);
-      const [name, code, bar] = li.children;
+      const [name, code, bar, sends] = li.children;
       const nameWords = o.main ? 'Main room' : o.name || 'A room';
       if (name.textContent !== nameWords) name.textContent = nameWords;
       if (code.textContent !== setupCodeWords(o)) code.textContent = setupCodeWords(o);
+      if (sends.textContent !== setupSendsWords(r)) sends.textContent = setupSendsWords(r);
       A.draw(bar, 'adminRoom', o, { more: (o.main ? 'Main room actions' : 'Actions for ' + (o.name || 'this room')), keysOn: li });
       if (ul.children[i] !== li) ul.insertBefore(li, ul.children[i] || null);
     });
@@ -438,6 +450,8 @@
     'adminRoom.newCode': (o) => AGM.outbox.now('room:update', { code: o.code, newCode: true }, roomDone('No new code.', (res) => AGM.toast('The new guest code of ' + o.hall + ' is ' + res.guestCode + '.'))),
     'adminRoom.remove': (o, c) => AGM.outbox.now('admin:deleteRoom', { roomCode: o.code, purgeFiles: !!(c.values && c.values.purge) }, roomDone('Not removed.', (res) => AGM.toast(res.keptWords ? 'Removed. ' + res.keptWords : 'Removed ' + o.hall + '.', !!res.keptWords))),
     'adminRoom.members': (o) => AGM.members.open({ code: o.code, name: o.name, hall: o.hall, main: o.main, hallName: (setupRooms && setupRooms.hallName) || o.hall }, { say: (w, bad) => AGM.toast(w, bad) }),
+    // Which rooms may send into it: every hall's rooms, each ticked with ↔ and send back; the rows' lists read again after.
+    'adminRoom.sendFrom': (o) => AGM.sendFrom.open({ code: o.code, hall: o.hall }, { read: readSetupRooms, say: (w, bad) => AGM.toast(w, bad), done: refreshSetupRooms }),
   });
   A.bind($('setupRooms'), { kind: 'adminRoom', find: (el) => el.closest('#setupRooms > li[data-key]'), get: setupRoomObject, label: (o) => (o.main ? 'Main room actions' : 'Room actions'), gone: 'That room is gone.', header: (o) => o.hall });
   AGM.roving($('setupRooms'), { item: 'li[data-key]' });

@@ -89,6 +89,19 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   room is made under a key a room, an account or a node's link still names, so a hall made later is never open to the
   accounts that held one before it under the same code; a Patterns or PlayMap linked for a hall that has been closed
   proposes to no show desk.
+- Which rooms may send into a room is a list per room, kept in the settings by room key, never by guest code
+  (`settings.roomSends`): a room with no list takes nothing in from another (fail closed), and a folder where none was
+  set has none. Only the admin sets it (`room:update {sendFrom, sendBack}`, never from an On stage page), through one
+  writer (`setRoomSends`, which the takes module's context does not hold): each key a room that is here and not the room
+  itself, an unknown one refused in words and never dropped, each once, at most 50 (a list is refused, never cut), the
+  lists a change touches saved together and in one `room.sendFrom` row that names the rooms by name, never by key; the
+  picker draws both ways as they are kept (each room's ↔ ticked where this room sends into it, whether or not that room
+  may send here), so a save takes away no permission the admin was not shown, and its answer names each room this one
+  now sends into or no longer does;
+  settings this run could not read are never saved over. The lists are told only to those who read a room's settings
+  (the admin and `halls.manage`; every hall's rooms only to the admin), never to a page in a room, and a room removed
+  leaves every list, as the room listed and as a room on one; no new room is made under a key a list still names, so a
+  room made later never inherits a removed room's place on a list.
 - Room keys and guest codes are two things. A guest joins by a room's guest code alone, each room its own: a side room's
   is made with it and is never its key, and a hall's Main room's is its key until the admin renews it (New code), so a
   0.5.1 hall keeps the code its guests know. A code is one room's (no live code, earlier code or key shared). The admin

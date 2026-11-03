@@ -603,6 +603,14 @@ document.getElementById('userViewModal')?.addEventListener('click', (e) => {
   if (e.target.id === 'userViewModal') closeUserView();
 });
 
+/** A room's settings as the server tells them (room:settings), or why not: a read, so a plain emit. */
+function readRoomSettings(code) {
+  return new Promise((resolve) => {
+    if (!socket || !socket.connected) { resolve({ ok: false, error: 'Not connected.' }); return; }
+    socket.emit('room:settings', { code }, (r) => resolve(r && typeof r === 'object' ? r : { ok: false, error: 'No answer.' }));
+  });
+}
+
 /** A room's name as the list has it: a hall's, or a side room's with its hall's ("Hall 2 › Legal"); '' when unnamed or unlisted. */
 function roomNameForCode(code) {
   const at = roomAt(code);
@@ -656,6 +664,8 @@ Object.assign(ADMIN_RUN, {
     const at = roomAt(o.code);
     AGM.members.open({ code: o.code, name: o.name, hall: o.hall, main: o.main, hallName: at ? at.hall.name || at.hall.code : o.hall }, { say, done: refreshRooms });
   },
+  // Which rooms may send into it (every hall's rooms, each ticked with ↔ and send back), read afresh and saved at once.
+  'adminRoom.sendFrom': (o) => AGM.sendFrom.open({ code: o.code, hall: o.hall }, { read: readRoomSettings, say }),
   'adminRoom.rename': (o, c) => AGM.outbox.now('room:update', { code: o.code, name: (c.values && c.values.name) || '' }, (res) => {
     if (!res || !res.ok) { say((res && res.error) || 'Not renamed.', true); return; }
     say(res.already ? 'It is called ' + res.name + ' already.' : 'Renamed ' + res.name + '.');

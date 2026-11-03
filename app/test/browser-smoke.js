@@ -1493,17 +1493,44 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await signin.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]')`, 3000);
     await signin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.codeToggle"]').click()`);
     const pressOn = await signin.until(`(() => { const t = ${SETUP_ROW(pressKey)}.querySelector('.setup-room-code').textContent; return /^code [A-Z2-9]{6}$/.test(t) && (document.getElementById('agmToast') || {}).textContent; })()`, 5000);
+    // May send in… (the admin's), over Set up: every hall's rooms by hall, Press itself listed and never offered, a ↔
+    // offered only beside a tick. The Main room ticked with its ↔ and saved: one save, said, and each room's row in Set up
+    // says which rooms may send into it. Opened again, the Main room is drawn both ways; unticked, its ↔ stays as it is
+    // and offered, since Press sends into it now (what is drawn is what a save keeps), and Cancel saves nothing.
+    const SENDS_ROW = (key) => `document.querySelector('#sendsList li.sends-row[data-key="${key}"]')`;
+    await signin.eval(`${SETUP_ROW(pressKey)}.querySelector('.obj-more').click()`);
+    await signin.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.sendFrom"]')`, 3000);
+    await signin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.sendFrom"]').click()`);
+    const pickerSeen = await signin.until(`(() => { const d = document.getElementById('sendsDialog'); const me = ${SENDS_ROW(pressKey)}; const main = ${SENDS_ROW(code)}; return !!d && d.open && !!me && !!main && JSON.stringify({ title: document.getElementById('sendsTitle').textContent, halls: document.querySelectorAll('#sendsList legend').length > 0, me: [me.querySelector('input.sends-on').disabled, !!me.querySelector('input.sends-back')], main: [main.querySelector('input.sends-on + span').textContent, main.querySelector('input.sends-on').checked, main.querySelector('input.sends-back').disabled] }); })()`, 5000);
+    await signin.eval(`${SENDS_ROW(code)}.querySelector('input.sends-on').click()`);
+    const backOffered = await signin.eval(`!${SENDS_ROW(code)}.querySelector('input.sends-back').disabled`);
+    await signin.shot(path.join(OUT, 'may-send-in.png'));
+    await signin.eval(`(() => { ${SENDS_ROW(code)}.querySelector('input.sends-back').click(); document.getElementById('sendsSave').click(); })()`);
+    const sendsSaid = await signin.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; const p = ${SETUP_ROW(pressKey)}.querySelector('.setup-room-sends').textContent; const m = ${SETUP_ROW(code)}.querySelector('.setup-room-sends').textContent; return !document.getElementById('sendsDialog').open && /^Saved/.test(t) && !!p && !!m && JSON.stringify({ t, p, m }); })()`, 5000);
+    await signin.eval(`${SETUP_ROW(pressKey)}.querySelector('.obj-more').click()`);
+    await signin.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.sendFrom"]')`, 3000);
+    await signin.eval(`document.querySelector('.agm-menu [data-action="adminRoom.sendFrom"]').click()`);
+    const BOTH = (key) => `(() => { const r = ${SENDS_ROW(key)}; const b = r.querySelector('input.sends-back'); return JSON.stringify({ on: r.querySelector('input.sends-on').checked, back: b.checked, offered: !b.disabled }); })()`;
+    const drawnAgain = await signin.until(`document.getElementById('sendsDialog').open && !!${SENDS_ROW(code)} && ${BOTH(code)}`, 5000);
+    await signin.eval(`${SENDS_ROW(code)}.querySelector('input.sends-on').click()`);
+    const untickedKeeps = await signin.eval(BOTH(code));
+    await signin.eval(`document.querySelector('#sendsDialog button[value="cancel"]').click()`);
+    const sendsCancelled = await signin.until(`!document.getElementById('sendsDialog').open && ${SETUP_ROW(code)}.querySelector('.setup-room-sends').textContent`, 3000);
+    report(pickerSeen === JSON.stringify({ title: 'Who may send into Smoke AGM › Press', halls: true, me: [true, false], main: ['Main room', false, true] }) && backOffered === true
+      && sendsSaid === JSON.stringify({ t: 'Saved: 1 room may send into Smoke AGM › Press. It now sends into Smoke AGM.', p: 'May send in: Main · Smoke AGM', m: 'May send in: Press · Smoke AGM' })
+      && drawnAgain === JSON.stringify({ on: true, back: true, offered: true }) && untickedKeeps === JSON.stringify({ on: false, back: true, offered: true }) && sendsCancelled === 'May send in: Press · Smoke AGM',
+      `May send in… lists every hall's rooms, the room itself not offered and a ↔ only beside a tick; the Main room ticked with ↔ is one save, said, and each row says who may send into it; opened again it is drawn both ways, and unticked its ↔ stays, offered (${pickerSeen}; ↔ offered ${backOffered}; ${sendsSaid}; ${drawnAgain}; ${untickedKeeps}; "${sendsCancelled}")`);
     await signin.eval(`${SETUP_ROW(pressKey)}.scrollIntoView({ block: 'center' })`);
     await signin.shot(path.join(OUT, 'setup-rooms.png'));
     await signin.eval(`document.getElementById('setupDialog').close()`);
     const pressButton = await signin.until(`(() => { const a = document.querySelector('.hall-row[data-code="${code}"] .hall-rooms a.room-btn[data-key="${pressKey}"]'); const o = AGM.page.object('hall', '${code}'); return a && JSON.stringify({ words: a.textContent, href: a.getAttribute('href'), rooms: AGM.catalog.ids('hall', AGM.page.facts(), o).includes('hall.rooms'), open: AGM.catalog.entry('hall', 'hall.open').label(AGM.page.facts(), o), above: document.elementFromPoint(a.getBoundingClientRect().left + 4, a.getBoundingClientRect().top + a.getBoundingClientRect().height / 2) === a }); })()`, 5000);
     await signin.shot(path.join(OUT, 'halls-rooms.png'));
     const setupSeen = setupMain && JSON.parse(setupMain);
-    report(!!setupSeen && setupSeen.name === 'Main room' && setupSeen.code === 'code ' + code && setupSeen.add && setupSeen.words && doorsInStep(mainSetupDoors) && mainSetupDoors.want === JSON.stringify(['adminRoom.create', 'adminRoom.members', 'adminRoom.codeToggle', 'adminRoom.newCode']),
-      `Set up lists the hall's rooms, the Main room first with its code; its doors are New room in this hall…, Board members… and its code (${setupMain}; ${mainSetupDoors.want}; ${mainSetupDoors.right} / ${mainSetupDoors.dots} / ${mainSetupDoors.key})`);
+    report(!!setupSeen && setupSeen.name === 'Main room' && setupSeen.code === 'code ' + code && setupSeen.add && setupSeen.words && doorsInStep(mainSetupDoors) && mainSetupDoors.want === JSON.stringify(['adminRoom.create', 'adminRoom.members', 'adminRoom.sendFrom', 'adminRoom.codeToggle', 'adminRoom.newCode']),
+      `Set up lists the hall's rooms, the Main room first with its code; its doors are New room in this hall…, Board members…, May send in… and its code (${setupMain}; ${mainSetupDoors.want}; ${mainSetupDoors.right} / ${mainSetupDoors.dots} / ${mainSetupDoors.key})`);
     report(addAsk === 'New room in Smoke AGM' && /^[A-Z2-9]{8}$/.test(pressKey || '') && pressMade === JSON.stringify({ toast: 'Made Press in Smoke AGM: its guest code is off.', code: true, order: [code, pressKey] })
-      && doorsInStep(pressDoors) && pressDoors.want === JSON.stringify(['adminRoom.members', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.remove']) && pressOn === 'The guest code of Smoke AGM › Press is on.',
-      `+ Add room makes a room in Set up, listed after the Main room with its code off; its doors are Members…, its code, Rename… and Remove room…, and Turn the code on switches it (${addAsk}; ${pressMade}; ${pressDoors.want}; "${pressOn}")`);
+      && doorsInStep(pressDoors) && pressDoors.want === JSON.stringify(['adminRoom.members', 'adminRoom.sendFrom', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.remove']) && pressOn === 'The guest code of Smoke AGM › Press is on.',
+      `+ Add room makes a room in Set up, listed after the Main room with its code off; its doors are Members…, May send in…, its code, Rename… and Remove room…, and Turn the code on switches it (${addAsk}; ${pressMade}; ${pressDoors.want}; "${pressOn}")`);
     // A room button is the room's own link, inside its hall's row: right-click and Shift+F10 on it open the room's menu
     // (kind room), never its row's; for the admin, who sets halls up and is told every code: Open, Open in a new tab, Copy
     // link, Copy guest code and Set up….
@@ -2751,7 +2778,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // Its row's name says its hall to a screen reader, which hears the list flat: "Legal, a room of Smoke AGM …".
     const sideRowName = await admin.eval(`window.__sideRow.querySelector('.room-pick').textContent`);
     const sideDoors = await doorsOf(admin, 'adminRoom', 'window.__sideRow', `AGM.page.object('adminRoom', '${sideKey}')`, { ...PAGE_DOORS, hit: '.room-pick' });
-    report(sideCreateAsk === 'New room in Smoke AGM' && /^[A-Z2-9]{8}$/.test(sideKey || '') && /^Legal, a room of Smoke AGM0 people · 0 messages · code [A-Z2-9]{6} off$/.test(sideRowName || '') && doorsInStep(sideDoors) && sideDoors.want === JSON.stringify(['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']) && JSON.parse(adminDoors.header.want).includes('adminRoom.create'),
+    report(sideCreateAsk === 'New room in Smoke AGM' && /^[A-Z2-9]{8}$/.test(sideKey || '') && /^Legal, a room of Smoke AGM0 people · 0 messages · code [A-Z2-9]{6} off$/.test(sideRowName || '') && doorsInStep(sideDoors) && sideDoors.want === JSON.stringify(['adminRoom.watch', 'adminRoom.transcript', 'adminRoom.minutes', 'adminRoom.invites', 'adminRoom.sendFrom', 'adminRoom.codeToggle', 'adminRoom.newCode', 'adminRoom.rename', 'adminRoom.clear', 'adminRoom.remove']) && JSON.parse(adminDoors.header.want).includes('adminRoom.create'),
       `New room in this hall… makes a room, listed under its hall and named with it, whose row opens the catalogue's set by right-click, ⋯ and Shift+F10 (${sideCreateAsk}; ${sideKey}; "${sideRowName}"; ${sideDoors.want}; ${sideDoors.right} / ${sideDoors.dots} / ${sideDoors.key}; ${sideDoors.inline})`);
     await admin.eval(`window.__sideRow.querySelector('.obj-more').click()`);
     await admin.until(`!!document.querySelector('.agm-menu [data-action="adminRoom.rename"]')`, 3000);
@@ -2777,6 +2804,19 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const sideOn = await admin.until(`(() => { const o = roomObject('${sideKey}'); return !!o && o.on && document.getElementById('watchedCodeNote').textContent === 'Guest code ' + o.guestCode + ': guests join with it.' && window.__sideRow.querySelector('.room-pick').textContent; })()`, 5000);
     report(/^[A-Z2-9]{6}$/.test(sideCodeBefore || '') && newCodeAsk === 'New guest code for Smoke AGM › Lawyers?' && /^[A-Z2-9]{6}$/.test(renewedSide || '') && renewedSide !== sideCodeBefore && (sideOn || '').endsWith(' · code ' + renewedSide),
       `a side room's code: New code… asks and renews it, the row and the header say the new one, and Turn the code on switches it with no ask (${sideCodeBefore} → ${renewedSide}; ${newCodeAsk}; "${sideOn}")`);
+    // May send in… on the admin page: Lawyers' picker, the hall's Main room ticked with its ↔ and saved; both lists hold
+    // it, beside Press, which Set up let send into the Main room.
+    await sideAct('adminRoom.sendFrom');
+    const SIDE_SENDS = (key) => `document.querySelector('#sendsList li.sends-row[data-key="${key}"]')`;
+    const adminPicker = await admin.until(`(() => { const d = document.getElementById('sendsDialog'); const me = ${SIDE_SENDS(sideKey)}; const main = ${SIDE_SENDS(code)}; return !!d && d.open && !!me && !!main && JSON.stringify({ title: document.getElementById('sendsTitle').textContent, me: me.querySelector('input.sends-on').disabled, main: main.querySelector('input.sends-on').checked }); })()`, 5000);
+    await admin.eval(`(() => { const main = ${SIDE_SENDS(code)}; main.querySelector('input.sends-on').click(); main.querySelector('input.sends-back').click(); document.getElementById('sendsSave').click(); })()`);
+    const adminSendsSaid = await admin.until(`!document.getElementById('sendsDialog').open && /^Saved/.test((document.getElementById('agmToast') || {}).textContent || '') && document.getElementById('agmToast').textContent`, 5000);
+    const listsNow = (key) => `new Promise((r) => socket.emit('room:settings', { code: '${key}' }, (a) => r(JSON.stringify({ from: a.sendFrom.map((x) => x.key), back: a.sendBack }))))`;
+    const sideLists = await admin.eval(listsNow(sideKey));
+    const mainLists = await admin.eval(listsNow(code));
+    report(adminPicker === JSON.stringify({ title: 'Who may send into Smoke AGM › Lawyers', me: true, main: false }) && adminSendsSaid === 'Saved: 1 room may send into Smoke AGM › Lawyers. It now sends into Smoke AGM.'
+      && sideLists === JSON.stringify({ from: [code], back: [code] }) && mainLists === JSON.stringify({ from: [pressKey, sideKey], back: [pressKey, sideKey] }),
+      `May send in… on the admin page: the hall's Main room ticked with ↔ sets both lists in one save (${adminPicker}; "${adminSendsSaid}"; ${sideLists}; ${mainLists})`);
     await admin.eval(`watchRoom('${code}')`);
     await admin.until(`currentRoom && currentRoom.code === '${code}' && document.getElementById('watchedKeyWord').textContent === 'Code'`, 5000);
     const residual = await admin.until(`document.getElementById('watchedCodeNote').textContent`, 3000);
@@ -2792,6 +2832,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const sideRemoveAsk = JSON.parse(await askOn('window.__sideRow', 'adminRoom.remove'));
     await admin.eval(`document.querySelector('.agm-ask [data-answer=yes]').click()`);
     const sideRemoved = await admin.until(`!document.querySelector('#roomList > li[data-key="${sideKey}"]') && currentRoom && currentRoom.code === '${code}' && !document.getElementById('roomHeader').hidden && (document.getElementById('agmToast') || {}).textContent`, 5000);
+    const mainListsAfter = await admin.eval(listsNow(code));
+    report(mainListsAfter === JSON.stringify({ from: [pressKey], back: [pressKey] }), `a room removed is taken off the list of the room it could send into (${mainListsAfter})`);
     report(sideRenameFilled === 'Legal' && roomRenamed === 'Renamed Lawyers.' && sideWatched === JSON.stringify(['Smoke AGM › Lawyers', 'Room key', sideKey]) && sideRemoveAsk.title === 'Remove room Smoke AGM › Lawyers?' && sideRemoveAsk.yes === 'Remove and delete' && sideRemoved === 'Removed Smoke AGM › Lawyers.',
       `Rename… fills in the room's name and names it again; watched, the room is named with its hall, by its key; Remove room… takes it out of the list in place (${sideRenameFilled}; "${roomRenamed}"; ${sideWatched}; ${sideRemoveAsk.title}; "${sideRemoved}")`);
     // Members… (an admin page opened by an account that manages accounts): Press's checklist names who holds it, one's own

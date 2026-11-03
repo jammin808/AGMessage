@@ -22,9 +22,9 @@
  *
  * The contexts (`contexts(parts)`), each frozen: `ctx`, every part the server names (its stores, their named effects,
  * `settings` to read and `io`), for the rooms module; `takesCtx`, for the takes module, the same parts but those that make
- * a room, a room's op or send to a room (`ROOM_SENDS`: `io`, `apply`, `systemMessage`, `newSideRoom`, `renameRoom`,
- * `sendGuestsOut`, `codeChanged`), and with `sendTo`, so a take reaches people's pages one socket at a time and never makes a room, a room's op or a room's
- * broadcast.
+ * a room, a room's op or send to a room, or set which rooms may send into one (`ROOM_SENDS`: `io`, `apply`,
+ * `systemMessage`, `newSideRoom`, `renameRoom`, `sendGuestsOut`, `codeChanged`, `setRoomSends`), and with `sendTo`, so a
+ * take reaches people's pages one socket at a time and never makes a room, a room's op or a room's broadcast.
  *
  * Pure: it requires nothing. What it reads of a socket, a room, the buckets and the sockets open, it is given.
  */
@@ -98,13 +98,14 @@ function gateOf(facts) {
 }
 
 /**
- * The parts of the server's context that make a room, a room's op or send to a room: `io` (a room's broadcast), `apply`
- * (an op committed and sent to its room), `systemMessage` (a system line, through `apply`), `newSideRoom` (a room made,
- * its snapshot written), `renameRoom` (a room's new name, a meta op through `apply`), `sendGuestsOut` (a room's guest
- * pages told why and closed) and `codeChanged` (each page of a room told its guest code). The rooms module's alone: the
- * takes context holds none of them.
+ * The parts of the server's context that make a room, a room's op or send to a room, or set which rooms may send into
+ * one: `io` (a room's broadcast), `apply` (an op committed and sent to its room), `systemMessage` (a system line, through
+ * `apply`), `newSideRoom` (a room made, its snapshot written), `renameRoom` (a room's new name, a meta op through
+ * `apply`), `sendGuestsOut` (a room's guest pages told why and closed), `codeChanged` (each page of a room told its guest
+ * code) and `setRoomSends` (the rooms that may send into a room, saved: the one writer of `settings.roomSends`). The
+ * rooms module's alone: the takes context holds none of them.
  */
-const ROOM_SENDS = Object.freeze(['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'sendGuestsOut', 'codeChanged']);
+const ROOM_SENDS = Object.freeze(['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'sendGuestsOut', 'codeChanged', 'setRoomSends']);
 
 /**
  * `sendTo(socketIds, event, payload)`: the event sent to each socket named by its id, one socket at a time, each once,

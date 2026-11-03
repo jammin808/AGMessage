@@ -172,7 +172,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 |---|---|
 | The server: routes, sockets, rooms, the board tick, links, screens | `app/server.js` |
 | The watchdog: the server's start and restart, its beat, a sleep told from a hang, the console tee | `app/supervise.js` |
-| Rooms: a hall is its Main room, its side rooms kept beside it (`data/rooms/<HALL>.<KEY>.*`); the op log, snapshots and atomic saves; the stop's order and its record | `app/lib/store.js`, `app/lib/resilience.js`, `app/lib/laststop.js`, `app/lib/handlers/rooms.js`; tests `units`, `laststop`, `halls` |
+| Rooms: a hall is its Main room, its side rooms kept beside it (`data/rooms/<HALL>.<KEY>.*`); the op log, snapshots and atomic saves; the stop's order and its record; which rooms may send into a room (`settings.roomSends`, set by the admin with May send in…) | `app/lib/store.js`, `app/lib/resilience.js`, `app/lib/laststop.js`, `app/lib/handlers/rooms.js`, `app/public/sendfrom.js`; tests `units`, `laststop`, `halls`, `sends` |
 | Each room's guest code: on, off and renewed by the store; who is told it | `app/lib/store.js`, `app/lib/handlers/rooms.js`, `app/lib/rbac.js` (`mayKnowCode`), `app/public/join.js`; test `codes` |
 | State frames, latest wins: the one primitive for the halls board, screens, people lists, seen receipts and a hall's rooms | `app/lib/latest.js` |
 | The op table: the event each change is sent under, and the hall page's table that draws a change missed or heard live | `app/lib/ops.js`, `app/public/app.js` (`UPD_EVENTS`) |

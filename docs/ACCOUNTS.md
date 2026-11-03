@@ -108,19 +108,45 @@ move nowhere.
 **Who sets rooms up.** Making a room beside a hall (`room:create`), renaming a room (`room:update`: a hall's Main room
 renamed is the hall renamed) and reading a room's settings (`room:settings`) are `halls.manage`'s and the admin's, as a
 hall's Set up is, never from an On stage seat; clearing a room, removing it, its guest code (switched on or off, renewed)
-and, as it lands, who may send into it are the admin's alone (owner question 5), never from an On stage page either. A hall holds at most 20 rooms beside its Main room. A room's key
+and which rooms may send into it are the admin's alone (owner question 5), never from an On stage page either. A hall holds at most 20 rooms beside its Main room. A room's key
 (8 characters) is an address, never a code a guest types: a hall's verbs (its screens, its Stagewatch, its show network,
 its Set up) refuse it, and nothing that lists halls lists it. A hall's Set up on the halls board lists its rooms, the Main
 room first (`room:settings`' `rooms`, each with its guest code as that page may be told it, `conn.codeTold`, whether it
 admits guests and how many guest pages are in it), each with its ⋯ from the catalogue's `adminRoom` rows: + Add room
-(the Main room's New room in this hall…) and Rename… for those who set halls up, the code and Remove room… for the admin,
-Members… for whoever manages accounts; the hall's own name and Stagewatch stay Set up's form, and the hall is closed on
-the admin page. No two rooms of a hall share a name, in any case, its Main
+(the Main room's New room in this hall…) and Rename… for those who set halls up, May send in…, the code and Remove room…
+for the admin, Members… for whoever manages accounts; the hall's own name and Stagewatch stay Set up's form, and the hall
+is closed on the admin page. No two rooms of a hall share a name, in any case, its Main
 room's included, whether a room is made or renamed or the hall is set up. A room removed is taken out of every account's
 rooms, and a hall removed out of every account's halls and On stage halls with its rooms (a room whose files another
 program held, which comes back at the next start, stays with the accounts given it); and no new hall or room is made under
 a key a room, an account or a node's link still names, so a hall made later under the same code is never open to an
 account that had the one before.
+
+**Which rooms may send into a room.** Each room has a list of the rooms, of any hall, whose people may send messages
+and files into it (`settings.roomSends`, kept in `settings.json` by room key, never by guest code); a room with no list,
+and a folder where none was ever set, takes nothing in from another room. The admin sets it with **May send in…** on a
+room's ⋯ (the admin page's list, or a hall's Set up; a hall's Main room as any other): every hall's rooms, grouped by
+hall, the room itself listed and not offered, each ticked where it may send in now, and beside each its **↔ and send
+back**, ticked where this room sends into that one now, whether or not that one may send here: what the picker draws,
+both ways, is what is kept. A ↔ is offered beside a tick, and stays offered, as it is, beside a room this room sends into
+now (a tick taken away leaves it, to keep or take away). Save is one `room:update {code, sendFrom, sendBack}`: each key
+must be a room that is here and not the room itself (an unknown one is refused in words, "No such room: …", never
+dropped), each once, at most 50 (a longer list is refused, never cut); `sendBack` is every room this room sends into,
+so this room is put on the list of each room it names and taken off the list of every other room that names it now (a
+room it does not send into yet only beside a room ticked), and each of those lists is held to 50 too; the answer names
+each room it now sends into or no longer does. A room on the list that is not open now (one whose files another program
+held, which comes back at the next start) is never shown, keeps its place through a save and counts toward the 50. The
+lists a change touches are saved together and written in one `room.sendFrom` row on the room's key ("may send here: Main
+(Hall 2), Main (Hall 3); it sends back into: Main (Hall 3)"), the rooms by name, never by key; a change that changes
+nothing is answered `already` and writes none, and settings this run could not read are never saved over (the change is
+refused with why). Only those who read a room's
+settings see the lists (`room:settings`: the admin, and those who set halls up, whose Set up says under each room "May send
+in: Legal · Hall 2, Main · Hall 3"; every hall's rooms, `everyHall`, are told only to the admin, who alone sets them). No
+page in a room is ever sent a list, nor a key of another hall's room on one. A room removed, or a hall with its rooms, is
+taken off every list, as the room listed and as a room on a list (one whose files another program held, which comes back
+at the next start, keeps its place for it), and no new room is made under a key a list still names. The list is read
+whenever a room sends into another, so a list changed mid-show applies at once; the sends themselves (`room:send`, a copy
+kept where it was sent from) land with their own unit. Going back to 0.5.1 keeps the lists in `settings.json`, unread.
 
 Rules that keep rights from growing by themselves: deny by default; only an admin makes an admin or hands out
 `users.manage`, `settings.manage` or `audit.export`, and only an admin changes, resets, signs out, turns back on or
@@ -346,7 +372,10 @@ its hall's and its key, never a guest code; "board → On stage in H7K2QA"; "vie
 side room its account is not given (`room.read`, once each: a page entered, never a resume; a watch begun; a transcript;
 a person's view opened; the AI asked for its minutes, its messages handed to it whatever it answers; the laptop's token is given none, so its reads always write one; never
 what was read), a room's guest code switched or renewed (`room.code`, by the room's key: "code on", "code off (3 guest
-pages kept)", "code off (3 guest pages sent home)", "a new code was issued"; never the code),
+pages kept)", "code off (3 guest pages sent home)", "a new code was issued"; never the code), which rooms may send into a
+room (`room.sendFrom`, by the room's key, one row for every list a change touches: "may send here: Main (Hall 2), Main
+(Hall 3); it sends back into: Main (Hall 3)", "it no longer sends into: …", a room on the list not open now counted, "2 rooms
+not open now"; each room by its name and its hall's, never a key),
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and

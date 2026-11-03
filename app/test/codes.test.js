@@ -91,8 +91,8 @@ test('a side room\'s guest code: off at birth and refused as a wrong code is; on
     [{ code: LEGAL, codeOn: false, keepGuests: 'no' }, 'Whether the guests stay is said as the code is switched off: true or false.'],
     [{ code: LEGAL, keepGuests: false }, 'Whether the guests stay is said as the code is switched off.'],
     [{ code: LEGAL, newCode: 1 }, 'Ask for a new code with newCode: true.'],
-    [{ code: LEGAL, name: 'Lawyers', codeOn: true }, 'One change at a time: the name, the code on or off, or a new code.'],
-    [{ code: LEGAL, codeOn: true, guests: 3 }, 'A room\'s name and its guest code are the settings changed here.'],
+    [{ code: LEGAL, name: 'Lawyers', codeOn: true }, 'One change at a time: the name, the code on or off, a new code, or the rooms that may send in.'],
+    [{ code: LEGAL, codeOn: true, guests: 3 }, 'A room\'s name, its guest code and the rooms that may send into it are the settings changed here.'],
     [{ code: 'NOROOM12', codeOn: true }, 'No such room.'],
   ]) assert.deepEqual(await act(ctl, 'room:update', args), { ok: false, error }, JSON.stringify(args));
   assert.deepEqual(await act(ctl, 'room:update', { code: LEGAL, codeOn: false }), { ok: true, already: true, codeOn: false }, 'off already: done, no row');

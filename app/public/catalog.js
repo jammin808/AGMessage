@@ -284,8 +284,9 @@
     // has no Rename… and no Close, and the admin page's own acts (Watch, Transcript, Minutes, Roles & invites, Clear) are
     // not drawn. On the admin page every act but Members… is whom its gate admits (`admin`), which every admin:* verb
     // checks again and which passes room:create's and room:update's own check; in Set up a room is made and renamed by
-    // one who sets halls up (`setsUp`), and its code switched, renewed and the room removed by the admin alone (`admin`,
-    // the halls board's /api/halls `isAdmin`). Members… (Board members… on a hall's Main room: the accounts seated On
+    // one who sets halls up (`setsUp`), and its code switched, renewed, the rooms that may send into it chosen (May send
+    // in…) and the room removed by the admin alone (`admin`, the halls board's /api/halls `isAdmin`), on both pages and on
+    // a hall's Main room as on any other. Members… (Board members… on a hall's Main room: the accounts seated On
     // stage there) is for an account that manages accounts (`manageUsers`), whose saves are the Accounts routes'. A
     // room's invite links are made with its guest code (a side room's a Member's alone), and a room is made in a hall.
     adminRoom: [
@@ -305,6 +306,10 @@
       // said (public/members.js); in a hall's Main room, those seated On stage there.
       { id: 'adminRoom.members', label: (f, o) => (isHall(o) ? 'Board members…' : 'Members…'), icon: '👥', group: '4_manage', verb: 'http:PATCH /api/users/:id', mode: 'now',
         may: (f) => !!f.manageUsers, fits: () => true },
+      // Which rooms may send into this one, a hall's Main room as any other: every hall's rooms, grouped, each ticked with
+      // "↔ and send back" beside it (public/sendfrom.js), saved in one room:update; the admin's alone.
+      { id: 'adminRoom.sendFrom', label: 'May send in…', icon: '↘', group: '4_manage', verb: 'room:update', mode: 'now',
+        may: (f) => f.admin, fits: () => true },
       { id: 'adminRoom.codeToggle', label: (f, o) => (o.on ? 'Turn the code off…' : 'Turn the code on'), icon: '🚦', group: '4_manage', verb: 'room:update', mode: 'now',
         may: (f) => f.admin, fits: () => true, confirm: (f, o) => (o.on ? codeOffAsk(o) : null) },
       { id: 'adminRoom.newCode', label: 'New code…', icon: '🎲', group: '4_manage', verb: 'room:update', mode: 'now',

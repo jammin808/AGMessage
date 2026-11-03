@@ -366,7 +366,8 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     'admin:tunnelUntil': () => ({ until: '23:30' }),
     'hall:settings': (o) => ({ code: o.hallKey || o.code }), 'nodes:list': () => ({}),
     'room:create': (o) => ({ hall: o.code, name: 'Media' }),
-    'room:update': (o, e) => (e.id === 'adminRoom.newCode' ? { code: o.code, newCode: true } : e.id === 'adminRoom.codeToggle' ? { code: o.code, codeOn: !o.on, ...(o.on ? { keepGuests: false } : {}) } : { code: o.code, name: 'Renamed by a seat that may not' }),
+    'room:update': (o, e) => (e.id === 'adminRoom.newCode' ? { code: o.code, newCode: true } : e.id === 'adminRoom.codeToggle' ? { code: o.code, codeOn: !o.on, ...(o.on ? { keepGuests: false } : {}) }
+      : e.id === 'adminRoom.sendFrom' ? { code: o.code, sendFrom: [o.code === hallB ? hallA : hallB], sendBack: [o.code === hallB ? hallA : hallB] } : { code: o.code, name: 'Renamed by a seat that may not' }),
     'help:respond': (o, e) => ({ code: o.code, messageId: o.id, state: e.id === 'help.respond' ? 'coming' : 'resolved' }),
   };
   // Members… saves each account with its own PATCH: sent here for Sid, the side room put in his rooms (Board members… on
@@ -419,6 +420,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   assert.deepEqual(roomsAfter.map((r) => r.side.map((x) => [x.key, x.name, x.messageCount])), rooms.map((r) => r.side.map((x) => [x.key, x.name, x.messageCount])), 'no room made, renamed, cleared or removed');
   const codes = (list) => list.flatMap((r) => [r, ...r.side]).map((x) => [x.guestCode, x.codeOn]);
   assert.deepEqual(codes(roomsAfter), codes(rooms), 'no guest code switched or renewed');
+  for (const x of roomsAfter.flatMap((r) => [r.code, ...r.side.map((y) => y.key)])) assert.deepEqual((await emit(ctl, 'room:settings', { code: x })).sendFrom, [], 'no room may send into ' + x);
   assert.equal(rooms.find((r) => r.code === hallA).side.length, 1, 'the side room was read');
   assert.deepEqual((await emit(ctl, 'nodes:list', {})).linked.map((l) => l.id), ['patterns01'], 'the node still linked');
   assert.deepEqual(roomsAfter.find((r) => r.code === hallA).users.map((u) => u.linkedRooms), [[hallB]], 'the guest still forwards into Hall B');

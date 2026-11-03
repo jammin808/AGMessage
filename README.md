@@ -50,7 +50,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   in under it, Chat view beside the role, and the rights in three groups (In the room, Show,
   Run AGMessage); its rows read "Hall 2 (Main, Legal) · On stage". A room's **Members…** (on Main, **Board members…**), on
   the admin page and in Set up, ticks the accounts that go in, for whoever manages accounts: one save per account, each
-  said ("2 saved · Kim: why"), the accounts a person may not change shown and not offered. An **audit log**
+  said ("2 saved · Kim: why"), the accounts a person may not change shown and not offered. A room's **May send in…**
+  (the admin's, on the admin page and in Set up) ticks, among every hall's rooms, those whose people may send into it,
+  with **↔ and send back** beside each to let it send there too: one save, one audit row; a room with none ticked takes
+  nothing in, and no page in a room is told the list. An **audit log**
   chained with a key, of every sign-in, change of rights, room control and screen take, and every proposal Stagewatch's
   show desk takes — never a message's text or a file's name. Its records live outside the data folder, so a cut or a log
   replaced while AGMessage is stopped is found; what this laptop cannot check reads △ until accepted at the laptop with

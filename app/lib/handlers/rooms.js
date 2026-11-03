@@ -15,11 +15,16 @@
  *
  * Setting rooms up (owner question 5, plan 1-§2.4): making a side room, renaming a room and reading a room's settings
  * are `halls.manage`'s and the admin's (`conn.canManageHall`, which an On stage seat never passes), as a hall's set-up
- * is; a room's guest code (switched on or off, renewed: `room:update`'s `codeOn` and `newCode`), who may send into it,
- * resetting and removing it are the admin's alone (`conn.admin`), never from an On stage page. A room is named by its
- * key; a hall, whose key is its Main room's, by its own. Every change is one audit row, written before it is answered,
- * naming the room by its name and its hall's, never a code; a change that changes nothing writes none and is answered
- * `already`.
+ * is; a room's guest code (switched on or off, renewed: `room:update`'s `codeOn` and `newCode`), who may send into it
+ * (`room:update`'s `sendFrom`, with `sendBack`), resetting and removing it are the admin's alone (`conn.admin`), never
+ * from an On stage page. A room is named by its key; a hall, whose key is its Main room's, by its own. Every change is
+ * one audit row, written before it is answered, naming the room by its name and its hall's, never a code; a change that
+ * changes nothing writes none and is answered `already`.
+ *
+ * Which rooms may send into a room (plan 1-§4.1) is a list per room, of the keys of rooms of any hall, kept in the
+ * settings (`settings.roomSends`), read through `ctx.sendersOf` and written only through `ctx.setRoomSends`. It is told
+ * only to those who read a room's settings (`room:settings`: the admin and those who set halls up), each room on it by
+ * its name and key and its hall's name, never a code; no page in a room is sent it.
  */
 const { str, cleanText } = require('../guard');
 
@@ -27,11 +32,18 @@ const { str, cleanText } = require('../guard');
  * What `room:update` reads: the room's key, one change, each read by its type, and the client id every act from a page
  * carries (public/outbox.js), which a repeat needs nothing of: a change already made is answered as done. The changes:
  * its name (`name`), whether its guest code admits guests (`codeOn`, with `keepGuests` as it is switched off: whether the
- * guest pages in it stay, true unless it says false), or a new guest code (`newCode: true`). Any other key is refused,
+ * guest pages in it stay, true unless it says false), a new guest code (`newCode: true`), or which rooms may send into it
+ * (`sendFrom`, their keys, with `sendBack`: the rooms it sends into, its "↔ and send back"s). Any other key is refused,
  * never ignored (fail closed), and so are two changes in one.
  */
-const UPDATES = Object.freeze(['code', 'name', 'codeOn', 'keepGuests', 'newCode', 'cid']);
-const CHANGES = Object.freeze(['name', 'codeOn', 'newCode']);
+const UPDATES = Object.freeze(['code', 'name', 'codeOn', 'keepGuests', 'newCode', 'sendFrom', 'sendBack', 'cid']);
+const CHANGES = Object.freeze(['name', 'codeOn', 'newCode', 'sendFrom']);
+/** What the admin alone changes: the guest code (and whether its guests stay), and which rooms may send in (and back). */
+const ADMINS = Object.freeze(['codeOn', 'keepGuests', 'newCode', 'sendFrom', 'sendBack']);
+/** The rooms a room's list may hold (server.js ROOM_SENDS_MAX, which setRoomSends holds it to as well). */
+const SENDS_MAX = 50;
+/** An audit row's words, in characters (lib/audit.js WORDS_MAX): a list in them is cut by whole names, the rest counted. */
+const ROW_MAX = 300;
 const NO_RIGHT = 'Your account may not set halls up.';
 const BACKSTAGE = 'Do that from a backstage page.';
 const OP_REFUSED = 'That change could not be made: nothing was saved.';
@@ -43,6 +55,24 @@ const pages = (n) => n + ' guest page' + (n === 1 ? '' : 's');
 const isRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 /** A key a client named, as the store keys rooms: upper case, or '' for anything that is no string. */
 const keyOf = (v) => str(v).toUpperCase();
+/** Keys a client listed, as the store keys rooms, each once in the order given; null for anything but a list of strings. */
+const keysOf = (v) => (Array.isArray(v) && v.every((k) => typeof k === 'string') ? [...new Set(v.map((k) => k.toUpperCase()))] : null);
+/** Whether two lists of keys hold the same keys, in any order. */
+const sameKeys = (a, b) => a.length === b.length && a.every((k) => b.includes(k));
+/**
+ * `head`, then ': ' and the names joined with commas as far as `room` characters hold them, the rest counted ("…, Media
+ * (Hall 2) and 3 more"), so a list is never cut part way through a name.
+ */
+function listWords(head, names, room) {
+  let out = '';
+  for (let i = 0; i < names.length; i++) {
+    const next = (out ? out + ', ' : '') + names[i];
+    const rest = names.length - i - 1;
+    if (head.length + 2 + next.length + (rest ? (' and ' + rest + ' more').length : 0) > room) return head + ': ' + (out ? out + ' and ' : '') + (names.length - i) + ' more';
+    out = next;
+  }
+  return head + ': ' + out;
+}
 /** A client id as a page makes one (public/outbox.js), and as a send's is read (server.js `CID_RE`). */
 const CID = /^[A-Za-z0-9_-]{1,40}$/;
 
@@ -60,13 +90,29 @@ const made = new Map();
  * @param {object} ctx    the server's context, frozen (lib/gate.js `contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, apply, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged } = ctx;
+  const { store, apply, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, sendersOf, setRoomSends } = ctx;
 
   /** A hall as a refusal names it: its name, or "This hall" when it has none. */
   const hallSaid = (hall) => hall.name || 'This hall';
   /** A hall as a row names it: its name, or that it has none (its key is its guest code until New code, so never that). */
   const hallRow = (hall) => hall.name || 'a hall with no name';
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
+  /** A room by its key, Main or side, or null: the one way this module reads a room a client or a list names. */
+  const roomOf = (key) => store.room(key);
+  /** A room as a row names it: "Legal (Hall 2)", a Main room "Main (Hall 2)"; never its key, which may be a code. */
+  const roomRow = (r) => (store.isMain(r) ? 'Main' : r.name || 'a room with no name') + ' (' + hallRow(store.get(r.hall)) + ')';
+  /** A room as the settings tell it: its key, its name, whether it is a Main room, and its hall's name; never a code. */
+  const roomTold = (r) => { const h = store.get(r.hall); return { key: r.code, name: r.name || '', main: store.isMain(r), hallName: (h && h.name) || '' }; };
+  /** The rooms that may send into `r`, as the settings tell them: those on its list that are here, in its order. */
+  const sendersTold = (r) => sendersOf(r.code).map(roomOf).filter(Boolean).map(roomTold);
+  /**
+   * Every room here, Main or side, of every hall, Main rooms first: the rooms whose lists a room's "↔ and send back"s are
+   * read from and set on. A list of a room not here (one whose files another program held) is never read through it: it
+   * is neither told nor changed.
+   */
+  const everyRoom = () => store.allRooms();
+  /** The rooms whose list names `r`: those `r` may send into (its "↔ and send back"s), by key, Main rooms first. */
+  const intoOf = (r) => everyRoom().filter((x) => x !== r && sendersOf(x.code).includes(r.code)).map((x) => x.code);
 
   // A side room of a hall (Legal, Media), beside its Main room: made by name, under a key of its own (8 characters, an
   // address and never a guest's code), its guest code off, so it is for the admin and the accounts it is given until the
@@ -100,27 +146,31 @@ function register(socket, conn, ctx) {
     answer(res);
   });
 
-  // A room's settings changed: its name, or its guest code switched on or off or renewed. A hall's Main room renamed is
-  // the hall renamed (its screens and the halls board say so), written as the hall's set-up writes it; a side room's is
-  // its own row. The guest code is the admin's alone, and never from an On stage page. A change already made is answered
-  // as done (`already`), with no row. A setting this verb does not change is refused with words, as are two at once.
+  // A room's settings changed: its name, its guest code switched on or off or renewed, or which rooms may send into it. A
+  // hall's Main room renamed is the hall renamed (its screens and the halls board say so), written as the hall's set-up
+  // writes it; a side room's is its own row. The guest code and the rooms that may send in are the admin's alone, and
+  // never from an On stage page. A change already made is answered as done (`already`), with no row. A setting this verb
+  // does not change is refused with words, as are two at once.
   socket.on('room:update', (args, ack) => {
     if (!conn.gate(ack, { joined: false, bucket: conn.writes })) return;
     const answer = conn.ok(ack);
     const a = isRecord(args) ? args : {};
     const asked = CHANGES.filter((k) => Object.hasOwn(a, k));
-    if (asked.includes('codeOn') || asked.includes('newCode') || Object.hasOwn(a, 'keepGuests')) {
+    if (ADMINS.some((k) => Object.hasOwn(a, k))) {
       if (!conn.admin(ack)) return;
       // The admin passes canManageHall wherever it does not sit On stage.
       if (!conn.canManageHall()) return answer({ ok: false, error: BACKSTAGE });
     } else if (!conn.canManageHall()) return answer({ ok: false, error: NO_RIGHT });
-    if (Object.keys(a).some((k) => !UPDATES.includes(k))) return answer({ ok: false, error: 'A room\'s name and its guest code are the settings changed here.' });
-    if (asked.length > 1) return answer({ ok: false, error: 'One change at a time: the name, the code on or off, or a new code.' });
-    const room = store.room(keyOf(a.code));
+    if (Object.keys(a).some((k) => !UPDATES.includes(k))) return answer({ ok: false, error: 'A room\'s name, its guest code and the rooms that may send into it are the settings changed here.' });
+    if (asked.length > 1) return answer({ ok: false, error: 'One change at a time: the name, the code on or off, a new code, or the rooms that may send in.' });
+    const room = roomOf(keyOf(a.code));
     if (!room) return answer({ ok: false, error: 'No such room.' });
+    // What comes with one change is refused beside any other, never ignored.
+    if (Object.hasOwn(a, 'keepGuests') && asked[0] !== 'codeOn') return answer({ ok: false, error: 'Whether the guests stay is said as the code is switched off.' });
+    if (Object.hasOwn(a, 'sendBack') && asked[0] !== 'sendFrom') return answer({ ok: false, error: 'Which rooms it sends back into is said with the rooms that may send in (sendFrom).' });
     if (asked[0] === 'codeOn') return switchCode(room, a.codeOn, a.keepGuests, answer);
     if (asked[0] === 'newCode') return renewCode(room, a.newCode, answer);
-    if (Object.hasOwn(a, 'keepGuests')) return answer({ ok: false, error: 'Whether the guests stay is said as the code is switched off.' });
+    if (asked[0] === 'sendFrom') return sendFrom(room, a.sendFrom, a.sendBack, answer);
     const name = cleanText(a.name, 80);
     if (!name) return answer({ ok: false, error: 'Type its new name.' });
     if (name === room.name) return answer({ ok: true, already: true, name });
@@ -170,23 +220,93 @@ function register(socket, conn, ctx) {
     answer({ ok: true, guestCode: store.guestCodeOf(room), codeOn: store.codeOn(room) });
   }
 
+  /**
+   * Which rooms may send into `room` (its list): `from`, the keys of rooms of any hall, each a room that is here and not
+   * this one (an unknown key refused in words, never dropped), each once, at most SENDS_MAX (a list is refused, never cut).
+   * A key on the list whose room is not here (one whose files another program held, which comes back at the next start)
+   * keeps its place: no picker shows it, so no save drops it, and it counts toward the bound.
+   *
+   * With `back`, which rooms this room sends into ("↔ and send back"), each a room here and not this one: this room put on
+   * the list of each room `back` names and taken off the list of each other room that names it now, so what the picker
+   * draws, the ↔ of every room, is what is kept. A room this room does not send into yet is added only beside a room that
+   * `from` names (a ↔ is ticked only beside a room ticked to send here); one it sends into already may stay or go whether
+   * or not that room may send here. Without `back`, no other room's list changes.
+   *
+   * The lists that change are saved together (`setRoomSends`, which refuses settings this run could not read) and written
+   * in one `room.sendFrom` row, each room by its name and its hall's, never a key; no change is answered `already`, with no
+   * row. Answered with the rooms on the list that are here (`sendFrom`) and those this room sends into (`sendBack`), by key,
+   * and, for a change, those it was let send into (`into`) and those it no longer sends into (`notInto`).
+   */
+  function sendFrom(room, from, back, answer) {
+    const keys = keysOf(from);
+    if (!keys) return answer({ ok: false, error: 'Say which rooms may send here: a list of their keys (an empty list for none).' });
+    const backKeys = back === undefined ? null : keysOf(back);
+    if (back !== undefined && !backKeys) return answer({ ok: false, error: 'Say which of them this room sends back into: a list of their keys.' });
+    if (keys.length > SENDS_MAX) return answer({ ok: false, error: 'At most ' + SENDS_MAX + ' rooms may send into one room: this list names ' + keys.length + '. Nothing was saved.' });
+    for (const k of keys.concat(backKeys || [])) {
+      const r = roomOf(k);
+      if (!r) return answer({ ok: false, error: 'No such room: ' + cleanText(k, 40) + '. Nothing was saved.' });
+      if (r === room) return answer({ ok: false, error: 'A room does not send into itself: leave it off its own list. Nothing was saved.' });
+    }
+    const sources = keys.map(roomOf);
+    const before = intoOf(room);
+    if (backKeys && backKeys.some((k) => !keys.includes(k) && !before.includes(k))) return answer({ ok: false, error: 'This room sends back only into a room that may send here: tick that room too. Nothing was saved.' });
+    const held = sendersOf(room.code).filter((k) => !roomOf(k));
+    const list = keys.concat(held);
+    if (list.length > SENDS_MAX) return answer({ ok: false, error: 'At most ' + SENDS_MAX + ' rooms may send into one room: this list names ' + keys.length + ', and with the ' + held.length + ' not open now that keep their places on it, ' + list.length + '. Nothing was saved.' });
+    const next = {};
+    if (!sameKeys(sendersOf(room.code), list)) next[room.code] = list;
+    const into = [];
+    const notInto = [];
+    for (const r of backKeys ? everyRoom() : []) {
+      if (r === room) continue;
+      const theirs = sendersOf(r.code);
+      const has = theirs.includes(room.code);
+      if (has === backKeys.includes(r.code)) continue;
+      if (!has && theirs.length >= SENDS_MAX) return answer({ ok: false, error: 'At most ' + SENDS_MAX + ' rooms may send into one room, and ' + roomRow(r) + ' has ' + theirs.length + ' already: this room cannot send back into it. Nothing was saved.' });
+      next[r.code] = has ? theirs.filter((k) => k !== room.code) : theirs.concat([room.code]);
+      (has ? notInto : into).push(r);
+    }
+    const now = () => ({ sendFrom: sendersOf(room.code).filter((k) => roomOf(k)), sendBack: intoOf(room) });
+    if (!Object.keys(next).length) return answer({ ok: true, already: true, ...now() });
+    const why = setRoomSends(next);
+    if (why) return answer({ ok: false, error: why });
+    // The row: the list as it now is (the rooms not open now that keep their places counted), then the rooms this one was
+    // let send into and those it no longer sends into, each list as far as its share of the row holds it.
+    const listed = sources.map(roomRow).concat(held.length ? [held.length + (held.length === 1 ? ' room' : ' rooms') + ' not open now'] : []);
+    const parts = [[list.length ? 'may send here' : 'no room may send here', listed], ['it sends back into', into.map(roomRow)], ['it no longer sends into', notInto.map(roomRow)]]
+      .filter(([, names], i) => i === 0 || names.length);
+    const share = Math.floor((ROW_MAX - 2 * (parts.length - 1)) / parts.length);
+    write('room.sendFrom', room.code, parts.map(([head, names]) => (names.length ? listWords(head, names, share) : head)).join('; '));
+    answer({ ok: true, ...now(), into: into.map((r) => r.code), notInto: notInto.map((r) => r.code) });
+  }
+
   // A room's settings, read: its name, its hall and whether it is the hall's Main room, its hall's rooms in the order they
-  // were made (Main first), each by name and key with its guest code, whether it admits guests and the guest pages in it
-  // now (a count, never who: what the admin's code-off ask says), and the asked room's guest code. For those who set rooms
-  // up (Set up's Rooms reads it); a read, from memory. A code is told as this page may be told it (`conn.codeTold`, the
-  // rule every list reads: those who set halls up hand codes out, but never one of a hall whose Main room their account
-  // sits On stage in), '' otherwise.
+  // were made (Main first), each by name and key with its guest code, whether it admits guests, the guest pages in it now
+  // (a count, never who: what the admin's code-off ask says) and the rooms that may send into it, and the asked room's
+  // guest code. For those who set rooms up (Set up's Rooms reads it); a read, from memory. A code is told as this page may
+  // be told it (`conn.codeTold`, the rule every list reads: those who set halls up hand codes out, but never one of a hall
+  // whose Main room their account sits On stage in), '' otherwise. Last, the rooms that may send into the asked room
+  // (`sendFrom`) and the rooms of any hall it sends into (`sendBack`, by key: those whose list names it, each a ↔ of its
+  // picker, whether or not that room may send here), and, for the admin, who alone sets them, every hall's rooms by name
+  // (`everyHall`: the halls by name, each hall's rooms Main first), the rooms a list may name.
   socket.on('room:settings', (args, ack) => {
     if (!conn.gate(ack, { joined: false, bucket: conn.chatter })) return;
     const answer = conn.ok(ack);
     if (!conn.canManageHall()) return answer({ ok: false, error: NO_RIGHT });
-    const room = store.room(keyOf((isRecord(args) ? args : {}).code));
+    const room = roomOf(keyOf((isRecord(args) ? args : {}).code));
     if (!room) return answer({ ok: false, error: 'No such room.' });
     const hall = store.get(room.hall);
+    // conn.admin, asked with no acknowledgement to answer, only reads whether this page is the admin's.
+    const everyHall = conn.admin() ? [...store.rooms.values()]
+      .map((h) => ({ key: h.code, name: h.name || '', rooms: store.roomsOf(h.code).map((r) => ({ key: r.code, name: r.name || '', main: store.isMain(r) })) }))
+      .sort((x, y) => (x.name || x.key).localeCompare(y.name || y.key)) : undefined;
     answer({
       ok: true, key: room.code, name: room.name || '', main: store.isMain(room), hall: hall.code, hallName: hall.name || '',
-      rooms: store.roomsOf(hall.code).map((r) => ({ key: r.code, name: r.name || '', main: store.isMain(r), guestCode: conn.codeTold(r), codeOn: store.codeOn(r), guests: guestPagesOf(r) })),
+      rooms: store.roomsOf(hall.code).map((r) => ({ key: r.code, name: r.name || '', main: store.isMain(r), guestCode: conn.codeTold(r), codeOn: store.codeOn(r), guests: guestPagesOf(r), sendFrom: sendersTold(r) })),
       guestCode: conn.codeTold(room), codeOn: store.codeOn(room),
+      sendFrom: sendersTold(room), sendBack: intoOf(room),
+      ...(everyHall ? { everyHall } : {}),
     });
   });
 }

@@ -704,7 +704,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'buildMessage', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'linkFor', 'stagePayload', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'buildMessage', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'setRoomSends', 'linkFor', 'stagePayload', 'io']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -1515,9 +1515,10 @@ const ANY_ROOM = {
   ],
   'lib/handlers/rooms.js': [
     'a hall full of rooms says how many it holds',
-    'a room renamed by its key, Main or side',
-    'a room\'s settings read by its key, Main or side',
-    'and its hall\'s rooms, Main first',
+    'a room by its key, Main or side: renamed, its code switched or renewed, its list of rooms that may send in set, its settings read; and each room such a list names',
+    'a room\'s settings: its hall\'s rooms, Main first',
+    'and, for the admin, every hall\'s rooms, Main first: the rooms a list of rooms that may send in may name',
+    'every room here, Main or side, of every hall: those whose list names a room (where it sends back), read and set by its ↔s',
   ],
 };
 /** A call to one of the store's any-room readers, however it is spaced. */
