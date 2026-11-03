@@ -678,7 +678,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   assert.ok(inClosure(made), 'conn is made in the connection');
   const conn = groupAt(server, made + 'const conn = Object.freeze('.length);
   const keys = conn.entries.map(keyOf);
-  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'canIn', 'admin', 'actor', 'canManageHall', 'codeTold', 'gate']);
+  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'onStage', 'canIn', 'admin', 'actor', 'canManageHall', 'codeTold', 'gate']);
   assert.deepEqual(keys.filter((k) => k.value !== null).map((k) => [k.key, k.value]), [['room', '() => room'], ['me', '() => me']]);
   for (const { key } of keys.filter((k) => k.value === null && k.key !== 'socket')) {
     const decl = server.indexOf('  const ' + key + ' = ', at);
@@ -704,7 +704,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'buildMessage', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'setRoomSends', 'linkFor', 'stagePayload', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'io']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -1512,13 +1512,15 @@ const ANY_ROOM = {
     'a move between rooms of a hall: a person who left another of its rooms within the grace',
     'the rooms of its hall a page may move between, its switcher\'s, Main first',
     'a hall\'s rooms told again to each page in any of them, when one is made, renamed or removed',
+    'the rooms a room may send into: each room here, Main or side, of any hall, whose list names it',
+    'a Main room renamed renames its hall: the rooms that send into any room of the hall are told to ask again',
   ],
   'lib/handlers/rooms.js': [
     'a hall full of rooms says how many it holds',
     'a room by its key, Main or side: renamed, its code switched or renewed, its list of rooms that may send in set, its settings read; and each room such a list names',
     'a room\'s settings: its hall\'s rooms, Main first',
     'and, for the admin, every hall\'s rooms, Main first: the rooms a list of rooms that may send in may name',
-    'every room here, Main or side, of every hall: those whose list names a room (where it sends back), read and set by its ↔s',
+    'every room here, Main or side, of every hall: each list a room\'s ↔s set it on, or take it off',
   ],
 };
 /** A call to one of the store's any-room readers, however it is spaced. */

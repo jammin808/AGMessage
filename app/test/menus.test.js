@@ -43,6 +43,7 @@ const ON_STAGE_WORDS = {
   'display:rotate': 'Do that from a backstage page.',
   'display:remove': 'Do that from a backstage page.',
   forward: 'Messages from On stage stay in this room.',
+  'room:send': 'Messages from On stage stay in this room.',
   delete: 'Only the author can delete this message',
   // A room's guest code is the admin's to switch and renew, whatever the seat: refused as every seat but the admin is.
   'room:update': 'Not admin',
@@ -150,6 +151,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'stage:send': (o) => ({ text: o.text || '', messageId: o.id }),
     'display:take': () => ({ ids: [screen.id], content: { kind: 'black' } }),
     forward: (o) => ({ messageId: o.id, targetRoom: hallB }),
+    // A room this hall's list does not name (no list names it here): the reference is no room's.
+    'room:send': () => ({ to: 'r' + 'A'.repeat(16), type: 'text', text: 'From a seat that may not send it' }),
     pin: (o) => ({ messageId: o.id, pinned: !o.pinned }),
     delete: (o) => ({ messageId: o.id }),
     'display:identify': (o) => ({ id: o.id }),
@@ -224,11 +227,12 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   const first = await join(anaA, hallA, 'Ana', 'research');
   assert.deepEqual([first.forwardable, await rooms(anaA)], [false, []]);
   // The same person backstage in B too: from A, B takes a message; the answer says so, its keys appended at the end in
-  // the order they landed (the build serving now, which a page on another build reloads for; then the hall's facts).
+  // the order they landed (the build serving now, which a page on another build reloads for; then the hall's facts; then
+  // whether a message here may be sent into another room by its list, `sends`: no list names Hall A, so it may not).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-9)], [true, [hallB], ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms']]);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-10), again.sends], [true, [hallB], ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends'], false]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board');

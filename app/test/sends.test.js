@@ -14,7 +14,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { ROOT, startServer, restartServer, stopServer, api, connect, emit, until, wait, TOKEN } = require('./helpers');
+const { RoomStore } = require('../lib/store');
+const { ROOT, startServer, restartServer, stopServer, api, connect, emit, once, until, wait, TOKEN } = require('./helpers');
 
 /** An audit row as the tests read it: its target, its words, who. */
 const rowsOf = (dataDir, action) => fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
@@ -287,6 +288,294 @@ test('a room whose files another program held, removed, keeps its places through
   assert.deepEqual((await act(ctl, 'room:settings', { code: 'HALLB2' })).sendFrom.map((r) => r.key), ['LGQ4MZP8']);
   const legal = await act(ctl, 'room:settings', { code: 'LGQ4MZP8' });
   assert.deepEqual([legal.sendFrom.map((r) => r.key), legal.sendBack], [['HALLB2'], ['HALLB2']]);
+});
+
+// ---------------------------------------------------------------- sending into another room (plan 1-§4.2, §4.3)
+const pdf = (text = 'contract') => new Blob([Buffer.from('%PDF-1.4\n% ' + text + '\n%%EOF\n')], { type: 'application/pdf' });
+/** An upload made with a page's token, for its room: its answer. */
+async function uploadWith(base, token, name = 'contract.pdf', text) {
+  const f = new FormData();
+  f.append('file', pdf(text), name);
+  return (await fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': token }, body: f })).json();
+}
+const STAYS_HERE = 'Messages from On stage stay in this room.';
+
+test('a message or a file is sent into another room by that room\'s list, with a copy kept here: across halls, by reference, read on every send; the copy and the message say where, and nothing of either room\'s key or code reaches the other\'s pages; a repeat lands once; refused for an observer, a seat that shares no file, a question and a help request, a stale or forged reference, and the rate; Send back threads under the question; one row, no words; the file outlives its room\'s reset', { timeout: 120_000 }, async (t) => {
+  let srv = await startServer();
+  t.after(() => stopServer(srv.child));
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
+  const account = async (username, role, extra = {}) => {
+    const made = await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: 'clipboard and coffee', ...extra }, { cookie: admin });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    return (await api(srv.base, 'POST', '/api/auth/login', { username, password: 'clipboard and coffee' })).cookie;
+  };
+  const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
+  const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
+  const ctl = await page(admin);
+  const LEGAL = (await act(ctl, 'room:create', { hall: hallA, name: 'Legal' })).key;
+  const legalCode = (await act(ctl, 'room:settings', { code: LEGAL })).guestCode;
+  assert.ok(legalCode && legalCode !== LEGAL);
+  const list = async (code, sendFrom) => { const r = await act(ctl, 'room:update', { code, sendFrom }); assert.ok(r.ok, JSON.stringify(r)); };
+
+  // Every frame and answer each page hears: Lou in Legal (given it alone), Gus in Hall A's Main room, Bea in Hall B's.
+  const heard = new Map();
+  const seated = async (name, join, cookie) => {
+    const s = await page(cookie);
+    const frames = [];
+    heard.set(name, frames);
+    s.onAny((ev, ...args) => frames.push([ev, args]));
+    const j = await emit(s, 'join', join);
+    frames.push(['join', j]);
+    assert.equal(j.ok, true, name + ': ' + JSON.stringify(j));
+    return { s, j, frames };
+  };
+  /** Whether a page heard a message (a `message` frame) that `pred` holds of. */
+  const heardMessage = (name, pred) => heard.get(name).some(([ev, args]) => ev === 'message' && Array.isArray(args) && !!args[0] && pred(args[0]));
+  const louCookie = await account('lou', 'staff', { rooms: [LEGAL] });
+  const lou = await seated('lou', { roomCode: LEGAL, as: 'account' }, louCookie);
+  const gus = await seated('gus', { roomCode: hallA, name: 'Gus', role: 'research' });
+  await seated('bea', { roomCode: hallB, name: 'Bea', role: 'research' });
+  // An observer of Legal (a Viewer given it), and a Staff of Legal who shares no file.
+  const vic = await seated('vic', { roomCode: LEGAL, as: 'account' }, await account('vic', 'viewer', { rooms: [LEGAL] }));
+  const sid = await seated('sid', { roomCode: LEGAL, as: 'account' }, await account('sid', 'staff', { rooms: [LEGAL], revoke: ['hall.files'] }));
+  assert.deepEqual([lou.j.role, vic.j.role, sid.j.role, !!sid.j.uploadToken], ['research', 'observer', 'research', false]);
+  const targets = async (p) => act(p.s, 'room:sendTargets', {});
+  const send = (p, args) => act(p.s, 'room:send', args);
+  /** A room's newest number, as its newest message carries it. */
+  const seqOf = async (code) => Math.max(0, ...(await act(ctl, 'admin:watchRoom', { roomCode: code })).messages.map((m) => m.seq || 0));
+  const messagesOf = async (code) => (await act(ctl, 'admin:watchRoom', { roomCode: code })).messages.filter((m) => m.type !== 'system');
+
+  // No list: no room to send to, and the join says so.
+  assert.equal(lou.j.sends, false);
+  assert.deepEqual(await targets(lou), { ok: true, targets: [] });
+  const forged = 'r' + 'A'.repeat(16);
+  assert.deepEqual(await send(lou, { to: forged, type: 'text', text: 'Hello' }), { ok: false, error: 'That room is gone.' });
+
+  // Hall A takes Legal in: Legal's pages are told to ask again (and Hall A's are not), and Lou may send there, by reference.
+  const nudged = once(lou.s, 'sendsChanged');
+  await list(hallA, [LEGAL]);
+  await nudged;
+  const toA = await targets(lou);
+  assert.equal(toA.targets.length, 1);
+  const REF_A = toA.targets[0].ref;
+  assert.deepEqual(toA, { ok: true, targets: [{ ref: REF_A, name: 'Hall A', hallName: 'Hall A' }] }, 'a Main room by its hall\'s name: no key, no code, no people, no numbers');
+  assert.ok(/^r[A-Za-z0-9_-]{16}$/.test(REF_A) && REF_A !== hallA);
+  assert.deepEqual([(await emit(await page(louCookie), 'join', { roomCode: LEGAL, as: 'account' })).sends, (await targets(gus)).targets, (await targets(vic)).targets], [true, [], []],
+    'the join says so; Hall A sends nowhere; an observer of Legal may send nowhere');
+  assert.ok(!heard.get('gus').some(([ev]) => ev === 'sendsChanged'), 'Hall A\'s pages are not nudged: where Hall A sends did not change');
+
+  // A message: into Hall A first, marked from Legal, then Legal's copy, marked with where it went; one answer.
+  const aSeq = await seqOf(hallA);
+  const sent = await send(lou, { to: REF_A, type: 'text', text: 'Is the contract signed?', cid: 'cid-lou-1', heldMs: 4200 });
+  assert.equal(sent.ok, true, JSON.stringify(sent));
+  assert.deepEqual(sent.to, { name: 'Hall A', hallName: 'Hall A' });
+  const [there] = (await messagesOf(hallA)).slice(-1);
+  const copy = (await messagesOf(LEGAL)).find((m) => m.id === sent.id);
+  const REF_L = there.sentFrom.ref;
+  assert.deepEqual({ type: there.type, text: there.text, from: there.from, sentFrom: there.sentFrom, cid: there.cid, held: there.held },
+    { type: 'text', text: 'Is the contract signed?', from: { uid: lou.j.uid, name: 'lou', role: 'research', acct: true }, sentFrom: { roomName: 'Legal', hallName: 'Hall A', ref: REF_L }, cid: undefined, held: 4 });
+  assert.deepEqual({ text: copy.text, cid: copy.cid, seq: copy.seq, sentTo: copy.sentTo }, { text: 'Is the contract signed?', cid: 'cid-lou-1', seq: sent.seq, sentTo: { roomName: 'Hall A', hallName: 'Hall A', ref: REF_A, id: there.id } });
+  assert.ok(REF_L !== REF_A && REF_L !== LEGAL && !RoomStore.validCode(REF_L));
+  assert.equal(await seqOf(hallA), aSeq + 1, 'one message into Hall A');
+  // Heard live by each room's pages, as they hear any message.
+  await until(() => heardMessage('gus', (m) => m.id === there.id) && heardMessage('lou', (m) => m.id === sent.id), 4000, 'both rooms heard it');
+  // A repeat (the outbox's, after a drop) is answered with what it did, and writes nothing into Hall A.
+  assert.deepEqual(await send(lou, { to: REF_A, type: 'text', text: 'Is the contract signed?', cid: 'cid-lou-1' }), sent);
+  assert.equal(await seqOf(hallA), aSeq + 1, 'a repeat writes nothing into Hall A');
+  // A client id a message of another kind holds here names no send: refused, never answered as one that went through.
+  const CID_HELD = 'That message\'s id is another message\'s.';
+  assert.equal((await act(lou.s, 'message', { type: 'text', text: 'Only for Legal', cid: 'cid-lou-here' })).ok, true);
+  assert.deepEqual(await send(lou, { to: REF_A, type: 'text', text: 'Only for Legal', cid: 'cid-lou-here' }), { ok: false, error: CID_HELD });
+  assert.equal(await seqOf(hallA), aSeq + 1, 'nothing reached Hall A');
+
+  // One of Legal's own messages, and a file: by its id, and new, the file uploaded for Legal by Lou.
+  const said = await act(lou.s, 'message', { type: 'text', text: 'Draft attached below' });
+  const up = await uploadWith(srv.base, lou.j.uploadToken);
+  assert.ok(up.url, JSON.stringify(up));
+  const fileSent = await send(lou, { to: REF_A, type: 'file', url: up.url, filename: 'contract.pdf', mime: 'application/pdf', caption: 'signed copy', cid: 'cid-lou-2' });
+  assert.equal(fileSent.ok, true, JSON.stringify(fileSent));
+  const byId = await send(lou, { to: REF_A, messageId: said.id, cid: 'cid-lou-3' });
+  assert.equal(byId.ok, true, JSON.stringify(byId));
+  const inA = await messagesOf(hallA);
+  const fileThere = inA.find((m) => m.type === 'file');
+  assert.deepEqual({ url: fileThere.url, filename: fileThere.filename, caption: fileThere.caption, sentFrom: fileThere.sentFrom.roomName }, { url: up.url, filename: 'contract.pdf', caption: 'signed copy', sentFrom: 'Legal' });
+  assert.deepEqual(inA.filter((m) => m.sentFrom).map((m) => m.text || m.filename), ['Is the contract signed?', 'contract.pdf', 'Draft attached below']);
+  // Its link serves Hall A's people, and outlives Legal's reset: Hall A still holds it.
+  assert.equal((await fetch(srv.base + up.url)).status, 200);
+  const fileFromLegal = (await messagesOf(LEGAL)).find((m) => m.type === 'file');
+  assert.deepEqual(fileFromLegal.sentTo.id, fileThere.id);
+
+  // Refused, each in words, and nothing written into Hall A.
+  const before = await seqOf(hallA);
+  const legalAction = await act(lou.s, 'message', { type: 'action', text: 'Sign it?', options: ['Yes', 'No'] });
+  const legalHelp = await act(lou.s, 'message', { type: 'help', category: 'Sound', text: 'mic' });
+  for (const [who, args, error] of [
+    [vic, { to: REF_A, type: 'text', text: 'From an observer' }, 'Observers can read but not post.'],
+    [sid, { to: REF_A, messageId: fileFromLegal.id }, 'Your account may not share files here.'],
+    [lou, { to: REF_A, type: 'action', text: 'Sign it?', options: ['Yes'] }, 'Only a message or a file is sent into another room.'],
+    [lou, { to: REF_A, messageId: legalAction.id }, 'Only a message or a file is sent into another room.'],
+    [lou, { to: REF_A, type: 'help', category: 'Sound', text: 'mic' }, 'A help request belongs to its room — ask in the other room instead.'],
+    [lou, { to: REF_A, messageId: legalHelp.id }, 'A help request belongs to its room — ask in the other room instead.'],
+    [lou, { to: REF_A, messageId: 'nope' }, 'Message not found'],
+    [lou, { to: REF_A, messageId: said.id, type: 'text', text: 'both' }, 'Send a message of this room (messageId) or a new one (type), one of them.'],
+    [lou, { to: REF_A }, 'Send a message of this room (messageId) or a new one (type), one of them.'],
+    [lou, { to: forged, type: 'text', text: 'x' }, 'That room is gone.'],
+    [lou, { to: REF_L, type: 'text', text: 'x' }, 'That room is gone.'],
+    [lou, { to: LEGAL, type: 'text', text: 'x' }, 'That room is gone.'],
+    [lou, { to: hallA, type: 'text', text: 'x' }, 'That room is gone.'],
+    [lou, { to: REF_A, type: 'text', text: 'x', cid: 'bad cid!' }, 'That message\'s id could not be read.'],
+  ]) assert.deepEqual(await send(who, args), { ok: false, error }, JSON.stringify(args));
+  // Hall A sends nowhere yet: Gus is refused Legal, which Legal's own pages are not even told of.
+  assert.deepEqual(await send(gus, { to: REF_L, type: 'text', text: 'Hello Legal' }), { ok: false, error: 'This room may not send there — ask an admin.' });
+  assert.equal(await seqOf(hallA), before, 'nothing refused reached Hall A');
+
+  // Across halls: Hall B takes Legal in, and Lou sends there; taken off mid-show, the next send is refused at once.
+  await list(hallB, [LEGAL]);
+  const both = await targets(lou);
+  assert.deepEqual(both.targets.map((x) => x.name), ['Hall A', 'Hall B']);
+  const REF_B = both.targets[1].ref;
+  assert.equal((await send(lou, { to: REF_B, type: 'text', text: 'Hall B, the contract' })).ok, true);
+  await list(hallB, []);
+  assert.deepEqual(await send(lou, { to: REF_B, type: 'text', text: 'again' }), { ok: false, error: 'This room may not send there — ask an admin.' });
+  assert.deepEqual((await targets(lou)).targets.map((x) => x.ref), [REF_A]);
+  // A room removed: its reference names nothing.
+  const MEDIA = (await act(ctl, 'room:create', { hall: hallB, name: 'Media' })).key;
+  await list(MEDIA, [LEGAL]);
+  const REF_M = (await targets(lou)).targets.find((x) => x.name === 'Media').ref;
+  // A room it sends into renamed, then that room's hall: Legal's pages are told to ask again each time, and hear the names.
+  const renamed = once(lou.s, 'sendsChanged');
+  assert.ok((await act(ctl, 'room:update', { code: MEDIA, name: 'Press' })).ok);
+  await renamed;
+  assert.deepEqual((await targets(lou)).targets.find((x) => x.ref === REF_M), { ref: REF_M, name: 'Press', hallName: 'Hall B' });
+  const hallRenamed = once(lou.s, 'sendsChanged');
+  assert.ok((await act(ctl, 'room:update', { code: hallB, name: 'Hall Bee' })).ok);
+  await hallRenamed;
+  assert.deepEqual((await targets(lou)).targets.find((x) => x.ref === REF_M), { ref: REF_M, name: 'Press', hallName: 'Hall Bee' });
+  assert.ok((await act(ctl, 'admin:deleteRoom', { roomCode: MEDIA })).ok);
+  assert.deepEqual(await send(lou, { to: REF_M, type: 'text', text: 'Media?' }), { ok: false, error: 'That room is gone.' });
+
+  // Send back: Hall A sends into Legal too (↔), and Gus answers the question under it; Legal reads the answer under its copy.
+  await list(LEGAL, [hallA]);
+  assert.deepEqual((await targets(gus)).targets, [{ ref: REF_L, name: 'Legal', hallName: 'Hall A' }]);
+  // A file is sent only from the room its upload was made for: one Lou uploaded for Legal is refused from Hall A by its link.
+  const legalOnly = await uploadWith(srv.base, lou.j.uploadToken, 'notes.pdf', 'notes');
+  assert.deepEqual(await send(gus, { to: REF_L, type: 'file', url: legalOnly.url, filename: 'notes.pdf' }), { ok: false, error: 'That file belongs to another room — send it from there.' });
+  const back = await send(gus, { to: there.sentFrom.ref, type: 'text', text: 'Signed this morning.', replyTo: there.id, cid: 'cid-gus-1' });
+  assert.equal(back.ok, true, JSON.stringify(back));
+  const answered = (await messagesOf(LEGAL)).slice(-1)[0];
+  assert.deepEqual({ text: answered.text, replyTo: answered.replyTo, sentFrom: answered.sentFrom }, { text: 'Signed this morning.', replyTo: { id: copy.id, name: 'lou', snippet: 'Is the contract signed?' }, sentFrom: { roomName: 'Hall A', hallName: 'Hall A', ref: REF_A } });
+  assert.deepEqual((await messagesOf(hallA)).find((m) => m.id === back.id).replyTo, { id: there.id, name: 'lou', snippet: 'Is the contract signed?' }, 'and Hall A\'s copy answers the question there');
+
+  // The rate: the writes bucket holds a burst of sends, refused ones included.
+  const burst = await Promise.all(Array.from({ length: 24 }, () => emit(lou.s, 'room:send', { to: forged, type: 'text', text: 'x' })));
+  assert.ok(burst.some((r) => r && r.busy === true && r.error === 'Slow down a little.'), 'the writes bucket applies: ' + JSON.stringify(burst.map((r) => r.error)));
+  await wait(3200);
+
+  // One row per send, naming the rooms by name and the message by its kind and size: never its words or a file's name.
+  const rows = rowsOf(srv.dataDir, 'room.send');
+  assert.deepEqual(rows, [
+    [hallA, 'a message (23 characters) from Legal (Hall A) to Main (Hall A)', 'lou'],
+    [hallA, 'a file (pdf, 1 KB) from Legal (Hall A) to Main (Hall A)', 'lou'],
+    [hallA, 'a message (20 characters) from Legal (Hall A) to Main (Hall A)', 'lou'],
+    [hallB, 'a message (20 characters) from Legal (Hall A) to Main (Hall B)', 'lou'],
+    [LEGAL, 'a message (20 characters) from Main (Hall A) to Legal (Hall A)', 'Gus'],
+  ]);
+  assert.ok(!JSON.stringify(rows).match(/contract|signed|\/uploads\//i), 'no words, no file name, no link');
+
+  // Legal's reset keeps the file Hall A holds.
+  assert.ok((await act(ctl, 'admin:resetRoom', { roomCode: LEGAL })).ok);
+  assert.equal((await fetch(srv.base + up.url)).status, 200, 'the file outlives Legal\'s reset');
+
+  // No frame a page in either room heard carries a key or a code of a room it is not in: Lou's (Legal) none of Hall A's or
+  // Hall B's, Gus's (Hall A) none of Legal's or Hall B's, Bea's (Hall B) none of Legal's.
+  const scan = (name, keys) => { const text = JSON.stringify(heard.get(name)); return keys.filter((k) => text.includes(k)); };
+  assert.deepEqual(scan('lou', [hallA, hallB, MEDIA]), []);
+  assert.deepEqual(scan('gus', [LEGAL, legalCode, hallB, MEDIA]), []);
+  assert.deepEqual(scan('bea', [LEGAL, legalCode, hallA]), []);
+  assert.ok(heardMessage('bea', (m) => m.text === 'Hall B, the contract'), 'Bea heard the send into Hall B');
+
+  // A restart: each room's reference is the same, and the copy's still names its room.
+  sockets.forEach((s) => s.close());
+  sockets.length = 0;
+  srv = await restartServer(srv);
+  const again = await page(louCookie);
+  assert.equal((await emit(again, 'join', { roomCode: LEGAL, as: 'account' })).sends, true);
+  assert.deepEqual((await act(again, 'room:sendTargets', {})).targets, [{ ref: REF_A, name: 'Hall A', hallName: 'Hall A' }]);
+});
+
+test('On stage nothing is sent into another room (owner answer B2): a Board guest and a Board account on its On stage page are refused room:send in both forms, Send back included, and told no room; the same account sends from its Legal page, and may delete its copy there but not the message where it went', { timeout: 90_000 }, async (t) => {
+  const srv = await startServer();
+  t.after(() => stopServer(srv.child));
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
+  const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
+  const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
+  const ctl = await page(admin);
+  const LEGAL = (await act(ctl, 'room:create', { hall: hallA, name: 'Legal' })).key;
+  // Hall B takes Hall A in, Hall A takes Legal in, and Legal takes Hall A in: every list holds the room a Board page is in.
+  for (const [code, from] of [[hallB, [hallA]], [hallA, [LEGAL]], [LEGAL, [hallA]]]) assert.ok((await act(ctl, 'room:update', { code, sendFrom: from })).ok);
+  const made = await api(srv.base, 'POST', '/api/users', { username: 'kib', name: 'Kib', role: 'tech', halls: [hallA], rooms: [LEGAL], board: [hallA], password: 'board pack on the lectern' }, { cookie: admin });
+  assert.equal(made.status, 200, JSON.stringify(made.body));
+  const kib = (await api(srv.base, 'POST', '/api/auth/login', { username: 'kib', password: 'board pack on the lectern' })).cookie;
+  const join = async (args, cookie) => { const s = await page(cookie); const j = await emit(s, 'join', args); assert.equal(j.ok, true, JSON.stringify(j)); return { s, j }; };
+  const ana = await join({ roomCode: hallA, name: 'Ana', role: 'research' });
+  const chair = await join({ roomCode: hallA, name: 'Chair', role: 'board' });
+  const kibStage = await join({ roomCode: hallA, as: 'account' }, kib);
+  const kibLegal = await join({ roomCode: LEGAL, as: 'account' }, kib);
+  assert.deepEqual([chair.j.role, kibStage.j.role, kibLegal.j.role], ['board', 'board', 'research']);
+  // Hall A's text and file, and one Legal sent in: what a Board page could send on, or send back to.
+  const text = await act(ana.s, 'message', { type: 'text', text: 'Slides are loaded' });
+  const up = await uploadWith(srv.base, ana.j.uploadToken, 'deck.pdf');
+  const file = await act(ana.s, 'message', { type: 'file', url: up.url, filename: 'deck.pdf', mime: 'application/pdf' });
+  const REF_A = (await act(kibLegal.s, 'room:sendTargets', {})).targets[0].ref;
+  const fromLegal = await act(kibLegal.s, 'room:send', { to: REF_A, type: 'text', text: 'From Legal' });
+  assert.equal(fromLegal.ok, true, JSON.stringify(fromLegal));
+  const watch = async (code) => (await act(ctl, 'admin:watchRoom', { roomCode: code }));
+  const inA = (await watch(hallA)).messages;
+  const legalsInA = inA.find((m) => m.sentFrom && m.text === 'From Legal');
+  const REF_L = legalsInA.sentFrom.ref;
+  const REF_B = (await act(ana.s, 'room:sendTargets', {})).targets.find((x) => x.name === 'Hall B').ref;
+  const seqs = async () => [(await watch(hallB)).messages.length, (await watch(LEGAL)).messages.length];
+  const was = await seqs();
+  for (const [name, p] of [['a Board guest', chair], ['a Board account', kibStage]]) {
+    assert.deepEqual([p.j.sends, await act(p.s, 'room:sendTargets', {})], [false, { ok: true, targets: [] }], name + ': no room to send to');
+    for (const args of [
+      { to: REF_B, type: 'text', text: 'From the Board' },
+      { to: REF_B, type: 'file', url: up.url, filename: 'deck.pdf' },
+      { to: REF_B, messageId: text.id },
+      { to: REF_B, messageId: file.id },
+      // Send back on the message Legal sent in: the same path.
+      { to: REF_L, type: 'text', text: 'Thanks', replyTo: legalsInA.id },
+    ]) assert.deepEqual(await act(p.s, 'room:send', args), { ok: false, error: STAYS_HERE }, name + ' ' + JSON.stringify(args));
+  }
+  // A client id the Board guest's own message holds is no send of its: refused, never answered as one that went through.
+  const boardSaid = await act(chair.s, 'message', { type: 'text', text: 'A note from the Board', cid: 'cid-board-1' });
+  assert.equal(boardSaid.ok, true, JSON.stringify(boardSaid));
+  assert.deepEqual(await act(chair.s, 'room:send', { to: REF_B, type: 'text', text: 'A note from the Board', cid: 'cid-board-1' }), { ok: false, error: 'That message\'s id is another message\'s.' });
+  assert.deepEqual(await seqs(), was, 'nothing reached Hall B or Legal');
+  // The same account, from its Legal page: a file of Legal's into Hall A, where it sits On stage (the rights in Legal decide).
+  const legalUp = await uploadWith(srv.base, kibLegal.j.uploadToken, 'brief.pdf');
+  const legalFile = await act(kibLegal.s, 'room:send', { to: REF_A, type: 'file', url: legalUp.url, filename: 'brief.pdf', mime: 'application/pdf' });
+  assert.equal(legalFile.ok, true, JSON.stringify(legalFile));
+  assert.equal((await watch(hallA)).messages.slice(-1)[0].sentFrom.roomName, 'Legal');
+
+  // What Legal sent into Hall A is Hall A's while it holds it (plan 1-§4.3): its sender's page there may not delete it,
+  // so Legal's copy is still true when it says "delivered"; the sender deletes the copy in Legal, and the admin removes
+  // the message in Hall A.
+  const SENT_STAYS = 'A message sent from another room stays here: only the admin removes it.';
+  assert.deepEqual(await act(kibStage.s, 'delete', { messageId: legalsInA.id }), { ok: false, error: SENT_STAYS });
+  assert.ok((await watch(hallA)).messages.some((m) => m.id === legalsInA.id), 'Hall A still holds it');
+  const copyInLegal = (await watch(LEGAL)).messages.find((m) => m.sentTo && m.sentTo.id === legalsInA.id);
+  assert.equal(copyInLegal.id, fromLegal.id);
+  assert.deepEqual(await act(kibLegal.s, 'delete', { messageId: copyInLegal.id }), { ok: true });
+  assert.ok((await watch(hallA)).messages.some((m) => m.id === legalsInA.id), 'the copy deleted, Hall A still holds the message');
+  assert.deepEqual(await act(ctl, 'admin:deleteMessage', { roomCode: hallA, messageId: legalsInA.id }), { ok: true });
+  assert.ok(!(await watch(hallA)).messages.some((m) => m.id === legalsInA.id));
 });
 
 // ---------------------------------------------------------------- the picker (public/sendfrom.js), its pure half

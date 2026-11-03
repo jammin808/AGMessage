@@ -109,4 +109,15 @@ function applier({ commit, send, changed, refused }) {
   };
 }
 
-module.exports = { UPD_EVENTS, KINDS, EVENTS, LINKED, refusal, eventsOf, applier, forPage, opForPage, unlinked };
+/**
+ * A room a send's mark names (a message's `sentFrom` or `sentTo`: `{roomName, hallName}`), as every reader of the record
+ * says it, the transcript and the AI's thread alike, and the pages' catalogue (`public/catalog.js` `placeOf`, held to this
+ * one by its test): a hall's Main room by its hall's name, a side room by its hall's and its own ("Hall 2 › Legal").
+ */
+function placeOf(mark) {
+  const room = (isRecord(mark) && typeof mark.roomName === 'string' && mark.roomName) || '';
+  const hall = (isRecord(mark) && typeof mark.hallName === 'string' && mark.hallName) || '';
+  return !room || room === hall ? hall || room || 'another room' : (hall || 'A hall with no name') + ' › ' + room;
+}
+
+module.exports = { UPD_EVENTS, KINDS, EVENTS, LINKED, refusal, eventsOf, applier, forPage, opForPage, unlinked, placeOf };

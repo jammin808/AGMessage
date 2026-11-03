@@ -580,6 +580,39 @@ test('store: the hall readers never see a side room; the any-room readers do', (
   assert.deepEqual([h1, legal, null, undefined].map((r) => a.isMain(r)), [true, false, false, false]);
 });
 
+test('store: each room\'s reference, made once from its key by the server\'s refOf: byRef finds the room, Main or side, at every start, and nothing once it is gone; no reference is a code, and none is written', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const secret = Buffer.alloc(32, 9);
+  const made = [];
+  const refOf = (key) => { made.push(key); return 'r' + guard.mac(secret, 'room-ref:' + key, 16); };
+  const a = new RoomStore(dir, { refOf });
+  const hall = a.create('HALL01', 'Hall 1');
+  const legal = a.createIn('HALL01', 'LGQ4MZP8', 'Legal');
+  const other = a.create('HALL02', 'Hall 2');
+  const [rh, rl, ro] = [hall, legal, other].map((r) => a.roomRef(r));
+  assert.deepEqual(made, ['HALL01', 'LGQ4MZP8', 'HALL02'], 'made once per room, as it is made');
+  assert.ok([rh, rl, ro].every((r) => /^r[A-Za-z0-9_-]{16}$/.test(r) && !RoomStore.validCode(r)), 'a reference is never a key or a code: ' + [rh, rl, ro]);
+  assert.equal(new Set([rh, rl, ro]).size, 3, 'one per room');
+  assert.deepEqual([a.byRef(rh), a.byRef(rl), a.byRef(ro)], [hall, legal, other], 'Main or side');
+  // A key, a code, another secret's reference, and anything that is no string name nothing.
+  const forged = 'r' + guard.mac(Buffer.alloc(32, 1), 'room-ref:LGQ4MZP8', 16);
+  assert.deepEqual(['HALL01', 'LGQ4MZP8', forged, rl.toLowerCase(), '', undefined, 7, { toString: 1 }].map((x) => a.byRef(x)), [null, null, null, null, null, null, null, null]);
+  // Never written: no snapshot holds it.
+  assert.ok(!fs.readFileSync(path.join(dir, 'HALL01.LGQ4MZP8.json'), 'utf8').includes(rl) && !('ref' in a.snapshotOf(legal)));
+  // The same at the next start; and nothing once its room is gone.
+  const b = new RoomStore(dir, { refOf });
+  b.loadAll();
+  assert.deepEqual([b.byRef(rh).code, b.byRef(rl).code, b.byRef(ro).code], ['HALL01', 'LGQ4MZP8', 'HALL02']);
+  b.remove('LGQ4MZP8');
+  assert.equal(b.byRef(rl), null, 'a side room removed');
+  b.remove('HALL02');
+  assert.deepEqual([b.byRef(ro), b.byRef(rh).code], [null, 'HALL01'], 'a hall removed, the other still found');
+  // A store given no refOf has none: no room is found by one.
+  const c = new RoomStore(dir);
+  c.loadAll();
+  assert.deepEqual([c.roomRef(c.room('HALL01')), c.byRef(rh), c.byRef('')], ['', null, null]);
+});
+
 test('store: a side room is made only beside a hall that is here, under a key no room has, and at most SIDE_MAX to a hall', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
   const a = new RoomStore(dir);
@@ -1869,6 +1902,12 @@ test('ai: thread text is compact and labelled', () => {
   ]).split('\n');
   assert.equal(held[0], '[14:06, written 14:02 and sent when the connection was back] Ana (research) asked for help (Sound): radio mic 3');
   assert.equal(held[1], '[14:06] Chair (board): Thanks');
+  // A message another room sent here says where it came from; this room's copy of one it sent, where it went.
+  const sent = ai.threadText([
+    { type: 'text', text: 'Is the contract signed?', at, from: { name: 'Lou', role: 'research' }, sentFrom: { roomName: 'Legal', hallName: 'Hall 2', ref: 'rABC' } },
+    { type: 'text', text: 'Signed.', at, from: { name: 'Gus', role: 'research' }, sentTo: { roomName: 'Hall 2', hallName: 'Hall 2', ref: 'rDEF', id: 'm1' } },
+  ]).split('\n');
+  assert.deepEqual(sent, ['[14:06] Lou (research) [sent here from Hall 2 › Legal]: Is the contract signed?', '[14:06] Gus (research) [sent to Hall 2, a copy kept here]: Signed.']);
 });
 
 test('ai: a draft in a hall\'s other room is told which room it is, and that nobody on stage reads it; a Main room\'s is told nothing', () => {

@@ -149,8 +149,9 @@
     r.parts.label.textContent = item.label;
     b.setAttribute('aria-label', item.label);
     r.parts.key.textContent = KEY_WORDS[item.key] || item.key || '';
-    // A disabled item says why on its second line; a row that is its own reason ("Looking…") says it once.
-    const why = item.disabled && item.disabled !== item.label ? item.disabled : item.held || '';
+    // A disabled item says why on its second line; a row that is its own reason ("Looking…") says it once. An item that
+    // acts may say what its act is on that line too (`note`: "a forward — no withdraw").
+    const why = item.disabled && item.disabled !== item.label ? item.disabled : item.held || item.note || '';
     r.parts.why.textContent = why;
     r.parts.why.hidden = !why;
     if (why) b.setAttribute('aria-describedby', r.parts.why.id); else b.removeAttribute('aria-describedby');

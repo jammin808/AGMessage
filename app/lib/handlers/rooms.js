@@ -25,8 +25,31 @@
  * settings (`settings.roomSends`), read through `ctx.sendersOf` and written only through `ctx.setRoomSends`. It is told
  * only to those who read a room's settings (`room:settings`: the admin and those who set halls up), each room on it by
  * its name and key and its hall's name, never a code; no page in a room is sent it.
+ *
+ * Sending into another room (plan 1-§4.2, §4.3): a page in room S is told the rooms whose list names S
+ * (`room:sendTargets`), each by its reference (`store.roomRef`, never its key or a code), its name and its hall's, and
+ * sends a message or a file into one of them (`room:send`): a new one, or one of S's. The rights in S decide (the list is
+ * the admin saying that who may post in S may post into T), read on every send, so a list changed mid-show holds at once.
+ * The message goes into T first, marked with where it came from (`sentFrom`), and S keeps a copy marked with where it went
+ * (`sentTo`), so a copy is there only for a message that is in T; nothing else of T (its people, its seen receipts, its
+ * replies, its numbers) comes back to S. A seat On stage sends nothing out of its room (owner answer B2): it is refused
+ * first, whatever it sends, and is told no room to send to. One `room.send` row per send, naming the rooms by name and
+ * the message by its kind and size, never its words or a file's name.
  */
 const { str, cleanText } = require('../guard');
+
+/** What a seat On stage is told of a send out of its room: what it writes stays in its room's feed (owner answer B2). */
+const STAYS_HERE = 'Messages from On stage stay in this room.';
+/** What `room:send` answers a client id a message of another kind holds here: no send of this person's carries it. */
+const CID_HELD = 'That message\'s id is another message\'s.';
+/** What `room:send` sends: a message's words, or a file. A question and a help request are asked in their own room. */
+const SENDABLE = Object.freeze(['text', 'file']);
+/** A file's size as a row says it: "340 KB", "2.1 MB". */
+const sizeWords = (n) => (n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB');
+/** A file's kind as a row says it: its upload's extension (an upload is named by the server, `<id>.<ext>`). */
+const kindWords = (url) => url.slice(url.lastIndexOf('.') + 1).toLowerCase();
+/** A message quoted by a reply: who wrote it and its first words, as the message verb quotes one (server.js). */
+const quoteOf = (m) => ({ id: m.id, name: (m.from && m.from.name) || 'system', snippet: m.text ? m.text.slice(0, 120) : m.filename ? '📄 ' + m.filename : '' });
 
 /**
  * What `room:update` reads: the room's key, one change, each read by its type, and the client id every act from a page
@@ -90,7 +113,7 @@ const made = new Map();
  * @param {object} ctx    the server's context, frozen (lib/gate.js `contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, apply, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, sendersOf, setRoomSends } = ctx;
+  const { store, apply, readSend, messageOf, uploadOnDisk, makeMessageId, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, sendersOf, sendsInto, setRoomSends } = ctx;
 
   /** A hall as a refusal names it: its name, or "This hall" when it has none. */
   const hallSaid = (hall) => hall.name || 'This hall';
@@ -112,7 +135,7 @@ function register(socket, conn, ctx) {
    */
   const everyRoom = () => store.allRooms();
   /** The rooms whose list names `r`: those `r` may send into (its "↔ and send back"s), by key, Main rooms first. */
-  const intoOf = (r) => everyRoom().filter((x) => x !== r && sendersOf(x.code).includes(r.code)).map((x) => x.code);
+  const intoOf = (r) => sendsInto(r).map((x) => x.code);
 
   // A side room of a hall (Legal, Media), beside its Main room: made by name, under a key of its own (8 characters, an
   // address and never a guest's code), its guest code off, so it is for the admin and the accounts it is given until the
@@ -308,6 +331,100 @@ function register(socket, conn, ctx) {
       sendFrom: sendersTold(room), sendBack: intoOf(room),
       ...(everyHall ? { everyHall } : {}),
     });
+  });
+
+  /**
+   * The rooms this page may send into now: each whose list names its room, none On stage (nothing leaves its room), none
+   * for a seat that may not post there, and none from the support view, which is unseated and acts on nothing.
+   */
+  const targetsNow = () => (conn.onStage() || socket.data.adminView || !conn.allowed('hall.post') ? [] : sendsInto(conn.room()));
+  /** A room as a page is told it, where it may send or where a send came from: its reference, its name and its hall's. */
+  const refTold = (r) => { const h = store.get(r.hall); return { ref: store.roomRef(r), name: r.name || '', hallName: (h && h.name) || '' }; };
+  /** A room as a send's mark names it (`sentFrom`, `sentTo`): its name and its hall's, and its reference; never a key. */
+  const markOf = (r) => { const t = refTold(r); return { roomName: t.name, hallName: t.hallName, ref: t.ref }; };
+
+  // The rooms this page may send into (plan 1-§4.2), each by its reference, its name and its hall's name: no key, no
+  // code, no people and no numbers of any of them. A read, from memory.
+  socket.on('room:sendTargets', (args, ack) => {
+    if (!conn.gate(ack, { bucket: conn.chatter })) return;
+    conn.ok(ack)({ ok: true, targets: targetsNow().map(refTold) });
+  });
+
+  // A message sent into another room, with a copy kept here (plan 1-§4.2, §4.3): `{to, messageId}` sends a message or a
+  // file of this room; `{to, type: 'text' | 'file', text, url, filename, mime, caption, priority, replyTo}` a new one,
+  // its file uploaded for this room by this person (its provenance). `to` is the room's reference. A repeat of a send
+  // that went through (its client id) is answered with what it did, before anything else, so it is never refused for
+  // what succeeded; then a seat On stage is refused, whatever it sends; then the rate, then the rights here: posting, and
+  // sharing files for a file. T is written first, then one row, then the copy here, then the answer.
+  socket.on('room:send', (args, ack) => {
+    if (!conn.gate(ack, { bucket: null })) return;   // a repeat is answered as done before the rate: the token is taken below
+    const answer = conn.ok(ack);
+    const a = isRecord(args) ? args : {};
+    const sent = readSend(a, { held: true });
+    if (sent.error) return answer({ ok: false, error: sent.error });
+    const room = conn.room();
+    const me = conn.me();
+    // A repeat is a client id this person's copy of a send carries (or carried, removed since); one a message of another
+    // kind holds here names no send, and is refused as a client id this verb cannot use, before any check reads it.
+    const was = sent.cid ? store.sentAs(room, me.uid, sent.cid) : null;
+    if (was && was.gone) return answer({ ok: true, id: was.id, seq: was.seq, gone: true });
+    if (was) {
+      const copy = room.byId.get(was.id);
+      if (!copy || !copy.sentTo) return answer({ ok: false, error: CID_HELD });
+      return answer({ ok: true, id: was.id, seq: was.seq, to: { name: copy.sentTo.roomName, hallName: copy.sentTo.hallName } });
+    }
+    if (conn.onStage()) return answer({ ok: false, error: STAYS_HERE });
+    if (!conn.writes.take()) return conn.limited(ack);
+    if (!conn.mayPost(ack)) return;
+    // Which form: one of this room's messages, or a new one; never both, never neither.
+    const byId = Object.hasOwn(a, 'messageId');
+    if (byId === Object.hasOwn(a, 'type')) return answer({ ok: false, error: 'Send a message of this room (messageId) or a new one (type), one of them.' });
+    const src = byId ? room.byId.get(str(a.messageId)) : null;
+    if (byId && !src) return answer({ ok: false, error: 'Message not found' });
+    const type = src ? src.type : a.type;
+    if (!SENDABLE.includes(type)) return answer({ ok: false, error: type === 'help' ? 'A help request belongs to its room — ask in the other room instead.' : 'Only a message or a file is sent into another room.' });
+    if (type === 'file' && !conn.allowed('hall.files')) return answer({ ok: false, error: 'Your account may not share files here.' });
+    const into = store.byRef(str(a.to));
+    if (!into || into === room) return answer({ ok: false, error: 'That room is gone.' });
+    if (!targetsNow().includes(into)) return answer({ ok: false, error: 'This room may not send there — ask an admin.' });
+    // The message: one of this room's, its words or its file as they are, or a new one made as `message` makes it.
+    let body;
+    let size = -1;
+    if (src) {
+      if (src.type === 'file') {
+        size = uploadOnDisk(src.url);
+        if (size < 0) return answer({ ok: false, error: 'That file is no longer on the AGMessage laptop.' });
+      }
+      body = { type: src.type, priority: !!src.priority, ...(src.type === 'text' ? { text: src.text } : { url: src.url, filename: src.filename, mime: src.mime, caption: src.caption || '' }) };
+    } else {
+      const built = messageOf(me, a, room, {});
+      if (built.refused) return answer({ ok: false, ...built.refused });
+      const { id, at, from, pinned, cid, held, ...rest } = built.msg;
+      body = rest;
+      size = built.size;
+    }
+    const now = Date.now();
+    const from = { uid: me.uid, name: me.name, role: me.role, ...(me.acct ? { acct: true } : {}) };
+    const author = src && src.from && src.from.name && src.from.uid !== me.uid ? src.from.name : '';
+    // A reply here that answers a message from T, or this room's copy of one sent to T, answers its counterpart there.
+    const parent = !src && typeof a.replyTo === 'string' ? room.byId.get(a.replyTo) : null;
+    const answered = !parent ? null
+      : parent.sentFrom && parent.sentFrom.ref === store.roomRef(into) ? into.messages.find((m) => m.sentTo && m.sentTo.id === parent.id) || null
+        : parent.sentTo && parent.sentTo.ref === store.roomRef(into) ? into.byId.get(parent.sentTo.id) || null : null;
+    const there = {
+      ...body, id: makeMessageId(), at: now, from, pinned: false, ...(sent.held ? { held: sent.held } : {}),
+      sentFrom: { ...markOf(room), ...(author ? { originalAuthor: author } : {}) }, ...(answered ? { replyTo: quoteOf(answered) } : {}),
+    };
+    if (!apply(into, { o: 'add', m: there })) return answer({ ok: false, error: OP_REFUSED });
+    // The row once the message is in T, whatever becomes of the copy: nothing crosses rooms without one.
+    write('room.send', into.code, (type === 'file' ? 'a file (' + kindWords(body.url) + ', ' + sizeWords(size) + ')' : 'a message (' + Array.from(body.text).length + ' characters)')
+      + ' from ' + roomRow(room) + ' to ' + roomRow(into));
+    const copy = {
+      ...body, id: makeMessageId(), at: now, from, pinned: false, ...(sent.cid ? { cid: sent.cid } : {}), ...(sent.held ? { held: sent.held } : {}),
+      sentTo: { ...markOf(into), id: there.id }, ...(parent ? { replyTo: quoteOf(parent) } : {}),
+    };
+    if (!apply(room, { o: 'add', m: copy })) return answer({ ok: false, error: 'It reached ' + roomRow(into) + ', but no copy could be kept here.' });
+    answer({ ok: true, id: copy.id, seq: copy.seq, to: { name: copy.sentTo.roomName, hallName: copy.sentTo.hallName } });
   });
 }
 

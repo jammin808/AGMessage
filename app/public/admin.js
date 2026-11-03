@@ -502,9 +502,12 @@ function buildAdminMessage(m) {
   } else if (m.type === 'help') bodyHtml = `<p>■ <strong>${escapeHtml(m.category || 'Help')}</strong> ${escapeHtml(m.text || '')}</p>`;
   // A message its page held before sending it (written offline) says when it was written and when it was sent.
   const heldHtml = Number.isInteger(m.held) && m.held > 0 ? '<div class="held-line">written ' + escapeHtml(formatTime(m.at - m.held * 1000)) + ' · sent ' + escapeHtml(formatTime(m.at)) + ' (offline)</div>' : '';
+  // A message another room sent here, and this room's copy of one it sent there, say which room, as the hall page does.
+  const sentHtml = m.sentFrom ? '<div class="sent-meta">↘ From ' + escapeHtml(AGM.catalog.placeOf(m.sentFrom)) + '</div>'
+    : m.sentTo ? '<div class="sent-meta">↗ Sent to ' + escapeHtml(AGM.catalog.placeOf(m.sentTo)) + ' — delivered</div>' : '';
   div.innerHTML =
     `<div class="admin-msg-head">${whoHtml} <time>${escapeHtml(formatTime(m.at))}</time>${m.priority ? ' <span class="priority-badge" style="display:inline-block">🔥 HIGH</span>' : ''}</div>` +
-    `<div class="admin-msg-body">${bodyHtml}${heldHtml}</div>` +
+    `<div class="admin-msg-body">${sentHtml}${bodyHtml}${heldHtml}</div>` +
     '<div class="admin-msg-foot obj-bar"></div>';
   ADMIN.draw(div.querySelector('.obj-bar'), 'adminMsg', { ...m, hall: hallName() }, { more: 'Message actions', keysOn: div });
   return div;

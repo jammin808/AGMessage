@@ -426,6 +426,9 @@ const frames = {
   // A hall's rooms, for the switcher and the header on each page in any of them (keyed by the hall): a room made,
   // renamed or removed, or the hall renamed.
   rooms: new Latest({ name: 'rooms', delayMs: 300, flush: (halls) => eachRoom('rooms', halls, (h) => sendHallRooms(h)) }),
+  // The rooms a room's pages may send into changed (keyed by the room): a list set, a room it sends into renamed or its
+  // hall renamed. Each page is told to ask again (room:sendTargets), and told nothing of any list.
+  sends: new Latest({ name: 'sends', delayMs: 300, flush: (rooms) => eachRoom('sends', rooms, (r) => io.to(r.code).emit('sendsChanged')) }),
 };
 /**
  * Each room of a frame's batch that is still here (a hall's key names its Main room), given to `send` with its value;
@@ -735,7 +738,10 @@ function noteEvent(text, link) { recentEvents.push({ at: Date.now(), text, link:
 // ---------------------------------------------------------------- rooms
 // Loaded without writing, its folder not made: until this copy holds the data folder and its port (`holdDataFolder`, at the
 // end of this file), another copy may be appending to these same files.
-const store = new RoomStore(ROOMS_DIR, { make: false });
+// A room's reference (store.byRef): 'r' and 16 characters of a MAC of its key under the server's secret, made once per
+// room, the same at every start. It never passes CODE_RE (17 characters, mixed case), so no join or lookup by code takes
+// one, and it names nothing a client could open: a page is told it of a room it may send into, or that sent to it.
+const store = new RoomStore(ROOMS_DIR, { make: false, refOf: (key) => 'r' + guard.mac(SECRET, 'room-ref:' + key, 16) });
 // Timed where they run; saved with the window they fall in (the health tick), or at once by a stop or a crash.
 store.onCompact = (ms, messages) => { peaks.compacted(ms, messages, Date.now()); };
 audit.onPut = (ms) => { peaks.auditPut(ms, Date.now()); };
@@ -1364,6 +1370,14 @@ function sendersOf(key) {
   const list = isRecord(all) && typeof key === 'string' && Object.hasOwn(all, key) ? all[key] : null;
   return Array.isArray(list) ? [...new Set(list.filter((k) => typeof k === 'string' && k.length > 0))] : [];
 }
+/**
+ * The rooms `room`'s people may send into (plan 1-§4.2): each room here, Main or side, of any hall, whose list names it,
+ * Main rooms first; none for a room no list names. What `room:sendTargets` lists (by reference, never a key), what
+ * `room:send` is allowed into, and the join's `sends`.
+ */
+function sendsInto(room) {
+  return store.allRooms().filter((t) => t !== room && sendersOf(t.code).includes(room.code));
+}
 /** Whether a list still names `key`, as the room it lists or a room on it (one whose room comes back at the next start). */
 function sendsName(key) {
   if (!isRecord(settings.roomSends)) return false;
@@ -1387,9 +1401,18 @@ function setRoomSends(next) {
   if (!lists.length) return '';
   if (settingsUnsaved()) return settingsUnsaved();
   const all = isRecord(settings.roomSends) ? { ...settings.roomSends } : {};
-  for (const [target, once] of lists) { if (once.length) all[target] = once; else delete all[target]; }
+  // The rooms whose people now send into more rooms, or fewer: each list's keys taken away or put on.
+  const moved = new Set();
+  for (const [target, once] of lists) {
+    const was = sendersOf(target);
+    for (const k of was) if (!once.includes(k)) moved.add(k);
+    for (const k of once) if (!was.includes(k)) moved.add(k);
+    if (once.length) all[target] = once; else delete all[target];
+  }
   if (Object.keys(all).length) settings.roomSends = all; else delete settings.roomSends;
   saveSettings();
+  // Each page in such a room asks again where it may send (room:sendTargets): told that, and nothing of any list.
+  for (const k of moved) frames.sends.mark(k);
   return '';
 }
 /**
@@ -1568,6 +1591,9 @@ function renameRoom(room, name) {
   const op = apply(room, { o: 'meta', name });
   if (op && store.isMain(room)) for (const d of displays.ofHall(room.code)) io.to('display:' + d.id).emit('display:state', displayState(d));
   if (op) frames.rooms.mark(room.hall);
+  // The rooms that send into it name it by its name and its hall's: a Main room's name is its hall's, so the rooms that
+  // send into any room of its hall are told to ask again too.
+  if (op) for (const r of store.isMain(room) ? store.roomsOf(room.hall) : [room]) for (const k of sendersOf(r.code)) frames.sends.mark(k);
   return op;
 }
 /** A room as a row and the AI name it: a side room by its name and its hall's ("Legal (Hall 2)"), a hall by its name. */
@@ -2079,6 +2105,10 @@ io.on('connection', (socket) => {
       // who sees the hall or is the admin (an account given a side room alone is told its name), and the rooms of it this
       // page may move between, its switcher's (switcherFor: an account's page; none for a code page or the support view).
       ...hallFacts(askerOf(socket), r, { page: !!acct && !isAdminView }),
+      // Whether a message here could be sent into another room by its list (room:sendTargets would list one): the page
+      // offers To: and the rooms of ↗ Send to only then. False On stage, where nothing leaves the room, for a seat that
+      // may not post, and for the support view, which is unseated.
+      sends: !isAdminView && !onStage() && allowed('hall.post') && sendsInto(r).length > 0,
     });
 
     if (!isAdminView) {
@@ -2114,6 +2144,8 @@ io.on('connection', (socket) => {
   // The two rules of the room a forward comes from, in the words the forward and its picker both answer with.
   const FILES_BACKSTAGE = 'Files are moved by the backstage team.';
   const ASKS_BACKSTAGE = 'Questions for the Board come from the backstage team.';
+  // A message another room sent here stays while this room holds it: its author removes no message here by `delete`.
+  const SENT_STAYS = 'A message sent from another room stays here: only the admin removes it.';
 
   // A send is said once: a repeat of a send (its client id, from the same person) is answered with what the first one
   // became, before any limit or right is read, since it asks for nothing new — never refused for what succeeded.
@@ -2127,17 +2159,9 @@ io.on('connection', (socket) => {
     if (!mayPost(ack)) return;
     if (payload && payload.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: onStage() ? 'On stage seats send messages, not files.' : 'Your account may not share files here.' });
     if (payload && payload.type === 'action' && !mayAsk()) return ok(ack)({ ok: false, error: ASKS_BACKSTAGE });
-    // An upload that is no longer here (a send held past the wait an unposted upload is kept for) is uploaded again by
-    // the page that holds the file, and sent with the same client id.
-    const upload = payload && payload.type === 'file' && guard.validUploadUrl(payload.url) ? payload.url : '';
-    if (upload && !fs.existsSync(path.join(UPLOAD_DIR, upload.slice(9)))) return ok(ack)({ ok: false, error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true });
-    // A file goes only into the room it was uploaded for (its provenance): another room's is refused with where it is,
-    // nothing posted; one no room holds and this run has no record of (a screen's alone, or one made before a restart) is
-    // uploaded again, as one that is no longer here.
-    const refused = upload ? fileRefusal(me, upload, room) : null;
-    if (refused) return ok(ack)({ ok: false, ...refused });
-    const msg = buildMessage(me, payload, { ...sent, room });
-    if (!msg) return ok(ack)({ ok: false, error: 'Invalid message' });
+    const built = messageOf(me, payload, room, sent);
+    if (built.refused) return ok(ack)({ ok: false, ...built.refused });
+    const msg = built.msg;
     if (payload.replyTo && typeof payload.replyTo === 'string') {
       const parent = room.byId.get(payload.replyTo);
       if (parent) {
@@ -2181,6 +2205,9 @@ io.on('connection', (socket) => {
     if (tomb && tomb.uid === me.uid) return ok(ack)({ ok: true, already: true });
     if (!msg) return ok(ack)({ ok: false, error: 'Message not found' });
     if (msg.type === 'system') return ok(ack)({ ok: false, error: 'Cannot delete system message' });
+    // A message another room sent here is not its author's to delete from this room (plan 1-§4.3): the copy kept where it
+    // came from says "delivered", which stays true while this room holds it. Only the admin removes it here.
+    if (msg.sentFrom) return ok(ack)({ ok: false, error: SENT_STAYS });
     if (!msg.from || !msg.from.uid || msg.from.uid !== me.uid) return ok(ack)({ ok: false, error: 'Only the author can delete this message' });
     if (!apply(room, { o: 'del', id: messageId })) return ok(ack)(OP_REFUSED);
     removeUnused(fileNamesOf([msg])).catch(() => { /* a file left behind is only space */ });
@@ -2266,7 +2293,8 @@ io.on('connection', (socket) => {
     if (!me) return ok(ack)({ ok: false, error: 'Not joined' });
     const src = q && typeof q === 'object' ? room.byId.get(guard.str(q.messageId)) : null;
     const t = forwardTargets(src);
-    ok(ack)({ ok: true, rooms: t.rooms.map((c) => ({ code: c, name: store.room(c).name || '' })), ...(t.why ? { why: t.why } : {}) });
+    // Each room also by its reference, so the picker draws a room its list lets this room send into once, sent there.
+    ok(ack)({ ok: true, rooms: t.rooms.map((c) => store.room(c)).map((r) => ({ code: r.code, name: r.name || '', ref: store.roomRef(r) })), ...(t.why ? { why: t.why } : {}) });
   });
 
   socket.on('forward', (args, ack) => {
@@ -3225,7 +3253,7 @@ io.on('connection', (socket) => {
   // page's socket but a screen's (a screen's returned at the top): the hall page's, the admin page's and the halls
   // board's. The rooms module is given the server's context, the takes module the takes context, which holds nothing
   // that makes a room's op or sends to a room (`ctx`, at the end of this file).
-  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, canIn, admin, actor, canManageHall, codeTold, gate });
+  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, onStage, canIn, admin, actor, canManageHall, codeTold, gate });
   roomVerbs.register(socket, conn, ctx);
   takeVerbs.register(socket, conn, takesCtx);
 
@@ -3540,6 +3568,31 @@ function fileRefusal(user, url, room) {
   return uploadsOnScreens().has(name) ? FILE_REFUSED.onScreen : FILE_REFUSED.expired;
 }
 
+/** An upload on this laptop's disk, by its link: its size in bytes, or -1 when it is not there (or no upload's link). */
+function uploadOnDisk(url) {
+  if (!guard.validUploadUrl(url)) return -1;
+  const st = fs.statSync(path.join(UPLOAD_DIR, url.slice(9)), { throwIfNoEntry: false });
+  return st && st.isFile() ? st.size : -1;
+}
+/**
+ * The message `user` posts in `room` from a page's `payload` (`message`'s, and a new one sent into another room,
+ * `room:send`), with its send's client id and wait (`sent`: readSend's): `{msg, size}` (a file's size in bytes, else -1),
+ * or `{refused}`, the answer's fields beside `ok: false`. An upload that is no longer here (a send held past the wait an
+ * unposted upload is kept for) is uploaded again by the page that holds the file and sent with the same client id
+ * (`reupload`); a file goes only into the room it was uploaded for (its provenance, `fileRefusal`): another room's is
+ * refused with where it is, and one no room holds and this run has no record of (a screen's alone, or one made before a
+ * restart) is uploaded again, as one that is no longer here. Nothing is posted here: the caller posts what it is given.
+ */
+function messageOf(user, payload, room, sent) {
+  const upload = payload && payload.type === 'file' && guard.validUploadUrl(payload.url) ? payload.url : '';
+  const size = upload ? uploadOnDisk(upload) : -1;
+  if (upload && size < 0) return { refused: { error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true } };
+  const refused = upload ? fileRefusal(user, upload, room) : null;
+  if (refused) return { refused };
+  const msg = buildMessage(user, payload, { ...sent, room });
+  return msg ? { msg, size } : { refused: { error: 'Invalid message' } };
+}
+
 /**
  * The message `user` posts in `room` from a page's `payload`, carrying its send's client id and wait (`cid`, `held`:
  * readSend's); null when the payload is no message, and for a file whose provenance does not let it into `room`
@@ -3610,6 +3663,8 @@ function renderTranscriptHtml(room) {
     if (m.aiDraft) extras += '<span class="pin">✨ drafted with AI, sent by a person</span>';
     if (m.held) extras += '<span class="pin">◷ written ' + esc(fmt(m.at - m.held * 1000)) + ', sent ' + esc(fmt(m.at)) + ' (offline)</span>';
     if (m.forwardedFrom) extras += '<div class="fwd">↗ Forwarded from ' + esc(m.forwardedFrom.roomName || 'another hall') + '</div>';
+    if (m.sentFrom) extras += '<div class="fwd">↘ From ' + esc(ops.placeOf(m.sentFrom)) + (m.sentFrom.originalAuthor ? ' · originally by ' + esc(m.sentFrom.originalAuthor) : '') + '</div>';
+    if (m.sentTo) extras += '<div class="fwd">↗ Sent to ' + esc(ops.placeOf(m.sentTo)) + ' — a copy kept here</div>';
     const cls = ['msg', 'type-' + m.type, m.priority ? 'priority' : ''].filter(Boolean).join(' ');
     rows.push('<article class="' + cls + '"><header><strong>' + who + '</strong><time>' + esc(fmt(m.at)) + '</time></header>' + extras + '<div class="body">' + content + '</div></article>');
   }
@@ -4736,13 +4791,15 @@ function firstWrites() {
 
 // The server's contexts for the handler modules (lib/gate.js `contexts`), built once, last, after every part they name
 // exists, and before this copy holds its port, so the first connection reads them whole: the stores and their named
-// effects, `settings` to read (a handler module never writes it: test/modules.test.js (j)), the rooms that may send into a
-// room (`sendersOf`, read; `setRoomSends`, its one writer, the rooms module's alone), the Stagewatch a hall follows
+// effects, `settings` to read (a handler module never writes it: test/modules.test.js (j)), a message made from what a page
+// sent (`readSend`, `messageOf`, its file on disk `uploadOnDisk`, a new id `makeMessageId`), the rooms that may send into
+// a room (`sendersOf`, read, and `sendsInto`, the rooms a room may send into; `setRoomSends`, its one writer, the rooms
+// module's alone), the Stagewatch a hall follows
 // and its frame, and `io` for the rooms module. The takes module's holds no io, apply or systemMessage: it reaches a page
 // by its socket's id alone (`sendTo`, over io's open sockets, read by the gate's module and never handed in), never a
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
-  store, apply, systemMessage, buildMessage, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, settings, sendersOf, setRoomSends, linkFor, stagePayload, io,
+  store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload, io,
 });
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.

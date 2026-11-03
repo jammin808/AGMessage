@@ -31,7 +31,17 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   "joined" or "left" line in either room; a second device or tab opened in another room is said there. A file is posted
   only in the room it was uploaded for, by whoever uploaded it (or again in a room that already holds it): another
   room's file posted by its link is refused ("That file belongs to another room — send it from there."); it goes there
-  by ↗ Send to, between rooms the person is in, or by choosing the file again there. **Help requests** go in two taps
+  by ↗ Send to, or by choosing the file again there. **Sending into another room:** where a room's **May send in…**
+  lets this room send there (in any hall), a message or a file goes into it from the composer's **To:** (Send reads
+  "Send to Legal", and "↗ to Legal — replies stay there" stays above the field, on a phone too, until it is sent) or
+  from a message's **↗ Send to ▸**: one list of rooms, first those this room's lists allow (sent there, a copy kept
+  here), then the rooms the person may forward into ("a forward — no withdraw"). The room it went to reads "↘ From Hall 2
+  › Legal" with the sender's name and offers **↗ Send back**, whose answer lands under the question in both rooms; the
+  room it came from keeps the copy, "↗ Sent to Hall 2 › Legal — delivered"; its sender may delete the copy, but not the
+  message in the other room, which only the admin removes there. Nothing else of the other room comes back
+  (its people, its replies, its receipts), no page is told another room's key or code, a file that arrives from another
+  room never opens itself on the On stage panel, and each send is one audit row, never its words or a file's name. A list
+  taken back mid-show stops the next send at once. **Help requests** go in two taps
   (Help, then Sound, Vision, Lighting, Stage, Presenter, IT / network or Something else), from any room, and stay red
   until someone is on the way and on the board until resolved. A side room's request is on the board whole for those who
   read the room, and for the hall's crew without its words ("Hall 2 › Legal · Sound"), who answer it from there. The asker's Help button says what happened ("■ Help asked", "▶ Ana is on
@@ -129,7 +139,7 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   Shift+F10, and each of these pages has a skip link and lists that are one Tab stop (↑ and ↓ between their rows).
 - **The Board.** People On stage read, reply, answer the backstage team's questions, send 🔥 Priority and ask for help,
   and mark their own help request sorted; what they write stays in their room, where the backstage team reads it. They
-  never share files, ask questions, forward anything into another room or answer other people's help requests: the
+  never share files, ask questions, forward or send anything into another room or answer other people's help requests: the
   server refuses each by the seat, for the admin and an account seated On stage too. An account seated On stage in a
   hall answers none of that hall's help requests from its halls board either, but marks its own sorted.
 - **Remote phones.** Through the built-in Cloudflare tunnel, up to 150 at once — a Quick Tunnel's 200 in-flight

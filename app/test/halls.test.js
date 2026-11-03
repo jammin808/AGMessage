@@ -1167,7 +1167,8 @@ test('rights in a room: an account given a side room joins it backstage, posts, 
   assert.equal((await emit(tomMain, 'join', { roomCode: 'HALLA1', as: 'account' })).role, 'research');
   assert.equal((await emit(await page(tom), 'join', { roomCode: SIDE, as: 'account' })).role, 'research');
   const sent = await emit(tomMain, 'message', { type: 'text', text: 'for the lawyers' });
-  assert.deepEqual((await emit(tomMain, 'myRooms', { messageId: sent.id })).rooms, [{ code: SIDE, name: 'Legal' }]);
+  // Each room by its reference too (unit 14), so Send to ▸ lists a room a list allows once.
+  assert.deepEqual((await emit(tomMain, 'myRooms', { messageId: sent.id })).rooms.map(({ code, name, ref }) => ({ code, name, ref: /^r[A-Za-z0-9_-]{16}$/.test(ref) })), [{ code: SIDE, name: 'Legal', ref: true }]);
   const heard = once(louSide, 'message');
   assert.ok((await emit(tomMain, 'forward', { messageId: sent.id, targetRoom: SIDE })).ok);
   assert.equal((await heard).text, 'for the lawyers');
@@ -1188,7 +1189,8 @@ test('rights in a room: an account given a side room joins it backstage, posts, 
   assert.ok(kimFileMsg.ok, JSON.stringify(kimFileMsg));
   const kimText = await emit(kimSide, 'message', { type: 'text', text: 'Clause 4 is signed' });
   assert.deepEqual(await emit(kimSide, 'myRooms', { messageId: kimFileMsg.id }), { ok: true, rooms: [] }, 'a file is not offered where her seat shares none');
-  assert.deepEqual(await emit(kimSide, 'myRooms', { messageId: kimText.id }), { ok: true, rooms: [{ code: 'HALLA1', name: 'Hall A' }] });
+  const kimRooms = await emit(kimSide, 'myRooms', { messageId: kimText.id });
+  assert.deepEqual({ ...kimRooms, rooms: kimRooms.rooms.map(({ code, name, ref }) => ({ code, name, ref: /^r[A-Za-z0-9_-]{16}$/.test(ref) })) }, { ok: true, rooms: [{ code: 'HALLA1', name: 'Hall A', ref: true }] });
   assert.deepEqual(await emit(kimSide, 'forward', { messageId: kimFileMsg.id, targetRoom: 'HALLA1' }), { ok: false, error: 'You may not share files in that hall.' });
   const inMain = hears(tomMain, 'Clause 4 is signed');
   assert.ok((await emit(kimSide, 'forward', { messageId: kimText.id, targetRoom: 'HALLA1' })).ok);

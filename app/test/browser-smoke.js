@@ -2444,8 +2444,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(doorsInStep(rowDoors) && rowDoors.want === '["person.mention"]' && peopleStops === 1, `a person's row in the People panel: its ⋯, right-click and Shift+F10 open the catalogue's set, and the list is one Tab stop (${JSON.stringify({ want: rowDoors.want, peopleStops })}${doorsInStep(rowDoors) ? '' : '; ' + JSON.stringify(rowDoors)})`);
 
     // The composer: Send is its act on the row, named for where it sends; its ⋯, a right-click and Shift+F10 on Send open
-    // the same list (✨ Draft a reply, Send, 🔥 Priority, Attach a file…); 🔥 is a checked toggle there; the text field
-    // keeps the browser's own menu.
+    // the same list (✨ Draft a reply, Send, To ▸ — Press's list names Smoke AGM, May send in… above —, 🔥 Priority,
+    // Attach a file…); 🔥 is a checked toggle there; the text field keeps the browser's own menu.
     const composeDoors = await doorsOf(research, 'compose', 'textPane', `composeObject('text')`, { hit: '.send-btn', bar: '.send-btn', focus: `textPane.querySelector('.send-btn')` });
     await research.eval(`textPriBtn.click()`);
     await research.eval(`textPane.querySelector('.compose-more').click()`);
@@ -2454,7 +2454,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const priorityOff = await research.until(`textPriBtn.getAttribute('aria-pressed') === 'false' && ${NO_MENU} && 'off'`, 3000);
     const fieldMenu = await research.eval(`(() => { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5, button: 2 }); textInput.dispatchEvent(e); return JSON.stringify({ prevented: e.defaultPrevented, menu: !!document.querySelector('.agm-menu') }); })()`);
     const sendName = await research.eval(`textPane.querySelector('.send-btn').getAttribute('aria-label')`);
-    report(doorsInStep(composeDoors) && JSON.parse(composeDoors.want).join() === 'compose.draft,compose.send,compose.priority,compose.attach' && sendName === 'Send to Smoke AGM' &&
+    report(doorsInStep(composeDoors) && JSON.parse(composeDoors.want).join() === 'compose.draft,compose.send,compose.sendTo,compose.priority,compose.attach' && sendName === 'Send to Smoke AGM' &&
       priorityItem === JSON.stringify(['menuitemcheckbox', 'true']) && priorityOff === 'off' && fieldMenu === JSON.stringify({ prevented: false, menu: false }),
       `the composer: Send ("${sendName}") and its ⋯, right-click and Shift+F10 on it open one list; 🔥 Priority is a checked toggle in it, which unpresses 🔥; the text field keeps the browser's own menu (${JSON.stringify({ want: composeDoors.want, priorityItem, fieldMenu })}${doorsInStep(composeDoors) ? '' : '; ' + JSON.stringify(composeDoors)})`);
 
@@ -2477,6 +2477,68 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const toComposer = await research.until(`document.activeElement === textInput && 'composer'`, 3000);
     report(JSON.parse(feedStops).length === 1 && JSON.parse(feedStops)[0] === JSON.parse(newest)[0] && upOnce === JSON.parse(newest)[0] && upTwice === JSON.parse(newest)[1] && rovingMenu === rovingWant && rovingBack === 'back' && toComposer === 'composer',
       `the feed is one Tab stop, its newest message; ↑ from the empty message box goes to it and ↑ again to the one before, whose Shift+F10 opens its set; Escape closes the menu, then goes back to the message box (${JSON.stringify({ feedStops, upOnce, upTwice, rovingMenu, rovingBack, toComposer })})`);
+
+    // ---------------- Sent into another room, a copy kept here (unit 14) ----------------
+    // Press's list names Smoke AGM and Smoke AGM's names Press (May send in… above, with its ↔). Pat, a Member of Press (its
+    // guest code is on), reads there. To: ▸ Press: Send reads "Send to Press", and the line "↗ to Press — replies stay
+    // there" stays above the field, at 390 px too, where Send is its mark. Sent, it lands in Press marked "↘ From Smoke
+    // AGM", the copy here says "↗ Sent to Smoke AGM › Press — delivered", and To: is back on This room. Send to ▸ is one
+    // list: Press once, sent by its list, then the halls this browser may forward into, each saying it is a forward; a file
+    // sent on from here never opens itself on Press's panel. Pat's ↗ Send back answers under the question, here.
+    const ctlSends = await connect(base, cookie);
+    const pressCode = (await emit(ctlSends, 'room:settings', { code: pressKey })).guestCode;
+    ctlSends.close();
+    const pressTab = await edge.tab(`${base}/app.html?code=${pressCode}&name=Pat&role=research`);
+    await pressTab.until('typeof joined !== "undefined" && joined && F.sends', 8000);
+    await research.until('F.sends && F.targets.length === 1', 5000);
+    const pressRef = await research.eval('F.targets[0].ref');
+    await research.eval(`document.querySelector('.compose-tabs .tab[data-tab="text"]').click()`);
+    const toShown = await research.eval(`JSON.stringify({ shown: !document.getElementById('composeTo').hidden, words: toBtn.textContent, line: toLine.hidden })`);
+    await research.eval('toBtn.click()');
+    const toValues = await research.until(`(() => { const rows = [...document.querySelectorAll('.agm-menu .agm-mi[data-action="compose.sendTo"]')]; return rows.length === 2 && JSON.stringify(rows.map((r) => [r.dataset.value || '', r.querySelector('.mi-label').textContent, r.getAttribute('aria-checked')])); })()`, 3000);
+    await research.eval(`document.querySelector('.agm-menu .agm-mi[data-value="${pressRef}"]').click()`);
+    const toSet = await research.until(`!toLine.hidden && JSON.stringify({ btn: toBtn.textContent, line: toLine.textContent, send: textPane.querySelector('.send-btn').getAttribute('aria-label'), word: textPane.querySelector('.send-word').textContent, edge: document.getElementById('researchCompose').classList.contains('to-other') })`, 3000);
+    await research.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await sleep(300);
+    const onPhone = await research.eval(`(() => { const r = toLine.getBoundingClientRect(); const f = textInput.getBoundingClientRect(); return JSON.stringify({ line: r.width > 0 && r.height > 0 && r.right <= innerWidth && r.bottom <= f.top + 1, word: getComputedStyle(textPane.querySelector('.send-word')).display, wide: document.documentElement.scrollWidth <= document.documentElement.clientWidth }); })()`);
+    await research.send('Emulation.clearDeviceMetricsOverride');
+    await sleep(300);
+    await research.eval(`(() => { textInput.value = 'Doors: is the press pack ready?'; textPane.querySelector('.send-btn').click(); })()`);
+    const sentLanded = await pressTab.until(`(() => { const m = allMessages.find((x) => x.text === 'Doors: is the press pack ready?'); const n = m && messagesById.get(m.id); return n && JSON.stringify({ from: n.querySelector('.sent-meta').textContent, mark: !!m.sentFrom && m.sentFrom.ref.length === 17 }); })()`, 6000);
+    const sentCopy = await research.until(`(() => { const m = allMessages.find((x) => x.text === 'Doors: is the press pack ready?'); const n = m && messagesById.get(m.id); return n && toLine.hidden && JSON.stringify({ to: n.querySelector('.sent-meta').textContent, btn: toBtn.textContent, edge: document.getElementById('researchCompose').classList.contains('to-other'), echo: !document.querySelector('#feed .echo') }); })()`, 6000);
+    report(toShown === JSON.stringify({ shown: true, words: '↗ To: This room', line: true }) && toValues === JSON.stringify([['', 'This room', 'true'], [pressRef, 'Smoke AGM › Press', 'false']])
+      && toSet === JSON.stringify({ btn: '↗ To: Smoke AGM › Press', line: '↗ to Press — replies stay there', send: 'Send to Press', word: 'Send to Press', edge: true })
+      && onPhone === JSON.stringify({ line: true, word: 'none', wide: true })
+      && sentLanded === JSON.stringify({ from: '↘ From Smoke AGM', mark: true }) && sentCopy === JSON.stringify({ to: '↗ Sent to Smoke AGM › Press — delivered', btn: '↗ To: This room', edge: false, echo: true }),
+      `To: ▸ Press sends the next message there: Send reads "Send to Press" and its line stays above the field, at 390 px too; it lands in Press "↘ From Smoke AGM", the copy here reads "↗ Sent to … — delivered", and To: is back on This room (${toShown}; ${toValues}; ${toSet}; ${onPhone}; ${sentLanded}; ${sentCopy})`);
+    // Send to ▸ on the PDF: Press once, by its list, first; then each hall this browser may forward into, said a forward.
+    // Sent to Press, it does not open itself on Press's panel.
+    await pressTab.eval('dismissDoc()');
+    await research.eval(`messagesById.get(${codeLiteral(capexId)}).querySelector('.obj-more').click()`);
+    await research.until(`!!document.querySelector('.agm-menu [data-action="msg.send"]')`, 3000);
+    await research.eval(`document.querySelector('.agm-menu [data-action="msg.send"]').click()`);
+    const sendRows = await research.until(`(() => { const rows = [...document.querySelectorAll('.agm-sub .agm-mi[data-value]')]; return rows.length > 0 && JSON.stringify(rows.map((r) => [r.dataset.value === ${codeLiteral(pressRef)} ? 'press' : 'hall', r.querySelector('.mi-why').hidden ? '' : r.querySelector('.mi-why').textContent])); })()`, 5000);
+    await research.eval(`document.querySelector('.agm-sub .agm-mi[data-value="${pressRef}"]').click()`);
+    const fileThere = await pressTab.until(`(() => { const m = allMessages.find((x) => x.type === 'file' && !!x.sentFrom); return m && JSON.stringify({ name: m.filename, open: currentDocMsgId !== null }); })()`, 6000);
+    const fileSaid = await research.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return /^Sent to /.test(t) && t; })()`, 5000);
+    const rowsSeen = JSON.parse(sendRows || '[]');
+    report(rowsSeen.length > 0 && JSON.stringify(rowsSeen[0]) === JSON.stringify(['press', '']) && rowsSeen.filter((r) => r[0] === 'press').length === 1 && rowsSeen.slice(1).every((r) => r[0] === 'hall' && r[1] === 'a forward — no withdraw')
+      && fileThere === JSON.stringify({ name: 'capex.pdf', open: false }) && fileSaid === 'Sent to Smoke AGM › Press — a copy stays here.',
+      `↗ Send to ▸ is one list: Press once, first, by its list, then each hall to forward into, said "a forward — no withdraw"; the PDF sent to Press does not open itself on its panel (${sendRows}; ${fileThere}; "${fileSaid}")`);
+    // Pat's ↗ Send back on the question: Press's composer set to Smoke AGM for one send, replying; the answer lands here
+    // under this room's copy of the question.
+    const pressQ = await pressTab.eval(`allMessages.find((x) => x.text === 'Doors: is the press pack ready?').id`);
+    await pressTab.eval(`messagesById.get(${codeLiteral(pressQ)}).querySelector('.obj-more').click()`);
+    const backItem = await pressTab.until(`(() => { const r = document.querySelector('.agm-menu [data-action="msg.sendBack"]'); return r && r.querySelector('.mi-label').textContent; })()`, 3000);
+    await pressTab.eval(`document.querySelector('.agm-menu [data-action="msg.sendBack"]').click()`);
+    const backSet = await pressTab.until(`!toLine.hidden && !!document.getElementById('replyChip') && JSON.stringify({ line: toLine.textContent, focus: document.activeElement === textInput })`, 3000);
+    await pressTab.eval(`(() => { textInput.value = 'Pack is on the desk.'; textPane.querySelector('.send-btn').click(); })()`);
+    const answeredHere = await research.until(`(() => { const a = allMessages.find((x) => x.text === 'Pack is on the desk.'); const q = allMessages.find((x) => x.text === 'Doors: is the press pack ready?'); return a && q && JSON.stringify({ under: !!a.replyTo && a.replyTo.id === q.id, from: messagesById.get(a.id).querySelector('.sent-meta').textContent }); })()`, 6000);
+    report(backItem === 'Send back to Smoke AGM' && backSet === JSON.stringify({ line: '↗ to Smoke AGM — replies stay there', focus: true }) && answeredHere === JSON.stringify({ under: true, from: '↘ From Smoke AGM › Press' }),
+      `↗ Send back to Smoke AGM sets Press's composer there for one send, replying; the answer lands here under this room's copy of the question (${backItem}; ${backSet}; ${answeredHere})`);
+    // Pat's page leaves Press (its socket closes as the page goes), so Press is listed with nobody in afterwards.
+    await pressTab.send('Page.navigate', { url: 'about:blank' });
+    await pressTab.close();
 
     // The header's chips, each its own door: the stage chip (the account's: the speaker's screen and the countdown on its
     // screens) and the code chip (copy the guest code or the join link).

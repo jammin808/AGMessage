@@ -1023,6 +1023,15 @@ html[data-theme="dark"] .doc-expand-rail:hover { background: linear-gradient(180
 html[data-theme="dark"] .doc-collapse-btn { color: var(--muted); border-color: var(--border); }
 html[data-theme="dark"] .doc-collapse-btn:hover { color: var(--ink); border-color: var(--brand); }
 
+/* A message another room sent here (↘ From), and this room's copy of one it sent (↗ Sent to): a line on the edge colour
+   of a room crossed, so it reads at once as from, or to, another room. */
+.sent-meta { font-size: .82rem; color: var(--c-ink-muted); border-left: 3px solid var(--c-other-room); padding: .15rem .5rem; margin-bottom: .35rem; }
+/* To: where the composer's next send goes; set to another room, the composer takes that edge and its line says where,
+   above the field, at every width. */
+.compose-to { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.compose-to .to-line { font-size: var(--fs-sm); font-weight: 600; color: var(--c-other-room); }
+.research-compose.to-other { border-left: 4px solid var(--c-other-room); }
+
 .fwd-meta {
   font-size: .82rem;
   color: var(--muted);

@@ -182,6 +182,21 @@ Every day of the event
   Shift+F10) for Open in a new tab, Copy link and Copy guest code. Moving
   between a hall's rooms writes no "joined" or "left" line in either
   room; a second phone or tab opened in another room is said there.
+- Sending into another room: where "May send in..." lets your room send
+  into another (in any hall), the message box shows "To: This room".
+  Choose the room there: Send reads "Send to Legal" and the line "to
+  Legal — replies stay there" stays above the box until you send; then
+  it is back on This room. Or use a message's "Send to" (its ⋯, its
+  right-click, or F): one list, first the rooms your room may send into,
+  then the rooms you may forward into (each says "a forward — no
+  withdraw"). The other room sees "From Hall 2 › Legal" with your name,
+  and can "Send back" (it answers under your message, in both rooms);
+  your room keeps a copy, "Sent to Hall 2 › Legal — delivered". You may
+  delete the copy; the message in the other room stays there (only the
+  admin removes it). Nothing else of the other room comes back to yours. A file sent from another
+  room never opens itself on the On stage panel. Each send is one audit
+  row (room.send), with no words and no file name. People On stage send
+  nothing into another room.
 - Presenters and guests: open the LAN URL, choose "Join with a code" and
   type the room's code first. Once it is typed the page names the room
   ("Hall 2", or "Legal · Hall 2") and offers its seats: Backstage or
@@ -750,8 +765,12 @@ Troubleshooting
   "That file belongs to another room — send it from there.": a file is
   posted only in the room it was uploaded for (or again in a room that
   already holds it). Open the room it is in and send it from there with
-  "↗ Send to" (you need to be in both rooms), or choose the file again
-  here. "Only the person who uploaded that file can post it.": it was
+  "↗ Send to" (into a room its list lets it send into, or forwarded
+  between two rooms you are in), or choose the file again here.
+  "This room may not send there — ask an admin.": the admin took this
+  room off that room's "May send in..." list; nothing was sent.
+  "Messages from On stage stay in this room.": an On stage seat sends
+  nothing into another room. "Only the person who uploaded that file can post it.": it was
   uploaded by someone else and not posted yet. "That file is on a
   screen, not in a room: choose the file again.": no room holds that
   file any more (only a screen or a hall's holding image shows it);

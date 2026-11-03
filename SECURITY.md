@@ -102,6 +102,20 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   (the admin and `halls.manage`; every hall's rooms only to the admin), never to a page in a room, and a room removed
   leaves every list, as the room listed and as a room on one; no new room is made under a key a list still names, so a
   room made later never inherits a removed room's place on a list.
+- A message or a file goes into another room (`room:send`) only where that room's list names the room it comes from,
+  read on every send, so a list taken back stops the next send at once; the rights in the room it comes from decide
+  (posting, and sharing files for a file), and a new file is one uploaded for that room by the sender. A page is told the
+  rooms it may send into by reference alone (`room:sendTargets`): 'r' and 16 characters of a MAC of the room's key under
+  the server's secret, which never passes the code shape, so no join or lookup takes one and it opens nothing; a forged,
+  stale or removed room's reference names no room ("That room is gone."). The message carries the room it came from
+  and the copy the room it went to by name and reference, never a key or a code; nothing else of either room (people,
+  replies, seen receipts, numbers) reaches the other, and a test reads every frame both rooms' pages hear for the other's
+  key and code. On stage nothing is sent out of its room, in either form, and no room to send to is told. A repeat of a
+  send (its client id) writes nothing new, and a client id another kind of message holds is refused, never answered as a
+  send. The message in the other room is not its sender's to delete there; only the admin removes it, so the copy's
+  "delivered" stays true. Each send is one `room.send` row, written once the message is there, never its words or a
+  file's name. A file that
+  arrives from another room never opens itself on the On stage panel.
 - Room keys and guest codes are two things. A guest joins by a room's guest code alone, each room its own: a side room's
   is made with it and is never its key, and a hall's Main room's is its key until the admin renews it (New code), so a
   0.5.1 hall keeps the code its guests know. A code is one room's (no live code, earlier code or key shared). The admin
@@ -236,7 +250,8 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   to each seat it is not offered, on a real server, and each is refused with nothing changed. The admin's support view
   draws the person's acts and runs none of them. No act there opens a native dialog, which pauses the page: a
   `confirm()` left open past the server's ping timeout dropped the page's socket and told the hall its person had left.
-  The join's `forwardable` says only whether Send to ▸ would list a hall, by the rule it lists halls by, never which.
+  The join's `forwardable` says only whether Send to ▸ would list a hall, by the rule it lists halls by, never which, and
+  its `sends` only whether a room's list lets this one send there.
 - The server listens only for the verbs its pages send, and sends only events a page hears: a test fails the build on
   a verb no page sends, an event no page hears (each exception named with its reason) and an event named in a way it
   cannot read. `typing`, which took a word from anyone who may post and sent it on to the whole hall, and which no page
@@ -274,7 +289,8 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   kept with the upload for its hour in memory, `freshUploads`), or again in a room a message of which holds it already;
   any other link is refused and nothing posted (another room's file or upload, another person's upload not yet posted,
   a file only a screen or a hall's holding image holds, an upload this run holds no record of, made before a restart),
-  so a file message crosses rooms only by a forward between rooms the person is in, by the forward's own rules. A
+  so a file message crosses rooms only by a send into a room whose list names its room, or a forward between rooms the
+  person is in, each by its own rules. A
   file's link stays the capability to read it, for whoever holds it: provenance governs where a file is posted, not who
   may open a link they were given. A screen's take and a hall's holding image are not held to it yet: whoever may drive
   a hall's screens can show any upload's link there (the stage's source check, the plan's Part 4 unit 25, holds them to

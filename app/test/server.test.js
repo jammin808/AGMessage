@@ -436,7 +436,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(typeof read.kb === 'number' && read.kb > 0, 'and its snapshot\'s size, kept when the hall was made');
 
     // What coalescing saves: each state frame's changes, and the frames sent for them.
-    assert.deepEqual(Object.keys(h.latest), ['board', 'screens', 'people', 'seen', 'rooms']);
+    assert.deepEqual(Object.keys(h.latest), ['board', 'screens', 'people', 'seen', 'rooms', 'sends']);
     for (const l of Object.values(h.latest)) assert.ok(Number.isInteger(l.marks) && Number.isInteger(l.flushes) && l.flushes <= l.marks, JSON.stringify(h.latest));
     assert.ok(h.latest.board.flushes >= 1, 'the board was sent: ' + JSON.stringify(h.latest.board));
     assert.ok(gone.latest.screens.marks > h.latest.screens.marks, 'a screen made, opened and closed is marked: ' + JSON.stringify(gone.latest.screens));
@@ -732,7 +732,7 @@ test('state frames: no per-message deflate; a join storm\'s people list and a bu
 
   await t.test('health says what each state frame saved: the changes marked and the frames sent', async () => {
     const { latest } = await (await fetch(srv.base + '/api/health', { headers: { cookie: admin } })).json();
-    assert.deepEqual(Object.keys(latest), ['board', 'screens', 'people', 'seen', 'rooms']);
+    assert.deepEqual(Object.keys(latest), ['board', 'screens', 'people', 'seen', 'rooms', 'sends']);
     for (const [name, l] of Object.entries(latest)) assert.ok(Number.isInteger(l.marks) && Number.isInteger(l.flushes) && l.flushes <= l.marks, name + ' ' + JSON.stringify(l));
     assert.ok(latest.people.marks >= 30 && latest.people.flushes < latest.people.marks / 3, 'the join storm\'s people lists: ' + JSON.stringify(latest.people));
     assert.equal(latest.seen.marks, 21, 'every receipt that moved is marked');

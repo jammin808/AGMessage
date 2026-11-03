@@ -80,6 +80,12 @@
           <button class="tab" data-tab="action" role="tab">Action prompt</button>
           <button class="tab" data-tab="file" role="tab">File / image</button>
         </div>
+        <!-- To: where the next message or file goes (the catalogue's compose.sendTo); set to another room, its line stays
+             above the field at every width -->
+        <div class="compose-to" id="composeTo" hidden>
+          <button type="button" class="btn ghost small to-btn" id="toBtn" aria-haspopup="menu" aria-expanded="false">↗ To: This room</button>
+          <span class="to-line" id="toLine" role="status" hidden></span>
+        </div>
 
         <form class="pane" id="textPane" data-pane="text">
           <textarea id="textInput" rows="1" placeholder="Type a message to the stage…"></textarea>

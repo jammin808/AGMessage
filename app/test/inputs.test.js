@@ -14,10 +14,10 @@ const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.joi
   .filter((e) => e !== 'disconnect');
 // Not sent from the admin socket: they start cloudflared or make a new certificate — real work, not an argument check.
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
-const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null };
+const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null };
 // An object whose toString is not a function: String() throws on it, so a handler must never call String() on input.
 const U = { toString: 1 };
-const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U] };
+const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U };
 const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode: 5, messageId: {}, content: 'x', text: {} }, UNCONVERTIBLE];
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
@@ -76,6 +76,10 @@ test('client values are read by their type: a value String() cannot convert reac
   // A message of the guest's own, so a reaction's `on` is read: an unknown message is refused before it.
   const posted = await emit(guest, 'message', { type: 'text', text: 'react to me' });
   assert.ok(posted.ok, JSON.stringify(posted));
+  // A room the hall may send into, so a send into it reads what it would send: its reference, as the guest is told it.
+  const legal = (await emit(ctl, 'room:create', { hall, name: 'Legal' })).key;
+  assert.ok((await emit(ctl, 'room:update', { code: legal, sendFrom: [hall] })).ok);
+  const ref = (await emit(guest, 'room:sendTargets', {})).targets[0].ref;
   const cases = [
     [anon, 'join', { roomCode: U }], [anon, 'join', { roomCode: hall, name: U, role: 'research' }],
     [anon, 'display:list', { code: U }], [anon, 'display:take', { id: U }], [anon, 'help:respond', { code: U }],
@@ -91,6 +95,9 @@ test('client values are read by their type: a value String() cannot convert reac
     [ctl, 'room:update', { code: hall, codeOn: false, keepGuests: U }],
     [ctl, 'room:update', { code: U, sendFrom: [U] }], [ctl, 'room:update', { code: hall, sendFrom: [U] }], [ctl, 'room:update', { code: hall, sendFrom: U }],
     [ctl, 'room:update', { code: hall, sendFrom: [], sendBack: [U] }],
+    [guest, 'room:send', { to: U, type: 'text', text: U }], [guest, 'room:send', { to: U, messageId: U }], [guest, 'room:send', { to: ref, messageId: U }],
+    [guest, 'room:send', { to: ref, type: 'text', text: U, replyTo: U }], [guest, 'room:send', { to: ref, type: 'file', url: U, caption: U }],
+    [guest, 'room:send', { to: ref, type: U }], [guest, 'room:send', { to: ref, type: 'text', text: 'x', cid: U }], [guest, 'room:sendTargets', U],
   ];
   // A room's code acts read by type: each a refusal in its own words, and nothing switched or renewed.
   const CODE_WORDS = {
@@ -106,7 +113,16 @@ test('client values are read by their type: a value String() cannot convert reac
     if (ev === 'react') assert.deepEqual(r, { ok: false, error: 'Say whether to add the reaction or take it away.' }, 'a reaction\'s `on` that is no boolean is read, and refused');
     if (ev === 'admin:tunnelUntil') assert.deepEqual(r, { ok: false, error: 'Give the end as a time of day, HH:MM by this laptop\'s clock (for example 23:30).' }, 'an end that is no string is read, and refused');
     // A room's hall, key and name that are no strings are read as none, and refused for it: no room is made or named.
+    // A send into another room names its room, its message and its words by type: each refused for what it lacks.
+    if (ev === 'room:sendTargets') assert.deepEqual(r, { ok: true, targets: [{ ref, name: 'Legal', hallName: 'Hall 3' }] }, 'a read takes no argument');
+    if (ev === 'room:send') {
+      const words = arg.cid ? 'That message\'s id could not be read.' : arg.to !== ref ? (arg.type ? 'That room is gone.' : 'Message not found') : arg.messageId ? 'Message not found'
+        : arg.type === U ? 'Only a message or a file is sent into another room.' : 'Invalid message';
+      assert.deepEqual(r, { ok: false, error: words }, ev + ' ' + JSON.stringify(arg));
+      continue;
+    }
     const coded = ['keepGuests', 'newCode', 'codeOn', 'sendBack', 'sendFrom'].find((k) => k in arg && (k !== 'sendBack' || Array.isArray(arg.sendFrom) && arg.sendFrom.length === 0));
+    if (ev === 'room:sendTargets') { await new Promise((resolve) => setTimeout(resolve, 250)); continue; }
     if (ev.startsWith('room:') && coded) assert.deepEqual(r, { ok: false, error: arg.code === hall ? CODE_WORDS[coded] : 'No such room.' }, ev + ' ' + JSON.stringify(arg));
     else if (ev.startsWith('room:')) assert.deepEqual(r, { ok: false, error: arg.hall === hall ? 'Name the room (for example Legal).' : ev === 'room:create' ? 'No such hall.' : 'No such room.' }, ev + ' ' + JSON.stringify(arg));
     await new Promise((resolve) => setTimeout(resolve, 250));   // under every per-socket rate limit
@@ -116,6 +132,7 @@ test('client values are read by their type: a value String() cannot convert reac
   const audit = await api(base, 'GET', '/api/audit?limit=50', undefined, { cookie: admin });
   assert.ok(!audit.body.entries.some((e) => e.action === 'settings'), 'settings in the wrong type are not taken, and so not audited');
   assert.ok(!audit.body.entries.some((e) => e.action === 'room.code'), 'a code act in the wrong type switches nothing, and so is not audited');
-  assert.ok(!audit.body.entries.some((e) => e.action === 'room.sendFrom'), 'a list in the wrong type sets nothing, and so is not audited');
+  assert.deepEqual(audit.body.entries.filter((e) => e.action === 'room.sendFrom').map((e) => e.target), [legal], 'a list in the wrong type sets nothing, and so is not audited: the one row is Legal\'s, set above');
+  assert.ok(!audit.body.entries.some((e) => e.action === 'room.send'), 'a send in the wrong type sends nothing, and so is not audited');
   assert.deepEqual((await send(ctl, 'room:settings', { code: hall })).sendFrom, [], 'and no room may send into the hall');
 });

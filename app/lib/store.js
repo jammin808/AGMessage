@@ -35,6 +35,10 @@
  * admits nobody, said on the console by its room, never by the code. Whether a code admits guests is its room's setting
  * (`codeOn`): a Main room's is on until switched off, a side room's off until switched on.
  *
+ * References. A send into another room names that room to a page by its reference (`roomRef`), never by its key or a
+ * code: made once per room from its key by the server's `refOf` (the same at every start), indexed with the codes
+ * (`refs`, read through `byRef`), and never written: a snapshot holds none.
+ *
  * Ops: {o:'add', m} {o:'upd', id, f} {o:'del', id} {o:'reset'} {o:'meta', name}
  *
  * A send is said once. A message a page sent with its client id (`cid`) is indexed by who sent it and that id
@@ -103,10 +107,15 @@ function readTomb(t) {
 }
 
 class RoomStore {
-  /** `make: false`: the folder is not made here (a server makes it once it holds its data folder, and loads before). */
-  constructor(dir, { make = true } = {}) {
+  /**
+   * `make: false`: the folder is not made here (a server makes it once it holds its data folder, and loads before).
+   * `refOf(key)`: a room's reference, made once per room as it is made or loaded (the server's: a MAC of its key under the
+   * server's secret, so it is the same at every start and names nothing a client could open); none, and rooms have none.
+   */
+  constructor(dir, { make = true, refOf = null } = {}) {
     this.dir = dir;
     if (make) fs.mkdirSync(dir, { recursive: true });
+    this.refOf = typeof refOf === 'function' ? refOf : null;
     this.rooms = new Map();  // the halls (their Main rooms), by key
     this.side = new Map();   // the side rooms, by key: reached only through the any-room readers
     // Each hall's side rooms, in the order they were made (`roomsOf`), so a hall's rooms are read without a walk of every
@@ -116,6 +125,9 @@ class RoomStore {
     // load and at every change (`_index`); read through `byCode`, `byRetired` and `codeHeld`.
     this.codes = new Map();
     this.retiredCodes = new Map();
+    // Each room's reference to its key (`byRef`): how a send into another room names it to a page, which is told no key.
+    // Rebuilt with the codes, at a load and at every change (`_index`).
+    this.refs = new Map();
     this.lastError = null;  // the last append or snapshot that failed, until every room is on disk again
     this.snapshots = 0;      // snapshots written this run (health)
     // What the last load found on disk, which a stop that saved never leaves: the rooms whose log held lines, and the
@@ -201,7 +213,7 @@ class RoomStore {
 
   _blank(code, name, createdAt, { hall = code, guestCode = '', retired = [] } = {}) {
     return {
-      code, hall, name, createdAt, guestCode, retired, messages: [], byId: new Map(), byCid: new Map(), gone: new Map(), goneKeys: new Map(), seq: 0, ring: [],
+      code, hall, name, createdAt, guestCode, retired, ref: this.refOf ? this.refOf(code) : '', messages: [], byId: new Map(), byCid: new Map(), gone: new Map(), goneKeys: new Map(), seq: 0, ring: [],
       users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false, ragged: false, snapKb: null, snapWhole: false, marked: false,
     };
   }
@@ -258,6 +270,13 @@ class RoomStore {
   byRetired(code) { const key = typeof code === 'string' ? this.retiredCodes.get(code) : undefined; return key === undefined ? null : this.room(key) || null; }
   /** Whether a code is taken: a room's key, a live guest code or an earlier one. A new key or code is none of them. */
   codeHeld(code) { return this.hasRoom(code) || this.codes.has(code) || this.retiredCodes.has(code); }
+  /**
+   * The room a reference names (`roomRef`), Main or side, or null: a reference never passes CODE_RE, so no join or lookup
+   * by code takes one, and one of a room removed names nothing.
+   */
+  byRef(ref) { const key = typeof ref === 'string' ? this.refs.get(ref) : undefined; return key === undefined ? null : this.room(key) || null; }
+  /** A room's reference: what a page is told of a room it may send into or that sent to it, never its key; '' for none. */
+  roomRef(room) { return (room && room.ref) || ''; }
 
   /**
    * A room's guest code renewed: `code` becomes its live code and the one before it joins its earlier codes (the newest
@@ -308,6 +327,10 @@ class RoomStore {
     }
     this.codes = codes;
     this.retiredCodes = retired;
+    // A reference to its room, the first of two that would share one (an HMAC's 96 bits: never met in practice) holding it.
+    const refs = new Map();
+    for (const room of order) if (room.ref && !refs.has(room.ref)) refs.set(room.ref, room.code);
+    this.refs = refs;
   }
 
   /** A hall's side rooms in the order they were made (the index's own list: never handed out to be changed). */

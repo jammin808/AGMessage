@@ -3349,6 +3349,115 @@ so a person who held another hall's link could post that hall's file in their ow
   holding image holds (its message deleted) refused with the screen's words and `reupload`, nothing refused posted.
 - The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `docs/DESIGN.md`, `SECURITY.md`, `CLAUDE.md`.
 
+**A message or a file is sent into another room, with a copy kept here** (the plan's Part 1, unit 14, its §4.2 and §4.3,
+§7.5's composer, ↗ menu and From / Sent to lines, §2.7's `room.send` row and §9's row 14, as Part 5 §0 (a client id on
+each send, the references kept by the store, the verbs in the rooms module), §13.3.4, §13.6, §16.3 and §16.7 (one list of
+rooms, the runner's choice of verb, Send back, To ▸) and Part 7 §0.1 and §11 (the owner's answer B2: nothing is sent out
+of its room On stage) amend them; the tree as the evidence: in 0.5.1 a message reached another hall only by a forward,
+into a hall the person sat in or was linked to, with no copy kept; the owner's ask, "It also needs file transfer between
+rooms for users to download.")
+- **A room's reference**: 'r' and 16 characters of a MAC of the room's key under the server's secret, made once per room
+  as it is made or loaded and the same at every start (`store.roomRef`, read back by `store.byRef`, indexed with the
+  codes and never written). It never passes the code shape, so no join or lookup takes one: it is how a page names a room
+  it may send into, or that sent to it, never by its key or a code.
+- **`room:sendTargets {}`** (the rooms module, behind the gate, one `chatter` token): the rooms whose list names this
+  page's room, each by its reference, its name and its hall's name (a Main room by its hall's), no key, no code, no
+  people, no numbers; none On stage, for a seat that may not post, or from the admin's support view. The join answer
+  appends **`sends`**, whether there are any, at its end. When the admin's May send in… changes which rooms a room may
+  send into, or a room it sends into or that room's hall is renamed, that room's pages are told to ask again
+  (`sendsChanged`, which names nothing), through a state frame of its own (`frames.sends`, latest wins, 300 ms; health's
+  `latest.sends`), and a page whose ask the rate held back asks once more a second later; a list taken back is read at
+  the next send, so it stops at once.
+- **`room:send`** (the rooms module): `{to, messageId}` sends a text or a file of this room, `{to, type: 'text' | 'file',
+  text, url, filename, mime, caption, priority, replyTo}` a new one, each with the outbox's client id and wait. In order: a
+  repeat of a send that went through (its client id, kept on this room's copy) is answered with what it did ("`{ok, id,
+  seq, to}`", or `gone` once the copy was deleted) and writes nothing into the other room, and a client id a message of
+  another kind holds here names no send ("That message's id is another message's."); On stage, nothing is sent, in
+  either form, Send back included ("Messages from On stage stay in this room."); then the writes bucket, then posting here
+  ("Observers can read but not post."); one form or the other ("Send a message of this room (messageId) or a new one
+  (type), one of them."); a question or a help request is not sent ("Only a message or a file is sent into another
+  room."; "A help request belongs to its room — ask in the other room instead."); a file needs `hall.files` here ("Your
+  account may not share files here.") and, new, an upload made for this room by the sender, as a file message is read
+  (unit 13's words, `reupload` included); a reference to no room, a removed room's or this room's own is "That room is
+  gone.", and a room whose list does not name this one "This room may not send there — ask an admin." The rights here
+  decide, as the plan has it: the list is the admin saying that whoever may post here may post there, so a Board
+  account's file sent from Legal, where it is a Member, goes into the Main room where it sits On stage.
+- **What each room holds**: the message goes into the other room first, from the sender, marked `sentFrom` (this room's
+  name, its hall's name and its reference, and who wrote it when the sender sent on someone else's message,
+  `originalAuthor`), without the client id; then this room's copy, marked `sentTo` (the other room's names and reference,
+  and its message's id), with the client id and the wait. A copy is there only for a message that reached the other
+  room, and nothing else of the other room (its people, its replies, its seen receipts, its numbers) comes back. A reply
+  sent across answers, in the room it reaches, that room's own message: its copy of the question, or the question there.
+  A file keeps its link, which the other room's people open as any file's; it outlives a reset of the room it came from
+  while the other holds it. One `room.send` row on the other room's key, written once the message is in the other room
+  and before the copy, so nothing crosses rooms without one, the rooms by name:
+  "a message (212 characters) from Legal (Hall 2) to Main (Hall 2)", "a file (pdf, 2.1 MB) from …"; never the words, a
+  file's name or its link. The message handler and the send read a new message alike (`messageOf`: the upload on disk,
+  its provenance, then `buildMessage`), and an upload's presence and size are one `fs.statSync` (`uploadOnDisk`), so the
+  server's synchronous calls stay at 15.
+- **The hall page**: the composer's **To:** (`compose.sendTo`, `room:send`, mode `hold`; shown on the message and file
+  composers where the join's `sends` is, in the full view): This room, then each room this room may send into ("Hall 2 ›
+  Legal"). Set to a room, Send reads "Send to Legal" (its word and its name), the composer takes the edge of a room
+  crossed (`--c-other-room`) and the line "↗ to Legal — replies stay there" stays above the field at every width, Send
+  then the 44 px mark on a phone; the send goes by `room:send`, its echo says "↗ to Legal: …", and To: is back on This
+  room. A message's **↗ Send to ▸** (`msg.send`, verb `forward`, F) is one list: first each room a list lets this room send
+  into (by `room:send`, a copy kept), then each room the person may forward into, its second line "a forward — no
+  withdraw" (a menu item's `note`); a room that is both is listed once, as the first (`myRooms` answers each room's
+  reference too). A question is only forwarded. A send said: "Sent to Hall 2 › Legal — a copy stays here." **↗ Send back
+  to Hall 2 › Legal** (`msg.sendBack`, `room:send`), on a message another room sent here while this room may send there:
+  the composer set to that room for one send, replying to the message. A message from another room reads "↘ From Hall 2 ›
+  Legal" (with "· originally by Kim" where it was someone else's), and this room's copy "↗ Sent to Hall 2 › Legal —
+  delivered", each as words. A file that arrives from another room, sent or forwarded, never opens itself on the On
+  stage panel: someone in the room opens or pins it.
+- **Deleting**: the sender deletes the copy here as any message of theirs, which leaves the other room's message. A
+  message another room sent is not its sender's to delete where it went, from a page they hold there too: `delete`
+  refuses it ("A message sent from another room stays here: only the admin removes it.") and the hall page offers no
+  Delete on it (`msg.delete` fits no message with `sentFrom`), so the copy's "delivered" stays true while that room
+  holds it; the admin removes it there (`admin:deleteMessage`, its `message.remove` row).
+- **Every reader**: the transcript says "↘ From Hall 2 › Legal" and "↗ Sent to … — a copy kept here", the admin page's
+  feed "↘ From …" and "↗ Sent to … — delivered", and the AI's thread marks a message sent here from another room, and
+  this room's copy of one sent there; the server's readers name a room by one helper (`lib/ops.js` `placeOf`), held to
+  the pages' (`AGM.catalog.placeOf`) by a test.
+- Not in this unit, by the build order: Withdraw (unit 15), so a send cannot be taken back yet and the copy's line says
+  "delivered" alone; a file moved only by a seat that may download it (Part 4's unit 26, `mayDownload`; until then a file
+  moves from a seat that shares files here); the confidential mark's confirm before a file crosses (Part 4's unit 31);
+  the unread dot on the switcher (unit 21).
+- Tests: `test/sends.test.js`: no list, no room to send to and the join says so; a list set, the room's pages told to ask
+  again and the other room's not; the targets by reference and names; a message into another room and its copy, each
+  field read back (the sender, the marks, the client id on the copy alone, the wait on both), heard live by both rooms; a
+  repeat answered as the first and nothing new; one of the room's own messages and a new file sent; the file served and
+  outliving the room's reset; each refusal in its words with nothing written (an observer, a seat that shares no file, a
+  question and a help request by either form, a message not found, both forms and neither, a forged reference, the room's
+  own, a key given as a reference, a client id that cannot be read, a room whose list does not name this one); across
+  halls, then the list taken back mid-show and the next send refused at once; a room removed, its reference naming
+  nothing; another room's upload refused by its link; Send back threading under the question in both rooms; the writes
+  bucket; the rows, no words, no name, no link; every frame each page heard holding no key or code of a room it is not
+  in; after a restart, the same references; a client id a plain message holds refused, nothing sent; a room it sends
+  into renamed, then that room's hall, each time the room's pages told to ask again and told the new names. And On stage
+  (B2): a Board guest and a Board account on its On stage page told no room and `sends` false, refused `room:send` in
+  both forms, a file, a text and Send back, nothing written; the Board guest's own message's client id refused, never
+  answered as a send; the same account's file sent from its Legal page into the hall where it sits On stage; its On
+  stage page refused deleting what its Legal page sent there, the hall still holding it, the copy in Legal deleted by
+  it, and the message removed by the admin. `test/units.test.js`: the store's
+  references (made once per room, found Main or side, at every start, none of a removed room, never a code, never
+  written; none without `refOf`), and the AI's thread marks. `test/halls.test.js`: `myRooms` answers each room's
+  reference too (moved on purpose). `test/busy.test.js`'s fence holds `room:send` as input (a send makes the copy busy, as
+  a message does) and `room:sendTargets` as a read (`lib/busy.js`). `test/inputs.test.js`: `to` and `replyTo` in the shapes, and
+  `room:send` and `room:sendTargets` by type, each refused in its words with no row. `test/catalog.test.js`: the facts'
+  `sends` and `targets`, a seat that sends by a list (Send to ▸, Send back, To ▸ with its values and Send's label), the On
+  stage set without Send back, ↗ as one act, no Delete on what the seat itself sent here from another room, and the
+  pages' room naming held to the server's. `test/menus.test.js`: `room:send` refused as each seat it is hidden from, On
+  stage in the table's words, and the join's `sends` at its end (moved on purpose). `test/modules.test.js`: the
+  connection's `onStage` and the server context's parts, and two any-room reasons more (moved on purpose).
+  `test/resilience.test.js` and `test/server.test.js`: the state frames and health's `latest` hold `sends` (moved on
+  purpose). The smoke: To:
+  ▸ a room, Send's name and word, the line above the field at 390 px, the message landing "↘ From" there and the copy
+  "↗ Sent to … — delivered" here, To: back on This room; Send to ▸ as one list with the room once, first, and each forward
+  said; a PDF sent there not opening itself on its panel; Send back setting the other room's composer and its answer
+  landing under the question; the composer's menu with To ▸ (moved on purpose).
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `docs/ANALYSIS.md`, `docs/DESIGN.md`, `docs/NODES.md`,
+  `SECURITY.md`, `CLAUDE.md`.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

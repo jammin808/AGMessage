@@ -39,7 +39,7 @@ const readOnly = () => document.body.dataset.role === 'observer';
 // page (the join's answer, the screens it may drive, the link's state, whether it is connected), kept current by its
 // events, and every button, menu and key on a message, a file, a screen, a person, the composer and the header's chips is
 // drawn from the catalogue's entries for them. A page binds only what each act does: RUN, by the entry's id.
-const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false };
+const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false };
 let F = AGM.catalog.facts(pageFacts);
 // Whether this page's room is its hall's Main room (the join's `main`; a hall until it answers): its seat words follow it
 // (roleLabel).
@@ -48,6 +48,9 @@ let MAIN = true;
 // the header's title ("Hall 2 › Legal"), and the rooms of it this person may move between, the switcher's.
 let HALL_NAME = '';
 let ROOMS = [];
+// Where the composer's next message or file goes (To:): '' for this room, else the reference of a room this room may send
+// into (the catalogue's compose.sendTo). It goes back to this room after every send.
+let sendTo = '';
 const RUN = {};
 
 // ---------------- UI sync state (declared early to avoid TDZ traps) ----------------
@@ -173,7 +176,7 @@ function rejoin() {
     AI_ON = !!res.ai;
     // The catalogue's facts from this answer, before anything is drawn with them; `connected` once the outbox is ready.
     factsChanged({ role: res.role || ROLE, uid: MY_UID, account: res.account || null, uploadToken: UPLOAD_TOKEN, canSendToStage: CAN_STAGE, canPropose: CAN_PROPOSE, ai: AI_ON, stage: res.stage || null, forwardable: !!res.forwardable, name: NAME,
-      guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode });
+      guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode, sends: !!res.sends, ...(res.sends ? {} : { targets: [] }) });
     drawChips();
     drawAiButtons();
     if (res.note) AGM.toast(res.note);
@@ -210,6 +213,8 @@ function rejoin() {
     // holds for this hall is sent now, a reload's included, and a reload's send already among the drawn is done.
     AGM.outbox.ready({ scope: 'hall|' + ROOM, who: MY_UID, has: (cid) => allMessages.some((m) => m.cid === cid && !!m.from && m.from.uid === MY_UID) });
     factsChanged({ connected: AGM.outbox.online });
+    // The rooms this page may send into, when the join says there are some.
+    if (res.sends) askTargets();
     // The build serving now: on another, this page reloads itself at a quiet moment (below).
     AGM.reconnect.build.heard(res.build);
   });
@@ -262,6 +267,22 @@ function askForwardable() {
   socket.emit('myRooms', {}, (r) => { if (r && r.ok && Array.isArray(r.rooms)) factsChanged({ forwardable: r.rooms.length > 0 }); });
 }
 socket.on('linkedRoomsChanged', askForwardable);
+/**
+ * The rooms this page may send into by their lists (room:sendTargets): each by its reference, its name and its hall's,
+ * never a key. Asked when the join says there are some, and when the server says the rooms this room sends into changed
+ * (`sendsChanged`: a list, or a name); a room To: was set to that is no longer one goes back to this room. A read the
+ * rate held back is asked once more after a second, so a change is not missed for a busy moment.
+ */
+function askTargets(again) {
+  if (!joined || !socket.connected || ADMIN_VIEW) return;
+  socket.emit('room:sendTargets', {}, (r) => {
+    if (r && r.busy && !again) { setTimeout(() => askTargets(true), 1000); return; }
+    if (!r || !r.ok || !Array.isArray(r.targets)) return;
+    factsChanged({ sends: r.targets.length > 0, targets: r.targets });
+    if (sendTo && !F.targets.some((t) => t.ref === sendTo)) setSendTo('');
+  });
+}
+socket.on('sendsChanged', () => askTargets(false));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') askForwardable(); });
 
 /** The room as the header names it (a hall's Main room by the hall's name; a rename arrives as a numbered change, like
@@ -776,7 +797,8 @@ function addMessage(msg, { silent = false, arrived = false } = {}) {
   if (msg.type === 'help' && isMine(msg)) HelpChip.draw();
   if (arrived) keepPlace(el, msg, follow);
   if (msg.pinned) refreshPinned();
-  if (!silent && msg.type === 'file' && HAS_STAGE) openDocInPanel(msg, { fromPush: true });
+  // A file another room sent or forwarded here never opens itself on the panel: someone in the room opens or pins it.
+  if (!silent && msg.type === 'file' && HAS_STAGE && !msg.sentFrom && !msg.forwardedFrom) openDocInPanel(msg, { fromPush: true });
   if (msg.type === 'file') refreshDocPinnedList();
 }
 
@@ -874,6 +896,17 @@ function rerenderMessage(node, msg) {
   }
   renderReactions(node, msg.reactions || []);
 
+  // "↘ From Hall 2 › Legal" on a message another room sent here (with whose words they were, when the sender sent on
+  // someone else's), and "↗ Sent to Hall 2 › Legal — delivered" on this room's copy of one it sent: each room by its
+  // names (a send carries no key and no code), drawn as words.
+  if (msg.sentFrom || msg.sentTo) {
+    const meta = document.createElement('div');
+    meta.className = 'sent-meta';
+    meta.textContent = msg.sentFrom
+      ? '↘ From ' + AGM.catalog.placeOf(msg.sentFrom) + (msg.sentFrom.originalAuthor ? ' · originally by ' + msg.sentFrom.originalAuthor : '')
+      : '↗ Sent to ' + AGM.catalog.placeOf(msg.sentTo) + ' — delivered';
+    body.prepend(meta);
+  }
   // "Forwarded from Hall 2 · originally by Sarah": the hall by its name (a forward never carries its code).
   if (msg.forwardedFrom) {
     const meta = document.createElement('div');
@@ -1066,21 +1099,31 @@ function submenuFor(kind, item, o) {
   if (item.id === 'msg.send') return sendTargets(o);
   return [];
 }
-/** The rooms this message would be taken in, as the server answers (myRooms): each a value; none, the words why. */
+/**
+ * The rooms this message would be taken in, as the server answers, one list: first each room whose list lets this room
+ * send into it (room:sendTargets: sent there by room:send, a copy kept here; not a question, which only a forward
+ * carries), then each other room this person may forward into (myRooms: by forward, its second line saying so), a room
+ * that is both listed once, as the first. Each a value; none, the words why.
+ */
 function sendTargets(o) {
   const why = (words) => [{ id: '', label: words, disabled: words }];
   if (!AGM.outbox.online) return why(AGM.catalog.WORDS.offline);
-  return new Promise((resolve) => {
-    socket.emit('myRooms', { messageId: o.id }, (res) => {
-      if (!res || !res.ok) { resolve(why((res && res.error) || 'Could not check your other halls.')); return; }
-      if (!res.rooms.length) {
-        // A rule of this room emptied the list: its words, not a hall to open (the person may have it open already).
-        resolve(why(typeof res.why === 'string' && res.why ? res.why
-          : 'To send it to another hall, open that hall where you may ' + (o.type === 'file' ? 'share files' : 'post') + ' (in another tab, as ' + NAME + ').'));
-        return;
-      }
-      resolve(res.rooms.filter((r) => r && typeof r.code === 'string').map((r) => ({ value: r.code, label: r.name ? r.name + ' · ' + r.code : r.code })));
-    });
+  const answer = (resolve) => (res) => resolve(res && res.ok ? res : { error: (res && res.error) || '' });
+  const asked = [
+    o.type === 'action' || !F.sends ? { targets: [] } : new Promise((resolve) => { socket.emit('room:sendTargets', {}, answer(resolve)); }),
+    new Promise((resolve) => { socket.emit('myRooms', { messageId: o.id }, answer(resolve)); }),
+  ];
+  return Promise.all(asked).then(([into, fwd]) => {
+    const sends = Array.isArray(into.targets) ? into.targets.filter((t) => t && typeof t.ref === 'string' && t.ref) : [];
+    const refs = new Set(sends.map((t) => t.ref));
+    const rooms = Array.isArray(fwd.rooms) ? fwd.rooms.filter((r) => r && typeof r.code === 'string' && !refs.has(r.ref)) : [];
+    const list = sends.map((t) => ({ value: t.ref, label: AGM.catalog.placeOf(t), via: 'room:send' }))
+      .concat(rooms.map((r) => ({ value: r.code, label: r.name ? r.name + ' · ' + r.code : r.code, via: 'forward', note: 'a forward — no withdraw' })));
+    if (list.length) return list;
+    if (into.error || fwd.error) return why(into.error || fwd.error || 'Could not check your other rooms.');
+    // A rule of this room emptied the list: its words, not a room to open (the person may have it open already).
+    return why(typeof fwd.why === 'string' && fwd.why ? fwd.why
+      : 'To send it to another hall, open that hall where you may ' + (o.type === 'file' ? 'share files' : 'post') + ' (in another tab, as ' + NAME + ').');
   });
 }
 
@@ -1256,9 +1299,18 @@ Object.assign(RUN, {
       : (res && res.error) || 'Could not send to the speaker\'s screen.', !(res && res.ok));
   }),
   'msg.screens': (m) => Screens.offer(m),
+  // A room its list lets this room send into: room:send, a copy kept here; any other: a forward.
   'msg.send': (m, { value, item }) => {
     if (typeof value !== 'string' || !value) return;
-    AGM.outbox.hold('forward', { messageId: m.id, targetRoom: value }, { tag: { forward: item && item.label ? item.label : value } });
+    const label = item && item.label ? item.label : value;
+    if (item && item.via === 'room:send') AGM.outbox.hold('room:send', { to: value, messageId: m.id }, { tag: { sendTo: label } });
+    else AGM.outbox.hold('forward', { messageId: m.id, targetRoom: value }, { tag: { forward: label } });
+  },
+  // The composer, set to the room the message came from for one send, answers under it there and here.
+  'msg.sendBack': (m) => {
+    selectTab('text');
+    setSendTo(m.sentFrom.ref);
+    beginReply(m);
   },
   'msg.pin': (m) => pinWithUndo(m),
   'msg.look': (m) => openDocInPanel(m),
@@ -1294,11 +1346,16 @@ function drawHeld(item) {
   if (item.verb === 'message') drawEcho(item);
   else if (item.verb === 'actionResponse' || item.verb === 'help:respond') drawHeldAnswer(item);
   else if (item.verb === 'forward') drawHeldForward(item);
+  else if (item.verb === 'room:send') { if (item.tag && item.tag.composer) drawEcho(item); else drawHeldSend(item); }
   else if (item.verb === 'react' && item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
 }
 
-/** What a held message says, in one line. */
-function echoText(a) {
+/** What a held message says, in one line: one sent into another room says where first. */
+function echoText(a, item) {
+  const into = item && item.verb === 'room:send' && item.tag && item.tag.to ? '↗ to ' + item.tag.to + ': ' : '';
+  return into + echoWords(a);
+}
+function echoWords(a) {
   if (a.type === 'help') return 'Help — ' + (a.category || 'Other') + (a.text ? ': ' + a.text : '');
   if (a.type === 'action') return '❓ ' + (a.text || '');
   if (a.type === 'file') return '📄 ' + (a.filename || 'a file') + (a.caption ? ' — ' + a.caption : '');
@@ -1344,7 +1401,7 @@ function drawEcho(item) {
       scrollToBottom();
     }
     node.dataset.state = item.state;
-    node.querySelector('.echo-text').textContent = echoText(item.args);
+    node.querySelector('.echo-text').textContent = echoText(item.args, item);
     node.querySelector('.echo-state').textContent = echoState(item);
     const acts = node.querySelector('.echo-acts');
     acts.textContent = '';
@@ -1370,9 +1427,18 @@ function composerHeld(c) {
   const it = cid ? AGM.outbox.items().find((i) => i.cid === cid) : null;
   return !!it && SENDING.has(it.state);
 }
-/** Hold what a composer says: a refused message it still holds is replaced by what it says now. */
+/**
+ * Hold what a composer says: a refused message it still holds is replaced by what it says now. Its message or file goes
+ * to the room To: is set to (room:send, a copy kept here) or to this room, and To: goes back to this room after the send.
+ */
 function holdMessage(c, args, opts) {
   if (composerCids[c]) AGM.outbox.drop(composerCids[c]);
+  const t = (c === 'text' || c === 'file') ? targetNow() : null;
+  if (t) {
+    AGM.outbox.hold('room:send', { ...args, to: t.ref }, { ...(opts || {}), tag: { composer: c, to: t.name || t.hallName || 'another room', toRef: t.ref } });
+    setSendTo('');
+    return;
+  }
   AGM.outbox.hold('message', args, { ...(opts || {}), tag: { composer: c } });
 }
 function lockComposer(c, on) {
@@ -1403,6 +1469,8 @@ function editHeld(item) {
   const c = item.tag && item.tag.composer;
   const kept = c && composerCids[c] === item.cid;
   AGM.outbox.drop(item.cid);
+  // One that was going into another room goes there again, while this room may still send there.
+  if (item.verb === 'room:send' && item.tag && typeof item.tag.toRef === 'string') setSendTo(item.tag.toRef);
   if (c) setPriority({ director: dirPriBtn, text: textPriBtn, action: actionPriBtn, file: filePriBtn }[c], !!a.priority);
   if (typeof a.replyTo === 'string' && a.replyTo) {
     const parent = findMessage(a.replyTo);
@@ -1433,6 +1501,14 @@ function drawHeldAnswer(item) {
   if (m && m.pinned) refreshPinned(m.id);
 }
 
+/** A message of this room sent into another (Send to ▸): held while the page is down, then said, or its refusal. */
+function drawHeldSend(item) {
+  const to = (item.tag && item.tag.sendTo) || 'the other room';
+  if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) AGM.toast('◷ Held — it is sent to ' + to + ' when the connection is back.');
+  else if (item.state === 'done') AGM.toast('Sent to ' + to + ' — a copy stays here.');
+  else if (item.state === 'gone') AGM.toast('Sent to ' + to + '.');
+  else if (item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
+}
 function drawHeldForward(item) {
   const to = (item.tag && item.tag.forward) || 'the other hall';
   if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) AGM.toast('◷ Held — it is forwarded to ' + to + ' when the connection is back.');
@@ -2328,8 +2404,51 @@ function composeObject(form) {
   const f = form || activeComposer();
   if (!f || !COMPOSER_FORMS[f] || !COMPOSER_FORMS[f]()) return null;
   const pri = PRIORITY[f]();
-  return { id: 'compose:' + f, form: f, room: ROOM_NAME, file: f === 'file' && pendingFile ? pendingFile.filename : '', replying: replyState ? replyState.name : '', priority: !!pri && pri.dataset.priority === '1' };
+  // A message or a file goes where To: is set; a question and the On stage composer's message, to this room.
+  const t = f === 'text' || f === 'file' ? targetNow() : null;
+  return { id: 'compose:' + f, form: f, room: t ? t.name || t.hallName : ROOM_NAME, to: t ? t.ref : '', file: f === 'file' && pendingFile ? pendingFile.filename : '', replying: replyState ? replyState.name : '', priority: !!pri && pri.dataset.priority === '1' };
 }
+/** The room To: is set to, as room:sendTargets told it, or null for this room (or one no longer offered). */
+function targetNow() { return sendTo ? F.targets.find((t) => t.ref === sendTo) || null : null; }
+/** To: set to a room this page may send into (by its reference), or back to this room (''), and drawn. */
+function setSendTo(ref) {
+  sendTo = typeof ref === 'string' && F.targets.some((t) => t.ref === ref) ? ref : '';
+  drawComposers();
+  refreshOpenMenu();
+}
+const toBar = document.getElementById('composeTo');
+const toBtn = document.getElementById('toBtn');
+const toLine = document.getElementById('toLine');
+/**
+ * To: as the catalogue says it now, for the composer shown: there where compose.sendTo is (a page that may send into
+ * another room, in the full view, on the message and file composers), naming where the next send goes. Set to another
+ * room, the line "↗ to Legal — replies stay there" stays above the field at every width, and the composer takes the edge
+ * of a room crossed.
+ */
+function drawTo() {
+  const o = composeObject();
+  const shown = !!o && !outOf && AGM.catalog.shown('compose', F, o).some((e) => e.id === 'compose.sendTo');
+  const t = shown ? targetNow() : null;
+  toBar.hidden = !shown;
+  const words = 'To: ' + (t ? AGM.catalog.placeOf(t) : 'This room');
+  if (toBtn.textContent !== '↗ ' + words) toBtn.textContent = '↗ ' + words;
+  toBtn.setAttribute('aria-label', words);
+  toLine.hidden = !t;
+  toLine.textContent = t ? '↗ to ' + (t.name || t.hallName) + ' — replies stay there' : '';
+  document.getElementById('researchCompose').classList.toggle('to-other', !!t);
+}
+// To: opens the catalogue's To ▸ values (This room, then each room this room may send into), as its own menu.
+toBtn.addEventListener('click', () => {
+  const o = composeObject();
+  if (!o) return;
+  if (AGM.menu.isOpen() && toBtn.getAttribute('aria-expanded') === 'true') { AGM.menu.close(); return; }
+  const values = AGM.catalog.submenu('compose', 'compose.sendTo', F, o) || [];
+  AGM.menu(values.map((v) => ({ ...v, id: 'compose.sendTo', icon: '', group: '2_send' })), { anchor: toBtn }, {
+    label: 'Send the next message to', opener: toBtn,
+    onPick: (id, value) => { const now = composeObject(); if (now) act('compose', 'compose.sendTo', now, { value, opener: toBtn, anchor: toBtn }); },
+    onDisabled: (words) => AGM.toast(words, true),
+  });
+});
 /**
  * The field a person types the next message in (`text`: the words' field, the Message tab opened for it backstage),
  * or, without `text`, the shown composer's first control; null where the page draws no composer.
@@ -2358,6 +2477,10 @@ function drawCompose(form) {
   if (inl) {
     send.dataset.action = inl.id;
     send.setAttribute('aria-label', inl.label);
+    // Its word says where it goes when that is another room: "Send to Legal".
+    const word = send.querySelector('.send-word');
+    const said = o.to ? inl.label : 'Send';
+    if (word && word.textContent !== said) word.textContent = said;
     send.title = inl.disabled || inl.label;
     if (inl.disabled) send.setAttribute('aria-disabled', 'true'); else send.removeAttribute('aria-disabled');
   }
@@ -2370,7 +2493,7 @@ function drawCompose(form) {
     send.after(more);
   } else if (!menu && more) more.remove();
 }
-function drawComposers() { for (const form of Object.keys(COMPOSER_FORMS)) drawCompose(form); }
+function drawComposers() { for (const form of Object.keys(COMPOSER_FORMS)) drawCompose(form); drawTo(); }
 const FORM_OF = new Map();   // a composer's form element → its name
 function composeDoor(t) {
   const formEl = t.closest('form');
@@ -2435,6 +2558,7 @@ Object.assign(RUN, {
     draftAnswer(replying || lastBoard);
   },
   'compose.priority': (o) => setPriority(PRIORITY[o.form](), !o.priority),
+  'compose.sendTo': (o, { value }) => { setSendTo(typeof value === 'string' ? value : ''); const field = composerField(); if (field) field.focus(); },
   'compose.attach': () => { selectTab('file'); fileInput.click(); },
   'compose.removeFile': () => { removePendingFile(); pickFileBtn.focus(); },
   'compose.cancelReply': () => { cancelReply(); const field = composerField(); if (field) field.focus(); },
@@ -2453,6 +2577,7 @@ document.querySelectorAll('.compose-tabs .tab').forEach((tab) => {
     tab.classList.add('active');
     const pane = document.querySelector(`.pane[data-pane="${tab.dataset.tab}"]`);
     if (pane) pane.classList.remove('hidden');
+    drawTo();
   });
 });
 

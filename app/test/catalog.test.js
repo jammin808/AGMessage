@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const vm = require('vm');
 const { ROOT, handlerFiles, readSource } = require('./helpers');
+const ops = require('../lib/ops');
 
 /** catalog.js as a page loads it: a classic script that extends window.AGM. */
 function loadCatalog() {
@@ -29,6 +30,8 @@ const ROUTES = new Set(['server.js', 'lib/http-accounts.js'].flatMap((f) => [...
 const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:propose', 'stage:send', 'display:take', 'forward', 'pin', 'delete', 'display:identify', 'display:update', 'display:rotate', 'display:remove',
   // the rest of the hall page (compose, chip, code, person's hall half)
   'message',
+  // a message or a file sent into another room (msg.sendBack, compose.sendTo; msg.send's runner too)
+  'room:send',
   // the admin page, the halls board and the Accounts page (adminRoom, person, adminMsg, link, tunnel, hall, help, account, audit)
   'admin:watchRoom', 'admin:summary', 'admin:invites', 'admin:resetRoom', 'admin:deleteRoom', 'admin:setRole', 'admin:linkRoom', 'admin:unlinkRoom', 'admin:kick', 'admin:deleteMessage',
   // a hall's rooms made and renamed (adminRoom)
@@ -41,13 +44,14 @@ const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:
 /** The status marks the pages draw (the marks table of the plan's §15.6): no act's icon is one, so a mark has one meaning. */
 const MARKS = ['✓', '◐', '◇', '▭', '○', '⊘', '◷', '△', '✕', '■', '▶', '●', '▲', 'i'];
 /** The action icons kept to one act each (§15.6): ↩ is Reply, ↗ is Send to and Send back, ⤴ is Show again. */
-const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack'], '⤴': ['show'] };
+const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack', 'sendTo'], '⤴': ['show'] };
 /**
  * Acts of different names that are one act, and so share an icon: 🗑 takes a thing away for good; ✨ is an AI draft a
- * person reads before anything is sent (a reply, the minutes); ▷ and 🏁 answer a help request, on a message or on the
+ * person reads before anything is sent (a reply, the minutes); ↗ sends into another room (Send to ▸, Send back, the
+ * composer's To ▸); ▷ and 🏁 answer a help request, on a message or on the
  * halls board; ⚙ sets a link up (a node's, or the default Stagewatch's).
  */
-const ONE_ACT = [['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode']];
+const ONE_ACT = [['send', 'sendBack', 'sendTo'], ['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode']];
 /** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export) and so end their label with "…" as an ask does. */
 const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'compose.attach', 'hall.setup', 'hall.network', 'room.setup', 'account.edit', 'audit.export', 'adminRoom.members', 'adminRoom.sendFrom']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
@@ -84,6 +88,11 @@ const SEATS = {
   tech: seat({ role: 'research', uid: 'a-tia', uploadToken: 't', canSendToStage: true, canPropose: false, forwardable: false, screens: screens(1), guestCode: GC, codeOn: true }),
   techNoScreens: seat({ role: 'research', uid: 'a-tia', uploadToken: 't', canSendToStage: true, canPropose: false, forwardable: false, screens: screens(0), guestCode: GC, codeOn: true }),
   admin: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, screens: screens(2, true), guestCode: GC, codeOn: true, setsCode: true }),
+  // A side room's Member whose room may send into Hall 2's Main room by its list (room:sendTargets), and into nothing by a
+  // forward: Send to ▸ by the list alone, Send back on what Hall 2 sent here, and the composer's To ▸.
+  researchSends: seat({ role: 'research', uid: 'u-lou', uploadToken: 't', forwardable: false, sends: true, targets: [{ ref: 'rH2aaaaaaaaaaaaaaa', name: 'Hall 2', hallName: 'Hall 2' }, { ref: 'rMDbbbbbbbbbbbbbbb', name: 'Media', hallName: 'Hall 2' }], guestCode: '', codeOn: false }),
+  // Its list emptied since: no Send back on what Hall 2 sent before.
+  researchSentNowhere: seat({ role: 'research', uid: 'u-lou', uploadToken: 't', forwardable: false, sends: false, targets: [] }),
   adminOffline: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, screens: screens(2, true), guestCode: GC, codeOn: true, setsCode: true, connected: false }),
   support: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, adminView: true, name: 'Kim', guestCode: GC, codeOn: true, setsCode: true }),
 };
@@ -99,6 +108,11 @@ const OBJECTS = {
   anaOld: { id: 'm8', type: 'text', text: 'Slides are loaded', from: from(ANA, 'research', 'Ana'), at, reactions: [] },
   anaNote: { id: 'm9', type: 'text', text: 'Doors open in five', from: from(ANA, 'research', 'Ana'), at, reactions: [] },
   anaHot: { id: 'm10', type: 'text', text: 'Wrap up now', priority: true, from: from(ANA, 'research', 'Ana'), at, reactions: [] },
+  // What Hall 2's Main room sent into this room, and this room's copy of what it sent there.
+  fromHall: { id: 'm12', type: 'text', text: 'Is the contract signed?', from: from(ANA, 'research', 'Ana'), at, reactions: [], sentFrom: { roomName: 'Hall 2', hallName: 'Hall 2', ref: 'rH2aaaaaaaaaaaaaaa' } },
+  // What this seat itself sent here from Hall 2: here it is that room's, not its sender's to delete.
+  fromLou: { id: 'm14', type: 'text', text: 'Contract is signed', from: from('u-lou', 'research', 'Lou'), at, reactions: [], sentFrom: { roomName: 'Hall 2', hallName: 'Hall 2', ref: 'rH2aaaaaaaaaaaaaaa' } },
+  sentThere: { id: 'm13', type: 'file', url: '/uploads/2-brief.pdf', filename: 'brief.pdf', mime: 'application/pdf', from: from('u-lou', 'research', 'Lou'), at, sentTo: { roomName: 'Hall 2', hallName: 'Hall 2', ref: 'rH2aaaaaaaaaaaaaaa', id: 'm1' } },
 };
 const ids = (kind, f, o) => plain(C.ids(kind, f, o));
 // The rest of the hall page's objects: its composers (`form`, `room`, the `file` chosen, whom it is `replying` to, 🔥
@@ -224,8 +238,8 @@ const PAGE_OBJECTS = {
 };
 /** The seats an act's words are read for, per kind: the hall page's for its kinds, each other page's own. */
 const KIND_SEATS = {
-  msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
-  compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple], chip: [SEATS.admin, SEATS.researchNoDesk], code: [SEATS.admin, SEATS.board, SEATS.research],
+  msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple, SEATS.researchSends], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
+  compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple, SEATS.researchSends], chip: [SEATS.admin, SEATS.researchNoDesk], code: [SEATS.admin, SEATS.board, SEATS.research],
   adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
   hall: [PAGE.board], room: [PAGE.board, SEATS.research], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
@@ -340,7 +354,11 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, mayKnowCode: false, setsCode: false, connected: true, support: '' });
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, connected: true, support: '' });
+  // The rooms a page may send into are room:sendTargets', read by type: each with a reference, its names strings.
+  assert.deepEqual(plain(C.facts({ sends: 1, targets: [{ ref: 'rA', name: 'Legal', hallName: 'Hall 2', key: 'LGQ4MZP8' }, { ref: '', name: 'x' }, { name: 'y' }, 'rB', null, { ref: 'rC', name: 7 }] })),
+    plain(C.facts({ sends: true, targets: [{ ref: 'rA', name: 'Legal', hallName: 'Hall 2' }, { ref: 'rC', name: '', hallName: '' }] })));
+  assert.deepEqual(plain(C.facts({ targets: 'rA' }).targets), [], 'a list, or none');
   // The guest code is the server's to tell (codeFor), whatever the seat: an observer guest is told the code it typed, a
   // backstage account whose rights do not cover it is told none; switching it is the admin's (setsCode), read by type.
   assert.deepEqual([C.facts({ role: 'observer', guestCode: 'K7P2QX' }).mayKnowCode, C.facts({ role: 'research', guestCode: '' }).mayKnowCode, C.facts({ role: 'research', guestCode: 7 }).mayKnowCode], [true, false, false]);
@@ -401,6 +419,18 @@ test('the seat matrix: what each seat is shown on each message', () => {
     // A question is not a thing a screen shows: no ⧉ on it.
     admin: { anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'], anaText: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.copy'] },
     support: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'] },
+    // A room that may send into others by its list: Send to ▸ on words and a file (never a question, which only a forward
+    // carries, and this seat forwards nowhere); Send back on what a room it sends into sent here, and none once its list
+    // no longer lets it; the copy of what it sent is a message like any other, and what it sent here from another room is
+    // not its to delete here.
+    researchSends: {
+      anaText: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy'],
+      anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pin', 'msg.copy'],
+      fromHall: ['msg.reply', 'msg.react', 'msg.send', 'msg.sendBack', 'msg.pin', 'msg.copy'],
+      sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.delete'],
+      fromLou: ['msg.reply', 'msg.react', 'msg.send', 'msg.sendBack', 'msg.pin', 'msg.copy'],
+    },
+    researchSentNowhere: { fromHall: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'] },
   };
   // The full view's sets are its menus; the simple view has no menu, and its sets are what its buttons may be.
   for (const [s, objs] of Object.entries(M)) {
@@ -412,7 +442,7 @@ test('the seat matrix: what each seat is shown on each message', () => {
   }
   // The Board, either view, a guest's page or an account's: none of what §17.1 keeps from an On stage seat, by right or by
   // its view.
-  const NEVER_ON_STAGE = ['msg.helpRespond', 'msg.send', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.download', 'msg.draft'];
+  const NEVER_ON_STAGE = ['msg.helpRespond', 'msg.send', 'msg.sendBack', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.download', 'msg.draft'];
   for (const s of ['board', 'boardSimple', 'boardAccount', 'boardAccountSimple']) for (const o of Object.keys(OBJECTS)) {
     const set = plain(C.shown('msg', SEATS[s], OBJECTS[o])).map((e) => e.id);
     assert.deepEqual(set.filter((id) => NEVER_ON_STAGE.includes(id)), [], s + ' on ' + o);
@@ -576,6 +606,10 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
     // A Viewer granted posting sits backstage: it drafts, sends and attaches.
     ['compose', 'viewerPost', COMPOSE.text, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach']],
     ['compose', 'observer', COMPOSE.text, []],
+    // A room that may send into others: To ▸ on the message and the file composer, never on a question's.
+    ['compose', 'researchSends', COMPOSE.text, ['compose.draft', 'compose.send', 'compose.sendTo', 'compose.priority', 'compose.attach']],
+    ['compose', 'researchSends', COMPOSE.fileChosen, ['compose.send', 'compose.sendTo', 'compose.priority', 'compose.attach', 'compose.removeFile']],
+    ['compose', 'researchSends', COMPOSE.action, ['compose.send', 'compose.priority', 'compose.attach']],
     // The stage chip: the speaker's screen for a seat with its rights, the countdown on screens for one that drives them.
     ['chip', 'research', STAGE, ['chip.speaker']],
     ['chip', 'tech', STAGE, ['chip.speaker', 'chip.screens']],
@@ -613,6 +647,23 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
 
   // The bar: Send alone, named for where it sends (its aria-label and its menu item alike).
   assert.deepEqual(plain(C.inline('compose', SEATS.research, COMPOSE.text)).map((i) => [i.id, i.label]), [['compose.send', 'Send to Hall 2']]);
+  // To ▸: This room, then each room this room may send into, by its reference, named as a room is named; the one chosen
+  // checked, and Send named for it.
+  const toMedia = { ...COMPOSE.text, room: 'Media', to: 'rMDbbbbbbbbbbbbbbb' };
+  assert.deepEqual(plain(C.submenu('compose', 'compose.sendTo', SEATS.researchSends, COMPOSE.text)), [
+    { value: '', label: 'This room', role: 'menuitemradio', checked: true },
+    { value: 'rH2aaaaaaaaaaaaaaa', label: 'Hall 2', role: 'menuitemradio', checked: false },
+    { value: 'rMDbbbbbbbbbbbbbbb', label: 'Hall 2 › Media', role: 'menuitemradio', checked: false },
+  ]);
+  assert.deepEqual(plain(C.submenu('compose', 'compose.sendTo', SEATS.researchSends, toMedia)).map((v) => v.checked), [false, false, true]);
+  assert.deepEqual(plain(C.inline('compose', SEATS.researchSends, toMedia)).map((i) => [i.id, i.label]), [['compose.send', 'Send to Media']]);
+  assert.equal(C.entry('msg', 'msg.sendBack').label(SEATS.researchSends, OBJECTS.fromHall), 'Send back to Hall 2');
+  assert.deepEqual([C.placeOf({ name: 'Legal', hallName: 'Hall 2' }), C.placeOf({ roomName: 'Hall 2', hallName: 'Hall 2' }), C.placeOf({ name: 'Legal', hallName: '' }), C.placeOf(null)],
+    ['Hall 2 › Legal', 'Hall 2', 'A hall with no name › Legal', 'another room']);
+  // The server's readers of a send's mark (the transcript, the AI's thread: lib/ops.js placeOf) name a room as the pages do.
+  for (const mark of [{ roomName: 'Legal', hallName: 'Hall 2' }, { roomName: 'Hall 2', hallName: 'Hall 2' }, { roomName: 'Legal', hallName: '' }, { roomName: '', hallName: 'Hall 2' }, { roomName: '', hallName: '' }, {}, null]) {
+    assert.equal(ops.placeOf(mark), C.placeOf(mark), JSON.stringify(mark));
+  }
   assert.deepEqual(plain(C.inline('compose', SEATS.board, COMPOSE.directorReplying)).map((i) => [i.id, i.label]), [['compose.send', 'Send']], 'before the room is named: Send');
   for (const [kind, o] of [['chip', STAGE], ['code', CODE], ['person', PERSON]]) assert.deepEqual(plain(C.inline(kind, SEATS.admin, o)), [], kind + ': no act on a row, only the menu');
 

@@ -29,8 +29,8 @@ rights, as the server checks them:
 | Right | Meaning |
 |---|---|
 | `hall.view` | see a hall: its messages, files, countdown and screens; in a side room (Legal, Media), only one the account is given |
-| `hall.post` | send messages, replies, action prompts and help requests; answer a prompt, pin, react; forward into the hall; in a side room, only one the account is given |
-| `hall.files` | share files and push them to a hall, or forward one into it; in a side room, only one the account is given |
+| `hall.post` | send messages, replies, action prompts and help requests; answer a prompt, pin, react; forward into the hall; send a message from the room into one whose list names it; in a side room, only one the account is given |
+| `hall.files` | share files and push them to a hall, or forward one into it, or send one from the room into one whose list names it; in a side room, only one the account is given |
 | `display.control` | change what a hall's screens show |
 | `display.manage` | add, rename, move, re-link and remove screens; the hall's holding image |
 | `stage.send` | send to Stagewatch: the speaker's screen, or to the operator to pass on |
@@ -145,8 +145,37 @@ in: Legal · Hall 2, Main · Hall 3"; every hall's rooms, `everyHall`, are told 
 page in a room is ever sent a list, nor a key of another hall's room on one. A room removed, or a hall with its rooms, is
 taken off every list, as the room listed and as a room on a list (one whose files another program held, which comes back
 at the next start, keeps its place for it), and no new room is made under a key a list still names. The list is read
-whenever a room sends into another, so a list changed mid-show applies at once; the sends themselves (`room:send`, a copy
-kept where it was sent from) land with their own unit. Going back to 0.5.1 keeps the lists in `settings.json`, unread.
+whenever a room sends into another, so a list changed mid-show applies at once, and the pages of each room whose list of
+rooms to send into changed are told to ask again (`sendsChanged`, which names nothing; also when a room it sends into, or
+that room's hall, is renamed). Going back to 0.5.1 keeps the
+lists in `settings.json`, unread.
+
+**Sending into another room.** A page in a room is told the rooms whose list names its room (`room:sendTargets`): each by
+its reference, a MAC of its key under the server's secret (`store.roomRef`, `store.byRef`: 17 characters that no join or
+lookup takes, the same at every start), its name and its hall's name, never a key, a code, its people or its numbers; none
+On stage, for a seat that may not post, or from the admin's support view. The join answer's `sends` says whether there are
+any. `room:send {to, messageId}` sends a message or a file of the room; `{to, type: 'text' | 'file', text, url, filename,
+mime, caption, priority, replyTo}` a new one. The rights in the room it comes from decide: the list is the admin saying
+that whoever may post there may post into the other room, so the sender's seat there is not read (a Board account's file
+sent from Legal, where it is a Member, goes into the Main room where it sits On stage). In order: a repeat of a send that
+went through (its client id, kept on the copy) is answered with what it did and writes nothing, and a client id a message
+of another kind holds is refused ("That message's id is another message's."); On stage, nothing is sent,
+in either form, Send back included ("Messages from On stage stay in this room."); then the writes bucket, then posting
+("Observers can read but not post."); a question or a help request is not sent ("Only a message or a file is sent into
+another room."; "A help request belongs to its room — ask in the other room instead."), and a file needs `hall.files` where
+it is ("Your account may not share files here.") and, when new, an upload made for that room by the sender (as `message`
+reads it); a reference to no room, a removed one or the room itself is "That room is gone.", and a room whose list no
+longer names this one "This room may not send there — ask an admin." The message goes into the other room first, from
+the sender, marked with the room it came from (`sentFrom`: its name, its hall's name and its reference, and who wrote it
+when the sender sent on someone else's), and the room it came from keeps a copy marked with where it went (`sentTo`, with
+the other room's message id), so a copy exists only for a message that is there; nothing else of the other room (its
+people, its replies, its seen receipts, its numbers) comes back. A reply sent back answers, in the room it reaches, that
+room's own message (its copy of the question, or the question itself). A file keeps its link, which the other room's
+people open as any file's; the copy's removal by its author leaves the other room's message, and a file leaves the disk
+only when no room and no screen holds it. The message in the other room is not its sender's to delete there, from a page
+they hold in that room too ("A message sent from another room stays here: only the admin removes it."), so the copy's
+"delivered" stays true while that room holds it; the admin removes it. A file that arrives from another room never opens itself on the On stage panel.
+Each send is one `room.send` row on the other room's key, written once the message is there and before the copy.
 
 Rules that keep rights from growing by themselves: deny by default; only an admin makes an admin or hands out
 `users.manage`, `settings.manage` or `audit.export`, and only an admin changes, resets, signs out, turns back on or
@@ -244,8 +273,8 @@ posts and shares files (`rbac.LINKED_CAPS`).
 A file message is posted only in the room its upload was made for, by the person who made it, or again in a room a
 message of which holds it already: the upload token a page is given at its join names its room and its person, and the
 upload keeps both. Another room's file is refused ("That file belongs to another room — send it from there."), and so is
-another person's upload not yet posted; a forward, between rooms the person is in and by the rules above, is how a file
-reaches another room. A file no room holds any more, only a screen or a hall's holding image, is chosen again to be
+another person's upload not yet posted; a send into a room its list lets the room send into, or a forward between rooms
+the person is in and by the rules above, is how a file reaches another room. A file no room holds any more, only a screen or a hall's holding image, is chosen again to be
 posted, and an upload not yet posted when AGMessage restarts is uploaded again by the page that holds it.
 
 **Each room's guest code.** A hall's Main room's code is its key until the admin renews it, so a hall of 0.5.1 keeps the
@@ -382,7 +411,9 @@ what was read), a room's guest code switched or renewed (`room.code`, by the roo
 pages kept)", "code off (3 guest pages sent home)", "a new code was issued"; never the code), which rooms may send into a
 room (`room.sendFrom`, by the room's key, one row for every list a change touches: "may send here: Main (Hall 2), Main
 (Hall 3); it sends back into: Main (Hall 3)", "it no longer sends into: …", a room on the list not open now counted, "2 rooms
-not open now"; each room by its name and its hall's, never a key),
+not open now"; each room by its name and its hall's, never a key), each message or file sent into another room
+(`room.send`, by the key of the room it went to: "a message (212 characters) from Legal (Hall 2) to Main (Hall 2)", "a
+file (pdf, 2.1 MB) from …"; never its words or a file's name),
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and

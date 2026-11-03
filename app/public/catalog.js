@@ -114,6 +114,18 @@
     ],
     yes: 'Make a new code', no: 'Keep this code',
   });
+  /**
+   * A room a page may send into, or one a send came from or went to (`{name | roomName, hallName}`), as every page names a
+   * room: a hall's Main room by its hall's name, a side room by its hall's and its own ("Hall 2 › Legal"); a send's mark
+   * as the server's readers name it (lib/ops.js `placeOf`, held to this one by its test).
+   */
+  function placeOf(r) {
+    const name = r ? String(r.name !== undefined ? r.name : r.roomName || '') : '';
+    const hall = r ? String(r.hallName || '') : '';
+    return !name || name === hall ? hall || name || 'another room' : (hall || 'A hall with no name') + ' › ' + name;
+  }
+  /** Whether the room a message came from (its `sentFrom`) is one this page may send into now: Send back goes there. */
+  const sendsBackTo = (f, o) => !!o.sentFrom && typeof o.sentFrom.ref === 'string' && f.targets.some((t) => t.ref === o.sentFrom.ref);
   /** A Patterns or PlayMap: the links a pairing token drives. */
   const isNode = (o) => o.t === 'patterns' || o.t === 'playmap';
   /** A verb's own words, without its placeholders: what a line to propose starts with. */
@@ -176,11 +188,18 @@
         verb: 'stage:send', mode: 'now', may: (f) => backstage(f) && f.canSendToStage, fits: (f, o) => full(f) && said(o), ready: (f) => f.stageWhy || true },
       { id: 'msg.screens', label: 'Show on screens…', icon: '⧉', group: '2_send', inline: () => 4, verb: 'display:take', mode: 'now',
         may: (f) => f.canScreens, fits: (f, o) => full(f) && showable(o), ready: (f) => f.screens > 0 || WORDS.noScreens },
-      // ↗ Send to ▸: the rooms this message would be taken in, asked of the server as it opens. A file moves only from a
-      // seat that shares files here; a help request stays in its hall.
+      // ↗ Send to ▸: one list of rooms, asked of the server as it opens: first those whose list lets this room send into
+      // them (a copy stays here), then the other rooms this person may forward into. The runner sends by room:send to the
+      // first, and by its verb, forward, to the rest; the person never chooses between two verbs. A file moves only from a
+      // seat that shares files here; a question is forwarded, never sent by a list; a help request stays in its room.
       { id: 'msg.send', label: 'Send to', icon: '↗', key: 'F', group: '2_send', verb: 'forward', mode: 'hold',
-        may: (f, o) => f.forwardable && (o.type !== 'file' || f.files), fits: (f, o) => full(f) && (o.type === 'text' || o.type === 'file' || o.type === 'action'),
+        may: (f, o) => (o.type === 'action' ? f.forwardable : f.forwardable || f.sends) && (o.type !== 'file' || f.files),
+        fits: (f, o) => full(f) && (o.type === 'text' || o.type === 'file' || o.type === 'action'),
         submenu: () => null },
+      // ↗ Send back to Hall 2 › Legal: on a message another room sent here, while this room may send into that one; the
+      // composer, set to that room for one send, answers under it.
+      { id: 'msg.sendBack', label: (f, o) => 'Send back to ' + placeOf(o.sentFrom), icon: '↗', group: '2_send', verb: 'room:send', mode: 'hold',
+        may: (f) => f.sends && f.post, fits: (f, o) => full(f) && sendsBackTo(f, o) },
       // The room's pin; the simple view keeps it off (its pinned place is read-only there).
       { id: 'msg.pin', label: (f, o) => (o.pinned ? 'Unpin' : 'Pin'), icon: '📌', key: 'P', group: '3_keep', verb: 'pin', mode: 'now',
         may: (f) => f.pin, fits: (f) => full(f), undo: 'msg.pin' },
@@ -191,7 +210,8 @@
       { id: 'msg.copy', label: 'Copy text', icon: '📋', group: '3_keep', verb: 'local', mode: 'local',
         may: () => true, fits: (f, o) => full(f) && typeof o.text === 'string' && o.text.length > 0 },
       { id: 'msg.delete', label: 'Delete…', icon: '🗑', key: 'Delete', group: '9_danger', verb: 'delete', mode: 'now',
-        may: (f, o) => mine(f, o), fits: (f) => full(f),
+        // A message another room sent here is not its sender's to delete from this room: only the admin removes it.
+        may: (f, o) => mine(f, o), fits: (f, o) => full(f) && !o.sentFrom,
         confirm: (f, o) => ({ title: 'Delete your message?', words: '“' + snippet(o) + '” goes from everyone\'s page in this room now. This cannot be undone.', yes: 'Delete', no: 'Keep it', danger: true }) },
     ],
 
@@ -232,8 +252,9 @@
 
     // The composer: its Send button (its one act on the row) and its ⋯, never its text field, where the browser's own
     // menu stays (spelling, paste). `form` is the composer shown ('director' On stage; 'text', 'action' or 'file'
-    // backstage), `room` the room's name, `file` the name of the file chosen to send ('' for none), `replying` whom the
-    // next send answers ('' for nobody), `priority` whether 🔥 is pressed.
+    // backstage), `room` the name of the room its next send goes to (this room's, or the one To: is set to), `file` the
+    // name of the file chosen to send ('' for none), `replying` whom the next send answers ('' for nobody), `priority`
+    // whether 🔥 is pressed, `to` the reference of the room To: is set to ('' for this room).
     compose: [
       // ✨ A draft of a reply, from the thread and the document on stage, into the composer: a person edits and sends it.
       // AI drafts off (no key, no internet) is the laptop's state, not a right: shown, with why.
@@ -241,6 +262,12 @@
         may: (f) => backstage(f), fits: (f, o) => full(f) && o.form === 'text', ready: (f) => f.ai || WORDS.aiOff },
       { id: 'compose.send', label: (f, o) => (o.room ? 'Send to ' + o.room : 'Send'), icon: '➤', group: '2_send', inline: () => 1, verb: 'message', mode: 'hold',
         may: (f) => f.post, fits: () => true, ready: (f, o) => (o.form === 'file' && !o.file ? WORDS.noFile : true) },
+      // To ▸: where the next message or file goes, this room or a room whose list lets this room send into it (by
+      // room:send, a copy kept here). It goes back to this room after every send.
+      { id: 'compose.sendTo', label: 'To', icon: '↗', group: '2_send', verb: 'room:send', mode: 'hold',
+        may: (f) => f.sends && f.post, fits: (f, o) => full(f) && (o.form === 'text' || o.form === 'file'),
+        submenu: (f, o) => [{ value: '', label: 'This room', role: 'menuitemradio', checked: !o.to }]
+          .concat(f.targets.map((t) => ({ value: t.ref, label: placeOf(t), role: 'menuitemradio', checked: o.to === t.ref }))) },
       { id: 'compose.priority', label: 'Priority', icon: '🔥', group: '2_send', verb: 'local', mode: 'local', checked: (f, o) => !!o.priority,
         may: (f) => f.post, fits: () => true },
       { id: 'compose.attach', label: 'Attach a file…', icon: '📎', group: '2_send', verb: 'local', mode: 'local',
@@ -549,6 +576,9 @@
     return WORDS.linkDown;
   }
 
+  /** The rooms a page may send into, as room:sendTargets tells them, read by type: each with a reference. */
+  const targetsOf = (v) => Object.freeze(Array.isArray(v) ? v.filter((t) => t && typeof t.ref === 'string' && t.ref.length > 0)
+    .map((t) => Object.freeze({ ref: t.ref, name: typeof t.name === 'string' ? t.name : '', hallName: typeof t.hallName === 'string' ? t.hallName : '' })) : []);
   /** A list of message ids, as the page gives it: strings only, in its order. */
   const idList = (v) => Object.freeze(Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.length > 0) : []);
 
@@ -576,6 +606,9 @@
       ai: !!s.ai,
       canScreens: !!screens, screensManage: !!(screens && screens.manage), screens: screens && Array.isArray(screens.displays) ? screens.displays.length : 0,
       forwardable: !!s.forwardable,
+      // Whether a message here may be sent into another room by its list (the join's `sends`), and those rooms as
+      // room:sendTargets tells them: each by its reference, its name and its hall's name.
+      sends: !!s.sends, targets: targetsOf(s.targets),
       // The room's guest code: the server tells it only to a page that may know it ('' else), and lets the admin switch it
       // and renew it from a page that names the room by its key.
       mayKnowCode: typeof s.guestCode === 'string' && s.guestCode.length > 0, setsCode: !!s.setsCode,
@@ -702,6 +735,6 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, KINDS, supportWords, stageWhy, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey });
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, KINDS, supportWords, stageWhy, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf });
   Object.assign(root.AGM = root.AGM || {}, { catalog });
 })(typeof window !== 'undefined' ? window : globalThis);

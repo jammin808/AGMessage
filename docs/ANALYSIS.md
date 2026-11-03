@@ -299,7 +299,8 @@ checks a link whose cloudflared never said it was registered, the watchdog's hea
 wait for the watchdog). The internet link's check
 starts none: each of its tries carries its own deadline (`AbortSignal.timeout`). A frame of state is never one
 of them: it is a `Latest` (`lib/latest.js`), whose timers are its own, and the halls board, the screens console, the
-people list, the seen receipts and a hall's rooms (each page's switcher and header) are the five, each named in
+people list, the seen receipts, a hall's rooms (each page's switcher and header) and the rooms a room's pages may send
+into (a nudge to ask again) are the six, each named in
 `server.js` and in health's `latest` (the guard reads the names). A new tick of a handler file's own moves the list, with its words; one taken away moves it too. A planted source
 holds the read to its rule: four forms are counted, and `clearTimeout(`, `resetTimeout(`, a destructured `setTimeout`
 and a `Latest` are not. A frame is sent through `sendEach`, each hall (and each board watcher) apart: one that faults
@@ -613,7 +614,16 @@ names the room, as Send's own name does); the stage chip's line box is `chip.spe
 the code chip's Copy guest code is `code.code` and Copy join link `code.copy`, and the admin's Turn the code off… / on
 `code.toggle` and New code… `code.new` (`room:update`, on a page that names the room by its key: the join's `setsCode`);
 the chip's code is the server's (`mayKnowCode` is the join's `guestCode`, then each `guestCode` event), never the page's
-address; a person's Mention is `person.mention`. An ask's verbs are its yes and no, or its `choices` and no (the rule
+address; a person's Mention is `person.mention`. Sending into another room (unit 14): the composer's To ▸ is
+`compose.sendTo` (`room:send`, mode `hold`; `may`: the join's `sends`, the facts' `targets` from `room:sendTargets`, by
+reference; its values This room, then each room, `menuitemradio`; drawn as the composer's To: button too, whose menu is
+those values, run through `act()`), and Send's label follows it ("Send to Legal"); a message's ↗ Send to ▸ is still
+`msg.send` (verb `forward`), one list whose runner sends by `room:send` to a room a list allows and by `forward` to the
+rest (a forward's row says "a forward — no withdraw" on its second line, an item's `note`); Send back is `msg.sendBack`
+(`room:send`), on a message whose `sentFrom` names a room this one may send into, the full view only. ↗ is Send to, Send
+back and To ▸, one act (`ONE_ACT`), and `room:send` is a required verb, refused as each seat it is hidden from (On stage
+in the table's words). Delete… (`msg.delete`) fits no message another room sent here (`sentFrom`): its sender may not
+delete it there, and the server's `delete` refuses it in its words. An ask's verbs are its yes and no, or its `choices` and no (the rule
 `test/catalog.test.js` reads of every ask).
 The hall page has one toast (`AGM.toast`, `common.js`), a `role=status` region (`test/resilience.test.js` refuses the
 toast's class or id named in any other page script, and a second toast class in the stylesheet), and its lists are `AGM.roving`'s: the
@@ -815,7 +825,7 @@ The fences the review added, beside the tests for each finding:
 
 | Fence | Holds |
 |---|---|
-| `test/inputs.test.js` | every event a handler file listens to (`handlerFiles()`: `server.js` and each module in `lib/handlers/`, read from their source, so a new handler is held too) is sent every argument shape — null, numbers, strings, lists, an object `String()` cannot convert — from a socket with no sign-in, a crew account, the admin and a screen; the server answers and stays up, and the handler guard has nothing to catch. The shapes carry the outbox's keys too (`cid`, `on` and `heldMs`, null and unconvertible) and a room's code acts and its list of rooms that may send in (`codeOn`, `newCode`, `keepGuests`, `sendFrom`, `sendBack`, null; the last two as lists of an unconvertible value), and the typed cases a room's hall, key and name (`room:create`, `room:update`, `room:settings`), each read as none and refused with its words, a room's code acts by type (`codeOn`, `newCode` and `keepGuests` unconvertible: each refused in its words, nothing switched and no `room.code` row), and its list by type (`sendFrom` and `sendBack` not lists of strings: each refused in its words, no list set and no `room.sendFrom` row) |
+| `test/inputs.test.js` | every event a handler file listens to (`handlerFiles()`: `server.js` and each module in `lib/handlers/`, read from their source, so a new handler is held too) is sent every argument shape — null, numbers, strings, lists, an object `String()` cannot convert — from a socket with no sign-in, a crew account, the admin and a screen; the server answers and stays up, and the handler guard has nothing to catch. The shapes carry the outbox's keys too (`cid`, `on` and `heldMs`, null and unconvertible) and a room's code acts and its list of rooms that may send in (`codeOn`, `newCode`, `keepGuests`, `sendFrom`, `sendBack`, null; the last two as lists of an unconvertible value) and a send into another room's (`to`, `replyTo`, null and unconvertible), and the typed cases a room's hall, key and name (`room:create`, `room:update`, `room:settings`), each read as none and refused with its words, a room's code acts by type (`codeOn`, `newCode` and `keepGuests` unconvertible: each refused in its words, nothing switched and no `room.code` row), its list by type (`sendFrom` and `sendBack` not lists of strings: each refused in its words, no list set and no `room.sendFrom` row), and a send by type (`room:send`'s room, message, words, file, kind and client id unconvertible, to a room it may send into and to none: each refused in its words, nothing sent and no `room.send` row; `room:sendTargets` given anything answers its list) |
 | `test/sessions.test.js` | sign-in refusals say nothing more than a wrong password does; a stranger's guesses cannot lock the laptop or the venue out; a session's end reaches its open pages; a page in use keeps its session, under a moved clock |
 | `test/uploads.test.js` | uploads stop before the disk fills; files nobody posted are removed; a reset or a deletion removes its own files and no one else's |
 | `test/shownet.test.js` | the discovery table is bounded; Stagewatch's numbers never cross a restart or a relink; a node's changed certificate is accepted only by typing the start of its fingerprint, and the page is never told it |
