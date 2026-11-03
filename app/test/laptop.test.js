@@ -15,6 +15,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const h = require('./helpers');
+const { readSource } = h;
 const { ServerLog, Lines, redact, HIDDEN } = require('../lib/serverlog');
 const laptop = require('../lib/laptop');
 const tlsmod = require('../lib/tls');
@@ -615,7 +616,7 @@ test('every PowerShell AGMessage runs names its functions so that no alias of Wi
   const root = path.join(__dirname, '..', '..');
   const lane = require('../../tools/readings-take');
   const scripts = [['lib/laptop.js SCRIPT', laptop.SCRIPT], ['lib/power.js SCRIPT', require('../lib/power').SCRIPT], ...Object.entries(lane.SCRIPTS).map(([k, v]) => ['tools/readings-take.js SCRIPTS.' + k, v])];
-  for (const f of fs.readdirSync(path.join(root, 'tools')).filter((n) => /\.ps1$/i.test(n))) scripts.push(['tools/' + f, fs.readFileSync(path.join(root, 'tools', f), 'utf8')]);
+  for (const f of fs.readdirSync(path.join(root, 'tools')).filter((n) => /\.ps1$/i.test(n))) scripts.push(['tools/' + f, readSource(path.join(root, 'tools', f))]);
   const named = [];
   for (const [where, text] of scripts) {
     assert.ok(!/\$\{function:|\bfunction:\\?\w/i.test(text), where + ' makes a function through the Function: drive');

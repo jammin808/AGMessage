@@ -148,15 +148,20 @@ browser opening is not yet seen on a Windows desktop)
   the other artifact stand beside it.
 - The Windows readings run for a `v*` tag and for a run asked for by hand (Actions, CI, Run workflow), never for a push
   or a pull request (the owner's choice, 2026-11-03, to cut CI time): a run takes up to 45 minutes, and a push to the
-  branch cancelled it, which cost a whole run once. A run by hand has a concurrency group of its own and is never
-  cancelled. The release still waits for the lane and is never held by it.
+  branch cancelled it, which cost a whole run once. A run by hand has a concurrency group of its own that a push
+  never touches, and once it runs nothing cancels it (a newer run by hand waiting behind it takes the place of an
+  earlier one still waiting). The release still waits for the lane and is never held by it.
 - Windows-only test failures show on Linux first (the owner's choice, 2026-11-03): CI's red Windows runs included tests
   that read a source with its CR LF line ends and matched LF, and a UDP port taken from a free TCP port, each found one
   20-minute run at a time. A new job, `test-crlf`, checks the tree out again on Linux with Windows' line ends
   (the vendored files left byte for byte, and both said if not so) and runs the suites, and the zip waits for it. Every
   test reads the checkout's text through one helper, `readSource` (LF on every checkout), and takes a port from
   `freePort` (TCP) or `freeUdpPort` (UDP, new); a house lint rule, `agm/test-helpers`, refuses a test's own text read of
-  the checkout and a port picker of its own. 41 reads in 14 test files and three port pickers moved to them. Nothing that
+  the checkout (followed back through what a name in its path was made from, a const's initialiser or a parameter's
+  default, so `(f, root = ROOT) => …` is caught too) and a port picker of its own (`free…Port`, never `findExport`). 53
+  reads in 18 test files and three port pickers moved to them; one of them, `loads.test.js`'s check that `server.js`
+  switches ws's helpers off before its first require, matched nothing on a CR LF checkout and passed whatever the file
+  said. Nothing that
   ships changed.
 - Rolling back: nothing is stored; 0.5.1's .bat and server start as they did.
 

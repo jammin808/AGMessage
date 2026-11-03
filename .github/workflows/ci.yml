@@ -22,7 +22,8 @@ permissions:
   contents: read
 
 # A newer push or pull request supersedes the run of its ref. A run asked for by hand, which takes the readings, has a
-# group of its own and is never cancelled: a push to its branch while it runs leaves it to finish.
+# group of its own that a push never touches, and once it runs nothing cancels it; a newer run by hand waiting behind it
+# takes the place of an earlier one still waiting (GitHub's concurrency keeps one waiting run per group).
 concurrency:
   group: ci-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}

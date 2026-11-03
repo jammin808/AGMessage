@@ -21,6 +21,7 @@ const verifier = require('../verify/verify-audit');
 const rules = require('../verify/auditrules');
 const secretbox = require('../lib/secretbox');
 const h = require('./helpers');
+const { readSource } = h;
 
 const { auditLog, recordsOf, chainOf, keyedLogWithPoints, acceptAll, FIXTURE_KEY, OTHER_KEY, HOST, ROOT } = h;
 const SIGN = 'agmessage audit sign v1';
@@ -141,7 +142,7 @@ async function onPage(dir, { fp = '' } = {}) {
   };
   const $ = (id) => { if (!els.has(id)) els.set(id, node()); return els.get(id); };
   const document = { getElementById: $, createElement: () => node(), addEventListener: () => {}, body: { classList: { add: () => {}, remove: () => {} } } };
-  vm.runInNewContext(fs.readFileSync(path.join(VERIFY_DIR, 'page.js'), 'utf8'), { document, AGMAuditRules: rules, crypto: globalThis.crypto, TextDecoder, TextEncoder, atob }, { filename: 'verify-page.js' });
+  vm.runInNewContext(readSource(path.join(VERIFY_DIR, 'page.js')), { document, AGMAuditRules: rules, crypto: globalThis.crypto, TextDecoder, TextEncoder, atob }, { filename: 'verify-page.js' });
   $('fp').value = fp;
   $('folder').files = fs.readdirSync(dir, { recursive: true }).map(String).filter((f) => fs.statSync(path.join(dir, f)).isFile()).map((rel) => ({
     name: path.basename(rel), webkitRelativePath: path.basename(dir) + '/' + rel.split(path.sep).join('/'),

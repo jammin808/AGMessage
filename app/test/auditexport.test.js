@@ -22,6 +22,7 @@ const rbac = require('../lib/rbac');
 const secretbox = require('../lib/secretbox');
 const audit = require('../lib/audit');
 const h = require('./helpers');
+const { readSource } = h;
 
 const { auditLog, keyedChainOf, chainOf, FIXTURE_KEY, OTHER_KEY, readZip, unzipTo, ROOT } = h;
 const VERIFY = path.join(ROOT, 'verify', 'verify-audit.js');
@@ -260,9 +261,8 @@ test('determinism: a fixed seed signs a fixed SHA256SUMS to fixed bytes; verify.
   const b64 = (t) => "'sha256-" + crypto.createHash('sha256').update(t, 'utf8').digest('base64') + "'";
   assert.equal(scripts.length, 2);
   assert.equal(csp, "default-src 'none'; script-src " + scripts.map(b64).join(' ') + '; style-src ' + b64(styles[0]) + "; connect-src 'none'; img-src 'none'; form-action 'none'; base-uri 'none'");
-  const lf = (t) => t.replace(/\r\n?/g, '\n');   // a Windows checkout writes CR LF; the page carries LF
-  assert.equal(scripts[0], lf(fs.readFileSync(path.join(VERIFY_DIR, 'auditrules.js'), 'utf8')));
-  assert.equal(scripts[1], lf(fs.readFileSync(path.join(VERIFY_DIR, 'page.js'), 'utf8')));
+  assert.equal(scripts[0], readSource(path.join(VERIFY_DIR, 'auditrules.js')));
+  assert.equal(scripts[1], readSource(path.join(VERIFY_DIR, 'page.js')));
   assert.ok(!page.includes('\r'), 'no CR in the page: a browser reads CR LF as LF before it checks a hash');
   // Parts written with CR LF, or a lone CR, make the same page, hashed over what the browser reads.
   const parts = { html: '__CSP__\n__VERSION__\n<style>__STYLE__</style><script>__RULES__</script><script>__PAGE__</script>', css: 'a {\n}\n', rules: 'x = 1;\ny = 2;\n', js: 'z = 3;\n', version: 'v' };
@@ -456,7 +456,7 @@ test('the verifier says where it came from: run from the bundle, it says so; run
   assert.match(fromBundle.out, /^△ this verifier came from the bundle it is checking: check it again with the release's verifier/m);
   const release = tmp('agm-release-');
   fs.copyFileSync(VERIFY, path.join(release, 'verify-audit.js'));
-  fs.writeFileSync(path.join(release, 'auditrules.js'), fs.readFileSync(path.join(VERIFY_DIR, 'auditrules.js'), 'utf8') + '// another release\n');
+  fs.writeFileSync(path.join(release, 'auditrules.js'), readSource(path.join(VERIFY_DIR, 'auditrules.js')) + '// another release\n');
   fs.writeFileSync(path.join(release, 'verify.html'), await verifier.pageFrom(VERIFY_DIR, 'test'));
   const fromRelease = await verify([dir, '--fingerprint', FP], path.join(release, 'verify-audit.js'));
   assert.equal(fromRelease.code, 0, fromRelease.out);
@@ -520,7 +520,7 @@ async function onPage(dir, { fp = '', earlier = null } = {}) {
   };
   const $ = (id) => { if (!els.has(id)) els.set(id, node()); return els.get(id); };
   const document = { getElementById: $, createElement: () => node(), addEventListener: () => {}, body: { classList: { add: () => {}, remove: () => {} } } };
-  vm.runInNewContext(fs.readFileSync(path.join(VERIFY_DIR, 'page.js'), 'utf8'), { document, AGMAuditRules: rules, crypto: globalThis.crypto, TextDecoder, TextEncoder, atob }, { filename: 'verify-page.js' });
+  vm.runInNewContext(readSource(path.join(VERIFY_DIR, 'page.js')), { document, AGMAuditRules: rules, crypto: globalThis.crypto, TextDecoder, TextEncoder, atob }, { filename: 'verify-page.js' });
   const chosen = (d) => fs.readdirSync(d, { recursive: true }).map(String).filter((f) => fs.statSync(path.join(d, f)).isFile()).map((rel) => ({
     name: path.basename(rel), webkitRelativePath: path.basename(d) + '/' + rel.split(path.sep).join('/'),
     arrayBuffer: async () => { const b = fs.readFileSync(path.join(d, rel)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.length); },

@@ -97,8 +97,12 @@ test('agm/test-helpers: a test\'s own text read of the checkout and its own port
     'fs.readFileSync(path.join(h.ROOT, \'public\', f), \'utf8\');',
     'fs.readFileSync(path.resolve(REPO, \'CHANGELOG.md\'), \'utf8\').replace(/\\r\\n/g, \'\\n\');',
     'fs.promises.readFile(path.join(APP, \'server.js\'), \'utf8\');',
+    // Through what a name was made from: a parameter's default, a const's initialiser, a few names deep.
+    'const read = (f, root = ROOT) => fs.readFileSync(path.join(root, f), \'utf8\');',
+    'const app = path.join(ROOT, \'app\'); const lib = app + \'/lib\'; fs.readFileSync(path.join(lib, \'x.js\'), \'utf8\');',
+    'const VERIFY_DIR = path.join(__dirname, \'..\', \'verify\'); fs.readFileSync(`${VERIFY_DIR}/page.js`, \'utf8\');',
   ]) assert.deepEqual(ids(code), ['source'], code);
-  for (const code of ['const freePort = () => 0;', 'function pickUdpPort() {}', 'let findPort;']) assert.deepEqual(ids(code), ['port'], code);
+  for (const code of ['const freePort = () => 0;', 'function pickUdpPort() {}', 'let findPort;', 'const findFreeTcpPort = 1;']) assert.deepEqual(ids(code), ['port'], code);
   for (const code of [
     'fs.readFileSync(path.join(ROOT, \'public\', \'vendor\', \'a.js\'));',
     'fs.readFileSync(path.join(dir, \'log.jsonl\'), \'utf8\');',
@@ -106,6 +110,11 @@ test('agm/test-helpers: a test\'s own text read of the checkout and its own port
     'const { freePort, freeUdpPort } = require(\'./helpers\');',
     'fs.readFile(path.join(ROOT, \'x\'), (e, b) => b);',
     'async function start() { const port = await freePort(); return port; }',
+    // Names that are not port pickers, and paths of the test's own making: a temporary folder, a server's data folder.
+    'function findExport() {} const findReport = 1; const pickImport = 2; function freeSupport() {}',
+    'const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p + ROOT)); const dir = tmp(\'x\'); fs.readFileSync(path.join(dir, \'a.log\'), \'utf8\');',
+    'async function f() { const srv = await startServer({ cwd: ROOT }); return fs.readFileSync(path.join(srv.dataDir, \'rooms\', \'A.log\'), \'utf8\'); }',
+    'fs.readFileSync(path.join(ROOT, \'public\', \'vendor\', \'m.js\'), \'latin1\');',
   ]) assert.deepEqual(ids(code), [], code);
   assert.deepEqual(ids('const freePort = () => 0; fs.readFileSync(path.join(REPO, \'x\'), \'utf8\');', 'app/test/helpers.js'), [], 'test/helpers.js defines them');
   const repo = path.join(__dirname, '..', '..');

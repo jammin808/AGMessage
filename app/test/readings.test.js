@@ -92,8 +92,8 @@ test('a reading that waits for a later unit is held to it: once that unit\'s cod
   const files = [...fs.readdirSync(app).filter((f) => f.endsWith('.js')).map((f) => path.join(app, f))];
   const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory()) walk(path.join(d, e.name)); else if (e.name.endsWith('.js')) files.push(path.join(d, e.name)); } };
   walk(path.join(app, 'lib'));
-  const code = files.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
-  const machine = fs.existsSync(path.join(app, 'machine.js')) ? fs.readFileSync(path.join(app, 'machine.js'), 'utf8') : '';
+  const code = files.map((f) => h.readSource(f)).join('\n');
+  const machine = fs.existsSync(path.join(app, 'machine.js')) ? h.readSource(path.join(app, 'machine.js')) : '';
   // Each unit's code as the plan names it: once it is there, the unit has landed.
   const LANDED = {
     U4: () => /last-stop\.json/.test(code),

@@ -19,7 +19,7 @@ const { readSource } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..', '..');
 const VENDOR = path.join(ROOT, 'app', 'public', 'vendor');
-const manifest = JSON.parse(fs.readFileSync(path.join(VENDOR, 'VENDOR.json'), 'utf8'));
+const manifest = JSON.parse(readSource(path.join(VENDOR, 'VENDOR.json')));
 const entries = Object.entries(manifest.files);
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const read = (rel) => readSource(path.join(ROOT, rel));
@@ -113,7 +113,7 @@ test('vendor: each licence folder holds the licence its entry names and the copy
       for (const re of LICENCES[id].not || []) assert.doesNotMatch(text, re, who + ': ' + c.notice + ' holds ' + id + ', not a licence with more clauses');
     }
     // An Apache-2.0 work keeps its copyright where it was put: in the file itself, which ships unchanged.
-    const own = c.licence === 'Apache-2.0' && !bundled ? flat(fs.readFileSync(path.join(VENDOR, file), 'utf8').slice(0, 4096)) : '';
+    const own = c.licence === 'Apache-2.0' && !bundled ? flat(readSource(path.join(VENDOR, file)).slice(0, 4096)) : '';
     assert.ok(text.includes(flat(c.copyright)) || own.includes(flat(c.copyright)), who + ': "' + c.copyright + '" is kept');
   }
   const folders = fs.readdirSync(path.join(ROOT, 'licenses')).map((f) => 'licenses/' + f);

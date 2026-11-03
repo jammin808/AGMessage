@@ -28,13 +28,13 @@ const { fileURLToPath, pathToFileURL } = require('url');
 const { createRequire, isBuiltin } = require('module');
 const { Linter } = require('eslint');
 const { io } = require('socket.io-client');
-const { ROOT, TOKEN, filesUnder, freePort, startServer, stopServer, until } = require('./helpers');
+const { ROOT, TOKEN, filesUnder, freePort, startServer, stopServer, until, readSource } = require('./helpers');
 const startup = require('../lib/startup');
 const laptop = require('../lib/laptop');
 const power = require('../lib/power');
 const launch = require('../launch');
 
-const read = (f, root = ROOT) => fs.readFileSync(path.join(root, f), 'utf8');
+const read = (f, root = ROOT) => readSource(path.join(root, f));
 const LOCK = JSON.parse(read('package-lock.json'));
 /** What the portable folder ships of app (tools/build-portable.ps1): these files at its top, these folders whole, and node_modules as `npm ci --omit=dev` makes it. */
 const SHIPPED_FILES = ['server.js', 'supervise.js', 'launch.js', 'machine.js', 'package.json', 'package-lock.json', 'README.md', 'build.json'];
@@ -159,7 +159,7 @@ test('only what it ships: the server started alone (as npm run dev and the tests
   // Read from the source: the two switches come before the first require in server.js's code.
   const src = read('server.js');
   const lineOf = (i) => (i < 0 ? Infinity : src.slice(0, i).split('\n').length);
-  const first = readSource(src, 'commonjs').requires[0].line;
+  const first = parseAsks(src, 'commonjs').requires[0].line;
   const at = ['WS_NO_BUFFER_UTIL', 'WS_NO_UTF_8_VALIDATE'].map((n) => lineOf(src.indexOf('\nprocess.env.' + n + " = '1';\n") + 1));
   assert.ok(at.every((l) => l < first), 'server.js sets both (lines ' + at.join(', ') + ') before its first require (line ' + first + ')');
 });
@@ -259,7 +259,7 @@ function staticAsks(entries, root = fs.realpathSync(ROOT)) {
       ImportDeclaration(n) { asks.push(n.source.value); },
       ImportExpression(n) { if (n.source.type === 'Literal') asks.push(n.source.value); else made.push({ made: path.relative(root, file).split(path.sep).join('/'), line: n.loc.start.line }); },
     }) };
-    const src = fs.readFileSync(file, 'utf8');
+    const src = readSource(file);
     const parsed = (file.endsWith('.mjs') ? ['module'] : ['commonjs', 'module']).some((sourceType) => {
       asks.length = 0;
       return !linter.verify(src, [{ languageOptions: { ecmaVersion: 'latest', sourceType }, linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: 'off' }, plugins: { asks: { rules: { read: rule } } }, rules: { 'asks/read': 'error' } }]).some((m) => m.fatal);
@@ -353,7 +353,7 @@ const sourceTypeOf = (f) => (f.endsWith('.mjs') ? 'module' : f.startsWith('publi
  *    (createRequire, dlopen, binding, `_load`, any `.require`), and require itself read as a value (aliased, `.call`,
  *    `.resolve`), but for `require.main`. {unread} when it does not parse.
  */
-function readSource(src, sourceType) {
+function parseAsks(src, sourceType) {
   const found = { calls: [], handed: [], unfollowed: [], requires: [], around: [] };
   const rule = { create: (context) => ({ 'Program:exit': (program) => collect(context.sourceCode, program, found) }) };
   const messages = linter.verify(src, [{ languageOptions: { ecmaVersion: 'latest', sourceType }, plugins: { fence: { rules: { read: rule } } }, rules: { 'fence/read': 'error' } }]);
@@ -552,7 +552,7 @@ function runProblems(sources, runs = RUNS, handed = HANDED) {
   const usedRuns = new Set();
   const usedHanded = new Set();
   for (const [file, src] of sources) {
-    const r = readSource(src, sourceTypeOf(file));
+    const r = parseAsks(src, sourceTypeOf(file));
     if (r.unread) { problems.push(file + ': the fence cannot read it: ' + r.unread); continue; }
     for (const c of r.calls) {
       if (c.program === 'process.execPath' || c.wrapped) continue;
@@ -581,7 +581,7 @@ function runProblems(sources, runs = RUNS, handed = HANDED) {
 function machineProblems(sources) {
   const problems = [];
   for (const [file, src] of sources) {
-    const r = readSource(src, 'commonjs');
+    const r = parseAsks(src, 'commonjs');
     if (r.unread) { problems.push(file + ': the fence cannot read it: ' + r.unread); continue; }
     for (const q of r.requires) {
       if (q.required === null) problems.push(file + ':' + q.line + ' requires what it does not write out');
@@ -728,7 +728,7 @@ test('the machine\'s own commands require Node\'s built-ins only, by node:, and 
   const present = MACHINE_FILES.filter((f) => fs.existsSync(path.join(ROOT, f)));
   assert.ok(present.includes('launch.js'), 'launch.js is read (machine.js too, once it is made)');
   assert.deepEqual(machineProblems(new Map(present.map((f) => [f, read(f)]))), []);
-  assert.ok(readSource(read('launch.js'), 'commonjs').requires.length >= 3, 'its requires are read');
+  assert.ok(parseAsks(read('launch.js'), 'commonjs').requires.length >= 3, 'its requires are read');
   // Planted: a relative file, a package, a built-in without node:, a computed name, an import, createRequire, a native addon,
   // and require reached around its plain call.
   const check = (src) => machineProblems(new Map([['machine.js', src]]));
