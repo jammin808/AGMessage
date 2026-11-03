@@ -118,6 +118,14 @@ browser opening is not yet seen on a Windows desktop)
 - CI runs the shipped bundle: the package job extracts the zip, starts its own `node.exe` and watchdog, and
   `/api/health` must answer within 30 s with the build the run stamped. Until now CI built the zip and never ran it.
   The release notes and `README.txt` say Extract All, and the .bat files are run by cmd in the Windows job.
+- CI holds every path the zip makes once extracted under Windows' limit (the owner's ask, 2026-11-03: "a CI check that
+  the longest path inside the portable zip, plus a realistic extraction base like a Downloads folder and the zip's own
+  name, stays under 260"). The package job's step after the build (`tools/zip-paths.js`, new) lays each member as
+  Extract All does: under `C:\Users\<20 characters>\Downloads`, the longest profile folder a local account makes, then
+  the folder named after the zip, then the bundle's own folder of the same name, so the zip's name counts twice. A
+  file's path must stay under 260 characters and a folder's under 248 (MAX_PATH, and CreateDirectory's room for an 8.3
+  name: Explorer is not long-path aware), or the job fails naming each. Today's longest is a file of the Anthropic SDK's
+  at 254 of 259, 5 to spare; its folder is 225 of 247. Nothing that ships changed.
 - Rolling back: nothing is stored; 0.5.1's .bat and server start as they did.
 
 **The audit log is keyed** (the owner's list, 2026-10-26: "Switch the audit chain to HMAC"; the owner's answers B, "Yes",

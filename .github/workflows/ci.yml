@@ -156,6 +156,17 @@ jobs:
       - name: Build the portable bundle (tools/build-portable.ps1)
         shell: pwsh
         run: ./tools/build-portable.ps1
+      # Every path the zip makes once a person extracts it, as Explorer's Extract All lays it: under a browser's Downloads
+      # folder in the longest profile folder a local account makes (C:\Users\<20 characters>\Downloads), then the folder
+      # Extract All names after the zip, then the bundle's own folder of the same name. A file's path stays under 260
+      # characters and a folder's under 248 (MAX_PATH, which Extract All is held to), or the job fails naming each.
+      - name: Every path in the zip, extracted from a Downloads folder, under 260 characters (tools/zip-paths.js)
+        shell: pwsh
+        run: |
+          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-Windows-*.zip')
+          if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
+          node tools/zip-paths.js $zip[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw "a path in the bundle is too long once extracted from a Downloads folder (tools/zip-paths.js, exit $LASTEXITCODE)" }
       # The shipped bundle, run as a person runs it after Extract All: the zip extracted to a throwaway folder, its own
       # node.exe running its own watchdog (no AGM_OPEN: nothing is opened), and /api/health must answer within 30 s with
       # the build this run stamped. Then its audit log is exported by the token at the laptop, extracted with
