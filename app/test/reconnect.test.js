@@ -9,9 +9,9 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { io } = require('socket.io-client');
-const { ROOT, TOKEN, startServer, stopServer, api, connect, emit, wait, until, pageScripts } = require('./helpers');
+const { ROOT, TOKEN, startServer, stopServer, api, connect, emit, wait, until, pageScripts, readSource } = require('./helpers');
 
-const SRC = fs.readFileSync(path.join(ROOT, 'public', 'reconnect.js'), 'utf8');
+const SRC = readSource(path.join(ROOT, 'public', 'reconnect.js'));
 
 /** reconnect.js run as a page runs it, with only what `globals` gives the window. Returns the window. */
 function page(globals) {
@@ -734,7 +734,7 @@ test('once no file 0.5.1 served can still be fresh in a browser, every 0.5.1 pag
 test('every page that opens a socket opens it at the reconnection\'s pace, names its build and attaches it, and its HTML loads /build.js and reconnect.js before it', () => {
   const opened = [];
   for (const file of pageScripts()) {
-    const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    const src = readSource(path.join(ROOT, file));
     const calls = [...src.matchAll(/\bio\(([^;]*)\);/g)];
     if (!calls.length) continue;
     opened.push(file);
@@ -744,7 +744,7 @@ test('every page that opens a socket opens it at the reconnection\'s pace, names
     for (const [call, args] of calls) assert.match(args, /\bauth: AGM\.reconnect\.auth\(/, file + ': ' + call + ' names the build that served it');
     assert.equal(calls.length, [...src.matchAll(/AGM\.reconnect\.attach\(socket\b/g)].length, file + ': each socket it opens is attached');
     const html = fs.readdirSync(path.join(ROOT, 'public')).filter((f) => f.endsWith('.html'))
-      .map((f) => fs.readFileSync(path.join(ROOT, 'public', f), 'utf8')).filter((h) => h.includes('src="/' + path.basename(file) + '"'));
+      .map((f) => readSource(path.join(ROOT, 'public', f))).filter((h) => h.includes('src="/' + path.basename(file) + '"'));
     assert.ok(html.length > 0, file + ' is loaded by a page');
     for (const h of html) {
       const own = h.indexOf('src="/' + path.basename(file) + '"');
@@ -756,9 +756,9 @@ test('every page that opens a socket opens it at the reconnection\'s pace, names
   }
   // Each answer a page reads its server's build from is heard: the hall's join, the board's watch, the admin page's
   // settings and a screen's state.
-  const heard = (file) => (fs.readFileSync(path.join(ROOT, file), 'utf8').match(/AGM\.reconnect\.build\.heard\(/g) || []).length;
+  const heard = (file) => (readSource(path.join(ROOT, file)).match(/AGM\.reconnect\.build\.heard\(/g) || []).length;
   assert.deepEqual(['public/app.js', 'public/halls.js', 'public/admin-plus.js', 'public/display.js'].map(heard), [1, 1, 1, 1]);
   assert.deepEqual(opened.sort(), ['public/admin.js', 'public/app.js', 'public/display.js', 'public/halls.js'], 'the four pages with a socket');
-  const ran = fs.readFileSync(path.join(ROOT, 'public', 'reconnect.js'), 'utf8');
+  const ran = readSource(path.join(ROOT, 'public', 'reconnect.js'));
   assert.ok(!/\bio\(/.test(ran), 'reconnect.js opens no socket of its own');
 });

@@ -968,8 +968,10 @@ From a git clone (developers): the two bundled programs aren't in git. Run
 once to download them (pinned versions, checksum-verified), or
 tools\build-portable.ps1 to make the zip. CI (GitHub Actions) runs the
 analyzers, the tests and the browser smoke test, builds the zip, and
-starts it once extracted, on every push. A CI run's artifact is a zip
-around the zip: extract the outer one, move the AGMessage-Portable-....zip
-inside it to your Downloads folder, and Extract All on it there.
-Extracted where it lies, every path is longer by the outer zip's name,
-and some are then too long for Windows.
+starts it once extracted, on every push. A CI run's development build is
+its artifact named AGMessage-Portable-<version>.zip: the zip itself,
+extracted as a release's is. (The run's other artifact,
+agmessage-portable-<commit>, is a zip around the zip: if you take the zip
+from that one, move it to your Downloads folder before Extract All.
+Extracted inside the outer zip's folder, every path is longer by that
+folder's name, and some are then too long for Windows.)

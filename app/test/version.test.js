@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const v = require('../lib/version');
+const { readSource } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -18,7 +19,7 @@ test('version: the three channels read apart, and in SemVer order', () => {
   assert.equal(v.compose('0.5.0', { channel: 'local', commit: 'abc1234def' }), '0.5.0-dev+abc1234');
   assert.equal(v.compose('0.5.0', { channel: 'local' }), '0.5.0-dev', 'outside a checkout: no commit, still -dev');
   assert.ok(v.BUILD.full.startsWith(v.BUILD.version + '-dev') || v.BUILD.full.startsWith(v.BUILD.version + '+'), v.BUILD.full);
-  assert.equal(v.BUILD.version, JSON.parse(fs.readFileSync(path.join(ROOT, 'app', 'package.json'), 'utf8')).version);
+  assert.equal(v.BUILD.version, JSON.parse(readSource(path.join(ROOT, 'app', 'package.json'))).version);
 });
 
 test('version: a stamp for another version, a bad build or commit, an install version not its own, or an unknown channel is not a stamp', () => {
@@ -166,7 +167,7 @@ test('stamp-build: numbers a CI build, names a release only for its own tag, ref
 });
 
 test('the release job asks the release order itself, one release job at a time, before it attests or publishes anything', () => {
-  const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8').replace(/\r\n/g, '\n');
+  const ci = readSource(path.join(ROOT, '.github', 'workflows', 'ci.yml')).replace(/\r\n/g, '\n');
   const job = (n) => '\n' + ' '.repeat(n);
   const release = ci.slice(ci.indexOf(job(2) + 'release:\n'));
   assert.ok(release.length > 20 && !/\n {2}[a-z-]+:\n/.test(release.slice(12)), 'the release job is the workflow\'s last');
@@ -179,7 +180,7 @@ test('the release job asks the release order itself, one release job at a time, 
 });
 
 test('changelog: the newest entry is the version package.json names, every header in the house shape', () => {
-  const text = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
+  const text = readSource(path.join(ROOT, 'CHANGELOG.md'));
   const headers = text.split(/\r?\n/).filter((l) => l.startsWith('## '));   // a Windows checkout has CRLF
   assert.ok(headers.length >= 1);
   for (const h of headers) assert.match(h, /^## (\d+\.\d+\.\d+) — \d{4}-\d{2}-\d{2} — \S.+$/, h);

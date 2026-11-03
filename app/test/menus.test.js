@@ -10,15 +10,14 @@
 // browser smoke's.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStagewatch, fakeNode, TOKEN } = require('./helpers');
+const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStagewatch, fakeNode, TOKEN, readSource } = require('./helpers');
 
 function loadCatalog() {
   const ctx = vm.createContext({});
   vm.runInContext('globalThis.window = globalThis;', ctx);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, 'public', 'catalog.js'), 'utf8'), ctx, { filename: 'catalog.js' });
+  vm.runInContext(readSource(path.join(ROOT, 'public', 'catalog.js')), ctx, { filename: 'catalog.js' });
   return ctx.AGM.catalog;
 }
 const C = loadCatalog();
@@ -27,7 +26,7 @@ function loadMenus() {
   const hear = () => {};
   const ctx = vm.createContext({ document: { addEventListener: hear }, innerWidth: 1400, addEventListener: hear });
   vm.runInContext('globalThis.window = globalThis;', ctx);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, 'public', 'menus.js'), 'utf8'), ctx, { filename: 'menus.js' });
+  vm.runInContext(readSource(path.join(ROOT, 'public', 'menus.js')), ctx, { filename: 'menus.js' });
   return ctx.AGM.menu;
 }
 const wait = (ms) => new Promise((r) => { setTimeout(r, ms); });

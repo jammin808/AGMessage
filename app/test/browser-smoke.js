@@ -15,11 +15,10 @@ const fs = require('fs');
 const zlib = require('zlib');
 const os = require('os');
 const path = require('path');
-const net = require('net');
 const http = require('http');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
-const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit } = require('./helpers');
+const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort } = require('./helpers');
 const { io: ioClient } = require('socket.io-client');
 
 const ROOT = path.join(__dirname, '..');
@@ -98,7 +97,6 @@ function browserPath() {
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].filter((p) => p && path.isAbsolute(p));
   return c.find((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } });
 }
-const freePort = () => new Promise((r) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
 
 // The runtime half of the fence on a hall's snapshot (test/snapshot-preload.js), beside any preload a server is given:
 // what it finds is appended to `<data folder>-snapshots.txt` as each server ends, and reported once all have stopped.

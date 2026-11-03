@@ -23,7 +23,7 @@ const R = require(path.join(ROOT, 'tools', 'readings.js'));
 const T = require(path.join(ROOT, 'tools', 'readings-take.js'));
 const READINGS_JS = path.join(ROOT, 'tools', 'readings.js');
 const TAKE_JS = path.join(ROOT, 'tools', 'readings-take.js');
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
+const read = (rel) => h.readSource(path.join(ROOT, rel)).replace(/\r\n/g, '\n');
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const NOT_WINDOWS = process.platform === 'win32' ? false : 'the PowerShell the lane asks runs on Windows: CI\'s Windows job runs it at every push, and the lane on windows-2025';
 
@@ -335,7 +335,7 @@ test('R1 as the lane takes it, on this machine with this checkout: halls seeded,
   const port = await h.freePort();
   // The hall page's pace, read from the page's own OPTIONS, so a change to the pages' pace moves the reading with it:
   // from 0.5 s doubling to 2 s, each ±50 %.
-  const page = /const OPTIONS = Object\.freeze\(\{ reconnectionDelay: (\d+), reconnectionDelayMax: (\d+), randomizationFactor: ([\d.]+) \}\);/.exec(fs.readFileSync(path.join(h.ROOT, 'public', 'reconnect.js'), 'utf8'));
+  const page = /const OPTIONS = Object\.freeze\(\{ reconnectionDelay: (\d+), reconnectionDelayMax: (\d+), randomizationFactor: ([\d.]+) \}\);/.exec(h.readSource(path.join(h.ROOT, 'public', 'reconnect.js')));
   assert.ok(page, 'reconnect.js names its OPTIONS on one line');
   assert.deepEqual(T.PAGE_PACE, { delayMs: Number(page[1]), maxMs: Number(page[2]), jitter: Number(page[3]) }, 'the reading\'s pace is the hall page\'s');
   for (let tries = 0; tries < 6; tries++) {
@@ -687,11 +687,7 @@ test('the probes: a start recorded and its exit code; a profile\'s change listed
     assert.equal(T.snapshot(home, { max: 1 }).size, 1, 'bounded');
     // UDP: a hello this process sends is heard on its port. The port is one Windows gives a UDP socket: a free TCP port
     // can lie in a range Windows keeps from UDP (its excluded port ranges), where a bind is refused with EACCES.
-    const udpPort = await new Promise((resolve, reject) => {
-      const probe = require('dgram').createSocket('udp4');
-      probe.once('error', reject);
-      probe.bind(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
-    });
+    const udpPort = await h.freeUdpPort();
     const udp = await T.udpHeard({ port: udpPort, to: '127.0.0.1', ms: 2000 });
     assert.deepEqual([udp.bound, udp.sent, udp.heard], [true, true, true], JSON.stringify(udp));
     // Health: waited for until it answers, its build read; a port nobody answers on is not served.
@@ -907,7 +903,10 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   const ci = read('.github/workflows/ci.yml');
   const lane = job(ci, 'readings');
   assert.match(lane, /\n {4}runs-on: windows-2025\n/);
-  assert.match(lane, /\n {4}needs: package\n/, 'the zip the package job built');
+  assert.match(lane, /\n {4}if: \$\{\{ startsWith\(github\.ref, 'refs\/tags\/v'\) \|\| github\.event_name == 'workflow_dispatch' \}\}\n {4}needs: package\n/, 'for a tag and a run asked for by hand, never a push: the zip the package job built');
+  // A run asked for by hand has a group of its own, never cancelled, so a push to its branch leaves it to finish.
+  assert.match(ci, /\non:\n {2}push:\n[\s\S]*?\n {2}workflow_dispatch:\n/);
+  assert.match(ci, /\nconcurrency:\n {2}group: ci-\$\{\{ github\.ref \}\}-\$\{\{ github\.event_name == 'workflow_dispatch' && 'by-hand' \|\| 'auto' \}\}\n {2}cancel-in-progress: \$\{\{ github\.event_name != 'workflow_dispatch' \}\}\n/);
   const uses = [...lane.matchAll(/^\s*(?:- )?uses: (\S+)(.*)$/gm)];
   assert.deepEqual(uses.map((u) => u[1].split('@')[0]), ['actions/checkout', 'actions/setup-node', 'actions/download-artifact', 'actions/upload-artifact']);
   for (const [, ref, comment] of uses) assert.match(ref + comment, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, ref + ' is pinned by its commit, its tag beside it');

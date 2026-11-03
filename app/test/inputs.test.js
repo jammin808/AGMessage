@@ -6,12 +6,11 @@
 // answers.
 const test = require('node:test');
 const assert = require('node:assert');
-const fs = require('fs');
 const path = require('path');
 const { io } = require('socket.io-client');
-const { ROOT, startServer, stopServer, api, connect, emit, handlerFiles, TOKEN } = require('./helpers');
+const { ROOT, startServer, stopServer, api, connect, emit, handlerFiles, TOKEN, readSource } = require('./helpers');
 
-const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1])))]
+const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.join(ROOT, f)).matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1])))]
   .filter((e) => e !== 'disconnect');
 // Not sent from the admin socket: they start cloudflared or make a new certificate — real work, not an argument check.
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);

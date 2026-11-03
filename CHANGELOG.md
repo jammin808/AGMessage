@@ -141,6 +141,23 @@ browser opening is not yet seen on a Windows desktop)
   that name was there already (up to 36 characters: today 256 of 259 there, 3 to spare), and a CI run's zip extracted
   inside the artifact zip GitHub wraps it in (every path longer by its 59-character name: 300, over). `README.txt` and
   `README.md` now say to move the inner zip to Downloads first. `--base` takes an absolute folder only.
+- A CI run's development build is an artifact of its own, `AGMessage-Portable-<version>.zip`, the zip itself
+  (upload-artifact's `archive: false`, named after the file), so it is extracted as a release's is and the path check
+  above measures it as it lands. The run's other artifact, `agmessage-portable-<commit>`, a zip around the zip, stays
+  for the readings and the release. Until a run shows the web download hands it over unwrapped, the README's words for
+  the other artifact stand beside it.
+- The Windows readings run for a `v*` tag and for a run asked for by hand (Actions, CI, Run workflow), never for a push
+  or a pull request (the owner's choice, 2026-11-03, to cut CI time): a run takes up to 45 minutes, and a push to the
+  branch cancelled it, which cost a whole run once. A run by hand has a concurrency group of its own and is never
+  cancelled. The release still waits for the lane and is never held by it.
+- Windows-only test failures show on Linux first (the owner's choice, 2026-11-03): CI's red Windows runs included tests
+  that read a source with its CR LF line ends and matched LF, and a UDP port taken from a free TCP port, each found one
+  20-minute run at a time. A new job, `test-crlf`, checks the tree out again on Linux with Windows' line ends
+  (the vendored files left byte for byte, and both said if not so) and runs the suites, and the zip waits for it. Every
+  test reads the checkout's text through one helper, `readSource` (LF on every checkout), and takes a port from
+  `freePort` (TCP) or `freeUdpPort` (UDP, new); a house lint rule, `agm/test-helpers`, refuses a test's own text read of
+  the checkout and a port picker of its own. 41 reads in 14 test files and three port pickers moved to them. Nothing that
+  ships changed.
 - Rolling back: nothing is stored; 0.5.1's .bat and server start as they did.
 
 **The audit log is keyed** (the owner's list, 2026-10-26: "Switch the audit chain to HMAC"; the owner's answers B, "Yes",

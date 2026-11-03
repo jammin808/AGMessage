@@ -16,7 +16,22 @@ const TOKEN = 'testadmintoken01';
 // whose test names no preloads of its own (NODE_OPTIONS), and read by stopServer.
 const SNAPSHOT_PRELOAD = '--require "' + path.join(__dirname, 'snapshot-preload.js').split(path.sep).join('/') + '"';
 
+/** The repository's root, the folder above app. */
+const REPO = path.join(ROOT, '..');
+/**
+ * A file of the checkout as text with LF line ends, whatever the checkout's (a Windows one has CR LF): `file` absolute,
+ * or relative to the repository's root. Every test reads the checkout's text through it (agm/test-helpers).
+ */
+const readSource = (file) => fs.readFileSync(path.resolve(REPO, file), 'utf8').replace(/\r\n/g, '\n');
+
+/** A TCP port free on loopback now. A UDP port comes from freeUdpPort: Windows keeps excluded port ranges for each protocol. */
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+/** A UDP port free on loopback now, one a UDP socket was given (a free TCP port may lie in a range Windows keeps from UDP). */
+const freeUdpPort = () => new Promise((resolve, reject) => {
+  const u = require('dgram').createSocket('udp4');
+  u.once('error', reject);
+  u.bind(0, '127.0.0.1', () => { const { port } = u.address(); u.close(() => resolve(port)); });
+});
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 /**
@@ -589,7 +604,7 @@ function unzipTo(buf, dir) {
 }
 
 module.exports = {
-  stagewatchQuery, ROOT, TOKEN, freePort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
+  stagewatchQuery, ROOT, REPO, TOKEN, readSource, freePort, freeUdpPort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
   filesUnder, handlerFiles, pageScripts,
   FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, auditMeter, acceptAll, brief,
   readZip, unzipTo, SEED_WORDS,

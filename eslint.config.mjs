@@ -10,7 +10,7 @@ const require = createRequire(new URL('./app/package.json', import.meta.url));
 const js = require('@eslint/js');
 const security = require('eslint-plugin-security');
 const globals = require('globals');
-const agm = { rules: { 'no-unescaped-html': require('./eslint-rules/no-unescaped-html.js') } };
+const agm = { rules: { 'no-unescaped-html': require('./eslint-rules/no-unescaped-html.js'), 'test-helpers': require('./eslint-rules/test-helpers.js') } };
 
 // The calls AGMessage never makes, with the reason each (the house's banned-API list).
 const bannedProperties = [
@@ -132,7 +132,8 @@ export default [
   // syntax is a parse error), `var` with it.
   { files: ['app/public/theme-init.js'], languageOptions: { ecmaVersion: 5 }, rules: { 'no-var': 'off', 'prefer-const': 'off' } },
 
-  // The tests: the same fences (they run on the show laptop's runtime too), with the test runner's globals.
-  { files: ['app/test/**/*.js'], languageOptions: { globals: { ...globals.node } } },
+  // The tests: the same fences (they run on the show laptop's runtime too), with the test runner's globals; a file of the
+  // checkout read through readSource and a free port from test/helpers.js (agm/test-helpers).
+  { files: ['app/test/**/*.js'], languageOptions: { globals: { ...globals.node } }, rules: { 'agm/test-helpers': 'error' } },
   { files: ['eslint.config.mjs'], languageOptions: { sourceType: 'module' } },
 ];

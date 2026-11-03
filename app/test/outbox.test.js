@@ -9,9 +9,9 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const nodeCrypto = require('crypto');
-const { ROOT, TOKEN, startServer, stopServer, restartServer, api, connect, emit, wait } = require('./helpers');
+const { ROOT, TOKEN, startServer, stopServer, restartServer, api, connect, emit, wait, readSource } = require('./helpers');
 
-const SRC = fs.readFileSync(path.join(ROOT, 'public', 'outbox.js'), 'utf8');
+const SRC = readSource(path.join(ROOT, 'public', 'outbox.js'));
 
 /** outbox.js run as a page runs it, with only what `globals` gives the window. Returns the window. */
 function page(globals) {

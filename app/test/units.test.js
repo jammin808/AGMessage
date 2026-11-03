@@ -8,6 +8,7 @@ const guard = require('../lib/guard');
 const { RoomStore } = require('../lib/store');
 const nodes = require('../lib/nodes');
 const ai = require('../lib/ai');
+const { readSource } = require('./helpers');
 
 test('identities: signed by the server, tamper-evident', () => {
   const secret = Buffer.alloc(32, 7);
@@ -460,12 +461,12 @@ test('store: the fence on the snapshot: every field it writes has its row, with 
   const files = ['server.js', ...require('./helpers').filesUnder('lib', /\.js$/)].filter((f) => f !== 'lib/store.js');
   assert.ok(files.includes('lib/board.js') && files.length > 20);
   for (const f of files) {
-    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const src = readSource(path.join(ROOT, f));
     assert.doesNotMatch(src, fieldWritten, f + ' changes a hall\'s snapshot field: through an op, or markDirty');
     const names = HALL.filter((n) => !(NOT_A_HALL[f] || []).includes(n));
     assert.doesNotMatch(src, nameWrittenBy(names), f + ' changes a hall\'s name or change number: through an op');
   }
-  assert.match(fs.readFileSync(path.join(ROOT, 'lib/displays.js'), 'utf8'), /\br\.seq = seq;/, 'the one exception is still there to need its row');
+  assert.match(readSource(path.join(ROOT, 'lib/displays.js')), /\br\.seq = seq;/, 'the one exception is still there to need its row');
   const writes = ['r.settings.lockRoles = true', 'r.name = x', 'h.messages.push(m)', 'dst.settings = {}', 'room.settings.seats[uid] = s', 'delete room.settings.codeOff',
     'Object.assign(room.settings, x)', 'hall.seq++', 'src.gone.clear()', 'x.messages.length = 0', 'room.settings.n += 1', 'room.guestCode = code', 'r.retired.push(code)'];
   for (const w of writes) assert.ok(fieldWritten.test(w) || nameWritten.test(w), 'the fence reads a change: ' + w);
@@ -1001,7 +1002,7 @@ test('the papers say what a power cut can lose: a crash of AGMessage or of a bro
   const ROOT = path.join(__dirname, '..', '..');
   // Line breaks, a source comment's leading asterisks and capitals never split a phrase: a rewrap moves no words.
   const read = (f) => {
-    const text = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const text = readSource(path.join(ROOT, f));
     return (f.endsWith('.js') ? text.replace(/\n[ \t]*\*(?!\/)/g, ' ') : text).replace(/\s+/g, ' ').toLowerCase();
   };
   for (const f of ['README.md', 'README.txt']) {

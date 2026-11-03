@@ -186,13 +186,14 @@ their way into a page's HTML ([docs/ANALYSIS.md](docs/ANALYSIS.md)). CI runs the
 and Windows, the browser smoke on both, CodeQL and the dependency audit; it builds the stamped zip with its SBOM (npm's
 packages and the browser libraries vendored in `app/public/vendor`, each with its SHA-256) and SHA256SUMS on every push,
 extracts it and starts the bundle once (its own Node and watchdog must answer `/api/health` with the stamped build
-within 30 s), runs both .bat files under cmd on Windows, takes the Windows readings of that zip on `windows-2025` with
-Defender's real-time monitoring turned back on first (the evidence lane, its actions pinned by commit: what each reading
-is, its mark and what a miss means are in [docs/INSTALL.md](docs/INSTALL.md)), and a `v*` tag publishes a release with a
-build-provenance attestation, its notes saying each reading that missed its mark; the readings inform a release and
-never hold it. A CI run's artifact is the zip inside a second zip, which GitHub adds: move the inner zip to Downloads
-before Extract All, since extracted inside the outer zip's folder every path is longer by that folder's name and some are
-too long for Windows. `tools\build-portable.ps1` builds the zip locally.
+within 30 s), runs both .bat files under cmd on Windows, and a `v*` tag publishes a release with a build-provenance
+attestation, its notes saying each reading that missed its mark. For a tag, and for a run asked for by hand (Actions,
+CI, Run workflow), it takes the Windows readings of that zip on `windows-2025` with Defender's real-time monitoring
+turned back on first (the evidence lane, its actions pinned by commit: what each reading is, its mark and what a miss
+means are in [docs/INSTALL.md](docs/INSTALL.md)); a push never starts it, and a push never cancels a run by hand. The
+readings inform a release and never hold it. A CI run's development build is the artifact named
+`AGMessage-Portable-<version>.zip`: the zip itself, to Extract All as a release's. `tools\build-portable.ps1` builds the
+zip locally.
 
 The libraries the pages use (pdf.js, mammoth, SheetJS and what each bundles) are listed with their licences in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), their texts in `licenses/`, and file by file, with each file's

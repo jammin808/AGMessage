@@ -372,7 +372,7 @@ test('launch.js reads this PC\'s AGMessage admin from the install record by reg.
     }
   } finally { if (before === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = before; }
   assert.equal(launch.adminName({ sys, platform: 'linux', run: () => { throw new Error('never run'); } }), '');
-  assert.ok(!/process\.env/.test(fs.readFileSync(path.join(ROOT, 'launch.js'), 'utf8')), 'launch.js reads no machine path from its environment');
+  assert.ok(!/process\.env/.test(h.readSource(path.join(ROOT, 'launch.js'))), 'launch.js reads no machine path from its environment');
 });
 
 test('launch.js knows one command, token --machine <full path> [--sys <System32 folder>], and refuses any other word', () => {

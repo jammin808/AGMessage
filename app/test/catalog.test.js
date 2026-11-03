@@ -6,16 +6,15 @@
 // the page is the browser smoke's.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { ROOT, handlerFiles } = require('./helpers');
+const { ROOT, handlerFiles, readSource } = require('./helpers');
 
 /** catalog.js as a page loads it: a classic script that extends window.AGM. */
 function loadCatalog() {
   const ctx = vm.createContext({});
   vm.runInContext('globalThis.window = globalThis;', ctx);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, 'public', 'catalog.js'), 'utf8'), ctx, { filename: 'catalog.js' });
+  vm.runInContext(readSource(path.join(ROOT, 'public', 'catalog.js')), ctx, { filename: 'catalog.js' });
   return ctx.AGM.catalog;
 }
 const C = loadCatalog();
@@ -24,8 +23,8 @@ const KINDS = Object.keys(C.KINDS);
 const all = () => KINDS.flatMap((k) => C.KINDS[k].map((e) => ({ kind: k, e })));
 
 /** The socket verbs the server registers (the fuzz's own read) and the HTTP routes it mounts, as `METHOD /path`. */
-const SOCKET_VERBS = new Set(handlerFiles().flatMap((f) => [...fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1])));
-const ROUTES = new Set(['server.js', 'lib/http-accounts.js'].flatMap((f) => [...fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/\bapp\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)].map((m) => m[1].toUpperCase() + ' ' + m[2])));
+const SOCKET_VERBS = new Set(handlerFiles().flatMap((f) => [...readSource(path.join(ROOT, f)).matchAll(/socket\.on\('([^']+)'/g)].map((m) => m[1])));
+const ROUTES = new Set(['server.js', 'lib/http-accounts.js'].flatMap((f) => [...readSource(path.join(ROOT, f)).matchAll(/\bapp\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)].map((m) => m[1].toUpperCase() + ' ' + m[2])));
 /** The verbs §16.7 names for the kinds landed so far: each must be some entry's. A unit that adds an act adds its verb. */
 const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:propose', 'stage:send', 'display:take', 'forward', 'pin', 'delete', 'display:identify', 'display:update', 'display:rotate', 'display:remove',
   // the rest of the hall page (compose, chip, code, person's hall half)

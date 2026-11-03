@@ -17,7 +17,8 @@ const ROOT = path.join(__dirname, '..', '..');
 const ZIP_PATHS_JS = path.join(ROOT, 'tools', 'zip-paths.js');
 const Z = require(ZIP_PATHS_JS);
 const T = require(path.join(ROOT, 'tools', 'readings-take.js'));
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
+const { readSource } = require('./helpers');
+const read = (rel) => readSource(path.join(ROOT, rel)).replace(/\r\n/g, '\n');
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const run = (...a) => spawnSync(process.execPath, [ZIP_PATHS_JS, ...a], { encoding: 'utf8' });
 const win = (p) => p.replace(/\//g, '\\');
@@ -197,4 +198,9 @@ test('the bundle: AGMessage-Portable-<version>.zip holding one folder, AGMessage
   assert.match(start, /\$root = \$top\[0\]\.FullName\n/);
   assert.match(steps[at('vendor-sbom.js')], /\$shipped = Join-Path \$env:RUNNER_TEMP 'bundle-start\\AGMessage'\n/);
   assert.match(ci, /run start-agmessage\.bat from the AGMessage folder it extracts/, 'the release\'s notes');
+  // The zip is an artifact of its own too, the zip itself (archive: false, named after the file), after the one the
+  // readings and the release download.
+  const alone = at('archive: false');
+  assert.ok(alone > at('actions/upload-artifact'), 'after the artifact the readings and the release download');
+  assert.equal(steps[alone], ['uses: actions/upload-artifact@v7', '        with:', '          path: dist/AGMessage-Portable-*.zip', '          archive: false', '          if-no-files-found: error', ''].join('\n'));
 });

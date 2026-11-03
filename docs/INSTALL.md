@@ -407,7 +407,9 @@ written in the release's notes, here and on the hour-before-doors card, with the
 a reading: the installer's life cycle in CI, when it lands, is a gate, as every test is.
 
 - **The lane.** CI's `readings` job runs on `windows-2025`, every action in it pinned by its commit, once the package
-  job has built the zip; its checkout keeps no credential (the stand-in tasks run the bundle's code from that folder).
+  job has built the zip, for a `v*` tag and for a run asked for by hand (Actions, CI, Run workflow, on any branch),
+  never for a push or a pull request: a run takes up to 45 minutes. A run by hand has a concurrency group of its own and
+  is never cancelled, so a push to its branch while it runs leaves it to finish; its checkout keeps no credential (the stand-in tasks run the bundle's code from that folder).
   Its first step after that checkout, `tools/defender-on.ps1`, turns Defender's real-time monitoring back on (GitHub's
   image turns it off), removes the image's exclusions of `C:\` and `D:\`, and records whether that took, read back from
   Defender itself: on means real-time monitoring and scanning on access on, in Defender's Normal mode (in passive or EDR

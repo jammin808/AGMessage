@@ -6,6 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const { Linter, ESLint } = require('eslint');
+const { readSource } = require('./helpers');
 const rule = require('../eslint-rules/no-unescaped-html');
 
 const linter = new Linter({ configType: 'flat' });
@@ -81,4 +82,51 @@ test('no native dialog in the lint: alert, confirm and prompt are refused on eve
   assert.deepEqual(await found('export const ask = () => window.prompt(\'x\');\n', 'app/public/planted.mjs'), ['no-alert'], 'and on a page module');
   assert.deepEqual(await found('AGM.ask(null, { title: \'Remove it?\' });\nAGM.toast(\'Not saved.\', true);\n', 'app/public/planted.js'), [], 'an ask in place and a toast pass');
   assert.deepEqual(await found('(function () { const confirm = [1]; AGM.x = confirm.length; })();\n', 'app/public/planted.js'), [], 'a value named confirm is no dialog');
+});
+
+// A test reads the checkout's text through readSource and finds a free port through test/helpers.js (agm/test-helpers):
+// a Windows checkout has CR LF, so a source read as it lies and matched with LF passes on Linux and fails on Windows; and
+// a port free for TCP may be one Windows keeps from UDP.
+test('agm/test-helpers: a test\'s own text read of the checkout and its own port picker are refused; bytes, files it wrote and the helpers pass; every test file is held to it', async () => {
+  const helpersRule = require('../eslint-rules/test-helpers');
+  const own = [{ plugins: { agm: { rules: { 'test-helpers': helpersRule } } }, languageOptions: { ecmaVersion: 2025, sourceType: 'script' }, rules: { 'agm/test-helpers': 'error' } }];
+  const ids = (code, filename = 'app/test/planted.test.js') => linter.verify(code, own, { filename }).map((m) => m.messageId);
+  for (const code of [
+    'fs.readFileSync(path.join(ROOT, \'server.js\'), \'utf8\');',
+    'readFileSync(path.join(__dirname, \'..\', \'lib\', \'x.js\'), { encoding: \'utf8\' });',
+    'fs.readFileSync(path.join(h.ROOT, \'public\', f), \'utf8\');',
+    'fs.readFileSync(path.resolve(REPO, \'CHANGELOG.md\'), \'utf8\').replace(/\\r\\n/g, \'\\n\');',
+    'fs.promises.readFile(path.join(APP, \'server.js\'), \'utf8\');',
+  ]) assert.deepEqual(ids(code), ['source'], code);
+  for (const code of ['const freePort = () => 0;', 'function pickUdpPort() {}', 'let findPort;']) assert.deepEqual(ids(code), ['port'], code);
+  for (const code of [
+    'fs.readFileSync(path.join(ROOT, \'public\', \'vendor\', \'a.js\'));',
+    'fs.readFileSync(path.join(dir, \'log.jsonl\'), \'utf8\');',
+    'readSource(path.join(ROOT, \'server.js\'));',
+    'const { freePort, freeUdpPort } = require(\'./helpers\');',
+    'fs.readFile(path.join(ROOT, \'x\'), (e, b) => b);',
+    'async function start() { const port = await freePort(); return port; }',
+  ]) assert.deepEqual(ids(code), [], code);
+  assert.deepEqual(ids('const freePort = () => 0; fs.readFileSync(path.join(REPO, \'x\'), \'utf8\');', 'app/test/helpers.js'), [], 'test/helpers.js defines them');
+  const repo = path.join(__dirname, '..', '..');
+  const eslint = new ESLint({ cwd: repo });
+  const found = async (code, file) => (await eslint.lintText(code, { filePath: path.join(repo, file) }))[0].messages.map((m) => m.ruleId);
+  assert.deepEqual(await found('\'use strict\';\nconst fs = require(\'fs\');\nconst path = require(\'path\');\nmodule.exports = fs.readFileSync(path.join(__dirname, \'..\', \'server.js\'), \'utf8\');\n', 'app/test/planted.test.js'), ['agm/test-helpers'], 'the config holds every test file to it');
+  assert.deepEqual(await found('\'use strict\';\nconst net = require(\'net\');\nmodule.exports = function freePort() { return net; };\n', 'app/test/planted-preload.js'), ['agm/test-helpers'], 'a preload too');
+});
+
+// The other half: CI runs the suites on Linux on a checkout with Windows' line ends, so a test that reads a source and
+// matches LF fails in minutes there, before the Windows job, and the zip is not built until it passes.
+test('CI: the suites run on a CR LF checkout on Linux, and the package waits for them', () => {
+  const ci = readSource('.github/workflows/ci.yml');
+  const at = ci.indexOf('\n  test-crlf:\n');
+  assert.ok(at > 0, 'the job');
+  const job = ci.slice(at, ci.indexOf('\n  test-windows:\n'));
+  assert.match(job, /\n {4}runs-on: ubuntu-latest\n/);
+  assert.match(job, /\n {10}git config core\.autocrlf true\n {10}git ls-files -z \| xargs -0 rm -f --\n {10}git checkout -- \.\n/, 'every tracked file checked out again with CR LF');
+  assert.match(job, /if ! grep -q \$'\\r\$' app\/server\.js; then echo "::error::[^"]+"; exit 1; fi/, 'and that it took');
+  assert.match(job, /if grep -q \$'\\r' app\/public\/vendor\/VENDOR\.json; then echo "::error::[^"]+"; exit 1; fi/, 'the vendored files left byte for byte');
+  assert.ok(job.indexOf('git checkout -- .') < job.indexOf('npm ci'), 'before the install');
+  assert.match(job, /\n {6}- name: Unit, end-to-end and watchdog tests\n {8}run: npm test\n {8}working-directory: app\n/);
+  assert.match(ci, /\n {2}package:\n[^]*?\n {4}needs: \[analyze, test-linux, test-crlf, test-windows\]\n/);
 });

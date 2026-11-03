@@ -15,13 +15,14 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const audit = require('../../tools/vendor-audit.js');
+const { readSource } = require('./helpers');
 
 const ROOT = path.join(__dirname, '..', '..');
 const VENDOR = path.join(ROOT, 'app', 'public', 'vendor');
 const manifest = JSON.parse(fs.readFileSync(path.join(VENDOR, 'VENDOR.json'), 'utf8'));
 const entries = Object.entries(manifest.files);
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+const read = (rel) => readSource(path.join(ROOT, rel));
 
 // The published files, by the SHA-256 of their bytes in each package (read from the registry's tarballs, whose
 // integrity npm checks): what the folder must hold, and what it must no longer hold.
@@ -50,7 +51,7 @@ const LICENCES = {
 const SEVERITIES = ['critical', 'high', 'moderate', 'low'];
 const ALLOWED = ['Apache-2.0', 'MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'MIT AND Zlib', 'MIT OR GPL-3.0-or-later'];
 const flat = (s) => s.replace(/^[ \t]*(?:\*|#)[ \t]?/gm, '').replace(/[*`]/g, '').replace(/\s+/g, ' ');
-const noticeText = (notice) => fs.readdirSync(path.join(ROOT, notice)).map((f) => fs.readFileSync(path.join(ROOT, notice, f), 'utf8')).join('\n');
+const noticeText = (notice) => fs.readdirSync(path.join(ROOT, notice)).map((f) => readSource(path.join(ROOT, notice, f))).join('\n');
 const everyComponent = () => entries.flatMap(([file, e]) => [{ file, c: e, bundled: false }, ...e.bundles.map((b) => ({ file, c: b, bundled: true }))]);
 
 test('vendor: every file in the folder is in VENDOR.json with its own SHA-256, build, licence and notice, and every file listed is there', () => {

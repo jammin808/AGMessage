@@ -13,7 +13,7 @@ const nodes = require('../lib/nodes');
 const { buildContext, showBrief } = require('../lib/context');
 
 const ROOT = path.join(__dirname, '..');
-const { filesUnder, handlerFiles, pageScripts } = require('./helpers');
+const { filesUnder, handlerFiles, pageScripts, readSource } = require('./helpers');
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 async function until(fn, ms = 8000) { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await wait(50); } return false; }
@@ -565,14 +565,14 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
     'lib/audit.js': { max: 11, why: 'the audit trail: an entry is on disk (fsync) before the action is acknowledged, a short write cut back, the file rotated at 20 MB; read once at startup, and the records outside the data folder, read once at open; verify reads asynchronously in slices' },
   };
   for (const f of files) {
-    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const src = readSource(path.join(ROOT, f));
     assert.ok(!/\beval\s*\(|new Function\s*\(/.test(src), f + ': no eval / new Function');
     // `fs.realpathSync.native(` is a synchronous call too.
     const sync = (src.match(/\bfs\.\w+Sync(?:\.native)?\s*\(/g) || []).length;
     const rule = allowed[f] || { max: 0 };
     assert.ok(sync <= rule.max, `${f}: ${sync} synchronous fs calls (allowed ${rule.max}${rule.why ? ': ' + rule.why : ''})`);
   }
-  const nodesSrc = fs.readFileSync(path.join(ROOT, 'lib/nodes.js'), 'utf8');
+  const nodesSrc = readSource(path.join(ROOT, 'lib/nodes.js'));
   assert.ok(!/[?&]pin=/.test(nodesSrc), 'no key in a WebSocket URL (Show Bus §7)');
 });
 
@@ -604,7 +604,7 @@ test('guard rails: the timers the handler files start are counted, each with its
   const files = handlerFiles();
   assert.deepEqual(Object.keys(TIMERS).filter((f) => !files.includes(f)), [], 'every file with a list is a handler file');
   for (const f of files) {
-    const timers = (fs.readFileSync(path.join(ROOT, f), 'utf8').match(TIMER_CALLS) || []).length;
+    const timers = (readSource(path.join(ROOT, f)).match(TIMER_CALLS) || []).length;
     const why = TIMERS[f] || [];
     assert.equal(timers, why.length, `${f}: ${timers} timers started, ${why.length} with a reason (${why.join('; ') || 'none'}): a state frame is a Latest; a tick of its own moves this list, with its words`);
   }
@@ -613,7 +613,7 @@ test('guard rails: the timers the handler files start are counted, each with its
   assert.equal(count('setTimeout(f, 1); setInterval (g, 2); global.setTimeout(h); timers.setInterval(i, 3);'), 4);
   assert.equal(count('clearTimeout(t); clearInterval(t); resetTimeout(t); const { setTimeout } = timers; new Latest({ name: "x", delayMs: 100, flush });'), 0);
   // The state frames that exist go through the one primitive, each by its name in health's `latest`.
-  const server = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+  const server = readSource(path.join(ROOT, 'server.js'));
   assert.deepEqual([...server.matchAll(/new Latest\(\{\s*name: '([^']+)'/g)].map((m) => m[1]), ['board', 'screens', 'people', 'seen']);
 });
 
@@ -650,7 +650,7 @@ test('guard rails: the stylesheet draws with its tokens: hex colours only in the
   // --c-ink-muted, at 4.5:1 for words and 3:1 for icons in both themes; an opacity between 0 and 1 fades whatever
   // is under it below that, so none is written (a toast or a switch hidden at 0 and shown at 1 is not muted ink).
   const HEX_CAP = 265;
-  const css = fs.readFileSync(path.join(ROOT, 'public', 'styles.css'), 'utf8');
+  const css = readSource(path.join(ROOT, 'public', 'styles.css'));
   const { outside, tokens } = hexOutsideTokens(css);
   assert.deepEqual(tokens, { ':root': 1, 'html[data-theme="dark"]': 1 }, 'the tokens are defined in one :root block and redefined in one dark block');
   assert.ok(outside <= HEX_CAP, `styles.css writes ${outside} hex colours outside its token blocks, more than ${HEX_CAP}: a new colour is a token`);
@@ -671,17 +671,17 @@ test('guard rails: a dialog opens through AGM.openDialog, which still opens it w
   // common.js's one call is the helper's own; every other page script, the hall page's included, holds none.
   const counted = {};
   for (const f of pageScripts()) {
-    const n = showModalCalls(fs.readFileSync(path.join(ROOT, f), 'utf8'));
+    const n = showModalCalls(readSource(path.join(ROOT, f)));
     if (n) counted[f] = n;
   }
   assert.deepEqual(counted, { 'public/common.js': 1 }, 'showModal() only in common.js\'s AGM.openDialog');
   // The hall page and the admin page load common.js before their own scripts (deferred alike on the hall page), so
   // AGM.openDialog and the one toast are there when they run.
   for (const [page, own] of [['app.html', '/app.js'], ['admin.html', '/admin.js']]) {
-    const scripts = [...fs.readFileSync(path.join(ROOT, 'public', page), 'utf8').matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
+    const scripts = [...readSource(path.join(ROOT, 'public', page)).matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
     assert.ok(scripts.indexOf('/common.js') > 0 && scripts.indexOf('/common.js') < scripts.indexOf(own), page + ' loads common.js before ' + own);
   }
-  const common = fs.readFileSync(path.join(ROOT, 'public', 'common.js'), 'utf8');
+  const common = readSource(path.join(ROOT, 'public', 'common.js'));
   assert.match(common, /function openDialog\(dlg\) \{\s*if \(!dlg\) return;\s*if \(typeof dlg\.showModal === 'function'\) \{ dlg\.showModal\(\); return; \}/, 'common.js calls showModal() only behind its probe, in AGM.openDialog');
   // The read sees a call however it is spaced, and nothing that only names it.
   assert.equal(showModalCalls('d.showModal(); $("x").showModal (); typeof d.showModal === "function"; d.showModalLater(); // showModal'), 2);
@@ -696,12 +696,12 @@ const ownToast = (src) => {
 test('guard rails: a page has one toast, AGM.toast (common.js), and no page script makes a toast of its own', () => {
   const own = {};
   for (const f of pageScripts()) {
-    const found = ownToast(fs.readFileSync(path.join(ROOT, f), 'utf8'));
+    const found = ownToast(readSource(path.join(ROOT, f)));
     if (found.length) own[f] = found;
   }
   assert.deepEqual(Object.keys(own), ['public/common.js'], 'only common.js makes the toast (' + JSON.stringify(own) + ')');
   // The stylesheet draws the one toast: `.agm-toast` is its only toast class.
-  const css = fs.readFileSync(path.join(ROOT, 'public', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const css = readSource(path.join(ROOT, 'public', 'styles.css')).replace(/\/\*[\s\S]*?\*\//g, '');
   assert.deepEqual([...new Set(css.match(/\.[a-z-]*toast[a-z-]*/g))].sort(), ['.agm-toast', '.toast-undo']);
   // The read sees a toast made by hand, and nothing that only calls the one toast or says the word in a comment.
   assert.equal(ownToast("const t = document.createElement('div'); t.className = 'agm-toast';").length, 1);
@@ -787,7 +787,7 @@ function floorFaults(src) {
 test('guard rails: the stylesheet holds on every browser from the page floor: each newer feature follows its fallback, and a newer selector stands in a rule of its own', () => {
   // A browser drops a declaration it cannot read (the one before it then holds) and a whole rule whose selector list holds
   // a selector it cannot read (https://developer.mozilla.org/en-US/docs/Web/CSS/Selector_list).
-  const css = fs.readFileSync(path.join(ROOT, 'public', 'styles.css'), 'utf8');
+  const css = readSource(path.join(ROOT, 'public', 'styles.css'));
   assert.deepEqual(floorFaults(css), [], 'styles.css: every feature above the page floor follows its fallback (docs/DEVICES.md)');
   const read = cssRules(css);
   assert.ok(read.length > 500 && read.some((r) => r.within.some((w) => w.startsWith('@media'))), `the reader reads the whole sheet, its @media rules too (${read.length} rules)`);
@@ -841,12 +841,12 @@ const clonesIn = (src) => [...src.matchAll(/([\w.$]+(?:\(\))?)\s*\.cloneNode\s*\
 test('guard rails: one page script hears the context menu, menus.js, so every object\'s right-click is its catalogue menu; the hall page copies only its message template', () => {
   const pages = pageScripts();
   for (const f of ['public/catalog.js', 'public/menus.js', 'public/outbox.js']) assert.ok(pages.includes(f), f + ' is a page script every fence reads');
-  const heard = Object.fromEntries(pages.map((f) => [f, contextmenuListeners(fs.readFileSync(path.join(ROOT, f), 'utf8'))]).filter(([, n]) => n));
+  const heard = Object.fromEntries(pages.map((f) => [f, contextmenuListeners(readSource(path.join(ROOT, f)))]).filter(([, n]) => n));
   // Two there: the door (AGM.menu.door), and a menu's own panel, which keeps the browser's menu from opening over it.
   assert.deepEqual(heard, { 'public/menus.js': 2 }, 'contextmenu only in menus.js: a right-click heard anywhere else would be a menu out of step with the catalogue');
   // A copy of a drawn message drops its listeners and goes stale: the pinned strip draws each message afresh instead, so
   // the template is the one node the hall page copies.
-  assert.deepEqual(clonesIn(fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8')), ['tpl.content.firstElementChild'], 'cloneNode in app.js only at the template\'s site');
+  assert.deepEqual(clonesIn(readSource(path.join(ROOT, 'public', 'app.js'))), ['tpl.content.firstElementChild'], 'cloneNode in app.js only at the template\'s site');
   // The reads find what they are for.
   assert.equal(contextmenuListeners("a.addEventListener('contextmenu', f); b.addEventListener( \"contextmenu\", g); c.addEventListener('click', h); // contextmenu"), 2);
   assert.deepEqual(clonesIn('const c = node.cloneNode(true); tpl.content.firstElementChild.cloneNode(true); x.cloneNodes(); el().cloneNode(false);'), ['node', 'tpl.content.firstElementChild', 'el()']);
@@ -855,7 +855,7 @@ test('guard rails: one page script hears the context menu, menus.js, so every ob
 test('guard rails: a page posts a message only to its own origin, and hears one only after checking who sent it', () => {
   let posts = 0, listeners = 0;
   for (const f of pageScripts()) {
-    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const src = readSource(path.join(ROOT, f));
     const read = [...src.matchAll(/\.postMessage\s*\(([^;]*)\)\s*;/g)];
     assert.equal(read.length, (src.match(/\.postMessage\s*\(/g) || []).length, `${f}: every postMessage is one statement the guard reads`);
     for (const m of read) {

@@ -127,6 +127,9 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
   to. `theme-init.js` stays ES5 and first on every page with people, and a page script stops below the floor before it
   asks the server anything or opens a socket. ESLint, `test/resilience.test.js` and `test/pagefloor.test.js` hold it.
 - **Test fixtures that look like keys** carry `// secret-scan: fixture` on their line.
+- **A test reads the checkout's text through `readSource`** (`test/helpers.js`: LF line ends on a Windows checkout too)
+  **and takes a free port from `freePort` (TCP) or `freeUdpPort` (UDP)**, never a picker of its own; `agm/test-helpers`
+  (`app/eslint-rules/test-helpers.js`) refuses the rest, and CI's `test-crlf` runs the suites on a CR LF checkout.
 - **The audit log** gets a row for every security-relevant action, never a secret, token or screen link.
 - **The coverage gate** (`npm run coverage`) is raised as tests are added, never lowered to make a build green.
 - **Node 24 LTS** (`engines`); CI also runs Node 26. CommonJS on the server, plain scripts in `app/public` (no build
@@ -150,9 +153,11 @@ node ../tools/stamp-build.js --print                  # the version this checkou
 ```
 
 CI (`.github/workflows/ci.yml`): `analyze` (lint, secret scan, version), `test-linux` (Node 24 and 26, coverage,
-Chrome smoke), `test-windows` (tests, Edge smoke), `package` (the stamped portable zip, CycloneDX SBOM, SHA256SUMS),
-`readings` (the Windows evidence lane on `windows-2025`, its actions pinned by commit: Defender turned back on first, then
-the readings of that zip, judged against their marks; they inform and never hold) and, on a `v*` tag that names
+Chrome smoke), `test-crlf` (the suites on Linux on a checkout with Windows' CR LF line ends), `test-windows` (tests, Edge
+smoke), `package` (the stamped portable zip, also an artifact of its own unwrapped, CycloneDX SBOM, SHA256SUMS),
+`readings` (the Windows evidence lane on `windows-2025`, for a `v*` tag or a run asked for by hand (Actions, CI, Run
+workflow), never a push, and in a concurrency group of its own a push never cancels; its actions pinned by commit:
+Defender turned back on first, then the readings of that zip, judged against their marks; they inform and never hold) and, on a `v*` tag that names
 `app/package.json`'s version, above every release already published and every other version tagged (asked again as its
 first step, one release job at a time), `release` with a build-provenance attestation, waiting for the lane and never
 held by it, its notes saying each reading that missed its mark.

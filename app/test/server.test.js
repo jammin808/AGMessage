@@ -7,15 +7,11 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const net = require('net');
 const { io } = require('socket.io-client');
 
 const ROOT = path.join(__dirname, '..');
 const TOKEN = 'testadmintoken01';
 
-function freePort() {
-  return new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
-}
 
 async function startServer(dataDir, port) {
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
@@ -33,7 +29,7 @@ async function startServer(dataDir, port) {
   child.kill();
   throw new Error('server did not start:\n' + out);
 }
-const { stopServer: stop } = require('./helpers');   // asked over IPC, so it saves first on Windows too
+const { stopServer: stop, freePort } = require('./helpers');   // asked over IPC, so it saves first on Windows too
 
 const emit = (s, ev, arg) => new Promise((resolve) => s.emit(ev, arg, resolve));
 const connect = (base, cookie) => new Promise((resolve, reject) => {
