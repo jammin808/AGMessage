@@ -46,8 +46,9 @@ $code = $LASTEXITCODE
 Pop-Location
 if ($code -ne 0) { throw 'npm ci failed' }
 
-# Never ship hall data, whatever the working copy holds.
-foreach ($p in 'app\data\rooms\*.json', 'app\data\rooms\*.log', 'app\data\*.key', 'app\data\settings.json') {
+# Never ship hall data, whatever the working copy holds: every file of every room (a hall's and each side room's
+# snapshot, log and backup), every store and every key.
+foreach ($p in 'app\data\*.json', 'app\data\rooms\*', 'app\data\*.key') {
   if (Get-ChildItem (Join-Path $stage $p) -ErrorAction SilentlyContinue) { throw "Refusing to package: $p is present" }
 }
 

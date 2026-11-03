@@ -149,8 +149,10 @@ run the show on the build you rehearsed.
   AGMessage 0.7.0+52 in format 3, and this build (...) reads format 2
   and older. ..." Start the newer build again, or start the older one on
   the copy the words name. 0.5.1 reads no format: it opens a 0.6 folder
-  with the losses "Going back to 0.5.1" names below. Do not go back to
-  0.5.1 during a show.
+  with the losses "Going back to 0.5.1" names below. It opens each hall
+  but none of a hall's other rooms (their files stay, and 0.6 opens them
+  again), and its reset or removal of any hall can delete a file only
+  one of those rooms holds. Do not go back to 0.5.1 during a show.
 
 Windows Firewall, a new folder, a standard account, a Public network
 ---------------------------------------------------------------------

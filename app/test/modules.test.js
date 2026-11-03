@@ -1,7 +1,8 @@
 'use strict';
-// The module fence (docs/ANALYSIS.md §3.5): the server's layers, read from its require() calls, and the wire's words,
-// read from the files that register socket verbs (`handlerFiles()`) and from every page script, closed both ways. Each
-// rule is a function of the sources it is given, so the tree is held to it and a planted breach of each kind fails it.
+// The module fence (docs/ANALYSIS.md §3.5): the server's layers, read from its require() calls, the wire's words, read
+// from the files that register socket verbs (`handlerFiles()`) and from every page script, closed both ways, and the
+// store's any-room readers, counted per file. Each rule is a function of the sources it is given, so the tree is held to
+// it and a planted breach of each kind fails it.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -631,4 +632,97 @@ test('(k) a planted upd of a field outside the table, and a page table out of st
   assert.deepEqual(run({ page: base.page.replace("['pinUpdate', setMessagePinned]", 'PIN_ROW') }), ["public/app.js has no row for 'pinned', which lib/ops.js sends as 'pinUpdate'", "public/app.js: a row of its op table is not field: ['event', draw]: pinned"]);
   assert.deepEqual(run({ page: '// no table' }), ["public/app.js has no row for 'pinned', which lib/ops.js sends as 'pinUpdate'", "public/app.js has no row for 'stage', which lib/ops.js sends as 'stageAck'", 'public/app.js: it holds no op table (const UPD_EVENTS = {…})']);
   assert.deepEqual(run({ handlers: { 'server.js': base.handlers['server.js'].split('\n')[0] } }), ["the op table's 'stage' is a field no upd sends: its row goes"]);
+});
+
+// ---------------------------------------------------------------- (l) the any-room readers
+/**
+ * Every call in a shipped server file to the store's any-room readers (lib/store.js: `store.room`, `hasRoom`, `allRooms`
+ * and `roomsOf`), counted per file, each with why it reads any room — a hall's Main room or a side room — and not a hall
+ * (`store.get`, `has`, `rooms`). A reader of a hall never sees a side room, so a reader missed fails closed ("Room not
+ * found"); one moved reaches side rooms, so each says why it may. A new any-room reader moves this list, with its words.
+ * No file but the store reaches its side rooms by another way (`store.side`, `store.sideByHall`).
+ */
+const ANY_ROOM = {
+  'server.js': [
+    'a stop\'s halls left unwritten: a side room left unwritten counts as its hall',
+    'a people list and seen receipts are a room\'s, Main or side (a screens frame names a hall, its Main room)',
+    'the power request: a hall is live with a page seated in any of its rooms, a side room alone included',
+    'the busy line: a message any room holds from the window, keyed by the room its page is in',
+    'a locked room\'s saved seats follow its seats while it is still here, Main or side',
+    'the boot\'s saved seats nobody took up are let go in every room',
+    'a file any room holds is in use: a hall\'s reset or deletion never removes one a side room still holds',
+    'the admin\'s transcript of any room',
+    'health\'s sideRooms: every room but the halls',
+    'a new hall\'s key is no room\'s, side rooms included',
+    '"This laptop"\'s Pages row names the room a hall page on another build is in, a side room by its hall\'s name and its own',
+    'an account and the admin\'s support view join a room by its key (a guest\'s code names a hall)',
+    'a page\'s room is still here, Main or side',
+    'the forward picker: the rooms this person sits in or is linked to that are still here',
+    'and this person\'s rights in each',
+    'and each named by its name',
+    'a forward\'s target room, where the person\'s seat or the admin\'s link takes it',
+    'a send to the speaker\'s screen is written into the room it came from only while that room is still kept',
+    'and a proposal to the show desk likewise',
+    'an admin\'s link names its room by its name',
+    'the admin\'s watch of any room',
+    'the admin\'s reset of any room',
+    'the admin\'s removal of any room',
+    'and a hall removed goes with every room it holds',
+    'the admin\'s removal of a message in any room',
+    'the admin\'s change of a seat in any room',
+    'the admin\'s lock of any room\'s seats',
+    'the admin\'s link of a person into any room',
+    'and the room that person is in',
+    'the admin\'s unlink, in the room that person is in',
+    'the admin sends a person out of the room they are in',
+    'the admin\'s AI summary of any room',
+    'and the minutes posted in it',
+    'a page gone past the grace is said to have left a room that is still here',
+    'and a locked room it left keeps its seats',
+    'a hall that follows another Stagewatch tells every room it holds',
+    'a Stagewatch\'s frame reaches every room of each hall that follows it',
+    'after a stop that did not save, every room says AGMessage restarted',
+  ],
+};
+/** A call to one of the store's any-room readers, however it is spaced. */
+const ANY_ROOM_CALL = /\bstore\s*\.\s*(?:room|hasRoom|allRooms|roomsOf)\s*\(/g;
+/** The store's side rooms reached past its readers: by key (`side`) or by hall (`sideByHall`). */
+const SIDE_REACHED = /\bstore\s*\.\s*side(?:ByHall)?\b/;
+/** The any-room calls in `sources` (file → source) that the rows do not account for, and rows of no file. Sorted. */
+function anyRoomProblems(sources, rows = ANY_ROOM) {
+  const problems = [];
+  for (const [file, src] of sources) {
+    const calls = (src.match(ANY_ROOM_CALL) || []).length;
+    const why = Object.hasOwn(rows, file) ? rows[file] : [];
+    if (calls !== why.length) problems.push(file + ': ' + calls + ' calls to the any-room readers, ' + why.length + ' with a reason: each reads a side room too, and says why');
+    if (SIDE_REACHED.test(src)) problems.push(file + ' reaches the store\'s side rooms past its readers (store.side, store.sideByHall)');
+  }
+  for (const file of Object.keys(rows)) if (!sources.has(file)) problems.push(file + ' is not in the tree: its row goes');
+  return problems.sort();
+}
+
+test('(l) the any-room readers: each call that reads a side room too is counted per file, with its reason', () => {
+  const sources = sourcesOf(serverCode());
+  assert.ok(sources.has('server.js') && sources.has('lib/store.js') && sources.has('lib/board.js'));
+  assert.deepEqual(anyRoomProblems(sources), []);
+  // §3.5's readers among them: the transcript, the forward, uploads in use, the boot's seats, the restart line and the stage.
+  for (const reader of ['admin\'s transcript', 'forward\'s target', 'a file any room holds', 'boot\'s saved seats', 'every room says AGMessage restarted', 'tells every room it holds']) {
+    assert.ok(ANY_ROOM['server.js'].some((w) => w.includes(reader)), reader);
+  }
+});
+
+test('(l) a planted any-room call without its reason, a row without its call, and the side rooms reached past the store, each fail it', () => {
+  const base = { 'server.js': 'const r = store.room(key);\nfor (const x of store.allRooms()) n++;', 'lib/board.js': 'const h = store.get(code);' };
+  const rows = { 'server.js': ['a room by its key', 'every room'] };
+  const run = (edit = {}, r = rows) => anyRoomProblems(new Map(Object.entries({ ...base, ...edit })), r);
+  assert.deepEqual(run(), [], 'the planted tree passes');
+  assert.deepEqual(run({ 'server.js': base['server.js'] + '\nif (store . hasRoom (k)) go();' }), ['server.js: 3 calls to the any-room readers, 2 with a reason: each reads a side room too, and says why']);
+  assert.deepEqual(run({ 'lib/board.js': 'for (const r of store.roomsOf(hall)) count(r);' }), ['lib/board.js: 1 calls to the any-room readers, 0 with a reason: each reads a side room too, and says why']);
+  assert.deepEqual(run({ 'server.js': 'const r = store.room(key);' }), ['server.js: 1 calls to the any-room readers, 2 with a reason: each reads a side room too, and says why']);
+  for (const past of ['for (const r of store.side.values()) count(r);', 'const list = store.sideByHall.get(hall);']) {
+    assert.deepEqual(run({ 'lib/board.js': past }), ['lib/board.js reaches the store\'s side rooms past its readers (store.side, store.sideByHall)'], past);
+  }
+  assert.deepEqual(run({}, { ...rows, 'lib/gone.js': ['x'] }), ['lib/gone.js is not in the tree: its row goes']);
+  // A hall's readers, a method of the same name on another object, and a room's own fields are none of them.
+  assert.deepEqual(run({ 'lib/board.js': 'store.get(c); store.has(c); store.rooms.values(); this.room(k); hall.roomsOf; r.side; displays.room(k);' }), []);
 });

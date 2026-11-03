@@ -190,7 +190,10 @@ task, so either one there stops it with code 3.
 halls and their Stagewatch, the admin's room controls (a hall made from the admin page or over HTTP, its messages cleared
 with the files that left the disk, a message removed with whose it was and its kind, a guest's role, roles locked or
 unlocked with the seats kept, a guest let forward into another hall or no longer (that hall by its name, never its
-code), a person sent out, the AI's minutes posted: one row for each change, none for a control that changes nothing),
+code), a person sent out, the AI's minutes posted, a hall removed (`hall.remove`, with how many other rooms went with it)
+or a hall's side room removed alone (`room.remove`, by its name and its hall's), each saying the files of any room
+another program held as they were removed, kept, and whether it opens again at the next start: one row for each change, none for a
+control that changes nothing),
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and

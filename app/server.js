@@ -312,7 +312,8 @@ function flushLanes() {
 function saveAll() {
   const unsaved = flushLanes();
   const halls = store.compactDirty();
-  const left = store.dirtyCodes().length;
+  // The halls any of whose rooms is left unwritten: a side room counts as its hall.
+  const left = new Set(store.dirtyCodes().map((key) => store.room(key).hall)).size;
   if (left) unsaved.push(plural(left, 'hall'));
   if (savePeaks() && !peaksLane.flushSync() && !unsaved.includes('peaks')) {
     console.error('  [save] peaks could not be written: ' + peaksLane.lastError);
@@ -399,19 +400,23 @@ const frames = {
   // people, screens and Stagewatch mark it, which are what make a hall live: the power request follows it then.
   board: new Latest({ name: 'board', delayMs: 300, flush: () => { sendBoards(); keepAwake(); } }),
   // A hall's screens console re-reads its list (keyed by the hall): a take on 50 screens is one re-read per console.
-  screens: new Latest({ name: 'screens', delayMs: 150, flush: (halls) => eachHall('screens', halls, (r) => io.to(r.code).emit('displays:changed', { code: r.code })) }),
-  // A hall's people list (keyed by the hall): a join storm is one list per window, not one per join to every page.
-  people: new Latest({ name: 'people', delayMs: 100, flush: (halls) => eachHall('people', halls, (r) => sendPeople(r)) }),
-  // A hall's seen receipts (keyed by the hall, with the people whose receipt moved): one frame per hall per second.
+  screens: new Latest({ name: 'screens', delayMs: 150, flush: (halls) => eachRoom('screens', halls, (r) => io.to(r.code).emit('displays:changed', { code: r.code })) }),
+  // A room's people list (keyed by the room, a hall's Main room or a side room): a join storm is one list per window, not
+  // one per join to every page.
+  people: new Latest({ name: 'people', delayMs: 100, flush: (rooms) => eachRoom('people', rooms, (r) => sendPeople(r)) }),
+  // A room's seen receipts (keyed by the room, with the people whose receipt moved): one frame per room per second.
   seen: new Latest({
     name: 'seen', delayMs: 1000,
     merge: (a, b) => { for (const uid of b) a.add(uid); return a; },
-    flush: (halls) => eachHall('seen', halls, (r, uids) => sendSeen(r, uids)),
+    flush: (rooms) => eachRoom('seen', rooms, (r, uids) => sendSeen(r, uids)),
   }),
 };
-/** Each hall of a frame's batch that is still here, given to `send` with its value; one that faults holds back no other. */
-function eachHall(frame, halls, send) {
-  sendEach(halls, ([code, value]) => { const r = store.get(code); if (r) send(r, value); }, (e) => frameRefused(frame, e));
+/**
+ * Each room of a frame's batch that is still here (a hall's key names its Main room), given to `send` with its value;
+ * one that faults holds back no other.
+ */
+function eachRoom(frame, rooms, send) {
+  sendEach(rooms, ([code, value]) => { const r = store.room(code); if (r) send(r, value); }, (e) => frameRefused(frame, e));
 }
 /**
  * Sockets open now: per lane, the most from one address (on the venue) or one network (through the tunnel), and those
@@ -629,8 +634,9 @@ function laptopFacts() {
 // report, a Stagewatch frame) and every 5 s window.
 const powerRequest = new power.PowerRequest({ planOf: () => power.plan(process.env), say: (words) => console.log('  [power] ' + words) });
 /**
- * Each hall now, as the power request reads it (lib/power.js isLive): its open pages seated there, idle or not (a Board
- * reading quietly is a live show; the admin's support view takes no seat), its screens on which a browser confirmed a
+ * Each hall now, as the power request reads it (lib/power.js isLive): its open pages seated in any of its rooms, idle or
+ * not (a Board reading quietly is a live show, and so is a meeting in a side room alone; the admin's support view takes
+ * no seat), its screens on which a browser confirmed a
  * take other than holding (one of a screen's browsers that could not show it takes nothing from one that did), and
  * whether its countdown counts, as its Stagewatch says now (a link connected, its frame not gone quiet): running, or
  * past zero and counting on into overtime. A Stagewatch several halls follow (the default) is one countdown: it makes
@@ -646,7 +652,7 @@ function hallsNow() {
   const following = [];   // the halls that follow the default Stagewatch
   for (const r of store.rooms.values()) {
     let pages = 0;
-    for (const sid of r.users.keys()) if (io.sockets.sockets.has(sid)) pages++;
+    for (const x of store.roomsOf(r.code)) for (const sid of x.users.keys()) if (io.sockets.sockets.has(sid)) pages++;
     const own = hallLinks.get(r.code);
     const h = { pages, takes: takes.get(r.code) || 0, running: own ? counting(own) : false };
     if (!own) following.push(h);
@@ -692,7 +698,8 @@ function busyNow(now = Date.now()) {
   }
   const active = new Set(activity.keys(now));
   let help = 0;
-  for (const r of store.rooms.values()) {
+  // A message any room holds from the window, a side room's too: its page is keyed by the room it is in (busy.pageKey).
+  for (const r of store.allRooms()) {
     const said = busy.fromMessages(r.code, r.messages, since);
     for (const k of said.pages) active.add(k);
     help += said.help;
@@ -839,12 +846,12 @@ function seatsSaved(room, seats) {
 }
 /** A locked room's saved seats follow the seats it holds: one numbered change, only when they differ. */
 function syncSeats(room) {
-  if (!store.has(room.code) || !room.settings.lockRoles) return;
+  if (!store.hasRoom(room.code) || !room.settings.lockRoles) return;
   const next = seatsNow(room);
   if (!seatsSaved(room, next)) apply(room, { o: 'meta', settings: { seats: next } });
 }
 // The boot's first seconds are over: a seat saved before the restart that nobody took up goes, as after a drop's grace.
-setTimeout(() => { for (const room of store.rooms.values()) if (Object.keys(room.settings.seats || {}).length) syncSeats(room); }, BOOT_SEAT_MS + 100).unref();
+setTimeout(() => { for (const room of store.allRooms()) if (Object.keys(room.settings.seats || {}).length) syncSeats(room); }, BOOT_SEAT_MS + 100).unref();
 
 // Upload tokens, issued at join: an upload must come from someone in a room. The rate is the connection's and the
 // network's (`guard.limitKey`: an address on the venue, a /64 for an IPv6 phone through the tunnel), not the token's, so
@@ -858,11 +865,20 @@ const uploadBuckets = new guard.Buckets(0.5, 8, 5000);
 // Files uploaded in this run and not yet past their wait: one nobody posted by then is removed.
 const freshUploads = new Map();    // file name -> uploaded at
 
-/** Every upload something still points at: a message in any hall, what a screen shows, a hall's holding image. */
+/**
+ * What the admin is told when a room's files could not all be removed (lib/store.js `remove`'s `kept`: another program
+ * held one, an antivirus or a backup): how many rooms' files stay, and, when `what` (the hall, the room) loads again at
+ * the next start for it, that its uploads are kept for it.
+ */
+function keptWords(gone, what) {
+  return 'Another program (an antivirus or a backup) held the files of ' + plural(gone.kept.length, 'room') + ', which stay in the data folder'
+    + (gone.again ? ': ' + what + ' opens again at the next start unless they are removed first, and its uploads are kept for it.' : ', unused.');
+}
+/** Every upload something still points at: a message in any room of any hall, what a screen shows, a hall's holding image. */
 function uploadsInUse() {
   const used = new Set();
   const add = (u) => { if (guard.validUploadUrl(u)) used.add(u.slice(9)); };
-  for (const r of store.rooms.values()) for (const m of r.messages) if (m.type === 'file') add(m.url);
+  for (const r of store.allRooms()) for (const m of r.messages) if (m.type === 'file') add(m.url);
   for (const d of displays.list.values()) if (d.content) { add(d.content.url); add(d.content.image); }
   for (const code of Object.keys(displays.halls)) add(displays.hallHolding(code));
   return used;
@@ -1137,7 +1153,7 @@ app.get('/d/:token', (req, res) => {
 
 app.get('/api/admin/transcript/:code', (req, res) => {
   if (!isAdminReq(req)) return res.status(403).send('Forbidden');
-  const room = store.get(String(req.params.code || '').toUpperCase());
+  const room = store.room(String(req.params.code || '').toUpperCase());
   if (!room) return res.status(404).send('Room not found');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
@@ -1149,7 +1165,8 @@ app.get('/api/admin/transcript/:code', (req, res) => {
 app.get('/api/health', (req, res) => {
   const base = { ok: true, version: VERSION, build: BUILD.full, uptime: Math.round(process.uptime()) };
   if (!(isAdminReq(req) || guard.isHostMachine(req))) return res.json(base);
-  res.json({ ...base, rooms: store.rooms.size, clients: io.engine.clientsCount, ...healthFacts() });
+  // `rooms` counts the halls (their Main rooms); `sideRooms`, the rooms beside them.
+  res.json({ ...base, rooms: store.rooms.size, clients: io.engine.clientsCount, ...healthFacts(), sideRooms: store.allRooms().length - store.rooms.size });
 });
 
 // Context (Show Bus §6): what another node's AI, or Patterns' Eye, needs to understand this one. Read-only token or admin.
@@ -1209,7 +1226,7 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
 // name is (no control, bidi override or isolate character), from the admin page's socket and the HTTP route alike.
 function newRoom(name) {
   let code;
-  do { code = makeRoomCode(); } while (store.has(code));
+  do { code = makeRoomCode(); } while (store.hasRoom(code));   // a key no room has, side rooms included
   return store.create(code, guard.cleanText(name, 80));
 }
 
@@ -1372,10 +1389,12 @@ function pagesElsewhere() {
     if (d.build === BUILD.full) continue;
     const kind = d.display ? 'screen' : d.userRoom ? 'hall' : boardSockets.has(s) ? 'halls' : d.adminPage ? 'admin' : 'page';
     const screen = d.display ? displays.get(d.display) : null;
-    const hall = store.get(screen ? screen.hall : d.userRoom || '');
+    // A screen's hall, or the room a hall page is in: a side room by its hall's name and its own ("Hall 2 › Legal").
+    const at = screen ? store.get(screen.hall) : store.room(d.userRoom || '');
+    const place = !at ? '' : store.isMain(at) ? at.name || '' : ((store.get(at.hall) || {}).name || '') + ' › ' + (at.name || '');
     const who = kind === 'hall' ? d.userName || '' : d.account ? d.account.name || d.account.username : d.adminSid ? 'the laptop\'s token' : '';
     const build = typeof d.build === 'string' ? d.build : null;
-    out.push({ kind, build, newer: build ? compareBuilds(build, BUILD.full) : null, where: screen ? screen.name || '' : '', hall: hall ? hall.name || '' : '', who: String(who || '') });
+    out.push({ kind, build, newer: build ? compareBuilds(build, BUILD.full) : null, where: screen ? screen.name || '' : '', hall: place, who: String(who || '') });
   }
   return out.sort((a, b) => PAGE_KINDS.indexOf(a.kind) - PAGE_KINDS.indexOf(b.kind));
 }
@@ -1536,7 +1555,9 @@ io.on('connection', (socket) => {
     if (!acct && !ROLES.includes(cleanRole)) return ack({ ok: false, error: 'Choose On stage, Backstage or Observer.' });
     const cleanName = acct ? acct.name : guard.cleanText(name, 40);
     if (!code || !cleanName) return ack({ ok: false, error: 'Missing room code or name' });
-    const r = RoomStore.validCode(code) ? store.get(code) : null;
+    // An account and the admin's support view name a room by its key, a hall's Main room or a side room; a guest's code
+    // names a hall, never a side room, whose key is an address and no code a guest may type.
+    const r = !RoomStore.validCode(code) ? null : acct || isAdminView ? store.room(code) : store.get(code);
     if (!r) { joinLock.fail(network); return ack({ ok: false, error: 'Room not found' }); }
 
     // The same page joining again on its own socket (it saw a gap in the room's numbers and is catching up) is still
@@ -1547,7 +1568,8 @@ io.on('connection', (socket) => {
     let id, identity = null;
     let note = '';
     if (acct) {
-      if (!rbac.seesHall(acct, code)) return ack({ ok: false, error: 'Your account has no access to this hall — ask an admin.' });
+      // An account's halls reach a hall's Main room and no side room: a side room is the admin's.
+      if (store.isMain(r) ? !rbac.seesHall(acct, code) : !socket.data.isAdmin) return ack({ ok: false, error: 'Your account has no access to this ' + (store.isMain(r) ? 'hall' : 'room') + ' — ask an admin.' });
       id = acct.id;
       cleanRole = rbac.roomRoleFor(acct, code);
     } else {
@@ -1616,14 +1638,16 @@ io.on('connection', (socket) => {
 
     // Resume: just what they missed, when we still have it; otherwise the whole history.
     const ops = Number.isInteger(since) ? store.opsSince(r, since) : null;
+    // A room shows its hall's countdown, as the frames sent to it do; a side room sends nothing to a Stagewatch.
+    const sw = linkFor(r.hall);
     ack({
       ok: true, roomCode: code, roomName: r.name || '', role: cleanRole, name: cleanName, adminView: isAdminView,
       identity, uid: id, note, uploadToken, seq: r.seq,
       ...(ops ? { ops } : { history: r.messages }),
       users: roomUserSummary(r, { links: socket.data.isAdmin }),
-      ai: !!aiKey(), stage: stagePayload(linkFor(code)),
-      canSendToStage: !!(linkFor(code).base && linkFor(code).key && linkFor(code).keyState !== 'refused') && allowed('stage.send'),
-      canPropose: !!(linkFor(code).desk && linkFor(code).key && !linkFor(code).deskRefusal) && allowed('stage.send'),
+      ai: !!aiKey(), stage: stagePayload(sw),
+      canSendToStage: !sideRoomStage() && !!(sw.base && sw.key && sw.keyState !== 'refused') && allowed('stage.send'),
+      canPropose: !sideRoomStage() && !!(sw.desk && sw.key && !sw.deskRefusal) && allowed('stage.send'),
       account: acct ? { username: acct.username, name: acct.name, role: acct.role, roleLabel: rbac.ROLES[acct.role].label } : null,
       seen: seenFor(r),
       // Whether a message here could be sent to another hall (the forward picker would list one): a fact the page's
@@ -1645,9 +1669,15 @@ io.on('connection', (socket) => {
     }
   });
 
+  // A side room reaches no Stagewatch and no crew of its own: nothing it sends to the speaker's screen or the show desk,
+  // no destination it lists, no show facts in its drafts and no help request it raises would be followed or answered,
+  // so each is refused with these words (its page shows its hall's countdown all the same).
+  const sideRoomStage = () => !!room && !store.isMain(room);
+  const SIDE_STAGE = 'This room sends nothing to the speaker\'s screen: send it from the hall\'s Main room.';
+  const SIDE_HELP = 'Help requests are asked from the hall\'s Main room, where its crew answers them.';
   const need = (ack) => {
     if (!room || !me) { ok(ack)({ ok: false, error: 'Not joined' }); return false; }
-    if (!store.has(room.code)) { ok(ack)({ ok: false, error: 'Room gone' }); return false; }
+    if (!store.hasRoom(room.code)) { ok(ack)({ ok: false, error: 'Room gone' }); return false; }
     return true;
   };
   // Posting, answering a prompt, pinning and reacting change what everyone in the hall sees: they need hall.post.
@@ -1684,6 +1714,7 @@ io.on('connection', (socket) => {
     if (!mayPost(ack)) return;
     if (payload && payload.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: onStage() ? 'On stage seats send messages, not files.' : 'Your account may not share files here.' });
     if (payload && payload.type === 'action' && !mayAsk()) return ok(ack)({ ok: false, error: ASKS_BACKSTAGE });
+    if (payload && payload.type === 'help' && sideRoomStage()) return ok(ack)({ ok: false, error: SIDE_HELP });
     // An upload that is no longer here (a send held past the wait an unposted upload is kept for) is uploaded again by
     // the page that holds the file, and sent with the same client id.
     if (payload && payload.type === 'file' && guard.validUploadUrl(payload.url) && !fs.existsSync(path.join(UPLOAD_DIR, payload.url.slice(9)))) return ok(ack)({ ok: false, error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true });
@@ -1771,13 +1802,14 @@ io.on('connection', (socket) => {
   });
 
   // Forwarding posts in another hall, so the person's rights there decide, never the hall the message comes from: an
-  // account goes by its rights in that hall; a code guest by their own seat there (a locked hall's observer seat
-  // included), the seat with the most rights when they hold more than one (backstage, then On stage, then observer, so
-  // the answer never depends on which page joined first), or, with no seat there, by the admin's link (LINKED_CAPS).
+  // account goes by its rights in that hall, which reach no side room; a code guest by their own seat there (a locked
+  // hall's observer seat included), the seat with the most rights when they hold more than one (backstage, then On
+  // stage, then observer, so the answer never depends on which page joined first), or, with no seat there, by the
+  // admin's link (LINKED_CAPS).
   const SEAT_RANK = { research: 0, board: 1, observer: 2 };
   const rightsIn = (r) => {
     if (socket.data.isAdmin) return { role: me.role, may: () => true };
-    if (me.acct) return { role: rbac.roomRoleFor(socket.data.account, r.code), may: (cap) => rbac.can(socket.data.account, cap, r.code) };
+    if (me.acct) return { role: rbac.roomRoleFor(socket.data.account, r.code), may: (cap) => store.isMain(r) && rbac.can(socket.data.account, cap, r.code) };
     const seats = Array.from(r.users.values()).filter((u) => u.uid === me.uid);
     const seat = seats.reduce((best, u) => (!best || SEAT_RANK[u.role] < SEAT_RANK[best.role] ? u : best), null);
     const linked = me.linkedRooms instanceof Set && me.linkedRooms.has(r.code);
@@ -1797,8 +1829,8 @@ io.on('connection', (socket) => {
     const linked = me.linkedRooms instanceof Set ? Array.from(me.linkedRooms) : [];
     let askedOnStage = false;
     const rooms = Array.from(new Set([...(userRooms.get(me.uid) || []), ...linked])).filter((c) => {
-      if (c === room.code || !store.has(c)) return false;
-      const there = rightsIn(store.get(c));
+      if (c === room.code || !store.hasRoom(c)) return false;
+      const there = rightsIn(store.room(c));
       if (src && src.type === 'action' && there.role === 'board') { askedOnStage = true; return false; }
       return needs.every((cap) => there.may(cap));
     });
@@ -1812,7 +1844,7 @@ io.on('connection', (socket) => {
     if (!me) return ok(ack)({ ok: false, error: 'Not joined' });
     const src = q && typeof q === 'object' ? room.byId.get(guard.str(q.messageId)) : null;
     const t = forwardTargets(src);
-    ok(ack)({ ok: true, rooms: t.rooms.map((c) => ({ code: c, name: store.get(c).name || '' })), ...(t.why ? { why: t.why } : {}) });
+    ok(ack)({ ok: true, rooms: t.rooms.map((c) => ({ code: c, name: store.room(c).name || '' })), ...(t.why ? { why: t.why } : {}) });
   });
 
   socket.on('forward', (args, ack) => {
@@ -1820,7 +1852,7 @@ io.on('connection', (socket) => {
     const { messageId, targetRoom } = args && typeof args === 'object' ? args : {};
     const sent = readSend(args);
     if (sent.error) return ok(ack)({ ok: false, error: sent.error });
-    const dst = store.get(guard.str(targetRoom).toUpperCase());
+    const dst = store.room(guard.str(targetRoom).toUpperCase());
     // The copy carries the send's client id in the hall it went to: a repeat is answered with it and posts nothing. Only
     // this person's own forward into that hall answers so, so it tells nothing of a code they did not already send to.
     const was = dst && sent.cid ? store.sentAs(dst, me.uid, sent.cid) : null;
@@ -1896,7 +1928,7 @@ io.on('connection', (socket) => {
     if (!canDraft()) return ok(ack)({ ok: false, error: 'Drafting is for the backstage team.' });
     const docText = typeof args.docText === 'string' ? args.docText.slice(0, 60_000) : '';
     runAi(ack, (signal) => ai.draftReply(aiKey(), {
-      show: briefFor(room.code),
+      show: sideRoomStage() ? null : briefFor(room.code),
       messages: room.messages,
       question: typeof args.question === 'string' ? args.question.slice(0, 2000) : '',
       instruction: typeof args.instruction === 'string' ? args.instruction.slice(0, 500) : '',
@@ -1909,13 +1941,14 @@ io.on('connection', (socket) => {
     if (!canDraft()) return ok(ack)({ ok: false, error: 'For the backstage team.' });
     const prompt = typeof args.prompt === 'string' ? args.prompt.trim().slice(0, 1000) : '';
     if (!prompt) return ok(ack)({ ok: false, error: 'Type the question first.' });
-    runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, messages: room.messages, show: briefFor(room.code) }, signal));
+    runAi(ack, (signal) => ai.suggestOptions(aiKey(), { prompt, messages: room.messages, show: sideRoomStage() ? null : briefFor(room.code) }, signal));
   });
 
   // ----- Stagewatch: put an answer on the speaker's confidence monitor (research or admin)
   socket.on('stage:send', async (args = {}, ack) => {
     ack = ok(ack);
     if (!need(ack)) return;
+    if (sideRoomStage()) return ack({ ok: false, error: SIDE_STAGE });
     if (!allowed('stage.send')) return ack({ ok: false, error: 'The speaker\'s screen is for the backstage team.' });
     if (!writes.take()) return limited(ack);
     let text = typeof args.text === 'string' ? args.text : '';
@@ -1931,9 +1964,9 @@ io.on('connection', (socket) => {
       // parentheses). The row says how many characters, never the words.
       const said = stagelines.words(text, stagelines.MESSAGE_MAX);
       audit.write(who, 'stagewatch.send', from.code, 'a line (' + plural(Array.from(said).length, 'character') + ') on the speaker\'s screen, sent now', socket.data.ip);
-      // A hall closed while Stagewatch answered keeps nothing of the send: no line is written into a room that is no
-      // longer kept (its files are gone), nor into another hall made since under the same code.
-      if (store.get(from.code) === from) {
+      // A room closed while Stagewatch answered keeps nothing of the send: no line is written into a room that is no
+      // longer kept (its files are gone), nor into another room made since under the same key.
+      if (store.room(from.code) === from) {
         // The receipt, and later the speaker's acknowledgement, live on the record of the send (and on the source
         // message). …with the link it went to, that Stagewatch's address tag and the seq of its frames then, so a restart
         // keeps following it only where it went, and only while that Stagewatch has not restarted since.
@@ -1954,6 +1987,7 @@ io.on('connection', (socket) => {
   socket.on('stage:targets', (_args, ack) => {
     ack = ok(ack);
     if (!need(ack)) return;
+    if (sideRoomStage()) return ack({ ok: false, error: SIDE_STAGE });
     const link = linkFor(room.code);
     ack({
       ok: true, linked: link.linked, key: link.keyState, cert: !!(link.tlsState && link.tlsState.problem), title: (link.context && link.context.node && link.context.node.name) || '',
@@ -1966,6 +2000,7 @@ io.on('connection', (socket) => {
   socket.on('stage:propose', async (args = {}, ack) => {
     ack = ok(ack);
     if (!need(ack)) return;
+    if (sideRoomStage()) return ack({ ok: false, error: SIDE_STAGE });
     if (!allowed('stage.send')) return ack({ ok: false, error: 'Proposing to the stage is for the backstage team.' });
     if (!writes.take()) return limited(ack);
     let text = typeof args.text === 'string' ? args.text : '';
@@ -1997,8 +2032,8 @@ io.on('connection', (socket) => {
     // The desk's id is its own (it numbers from p1 again after a restart): the line and the Stagewatch's address tag
     // travel with it, so a proposal of the same number that is not this one is never taken for it.
     const proposal = { id: r.proposal.id, link: link.id, state: r.proposal.state, ok: null, words: '', to: built.words, at: Date.now(), sw: link.tag, line: built.line };
-    // A hall closed while the desk answered keeps nothing of the proposal, as for a send above.
-    if (store.get(from.code) === from) {
+    // A room closed while the desk answered keeps nothing of the proposal, as for a send above.
+    if (store.room(from.code) === from) {
       // Followed on the records that took it, as for a send above.
       const sys = apply(from, { o: 'add', m: { id: makeMessageId(), type: 'system', text: `${asker} asked Stagewatch's operator to put this on ${built.words}: “${stagelines.cut(parsed.text, 120)}” — waiting for the show desk`, at: Date.now(), proposal } });
       const onSource = !!source && !!apply(from, { o: 'upd', id: source.id, f: { proposal } });
@@ -2346,9 +2381,9 @@ io.on('connection', (socket) => {
   // nothing writes none: which room (by its code) and what changed, in words that name people and halls — never a
   // message's text, a file's name or a token.
   const auditRoom = (action, code, words) => audit.write(socket.data.actor || HOST_ACTOR, action, code, words, socket.data.ip);
-  // The other hall of a link is named by its name alone ("another hall" when it has none, as a forwarded message names
-  // it): its code is the code its guests join with, and a row's words carry no guest code.
-  const hallWords = (code) => { const h = store.get(code); return (h && h.name) || 'another hall'; };
+  // The other room of a link is named by its name alone ("another hall" when it has none, as a forwarded message names
+  // it): a hall's key is the code its guests join with, and a row's words carry no guest code.
+  const hallWords = (code) => { const h = store.room(code); return (h && h.name) || 'another hall'; };
 
   socket.on('admin:listRooms', (ack) => {
     if (!admin(ack)) return;
@@ -2357,7 +2392,7 @@ io.on('connection', (socket) => {
   });
   socket.on('admin:watchRoom', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
-    const r = store.get(roomCode);
+    const r = store.room(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
     if (socket.data.watching && socket.data.watching !== roomCode) socket.leave(socket.data.watching);
     socket.join(roomCode);
@@ -2373,7 +2408,7 @@ io.on('connection', (socket) => {
   });
   socket.on('admin:resetRoom', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
-    const r = store.get(roomCode);
+    const r = store.room(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
     const files = fileNamesOf(r.messages);
     if (!apply(r, { o: 'reset' })) return ok(ack)(OP_REFUSED);
@@ -2389,21 +2424,40 @@ io.on('connection', (socket) => {
   });
   socket.on('admin:deleteRoom', async ({ roomCode, purgeFiles } = {}, ack) => {
     if (!admin(ack)) return;
-    const r = store.get(roomCode);
+    const r = store.room(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
-    const files = fileNamesOf(r.messages);
-    // The admin pages watching this hall (this one among them) leave it first: they are told, not cut off, so this
-    // page gets its answer and a second admin tab stays live. Everyone else in the hall is sent home.
-    for (const id of Array.from(io.sockets.adapter.rooms.get(r.code) || [])) {
-      const w = io.sockets.sockets.get(id);
-      if (!w || w.data.watching !== r.code) continue;
-      w.leave(r.code);
-      w.data.watching = null;
-      if (w !== socket) w.emit('roomClosed', { code: r.code });
+    // A hall goes with every room it holds, so no side room is ever left without its hall; a side room goes alone.
+    const main = store.isMain(r);
+    const rooms = main ? store.roomsOf(r.code) : [r];
+    const files = fileNamesOf(rooms.flatMap((x) => x.messages));
+    // The admin pages watching a room that goes (this one among them) leave it first: they are told, not cut off, so
+    // this page gets its answer and a second admin tab stays live. Everyone else in it is sent home.
+    for (const x of rooms) {
+      for (const id of Array.from(io.sockets.adapter.rooms.get(x.code) || [])) {
+        const w = io.sockets.sockets.get(id);
+        if (!w || w.data.watching !== x.code) continue;
+        w.leave(x.code);
+        w.data.watching = null;
+        if (w !== socket) w.emit('roomClosed', { code: x.code });
+      }
+      io.to(x.code).emit('kicked', { reason: main ? 'This hall was closed by the admin.' : 'This room was closed by the admin.' });
+      io.in(x.code).disconnectSockets(true);
     }
-    io.to(r.code).emit('kicked', { reason: 'This hall was closed by the admin.' });
-    io.in(r.code).disconnectSockets(true);
-    store.remove(r.code);
+    // What could not be removed is said (another program held a room's files): a room that opens again at the next start
+    // keeps its uploads, and its row and its answer say so.
+    const said = (gone) => {
+      const purge = !!purgeFiles && !gone.again;
+      const kept = gone.kept.length ? ', the files of ' + plural(gone.kept.length, 'room') + ' held by another program and kept' + (gone.again ? ': it opens again at the next start' : '') : '';
+      return { purge, row: (purge ? ', files removed' : '') + kept, answer: gone.kept.length ? { kept: gone.kept.length, keptWords: keptWords(gone, main ? 'the hall' : 'the room') } : {} };
+    };
+    if (!main) {
+      // The room alone: its hall's Stagewatch, screens and links stay the hall's.
+      const gone = said(store.remove(r.code));
+      audit.write(socket.data.actor || HOST_ACTOR, 'room.remove', r.code, (r.name || '(no name)') + ' (' + hallWords(r.hall) + ')' + gone.row, socket.data.ip);
+      const purged = gone.purge ? await removeUnused(files) : 0;
+      return ok(ack)({ ok: true, purged, ...gone.answer });
+    }
+    const gone = said(store.removeHall(r.code));
     if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
     for (const d of displays.ofHall(r.code)) revokeDisplaySockets(d.id, 'This screen\'s hall was closed.');
     displays.removeHall(r.code);
@@ -2412,13 +2466,13 @@ io.on('connection', (socket) => {
     if (hallLinks.has(r.code)) forgetStagewatchPins(hallLinks.get(r.code));
     configureHallLink({ code: r.code });   // its own Stagewatch link, if it had one, stops
     boardDirty();
-    audit.write(socket.data.actor || HOST_ACTOR, 'hall.remove', r.code, (r.name || '(no name)') + (purgeFiles ? ', files removed' : ''), socket.data.ip);
-    const purged = purgeFiles ? await removeUnused(files) : 0;
-    ok(ack)({ ok: true, purged });
+    audit.write(socket.data.actor || HOST_ACTOR, 'hall.remove', r.code, (r.name || '(no name)') + (rooms.length > 1 ? ' with ' + plural(rooms.length - 1, 'other room') : '') + gone.row, socket.data.ip);
+    const purged = gone.purge ? await removeUnused(files) : 0;
+    ok(ack)({ ok: true, purged, ...gone.answer });
   });
   socket.on('admin:deleteMessage', ({ roomCode, messageId } = {}, ack) => {
     if (!admin(ack)) return;
-    const r = store.get(roomCode);
+    const r = store.room(roomCode);
     if (!r || !r.byId.has(messageId)) return ok(ack)({ ok: false, error: 'Message not found' });
     const m = r.byId.get(messageId);
     const files = fileNamesOf([m]);
@@ -2430,7 +2484,7 @@ io.on('connection', (socket) => {
   socket.on('admin:setRole', ({ roomCode, socketId, role } = {}, ack) => {
     if (!admin(ack)) return;
     if (!ROLES.includes(role)) return ok(ack)({ ok: false, error: 'Invalid role' });
-    const r = store.get(roomCode);
+    const r = store.room(roomCode);
     const target = r && r.users.get(socketId);
     if (!target) return ok(ack)({ ok: false, error: 'User not in room' });
     // An account's role in a hall follows its rights, which are set on the Accounts page: a role set here would change
@@ -2456,7 +2510,7 @@ io.on('connection', (socket) => {
   });
   socket.on('admin:lockRoles', ({ roomCode, on } = {}, ack) => {
     if (!admin(ack)) return;
-    const r = store.get(roomCode);
+    const r = store.room(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
     // Locked, the seats taken now are kept (saved, so a restart keeps them too); unlocked, there is nothing to keep.
     const seats = on ? seatsNow(r) : {};
@@ -2469,6 +2523,7 @@ io.on('connection', (socket) => {
   });
   socket.on('admin:invites', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
+    // A hall's invite links: a guest joins a hall by its code, never a side room, so a side room has none to give.
     if (!store.has(roomCode)) return ok(ack)({ ok: false, error: 'Room not found' });
     ok(ack)({ ok: true, invites: invitesFor(roomCode) });
   });
@@ -2476,12 +2531,13 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const target = io.sockets.sockets.get(socketId);
     const code = guard.str(targetRoom).toUpperCase();
-    if (!target || !store.has(code)) return ok(ack)({ ok: false, error: 'User or room not found' });
-    const r = store.get(target.data.userRoom);
+    if (!target || !store.hasRoom(code)) return ok(ack)({ ok: false, error: 'User or room not found' });
+    const r = store.room(target.data.userRoom);
     const u = r && r.users.get(socketId);
     if (!u) return ok(ack)({ ok: false, error: 'User not in room' });
-    // A link lets a code guest forward into a hall; an account forwards by its own rights there, so a link would give it
-    // nothing it may not already do.
+    // A link lets a code guest forward into a hall; an account forwards by its own rights there, which reach no side
+    // room, so a link would give it nothing it may not already do.
+    if (u.acct && !store.has(code)) return ok(ack)({ ok: false, error: u.name + ' signs in with an account, and an account\'s halls reach no side room.' });
     if (u.acct && !rbac.can(target.data.account, 'hall.post', code)) return ok(ack)({ ok: false, error: u.name + ' signs in with an account that may not post in that hall: give the account that hall on the Accounts page.' });
     let added = false;
     for (const [sid, seat] of seatsOf(r, u.uid)) {
@@ -2499,7 +2555,7 @@ io.on('connection', (socket) => {
     const target = io.sockets.sockets.get(socketId);
     if (!target) return ok(ack)({ ok: false, error: 'User not connected' });
     const code = guard.str(targetRoom).toUpperCase();
-    const r = store.get(target.data.userRoom);
+    const r = store.room(target.data.userRoom);
     const u = r && r.users.get(socketId);
     if (!u || !u.linkedRooms) return ok(ack)({ ok: true });
     let removed = false;
@@ -2517,8 +2573,8 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const target = io.sockets.sockets.get(socketId);
     if (!target) return ok(ack)({ ok: false, error: 'User not connected' });
-    // The person leaves the hall: every page they have open there, not only the one the room list names.
-    const r = store.get(target.data.userRoom);
+    // The person leaves the room: every page they have open there, not only the one the room list names.
+    const r = store.room(target.data.userRoom);
     const u = r && r.users.get(socketId);
     const pages = u ? seatsOf(r, u.uid).map(([sid]) => io.sockets.sockets.get(sid)).filter(Boolean) : [target];
     // The page sent out says who sent it out, and of where: the room as its page names it (Main by its hall's name).
@@ -2533,13 +2589,13 @@ io.on('connection', (socket) => {
   });
   socket.on('admin:summary', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
-    const r = store.get(roomCode);
+    const r = store.room(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
     runAi(ack, (signal) => ai.summarise(aiKey(), { messages: r.messages, roomName: r.name }, signal));
   });
   socket.on('admin:postSummary', ({ roomCode, text } = {}, ack) => {
     if (!admin(ack)) return;
-    const r = store.get(roomCode);
+    const r = store.room(roomCode);
     const t = typeof text === 'string' ? text.trim().slice(0, 4000) : '';
     if (!r || !t) return ok(ack)({ ok: false, error: 'Nothing to post' });
     const m = { id: makeMessageId(), at: Date.now(), type: 'text', text: t, pinned: true, priority: false, from: { uid: 'minutes', name: 'Minutes', role: 'observer', ai: true } };
@@ -2695,7 +2751,7 @@ io.on('connection', (socket) => {
       const k = r.code + '|' + u.uid;
       const announce = () => {
         pendingLeaves.delete(k);
-        if (!store.has(r.code) || Array.from(r.users.values()).some((x) => x.uid === u.uid)) return;
+        if (!store.hasRoom(r.code) || Array.from(r.users.values()).some((x) => x.uid === u.uid)) return;
         syncSeats(r);
         systemMessage(r, `${u.name} left`);
       };
@@ -2705,7 +2761,7 @@ io.on('connection', (socket) => {
         pendingLeaves.set(k, { timer: setTimeout(announce, LEAVE_GRACE_MS), name: u.name, role: holdSeat ? u.role : null, guest: !u.acct });
       }
     }
-    if (store.has(r.code)) syncSeats(r);
+    if (store.hasRoom(r.code)) syncSeats(r);
   }
 
   socket.on('disconnect', (reason) => {
@@ -3014,15 +3070,16 @@ function stagePayload(link) {
 function forgetStagewatchPins(link) {
   if (link.base && !allLinks().some((l) => l !== link && l.base === link.base)) link.forgetPins();
 }
-/** A hall now follows another Stagewatch (or none): its room and its screens are told at once, never left on the old frame. */
+/** A hall now follows another Stagewatch (or none): its rooms and its screens are told at once, never left on the old frame. */
 function hallStageChanged(code) {
   const payload = stagePayload(linkFor(code));
-  io.to(code).emit('stage', payload || { status: 'off', desk: false });
+  for (const r of store.roomsOf(code)) io.to(r.code).emit('stage', payload || { status: 'off', desk: false });
   for (const d of displays.ofHall(code)) if (Displays.screens(d)) io.to('display:' + d.id).emit('display:stage', payload);
 }
 function onStageState(link, view) {
   const payload = stagePayload(link) || { status: 'off', desk: false };
-  for (const r of roomsUsing(link)) io.to(r.code).emit('stage', payload);
+  // Every room of each hall that follows it.
+  for (const hall of roomsUsing(link)) for (const r of store.roomsOf(hall.code)) io.to(r.code).emit('stage', payload);
   followStageAck(link, view);
   stageChanged(link);
   boardDirty();
@@ -4059,18 +4116,18 @@ if (RUNS === 'task') {
 
 holdDataFolder(() => front.listen(PORT, HOST, () => {
   // This copy holds the folder and the port: now it writes. Its folders, keys and secret are made where there are none,
-  // each dirty hall's snapshot is written (a replayed log folded in, a torn last line cut before anything is appended
+  // each dirty room's snapshot is written (a replayed log folded in, a torn last line cut before anything is appended
   // after it), and no other; after a stop that did not save (a crash, a kill, Windows ending it, a power cut, or no record
-  // of one) each hall says AGMessage restarted; the audit log is opened (and given what waited for it), and the show
-  // desk's loop may run (and save what it reports), as may the peaks' saves (from the next 5 s window).
+  // of one) every room of each hall says AGMessage restarted; the audit log is opened (and given what waited for it), and
+  // the show desk's loop may run (and save what it reports), as may the peaks' saves (from the next 5 s window).
   listening = true;
   serving = true;
   firstWrites();
   bootSnapshots = store.compactDirty();
   if (!stopBefore.saved) {
-    for (const room of store.rooms.values()) {
+    for (const room of store.allRooms()) {
       store.commit(room, { o: 'add', m: { id: makeMessageId(), type: 'system', text: '— AGMessage restarted · ' + plural(room.messages.length, 'message') + ' kept —', at: Date.now() } });
-      restartSaid++;
+      if (store.isMain(room)) restartSaid++;   // every room says it; health counts the halls
     }
   }
   audit.open();

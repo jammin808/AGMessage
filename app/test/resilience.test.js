@@ -933,6 +933,122 @@ test('a restart announces nobody: a 3-page hall back after a restart writes no "
   assert.deepEqual(joinedLines(after(lateReader.res.history, stoppedAgainAt)), ['Ana joined Backstage'], 'announced after the window');
 });
 
+// ---------------------------------------------------------------- a 0.5.1 folder: halls with one room each
+test('a 0.5.1 data folder boots as halls with one room each, keeping codes, messages, seats, a forward, a stage send still followed, Stagewatch, a screen, a desk result, an account\'s halls and an invite, and writing nothing new', async (t) => {
+  const h = require('./helpers');
+  const sockets = [];
+  let srv = await h.startServer();
+  // Hall A's own Stagewatch, with no show desk: a result waiting for it waits, and its frames reach the hall.
+  const swA = await h.fakeStagewatch({ name: 'Hall A timer', desk: false });
+  t.after(async () => { sockets.forEach((s) => s.close()); if (srv.child.exitCode === null && srv.child.signalCode === null) await h.stopServer(srv.child); await swA.close(); });
+  const page = async (cookie) => { const s = await h.connect(srv.base, cookie); sockets.push(s); return s; };
+  // The folder as 0.5.1 kept it, made through the acts a show takes: two halls, the first with its own Stagewatch and a
+  // screen, an account given the second, a backstage guest in both who forwards a message, and the first hall locked.
+  const PASSWORD = 'the green room kettle';
+  let admin = (await h.api(srv.base, 'POST', '/api/setup', { token: h.TOKEN, username: 'ada', name: 'Ada Admin', password: PASSWORD })).cookie;
+  assert.match(admin, /^agm_s=/, 'the first admin account');
+  const A = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
+  const B = (await h.api(srv.base, 'POST', '/api/rooms', { name: 'Hall B' }, { cookie: admin })).body.code;
+  let adm = await page(admin);
+  assert.ok((await h.emit(adm, 'hall:configure', { code: A, name: 'Hall A', stagewatchUrl: swA.url })).ok);
+  const stagewatchBefore = (await h.emit(adm, 'hall:settings', { code: A })).stagewatch.url;
+  assert.ok((await h.emit(adm, 'display:create', { code: A, name: 'Lobby' })).ok);
+  const sam = (await h.api(srv.base, 'POST', '/api/users', { username: 'sam', name: 'Sam Tech', role: 'tech', halls: [B] }, { cookie: admin })).body;
+  assert.ok(sam.ok, JSON.stringify(sam));
+  const anaA = await page();
+  const inA = await h.emit(anaA, 'join', { roomCode: A, name: 'Ana', role: 'research' });
+  const anaB = await page();
+  assert.ok((await h.emit(anaB, 'join', { roomCode: B, name: 'Ana', role: 'research', uid: inA.identity })).ok);
+  const said = await h.emit(anaA, 'message', { type: 'text', text: 'hello A' });
+  assert.ok((await h.emit(anaB, 'message', { type: 'text', text: 'hello B' })).ok);
+  assert.ok((await h.emit(anaA, 'forward', { messageId: said.id, targetRoom: B })).ok);
+  assert.ok((await h.emit(adm, 'admin:lockRoles', { roomCode: A, on: true })).ok);
+  const invite = new URL((await h.emit(adm, 'admin:invites', { roomCode: A })).invites.board, srv.base).searchParams.get('invite');
+  assert.ok(invite);
+  sockets.splice(0).forEach((s) => s.close());
+  await h.stopServer(srv.child);
+
+  // Laid on by hand as 0.5.1 wrote them: each hall's snapshot (and its backup) in 0.5.1's shape, the fields its compaction
+  // wrote and no other (lib/store.js at 0.5.1: no tombstones, `gone`); a line sent to the speaker's screen through hall
+  // A's own Stagewatch (`link` 'hall:<code>', and that Stagewatch's address tag), in its log after its snapshot, not yet
+  // acknowledged; and a show-desk result for that Stagewatch not taken yet. What 0.5.1 never wrote goes: the data
+  // folder's format marker and the record of how the stop went. (The audit log stays this build's: 0.5.1's plain chain
+  // opened under a key is the audit log's own tests', test/audit.test.js.)
+  const data = srv.dataDir;
+  const rooms = path.join(data, 'rooms');
+  const SHAPE_051 = ['code', 'name', 'createdAt', 'seq', 'settings', 'messages', 'savedAt'];
+  for (const f of fs.readdirSync(rooms).filter((x) => /\.json(\.bak)?$/.test(x))) {
+    const snap = JSON.parse(fs.readFileSync(path.join(rooms, f), 'utf8'));
+    fs.writeFileSync(path.join(rooms, f), JSON.stringify(Object.fromEntries(SHAPE_051.map((k) => [k, snap[k]]))));
+  }
+  const seqOf = (code) => JSON.parse(fs.readFileSync(path.join(rooms, code + '.json'), 'utf8')).seq;
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path.join(rooms, A + '.json'), 'utf8'))), SHAPE_051);
+  const before = { A: seqOf(A), B: seqOf(B) };
+  const tag = nodes.addressTag(nodes.normaliseBase(swA.url));
+  const stage = { ref: 7, receipt: 'applied', ack: 'sent', by: '', at: 1_700_000_000_000, link: 'hall:' + A, sw: tag, seq: 0 };
+  fs.appendFileSync(path.join(rooms, A + '.log'), JSON.stringify({ o: 'add', m: { id: 'stage1', type: 'system', text: 'Ana sent to the speaker\'s screen: “Five minutes”', at: 1_700_000_000_000, stage }, s: before.A + 1 }) + '\n');
+  const nodeId = JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).nodeId;
+  fs.writeFileSync(path.join(data, 'desk-results.json'), JSON.stringify({ results: [{ sw: tag, link: 'hall:' + A, id: 'p3', created: 1_700_000_000_000, line: 'Hall A: Five minutes', target: nodeId, ok: true, words: 'Shown', ran: 1_700_000_000_500 }] }));
+  for (const f of ['format.json', 'last-stop.json']) fs.rmSync(path.join(data, f), { force: true });
+
+  srv = await h.startServer({ AGM_DATA_DIR: data });
+  admin = (await h.api(srv.base, 'POST', '/api/auth/login', { username: 'ada', password: PASSWORD })).cookie;
+  assert.match(admin, /^agm_s=/, 'the admin account signs in');
+  const health = (await h.api(srv.base, 'GET', '/api/health', undefined, { cookie: admin })).body;
+  assert.deepEqual([health.rooms, health.sideRooms], [2, 0], 'two halls, each its Main room alone');
+  assert.deepEqual([health.desk.waiting, health.lastStop.state, health.lastStop.said], [1, 'none', 2], 'the desk result kept; no stop record, so both halls say AGMessage restarted');
+  // Each hall by its code, as its guests type it: its name, its messages, and its numbers carried on by the restart line.
+  const look = async (code, name) => { const s = await page(); return { s, j: await h.emit(s, 'join', { roomCode: code, name, role: 'observer' }) }; };
+  const { s: inHallA, j: a } = await look(A, 'Obs');
+  const { j: b } = await look(B, 'Obs');
+  const restart = /^— AGMessage restarted · \d+ messages? kept —$/;
+  assert.deepEqual([a.ok, a.roomName, a.seq, restart.test(a.history.at(-1).text)], [true, 'Hall A', before.A + 2, true], 'the stage line and the restart line after what it kept');
+  assert.deepEqual([b.ok, b.roomName, b.seq, restart.test(b.history.at(-1).text)], [true, 'Hall B', before.B + 1, true]);
+  assert.ok(a.history.some((m) => m.text === 'hello A') && b.history.some((m) => m.text === 'hello B'));
+  assert.deepEqual(b.history.filter((m) => m.forwardedFrom).map((m) => [m.text, m.forwardedFrom.roomName]), [['hello A', 'Hall A']], 'the forward, by its hall\'s name');
+  assert.deepEqual(a.history.filter((m) => m.stage).map((m) => [m.stage.link, m.stage.ack]), [['hall:' + A, 'sent']], 'the stage send still names the hall\'s own Stagewatch');
+  // …and is still followed: the speaker's acknowledgement, in a frame of that Stagewatch, reaches the line it sent.
+  await h.until(() => swA.connected, 8000, 'hall A\'s Stagewatch linked again');
+  const acked = h.once(inHallA, 'stageAck');
+  swA.frame({ messageId: 7, messageAck: 'done', messageAckBy: 'Speaker A' });
+  const ack = await acked;
+  assert.deepEqual([ack.messageId, ack.stage, ack.seq > a.seq], ['stage1', { ...stage, ack: 'done', by: 'Speaker A' }, true], 'the acknowledgement on the line it sent, a change numbered after the join');
+  // The lock and its seats: Ana comes back to her seat, the invite seats On stage, and a newcomer without one is an observer.
+  const ana = await page();
+  assert.deepEqual((({ ok, role, note }) => ({ ok, role, note }))(await h.emit(ana, 'join', { roomCode: A, name: 'Ana', role: 'research', uid: inA.identity })), { ok: true, role: 'research', note: '' });
+  const bea = await page();
+  assert.deepEqual((({ ok, role, note }) => ({ ok, role, note }))(await h.emit(bea, 'join', { roomCode: A, name: 'Bea', role: 'board', invite })), { ok: true, role: 'board', note: '' });
+  const cy = await page();
+  assert.equal((await h.emit(cy, 'join', { roomCode: A, name: 'Cy', role: 'research' })).role, 'observer');
+  // The hall's Stagewatch, its screen, and the account's hall.
+  adm = await page(admin);
+  assert.equal((await h.emit(adm, 'hall:settings', { code: A })).stagewatch.url, stagewatchBefore);
+  assert.deepEqual((await h.emit(adm, 'display:list', { code: A })).displays.map((d) => d.name), ['Lobby']);
+  assert.deepEqual((await h.api(srv.base, 'GET', '/api/users', undefined, { cookie: admin })).body.users.filter((u) => u.username === 'sam').map((u) => u.halls), [[B]]);
+  // Nothing of rooms beside a hall is written: no people's pages, no list of rooms that may send in.
+  assert.ok(!fs.existsSync(path.join(data, 'pages.json')));
+  assert.ok(!Object.hasOwn(JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')), 'roomSends'));
+  assert.deepEqual(fs.readdirSync(rooms).filter((f) => f.includes('.') && !/^[A-Z0-9]+\.(json|log|json\.bak)$/.test(f)), [], 'every room file is a hall\'s');
+
+  // A second copy on the folder writes nothing, and goes.
+  const roomBytes = () => fs.readdirSync(rooms).sort().map((f) => f + ':' + fs.readFileSync(path.join(rooms, f), 'utf8'));
+  const held = roomBytes();
+  const otherPort = String(await h.freePort());
+  const second = await new Promise((resolve) => {
+    const c = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
+      env: { ...process.env, PORT: otherPort, HOST: '127.0.0.1', AGM_DATA_DIR: data, AGM_KEY_DIR: data + '-keys', ADMIN_TOKEN: h.TOKEN, AGM_NODES: '0', AGM_TLS: '0', ANTHROPIC_API_KEY: '' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
+    const stop = setTimeout(() => c.kill('SIGKILL'), 8000);
+    c.on('exit', (code) => { clearTimeout(stop); resolve({ code, out }); });
+  });
+  assert.equal(second.code, 3, second.out);
+  assert.match(second.out, /already running on this data folder/);
+  assert.deepEqual(roomBytes(), held, 'the running copy\'s room files are as they were');
+});
+
 // ---------------------------------------------------------------- one server per data folder
 test('a second start on the same data folder changes nothing and goes away; every acknowledged message survives', async (t) => {
   const h = require('./helpers');

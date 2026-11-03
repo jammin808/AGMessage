@@ -463,10 +463,13 @@ test('store: the fence\'s runtime half finds each field of a hall changed beside
     'const { RoomStore } = require(' + at(['..', 'lib', 'store.js']) + ');',
     'const a = new RoomStore(' + JSON.stringify(rooms) + ');',
     'const [one, two, three, four, five] = ["ABC234", "DEF234", "GHJ234", "KLM234", "NPQ234"].map((c) => a.create(c, c));',
+    'const [legal, media] = [["LGQ4MZP8", "Legal"], ["MDR7VX2C", "Media"]].map(([k, n]) => a.createIn("ABC234", k, n));',
     'a.commit(one, { o: "add", m: { id: "m1", type: "text", text: "x", at: 1 } });',
+    'a.commit(media, { o: "add", m: { id: "m2", type: "text", text: "y", at: 1 } });',
     'a.compactDirty();',
-    // Beside the store: a message changed in place, a setting written, a name; none marked, none written by the stop.
-    'one.byId.get("m1").pinned = true; two.settings.lockRoles = true; three.name = "moved";',
+    // Beside the store: a message changed in place, a setting written, a name; none marked, none written by the stop. A
+    // side room is held as a hall is.
+    'one.byId.get("m1").pinned = true; two.settings.lockRoles = true; three.name = "moved"; legal.settings.lockRoles = true; media.byId.get("m2").pinned = true;',
     // Told: an op, and a change marked.
     'a.commit(four, { o: "meta", name: "renamed" }); five.settings.x = 1; a.markDirty(five);',
     'a.compactDirty();',
@@ -476,7 +479,262 @@ test('store: the fence\'s runtime half finds each field of a hall changed beside
     'b.compactDirty();',
   ].join('\n');
   require('child_process').execFileSync(process.execPath, ['-e', script], { env: { ...process.env, AGM_TEST_SNAPSHOTS: out } });
-  assert.deepEqual(fs.readFileSync(out, 'utf8').split('\n').filter(Boolean).sort(), ['ABC234 messages', 'DEF234 settings', 'GHJ234 name', 'KLM234 settings']);
+  assert.deepEqual(fs.readFileSync(out, 'utf8').split('\n').filter(Boolean).sort(), ['ABC234 messages', 'DEF234 settings', 'GHJ234 name', 'KLM234 settings', 'LGQ4MZP8 settings', 'MDR7VX2C messages']);
+});
+
+// ---------------------------------------------------------------- a hall's side rooms, kept beside it
+const { CODE_RE, SIDE_RE, SIDE_MAX } = require('../lib/store');
+/** What the store said on the console while `fn` ran, its warnings and errors, one string a line. */
+function said(fn) {
+  const lines = [];
+  const { warn, error } = console;
+  console.warn = (...a) => lines.push(a.join(' '));
+  console.error = (...a) => lines.push(a.join(' '));
+  try { fn(); } finally { console.warn = warn; console.error = error; }
+  return lines;
+}
+const sayIn = (store, room, id) => store.commit(room, { o: 'add', m: { id, type: 'text', text: id, at: 1 } });
+const jsonFiles = (dir) => fs.readdirSync(dir).filter((f) => /\.json$/.test(f)).sort();
+
+test('store: a side room is kept beside its hall as <HALL>.<KEY>, and reloads under it with its seq, its messages and its log replayed', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const hall = a.create('HALL01', 'Hall 1');
+  a.create('HALL02', 'Hall 2');
+  const legal = a.createIn('HALL01', 'LGQ4MZP8', 'Legal');
+  const media = a.createIn('HALL01', 'MDR7VX2C', 'Media');
+  assert.deepEqual([legal.code, legal.hall, legal.name, hall.hall], ['LGQ4MZP8', 'HALL01', 'Legal', 'HALL01'], 'a room knows its hall; a Main room is its own');
+  assert.deepEqual(legal.settings, { codeOff: true }, 'its guest code off at birth: a new room is for accounts until it is switched on');
+  assert.deepEqual(a.createIn('HALL01', 'TEST2345', 'X', { settings: { codeOff: false, lockRoles: true } }).settings, { codeOff: false, lockRoles: true });
+  a.remove('TEST2345');
+  assert.deepEqual(jsonFiles(dir), ['HALL01.LGQ4MZP8.json', 'HALL01.MDR7VX2C.json', 'HALL01.json', 'HALL02.json'], 'each with its first snapshot, beside its hall');
+  sayIn(a, legal, 'l1');
+  sayIn(a, legal, 'l2');
+  assert.ok(a.compact('LGQ4MZP8'));
+  sayIn(a, legal, 'l3');   // in its log only, as at a crash
+  sayIn(a, hall, 'h1');
+  assert.deepEqual(fs.readFileSync(path.join(dir, 'HALL01.LGQ4MZP8.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).m.id), ['l3']);
+  assert.deepEqual([legal.seq, hall.seq, media.seq], [3, 1, 0], 'each room numbers its own changes');
+  // Its snapshot holds the fields a hall's does, its key as its code; its hall is named by its file, never in a field,
+  // and the hall's snapshot names none of its rooms.
+  const snap = (f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+  assert.deepEqual(Object.keys(snap('HALL01.LGQ4MZP8.json')), Object.keys(SNAPSHOT_FIELDS));
+  assert.equal(snap('HALL01.LGQ4MZP8.json').code, 'LGQ4MZP8');
+  assert.ok(a.compact('HALL01'));
+  assert.deepEqual(Object.keys(snap('HALL01.json')), Object.keys(SNAPSHOT_FIELDS), 'a hall\'s snapshot is the shape a hall without rooms writes');
+  assert.ok(!/LGQ4MZP8|MDR7VX2C/.test(fs.readFileSync(path.join(dir, 'HALL01.json'), 'utf8')));
+
+  const b = new RoomStore(dir);
+  assert.equal(b.loadAll(null, { compact: false }), 4, 'two halls and two side rooms');
+  const back = b.room('LGQ4MZP8');
+  assert.deepEqual([back.hall, back.name, back.seq, back.messages.map((m) => m.id), back.logCount, back.settings], ['HALL01', 'Legal', 3, ['l1', 'l2', 'l3'], 1, { codeOff: true }]);
+  assert.deepEqual(b.roomsOf('HALL01').map((r) => [r.code, r.seq]), [['HALL01', 1], ['LGQ4MZP8', 3], ['MDR7VX2C', 0]]);
+  // The next change carries on from its seq, and a page that missed one resumes within the room.
+  const op = sayIn(b, back, 'l4');
+  assert.equal(op.s, 4);
+  assert.deepEqual(b.opsSince(back, 3).map((o) => o.m.id), ['l4']);
+});
+
+test('store: the hall readers never see a side room; the any-room readers do', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const [h1, h2] = [a.create('HALL01', 'Hall 1'), a.create('HALL02', 'Hall 2')];
+  const media = a.createIn('HALL01', 'MDR7VX2C', 'Media');
+  media.createdAt = 1;   // made before Legal: the order a hall's rooms are listed in is the order they were made
+  const legal = a.createIn('HALL01', 'LGQ4MZP8', 'Legal');
+  legal.createdAt = 2;
+  const press = a.createIn('HALL02', 'PRS3SS45', 'Press');
+  // A hall: its Main room, by `rooms`, `get` and `has`, and nothing else.
+  assert.deepEqual(Array.from(a.rooms.keys()), ['HALL01', 'HALL02']);
+  assert.deepEqual([a.get('LGQ4MZP8'), a.has('LGQ4MZP8'), a.get('HALL01')], [undefined, false, h1]);
+  // Any room.
+  assert.deepEqual([a.room('LGQ4MZP8'), a.room('HALL02'), a.room('NOPE2345')], [legal, h2, undefined]);
+  assert.deepEqual(['LGQ4MZP8', 'HALL01', 'NOPE2345', undefined].map((k) => a.hasRoom(k)), [true, true, false, false]);
+  assert.deepEqual(a.allRooms().map((r) => r.code), ['HALL01', 'HALL02', 'MDR7VX2C', 'LGQ4MZP8', 'PRS3SS45'], 'the halls, then the side rooms');
+  assert.deepEqual(a.roomsOf('HALL01'), [h1, media, legal], 'its Main room first, then its side rooms as they were made');
+  assert.deepEqual(a.roomsOf('HALL02'), [h2, press]);
+  assert.deepEqual([a.roomsOf('LGQ4MZP8'), a.roomsOf('NOPE2345')], [[], []], 'a side room is no hall, and holds no rooms');
+  assert.deepEqual([h1, legal, null, undefined].map((r) => a.isMain(r)), [true, false, false, false]);
+});
+
+test('store: a side room is made only beside a hall that is here, under a key no room has, and at most SIDE_MAX to a hall', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  a.create('HALL01', 'Hall 1');
+  assert.ok(a.createIn('HALL01', 'LGQ4MZP8', 'Legal'));
+  const refused = [['NOPE2345', 'KEY23456'], ['LGQ4MZP8', 'KEY23456'], ['HALL01', 'LGQ4MZP8'], ['HALL01', 'HALL01'], ['HALL01', 'lower234'], ['HALL01', 'A.B'], ['HALL01', 'K3'], ['HALL01', 7]];
+  for (const [hall, key] of refused) assert.equal(a.createIn(hall, key, 'X'), null, hall + ' / ' + key);
+  assert.deepEqual(jsonFiles(dir), ['HALL01.LGQ4MZP8.json', 'HALL01.json'], 'a refusal writes nothing');
+  assert.equal(SIDE_MAX, 20);
+  for (let i = 2; i <= SIDE_MAX; i++) assert.ok(a.createIn('HALL01', 'SIDE' + String(i).padStart(4, '0').replace(/0/g, 'Z'), 'Room ' + i), 'side room ' + i);
+  assert.equal(a.roomsOf('HALL01').length, 1 + SIDE_MAX);
+  assert.equal(a.createIn('HALL01', 'ONEMORE2', 'One more'), null, 'the 21st is refused');
+});
+
+test('store: a side room whose hall is gone, one whose key another room has, and a file of no hall or room, are said, not loaded, and kept', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  a.create('HALL01', 'Hall 1');
+  a.create('HALL02', 'Hall 2');
+  sayIn(a, a.createIn('HALL01', 'LGQ4MZP8', 'Legal'), 'kept');
+  a.compactDirty();   // every room loaded is clean: the load writes none
+  // Files placed by hand: a room of a hall that is not here, a second room under Legal's key, one under a hall's key,
+  // and two names that are no hall's and no room's.
+  const room = (code) => JSON.stringify({ code, name: code, createdAt: 1, seq: 0, settings: {}, messages: [] });
+  const placed = { 'GONE99.ORPHAN23.json': room('ORPHAN23'), 'HALL02.LGQ4MZP8.json': room('LGQ4MZP8'), 'HALL02.HALL01.json': room('HALL01'), 'lower.json': room('X'), 'A.B.C.json': room('X') };
+  for (const [f, text] of Object.entries(placed)) fs.writeFileSync(path.join(dir, f), text);
+  const before = jsonFiles(dir).map((f) => f + ':' + fs.readFileSync(path.join(dir, f), 'utf8'));
+  const b = new RoomStore(dir);
+  let n = 0;
+  const lines = said(() => { n = b.loadAll(); });
+  assert.equal(n, 3, 'the two halls and Legal');
+  assert.deepEqual(b.allRooms().map((r) => r.code), ['HALL01', 'HALL02', 'LGQ4MZP8']);
+  assert.equal(b.room('LGQ4MZP8').hall, 'HALL01', 'the room under its own hall, whatever another file claims');
+  assert.deepEqual(b.room('LGQ4MZP8').messages.map((m) => m.id), ['kept']);
+  assert.deepEqual(lines.sort(), [
+    '  Not loaded: A.B.C names no hall and no room (its files are kept)',
+    '  Not loaded: lower names no hall and no room (its files are kept)',
+    '  Not loaded: room HALL01 of hall HALL02 — another room has its key (its files are kept as HALL02.HALL01)',
+    '  Not loaded: room LGQ4MZP8 of hall HALL02 — another room has its key (its files are kept as HALL02.LGQ4MZP8)',
+    '  Not loaded: room ORPHAN23 — its hall GONE99 is gone (its files are kept as GONE99.ORPHAN23)',
+  ]);
+  assert.deepEqual(jsonFiles(dir).map((f) => f + ':' + fs.readFileSync(path.join(dir, f), 'utf8')), before, 'every file is kept as it was');
+});
+
+test('store: compactDirty, dirtyCodes, unsaved, remove and removeHall cover the side rooms; a hall goes with its rooms, its side rooms\' files first', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const hall = a.create('HALL01', 'Hall 1');
+  const other = a.create('HALL02', 'Hall 2');
+  const legal = a.createIn('HALL01', 'LGQ4MZP8', 'Legal');
+  const media = a.createIn('HALL01', 'MDR7VX2C', 'Media');
+  const press = a.createIn('HALL02', 'PRS3SS45', 'Press');
+  assert.deepEqual(a.dirtyCodes(), [], 'each made with its snapshot, clean');
+  sayIn(a, legal, 'l1');
+  assert.deepEqual(a.dirtyCodes(), ['LGQ4MZP8']);
+  assert.equal(a.compactDirty(), 1);
+  assert.deepEqual(a.dirtyCodes(), []);
+  // An append the disk refuses: the side room is unsaved until its next snapshot lands.
+  const log = path.join(dir, 'HALL01.MDR7VX2C.log');
+  fs.unlinkSync(log);
+  fs.mkdirSync(log);
+  said(() => sayIn(a, media, 'm1'));
+  assert.deepEqual([a.unsaved(), a.dirtyCodes()], [['MDR7VX2C'], ['MDR7VX2C']]);
+  fs.rmdirSync(log);
+  assert.equal(a.compactDirty(), 1);
+  assert.deepEqual(a.unsaved(), []);
+
+  // A side room alone: its files go (its open log let go first), and nothing else's.
+  sayIn(a, press, 'p1');
+  assert.notEqual(press.logFd, null);
+  assert.deepEqual(a.remove('PRS3SS45'), { rooms: [press], kept: [], again: 0 });
+  assert.deepEqual([a.room('PRS3SS45'), a.roomsOf('HALL02')], [undefined, [other]]);
+  assert.deepEqual(jsonFiles(dir), ['HALL01.LGQ4MZP8.json', 'HALL01.MDR7VX2C.json', 'HALL01.json', 'HALL02.json']);
+  assert.equal(press.logFd, null, 'its log let go');
+  // A hall goes with its rooms, its side rooms' files first: a stop part way leaves a whole hall with fewer rooms, never a
+  // side room without its hall.
+  const order = [];
+  const unlink = fs.unlinkSync;
+  fs.unlinkSync = (f) => { if (/\.json$/.test(String(f))) order.push(path.basename(String(f))); return unlink.call(fs, f); };
+  let gone;
+  try { gone = a.removeHall('HALL01'); } finally { fs.unlinkSync = unlink; }
+  assert.deepEqual(gone, { rooms: [hall, legal, media], kept: [], again: 0 }, 'the rooms removed, Main first, every file gone');
+  assert.deepEqual(order, ['HALL01.LGQ4MZP8.json', 'HALL01.MDR7VX2C.json', 'HALL01.json']);
+  assert.deepEqual([a.allRooms(), jsonFiles(dir)], [[other], ['HALL02.json']]);
+  assert.ok(!fs.readdirSync(dir).some((f) => f.startsWith('HALL01')), 'no file of the hall is left: snapshots, logs and backups');
+  // remove() of a hall is removeHall().
+  const again = a.createIn('HALL02', 'PRS3SS45', 'Press');
+  assert.deepEqual(a.remove('HALL02'), { rooms: [other, again], kept: [], again: 0 });
+  assert.deepEqual([a.allRooms(), fs.readdirSync(dir)], [[], []]);
+  const c = new RoomStore(dir);
+  assert.equal(c.loadAll(), 0, 'the next start loads cleanly');
+});
+
+test('store: 0.5.1 loads a hall\'s file and never a side room\'s, whose name its one test, CODE_RE, refuses', () => {
+  // 0.5.1's loader (lib/store.js at 0.5.1): each name in the folder whose stem CODE_RE takes is a hall; every other is skipped.
+  const CODE_RE_051 = /^[A-Z0-9]{4,12}$/;
+  assert.equal(String(CODE_RE), String(CODE_RE_051), 'a hall\'s stem is read as 0.5.1 reads it');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  a.create('HALL01', 'Hall 1');
+  sayIn(a, a.createIn('HALL01', 'LGQ4MZP8', 'Legal'), 'l1');
+  a.compactDirty();
+  const stems = new Set(fs.readdirSync(dir).map((f) => (/^(.+)\.json(\.bak)?$/.exec(f) || [])[1]).filter(Boolean));
+  assert.deepEqual([...stems].sort(), ['HALL01', 'HALL01.LGQ4MZP8']);
+  assert.deepEqual([...stems].filter((s) => CODE_RE_051.test(s)), ['HALL01'], '0.5.1 loads the hall alone');
+  assert.ok(SIDE_RE.test('HALL01.LGQ4MZP8') && !SIDE_RE.test('HALL01') && !CODE_RE_051.test('HALL01.LGQ4MZP8'));
+});
+
+test('store: a room whose file another program holds keeps its files from that one on, says so, and loads again whole only beside its hall', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  a.create('HALL01', 'Hall 1');
+  a.create('HALL02', 'Hall 2');
+  const legal = a.createIn('HALL01', 'LGQ4MZP8', 'Legal');
+  const press = a.createIn('HALL02', 'PRS3SS45', 'Press');
+  for (const r of [legal, press]) { sayIn(a, r, r.code + '-1'); a.compact(r.code); sayIn(a, r, r.code + '-2'); }   // a snapshot, its backup and a log line
+  /** Remove with `held` (a file's name → its code) held by another program; gives back the answer and the console's lines. */
+  const removing = (fn, held) => {
+    const unlink = fs.unlinkSync;
+    const tried = [];
+    fs.unlinkSync = (f) => {
+      const name = path.basename(String(f));
+      tried.push(name);
+      if (held[name]) throw Object.assign(new Error(held[name] + ': held'), { code: held[name] });
+      return unlink.call(fs, f);
+    };
+    let answer;
+    let lines;
+    try { lines = said(() => { answer = fn(); }); } finally { fs.unlinkSync = unlink; }
+    return { answer, lines, tried };
+  };
+  // Its snapshot held: the room goes from memory, its files from that one on stay, and it loads again whole.
+  const one = removing(() => a.remove('LGQ4MZP8'), { 'HALL01.LGQ4MZP8.json': 'EBUSY' });
+  assert.deepEqual(one.answer, { rooms: [legal], kept: ['HALL01.LGQ4MZP8.json'], again: 1 });
+  assert.deepEqual(one.tried, ['HALL01.LGQ4MZP8.json.bak', 'HALL01.LGQ4MZP8.json'], 'its backup, then its snapshot, where it stops');
+  assert.deepEqual(one.lines, ['  Could not remove HALL01.LGQ4MZP8.json (EBUSY): it and the files of its room after it stay on disk']);
+  assert.deepEqual([a.room('LGQ4MZP8'), a.roomsOf('HALL01').length], [undefined, 1]);
+  const b = new RoomStore(dir);
+  b.loadAll(null, { compact: false });
+  assert.deepEqual(b.room('LGQ4MZP8').messages.map((m) => m.id), ['LGQ4MZP8-1', 'LGQ4MZP8-2'], 'whole: its snapshot and its log');
+  // Only its log held: its snapshot and backup gone, nothing of it loads again; the log stays, unused.
+  const two = removing(() => a.remove('PRS3SS45'), { 'HALL02.PRS3SS45.log': 'EPERM' });
+  assert.deepEqual(two.answer, { rooms: [press], kept: ['HALL02.PRS3SS45.log'], again: 0 });
+  assert.ok(fs.existsSync(path.join(dir, 'HALL02.PRS3SS45.log')) && !fs.existsSync(path.join(dir, 'HALL02.PRS3SS45.json')));
+  // A hall whose side room's snapshot is held: the hall goes, so the room left on disk never loads again (it has no hall).
+  const c = new RoomStore(dir);
+  said(() => c.loadAll());
+  const [hall, back] = [c.get('HALL01'), c.room('LGQ4MZP8')];
+  const media = c.createIn('HALL01', 'MDR7VX2C', 'Media');
+  assert.deepEqual(removing(() => c.removeHall('HALL01'), { 'HALL01.LGQ4MZP8.json': 'EBUSY' }).answer, { rooms: [hall, back, media], kept: ['HALL01.LGQ4MZP8.json'], again: 0 });
+  // A hall whose own snapshot is held loads again, with each of its side rooms whose snapshot stayed beside it.
+  const h3 = c.create('HALL03', 'Hall 3');
+  const [s1, s2] = [c.createIn('HALL03', 'SIDE2345', 'One'), c.createIn('HALL03', 'SIDE6789', 'Two')];
+  assert.deepEqual(removing(() => c.remove('HALL03'), { 'HALL03.json': 'EBUSY', 'HALL03.SIDE2345.json': 'EBUSY' }).answer, { rooms: [h3, s1, s2], kept: ['HALL03.SIDE2345.json', 'HALL03.json'], again: 2 });
+  const d = new RoomStore(dir);
+  const lines = said(() => d.loadAll(null, { compact: false }));
+  assert.deepEqual(d.allRooms().map((r) => r.code), ['HALL02', 'HALL03', 'SIDE2345']);
+  assert.deepEqual(lines, ['  Not loaded: room LGQ4MZP8 — its hall HALL01 is gone (its files are kept as HALL01.LGQ4MZP8)']);
+});
+
+test('store: a hall holds SIDE_MAX side rooms at a start: one more on disk is said, left out and kept, the same ones every start', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  a.create('HALL01', 'Hall 1');
+  const keys = Array.from({ length: SIDE_MAX + 1 }, (_, i) => 'ROOM' + String.fromCharCode(65 + i) + 'ZZZ');
+  for (const k of keys.slice(0, SIDE_MAX)) a.createIn('HALL01', k, k);
+  // One more, laid on by hand (a folder restored or edited): its name sorts last.
+  const extra = keys[SIDE_MAX];
+  fs.writeFileSync(path.join(dir, 'HALL01.' + extra + '.json'), JSON.stringify({ code: extra, name: extra, createdAt: 1, seq: 0, settings: {}, messages: [] }));
+  for (let i = 0; i < 2; i++) {
+    const b = new RoomStore(dir);
+    let n = 0;
+    const lines = said(() => { n = b.loadAll(); });
+    assert.equal(n, 1 + SIDE_MAX);
+    assert.deepEqual(b.roomsOf('HALL01').slice(1).map((r) => r.code).sort(), keys.slice(0, SIDE_MAX).sort());
+    assert.deepEqual(lines, ['  Not loaded: room ' + extra + ' of hall HALL01 — the hall holds ' + SIDE_MAX + ' rooms beside it already (its files are kept as HALL01.' + extra + ')']);
+    assert.ok(fs.existsSync(path.join(dir, 'HALL01.' + extra + '.json')), 'its file kept');
+  }
 });
 
 // ---------------------------------------------------------------- compaction trusts the snapshot it wrote

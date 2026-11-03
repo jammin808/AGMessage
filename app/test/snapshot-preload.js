@@ -1,11 +1,12 @@
 'use strict';
 // Preloaded into a server under test (NODE_OPTIONS=--require; every server test/helpers.js starts without preloads of its
-// own, and the smoke's): the runtime half of the fence on a hall's snapshot. A start and a stop write only the dirty halls
-// (lib/store.js `compactDirty`), so a change to a field a snapshot writes that the store was never told of (an op, or
-// `markDirty`) would be lost at the stop. Each hall's fields are kept here as the store last wrote them or loaded them
-// (`savedAt` aside, and before the load's `onMigrate`); at each `compactDirty` (a start, a stop, a crash) every hall it
-// leaves unwritten is compared with them, and each field that differs is appended to the file AGM_TEST_SNAPSHOTS names
-// as the process exits, a line `<code> <field>`. Nothing the server does is changed. A process killed writes nothing.
+// own, and the smoke's): the runtime half of the fence on a room's snapshot, a hall's Main room's and a side room's
+// alike. A start and a stop write only the dirty rooms (lib/store.js `compactDirty`), so a change to a field a snapshot
+// writes that the store was never told of (an op, or `markDirty`) would be lost at the stop. Each room's fields are kept
+// here as the store last wrote them or loaded them (`savedAt` aside, and before the load's `onMigrate`); at each
+// `compactDirty` (a start, a stop, a crash) every room it leaves unwritten is compared with them, and each field that
+// differs is appended to the file AGM_TEST_SNAPSHOTS names as the process exits, a line `<key> <field>`. Nothing the
+// server does is changed. A process killed writes nothing.
 const fs = require('fs');
 
 const file = process.env.AGM_TEST_SNAPSHOTS;
@@ -19,7 +20,7 @@ if (file) {
   const compact = RoomStore.prototype.compact;
   RoomStore.prototype.compact = function keptAsWritten(code) {
     const wrote = compact.call(this, code);
-    if (wrote) kept.set(this.rooms.get(code), fieldsOf(this, this.rooms.get(code)));
+    if (wrote) kept.set(this.room(code), fieldsOf(this, this.room(code)));
     return wrote;
   };
   const loadAll = RoomStore.prototype.loadAll;
@@ -29,7 +30,7 @@ if (file) {
   const compactDirty = RoomStore.prototype.compactDirty;
   RoomStore.prototype.compactDirty = function checked() {
     const n = compactDirty.call(this);
-    for (const room of this.rooms.values()) {
+    for (const room of this.allRooms()) {
       const was = kept.get(room);
       if (!was || this.dirty(room)) continue;
       const now = fieldsOf(this, room);

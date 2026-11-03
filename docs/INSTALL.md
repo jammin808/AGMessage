@@ -194,10 +194,10 @@ the installer's units'; what they will ask is built and tested here, against the
 not it.
 
 - **The busy line** (`lib/busy.js`) is one line of counts, and nothing else: no name, code, token or path. `active`, the
-  pages active in the last 10 minutes, a page being a person in a hall (the hall's code and the uid its join gave them,
-  so the same person back on a new socket is the same page): one whose seat gave input (an answer, a reaction, a take, a
+  pages active in the last 10 minutes, a page being a person in a room (the room's key, a hall's code for its Main room,
+  and the uid its join gave them, so the same person back on a new socket is the same page): one whose seat gave input (an answer, a reaction, a take, a
   help request, an ask of the AI: a verb of `busy.INPUT`, heard before its handler runs, so one refused counts too), or
-  whose message the hall holds from the window, whoever sent it (a seat, the admin's support view, the minutes, a show
+  whose message the room holds from the window, a hall's side room's too, whoever sent it (a seat, the admin's support view, the minutes, a show
   system) and whether or not the server restarted since, the system's own lines never; `takes`, the screens whose take
   changed in them (`takenAt`, kept in `displays.json`); `help`, the help requests raised in them; `countdowns`, the
   Stagewatch countdowns running now (as the power request reads them); `seats`, the pages seated now that are not
@@ -275,7 +275,7 @@ Linux processes frozen and thawed, and lab 1 is the show laptop's.
   the stop saves it) and keeps it with the show day's peaks (`peaks.json`: each day's count and longest, and the newest
   20 whole), so a restart keeps them: health's `sleeps`, the admin page's peaks and "This laptop"'s Sleeps row.
 - **The power request** (`lib/power.js`). While a hall is live, the server holds a power request. A hall is live while
-  it has an open page seated in it, idle or not (a Board reading quietly through a long session is a live show, so a
+  it has an open page seated in any of its rooms, idle or not (a Board reading quietly through a long session is a live show, so a
   page left open in a hall holds the request until it is closed: "This laptop" says what makes the halls live, "2 pages
   open, 1 screen showing"); a screen on which a browser confirmed a take other than holding (another browser on the same
   link that could not show it takes nothing from it); or its Stagewatch countdown counting, as Stagewatch says now (a

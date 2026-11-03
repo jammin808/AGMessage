@@ -31,6 +31,8 @@ const adminState = { ok: false, admin: false, ai: false, halls: [], connected: f
 let ADMIN_F = AGM.catalog.adminFacts(adminState);
 const ADMIN_RUN = {};
 const say = (words, bad) => AGM.toast(words, bad);
+// Long enough to read a sentence about files left on disk before the page starts afresh.
+const KEPT_READ_MS = 8000;
 /** The server's refusal said, or its words when it gave none. */
 const saidIfNot = (words) => (res) => { if (!res || !res.ok) say((res && res.error) || words, true); };
 const ADMIN = AGM.acts({ facts: () => ADMIN_F, run: ADMIN_RUN, say });
@@ -511,8 +513,10 @@ Object.assign(ADMIN_RUN, {
     say('Cleared every message in ' + o.hall + '.');
     if (currentRoom && currentRoom.code === o.code) { currentRoom.messages = []; renderFeed(currentRoom.messages); updateCounts(); }
   }),
+  // Closed: the page starts afresh on the list without it, once the admin has read what stayed on disk, if anything did.
   'adminRoom.remove': (o, c) => AGM.outbox.now('admin:deleteRoom', { roomCode: o.code, purgeFiles: !!(c.values && c.values.purge) }, (res) => {
     if (!res || !res.ok) { say((res && res.error) || 'Not closed.', true); return; }
+    if (res.keptWords) { say('Closed. ' + res.keptWords, true); setTimeout(() => location.reload(), KEPT_READ_MS); return; }
     location.reload();
   }),
   // The select shows the seat once the server has it; a refusal leaves it on the seat the server keeps.

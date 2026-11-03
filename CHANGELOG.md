@@ -2353,6 +2353,111 @@ Windows runner, and R3′ waits for the server task)
 - Rolling back: 0.5.1 has no `/api/machine/*` (a machine asking it reads it as not proven, so busy), its pipe answers
   nothing, and it ignores `takenAt` in `displays.json`.
 
+**A hall's other rooms are kept beside it, and today's halls are read as halls with one room** (the plan's Part 1, unit
+4, its §1.1-1.5 and §3.5, with Part 5's fence (l); the tree's tests. No act makes a side room yet, so nothing a page
+shows changes: the rooms are made, given and joined in the units that follow)
+- **A hall is its Main room**, as in 0.5.1: its key, its code, its name and its files are today's, and the store's hall
+  readers (`store.rooms`, `get`, `has`) read halls and nothing else, so the halls board, `/api/halls`, the context and
+  the desk's notice count, screens, Stagewatch and peer links, a hall's set-up and accounts' halls never see a side
+  room. A reader of a hall that should have read any room answers "Room not found" there: it fails closed. Left on
+  halls, each with the unit that moves it: what a side room sends to its hall's Stagewatch (`linkFor`, the AI's brief:
+  the plan's unit 8, refused there until then, below), a help request's answer (`help:respond`: units 5 and 8, none
+  raised there until then), the admin's room list (`admin:listRooms`: unit 6) and a hall's invite links (unit 7); the
+  halls board's row, the context and health's `largestHall` count Main rooms, as their words say.
+- **A side room** (Legal, Media) is a room as a hall's Main room is, with its own op log, numbers, ring, snapshot, seats
+  and lock, kept beside its hall as `data/rooms/<HALL>.<KEY>.json`, `.log` and `.json.bak` (`lib/store.js`) and reached
+  only by the any-room readers (`room`, `hasRoom`, `allRooms`, `roomsOf`). One is made only beside a hall that is here,
+  under a key no room has, at most 20 to a hall (`createIn`), its first snapshot written at once with its guest code
+  off, so a new room is for accounts until it is switched on; a hall's rooms are read from its own list, in the order
+  they were made, never by a walk of every hall's. A start loads every hall first, as 0.5.1 does, then each side room
+  whose hall loaded, whose key no other room has and whose hall holds fewer than 20 already; a room whose hall is gone,
+  one whose key another room has, one past the 20 (by its file's name, the same ones every start) and a file of no hall
+  and no room are each said on the console ("Not loaded: room LGQ4MZP8 — its hall H7K2QA is gone (its files are kept as
+  H7K2QA.LGQ4MZP8)") and left on disk, where 0.5.1 skipped a name it did not read without a word. A start and a stop
+  write the rooms that changed, side rooms included, and a stop that could not write a side room counts its hall among
+  those it names. A hall removed goes with its side rooms, their files first, so a stop part way leaves a whole hall
+  with fewer rooms, never a room without its hall. A room's backup, then its snapshot, then its log are removed, and a
+  file another program holds (an antivirus, a backup: EBUSY or EPERM) is no longer passed over in silence: the removal
+  stops at it, so the room's files from it on stay whole, it is said on the console ("Could not remove
+  H7K2QA.LGQ4MZP8.json (EBUSY): …"), and the admin's answer, the admin page and the row say the files of how many rooms
+  stayed and whether the room or hall opens again at the next start (it does while its backup or snapshot stays, beside
+  its hall), in which case its uploads are kept for it even when the removal asked for them to go.
+- **Who reaches a side room, by its key:** an admin account (one that manages settings) joins one, and the admin's
+  support view and room controls (the laptop's token's too) reach one. No other account: an account's halls reach a
+  hall's Main room only, every hall's included ("Your account has no access to this room — ask an admin."). No guest: a
+  code names a hall, never a side room, so a join or a lookup with a side room's key finds nothing, as a wrong code
+  does. An account's rights reach no side room, so nothing is forwarded into one on them, and the admin's link of an
+  account into one is refused, as a link into a hall it may not post in is; a guest the admin links into one forwards
+  there, as into another hall. A side room shows its hall's countdown (the join's `stage` and every frame are its
+  hall's Stagewatch's), and sends nothing to a Stagewatch: Send to the speaker's screen, a proposal to the show desk and
+  their destinations are refused there ("This room sends nothing to the speaker's screen: send it from the hall's Main
+  room."), `canSendToStage` and `canPropose` false, and a draft carries no show facts, where they would have gone to the
+  default Stagewatch and been answered as sent with nothing kept in the room. A help request raised there is refused
+  ("Help requests are asked from the hall's Main room, where its crew answers them."): no board would show it and no
+  one could answer it.
+- **Every room, not only a hall:** a file a side room holds is in use, so a hall's reset or a message removed there
+  never takes it from the disk (0.5.1 scans only the halls it loads); a page's room is "gone" only when no room has its
+  key; a room's people list and seen receipts are sent to that room's pages; a hall that follows another Stagewatch, and
+  each frame of its Stagewatch, reaches every room it holds; a hall is live for the power request with a page seated in
+  any of its rooms, a meeting in a side room alone included, and a message any room holds from the busy line's window
+  makes its page active, across a restart too; "This laptop"'s Pages row names a side room's page by its hall's name and
+  its own ("Hall 2 › Legal"); a send to the speaker's screen or a proposal is kept only while its room is
+  (`store.room`); the boot's saved seats nobody took up are let go in every room; after a stop that did not save, every
+  room says "— AGMessage restarted · N messages kept —" (health's `lastStop.said` still counts the halls); a forward and
+  its picker reach a room the person sits in or the admin linked them to; and a new hall's key is no room's key. The
+  admin's room controls take a room by its key: watch, the transcript, reset, remove, a message removed, a seat, the
+  lock, a link in, out or back, send out, the AI's summary and its minutes; a hall's invite links stay a hall's (a
+  guest's code names a hall, so a side room's would admit nobody). A side room removed alone sends its pages out ("This
+  room was closed by the admin."), leaves its hall's Stagewatch, screens and links as they are, and writes one
+  `room.remove` row with its name and its hall's ("Legal (Hall 2), files removed"); a hall removed sends every room's
+  pages out, and its `hall.remove` row counts its other rooms ("Hall 2 with 2 other rooms, files removed").
+- **Health:** `/api/health` appends `sideRooms` at the end of its detail, the rooms the halls hold beside their Main
+  rooms; `rooms` still counts the halls.
+- **Today's halls read as halls with one room.** A 0.5.1 data folder boots with each hall's rooms its Main room alone:
+  the same code, name, messages and numbers (one more, for the restart line), seats and lock, invite links, forwards (by
+  their hall's name), stage sends (`link: 'hall:<code>'` with its Stagewatch's address tag, still followed: the
+  speaker's acknowledgement after the restart reaches the line it sent), the hall's Stagewatch, its screens, the desk's
+  results and the accounts' halls. Nothing is rewritten but what a start already writes, and no people's pages
+  file and no list of rooms that may send in appears.
+- **The fence (l)** (`test/modules.test.js`, `docs/ANALYSIS.md` §3.5): every call to an any-room reader in a shipped
+  server file is counted per file with why it reads any room and not a hall, 38 in `server.js` (the plan's §3.5 and the
+  readers of room state beside it: the people and seen frames, a stop's halls left unwritten, the power request, the
+  busy line, "This laptop"'s Pages row and a stage send's room still kept); the store's side rooms are read through
+  those readers alone (`store.side` and `store.sideByHall` nowhere else). A planted call
+  without its reason, a reason without its call and `store.side` read past the store each fail it. The snapshot fence's
+  runtime half (`test/snapshot-preload.js`) holds a side room as a hall: a field changed beside the store is found.
+- Tests: `test/units.test.js`: a side room kept as `<HALL>.<KEY>`, reloaded under its hall with its numbers, its
+  messages and its log replayed, resumed within the room; the hall readers never see it and the any-room readers do, in
+  order; made only beside a hall, under a free key, at most 20; a room whose hall is gone, one whose key another room
+  has, one past the 20 (the same ones at every start) and a file of no hall or room said and kept byte for byte;
+  `compactDirty`, `dirtyCodes`, `unsaved`, `remove` and `removeHall` cover side rooms, the side rooms' files removed
+  first; a file another program holds stops the removal at it, said, its room loading again whole only beside its hall;
+  0.5.1's one test, `CODE_RE`, takes a hall's stem and never a side room's. `test/resilience.test.js`: a 0.5.1 folder
+  (two halls, each snapshot in 0.5.1's shape, a locked hall's seats, a forward, a stage send with `link:'hall:CODE'` and
+  its Stagewatch's tag, a desk result, an account's halls, a screen, the hall's Stagewatch, an invite) boots with
+  `sideRooms` 0 and every hall as it was, seq + 1, the stage send acknowledged after the restart, and a second copy on
+  the folder writes nothing. `test/uploads.test.js`: a file a side room holds survives its hall's reset; the room
+  removed takes the file only it held and its own files, with its row; the hall removed takes the rest; a side room
+  whose snapshot another program holds (`test/busy-preload.js`'s `AGM_TEST_UNREMOVABLE`) is said to the admin, in its
+  row and on the console, its upload kept, and is back at the next start. `test/halls.test.js`: who reaches a side room
+  by its key and who never does (the laptop token's support view among those who do), its own numbers and people, the
+  hall's Stagewatch, a forward and a linked guest's forward reaching it, an account's link into it refused, the Main
+  room never hearing it; its stage sends, proposals, destinations and help refused with their words while its hall's
+  Main room may send, nothing reaching either Stagewatch, its page counted by the power request and its message keeping
+  the busy line active across a restart. `test/modules.test.js`: the fence (l) and a planted breach of each kind. Moved
+  on purpose: `test/server.test.js`'s health keys end with `sideRooms`.
+- The papers: `CLAUDE.md` (the store's row, the fence's, the frames', the start rules' preload, and a room in the house
+  words), `README.txt` (going back to 0.5.1: a hall's other rooms not opened, and a file only one holds),
+  `docs/ACCOUNTS.md` (the audit log's `room.remove` and `hall.remove`), `docs/ANALYSIS.md` (the fence (l)),
+  `docs/DESIGN.md` (the per-room numbers, fail closed, the modules fence), `docs/INSTALL.md` (the busy line's pages and
+  the power request's halls, by room), `docs/NODES.md` (health's `sideRooms`; a meeting in the context is a hall, its
+  side rooms never counted), and `tools/build-portable.ps1` (it refuses to package any file under `app\data\rooms`, a
+  side room's included, and every store and key in `app\data`).
+- Rolling back: 0.5.1 loads the halls with every message and leaves each side room's files on disk (their names hold a
+  dot, which its loader never takes); back on 0.6 they load again. Under 0.5.1 a file only a side room holds can be
+  removed by a reset or a deletion of any hall, since it scans only the halls it loads: do not go back to 0.5.1 during
+  a show.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

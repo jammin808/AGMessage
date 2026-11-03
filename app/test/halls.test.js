@@ -3,7 +3,9 @@
 // receipts never cross), the halls board for a project manager and a tech, help requests answered from the board and
 // from the hall, and a hall's Stagewatch key kept sealed in the server's settings, never in the room's log. Then the rights
 // inside a hall: forwarding is posting where it lands, read-only people change nothing, the admin's room list, a rename
-// or a lock reaching open pages as one numbered change, and one person on two devices.
+// or a lock reaching open pages as one numbered change, and one person on two devices. Last, a side room beside a hall:
+// who reaches it by its key, and who, reading halls, never sees it; what it never sends to a Stagewatch, and what it
+// still counts for (the power request, the busy line).
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -16,7 +18,8 @@ const tlsmod = require('../lib/tls');
 const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
 const { io } = require('socket.io-client');
-const { startServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, freePort, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, freePort, TOKEN } = require('./helpers');
+const wire = require('../lib/machinewire');
 
 // Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
 const KEY_A = 'swk_hallA_node_key_0001';   // secret-scan: fixture
@@ -1000,4 +1003,139 @@ test('a locked hall\'s seats outlive the watchdog\'s restart for the pages back 
   const sam3 = await join('Sam Backstage', 'research', { uid: sam.j.identity });
   const oz3 = await join('Oz Onstage', 'board', { uid: oz.j.identity });
   assert.deepEqual({ lee: [lee2.j.role, /invite/.test(lee2.j.note)], sam: sam3.j.role, oz: oz3.j.role }, { lee: ['observer', true], sam: 'research', oz: 'board' });
+});
+
+test('a side room beside a hall: the admin and the support view reach it by its key, no other account, no guest\'s code and no hall reader does; its people and its hall\'s Stagewatch reach its pages', async (t) => {
+  // No act makes a side room yet: the folder is laid out as the store keeps one, a hall and a room beside it.
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  fs.mkdirSync(path.join(data, 'rooms'));
+  const room = (code, name, messages = []) => JSON.stringify({ code, name, createdAt: 1, seq: messages.length, settings: {}, messages, savedAt: 1, gone: [] });
+  fs.writeFileSync(path.join(data, 'rooms', 'HALLA1.json'), room('HALLA1', 'Hall A'));
+  fs.writeFileSync(path.join(data, 'rooms', 'HALLA1.LGQ4MZP8.json'), room('LGQ4MZP8', 'Legal', [{ id: 'l1', type: 'text', text: 'the contract', at: 1, seq: 1, from: { uid: 'u1', name: 'Lou', role: 'research' } }]));
+  const srv = await startServer({ AGM_DATA_DIR: data });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const signIn = async (username, role, extra) => {
+    assert.ok((await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: 'clipboard and coffee', ...extra }, { cookie: admin })).body.ok);
+    return (await api(srv.base, 'POST', '/api/auth/login', { username, password: 'clipboard and coffee' })).cookie;
+  };
+  const tom = await signIn('tom', 'tech', { halls: ['HALLA1'] });
+  const pat = await signIn('pat', 'manager');
+  const SIDE = 'LGQ4MZP8';
+
+  // The hall readers never see it: the lookup a guest's code makes, a guest's join, the halls an account sees.
+  assert.deepEqual((await api(srv.base, 'GET', '/api/rooms/' + SIDE)).body, { code: SIDE, exists: false, name: '', locked: false });
+  assert.deepEqual(await emit(await page(), 'join', { roomCode: SIDE, name: 'Gus', role: 'research' }), { ok: false, error: 'Room not found' }, 'a side room\'s key is no code a guest types');
+  assert.deepEqual((await api(srv.base, 'GET', '/api/halls', undefined, { cookie: pat })).body.halls.map((h) => h.code), ['HALLA1']);
+  // An account's halls reach the Main room and no side room, every hall's or one's own.
+  for (const cookie of [tom, pat]) {
+    assert.deepEqual(await emit(await page(cookie), 'join', { roomCode: SIDE, as: 'account' }), { ok: false, error: 'Your account has no access to this room — ask an admin.' });
+    assert.ok((await emit(await page(cookie), 'join', { roomCode: 'HALLA1', as: 'account' })).ok);
+  }
+  // The admin reaches it by its key, with its history and its own numbers; the support view too.
+  const ana = await page(admin);
+  const inSide = await emit(ana, 'join', { roomCode: SIDE, as: 'account' });
+  // A folder with no record of how its last copy stopped: every room, this one too, says AGMessage restarted.
+  assert.deepEqual([inSide.ok, inSide.roomName, inSide.seq, inSide.history.map((m) => m.text)], [true, 'Legal', 2, ['the contract', '— AGMessage restarted · 1 message kept —']]);
+  const watch = await page(admin);
+  const view = await emit(watch, 'join', { roomCode: SIDE, as: 'account', name: 'Ana Admin', adminView: true });
+  assert.deepEqual([view.ok, view.adminView, view.roomName], [true, true, 'Legal']);
+  // The laptop's token signs in no account: its support view names the room by its key all the same, unseated.
+  const token = (await api(srv.base, 'POST', '/api/admin/login', { token: TOKEN })).cookie;
+  const support = await emit(await page(token), 'join', { roomCode: SIDE, name: 'Gwen', role: 'observer', adminView: true });
+  assert.deepEqual([support.ok, support.adminView, support.roomName, support.users.some((u) => u.name === 'Gwen')], [true, true, 'Legal', false]);
+  const tomMain = await page(tom);
+  assert.ok((await emit(tomMain, 'join', { roomCode: 'HALLA1', as: 'account' })).ok);
+  const mainHeard = [];
+  tomMain.on('message', (m) => mainHeard.push(m.text));
+  const heard = once(watch, 'message');
+  assert.ok((await emit(ana, 'message', { type: 'text', text: 'in Legal only' })).ok);
+  assert.equal((await heard).text, 'in Legal only', 'a page in the room hears it');
+  // Its people list is its own, sent to its pages.
+  const people = once(watch, 'users');
+  const second = await page(admin);
+  assert.ok((await emit(second, 'join', { roomCode: SIDE, as: 'account' })).ok);
+  assert.ok((await people).some((u) => u.name === 'Ana Admin'));
+  // The hall's Stagewatch, set or changed, reaches every room the hall holds.
+  const staged = once(ana, 'stage');
+  assert.ok((await emit(await page(admin), 'hall:configure', { code: 'HALLA1', name: 'Hall A', stagewatchUrl: '127.0.0.1:9' })).ok);
+  assert.ok(Object.hasOwn(await staged, 'cert'), 'the frame of a Stagewatch with an address, not "off"');
+  // A forward from the Main room into the side room the admin sits in lands there, and the Main room never hears Legal.
+  const anaMain = await page(admin);
+  assert.ok((await emit(anaMain, 'join', { roomCode: 'HALLA1', as: 'account' })).ok);
+  const sent = await emit(anaMain, 'message', { type: 'text', text: 'for the lawyers' });
+  const forwarded = once(watch, 'message');
+  assert.ok((await emit(anaMain, 'forward', { messageId: sent.id, targetRoom: SIDE })).ok);
+  assert.deepEqual([(await forwarded).text, (await forwarded).forwardedFrom.roomName], ['for the lawyers', 'Hall A']);
+  await wait(200);
+  assert.ok(!mainHeard.includes('in Legal only'), 'the Main room never hears its side room: ' + JSON.stringify(mainHeard));
+  // The admin's link: a guest in the Main room may then forward into it; an account, whose halls reach no side room, may not.
+  assert.deepEqual(await emit(anaMain, 'admin:linkRoom', { socketId: tomMain.id, targetRoom: SIDE }), { ok: false, error: 'tom signs in with an account, and an account\'s halls reach no side room.' });
+  const gus = await page();
+  assert.ok((await emit(gus, 'join', { roomCode: 'HALLA1', name: 'Gus', role: 'research' })).ok);
+  const fromGus = await emit(gus, 'message', { type: 'text', text: 'from the floor' });
+  assert.deepEqual(await emit(gus, 'forward', { messageId: fromGus.id, targetRoom: SIDE }), { ok: false, error: 'You must be in the target room too (or ask admin to link you)' });
+  assert.ok((await emit(anaMain, 'admin:linkRoom', { socketId: gus.id, targetRoom: SIDE })).ok);
+  const linked = once(watch, 'message');
+  assert.ok((await emit(gus, 'forward', { messageId: fromGus.id, targetRoom: SIDE })).ok);
+  assert.equal((await linked).text, 'from the floor');
+  // The admin's room controls reach it by its key.
+  assert.ok((await emit(anaMain, 'admin:watchRoom', { roomCode: SIDE })).ok);
+  assert.ok((await emit(anaMain, 'admin:lockRoles', { roomCode: SIDE, on: true })).locked);
+  const health = (await api(srv.base, 'GET', '/api/health', undefined, { cookie: admin })).body;
+  assert.deepEqual([health.rooms, health.sideRooms], [1, 1]);
+});
+
+test('a side room sends nothing to a Stagewatch and raises no help request, each refused with words and none sent to another Stagewatch; it shows its hall\'s countdown, and its pages and messages keep the laptop awake and busy', async (t) => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-e2e-'));
+  fs.mkdirSync(path.join(data, 'rooms'));
+  const room = (code, name) => JSON.stringify({ code, name, createdAt: 1, seq: 0, settings: {}, messages: [], savedAt: 1, gone: [] });
+  fs.writeFileSync(path.join(data, 'rooms', 'HALLA1.json'), room('HALLA1', 'Hall A'));
+  fs.writeFileSync(path.join(data, 'rooms', 'HALLA1.LGQ4MZP8.json'), room('LGQ4MZP8', 'Legal'));
+  let srv = await startServer({ AGM_DATA_DIR: data });
+  const swHall = await fakeStagewatch({ name: 'Hall A timer' });
+  const swDef = await fakeStagewatch({ name: 'Default timer' });
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); await swHall.close(); await swDef.close(); });
+  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const ctl = await page(admin);
+  assert.ok((await emit(ctl, 'admin:settings', { stagewatchUrl: swDef.url, stagewatchKey: KEY_B })).ok);
+  assert.ok((await emit(ctl, 'hall:configure', { code: 'HALLA1', name: 'Hall A', stagewatchUrl: swHall.url, stagewatchKey: KEY_A })).ok);
+  await until(() => swHall.connected && swDef.connected, 8000, 'both Stagewatches linked');
+  // The hall's Main room may send to its Stagewatch: what a side room is refused is the room's, never the link's.
+  const main = await page(admin);
+  await until(async () => { const j = await emit(main, 'join', { roomCode: 'HALLA1', as: 'account' }); return j.canSendToStage && j.stage && j.stage.title === 'Hall A timer'; }, 8000, 'the Main room able to send');
+  main.close();
+
+  const SIDE = 'LGQ4MZP8';
+  const SIDE_STAGE = 'This room sends nothing to the speaker\'s screen: send it from the hall\'s Main room.';
+  const ana = await page(admin);
+  const j = await emit(ana, 'join', { roomCode: SIDE, as: 'account' });
+  assert.deepEqual([j.ok, j.stage && j.stage.title, j.canSendToStage, j.canPropose], [true, 'Hall A timer', false, false], 'its hall\'s countdown, and nothing to send');
+  const heard = once(ana, 'stage');
+  swHall.frame({ text: '04:59', seconds: 299 });
+  assert.equal((await heard).title, 'Hall A timer', 'its hall\'s frames reach it');
+  const sends = () => [swHall, swDef].map((sw) => sw.requests.filter((r) => r.url.startsWith('/api/message/') || (r.method === 'POST' && r.url === '/api/proposals')).length);
+  assert.deepEqual(await emit(ana, 'stage:targets', {}), { ok: false, error: SIDE_STAGE });
+  assert.deepEqual(await emit(ana, 'stage:send', { text: 'Five minutes' }), { ok: false, error: SIDE_STAGE });
+  assert.deepEqual(await emit(ana, 'stage:propose', { text: 'Five minutes', destination: 'speaker' }), { ok: false, error: SIDE_STAGE });
+  assert.deepEqual(await emit(ana, 'message', { type: 'help', category: 'Sound', text: 'no signal' }), { ok: false, error: 'Help requests are asked from the hall\'s Main room, where its crew answers them.' });
+  await wait(200);
+  assert.deepEqual(sends(), [0, 0], 'nothing reached either Stagewatch');
+  const since = (await emit(ana, 'join', { roomCode: SIDE, as: 'account', since: j.seq })).ops;
+  assert.deepEqual(since.map((o) => [o.o, o.m.type, !!(o.m.stage || o.m.proposal)]), [['add', 'system', false]], 'nothing written in the room but its join line: ' + JSON.stringify(since));
+
+  // A meeting in the side room alone is a live hall: its page is counted where the power request reads the halls.
+  let power;
+  await until(async () => { power = (await api(srv.base, 'GET', '/api/health', undefined, { cookie: admin })).body.power; return power.what.pages === 1; }, 5000, 'the side room\'s page counted: ' + JSON.stringify(power));
+  // A message it holds from the window makes its page active, across a restart too (no input heard since).
+  assert.ok((await emit(ana, 'message', { type: 'text', text: 'Contract signed' })).ok);
+  sockets.forEach((s) => s.close());
+  sockets.length = 0;
+  srv = await restartServer(srv);
+  const b = await wire.busy({ port: srv.port, token: TOKEN });
+  assert.deepEqual([b.busy, b.line.active, b.line.sockets], [true, 1, 0], 'the side room\'s message: ' + JSON.stringify(b));
 });
