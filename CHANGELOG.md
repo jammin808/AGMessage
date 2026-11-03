@@ -146,11 +146,14 @@ browser opening is not yet seen on a Windows desktop)
   above measures it as it lands. The run's other artifact, `agmessage-portable-<commit>`, a zip around the zip, stays
   for the readings and the release. Until a run shows the web download hands it over unwrapped, the README's words for
   the other artifact stand beside it.
-- The Windows readings run for a `v*` tag and for a run asked for by hand (Actions, CI, Run workflow), never for a push
-  or a pull request (the owner's choice, 2026-11-03, to cut CI time): a run takes up to 45 minutes, and a push to the
-  branch cancelled it, which cost a whole run once. A run by hand has a concurrency group of its own that a push
-  never touches, and once it runs nothing cancels it (a newer run by hand waiting behind it takes the place of an
-  earlier one still waiting). The release still waits for the lane and is never held by it.
+- The Windows readings are never cancelled once they run (the owner's choices, 2026-11-03: not to lose a lane to a
+  newer push, and then for a regression to show on a push, not only on a tag or a run asked for by hand). The
+  workflow has no group for the whole run any more: each job has its own. The tests and the zip of a newer push or
+  pull request cancel the older run's, as before (a run asked for by hand has groups of its own, which a push never
+  touches); the readings run for every push, a tag and a run by hand, never a pull request, one at a time per branch or
+  tag, and a newer push's wait their turn, the newest waiting taking the place of an older one still waiting. Every
+  lane runs whole: a push to the branch cancelled one half-taken, which cost a whole run once. The release still waits
+  for the lane and is never held by it.
 - Windows-only test failures show on Linux first (the owner's choice, 2026-11-03): CI's red Windows runs included tests
   that read a source with its CR LF line ends and matched LF, and a UDP port taken from a free TCP port, each found one
   20-minute run at a time. A new job, `test-crlf`, checks the tree out again on Linux with Windows' line ends

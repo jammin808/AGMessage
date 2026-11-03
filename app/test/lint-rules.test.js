@@ -100,7 +100,8 @@ test('agm/test-helpers: a test\'s own text read of the checkout and its own port
     // Through what a name was made from: a parameter's default, a const's initialiser, a few names deep.
     'const read = (f, root = ROOT) => fs.readFileSync(path.join(root, f), \'utf8\');',
     'const app = path.join(ROOT, \'app\'); const lib = app + \'/lib\'; fs.readFileSync(path.join(lib, \'x.js\'), \'utf8\');',
-    'const VERIFY_DIR = path.join(__dirname, \'..\', \'verify\'); fs.readFileSync(`${VERIFY_DIR}/page.js`, \'utf8\');',
+    'const VERIFY_DIR = path.join(__dirname, \'..\', \'verify\'); fs.readFileSync(`$' + '{VERIFY_DIR}/page.js`, \'utf8\');',
+    'const VERIFY_DIR = path.join(__dirname, \'..\', \'verify\'); fs.readFileSync(VERIFY_DIR + \'/page.js\', \'utf8\');',
   ]) assert.deepEqual(ids(code), ['source'], code);
   for (const code of ['const freePort = () => 0;', 'function pickUdpPort() {}', 'let findPort;', 'const findFreeTcpPort = 1;']) assert.deepEqual(ids(code), ['port'], code);
   for (const code of [

@@ -903,10 +903,17 @@ test('the lane in CI: windows-2025, every action pinned by its commit, no creden
   const ci = read('.github/workflows/ci.yml');
   const lane = job(ci, 'readings');
   assert.match(lane, /\n {4}runs-on: windows-2025\n/);
-  assert.match(lane, /\n {4}if: \$\{\{ startsWith\(github\.ref, 'refs\/tags\/v'\) \|\| github\.event_name == 'workflow_dispatch' \}\}\n {4}needs: package\n/, 'for a tag and a run asked for by hand, never a push: the zip the package job built');
-  // A run asked for by hand has a group of its own, never cancelled, so a push to its branch leaves it to finish.
+  // Every push's readings, a tag's and a run's asked for by hand (a pull request's commits are pushes already), one lane
+  // at a time per ref and never cancelled once it runs: a newer push's waits its turn, so no run is thrown away
+  // half-taken and a regression shows on the next readings taken.
+  assert.match(lane, /\n {4}if: \$\{\{ github\.event_name != 'pull_request' \}\}\n {4}needs: package\n {4}concurrency:\n {6}group: readings-\$\{\{ github\.ref \}\}\n {6}cancel-in-progress: false\n/, 'the zip the package job built');
+  // No group holds the whole run, so a newer push cancels only the older run's tests and zip, each job by its own group;
+  // a run by hand's are a group of their own, which a push never touches.
+  assert.doesNotMatch(ci, /\nconcurrency:/, 'no group for the whole run: it would cancel the readings with the rest');
   assert.match(ci, /\non:\n {2}push:\n[\s\S]*?\n {2}workflow_dispatch:\n/);
-  assert.match(ci, /\nconcurrency:\n {2}group: ci-\$\{\{ github\.ref \}\}-\$\{\{ github\.event_name == 'workflow_dispatch' && 'by-hand' \|\| 'auto' \}\}\n {2}cancel-in-progress: \$\{\{ github\.event_name != 'workflow_dispatch' \}\}\n/);
+  for (const [name, extra] of [['analyze', ''], ['test-linux', '-$' + '{{ matrix.node }}'], ['test-crlf', ''], ['test-windows', ''], ['package', '']]) {
+    assert.ok(job(ci, name).includes('\n    concurrency:\n      group: ci-$' + '{{ github.ref }}-' + name + extra + '-$' + "{{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}\n      cancel-in-progress: $" + "{{ github.event_name != 'workflow_dispatch' }}\n"), name + ': cancelled by a newer push or pull request of its ref, never by one asked for by hand');
+  }
   const uses = [...lane.matchAll(/^\s*(?:- )?uses: (\S+)(.*)$/gm)];
   assert.deepEqual(uses.map((u) => u[1].split('@')[0]), ['actions/checkout', 'actions/setup-node', 'actions/download-artifact', 'actions/upload-artifact']);
   for (const [, ref, comment] of uses) assert.match(ref + comment, /^[\w.-]+\/[\w.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$/, ref + ' is pinned by its commit, its tag beside it');

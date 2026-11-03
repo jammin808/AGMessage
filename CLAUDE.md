@@ -155,8 +155,9 @@ node ../tools/stamp-build.js --print                  # the version this checkou
 CI (`.github/workflows/ci.yml`): `analyze` (lint, secret scan, version), `test-linux` (Node 24 and 26, coverage,
 Chrome smoke), `test-crlf` (the suites on Linux on a checkout with Windows' CR LF line ends), `test-windows` (tests, Edge
 smoke), `package` (the stamped portable zip, also an artifact of its own unwrapped, CycloneDX SBOM, SHA256SUMS),
-`readings` (the Windows evidence lane on `windows-2025`, for a `v*` tag or a run asked for by hand (Actions, CI, Run
-workflow), never a push, and in a concurrency group of its own a push never cancels; its actions pinned by commit:
+`readings` (the Windows evidence lane on `windows-2025`, for every push, a `v*` tag and a run asked for by hand, one
+at a time per ref and never cancelled once it runs, a newer push's waiting its turn; each other job is cancelled by a
+newer push of its ref through a group of its own, never the whole run's; its actions pinned by commit:
 Defender turned back on first, then the readings of that zip, judged against their marks; they inform and never hold) and, on a `v*` tag that names
 `app/package.json`'s version, above every release already published and every other version tagged (asked again as its
 first step, one release job at a time), `release` with a build-provenance attestation, waiting for the lane and never

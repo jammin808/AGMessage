@@ -6,9 +6,9 @@
 # build. The zip is also an artifact of its own, the zip itself (archive: false). A tag publishes a GitHub Release with
 # the zip, its SBOM, SHA256SUMS and a build-provenance attestation, once every job above is green and only when its
 # version is above every release already published and every other version tagged, asked again just before it
-# publishes, one release job at a time. For a tag, and for a run asked for by hand (Actions, CI, Run workflow), the
-# Windows evidence lane takes its readings of that zip on windows-2025, with Defender's real-time monitoring back on:
-# they inform the release's notes and never hold it; a push never starts it.
+# publishes, one release job at a time. For every push, a tag and a run asked for by hand (Actions, CI, Run workflow),
+# the Windows evidence lane takes its readings of that zip on windows-2025, with Defender's real-time monitoring back
+# on, one lane at a time per ref and never cancelled once it runs: they inform the release's notes and never hold it.
 name: CI
 
 on:
@@ -21,12 +21,10 @@ on:
 permissions:
   contents: read
 
-# A newer push or pull request supersedes the run of its ref. A run asked for by hand, which takes the readings, has a
-# group of its own that a push never touches, and once it runs nothing cancels it; a newer run by hand waiting behind it
-# takes the place of an earlier one still waiting (GitHub's concurrency keeps one waiting run per group).
-concurrency:
-  group: ci-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+# No group for the whole run: each job says what a newer run of its ref does to it. The tests and the zip of a newer push
+# or pull request cancel the older run's (a run asked for by hand has groups of its own a push never touches); the
+# readings are never cancelled once they run, and a newer push's wait their turn (one waits per ref: a newer one takes
+# its place), so every push's readings are taken unless a newer push's are waiting, and none is thrown away half-taken.
 
 env:
   # The runtime the portable bundle ships (tools/fetch-runtime.ps1 pins the same version by SHA-256).
@@ -36,6 +34,9 @@ jobs:
   analyze:
     name: Analyzers, secret scan, version
     runs-on: ubuntu-latest
+    concurrency:
+      group: ci-${{ github.ref }}-analyze-${{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -71,6 +72,9 @@ jobs:
   test-linux:
     name: Tests (Node ${{ matrix.node }}, Linux)
     runs-on: ubuntu-latest
+    concurrency:
+      group: ci-${{ github.ref }}-test-linux-${{ matrix.node }}-${{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -115,6 +119,9 @@ jobs:
   test-crlf:
     name: Tests on a CR LF checkout (Node 24, Linux)
     runs-on: ubuntu-latest
+    concurrency:
+      group: ci-${{ github.ref }}-test-crlf-${{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -139,6 +146,9 @@ jobs:
   test-windows:
     name: Tests and browser smoke (Windows, Edge)
     runs-on: windows-latest
+    concurrency:
+      group: ci-${{ github.ref }}-test-windows-${{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
     timeout-minutes: 25
     defaults:
       run:
@@ -169,6 +179,9 @@ jobs:
     name: Portable Windows zip
     needs: [analyze, test-linux, test-crlf, test-windows]
     runs-on: windows-latest
+    concurrency:
+      group: ci-${{ github.ref }}-package-${{ github.event_name == 'workflow_dispatch' && 'by-hand' || 'auto' }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
     timeout-minutes: 20
     outputs:
       full: ${{ steps.stamp.outputs.full }}
@@ -305,12 +318,17 @@ jobs:
   # write its readings fails here, and the release does not wait on that. Every action here is pinned by its commit.
   # Every step has a bound of its own, and together they end well inside the job's (the lane's own bound, BUDGET_MS in
   # tools/readings-take.js, inside the take step's): a step that runs over fails, the job ends failed, never cancelled,
-  # and the release, which waits for it, still publishes. It runs for a tag and for a run asked for by hand, never for
-  # a push or a pull request: a run takes up to 45 minutes, and a push would cancel it.
+  # and the release, which waits for it, still publishes. It runs for every push, a tag and a run asked for by hand
+  # (never a pull request, whose commits are pushes already), one at a time per ref: once it runs nothing cancels it,
+  # and a newer push's waits, the newest waiting taking the place of an older one, so a regression shows on the next
+  # readings taken, never on a run cut short.
   readings:
     name: Windows readings (the evidence lane)
-    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name != 'pull_request' }}
     needs: package
+    concurrency:
+      group: readings-${{ github.ref }}
+      cancel-in-progress: false
     runs-on: windows-2025
     timeout-minutes: 90
     steps:
