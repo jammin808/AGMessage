@@ -1123,6 +1123,54 @@ test('op table: each change is committed, then sent under the event the table na
   assert.deepEqual(ops.eventsOf({ o: 'nothing', s: 1 }, t.room), [], 'a kind the table does not hold sends nothing');
 });
 
+test('op table: a page is sent a stage send\'s and a proposal\'s record without the link it went to, which the record, the log and the ring keep', () => {
+  const t = opsRig();
+  const stage = { ref: 77, receipt: 'applied', ack: 'sent', by: '', at: 5, link: 'hall:ABC234', sw: '0123456789ab', seq: 3 };
+  const proposal = { id: 'p1', link: 'hall:ABC234', state: 'pending', ok: null, words: '', to: 'the speaker\'s screen', at: 6, sw: '0123456789ab', line: 'x' };
+  const sys = t.apply(t.room, { o: 'add', m: { id: 's1', type: 'system', text: 'Ana sent to the speaker\'s screen', at: 5, stage } });
+  const ask = t.apply(t.room, { o: 'add', m: { id: 's2', type: 'system', text: 'Ana asked the operator', at: 6, proposal } });
+  const plain = t.apply(t.room, { o: 'add', m: { id: 'm1', type: 'text', text: 'hello', at: 7 } });
+  t.apply(t.room, { o: 'upd', id: 's1', f: { stage: { ...stage, ack: 'done', by: 'Speaker A' } } });
+  t.apply(t.room, { o: 'upd', id: 's2', f: { proposal: { ...proposal, state: 'done', ok: true }, pinned: true } });
+  const { link: l1, ...stageSent } = stage;
+  const { link: l2, ...proposalSent } = proposal;
+  assert.deepEqual([l1, l2], ['hall:ABC234', 'hall:ABC234']);
+  assert.deepEqual(t.sent.map(([, event, payload]) => [event, payload]), [
+    ['system', { id: 's1', type: 'system', text: 'Ana sent to the speaker\'s screen', at: 5, stage: stageSent, seq: 1 }],
+    ['system', { id: 's2', type: 'system', text: 'Ana asked the operator', at: 6, proposal: proposalSent, seq: 2 }],
+    ['message', plain.m],
+    ['stageAck', { messageId: 's1', stage: { ...stageSent, ack: 'done', by: 'Speaker A' }, seq: 4 }],
+    ['pinUpdate', { messageId: 's2', pinned: true, seq: 5 }],
+    ['proposalUpdate', { messageId: 's2', proposal: { ...proposalSent, state: 'done', ok: true }, seq: 5 }],
+  ]);
+  assert.equal(t.sent[2][2], plain.m, 'a message with no link is sent as it is, never copied');
+  // The record keeps the link: in the hall, in the ring a resuming page is sent from, and on disk.
+  assert.deepEqual([t.room.byId.get('s1').stage.link, t.room.byId.get('s2').proposal.link, sys.m.stage.link, ask.m.proposal.link], Array(4).fill('hall:ABC234'));
+  const ring = t.store.opsSince(t.room, 0);
+  assert.deepEqual(ring.map((op) => (op.m ? (op.m.stage || op.m.proposal || {}).link : (op.f.stage || op.f.proposal || {}).link)), ['hall:ABC234', 'hall:ABC234', undefined, 'hall:ABC234', 'hall:ABC234']);
+  assert.equal(t.logged().split('hall:ABC234').length - 1, 4, 'each of the four records on disk names its link');
+  // What a resuming page and a page sent the history are given: the same ops and messages without it, nothing else moved.
+  const resumed = ring.map(ops.opForPage);
+  assert.ok(!JSON.stringify(resumed).includes('hall:'), 'no op a page is sent names a link');
+  assert.deepEqual(resumed.map((op) => op.s), [1, 2, 3, 4, 5]);
+  assert.deepEqual(resumed[1].m.proposal, { ...proposalSent, state: 'done', ok: true }, 'the record as it is now, the ring\'s added message being the hall\'s');
+  assert.deepEqual(resumed[3].f, { stage: { ...stageSent, ack: 'done', by: 'Speaker A' } });
+  assert.equal(resumed[2], ring[2], 'an op with no link is sent as it is');
+  const history = t.room.messages.map(ops.forPage);
+  assert.ok(!JSON.stringify(history).includes('hall:'), 'no message a page is sent names a link');
+  assert.equal(history.find((m) => m.id === 'm1'), t.room.byId.get('m1'));
+  assert.deepEqual(t.room.byId.get('s1').stage.link, 'hall:ABC234', 'the record is never changed by what a page is sent');
+  // Anything else is answered as it is: a message with no record, a record with no link, an op of another kind, a value.
+  const bare = { id: 'x', stage: { ack: 'sent' } };
+  for (const v of [bare, null, 'x', [1]]) assert.equal(ops.forPage(v), v);
+  assert.deepEqual(ops.unlinked(proposal), proposalSent, 'a proposal\'s answer to the page that asked');
+  assert.equal(proposal.link, 'hall:ABC234', 'its record untouched');
+  for (const v of [bare.stage, null, 'x']) assert.equal(ops.unlinked(v), v);
+  for (const op of [{ o: 'del', id: 'x', s: 1 }, { o: 'meta', name: 'x', s: 1 }, { o: 'reset', s: 1 }, null]) assert.equal(ops.opForPage(op), op);
+  assert.deepEqual(ops.LINKED, ['stage', 'proposal']);
+  assert.ok(Object.isFrozen(ops.LINKED));
+});
+
 // ---------------------------------------------------------------- the one gate, and the handler modules' contexts
 const gate = require('../lib/gate');
 /**

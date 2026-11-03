@@ -389,10 +389,12 @@ each be a new dev dependency (audit, signatures, SBOM) for rules a node:test rea
 | (k) one op table | the hall page's `UPD_EVENTS` (`public/app.js`, field → [event, draw], read from its source) is `lib/ops.js`'s, field by field and event by event, and the page names each of its events once, there; the op of every `apply(` call in the handler files (not a method's `.apply(`, and `apply()` with nothing in it passes none) and every op whose kind is written `upd` wherever it is built (its `o` bare or quoted, its kind in any quotes) is an object written out, of a kind the table holds, and an `upd`'s `f` is written out with each field in the table; every field of the table is one some `upd` sends; `apply()` is the one `server.js` makes with `ops.applier(`, given the store's commit and a refusal that only logs. The ops are read as code (a bracket, a comma or a word inside a string, a template or a comment is not the code's; a call written out in a comment is read as one) | a field in one table and not the other, or under two events; a page with no table, a row not `field: ['event', draw]`, or an event of the table named again beside it; an op given to `apply()` that is not written out (a variable, no op), whose kind is not (`o` from a variable, or none), that holds a spread or a computed key, or of a kind the table does not hold (by file and line); an `upd` of a field outside the table, of no field, or whose fields cannot be read (an `f` not written out as an object, a spread or a computed key in it, an op not an object literal); a field of the table no `upd` sends; another `apply` declared or assigned in a handler file, or a refusal that does more than log |
 | (l) the any-room readers | every call in a shipped server file (`server.js`, `supervise.js`, `lib/` and `verify/`) to the store's any-room readers, `store.room`, `hasRoom`, `allRooms` and `roomsOf`, which reach a hall's side rooms as well as its Main room, is counted per file, each with why it reads any room and not a hall (`store.get`, `has`, `rooms`), in `ANY_ROOM`, as the guard rail counts synchronous calls; the store's side rooms are reached through those readers only | a file whose count of those calls is not its reasons' (a reader added, or one gone, without its words moving); `store.side` or `store.sideByHall` (the side rooms by key, and by hall) read outside the store; a row for a file that is not there |
 
-The allow-list of (f), of events no page hears, is empty: its one row, `linkedRoomsChanged`, sent to a guest's pages when
-the admin lets them forward into another hall or takes it back, went once the hall page heard it, to keep its
-`forwardable` fact live (§3.6). A row fails the fence once a page hears it, or once the server stops sending it, and a
-planted tree holds both. On the tree before 0.6.0 the fence failed on two words, both `typing`'s: a verb no page sent,
+The allow-list of (f), of events no page hears, holds one row: `view`, an account's chat view changed alone, told live to
+its pages in a room, which stay open (the plan's Part 1 unit 9); the hall page draws the simple view, and hears it, with
+Part 7's unit 20a, which takes the row out. Its row before, `linkedRoomsChanged`, sent to a guest's pages when the admin
+lets them forward into another hall or takes it back, went once the hall page heard it, to keep its `forwardable` fact
+live (§3.6). A row fails the fence once a page hears it, or once the server stops sending it, and a planted tree holds
+both. On the tree before 0.6.0 the fence failed on two words, both `typing`'s: a verb no page sent,
 and an event no page heard. `typing` was removed (the owner's answer 26 wants no typing indicator), which lowered the fuzz's count of
 events by one, to 55.
 
@@ -421,8 +423,10 @@ its hall: a help request answered in its room by its key, Main or side; the hall
 reads the room, without its words to the hall's crew); the followers of a send and of a proposal, which write the
 speaker's acknowledgement, a send lost and a proposal's state into the room it came from; the restart's two loops, which
 follow the sends and the proposals of every room again; and the show desk's notice, posted into every room of every hall
-and counted by its halls. A hall's invite links stay a hall's (a guest's code names a hall). The 50 calls of `server.js`
-are the plan's 1-§3.5 and the readers of room state beside it; a unit that adds one moves the list with its words. A
+and counted by its halls. The rooms an account may enter are listed by its hall (`/api/halls` and the halls board, by
+`sideRoomsFor`), and every side room an account may be given by the Accounts route (`sideRoomNames`). A hall's invite
+links stay a hall's (a guest's code names a hall). The 52 calls of `server.js` are the plan's 1-§3.5 and the readers of
+room state beside it; a unit that adds one moves the list with its words. A
 planted call without its row, a row without its call and `store.side` or `store.sideByHall` read past the store each fail
 it.
 
@@ -437,7 +441,11 @@ holds the fence for every role (accounts of their own halls and of every hall, a
 `canIn` in a Main room to 0.5.1's answer for every role, right and hall, a side room to its members and the admin role,
 and a malformed scope to no; handler modules ask a right of their connection, never of `rbac.can` ((j)): what a verb
 may do in the room it sits in of `conn.allowed` (the gate's `may`), which reads the seat's limit first, and what it may
-do in another room of `conn.canIn`, which answers by rights alone and reads no seat.
+do in another room of `conn.canIn`, which answers by rights alone and reads no seat. The escalation fence
+(`rbac.mayChange`, `exceeds`, `afterChange`) reads an account's side rooms before every hall, so an account that manages
+accounts and is not an admin gives no side room it is not given, every hall's included, and reads its On stage halls as
+halls; nobody sets their own side rooms, On stage halls or chat view; the test holds each, with what the Accounts page is
+offered (`giveableRooms`) and a value that is no name refused in words rather than thrown.
 
 The handler modules (plan 5-§14.2) are where a new verb registers: `lib/handlers/rooms.js` (the verbs on a hall's rooms)
 and `lib/handlers/takes.js` (the takes on people's pages), each one `register(socket, conn, ctx)` the connection calls

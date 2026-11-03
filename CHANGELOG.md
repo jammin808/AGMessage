@@ -2947,6 +2947,113 @@ no help request, this unit undoes it)
   room, counted by halls), `docs/ANALYSIS.md` ((l): 50 calls, and this unit's readers), `SECURITY.md` (who sees a side
   room's help request, and a hall's key only for who sees the hall), `CLAUDE.md`.
 
+**Accounts are given side rooms, an On stage seat and a chat view** (the plan's Part 1, unit 9, its §2.1, §2.3, §2.7,
+§3.2, §3.3, §6 (as Part 7 §0.1 replaces it: "How it is chosen" and "How it is changed" are unchanged), §7.2 and §7.3, with
+Part 7's additions to unit 9, the seat limit for accounts (7-§0.1, §17.1), and owner questions 2 ("Defaults": a side room
+is only for those it is given to, and for the admin) and B1 ("they don't need to answer other people's help requests");
+the tree's tests. The Accounts page's tree, the admin page's Members… and Set up's rooms are unit 10's, the room choice at
+sign-in and the switcher unit 11's: no page sets or draws these yet)
+- **Three fields of an account** (`lib/accounts.js`): `rooms`, the side rooms it is given; `board`, the halls in whose Main
+  room it sits On stage; `view`, its chat view (`''` by its seat, `simple` or `full`). `POST /api/users` and `PATCH
+  /api/users/:id` take them (`pick`), each list of keys stored upper case, once, 200 at most, compared as a set, so a Save
+  that sends them back as they are is no change; an account made without them is stored as 0.5.1 stored one. The
+  Accounts route's answer and `/api/auth/me` tell an account's three last (`Accounts.view`), and its rights' `rooms` and
+  `board` (`rightsView`).
+- **Read by type, and known.** Each of an account's lists (its halls too) is a list of keys: a value that is no name,
+  `{"toString": 1}` for one, is refused with words ("An account's rooms are a list of their keys."), where 0.5.1 answered a
+  500 for one in its halls; an unknown right that is no name is refused the same way ("Unknown right: one that is not a
+  name"). An entry an account does not hold already must name a side room that is here ("No such room: LGQ4MZP8."; a
+  hall's key, "… is a hall: its Main room comes with the hall.") or, for its On stage halls, a hall that is here ("No such
+  hall: …"), so a key typed wrong is never kept to open a room made later; an entry already on the account passes. Its
+  halls keep 0.5.1's rule, a hall's key taken as given. A chat view that is none of the three is refused in words.
+- **Who gives which** (`rbac.mayChange`): nobody sets their own side rooms, On stage halls or chat view, in the words a
+  role is refused in. An account that manages accounts and is not an admin gives only the side rooms it is given itself,
+  read before every hall (`exceeds`), so a project manager of every hall gives none it is not given, and manages (edits,
+  resets, signs out, removes) no account that holds one; it seats On stage only in a hall it reaches, as it gives halls.
+  The Accounts route tells each viewer what it may give: `giveableRooms` (`{all, rooms}`: the admin every room, anyone
+  else the rooms it is given), the side rooms by key with their names and their hall's (`rooms`; its hall's key only where
+  the viewer reaches that hall, its name always) and, on each account's row, only those rooms, the rest a count
+  (`otherRooms`), never a guest code; a viewer that does not reach every hall is told its On stage halls only where it
+  reaches them, as its halls.
+- **Audited in words**: `user.create` and `user.update` name an account's side rooms by their name, their hall's and
+  their key ("rooms → Legal (Hall 2) LGQ4MZP8"), its On stage halls by key ("board → On stage in H7K2QA"), and its view
+  ("view → simple", "view → by seat"); never a guest code.
+- **A chat view changed alone is said live.** It is no right: the account's pages in a room are told the view each draws
+  now (`view`: its own choice, else the simple view On stage and the full view elsewhere) and stay open; its halls board
+  is told nothing and nobody else is. Any other change still ends every page the account has open, as before. No page
+  draws the simple view yet (Part 7's unit 20a), so the event is the module fence's one allow-list row of an event no page
+  hears, with its reason.
+- **An account given a side room joins it**, seated by its rights there, and never its hall by that: the join already
+  opened it (unit 5); nothing it is given carries its hall's key or its Main room's guest code. **`/api/halls`** gives each
+  hall's row the seat the account joins its Main room with (`seat`: On stage where its On stage halls name the hall, the
+  admin backstage wherever its account would only read, as the join seats it, `seatIn`) and the hall's side rooms it may
+  enter (`rooms`: the admin every one, an account those it is given; each with its key, name, people, guest code where it
+  may know it, whether the code admits, and its seat there), and lists apart (`rooms`) the side rooms it may enter in a
+  hall it does not see, by that hall's name. **The halls board** does the same per watcher: `rooms` on each hall's row,
+  chosen beside the row every watcher shares, and `yourRooms` apart. Nothing that lists halls lists a side room as one.
+- **A stage send's link stays on the server.** A line sent to a hall's speaker's screen, and one asked of its show desk,
+  keeps on its record the link it went to, which a hall's own Stagewatch names by the hall's key (`hall:<key>`: its Main
+  room's address, and its guest code until New code). Every room of a hall sends there (unit 8), so a send from Legal
+  handed that key to everyone reading Legal, a Legal-only account and Legal's guests included. A room's pages are now sent
+  each record without it (`lib/ops.js` `forPage`, `opForPage`): live, in a join's history and in the changes a resuming
+  page missed, and the page that asked the show desk in its answer (`unlinked`). The record keeps it, so a restart still
+  follows each send only where it went; no page read it.
+- **A Board account** (an account its On stage halls seat On stage) is held to the seat on that page, as a guest is: no
+  upload token, the speaker's screen and the show desk neither offered nor taken, no screen, set-up or node driven ("Do
+  that from a backstage page."), no guest code, nothing forwarded out of the hall ("Messages from On stage stay in this
+  room."); it chats and sends 🔥 Priority. On its other pages (a side room it is given, a hall where it is crew) it is the
+  crew its rights make it, and a file or a question it forwards from there never goes into the hall where it sits On stage.
+  It answers none of that hall's help requests from any page, a side room's of that hall it would answer only as the
+  hall's crew included: from its halls board each is refused in the On stage words, "Help requests are answered by the
+  backstage team." (an account refused only for its On stage seat was told "Only people in that hall can answer its help
+  requests."), and the board offers neither On my way nor Resolved on them (`canRespond` false); it answers those of a
+  side room it is given and of the halls where it is crew, and marks its own request sorted.
+- Tests: `test/accounts.test.js`: the escalation fence with side rooms (read before every hall; a room given only by one
+  who holds it, the admin any; an account holding a room another may not manage; On stage halls read as halls), nobody
+  setting their own three, a right that is no name refused in words, `giveableRooms`, `rightsView`'s last two;
+  `Accounts.create` and `update` with the three (kept upper case once, read by type, a view none of the three not kept, an
+  untouched editor's lists no change, by seat stored as none, saved through the lane); end to end, an account made and
+  changed with the three by the admin and by a one-hall lead who manages accounts (given Legal by the admin before giving
+  it; refused Hall B's On stage seat and a room it lacks; refused its own three in the self-change words), each list's
+  shape and each unknown entry refused with its words and nothing made, the audit rows' words, what the Accounts route
+  tells the admin and the lead (the rooms, `giveableRooms`, a row's rooms and `otherRooms`, no Media key or Hall B key in
+  the lead's), the three kept across a restart, and a key no room has now passing an untouched Save while a new one is
+  refused; a view changed alone told to the account's On stage and side-room pages as each draws it (full, then by seat:
+  simple On stage, full in Legal) with none closed and its halls board and another account told nothing, the same view
+  again no change, and a view with a change of halls ending every page; a Legal-only account seated in Legal and refused
+  Hall A, with Hall A's key and its renewed code in nothing it is given (its join, `/api/halls`, its board and every frame
+  its pages hear while Hall A and Legal are busy and Hall A is renamed, Hall A on a Stagewatch and show desk of its own
+  with a line sent and one proposed from Legal and the speaker's acknowledgement, and Legal's history and missed changes
+  when its page comes back, the records keeping the link) and Hall A's message and help request in none;
+  `/api/halls`' and the board's rooms and seats per watcher (a tech of the hall given Legal, a Board account given a room
+  of another hall, a Viewer, a project manager of every hall, the admin). `test/onstage.test.js`: a Tech given Hall 2's
+  On stage seat and its Legal room, with Hall 2's Stagewatch and show desk linked, held to the seat on its On stage page
+  (no upload token, no speaker's screen or show desk offered or taken, no screen or node, no code, nothing forwarded into
+  Hall 3) and not in Legal (its screens, the show network and a node's command past the seat to the link's own check,
+  the speaker's screen and the show desk), its 🔥 stored, a file
+  from Hall 3 refused into Hall 2 and not offered there; an admin given the seat, with no upload token and no code and a
+  file refused; its help: the On stage page
+  refused another's request whatever code it names, its halls board refused Hall 2's Main room's (a Board guest's
+  included) and a room of Hall 2 it is not given, in the On stage words, and answering Legal's and Hall 3's and its own
+  Resolved, the board's `canRespond` saying the same. `test/menus.test.js`: a Board account among the hall page's seats,
+  every act its rights hide refused in the On stage table's words, and on the halls board, a Board account's help item
+  with no On my way or Resolved and the verb refused in those words. `test/catalog.test.js`: a Board account's page,
+  either view, shown exactly what a Board guest's is on every object of the hall page. `test/halls.test.js`: a side room
+  listed under its hall's row on the admin's board and nowhere else, never to every hall's account (moved on purpose: the
+  test said no side room was on the board at all), and a Board member of Hall A refused Legal's request from her halls
+  board in the On stage words (moved on purpose from "Only people in that hall…"). `test/modules.test.js`: (f)'s allow-list row for `view`, and (l)'s two
+  new readers with their reasons. `test/units.test.js`: the op table sends a page a stage send's and a proposal's record,
+  added and changed, without its link, which the hall, the ring and the log keep, and a resume and a history likewise.
+  `test/resilience.test.js`: the 0.5.1 folder's stage send read back with its link from the record (the admin's watch),
+  and its page's history and acknowledgement without it (moved on purpose: it read the link from a page's history).
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md` (an account's three fields, who gives them, what the routes
+  tell, the Board account, a stage send's link), `SECURITY.md`, `docs/DESIGN.md` (sequence numbers and deltas; the server
+  is the authority; fail closed), `docs/ANALYSIS.md`
+  ((f)'s allow-list, (l): 52 calls, the escalation fence), `CLAUDE.md`, and the admin page's rollback line.
+- Rolling back: 0.5.1 keeps an account's `rooms`, `board` and `view` through a load and a save, and ignores them: an
+  account given a hall's On stage seat sits backstage there with every right it holds, and its side rooms do not open
+  (0.5.1 loads none). Back on 0.6, each is read again. The admin page's rollback line and README.txt say so.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

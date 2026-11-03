@@ -28,6 +28,39 @@ const KINDS = Object.freeze(['add', 'upd', 'del', 'reset', 'meta']);
 const EVENTS = Object.freeze(['message', 'system', ...Object.values(UPD_EVENTS), 'messageDeleted', 'roomReset', 'roomMeta']);
 
 const isRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * The fields of a message (and of an `upd`) whose record names the link it went to (`link`): a stage send's and a
+ * proposal's. A hall's own link is named by the hall's key ('hall:<key>'), which is its Main room's address and its guest
+ * code until New code, and which a side room's readers are never given; a page draws nothing by it. So a page is sent
+ * each of these without it, and the record keeps it on the server, whose followers alone read it (a restart's
+ * re-follow).
+ */
+const LINKED = Object.freeze(['stage', 'proposal']);
+const linked = (v) => isRecord(v) && Object.hasOwn(v, 'link');
+/** A stage send's or a proposal's record as a page is sent it: a copy without `link`, or the very record when it has none. */
+function unlinked(v) {
+  if (!linked(v)) return v;
+  const { link, ...rest } = v;
+  return rest;
+}
+/**
+ * What a page is sent of a message, or of an `upd`'s fields: a copy without the link a stage send or a proposal went to
+ * (LINKED), or the very value when it holds none. The record itself is never changed.
+ */
+function forPage(m) {
+  if (!isRecord(m) || !LINKED.some((f) => linked(m[f]))) return m;
+  const out = { ...m };
+  for (const f of LINKED) if (linked(m[f])) out[f] = unlinked(m[f]);
+  return out;
+}
+/** What a resuming page is sent of a committed op: an added message, or an `upd`'s fields, as forPage sends them. */
+function opForPage(op) {
+  if (!isRecord(op)) return op;
+  if (op.o === 'add') { const m = forPage(op.m); return m === op.m ? op : { ...op, m }; }
+  if (op.o === 'upd') { const f = forPage(op.f); return f === op.f ? op : { ...op, f }; }
+  return op;
+}
 /** A key as a log line may carry it: a few of them, each cut short, nothing but a name's characters. */
 const named = (keys) => keys.slice(0, 5).map((k) => k.replace(/[^\w$-]/g, '?').slice(0, 40)).join(', ') + (keys.length > 5 ? ' and ' + (keys.length - 5) + ' more' : '');
 
@@ -46,13 +79,13 @@ function refusal(op) {
 /**
  * The events a committed op is sent under, in order, as [event, payload]: an added message under its kind (and given
  * its seq), each field of an `upd` under the table's event for it, a removal, a reset and a hall's new name or settings.
- * `room` is the hall after the op was applied.
+ * A message and a field are sent as a page is sent them (forPage). `room` is the hall after the op was applied.
  */
 function eventsOf(op, room) {
   const s = op.s;
   switch (op.o) {
-    case 'add': op.m.seq = s; return [[op.m.type === 'system' ? 'system' : 'message', op.m]];
-    case 'upd': return Object.keys(UPD_EVENTS).filter((f) => Object.hasOwn(op.f, f)).map((f) => [UPD_EVENTS[f], { messageId: op.id, [f]: op.f[f], seq: s }]);
+    case 'add': op.m.seq = s; return [[op.m.type === 'system' ? 'system' : 'message', forPage(op.m)]];
+    case 'upd': { const f = forPage(op.f); return Object.keys(UPD_EVENTS).filter((k) => Object.hasOwn(f, k)).map((k) => [UPD_EVENTS[k], { messageId: op.id, [k]: f[k], seq: s }]); }
     case 'del': return [['messageDeleted', { messageId: op.id, seq: s }]];
     case 'reset': return [['roomReset', { roomCode: room.code, seq: s }]];
     case 'meta': return [['roomMeta', { name: room.name || '', seq: s }]];
@@ -76,4 +109,4 @@ function applier({ commit, send, changed, refused }) {
   };
 }
 
-module.exports = { UPD_EVENTS, KINDS, EVENTS, refusal, eventsOf, applier };
+module.exports = { UPD_EVENTS, KINDS, EVENTS, LINKED, refusal, eventsOf, applier, forPage, opForPage, unlinked };

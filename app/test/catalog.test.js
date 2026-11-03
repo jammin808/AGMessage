@@ -71,6 +71,10 @@ const SEATS = {
   board: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, guestCode: '', codeOn: true }),
   // The Board in the simple view: two plain messages and one 🔥 wait for its answer.
   boardSimple: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] } }),
+  // A Board account (an account its On stage halls seat On stage): its join answer as the Chair's page, its account's
+  // rights behind it (a Tech's: the speaker's screen and files elsewhere), held to the seat on this page.
+  boardAccount: seat({ role: 'board', uid: CHAIR, uploadToken: null, canSendToStage: false, canPropose: false, forwardable: false, account: { role: 'tech' }, guestCode: '', codeOn: true }),
+  boardAccountSimple: seat({ role: 'board', uid: CHAIR, uploadToken: null, canSendToStage: false, canPropose: false, forwardable: false, account: { role: 'tech' }, guestCode: '', codeOn: true, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] } }),
   observer: seat({ role: 'observer', uid: OBS, uploadToken: null, forwardable: false, guestCode: GC, codeOn: true }),
   observerElsewhere: seat({ role: 'observer', uid: OBS, uploadToken: null, forwardable: true, guestCode: GC, codeOn: true }),
   viewer: seat({ role: 'observer', uid: 'a-vic', uploadToken: null, forwardable: false, account: { role: 'viewer' }, guestCode: '', codeOn: true }),
@@ -389,17 +393,30 @@ test('the seat matrix: what each seat is shown on each message', () => {
       if (SEATS[s].view === 'simple') assert.deepEqual(ids('msg', SEATS[s], OBJECTS[o]), [], s + ' on ' + o + ': no menu door');
     }
   }
-  // The Board, either view: none of what §17.1 keeps from an On stage seat, by right or by its view.
+  // The Board, either view, a guest's page or an account's: none of what §17.1 keeps from an On stage seat, by right or by
+  // its view.
   const NEVER_ON_STAGE = ['msg.helpRespond', 'msg.send', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.download', 'msg.draft'];
-  for (const s of ['board', 'boardSimple']) for (const o of Object.keys(OBJECTS)) {
+  for (const s of ['board', 'boardSimple', 'boardAccount', 'boardAccountSimple']) for (const o of Object.keys(OBJECTS)) {
     const set = plain(C.shown('msg', SEATS[s], OBJECTS[o])).map((e) => e.id);
     assert.deepEqual(set.filter((id) => NEVER_ON_STAGE.includes(id)), [], s + ' on ' + o);
-    if (s === 'board') assert.ok(!set.includes('msg.ack'), 'Got it is the simple view\'s only: the full view\'s React ▸ 👍 is the same fact');
+    if (SEATS[s].view !== 'simple') assert.ok(!set.includes('msg.ack'), 'Got it is the simple view\'s only: the full view\'s React ▸ 👍 is the same fact');
   }
   // Every act asserted absent somewhere exists, and is shown to another seat: none passes by its absence.
   const everyId = new Set(C.KINDS.msg.map((e) => e.id));
   const shownSomewhere = new Set(Object.values(M).flatMap((objs) => Object.values(objs).flat()));
   for (const id of everyId) assert.ok(shownSomewhere.has(id), id + ' is shown to some seat in the matrix');
+});
+
+test('a Board account\'s page is the Board\'s: in either view, on every object of the hall page, it is shown what a Board guest is, whatever its account holds', () => {
+  const HALL_KINDS = { msg: Object.values(OBJECTS), file: [{ ...OBJECTS.anaFile, where: 'list' }, { ...OBJECTS.anaFile, where: 'preview' }], compose: Object.values(COMPOSE), chip: [STAGE], code: [CODE, CODE_OFF] };
+  const shown = (s, kind, o) => plain(C.shown(kind, SEATS[s], o)).map((e) => e.id);
+  for (const [account, guest] of [['boardAccount', 'board'], ['boardAccountSimple', 'boardSimple']]) {
+    for (const [kind, list] of Object.entries(HALL_KINDS)) {
+      for (const o of list) assert.deepEqual(shown(account, kind, o), shown(guest, kind, o), account + ' · ' + kind + ' ' + (o.id || ''));
+    }
+  }
+  // Its account would send to the speaker's screen and share files on a backstage page; here it holds neither.
+  assert.deepEqual([SEATS.boardAccount.files, SEATS.boardAccount.canSendToStage, SEATS.boardAccount.ask, SEATS.boardAccount.respondHelp, SEATS.boardAccount.mayKnowCode], [false, false, false, false, false]);
 });
 
 test('what a seat may do but not now is shown, disabled, with the words why; the support view acts on nothing', () => {

@@ -1057,6 +1057,7 @@ const web = mountAccounts(app, {
   // The split: its archiver, and the admin page's gate, which "the admin" narrows (theAdminReq).
   archiver: auditArchiver, isAdminReq: (req) => isAdminReq(req),
   hallNames: () => Array.from(store.rooms.values()).map((r) => ({ code: r.code, name: r.name || '' })),
+  roomNames: () => sideRoomNames(),
   onAccountChanged: (id, what) => accountChanged(id, what),
   onSessionEnded: (h) => endSockets((s) => s.data.sessionHash === h, 'signout', SIGNED_OUT),
 });
@@ -1241,14 +1242,23 @@ app.get('/api/halls', web.signedIn(), (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const a = req.agm.account;
   // Posting and sharing files are asked in each hall's Main room (rbac.canIn); its screens and its Stagewatch are the hall's.
-  // Each row's guest code only for an account that may know it (codeFor), with whether it admits guests now.
+  // Each row's guest code only for an account that may know it (codeFor), with whether it admits guests now, the seat it
+  // joins its Main room with, and the hall's side rooms it may enter (sideRoomsFor). The side rooms it may enter in a hall
+  // it does not see are listed apart (`rooms`), each by its hall's name, never the hall's key: that is its Main room's
+  // address, and its guest code until New code.
   const who = { isAdmin: isAdminReq(req), account: a };
-  const halls = Array.from(store.rooms.values()).filter((r) => rbac.seesHall(a, r.code)).map((r) => ({
-    code: r.code, name: r.name || '', people: board.peopleIn(r), messages: r.messages.length, locked: !!r.settings.lockRoles,
-    can: { post: rbac.canIn(a, 'hall.post', store.scopeOf(r)), files: rbac.canIn(a, 'hall.files', store.scopeOf(r)), displays: rbac.can(a, 'display.control', r.code), stage: rbac.can(a, 'stage.send', r.code) },
-    guestCode: codeFor(who, r), codeOn: store.codeOn(r),
-  })).sort((x, y) => (x.name || x.code).localeCompare(y.name || y.code));
-  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: rbac.can(a, 'users.manage') && !web.adminBlocked(req, a), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req) });
+  const halls = [], rooms = [];
+  for (const r of store.rooms.values()) {
+    if (!rbac.seesHall(a, r.code)) { rooms.push(...sideRoomsApart(who, r)); continue; }
+    halls.push({
+      code: r.code, name: r.name || '', people: board.peopleIn(r), messages: r.messages.length, locked: !!r.settings.lockRoles,
+      can: { post: rbac.canIn(a, 'hall.post', store.scopeOf(r)), files: rbac.canIn(a, 'hall.files', store.scopeOf(r)), displays: rbac.can(a, 'display.control', r.code), stage: rbac.can(a, 'stage.send', r.code) },
+      guestCode: codeFor(who, r), codeOn: store.codeOn(r), seat: seatIn(who, r), rooms: sideRoomsFor(who, r),
+    });
+  }
+  halls.sort((x, y) => (x.name || x.code).localeCompare(y.name || y.code));
+  rooms.sort((x, y) => x.hallName.localeCompare(y.hallName) || x.name.localeCompare(y.name));
+  res.json({ ok: true, halls, account: Accounts.view(a), canManageHalls: rbac.can(a, 'halls.manage'), canManageUsers: rbac.can(a, 'users.manage') && !web.adminBlocked(req, a), canAudit: rbac.can(a, 'audit.read'), isAdmin: isAdminReq(req), rooms });
 });
 
 // A hall's name is shown on every page, screen and board, and written in the audit log: it is cleaned as every typed
@@ -1302,6 +1312,42 @@ function codeFor(who, room) {
 }
 /** One told no code: no admin, no account, typed none. */
 const TOLD_NONE = Object.freeze({ isAdmin: false, account: null, onStage: false, joinedWith: '' });
+/**
+ * The seat `who` ({isAdmin, account}) joins `room` with by its account, the join's own rule wherever a room is listed for
+ * it: its rights' in that room (rbac.roomRoleFor: On stage in a hall's Main room its On stage halls name, backstage where
+ * it may post, else an observer), and backstage for the admin wherever its account's own rights would seat it an
+ * observer, since the admin may post wherever it sits (`allowed`).
+ */
+function seatIn(who, room) {
+  const seat = rbac.roomRoleFor(who.account, store.scopeOf(room));
+  return seat === 'observer' && who.isAdmin ? 'research' : seat;
+}
+/**
+ * The side rooms of `hall` that `who` may enter, as the join admits it: the admin every one, an account the rooms it is
+ * given (rbac.seesRoom), never by its halls. Each as /api/halls and the halls board list it: its key (an address, never a
+ * guest code), its name, how many people are in, its guest code only for one who may know it (codeFor) with whether it
+ * admits guests, and the seat `who` would join with there.
+ */
+function sideRoomsFor(who, hall) {
+  return store.roomsOf(hall.code).filter((r) => !store.isMain(r) && (who.isAdmin || (!!who.account && rbac.seesRoom(who.account, store.scopeOf(r)))))
+    .map((r) => ({ key: r.code, name: r.name || '', people: board.peopleIn(r), guestCode: codeFor(who, r), codeOn: store.codeOn(r), seat: seatIn(who, r) }));
+}
+/**
+ * The side rooms of a hall `who` does not see that it may enter, listed apart from the halls: each as sideRoomsFor lists
+ * it, with its hall's name after its own (or "A hall with no name"), never the hall's key, which is its Main room's
+ * address and its guest code until New code.
+ */
+function sideRoomsApart(who, hall) {
+  return sideRoomsFor(who, hall).map(({ key, name, ...rest }) => ({ key, name, hallName: hall.name || 'A hall with no name', ...rest }));
+}
+/** Every side room an account may be given, by its key, its name, its hall's key and its hall's name (the Accounts page's). */
+function sideRoomNames() {
+  const out = [];
+  for (const hall of store.rooms.values()) {
+    for (const r of store.roomsOf(hall.code)) if (!store.isMain(r)) out.push({ key: r.code, name: r.name || '', hall: hall.code, hallName: hall.name || '' });
+  }
+  return out;
+}
 /**
  * Who a page's socket is when it is told a room's guest code (codeFor): the admin, its account, whether it sits On stage,
  * and the code a guest's page typed (a page signed in with an account typed none: it names its room by its key). A socket
@@ -1771,9 +1817,8 @@ io.on('connection', (socket) => {
       id = acct.id;
       // The seat is its rights' in that room (rbac.roomRoleFor). The admin may post wherever it sits (`allowed`), so its
       // seat says so: backstage where its account's own rights would seat it an observer (a side room it is not given, a
-      // hall its halls do not list, a hall where they only read), On stage where its On stage halls seat it.
-      const seat = rbac.roomRoleFor(acct, store.scopeOf(r));
-      cleanRole = seat === 'observer' && socket.data.isAdmin ? 'research' : seat;
+      // hall its halls do not list, a hall where they only read), On stage where its On stage halls seat it (seatIn).
+      cleanRole = seatIn({ isAdmin: !!socket.data.isAdmin, account: acct }, r);
     } else {
       id = guard.checkIdentity(SECRET, uid);
       if (!id) { identity = guard.newIdentity(SECRET); id = guard.checkIdentity(SECRET, identity); }
@@ -1859,15 +1904,16 @@ io.on('connection', (socket) => {
     if ((acct || isAdminView) && !stillSeated && !Number.isInteger(since)) {
       readAsAdmin(actor(), socket.data.account, r, (n) => (isAdminView ? 'opened ' + cleanName + '\'s view of ' + n : 'entered ' + n + ' as the admin'), socket.data.ip);
     }
-    // Resume: just what they missed, when we still have it; otherwise the whole history.
-    const ops = Number.isInteger(since) ? store.opsSince(r, since) : null;
+    // Resume: just what they missed, when we still have it; otherwise the whole history. Each as a page is sent it
+    // (lib/ops.js forPage): a stage send's and a proposal's record without the link it went to, which names the hall's key.
+    const missed = Number.isInteger(since) ? store.opsSince(r, since) : null;
     // Every room of a hall follows its hall's Stagewatch: its countdown, and its sends and proposals by this seat's rights
     // there (a side room's guest holds none; an account its stage.send in the hall), as the frames sent to it do.
     const sw = linkFor(r.hall);
     ack({
       ok: true, roomCode: code, roomName: r.name || '', role: cleanRole, name: cleanName, adminView: isAdminView,
       identity, uid: id, note, uploadToken, seq: r.seq,
-      ...(ops ? { ops } : { history: r.messages }),
+      ...(missed ? { ops: missed.map(ops.opForPage) } : { history: r.messages.map(ops.forPage) }),
       users: roomUserSummary(r, { links: socket.data.isAdmin }),
       ai: !!aiKey(), stage: stagePayload(sw),
       canSendToStage: !!(sw.base && sw.key && sw.keyState !== 'refused') && allowed('stage.send'),
@@ -2265,7 +2311,8 @@ io.on('connection', (socket) => {
       if (held.length) trackProposal(link.id, proposal.id, from.code, held, proposal.state, proposal);
     }
     noteEvent('research proposed a stage message to the show desk', link);
-    ack({ ok: true, proposal });
+    // The page that asked is told the proposal as every page of its room is (lib/ops.js unlinked).
+    ack({ ok: true, proposal: ops.unlinked(proposal) });
   });
 
   // ----- Displays: a hall's screens. Seeing and changing what they show is display.control; making, renaming, moving,
@@ -2509,7 +2556,9 @@ io.on('connection', (socket) => {
   // (owner answer B1): an On stage page marks its own request resolved and nothing else, whatever room its code names,
   // before any right is read; an account answers as the crew of the request's room, or of its hall's Main room (the
   // hall's crew answer a side room's request without reading the room), only where it does not sit On stage there
-  // (rbac.answersHelp, by each room's scope), from any page, its own request's Resolved excepted.
+  // (rbac.answersHelp, by each room's scope), from any page, its own request's Resolved excepted. An account refused
+  // only because it sits On stage where it would answer (a Board account, from its halls board) is told so in the On
+  // stage words.
   socket.on('help:respond', ({ code, messageId, state } = {}, ack) => {
     ack = ok(ack);
     if (!chatter.take()) return limited(ack);
@@ -2525,7 +2574,10 @@ io.on('connection', (socket) => {
     const inRoom = room && room.code === r.code && allowed('hall.post');
     const crewOf = [store.scopeOf(r), store.scopeOf(store.get(r.hall))];
     const byAccount = !!acct && (crewOf.some((scope) => rbac.answersHelp(acct, scope)) || (canIn('hall.post', r) && resolvesOwn(acct.id)));
-    if (!(inRoom || byAccount || socket.data.isAdmin)) return ack({ ok: false, error: 'Only people in that hall can answer its help requests.' });
+    if (!(inRoom || byAccount || socket.data.isAdmin)) {
+      const seatedOnStage = !!acct && crewOf.some((scope) => rbac.canIn(acct, 'hall.post', scope) && rbac.roomRoleFor(acct, scope) === 'board');
+      return ack({ ok: false, error: seatedOnStage ? 'Help requests are answered by the backstage team.' : 'Only people in that hall can answer its help requests.' });
+    }
     if (state !== 'coming' && state !== 'resolved') return ack({ ok: false, error: 'Say "on my way" or "resolved".' });
     const by = (me && room && room.code === r.code) ? me.name : socket.data.account ? socket.data.account.name : 'Admin';
     // The same person saying the same again (a repeat of a held answer) is told it is done, never refused for it.
@@ -3139,6 +3191,7 @@ function hallParts(r, shared) {
 }
 function boardFor(socket, shared = new Map()) {
   const a = socket.data.account;
+  const who = askerOf(socket);
   const sees = (code) => socket.data.isAdmin || (a && rbac.seesHall(a, code));
   const rooms = Array.from(store.rooms.values()).filter((r) => sees(r.code));
   const nodeChip = (l) => { const v = l.view(); return { id: v.id, t: v.t, name: v.name, hall: v.hall, status: v.status, light: v.light, headline: v.headline }; };
@@ -3147,9 +3200,13 @@ function boardFor(socket, shared = new Map()) {
     nodes: links.map(nodeChip),
     canDrive: Array.from(peerLinks.values()).some((l) => mayDriveNode(socket, l)),   // what nodes:list would list: Show network
     // Each hall's guest code only for a watcher who may know it (codeFor; a board's socket sits in no room), with whether it
-    // admits guests now: a chip that follows Code off and New code as they happen.
-    halls: rooms.map((r) => ({ ...hallParts(r, shared).row, nodes: links.filter((l) => l.hall === r.code).map(nodeChip), guestCode: codeFor(askerOf(socket), r), codeOn: store.codeOn(r) })),
+    // admits guests now: a chip that follows Code off and New code as they happen. Then the hall's side rooms this watcher
+    // may enter (sideRoomsFor), chosen per watcher beside the row every watcher shares.
+    halls: rooms.map((r) => ({ ...hallParts(r, shared).row, nodes: links.filter((l) => l.hall === r.code).map(nodeChip), guestCode: codeFor(who, r), codeOn: store.codeOn(r), rooms: sideRoomsFor(who, r) })),
     help: helpFor(socket),
+    // The side rooms it may enter in a hall it does not see, each by its hall's name and never the hall's key (its Main
+    // room's address, and its guest code until New code).
+    yourRooms: Array.from(store.rooms.values()).filter((r) => !sees(r.code)).flatMap((r) => sideRoomsApart(who, r)),
   };
 }
 /**
@@ -3204,11 +3261,29 @@ function endSockets(match, what, words) {
 const SIGNED_OUT = 'Signed out — sign in again to carry on.';
 
 /**
- * An account changed (role, rights, halls, password, turned off, removed): every socket it has open is told and closed,
- * so its next connection is judged by the rights it has now — never by the ones it had.
+ * An account changed (role, rights, halls, rooms, On stage halls, password, turned off, removed): every socket it has
+ * open is told and closed, so its next connection is judged by the rights it has now — never by the ones it had. Its chat
+ * view alone is no right: each of its pages in a room is told the view it draws now (`view`), and none is closed.
  */
 function accountChanged(id, what) {
-  endSockets((s) => s.data.accountId === id, what, 'Your account was changed by an admin — reconnecting with your current rights.');
+  if (what === 'view') return viewChanged(id);
+  return endSockets((s) => s.data.accountId === id, what, 'Your account was changed by an admin — reconnecting with your current rights.');
+}
+/**
+ * The chat view a page draws (plan 1-§6, "How it is chosen"): the person's own, an account's `view`, when one is chosen;
+ * else the simple view for a seat On stage (a hall's Main room's alone), else the full view. A view is no right: no
+ * check reads it.
+ */
+function drawnView(account, s) {
+  if (account && (account.view === 'simple' || account.view === 'full')) return account.view;
+  return s.data.seat === 'board' && !s.data.adminView ? 'simple' : 'full';
+}
+/** An account's chat view changed: each of its pages seated in a room is told the view to draw, live; nothing is closed. */
+function viewChanged(id) {
+  const account = accounts.get(id);
+  for (const [, s] of io.sockets.sockets) {
+    if (s.data && s.data.accountId === id && s.data.userRoom && !s.data.adminView) s.emit('view', { view: drawnView(account, s) });
+  }
 }
 
 /**

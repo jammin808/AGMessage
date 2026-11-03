@@ -179,13 +179,17 @@ class Accounts {
   }
   activeAdmins() { let n = 0; for (const a of this.users.values()) if (a.role === 'admin' && !a.disabled) n++; return n; }
 
-  /** What a page may know about an account: never its hash. */
+  /**
+   * What a page may know about an account: never its hash. Its side rooms (`rooms`), its On stage halls (`board`) and its
+   * chat view (`view`: '' by its seat, 'simple' or 'full') last, each as stored: none when never set.
+   */
   static view(a) {
     if (!a) return null;
     return {
       id: a.id, username: a.username, name: a.name, role: a.role, halls: a.halls || [], allHalls: typeof a.allHalls === 'boolean' ? a.allHalls : null,
       grant: a.grant || [], revoke: a.revoke || [], disabled: !!a.disabled, mustChange: !!a.mustChange,
       createdAt: a.createdAt, lastLoginAt: a.lastLoginAt || 0, pwSetAt: a.pwSetAt || 0, rights: rbac.rightsView(a),
+      rooms: Array.isArray(a.rooms) ? a.rooms : [], board: Array.isArray(a.board) ? a.board : [], view: isView(a.view) ? a.view : '',
     };
   }
   list() { return Array.from(this.users.values()).map(Accounts.view).sort((x, y) => x.username.localeCompare(y.username)); }
@@ -193,9 +197,10 @@ class Accounts {
   /**
    * Make an account. Returns {account, password?} (the one-time password when none was given), or {error} ({error,
    * exists} for a first admin when there are accounts already). The name is reserved before its hash is made, so two
-   * requests at once never make two accounts of one name, nor two first admins.
+   * requests at once never make two accounts of one name, nor two first admins. Its side rooms, On stage halls and chat
+   * view are stored only when given (an account made without them is stored as 0.5.1 stored one).
    */
-  async create({ username, name, role = 'staff', halls = [], allHalls, grant = [], revoke = [], password }, actorId = '', { firstAdmin = false } = {}) {
+  async create({ username, name, role = 'staff', halls = [], allHalls, rooms = [], board = [], view = '', grant = [], revoke = [], password }, actorId = '', { firstAdmin = false } = {}) {
     const u = String(username || '').trim().toLowerCase();
     if (!USERNAME.test(u)) return { error: 'A username is 2 to 32 lowercase letters, digits, dots, dashes or underscores, starting with a letter or digit.' };
     if (firstAdmin && (this.users.size > 0 || this.pending.size > 0)) return { error: 'Accounts are set up already — sign in.', exists: true };
@@ -210,9 +215,11 @@ class Accounts {
     let hash;
     try { hash = await hashPassword(pw); } finally { this.pending.delete(u); }
     const now = Date.now();
+    const sideRooms = cleanKeys(rooms), onStage = cleanKeys(board);
     const a = {
       id: 'a' + makeId(), username: u, name: display, role, halls: cleanHalls(halls),
       ...(typeof allHalls === 'boolean' ? { allHalls } : {}),
+      ...(sideRooms.length ? { rooms: sideRooms } : {}), ...(onStage.length ? { board: onStage } : {}), ...(isView(view) && view ? { view } : {}),
       grant: (grant || []).filter(rbac.isCap), revoke: (revoke || []).filter(rbac.isCap),
       disabled: false, mustChange: temp, pw: hash, pwSetAt: now, epoch: 1,
       createdAt: now, createdBy: String(actorId || ''), lastLoginAt: 0,
@@ -224,7 +231,9 @@ class Accounts {
 
   /**
    * Set fields an admin may change (checked by the caller with rbac.mayChange). Returns the names of the fields that
-   * now hold something else: a field sent as it already is is no change (no reconnect, no audit row).
+   * now hold something else: a field sent as it already is is no change (no reconnect, no audit row). Side rooms and On
+   * stage halls are lists of keys, compared as sets; the chat view is '' (by the seat), 'simple' or 'full', and any other
+   * value changes nothing (the caller refuses it with words).
    */
   update(id, change) {
     const a = this.get(id);
@@ -233,6 +242,12 @@ class Accounts {
     if (typeof change.name === 'string') { const n = cleanText(change.name, 40); if (n && n !== a.name) { a.name = n; changed.push('name'); } }
     if (rbac.isRole(change.role) && change.role !== a.role) { a.role = change.role; changed.push('role'); }
     if (Array.isArray(change.halls)) { const h = cleanHalls(change.halls); if (!sameSet(h, a.halls)) { a.halls = h; changed.push('halls'); } }
+    if (Array.isArray(change.rooms)) { const r = cleanKeys(change.rooms); if (!sameSet(r, a.rooms)) { a.rooms = r; changed.push('rooms'); } }
+    if (Array.isArray(change.board)) { const b = cleanKeys(change.board); if (!sameSet(b, a.board)) { a.board = b; changed.push('board'); } }
+    if (isView(change.view) && change.view !== (isView(a.view) ? a.view : '')) {
+      if (change.view) a.view = change.view; else delete a.view;
+      changed.push('view');
+    }
     if ('allHalls' in change) {
       const next = typeof change.allHalls === 'boolean' ? change.allHalls : undefined;
       if (next !== (typeof a.allHalls === 'boolean' ? a.allHalls : undefined)) { if (next === undefined) delete a.allHalls; else a.allHalls = next; changed.push('allHalls'); }
@@ -336,7 +351,17 @@ class Accounts {
 }
 
 const HALL_CODE = /^[A-Z0-9]{4,12}$/;
-function cleanHalls(list) { return Array.from(new Set((Array.isArray(list) ? list : []).map((c) => String(c).toUpperCase()).filter((c) => HALL_CODE.test(c)))).slice(0, 200); }
+/**
+ * A list of keys as an account keeps it: a hall's (its halls, its On stage halls) or a side room's, each read by type (a
+ * name only, never a value made into one), upper case, once, 200 at most; anything else is dropped.
+ */
+function cleanKeys(list) {
+  return Array.from(new Set((Array.isArray(list) ? list : []).filter((c) => typeof c === 'string').map((c) => c.toUpperCase()).filter((c) => HALL_CODE.test(c)))).slice(0, 200);
+}
+const cleanHalls = cleanKeys;
+/** An account's chat view: '' (by its seat: the simple view On stage, the full view elsewhere), 'simple' or 'full'. */
+const VIEWS = Object.freeze(['', 'simple', 'full']);
+const isView = (v) => typeof v === 'string' && VIEWS.includes(v);
 /** The same members, in any order (a missing list is an empty one). */
 function sameSet(x, y) {
   const a = [...new Set(x || [])].sort(), b = [...new Set(y || [])].sort();
@@ -481,6 +506,6 @@ class TokenSessions {
 }
 
 module.exports = {
-  Accounts, Sessions, TokenSessions, hashPassword, verifyPassword, parseHash, passwordProblem, temporaryPassword, sha256,
+  Accounts, Sessions, TokenSessions, hashPassword, verifyPassword, parseHash, passwordProblem, temporaryPassword, sha256, cleanKeys, VIEWS, isView,
   SCRYPT, USERNAME, MIN_PW, IDLE_MS, MAX_AGE_MS, TOUCH_MS, MAX_SESSIONS, MAX_PER_ACCOUNT, TOKEN_SESSION_MS, NO_MATCH, LANES,
 };

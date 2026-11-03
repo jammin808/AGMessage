@@ -966,10 +966,12 @@ const PAGE_NAMED_BY_EXPRESSION = {
   'public/outbox.js: socket.emit(verb': { names: [], why: 'the outbox sends what its callers name, each read where it is called: AGM.outbox.hold(\'x\', AGM.outbox.now(\'x\', AGM.outbox.self(\'x\'' },
 };
 /**
- * A server emit that no page hears, with why. The fence fails on a row a page hears, or that no handler file sends. None
- * today: every emit is heard (the hall page hears linkedRoomsChanged, which keeps its `forwardable` fact live).
+ * A server emit that no page hears, with why. The fence fails on a row a page hears, or that no handler file sends. The
+ * hall page hears linkedRoomsChanged, which keeps its `forwardable` fact live.
  */
-const UNHEARD = {};
+const UNHEARD = {
+  view: 'an account\'s chat view changed alone, told to its pages in a room, which stay open (the plan\'s Part 1 unit 9): the hall page draws the simple view, and hears this, with Part 7 unit 20a (#55)',
+};
 
 const literal = (re, src) => [...src.matchAll(re)].map((m) => m[2]);
 /** Every way a listener is added to a socket, its first argument as written. The fuzz reads one: `socket.on('x'`. */
@@ -1463,6 +1465,8 @@ const ANY_ROOM = {
     'a file any room holds is in use: a hall\'s reset or deletion never removes one a side room still holds',
     'the admin\'s transcript of any room',
     'health\'s sideRooms: every room but the halls',
+    'the side rooms of a hall a person may enter, as /api/halls and the halls board list them',
+    'every side room an account may be given, for the Accounts page',
     'the support view is told a room\'s guest code as the person\'s own page in it is, Main or side',
     'a room\'s name is one no other room of its hall has, its Main room\'s (the hall\'s) included, made, renamed or set up',
     '"This laptop"\'s Pages row names the room a hall page on another build is in, a side room by its hall\'s name and its own',

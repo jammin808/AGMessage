@@ -9,7 +9,8 @@
  * Hall-scoped capabilities need access to that hall as well; global ones (managing halls, accounts, settings, reading
  * the audit log) do not. Three rules keep the rights from escalating: only an admin may make an admin or hand out
  * users.manage, settings.manage or audit.export; an account that is not an admin manages only accounts within its own
- * rights and halls, and hands out only those; and nobody changes their own role or rights.
+ * rights, halls and side rooms, and hands out only those; and nobody changes their own role, rights, halls, rooms, On
+ * stage halls or chat view.
  *
  * Rights in a room. Seeing, posting and sharing files (ROOM_SCOPED) are a room's: in a hall's Main room by the account's
  * halls, as before, and in a side room (Legal, Media) only by the account's own `rooms`, or by the admin role, which is
@@ -144,13 +145,22 @@ const seesHall = (account, hall) => hallCan(account, 'hall.view', hall);
 const seesRoom = (account, scope) => canIn(account, 'hall.view', scope);
 
 /**
+ * What nobody sets on their own account: its role and rights, its halls, its side rooms and On stage halls (`rooms`,
+ * `board`), and its chat view, which another person who manages accounts chooses for it.
+ */
+const NOT_ONES_OWN = Object.freeze(['role', 'grant', 'revoke', 'disabled', 'allHalls', 'halls', 'rooms', 'board', 'view']);
+/** A right as a refusal names it: what was sent, when it is a name, cut short; never a value made into one. */
+const rightWords = (c) => (typeof c === 'string' ? c.slice(0, 40) : 'one that is not a name');
+
+/**
  * Whether `actor` may make `change` to `target` (an account; null when creating). Returns null when allowed, else the
- * reason in words. `change` holds only the fields being set: role, grant, revoke, disabled, halls, allHalls.
+ * reason in words. `change` holds only the fields being set: role, grant, revoke, disabled, halls, allHalls, rooms,
+ * board, view.
  */
 function mayChange(actor, target, change, { activeAdmins = 1 } = {}) {
   if (!can(actor, 'users.manage')) return 'You may not manage accounts.';
   const actorIsAdmin = actor.role === 'admin';
-  if (target && target.id === actor.id && ('role' in change || 'grant' in change || 'revoke' in change || 'disabled' in change || 'allHalls' in change || 'halls' in change)) {
+  if (target && target.id === actor.id && NOT_ONES_OWN.some((k) => k in change)) {
     return 'Nobody changes their own role, rights or halls — ask another admin.';
   }
   if ('role' in change && !isRole(change.role)) return 'Unknown role.';
@@ -160,13 +170,13 @@ function mayChange(actor, target, change, { activeAdmins = 1 } = {}) {
   // with the account enabled, so a disabled holder is not re-enabled by a non-admin either. Changing one's own name is not this.
   if (target && target.id !== actor.id && !actorIsAdmin && holdsAdminOnly(target)) return 'Only an admin may change an account that manages accounts or settings, or exports the audit log.';
   for (const c of [].concat(change.grant || [])) {
-    if (!isCap(c)) return 'Unknown right: ' + String(c).slice(0, 40);
+    if (!isCap(c)) return 'Unknown right: ' + rightWords(c);
     if (ADMIN_ONLY.has(c) && !actorIsAdmin) return 'Only an admin may grant ' + c + '.';
   }
-  for (const c of [].concat(change.revoke || [])) if (!isCap(c)) return 'Unknown right: ' + String(c).slice(0, 40);
+  for (const c of [].concat(change.revoke || [])) if (!isCap(c)) return 'Unknown right: ' + rightWords(c);
   // A holder of users.manage who is not an admin reaches no further through the accounts it manages than it reaches
-  // itself: it neither makes nor widens an account past its own rights and halls, nor resets, signs out or removes one
-  // that holds more (a reset hands it that account's one-time password).
+  // itself: it neither makes nor widens an account past its own rights, halls and side rooms, nor resets, signs out or
+  // removes one that holds more (a reset hands it that account's one-time password).
   if (!actorIsAdmin) {
     if (target && target.id !== actor.id && exceeds(target, actor)) return 'You may only manage accounts whose rights and halls you hold yourself.';
     if (exceeds(afterChange(target, change), actor)) return 'You may only give rights and halls you hold yourself.';
@@ -178,29 +188,43 @@ function mayChange(actor, target, change, { activeAdmins = 1 } = {}) {
   return null;
 }
 
-/** Whether `account`, enabled, would hold a right or reach a hall that `actor` does not. */
+/**
+ * Whether `account`, enabled, would hold a right, reach a hall or a side room, or sit On stage in a hall that `actor`
+ * does not reach. A side room is read before every hall is: an account of every hall reaches no side room by that, so it
+ * gives only the rooms it is given itself (the admin role, a member of every room, gives any). An On stage hall is read
+ * as a hall is.
+ */
 function exceeds(account, actor) {
   const mine = effective(actor);
   const theirs = effective({ ...account, disabled: false });
   for (const c of theirs.caps) if (!mine.caps.has(c)) return true;
+  if (!(actor && actor.role === 'admin')) for (const k of theirs.rooms) if (!mine.rooms.has(k)) return true;
   if (mine.allHalls) return false;
   if (theirs.allHalls) return true;
   for (const h of theirs.halls) if (!mine.halls.has(h)) return true;
+  for (const h of theirs.board) if (!mine.halls.has(h)) return true;
   return false;
 }
 
+/** A list of keys as the store reads it (upper case); anything that is not a name reads as none. */
+const keysAsStored = (list) => list.map((k) => (typeof k === 'string' ? k.toUpperCase() : ''));
+
 /**
  * The account as it would be after `change` (a new one when `target` is null), read as Accounts.create and update
- * apply it: a role only when it is one, halls and revokes only as lists, a grant as whatever it names (never fewer rights
- * than would be stored), and an allHalls that is not true or false meaning the role's own.
+ * apply it: a role only when it is one, halls, side rooms, On stage halls and revokes only as lists, a grant as whatever
+ * it names (never fewer rights than would be stored), an allHalls that is not true or false meaning the role's own, and
+ * a chat view as the value it is (it widens nothing).
  */
 function afterChange(target, change) {
   const a = { ...(target || { role: 'staff', halls: [], grant: [], revoke: [] }) };
   if (isRole(change.role)) a.role = change.role;
-  if (Array.isArray(change.halls)) a.halls = change.halls.map((h) => (typeof h === 'string' ? h.toUpperCase() : ''));
+  if (Array.isArray(change.halls)) a.halls = keysAsStored(change.halls);
+  if (Array.isArray(change.rooms)) a.rooms = keysAsStored(change.rooms);
+  if (Array.isArray(change.board)) a.board = keysAsStored(change.board);
   if ('grant' in change) a.grant = [].concat(change.grant || []);
   if (Array.isArray(change.revoke)) a.revoke = change.revoke;
   if ('allHalls' in change) { if (typeof change.allHalls === 'boolean') a.allHalls = change.allHalls; else delete a.allHalls; }
+  if ('view' in change) a.view = change.view;
   return a;
 }
 
@@ -214,6 +238,16 @@ function giveable(actor) {
   const admin = !!actor && actor.role === 'admin' && !actor.disabled;
   if (admin) return { admin: true, caps: Object.keys(CAPS), allHalls: true, halls: [] };
   return { admin: false, caps: Array.from(e.caps).filter((c) => !ADMIN_ONLY.has(c)).sort(), allHalls: e.allHalls, halls: e.allHalls ? [] : Array.from(e.halls).sort() };
+}
+
+/**
+ * The side rooms `actor` may give on the Accounts page, so it offers no more than mayChange allows: {all, rooms}. An
+ * admin gives every room (`all`, the list empty); anyone else only the rooms it is given itself, every hall's account
+ * included (its halls reach no side room).
+ */
+function giveableRooms(actor) {
+  const admin = !!actor && actor.role === 'admin' && !actor.disabled;
+  return { all: admin, rooms: admin ? [] : Array.from(effective(actor).rooms).sort() };
 }
 
 /**
@@ -283,13 +317,16 @@ function mayKnowCode(account, scope) {
   return (s.main ? GUEST_CAPS.research : GUEST_CAPS_SIDE.research).every((cap) => canIn(account, cap, s));
 }
 
-/** What a page needs to know about an account's rights (no secrets). */
+/** What a page needs to know about an account's rights (no secrets): with its side rooms and its On stage halls last. */
 function rightsView(account) {
   const e = effective(account);
-  return { role: account ? account.role : '', roleLabel: account && isRole(account.role) ? ROLES[account.role].label : '', caps: Array.from(e.caps).sort(), allHalls: e.allHalls, halls: Array.from(e.halls).sort() };
+  return {
+    role: account ? account.role : '', roleLabel: account && isRole(account.role) ? ROLES[account.role].label : '', caps: Array.from(e.caps).sort(), allHalls: e.allHalls, halls: Array.from(e.halls).sort(),
+    rooms: Array.from(e.rooms).sort(), board: Array.from(e.board).sort(),
+  };
 }
 
 module.exports = {
   CAPS, ROLES, HALL_SCOPED, ROOM_SCOPED, ADMIN_ONLY, SEAT_LIMITS, LINKED_CAPS, GUEST_CAPS, GUEST_CAPS_SIDE, isCap, isRole, effective,
-  can, canIn, seesHall, seesRoom, holdsAdminOnly, mayChange, giveable, seatAllows, guestCaps, roomRoleFor, answersHelp, mayKnowCode, rightsView,
+  can, canIn, seesHall, seesRoom, holdsAdminOnly, mayChange, giveable, giveableRooms, seatAllows, guestCaps, roomRoleFor, answersHelp, mayKnowCode, rightsView,
 };

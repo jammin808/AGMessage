@@ -1334,10 +1334,11 @@ test('a side room follows its hall: its countdown, and its sends and proposals t
   assert.equal(itemOf(await boardOf(kim)), undefined, 'Kim, On stage in Hall A');
   // The hall row's count is its Main room's; the board counts its rooms' requests by hall.
   assert.equal((await boardOf(pat)).halls.find((h) => h.code === 'HALLA1').help, 0);
-  // Pat answers it from the board: Legal hears who is on the way. Vic and Kim may not.
+  // Pat answers it from the board: Legal hears who is on the way. Vic and Kim may not; Kim, who would answer it as the
+  // hall's crew but for her On stage seat there, is told so in the On stage words (owner answer B1).
   const vicBoard = await page(vic);
   assert.deepEqual(await emit(vicBoard, 'help:respond', { code: SIDE, messageId: help.id, state: 'coming' }), { ok: false, error: 'Only people in that hall can answer its help requests.' });
-  assert.deepEqual(await emit(await page(kim), 'help:respond', { code: SIDE, messageId: help.id, state: 'coming' }), { ok: false, error: 'Only people in that hall can answer its help requests.' });
+  assert.deepEqual(await emit(await page(kim), 'help:respond', { code: SIDE, messageId: help.id, state: 'coming' }), { ok: false, error: 'Help requests are answered by the backstage team.' });
   const onWay = once(gus, 'helpUpdate');
   assert.deepEqual(await emit(await page(pat), 'help:respond', { code: SIDE, messageId: help.id, state: 'coming' }), { ok: true });
   assert.deepEqual([(await onWay).help.state, (await onWay).help.by], ['coming', 'pat']);
@@ -1563,7 +1564,9 @@ test('rooms are made, renamed, reset and removed by those who set halls up; a si
     ['hall:settings', { code: LEGAL }, 'No such hall.'],
     ['hall:configure', { code: LEGAL, name: 'Taken for a hall' }, 'No such hall.'],
   ]) assert.deepEqual(await asked(ctl, verb, args), { ok: false, error }, verb);
-  // Nor is it listed where halls are: the halls board, /api/halls, the show network's halls, the context.
+  // Nor is it listed where halls are: the halls board, /api/halls, the show network's halls, the context. It is listed
+  // under its hall's row (`rooms`), to whoever may enter it: the admin's board, never a project manager of every hall,
+  // who is given neither room.
   const board = (await emit(ctl, 'board:watch', {})).board;
   const halls = (await api(srv.base, 'GET', '/api/halls', undefined, { cookie: pat })).body;
   const nodesHalls = (await emit(ctl, 'nodes:list', {})).halls;
@@ -1571,7 +1574,11 @@ test('rooms are made, renamed, reset and removed by those who set halls up; a si
   const three = [hallA, hallB, hallC].sort();
   assert.deepEqual([board.halls.map((h) => h.code).sort(), halls.halls.map((h) => h.code).sort(), nodesHalls.map((h) => h.code).sort()], [three, three, three]);
   assert.match(context.items.find((i) => i.id === 'meetings').state, /^3 meetings/, 'the context counts halls');
-  const read = JSON.stringify([board, halls, nodesHalls, context]);
+  const underIts = Object.fromEntries(board.halls.map((h) => [h.code, h.rooms.map((x) => x.name)]));
+  assert.deepEqual(underIts, { [hallA]: ['Legal', 'Media'], [hallB]: [], [hallC]: Array.from({ length: 20 }, (_, i) => 'Room ' + (i + 1)) }, 'under its hall, on the admin\'s board');
+  assert.deepEqual(board.halls.find((h) => h.code === hallA).rooms.map((x) => x.key), [LEGAL, MEDIA]);
+  assert.deepEqual([board.yourRooms, halls.rooms, halls.halls.flatMap((h) => h.rooms)], [[], [], []], 'nowhere else, and not to every hall\'s account');
+  const read = JSON.stringify([{ ...board, halls: board.halls.map(({ rooms, ...row }) => row) }, halls, nodesHalls, context]);
   assert.ok(!read.includes(LEGAL) && !read.includes(MEDIA) && !/Legal|Media|Room 1\b/.test(read), 'no side room, by its key or its name: ' + read.slice(0, 200));
   // The admin's room list holds each hall's rooms beside it, by key, in the order they were made; no row of its own.
   const list = async () => (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms;

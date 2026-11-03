@@ -44,9 +44,31 @@ senior tech, "every hall, including new ones") reaches no side room by that, and
 room. A hall's own rights stay its hall's in each of its rooms: its screens, its Stagewatch, its show network. The
 server asks a room's rights of that room alone (`rbac.canIn`, by the room's key, its hall's and whether it is the Main
 room); asked by a hall's code they are refused, so a check written against a room's key fails closed rather than let an
-account of every hall in. No page gives an account a room yet, so a side room is the admin's. An account that manages
-settings is the admin on its pages: it opens any hall or room by its key, a hall its own halls do not list and a side
-room it is not given included, and is seated backstage there, since it may post wherever it sits.
+account of every hall in. An account that manages settings is the admin on its pages: it opens any hall or room by its
+key, a hall its own halls do not list and a side room it is not given included, and is seated backstage there, since it
+may post wherever it sits.
+
+**An account's side rooms, On stage halls and chat view.** Beside its halls an account holds three fields: `rooms`, the
+side rooms it is given (by their keys); `board`, the halls in whose Main room it sits On stage; and `view`, its chat view
+(`''` by its seat, `simple` or `full`). They are set where its halls are, `POST /api/users` and `PATCH /api/users/:id`
+(`users.manage`, through `rbac.mayChange`); no page sets them yet. Each list is a list of keys, read by type (anything
+else is refused, "An account's rooms are a list of their keys.", and never a 500), and an entry it adds that the account
+does not hold already names a side room that is here ("No such room: …"; a hall's key, "… is a hall: its Main room comes
+with the hall.") or a hall that is here ("No such hall: …"), so a key typed wrong is said and never kept to open a room
+made later; an entry already on the account passes, so a Save that sends the lists back as they are changes nothing. A
+view that is none of the three is refused in words. Nobody sets the three on their own account ("Nobody changes their own
+role, rights or halls — ask another admin."). An account that manages accounts and is not an admin gives only the side
+rooms it is given itself, read before every hall is, so a project manager of every hall gives none it is not given and
+manages no account that holds one; it seats an account On stage only in a hall it reaches, as it gives halls. The
+Accounts route tells each viewer the rooms it may give (`rooms`, each by its key, its name, its hall's key where the
+viewer reaches that hall, and its hall's name; `giveableRooms`): the admin every room, anyone else the rooms it is given,
+and on each account's row only those (`otherRooms` counts the rest), never a guest code. A change of the chat view alone is
+no change of rights: the account's pages in a room are told the view each draws now (`view`: its own choice, else the
+simple view On stage and the full view elsewhere) and stay open; any other change still ends its pages, which reconnect
+with the rights it has now. `/api/halls` gives each hall's row the seat the account joins its Main room with (`seat`) and
+the hall's side rooms it may enter (`rooms`, each with its key, name, people, guest code where it may know it, whether the
+code admits and its seat there), and lists apart the side rooms it may enter in a hall it does not see, by that hall's
+name and never its key; the halls board does the same (`rooms` on each row, `yourRooms` apart).
 
 **Who sets rooms up.** Making a room beside a hall (`room:create`), renaming a room (`room:update`: a hall's Main room
 renamed is the hall renamed) and reading a room's settings (`room:settings`) are `halls.manage`'s and the admin's, as a
@@ -125,15 +147,22 @@ refused at its next use in the new seat's words ("On stage seats send messages, 
 post.") and is gone, and the page's join after its reload takes a new one where the seat shares files. Accounts are
 seated by their rights in the room (backstage, or an observer without `hall.post`), and On stage in a hall's Main room
 whose hall the account's On stage halls name, where it may post (`rbac.roomRoleFor`): the limit holds it there as it
-holds any seat. No page gives an account On stage halls yet. An account answers a room's help requests, from its hall
-page or the halls board, only where it may post and does not sit On stage (`rbac.answersHelp`, by the room, which the
-halls board's On my way and Resolved read too): a Board member of a hall will answer none of that hall's requests from
-any page, its own Resolved excepted. A side room's help request (Legal) is answered by those who may post there, and by
+holds any seat. On that page a Board account (a Tech given a hall's On stage seat, an admin given one) is given no
+upload token, is not offered the speaker's screen or the show desk and is refused them, drives no screen or node, is
+handed no guest code, and forwards nothing out of the hall; from its other pages it is the crew its rights make it, and a
+file or a question it forwards from there never goes into the hall where it sits On stage. An account answers a room's
+help requests, from its hall page or the halls board, only where it may post and does not sit On stage
+(`rbac.answersHelp`, by the room, which the halls board's On my way and Resolved read too): a Board member of a hall
+answers none of that hall's requests from any page, a side room's of that hall it would answer only as the hall's crew
+included, and is told so in the On stage words ("Help requests are answered by the backstage team."), its own Resolved
+excepted; it answers those of a side room it is given and of the halls where it is crew. A side room's help request (Legal) is answered by those who may post there, and by
 the hall's crew, those who answer its Main room's requests: the halls board shows it whole to an account that may read
 the room, and to the hall's crew who may not with its category, who asked and its state, never its words, and to nobody
 else; an account given the side room alone is told its hall by name, never by the hall's key. From any room of a hall,
 an account sends to the hall's speaker's screen and its show desk where it holds `stage.send` in that hall; a side
-room's guest never does.
+room's guest never does. The line's record keeps the link it went to, which a hall's own Stagewatch names by the hall's
+key; the room's pages are sent it without that link (live, in the history and in the changes a page missed), so a send
+from Legal tells Legal's readers nothing of the hall's key.
 
 Forwarding keeps two rules of the room a message comes from: a file moves only from a seat that may share files there
 ("Files are moved by the backstage team."), and a file or a question goes only into a room where the forwarder sits
@@ -266,7 +295,9 @@ how many accounts were given it or its rooms no more, and its rooms by name and 
 given it no more), each saying the files of any room
 another program held as they were removed, kept, and whether it opens again at the next start: one row for each change, none for a
 control that changes nothing), a hall's rooms (`room.create`: "Legal in Hall 2 (code off)"; `room.update`: a side room
-renamed, "name → Media"; a hall's Main room renamed is `hall.update`, as its Set up writes it), the admin's reads of a
+renamed, "name → Media"; a hall's Main room renamed is `hall.update`, as its Set up writes it), an account's side rooms,
+On stage halls and chat view (`user.create` and `user.update`: "rooms → Legal (Hall 2) LGQ4MZP8", each room by its name,
+its hall's and its key, never a guest code; "board → On stage in H7K2QA"; "view → simple", "view → by seat"), the admin's reads of a
 side room its account is not given (`room.read`, once each: a page entered, never a resume; a watch begun; a transcript;
 a person's view opened; the AI asked for its minutes, its messages handed to it whatever it answers; the laptop's token is given none, so its reads always write one; never
 what was read), a room's guest code switched or renewed (`room.code`, by the room's key: "code on", "code off (3 guest

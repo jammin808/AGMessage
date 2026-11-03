@@ -31,7 +31,13 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   Backstage and Observer in a hall's Main room, Member and Observer in its other rooms. A code is shown only to those who
   may know it (the admin, those who set halls up, an account whose rights already hold what the code gives, a guest the
   code it typed; never On stage, a Viewer or a Staff account in a Main room). Roles (admin, project manager,
-  senior tech, tech, staff, viewer), halls per person, and single rights an admin can add or remove. An **audit log**
+  senior tech, tech, staff, viewer), halls per person, and single rights an admin can add or remove. An account is
+  also given **side rooms** (a hall's Legal or Media, never reached by its halls, "every hall" included), **On stage**
+  halls (it sits On stage in that hall's Main room, held to the seat there, and backstage everywhere else) and a **chat
+  view** (by its seat, simple or full), each given only by someone who holds that room or hall themselves and never set
+  on one's own account; a view changed alone reaches the account's open pages without closing them. Each signed-in
+  account's halls and the halls board list the rooms it may enter, with the seat it would take in each. No page sets
+  these three yet: the accounts route does (`POST` and `PATCH /api/users`). An **audit log**
   chained with a key, of every sign-in, change of rights, room control and screen take, and every proposal Stagewatch's
   show desk takes — never a message's text or a file's name. Its records live outside the data folder, so a cut or a log
   replaced while AGMessage is stopped is found; what this laptop cannot check reads △ until accepted at the laptop with
@@ -105,7 +111,8 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 - **The Board.** People On stage read, reply, answer the backstage team's questions, send 🔥 Priority and ask for help,
   and mark their own help request sorted; what they write stays in their room, where the backstage team reads it. They
   never share files, ask questions, forward anything into another room or answer other people's help requests: the
-  server refuses each by the seat, for the admin seated On stage too.
+  server refuses each by the seat, for the admin and an account seated On stage too. An account seated On stage in a
+  hall answers none of that hall's help requests from its halls board either, but marks its own sorted.
 - **Remote phones.** Through the built-in Cloudflare tunnel, up to 150 at once — a Quick Tunnel's 200 in-flight
   requests, less room for page loads and files — and half of them at most from one network (an IPv6 phone counted by
   its /64, so a phone that changes its address is still one network). A page that has not joined a room within 20 s

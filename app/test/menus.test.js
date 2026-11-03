@@ -59,14 +59,16 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   const root = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: root })).body.code;
   const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
-  const account = async (username, role, halls, password) => {
-    const made = await api(base, 'POST', '/api/users', { username, name: username.toUpperCase(), role, halls, password }, { cookie: root });
+  const account = async (username, role, halls, password, extra = {}) => {
+    const made = await api(base, 'POST', '/api/users', { username, name: username.toUpperCase(), role, halls, password, ...extra }, { cookie: root });
     assert.equal(made.status, 200, JSON.stringify(made.body));
     return (await api(base, 'POST', '/api/auth/login', { username, password })).cookie;
   };
   const vic = await account('vic', 'viewer', [hallA, hallB], 'only looking at screens');
   const sid = await account('sid', 'staff', [hallA], 'cable ties and gaffer');
   const tia = await account('tia', 'tech', [hallA], 'mixing desk on stage left');
+  // A Tech of hall A given its On stage seat: the Board's account, whose rights hold what the seat does not.
+  const kib = await account('kib', 'tech', [hallA, hallB], 'board pack on the lectern', { board: [hallA] });
   // Hall A's Stagewatch, with a show desk: the speaker's screen is there for every seat whose rights allow it.
   const ctl = await open(root);
   assert.ok((await emit(ctl, 'hall:configure', { code: hallA, stagewatchUrl: sw.url, stagewatchKey: KEY })).ok);
@@ -92,11 +94,12 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     staff: await seatOf({ as: 'account' }, sid),
     tech: await seatOf({ as: 'account' }, tia),
     admin: await seatOf({ as: 'account' }, root),
+    boardAccount: await seatOf({ as: 'account' }, kib),
   };
-  assert.deepEqual(Object.fromEntries(Object.entries(seats).map(([k, v]) => [k, v.f.role])), { research: 'research', board: 'board', observer: 'observer', viewer: 'observer', staff: 'research', tech: 'research', admin: 'research' });
+  assert.deepEqual(Object.fromEntries(Object.entries(seats).map(([k, v]) => [k, v.f.role])), { research: 'research', board: 'board', observer: 'observer', viewer: 'observer', staff: 'research', tech: 'research', admin: 'research', boardAccount: 'board' });
   assert.deepEqual([seats.tech.f.canScreens, seats.tech.f.screensManage, seats.admin.f.screensManage, seats.staff.f.canScreens], [true, false, true, false], 'the screens each may drive, from display:list');
   assert.deepEqual(Object.fromEntries(Object.entries(seats).map(([k, v]) => [k, [v.f.canSendToStage, v.f.canPropose]])),
-    { research: [true, true], board: [false, false], observer: [false, false], viewer: [false, false], staff: [false, false], tech: [true, true], admin: [true, true] },
+    { research: [true, true], board: [false, false], observer: [false, false], viewer: [false, false], staff: [false, false], tech: [true, true], admin: [true, true], boardAccount: [false, false] },
     'the speaker\'s screen, by each seat\'s rights, with the link up');
 
   // The objects: Ana's text, file, question and help request, the Chair's text and help request, and a screen.
@@ -174,7 +177,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     return { busy: true };
   };
   const refused = new Map();   // verb → how many seats' refusals were read
-  const onStage = new Set();   // the verbs the On stage seat was refused
+  // The verbs each On stage fixture was refused: a Board guest's, and a Board account's (unit 9), in the same words.
+  const onStage = { board: new Set(), boardAccount: new Set() };
   const wrong = [];
   for (const [name, { s, f }] of Object.entries(seats)) {
     for (const [kind, list] of Object.entries(objects)) {
@@ -184,15 +188,15 @@ test('every act hidden from a seat by its rights is refused by the server as tha
           const r = await refusal(s, e.verb, PAYLOADS[e.verb](o, e));
           if (!r || r.ok !== false || typeof r.error !== 'string' || !r.error || r.busy) wrong.push(name + ' · ' + e.id + ' on ' + (o.type || kind) + ': ' + JSON.stringify(r));
           // On stage, the words are the table's: a refusal for another reason would hide a check that never ran.
-          else if (name === 'board' && r.error !== ON_STAGE_WORDS[e.verb]) wrong.push('board · ' + e.id + ' on ' + (o.type || kind) + ': "' + r.error + '", not "' + ON_STAGE_WORDS[e.verb] + '"');
+          else if (onStage[name] && r.error !== ON_STAGE_WORDS[e.verb]) wrong.push(name + ' · ' + e.id + ' on ' + (o.type || kind) + ': "' + r.error + '", not "' + ON_STAGE_WORDS[e.verb] + '"');
           refused.set(e.verb, (refused.get(e.verb) || 0) + 1);
-          if (name === 'board') onStage.add(e.verb);
+          if (onStage[name]) onStage[name].add(e.verb);
         }
       }
     }
   }
   assert.deepEqual(wrong, [], 'each hidden act is refused with words');
-  assert.deepEqual([...onStage].sort(), Object.keys(ON_STAGE_WORDS).sort(), 'every verb of the On stage table was sent as the On stage seat');
+  for (const [name, verbs] of Object.entries(onStage)) assert.deepEqual([...verbs].sort(), Object.keys(ON_STAGE_WORDS).sort(), 'every verb of the On stage table was sent as ' + name);
   // Every verb was refused to some seat, so none passes by never being sent.
   assert.deepEqual([...sent].filter((v) => !refused.get(v)), [], 'every verb is sent as a seat it is hidden from: ' + JSON.stringify(Object.fromEntries(refused)));
   // And nothing changed: no message pinned, reacted to, answered, removed or moved on; the screen as it was.
@@ -273,6 +277,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   const vic = await account('vic', 'viewer', [hallA, hallB], 'only looking at screens');
   const mia = await account('mia', 'manager', [], 'running order on the wall');               // audit.read; no users.manage, no audit.export
   const kim = await account('kim', 'manager', [], 'mixing desk on stage left', { grant: ['users.manage'] });   // may manage accounts, not an admin's
+  const kib = await account('kib', 'tech', [hallA], 'board pack on the lectern', { board: [hallA] });   // Hall A's crew, and its On stage seat
 
   // The objects, as the pages read them: a hall and its people and feed (the admin's own answers), a linked Patterns.
   const ctl = await open(root);
@@ -317,7 +322,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   const accountSeat = async (cookie) => ({ cookie, f: C.accountFacts({ account: (await api(base, 'GET', '/api/auth/me', undefined, { cookie })).body.account, admin: (await me(cookie)).admin }) });
   const seats = {
     admin: { staff: await adminSeat(sid), codeGuest: await adminSeat(undefined) },
-    board: { viewer: await boardSeat(vic) },
+    board: { viewer: await boardSeat(vic), boardAccount: await boardSeat(kib) },
     accounts: { staff: await accountSeat(sid), manager: await accountSeat(mia), usersManager: await accountSeat(kim) },
   };
   assert.deepEqual([seats.admin.staff.f.admin, seats.admin.codeGuest.f.admin, seats.board.viewer.f.manageHalls, seats.board.viewer.f.canDrive], [false, false, false, false]);
@@ -326,6 +331,13 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   objects.hall = seats.board.viewer.board.halls.map((h) => ({ code: h.code, name: h.name || h.code, guestCode: h.guestCode }));
   objects.help = seats.board.viewer.board.help.map((x) => ({ code: x.code, id: x.id, state: x.state, canRespond: !!x.canRespond, canOpen: !!x.canOpen, hall: x.hallName || x.code, room: x.roomName || '', category: x.category }));
   assert.deepEqual(objects.help.map((x) => [x.canRespond, x.canOpen]), [[false, true]], 'a Viewer answers no help request, and opens the hall it reads: the board says so');
+  // A Board account of Hall A answers none of Hall A's either, from its halls board (owner answer B1): no On my way, no
+  // Resolved, and the verb refused in the On stage words.
+  const boardItems = seats.board.boardAccount.board.help;
+  assert.deepEqual(boardItems.map((x) => [x.id, x.canRespond, x.canOpen]), objects.help.map((x) => [x.id, false, true]));
+  const helpActs = (o) => [...C.ids('help', seats.board.boardAccount.f, o)].filter((id) => /^help\.(respond|resolve)$/.test(id)).sort();
+  assert.deepEqual([helpActs(objects.help[0]), helpActs({ ...objects.help[0], canRespond: true })], [[], ['help.resolve', 'help.respond']], 'the board\'s canRespond decides: none on Hall A\'s request');
+  assert.deepEqual(await emit(seats.board.boardAccount.s, 'help:respond', { code: hallA, messageId: objects.help[0].id, state: 'coming' }), { ok: false, error: 'Help requests are answered by the backstage team.' });
   const users = (await api(base, 'GET', '/api/users', undefined, { cookie: root })).body.users;
   const kimsView = (await api(base, 'GET', '/api/users', undefined, { cookie: kim })).body.users;
   objects.account = users.map((u) => ({ id: u.id, name: u.name, username: u.username, disabled: !!u.disabled, locked: (kimsView.find((x) => x.id === u.id) || {}).locked || '', self: false }));

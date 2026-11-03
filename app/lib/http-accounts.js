@@ -13,7 +13,7 @@
  * the admin turned on "Admin sign-in through the tunnel"; everyone else may. A refused sign-in gets the same answer as a wrong
  * password, so it never tells a stranger that a password was right.
  */
-const { Accounts, passwordProblem, temporaryPassword, NO_MATCH } = require('./accounts');
+const { Accounts, passwordProblem, temporaryPassword, isView, NO_MATCH } = require('./accounts');
 const rbac = require('./rbac');
 const guard = require('./guard');
 
@@ -24,7 +24,7 @@ const UNKNOWN_NAME = '(unknown username)';
 const FAIL_WORDS = { unknown: 'no such username', wrong: 'wrong password', disabled: 'the account is turned off' };
 
 function mountAccounts(app, o) {
-  const { accounts, sessions, audit, settings, isEncrypted, isLoopback, onAccountChanged, onSessionEnded, hallNames } = o;
+  const { accounts, sessions, audit, settings, isEncrypted, isLoopback, onAccountChanged, onSessionEnded, hallNames, roomNames } = o;
   const ipBuckets = new guard.Buckets(0.5, 5, 5000);
   // Wrong passwords for a username count where they come from: a device on the venue network by its address, the whole
   // tunnel as one place (anyone on the internet is there). A stranger's guesses hold that username only where the
@@ -200,46 +200,94 @@ function mountAccounts(app, o) {
 
   const roleList = () => Object.entries(rbac.ROLES).map(([id, r]) => ({ id, label: r.label, allHalls: r.allHalls, caps: r.caps, words: r.words }));
 
+  // The side rooms an account may be given, by key, each with its name and its hall's (keys only, never a guest code).
+  const sideRooms = () => new Map(roomNames().map((r) => [r.key, r]));
+  /**
+   * Why the lists and the chat view a change sets may not be taken, or '': its halls, side rooms and On stage halls are
+   * each a list of names (a value that is not a name is refused, never made into one), and an entry it adds that the
+   * account does not hold already names a side room that is here (`rooms`) or a hall that is here (`board`), so a key
+   * typed wrong is said, never kept to open a room made later; an entry already on the account passes, so a Save that
+   * sends its lists back as they are changes nothing. Its halls keep 0.5.1's rule: a hall's key is taken as given. The
+   * chat view is '' (by the seat), 'simple' or 'full'.
+   */
+  function listsRefusal(change, target) {
+    for (const [field, what] of [['halls', 'halls'], ['board', 'On stage halls'], ['rooms', 'rooms']]) {
+      if (!(field in change)) continue;
+      const list = change[field];
+      if (!Array.isArray(list) || !list.every((k) => typeof k === 'string')) return 'An account\'s ' + what + ' are a list of their keys.';
+    }
+    const held = (field) => new Set((target && Array.isArray(target[field]) ? target[field] : []));
+    const added = (field) => (Array.isArray(change[field]) ? change[field].map((k) => k.toUpperCase()).filter((k) => !held(field).has(k)) : []);
+    const halls = new Set(hallNames().map((h) => h.code));
+    for (const k of added('board')) if (!halls.has(k)) return 'No such hall: ' + guard.cleanText(k, 40) + '.';
+    const rooms = sideRooms();
+    for (const k of added('rooms')) {
+      if (!rooms.has(k)) return halls.has(k) ? k + ' is a hall: its Main room comes with the hall.' : 'No such room: ' + guard.cleanText(k, 40) + '.';
+    }
+    if ('view' in change && !isView(change.view)) return 'A chat view is By seat (\'\'), Simple (\'simple\') or Full (\'full\').';
+    return '';
+  }
+
   app.get('/api/users', signedIn('users.manage'), (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     // `locked`: why this viewer may not change that person (empty when they may); `giveable`: the rights and halls this
     // viewer may hand out — the page offers what the server allows. A hall's code is a guest's way in, so a viewer who
-    // does not reach every hall is told only the halls it reaches: on the list, and on each person's row (`otherHalls`
-    // counts the rest). A row it may edit holds no other hall (rbac.exceeds would lock it), so a save drops none.
+    // does not reach every hall is told only the halls it reaches: on the list, and on each person's row and its On stage
+    // halls (`otherHalls` counts the rest). A row it may edit holds no other hall (rbac.exceeds would lock it), so a save
+    // drops none. Side rooms likewise, by `giveableRooms`: the admin is told every room (`rooms`, each by key with its name
+    // and its hall's), anyone else the rooms it is given itself, on the list and on each row (`otherRooms` counts the rest).
     const activeAdmins = accounts.activeAdmins();
     const giveable = rbac.giveable(req.agm.account);
+    const giveableRooms = rbac.giveableRooms(req.agm.account);
     const reaches = (code) => giveable.allHalls || giveable.halls.includes(code);
+    const holds = (key) => giveableRooms.all || giveableRooms.rooms.includes(key);
     const users = accounts.list().map((u) => {
       const row = { ...u, sessions: sessions.of(u.id).length, locked: rbac.mayChange(req.agm.account, u, {}, { activeAdmins }) || '' };
-      if (giveable.allHalls) return row;
+      if (giveable.admin) return row;
+      const rooms = u.rights.rooms.filter(holds);
+      const told = { ...row, rights: { ...u.rights, rooms }, rooms: u.rooms.filter(holds), otherRooms: u.rights.rooms.length - rooms.length };
+      if (giveable.allHalls) return told;
       const halls = u.rights.halls.filter(reaches);
-      return { ...row, halls: u.halls.filter(reaches), rights: { ...u.rights, halls }, otherHalls: u.rights.halls.length - halls.length };
+      return {
+        ...told, halls: u.halls.filter(reaches), board: u.board.filter(reaches), rights: { ...told.rights, halls, board: u.rights.board.filter(reaches) },
+        otherHalls: u.rights.halls.length - halls.length,
+      };
     });
-    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames().filter((h) => reaches(h.code)), giveable });
+    const rooms = roomNames().filter((r) => holds(r.key)).map((r) => ({ key: r.key, name: r.name, hall: reaches(r.hall) ? r.hall : '', hallName: r.hallName }));
+    res.json({ ok: true, users, roles: roleList(), caps: rbac.CAPS, halls: hallNames().filter((h) => reaches(h.code)), giveable, rooms, giveableRooms });
   });
 
   app.post('/api/users', signedIn('users.manage'), async (req, res) => {
     const b = req.body || {};
-    const change = pick(b, ['role', 'grant', 'revoke', 'halls', 'allHalls']);
+    const change = pick(b, ['role', 'grant', 'revoke', 'halls', 'allHalls', 'rooms', 'board', 'view']);
     const refusal = rbac.mayChange(req.agm.account, null, change, { activeAdmins: accounts.activeAdmins() });
     if (refusal) return res.status(403).json({ ok: false, error: refusal });
+    const wrong = listsRefusal(change, null);
+    if (wrong) return res.status(400).json({ ok: false, error: wrong });
     if (b.password) { const p = passwordProblem(b.password, { username: b.username, name: b.name }); if (p) return res.status(400).json({ ok: false, error: p }); }
-    const r = await accounts.create({ username: b.username, name: b.name, role: b.role, halls: b.halls, allHalls: b.allHalls, grant: b.grant, revoke: b.revoke, password: b.password || undefined }, req.agm.account.id);
+    const r = await accounts.create({ username: b.username, name: b.name, role: b.role, halls: b.halls, allHalls: b.allHalls, rooms: b.rooms, board: b.board, view: b.view, grant: b.grant, revoke: b.revoke, password: b.password || undefined }, req.agm.account.id);
     if (r.error) return res.status(400).json({ ok: false, error: r.error });
-    audit.write(actorOf(req.agm), 'user.create', r.account.username, 'role ' + r.account.role + hallWords(r.account), guard.clientIp(req));
+    const named = sideRooms();
+    const more = ['rooms', 'board', 'view'].filter((f) => f in r.account).map((f) => '; ' + f + ' → ' + describe(f, r.account, named)).join('');
+    audit.write(actorOf(req.agm), 'user.create', r.account.username, 'role ' + r.account.role + hallWords(r.account) + more, guard.clientIp(req));
     res.json({ ok: true, user: Accounts.view(r.account), password: r.password });
   });
 
   app.patch('/api/users/:id', signedIn('users.manage'), (req, res) => {
     const target = accounts.get(req.params.id);
     if (!target) return res.status(404).json({ ok: false, error: 'No such account.' });
-    const change = pick(req.body || {}, ['name', 'role', 'grant', 'revoke', 'halls', 'allHalls', 'disabled']);
+    const change = pick(req.body || {}, ['name', 'role', 'grant', 'revoke', 'halls', 'allHalls', 'disabled', 'rooms', 'board', 'view']);
     const refusal = rbac.mayChange(req.agm.account, target, change, { activeAdmins: accounts.activeAdmins() });
     if (refusal) return res.status(403).json({ ok: false, error: refusal });
+    const wrong = listsRefusal(change, target);
+    if (wrong) return res.status(400).json({ ok: false, error: wrong });
     const changed = accounts.update(target.id, change);
     if (changed.length) {
+      // A change of the chat view alone is said to the account's pages, which stay open (a view is no right); any other
+      // change ends them, so their next connection is judged by the account as it is now.
       onAccountChanged(target.id, changed.join(','));
-      audit.write(actorOf(req.agm), 'user.update', target.username, changed.map((f) => f + ' → ' + describe(f, target)).join('; '), guard.clientIp(req));
+      const named = sideRooms();
+      audit.write(actorOf(req.agm), 'user.update', target.username, changed.map((f) => f + ' → ' + describe(f, target, named)).join('; '), guard.clientIp(req));
     }
     res.json({ ok: true, user: Accounts.view(target), changed });
   });
@@ -368,7 +416,20 @@ function mountAccounts(app, o) {
 
 function pick(o, keys) { const out = {}; for (const k of keys) if (Object.prototype.hasOwnProperty.call(o, k)) out[k] = o[k]; return out; }
 function hallWords(a) { const e = rbac.effective(a); return e.allHalls ? ', every hall' : ', halls ' + (Array.from(e.halls).join(' ') || 'none'); }
-function describe(field, a) {
+/**
+ * An account's side rooms as a row names them: each by its name, its hall's name and its key ("Legal (Hall 2)
+ * LGQ4MZP8"), a key no room has any more by the key alone. A side room's key is an address, never a guest code.
+ */
+function roomWords(a, named) {
+  const list = (Array.isArray(a.rooms) ? a.rooms : []).map((k) => {
+    const r = named.get(k);
+    return r ? (r.name || 'a room with no name') + ' (' + (r.hallName || 'a hall with no name') + ') ' + k : k;
+  });
+  return list.join(', ') || 'none';
+}
+const VIEW_WORDS = { '': 'by seat', simple: 'simple', full: 'full' };
+/** What a field of an account holds now, in an audit row's words: never a password, a token or a guest code. */
+function describe(field, a, named = new Map()) {
   switch (field) {
     case 'role': return a.role;
     case 'halls': case 'allHalls': return hallWords(a).slice(2);
@@ -376,6 +437,9 @@ function describe(field, a) {
     case 'revoke': return (a.revoke || []).join(' ') || 'none';
     case 'disabled': return a.disabled ? 'turned off' : 'turned on';
     case 'name': return a.name;
+    case 'rooms': return roomWords(a, named);
+    case 'board': return (Array.isArray(a.board) && a.board.length ? 'On stage in ' + a.board.join(' ') : 'none');
+    case 'view': return VIEW_WORDS[isView(a.view) ? a.view : ''];
     default: return 'changed';
   }
 }

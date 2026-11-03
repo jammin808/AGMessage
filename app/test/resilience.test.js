@@ -1006,13 +1006,19 @@ test('a 0.5.1 data folder boots as halls with one room each, keeping codes, mess
   assert.deepEqual([b.ok, b.roomName, b.seq, restart.test(b.history.at(-1).text)], [true, 'Hall B', before.B + 1, true]);
   assert.ok(a.history.some((m) => m.text === 'hello A') && b.history.some((m) => m.text === 'hello B'));
   assert.deepEqual(b.history.filter((m) => m.forwardedFrom).map((m) => [m.text, m.forwardedFrom.roomName]), [['hello A', 'Hall A']], 'the forward, by its hall\'s name');
-  assert.deepEqual(a.history.filter((m) => m.stage).map((m) => [m.stage.link, m.stage.ack]), [['hall:' + A, 'sent']], 'the stage send still names the hall\'s own Stagewatch');
+  // The record still names the hall's own Stagewatch; a page is sent it without the link (lib/ops.js forPage), whose id
+  // names the hall's key.
+  const { link, ...unlinked } = stage;
+  assert.equal(link, 'hall:' + A);
+  const kept = (await h.emit(await page(admin), 'admin:watchRoom', { roomCode: A })).messages.filter((m) => m.stage);
+  assert.deepEqual(kept.map((m) => [m.stage.link, m.stage.ack]), [['hall:' + A, 'sent']], 'the stage send still names the hall\'s own Stagewatch');
+  assert.deepEqual(a.history.filter((m) => m.stage).map((m) => m.stage), [unlinked], 'a page is sent the send without its link');
   // …and is still followed: the speaker's acknowledgement, in a frame of that Stagewatch, reaches the line it sent.
   await h.until(() => swA.connected, 8000, 'hall A\'s Stagewatch linked again');
   const acked = h.once(inHallA, 'stageAck');
   swA.frame({ messageId: 7, messageAck: 'done', messageAckBy: 'Speaker A' });
   const ack = await acked;
-  assert.deepEqual([ack.messageId, ack.stage, ack.seq > a.seq], ['stage1', { ...stage, ack: 'done', by: 'Speaker A' }, true], 'the acknowledgement on the line it sent, a change numbered after the join');
+  assert.deepEqual([ack.messageId, ack.stage, ack.seq > a.seq], ['stage1', { ...unlinked, ack: 'done', by: 'Speaker A' }, true], 'the acknowledgement on the line it sent, a change numbered after the join');
   // The lock and its seats: Ana comes back to her seat, the invite seats On stage, and a newcomer without one is an observer.
   const ana = await page();
   assert.deepEqual((({ ok, role, note }) => ({ ok, role, note }))(await h.emit(ana, 'join', { roomCode: A, name: 'Ana', role: 'research', uid: inA.identity })), { ok: true, role: 'research', note: '' });

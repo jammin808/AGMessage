@@ -59,6 +59,18 @@ First time on a new laptop
    Each new person gets a one-time password, shown once — give it to them;
    they choose their own at their first sign-in. Project managers and
    senior techs see every hall; techs, staff and viewers see their own.
+   An account can also be given rooms of a hall other than its Main room
+   (Legal, Media: "every hall" never reaches those), a hall's On stage
+   seat (it then sits On stage in that hall's Main room, reads and writes
+   messages there and nothing else, answers none of that hall's help
+   requests, even from the halls board, but marks its own sorted; and it
+   is backstage everywhere else), and a chat view (by its seat, simple or
+   full). Only someone who holds that room or hall themselves gives it,
+   nobody sets them on their own account, and each change is an audit row
+   (user.update). A chat view changed alone reaches the person's open
+   pages without closing them; any other change reconnects them. The
+   halls board lists the rooms each person may enter. (The Accounts page
+   does not offer these three yet.)
 
 5. Halls -> New hall: one per hall in use (e.g. "Hall 3", "Hall 4"). Each
    hall gets a 6-character code (e.g. K7P2QX) for the people who join
@@ -207,9 +219,11 @@ run the show on the build you rehearsed.
   one of those rooms holds. A hall's code switched off admits guests
   again under 0.5.1 (back on 0.6 it is off again), and a hall's New code
   is lost: under 0.5.1, and after it, the hall's old code (its address)
-  admits again and the new one does not (choose New code again). Do not
-  go back to 0.5.1 during a show. The admin page says so too, under its
-  build line.
+  admits again and the new one does not (choose New code again). An
+  account given a hall's On stage seat sits backstage there under 0.5.1,
+  with every right it holds; its rooms, On stage halls and chat view are
+  kept, and 0.6 reads them again. Do not go back to 0.5.1 during a show.
+  The admin page says so too, under its build line.
 
 Windows Firewall, a new folder, a standard account, a Public network
 ---------------------------------------------------------------------

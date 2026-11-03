@@ -182,8 +182,8 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | Identities, rate limits, lockouts, text cleaning, the per-network key and the tunnel's places | `app/lib/guard.js` |
 | Remote phones through the tunnel: the connection's gate, the link's check, the tunnel's end kept across a restart | `app/lib/tunnelend.js`, `app/lib/peaks.js`, `app/server.js`; test `tunnel` |
 | Rights and roles (pure), checked per room behind a fence; a code guest's rights; the escalation fence | `app/lib/rbac.js`; tests `accounts`, `halls` |
-| What a seat may do on its page, on the server (the seat read before any right) | `app/server.js` (`allowed()`); test `onstage` |
-| Accounts, password hashing, sessions, their routes; the Accounts page | `app/lib/accounts.js`, `app/lib/http-accounts.js`, `app/public/users.js`; test `accounts` |
+| What a seat may do on its page, on the server (the seat read before any right; a Board account held to On stage where its halls seat it) | `app/server.js` (`allowed()`); test `onstage` |
+| Accounts (with their side rooms, On stage halls and chat view), password hashing, sessions, their routes; the Accounts page | `app/lib/accounts.js`, `app/lib/http-accounts.js`, `app/public/users.js`; test `accounts` |
 | The audit log, chained with a key; its check and Accept; its work counted in tests, never timed | `app/lib/audit.js`, `app/test/audit-preload.js` |
 | The audit log's rules that need no key, shared with a checker on another computer | `app/verify/auditrules.js` |
 | The audit log's signed export and the zip it streams | `app/lib/auditexport.js`, `app/lib/zip.js`, `app/public/audit-export.js` |

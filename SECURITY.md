@@ -62,6 +62,16 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   account of every hall's included. Asked of `rbac.can` by a hall's code, those three are refused whoever asks, so a
   check left on a room's key where a hall's was meant fails closed instead of letting every account of every hall in. A
   code guest's rights are its seat's, by the kind of room it sits in, from one table (`rbac.guestCaps`).
+- An account's side rooms, On stage halls and chat view are given as its halls are, through `rbac.mayChange`: nobody
+  sets them on their own account, and an account that manages accounts and is not an admin gives only the side rooms it
+  is given itself (read before every hall, so every hall's account gives none) and seats On stage only in a hall it
+  reaches. Each list is read by type, so a value that is no name is refused with words, never a 500, and each side room
+  or On stage hall it adds must be one that is here, so a key typed wrong is never kept to open a room made later (a
+  list of halls takes a key as given, as 0.5.1's did). The Accounts
+  route tells a viewer that is not the admin only the side rooms it holds, on its list and on each row, never a guest
+  code; a hall's key in it only where the viewer reaches that hall. `/api/halls` and the halls board list the side rooms
+  each watcher may enter, and those of a hall it does not see by that hall's name, never its key. A change of the chat
+  view alone is no right and closes no page; any other change of an account still ends every page it has open.
 - A hall's rooms are made and renamed by those who set halls up (`halls.manage`, the admin) and cleared and removed by
   the admin, each one audit row. A side room's key is an address, never a credential: no lookup or join takes it from a
   guest, and a hall's verbs (screens, Stagewatch, show network, Set up) refuse it. The admin's reads of a side room its
@@ -176,10 +186,17 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   question never into a room where the forwarder sits On stage. A seat On stage answers no one else's help request:
   from an On stage page only its own request's Resolved is taken, whatever hall the request names, before any right is
   read, and an account answers a hall's help requests only where it does not sit On stage, from the halls board too, its
-  own request's Resolved excepted. A side room's help request reaches the halls board whole only for those who may read
+  own request's Resolved excepted. An account seated On stage by its On stage halls is held to the seat on that page as
+  a guest is (no upload token, no stage, no screen or node, no guest code, nothing forwarded out), whatever its rights,
+  and keeps them on its other pages; a file or a question it forwards from there never goes into the hall where it sits
+  On stage. A side room's help request reaches the halls board whole only for those who may read
   that room; the hall's crew who may not are shown its category, who asked and its state, never its words. A request
   names its hall's key (its Main room's address, and its guest code until New code) only to a watcher who sees the hall:
-  an account given a side room alone is told the hall's name, or that it has none, never its key.
+  an account given a side room alone is told the hall's name, or that it has none, never its key. A line sent to the
+  speaker's screen or asked of the show desk keeps, on its record, the link it went to, which a hall's own Stagewatch
+  names by the hall's key; a room's pages are sent the record without it (`lib/ops.js` `forPage`), live, in the history,
+  in the changes a page missed and in the show desk's answer to the page that asked, so a send made from a side room
+  tells its readers nothing of the hall's key.
 - A connection refused for its rate says when to try again (`retryMs`, read from that address's own bucket, with a
   random spread) and nothing else: no address and no count; the page waits it out. A page that comes back in a
   restart's first 30 s naming a change its hall holds is not announced again: that is the "joined" words only, and its
