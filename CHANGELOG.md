@@ -144,8 +144,8 @@ browser opening is not yet seen on a Windows desktop)
 - A CI run's development build is an artifact of its own, `AGMessage-Portable-<version>.zip`, the zip itself
   (upload-artifact's `archive: false`, named after the file), so it is extracted as a release's is and the path check
   above measures it as it lands. The run's other artifact, `agmessage-portable-<commit>`, a zip around the zip, stays
-  for the readings and the release. Until a run shows the web download hands it over unwrapped, the README's words for
-  the other artifact stand beside it.
+  for the readings and the release. Run 86's, downloaded, is the zip itself: `AGMessage-Portable-0.6.0-dev.86_b25ab0c.zip`,
+  one folder, `AGMessage`, its 5,222 members. `README.txt` keeps its words for the other artifact.
 - The Windows readings are never cancelled once they run (the owner's choices, 2026-11-03: not to lose a lane to a
   newer push, and then for a regression to show on a push, not only on a tag or a run asked for by hand). The
   workflow has no group for the whole run any more: each job has its own. The tests and the zip of a newer push or
