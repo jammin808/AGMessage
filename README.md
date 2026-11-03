@@ -143,11 +143,12 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 
 ## Run it
 
-Download the portable zip from a release (or a CI run's artifacts), Extract All, and double-click `start-agmessage.bat`
-in the extracted folder (run from inside the zip it finds nothing beside it, and says so). The browser opens on
-`http://localhost:3023` once that copy serves, to make the first admin account with the token its window shows (the
-token is printed only in a console window, never into output kept in a file). A start that cannot run says why in its
-window: a file missing beside the .bat, or who holds the port. Full instructions: [README.txt](README.txt).
+Download the portable zip (`AGMessage-Portable-<version>.zip`) from a release (or a CI run's artifacts), Extract All, and
+double-click `start-agmessage.bat` in the `AGMessage` folder it extracts (run from inside the zip it finds nothing beside
+it, and says so). The browser opens on `http://localhost:3023` once that copy serves, to make the first admin account
+with the token its window shows (the token is printed only in a console window, never into output kept in a file). A
+start that cannot run says why in its window: a file missing beside the .bat, or who holds the port. Full instructions:
+[README.txt](README.txt).
 
 ## Versions
 
@@ -189,8 +190,9 @@ within 30 s), runs both .bat files under cmd on Windows, takes the Windows readi
 Defender's real-time monitoring turned back on first (the evidence lane, its actions pinned by commit: what each reading
 is, its mark and what a miss means are in [docs/INSTALL.md](docs/INSTALL.md)), and a `v*` tag publishes a release with a
 build-provenance attestation, its notes saying each reading that missed its mark; the readings inform a release and
-never hold it. A CI run's artifact is the zip inside a second zip, which GitHub adds. `tools\build-portable.ps1` builds
-the zip locally.
+never hold it. A CI run's artifact is the zip inside a second zip, which GitHub adds: move the inner zip to Downloads
+before Extract All, since extracted inside the outer zip's folder every path is longer by that folder's name and some are
+too long for Windows. `tools\build-portable.ps1` builds the zip locally.
 
 The libraries the pages use (pdf.js, mammoth, SheetJS and what each bundles) are listed with their licences in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), their texts in `licenses/`, and file by file, with each file's

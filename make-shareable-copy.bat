@@ -15,7 +15,7 @@ for /f "delims=" %%t in ('call "%SystemRoot%\System32\WindowsPowerShell\v1.0\pow
 REM Only digits and the dash are taken: anything else PowerShell printed (a policy's warning) leaves the copy undated.
 if not defined STAMP set "STAMP=undated"
 for /f "delims=0123456789-" %%x in ("%STAMP%") do set "STAMP=undated"
-set "NAME=AGMessage-Portable-Windows-clean-%STAMP%"
+set "NAME=AGMessage-Portable-clean-%STAMP%"
 set "DEST=%PARENT%\%NAME%"
 set N=1
 :name

@@ -118,14 +118,29 @@ browser opening is not yet seen on a Windows desktop)
 - CI runs the shipped bundle: the package job extracts the zip, starts its own `node.exe` and watchdog, and
   `/api/health` must answer within 30 s with the build the run stamped. Until now CI built the zip and never ran it.
   The release notes and `README.txt` say Extract All, and the .bat files are run by cmd in the Windows job.
+- The portable zip is `AGMessage-Portable-<version>.zip` and holds one folder, `AGMessage`, whatever the build (the
+  owner's answers, 2026-11-03: the top folder "AGMessage", and the zip "AGMessage-Portable-<version>.zip"). 0.5's zip was
+  `AGMessage-Portable-Windows-<version>.zip` holding a folder of the same name, so Extract All, which makes a folder named
+  after the zip, said the build's name twice in every path: 47 characters each time for a CI build. A clean copy
+  (`make-shareable-copy.bat`) is now `AGMessage-Portable-clean-<date>-<time>`. Upgrading: extract the new zip into a new
+  folder, as Extract All proposes; every build's folder is now called AGMessage, so extracting into the folder that holds
+  the old copy would lay the new build's files over the old one's (`README.txt` says so). CI checks that the zip holds
+  that one folder and starts it from there, and the release's notes and the readings lane read both names (the lane
+  takes the release a zip is from its name, `releaseOf`, as the folder no longer says it).
 - CI holds every path the zip makes once extracted under Windows' limit (the owner's ask, 2026-11-03: "a CI check that
   the longest path inside the portable zip, plus a realistic extraction base like a Downloads folder and the zip's own
   name, stays under 260"). The package job's step after the build (`tools/zip-paths.js`, new) lays each member as
-  Extract All does: under `C:\Users\<20 characters>\Downloads`, the longest profile folder a local account makes, then
-  the folder named after the zip, then the bundle's own folder of the same name, so the zip's name counts twice. A
-  file's path must stay under 260 characters and a folder's under 248 (MAX_PATH, and CreateDirectory's room for an 8.3
-  name: Explorer is not long-path aware), or the job fails naming each. Today's longest is a file of the Anthropic SDK's
-  at 254 of 259, 5 to spare; its folder is 225 of 247. Nothing that ships changed.
+  Extract All does, under `C:\Users\<20 characters>\Downloads` (the profile folder of the longest user name Windows
+  takes), then the folder named after the zip, then `AGMessage`; and again as a clean copy beside `AGMessage`, under the
+  longest name the .bat gives one (numbered -99). A file's path must stay under 260 characters and a folder's under 248
+  (MAX_PATH, and CreateDirectory's room for an 8.3 name: Explorer is not long-path aware), or the job fails naming each.
+  Measured on CI run 83's zip laid out as now: the longest file in `AGMessage` is 208 of 259, 51 to spare (254, 5 to
+  spare, with the zip's name said twice), and the longest anywhere is that file in a clean copy, 240 of 259, 19 to spare;
+  the longest folder, the SDK's `src` copy of its folder in a clean copy, is 211 of 247. The longest is a file of the
+  Anthropic SDK's. What is not covered, and said: a profile folder Windows renames `<name>.<COMPUTERNAME>` because one of
+  that name was there already (up to 36 characters: today 256 of 259 there, 3 to spare), and a CI run's zip extracted
+  inside the artifact zip GitHub wraps it in (every path longer by its 59-character name: 300, over). `README.txt` and
+  `README.md` now say to move the inner zip to Downloads first. `--base` takes an absolute folder only.
 - Rolling back: nothing is stored; 0.5.1's .bat and server start as they did.
 
 **The audit log is keyed** (the owner's list, 2026-10-26: "Switch the audit chain to HMAC"; the owner's answers B, "Yes",

@@ -176,11 +176,21 @@ function layFile(target, data) {
   fs.renameSync(tmp, target);
 }
 
-/** The one folder every member of a bundle lies in (its name carries the build), or a refusal. */
+/** The one folder every member of a bundle lies in (AGMessage from 0.6.0; 0.5's was named as its zip is), or a refusal. */
 function topFolder(entries) {
   const tops = new Set(entries.map((e) => memberParts(e.name)[0]));
   if (tops.size !== 1 || entries.some((e) => !e.dir && memberParts(e.name).length < 2)) throw new Error('the bundle is not one folder (' + tops.size + ' at its top)');
   return [...tops][0];
+}
+
+/**
+ * The release a bundle's zip is, read from the zip's own name: AGMessage-Portable-0.6.0.zip from 0.6.0,
+ * AGMessage-Portable-Windows-0.5.1.zip before it (a browser's " (1)" after it read alike); '' for any other name (pure).
+ */
+function releaseOf(zipFile) {
+  const name = String(zipFile).split(/[\\/]/).pop().replace(/ \(\d+\)\.zip$/i, '.zip');
+  const m = /^AGMessage-Portable-(?:Windows-)?(\d+\.\d+\.\d+)\.zip$/i.exec(name);
+  return m ? m[1] : '';
 }
 
 /**
@@ -880,9 +890,9 @@ async function take(o) {
     let previous = null;
     let overWhy = '';
     if (o.previous) {
-      try { previous = { entries: zipEntries(o.previous) }; previous.top = topFolder(previous.entries); } catch (e) { previous = null; overWhy = 'its zip could not be read: ' + e.message; }
+      try { previous = { entries: zipEntries(o.previous) }; topFolder(previous.entries); } catch (e) { previous = null; overWhy = 'its zip could not be read: ' + e.message; }
     } else overWhy = 'none was given';
-    const over = previous ? (/^AGMessage-Portable-Windows-(\d+\.\d+\.\d+)\b/.exec(previous.top) || [])[1] : '';
+    const over = previous ? releaseOf(o.previous) : '';
     const rounds = [];
     for (let i = 0; i < R2_ROUNDS; i++) {
       if (previous) {
@@ -893,7 +903,7 @@ async function take(o) {
       rounds.push(Math.round(layOut(o.zip, dest, entries, { strip: 1 }).ms));
     }
     fs.rmSync(path.join(work, 'r2'), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    return { files: first.files, bytes: first.bytes, emptyMs: Math.round(first.ms), rounds, over: previous ? (over ? 'v' + over : previous.top) : '', overWhy, how: 'each file inflated to a name of its own beside it, then renamed over the one before' };
+    return { files: first.files, bytes: first.bytes, emptyMs: Math.round(first.ms), rounds, over: previous ? (over ? 'v' + over : path.basename(o.previous)) : '', overWhy, how: 'each file inflated to a name of its own beside it, then renamed over the one before' };
   });
   try {
     layOut(o.zip, root, entries, { strip: 1 });
@@ -1043,7 +1053,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  zipEntries, memberParts, topFolder, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, SCRIPTS, lane, system32,
+  zipEntries, memberParts, topFolder, releaseOf, layOut, extractOne, taskXml, winArg, utf16, SERVER_PRINCIPAL, SCRIPTS, lane, system32,
   snapshot, snapshotDiff, udpHeard, waitHealth, quickTunnel, readRelease, probeExit, parseArgs, main, TRYCF,
   sddlOfSave, pipeReach, keepTail, tokenIn, withoutSecrets, placeRefusal, takeR12, take,
   seedHalls, pageSocket, paceMs, takeR1, R1_SIZES, R1_QUIET_MS, PAGE_PACE,

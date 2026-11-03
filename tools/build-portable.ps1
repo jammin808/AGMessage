@@ -1,5 +1,5 @@
 <#
-  Builds the portable Windows bundle: dist\AGMessage-Portable-Windows-<version>.zip
+  Builds the portable Windows bundle: dist\AGMessage-Portable-<version>.zip, holding one folder, AGMessage.
   The zip never contains hall history, uploads, keys or settings: app\data and app\uploads start empty.
 
     powershell -File tools\build-portable.ps1
@@ -9,16 +9,18 @@ $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 & (Join-Path $PSScriptRoot 'fetch-runtime.ps1')
 
-# The name says which build this is (app/lib/version.js): a release is AGMessage-Portable-Windows-0.5.0, a CI development
-# build AGMessage-Portable-Windows-0.5.0-dev.17_abc1234, a local one ...-0.5.0-dev_abc1234. CI stamps app\build.json first
+# The zip's name says which build this is (app/lib/version.js): a release is AGMessage-Portable-0.6.0.zip, a CI development
+# build AGMessage-Portable-0.6.0-dev.17_abc1234.zip, a local one ...-0.6.0-dev_abc1234.zip. CI stamps app\build.json first
 # (tools/stamp-build.js); the bundle carries it, so the running app, /api/health and its hello say the same.
+# The folder inside is AGMessage for every build: Extract All already makes a folder named after the zip, so the build's
+# name is not said twice in every path (tools/zip-paths.js holds each path under MAX_PATH).
 $full = (& (Join-Path $root 'node\node.exe') (Join-Path $PSScriptRoot 'stamp-build.js') --print).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $full) { throw 'Could not read the version (tools/stamp-build.js --print)' }
 $channel = if (Test-Path app\build.json) { (Get-Content app\build.json -Raw | ConvertFrom-Json).channel } else { 'local' }
 $version = (Get-Content app\package.json -Raw | ConvertFrom-Json).version
 $label = if ($channel -eq 'release') { $version } else { $full -replace '\+', '_' }
-$name = "AGMessage-Portable-Windows-$label"
-$stage = Join-Path $root "dist\$name"
+$name = "AGMessage-Portable-$label"
+$stage = Join-Path $root 'dist\AGMessage'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force "$stage\app" | Out-Null
 

@@ -244,7 +244,7 @@ test('vendor: the portable folder carries the notices, and CI adds the vendored 
   const sums = ci.indexOf('Set-Content -Path dist/SHA256SUMS');
   const start = ci.indexOf('- name: Start the bundle');
   assert.ok(start > 0 && npmSbom > start && ours > npmSbom && sums > ours, 'the bundle extracted, then npm\'s SBOM, then the vendored files read from it, then the sums over both');
-  assert.match(ci.slice(npmSbom, ours), /\$shipped = \(Get-ChildItem \(Join-Path \$env:RUNNER_TEMP 'bundle-start'\) -Directory \| Select-Object -First 1\)\.FullName/, 'the folder read is the bundle the zip extracts to');
+  assert.match(ci.slice(npmSbom, ours), /\$shipped = Join-Path \$env:RUNNER_TEMP 'bundle-start\\AGMessage'\n/, 'the folder read is the bundle the zip extracts to: its one folder, AGMessage');
   assert.match(ci.slice(ours, sums), /if \(\$LASTEXITCODE -ne 0\) \{ throw /, 'a refusal stops the job');
 });
 

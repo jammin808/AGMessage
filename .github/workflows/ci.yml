@@ -157,13 +157,15 @@ jobs:
         shell: pwsh
         run: ./tools/build-portable.ps1
       # Every path the zip makes once a person extracts it, as Explorer's Extract All lays it: under a browser's Downloads
-      # folder in the longest profile folder a local account makes (C:\Users\<20 characters>\Downloads), then the folder
-      # Extract All names after the zip, then the bundle's own folder of the same name. A file's path stays under 260
-      # characters and a folder's under 248 (MAX_PATH, which Extract All is held to), or the job fails naming each.
+      # folder in the profile folder of the longest user name Windows takes (C:\Users\<20 characters>\Downloads), then the
+      # folder Extract All names after the zip, then the bundle's own folder, AGMessage; and every path of a clean copy
+      # beside it (make-shareable-copy.bat, under the longest name it gives one). A file's path stays under 260 characters
+      # and a folder's under 248 (MAX_PATH, which Extract All is held to), or the job fails naming each. It measures the
+      # zip downloaded on its own: a release's, or this run's moved out of the artifact zip GitHub wraps it in.
       - name: Every path in the zip, extracted from a Downloads folder, under 260 characters (tools/zip-paths.js)
         shell: pwsh
         run: |
-          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-Windows-*.zip')
+          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-*.zip')
           if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
           node tools/zip-paths.js $zip[0].FullName
           if ($LASTEXITCODE -ne 0) { throw "a path in the bundle is too long once extracted from a Downloads folder (tools/zip-paths.js, exit $LASTEXITCODE)" }
@@ -175,11 +177,14 @@ jobs:
       - name: Start the bundle (the zip, extracted), and check an export of its audit log
         shell: pwsh
         run: |
-          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-Windows-*.zip')
+          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-*.zip')
           if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
           $dest = Join-Path $env:RUNNER_TEMP 'bundle-start'
           Expand-Archive -Path $zip[0].FullName -DestinationPath $dest -Force
-          $root = (Get-ChildItem $dest -Directory | Select-Object -First 1).FullName
+          # The zip holds one folder, AGMessage, whatever the build (tools/build-portable.ps1).
+          $top = @(Get-ChildItem $dest -Force)
+          if ($top.Count -ne 1 -or $top[0].Name -cne 'AGMessage' -or -not $top[0].PSIsContainer) { throw "the zip's top holds $($top.Count): $(($top | ForEach-Object Name) -join ', '); it should hold one folder, AGMessage" }
+          $root = $top[0].FullName
           $out = Join-Path $env:RUNNER_TEMP 'bundle-start.out.log'
           $err = Join-Path $env:RUNNER_TEMP 'bundle-start.err.log'
           $env:PORT = '3123'
@@ -236,7 +241,7 @@ jobs:
         run: |
           npm sbom --sbom-format cyclonedx --omit dev --package-lock-only --prefix app | Out-File -Encoding utf8 dist/agmessage-sbom.cdx.json
           if ($LASTEXITCODE -ne 0) { throw 'npm sbom failed' }
-          $shipped = (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'bundle-start') -Directory | Select-Object -First 1).FullName
+          $shipped = Join-Path $env:RUNNER_TEMP 'bundle-start\AGMessage'
           node tools/vendor-sbom.js dist/agmessage-sbom.cdx.json --tree $shipped
           if ($LASTEXITCODE -ne 0) { throw 'the bundle''s vendored libraries could not be added to the SBOM (tools/vendor-sbom.js)' }
           # The list is taken before SHA256SUMS is written, so the file being written is never one being hashed.
@@ -301,7 +306,7 @@ jobs:
           $tag = gh release list --repo $env:GITHUB_REPOSITORY --limit 1 --exclude-drafts --exclude-pre-releases --json tagName --jq '.[0].tagName // ""'
           if ($LASTEXITCODE -ne 0 -or "$tag" -notmatch '^v\d+\.\d+\.\d+$') { $tag = '' }
           if ($tag) {
-            gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern 'AGMessage-Portable-Windows-*.zip' --dir (Join-Path $env:RUNNER_TEMP 'previous')
+            gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern 'AGMessage-Portable-*.zip' --dir (Join-Path $env:RUNNER_TEMP 'previous')
             if ($LASTEXITCODE -ne 0) { Write-Host "the zip of $tag was not downloaded: R2 lays this build over its own" }
           }
           "tag=$tag" >> $env:GITHUB_OUTPUT
@@ -312,9 +317,9 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
-          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-Windows-*.zip')
+          $zip = @(Get-ChildItem dist -Filter 'AGMessage-Portable-*.zip')
           if ($zip.Count -ne 1) { throw "expected one bundle zip in dist, found $($zip.Count)" }
-          $previous = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'previous') -Filter 'AGMessage-Portable-Windows-*.zip' -ErrorAction SilentlyContinue)
+          $previous = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'previous') -Filter 'AGMessage-Portable-*.zip' -ErrorAction SilentlyContinue)
           $over = if ($previous.Count -eq 1) { @('--previous', $previous[0].FullName) } else { @() }
           # No release named: no --tag at all, never an empty argument, and R13 reads not run with why.
           $release = if ($env:RELEASE_TAG) { @('--repo', $env:GITHUB_REPOSITORY, '--tag', $env:RELEASE_TAG) } else { @() }
@@ -396,7 +401,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo "Build ${{ needs.package.outputs.full }}. Extract All first (right-click the zip), then run start-agmessage.bat from the extracted folder: run from inside the zip it finds nothing beside it. The zip's SHA-256 is in SHA256SUMS; its packages are listed in agmessage-sbom.cdx.json. The audit log's verifier is agmessage-audit-verifier-${GITHUB_REF_NAME#v}.zip: take it from here to check an export on another computer, its SHA-256 in SHA256SUMS."
+            echo "Build ${{ needs.package.outputs.full }}. Extract All first (right-click the zip), then run start-agmessage.bat from the AGMessage folder it extracts: run from inside the zip it finds nothing beside it. The zip's SHA-256 is in SHA256SUMS; its packages are listed in agmessage-sbom.cdx.json. The audit log's verifier is agmessage-audit-verifier-${GITHUB_REF_NAME#v}.zip: take it from here to check an export on another computer, its SHA-256 in SHA256SUMS."
             echo
             node tools/readings.js notes readings/readings.json --install docs/INSTALL.md || printf '### The Windows readings\n\nThe Windows readings for this build could not be read: nothing is claimed for them. They inform the release and never hold it.\n'
           } > "$RUNNER_TEMP/notes.md"

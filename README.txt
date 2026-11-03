@@ -5,10 +5,10 @@ What this is
 ------------
 A self-contained copy of AGMessage that runs on any Windows laptop without
 installing Node.js or anything else. Extract the zip (right-click it,
-Extract All), double-click the launcher in the extracted folder, and share
-the URL with your team. Messages, files, help requests and screens for
-every hall of the event; crew sign in with their own accounts, presenters
-and guests join with a room's code.
+Extract All), double-click the launcher in the AGMessage folder it
+extracts, and share the URL with your team. Messages, files, help
+requests and screens for every hall of the event; crew sign in with their
+own accounts, presenters and guests join with a room's code.
 
 The build this copy is (e.g. 0.5.0+17.abc1234) is in the zip's name, the
 black window's first lines, and the admin page. The window's banner also
@@ -23,10 +23,11 @@ First time on a new laptop
 --------------------------
 1. Extract All first (right-click the zip). Running the .bat from inside
    the zip does not work: Windows copies out only the file you opened, and
-   nothing it needs is beside it. Extract it somewhere convenient (e.g.
-   C:\Tools\AGMessage).
+   nothing it needs is beside it. Extract it somewhere convenient: the
+   zip holds one folder, AGMessage, so extracted to C:\Tools it is
+   C:\Tools\AGMessage.
 
-2. In the extracted folder, double-click:
+2. In that AGMessage folder, double-click:
 
        start-agmessage.bat
 
@@ -156,9 +157,13 @@ run the show on the build you rehearsed.
 
 1. Close the old copy's black window (or press Ctrl+C in it): it saves
    as it stops.
-2. Extract the new zip into a new folder (Extract All).
-3. Copy the old folder's app\data and app\uploads into the new folder,
-   over its empty ones, before the new copy's first start.
+2. Extract the new zip into a new folder (Extract All proposes one named
+   after the zip). Never into the folder that holds the old copy: every
+   build's folder is called AGMessage, so the new build's files would be
+   laid over the old one's.
+3. Copy the old folder's app\data and app\uploads into the new
+   AGMessage folder, over its empty ones, before the new copy's first
+   start.
 4. Start the new folder's start-agmessage.bat from the same Windows
    account as before. The keys that open the saved links, the
    certificate and the audit log's key are in that account's
@@ -950,7 +955,7 @@ Sharing this bundle
 app\data and app\uploads hold the halls' real history, accounts, the audit
 log and files. Before giving the bundle to anyone, double-click
 make-shareable-copy.bat: it makes a copy next to this folder without them,
-in a new folder each time (AGMessage-Portable-Windows-clean-<date>-<time>),
+in a new folder each time (AGMessage-Portable-clean-<date>-<time>),
 never into one that is already there. It says "Done" only after checking
 that the copy holds nothing under app\data or app\uploads; otherwise it
 deletes the copy and says so. Give away the copy you just made, not an
@@ -964,4 +969,7 @@ once to download them (pinned versions, checksum-verified), or
 tools\build-portable.ps1 to make the zip. CI (GitHub Actions) runs the
 analyzers, the tests and the browser smoke test, builds the zip, and
 starts it once extracted, on every push. A CI run's artifact is a zip
-around the zip: extract both.
+around the zip: extract the outer one, move the AGMessage-Portable-....zip
+inside it to your Downloads folder, and Extract All on it there.
+Extracted where it lies, every path is longer by the outer zip's name,
+and some are then too long for Windows.

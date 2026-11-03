@@ -72,7 +72,7 @@ test('make-shareable-copy.bat: a new folder each time, never one that exists, ch
   const text = readsAsCmdReadsIt(CLEAN);
   const lines = commands(text);
   assert.ok(!/clean"|clean\r\n/.test(text), 'never the one fixed folder of 0.5.1');
-  assert.match(text, /set "NAME=AGMessage-Portable-Windows-clean-%STAMP%"/, 'named with the time');
+  assert.match(text, /set "NAME=AGMessage-Portable-clean-%STAMP%"/, 'named with the time');
   const named = firstLine(lines, /^if not exist "%DEST%" goto named\s*$/);
   const copy = firstLine(lines, /^"%SystemRoot%\\System32\\robocopy\.exe" /);
   const check = firstLine(lines, /^for %%d in \(data uploads\) do for \/f "delims=" %%f in \('dir \/s \/b \/a-d "%DEST%\\app\\%%d"/);
@@ -170,14 +170,14 @@ test('make-shareable-copy.bat on Windows: each copy a new folder holding no data
   put('app/data/secret.key', 'f'.repeat(64));
   put('app/uploads/minutes.pdf', '%PDF-1.7');
   put('app/uploads/.gitkeep', '');
-  const copies = () => fs.readdirSync(root).filter((f) => f.startsWith('AGMessage-Portable-Windows-clean')).sort();
+  const copies = () => fs.readdirSync(root).filter((f) => f.startsWith('AGMessage-Portable-clean')).sort();
   const has = (copy, rel) => fs.existsSync(path.join(root, copy, rel));
 
   const first = await runBat(bundle, 'make-shareable-copy.bat');
   assert.equal(first.code, 0, first.out);
   assert.equal(copies().length, 1, first.out);
   const [one] = copies();
-  assert.match(one, /^AGMessage-Portable-Windows-clean-\d{8}-\d{4}$/, 'named with the time');
+  assert.match(one, /^AGMessage-Portable-clean-\d{8}-\d{4}$/, 'named with the time');
   assert.ok(has(one, 'app/server.js') && has(one, 'node/node.exe') && has(one, 'app/uploads/.gitkeep') && has(one, 'app/data/rooms'), 'the program is copied');
   for (const rel of ['app/data/rooms/ABCDEF.json', 'app/data/secret.key', 'app/uploads/minutes.pdf']) assert.ok(!has(one, rel), rel + ' is not copied');
   assert.ok(first.out.includes('Done.'), first.out);
@@ -187,7 +187,7 @@ test('make-shareable-copy.bat on Windows: each copy a new folder holding no data
   assert.equal(second.code, 0, second.out);
   const two = copies().find((f) => f !== one);
   assert.equal(copies().length, 2, 'a new folder, never the earlier one:\n' + second.out);
-  assert.ok(/^AGMessage-Portable-Windows-clean-\d{8}-\d{4}$/.test(two) || /^AGMessage-Portable-Windows-clean-\d{8}-\d{4}-\d{1,2}$/.test(two), two);
+  assert.ok(/^AGMessage-Portable-clean-\d{8}-\d{4}$/.test(two) || /^AGMessage-Portable-clean-\d{8}-\d{4}-\d{1,2}$/.test(two), two);
   assert.ok(!has(two, 'app/data/planted.json'), 'the new copy holds nothing of the earlier one');
   assert.equal(fs.readFileSync(path.join(root, one, 'app', 'data', 'planted.json'), 'utf8'), '{"accounts":[]}', 'and the earlier copy is untouched');
   assert.ok(fs.existsSync(path.join(bundle, 'app', 'data', 'secret.key')), 'the bundle\'s own data stays where it is');

@@ -577,13 +577,13 @@ test('the payload: every member of the bundle laid over the one before, each who
   try {
     const big = Buffer.alloc(300_000, 7);
     const zip = path.join(dir, 'bundle.zip');
-    await zipFile(zip, [['AGMessage-Portable-Windows-0.6.0/node/node.exe', big], ['AGMessage-Portable-Windows-0.6.0/app/server.js', 'one'], ['AGMessage-Portable-Windows-0.6.0/app/data/rooms/.keep', null]]);
+    await zipFile(zip, [['AGMessage/node/node.exe', big], ['AGMessage/app/server.js', 'one'], ['AGMessage/app/data/rooms/.keep', null]]);
     const entries = T.zipEntries(zip);
-    assert.deepEqual(entries.map((e) => [e.name, e.size, e.dir]), [['AGMessage-Portable-Windows-0.6.0/node/node.exe', 300_000, false], ['AGMessage-Portable-Windows-0.6.0/app/server.js', 3, false], ['AGMessage-Portable-Windows-0.6.0/app/data/rooms/.keep', 0, false]]);
+    assert.deepEqual(entries.map((e) => [e.name, e.size, e.dir]), [['AGMessage/node/node.exe', 300_000, false], ['AGMessage/app/server.js', 3, false], ['AGMessage/app/data/rooms/.keep', 0, false]]);
     const dest = path.join(dir, 'payload');
     const first = T.layOut(zip, dest);
     assert.deepEqual([first.files, first.bytes], [3, 300_003]);
-    const top = path.join(dest, 'AGMessage-Portable-Windows-0.6.0');
+    const top = path.join(dest, 'AGMessage');
     fs.writeFileSync(path.join(top, 'app', 'server.js'), 'an earlier build');
     const again = T.layOut(zip, dest, entries);
     assert.equal(again.files, 3);
@@ -611,8 +611,8 @@ test('the payload: every member of the bundle laid over the one before, each who
     assert.throws(() => T.layOut(torn, path.join(dir, 'torn')), /do not check|invalid|incorrect|unexpected end/i);
     fs.writeFileSync(path.join(dir, 'not.zip'), 'not a zip at all');
     assert.throws(() => T.zipEntries(path.join(dir, 'not.zip')), /is not a zip/);
-    // Two builds, whose folders are named apart, laid over each other: what is inside each bundle's one folder.
-    assert.equal(T.topFolder(entries), 'AGMessage-Portable-Windows-0.6.0');
+    // Two builds laid over each other, what is inside each bundle's one folder: 0.5.1's named as its zip, this one's AGMessage.
+    assert.equal(T.topFolder(entries), 'AGMessage');
     const prev = path.join(dir, 'prev.zip');
     await zipFile(prev, [['AGMessage-Portable-Windows-0.5.1/app/server.js', 'the earlier build'], ['AGMessage-Portable-Windows-0.5.1/app/gone.js', 'only in 0.5.1']]);
     const over = path.join(dir, 'over', 'AGMessage');
@@ -629,6 +629,15 @@ test('the payload: every member of the bundle laid over the one before, each who
     await zipFile(flat, [['x.js', '1']]);
     assert.throws(() => T.topFolder(T.zipEntries(flat)), /not one folder/, 'a file at the top is no bundle');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the release a bundle is: read from its zip\'s own name, 0.6.0\'s and 0.5\'s, never from the folder inside', () => {
+  assert.equal(T.releaseOf('C:\\r\\previous\\AGMessage-Portable-0.6.0.zip'), '0.6.0');
+  assert.equal(T.releaseOf('/r/previous/AGMessage-Portable-Windows-0.5.1.zip'), '0.5.1');
+  assert.equal(T.releaseOf('AGMessage-Portable-0.6.1 (1).zip'), '0.6.1', 'a browser\'s second copy');
+  for (const other of ['AGMessage-Portable-0.6.0-dev.83_f3a8232.zip', 'AGMessage-0.6.0.zip', 'agmessage-audit-verifier-0.6.0.zip', 'AGMessage-Portable-0.6.zip', 'AGMessage-Portable-0.6.0.zip.part', '']) {
+    assert.equal(T.releaseOf(other), '', other);
+  }
 });
 
 test('the stand-in tasks: U12\'s server task\'s principal and settings, one action by absolute path, UTF-16 as schtasks reads it', () => {
