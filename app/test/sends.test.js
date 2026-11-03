@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { RoomStore } = require('../lib/store');
-const { ROOT, startServer, restartServer, stopServer, api, connect, emit, once, until, wait, TOKEN } = require('./helpers');
+const { ROOT, startServer, restartServer, stopServer, api, connect, emit, once, until, wait, TOKEN, readSource } = require('./helpers');
 
 /** An audit row as the tests read it: its target, its words, who. */
 const rowsOf = (dataDir, action) => fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
@@ -37,7 +37,7 @@ function loadPicker() {
   const ctx = { console };
   ctx.window = ctx;
   vm.createContext(ctx);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, 'public', 'sendfrom.js'), 'utf8'), ctx, { filename: 'sendfrom.js' });
+  vm.runInContext(readSource(path.join(ROOT, 'public', 'sendfrom.js')), ctx, { filename: 'sendfrom.js' });
   return ctx.AGM.sendFrom;
 }
 /** A value made in the picker's context, as this one compares it. */

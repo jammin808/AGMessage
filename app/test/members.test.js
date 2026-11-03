@@ -5,16 +5,15 @@
 // and their answers on a real server are the browser smoke's; each save's refusal by right is test/menus.test.js's.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { ROOT } = require('./helpers');
+const { ROOT, readSource } = require('./helpers');
 const rbac = require('../lib/rbac');
 
 function loadMembers() {
   const ctx = vm.createContext({});
   vm.runInContext('globalThis.window = globalThis;', ctx);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, 'public', 'members.js'), 'utf8'), ctx, { filename: 'members.js' });
+  vm.runInContext(readSource(path.join(ROOT, 'public', 'members.js')), ctx, { filename: 'members.js' });
   return ctx.AGM.members;
 }
 const M = loadMembers();
