@@ -188,10 +188,14 @@ test('a stop saves the audit log, then the lanes, then only the halls that chang
   const stop = steps.slice(steps.indexOf('stop') + 1);
   assert.equal(stop[0], 'audit', 'the audit log first: ' + stop.join(', '));
   const at = (re) => stop.map((x, i) => (re.test(x) ? i : -1)).filter((i) => i >= 0);
-  const lanes = at(/^lane /);
   const compacts = at(/^compact /);
+  // A hall's snapshot that took longer than any before it today raises the day's peak, which the stop saves after the
+  // halls and before its record (saveAll): that one flush of the peaks' lane is the halls', not the lanes' before them.
+  const raised = at(/^lane peaks\.json$/).filter((i) => i > Math.min(...compacts));
+  const lanes = at(/^lane /).filter((i) => !raised.includes(i));
   assert.ok(lanes.length >= 7, 'every lane flushed: ' + stop.join(', '));
   assert.ok(Math.max(...lanes) < Math.min(...compacts), 'the lanes before any hall: ' + stop.join(', '));
+  assert.ok(raised.length <= 1 && raised.every((i) => i > stop.indexOf('rename ' + A + '.json')), 'the peaks a snapshot raised, once, after the halls: ' + stop.join(', '));
   assert.deepEqual(compacts.map((i) => stop[i]), ['compact ' + A], 'only the hall that changed');
   assert.equal(stop[stop.length - 1], 'rename ' + laststop.FILE, 'the record last: ' + stop.join(', '));
   assert.ok(stop.indexOf('rename ' + A + '.json') > Math.max(...lanes), 'its snapshot written after the lanes');
