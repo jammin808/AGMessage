@@ -519,6 +519,34 @@ function said(fn) {
 const sayIn = (store, room, id) => store.commit(room, { o: 'add', m: { id, type: 'text', text: id, at: 1 } });
 const jsonFiles = (dir) => fs.readdirSync(dir).filter((f) => /\.json$/.test(f)).sort();
 
+test('store: rooms made within one millisecond keep the order they were made, live and after a reload, each stamped after the newest the store holds', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const realNow = Date.now;
+  const t = 1_800_000_000_000;
+  try {
+    Date.now = () => t;   // the clock not moved on between rooms, as a fast machine making several in a row reads it
+    const a = new RoomStore(dir);
+    a.create('HALL01', 'Hall 1');
+    // Keys that sort against the order the rooms are made in: a tie broken by key would list them backwards.
+    const keys = ['ZZZZ2345', 'YYYY2345', 'XXXX2345', 'WWWW2345', 'VVVV2345'];
+    const names = keys.map((_, i) => 'Room ' + (i + 1));
+    for (const [i, k] of keys.entries()) assert.ok(a.createIn('HALL01', k, names[i]), k);
+    assert.deepEqual(a.roomsOf('HALL01').map((r) => [r.name, r.createdAt]), [['Hall 1', t], ...names.map((n, i) => [n, t + i + 1])], 'in the order made, each a millisecond after the one before');
+    const b = new RoomStore(dir);
+    assert.equal(b.loadAll(null, { compact: false }), 6);
+    assert.deepEqual(b.roomsOf('HALL01').slice(1).map((r) => r.name), names, 'and so after a reload, from the times kept');
+    assert.equal(b.createIn('HALL01', 'UUUU2345', 'Room 6').createdAt, t + 6, 'a store loaded stamps after the newest it read');
+    Date.now = () => t - 60_000;   // the clock stepped back
+    assert.equal(b.createIn('HALL01', 'TTTT2345', 'Room 7').createdAt, t + 7);
+    Date.now = () => t + 5000;     // and on again
+    assert.equal(b.create('HALL02', 'Hall 2').createdAt, t + 5000, 'a clock that moved on is read as it is');
+    assert.deepEqual(b.roomsOf('HALL01').slice(1).map((r) => r.name), [...names, 'Room 6', 'Room 7']);
+  } finally {
+    Date.now = realNow;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('store: a side room is kept beside its hall as <HALL>.<KEY>, and reloads under it with its seq, its messages and its log replayed', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
   const a = new RoomStore(dir);

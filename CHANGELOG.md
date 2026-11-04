@@ -3638,6 +3638,11 @@ push, its console and the layer are units 17 and 18)
 - The papers: `docs/DESIGN.md`, `docs/ANALYSIS.md`, `CLAUDE.md`.
 
 **Fixed**
+- A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
+  two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after
+  another with Room 7 before Room 6. A room made now is stamped after the newest the store holds, loaded or made, so the
+  order is the order of making, on the halls board, the admin page and after a restart, however fast the rooms come
+  and if the clock stepped back.
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and
   Entered was thrown away. Cancel is now a plain button that closes its dialog, and Save is the form's default.

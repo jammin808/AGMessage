@@ -121,6 +121,9 @@ class RoomStore {
     // Each hall's side rooms, in the order they were made (`roomsOf`), so a hall's rooms are read without a walk of every
     // side room of every hall; kept with `side`, which holds the same rooms by key.
     this.sideByHall = new Map();
+    // The newest createdAt this store holds, loaded or made: a room made now is stamped after it (`_madeNow`), so rooms
+    // keep the order they were made in even when the clock has not moved on or has stepped back.
+    this.newestMade = 0;
     // The guest codes: each live code, and each earlier one a room keeps (`retired`), to the key of its room. Rebuilt at a
     // load and at every change (`_index`); read through `byCode`, `byRetired` and `codeHeld`.
     this.codes = new Map();
@@ -187,6 +190,7 @@ class RoomStore {
       const { data, whole } = readJsonWhole(this._at(stem, '.json'));
       if (!data) throw new Error('snapshot and its backup are both unreadable');
       const room = this._blank(code, typeof data.name === 'string' ? data.name : '', data.createdAt || Date.now(), { hall, ...readCodes(data, code) });
+      if (Number(room.createdAt) > this.newestMade) this.newestMade = Number(room.createdAt);
       room.messages = Array.isArray(data.messages) ? data.messages.filter((m) => m && typeof m.id === 'string') : [];
       room.seq = Number.isInteger(data.seq) ? data.seq : room.messages.length;
       room.settings = data.settings && typeof data.settings === 'object' ? data.settings : {};
@@ -209,6 +213,13 @@ class RoomStore {
       console.warn('  Failed to load room', stem, e.message);
       return false;
     }
+  }
+
+  /** The createdAt of a room made now: the clock's time, or a millisecond after the newest this store holds when that is no later. */
+  _madeNow() {
+    const t = Date.now();
+    this.newestMade = t > this.newestMade ? t : this.newestMade + 1;
+    return this.newestMade;
   }
 
   _blank(code, name, createdAt, { hall = code, guestCode = '', retired = [] } = {}) {
@@ -391,7 +402,7 @@ class RoomStore {
 
   /** Make a hall: its key is its guest code until it is renewed (`setGuestCode`), and its first snapshot is written at once. */
   create(code, name) {
-    const room = this._blank(code, name || '', Date.now());
+    const room = this._blank(code, name || '', this._madeNow());
     this.rooms.set(code, room);
     this._index();
     this.compact(code);
@@ -409,7 +420,7 @@ class RoomStore {
     if (!this.rooms.has(hall) || !RoomStore.validCode(key) || this.hasRoom(key)) return null;
     if (guestCode !== '' && (!RoomStore.validCode(guestCode) || guestCode === key || this.codeHeld(guestCode))) return null;
     if (this._sidesOf(hall).length >= SIDE_MAX) return null;
-    const room = this._blank(key, name || '', Date.now(), { hall, guestCode });
+    const room = this._blank(key, name || '', this._madeNow(), { hall, guestCode });
     room.settings = { codeOff: true, ...(settings && typeof settings === 'object' ? settings : {}) };
     this._keepSide(room);
     this._index();
