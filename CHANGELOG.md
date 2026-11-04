@@ -3537,6 +3537,106 @@ taken back, and its copy said "delivered" for good)
   mark through `applyOp`; the op table's listener count read from `lib/ops.js` (moved on purpose).
 - The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `docs/ANALYSIS.md`, `SECURITY.md`, `CLAUDE.md`.
 
+**What people's pages are shown, as a store and a vocabulary** (the plan's Part 1, unit 16, its §1.10 and §5.1-§5.5, as
+Part 4 §0 and §5.9.1 (`pages.json` in layers, its shape changed before anything writes it), Part 5 §0 (`brand` gone,
+owner answer 31; the marks ◷ and ○), §14.4's fence (n) and §15.7's person-first words, and Part 7 §0.1 (`views`) amend
+them; the plan as the evidence: 0.5.1 has no people's pages, and nothing of this is drawn on a page or sent yet: the
+push, its console and the layer are units 17 and 18)
+- **`lib/pages.js`**, a store of its own beside the screens': what a person's hall page is shown over its chat. A take
+  is numbered with one counter per hall and goes to the Board (every page seated On stage in the hall's Main room) or to
+  one person (`a:<account id>`, every device of an account; `u:<uid>`, a guest's device). A page is shown the
+  highest-numbered take addressed to it, its person's or, on a Board page, the Board's; latest wins.
+- **What may be shown** (`cleanPage`, pure, fail closed): back to chat, Stagewatch, the clock, holding or blank, each
+  rebuilt as a fresh object, a key it does not know left behind. Anything else, `brand` (gone: one Holding page with the
+  mark) and the web page (a later unit's) among them, is refused with the kinds in words, "Choose what to show: back to
+  chat, Stagewatch, the clock, holding or blank.", and so is a kind that is not a string or that the take only inherits;
+  a known key of the wrong type (a holding picture that is not a string among them) refuses the whole take in the same
+  words, and so does a back to chat that names a layer (the store keeps the show layer alone, so a hand-back of one
+  layer is never widened to every layer). Stagewatch only where the hall has one linked ("This hall has no Stagewatch
+  linked — link one in Set up."); a holding slide with no picture, or a PNG, JPEG, GIF or WebP of AGMessage's uploads, a
+  screen's holding rule type by type ("A holding image is a PNG, JPEG, GIF or WebP shared in AGMessage."), in a message
+  of a room of the hall the pusher may read ("That picture is in no room of this hall you can read — share it there
+  first."), the server's facts deciding, never the client's.
+- **What a take is called** (`describePage`), the console's and the audit's words alike, none naming a file or carrying
+  its address: "back to chat", "Stagewatch", "the clock", "a holding slide" ("… with the AGMessage mark" where neither
+  the take nor the hall has a picture), "blank"; no take is "the chat".
+- **The answers.** A person's Back to chat or Minimise is kept with the take it answered, for every page of theirs, and
+  counts only on that take: a newer take shows again. Back to chat is final for its take (said again, it is answered as
+  done; shown or minimised after it, refused). A Minimise is taken back only by the person's Show again: a page that
+  says it drew the take (as it first draws it, or comes back into view) before it hears of the Minimise made on another
+  device keeps it, so one device never undoes what the person did on another. A report on any take but the one that page
+  is shown now is refused, and so is one of no person (a key that is not a person's, `__proto__` among them) or at no
+  time, which keeps nothing; a page reports only what a take of its kind can be (a page handed back to its chat is in
+  view or not, with nothing to fail, put away or minimise), and "opened" is a web page's alone, so no take here is ever
+  read as opened.
+- **A Board take puts away** the older takes, and the answers, in its layer, of everyone seated On stage then: none of
+  them could show on a Board page again. A person's take puts away that person's answer to an older one.
+- **The bounds**, the oldest going first: 200 person takes a hall, the first made first, each taking its answer with it;
+  500 answers a hall, the one given longest ago first; and 5,000 guests' chat views, the one set longest ago first. Both
+  are kept, and written, in the order given or set, and read back in the file's order, so neither reads the laptop's
+  clock: a clock stepped back, in a run or across a restart, never makes the answer just given the one that goes.
+- **Status, person first** (`Pages.status`, pure, from each page's report on the take it holds, never from the send),
+  one mark one meaning: ✓ "On all 6 Board pages", "On Ana's page"; ◷ "Sending · on 2 of 4 pages" until every page has
+  said; △ "Couldn't show it: the picture didn't load"; ○ "Ana went back to chat at 14:02" (the laptop's clock), "Back to
+  chat on all 6 Board pages" (the operator's hand-back, once every page says it is back on its chat: never ✓, which is
+  on screen), "Nothing shown yet"; ▭ "Ana minimised it at 14:02"; ◇ "Opened · AGMessage can't see inside web pages",
+  never ✓ (a web page's, none yet); ◐ "5 of 6 showing · 1 asleep or in another app" ("5 of 6 back to chat" for a
+  hand-back), with whoever went back to chat, minimised it or is shown something else; ✕ "Nobody on the Board is
+  online". The pages' reports are the run's alone: never saved, and a page that goes takes its own with it.
+- **A guest's chat view** (Simple, Full, or by their seat) is kept by their uid, in the accounts' words.
+- **The `pages` lane**: `data/pages.json` (`{v: 1, views, halls}`; a hall's `{seq, board: {show}, people, answers}`,
+  each person's take and answer by layer), written through a write lane of its own, mode 0600, named in `saveLanes()`
+  and so in health (`saves.stores.pages`) and flushed at a stop or a crash; nothing is written until this copy holds its
+  data folder (`hold()`, in the first writes), a change before that kept and written then, and a start that changes
+  nothing writes nothing. It is read with its `.bak`, and a record of the wrong shape is dropped as it is read (a hall's
+  key, a person's, a take numbered past its hall, a kind that is not one, a picture that is not an upload, an answer
+  that is not one); why a file could not be read (EBUSY, EACCES) is recorded (`unread`), and nothing reads it yet: the
+  file holds nothing sealed, and the web page's unit, which seals its addresses there, has the start read it as it reads
+  the screens' store's. A hall closed takes what its people's pages were shown with it, unless it opens again at the
+  next start (another program held its files).
+- **The module fence** gains (n)'s kinds: `lib/pages.js`'s `KINDS` and `describePage`'s words are one set, read from the
+  source, each kind its own words; no catalogue row sends a take yet, and the Board chip's rows join the set when it is
+  drawn.
+- Choices where the plan left room: the store keeps Part 4's shape in layers from its first write, with the show layer
+  alone (the information layer, `chat {layer}` and Earlier come with the Board's information takes), so nothing
+  migrates; a take's `by` is an object (`{name}`), which Part 4's `op` and Part 7's `onStage` join; the holding rule is
+  Part 1's (in a room of the hall the pusher may read), which the stage's `sourceOk` replaces; one voice of words for
+  now, since no kind here names a file; the pages' reports and the answers they carry are the store's (`report`, `left`,
+  `pageState`), so status reads one place, and `page:report` itself is unit 17's, which carries Show again to the store
+  as `again` (a `shown` report that is the person's act, not a page's routine one); Back to chat stays final for its
+  take (the 10 s Show it again is unit 18's); a Board take puts away the person takes of those seated On stage, as the
+  plan says, their pages in a side room included, so the push (unit 17) sends `page:take` again to every page of theirs
+  whose take changed, never to the Board pages alone; a person's status is the newest take any of their pages is shown
+  now, and a page shown another take "showing something else"; the time is said only where one person answered; the
+  words for one Board page ("On the 1 Board page"), several of one person's ("On all 2 of Ana's pages") and several
+  names ("Ana, Ben and 2 more"), which the plan does not give, follow its table; a guest's views kept in the order set,
+  so a laptop clock stepped back never changes which goes; a `pages.json` that cannot be read is recorded, as
+  `displays.json`'s is, and not refused (it holds nothing sealed yet); two names in `server.js` that would have hidden
+  the store (`pages` in the power request's count and in `admin:kick`) are renamed.
+- Rolling back: 0.5.1 never reads `pages.json`, which stays, and 0.6 reads it again.
+- Tests: `test/pages.test.js` (new, pure): every kind refused that is not one (`brand`, the web page, the documents, a
+  kind of the wrong type or inherited, none), each kind's clean shape as a fresh object; Stagewatch only with the hall's
+  link; the holding rules (no picture; a picture of ours asked of the facts by its address; each image type; a type or
+  an address that is not one; a value that is not a string, refused with the kinds; one in no room the pusher reads, and
+  facts that cannot say; the screens' rule, upload type by upload type); back to chat naming a layer refused; the words
+  for each kind, one set, and none naming a file; which take a page shows by number, on a Board page and elsewhere,
+  across halls; a take the store would not read back not numbered; answers only on the current take, across a person's
+  pages, final for Back to chat, a Minimise taken back by Show again alone (another device's report of the take keeping
+  it), kept across a restart with no report written; a report of no person or at no time keeping nothing, the answers'
+  prototype untouched and nothing written; each kind's reports, opened by none and a hand-back neither put away nor
+  minimised; a Board take putting away the On stage persons' takes and answers and no one else's; the bounds (201 takes,
+  501 answers, 5,001 views, and a file over them read back within them, in its order), an answer given with the clock
+  stepped back kept as answered, and the order given or set kept across a restart; a guest's view set, cleared and
+  refused; each status mark with its words, a hand-back ○ and never ✓, and every mark drawn one of the table's; status
+  read from the store's reports as pages say, go and come back; a hall forgotten with its reports; a record of each
+  wrong shape dropped as the file is read, `__proto__` among them, and a file that cannot be read recorded; nothing
+  written before `hold()`, what changed before written at it, mode 0600, and nothing written by a hold with nothing
+  changed; the store's hall keys the rooms'. `test/modules.test.js`: (n), and a planted kind without words, words
+  without a kind and words given twice failing it. `test/server.test.js`: `pages` among the lanes health names.
+  `test/halls.test.js`: a `pages.json` read at a start and not written by it, and a hall removed taking its people's
+  pages with it while another hall's and a guest's view stay.
+- The papers: `docs/DESIGN.md`, `docs/ANALYSIS.md`, `CLAUDE.md`.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

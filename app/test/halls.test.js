@@ -1487,7 +1487,7 @@ async function fakeModel() {
   return { url: 'http://127.0.0.1:' + srv.address().port, bodies, close: () => new Promise((resolve) => { srv.close(resolve); }) };
 }
 
-test('rooms are made, renamed, reset and removed by those who set halls up; a side room\'s key is never taken for a hall; the admin\'s reads of a room it is not given are audited once; a hall removed takes its rooms and its accounts\' keys, the next start loads cleanly, and its node proposes nothing', async (t) => {
+test('rooms are made, renamed, reset and removed by those who set halls up; a side room\'s key is never taken for a hall; the admin\'s reads of a room it is not given are audited once; a hall removed takes its rooms, its accounts\' keys and what its people\'s pages were shown, the next start loads cleanly, and its node proposes nothing', async (t) => {
   const sw = await fakeStagewatch({ name: 'Default timer' });
   const node = await fakeNode({ commands: [{ verb: 'CUE <n>', risk: 'low' }] });
   const model = await fakeModel();
@@ -1684,7 +1684,15 @@ test('rooms are made, renamed, reset and removed by those who set halls up; a si
   const store = JSON.parse(fs.readFileSync(accountsFile, 'utf8'));
   for (const u of store.users) Object.assign(u, given[u.username] || {});
   fs.writeFileSync(accountsFile, JSON.stringify(store));
+  // What people's pages were shown in Hall A and Hall B, and a guest's chat view (no page pushes yet: written while the
+  // server is stopped, as the store keeps them). A start that changes none of it writes none of it.
+  const pagesFile = path.join(srv.dataDir, 'pages.json');
+  const shown = (seq, kind) => ({ seq, content: { kind }, by: { name: 'Ana' }, at: 1 });
+  const hallAPages = { seq: 2, board: { show: shown(2, 'clock') }, people: {}, answers: { 'u:uguestview01': { show: { seq: 2, state: 'minimised', at: 3 } } } };
+  const seeded = JSON.stringify({ v: 1, views: { 'u:uguestview01': { view: 'simple', at: 1 } }, halls: { [hallA]: hallAPages, [hallB]: { seq: 1, board: {}, people: { 'u:uguestview01': { show: shown(1, 'blank') } }, answers: {} } } });
+  fs.writeFileSync(pagesFile, seeded);
   srv = await startServer({ AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port) });
+  assert.equal(fs.readFileSync(pagesFile, 'utf8'), seeded, 'read at the start, and not written');
   const ctl2 = await page(admin);
   const readsBefore = rows('room.read').length;
   // The admin's account given the room reads it as a member: no row. The laptop's token, which lists none, still writes one.
@@ -1716,6 +1724,9 @@ test('rooms are made, renamed, reset and removed by those who set halls up; a si
   assert.deepEqual(fs.readdirSync(path.join(srv.dataDir, 'rooms')).filter((f) => f.startsWith(hallB)), [], 'no file of the hall or its room is left');
   await until(() => !JSON.stringify(accounts()).includes(hallB), 3000, 'the accounts saved');
   assert.deepEqual(accounts().tom, { halls: [hallA], rooms: [LEGAL], board: [] });
+  // What Hall B's people's pages were shown goes with it; Hall A's, and the guest's chat view, stay as they were.
+  await until(() => !fs.readFileSync(pagesFile, 'utf8').includes(hallB), 3000, 'the people\'s pages saved');
+  assert.deepEqual(JSON.parse(fs.readFileSync(pagesFile, 'utf8')), { v: 1, views: { 'u:uguestview01': { view: 'simple', at: 1 } }, halls: { [hallA]: hallAPages } });
   assert.deepEqual(await emit(ctl2, 'nodes:command', { id: 'patb', line: 'CUE 2', mode: 'propose' }),
     { ok: false, error: 'Patterns B was linked for a hall that has been closed: link it again for a hall, or for every hall (Admin → Show network) — not proposed.' });
   assert.equal(sw.proposals.size, proposed, 'nothing reached the default Stagewatch\'s desk');

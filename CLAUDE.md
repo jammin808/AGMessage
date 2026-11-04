@@ -193,6 +193,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The room choice and the switcher: an account with one room goes straight into it; a hall page names its room ("Hall 2 › Legal") and moves between its hall's rooms | `app/public/halls.js` (`waysIn`), `app/public/app.js` (the switcher), `app/server.js` (`switcherFor`, `frames.rooms`); test `halls` |
 | Uploads: a token per page's join, checked again at use; a file message posted only in the room it was made for, reaching another only by a forward | `app/server.js` (`/api/upload`, `fileRefusal`), `app/lib/guard.js`; test `uploads` |
 | Screens (display URLs) | `app/lib/displays.js`, `app/public/display.*` |
+| People's pages: what a person's hall page is shown over its chat (numbered takes to the Board or one person, their answers, the status read from each page's report) and guests' chat views, kept in `pages.json` through the `pages` lane | `app/lib/pages.js`; test `pages` |
 | Stagewatch links, peers, hello; what a send says (Stagewatch's grammar as the oracle) | `app/lib/nodes.js`, `app/lib/stagelines.js` |
 | Patterns and PlayMap links; the context other show systems read | `app/lib/peerlinks.js`, `app/lib/context.js` |
 | HTTPS and certificate pins; the machine key, sealed secrets and the keys derived from it | `app/lib/tls.js`, `app/lib/secretbox.js` |
@@ -230,15 +231,15 @@ tagged `vX.Y.Z`.
 ## House words
 
 **a hall** — a venue space with its Main room, its own code, Stagewatch link, screens and help requests; **the halls
-board** — every hall an account may see; **a screen** — a browser holding a screen's link; **a take** — what a screen is
-told to show, numbered; **the desk** — Stagewatch's approval queue, where a proposal waits for the operator; **a link**
-— AGMessage's connection to a Stagewatch, Patterns or PlayMap; **a fence** — a test or lint rule that fails the build
-when an invariant breaks; **a seat limit** — what a seat allows at all, whatever the rights behind it, read before any
-right and the admin's too (On stage: reading and writing messages, nothing else); **the air** — what the audience and
-the speaker see; **the outbox** — what holds a page's send until the server answers it, so it is never lost and never
-made twice; **a catalogue entry** — an act, drawn as a button and a menu item from one row, absent where a seat may never
-do it and disabled with its reason where it cannot now; **a fold** — catalogue entries of one kind drawn as one item when
-both are shown (Speaker's screen ▸: Ask the operator… · Send now), flat when one is.
+board** — every hall an account may see; **a screen** — a browser holding a screen's link; **a take** — what a screen,
+or a person's page, is told to show, numbered; **the desk** — Stagewatch's approval queue, where a proposal waits for
+the operator; **a link** — AGMessage's connection to a Stagewatch, Patterns or PlayMap; **a fence** — a test or lint
+rule that fails the build when an invariant breaks; **a seat limit** — what a seat allows at all, whatever the rights
+behind it, read before any right and the admin's too (On stage: reading and writing messages, nothing else); **the air**
+— what the audience and the speaker see; **the outbox** — what holds a page's send until the server answers it, so it is
+never lost and never made twice; **a catalogue entry** — an act, drawn as a button and a menu item from one row, absent
+where a seat may never do it and disabled with its reason where it cannot now; **a fold** — catalogue entries of one
+kind drawn as one item when both are shown (Speaker's screen ▸: Ask the operator… · Send now), flat when one is.
 
 **One word per thing** (the smoke's word check holds the pages to it): a hall (never "meeting", "session" or "room");
 a room — Main, Legal, Media, named "Hall 2 › Legal" (never "hall"): the Main room is the hall itself, its key the hall's, and a side room one of its other rooms, kept beside it and reached by its key; a code — what guests type, each room its own, a hall's its key until New code ("guest code" in the

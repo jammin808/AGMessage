@@ -1,8 +1,8 @@
 'use strict';
 // The module fence (docs/ANALYSIS.md §3.5): the server's layers, read from its require() calls, the wire's words, read
-// from the files that register socket verbs (`handlerFiles()`) and from every page script, closed both ways, and the
-// store's any-room readers, counted per file. Each rule is a function of the sources it is given, so the tree is held to
-// it and a planted breach of each kind fails it.
+// from the files that register socket verbs (`handlerFiles()`) and from every page script, closed both ways, the
+// store's any-room readers, counted per file, and the kinds a person's page is shown, each with its words. Each rule is
+// a function of the sources it is given, so the tree is held to it and a planted breach of each kind fails it.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -11,6 +11,7 @@ const path = require('path');
 const { ROOT, filesUnder, handlerFiles, pageScripts, readSource } = require('./helpers');
 const ops = require('../lib/ops');
 const gateLib = require('../lib/gate');
+const pagesLib = require('../lib/pages');
 
 // A source as LF: a Windows checkout writes CR LF, and the fences match lines and closes by \n.
 const read = (f) => readSource(path.join(ROOT, f)).replace(/\r\n/g, '\n');
@@ -1569,4 +1570,42 @@ test('(l) a planted any-room call without its reason, a row without its call, an
   assert.deepEqual(run({}, { ...rows, 'lib/gone.js': ['x'] }), ['lib/gone.js is not in the tree: its row goes']);
   // A hall's readers, a method of the same name on another object, and a room's own fields are none of them.
   assert.deepEqual(run({ 'lib/board.js': 'store.get(c); store.has(c); store.rooms.values(); this.room(k); hall.roomsOf; r.side; displays.room(k);' }), []);
+});
+
+// ---------------------------------------------------------------- (n) the kinds in step
+/**
+ * What breaks the kinds' agreement in lib/pages.js's source `src`, whose kinds are `kinds` (its KINDS): describePage
+ * gives words for each kind, once, and for no other. The take catalogue's ids join the set when the catalogue draws a
+ * take (the Board chip's kinds, the plan's unit 18); until then no catalogue row sends one.
+ */
+function kindsProblems(src, kinds) {
+  const at = src.indexOf('function describePage(');
+  if (at < 0) return ['lib/pages.js has no describePage'];
+  const end = src.indexOf('\n}\n', at);
+  const cases = [...src.slice(at, end < 0 ? src.length : end).matchAll(/\bcase '([^']+)':/g)].map((m) => m[1]);
+  const problems = [];
+  for (const k of kinds) if (!cases.includes(k)) problems.push('the kind ' + k + ' has no words in describePage');
+  for (const c of new Set(cases)) {
+    if (!kinds.includes(c)) problems.push('describePage has words for ' + c + ', which is no kind');
+    if (cases.indexOf(c) !== cases.lastIndexOf(c)) problems.push('describePage gives ' + c + ' words twice');
+  }
+  return problems;
+}
+
+test('(n) the kinds in step: lib/pages.js\'s KINDS and describePage\'s words are one set, each kind its own words', () => {
+  assert.deepEqual(kindsProblems(read('lib/pages.js'), pagesLib.KINDS), []);
+  const words = pagesLib.KINDS.map((kind) => pagesLib.describePage({ kind }));
+  assert.ok(words.every((w) => typeof w === 'string' && w), 'each kind has words: ' + words.join(', '));
+  assert.equal(new Set(words).size, words.length, 'no two kinds share words: ' + words.join(', '));
+  // No catalogue row sends a take yet: the Board chip's rows bring the take catalogue's ids into this set.
+  assert.ok(!/verb:\s*'page:push'/.test(read('public/catalog.js')), 'a catalogue row sends page:push: its take ids join (n)');
+});
+
+test('(n) a planted kind without words, words without a kind, and words given twice each fail it', () => {
+  const src = "function describePage(c) {\n  switch (c.kind) {\n    case 'chat': return 'back to chat';\n    case 'clock': return 'the clock';\n    default: return '';\n  }\n}\nfunction other() { switch (x) { case 'brand': return 1; } }\n";
+  assert.deepEqual(kindsProblems(src, ['chat', 'clock']), [], 'the planted source passes; a case outside describePage is not read');
+  assert.deepEqual(kindsProblems(src, ['chat', 'clock', 'blank']), ['the kind blank has no words in describePage']);
+  assert.deepEqual(kindsProblems(src, ['chat']), ['describePage has words for clock, which is no kind']);
+  assert.deepEqual(kindsProblems(src.replace("    default:", "    case 'chat': return 'chat';\n    default:"), ['chat', 'clock']), ['describePage gives chat words twice']);
+  assert.deepEqual(kindsProblems('const describe = 1;', ['chat']), ['lib/pages.js has no describePage']);
 });

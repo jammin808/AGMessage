@@ -61,6 +61,7 @@ const roomVerbs = require('./lib/handlers/rooms');
 const takeVerbs = require('./lib/handlers/takes');
 const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
+const { Pages } = require('./lib/pages');
 const readings = require('./lib/peaks');
 const startup = require('./lib/startup');
 const laptop = require('./lib/laptop');
@@ -274,6 +275,9 @@ auditExporter.archiver = auditArchiver;
 /** A count in an audit row's words: "1 file", "4 files". */
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
 const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
+// What people's pages are shown over their chat, their answers and guests' chat views (lib/pages.js): read now, written
+// through its lane only once this copy holds its data folder (`firstWrites` calls `hold`).
+const pages = new Pages(path.join(DATA_DIR, 'pages.json'));
 // The results of approved show-desk proposals this AGMessage ran that Stagewatch has not taken yet (lib/deskresults.js):
 // read now, written only by the desk loop, which runs once this copy holds the data folder and its port. In memory too:
 // the tries (attempts, posts), when the next is due, the last answer, and the link's generation it was collected under
@@ -302,7 +306,7 @@ function savePeaks() {
  * here, once, so a stop or a crash flushes them all: health's `saves.built` counts the lanes made and `saves.named` the
  * distinct lanes here, and a test holds both to this list.
  */
-const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['deskResults', deskLane], ['peaks', peaksLane], ['auditHead', audit.headLane]];
+const saveLanes = () => [['settings', settingsLane], ['accounts', accounts.lane], ['sessions', sessions.lane], ['adminSessions', tokenSessions.lane], ['screens', displays.lane], ['pages', pages.lane], ['deskResults', deskLane], ['peaks', peaksLane], ['auditHead', audit.headLane]];
 /**
  * Write the audit entries still waiting and the head that covers them first, then every lane, now (shutdown, a crash);
  * what still cannot be written is named on the console, and returned in words ([] when everything was written). The
@@ -670,10 +674,10 @@ function hallsNow() {
   const halls = [];
   const following = [];   // the halls that follow the default Stagewatch
   for (const r of store.rooms.values()) {
-    let pages = 0;
-    for (const x of store.roomsOf(r.code)) for (const sid of x.users.keys()) if (io.sockets.sockets.has(sid)) pages++;
+    let open = 0;
+    for (const x of store.roomsOf(r.code)) for (const sid of x.users.keys()) if (io.sockets.sockets.has(sid)) open++;
     const own = hallLinks.get(r.code);
-    const h = { pages, takes: takes.get(r.code) || 0, running: own ? counting(own) : false };
+    const h = { pages: open, takes: takes.get(r.code) || 0, running: own ? counting(own) : false };
     if (!own) following.push(h);
     halls.push(h);
   }
@@ -2961,6 +2965,8 @@ io.on('connection', (socket) => {
     if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
     for (const d of displays.ofHall(r.code)) revokeDisplaySockets(d.id, 'This screen\'s hall was closed.');
     displays.removeHall(r.code);
+    // What its people's pages were shown goes too, unless the hall comes back at the next start.
+    if (!removed.back.includes(r.code)) pages.forgetHall(r.code);
     // Its own Stagewatch's address goes with it, and so do that Stagewatch's pins: read while the link still has its
     // address, and kept when another link follows the same one.
     if (hallLinks.has(r.code)) forgetStagewatchPins(hallLinks.get(r.code));
@@ -3084,15 +3090,15 @@ io.on('connection', (socket) => {
     // The person leaves the room: every page they have open there, not only the one the room list names.
     const r = store.room(target.data.userRoom);
     const u = r && r.users.get(socketId);
-    const pages = u ? seatsOf(r, u.uid).map(([sid]) => io.sockets.sockets.get(sid)).filter(Boolean) : [target];
+    const theirs = u ? seatsOf(r, u.uid).map(([sid]) => io.sockets.sockets.get(sid)).filter(Boolean) : [target];
     // The page sent out says who sent it out, and of where: the room as its page names it (Main by its hall's name).
     const reason = 'An admin sent you out' + (r ? ' of ' + (r.name || 'this hall') : '') + '.';
-    for (const p of pages) {
+    for (const p of theirs) {
       p.emit('kicked', { reason });
       p.disconnect(true);
     }
     if (r) syncSeats(r);   // logged out: the seat goes now, not after a restart
-    auditRoom('seat.kick', r ? r.code : '', (u ? u.name : target.data.userName || 'a page in no hall') + ' sent out (' + plural(pages.length, 'page') + ' closed)');
+    auditRoom('seat.kick', r ? r.code : '', (u ? u.name : target.data.userName || 'a page in no hall') + ' sent out (' + plural(theirs.length, 'page') + ' closed)');
     ok(ack)({ ok: true });
   });
   socket.on('admin:summary', ({ roomCode } = {}, ack) => {
@@ -4737,9 +4743,10 @@ function taskKeysProblem() {
 /**
  * What a start writes, only once this copy holds its data folder and its port: its folders; the machine key, the
  * certificate and the server secret where there are none (never over one that is there, or that could not be read); the
- * settings' saves asked meanwhile; the watchdog's give-up marked as seen. A data or uploads folder that cannot be made
- * stops the start (code 3), in either channel; for the installed node, so does a machine key, certificate or server secret
- * that cannot be made, since it never runs without them.
+ * saves asked meanwhile (the settings', and people's pages', whose store writes from then on); the watchdog's give-up
+ * marked as seen. A data or uploads folder that cannot be made stops the start (code 3), in either channel; for the
+ * installed node, so does a machine key, certificate or server secret that cannot be made, since it never runs without
+ * them.
  */
 function firstWrites() {
   for (const [dir, what, name] of [[ROOMS_DIR, 'data', 'AGM_DATA_DIR'], [UPLOAD_DIR, 'uploads', 'AGM_UPLOAD_DIR']]) {
@@ -4783,6 +4790,7 @@ function firstWrites() {
     if (why) secretFound.words = secretFound.file + ' was not made: ' + why;
   }
   if (settingsDue) saveSettings();
+  pages.hold();
   if (watchdogBefore) { try { fs.renameSync(path.join(DATA_DIR, 'watchdog.json'), path.join(DATA_DIR, 'watchdog.seen.json')); } catch { /* shown once anyway */ } }
   // How the copy before this one stopped, its record moved aside now, so a crash or a kill of this one is never read as
   // a stop that saved; and the temporary files a stop cut short left (a process no longer running), removed.
