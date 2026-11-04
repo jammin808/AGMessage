@@ -35,11 +35,23 @@
  * replies, its numbers) comes back to S. A seat On stage sends nothing out of its room (owner answer B2): it is refused
  * first, whatever it sends, and is told no room to send to. One `room.send` row per send, naming the rooms by name and
  * the message by its kind and size, never its words or a file's name.
+ *
+ * A send taken back (plan 1-§4.4): on S's copy, its sender or the admin withdraws the message from T (`room:withdraw`).
+ * It goes from T, which says so in a line of its own; a reply in T that quoted it keeps no word of it (its quote marked
+ * `withdrawn`, an op T's pages hear as `replyUpdate`); and the copy keeps when (`sentTo.withdrawn`, an op S's pages hear
+ * as `sentUpdate`), so S reads how long it was there: people there may have read it. One `room.withdraw` row.
  */
 const { str, cleanText } = require('../guard');
+const { placeOf, lasted } = require('../ops');
 
 /** What a seat On stage is told of a send out of its room: what it writes stays in its room's feed (owner answer B2). */
 const STAYS_HERE = 'Messages from On stage stay in this room.';
+/** What `room:withdraw` answers on a message of this room that is no copy of a send into another room. */
+const NOT_SENT = 'Only a message this room sent into another room is withdrawn.';
+/** Who takes a send back: the person who sent it, or the admin. */
+const NOT_YOURS = 'Only its sender or the admin withdraws it.';
+/** What the admin's support view is told of an act: it shows the person's page, and acts on nothing (as its doors say). */
+const SUPPORT = 'This is someone else\'s view — act from your own page.';
 /** What `room:send` answers a client id a message of another kind holds here: no send of this person's carries it. */
 const CID_HELD = 'That message\'s id is another message\'s.';
 /** What `room:send` sends: a message's words, or a file. A question and a help request are asked in their own room. */
@@ -113,7 +125,7 @@ const made = new Map();
  * @param {object} ctx    the server's context, frozen (lib/gate.js `contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, apply, readSend, messageOf, uploadOnDisk, makeMessageId, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, sendersOf, sendsInto, setRoomSends } = ctx;
+  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, sendersOf, sendsInto, setRoomSends } = ctx;
 
   /** A hall as a refusal names it: its name, or "This hall" when it has none. */
   const hallSaid = (hall) => hall.name || 'This hall';
@@ -425,6 +437,56 @@ function register(socket, conn, ctx) {
     };
     if (!apply(room, { o: 'add', m: copy })) return answer({ ok: false, error: 'It reached ' + roomRow(into) + ', but no copy could be kept here.' });
     answer({ ok: true, id: copy.id, seq: copy.seq, to: { name: copy.sentTo.roomName, hallName: copy.sentTo.hallName } });
+  });
+
+  // A send taken back (plan 1-§4.4): `{messageId}`, this room's copy of a message it sent into another room. Its sender or
+  // the admin withdraws it, never from the support view (which acts on nothing) or a seat On stage (which acts on no other
+  // room). A repeat after a lost answer (a copy withdrawn already, asked by one who may withdraw it) is answered as done
+  // (`already`) before the rate, so it is never refused for what succeeded and tells nobody else anything; every other
+  // request takes its token before it is refused (lib/gate.js: a refused lookup is never free). Then the message must still
+  // be where it went: a room removed, or a message the admin removed or a reset cleared there, leaves nothing to take back,
+  // said so. The message goes from T first, then each reply there that quoted it keeps no word of it (its quote marked
+  // `withdrawn`), then a line there says who took it back, then one row, then the copy's mark here (`sentTo.withdrawn`, the
+  // time it went), then its file where nothing holds it any more (the copy here holds it while it is here).
+  socket.on('room:withdraw', (args, ack) => {
+    if (!conn.gate(ack, { bucket: null })) return;   // a repeat is answered as done before the rate: the token is taken below, before any refusal
+    const answer = conn.ok(ack);
+    const a = isRecord(args) ? args : {};
+    const room = conn.room();
+    const me = conn.me();
+    const copy = room.byId.get(str(a.messageId));
+    const sent = !!copy && isRecord(copy.sentTo);
+    const theirs = sent && !!copy.from && copy.from.uid === me.uid;
+    // conn.admin, asked with no acknowledgement to answer, only reads whether this page is the admin's.
+    const mayTake = sent && !socket.data.adminView && (theirs || conn.admin());
+    if (mayTake && copy.sentTo.withdrawn) return answer({ ok: true, already: true });
+    if (!conn.writes.take()) return conn.limited(ack);
+    if (!copy) return answer({ ok: false, error: 'Message not found' });
+    if (!sent) return answer({ ok: false, error: NOT_SENT });
+    if (socket.data.adminView) return answer({ ok: false, error: SUPPORT });
+    if (!mayTake) return answer({ ok: false, error: NOT_YOURS });
+    if (conn.onStage()) return answer({ ok: false, error: BACKSTAGE });
+    const place = placeOf(copy.sentTo);
+    // The room it went to, by its reference, and the message there that came from this room: none, nothing to take back.
+    const into = store.byRef(copy.sentTo.ref);
+    const there = into && into !== room ? into.byId.get(copy.sentTo.id) : null;
+    if (!there || !isRecord(there.sentFrom) || there.sentFrom.ref !== store.roomRef(room)) return answer({ ok: false, error: 'It is no longer in ' + place + ': there is nothing to withdraw.' });
+    const at = Date.now();
+    if (!apply(into, { o: 'del', id: there.id })) return answer({ ok: false, error: OP_REFUSED });
+    // A reply there quoted its first words (or its file's name): the quote keeps who wrote it and says it was withdrawn,
+    // so neither T's pages, nor a page joining T later, nor T's transcript holds any word of it.
+    for (const q of into.messages.filter((m) => isRecord(m.replyTo) && m.replyTo.id === there.id)) {
+      apply(into, { o: 'upd', id: q.id, f: { replyTo: { ...q.replyTo, snippet: '', withdrawn: true } } });
+    }
+    const kind = there.type === 'file' ? 'a file' : 'a message';
+    const author = theirs || !there.from || !there.from.name ? '' : there.from.name;
+    systemMessage(into, me.name + ' withdrew ' + kind + (author ? ' ' + author : '') + ' sent from ' + placeOf(markOf(room)));
+    // The row once the message has gone from T, whatever becomes of the copy's mark: nothing leaves a room without one.
+    write('room.withdraw', into.code, kind + (author ? ' by ' + author : '') + ' sent from ' + roomRow(room) + ', there ' + lasted(at - there.at));
+    const mark = { ...copy.sentTo, withdrawn: at };
+    if (!apply(room, { o: 'upd', id: copy.id, f: { sentTo: mark } })) return answer({ ok: false, error: 'It went from ' + place + ', but this copy could not say so.' });
+    removeUnused(fileNamesOf([there])).catch(() => { /* a file left behind is only space */ });
+    answer({ ok: true });
   });
 }
 

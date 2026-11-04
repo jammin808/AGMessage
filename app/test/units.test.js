@@ -1071,8 +1071,8 @@ test('op table: apply() given a field outside the table says so, commits nothing
   const m = t.apply(t.room, { o: 'add', m: { id: 'm1', type: 'text', text: 'one', at: 1 } }).m;
   const before = { seq: t.room.seq, ring: t.room.ring.length, log: t.logged(), steps: t.steps.length, sent: t.sent.length, marked: t.marked.length };
   const refused = [
-    { o: 'upd', id: m.id, f: { sentTo: { id: 'x' } } },
-    { o: 'upd', id: m.id, f: { pinned: true, sentTo: { id: 'x' } } },   // one field outside refuses the op whole
+    { o: 'upd', id: m.id, f: { edited: { text: 'x' } } },
+    { o: 'upd', id: m.id, f: { pinned: true, edited: { text: 'x' } } },   // one field outside refuses the op whole
     { o: 'upd', id: m.id, f: {} },
     { o: 'upd', id: m.id, f: ['pinned'] },
     { o: 'upd', id: m.id },
@@ -1089,8 +1089,8 @@ test('op table: apply() given a field outside the table says so, commits nothing
   assert.deepEqual({ seq: t.room.seq, ring: t.room.ring.length, log: t.logged(), steps: t.steps.length, sent: t.sent.length, marked: t.marked.length }, before, 'no number taken, nothing committed, on disk, sent or marked');
   assert.equal(t.room.byId.get(m.id).pinned, undefined, 'the field inside the table was not applied either');
   assert.deepEqual(t.said, [
-    'a change of sentTo, a field outside the op table',
-    'a change of sentTo, a field outside the op table',
+    'a change of edited, a field outside the op table',
+    'a change of edited, a field outside the op table',
     'a change of no field',
     'a change of no field',
     'a change of no field',
@@ -1117,7 +1117,7 @@ test('op table: each change is committed, then sent under the event the table na
   const add = t.apply(t.room, { o: 'add', m: { id: 'm1', type: 'action', text: 'Ready?', at: 1 } });
   const sys = t.apply(t.room, { o: 'add', m: { id: 's1', type: 'system', text: 'Ana joined', at: 2 } });
   assert.equal(add.m.seq, 1, 'an added message carries its seq');
-  const fields = { responses: [{ uid: 'u1', optionIndex: 0 }], pinned: true, reactions: [{ uid: 'u1', emoji: '👍' }], stage: { ack: 'sent' }, proposal: { id: 'p1', state: 'pending' }, help: { state: 'coming' } };
+  const fields = { responses: [{ uid: 'u1', optionIndex: 0 }], pinned: true, reactions: [{ uid: 'u1', emoji: '👍' }], stage: { ack: 'sent' }, proposal: { id: 'p1', state: 'pending' }, help: { state: 'coming' }, sentTo: { roomName: 'Legal', hallName: 'Hall 2', ref: 'rLG', id: 'm9', withdrawn: 2 }, replyTo: { id: 'm8', name: 'Lou', snippet: '', withdrawn: true } };
   // Every field in one op, written in the reverse of the table's order: sent in the table's order, each with the seq.
   const all = t.apply(t.room, { o: 'upd', id: 'm1', f: Object.fromEntries(Object.entries(fields).reverse()) });
   t.apply(t.room, { o: 'meta', name: 'Main hall, day 2' });
@@ -1151,7 +1151,7 @@ test('op table: each change is committed, then sent under the event the table na
   assert.deepEqual(t.room.settings.lockRoles, true);
   // The events the table names are the events apply() sends, every one of them: the wire fence reads them from EVENTS.
   assert.deepEqual([...new Set(t.sent.map((x) => x[1]))].sort(), [...ops.EVENTS].sort());
-  assert.deepEqual(Object.keys(ops.UPD_EVENTS), ['responses', 'pinned', 'reactions', 'stage', 'proposal', 'help']);
+  assert.deepEqual(Object.keys(ops.UPD_EVENTS), ['responses', 'pinned', 'reactions', 'stage', 'proposal', 'help', 'sentTo', 'replyTo']);
   assert.ok(Object.isFrozen(ops.UPD_EVENTS) && Object.isFrozen(ops.EVENTS) && Object.isFrozen(ops.KINDS));
   assert.deepEqual(ops.eventsOf({ o: 'nothing', s: 1 }, t.room), [], 'a kind the table does not hold sends nothing');
 });
@@ -1906,8 +1906,10 @@ test('ai: thread text is compact and labelled', () => {
   const sent = ai.threadText([
     { type: 'text', text: 'Is the contract signed?', at, from: { name: 'Lou', role: 'research' }, sentFrom: { roomName: 'Legal', hallName: 'Hall 2', ref: 'rABC' } },
     { type: 'text', text: 'Signed.', at, from: { name: 'Gus', role: 'research' }, sentTo: { roomName: 'Hall 2', hallName: 'Hall 2', ref: 'rDEF', id: 'm1' } },
+    { type: 'text', text: 'Wrong room.', at, from: { name: 'Gus', role: 'research' }, sentTo: { roomName: 'Hall 2', hallName: 'Hall 2', ref: 'rDEF', id: 'm2', withdrawn: at + 40_500 } },
   ]).split('\n');
-  assert.deepEqual(sent, ['[14:06] Lou (research) [sent here from Hall 2 › Legal]: Is the contract signed?', '[14:06] Gus (research) [sent to Hall 2, a copy kept here]: Signed.']);
+  assert.deepEqual(sent, ['[14:06] Lou (research) [sent here from Hall 2 › Legal]: Is the contract signed?', '[14:06] Gus (research) [sent to Hall 2, a copy kept here]: Signed.',
+    '[14:06] Gus (research) [sent to Hall 2 and withdrawn from there after 40 s, a copy kept here]: Wrong room.']);
 });
 
 test('ai: a draft in a hall\'s other room is told which room it is, and that nobody on stage reads it; a Main room\'s is told nothing', () => {

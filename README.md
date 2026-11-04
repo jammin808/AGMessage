@@ -37,10 +37,14 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   from a message's **↗ Send to ▸**: one list of rooms, first those this room's lists allow (sent there, a copy kept
   here), then the rooms the person may forward into ("a forward — no withdraw"). The room it went to reads "↘ From Hall 2
   › Legal" with the sender's name and offers **↗ Send back**, whose answer lands under the question in both rooms; the
-  room it came from keeps the copy, "↗ Sent to Hall 2 › Legal — delivered"; its sender may delete the copy, but not the
-  message in the other room, which only the admin removes there. Nothing else of the other room comes back
+  room it came from keeps the copy, "↗ Sent to Hall 2 › Legal — delivered". **A mis-sent message is withdrawn**: on the
+  copy, its sender or the admin chooses **Withdraw from Hall 2 › Legal…**, which asks first ("people there may have read
+  it (it was there 40 s)"); it goes from the other room, which says who took it back, a reply there that quoted it keeps
+  none of its words ("↩ Ana: ⊘ withdrawn"), and the copy stays, reading "⊘ Withdrawn from Hall 2 › Legal after 40 s". The sender may delete the copy (withdraw first: the copy is what takes it
+  back), but not the message in the other room, which the admin removes there. Nothing else of the other room comes back
   (its people, its replies, its receipts), no page is told another room's key or code, a file that arrives from another
-  room never opens itself on the On stage panel, and each send is one audit row, never its words or a file's name. A list
+  room never opens itself on the On stage panel, and each send and each withdrawal is one audit row, never its words or a
+  file's name. A list
   taken back mid-show stops the next send at once. **Help requests** go in two taps
   (Help, then Sound, Vision, Lighting, Stage, Presenter, IT / network or Something else), from any room, and stay red
   until someone is on the way and on the board until resolved. A side room's request is on the board whole for those who

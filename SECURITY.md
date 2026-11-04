@@ -116,6 +116,18 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   "delivered" stays true. Each send is one `room.send` row, written once the message is there, never its words or a
   file's name. A file that
   arrives from another room never opens itself on the On stage panel.
+- A send is taken back (`room:withdraw`) only from the copy the room it came from keeps, by its sender or the admin's own
+  page: never another person of that room, the admin's support view or a seat On stage (which acts on no other room).
+  Every refusal takes a token of the writes bucket first, so asking about messages one may not withdraw is rate-limited;
+  only a repeat of a withdrawal made (asked by its sender or the admin) is answered as done before it. It takes the message
+  from the other room only while that room still holds it, the one that came from this room by its reference; a room
+  removed or a message the admin removed there leaves nothing to take back, said so. With it goes every word of it a reply
+  there quoted (a quote's first 120 characters, or a file's name): the reply keeps who wrote it and says it was withdrawn,
+  in the room's feed, in what a page joining later is sent and in its transcript. The copy keeps when it was withdrawn, and
+  its line says how long the message was there: a withdrawal cannot take back what people read, a file someone
+  downloaded, or a copy someone there forwarded or sent on into another room, and a file's link keeps working while any
+  room (the copy here among them) or screen holds it. Each withdrawal is one `room.withdraw` row, never the words or a
+  file's name; a repeat changes nothing and writes none.
 - Room keys and guest codes are two things. A guest joins by a room's guest code alone, each room its own: a side room's
   is made with it and is never its key, and a hall's Main room's is its key until the admin renews it (New code), so a
   0.5.1 hall keeps the code its guests know. A code is one room's (no live code, earlier code or key shared). The admin

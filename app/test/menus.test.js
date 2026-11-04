@@ -45,6 +45,8 @@ const ON_STAGE_WORDS = {
   forward: 'Messages from On stage stay in this room.',
   'room:send': 'Messages from On stage stay in this room.',
   delete: 'Only the author can delete this message',
+  // What the room sent into another is its sender's and the admin's to withdraw: neither On stage page sent it.
+  'room:withdraw': 'Only its sender or the admin withdraws it.',
   // A room's guest code is the admin's to switch and renew, whatever the seat: refused as every seat but the admin is.
   'room:update': 'Not admin',
 };
@@ -59,7 +61,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
 
   const root = (await api(base, 'POST', '/api/setup', { token: TOKEN, username: 'root', name: 'Root Admin', password: 'the green room kettle' })).cookie;
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: root })).body.code;
-  const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
+  const [hallA, hallB, hallC] = [await hall('Hall A'), await hall('Hall B'), await hall('Hall C')];
   const account = async (username, role, halls, password, extra = {}) => {
     const made = await api(base, 'POST', '/api/users', { username, name: username.toUpperCase(), role, halls, password, ...extra }, { cookie: root });
     assert.equal(made.status, 200, JSON.stringify(made.body));
@@ -119,6 +121,11 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     await emit(seats.board.s, 'message', { type: 'help', category: 'Presenter', text: 'water, please' }),
   ];
   assert.ok(said.every((r) => r && r.ok), JSON.stringify(said));
+  // And Hall A's copy of what Ana sent into Hall C, whose list names Hall A: Withdraw is its sender's and the admin's.
+  assert.ok((await emit(seats.admin.s, 'room:update', { code: hallC, sendFrom: [hallA] })).ok);
+  const toC = (await emit(ana.s, 'room:sendTargets', {})).targets[0].ref;
+  const sentToC = await emit(ana.s, 'room:send', { to: toC, type: 'text', text: 'Is the overflow room open?' });
+  assert.ok(sentToC.ok, JSON.stringify(sentToC));
   const made = await emit(seats.admin.s, 'display:create', { code: hallA, name: 'Lectern monitor' });
   assert.ok(made.ok, JSON.stringify(made));
   const hallNow = async () => {
@@ -155,6 +162,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'room:send': () => ({ to: 'r' + 'A'.repeat(16), type: 'text', text: 'From a seat that may not send it' }),
     pin: (o) => ({ messageId: o.id, pinned: !o.pinned }),
     delete: (o) => ({ messageId: o.id }),
+    'room:withdraw': (o) => ({ messageId: o.id }),
     'display:identify': (o) => ({ id: o.id }),
     'display:update': (o) => ({ id: o.id, name: 'Renamed by a seat that may not' }),
     'display:rotate': (o) => ({ id: o.id }),
@@ -208,6 +216,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   assert.deepEqual(brief(after), brief(before));
   const inB = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallB })).messages.filter((m) => m.type !== 'system');
   assert.deepEqual(inB, [], 'nothing was forwarded into hall B');
+  const inC = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallC })).messages.filter((m) => m.type !== 'system');
+  assert.deepEqual(inC.map((m) => [m.text, !!m.sentFrom]), [['Is the overflow room open?', true]], 'nothing was withdrawn from hall C');
 });
 
 test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, never On stage, and asked again when the admin\'s link changes', async (t) => {
@@ -228,11 +238,12 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   assert.deepEqual([first.forwardable, await rooms(anaA)], [false, []]);
   // The same person backstage in B too: from A, B takes a message; the answer says so, its keys appended at the end in
   // the order they landed (the build serving now, which a page on another build reloads for; then the hall's facts; then
-  // whether a message here may be sent into another room by its list, `sends`: no list names Hall A, so it may not).
+  // whether a message here may be sent into another room by its list, `sends`: no list names Hall A, so it may not; then
+  // whether the page is the admin's own, `admin`, which a guest's is not).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-10), again.sends], [true, [hallB], ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends'], false]);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-11), again.sends, again.admin], [true, [hallB], ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin'], false, false]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board');

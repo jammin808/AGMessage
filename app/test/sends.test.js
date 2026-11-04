@@ -16,6 +16,7 @@ const path = require('path');
 const vm = require('vm');
 const { RoomStore } = require('../lib/store');
 const { ROOT, startServer, restartServer, stopServer, api, connect, emit, once, until, wait, TOKEN, readSource } = require('./helpers');
+const ops = require('../lib/ops');
 
 /** An audit row as the tests read it: its target, its words, who. */
 const rowsOf = (dataDir, action) => fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
@@ -567,7 +568,7 @@ test('On stage nothing is sent into another room (owner answer B2): a Board gues
   // What Legal sent into Hall A is Hall A's while it holds it (plan 1-§4.3): its sender's page there may not delete it,
   // so Legal's copy is still true when it says "delivered"; the sender deletes the copy in Legal, and the admin removes
   // the message in Hall A.
-  const SENT_STAYS = 'A message sent from another room stays here: only the admin removes it.';
+  const SENT_STAYS = 'A message sent from another room stays here: its sender withdraws it from that room, or the admin removes it.';
   assert.deepEqual(await act(kibStage.s, 'delete', { messageId: legalsInA.id }), { ok: false, error: SENT_STAYS });
   assert.ok((await watch(hallA)).messages.some((m) => m.id === legalsInA.id), 'Hall A still holds it');
   const copyInLegal = (await watch(LEGAL)).messages.find((m) => m.sentTo && m.sentTo.id === legalsInA.id);
@@ -576,6 +577,198 @@ test('On stage nothing is sent into another room (owner answer B2): a Board gues
   assert.ok((await watch(hallA)).messages.some((m) => m.id === legalsInA.id), 'the copy deleted, Hall A still holds the message');
   assert.deepEqual(await act(ctl, 'admin:deleteMessage', { roomCode: hallA, messageId: legalsInA.id }), { ok: true });
   assert.ok(!(await watch(hallA)).messages.some((m) => m.id === legalsInA.id));
+});
+
+// ---------------------------------------------------------------- a send withdrawn (plan 1-§4.4)
+test('a mis-sent message is withdrawn: by its sender or the admin, never another, the support view or a seat On stage, each refusal taking a token; it goes from the room it went to with a line saying who, and a reply there keeps no word of it; the copy keeps when and each room\'s pages hear it in order, a resumed page reads it from the ops, a repeat is answered as done before the rate, one no longer there is said so; the file stays while the copy holds it; one row each, no words', { timeout: 120_000 }, async (t) => {
+  const srv = await startServer();
+  t.after(() => stopServer(srv.child));
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: PASSWORD })).cookie;
+  const account = async (username, role, extra = {}) => {
+    const made = await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: 'clipboard and coffee', ...extra }, { cookie: admin });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    return (await api(srv.base, 'POST', '/api/auth/login', { username, password: 'clipboard and coffee' })).cookie;
+  };
+  const hall = async (name) => (await api(srv.base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
+  const [hallA, hallB] = [await hall('Hall A'), await hall('Hall B')];
+  const ctl = await page(admin);
+  const LEGAL = (await act(ctl, 'room:create', { hall: hallA, name: 'Legal' })).key;
+  const MEDIA = (await act(ctl, 'room:create', { hall: hallB, name: 'Media' })).key;
+  // Hall A and Media take Legal in, and Legal takes Hall A in.
+  for (const [code, from] of [[hallA, [LEGAL]], [MEDIA, [LEGAL]], [LEGAL, [hallA]]]) assert.ok((await act(ctl, 'room:update', { code, sendFrom: from })).ok);
+
+  // Every frame and answer each page hears.
+  const heard = new Map();
+  const seated = async (name, join, cookie) => {
+    const s = await page(cookie);
+    const frames = [];
+    heard.set(name, frames);
+    s.onAny((ev, ...args) => frames.push([ev, args]));
+    const j = await emit(s, 'join', join);
+    assert.equal(j.ok, true, name + ': ' + JSON.stringify(j));
+    return { s, j };
+  };
+  /** The numbers a page heard on the changes it was sent (lib/ops.js EVENTS), in the order heard. */
+  const seqsOf = (name) => heard.get(name).filter(([ev, args]) => ops.EVENTS.includes(ev) && args[0] && Number.isInteger(args[0].seq)).map(([, args]) => args[0].seq);
+  const heardSystem = (name, text) => heard.get(name).some(([ev, args]) => ev === 'system' && args[0] && args[0].text === text);
+  const louCookie = await account('lou', 'staff', { rooms: [LEGAL] });
+  const vicCookie = await account('vic', 'viewer', { rooms: [LEGAL] });
+  const lou = await seated('lou', { roomCode: LEGAL, as: 'account' }, louCookie);
+  const sid = await seated('sid', { roomCode: LEGAL, as: 'account' }, await account('sid', 'staff', { rooms: [LEGAL] }));
+  const vic = await seated('vic', { roomCode: LEGAL, as: 'account' }, vicCookie);
+  const root = await seated('root', { roomCode: LEGAL, as: 'account' }, admin);
+  const support = await seated('support', { roomCode: LEGAL, name: 'lou', role: 'research', adminView: true }, admin);
+  const gus = await seated('gus', { roomCode: hallA, name: 'Gus', role: 'research' });
+  // An admin account seated On stage in Hall A: the seat's limit holds the admin as anyone there.
+  const ada = await seated('ada', { roomCode: hallA, as: 'account' }, await account('ada', 'admin', { halls: [hallA], board: [hallA] }));
+  assert.deepEqual([lou.j.admin, sid.j.admin, root.j.admin, support.j.admin, gus.j.admin, ada.j.admin, ada.j.role], [false, false, true, false, false, true, 'board'],
+    'the join says whether the page is the admin\'s own: the support view is not');
+
+  const targets = async (p) => (await act(p.s, 'room:sendTargets', {})).targets;
+  const REF_A = (await targets(lou)).find((x) => x.name === 'Hall A').ref;
+  const REF_M = (await targets(lou)).find((x) => x.name === 'Media').ref;
+  const REF_L = (await targets(gus)).find((x) => x.name === 'Legal').ref;
+  const send = async (p, args) => { const r = await act(p.s, 'room:send', args); assert.equal(r.ok, true, JSON.stringify(r)); return r; };
+  const messagesIn = async (code) => (await act(ctl, 'admin:watchRoom', { roomCode: code })).messages;
+  const first = await send(lou, { to: REF_A, type: 'text', text: 'Wrong room: the fee is 40k' });
+  const up = await uploadWith(srv.base, lou.j.uploadToken, 'fees.pdf', 'fees');
+  const fileSent = await send(lou, { to: REF_A, type: 'file', url: up.url, filename: 'fees.pdf', mime: 'application/pdf' });
+  const second = await send(lou, { to: REF_A, type: 'text', text: 'And the venue is booked' });
+  const third = await send(lou, { to: REF_A, type: 'text', text: 'Removed there by the admin' });
+  const toMedia = await send(lou, { to: REF_M, type: 'text', text: 'Media, a room that goes' });
+  const fromA = await send(gus, { to: REF_L, type: 'text', text: 'From Hall A, sent by mistake' });
+  const inA = await messagesIn(hallA);
+  const thereOf = (text) => inA.find((m) => m.sentFrom && m.text === text);
+  const copyFirst = (await messagesIn(LEGAL)).find((m) => m.id === first.id);
+  assert.deepEqual(copyFirst.sentTo, { roomName: 'Hall A', hallName: 'Hall A', ref: REF_A, id: thereOf('Wrong room: the fee is 40k').id });
+
+  // Refused, each in words, and nothing taken back: another member of the room, an observer, the admin's support view of
+  // the sender, a message that is no copy of a send (this room's own, and the message where it went), none at all, and the
+  // admin On stage.
+  const withdraw = (p, messageId) => act(p.s, 'room:withdraw', { messageId });
+  const NOT_YOURS = 'Only its sender or the admin withdraws it.';
+  const NOT_SENT = 'Only a message this room sent into another room is withdrawn.';
+  const plainHere = await act(lou.s, 'message', { type: 'text', text: 'Only for Legal' });
+  for (const [who, p, id, error] of [
+    ['another member', sid, first.id, NOT_YOURS],
+    ['an observer', vic, first.id, NOT_YOURS],
+    ['the support view', support, first.id, 'This is someone else\'s view — act from your own page.'],
+    ['this room\'s own message', lou, plainHere.id, NOT_SENT],
+    ['no message', lou, 'nope', 'Message not found'],
+    ['the message where it went', gus, thereOf('Wrong room: the fee is 40k').id, NOT_SENT],
+    ['the admin On stage', ada, fromA.id, 'Do that from a backstage page.'],
+  ]) assert.deepEqual(await withdraw(p, id), { ok: false, error }, who);
+  assert.deepEqual((await messagesIn(hallA)).map((m) => m.id), inA.map((m) => m.id), 'nothing went from Hall A');
+  assert.ok((await messagesIn(LEGAL)).some((m) => m.sentFrom && m.text === 'From Hall A, sent by mistake'), 'nothing went from Legal');
+  // A refusal is never free: one who may not withdraw a copy, or asks of a message that is not here, takes a token for
+  // each ask, so a burst of them meets the rate (lib/gate.js); only a repeat of what was done is answered before it.
+  for (const [who, p, id, error] of [['another member', sid, first.id, NOT_YOURS], ['no message', vic, 'nope', 'Message not found']]) {
+    const asked = await Promise.all(Array.from({ length: 24 }, () => emit(p.s, 'room:withdraw', { messageId: id })));
+    assert.ok(asked.some((r) => r && r.busy === true) && asked.every((r) => r && r.ok === false && (r.busy === true || r.error === error)), who + ': ' + JSON.stringify(asked.map((r) => r && r.error)));
+  }
+  assert.deepEqual((await messagesIn(hallA)).map((m) => m.id), inA.map((m) => m.id), 'nothing went from Hall A in a burst either');
+
+  // Replies in Hall A that quote the first: Gus's, and Hall A's copy of what Gus sends back into Legal under it.
+  const thereFirst = thereOf('Wrong room: the fee is 40k');
+  const noted = await act(gus.s, 'message', { type: 'text', text: 'Noted', replyTo: thereFirst.id });
+  assert.equal(noted.ok, true, JSON.stringify(noted));
+  const whichFee = await send(gus, { to: REF_L, type: 'text', text: 'Which fee?', replyTo: thereFirst.id });
+  assert.deepEqual((await messagesIn(hallA)).filter((m) => m.replyTo && m.replyTo.id === thereFirst.id).map((m) => [m.id, m.replyTo.snippet]), [[noted.id, 'Wrong room: the fee is 40k'], [whichFee.id, 'Wrong room: the fee is 40k']]);
+
+  // A page that leaves before the sends are withdrawn, to come back by resuming: Vic's, from the last change it heard.
+  const vicSince = Math.max(vic.j.seq, ...seqsOf('vic'));
+  vic.s.close();
+
+  // Gus takes back what Hall A sent into Legal: it goes from Legal, which says who took it back.
+  const fromAThere = (await messagesIn(LEGAL)).find((m) => m.sentFrom && m.text === 'From Hall A, sent by mistake');
+  const legalHeard = once(lou.s, 'messageDeleted');
+  assert.deepEqual(await withdraw(gus, fromA.id), { ok: true });
+  assert.equal((await legalHeard).messageId, fromAThere.id);
+  await until(() => heardSystem('lou', 'Gus withdrew a message sent from Hall A'), 4000, 'Legal\'s line');
+  assert.ok(!(await messagesIn(LEGAL)).some((m) => m.id === fromAThere.id), 'it went from Legal');
+
+  // Lou takes back the first: it goes from Hall A, with its line; Legal's copy keeps when, heard by Legal's pages under the
+  // next number; a repeat is answered as done and changes nothing.
+  const updated = once(lou.s, 'sentUpdate');
+  const deleted = once(gus.s, 'messageDeleted');
+  const copyAt = copyFirst.at;
+  assert.deepEqual(await withdraw(lou, first.id), { ok: true });
+  const upd = await updated;
+  assert.equal((await deleted).messageId, thereOf('Wrong room: the fee is 40k').id);
+  assert.deepEqual({ messageId: upd.messageId, sentTo: { ...upd.sentTo, withdrawn: 0 } }, { messageId: first.id, sentTo: { ...copyFirst.sentTo, withdrawn: 0 } });
+  assert.ok(Number.isInteger(upd.sentTo.withdrawn) && upd.sentTo.withdrawn >= copyAt && Number.isInteger(upd.seq), JSON.stringify(upd));
+  await until(() => heardSystem('gus', 'lou withdrew a message sent from Hall A › Legal'), 4000, 'Hall A\'s line');
+  const nowA = await messagesIn(hallA);
+  assert.ok(!nowA.some((m) => m.id === thereOf('Wrong room: the fee is 40k').id), 'it went from Hall A');
+  assert.deepEqual((await messagesIn(LEGAL)).find((m) => m.id === first.id).sentTo, upd.sentTo, 'the copy stays, its mark kept');
+  // Hall A's replies to it keep who wrote it and no word of it, each a change Hall A's pages hear; Legal's own answer under
+  // its copy keeps its quote, Legal's own words.
+  const unquoted = { id: thereFirst.id, name: 'lou', snippet: '', withdrawn: true };
+  assert.deepEqual((await messagesIn(hallA)).filter((m) => m.replyTo && m.replyTo.id === thereFirst.id).map((m) => [m.id, m.replyTo]), [[noted.id, unquoted], [whichFee.id, unquoted]]);
+  await until(() => heard.get('gus').filter(([ev, args]) => ev === 'replyUpdate' && args[0] && args[0].replyTo && args[0].replyTo.withdrawn === true && Number.isInteger(args[0].seq)).map(([, args]) => args[0].messageId).join() === [noted.id, whichFee.id].join(), 4000, 'Hall A\'s pages hear the quotes go');
+  assert.ok(!JSON.stringify(await messagesIn(hallA)).includes('40k'), 'Hall A holds no word of it');
+  const transcriptA = await (await fetch(srv.base + '/api/admin/transcript/' + hallA, { headers: { cookie: admin } })).text();
+  assert.ok(!transcriptA.includes('40k') && (transcriptA.match(/↩ replying to lou: <em>⊘ withdrawn<\/em>/g) || []).length === 2, 'nor its transcript');
+  assert.deepEqual((await messagesIn(LEGAL)).find((m) => m.text === 'Which fee?').replyTo, { id: first.id, name: 'lou', snippet: 'Wrong room: the fee is 40k' }, 'Legal keeps its own words');
+  assert.deepEqual(await withdraw(lou, first.id), { ok: true, already: true });
+  assert.deepEqual((await messagesIn(hallA)).map((m) => m.id), nowA.map((m) => m.id), 'a repeat takes nothing more from Hall A');
+
+  // The admin takes back what Lou sent, from the admin's own page in Legal: Hall A's line says whose it was.
+  assert.deepEqual(await withdraw(root, second.id), { ok: true });
+  await until(() => heardSystem('gus', 'Ana Admin withdrew a message lou sent from Hall A › Legal'), 4000, 'the admin\'s line');
+
+  // A file: it goes from Hall A, and stays on the laptop while Legal's copy holds it; the copy deleted, it goes.
+  assert.deepEqual(await withdraw(lou, fileSent.id), { ok: true });
+  await until(() => heardSystem('gus', 'lou withdrew a file sent from Hall A › Legal'), 4000, 'the file\'s line');
+  assert.ok(!(await messagesIn(hallA)).some((m) => m.url === up.url), 'it went from Hall A');
+  assert.equal((await fetch(srv.base + up.url)).status, 200, 'Legal\'s copy still holds the file');
+  assert.deepEqual(await act(lou.s, 'delete', { messageId: fileSent.id }), { ok: true });
+  await until(async () => (await fetch(srv.base + up.url)).status === 404, 4000, 'the file removed once nothing holds it');
+
+  // No longer there: removed by the admin where it went, or its room removed, it is said so; the rate holds a burst.
+  const thirdThere = (await messagesIn(hallA)).find((m) => m.text === 'Removed there by the admin');
+  assert.deepEqual(await act(ctl, 'admin:deleteMessage', { roomCode: hallA, messageId: thirdThere.id }), { ok: true });
+  assert.deepEqual(await withdraw(lou, third.id), { ok: false, error: 'It is no longer in Hall A: there is nothing to withdraw.' });
+  const burst = await Promise.all(Array.from({ length: 24 }, () => emit(lou.s, 'room:withdraw', { messageId: third.id })));
+  assert.ok(burst.some((r) => r && r.busy === true && r.error === 'Slow down a little.'), 'the writes bucket applies: ' + JSON.stringify(burst.map((r) => r.error)));
+  // While the rate holds the rest, a repeat of what was done is still answered as done: it takes no token.
+  assert.deepEqual(await emit(lou.s, 'room:withdraw', { messageId: first.id }), { ok: true, already: true }, 'a repeat is answered before the rate');
+  await wait(3200);
+  assert.ok((await act(ctl, 'admin:deleteRoom', { roomCode: MEDIA })).ok);
+  assert.deepEqual(await withdraw(lou, toMedia.id), { ok: false, error: 'It is no longer in Hall B › Media: there is nothing to withdraw.' });
+
+  // Every change Legal's pages were sent, Lou's from its join on, reached them under the next number: no gap, so no page
+  // rejoins to catch up.
+  const legalNow = (await emit(await page(louCookie), 'join', { roomCode: LEGAL, as: 'account' })).seq;
+  const louSeqs = seqsOf('lou');
+  assert.deepEqual(louSeqs, Array.from({ length: legalNow - lou.j.seq }, (_, i) => lou.j.seq + 1 + i), 'Lou\'s page heard every change in order');
+  // And Hall A's, its quotes taken out among them.
+  const gusSeqs = seqsOf('gus');
+  assert.deepEqual(gusSeqs, Array.from({ length: gusSeqs.length }, (_, i) => gus.j.seq + 1 + i), 'Gus\'s page heard every change in order');
+  // Vic's page, back by resuming, is sent each withdrawal's mark among the changes it missed.
+  const back = await emit(await page(vicCookie), 'join', { roomCode: LEGAL, as: 'account', since: vicSince });
+  assert.ok(Array.isArray(back.ops), JSON.stringify(back).slice(0, 200));
+  assert.deepEqual(back.ops.map((o) => o.s), Array.from({ length: back.ops.length }, (_, i) => vicSince + 1 + i), 'the ops it missed, in order');
+  assert.deepEqual(back.ops.filter((o) => o.o === 'upd' && o.f.sentTo).map((o) => [o.id, Number.isInteger(o.f.sentTo.withdrawn)]), [[first.id, true], [second.id, true], [fileSent.id, true]]);
+
+  // The transcript says it of each copy: withdrawn and after how long, or where it went.
+  const transcript = await (await fetch(srv.base + '/api/admin/transcript/' + LEGAL, { headers: { cookie: admin } })).text();
+  assert.equal((transcript.match(/⊘ Withdrawn from Hall A after \d+ s — a copy kept here/g) || []).length, 2, 'the two copies withdrawn and kept');
+  assert.ok(transcript.includes('↗ Sent to Hall A — a copy kept here') && transcript.includes('↗ Sent to Hall B › Media — a copy kept here'), 'the copies not withdrawn say where they went');
+
+  // One row each, by the room it went from and how long it was there: never the words or a file's name.
+  const rows = rowsOf(srv.dataDir, 'room.withdraw');
+  assert.deepEqual(rows.map(([target, , who]) => [target, who]), [[LEGAL, 'Gus'], [hallA, 'lou'], [hallA, 'ana'], [hallA, 'lou']]);
+  assert.deepEqual(rows.map(([, words]) => words.replace(/there \d+ s$/, 'there N s')), [
+    'a message sent from Main (Hall A), there N s',
+    'a message sent from Legal (Hall A), there N s',
+    'a message by lou sent from Legal (Hall A), there N s',
+    'a file sent from Legal (Hall A), there N s',
+  ]);
+  assert.ok(!JSON.stringify(rows).match(/fee|venue|mistake|\/uploads\//i), 'no words, no file name, no link');
 });
 
 // ---------------------------------------------------------------- the picker (public/sendfrom.js), its pure half

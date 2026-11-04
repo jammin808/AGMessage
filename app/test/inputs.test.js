@@ -98,6 +98,7 @@ test('client values are read by their type: a value String() cannot convert reac
     [guest, 'room:send', { to: U, type: 'text', text: U }], [guest, 'room:send', { to: U, messageId: U }], [guest, 'room:send', { to: ref, messageId: U }],
     [guest, 'room:send', { to: ref, type: 'text', text: U, replyTo: U }], [guest, 'room:send', { to: ref, type: 'file', url: U, caption: U }],
     [guest, 'room:send', { to: ref, type: U }], [guest, 'room:send', { to: ref, type: 'text', text: 'x', cid: U }], [guest, 'room:sendTargets', U],
+    [guest, 'room:withdraw', { messageId: U }], [guest, 'room:withdraw', { messageId: U, cid: U }], [ctl, 'room:withdraw', { messageId: U }],
   ];
   // A room's code acts read by type: each a refusal in its own words, and nothing switched or renewed.
   const CODE_WORDS = {
@@ -115,6 +116,12 @@ test('client values are read by their type: a value String() cannot convert reac
     // A room's hall, key and name that are no strings are read as none, and refused for it: no room is made or named.
     // A send into another room names its room, its message and its words by type: each refused for what it lacks.
     if (ev === 'room:sendTargets') assert.deepEqual(r, { ok: true, targets: [{ ref, name: 'Legal', hallName: 'Hall 3' }] }, 'a read takes no argument');
+    // A send taken back names its message by type: one that is no string is no message (the admin's page sits in no room).
+    if (ev === 'room:withdraw') {
+      assert.deepEqual(r, { ok: false, error: s === ctl ? 'Not joined' : 'Message not found' }, ev + ' ' + JSON.stringify(arg));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
     if (ev === 'room:send') {
       const words = arg.cid ? 'That message\'s id could not be read.' : arg.to !== ref ? (arg.type ? 'That room is gone.' : 'Message not found') : arg.messageId ? 'Message not found'
         : arg.type === U ? 'Only a message or a file is sent into another room.' : 'Invalid message';
@@ -134,5 +141,6 @@ test('client values are read by their type: a value String() cannot convert reac
   assert.ok(!audit.body.entries.some((e) => e.action === 'room.code'), 'a code act in the wrong type switches nothing, and so is not audited');
   assert.deepEqual(audit.body.entries.filter((e) => e.action === 'room.sendFrom').map((e) => e.target), [legal], 'a list in the wrong type sets nothing, and so is not audited: the one row is Legal\'s, set above');
   assert.ok(!audit.body.entries.some((e) => e.action === 'room.send'), 'a send in the wrong type sends nothing, and so is not audited');
+  assert.ok(!audit.body.entries.some((e) => e.action === 'room.withdraw'), 'a withdrawal in the wrong type takes nothing back, and so is not audited');
   assert.deepEqual((await send(ctl, 'room:settings', { code: hall })).sendFrom, [], 'and no room may send into the hall');
 });

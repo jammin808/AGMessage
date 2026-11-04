@@ -411,7 +411,12 @@ What (k) cannot read it fails rather than pass: an `apply` reached under another
 and the run-time refusal still holds it. The hall page applies a change it reads when it comes back and one it hears live
 through the same row of its table, and the smoke holds the two drawing the show desk's answer the same way. On the tree before (k)
 the page had no table: the resumed path and the six live listeners were written apart, and drew that answer differently
-on a message whose record the page no longer held.
+on a message whose record the page no longer held. A send's mark (`sentTo`, sent as `sentUpdate`) and a reply's quote
+(`replyTo`, sent as `replyUpdate`) are the table's seventh and eighth rows, each changed by the rooms module's withdrawal
+(unit 15), the mark on the copy kept where the send came from and the quote on each reply that quoted it where it went:
+without them, the withdrawal's changes would leave every page of either room with a gap, and each would rejoin. The smoke
+holds the page that withdraws drawing the mark heard live with no join again, a page back by resuming drawing it through
+`applyOp`, and the room it went to drawing the quote "⊘ withdrawn" with none of its words.
 
 (l) keeps the hall and the room apart. A hall is its Main room: `store.rooms`, `get` and `has` see only halls, so a reader
 that means a hall (the halls board, `/api/halls`, the context, screens, Stagewatch and peer links, hall settings) never
@@ -623,7 +628,18 @@ rest (a forward's row says "a forward — no withdraw" on its second line, an it
 (`room:send`), on a message whose `sentFrom` names a room this one may send into, the full view only. ↗ is Send to, Send
 back and To ▸, one act (`ONE_ACT`), and `room:send` is a required verb, refused as each seat it is hidden from (On stage
 in the table's words). Delete… (`msg.delete`) fits no message another room sent here (`sentFrom`): its sender may not
-delete it there, and the server's `delete` refuses it in its words. An ask's verbs are its yes and no, or its `choices` and no (the rule
+delete it there, and the server's `delete` refuses it in its words. Withdraw (unit 15) is `msg.withdraw` (`room:withdraw`,
+mode `now`, in the danger group before Delete…; its icon 🔙, since ⊘ is the withdrawn line's mark and no act's icon is a
+mark): it fits this room's copy of a send not withdrawn yet (`sentTo` without `withdrawn`), the full view only; `may`: its
+sender, or the admin's own page (the join's `admin`, never the support view's), and never a seat On stage; it asks first,
+naming the room and how long the message has been there by the page's clock when it is asked (`confirm`'s third argument,
+`now`, by default the time it asks), and the copy's Delete… says, while it is not withdrawn, that the message stays where it
+went. `room:withdraw` is a required verb, refused as each seat it is hidden from (On stage in the table's words), and in
+the outbox's `REPEATS`: a copy withdrawn already is answered `already`, to its sender or the admin, before the rate;
+every refusal takes a writes token first, as the gate's rule has it (`bucket: null` on its gate, the token taken in the
+handler after the repeat), and `test/sends.test.js` holds a burst of refusals to the rate and a repeat answered while the
+rate refuses the rest. The seat matrix holds an admin's own page seated On stage to no Withdraw. How long a withdrawn send was there is said alike by
+the pages and the server's readers (`AGM.catalog.lasted`, `lib/ops.js` `lasted`, held equal by `test/catalog.test.js`). An ask's verbs are its yes and no, or its `choices` and no (the rule
 `test/catalog.test.js` reads of every ask).
 The hall page has one toast (`AGM.toast`, `common.js`), a `role=status` region (`test/resilience.test.js` refuses the
 toast's class or id named in any other page script, and a second toast class in the stylesheet), and its lists are `AGM.roving`'s: the
@@ -825,7 +841,7 @@ The fences the review added, beside the tests for each finding:
 
 | Fence | Holds |
 |---|---|
-| `test/inputs.test.js` | every event a handler file listens to (`handlerFiles()`: `server.js` and each module in `lib/handlers/`, read from their source, so a new handler is held too) is sent every argument shape — null, numbers, strings, lists, an object `String()` cannot convert — from a socket with no sign-in, a crew account, the admin and a screen; the server answers and stays up, and the handler guard has nothing to catch. The shapes carry the outbox's keys too (`cid`, `on` and `heldMs`, null and unconvertible) and a room's code acts and its list of rooms that may send in (`codeOn`, `newCode`, `keepGuests`, `sendFrom`, `sendBack`, null; the last two as lists of an unconvertible value) and a send into another room's (`to`, `replyTo`, null and unconvertible), and the typed cases a room's hall, key and name (`room:create`, `room:update`, `room:settings`), each read as none and refused with its words, a room's code acts by type (`codeOn`, `newCode` and `keepGuests` unconvertible: each refused in its words, nothing switched and no `room.code` row), its list by type (`sendFrom` and `sendBack` not lists of strings: each refused in its words, no list set and no `room.sendFrom` row), and a send by type (`room:send`'s room, message, words, file, kind and client id unconvertible, to a room it may send into and to none: each refused in its words, nothing sent and no `room.send` row; `room:sendTargets` given anything answers its list) |
+| `test/inputs.test.js` | every event a handler file listens to (`handlerFiles()`: `server.js` and each module in `lib/handlers/`, read from their source, so a new handler is held too) is sent every argument shape — null, numbers, strings, lists, an object `String()` cannot convert — from a socket with no sign-in, a crew account, the admin and a screen; the server answers and stays up, and the handler guard has nothing to catch. The shapes carry the outbox's keys too (`cid`, `on` and `heldMs`, null and unconvertible) and a room's code acts and its list of rooms that may send in (`codeOn`, `newCode`, `keepGuests`, `sendFrom`, `sendBack`, null; the last two as lists of an unconvertible value) and a send into another room's (`to`, `replyTo`, null and unconvertible), and the typed cases a room's hall, key and name (`room:create`, `room:update`, `room:settings`), each read as none and refused with its words, a room's code acts by type (`codeOn`, `newCode` and `keepGuests` unconvertible: each refused in its words, nothing switched and no `room.code` row), its list by type (`sendFrom` and `sendBack` not lists of strings: each refused in its words, no list set and no `room.sendFrom` row), and a send by type (`room:send`'s room, message, words, file, kind and client id unconvertible, to a room it may send into and to none: each refused in its words, nothing sent and no `room.send` row; `room:sendTargets` given anything answers its list), and a send taken back by type (`room:withdraw`'s message and client id unconvertible: no message, nothing withdrawn and no `room.withdraw` row) |
 | `test/sessions.test.js` | sign-in refusals say nothing more than a wrong password does; a stranger's guesses cannot lock the laptop or the venue out; a session's end reaches its open pages; a page in use keeps its session, under a moved clock |
 | `test/uploads.test.js` | uploads stop before the disk fills; files nobody posted are removed; a reset or a deletion removes its own files and no one else's |
 | `test/shownet.test.js` | the discovery table is bounded; Stagewatch's numbers never cross a restart or a relink; a node's changed certificate is accepted only by typing the start of its fingerprint, and the page is never told it |

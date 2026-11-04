@@ -47,7 +47,7 @@ const INPUT = new Set([
   'ai:draft', 'ai:options', 'delete', 'display:create', 'display:hallHolding', 'display:identify', 'display:remove',
   'display:rotate', 'display:take', 'display:update', 'forward', 'hall:acceptCertificate', 'hall:configure', 'help:respond',
   'message', 'nodes:acceptCertificate', 'nodes:command', 'nodes:link', 'nodes:unlink', 'pin', 'react', 'room:create',
-  'room:send', 'room:update', 'stage:propose', 'stage:send',
+  'room:send', 'room:update', 'room:withdraw', 'stage:propose', 'stage:send',
 ]);
 const READS = new Set([
   'join', 'seen', 'myRooms', 'board:watch', 'userState:push', 'userState:requestPeers', 'stage:targets', 'display:list',

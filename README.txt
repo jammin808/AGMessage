@@ -191,12 +191,20 @@ Every day of the event
   then the rooms you may forward into (each says "a forward — no
   withdraw"). The other room sees "From Hall 2 › Legal" with your name,
   and can "Send back" (it answers under your message, in both rooms);
-  your room keeps a copy, "Sent to Hall 2 › Legal — delivered". You may
-  delete the copy; the message in the other room stays there (only the
-  admin removes it). Nothing else of the other room comes back to yours. A file sent from another
-  room never opens itself on the On stage panel. Each send is one audit
-  row (room.send), with no words and no file name. People On stage send
-  nothing into another room.
+  your room keeps a copy, "Sent to Hall 2 › Legal — delivered".
+- Sent to the wrong room? On your copy, choose "Withdraw from Hall 2 ›
+  Legal..." (its ⋯ or right-click); it asks first, saying how long the
+  message has been there, since people there may have read it. It goes
+  from the other room, which says you took it back; a reply there that
+  quoted it keeps none of its words ("withdrawn" in its place). Your copy
+  stays, reading "Withdrawn from Hall 2 › Legal after 40 s". The admin may
+  withdraw anyone's. Withdraw before deleting your copy: once the copy is
+  gone, the message in the other room stays there (only the admin
+  removes it). Nothing else of the other room comes back to yours. A file sent from another
+  room never opens itself on the On stage panel. Each send and each
+  withdrawal is one audit row (room.send, room.withdraw), with no words
+  and no file name. People On stage send nothing into another room, and
+  withdraw nothing.
 - Presenters and guests: open the LAN URL, choose "Join with a code" and
   type the room's code first. Once it is typed the page names the room
   ("Hall 2", or "Legal · Hall 2") and offers its seats: Backstage or

@@ -173,9 +173,29 @@ people, its replies, its seen receipts, its numbers) comes back. A reply sent ba
 room's own message (its copy of the question, or the question itself). A file keeps its link, which the other room's
 people open as any file's; the copy's removal by its author leaves the other room's message, and a file leaves the disk
 only when no room and no screen holds it. The message in the other room is not its sender's to delete there, from a page
-they hold in that room too ("A message sent from another room stays here: only the admin removes it."), so the copy's
-"delivered" stays true while that room holds it; the admin removes it. A file that arrives from another room never opens itself on the On stage panel.
+they hold in that room too ("A message sent from another room stays here: its sender withdraws it from that room, or the
+admin removes it."), so the copy's "delivered" stays true while that room holds it; the admin removes it. A file that
+arrives from another room never opens itself on the On stage panel.
 Each send is one `room.send` row on the other room's key, written once the message is there and before the copy.
+
+**Withdrawing a send.** A mis-sent message is taken back from its copy (`room:withdraw {messageId}`, Withdraw from Hall 2 ›
+Legal… on the copy, which asks first, naming the room and how long it has been there). A repeat of a withdrawal made,
+asked by the copy's sender or the admin's own page, is answered as done (`already`) before the rate, so it is never
+refused for what succeeded; every other request takes a token of the writes bucket first, then is refused, in order: a
+message that is not in the room ("Message not found") or is no copy of a send ("Only a message this room sent into
+another room is withdrawn."); the admin's support view ("This is someone else's view — act from your own page."); anyone
+but the copy's sender and the admin's own page ("Only its sender or the admin withdraws it."); a seat On stage, the
+admin's included ("Do that from a backstage page."); then the message must still be where it went, the one that came from
+this room ("It is no longer in Hall 2 › Legal: there is nothing to withdraw." after a room removed, or a message the admin
+removed or a reset cleared there). The message goes from the other room, and each reply there that quoted it keeps who
+wrote it and none of its words ("↩ Ana: ⊘ withdrawn", a change that room's pages hear as `replyUpdate`); the room says who
+took it back ("Ana withdrew a message sent from Hall 2", "… a file …"; the admin's "Ana Admin withdrew a message Lou sent
+from …"); then one `room.withdraw` row on that room's key; then the copy keeps when (`sentTo.withdrawn`, a change its
+room's pages hear as `sentUpdate`, in order, and a page back from a drop reads among what it missed), and reads "⊘
+Withdrawn from Hall 2 › Legal after 40 s": people there may have read it, and a copy one of them forwarded or sent on
+stays where it went. The copy stays: its file stays on the laptop while the copy holds it, and leaves when the copy is
+deleted and nothing else holds it. Delete… on a copy not withdrawn says the message stays where it went: withdraw first,
+since the copy is what takes it back.
 
 Rules that keep rights from growing by themselves: deny by default; only an admin makes an admin or hands out
 `users.manage`, `settings.manage` or `audit.export`, and only an admin changes, resets, signs out, turns back on or
@@ -413,7 +433,9 @@ room (`room.sendFrom`, by the room's key, one row for every list a change touche
 (Hall 3); it sends back into: Main (Hall 3)", "it no longer sends into: …", a room on the list not open now counted, "2 rooms
 not open now"; each room by its name and its hall's, never a key), each message or file sent into another room
 (`room.send`, by the key of the room it went to: "a message (212 characters) from Legal (Hall 2) to Main (Hall 2)", "a
-file (pdf, 2.1 MB) from …"; never its words or a file's name),
+file (pdf, 2.1 MB) from …"; never its words or a file's name), each send withdrawn (`room.withdraw`, by the key of the
+room it went to and was taken from: "a message sent from Legal (Hall 2), there 40 s", "a file …", the admin's "a message by Lou sent
+from …"; never its words or a file's name),
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and

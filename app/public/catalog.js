@@ -124,6 +124,20 @@
     const hall = r ? String(r.hallName || '') : '';
     return !name || name === hall ? hall || name || 'another room' : (hall || 'A hall with no name') + ' › ' + name;
   }
+  /**
+   * How long a message was in a room ("40 s", "3 min", "1 h 5 min", "2 d 3 h"), as the server's readers say it (lib/ops.js
+   * `lasted`, held to this one by its test): a withdrawn send's line, and the ask before one is withdrawn.
+   */
+  function lasted(ms) {
+    const s = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+    if (s < 60) return s + ' s';
+    if (s < 3600) return Math.floor(s / 60) + ' min';
+    const and = (n, unit) => (n ? ' ' + n + ' ' + unit : '');
+    if (s < 86400) return Math.floor(s / 3600) + ' h' + and(Math.floor((s % 3600) / 60), 'min');
+    return Math.floor(s / 86400) + ' d' + and(Math.floor((s % 86400) / 3600), 'h');
+  }
+  /** This room's copy of a message it sent into another room, not withdrawn from there: Withdraw takes it back. */
+  const withdrawable = (o) => !!o.sentTo && typeof o.sentTo === 'object' && !o.sentTo.withdrawn;
   /** Whether the room a message came from (its `sentFrom`) is one this page may send into now: Send back goes there. */
   const sendsBackTo = (f, o) => !!o.sentFrom && typeof o.sentFrom.ref === 'string' && f.targets.some((t) => t.ref === o.sentFrom.ref);
   /** A Patterns or PlayMap: the links a pairing token drives. */
@@ -209,10 +223,17 @@
         may: (f) => backstage(f) && !f.viewer, fits: (f, o) => o.type === 'file' && typeof o.url === 'string' && o.url.length > 0 },
       { id: 'msg.copy', label: 'Copy text', icon: '📋', group: '3_keep', verb: 'local', mode: 'local',
         may: () => true, fits: (f, o) => full(f) && typeof o.text === 'string' && o.text.length > 0 },
+      // ⊘ is the withdrawn line's mark, so the act has an icon of its own. Its sender or the admin takes back what this
+      // room sent into another room, never On stage (where the seat acts on no other room); the ask names the room and how
+      // long it has been there (`now`, the page's clock, given where the ask is made: by default, the time it is asked).
+      { id: 'msg.withdraw', label: (f, o) => 'Withdraw from ' + placeOf(o.sentTo) + '…', icon: '🔙', group: '9_danger', verb: 'room:withdraw', mode: 'now',
+        may: (f, o) => (mine(f, o) || f.admin) && f.role !== 'board', fits: (f, o) => full(f) && withdrawable(o),
+        confirm: (f, o, now = Date.now()) => ({ title: 'Withdraw from ' + placeOf(o.sentTo) + '?', words: 'It goes from ' + placeOf(o.sentTo) + '\'s chat now; people there may have read it (it was there ' + lasted(now - o.at) + ').', yes: 'Withdraw', no: 'Keep it', danger: true }) },
       { id: 'msg.delete', label: 'Delete…', icon: '🗑', key: 'Delete', group: '9_danger', verb: 'delete', mode: 'now',
-        // A message another room sent here is not its sender's to delete from this room: only the admin removes it.
+        // A message another room sent here is not its sender's to delete from this room: its sender withdraws it from the
+        // room it came from, and the admin removes it here. A copy of what this room sent there goes from here alone.
         may: (f, o) => mine(f, o), fits: (f, o) => full(f) && !o.sentFrom,
-        confirm: (f, o) => ({ title: 'Delete your message?', words: '“' + snippet(o) + '” goes from everyone\'s page in this room now. This cannot be undone.', yes: 'Delete', no: 'Keep it', danger: true }) },
+        confirm: (f, o) => ({ title: 'Delete your message?', words: '“' + snippet(o) + '” goes from everyone\'s page in this room now.' + (withdrawable(o) ? ' It stays in ' + placeOf(o.sentTo) + ': withdraw it first to take it from there, which this copy alone can do.' : '') + ' This cannot be undone.', yes: 'Delete', no: 'Keep it', danger: true }) },
     ],
 
     // A file: an entry of the panel's pinned list, and the file open in the panel (the Preview's header).
@@ -612,6 +633,8 @@
       // The room's guest code: the server tells it only to a page that may know it ('' else), and lets the admin switch it
       // and renew it from a page that names the room by its key.
       mayKnowCode: typeof s.guestCode === 'string' && s.guestCode.length > 0, setsCode: !!s.setsCode,
+      // The admin's own page (the join's `admin`; never its support view): it withdraws any send this room made.
+      admin: s.admin === true,
       connected: !!s.connected,
       support: s.adminView ? String(s.name || 'this person') : '',
     });
@@ -735,6 +758,6 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, KINDS, supportWords, stageWhy, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf });
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, KINDS, supportWords, stageWhy, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
   Object.assign(root.AGM = root.AGM || {}, { catalog });
 })(typeof window !== 'undefined' ? window : globalThis);

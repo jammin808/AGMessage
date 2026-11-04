@@ -20,6 +20,7 @@ const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort } = require('./helpers');
 const { io: ioClient } = require('socket.io-client');
+const ops = require('../lib/ops');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = process.env.AGM_SMOKE_OUT || path.join(ROOT, '..', 'artifacts', 'smoke');
@@ -2536,6 +2537,47 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const answeredHere = await research.until(`(() => { const a = allMessages.find((x) => x.text === 'Pack is on the desk.'); const q = allMessages.find((x) => x.text === 'Doors: is the press pack ready?'); return a && q && JSON.stringify({ under: !!a.replyTo && a.replyTo.id === q.id, from: messagesById.get(a.id).querySelector('.sent-meta').textContent }); })()`, 6000);
     report(backItem === 'Send back to Smoke AGM' && backSet === JSON.stringify({ line: '↗ to Smoke AGM — replies stay there', focus: true }) && answeredHere === JSON.stringify({ under: true, from: '↘ From Smoke AGM › Press' }),
       `↗ Send back to Smoke AGM sets Press's composer there for one send, replying; the answer lands here under this room's copy of the question (${backItem}; ${backSet}; ${answeredHere})`);
+    // ---------------- A mis-sent message withdrawn (unit 15) ----------------
+    // Ana's copy of the question offers 🔙 Withdraw from Smoke AGM › Press…, which asks first, naming the room and how long it
+    // has been there, the safe choice focused. Withdrawn, it goes from Press, whose line says who took it back, and Press's
+    // copy of Pat's answer under it keeps no word of it ("↩ Ana: ⊘ withdrawn"); the copy here stays and reads "⊘ Withdrawn
+    // from Smoke AGM › Press after …", offers Withdraw no more, and this page heard it under the next number, joining
+    // nothing again; the admin page watching this room redraws the copy's line from "↗ Sent to … — delivered" alike. A
+    // second ask is answered as done. The Chair's page, in this room too and off the network meanwhile, comes back by
+    // resuming and draws the copy's mark from the change it missed (applyOp).
+    const copyQ = await research.eval(`allMessages.find((x) => x.text === 'Doors: is the press pack ready?' && !!x.sentTo).id`);
+    const adminW = await edge.tab(`${base}/admin.html`);
+    await adminW.until(`!document.getElementById('dashboard').hidden && !!roomObject('${code}')`, 8000);
+    await adminW.eval(`watchRoom('${code}')`);
+    const ADMIN_COPY = `(() => { const d = document.querySelector('#adminFeed > .admin-msg[data-key="' + CSS.escape(${codeLiteral(copyQ)}) + '"] .sent-meta'); return d ? d.textContent : ''; })()`;
+    const adminBefore = await adminW.until(ADMIN_COPY, 6000);
+    await board.until(`!!findMessage(${codeLiteral(copyQ)})`, 5000);
+    await board.eval(`(() => { window.__ops = []; const was = applyOp; applyOp = (op) => { window.__ops.push(op && op.o + ':' + Object.keys(op.f || {}).join()); return was(op); }; socket.disconnect(); return true; })()`);
+    await research.eval(`(() => { window.__joins = 0; const was = socket.emit; window.__emit = was; socket.emit = function (ev, ...a) { if (ev === 'join') window.__joins++; return was.call(this, ev, ...a); }; return true; })()`);
+    await research.eval(`messagesById.get(${codeLiteral(copyQ)}).querySelector('.obj-more').click()`);
+    const withdrawItem = await research.until(`(() => { const r = document.querySelector('.agm-menu [data-action="msg.withdraw"]'); return r && r.querySelector('.mi-label').textContent; })()`, 3000);
+    await research.eval(`document.querySelector('.agm-menu [data-action="msg.withdraw"]').click()`);
+    const withdrawAsk = await research.until(`(() => { const a = document.querySelector('.agm-ask'); return a && JSON.stringify({ title: a.querySelector('.agm-ask-title').textContent, words: [...a.querySelectorAll('.agm-ask-words')].map((w) => w.textContent).join(' '), yes: a.querySelector('[data-answer=yes]').textContent, no: a.querySelector('[data-answer=no]').textContent, focused: document.activeElement === a.querySelector('[data-answer=no]') }); })()`, 3000);
+    await research.eval(`document.querySelector('.agm-ask [data-answer=yes]').click()`);
+    const goneThere = await pressTab.until(`(() => !allMessages.some((x) => x.text === 'Doors: is the press pack ready?') && [...document.querySelectorAll('#feed .sys')].some((n) => n.textContent === 'Ana withdrew a message sent from Smoke AGM') && 'gone')()`, 6000);
+    const withdrawnHere = await research.until(`(() => { const m = findMessage(${codeLiteral(copyQ)}); const n = m && messagesById.get(m.id); const line = n && n.querySelector('.sent-meta').textContent; const said = (document.getElementById('agmToast') || {}).textContent || ''; return line && /^⊘ /.test(line) && /withdr/i.test(said) && JSON.stringify({ line: line.replace(/after \\d+ (s|min)$/, 'after N'), offered: AGM.catalog.ids('msg', F, m).includes('msg.withdraw'), joins: window.__joins, said }); })()`, 6000);
+    const adminAfter = await adminW.until(`/^⊘ /.test(${ADMIN_COPY}) && ${ADMIN_COPY}.replace(/after \\d+ (s|min)$/, 'after N')`, 6000);
+    const quoteThere = await pressTab.until(`(() => { const a = allMessages.find((x) => x.text === 'Pack is on the desk.'); const q = a && a.replyTo && a.replyTo.withdrawn === true && messagesById.get(a.id).querySelector('.reply-quote'); return q && JSON.stringify({ quote: q.textContent, words: allMessages.some((x) => !!x.replyTo && /press pack/.test(x.replyTo.snippet || '')) }); })()`, 6000);
+    const adminWProblems = adminW.problems.slice();
+    await adminW.send('Page.navigate', { url: 'about:blank' });
+    await adminW.close();
+    const withdrawAgain = await research.eval(`new Promise((r) => window.__emit.call(socket, 'room:withdraw', { messageId: ${codeLiteral(copyQ)} }, (a) => r(JSON.stringify(a))))`);
+    await research.eval('socket.emit = window.__emit; true');
+    await board.eval('socket.connect(); true');
+    const resumedMark = await board.until(`(() => { const m = findMessage(${codeLiteral(copyQ)}); const n = m && messagesById.get(m.id); const line = n && n.querySelector('.sent-meta').textContent; return socket.connected && line && /^⊘ /.test(line) && JSON.stringify({ line: line.replace(/after \\d+ (s|min)$/, 'after N'), applied: window.__ops.includes('upd:sentTo') }); })()`, 8000);
+    const askSeen = JSON.parse(withdrawAsk || '{}');
+    report(withdrawItem === 'Withdraw from Smoke AGM › Press…' && askSeen.title === 'Withdraw from Smoke AGM › Press?' && /^It goes from Smoke AGM › Press's chat now; people there may have read it \(it was there \d+ (s|min)\)\.$/.test(askSeen.words || '')
+      && askSeen.yes === 'Withdraw' && askSeen.no === 'Keep it' && askSeen.focused === true && goneThere === 'gone'
+      && withdrawnHere === JSON.stringify({ line: '⊘ Withdrawn from Smoke AGM › Press after N', offered: false, joins: 0, said: 'Withdrawn from Smoke AGM › Press.' })
+      && withdrawAgain === JSON.stringify({ ok: true, already: true }) && resumedMark === JSON.stringify({ line: '⊘ Withdrawn from Smoke AGM › Press after N', applied: true })
+      && quoteThere === JSON.stringify({ quote: '↩ Ana: ⊘ withdrawn', words: false })
+      && adminBefore === '↗ Sent to Smoke AGM › Press — delivered' && adminAfter === '⊘ Withdrawn from Smoke AGM › Press after N' && adminWProblems.length === 0,
+      `🔙 Withdraw from Press asks first, naming the room and how long it was there; it goes from Press with a line saying who, and the quote of it there says withdrawn with none of its words; the copy here reads "⊘ Withdrawn … after …" with no Withdraw left, heard in order with no rejoin, and the admin page watching this room redraws it; asked again it is done already, and a page back by resuming draws the mark from the change it missed (${withdrawItem}; ${withdrawAsk}; ${goneThere}; ${quoteThere}; ${withdrawnHere}; admin ${adminBefore} → ${adminAfter}${adminWProblems.length ? ' ' + adminWProblems.slice(0, 3).join(' | ') : ''}; ${withdrawAgain}; ${resumedMark})`);
     // Pat's page leaves Press (its socket closes as the page goes), so Press is listed with nobody in afterwards.
     await pressTab.send('Page.navigate', { url: 'about:blank' });
     await pressTab.close();
@@ -3176,9 +3218,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const live = await board.until(DRAWN, 12000);
     await research.eval(`socket.connect()`);
     const resumed = await research.until(`socket.connected && ${DRAWN}`, 12000);
-    // One listener for each row of the table: the generated ones, and no hand-written one beside them.
+    // One listener for each row of the table (lib/ops.js's, which the page's is held to): the generated ones, and no
+    // hand-written one beside them.
     const listeners = await board.eval(`JSON.stringify(Object.keys(UPD_EVENTS).map((f) => socket.listeners(UPD_EVENTS[f][0]).length))`);
-    report(proposed.ok && bothPending && forgot && !!atDesk && live === JSON.stringify({ on: 'rejected ✗ Not approved by Smoke desk', own: 'rejected ✗ Not approved by Smoke desk' }) && resumed === live && listeners === '[1,1,1,1,1,1]',
+    report(proposed.ok && bothPending && forgot && !!atDesk && live === JSON.stringify({ on: 'rejected ✗ Not approved by Smoke desk', own: 'rejected ✗ Not approved by Smoke desk' }) && resumed === live && listeners === JSON.stringify(Object.keys(ops.UPD_EVENTS).map(() => 1)),
       `a live page and a resumed one draw the desk's answer the same way, on a message whose record is gone and on the proposal's line (${JSON.stringify(proposed)}; ${bothPending} ${forgot}; live ${live}; resumed ${resumed}; listeners ${listeners})`);
     for (const p of [research, board]) await p.eval(`removeMessageLocal(${codeLiteral(proposed.id)})`);
 

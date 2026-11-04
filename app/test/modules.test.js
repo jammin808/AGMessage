@@ -1351,8 +1351,8 @@ test('(k) one op table: the hall page\'s is the server\'s, field by field, and e
   const handlers = sourcesOf(handlerFiles());
   const page = ['public/app.js', read('public/app.js')];
   assert.deepEqual(opTableProblems(handlers, page), []);
-  // What the read sees, so the rule is not passed by reading nothing: the page's six rows, and the op of every apply()
-  // call in server.js, of every kind, each upd's one field (the Stagewatch followers', a spread inside its value) included.
+  // What the read sees, so the rule is not passed by reading nothing: the page's rows, and the op of every apply() call
+  // in server.js, of every kind, each upd's one field (the Stagewatch followers', a spread inside its value) included.
   assert.deepEqual([...pageTable(page[1]).rows], Object.entries(ops.UPD_EVENTS));
   const server = handlers.get('server.js');
   const seen = opLiterals(server);
@@ -1361,7 +1361,12 @@ test('(k) one op table: the hall page\'s is the server\'s, field by field, and e
   assert.deepEqual([...new Set(seen.map((u) => u.kind))].sort(), [...ops.KINDS].sort(), 'an op of every kind is read');
   const upds = seen.filter((u) => u.kind === 'upd');
   assert.ok(upds.length >= 9 && upds.every((u) => u.fields.length === 1), JSON.stringify(upds));
-  assert.deepEqual([...new Set(upds.flatMap((u) => u.fields))].sort(), Object.keys(ops.UPD_EVENTS).sort());
+  // server.js changes every field of the table but a send's mark (`sentTo`) and a reply's quote (`replyTo`), which the
+  // rooms module's withdrawal changes: read there too, every field is some handler file's.
+  assert.deepEqual([...new Set(upds.flatMap((u) => u.fields))].sort(), Object.keys(ops.UPD_EVENTS).filter((f) => f !== 'sentTo' && f !== 'replyTo').sort());
+  const rooms = opLiterals(handlers.get('lib/handlers/rooms.js')).filter((u) => u.kind === 'upd');
+  assert.deepEqual(rooms.map((u) => u.fields), [['replyTo'], ['sentTo']], 'the rooms module\'s two upds: a withdrawn message\'s quotes there, and the copy\'s mark here');
+  assert.deepEqual([...new Set([...handlers.values()].flatMap((src) => opLiterals(src)).filter((u) => u.kind === 'upd').flatMap((u) => u.fields))].sort(), Object.keys(ops.UPD_EVENTS).sort());
 });
 
 test('(k) apply() is the op table\'s: made once in server.js by lib/ops.js, and its refusal is a log line and nothing more', () => {

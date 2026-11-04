@@ -3458,6 +3458,85 @@ rooms for users to download.")
 - The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `docs/ANALYSIS.md`, `docs/DESIGN.md`, `docs/NODES.md`,
   `SECURITY.md`, `CLAUDE.md`.
 
+**A mis-sent message is withdrawn** (the plan's Part 1, unit 15, its §4.4, §2.7's `room.withdraw` row and §9's row 15, as
+Part 5 §0 (`sentUpdate` a row of the op table; "⊘ Withdrawn from Legal after 40 s"; a repeat answered `already`),
+§13.3.4, §13.6, §15.6 and §15.7 (⊘, the withdrawn mark), §16.3 to §16.7 (Withdraw in the danger group, asked in place,
+`msg.withdraw`) and §9's row 15 of Part 5 amend them; the tree as the evidence: a send into another room could not be
+taken back, and its copy said "delivered" for good)
+- **`room:withdraw {messageId}`** (the rooms module, behind the gate): on this room's copy of a send. A repeat after a
+  lost answer (a copy withdrawn already, asked by its sender or the admin's own page) is answered `{ok: true, already:
+  true}` before the rate, so it is never refused for what succeeded; every other request takes one `writes` token before
+  anything refuses it, so a refused lookup is never free (the gate's rule), and is then refused, in order: a message not
+  here ("Message not found") or no copy of a send ("Only a message this room sent into another room is withdrawn."); the
+  admin's support view ("This is someone else's view — act from your own page."); anyone but the copy's sender and the
+  admin's own page ("Only its sender or the admin withdraws it."); a seat On stage, the admin's included ("Do that from a
+  backstage page."); then the message must still be in the room it went to, the one that came from this room by its
+  reference ("It is no longer in Hall 2 › Legal: there is nothing to withdraw." once that room is removed, or the admin
+  removed the message there or cleared the room).
+- **The room it went to**: the message goes; each reply there that quoted it (a reply's quote, the first 120 characters or
+  a file's name, which the room's feed, a page joining it later and its transcript draw) keeps who wrote it and none of its
+  words, its quote marked `withdrawn` and drawn "↩ Ana: ⊘ withdrawn", a change of an eighth row of the op table, `replyTo`
+  → `replyUpdate`; and a line says who took it back ("Ana withdrew a message sent from Hall 2 › Legal", "… a file …"; the
+  admin's "Ana Admin withdrew a message Lou sent from …"). Then one `room.withdraw` row on that room's key, the rooms by
+  name and how long it was there ("a message sent from Legal (Hall 2), there 40 s"; the admin's "a message by Lou sent
+  from …"), never the words or a file's name. What a withdrawal cannot take back: what people there read, a file someone
+  downloaded, a copy someone there forwarded or sent on into another room, and a file's link while a room or a screen
+  holds it.
+- **The copy here** stays and keeps when (`sentTo.withdrawn`), a change of a seventh row of the op table, `sentTo` →
+  `sentUpdate` (`lib/ops.js`, and the hall page's `UPD_EVENTS`): heard under the next number, and read by a page back
+  from a drop among the changes it missed (`applyOp`), so no page of either room is left with a gap, and none joins again
+  to catch up. It reads "⊘ Withdrawn from Hall 2 › Legal after 40 s" (how long, by the server's times: `lasted`, one helper
+  in `lib/ops.js` and `AGM.catalog`, held equal by a test). Its file stays on the laptop while the copy holds it, and
+  leaves when the copy is deleted and nothing else holds it.
+- **The hall page**: 🔙 **Withdraw from Hall 2 › Legal…** (`msg.withdraw`, mode `now`, in the danger group before
+  Delete…; ⊘ is the line's mark, so the act has an icon of its own), on a copy not withdrawn, for its sender and the
+  admin's own page, never On stage; it asks first: "Withdraw from Hall 2 › Legal? It goes from Hall 2 › Legal's chat now;
+  people there may have read it (it was there 40 s)." **[Withdraw] [Keep it]**, Keep it focused; done, "Withdrawn from
+  Hall 2 › Legal." The join answer appends `admin`: whether the page is the admin's own (never the support view). The
+  outbox answers a repeat of `room:withdraw` as it does a delete's. Delete… on a copy not withdrawn says the message stays
+  where it went: withdraw first, since the copy is what takes it back. `delete`'s refusal of a message another room sent
+  now names Withdraw: "A message sent from another room stays here: its sender withdraws it from that room, or the admin
+  removes it."
+- **Every reader**: the admin page's feed hears the change and redraws the copy's line; the transcript says "⊘ Withdrawn
+  from … after … — a copy kept here", and of a reply in the room it went to "↩ replying to Ana: ⊘ withdrawn"; the AI's
+  thread "[sent to … and withdrawn from there after …, a copy kept here]". `lib/busy.js` reads `room:withdraw` as a
+  person's input.
+- Choices where the plan left room: a seat On stage withdraws nothing, the admin seated there included (Part 7 §17.1: the
+  checks that do not call `allowed()` refuse On stage in those words); a repeat is answered before the On stage refusal
+  and the rate, as a send's repeat is, and only to one who may withdraw the copy; a reply's quote of the message in the
+  room it went to is taken out with it (the plan's steps did not name the quotes; a withdrawal is for what that room
+  should never have read), while `delete` within one room keeps its replies' quotes as before, the room having been the
+  message's readers; the line in the room it went to names the room as its "↘ From" did, with the room's name now; a
+  message the admin removed in the room it went to, or that room cleared or removed, leaves the copy reading "delivered",
+  as unit 14 left it (Withdraw then says it is no longer there: marking the copy from the admin's removals is a change
+  across rooms no section asks for, left to a later unit); the confirm reads the page's clock for "it was there 40 s", as
+  "2 min ago" does elsewhere, and the line the server's.
+- Tests: `test/sends.test.js`: refused, each in its words with nothing taken back, for another member of the room, an
+  observer, the support view of the sender, a message of the room's own, none, the message where it went, and the admin
+  account seated On stage; a burst of refusals (another member's, a message not here) meets the rate; taken back from a
+  side room by a Main room's guest and from a Main room by a side room's account, each gone there with its line, the
+  copy's mark heard live with its number; the two replies quoting it there (a reply, and the copy of a Send back) keep its
+  author and no word of it, heard as `replyUpdate`, in neither the room's messages nor its transcript, while the answer
+  that landed back keeps its own room's quote; a repeat answered `already`, nothing more taken, and answered so while the
+  rate refuses the rest; the admin's withdrawal from its own page naming whose message it was; a file gone from the room
+  it went to, still served while the copy holds it and removed once the copy is deleted; a message the admin removed there
+  and a room removed, each said; the writes bucket; every change Legal's page and Hall A's page were sent heard in order,
+  no number missed; a page back by resuming sent each mark among the ops it missed; the transcript's lines; one row each,
+  no words; the join's `admin` for each page, the support view's false. `test/units.test.js`: the AI's thread on a
+  withdrawn copy; the op table's eight rows sent in order, and its refusal planted with another field than `sentTo`, now
+  the table's (moved on purpose).
+  `test/catalog.test.js`: the facts' `admin` (true alone says so), Withdraw in the seat matrix (the sender, the admin; not
+  another member, not withdrawn twice, never On stage, the admin's own page seated there included), its label and ask
+  with the time, Delete…'s words on a copy, and `lasted` held to the server's. `test/menus.test.js`: `room:withdraw`
+  refused as each seat it is hidden from, On stage in the table's words, and the join's `admin` at its end (moved on
+  purpose). `test/inputs.test.js`: `room:withdraw` by type. `test/modules.test.js`: the op table's fields read from every
+  handler file, `sentTo` and `replyTo` the rooms module's (moved on purpose). The smoke: Withdraw on the copy asks with the
+  room and the time, the message gone there with its line and the quote of it there "↩ Ana: ⊘ withdrawn" with none of its
+  words, the copy's "⊘ Withdrawn … after …" with no Withdraw left and no join again, the admin page watching the room
+  redrawing the copy's line from "↗ Sent to … — delivered", a repeat `already`, and a page back by resuming drawing the
+  mark through `applyOp`; the op table's listener count read from `lib/ops.js` (moved on purpose).
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md`, `docs/ANALYSIS.md`, `SECURITY.md`, `CLAUDE.md`.
+
 **Fixed**
 - Enter in a field of a dialog on the halls board (New hall, Password, Set up the hall) or the Accounts page (Add a
   person, Edit) saves. Each form's first button was Cancel, which Enter presses, so a name typed and

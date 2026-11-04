@@ -79,6 +79,8 @@ const SEATS = {
   // rights behind it (a Tech's: the speaker's screen and files elsewhere), held to the seat on this page.
   boardAccount: seat({ role: 'board', uid: CHAIR, uploadToken: null, canSendToStage: false, canPropose: false, forwardable: false, account: { role: 'tech' }, guestCode: '', codeOn: true }),
   boardAccountSimple: seat({ role: 'board', uid: CHAIR, uploadToken: null, canSendToStage: false, canPropose: false, forwardable: false, account: { role: 'tech' }, guestCode: '', codeOn: true, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] } }),
+  // The admin's own page seated On stage (an admin account a hall's Board seats): the seat's limit holds it as anyone there.
+  adminOnStage: seat({ role: 'board', uid: 'a-root', uploadToken: null, canSendToStage: false, canPropose: false, forwardable: false, account: { role: 'admin' }, guestCode: '', codeOn: true, admin: true }),
   observer: seat({ role: 'observer', uid: OBS, uploadToken: null, forwardable: false, guestCode: GC, codeOn: true }),
   observerElsewhere: seat({ role: 'observer', uid: OBS, uploadToken: null, forwardable: true, guestCode: GC, codeOn: true }),
   viewer: seat({ role: 'observer', uid: 'a-vic', uploadToken: null, forwardable: false, account: { role: 'viewer' }, guestCode: '', codeOn: true }),
@@ -87,13 +89,13 @@ const SEATS = {
   staff: seat({ role: 'research', uid: 'a-sid', uploadToken: 't', canSendToStage: false, canPropose: false, forwardable: true, guestCode: '', codeOn: true }),
   tech: seat({ role: 'research', uid: 'a-tia', uploadToken: 't', canSendToStage: true, canPropose: false, forwardable: false, screens: screens(1), guestCode: GC, codeOn: true }),
   techNoScreens: seat({ role: 'research', uid: 'a-tia', uploadToken: 't', canSendToStage: true, canPropose: false, forwardable: false, screens: screens(0), guestCode: GC, codeOn: true }),
-  admin: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, screens: screens(2, true), guestCode: GC, codeOn: true, setsCode: true }),
+  admin: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, screens: screens(2, true), guestCode: GC, codeOn: true, setsCode: true, admin: true }),
   // A side room's Member whose room may send into Hall 2's Main room by its list (room:sendTargets), and into nothing by a
   // forward: Send to ▸ by the list alone, Send back on what Hall 2 sent here, and the composer's To ▸.
   researchSends: seat({ role: 'research', uid: 'u-lou', uploadToken: 't', forwardable: false, sends: true, targets: [{ ref: 'rH2aaaaaaaaaaaaaaa', name: 'Hall 2', hallName: 'Hall 2' }, { ref: 'rMDbbbbbbbbbbbbbbb', name: 'Media', hallName: 'Hall 2' }], guestCode: '', codeOn: false }),
   // Its list emptied since: no Send back on what Hall 2 sent before.
   researchSentNowhere: seat({ role: 'research', uid: 'u-lou', uploadToken: 't', forwardable: false, sends: false, targets: [] }),
-  adminOffline: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, screens: screens(2, true), guestCode: GC, codeOn: true, setsCode: true, connected: false }),
+  adminOffline: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, screens: screens(2, true), guestCode: GC, codeOn: true, setsCode: true, admin: true, connected: false }),
   support: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, adminView: true, name: 'Kim', guestCode: GC, codeOn: true, setsCode: true }),
 };
 const from = (uid, role, name) => ({ uid, role, name });
@@ -113,6 +115,8 @@ const OBJECTS = {
   // What this seat itself sent here from Hall 2: here it is that room's, not its sender's to delete.
   fromLou: { id: 'm14', type: 'text', text: 'Contract is signed', from: from('u-lou', 'research', 'Lou'), at, reactions: [], sentFrom: { roomName: 'Hall 2', hallName: 'Hall 2', ref: 'rH2aaaaaaaaaaaaaaa' } },
   sentThere: { id: 'm13', type: 'file', url: '/uploads/2-brief.pdf', filename: 'brief.pdf', mime: 'application/pdf', from: from('u-lou', 'research', 'Lou'), at, sentTo: { roomName: 'Hall 2', hallName: 'Hall 2', ref: 'rH2aaaaaaaaaaaaaaa', id: 'm1' } },
+  // This room's copy of what it sent into Hall 2's Legal, withdrawn from there 40 s after it went.
+  sentWithdrawn: { id: 'm15', type: 'text', text: 'Wrong room', from: from('u-lou', 'research', 'Lou'), at, reactions: [], sentTo: { roomName: 'Legal', hallName: 'Hall 2', ref: 'rLGcccccccccccccccc', id: 'm2', withdrawn: at + 40_000 } },
 };
 const ids = (kind, f, o) => plain(C.ids(kind, f, o));
 // The rest of the hall page's objects: its composers (`form`, `room`, the `file` chosen, whom it is `replying` to, 🔥
@@ -354,7 +358,7 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, connected: true, support: '' });
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '' });
   // The rooms a page may send into are room:sendTargets', read by type: each with a reference, its names strings.
   assert.deepEqual(plain(C.facts({ sends: 1, targets: [{ ref: 'rA', name: 'Legal', hallName: 'Hall 2', key: 'LGQ4MZP8' }, { ref: '', name: 'x' }, { name: 'y' }, 'rB', null, { ref: 'rC', name: 7 }] })),
     plain(C.facts({ sends: true, targets: [{ ref: 'rA', name: 'Legal', hallName: 'Hall 2' }, { ref: 'rC', name: '', hallName: '' }] })));
@@ -363,6 +367,8 @@ test('the facts: read from the server\'s answers, the link\'s words by its state
   // backstage account whose rights do not cover it is told none; switching it is the admin's (setsCode), read by type.
   assert.deepEqual([C.facts({ role: 'observer', guestCode: 'K7P2QX' }).mayKnowCode, C.facts({ role: 'research', guestCode: '' }).mayKnowCode, C.facts({ role: 'research', guestCode: 7 }).mayKnowCode], [true, false, false]);
   assert.deepEqual([C.facts({ setsCode: true }).setsCode, C.facts({ setsCode: 'yes' }).setsCode, C.facts({}).setsCode], [true, true, false]);
+  // Whether the page is the admin's own (the join's `admin`): true alone says so.
+  assert.deepEqual([C.facts({ admin: true }).admin, C.facts({ admin: 'yes' }).admin, C.facts({ admin: 1 }).admin, C.facts({}).admin], [true, false, false, false]);
   assert.equal(C.facts({ role: 'nonsense' }).role, 'observer', 'an unknown seat reads as the one with no rights');
   assert.deepEqual(['observer', 'board', 'research'].map((role) => { const x = C.facts({ role }); return [x.post, x.ask, x.respondHelp]; }), [[false, false, false], [true, false, false], [true, true, true]],
     'a question and an answer to others\' help come from backstage');
@@ -414,10 +420,15 @@ test('the seat matrix: what each seat is shown on each message', () => {
     viewerPost: { anaFile: ['msg.reply', 'msg.react', 'msg.pin'], anaText: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'] },
     // Staff: messages and files, no Stagewatch: neither 📝 nor 🖥. Tech: Stagewatch's speaker's screen (no show desk), and
     // the hall's screens.
-    staff: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.send', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'] },
+    // (What this room sent into another, by someone else, is not Staff's to withdraw.)
+    staff: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.send', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'], sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'] },
     tech: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.screens', 'msg.pin', 'msg.look', 'msg.download'] },
     // A question is not a thing a screen shows: no ⧉ on it.
-    admin: { anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'], anaText: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.copy'] },
+    // The admin withdraws any send this room made, and deletes only its own.
+    admin: {
+      anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'], anaText: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.copy'],
+      sentThere: ['msg.reply', 'msg.react', 'msg.screens', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.withdraw'], sentWithdrawn: ['msg.reply', 'msg.react', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.send', 'msg.pin', 'msg.copy'],
+    },
     support: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.send', 'msg.pin', 'msg.copy'] },
     // A room that may send into others by its list: Send to ▸ on words and a file (never a question, which only a forward
     // carries, and this seat forwards nowhere); Send back on what a room it sends into sent here, and none once its list
@@ -427,9 +438,12 @@ test('the seat matrix: what each seat is shown on each message', () => {
       anaText: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy'],
       anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pin', 'msg.copy'],
       fromHall: ['msg.reply', 'msg.react', 'msg.send', 'msg.sendBack', 'msg.pin', 'msg.copy'],
-      sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.delete'],
+      sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download', 'msg.withdraw', 'msg.delete'],
       fromLou: ['msg.reply', 'msg.react', 'msg.send', 'msg.sendBack', 'msg.pin', 'msg.copy'],
+      // Withdrawn already: no Withdraw; still its copy here, to delete.
+      sentWithdrawn: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy', 'msg.delete'],
     },
+
     researchSentNowhere: { fromHall: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'] },
   };
   // The full view's sets are its menus; the simple view has no menu, and its sets are what its buttons may be.
@@ -442,8 +456,9 @@ test('the seat matrix: what each seat is shown on each message', () => {
   }
   // The Board, either view, a guest's page or an account's: none of what §17.1 keeps from an On stage seat, by right or by
   // its view.
-  const NEVER_ON_STAGE = ['msg.helpRespond', 'msg.send', 'msg.sendBack', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.download', 'msg.draft'];
-  for (const s of ['board', 'boardSimple', 'boardAccount', 'boardAccountSimple']) for (const o of Object.keys(OBJECTS)) {
+  const NEVER_ON_STAGE = ['msg.helpRespond', 'msg.send', 'msg.sendBack', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.download', 'msg.draft', 'msg.withdraw'];
+  // The admin seated there too, who withdraws any send of this room's from a backstage page.
+  for (const s of ['board', 'boardSimple', 'boardAccount', 'boardAccountSimple', 'adminOnStage']) for (const o of Object.keys(OBJECTS)) {
     const set = plain(C.shown('msg', SEATS[s], OBJECTS[o])).map((e) => e.id);
     assert.deepEqual(set.filter((id) => NEVER_ON_STAGE.includes(id)), [], s + ' on ' + o);
     if (SEATS[s].view !== 'simple') assert.ok(!set.includes('msg.ack'), 'Got it is the simple view\'s only: the full view\'s React ▸ 👍 is the same fact');
@@ -575,6 +590,15 @@ test('a file and a screen: what each seat is shown, its bar, and its asks', () =
   assert.deepEqual(ask('screen.remove', SCREEN), { title: 'Remove Lectern monitor?', words: 'Its link stops working on every screen that has it open.', yes: 'Remove', no: 'Keep it', danger: true }, 'an ask names the object and what follows');
   assert.deepEqual(ask('screen.rename', SCREEN).fields, [{ name: 'name', label: 'Name', value: 'Lectern monitor', max: 60 }], 'Rename is a field in place, not a prompt()');
   assert.match(plain(C.entry('msg', 'msg.delete').confirm(SEATS.research, OBJECTS.anaText)).words, /^“Capex is on slide 14” goes from everyone's page/);
+  // Withdraw asks first, naming the room it goes from and how long it has been there by the time it is asked.
+  assert.equal(C.entry('msg', 'msg.withdraw').label(SEATS.researchSends, OBJECTS.sentThere), 'Withdraw from Hall 2…');
+  assert.deepEqual(plain(C.entry('msg', 'msg.withdraw').confirm(SEATS.researchSends, OBJECTS.sentThere, at + 40_000)),
+    { title: 'Withdraw from Hall 2?', words: 'It goes from Hall 2\'s chat now; people there may have read it (it was there 40 s).', yes: 'Withdraw', no: 'Keep it', danger: true });
+  assert.match(plain(C.entry('msg', 'msg.withdraw').confirm(SEATS.admin, OBJECTS.sentThere, at + 3_725_000)).words, /\(it was there 1 h 2 min\)\.$/);
+  // Deleting the copy of a send not withdrawn says the message stays where it went; once withdrawn, nothing more.
+  assert.deepEqual([plain(C.entry('msg', 'msg.delete').confirm(SEATS.researchSends, OBJECTS.sentThere)).words, plain(C.entry('msg', 'msg.delete').confirm(SEATS.researchSends, OBJECTS.sentWithdrawn)).words],
+    ['“brief.pdf” goes from everyone\'s page in this room now. It stays in Hall 2: withdraw it first to take it from there, which this copy alone can do. This cannot be undone.',
+      '“Wrong room” goes from everyone\'s page in this room now. This cannot be undone.']);
   assert.deepEqual(plain(C.entry('msg', 'msg.answerWords').confirm(SEATS.board, OBJECTS.anaQuestion)).fields, [{ name: 'note', label: 'Your answer', max: 200 }], 'answered in a field of 200 characters, as the server keeps');
 });
 
@@ -664,6 +688,10 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
   for (const mark of [{ roomName: 'Legal', hallName: 'Hall 2' }, { roomName: 'Hall 2', hallName: 'Hall 2' }, { roomName: 'Legal', hallName: '' }, { roomName: '', hallName: 'Hall 2' }, { roomName: '', hallName: '' }, {}, null]) {
     assert.equal(ops.placeOf(mark), C.placeOf(mark), JSON.stringify(mark));
   }
+  // How long a withdrawn send was there, said alike by the pages and by the server's readers and rows (lib/ops.js lasted).
+  const spans = [-5, 0, 999, 1000, 40_999, 59_999, 60_000, 3_599_999, 3_600_000, 3_725_000, 86_399_999, 86_400_000, 97_200_000, 90_000_000, NaN, Infinity, '40000', null];
+  assert.deepEqual(spans.map((ms) => C.lasted(ms)), ['0 s', '0 s', '0 s', '1 s', '40 s', '59 s', '1 min', '59 min', '1 h', '1 h 2 min', '23 h 59 min', '1 d', '1 d 3 h', '1 d 1 h', '0 s', '0 s', '0 s', '0 s']);
+  for (const ms of spans) assert.equal(ops.lasted(ms), C.lasted(ms), String(ms));
   assert.deepEqual(plain(C.inline('compose', SEATS.board, COMPOSE.directorReplying)).map((i) => [i.id, i.label]), [['compose.send', 'Send']], 'before the room is named: Send');
   for (const [kind, o] of [['chip', STAGE], ['code', CODE], ['person', PERSON]]) assert.deepEqual(plain(C.inline(kind, SEATS.admin, o)), [], kind + ': no act on a row, only the menu');
 

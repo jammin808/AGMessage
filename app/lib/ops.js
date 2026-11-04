@@ -21,6 +21,8 @@ const UPD_EVENTS = Object.freeze({
   stage: 'stageAck',
   proposal: 'proposalUpdate',
   help: 'helpUpdate',
+  sentTo: 'sentUpdate',
+  replyTo: 'replyUpdate',
 });
 /** The kinds of op a room's log holds (`lib/store.js`). */
 const KINDS = Object.freeze(['add', 'upd', 'del', 'reset', 'meta']);
@@ -120,4 +122,18 @@ function placeOf(mark) {
   return !room || room === hall ? hall || room || 'another room' : (hall || 'A hall with no name') + ' › ' + room;
 }
 
-module.exports = { UPD_EVENTS, KINDS, EVENTS, LINKED, refusal, eventsOf, applier, forPage, opForPage, unlinked, placeOf };
+/**
+ * How long a message was in a room, as every reader says it (a withdrawn send's "after 40 s", the row's "there 40 s"),
+ * the pages' catalogue too (`public/catalog.js` `lasted`, held to this one by its test): whole seconds under a minute,
+ * whole minutes under an hour, then hours and minutes, then days and hours; anything that is no length of time, none.
+ */
+function lasted(ms) {
+  const s = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+  if (s < 60) return s + ' s';
+  if (s < 3600) return Math.floor(s / 60) + ' min';
+  const and = (n, unit) => (n ? ' ' + n + ' ' + unit : '');
+  if (s < 86400) return Math.floor(s / 3600) + ' h' + and(Math.floor((s % 3600) / 60), 'min');
+  return Math.floor(s / 86400) + ' d' + and(Math.floor((s % 86400) / 3600), 'h');
+}
+
+module.exports = { UPD_EVENTS, KINDS, EVENTS, LINKED, refusal, eventsOf, applier, forPage, opForPage, unlinked, placeOf, lasted };

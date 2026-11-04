@@ -39,7 +39,7 @@ const readOnly = () => document.body.dataset.role === 'observer';
 // page (the join's answer, the screens it may drive, the link's state, whether it is connected), kept current by its
 // events, and every button, menu and key on a message, a file, a screen, a person, the composer and the header's chips is
 // drawn from the catalogue's entries for them. A page binds only what each act does: RUN, by the entry's id.
-const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false };
+const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false };
 let F = AGM.catalog.facts(pageFacts);
 // Whether this page's room is its hall's Main room (the join's `main`; a hall until it answers): its seat words follow it
 // (roleLabel).
@@ -176,7 +176,7 @@ function rejoin() {
     AI_ON = !!res.ai;
     // The catalogue's facts from this answer, before anything is drawn with them; `connected` once the outbox is ready.
     factsChanged({ role: res.role || ROLE, uid: MY_UID, account: res.account || null, uploadToken: UPLOAD_TOKEN, canSendToStage: CAN_STAGE, canPropose: CAN_PROPOSE, ai: AI_ON, stage: res.stage || null, forwardable: !!res.forwardable, name: NAME,
-      guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode, sends: !!res.sends, ...(res.sends ? {} : { targets: [] }) });
+      guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode, sends: !!res.sends, ...(res.sends ? {} : { targets: [] }), admin: res.admin === true });
     drawChips();
     drawAiButtons();
     if (res.note) AGM.toast(res.note);
@@ -443,6 +443,8 @@ const UPD_EVENTS = {
   stage: ['stageAck', setStage],
   proposal: ['proposalUpdate', setProposal],
   help: ['helpUpdate', setHelp],
+  sentTo: ['sentUpdate', setSentTo],
+  replyTo: ['replyUpdate', setReplyTo],
 };
 const ownField = (o, f) => Object.prototype.hasOwnProperty.call(o, f);
 function applyOp(op) {
@@ -860,8 +862,9 @@ function rerenderMessage(node, msg) {
   if (msg.replyTo) {
     const rt = document.createElement('div');
     rt.className = 'reply-quote';
+    // A quote of a message withdrawn from this room since keeps no word of it (the server took them out): it says so.
     rt.innerHTML = '↩ <strong>' + escapeHtml(msg.replyTo.name) + '</strong>: ' +
-      '<em>' + escapeHtml((msg.replyTo.snippet || '').slice(0, 120)) + '</em>';
+      '<em>' + escapeHtml(msg.replyTo.withdrawn ? '⊘ withdrawn' : (msg.replyTo.snippet || '').slice(0, 120)) + '</em>';
     rt.title = 'Click to scroll to original';
     rt.dataset.goto = msg.replyTo.id;
     body.appendChild(rt);
@@ -897,14 +900,16 @@ function rerenderMessage(node, msg) {
   renderReactions(node, msg.reactions || []);
 
   // "↘ From Hall 2 › Legal" on a message another room sent here (with whose words they were, when the sender sent on
-  // someone else's), and "↗ Sent to Hall 2 › Legal — delivered" on this room's copy of one it sent: each room by its
-  // names (a send carries no key and no code), drawn as words.
+  // someone else's), and "↗ Sent to Hall 2 › Legal — delivered" on this room's copy of one it sent, or, taken back since,
+  // "⊘ Withdrawn from Hall 2 › Legal after 40 s" (how long it was there, by the server's times): each room by its names
+  // (a send carries no key and no code), drawn as words.
   if (msg.sentFrom || msg.sentTo) {
     const meta = document.createElement('div');
     meta.className = 'sent-meta';
     meta.textContent = msg.sentFrom
       ? '↘ From ' + AGM.catalog.placeOf(msg.sentFrom) + (msg.sentFrom.originalAuthor ? ' · originally by ' + msg.sentFrom.originalAuthor : '')
-      : '↗ Sent to ' + AGM.catalog.placeOf(msg.sentTo) + ' — delivered';
+      : msg.sentTo.withdrawn ? '⊘ Withdrawn from ' + AGM.catalog.placeOf(msg.sentTo) + ' after ' + AGM.catalog.lasted(msg.sentTo.withdrawn - msg.at)
+        : '↗ Sent to ' + AGM.catalog.placeOf(msg.sentTo) + ' — delivered';
     body.prepend(meta);
   }
   // "Forwarded from Hall 2 · originally by Sarah": the hall by its name (a forward never carries its code).
@@ -1316,6 +1321,10 @@ Object.assign(RUN, {
   'msg.look': (m) => openDocInPanel(m),
   'msg.download': (m) => download(m),
   'msg.copy': (m, { anchor }) => copyText(m.text || '', 'Copied.', anchor),
+  // Taken back from the room it went to: this copy stays, and its line says so once the server has done it (sentUpdate).
+  'msg.withdraw': (m) => AGM.outbox.now('room:withdraw', { messageId: m.id }, (r) => {
+    AGM.toast(r && r.ok ? 'Withdrawn from ' + AGM.catalog.placeOf(m.sentTo) + '.' : (r && r.error) || 'Could not withdraw it.', !(r && r.ok));
+  }),
   'msg.delete': (m, { node }) => {
     const next = node ? neighbour(messagesById.get(m.id) || node) : null;
     AGM.outbox.now('delete', { messageId: m.id }, (r) => {
@@ -1557,6 +1566,22 @@ function renderHelpBody(msg) {
     wrap.appendChild(row);
   }
   return wrap;
+}
+/** This room's copy of a send, its mark changed (withdrawn from where it went, and when): its line and its acts drawn again. */
+function setSentTo(messageId, sentTo) {
+  const msg = findMessage(messageId);
+  if (!msg || !sentTo || typeof sentTo !== 'object') return;
+  msg.sentTo = sentTo;
+  const node = messagesById.get(messageId);
+  if (node && node.classList.contains('msg')) rerenderMessage(node, msg);
+}
+/** A reply whose quote changed (the message it answered withdrawn from this room): the reply drawn again from its record. */
+function setReplyTo(messageId, replyTo) {
+  const msg = findMessage(messageId);
+  if (!msg || !replyTo || typeof replyTo !== 'object') return;
+  msg.replyTo = replyTo;
+  const node = messagesById.get(messageId);
+  if (node && node.classList.contains('msg')) rerenderMessage(node, msg);
 }
 function setHelp(messageId, help) {
   const msg = findMessage(messageId);

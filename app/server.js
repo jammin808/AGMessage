@@ -2109,6 +2109,9 @@ io.on('connection', (socket) => {
       // offers To: and the rooms of ↗ Send to only then. False On stage, where nothing leaves the room, for a seat that
       // may not post, and for the support view, which is unseated.
       sends: !isAdminView && !onStage() && allowed('hall.post') && sendsInto(r).length > 0,
+      // Whether this is the admin's own page (never its support view): the admin takes back any send this room made
+      // (room:withdraw), wherever it does not sit On stage, where its seat's limit holds it as anyone's.
+      admin: !!socket.data.isAdmin && !isAdminView,
     });
 
     if (!isAdminView) {
@@ -2144,8 +2147,9 @@ io.on('connection', (socket) => {
   // The two rules of the room a forward comes from, in the words the forward and its picker both answer with.
   const FILES_BACKSTAGE = 'Files are moved by the backstage team.';
   const ASKS_BACKSTAGE = 'Questions for the Board come from the backstage team.';
-  // A message another room sent here stays while this room holds it: its author removes no message here by `delete`.
-  const SENT_STAYS = 'A message sent from another room stays here: only the admin removes it.';
+  // A message another room sent here stays while this room holds it: its author removes no message here by `delete`, but
+  // takes it back from the room it came from (room:withdraw, on that room's copy), and the admin removes it here.
+  const SENT_STAYS = 'A message sent from another room stays here: its sender withdraws it from that room, or the admin removes it.';
 
   // A send is said once: a repeat of a send (its client id, from the same person) is answered with what the first one
   // became, before any limit or right is read, since it asks for nothing new — never refused for what succeeded.
@@ -2206,7 +2210,8 @@ io.on('connection', (socket) => {
     if (!msg) return ok(ack)({ ok: false, error: 'Message not found' });
     if (msg.type === 'system') return ok(ack)({ ok: false, error: 'Cannot delete system message' });
     // A message another room sent here is not its author's to delete from this room (plan 1-§4.3): the copy kept where it
-    // came from says "delivered", which stays true while this room holds it. Only the admin removes it here.
+    // came from says "delivered", which stays true while this room holds it. Its sender withdraws it from there; only the
+    // admin removes it here.
     if (msg.sentFrom) return ok(ack)({ ok: false, error: SENT_STAYS });
     if (!msg.from || !msg.from.uid || msg.from.uid !== me.uid) return ok(ack)({ ok: false, error: 'Only the author can delete this message' });
     if (!apply(room, { o: 'del', id: messageId })) return ok(ack)(OP_REFUSED);
@@ -3652,7 +3657,7 @@ function renderTranscriptHtml(room) {
       }
     }
     let extras = '';
-    if (m.replyTo) extras += '<div class="rt">↩ replying to ' + esc(m.replyTo.name) + ': <em>' + esc(m.replyTo.snippet) + '</em></div>';
+    if (m.replyTo) extras += '<div class="rt">↩ replying to ' + esc(m.replyTo.name) + ': <em>' + esc(m.replyTo.withdrawn ? '⊘ withdrawn' : m.replyTo.snippet) + '</em></div>';
     if (Array.isArray(m.reactions) && m.reactions.length) {
       const counts = {};
       for (const r of m.reactions) counts[r.emoji] = (counts[r.emoji] || 0) + 1;
@@ -3664,7 +3669,7 @@ function renderTranscriptHtml(room) {
     if (m.held) extras += '<span class="pin">◷ written ' + esc(fmt(m.at - m.held * 1000)) + ', sent ' + esc(fmt(m.at)) + ' (offline)</span>';
     if (m.forwardedFrom) extras += '<div class="fwd">↗ Forwarded from ' + esc(m.forwardedFrom.roomName || 'another hall') + '</div>';
     if (m.sentFrom) extras += '<div class="fwd">↘ From ' + esc(ops.placeOf(m.sentFrom)) + (m.sentFrom.originalAuthor ? ' · originally by ' + esc(m.sentFrom.originalAuthor) : '') + '</div>';
-    if (m.sentTo) extras += '<div class="fwd">↗ Sent to ' + esc(ops.placeOf(m.sentTo)) + ' — a copy kept here</div>';
+    if (m.sentTo) extras += '<div class="fwd">' + (m.sentTo.withdrawn ? '⊘ Withdrawn from ' + esc(ops.placeOf(m.sentTo)) + ' after ' + esc(ops.lasted(m.sentTo.withdrawn - m.at)) : '↗ Sent to ' + esc(ops.placeOf(m.sentTo))) + ' — a copy kept here</div>';
     const cls = ['msg', 'type-' + m.type, m.priority ? 'priority' : ''].filter(Boolean).join(' ');
     rows.push('<article class="' + cls + '"><header><strong>' + who + '</strong><time>' + esc(fmt(m.at)) + '</time></header>' + extras + '<div class="body">' + content + '</div></article>');
   }

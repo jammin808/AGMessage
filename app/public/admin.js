@@ -147,6 +147,15 @@ function showDashboard() {
     ADMIN.refresh();
   });
   socket.on('actionUpdate', () => { /* admin doesn't need to render */ });
+  // The watched room's copy of a send, withdrawn from where it went: its line says so, drawn again from its record.
+  socket.on('sentUpdate', ({ messageId, sentTo } = {}) => {
+    const m = currentRoom && currentRoom.messages.find((x) => x.id === messageId);
+    if (!m || !sentTo || typeof sentTo !== 'object') return;
+    m.sentTo = sentTo;
+    const el = document.querySelector(`.admin-msg[data-key="${CSS.escape(String(messageId))}"]`);
+    if (el) el.replaceWith(buildAdminMessage(m));
+    ADMIN.refresh();
+  });
   // The watched room's guest code was switched or renewed (here or in another tab): its header, and the list.
   socket.on('guestCode', ({ guestCode, codeOn } = {}) => { codeNow(typeof guestCode === 'string' ? guestCode : '', !!codeOn); refreshRooms(); });
   // Another admin tab closed the hall this one is watching: show what is left.
@@ -502,9 +511,11 @@ function buildAdminMessage(m) {
   } else if (m.type === 'help') bodyHtml = `<p>■ <strong>${escapeHtml(m.category || 'Help')}</strong> ${escapeHtml(m.text || '')}</p>`;
   // A message its page held before sending it (written offline) says when it was written and when it was sent.
   const heldHtml = Number.isInteger(m.held) && m.held > 0 ? '<div class="held-line">written ' + escapeHtml(formatTime(m.at - m.held * 1000)) + ' · sent ' + escapeHtml(formatTime(m.at)) + ' (offline)</div>' : '';
-  // A message another room sent here, and this room's copy of one it sent there, say which room, as the hall page does.
+  // A message another room sent here, and this room's copy of one it sent there (or took back since), say which room, as
+  // the hall page does.
   const sentHtml = m.sentFrom ? '<div class="sent-meta">↘ From ' + escapeHtml(AGM.catalog.placeOf(m.sentFrom)) + '</div>'
-    : m.sentTo ? '<div class="sent-meta">↗ Sent to ' + escapeHtml(AGM.catalog.placeOf(m.sentTo)) + ' — delivered</div>' : '';
+    : m.sentTo && m.sentTo.withdrawn ? '<div class="sent-meta">⊘ Withdrawn from ' + escapeHtml(AGM.catalog.placeOf(m.sentTo)) + ' after ' + escapeHtml(AGM.catalog.lasted(m.sentTo.withdrawn - m.at)) + '</div>'
+      : m.sentTo ? '<div class="sent-meta">↗ Sent to ' + escapeHtml(AGM.catalog.placeOf(m.sentTo)) + ' — delivered</div>' : '';
   div.innerHTML =
     `<div class="admin-msg-head">${whoHtml} <time>${escapeHtml(formatTime(m.at))}</time>${m.priority ? ' <span class="priority-badge" style="display:inline-block">🔥 HIGH</span>' : ''}</div>` +
     `<div class="admin-msg-body">${sentHtml}${bodyHtml}${heldHtml}</div>` +
