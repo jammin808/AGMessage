@@ -130,7 +130,7 @@
     const r = { el: b, item, panel, parts: { icon, label, why, key } };
     draw(r, item);
     b.addEventListener('click', (e) => { e.preventDefault(); choose(r, { keyboard: e.detail === 0 }); });
-    b.addEventListener('pointerenter', () => hover(r));
+    b.addEventListener('pointerenter', (e) => { if (moved(e)) hover(r); });
     return r;
   }
   /** A named key as a menu shows it beside its item (as keyboards print it). */
@@ -254,6 +254,13 @@
     close(!item.asks);
     opts.onPick(id, value, item);
   }
+  // Where the pointer last was, from its every move, press and release: a pointer left at rest where a menu opens, or under
+  // a row the page moved there, is reported entering that row though it never moved, and is no hover, so a submenu opened
+  // by a key (F, E) stays open under a mouse lying on the page and keeps the focus.
+  let lastPointer = null;
+  const notePointer = (e) => { lastPointer = { x: e.clientX, y: e.clientY }; };
+  for (const type of ['pointermove', 'pointerdown', 'pointerup']) document.addEventListener(type, notePointer, true);
+  const moved = (e) => !lastPointer || e.clientX !== lastPointer.x || e.clientY !== lastPointer.y;
   function hover(r) {
     const p = r.panel;
     clearTimeout(p.timer);

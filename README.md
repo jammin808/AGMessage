@@ -14,7 +14,7 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   room it is. A hall's **Set up** on the halls board lists its rooms too, the Main room first, each with its code and its
   ⋯: **+ Add room** and Rename… for those who set halls up, the code and Remove room… for the admin, done at once. **Each
   room has its own guest code**, switched on or off and renewed by the admin (the admin page's room ⋯, Set up's, or the
-  code chip on the admin's own hall page): a side room's starts off, so it
+  header's ⋯ on the admin's own hall page): a side room's starts off, so it
   is for the admin and the accounts given it until the admin switches it on; switched off, the guests already in stay (or
   are sent out, with their seats), and nobody new joins with it; **New code** gives a room a new one, the one before it
   then admitting only a person already seated there, and the invite links made with it stop. Until a hall's code is
@@ -85,7 +85,12 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, images) shared and
   pushed to the on-stage panel or to screens, PDFs on iPads from iPadOS 16.4 (pdf.js's legacy build); pins, replies,
   reactions, priority, seen receipts. The hall page fits a phone, its words and icons at WCAG AA contrast in light and
-  dark. A new message never moves a feed you have scrolled up — "↓ 3 new" says how many came below — and a New line
+  dark. Its header is the same at every width: the room's name, its status (the connection, the countdown), Help and a
+  ⋯ that holds People, Screens…, the text size, the theme, the guest code and Leave, with the room switcher on a row of
+  its own. Every status on every page — a screen, a help request, a send held or refused, a link, the countdown — is a
+  mark of one table, each mark with one meaning, beside its word and in its colour, never the colour alone (✓ on screen
+  or resolved, ◷ sending or waiting, △ could not, ✕ none or a fault, ■ waiting for someone, ▶ on the way, ▲ soon, ○ off,
+  ◐ not fully seen, ◇ reached but not seen into, ▭ minimised, ⊘ withdrawn, ● a note). A new message never moves a feed you have scrolled up — "↓ 3 new" says how many came below — and a New line
   marks the first that arrived since you last touched the page, instead of a fill that fades. A sent message shows "◷
   Sending" until AGMessage has it, and is never posted twice; one written while the connection is down waits on the
   page, a reload included, and is sent when it is back, marked with its wait ("written 14:02 · sent 14:06 (offline)").
@@ -126,10 +131,11 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   a start that has no network address, so it never names none: it serves on, and This laptop says when New certificate
   renews it. The installed node's next start says why the start before was refused.
 - **Right-click.** Every act on a message, on a file in the panel, on a screen, on a person (a sender's name, a row of
-  People: @ Mention), on the composer's Send (✨ Draft a reply, 🔥 Priority, Attach a file…, Cancel the reply) and on the
-  header's code and countdown chips (Copy guest code, Copy join link, and for the admin Turn the code off… or on and New
-  code…; Speaker's screen…, Show the countdown on screens)
-  is on its ⋯ (a chip is its own), its right-click and Shift+F10 (or the menu key) — one list, drawn from one
+  People: @ Mention), on the composer's Send (✨ Draft a reply, 🔥 Priority, Attach a file…, Cancel the reply), on the
+  header (its ⋯: People, Screens…, Text size, Dark theme, Copy guest code, Copy join link, for the admin Turn the code
+  off… or on and New code…, and Leave, or All halls for an account) and on its countdown (Speaker's screen…, Show the
+  countdown on screens)
+  is on its ⋯ (the countdown is its own), its right-click and Shift+F10 (or the menu key) — one list, drawn from one
   catalogue, so the buttons and the menus never disagree. A message keeps two acts on its row: ↩ Reply and the one the
   seat uses most (Ask the operator, Send now or Show on screens). What a seat may not do is not offered; what it cannot
   do now is greyed with the reason. Keys on a message with the focus: R reply, E react, F send to, P pin (with Undo), D

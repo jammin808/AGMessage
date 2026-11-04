@@ -21,7 +21,7 @@ to a red square (`?status=hide` hides it). The screen keeps itself awake where t
 
 ## Driving screens
 
-In a hall (as an account with `display.control`): **Screens**. Tick the screens, then take Holding, Countdown, Clock,
+In a hall (as an account with `display.control`): the header's ⋯ → **Screens…**. Tick the screens, then take Holding, Countdown, Clock,
 Black, or type a message and choose **Show** (tick "Under the countdown" to put it in the countdown's strip). On any
 message, or any image or PDF shared in the hall, **⧉** offers it to the ticked screens (a PDF from its first page).
 A take goes to every ticked screen in one request — all 50 of a hall's screens if they are ticked; a screen it could
@@ -31,13 +31,13 @@ PDF at p. 3", "an image", "the countdown with words (8 characters)"), never the 
 which the console and the halls board quote and name.
 
 Every take is numbered. The screen renders it and says so, and only then does the console say **✓ on screen**. Until
-then it says **… sending**; **△** and the reason when the screen could not show it (an image that did not load, a PDF
+then it says **◷ sending**; **△** and the reason when the screen could not show it (an image that did not load, a PDF
 that did not render — the screen is then black, never the picture before it); **✕ offline** when no browser has the
 link open. **Holding** reads "holding image" when the hall
 has one, which is what the screen shows.
 
 Several browsers can hold one link (a projector and its backup, a manager's laptop after **Open**). Each says for itself
-what it showed: the console says **✓ on all 2 screens** only when every one did, **… sending — on 1 of 2 screens** until
+what it showed: the console says **✓ on all 2 screens** only when every one did, **◷ sending — on 1 of 2 screens** until
 then, and **△ could not show it on 1 of 2 screens** as long as any one could not. A screen whose network blips comes back
 as the same screen, not a second one, by itself: from half a second after a drop, at once when its browser is shown
 again or back online, and after AGMessage refused it at a busy moment, at the wait AGMessage named. It never says

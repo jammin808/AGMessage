@@ -17,6 +17,7 @@ const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStag
 function loadCatalog() {
   const ctx = vm.createContext({});
   vm.runInContext('globalThis.window = globalThis;', ctx);
+  vm.runInContext(readSource(path.join(ROOT, 'public', 'common.js')), ctx, { filename: 'common.js' });
   vm.runInContext(readSource(path.join(ROOT, 'public', 'catalog.js')), ctx, { filename: 'catalog.js' });
   return ctx.AGM.catalog;
 }
@@ -42,6 +43,8 @@ const ON_STAGE_WORDS = {
   'display:update': 'Do that from a backstage page.',
   'display:rotate': 'Do that from a backstage page.',
   'display:remove': 'Do that from a backstage page.',
+  // The header's Screens…: the screens console's list is a backstage page's to read.
+  'display:list': 'Do that from a backstage page.',
   forward: 'Messages from On stage stay in this room.',
   'room:send': 'Messages from On stage stay in this room.',
   delete: 'Only the author can delete this message',
@@ -137,13 +140,14 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   const messages = before.messages;
   const screen = before.displays[0];
   const fileOf = (where) => ({ ...messages.find((m) => m.type === 'file'), where });
-  // The rest of the hall page: each composer, the stage chip (the link up), the code chip, and the people of the room as
+  // The rest of the hall page: each composer, the stage chip (the link up), the header's ⋯, and the people of the room as
   // the server lists them (a person: `person`'s hall half; the admin's rows fit the admin page alone).
   const composer = (form) => ({ id: 'compose:' + form, form, room: 'Hall A', file: form === 'file' ? 'capex.pdf' : '', replying: '', priority: false });
   const people = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallA })).users.map((u) => ({ id: 'person:' + u.uid, uid: u.uid, name: u.name, role: u.role }));
   const objects = {
     msg: messages, file: [fileOf('list'), fileOf('preview')], screen: [screen],
-    compose: ['director', 'text', 'action', 'file'].map(composer), chip: [{ id: 'stage', live: true, text: '04:30', words: 'Live from Stagewatch' }], code: [{ id: 'code', code: hallA, on: true, hall: 'Hall A' }], person: people,
+    compose: ['director', 'text', 'action', 'file'].map(composer), chip: [{ id: 'stage', live: true, text: '04:30', words: 'Live from Stagewatch' }],
+    header: [{ id: 'header', people: people.length, peopleShown: false, zoom: 1, dark: false, code: hallA, on: true, hall: 'Hall A', account: false, away: '/' }], person: people,
   };
   assert.ok(people.length >= 7, 'the room\'s people, as the join lists them');
 
@@ -168,7 +172,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'display:rotate': (o) => ({ id: o.id }),
     'display:remove': (o) => ({ id: o.id }),
     message: () => ({ type: 'text', text: 'From a seat that may not post' }),
-    'room:update': (o, e) => (e.id === 'code.new' ? { code: hallA, newCode: true } : { code: hallA, codeOn: false, keepGuests: false }),
+    'room:update': (o, e) => (e.id === 'header.newCode' ? { code: hallA, newCode: true } : { code: hallA, codeOn: false, keepGuests: false }),
+    'display:list': () => ({ code: hallA }),
   };
   // The acts the hall page draws: each that fits some seat's facts and some object here (a kind's rows another page draws
   // never fit this one).

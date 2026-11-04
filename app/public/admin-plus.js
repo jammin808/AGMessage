@@ -91,10 +91,10 @@
     fill('swFp', typed || '');
     const l = t.link || {};
     $('swTls').textContent = !l.on ? 'Link to Stagewatch: plain HTTP (it announces no certificate)'
-      : l.problem ? '⚠ ' + l.problem
-      : 'Link to Stagewatch: encrypted ✓ — certificate ' + pretty(l.fp).slice(0, 23) + '… ' + (l.pinned ? '(pinned)' : '(pinned once Stagewatch accepts the key)');
+      : l.problem ? AGM.mark('couldNot') + ' ' + l.problem
+      : 'Link to Stagewatch: encrypted ' + AGM.mark('ok') + ' — certificate ' + pretty(l.fp).slice(0, 23) + '… ' + (l.pinned ? '(pinned)' : '(pinned once Stagewatch accepts the key)');
     $('swTls').classList.toggle('bad', !!l.problem);
-    $('deskLine').textContent = t.deskRefusal ? '⚠ Show desk: Stagewatch refuses to hand this AGMessage what it approves (' + t.deskRefusal + ') — proposals are off until it takes this AGMessage\'s collect; give AGMessage a node key of its own.'
+    $('deskLine').textContent = t.deskRefusal ? AGM.mark('couldNot') + ' Show desk: Stagewatch refuses to hand this AGMessage what it approves (' + t.deskRefusal + ') — proposals are off until it takes this AGMessage\'s collect; give AGMessage a node key of its own.'
       : t.desk ? 'Show desk: Stagewatch keeps the shared approval queue — the backstage team can propose stage messages (📝), and approved "notice" proposals for this AGMessage are shown in every room.' : '';
     $('deskLine').classList.toggle('bad', !!t.deskRefusal);
   }
@@ -143,7 +143,7 @@
     $('tunnelPlaces').textContent = tunnelWords(h.tunnel);
     const parts = [];
     parts.push(h.restarts ? 'restarted by the watchdog ' + h.restarts + '×' : 'running since start');
-    if (h.watchdog) parts.push((h.watchdog.refused ? '⚠ the start before this one was refused at ' : '⚠ the watchdog gave up at ') + new Date(h.watchdog.at).toLocaleTimeString() + ': ' + h.watchdog.reason);
+    if (h.watchdog) parts.push(AGM.mark('couldNot') + (h.watchdog.refused ? ' the start before this one was refused at ' : ' the watchdog gave up at ') + new Date(h.watchdog.at).toLocaleTimeString() + ': ' + h.watchdog.reason);
     if (h.lastCrash) parts.push('last crash ' + new Date(h.lastCrash.at).toLocaleString() + ': ' + h.lastCrash.message);
     if (h.rejections) parts.push(h.rejections + ' failed background task(s)');
     if (h.loopMs && h.loopMs.count) parts.push('loop delay p95 ' + h.loopMs.p95 + ' ms (max ' + h.loopMs.max + ')' + (h.elu && h.elu.count ? ' · busy ' + Math.round(h.elu.p95 * 100) + ' %' : ''));
@@ -152,24 +152,24 @@
     // The power request a live show holds: said while a hall is live ("This laptop" says the rest).
     const pw = h.power;
     if (pw && pw.state === 'held') parts.push('kept awake while ' + pw.live + (pw.live === 1 ? ' hall is' : ' halls are') + ' live');
-    else if (pw && (pw.state === 'refused' || pw.state === 'failed')) parts.push('⚠ not kept awake: ' + pw.why);
+    else if (pw && (pw.state === 'refused' || pw.state === 'failed')) parts.push(AGM.mark('couldNot') + ' not kept awake: ' + pw.why);
     if (h.stageRttMs && h.stageRttMs.count) parts.push('send-to-stage ' + h.stageRttMs.p50 + ' ms typical, ' + h.stageRttMs.max + ' worst');
     if (h.clock) parts.push('clock vs Stagewatch ' + (h.clock.offsetMs >= 0 ? '+' : '') + h.clock.offsetMs + ' ms' + (h.clock.apart ? ' — CLOCKS APART' : ''));
     // Each store that could not be saved, by name: what it holds is kept and tried again until it is on disk.
     const stores = (h.saves && h.saves.stores) || {};
     for (const [name, st] of Object.entries(stores)) {
-      if (st && st.error) parts.push('⚠ ' + name + ' save failed (kept, tried again): ' + st.error);
-      else if (st && st.unwritten) parts.push('⚠ ' + st.unwritten + ' ' + name + ' entries not yet on disk');
+      if (st && st.error) parts.push(AGM.mark('couldNot') + ' ' + name + ' save failed (kept, tried again): ' + st.error);
+      else if (st && st.unwritten) parts.push(AGM.mark('couldNot') + ' ' + st.unwritten + ' ' + name + ' entries not yet on disk');
     }
     if (h.desk && h.desk.waiting) {
       const n = h.desk.waiting;
       const last = h.desk.lastStatus === null ? '' : h.desk.lastStatus ? 'last answer ' + h.desk.lastStatus : 'no answer to the last try';
       const next = h.desk.nextInMs === null ? 'tried once its Stagewatch is linked and keeps a desk' : 'next try in ' + Math.round(h.desk.nextInMs / 1000) + ' s';
-      parts.push('⚠ ' + n + ' show-desk result' + (n === 1 ? '' : 's') + ' waiting for Stagewatch to take ' + (n === 1 ? 'it' : 'them') + ' (' + [last, next].filter(Boolean).join(', ') + ')');
+      parts.push(AGM.mark('waiting') + ' ' + n + ' show-desk result' + (n === 1 ? '' : 's') + ' waiting for Stagewatch to take ' + (n === 1 ? 'it' : 'them') + ' (' + [last, next].filter(Boolean).join(', ') + ')');
     }
-    if (h.tls && h.tls.link && h.tls.link.changed) parts.push('⚠ CERTIFICATE CHANGED — Stagewatch\'s certificate is not the one pinned; the link is refused until you accept it');
+    if (h.tls && h.tls.link && h.tls.link.changed) parts.push(AGM.mark('fault') + ' CERTIFICATE CHANGED — Stagewatch\'s certificate is not the one pinned; the link is refused until you accept it');
     // The data folder was last written by a newer build of its format: this one serves it (This laptop says the rest).
-    if (h.format && h.format.newer === true) parts.push('⚠ the data folder was last written by a newer build, ' + h.format.before + ': this one reads its format and writes it now');
+    if (h.format && h.format.newer === true) parts.push(AGM.mark('couldNot') + ' the data folder was last written by a newer build, ' + h.format.before + ': this one reads its format and writes it now');
     $('healthLine').textContent = parts.join(' · ');
   }
 
@@ -194,7 +194,9 @@
   const lastExportWords = (x) => (x && x.to
     ? 'Last export: entries ' + x.from + '–' + x.to + ', sent whole at ' + at(x.at) + ' (' + x.by + '). Export at the end of each show day.'
     : 'No export in the log\'s newest file: export at the end of each show day.');
-  const SHAPE = { intact: '✓', linked: '◇', unvouched: '△', broken: '✕' };
+  // The audit log's marks, each one of the one table: intact ✓; linked ◇ (accepted on this laptop, and not checkable under
+  // its key: reached, not seen into); unvouched △; broken ✕.
+  const SHAPE = { intact: AGM.mark('ok'), linked: AGM.mark('unseen'), unvouched: AGM.mark('couldNot'), broken: AGM.mark('fault') };
   const RANK = { intact: 0, linked: 1, unvouched: 2, broken: 3 };
   /** The first keyed start's question about the older entries, asked of the person at the laptop. */
   const question = (f) => f.words.replace(/, and nothing vouches for them until they are accepted$/, '') + '; anyone who could write this folder could have rewritten them. If this log has been in your hands, accept them.';
@@ -214,7 +216,7 @@
     for (const f of list) {
       const li = document.createElement('li');
       li.dataset.mark = SHAPE[f.mark] ? f.mark : 'broken';
-      li.textContent = (SHAPE[f.mark] || '✕') + ' ' + (f.first ? question(f) : f.words);
+      li.textContent = (SHAPE[f.mark] || SHAPE.broken) + ' ' + (f.first ? question(f) : f.words);
       ul.appendChild(li);
     }
     // A check broken at a line is never accepted, and nothing else is while it stands.
@@ -267,8 +269,8 @@
     splitSay('', 'Splitting… the files before the point are moved into the archive and signed.');
     const r = await fetch('/api/audit/split', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seq }) }).then((x) => x.json()).catch(() => ({ ok: false, error: 'No answer from the server.' }));
     // A split that waits (a file held, or its entry not on disk yet) is △ with its words, never ✓ and never "Not split".
-    if (!r.ok && !r.waits) { splitSay('broken', '✕ ' + (r.error || 'Not split.')); return; }
-    splitSay(r.waits ? 'unvouched' : 'intact', r.waits ? '△ ' + (r.words || r.error) : r.words);
+    if (!r.ok && !r.waits) { splitSay('broken', SHAPE.broken + ' ' + (r.error || 'Not split.')); return; }
+    splitSay(r.waits ? 'unvouched' : 'intact', r.waits ? SHAPE.unvouched + ' ' + (r.words || r.error) : r.words);
     setTimeout(() => loadSettings(), 300);
   }
   let shown = null;   // the check the dialog was drawn from: its digest goes with the Accept
@@ -281,16 +283,16 @@
     const r = await fetch('/api/audit/verify').then((x) => x.json()).catch(() => null);
     ul.textContent = '';
     if (!r || !Array.isArray(r.findings)) { ul.textContent = 'The log could not be checked: ' + ((r && r.error) || 'no answer'); return; }
-    if (r.why) { ul.textContent = '✕ ' + r.words + ' — a broken entry cannot be accepted.'; return; }
+    if (r.why) { ul.textContent = SHAPE.broken + ' ' + r.words + ' — a broken entry cannot be accepted.'; return; }
     shown = r;
     let used = 0;   // characters of the accept's target the ticked ids take (it holds 80)
     for (const f of r.findings) {
       const li = document.createElement('li');
       li.dataset.mark = SHAPE[f.mark] ? f.mark : 'broken';
-      if (f.held) { li.textContent = (SHAPE[f.mark] || '✕') + ' ' + f.words + ' — not on disk yet; it can be accepted once it is'; ul.appendChild(li); continue; }
+      if (f.held) { li.textContent = (SHAPE[f.mark] || SHAPE.broken) + ' ' + f.words + ' — not on disk yet; it can be accepted once it is'; ul.appendChild(li); continue; }
       const label = document.createElement('label'); label.className = 'check';
       const box = document.createElement('input'); box.type = 'checkbox'; box.dataset.id = f.id;
-      const shape = document.createElement('span'); shape.textContent = SHAPE[f.mark] || '✕';
+      const shape = document.createElement('span'); shape.textContent = SHAPE[f.mark] || SHAPE.broken;
       const words = document.createElement('span'); words.textContent = f.first ? question(f) : f.words;
       label.append(box, shape, words);
       li.appendChild(label);
@@ -304,8 +306,8 @@
         const arc = f.kind === 'archive' && Array.isArray(r.archives) ? r.archives.find((a) => a.finding === f.id) : null;
         const older = arc && arc.from > 1 ? ' Entries 1–' + (arc.from - 1) + ' are in an older archive this one named: Accounts then lists it as not reached from the live log, with its own Check.' : '';
         const say = document.createElement('span'); say.textContent = f.kind === 'archive'
-          ? 'Accept that ' + f.words + '? From now on it reads ◇ here, and its entries cannot be checked on this laptop again. Keep it, or an export that holds it, where it went.' + older
-          : 'Accept that ' + f.words + '? From now on it reads ◇, and what it names cannot be brought back.';
+          ? 'Accept that ' + f.words + '? From now on it reads ' + SHAPE.linked + ' here, and its entries cannot be checked on this laptop again. Keep it, or an export that holds it, where it went.' + older
+          : 'Accept that ' + f.words + '? From now on it reads ' + SHAPE.linked + ', and what it names cannot be brought back.';
         line.append(sure, say);
         li.appendChild(line);
         box.addEventListener('change', () => { line.hidden = !box.checked; if (!box.checked) sure.checked = false; });
@@ -400,7 +402,7 @@
       prune(ul, new Set(r.linked.map((l) => 'node:' + l.id)));
       if (!r.linked.length && !ul.querySelector('li')) emptyLine(ul, 'No Patterns or PlayMap linked. Link one from the list above when AGMessage hears it.');
       for (const l of r.linked) {
-        const mark = { green: '✓', amber: '△', red: '✕', grey: '○' }[l.light] || '○';
+        const mark = AGM.mark({ green: 'ok', amber: 'couldNot', red: 'fault' }[l.light] || 'off');
         linkRow(ul, 'node:' + l.id, mark + ' ' + (l.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' “' + l.name + '” — ' + l.status + (l.problem ? ' (' + l.problem + ')' : '') + (l.headline ? ': ' + l.headline : '') + (l.hall ? ' · hall ' + l.hall : '') + ' · ' + l.commands.length + ' verbs'
           + (l.certificateWaits ? ' · ' + (l.certificateChanged ? 'its certificate changed: confirm it' : 'its certificate waits to be confirmed') : ''));
       }
@@ -438,7 +440,7 @@
       AGM.outbox.now('nodes:command', { id: o.id, line, mode: 'propose' }, (r) => {
         if (!r) { say('No answer.', true); return; }
         if (!r.ok) { say(r.error, true); return; }
-        say('▲ Proposed to the show desk (' + r.proposal.id + ', ' + r.risk + ' risk) — a person approves it in Stagewatch.');
+        say(AGM.mark('waiting') + ' Proposed to the show desk (' + r.proposal.id + ', ' + r.risk + ' risk) — a person approves it in Stagewatch.');
       });
     },
     'link.accept': () => AGM.outbox.now('admin:acceptCertificate', undefined, (r) => { if (!r || !r.ok) say((r && r.error) || 'Not accepted.', true); else say('Stagewatch\'s new certificate is accepted.'); setTimeout(() => loadSettings(), 800); }),
@@ -450,7 +452,7 @@
   // ---------------------------------------------------------------- "This laptop" (kind laptop)
   // Its rows are the server's (lib/laptop.js): a label, the words, a mark (its shape beside its colour) and where each was
   // read. Drawn from the settings' answer, from Refresh's, and from laptop:facts once a read of Windows ends.
-  const LAPTOP_MARK = { ok: '✓', warn: '△', fault: '✕', off: '○' };
+  const LAPTOP_MARK = { ok: AGM.mark('ok'), warn: AGM.mark('couldNot'), fault: AGM.mark('fault'), off: AGM.mark('off') };
   let laptopNow = null;
   /** "This laptop" as the catalogue reads it: each LAN address as devices open it, and whether Windows is read now. */
   function laptopObject() {

@@ -77,7 +77,7 @@ const CHROME_OLD_WORDS = (doc = 'document') => `((doc) => {
 // and what it still offers of the hall (its header's buttons, a chip that is a door, an open dialog, an ask): nothing.
 const OUT_OF_HALL = `(() => { const box = document.getElementById('outOfHall'); const back = document.getElementById('outBack');
   const doors = [...document.querySelectorAll('.app-meta [role=button], .app-meta [aria-haspopup]')].filter((n) => n.getClientRects().length > 0).map((n) => n.id);
-  const offered = [...new Set(['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn'].filter((id) => !document.getElementById(id).hidden).concat(doors, [...document.querySelectorAll('dialog[open], .agm-ask')].map((d) => d.id)))];
+  const offered = [...new Set(['helpBtn', 'headerMore'].filter((id) => !document.getElementById(id).hidden).concat(doors, [...document.querySelectorAll('dialog[open], .agm-ask')].map((d) => d.id)))];
   return !box.hidden && JSON.stringify({ words: document.getElementById('outWords').textContent, back: back.textContent, to: back.getAttribute('href'),
     hall: document.querySelector('.main-row').hidden, offered, focused: document.activeElement === back, connected: socket.connected }); })()`;
 // The server's own time zone for the smoke: a screen in another zone must still show this one's time of day.
@@ -459,7 +459,7 @@ const PHONE_READ = `(() => {
   const help = document.getElementById('helpBtn');
   const send = [...document.querySelectorAll('.send-btn')].filter(vis).map((b) => { const r = b.getBoundingClientRect(); return { w: r.width, h: r.height, label: b.getAttribute('aria-label'), word: getComputedStyle(b.querySelector('.send-word')).display, mark: getComputedStyle(b.querySelector('.send-icon')).display }; });
   const header = [...document.querySelectorAll('.app-meta .btn')].filter(vis).map((b) => b.getBoundingClientRect().height);
-  const doors = [...document.querySelectorAll('.app-meta [role=button], #feed .msg header button.from, .compose .compose-more')].filter(vis).map((b) => { const r = b.getBoundingClientRect(); return { door: b.id || b.className, size: Math.round(Math.min(r.width, r.height) * 10) / 10 }; });
+  const doors = [...document.querySelectorAll('.app-meta [role=button], #headerMore, #feed .msg header button.from, .compose .compose-more')].filter(vis).map((b) => { const r = b.getBoundingClientRect(); return { door: b.id || b.className, size: Math.round(Math.min(r.width, r.height) * 10) / 10 }; });
   const pri = [...document.querySelectorAll('.compose .priority-btn')].find(vis);
   let priority = null;
   if (pri) {
@@ -532,6 +532,8 @@ const middleOf = (tab, el) => tab.eval(`(() => { const n = ${el}; n.scrollIntoVi
 /** The ids of the open menu, as drawn: each row's act, a fold's entries in its place; '' while none is open. */
 const MENU_IDS = `(() => { const m = document.querySelector('.agm-menu:not(.agm-sub)'); return m ? JSON.stringify([...m.querySelectorAll(':scope > .agm-mi')].flatMap((b) => b.dataset.children ? b.dataset.children.split(' ') : b.dataset.action ? [b.dataset.action] : [])) : ''; })()`;
 const NO_MENU = `!document.querySelector('.agm-menu')`;
+/** The hall page's Screens console, opened as a person opens it: the header's ⋯, then Screens…. False where it is not offered. */
+const OPEN_SCREENS = `(() => { document.getElementById('headerMore').click(); const b = document.querySelector('.agm-menu [data-action="header.screens"]'); if (b) b.click(); else AGM.menu.close(); return !!b; })()`;
 /**
  * An object's doors on a page, each opened and read: right-click (at its name), its ⋯, and Shift+F10 on the focused
  * object each open the ids of the catalogue's shown set for it; the ⋯ clicked again closes its menu, the focus on it;
@@ -927,13 +929,13 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       await phones[seat].until(`typeof joined !== "undefined" && joined && allMessages.some((m) => m.priority)`);
     }
     for (const [seat, tab] of Object.entries(phones)) await readOldWords('the hall page on a phone, ' + { board: 'On stage', research: 'Backstage', observer: 'Observer' }[seat], tab);
-    const hallDeck = JSON.parse(await phones.board.eval(`JSON.stringify({ chip: document.getElementById('roomChip').title, people: document.querySelector('#peoplePanel h3').textContent,
+    const hallDeck = JSON.parse(await phones.board.eval(`JSON.stringify({ chip: document.querySelector('.app-title strong').textContent, people: document.querySelector('#peoplePanel h3').textContent,
       placeholder: document.getElementById('directorInput').placeholder, label: document.getElementById('directorInput').getAttribute('aria-label') })`));
     const backDeck = JSON.parse(await phones.research.eval(`JSON.stringify({ ask: document.querySelector('#actionPane .field > span').textContent,
       files: document.querySelector('#filePane .dropzone .hint').textContent, panel: document.querySelector('#docDisplay .empty-state .hint').textContent })`));
     report(JSON.stringify(hallDeck) === JSON.stringify({ chip: 'Phone hall', people: 'In this room', placeholder: 'Message everyone here…', label: 'Message everyone here…' })
       && JSON.stringify(backDeck) === JSON.stringify({ ask: 'Question for the Board', files: 'Max 25 MB. Files show on the Board\'s On stage panel.', panel: 'When the backstage team shares a file, it appears here automatically.' }),
-      `the hall page says room, the Board and the backstage team: the code's title names the room, "In this room", "Message everyone here…", "Question for the Board" (${JSON.stringify({ hallDeck, backDeck })})`);
+      `the hall page says room, the Board and the backstage team: the header names the room, "In this room", "Message everyone here…", "Question for the Board" (${JSON.stringify({ hallDeck, backDeck })})`);
     // Nobody touches Oli's page from here to the end of the smoke: no tap, no key, no wheel.
     await post(pat, { type: 'text', text: 'First new' });
     const firstNew = Date.now();
@@ -957,14 +959,13 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const { light, dark } = seen;
       const writes = seat !== 'observer';
       const sendOk = writes ? light.send.length === 1 && light.send[0].w >= 44 && light.send[0].h >= 44 && light.send[0].label === 'Send to Phone hall' && light.send[0].word === 'none' && light.send[0].mark !== 'none' : light.send.length === 0;
-      // The doors that are not buttons by look (the code chip, a sender's name, the composer's ⋯): 44 px under a finger too;
-      // a guest's page has the code chip it typed (On stage none: a Board tablet is handed no code), and a seat that writes
-      // in the full view the composer's ⋯.
-      const chipOk = light.doors.some((d) => d.door === 'roomChip') === (seat !== 'board');
+      // The doors that are not buttons by look (the header's ⋯, a sender's name, the composer's ⋯): 44 px under a finger
+      // too; every seat has the header's ⋯, and a seat that writes in the full view the composer's ⋯.
+      const chipOk = light.doors.some((d) => d.door === 'headerMore');
       const doorsOk = light.doors.every((d) => d.size >= 44) && chipOk && (!writes || !light.full || light.doors.some((d) => /compose-more/.test(d.door)));
       report(light.fits && dark.fits && Array.isArray(dialogs) && dialogs.length === 3 && dialogs.every((d) => d.buttons > 0 && d.missed.length === 0) && (dialogs[0].via === 'Help') === writes &&
         sendOk && light.coarse && light.header >= 44 && doorsOk,
-        `the hall page fits a 390 px phone as ${seat}: no wider than the screen (${light.width}), every dialog's buttons on the screen and reached by a tap, Send a 44 px button named for where it sends, the header's controls and the doors (the code chip, a sender's name, the composer's ⋯) 44 px under a finger (${JSON.stringify({ dialogs, send: light.send, header: light.header, doors: light.doors })})`);
+        `the hall page fits a 390 px phone as ${seat}: no wider than the screen (${light.width}), every dialog's buttons on the screen and reached by a tap, Send a 44 px button named for where it sends, the header's controls and the doors (the header's ⋯, a sender's name, the composer's ⋯) 44 px under a finger (${JSON.stringify({ dialogs, send: light.send, header: light.header, doors: light.doors })})`);
       // 🔥 Priority pressed is filled with the fault red and says it is pressed; unpressed it is neither; each click turns it.
       const priorityOk = (t) => (writes ? !!t.priority && !t.priority.off.red && t.priority.off.pressed !== 'true' && t.priority.on.red && t.priority.on.pressed === 'true' && t.priority.on.ratio >= 4.5 &&
         !t.priority.back.red && t.priority.back.pressed === 'false' : t.priority === null);
@@ -1824,7 +1825,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
 
     // Screens: the account adds one from the hall's Screens console; its link opens a display page that shows a message
     // (fitted to the screen) and the countdown, and confirms each — the console then reads ✓ on screen.
-    report(!!(await hallView.until(`!document.getElementById('screensBtn').hidden`)), 'the hall view offers Screens to an account that may drive them');
+    report(!!(await hallView.until(`AGM.catalog.ids('header', F, headerObject()).includes('header.screens')`)), 'the hall view offers Screens… in its header\'s ⋯ to an account that may drive them');
     const made = await hallView.eval(`new Promise((r) => socket.emit('display:create', { code: ROOM, name: 'Lectern monitor' }, r))`);
     const screen = await edge.tab(`${base}${made.display.path}`);
     report(!!(await screen.until(`document.body.dataset.kind === 'holding' && document.getElementById('idleName').textContent.includes('Lectern monitor')`)), 'a display link opens a holding screen named for the crew');
@@ -1834,7 +1835,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await sleep(400);
     await screen.shot(path.join(OUT, 'screen-message.png'));
     report(!!(await hallView.until(`new Promise((r) => socket.emit('display:list', { code: ROOM }, (x) => r(x.displays[0].state === 'shown')))`)), 'the console reads ✓ on screen once the screen confirmed it');
-    await hallView.eval(`document.getElementById('screensBtn').click()`);
+    await hallView.eval(OPEN_SCREENS);
     await hallView.until(`document.getElementById('screensDialog').open && document.querySelectorAll('.screen-item').length === 1`);
     await sleep(300);
     await hallView.shot(path.join(OUT, 'screens-console.png'));
@@ -1997,7 +1998,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
 
     // The Screens console: a page typed for one PDF is not carried to the next one offered; a take on every ticked screen
     // is one request, and a screen it could not reach is named; a holding image picked but not saved survives refreshes.
-    await hallView.until(`document.getElementById('screensDialog').open || (document.getElementById('screensBtn').click(), false)`);
+    await hallView.until(`document.getElementById('screensDialog').open || (${OPEN_SCREENS}, false)`);
     const pageField = await hallView.eval(`(() => { const f = (n) => allMessages.find((m) => m.filename === n); Screens.offer(f('deck.pdf')); document.getElementById('pendingPage').value = '7'; Screens.offer(f('agenda.pdf')); return document.getElementById('pendingPage').value; })()`);
     report(pageField === '1', `a page typed for one PDF does not carry over to the next one offered (the field reads ${pageField})`);
     await hallView.eval(`document.getElementById('pendingCancel').click()`);
@@ -2284,11 +2285,42 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await research.until(`!!document.querySelector('.agm-menu .agm-mi[data-action="msg.delete"]')`, 3000);
     await research.eval(`document.querySelector('.agm-menu .agm-mi[data-action="msg.delete"]').click()`);
     const dotsAsk = await research.until(`(() => { const a = document.querySelector('.agm-ask'); return a && !document.querySelector('.agm-menu') && a.querySelector('.agm-ask-title').textContent; })()`, 3000);
-    await leftClick(research, await middleOf(research, keptDots));
+    const keptAt = await middleOf(research, keptDots);
+    await leftClick(research, keptAt);
     const dotsAgain = await research.until(`!document.querySelector('.agm-ask') && !!document.querySelector('.agm-menu:not(.agm-sub)') && messagesById.has(${codeLiteral(doorMsgs.ownText)}) && 'no'`, 3000);
     await press(research, 'Escape');
     await research.until(NO_MENU, 3000);
     report(dotsAsk === 'Delete your message?' && dotsAgain === 'no', `The ⋯ pressed again under the Delete… it opened answers the ask "no": the ask goes, the message stays, and only the ⋯'s menu opens (${JSON.stringify({ dotsAsk, dotsAgain })})`);
+
+    // A pointer at rest is no hover (menus.js): parked by a move of its own on a row of a message's menu, the menu shut,
+    // then opened again under it by E, the React ▸ that E opened stays open past the hover's 200 ms with the focus in it,
+    // though the page reports the pointer entering the row it lies on. Moved one row, onto Send to ▸, it hovers: Send
+    // to's submenu takes React's place. The pointer then lies where it lay before.
+    const TOP_ROWS = `JSON.stringify([...document.querySelectorAll('.agm-menu:not(.agm-sub) > .agm-mi')].map((b) => { const q = b.getBoundingClientRect(); return { id: b.dataset.action || '', sub: b.hasAttribute('aria-haspopup'), x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2) }; }))`;
+    const REACT_OPEN = `!!document.activeElement && !!document.activeElement.closest('.agm-sub') && document.querySelector('.agm-menu:not(.agm-sub) [data-action="msg.react"]').getAttribute('aria-expanded') === 'true'`;
+    const reactByKey = async () => {
+      await research.eval(`messagesById.get(${codeLiteral(doorMsgs.ownText)}).focus()`);
+      await press(research, 'e');
+      return research.until(`(${REACT_OPEN}) && ${TOP_ROWS}`, 3000);
+    };
+    const restRows = JSON.parse((await reactByKey()) || '[]');
+    await research.eval('AGM.menu.close()');
+    await research.until(NO_MENU, 3000);
+    const parkOn = restRows.find((r) => !r.sub) || { id: '-', x: 0, y: 0 };
+    const hoverTo = restRows.find((r) => r.id === 'msg.send') || { x: 0, y: 0 };
+    await research.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: parkOn.x, y: parkOn.y });
+    const reactAgain = !!(await reactByKey());
+    const underRest = await research.eval(`(() => { const b = document.elementFromPoint(${parkOn.x}, ${parkOn.y}); const r = b && b.closest('.agm-menu:not(.agm-sub) > .agm-mi'); return r ? r.dataset.action || '' : ''; })()`);
+    await sleep(600);
+    const atRest = await research.eval(`(${REACT_OPEN}) && 'open'`);
+    await research.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hoverTo.x, y: hoverTo.y });
+    const hovered = await research.until(`(() => { const top = document.querySelector('.agm-menu:not(.agm-sub)'); const ex = (id) => top && top.querySelector('[data-action="' + id + '"]').getAttribute('aria-expanded');
+      return ex('msg.send') === 'true' && ex('msg.react') === 'false' && !!document.querySelector('.agm-sub') && 'send'; })()`, 3000);
+    await research.eval('AGM.menu.close()');
+    await research.until(NO_MENU, 3000);
+    await research.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: keptAt.x, y: keptAt.y });
+    report(restRows.length > 1 && reactAgain && underRest === parkOn.id && atRest === 'open' && hovered === 'send',
+      `a pointer at rest is no hover: lying on a row of the menu E opened again, React ▸ stays open past 200 ms with the focus in it; moved onto Send to ▸, it hovers and that submenu opens (${JSON.stringify({ rows: restRows.map((r) => r.id + (r.sub ? ' ▸' : '')), parkOn: parkOn.id, reactAgain, underRest, atRest, hovered })})`);
 
     // Copy text over plain http (no clipboard API there): the browser's own copy, else a field to copy from; either way
     // the focus comes back where it was, never to the page.
@@ -2327,7 +2359,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // A screen, inside the Screens dialog: its menu and its asks open in the dialog, Escape closes them and the dialog stays;
     // Rename… is a field in place and Remove… asks in place, never a native dialog.
     const doorScreen = await hallView.eval(`new Promise((r) => socket.emit('display:create', { code: ROOM, name: 'Doors spare' }, (x) => r(x.display.id)))`);
-    await hallView.eval(`document.getElementById('screensBtn').click()`);
+    await hallView.eval(OPEN_SCREENS);
     const screenRow = `[...document.querySelectorAll('#screenList .screen-item')].find((li) => li.dataset.screenId === ${codeLiteral(doorScreen)})`;
     await hallView.until(`document.getElementById('screensDialog').open && !!${screenRow}`);
     const screenDoors = await doorsOf(hallView, 'screen', screenRow, `Screens.of(${codeLiteral(doorScreen)})`);
@@ -2582,8 +2614,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await pressTab.send('Page.navigate', { url: 'about:blank' });
     await pressTab.close();
 
-    // The header's chips, each its own door: the stage chip (the account's: the speaker's screen and the countdown on its
-    // screens) and the code chip (copy the guest code or the join link).
+    // The header's countdown chip is its own door (the account's: the speaker's screen and the countdown on its screens).
     await hallView.until(`!document.getElementById('stageChip').hidden && document.getElementById('stageChip').getAttribute('role') === 'button'`, 8000);
     const stageDoors = await selfDoors(hallView, 'chip', `document.getElementById('stageChip')`, 'stageNow');
     await hallView.eval(`document.getElementById('stageChip').click()`);
@@ -2592,7 +2623,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const lineBox = await hallView.until(`document.getElementById('swDialog').open && JSON.stringify({ text: document.getElementById('swText').value, dest: document.getElementById('swDest').options.length > 0 })`, 5000);
     await hallView.eval(`document.getElementById('swDialog').close()`);
     // Every screen ticked in Screens (the steps above left one ticked that is gone), then the countdown from the chip.
-    await hallView.eval(`(() => { document.getElementById('screensBtn').click(); const all = document.getElementById('screensAll'); if (!all.checked) all.click(); document.getElementById('screensClose').click(); })()`);
+    await hallView.eval(`(() => { ${OPEN_SCREENS}; const all = document.getElementById('screensAll'); if (!all.checked) all.click(); document.getElementById('screensClose').click(); })()`);
     await hallView.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; document.getElementById('stageChip').click(); })()`);
     await hallView.until(`!!document.querySelector('.agm-menu [data-action="chip.screens"]')`, 3000);
     await hallView.eval(`document.querySelector('.agm-menu [data-action="chip.screens"]').click()`);
@@ -2600,36 +2631,109 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const countdownOn = await hallView.until(`new Promise((r) => socket.emit('display:list', { code: ROOM }, (x) => r(x.displays.length > 0 && x.displays.every((d) => d.content && d.content.kind === 'countdown') && x.displays.length)))`, 5000);
     report(selfInStep(stageDoors) && stageDoors.want === '["chip.speaker","chip.screens"]' && lineBox === JSON.stringify({ text: '', dest: true }) && /^Sent to \d+ screens? — each shows ✓/.test(countdownSaid || '') && !!countdownOn,
       `the stage chip opens its menu by a click, a right-click and Shift+F10 alike; Speaker's screen… opens the line box empty, and Show the countdown on screens puts it on the hall's ${countdownOn} screens (${JSON.stringify({ want: stageDoors.want, lineBox, countdownSaid })}${selfInStep(stageDoors) ? '' : '; ' + JSON.stringify(stageDoors)})`);
-    const codeDoors = await selfDoors(research, 'code', `document.getElementById('roomChip')`, 'codeObject()');
-    await research.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; document.getElementById('roomChip').click(); })()`);
-    await research.until(`!!document.querySelector('.agm-menu [data-action="code.copy"]')`, 3000);
-    await research.eval(`document.querySelector('.agm-menu [data-action="code.copy"]').click()`);
+    // The header's ⋯ is its own door: a click on it, a right-click on it and Shift+F10 on it focused open the catalogue's
+    // set for the header, and so does a right-click on the room's name; Copy join link copies the join page's link with
+    // the code.
+    const HEADER_WANT = ['header.people', 'header.size', 'header.theme', 'header.code', 'header.copy', 'header.leave'];
+    const headerDoors = await selfDoors(research, 'header', `document.getElementById('headerMore')`, 'headerObject()');
+    await rightClick(research, await middleOf(research, `document.querySelector('.app-title strong')`));
+    const byTitle = await research.until(MENU_IDS, 3000);
+    await press(research, 'Escape');
+    await research.until(NO_MENU, 3000);
+    await research.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; document.getElementById('headerMore').click(); })()`);
+    await research.until(`!!document.querySelector('.agm-menu [data-action="header.copy"]')`, 3000);
+    await research.eval(`document.querySelector('.agm-menu [data-action="header.copy"]').click()`);
     const joinLink = await research.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; const a = document.querySelector('.agm-ask');
       if (/^Copied the join link/.test(t)) return 'copied'; return a && a.querySelector('input').value === location.origin + '/?code=' + ROOM && 'field'; })()`, 3000);
     if (joinLink === 'field') await press(research, 'Escape');
-    report(selfInStep(codeDoors) && codeDoors.want === '["code.code","code.copy"]' && !!joinLink, `the code chip opens its menu by a click, a right-click and Shift+F10 alike, and Copy join link copies the join page's link with the code (${JSON.stringify({ want: codeDoors.want, joinLink })}${selfInStep(codeDoors) ? '' : '; ' + JSON.stringify(codeDoors)})`);
-    // The admin's own page: the code chip adds Turn the code off… and New code…. Turn off asks which way (the guests in
-    // stay, or are sent out), its safe answer focused; chosen to keep them, every page's chip says "(off)" as the server
-    // tells it, the guest's too; Turn the code on asks nothing and puts it back.
-    const adminCodeDoors = await selfDoors(hallView, 'code', `document.getElementById('roomChip')`, 'codeObject()');
-    const chipAct = async (id) => {
-      await hallView.eval(`document.getElementById('roomChip').click()`);
+    report(selfInStep(headerDoors) && headerDoors.want === JSON.stringify(HEADER_WANT) && byTitle === headerDoors.want && !!joinLink,
+      `the header's ⋯ opens its menu by a click, a right-click and Shift+F10 alike, and so does a right-click on the room's name; Copy join link copies the join page's link with the code (${JSON.stringify({ want: headerDoors.want, byTitle, joinLink })}${selfInStep(headerDoors) ? '' : '; ' + JSON.stringify(headerDoors)})`);
+    // The admin's own page: the header's ⋯ adds Screens…, Turn the code off… and New code…. Turn off asks which way (the
+    // guests in stay, or are sent out), its safe answer focused; chosen to keep them, every page's Copy guest code says
+    // "(off)" as the server tells it, the guest's too; Turn the code on asks nothing and puts it back.
+    const adminHeaderDoors = await selfDoors(hallView, 'header', `document.getElementById('headerMore')`, 'headerObject()');
+    const headerAct = async (id) => {
+      await hallView.eval(`document.getElementById('headerMore').click()`);
       await hallView.until(`!!document.querySelector('.agm-menu [data-action="${id}"]')`, 3000);
       const words = await hallView.eval(`document.querySelector('.agm-menu [data-action="${id}"] .mi-label').textContent`);
       await hallView.eval(`document.querySelector('.agm-menu [data-action="${id}"]').click()`);
       return words;
     };
-    const toggleOffWords = await chipAct('code.toggle');
+    const CODE_SAID = `AGM.catalog.items('header', F, headerObject()).find((i) => i.id === 'header.code').label`;
+    const toggleOffWords = await headerAct('header.codeToggle');
     const offAsk = await hallView.until(`(() => { const a = document.querySelector('.agm-ask'); return a && JSON.stringify({ title: a.querySelector('.agm-ask-title').textContent, answers: [...a.querySelectorAll('[data-answer]')].map((b) => b.dataset.answer + ':' + b.textContent), focus: document.activeElement === a.querySelector('[data-answer=no]') }); })()`, 3000);
     await hallView.eval(`document.querySelector('.agm-ask [data-answer=keep]').click()`);
-    const chipsOff = [await hallView.until(`document.getElementById('roomChip').textContent === ROOM + ' (off)' && document.getElementById('roomChip').textContent`, 5000),
-      await research.until(`document.getElementById('roomChip').textContent === ROOM + ' (off)' && document.getElementById('roomChip').textContent`, 5000)];
-    const onWords = await chipAct('code.toggle');
-    const chipsOn = [await hallView.until(`document.getElementById('roomChip').textContent === ROOM && 'on'`, 5000), await research.until(`document.getElementById('roomChip').textContent === ROOM && 'on'`, 5000)];
-    report(selfInStep(adminCodeDoors) && adminCodeDoors.want === '["code.code","code.copy","code.toggle","code.new"]' && toggleOffWords === 'Turn the code off…' && onWords === 'Turn the code on'
+    const codesOff = [await hallView.until(`${CODE_SAID} === 'Copy guest code ' + ROOM + ' (off)' && ${CODE_SAID}`, 5000),
+      await research.until(`${CODE_SAID} === 'Copy guest code ' + ROOM + ' (off)' && ${CODE_SAID}`, 5000)];
+    const onWords = await headerAct('header.codeToggle');
+    const codesOn = [await hallView.until(`${CODE_SAID} === 'Copy guest code ' + ROOM && 'on'`, 5000), await research.until(`${CODE_SAID} === 'Copy guest code ' + ROOM && 'on'`, 5000)];
+    report(selfInStep(adminHeaderDoors) && adminHeaderDoors.want === JSON.stringify(['header.people', 'header.screens', 'header.size', 'header.theme', 'header.code', 'header.copy', 'header.codeToggle', 'header.newCode', 'header.leave'])
+      && toggleOffWords === 'Turn the code off…' && onWords === 'Turn the code on'
       && offAsk === JSON.stringify({ title: 'Turn off the guest code of Smoke AGM?', answers: ['keep:Turn off', 'out:Turn off and send them out', 'no:Keep it on'], focus: true })
-      && JSON.stringify(chipsOff) === JSON.stringify([code + ' (off)', code + ' (off)']) && JSON.stringify(chipsOn) === '["on","on"]',
-    `the admin's code chip adds Turn the code off… and New code…; off asks which way, keeps the guests and every page's chip says "(off)", and on asks nothing (${JSON.stringify({ want: adminCodeDoors.want, toggleOffWords, offAsk, chipsOff, onWords, chipsOn })}${selfInStep(adminCodeDoors) ? '' : '; ' + JSON.stringify(adminCodeDoors)})`);
+      && JSON.stringify(codesOff) === JSON.stringify(['Copy guest code ' + code + ' (off)', 'Copy guest code ' + code + ' (off)']) && JSON.stringify(codesOn) === '["on","on"]',
+    `the admin's ⋯ adds Screens…, Turn the code off… and New code…; off asks which way, keeps the guests and every page's Copy guest code says "(off)", and on asks nothing (${JSON.stringify({ want: adminHeaderDoors.want, toggleOffWords, offAsk, codesOff, onWords, codesOn })}${selfInStep(adminHeaderDoors) ? '' : '; ' + JSON.stringify(adminHeaderDoors)})`);
+
+    // The header is one model at every width: row 1 the room's name, its status, Help and the ⋯, at most 6 controls at 1440
+    // and 1024 px (and on a phone), on one line, each 44 px; row 2 the switcher, its rooms 44 px under a mouse too, only
+    // with two rooms or more (the admin account's page, whose hall has side rooms; a guest's page has one room). The ⋯
+    // holds People, Screens…, Text size,
+    // Dark theme, the guest code and the way out, and each acts: the panel, the text size, the theme. Every status in the
+    // header is one chip: its mark the table's for its name, its colour that name's role.
+    const HEADER_READ = `(() => { const vis = (n) => n.getClientRects().length > 0 && getComputedStyle(n).visibility !== 'hidden';
+      const bar = document.querySelector('.app-bar'); const sw = document.getElementById('roomSwitcher');
+      const controls = [...bar.querySelectorAll('button, a[href], [role=button], select, input')].filter(vis);
+      const mid = (n) => { const q = n.getBoundingClientRect(); return q.top + q.height / 2; };
+      const middles = controls.map(mid).concat(mid(bar.querySelector('.app-title strong')));
+      return JSON.stringify({ width: innerWidth, controls: controls.map((n) => n.id || n.className).concat(vis(sw) ? ['roomSwitcher'] : []), oneRow: Math.max(...middles) - Math.min(...middles) < 12,
+        below: !vis(sw) || sw.getBoundingClientRect().top >= bar.getBoundingClientRect().bottom - 1, rooms: sw.querySelectorAll('a').length, fits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        small: controls.concat(vis(sw) ? [...sw.querySelectorAll('a')] : []).filter((n) => Math.min(n.getBoundingClientRect().width, n.getBoundingClientRect().height) < 44).map((n) => n.id || n.className) }); })()`;
+    const headerAt = async (tab, width, phone) => {
+      await tab.send('Emulation.setDeviceMetricsOverride', { width, height: phone ? 844 : 900, deviceScaleFactor: phone ? 2 : 1, mobile: !!phone });
+      await sleep(250);
+      return JSON.parse(await tab.eval(HEADER_READ));
+    };
+    const headers = { admin: [await headerAt(hallView, 1440), await headerAt(hallView, 1024)], guest: [await headerAt(research, 1440), await headerAt(research, 1024), await headerAt(research, 390, true)] };
+    await hallView.send('Emulation.clearDeviceMetricsOverride');
+    await research.send('Emulation.clearDeviceMetricsOverride');
+    await sleep(250);
+    const headerOk = (h, rows) => h.controls.length <= 6 && h.oneRow && h.fits && h.small.length === 0 && h.below && (rows ? h.controls.includes('roomSwitcher') && h.rooms >= 2 : !h.controls.includes('roomSwitcher'))
+      && h.controls.includes('headerMore') && !h.controls.some((c) => /zoom|theme|people|screens|roomChip|Leave/i.test(c));
+    await hallView.eval(`document.getElementById('headerMore').click()`);
+    const adminMenu = await hallView.until(`(() => { const m = document.querySelector('.agm-menu:not(.agm-sub)'); return m && JSON.stringify([...m.querySelectorAll(':scope > .agm-mi')].map((b) => b.querySelector('.mi-label').textContent.replace(/^(People · )\\d+$/, '$1N'))); })()`, 3000);
+    await press(hallView, 'Escape');
+    // People shows the panel; Text size ▸ Large sets the messages' size, Standard puts it back; Dark theme turns it dark and back.
+    const headerPick = async (tab, id, value) => {
+      await tab.eval(`document.getElementById('headerMore').click()`);
+      await tab.until(`!!document.querySelector('.agm-menu [data-action="${id}"]')`, 3000);
+      await tab.eval(`document.querySelector('.agm-menu [data-action="${id}"]').click()`);
+      if (value !== undefined) {
+        await tab.until(`!!document.querySelector('.agm-sub .agm-mi[data-value="${value}"]')`, 3000);
+        await tab.eval(`document.querySelector('.agm-sub .agm-mi[data-value="${value}"]').click()`);
+      }
+      await tab.until(NO_MENU, 3000);
+    };
+    const headerWas = await research.eval(`JSON.stringify({ people: document.getElementById('peoplePanel').hidden, theme: document.documentElement.dataset.theme })`);
+    await headerPick(research, 'header.people');
+    await headerPick(research, 'header.size', 1.15);
+    await headerPick(research, 'header.theme');
+    const headerActed = await research.eval(`JSON.stringify({ people: !document.getElementById('peoplePanel').hidden, zoom: getComputedStyle(document.documentElement).getPropertyValue('--zoom-msg').trim(), theme: document.documentElement.dataset.theme,
+      checked: AGM.catalog.items('header', F, headerObject()).filter((i) => i.checked).map((i) => i.id), size: AGM.catalog.submenu('header', 'header.size', F, headerObject()).filter((v) => v.checked).map((v) => v.label) })`);
+    await headerPick(research, 'header.people');
+    await headerPick(research, 'header.size', 1);
+    await headerPick(research, 'header.theme');
+    const headerBack = await research.eval(`JSON.stringify({ people: document.getElementById('peoplePanel').hidden, theme: document.documentElement.dataset.theme, zoom: currentZoom })`);
+    // One status chip: each marked chip of the header has the table's mark for its name, and that name's colour role.
+    const CHIPS_READ = `JSON.stringify([...document.querySelectorAll('.app-header .status-chip')].filter((c) => c.dataset.mark).map((c) => { const m = AGM.MARKS[c.dataset.mark];
+      const probe = document.createElement('i'); probe.style.color = 'var(--c-' + m.role + ')'; c.appendChild(probe); const role = getComputedStyle(probe).color; probe.remove();
+      const mark = c.querySelector(':scope > .chip-mark');
+      return [c.id, c.dataset.mark, mark.textContent === m.mark + ' ' && c.dataset.tone === m.role && (c.classList.contains('help-btn') || getComputedStyle(mark).color === role)]; }))`;
+    const headerChips = [JSON.parse(await hallView.eval(CHIPS_READ)), JSON.parse(await research.eval(CHIPS_READ))];
+    report(headers.admin.every((h) => headerOk(h, true)) && headers.guest.every((h) => headerOk(h, false))
+      && adminMenu === JSON.stringify(['People · N', 'Screens…', 'Text size', 'Dark theme', 'Copy guest code ' + code, 'Copy join link', 'Turn the code off…', 'New code…', 'All halls'])
+      && headerWas === JSON.stringify({ people: true, theme: 'light' }) && headerActed === JSON.stringify({ people: true, zoom: '1.15', theme: 'dark', checked: ['header.people', 'header.theme'], size: ['Large'] })
+      && headerBack === JSON.stringify({ people: true, theme: 'light', zoom: 1 })
+      && headerChips.every((list) => list.some(([id, mark]) => id === 'connChip' && mark === 'ok') && list.every(([, , same]) => same)),
+      `the header is one model at every width: at most 6 controls on one row at 1440 and 1024 px and on a phone, each 44 px, the switcher on a row of its own only with two rooms; the ⋯ holds People, Screens…, Text size, Dark theme, the guest code and the way out, and each acts; every status in it is one chip of the table's mark and colour (${JSON.stringify({ headers, adminMenu, headerWas, headerActed, headerBack, headerChips })})`);
 
     // The skip link: the first Tab of a fresh page; Enter takes the focus to the message box, or, for an observer (who
     // has none), to the newest message. An observer reads a question's options as words, with no button.
@@ -3051,7 +3155,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // Vic reads one hall and has nothing else to do on the halls page: it takes the Viewer straight into the hall, seated
     // to read as the server seats it; the hall page's way back is the board that stays (?stay=1).
     const vicStraight = await edge.tab(`${base}/halls.html`);
-    const HERE_OF = `{ code: new URLSearchParams(location.search).get('code'), role: new URLSearchParams(location.search).get('role'), back: [...document.querySelectorAll('header a.btn')].map((a) => a.getAttribute('href')) }`;
+    const HERE_OF = `{ code: new URLSearchParams(location.search).get('code'), role: new URLSearchParams(location.search).get('role'), back: [headerObject().away] }`;
     const HERE = `JSON.stringify(${HERE_OF})`;
     const vicLanded = await vicStraight.until(`location.pathname === '/app.html' && typeof joined !== 'undefined' && joined && ${HERE}`, 10000);
     report(vicLanded === JSON.stringify({ code, role: 'observer', back: ['/halls.html?stay=1'] }), `an account with one room and nothing else to do is taken straight into it, seated as the server seats it, its way back the board that stays (${vicLanded})`);
@@ -3066,7 +3170,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const visible = (el) => !!el && getComputedStyle(el).display !== 'none' && !el.closest('[hidden]');
       return JSON.stringify({
         composer: visible(document.getElementById('researchCompose')) || visible(document.getElementById('directorCompose')),
-        stage: visible(document.getElementById('stageToggleBtn')),
+        header: AGM.catalog.ids('header', F, headerObject()),
         acts: [...new Set(allMessages.filter((m) => m.type !== 'system').flatMap((m) => AGM.catalog.ids('msg', F, m)))].sort(),
         bars: Array.from(document.querySelectorAll('.msg .msg-act')).filter(visible).length,
         answer: Array.from(document.querySelectorAll('.action-btn')).some((b) => !b.disabled),
@@ -3075,7 +3179,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         files: document.querySelectorAll('.msg[data-type="file"]').length,
       });
     })()`);
-    report(shown === JSON.stringify({ composer: false, stage: false, acts: ['msg.copy'], bars: 0, answer: false, answerWords: false, reactions: false, files: shown && JSON.parse(shown).files }) && JSON.parse(shown).files > 0,
+    report(shown === JSON.stringify({ composer: false, header: ['header.people', 'header.size', 'header.theme', 'header.leave'], acts: ['msg.copy'], bars: 0, answer: false, answerWords: false, reactions: false, files: shown && JSON.parse(shown).files }) && JSON.parse(shown).files > 0,
       `the Viewer is offered nothing the server refuses: Copy text alone, no pin, reaction, answer, Send to, Look or Download on any message, a file's included (${shown})`);
     report(await viewerHall.eval(`document.getElementById('movedLine').hidden`), 'a page opened in this browser after What moved\'s Got it does not say it again');
     await readOldWords('the hall page opened by a Viewer account, Observer', viewerHall);
@@ -3096,7 +3200,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const louLanded = await louBoard.until(`location.pathname === '/app.html' && typeof joined !== 'undefined' && joined && JSON.stringify({ ...${HERE_OF}, title: document.querySelector('.app-title strong').textContent, tab: document.title, switcher: document.getElementById('roomSwitcher').hidden, key: document.documentElement.outerHTML.includes('${code}') })`, 10000);
     report(louLanded === JSON.stringify({ code: pressKey, role: 'research', back: ['/halls.html?stay=1'], title: 'Smoke AGM › Press', tab: 'AGMessage · Smoke AGM › Press', switcher: true, key: false }),
       `an account given one side room alone is taken straight into it, its header "Smoke AGM › Press", no switcher, and the hall's key nowhere on it (${louLanded})`);
-    await louBoard.eval(`document.querySelector('header a.btn').click()`);
+    await louBoard.eval(`(() => { document.getElementById('headerMore').click(); document.querySelector('.agm-menu [data-action="header.leave"]').click(); })()`);
     // Lou's page in Press closed its socket as its tab left it (reconnect.js), so the server heard it go then: within 6 s
     // Press is listed with nobody in (a page the browser keeps with its socket open would be counted until its pings went
     // unanswered, some 18 s).
@@ -3221,7 +3325,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // One listener for each row of the table (lib/ops.js's, which the page's is held to): the generated ones, and no
     // hand-written one beside them.
     const listeners = await board.eval(`JSON.stringify(Object.keys(UPD_EVENTS).map((f) => socket.listeners(UPD_EVENTS[f][0]).length))`);
-    report(proposed.ok && bothPending && forgot && !!atDesk && live === JSON.stringify({ on: 'rejected ✗ Not approved by Smoke desk', own: 'rejected ✗ Not approved by Smoke desk' }) && resumed === live && listeners === JSON.stringify(Object.keys(ops.UPD_EVENTS).map(() => 1)),
+    report(proposed.ok && bothPending && forgot && !!atDesk && live === JSON.stringify({ on: 'rejected ✕ Not approved by Smoke desk', own: 'rejected ✕ Not approved by Smoke desk' }) && resumed === live && listeners === JSON.stringify(Object.keys(ops.UPD_EVENTS).map(() => 1)),
       `a live page and a resumed one draw the desk's answer the same way, on a message whose record is gone and on the proposal's line (${JSON.stringify(proposed)}; ${bothPending} ${forgot}; live ${live}; resumed ${resumed}; listeners ${listeners})`);
     for (const p of [research, board]) await p.eval(`removeMessageLocal(${codeLiteral(proposed.id)})`);
 

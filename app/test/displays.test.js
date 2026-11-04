@@ -107,7 +107,7 @@ test('displays: every browser on a link reports for itself — one that could no
   assert.deepEqual([st.state, st.words], ['sending', 'sending'], 'a new take: no browser has shown it yet');
   store.shown(d, 'laptop', d.seq, true);
   st = Displays.status(d);
-  assert.deepEqual([st.state, st.mark, st.words], ['sending', '…', 'sending — on 1 of 2 screens'], 'one of two is not ✓');
+  assert.deepEqual([st.state, st.mark, st.words], ['sending', '◷', 'sending — on 1 of 2 screens'], 'one of two is not ✓');
   store.shown(d, 'projector', d.seq, true);
   st = Displays.status(d);
   assert.deepEqual([st.state, st.mark, st.words], ['shown', '✓', 'on all 2 screens']);

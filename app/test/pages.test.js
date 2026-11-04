@@ -383,7 +383,7 @@ test('status: a mark and its words, person first, from each page\'s report on th
   assert.deepEqual(back([pg('shown'), pg('waiting')], { board: true }), ['◷', 'Sending · on 1 of 2 pages']);
   // Every mark it draws is one of the marks' table, each with one meaning; ◷ is sending and ○ back to chat.
   const drawn = new Set([st([pg('shown')]), st([pg('waiting')]), st([pg('failed')]), st([pg('dismissed')]), st([pg('minimised')]), st([pg('opened')]), st([pg('hidden')]), st([]), Pages.status(null, [pg('waiting')])].map((r) => r.mark));
-  assert.deepEqual([...drawn].sort(), [...MARKS].sort());
+  assert.deepEqual([...drawn].sort(), Object.values(MARKS).sort(), 'every mark it draws, and no other');
 });
 
 test('status read from the store: each page\'s report on the take it is shown now, its person\'s answer first', () => {

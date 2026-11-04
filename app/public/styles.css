@@ -152,14 +152,40 @@ button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 }
 .app-title { display: flex; align-items: center; gap: .6rem; }
 .app-title strong { font-size: 1rem; }
-.room-chip {
-  background: #eef2fb; color: var(--brand-dark);
-  padding: .15rem .55rem; border-radius: 999px; font-weight: 600;
-  letter-spacing: 1px; font-size: .8rem;
-}
 .app-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .5rem; min-width: 0; font-size: .9rem; color: var(--muted); }
-.dot { width: 10px; height: 10px; border-radius: 50%; background: #cbd2de; transition: background .2s; }
-.dot.ok { background: var(--success); }
+/* The hall page's header is one model at every width. Row 1 (.app-bar) never wraps: the room's name (and who this is)
+   gives way first, cut with an ellipsis, then the countdown's title; the connection's mark, Help and the ⋯ keep their
+   place, each control --target-touch. Row 2 is the switcher, with two rooms or more. */
+/* min-width 0: the page's grid column never grows to the row's widest content; the row gives way inside it instead */
+.app-page .app-header { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: var(--sp-1); min-width: 0; }
+.app-bar { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.app-bar .app-title { flex-direction: column; align-items: stretch; gap: 0; flex: 1 1 auto; min-width: 4em; }
+.app-bar .app-title strong, .app-bar .app-title .whoami { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-bar .app-title strong { font-size: var(--fs-md); }
+.app-bar .app-title .whoami { font-size: var(--fs-xs); color: var(--c-ink-muted); }
+.app-bar .app-title .whoami:empty { display: none; }
+.app-bar .app-meta { flex-wrap: nowrap; gap: var(--sp-2); flex: 0 1 auto; }
+.app-status { display: flex; align-items: center; gap: var(--sp-1); flex: 0 1 auto; min-width: 0; }
+.app-bar .app-meta > .btn, .app-bar .app-meta > .header-more { flex: none; min-height: var(--target-touch); }
+/* Help's chip may take two lines of its words on a narrow screen ("▶ Ana is on the way") rather than push the row wider */
+.app-bar .app-meta > .help-btn { flex: 0 1 auto; min-width: var(--target-touch); }
+.app-bar .app-meta > .header-more { min-width: var(--target-touch); padding: 0 var(--sp-2); font-size: var(--fs-lg); font-weight: 700; line-height: 1; }
+
+/* One status chip (common.js AGM.chip): a mark of AGM.MARKS (its word said by the words beside it, or for a screen reader),
+   its words, and its colour role, never the colour alone; at rest it has no mark and ordinary ink. Each role's ink is
+   4.5:1 or more on the surfaces a chip sits on, in both themes. */
+.status-chip { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; max-width: 100%; }
+.status-chip .chip-mark { flex: none; font-weight: 700; }
+.status-chip .chip-mark[hidden] { display: none; }
+/* A status line (common.js AGM.toned: a show-desk request's, a send to the speaker's screen, a help request's) is drawn in
+   its mark's role too, never in a colour of its state's own, so a mark has one colour on every line and page. */
+.status-chip[data-tone="ok"] .chip-mark, span.status-chip[data-tone="ok"], .toned[data-tone="ok"] { color: var(--c-ok); }
+.status-chip[data-tone="info"] .chip-mark, span.status-chip[data-tone="info"], .toned[data-tone="info"] { color: var(--c-info); }
+.status-chip[data-tone="warn"] .chip-mark, span.status-chip[data-tone="warn"], .toned[data-tone="warn"] { color: var(--c-warn); }
+.status-chip[data-tone="fault"] .chip-mark, span.status-chip[data-tone="fault"], .toned[data-tone="fault"] { color: var(--c-fault); }
+.status-chip[data-tone="off"] .chip-mark, span.status-chip[data-tone="off"], .toned[data-tone="off"] { color: var(--c-off); }
+/* The connection's chip: its mark alone while the page is in its hall, its words beside it once it has been down 5 s */
+.conn-chip { flex: none; font-size: var(--fs-sm); }
 
 /* Two-column body row */
 .main-row {
@@ -538,11 +564,6 @@ body[data-role="director"] .pinned-strip, body[data-role="board"] .pinned-strip 
 }
 
 /* Smaller room chip when shown on the right side of the header */
-.room-chip-tiny {
-  font-size: .7rem;
-  padding: .1rem .45rem;
-  letter-spacing: 1px;
-}
 
 /* Own messages — right-aligned, brand-tinted bubble */
 .feed { align-items: stretch; }
@@ -657,7 +678,6 @@ html[data-theme="dark"] .doc-panel-header {
 html[data-theme="dark"] .doc-display { background: #131a2a; }
 html[data-theme="dark"] .doc-display .empty-state { color: var(--muted); }
 
-html[data-theme="dark"] .room-chip { background: #1f2942; color: #b8c8ff; }
 html[data-theme="dark"] .role-tag { background: #2a3450; color: #c8d3ff; }
 html[data-theme="dark"] .role-tag[data-role="director"], html[data-theme="dark"] .role-tag[data-role="board"] { background: #2e2655; color: #c4b5fd; }
 html[data-theme="dark"] .role-tag[data-role="research"] { background: #1a3142; color: #7dd3fc; }
@@ -933,8 +953,6 @@ html[data-theme="dark"] .room-code-big { color: #b8c8ff; }
 .feed, .pinned-strip {
   font-size: calc(1rem * var(--zoom-msg, 1));
 }
-.zoom-controls { display: inline-flex; gap: .15rem; }
-.zoom-controls .btn { padding: .2rem .5rem; font-weight: 600; min-width: 1.8rem; }
 
 /* Stage collapse — hide the body & shrink to a thin vertical rail */
 .doc-panel.collapsed {
@@ -975,11 +993,6 @@ html[data-theme="dark"] .room-code-big { color: #b8c8ff; }
   line-height: 1;
 }
 .doc-collapse-btn:hover { color: var(--ink); border-color: var(--brand); }
-
-/* The header-side stage toggle (📺) is only useful for directors */
-.director-only { display: none; }
-body[data-role="director"] .director-only, body[data-role="board"] .director-only,
-body[data-role="research"] .director-only { display: inline-flex; }
 
 /* Mobile / narrow: stack vertically, splitter is a horizontal bar */
 @media (max-width: 800px) {
@@ -1436,10 +1449,16 @@ html[data-theme="dark"] .admin-tunnel-error .error {
 
 
 /* ---- 0.2: stage chip, seen receipts, AI drafts, toasts ---- */
-.stage-chip{display:inline-flex;align-items:center;gap:.4rem;padding:.15rem .55rem;border-radius:999px;background:#0b1220;color:#e2e8f0;font-size:.85rem;max-width:min(22rem,100%);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.stage-chip b{font-variant-numeric:tabular-nums;font-size:1rem}
-.stage-chip.stale{color:var(--stage-dim);outline:1px dashed #f59e0b}   /* the last time known, in the dim ink, never faded */
-.seen-line{font-size:.75rem;color:var(--c-ink-muted);margin-top:.15rem;text-align:right}
+/* The countdown's chip: one status chip on the header's surface, Stagewatch's own colour its 3 px left edge (never the
+   digits' ink, so the digits keep their contrast); its title gives way before the digits; the last time known, with the
+   link lost, in muted ink, never faded */
+.stage-chip { padding: .15rem .55rem; border: 1px solid var(--c-border); border-left-width: 3px; border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); font-size: .85rem; max-width: min(22rem, 100%); white-space: nowrap; overflow: hidden; }
+.stage-chip b { flex: none; font-variant-numeric: tabular-nums; font-size: var(--fs-md); }
+.stage-chip #stageTitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.stage-chip.stale b { color: var(--c-ink-muted); }
+/* A whole number of pixels tall (its line and its margin), so a receipt drawn under an open menu moves nothing there by a
+   fraction the scroll that holds the menu's ⋯ still cannot take back (menus.js keep()) */
+.seen-line{font-size:.75rem;line-height:1rem;color:var(--c-ink-muted);margin-top:.125rem;text-align:right}
 .ai-hint{flex:1 1 100%;font-size:.8rem;color:var(--c-info);margin:.3rem 0 0}   /* its own line under the composer; 4.5:1 or more in both themes */
 .ai-hint.bad{color:var(--c-fault)}
 .ai-btn{border-color:#818cf8}
@@ -1472,8 +1491,7 @@ html[data-theme="dark"] .admin-tunnel-error .error {
 .laptop-facts .lf-from { color: var(--c-ink-muted); }
 
 /* Show Bus 1.1: a stage message's receipt and the speaker's acknowledgement, on the message that was sent */
-.stage-line { font-size: .78rem; font-style: normal; margin-top: .25rem; color: var(--muted); }
-.stage-line[data-ack="seen"], .stage-line[data-ack="done"] { color: #16a34a; }
+.stage-line { font-size: .78rem; font-style: normal; margin-top: .25rem; color: var(--muted); }   /* its mark's role colours it (AGM.toned) */
 .sys .stage-line { display: block; text-align: center; }
 /* The outbox: a message held for sending says so on its echo, and a message its page held before sending says when */
 .msg.echo { border-style: dashed; }
@@ -1494,9 +1512,7 @@ form[data-held="1"] textarea, form[data-held="1"] input { background: var(--bg);
 .out-of-hall p { margin: 0 0 var(--sp-4); font-size: var(--fs-lg); overflow-wrap: break-word; }
 .out-of-hall .btn { min-height: var(--target-touch); }
 
-/* 0.4: proposals to the show desk, and the /tls page */
-.proposal-line[data-state="done"]{color:#16a34a}
-.proposal-line[data-state="rejected"],.proposal-line[data-state="failed"],.proposal-line[data-state="undelivered"]{color:#dc2626}
+/* 0.4: proposals to the show desk, and the /tls page (a request's line is a status line: AGM.toned colours it) */
 .btn.danger{background:var(--c-fault);color:var(--c-on-fault);border-color:var(--c-fault)}
 .tls-page main.tls{max-width:44rem;margin:2rem auto;padding:0 1rem;line-height:1.5}
 .tls-page .fp code{font-size:.85rem;word-break:break-all}
@@ -1556,7 +1572,9 @@ html[data-theme="dark"] input, html[data-theme="dark"] textarea { background: va
 .hall-clock { display: flex; flex-direction: column; justify-content: center; padding: .35rem .8rem; border-radius: 10px; background: var(--stage); color: var(--stage-ink); min-height: 4.1rem; }
 .hall-time { font-size: 2.1rem; line-height: 1.05; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .hall-state { font-size: .78rem; color: var(--stage-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hall-row[data-state="over"] .hall-clock { box-shadow: inset 4px 0 0 #ef4444; }
+/* Over time is ▲, warn's mark: its edge warn's (3:1 or more on the stage's dark in both themes), never a fault's red; a
+   colour Stagewatch sends for its live time is the edge instead (halls.js) */
+.hall-row[data-state="over"] .hall-clock { box-shadow: inset 4px 0 0 var(--c-warn); }
 .hall-row[data-state="stale"] .hall-time, .hall-row[data-state="none"] .hall-time,
 .hall-row[data-state="checking"] .hall-time, .hall-row[data-state="refused"] .hall-time, .hall-row[data-state="refusedView"] .hall-time,
 .hall-row[data-state="certificate"] .hall-time { color: var(--stage-dim); }
@@ -1568,8 +1586,11 @@ html[data-theme="dark"] input, html[data-theme="dark"] textarea { background: va
 .hall-meta { display: flex; flex-wrap: wrap; gap: .35rem; justify-content: flex-end; font-size: .82rem; color: var(--muted); }
 .help-count { color: var(--c-on-fault); background: var(--c-fault); padding: .1rem .5rem; border-radius: 999px; font-weight: 700; }
 .disp-chip { border: 1px solid var(--border); border-radius: 999px; padding: .05rem .5rem; color: var(--ink); background: var(--card); }
-.disp-chip[data-ok="shown"] { border-color: var(--ok); }
-.disp-chip[data-ok="offline"], .disp-chip[data-ok="error"] { border-color: var(--danger); }
+/* A screen's chip on the board is edged in its mark's role (data-tone): ✓ ok, ◷ info, △ warn, ✕ fault, as the console draws it */
+.disp-chip[data-tone="ok"] { border-color: var(--c-ok); }
+.disp-chip[data-tone="info"] { border-color: var(--c-info); }
+.disp-chip[data-tone="warn"] { border-color: var(--c-warn); }
+.disp-chip[data-tone="fault"] { border-color: var(--c-fault); }
 /* A hall's side rooms this account may enter: real links under the hall's name (the row's first column, a line of its
    own below the rest of the row), above the row's link; on a narrow screen, a line of their own across the row. */
 .hall-rooms { grid-column: 1; grid-row: 2; display: flex; flex-wrap: wrap; gap: var(--sp-2); position: relative; z-index: 1; }
@@ -1580,14 +1601,14 @@ html[data-theme="dark"] input, html[data-theme="dark"] textarea { background: va
 @media (pointer: coarse) { .room-btn { min-height: var(--target-touch); } }
 /* The hall page's room switcher: a row of its own in the header, under the title and the controls, shown with two rooms
    or more. Each room a real link; this room marked filled and bold beside aria-current, never by its colour alone. A
-   long list scrolls sideways rather than wrapping or widening the page. */
-.room-switcher { flex: 1 0 100%; display: flex; flex-wrap: nowrap; gap: var(--sp-1); overflow-x: auto; padding: var(--sp-1); }
-.room-seg { display: inline-flex; align-items: center; flex: 0 0 auto; min-height: var(--target-min); padding: 0 var(--sp-3); border: 1px solid var(--c-border);
+   long list scrolls sideways rather than wrapping or widening the page. Each room is --target-touch at every pointer, as
+   every control of the header is. */
+.room-switcher { flex: none; display: flex; flex-wrap: nowrap; gap: var(--sp-1); overflow-x: auto; padding: var(--sp-1); }
+.room-seg { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-height: var(--target-touch); min-width: var(--target-touch); padding: 0 var(--sp-3); border: 1px solid var(--c-border);
   border-radius: var(--radius-pill); background: var(--c-surface-raised); color: var(--c-ink); font-size: var(--fs-sm); text-decoration: none; white-space: nowrap; }
 .room-seg:hover { border-color: var(--c-action); color: var(--c-action); }
 .room-seg[aria-current="page"] { background: var(--c-action); border-color: var(--c-action); color: var(--c-on-action); font-weight: 700; }
 .room-seg:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
-@media (pointer: coarse) { .room-seg { min-height: var(--target-touch); } }
 /* Your rooms: side rooms of halls this account does not see, by their hall's name. */
 .your-rooms { margin-top: var(--sp-6); }
 .your-rooms h2 { font-size: 1.1rem; margin: 0 0 var(--sp-2); }
@@ -1686,11 +1707,12 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .acct-table td { padding: .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
 .acct-table tr.off td { color: var(--c-ink-muted); }
 /* The audit log's four marks: ✓ checked under this key, ◇ linked and accepted, △ not vouched for, ✕ did not check. The
-   shape is always drawn beside the colour, so no state is told by colour alone. */
-[data-mark="intact"] { --mark: var(--ok); }
-[data-mark="linked"] { --mark: var(--ink); }
-[data-mark="unvouched"] { --mark: var(--warn); }
-[data-mark="broken"] { --mark: var(--danger); }
+   shape is always drawn beside the colour, so no state is told by colour alone; each colour is its mark's role in
+   AGM.MARKS (◇, reached and not seen into, is info's). */
+[data-mark="intact"] { --mark: var(--c-ok); }
+[data-mark="linked"] { --mark: var(--c-info); }
+[data-mark="unvouched"] { --mark: var(--c-warn); }
+[data-mark="broken"] { --mark: var(--c-fault); }
 .chain-state[data-mark], .audit-line[data-mark], .export-state[data-mark] { color: var(--mark, inherit); font-weight: 600; }
 .export-words { line-height: 1.45; }
 .audit-mark { color: var(--mark); font-weight: 700; text-align: center; }
@@ -1733,14 +1755,14 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .help-btn[data-state="resolved"] { border-color: var(--c-ok); color: var(--c-ok); }
 .app-meta .help-btn[data-state]:hover { border-color: currentColor; }
 .help-btn[data-state="open"]:hover { filter: brightness(1.08); }
-.msg.is-help { border-left: 6px solid var(--danger); }
-.msg.is-help[data-help="coming"] { border-left-color: var(--accent); }
-.msg.is-help[data-help="resolved"] { border-left-color: var(--success); }
+/* The Help chip is drawn whole in its state's colours (filled red while open), its mark with its words */
+.help-btn[data-tone] .chip-mark { color: inherit; }
+/* A help request's edge is its line's mark's role: ■ open in the fault red, ▶ on the way in info, ✓ resolved in ok */
+.msg.is-help { border-left: 6px solid var(--c-fault); }
+.msg.is-help[data-help="coming"] { border-left-color: var(--c-info); }
+.msg.is-help[data-help="resolved"] { border-left-color: var(--c-ok); }
 .help-body .help-head { margin: 0 0 .35rem; font-size: calc(1.05rem * var(--zoom-msg, 1)); }
-.help-line { font-size: .88rem; font-weight: 600; }
-.help-line[data-state="open"] { color: var(--danger); }
-.help-line[data-state="coming"] { color: var(--accent); }
-.help-line[data-state="resolved"] { color: var(--success); }
+.help-line { font-size: .88rem; font-weight: 600; }   /* its colour its mark's role (AGM.toned) */
 .help-actions { display: flex; gap: .4rem; margin-top: .45rem; flex-wrap: wrap; }
 /* The help dialog: the words first, then one large button per category, each sending at once; none is chosen */
 .help-cats-label { margin: var(--sp-3) 0 var(--sp-2); font-weight: 600; font-size: var(--fs-sm); }
@@ -1762,9 +1784,7 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .screen-item { padding: .6rem 0; border-bottom: 1px solid var(--border); display: grid; gap: .25rem; }
 .screen-line { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
 .screen-state { font-size: .85rem; font-weight: 600; }
-.screen-item[data-state="shown"] .screen-state { color: var(--ok); }
-.screen-item[data-state="sending"] .screen-state { color: var(--accent); }
-.screen-item[data-state="offline"] .screen-state, .screen-item[data-state="error"] .screen-state { color: var(--danger); }
+/* A screen's state is one status chip: its mark, words and colour role (AGM.chip) */
 .screen-showing { font-size: .88rem; color: var(--muted); padding-left: 1.6rem; }
 .screen-refused { font-size: .85rem; font-weight: 600; color: var(--danger); }
 .screen-acts { display: flex; flex-wrap: wrap; gap: .3rem; padding-left: 1.4rem; }
@@ -1775,11 +1795,11 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 /* The show network on the board: a linked Patterns or PlayMap, its light in a shape, its verbs with their risk */
 .node-chip { border: 1px solid var(--border); border-radius: 999px; padding: .05rem .5rem; color: var(--ink); background: var(--card); }
 .node-chip[data-light="green"] { border-color: var(--ok); }
-.node-chip[data-light="amber"] { border-color: var(--accent); }
+.node-chip[data-light="amber"] { border-color: var(--c-warn); }   /* △, warn's mark */
 .node-chip[data-light="red"] { border-color: var(--danger); }
 .node-card { border: 1px solid var(--border); border-left: 5px solid var(--muted); border-radius: 10px; padding: .7rem .9rem; margin: .7rem 0; }
 .node-card[data-light="green"] { border-left-color: var(--ok); }
-.node-card[data-light="amber"] { border-left-color: var(--accent); }
+.node-card[data-light="amber"] { border-left-color: var(--c-warn); }
 .node-card[data-light="red"] { border-left-color: var(--danger); }
 .node-card h3 { margin: 0 0 .25rem; font-size: 1.05rem; }
 .node-headline { margin: 0 0 .4rem; }
@@ -1787,8 +1807,6 @@ fieldset.field legend { font-weight: 600; font-size: .85rem; padding: 0 .3rem; }
 .node-cmd { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(10rem, 1.2fr) auto auto; gap: .4rem; align-items: center; }
 .node-cmd select, .node-cmd input { width: 100%; }
 @media (max-width: 640px) { .node-cmd { grid-template-columns: 1fr 1fr; } .node-cmd select, .node-cmd input { grid-column: 1 / -1; } }
-.node-out[data-ok="1"] { color: var(--ok); }
-.node-out[data-ok="0"] { color: var(--danger); }
 
 /* ---------- Menus and asks in place (menus.js) ----------
    A menu is the catalogue's list for an object (catalog.js), opened alike by right-click, its ⋯ and Shift+F10. Where the
@@ -1887,10 +1905,10 @@ h1[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 .compose .compose-more { flex: none; }
 /* The header's chips that open a menu: a pointer, a ring and a target of --target-min (--target-touch under a finger),
    nothing else of a button */
-.room-chip[role="button"], .stage-chip[role="button"] { display: inline-flex; align-items: center; min-height: var(--target-min); cursor: pointer; }
-.room-chip[role="button"]:focus-visible, .stage-chip[role="button"]:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+.stage-chip[role="button"] { min-height: var(--target-touch); cursor: pointer; }
+.stage-chip[role="button"]:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
 @media (pointer: coarse) {
-  .room-chip[role="button"], .stage-chip[role="button"], .msg button.from { min-height: var(--target-touch); min-width: var(--target-touch); }
+  .msg button.from { min-height: var(--target-touch); min-width: var(--target-touch); }
 }
 /* The feed takes the focus only as the skip link's last resort (no message yet): no ring on the whole feed */
 .feed:focus { outline: none; }

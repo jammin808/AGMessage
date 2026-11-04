@@ -3760,6 +3760,114 @@ unit 18's)
 - The papers: `docs/DISPLAYS.md` (People's screens), `docs/ACCOUNTS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`,
   `SECURITY.md`, `CLAUDE.md`.
 
+**The hall page's header is one model at every width, and every status is drawn from one table of marks** (the plan's
+Part 5, unit 31, its §15.4 (the header's rows and ⋯), §15.6 (`AGM.MARKS`, one status chip), §15.9 (1.4.10), §14.4's fence
+(n), its marks half, and §9's row 31, as Part 0 §0.8 C3 (it lands in 0.6.0) and Part 7 §0.2 amend them; the tree as the
+evidence: the header held 13 controls in a row that wrapped (who, the dot, A−, A, A+, 📺, 🌙, Help, Screens, People,
+Leave, the code, the countdown), and the countdown, Help and a screen's state were three chips drawn three ways)
+- **The header** is the same on a phone and a laptop. Row 1: the room's name ("Hall 2 › Legal"; a Main room the hall's)
+  with who this is under it, then its status (the connection's mark, with "Offline · reconnecting" beside it once the
+  page has been down 5 s; the countdown), then Help and a 44 px ⋯; it never wraps: the name gives way first, cut with an
+  ellipsis, then the countdown's title. Row 2, only with two rooms or more: the switcher. Every control on row 1 is 44
+  px, and so is each room of the switcher, under a mouse too (it was 24 px but on a touch screen). The ⋯ — and a
+  right-click anywhere on row 1 but the countdown and Help, and Shift+F10 or the menu key on the ⋯ — opens the header's
+  menu (kind `header` of the catalogue): People · n (the People panel, a checked toggle), Screens… (the screens console,
+  for a seat that drives them; it reads their list as it opens, so it waits for the connection), Text size ▸ (Small,
+  Standard, Large, Larger, Very large and Largest, twice the standard, the one in use checked), Dark theme (a checked
+  toggle, kept and handed to the person's other pages as before), Copy guest code K7P2QX (with "(off)" while it admits
+  nobody new) and Copy join link where the server tells the page its code, for the admin Turn the code off… / on and New
+  code…, and, last behind its separator, Leave (All halls for an account, which keeps what was written and not sent for
+  the person's return to the room, as a move to another room does). Its line names the room and who this is. The buttons
+  it replaces are gone: A−, A, A+, 🌙, Screens, People, Leave, the code chip (its acts are the ⋯'s, and the catalogue's
+  kind `code` is `header`'s rows now) and 📺, whose panel keeps its own ⇥ and its rail. Out of its hall a page draws no
+  ⋯. The admin's support view draws the person's ⋯, every item disabled with whose view it is, as every menu there is:
+  so the support view no longer sets the person's text size or theme, which its A−, A+ and 🌙 did (a change the person
+  makes still shows there).
+- **`AGM.MARKS`** (`public/common.js`): one table of the thirteen marks every status is drawn with, each with one name,
+  one meaning and a colour role of the tokens: ✓ ok (showing, resolved, on screen), ◐ partly (not fully seen), ◇ unseen
+  (reached but not seen into: a web page opened, and the audit log's entries accepted on this laptop, its "Linked"), ▭
+  minimised, ○ off, ⊘ withdrawn, ◷ waiting (sending, waiting), △ couldNot, ✕ fault (none, or a fault), ■ urgent (waiting
+  for someone), ▶ coming (on the way), ● note and ▲ soon. `AGM.mark(name)` gives a mark (a name that is none throws),
+  `AGM.markOf(mark)` its name, and `AGM.chip(el, name, words)` draws **one status chip**: the mark (hidden from a screen
+  reader, which reads the words), the words and the role's colour, or at rest neither mark nor colour; a name that is
+  none, an inherited one (`toString`) included, is refused before anything is drawn. `AGM.toned(el, text)` draws **a
+  status line** (a show-desk request's, a send to the speaker's screen, a help request's) in the role of the mark its
+  words start with, so a mark draws in one colour on every line and page. The connection's mark (✓ in the hall, ◷
+  connecting or down less than 5 s, ✕ down 5 s or not coming back; its name for a screen reader as before), the
+  countdown (no mark while live, ▲ near the end or over time, ◷ while Stagewatch has not accepted the key, ✕ with the
+  last time known, in muted ink, while the link is lost; Stagewatch's colour is its 3 px left edge, never the digits'
+  ink, so they keep their contrast), Help's chip (■ Help asked on the fault red, ▶ Ana is on the way, ✓ Resolved) and
+  each screen's state in the Screens console are that one chip.
+- **Every page draws its statuses from the table**, each mark in its role's colour: the hall page (the show desk's
+  lines: ◷ Waiting for the show desk, ✓ Approved, ✕ Not approved, △ for one that failed, was not delivered, could not be
+  read or is lost, where they read ✗ and ⚠, in warn's colour where a failed or undelivered one was red; the speaker's
+  screen's lines: ◷ while it waits for the speaker, where they read ⏳, ✓ on the speaker's screen, and ◷ sent but not
+  confirmed, which had no mark; seen receipts, held and refused sends, a help request's line and its edge, ▶ on the way
+  in info where they were amber, a withdrawn send), the halls board (a hall's stage: running and held with no mark, as
+  the hall page's countdown draws a live time, where they read ▶ and ⏸; ○ not running; ▲ over time, where it read ■, its
+  edge warn's where it was red; ✕ a link lost, refused or whose certificate changed, where a lost link read ?; ◷
+  checking the key, where it read …; Stagewatch's colour the clock's left edge, never the digits' ink, as on the hall
+  page; a screen's chip edged in its mark's role, △ in warn where it was red; a node's light, △ amber in warn's colour;
+  a verb's risk in words, low risk, needs review and high risk, where it read ● ▲ ■, since no mark means a risk; ◷
+  Proposed to the show desk, where it read ▲ in ok's green, a status line in info now; ✓ Live and ◷ Reconnecting, where
+  they read ● and ○), the admin page (its health line's △, where it read ⚠, and ✕ for a changed certificate; ◷ for
+  show-desk results waiting and a proposal; the audit log's marks; "This laptop"), the Accounts page and the audit
+  export (their marks unchanged, each in its role's colour: ◇ Linked in info's, where it was ink). The server's screens
+  read ◷ sending, where they read …; their marks and a take's are named in `lib/displays.js`'s and `lib/pages.js`'s
+  `MARKS` by the table's names.
+- **The fences**: ESLint's `no-restricted-syntax` refuses a mark of the table, or a retired one (✗ ⚠ ⏳ ⏸), written in a
+  string or a template of any page script or page module (a template read as written and as it reads, so a mark written
+  as its escape is caught too) but `common.js` (the table's home) and the screen page's `display.js` (which loads none
+  of the people's pages' scripts); `test/lint-rules.test.js` plants each of the 17 in each page script, a template and a
+  module, and each as its escape in a string and a template. Fence (n), its marks half (`test/modules.test.js`):
+  `lib/pages.js` and `lib/displays.js` name each mark they draw by its name in the table, with its mark, write none of
+  their own (a retired one, … included), and draw every mark of their `MARKS` and no other; the screen page's three
+  tones are the table's note, soon and urgent; a mark given two names fails; each half planted. `test/catalog.test.js`
+  loads `common.js` before `catalog.js`, as every page does, and holds no act's icon and no fold's a mark of the table,
+  the table's thirteen names and marks, each role a token of the stylesheet, red a fault's or an urgent wait's alone, a
+  chip refusing an inherited name, and a status line's colour its mark's role.
+- **The stylesheet** loses eleven hex colours with the dot, the code chip, the dark countdown chip, the show desk's and
+  the speaker's screen's lines' own greens and red, and the board's over-time red (the count is 254); a chip's and a
+  status line's colours are the role tokens. The header never widens the page's column past the screen (its row gives
+  way inside it), and a "✓ Seen by" line is a whole number of pixels tall, so one drawn under an open menu moves nothing
+  there by a fraction the scroll that holds the menu's ⋯ cannot take back.
+- **A menu's submenu opened by a key stays open under a mouse at rest.** A pointer left lying where a menu opens, or
+  under a row the page moved there, is reported entering that row though it never moved; it was taken for a hover, which
+  shut a submenu F or E had just opened (Send to ▸, React ▸) 200 ms later and left the focus on the page. A row is
+  hovered now only when the pointer is somewhere it was not at its last move, press or release (`public/menus.js`). The
+  header's new height put such a row under the smoke's resting pointer, whose F test found it; a smoke step of its own
+  now parks the pointer on the menu's row, opens React ▸ by E under it, and then moves the pointer onto Send to ▸, which
+  it hovers.
+- Choices where the plan left room: the ⋯'s Screens & pages… reads Screens… until the console holds people's pages (unit
+  18's); text size is six sizes in a radio list, from 0.85 to twice the standard, set once and seldom, in place of A−, A
+  and A+, which stepped by a tenth from 0.7 to 2.2 (a size the page was set to between two of them checks neither, and
+  stays until one is chosen); the code chip's four acts are the ⋯'s, with
+  the code in its label, so the code stays one tap from being read aloud; the way out is in the manage group, behind a
+  separator, with no ask (it loses nothing); a right-click on the room's name or the header's empty space opens the ⋯'s
+  menu, and Help keeps its own ask; the person's name and seat stay under the room's name, as words, not a control; the
+  audit log's ◇ "Linked" (the owner's answer A2) is the table's ◇, reached and not seen into; a mark is drawn only where
+  its meaning in the table is the state's (a live countdown and a verb's risk have none); the screen page keeps its
+  own three tones, held to the table by a test, since it loads none of the people's pages' scripts; the Board chip
+  ("Board ✓ 6/6") joins the status row with unit 18, which draws it.
+- Tests: `test/catalog.test.js` (the header's ⋯ by seat: People, Text size, Dark theme and the way out for every seat,
+  Screens… for one that drives screens, the code for a page told it, the admin's Turn the code off… and New code…, none
+  in the simple view, every item disabled in the support view, Screens… and the admin's acts disabled offline; its
+  labels, toggles and sizes; the marks' table, a chip's names and a status line's colour), `test/menus.test.js`
+  (Screens… refused as each seat that may not drive screens, On stage in the table's words, and the code's acts as
+  before, now the header's), `test/modules.test.js` (fence (n)'s marks half, planted), `test/lint-rules.test.js` (the
+  marks in the lint, escapes included), `test/pages.test.js` and `test/displays.test.js` (the marks by name, ◷ for a
+  screen sending), `test/resilience.test.js` (the hex count, 254). The browser smoke: the header at 1440 and 1024 px and
+  on a phone, at most 6 controls on one row, each 44 px, the switcher only with two rooms, its rooms 44 px under a
+  mouse; a pointer at rest on a menu's row leaving React ▸ open with the focus in it, and a move onto Send to ▸ hovering
+  it; the ⋯'s items in order and each acting (the panel, the messages' size, the theme); the ⋯'s doors (a click, a
+  right-click and Shift+F10, and a right-click on the room's name); every status chip in the header the table's mark and
+  its role's colour; the admin's code acts from the ⋯, every page's Copy guest code saying "(off)"; Screens… opening the
+  console, Leave leaving to the halls board; and, moved on purpose, the phone pass (the ⋯ a door of 44 px for every
+  seat), a page out of its hall (no ⋯), the Viewer's header and a refused proposal's ✕.
+- The papers: `README.md`, `README.txt` (the header's ⋯ → Screens…, the connection's mark), `docs/ANALYSIS.md`,
+  `docs/DEVICES.md`, `docs/DISPLAYS.md` (◷ sending; the header's ⋯ → Screens…), `docs/NODES.md` (△ for a show-desk
+  request whose state cannot be read), `CLAUDE.md`.
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after

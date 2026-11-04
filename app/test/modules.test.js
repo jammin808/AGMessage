@@ -8,10 +8,12 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const vm = require('vm');
 const { ROOT, filesUnder, handlerFiles, pageScripts, readSource } = require('./helpers');
 const ops = require('../lib/ops');
 const gateLib = require('../lib/gate');
 const pagesLib = require('../lib/pages');
+const displaysLib = require('../lib/displays');
 
 // A source as LF: a Windows checkout writes CR LF, and the fences match lines and closes by \n.
 const read = (f) => readSource(path.join(ROOT, f)).replace(/\r\n/g, '\n');
@@ -1635,4 +1637,62 @@ test('(n) a planted kind without words, words without a kind, and words given tw
   assert.deepEqual(kindsProblems(src, ['chat']), ['describePage has words for clock, which is no kind']);
   assert.deepEqual(kindsProblems(src.replace("    default:", "    case 'chat': return 'chat';\n    default:"), ['chat', 'clock']), ['describePage gives chat words twice']);
   assert.deepEqual(kindsProblems('const describe = 1;', ['chat']), ['lib/pages.js has no describePage']);
+});
+
+// ---------------------------------------------------------------- (n) the marks in step
+/** The pages' one table of marks (public/common.js's AGM.MARKS), as a page loads it: each name and its mark. */
+function pageMarks(src = read('public/common.js')) {
+  const ctx = vm.createContext({});
+  vm.runInContext('globalThis.window = globalThis;', ctx);
+  vm.runInContext(src, ctx, { filename: 'common.js' });
+  return Object.fromEntries(Object.entries(ctx.AGM.MARKS).map(([name, m]) => [name, m.mark]));
+}
+/** The marks the table retired: never a status's mark again. */
+const RETIRED_MARKS = ['✗', '⚠', '⏳', '⏸', '…'];
+/**
+ * What breaks a server module's agreement with the pages' table: `marks` (its MARKS, name → mark) names a mark the table
+ * has not, or gives one of its names another mark; and its source `src`, comments and its MARKS taken out, writes a mark
+ * of its own (one of the table's, or a retired one) in place of a name of its MARKS.
+ */
+function marksProblems(where, marks, table, src) {
+  const problems = [];
+  for (const [name, mark] of Object.entries(marks)) {
+    if (!Object.hasOwn(table, name)) problems.push(where + ' names a mark ' + name + ', which the pages\' table has not');
+    else if (table[name] !== mark) problems.push(where + '\'s ' + name + ' is ' + mark + ', and the pages\' table\'s ' + table[name]);
+  }
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/[^\n]*/g, '$1').replace(/\bconst MARKS = Object\.freeze\(\{[^}]*\}\);/, '');
+  for (const glyph of [...new Set([...Object.values(table), ...RETIRED_MARKS])]) if (code.includes(glyph)) problems.push(where + ' writes ' + glyph + ' of its own: a status names its mark in MARKS');
+  return problems;
+}
+
+test('(n) the marks in step: lib/pages.js and lib/displays.js draw each status with a mark of AGM.MARKS by its name, each mark one meaning; the screen page\'s tones are its note, soon and urgent', () => {
+  const table = pageMarks();
+  assert.ok(Object.keys(table).length >= 13, 'the table is read: ' + JSON.stringify(table));
+  assert.equal(new Set(Object.values(table)).size, Object.keys(table).length, 'each mark is one name\'s: one meaning');
+  assert.deepEqual(marksProblems('lib/pages.js', pagesLib.MARKS, table, read('lib/pages.js')), []);
+  assert.deepEqual(marksProblems('lib/displays.js', displaysLib.MARKS, table, read('lib/displays.js')), []);
+  // What a status says is one of its module's marks: a take's over each state a page reports, a screen's over each it is in.
+  const take = { seq: 4, content: { kind: 'clock' } };
+  const page = (state) => ({ state, name: 'Ana', at: 1 });
+  const takes = [[], [page('waiting')], [page('failed')], [page('shown')], [page('hidden'), page('shown')], [page('dismissed')], [page('minimised')], [page('opened')]].map((list) => pagesLib.Pages.status(take, list).mark);
+  assert.deepEqual([...new Set(takes)].sort(), Object.values(pagesLib.MARKS).sort(), 'Pages.status draws every mark of its MARKS, and no other');
+  const screen = (reports) => displaysLib.Displays.status({ id: 'd1', name: 'Lectern', hall: 'K7P2QX', seq: 2, content: { kind: 'clock' }, live: { reports: new Map(reports.map((r, i) => ['s' + i, r])) } }).mark;
+  const screens = [[], [{ seq: 2, ok: false, words: 'no such page' }], [{ seq: 1, ok: true }], [{ seq: 2, ok: true }]].map(screen);
+  assert.deepEqual(screens.sort(), Object.values(displaysLib.MARKS).sort(), 'Displays.status draws every mark of its MARKS, and no other');
+  // The screen page loads none of the people's pages' scripts: its three tones are the table's note, soon and urgent.
+  const tones = /\bconst MARK = \{ info: '([^']+)', warn: '([^']+)', urgent: '([^']+)' \};/.exec(read('public/display.js'));
+  assert.deepEqual(tones && tones.slice(1), [table.note, table.soon, table.urgent], 'display.js\'s tones');
+});
+
+test('(n) a planted mark of its own, a name the table has not and a name given another mark each fail it', () => {
+  const table = pageMarks();
+  const src = "const MARKS = Object.freeze({ ok: '✓', waiting: '◷' });\n// ✓ in a comment is no mark\nconst out = (m) => m;\nout(MARKS.ok); out(MARKS.waiting);\n";
+  assert.deepEqual(marksProblems('planted.js', { ok: '✓', waiting: '◷' }, table, src), [], 'the planted source passes');
+  assert.deepEqual(marksProblems('planted.js', { ok: '✓', waiting: '◷' }, table, src + "out('△');\n"), ['planted.js writes △ of its own: a status names its mark in MARKS']);
+  assert.deepEqual(marksProblems('planted.js', { ok: '✓', waiting: '◷' }, table, src + "out('…');\n"), ['planted.js writes … of its own: a status names its mark in MARKS'], 'a retired mark too');
+  assert.deepEqual(marksProblems('planted.js', { ok: '✓', sending: '◷' }, table, src), ['planted.js names a mark sending, which the pages\' table has not']);
+  assert.deepEqual(marksProblems('planted.js', { ok: '✔', waiting: '◷' }, table, src), ['planted.js\'s ok is ✔, and the pages\' table\'s ✓']);
+  // The table itself: a second name for a mark is two meanings.
+  const twice = pageMarks(read('public/common.js').replace("soon: Object.freeze({ mark: '▲'", "soon: Object.freeze({ mark: '△'"));
+  assert.notEqual(new Set(Object.values(twice)).size, Object.keys(twice).length, 'a mark given twice is seen');
 });

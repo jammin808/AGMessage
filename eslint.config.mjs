@@ -41,6 +41,19 @@ const pageFloor = {
       message: 'requestSubmit() is Safari 16, above the page floor: call it behind its probe, with the form\'s submit button clicked where it is missing' }],
 };
 
+// Every status a page draws is a mark of one table, AGM.MARKS (app/public/common.js), each mark with one meaning: no page
+// script writes one of its own in a string, and none writes the marks the table retired (✗ ⚠ ⏳ ⏸) in their place.
+// common.js holds the table; the screen page (display.js) loads none of the people's pages' scripts, and its three tones
+// are held to the table by test/modules.test.js.
+const MARK_GLYPHS = '✓◐◇▭○⊘◷△✕■▶●▲✗⚠⏳⏸';
+const MARK_WORDS = 'a status mark is AGM.MARKS\' (common.js): AGM.mark(name), or AGM.chip(el, name, words), so each mark keeps one meaning';
+const marksFromTable = {
+  'no-restricted-syntax': [...pageFloor['no-restricted-syntax'],
+    { selector: `Literal[value=/[${MARK_GLYPHS}]/u]`, message: MARK_WORDS },
+    // A template's text as written and as it reads: a mark written as its escape (\u2713) is that mark.
+    { selector: `TemplateElement:matches([value.raw=/[${MARK_GLYPHS}]/u], [value.cooked=/[${MARK_GLYPHS}]/u])`, message: MARK_WORDS }],
+};
+
 export default [
   { ignores: ['app/public/vendor/**', '**/node_modules/**', 'app/uploads/**', 'app/data/**', '**/coverage/**', 'dist/**', 'node/**', 'bin/**', 'artifacts/**'] },
   { linterOptions: { reportUnusedDisableDirectives: 'error', reportUnusedInlineConfigs: 'error' } },
@@ -128,6 +141,7 @@ export default [
     rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor },
   },
   { files: ['app/public/**/*.mjs'], languageOptions: { sourceType: 'module', globals: { ...globals.browser } }, rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor } },
+  { files: ['app/public/**/*.js', 'app/public/**/*.mjs'], ignores: ['app/public/common.js', 'app/public/display.js'], rules: marksFromTable },
   // The first script of every page with people says the floor's words below it, so it parses there: ES5 only (a newer
   // syntax is a parse error), `var` with it.
   { files: ['app/public/theme-init.js'], languageOptions: { ecmaVersion: 5 }, rules: { 'no-var': 'off', 'prefer-const': 'off' } },

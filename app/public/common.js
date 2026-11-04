@@ -84,6 +84,85 @@
     });
   }
 
+  // The one table of marks: every status a page draws (a take, a help request, a screen, a link, a send held or refused, the
+  // connection, the countdown) is one of these, and each mark has one meaning, a colour role (styles.css's --c-<role>) and
+  // its word beside it, never the colour alone. lib/pages.js and lib/displays.js draw the same marks on the server, and
+  // test/modules.test.js holds them to this table by name; no act's icon is a mark (test/catalog.test.js), and no page
+  // script writes a mark of its own (eslint.config.mjs). `unseen` is reached but not seen into: a web page opened, which
+  // AGMessage cannot see inside, and the audit log's entries accepted on this laptop, which it cannot check under its key.
+  const MARKS = Object.freeze({
+    ok: Object.freeze({ mark: '✓', role: 'ok', means: 'showing, resolved, on screen' }),
+    partly: Object.freeze({ mark: '◐', role: 'warn', means: 'not fully seen: out of view, under a quote, held under blank' }),
+    unseen: Object.freeze({ mark: '◇', role: 'info', means: 'reached, but not seen into: a web page opened' }),
+    minimised: Object.freeze({ mark: '▭', role: 'info', means: 'minimised' }),
+    off: Object.freeze({ mark: '○', role: 'off', means: 'back to chat, taken down, off' }),
+    withdrawn: Object.freeze({ mark: '⊘', role: 'info', means: 'withdrawn' }),
+    waiting: Object.freeze({ mark: '◷', role: 'info', means: 'sending, waiting' }),
+    couldNot: Object.freeze({ mark: '△', role: 'warn', means: 'could not' }),
+    fault: Object.freeze({ mark: '✕', role: 'fault', means: 'none, or a fault' }),
+    urgent: Object.freeze({ mark: '■', role: 'fault', means: 'waiting for someone, urgent' }),
+    coming: Object.freeze({ mark: '▶', role: 'info', means: 'on the way' }),
+    note: Object.freeze({ mark: '●', role: 'info', means: 'a note' }),
+    soon: Object.freeze({ mark: '▲', role: 'warn', means: 'soon' }),
+  });
+  /** The table's entry by its own name (never one it inherits, `toString`); a name that is none throws. */
+  function entryOf(name) {
+    if (!Object.prototype.hasOwnProperty.call(MARKS, name)) throw new Error('No mark is named ' + name);
+    return MARKS[name];
+  }
+  /** A mark of the table by its name; a name that is none is a fault in the page, never a mark made up. */
+  function mark(name) {
+    return entryOf(name).mark;
+  }
+  /** The name of the table's mark a server's status carries (a screen's), or '' for one that is none of them. */
+  function markOf(glyph) {
+    for (const name of Object.keys(MARKS)) if (MARKS[name].mark === glyph) return name;
+    return '';
+  }
+  /**
+   * One status chip: `el` drawn with the mark named `name` (aria-hidden: its word says it) and its colour role, and, when
+   * `words` is given, its words after it. `name` '' is a chip at rest: no mark and no colour of its own. The chip keeps the
+   * rest of what it holds (a countdown's digits); it is drawn again only where it changed.
+   */
+  function chip(el, name, words) {
+    if (!el) return el;
+    const m = name ? entryOf(name) : null;
+    let markEl = el.querySelector(':scope > .chip-mark');
+    if (!markEl) {
+      markEl = document.createElement('span');
+      markEl.className = 'chip-mark';
+      markEl.setAttribute('aria-hidden', 'true');
+      el.insertBefore(markEl, el.firstChild);
+    }
+    // The space after the mark keeps the chip's words apart where its text is read whole (a copy, its textContent).
+    const glyph = m ? m.mark + ' ' : '';
+    if (markEl.textContent !== glyph) markEl.textContent = glyph;
+    markEl.hidden = !glyph;
+    if (m) { el.dataset.mark = name; el.dataset.tone = m.role; } else { delete el.dataset.mark; delete el.dataset.tone; }
+    if (words !== undefined) {
+      let w = el.querySelector(':scope > .chip-words');
+      if (!w) { w = document.createElement('span'); w.className = 'chip-words'; el.appendChild(w); }
+      const text = String(words);
+      if (w.textContent !== text) w.textContent = text;
+    }
+    return el;
+  }
+  /**
+   * A line that says a status (a show-desk request's, a send to the speaker's screen, a help request's): its words, which
+   * start with a mark of the table and a space, and its colour that mark's role (`data-tone`, styles.css `.toned`), never a
+   * colour of the line's own state, so a mark draws in one colour on every line and page. Words with no mark of the table
+   * first are a line at rest, in its ordinary ink.
+   */
+  function toned(el, text) {
+    if (!el) return el;
+    const t = String(text);
+    if (el.textContent !== t) el.textContent = t;
+    const name = markOf(t.split(' ', 1)[0]);
+    el.classList.add('toned');
+    if (name) el.dataset.tone = MARKS[name].role; else delete el.dataset.tone;
+    return el;
+  }
+
   /** "2 min ago" for a time in ms. */
   function ago(at) {
     const s = Math.max(0, Math.round((Date.now() - at) / 1000));
@@ -301,5 +380,5 @@
     return () => clearTimeout(t);
   }
 
-  Object.assign(window.AGM = window.AGM || {}, { esc, api, toast, theme, ago, clock, openDialog, awake, idle });
+  Object.assign(window.AGM = window.AGM || {}, { esc, api, toast, theme, ago, clock, openDialog, awake, idle, MARKS, mark, markOf, chip, toned });
 })();

@@ -10,28 +10,25 @@
 <body class="app-page" data-role="">
   <!-- The first Tab: to the message box, or to the messages for a seat with no composer (app.js, drawSkip). -->
   <a class="skip-link" id="skipLink" href="#feed">Skip to message box</a>
+  <!-- The header is one model at every width. Row 1: the room's name (and who this is), its status (the connection's mark,
+       with its words when it is down; the countdown), Help, and the ⋯ that holds People, Screens, the text size, the theme,
+       the guest code and the way out (app.js, kind `header`). Row 2, only with two rooms or more: the switcher. Each status is
+       one chip of a mark of AGM.MARKS, its words and its colour (common.js, AGM.chip). -->
   <header class="app-header">
-    <div class="app-title">
-      <strong>AGMessage</strong>
-    </div>
-    <div class="app-meta">
-      <span id="whoami"></span>
-      <span class="dot" id="connDot" role="img" aria-label="Connecting" title="Connecting"></span>
-      <span class="conn-words" id="connWords" hidden>Offline · reconnecting</span>
-      <span class="zoom-controls" role="group" aria-label="Message text size">
-        <button id="zoomOutBtn" class="btn ghost small" title="Smaller text" type="button">A−</button>
-        <button id="zoomResetBtn" class="btn ghost small" title="Reset text size" type="button">A</button>
-        <button id="zoomInBtn" class="btn ghost small" title="Larger text" type="button">A+</button>
-      </span>
-      <button id="stageToggleBtn" class="btn ghost small director-only" title="Collapse / expand the On stage panel" type="button" hidden>📺</button>
-      <button id="themeBtn" class="btn ghost small" title="Toggle dark mode">🌙</button>
-      <button id="helpBtn" class="btn small help-btn" type="button" aria-haspopup="dialog" title="Ask this room and the hall's crew for help" hidden>Help</button>
-      <span class="sr-only" id="helpStatus" role="status"></span>
-      <button id="screensBtn" class="btn small" type="button" title="What this hall's screens show" hidden>Screens</button>
-      <button id="peopleBtn" class="btn ghost small" title="Who's here">People</button>
-      <a href="/" class="btn ghost small">Leave</a>
-      <span class="room-chip room-chip-tiny" id="roomChip" title="Guest code">—</span>
-      <span class="stage-chip" id="stageChip" hidden title="Live from Stagewatch"><b id="stageTime">--:--</b> <span id="stageTitle"></span></span>
+    <div class="app-bar">
+      <div class="app-title">
+        <strong>AGMessage</strong>
+        <span id="whoami" class="whoami"></span>
+      </div>
+      <div class="app-meta">
+        <span class="app-status">
+          <span class="status-chip conn-chip" id="connChip"><span class="chip-mark" id="connDot" role="img" aria-label="Connecting" title="Connecting">◷</span><span class="conn-words" id="connWords" hidden>Offline · reconnecting</span></span>
+          <span class="status-chip stage-chip" id="stageChip" hidden title="Live from Stagewatch"><b id="stageTime">--:--</b> <span id="stageTitle"></span></span>
+        </span>
+        <button id="helpBtn" class="btn small help-btn status-chip" type="button" aria-haspopup="dialog" title="Ask this room and the hall's crew for help" hidden><span class="chip-mark" aria-hidden="true" hidden></span><span class="chip-words">Help</span></button>
+        <span class="sr-only" id="helpStatus" role="status"></span>
+        <button id="headerMore" class="btn ghost small header-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for this room" title="People, screens, text size, theme, guest code and the way out (or right-click the header, or Shift+F10)">⋯</button>
+      </div>
     </div>
     <!-- The rooms of this hall this person may move between, this one marked (app.js, drawSwitcher): shown with two or more. -->
     <nav class="room-switcher" id="roomSwitcher" aria-label="Rooms of this hall" hidden></nav>

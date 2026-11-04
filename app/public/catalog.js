@@ -27,14 +27,20 @@
 // what only that page's facts and objects carry), so a page never draws a row whose runner is another page's, and no row
 // is hidden by a right the server would not refuse.
 // An entry with `checked` is a toggle, drawn as a menu item that is checked or not (🔥 Priority).
+// A status its words carry is a mark of AGM.MARKS (common.js, which every page loads before this script).
 (function (root) {
   'use strict';
 
   const GROUPS = Object.freeze(['1_respond', '2_send', '3_keep', '4_manage', '9_danger']);
+  /**
+   * The text sizes the header offers, each a factor of the messages' type (`--zoom-msg`) and its word: from a little under
+   * standard to twice it, for a reader at a glance under lights (the page's own bounds are 0.7 and 2.2, app.js setZoom).
+   */
+  const TEXT_SIZES = Object.freeze([[0.85, 'Small'], [1, 'Standard'], [1.15, 'Large'], [1.3, 'Larger'], [1.6, 'Very large'], [2, 'Largest']].map((x) => Object.freeze(x)));
   const REACTIONS = Object.freeze(['👍', '👎', '❤️', '🎉', '🤔', '👀', '😂', '🔥']);
   const WORDS = Object.freeze({
     offline: 'Not connected — AGMessage is reconnecting.',
-    held: '◷ sent when the connection is back',
+    held: root.AGM.mark('waiting') + ' sent when the connection is back',
     gone: 'Not available any more.',
     noScreens: 'No screens in this hall yet — add one in Screens.',
     linkDown: 'Stagewatch is not connected right now — nothing is queued; try again when it is.',
@@ -310,17 +316,30 @@
         may: (f) => f.canScreens, fits: (f) => full(f), ready: (f) => f.stageWhy || (f.screens > 0 || WORDS.noScreens) },
     ],
 
-    // The code chip: the room's guest code (`code`, and `on`: whether it admits guests), for a page the server tells it
-    // (`mayKnowCode`); switched on or off and renewed by the admin, on a page that names the room by its key (`setsCode`).
-    code: [
-      { id: 'code.code', label: 'Copy guest code', icon: '🔢', group: '3_keep', verb: 'local', mode: 'local',
+    // The hall page's header: its ⋯, a right-click on the header and Shift+F10 on its ⋯ hold what is set once and seldom
+    // looked at, so the header's row keeps the room's name, its status, Help and the ⋯ at every width. `people` (how many
+    // are in the room) and `peopleShown` (the People panel open), the text size (`zoom`), the theme (`dark`), the room's
+    // guest code as the server tells this page (`code`, '' for none, and `on`: whether it admits guests; copied by a page
+    // the server tells it, `mayKnowCode`, switched and renewed by the admin on a page that names the room by its key,
+    // `setsCode`), `hall` (the room as an ask names it), and the way out (`account`: an account goes back to its halls).
+    header: [
+      { id: 'header.people', label: (f, o) => 'People · ' + o.people, icon: '👫', group: '3_keep', verb: 'local', mode: 'local',
+        checked: (f, o) => !!o.peopleShown, may: () => true, fits: () => true },
+      // Screens…: the hall's screens console, which reads their list (display:list) as it opens.
+      { id: 'header.screens', label: 'Screens…', icon: '⧉', group: '3_keep', verb: 'display:list', mode: 'now', may: (f) => f.canScreens, fits: () => true },
+      { id: 'header.size', label: 'Text size', icon: 'Aa', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true,
+        submenu: (f, o) => TEXT_SIZES.map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: Math.round(o.zoom * 100) === Math.round(value * 100) })) },
+      { id: 'header.theme', label: 'Dark theme', icon: '🌙', group: '3_keep', verb: 'local', mode: 'local', checked: (f, o) => !!o.dark, may: () => true, fits: () => true },
+      { id: 'header.code', label: (f, o) => 'Copy guest code ' + o.code + (o.on ? '' : ' (off)'), icon: '🔢', group: '3_keep', verb: 'local', mode: 'local',
         may: (f, o) => f.mayKnowCode && typeof o.code === 'string' && o.code.length > 0, fits: () => true },
-      { id: 'code.copy', label: 'Copy join link', icon: '🔗', group: '3_keep', verb: 'local', mode: 'local',
+      { id: 'header.copy', label: 'Copy join link', icon: '🔗', group: '3_keep', verb: 'local', mode: 'local',
         may: (f, o) => f.mayKnowCode && typeof o.code === 'string' && o.code.length > 0, fits: () => true },
-      { id: 'code.toggle', label: (f, o) => (o.on ? 'Turn the code off…' : 'Turn the code on'), icon: '🚦', group: '4_manage', verb: 'room:update', mode: 'now',
+      { id: 'header.codeToggle', label: (f, o) => (o.on ? 'Turn the code off…' : 'Turn the code on'), icon: '🚦', group: '4_manage', verb: 'room:update', mode: 'now',
         may: (f) => f.setsCode, fits: () => true, confirm: (f, o) => (o.on ? codeOffAsk(o) : null) },
-      { id: 'code.new', label: 'New code…', icon: '🎲', group: '4_manage', verb: 'room:update', mode: 'now',
+      { id: 'header.newCode', label: 'New code…', icon: '🎲', group: '4_manage', verb: 'room:update', mode: 'now',
         may: (f) => f.setsCode, fits: () => true, confirm: (f, o) => newCodeAsk(o) },
+      // The way out: last, a separator before it; it loses nothing (a send held for this room stays held for this tab).
+      { id: 'header.leave', label: (f, o) => (o.account ? 'All halls' : 'Leave'), icon: '←', group: '4_manage', verb: 'local', mode: 'local', may: () => true, fits: () => true },
     ],
 
     // ------------------------------------------------------------ the admin page (adminFacts) and Set up's Rooms (boardFacts)

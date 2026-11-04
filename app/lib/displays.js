@@ -60,6 +60,12 @@ function cleanContent(c) {
 const characters = (s) => s.length + (s.length === 1 ? ' character' : ' characters');
 
 /**
+ * The marks a screen's status is drawn with, by their names in the pages' one table (public/common.js AGM.MARKS), each
+ * with its one meaning there: on screen, sending, could not, offline. test/modules.test.js holds each to that table.
+ */
+const MARKS = Object.freeze({ ok: '✓', waiting: '◷', couldNot: '△', fault: '✕' });
+
+/**
  * What is on a screen, in a few words (pure). Holding with no image of its own shows the hall's holding image
  * (`hallHolding`) when the hall has one. The operator's and the board's voice quotes a message's first words and names a
  * file; the audit voice (`{audit: true}`) carries neither — a message's length and a PDF's page only.
@@ -198,9 +204,9 @@ class Displays {
   setHallHolding(code, url) { this.halls[code] = { ...(this.halls[code] || {}), holding: url || '' }; if (!url) delete this.halls[code]; this.save(); }
 
   /**
-   * A display as an operator sees it: its state in a word and a shape (never colour alone), and what is on it. With
-   * several browsers on the link the words carry the count; a screen's note on a take it showed (a PDF page past the end)
-   * follows "on screen". `hallHolding` is the hall's holding image, which Holding shows when it has none of its own.
+   * A display as an operator sees it: its state in a word and a mark of the pages' one table (MARKS, never colour alone),
+   * and what is on it. With several browsers on the link the words carry the count; a screen's note on a take it showed
+   * (a PDF page past the end) follows "on screen". `hallHolding` is the hall's holding image, which Holding shows when it has none of its own.
    */
   static status(d, hallHolding = '') {
     const reports = Array.from(d.live.reports.values());
@@ -210,15 +216,15 @@ class Displays {
     const done = newest.length - failed.length;
     const of = (k) => ' on ' + k + ' of ' + n + ' screens';
     let state, mark, words;
-    if (!n) { state = 'offline'; mark = '✕'; words = 'offline — no screen has this link open'; }
-    else if (failed.length) { state = 'error'; mark = '△'; words = 'could not show it' + (n > 1 ? of(failed.length) : '') + ': ' + (failed[0].words || 'unknown'); }
-    else if (done < n) { state = 'sending'; mark = '…'; words = 'sending' + (done ? ' —' + of(done) : ''); }
+    if (!n) { state = 'offline'; mark = MARKS.fault; words = 'offline — no screen has this link open'; }
+    else if (failed.length) { state = 'error'; mark = MARKS.couldNot; words = 'could not show it' + (n > 1 ? of(failed.length) : '') + ': ' + (failed[0].words || 'unknown'); }
+    else if (done < n) { state = 'sending'; mark = MARKS.waiting; words = 'sending' + (done ? ' —' + of(done) : ''); }
     else {
       const note = newest.map((r) => r.words).find(Boolean);
-      state = 'shown'; mark = '✓'; words = (n > 1 ? 'on all ' + n + ' screens' : 'on screen') + (note ? ': ' + note : '');
+      state = 'shown'; mark = MARKS.ok; words = (n > 1 ? 'on all ' + n + ' screens' : 'on screen') + (note ? ': ' + note : '');
     }
     return { id: d.id, name: d.name, hall: d.hall, state, mark, words, showing: describe(d.content, hallHolding), content: d.content, seq: d.seq, screens: n, updatedAt: d.updatedAt };
   }
 }
 
-module.exports = { Displays, cleanContent, describe, KINDS, TONES, TOKEN };
+module.exports = { Displays, cleanContent, describe, KINDS, TONES, TOKEN, MARKS };

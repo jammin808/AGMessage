@@ -74,17 +74,21 @@
   }
 
   // ---------------------------------------------------------------- the board
+  // A hall's stage: its words, and a mark of the one table (AGM.MARKS) where one means it. Running and held are the time
+  // live, with no mark, as the hall page's countdown chip draws it; not running is off; over time is soon's ▲ (the
+  // countdown's own past its end); a link lost, refused or whose certificate changed is a fault; a key not yet accepted
+  // is waiting.
   const STATE = {
-    running: { mark: '▶', words: 'running' },
-    paused: { mark: '⏸', words: 'held' },
-    over: { mark: '■', words: 'over time' },
-    idle: { mark: '○', words: 'not running' },
-    stale: { mark: '?', words: 'link lost — last known' },
-    checking: { mark: '…', words: 'checking Stagewatch\'s key' },
-    refused: { mark: '✕', words: 'Stagewatch refused the key' },
-    refusedView: { mark: '✕', words: 'Stagewatch refused the view (its viewing code)' },
-    certificate: { mark: '✕', words: 'Stagewatch\'s certificate changed — an admin must accept it' },
-    none: { mark: '○', words: 'no Stagewatch linked' },
+    running: { mark: '', words: 'running' },
+    paused: { mark: '', words: 'held' },
+    over: { mark: 'soon', words: 'over time' },
+    idle: { mark: 'off', words: 'not running' },
+    stale: { mark: 'fault', words: 'link lost — last known' },
+    checking: { mark: 'waiting', words: 'checking Stagewatch\'s key' },
+    refused: { mark: 'fault', words: 'Stagewatch refused the key' },
+    refusedView: { mark: 'fault', words: 'Stagewatch refused the view (its viewing code)' },
+    certificate: { mark: 'fault', words: 'Stagewatch\'s certificate changed — an admin must accept it' },
+    none: { mark: 'off', words: 'no Stagewatch linked' },
   };
   function stageState(st) {
     if (!st || !st.status || st.status === 'off') return 'none';
@@ -97,6 +101,8 @@
     if (st.state === 'paused') return 'paused';
     return 'idle';
   }
+  /** The states whose time is Stagewatch's live time, which its own colour edges. */
+  const LIVE = ['running', 'paused', 'over', 'idle'];
 
   /** The rows, each kept by its code and drawn again in place, so a frame every second keeps the focus and an open menu. */
   function render() {
@@ -214,7 +220,12 @@
     const timeHtml = st && st.text ? esc(st.text) : '--:--';
     const titleHtml = st && st.title ? esc(st.title) : '';
     // A chip's state is its words as well as its mark: in its title for a pointer, beside its name for a screen reader.
-    const displaysHtml = (l.displays || []).map((d) => '<span class="disp-chip" data-ok="' + esc(d.state) + '" title="' + esc(d.words) + '">' + esc(d.mark) + ' ' + esc(d.name) + '<span class="sr-only">: ' + esc(d.words) + '</span></span>').join('');
+    // Its mark is the server's, one of the table's (a mark that is none of them reads as a fault), and its edge is that
+    // mark's role, as the Screens console draws it.
+    const displaysHtml = (l.displays || []).map((d) => {
+      const mark = AGM.markOf(d.mark) || 'fault';
+      return '<span class="disp-chip" data-ok="' + esc(d.state) + '" data-tone="' + esc(AGM.MARKS[mark].role) + '" title="' + esc(d.words) + '">' + esc(AGM.mark(mark)) + ' ' + esc(d.name) + '<span class="sr-only">: ' + esc(d.words) + '</span></span>';
+    }).join('');
     const href = hallHref(h.code);
     if (open.getAttribute('href') !== href) open.setAttribute('href', href);
     // The guest code, only where this account may know it, and "(off)" while it admits nobody new.
@@ -223,14 +234,22 @@
       (code.guestCode ? '<span class="hall-code" title="' + (code.on ? 'Guests without an account join with this code' : 'This code is off: nobody new joins with it') + '">' + esc(code.guestCode) + (code.on ? '' : ' (off)') + '</span>' : ''));
     // An unlinked hall says so quietly, with no clock to read.
     put(clock, state === 'none'
-      ? '<span class="hall-state"><span aria-hidden="true">○</span> No Stagewatch linked</span>'
-      : '<span class="hall-time" style="' + (st && st.color && !['stale', 'checking', 'refused', 'refusedView', 'certificate'].includes(state) ? 'color:' + esc(st.color) : '') + '">' + timeHtml + '</span>' +
-        '<span class="hall-state"><span aria-hidden="true">' + esc(STATE[state].mark) + '</span> ' + esc(STATE[state].words) + (titleHtml ? ' — ' + titleHtml : '') + '</span>');
+      ? '<span class="hall-state"><span aria-hidden="true">' + esc(AGM.mark('off')) + '</span> No Stagewatch linked</span>'
+      : '<span class="hall-time">' + timeHtml + '</span>' +
+        '<span class="hall-state">' + (STATE[state].mark ? '<span aria-hidden="true">' + esc(AGM.mark(STATE[state].mark)) + '</span> ' : '') + esc(STATE[state].words) + (titleHtml ? ' — ' + titleHtml : '') + '</span>');
+    // Stagewatch's own colour, while its time is live, is the clock's 4 px left edge, never the digits' ink, as the hall
+    // page's countdown chip draws it: the digits keep their contrast whatever colour it sends. A colour that is no
+    // #rrggbb, or its default white, draws no edge, and the state's own edge (over time, a refusal) stands.
+    const edge = st && LIVE.includes(state) && /^#[0-9A-Fa-f]{6}$/.test(st.color || '') && !/^#ffffff$/i.test(st.color) ? st.color : '';
+    if ((clock.dataset.edge || '') !== edge) {
+      clock.dataset.edge = edge;
+      clock.style.boxShadow = edge ? 'inset 4px 0 0 ' + edge : '';
+    }
     clock.title = STATE[state].words;
     clock.dataset.none = state === 'none' ? '1' : '';
     put(last, l.last ? '<strong>' + esc(l.last.name) + '</strong> ' + esc(l.last.text) + ' <time>' + esc(AGM.ago(l.last.at)) + '</time>' : '<span class="muted">No messages yet</span>');
     put(meta, '<span title="People in the hall now">' + esc(String(l.people ?? h.people)) + ' in</span>' +
-      (helpOpen ? '<span class="help-count" title="Open help requests">■ ' + esc(String(helpOpen)) + (helpOpen === 1 ? ' needs help' : ' need help') + '</span>' : '') +
+      (helpOpen ? '<span class="help-count" title="Open help requests">' + esc(AGM.mark('urgent')) + ' ' + esc(String(helpOpen)) + (helpOpen === 1 ? ' needs help' : ' need help') + '</span>' : '') +
       displaysHtml + nodesHtml(l.nodes));
     drawRoomButtons(rooms, roomsOf(h), h.name || h.code);
     A.draw(bar, 'hall', hallObject(h.code), { more: 'Actions for ' + (h.name || h.code), keysOn: li });
@@ -468,14 +487,17 @@
   });
   $('setupAccept').addEventListener('click', () => AGM.outbox.now('hall:acceptCertificate', { code: setupCode }, (r) => AGM.toast(r && r.ok ? 'New certificate accepted.' : (r && r.error) || 'Not accepted.', !(r && r.ok))));
 
-  const LIGHT_MARK = { green: '✓', amber: '△', red: '✕', grey: '○' };
+  // A node's light as a mark of the one table: green ok, amber could not, red a fault, grey (or none it names) off.
+  const LIGHT = { green: 'ok', amber: 'couldNot', red: 'fault', grey: 'off' };
+  const lightMark = (light) => AGM.mark(LIGHT[light] || 'off');
   /** A linked Patterns or PlayMap as a chip: its light in a shape and its name; its headline on hover. */
   function nodesHtml(list) {
-    return (list || []).map((n) => { const words = (n.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' — ' + (n.headline || n.status); return '<span class="node-chip" data-light="' + esc(n.light) + '" title="' + esc(words) + '">' + esc(LIGHT_MARK[n.light] || '○') + ' ' + esc(n.name) + '<span class="sr-only">: ' + esc(words) + '</span></span>'; }).join('');
+    return (list || []).map((n) => { const words = (n.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' — ' + (n.headline || n.status); return '<span class="node-chip" data-light="' + esc(n.light) + '" title="' + esc(words) + '">' + esc(lightMark(n.light)) + ' ' + esc(n.name) + '<span class="sr-only">: ' + esc(words) + '</span></span>'; }).join('');
   }
 
   // ---------------------------------------------------------------- the show network: Patterns and PlayMap, and their verbs
-  const RISK = { low: '● low', review: '▲ review', high: '■ high' };
+  // A verb's risk, in words: no mark of the table means a risk, so none is drawn for one.
+  const RISK = { low: 'low risk', review: 'needs review', high: 'high risk' };
   function openNetwork() {
     socket.emit('nodes:list', {}, (r) => {
       if (!r || !r.ok) { AGM.toast((r && r.error) || 'Not available.', true); return; }
@@ -488,7 +510,7 @@
   }
   /** A node's items that need attention, as list rows built from escaped parts. */
   function itemsHtml(items) {
-    return items.map((i) => '<li data-light="' + esc(i.light) + '">' + esc(LIGHT_MARK[i.light]) + ' <strong>' + esc(i.label) + '</strong> ' + esc(i.state) + '</li>').join('');
+    return items.map((i) => '<li data-light="' + esc(i.light) + '">' + esc(lightMark(i.light)) + ' <strong>' + esc(i.label) + '</strong> ' + esc(i.state) + '</li>').join('');
   }
   function nodeCard(n, desk) {
     const sec = document.createElement('section');
@@ -496,7 +518,7 @@
     sec.dataset.light = n.light;
     const items = (n.items || []).filter((i) => i.light === 'red' || i.light === 'amber').slice(0, 6);
     sec.innerHTML =
-      '<h3><span aria-hidden="true">' + esc(LIGHT_MARK[n.light] || '○') + '</span> ' + esc(n.name) + ' <small class="muted">' + esc(n.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' · ' + esc(n.status) + (n.hall ? ' · ' + esc(n.hall) : '') + '</small></h3>' +
+      '<h3><span aria-hidden="true">' + esc(lightMark(n.light)) + '</span> ' + esc(n.name) + ' <small class="muted">' + esc(n.t === 'playmap' ? 'PlayMap' : 'Patterns') + ' · ' + esc(n.status) + (n.hall ? ' · ' + esc(n.hall) : '') + '</small></h3>' +
       '<p class="node-headline">' + esc(n.headline || n.problem || 'No word from it yet.') + '</p>' +
       (items.length ? '<ul class="node-items">' + itemsHtml(items) + '</ul>' : '');
     const form = document.createElement('form');
@@ -523,8 +545,8 @@
     form.onsubmit = (e) => {
       e.preventDefault();
       AGM.outbox.now('nodes:command', { id: n.id, line: line.value.trim(), mode: 'propose' }, (r) => {
-        out.dataset.ok = r && r.ok ? '1' : '0';
-        out.textContent = !r ? 'No answer.' : !r.ok ? '✕ ' + r.error : '▲ Proposed to the show desk (' + r.proposal.id + ', ' + r.risk + ' risk) — a person approves it in Stagewatch.';
+        // A status line, coloured by its mark's role (AGM.toned): ✕ not proposed, ◷ waiting for a person at the desk.
+        AGM.toned(out, !r ? AGM.mark('fault') + ' No answer.' : !r.ok ? AGM.mark('fault') + ' ' + r.error : AGM.mark('waiting') + ' Proposed to the show desk (' + r.proposal.id + ', ' + r.risk + ' risk) — a person approves it in Stagewatch.');
       });
     };
     form.append(sel, line, propose);
@@ -582,7 +604,7 @@
       // An answer held by the outbox until the server has it says so beside the answers.
       const mine = heldAnswers.get(key);
       held.hidden = !mine;
-      held.textContent = mine ? '◷ ' + (mine === 'coming' ? 'On my way' : 'Resolved') + ': sent when the connection is back' : '';
+      held.textContent = mine ? AGM.mark('waiting') + ' ' + (mine === 'coming' ? 'On my way' : 'Resolved') + ': sent when the connection is back' : '';
       A.draw(bar, 'help', helpObject(key), { more: 'Actions for this help request', words: true, cls: 'btn small primary', keysOn: li });
       if (ul.children[i] !== li) ul.insertBefore(li, ul.children[i] || null);
     });
@@ -643,7 +665,7 @@
     AGM.outbox.attach(socket, { onChange: drawHeld });
     const ls = $('linkState');
     socket.on('connect', () => {
-      ls.dataset.ok = '1'; ls.textContent = '● Live';
+      ls.dataset.ok = '1'; ls.textContent = AGM.mark('ok') + ' Live';
       factsChanged();
       socket.emit('board:watch', {}, (r) => {
         if (r && r.ok) { applyBoard(r.board); AGM.outbox.ready({ scope: 'board', who: me ? me.username : '' }); AGM.reconnect.build.heard(r.build); } else if (r && r.error) AGM.toast(r.error, true);
@@ -656,7 +678,7 @@
       ...t, online: AGM.outbox.online, held: AGM.outbox.items().length > 0 || AGM.outbox.acting() > 0,
       dialog: !!document.querySelector('dialog[open]') || AGM.menu.isOpen() || AGM.ask.isOpen(),
     }), { stays: (words) => AGM.toast(words) });
-    socket.on('disconnect', () => { ls.dataset.ok = '0'; ls.textContent = '○ Reconnecting'; factsChanged(); });
+    socket.on('disconnect', () => { ls.dataset.ok = '0'; ls.textContent = AGM.mark('waiting') + ' Reconnecting'; factsChanged(); });
     socket.on('board', applyBoard);
     socket.on('nodes:changed', () => { if ($('networkDialog').open) openNetwork(); });
     socket.on('account:changed', ({ words } = {}) => { AGM.toast(words || 'Your account was changed — reloading.'); setTimeout(() => location.reload(), 1200); });

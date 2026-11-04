@@ -77,7 +77,7 @@ Each fallback is the same on every device. "Today" is the tree as 0.6.0 is built
 | `inset` and the logical properties | `css.properties.inset`, `margin-inline` and the rest: Safari 14.1, Chrome 87, so Chrome 84 to 86 drop them | the Shown to you panel's rail, the support view's backdrop, the Help chip's ask | `top`, `right`, `bottom` and `left` (or the physical sides) first | in `styles.css` |
 | `light-dark()`, `@container`, `text-wrap` | Safari 17.5, 16, 17.4; Chrome 123, 105, 114 | not used | a plain declaration of the same property first, or inside `@supports` | held by the fence |
 | pdf.js | its legacy build's targets: Safari 16.4, Chrome 103 (the document floor) | the panel and screens | the stage's stand-in below the document floor, with the stage's devices unit | the legacy build |
-| Marks and emoji | each device's own fonts | every mark | every mark carries its word, so a glyph a device lacks never takes the meaning away; the walk checks each draws | with the marks' table (unit 31) |
+| Marks and emoji | each device's own fonts | every mark | every mark carries its word, so a glyph a device lacks never takes the meaning away; the walk checks each draws | `AGM.MARKS` (`app/public/common.js`): the thirteen marks ✓ ◐ ◇ ▭ ○ ⊘ ◷ △ ✕ ■ ▶ ● ▲, each with its word beside it (or for a screen reader) and its colour role, drawn by name on every page (the lint refuses a mark a page writes itself) |
 
 ## 4. What every push proves (Chromium)
 
@@ -128,7 +128,7 @@ On every row, each feature ✓, its fallback named, or ✕:
 | Help opened, sent and closed | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
 | ⋯ and a long press on a message in the full view; on a take in the simple view nothing opens and nothing saves | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
 | A dialog's buttons reached with the on-screen keyboard up | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
-| Every mark drawn | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
+| Every mark of `AGM.MARKS` drawn (✓ ◐ ◇ ▭ ○ ⊘ ◷ △ ✕ ■ ▶ ● ▲); the hall page's header on one row with its ⋯ | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
 | Back by itself after the device slept | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
 | A send written offline lands once | not walked | not walked | not walked | not walked | not walked | not walked | not walked |
 | The same through the internet link on mobile data | — | — | — | — | — | not walked | not walked |

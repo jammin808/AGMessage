@@ -117,7 +117,7 @@ First time on a new laptop
    not given, the audit log says so (room.read).
 
    A room's code, in its ⋯ on the admin page or in its hall's Set up (or
-   the code in the header of your own hall page, signed in as the admin):
+   the ⋯ in the header of your own hall page, signed in as the admin):
    - "Turn the code off..." asks which way: "Turn off" keeps the guests
      already in (one whose Wi-Fi drops comes back within a few seconds)
      and lets nobody new join with it; "Turn off and send them out"
@@ -484,15 +484,23 @@ The rest of the hall page works the same way. A person's name on a
 message, and each person under People, opens a small menu: Mention puts
 "@Kim " in your message box. The ⋯ beside Send holds Draft a reply,
 Priority, Attach a file..., Remove the file and Cancel the reply (Escape
-in the message box or on Send does that too). The guest code in the header copies
-the code or the join link, and for the admin turns it off or on or makes
-a new one; it shows "(off)" while it admits nobody new, and nothing for a
-page that may not know it. The countdown there, for the backstage team,
-opens the speaker's screen box or shows the countdown on the hall's
-screens. The first Tab is "Skip to message box" ("Skip to messages" for
-an observer). The messages are one Tab stop: the arrow keys move between
-them, Up from an empty message box goes to the newest, and Escape comes
-back to the box. An observer reads a question's answers as words.
+in the message box or on Send does that too). The header is the same on
+a phone and a laptop: the room's name, the connection and the countdown,
+Help, and a ⋯ (or right-click the header, or Shift+F10 on the ⋯) that
+holds People, Screens..., Text size, Dark theme, the guest code and
+Leave (All halls for an account). Copy guest code there copies the code,
+Copy join link the join page's link, and for the admin it turns the code
+off or on or makes a new one; it says "(off)" while the code admits
+nobody new, and is not there for a page that may not know it. The
+countdown in the header, for the backstage team, opens the speaker's
+screen box or shows the countdown on the hall's screens. Every status
+has its mark beside its words, the same on every page: a tick when it is
+on screen or resolved, a clock face while it is sent or waits, a
+triangle when it could not, a cross for none or a fault. The first Tab
+is "Skip to message box" ("Skip to messages" for an observer). The
+messages are one Tab stop: the arrow keys move between them, Up from an
+empty message box goes to the newest, and Escape comes back to the box.
+An observer reads a question's answers as words.
 
 The other pages work the same way. On the admin page each hall, person,
 message of the live feed, linked Patterns or PlayMap, the Stagewatch
@@ -518,16 +526,16 @@ rows.
 
 Screens (projector PC, lectern monitor, foyer TV)
 -------------------------------------------------
-In a hall, Screens -> Add screen. The screen's link is copied: open it in
-the browser on that screen (double-click for full screen) and leave it.
-From the hall you can then show on it: the holding image, a message, an
-image or PDF page shared in the hall, the hall's countdown with a message
-under it (the speaker's comfort monitor), the clock, or black. The console
-says "on screen" only when the screen confirms it. Each screen's row keeps
-Identify; its ⋯ (or a right-click on it) has Tick only this one, Copy
-link, Open, Rename..., New link... and Remove.... Anyone with a screen's
-link can see that screen: give it only to that machine. "New link..."
-stops the old one at once.
+In a hall, the header's ⋯ -> Screens... -> Add screen. The screen's link
+is copied: open it in the browser on that screen (double-click for full
+screen) and leave it. From the hall you can then show on it: the holding
+image, a message, an image or PDF page shared in the hall, the hall's
+countdown with a message under it (the speaker's comfort monitor), the
+clock, or black. The console says "on screen" only when the screen
+confirms it. Each screen's row keeps Identify; its ⋯ (or a right-click
+on it) has Tick only this one, Copy link, Open, Rename..., New link...
+and Remove.... Anyone with a screen's link can see that screen: give it
+only to that machine. "New link..." stops the old one at once.
 
 Stagewatch (the countdown) for each hall
 ----------------------------------------
@@ -790,12 +798,12 @@ Troubleshooting
   whether it was done before doing it again.
 
 - "Reconnecting… what you write waits here until we're back." at the top
-  of a hall's messages (and "Offline · reconnecting" beside the dot after
-  5 seconds): the page lost its connection to AGMessage - the Wi-Fi, or
-  the laptop restarting. Leave it open: it comes back by itself, at once
-  when the phone or tablet is woken or the Wi-Fi is back, and what was
-  written meanwhile is sent then. Nobody in the hall is told it joined
-  again.
+  of a hall's messages (and "Offline · reconnecting" beside the
+  connection's mark in the header after 5 seconds): the page lost its
+  connection to AGMessage - the Wi-Fi, or the laptop restarting. Leave it
+  open: it comes back by itself, at once when the phone or tablet is woken
+  or the Wi-Fi is back, and what was written meanwhile is sent then.
+  Nobody in the hall is told it joined again.
   "Busy — trying again in 3 s." at the top of a page: AGMessage is taking
   many connections from the same network at once (a room filling up). Leave
   it: the page connects by itself after those seconds, without a reload.

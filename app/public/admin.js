@@ -508,13 +508,13 @@ function buildAdminMessage(m) {
   else if (m.type === 'action') {
     bodyHtml = `<p>🟧 <strong>${escapeHtml(m.text)}</strong></p>` +
            `<p class="muted">Options: ${escapeHtml((m.options || []).join(' · '))}</p>`;
-  } else if (m.type === 'help') bodyHtml = `<p>■ <strong>${escapeHtml(m.category || 'Help')}</strong> ${escapeHtml(m.text || '')}</p>`;
+  } else if (m.type === 'help') bodyHtml = `<p>${escapeHtml(AGM.mark('urgent'))} <strong>${escapeHtml(m.category || 'Help')}</strong> ${escapeHtml(m.text || '')}</p>`;
   // A message its page held before sending it (written offline) says when it was written and when it was sent.
   const heldHtml = Number.isInteger(m.held) && m.held > 0 ? '<div class="held-line">written ' + escapeHtml(formatTime(m.at - m.held * 1000)) + ' · sent ' + escapeHtml(formatTime(m.at)) + ' (offline)</div>' : '';
   // A message another room sent here, and this room's copy of one it sent there (or took back since), say which room, as
   // the hall page does.
   const sentHtml = m.sentFrom ? '<div class="sent-meta">↘ From ' + escapeHtml(AGM.catalog.placeOf(m.sentFrom)) + '</div>'
-    : m.sentTo && m.sentTo.withdrawn ? '<div class="sent-meta">⊘ Withdrawn from ' + escapeHtml(AGM.catalog.placeOf(m.sentTo)) + ' after ' + escapeHtml(AGM.catalog.lasted(m.sentTo.withdrawn - m.at)) + '</div>'
+    : m.sentTo && m.sentTo.withdrawn ? '<div class="sent-meta">' + escapeHtml(AGM.mark('withdrawn')) + ' Withdrawn from ' + escapeHtml(AGM.catalog.placeOf(m.sentTo)) + ' after ' + escapeHtml(AGM.catalog.lasted(m.sentTo.withdrawn - m.at)) + '</div>'
       : m.sentTo ? '<div class="sent-meta">↗ Sent to ' + escapeHtml(AGM.catalog.placeOf(m.sentTo)) + ' — delivered</div>' : '';
   div.innerHTML =
     `<div class="admin-msg-head">${whoHtml} <time>${escapeHtml(formatTime(m.at))}</time>${m.priority ? ' <span class="priority-badge" style="display:inline-block">🔥 HIGH</span>' : ''}</div>` +
@@ -795,7 +795,7 @@ const tunnelCard = (function initTunnelControl() {
     const s = last || {};
     const check = s.check && typeof s.check === 'object' ? s.check : null;
     const up = !!(s.running && s.url);
-    put(line, !up ? '' : check ? (check.ok ? 'Checked ' + hhmm(check.at) + ' · ' + check.words : '△ ' + check.words) : s.checking ? '' : 'Not checked yet.');
+    put(line, !up ? '' : check ? (check.ok ? 'Checked ' + hhmm(check.at) + ' · ' + check.words : AGM.mark('couldNot') + ' ' + check.words) : s.checking ? '' : 'Not checked yet.');
     line.classList.toggle('bad', !!(up && check && !check.ok));
     const r = AGM.catalog.ready('tunnel', 'tunnel.check', ADMIN_F, o);
     put(why, refusedWhy || (r === true ? '' : r));
@@ -820,7 +820,7 @@ const tunnelCard = (function initTunnelControl() {
       end.hidden = !words;
     }
     if (again) {
-      const words = s.running && text(s.againWords) ? '△ New address: AGMessage started again at ' + s.againWords + ' and turned the internet link on again. Send this address to remote people; the one before no longer works.' : '';
+      const words = s.running && text(s.againWords) ? AGM.mark('couldNot') + ' New address: AGMessage started again at ' + s.againWords + ' and turned the internet link on again. Send this address to remote people; the one before no longer works.' : '';
       put(again, words);
       again.hidden = !words;
     }

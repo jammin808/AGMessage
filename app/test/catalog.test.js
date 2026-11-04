@@ -11,14 +11,16 @@ const vm = require('vm');
 const { ROOT, handlerFiles, readSource } = require('./helpers');
 const ops = require('../lib/ops');
 
-/** catalog.js as a page loads it: a classic script that extends window.AGM. */
+/** catalog.js as a page loads it: a classic script that extends window.AGM, after common.js (the marks' table). */
 function loadCatalog() {
   const ctx = vm.createContext({});
   vm.runInContext('globalThis.window = globalThis;', ctx);
+  vm.runInContext(readSource(path.join(ROOT, 'public', 'common.js')), ctx, { filename: 'common.js' });
   vm.runInContext(readSource(path.join(ROOT, 'public', 'catalog.js')), ctx, { filename: 'catalog.js' });
-  return ctx.AGM.catalog;
+  return ctx.AGM;
 }
-const C = loadCatalog();
+const AGM = loadCatalog();
+const C = AGM.catalog;
 const plain = (v) => JSON.parse(JSON.stringify(v));   // a value from the script's realm, compared as data
 const KINDS = Object.keys(C.KINDS);
 const all = () => KINDS.flatMap((k) => C.KINDS[k].map((e) => ({ kind: k, e })));
@@ -41,8 +43,8 @@ const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:
   'admin:laptop',
   'hall:settings', 'nodes:list', 'http:PATCH /api/users/:id', 'http:POST /api/users/:id/password', 'http:POST /api/users/:id/signout', 'http:DELETE /api/users/:id',
   'http:GET /api/audit/verify', 'http:POST /api/audit/export', 'http:POST /api/audit/split'];
-/** The status marks the pages draw (the marks table of the plan's §15.6): no act's icon is one, so a mark has one meaning. */
-const MARKS = ['✓', '◐', '◇', '▭', '○', '⊘', '◷', '△', '✕', '■', '▶', '●', '▲', 'i'];
+/** The status marks the pages draw (AGM.MARKS, common.js's one table): no act's icon is one, so a mark has one meaning. */
+const MARKS = Object.values(AGM.MARKS).map((m) => m.mark);
 /** The action icons kept to one act each (§15.6): ↩ is Reply, ↗ is Send to and Send back, ⤴ is Show again. */
 const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack', 'sendTo'], '⤴': ['show'] };
 /**
@@ -53,7 +55,7 @@ const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack', 'sendTo']
  */
 const ONE_ACT = [['send', 'sendBack', 'sendTo'], ['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode']];
 /** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export) and so end their label with "…" as an ask does. */
-const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'compose.attach', 'hall.setup', 'hall.network', 'room.setup', 'account.edit', 'audit.export', 'adminRoom.members', 'adminRoom.sendFrom']);
+const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'header.screens', 'compose.attach', 'hall.setup', 'hall.network', 'room.setup', 'account.edit', 'audit.export', 'adminRoom.members', 'adminRoom.sendFrom']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
 const NAMED_KEYS = ['Enter', 'Delete', 'Escape'];
 
@@ -131,9 +133,13 @@ const COMPOSE = {
   directorReplying: { id: 'compose:director', form: 'director', room: '', file: '', replying: 'Ana', priority: false },
 };
 const STAGE = { id: 'stage', live: true, text: '04:30', words: 'Live from Stagewatch: Keynote' };
-const CODE = { id: 'code', code: 'K7P2QX', on: true, hall: 'Hall 2' };
-const CODE_OFF = { id: 'code', code: 'K7P2QX', on: false, hall: 'Hall 2' };
-const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], code: [CODE, CODE_OFF] };
+// The header: three in the room, the People panel shut, standard text, light; the room's guest code as the server tells
+// the page (on, or off), or none; a guest's way out, or an account's.
+const HEADER = { id: 'header', people: 3, peopleShown: false, zoom: 1, dark: false, code: 'K7P2QX', on: true, hall: 'Hall 2', account: false, away: '/' };
+const HEADER_OFF = { ...HEADER, on: false };
+const HEADER_UNTOLD = { ...HEADER, code: '' };
+const HEADER_ACCOUNT = { ...HEADER, code: '', account: true, away: '/halls.html?stay=1', peopleShown: true, dark: true, zoom: 1.3 };
+const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT] };
 
 // ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
 const HALLS = [{ code: 'K7P2QX', name: 'Hall 2' }, { code: 'M3N4PQ', name: 'Legal' }];
@@ -243,7 +249,7 @@ const PAGE_OBJECTS = {
 /** The seats an act's words are read for, per kind: the hall page's for its kinds, each other page's own. */
 const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple, SEATS.researchSends], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
-  compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple, SEATS.researchSends], chip: [SEATS.admin, SEATS.researchNoDesk], code: [SEATS.admin, SEATS.board, SEATS.research],
+  compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple, SEATS.researchSends], chip: [SEATS.admin, SEATS.researchNoDesk], header: [SEATS.admin, SEATS.board, SEATS.research],
   adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
   hall: [PAGE.board], room: [PAGE.board, SEATS.research], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
@@ -256,7 +262,7 @@ function pairsOf(kind) {
 }
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'code', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -470,7 +476,7 @@ test('the seat matrix: what each seat is shown on each message', () => {
 });
 
 test('a Board account\'s page is the Board\'s: in either view, on every object of the hall page, it is shown what a Board guest is, whatever its account holds', () => {
-  const HALL_KINDS = { msg: Object.values(OBJECTS), file: [{ ...OBJECTS.anaFile, where: 'list' }, { ...OBJECTS.anaFile, where: 'preview' }], compose: Object.values(COMPOSE), chip: [STAGE], code: [CODE, CODE_OFF] };
+  const HALL_KINDS = { msg: Object.values(OBJECTS), file: [{ ...OBJECTS.anaFile, where: 'list' }, { ...OBJECTS.anaFile, where: 'preview' }], compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD] };
   const shown = (s, kind, o) => plain(C.shown(kind, SEATS[s], o)).map((e) => e.id);
   for (const [account, guest] of [['boardAccount', 'board'], ['boardAccountSimple', 'boardSimple']]) {
     for (const [kind, list] of Object.entries(HALL_KINDS)) {
@@ -614,7 +620,7 @@ test('a single key on the focused object: R E F P D, Enter, Delete or Backspace,
 });
 
 // ---------------------------------------------------------------- the rest of the hall page: the composer, the chips, a person
-test('the rest of the hall page: what each seat is shown on the composer, the stage chip, the code chip and a person', () => {
+test('the rest of the hall page: what each seat is shown on the composer, the stage chip, the header\'s ⋯ and a person', () => {
   const PERSON = { id: 'person:u-kim', uid: 'u-kim', name: 'Kim', role: 'research' };
   const SELF = { id: 'person:' + ANA, uid: ANA, name: 'Ana', role: 'research' };
   const M = [
@@ -641,16 +647,20 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
     ['chip', 'staff', STAGE, []],
     ['chip', 'board', STAGE, []],
     ['chip', 'observer', STAGE, []],
-    // The code chip: copied by a page the server tells the code (a guest the code it typed, an observer's too; an account
-    // whose rights cover it), never On stage, a Viewer's or a Staff account's; switched and renewed by the admin.
-    ['code', 'research', CODE, ['code.code', 'code.copy']],
-    ['code', 'observer', CODE, ['code.code', 'code.copy']],
-    ['code', 'tech', CODE, ['code.code', 'code.copy']],
-    ['code', 'board', CODE, []],
-    ['code', 'viewer', CODE, []],
-    ['code', 'staff', CODE, []],
-    ['code', 'admin', CODE, ['code.code', 'code.copy', 'code.toggle', 'code.new']],
-    ['code', 'admin', CODE_OFF, ['code.code', 'code.copy', 'code.toggle', 'code.new']],
+    // The header's ⋯: People, the text size, the theme and the way out for every seat; Screens… for a seat that drives
+    // the hall's screens; the guest code copied by a page the server tells it (a guest the code it typed, an observer's
+    // too; an account whose rights cover it), never On stage, a Viewer's or a Staff account's, and none when the page is
+    // told no code; switched and renewed by the admin.
+    ['header', 'research', HEADER, ['header.people', 'header.size', 'header.theme', 'header.code', 'header.copy', 'header.leave']],
+    ['header', 'research', HEADER_UNTOLD, ['header.people', 'header.size', 'header.theme', 'header.leave']],
+    ['header', 'observer', HEADER, ['header.people', 'header.size', 'header.theme', 'header.code', 'header.copy', 'header.leave']],
+    ['header', 'tech', HEADER, ['header.people', 'header.screens', 'header.size', 'header.theme', 'header.code', 'header.copy', 'header.leave']],
+    ['header', 'board', HEADER, ['header.people', 'header.size', 'header.theme', 'header.leave']],
+    ['header', 'viewer', HEADER, ['header.people', 'header.size', 'header.theme', 'header.leave']],
+    ['header', 'staff', HEADER_ACCOUNT, ['header.people', 'header.size', 'header.theme', 'header.leave']],
+    ['header', 'admin', HEADER, ['header.people', 'header.screens', 'header.size', 'header.theme', 'header.code', 'header.copy', 'header.codeToggle', 'header.newCode', 'header.leave']],
+    ['header', 'admin', HEADER_OFF, ['header.people', 'header.screens', 'header.size', 'header.theme', 'header.code', 'header.copy', 'header.codeToggle', 'header.newCode', 'header.leave']],
+    ['header', 'boardSimple', HEADER, []],
     // A person: mentioned by a seat that posts, never oneself; the hall page's admin account is shown the hall page's half
     // only (the admin's rows are the admin page's, run on its socket).
     ['person', 'research', PERSON, ['person.mention']],
@@ -660,7 +670,7 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
     ['person', 'observer', PERSON, []],
   ];
   for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, SEATS[seat], o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
-  for (const kind of ['compose', 'chip', 'code']) for (const e of C.KINDS[kind]) assert.ok(M.some((r) => r[0] === kind && r[3].includes(e.id)), e.id + ' is shown to some seat in the matrix');
+  for (const kind of ['compose', 'chip', 'header']) for (const e of C.KINDS[kind]) assert.ok(M.some((r) => r[0] === kind && r[3].includes(e.id)), e.id + ' is shown to some seat in the matrix');
   // The admin page's facts show none of the hall page's half, and the hall page's none of the admin's.
   assert.deepEqual(ids('person', PAGE.admin, PERSON), ['person.seat', 'person.forward', 'person.view', 'person.kick']);
   for (const f of Object.values(SEATS)) assert.ok(ids('person', f, PERSON).every((id) => id === 'person.mention'), 'a hall seat is shown only the hall page\'s half');
@@ -693,7 +703,7 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
   assert.deepEqual(spans.map((ms) => C.lasted(ms)), ['0 s', '0 s', '0 s', '1 s', '40 s', '59 s', '1 min', '59 min', '1 h', '1 h 2 min', '23 h 59 min', '1 d', '1 d 3 h', '1 d 1 h', '0 s', '0 s', '0 s', '0 s']);
   for (const ms of spans) assert.equal(ops.lasted(ms), C.lasted(ms), String(ms));
   assert.deepEqual(plain(C.inline('compose', SEATS.board, COMPOSE.directorReplying)).map((i) => [i.id, i.label]), [['compose.send', 'Send']], 'before the room is named: Send');
-  for (const [kind, o] of [['chip', STAGE], ['code', CODE], ['person', PERSON]]) assert.deepEqual(plain(C.inline(kind, SEATS.admin, o)), [], kind + ': no act on a row, only the menu');
+  for (const [kind, o] of [['chip', STAGE], ['header', HEADER], ['person', PERSON]]) assert.deepEqual(plain(C.inline(kind, SEATS.admin, o)), [], kind + ': no act on a row, only the menu');
 
   // Disabled, with the reason: a file not chosen, AI drafts off, the link down, no screens, not connected; a send held
   // by the outbox stays live; the support view acts on nothing.
@@ -709,25 +719,83 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
   // 🔥 Priority is a toggle in the menu: checked while pressed.
   const pri = (o) => plain(C.items('compose', SEATS.research, o)).find((i) => i.id === 'compose.priority');
   assert.deepEqual([pri(COMPOSE.text).role, pri(COMPOSE.text).checked, pri(COMPOSE.replying).checked], ['menuitemcheckbox', false, true]);
-  assert.equal(plain(C.items('code', SEATS.research, CODE)).find((i) => i.id === 'code.code').role, undefined, 'an act that is no toggle is a plain item');
+  assert.equal(plain(C.items('header', SEATS.research, HEADER)).find((i) => i.id === 'header.code').role, undefined, 'an act that is no toggle is a plain item');
   // The admin's two acts on the code: Turn the code off… asks the three-way choice (the guests stay, or are sent out),
   // Turn the code on asks nothing, New code… says who stays and what stops; each refused offline, and none in the support
   // view.
-  const codeItems = (f, o) => plain(C.items('code', f, o)).filter((i) => !i.sep).map((i) => [i.id, i.label, i.asks, i.disabled]);
-  assert.deepEqual(codeItems(SEATS.admin, CODE).slice(2), [['code.toggle', 'Turn the code off…', true, ''], ['code.new', 'New code…', true, '']]);
-  assert.deepEqual(codeItems(SEATS.admin, CODE_OFF)[2], ['code.toggle', 'Turn the code on', false, '']);
-  assert.deepEqual(codeItems(SEATS.adminOffline, CODE).map((x) => x[3]), ['', '', C.WORDS.offline, C.WORDS.offline]);
-  assert.deepEqual(plain(C.entry('code', 'code.toggle').confirm(SEATS.admin, CODE)), {
+  const codeItems = (f, o) => plain(C.items('header', f, o)).filter((i) => !i.sep && /^header\.(code|copy|codeToggle|newCode)$/.test(i.id)).map((i) => [i.id, i.label, i.asks, i.disabled]);
+  assert.deepEqual(codeItems(SEATS.admin, HEADER), [['header.code', 'Copy guest code K7P2QX', false, ''], ['header.copy', 'Copy join link', false, ''], ['header.codeToggle', 'Turn the code off…', true, ''], ['header.newCode', 'New code…', true, '']]);
+  assert.deepEqual(codeItems(SEATS.admin, HEADER_OFF).slice(0, 3).map((x) => x.slice(1, 3)), [['Copy guest code K7P2QX (off)', false], ['Copy join link', false], ['Turn the code on', false]], 'a code that is off says so where it is copied');
+  assert.deepEqual(codeItems(SEATS.adminOffline, HEADER).map((x) => x[3]), ['', '', C.WORDS.offline, C.WORDS.offline]);
+  assert.deepEqual(plain(C.entry('header', 'header.codeToggle').confirm(SEATS.admin, HEADER)), {
     title: 'Turn off the guest code of Hall 2?',
     words: ['Turn off: nobody new joins with it, and a guest already in comes back within a few seconds of a dropped connection. Turn off and send them out: every guest page closes, and its seat goes. Accounts stay either way.'],
     choices: [{ answer: 'keep', label: 'Turn off' }, { answer: 'out', label: 'Turn off and send them out', danger: true }], no: 'Keep it on' });
-  assert.deepEqual(plain(C.entry('code', 'code.new').confirm(SEATS.admin, CODE)), { title: 'New guest code for Hall 2?', words: ['Guests in the room now stay. Anyone joining or reconnecting after a long break needs the new code, and the invite links made with this one stop working.'], yes: 'Make a new code', no: 'Keep this code' });
+  assert.deepEqual(plain(C.entry('header', 'header.newCode').confirm(SEATS.admin, HEADER)), { title: 'New guest code for Hall 2?', words: ['Guests in the room now stay. Anyone joining or reconnecting after a long break needs the new code, and the invite links made with this one stop working.'], yes: 'Make a new code', no: 'Keep this code' });
 
   // The caps, on the richest seat of each kind.
-  for (const [kind, o] of [['compose', COMPOSE.replying], ['chip', STAGE], ['code', CODE], ['person', PERSON]]) {
+  for (const [kind, o] of [['compose', COMPOSE.replying], ['chip', STAGE], ['header', HEADER], ['person', PERSON]]) {
     const items = plain(C.items(kind, SEATS.admin, o)).filter((i) => !i.sep);
     assert.ok(items.length > 0 && items.length <= 12 && items.filter((i) => i.group === '9_danger').length <= 2, kind + ': at most 12 items and 2 dangers');
   }
+});
+
+// ---------------------------------------------------------------- the header's ⋯
+test('the header\'s ⋯: People, Screens…, Text size ▸, Dark theme, the guest code and the way out, Leave last behind its separator; toggles checked as they stand; the simple view has none; the support view acts on none', () => {
+  const menu = (f, o) => plain(C.items('header', f, o)).map((i) => (i.sep ? '—' : [i.id, i.label, i.role || '', i.checked === undefined ? '' : i.checked, i.submenu]));
+  assert.deepEqual(menu(SEATS.tech, HEADER), [
+    ['header.people', 'People · 3', 'menuitemcheckbox', false, false], ['header.screens', 'Screens…', '', '', false], ['header.size', 'Text size', '', '', true],
+    ['header.theme', 'Dark theme', 'menuitemcheckbox', false, false], ['header.code', 'Copy guest code K7P2QX', '', '', false], ['header.copy', 'Copy join link', '', '', false],
+    '—', ['header.leave', 'Leave', '', '', false]]);
+  // An account's way out is its halls; the panel open and the dark theme checked; no code told, none offered.
+  assert.deepEqual(menu(SEATS.staff, HEADER_ACCOUNT), [['header.people', 'People · 3', 'menuitemcheckbox', true, false], ['header.size', 'Text size', '', '', true], ['header.theme', 'Dark theme', 'menuitemcheckbox', true, false], '—', ['header.leave', 'All halls', '', '', false]]);
+  // Text size ▸: the sizes, one checked where the text is that size, none where it is between two.
+  const sizes = (zoom) => plain(C.submenu('header', 'header.size', SEATS.board, { ...HEADER, zoom }));
+  assert.deepEqual(sizes(1).map((v) => [v.value, v.label, v.role, v.checked]), [[0.85, 'Small', 'menuitemradio', false], [1, 'Standard', 'menuitemradio', true], [1.15, 'Large', 'menuitemradio', false], [1.3, 'Larger', 'menuitemradio', false], [1.6, 'Very large', 'menuitemradio', false], [2, 'Largest', 'menuitemradio', false]]);
+  assert.deepEqual(sizes(1.3).filter((v) => v.checked).map((v) => v.label), ['Larger']);
+  assert.deepEqual(sizes(2).filter((v) => v.checked).map((v) => v.label), ['Largest'], 'up to twice the standard size');
+  assert.deepEqual(sizes(1.1).filter((v) => v.checked), [], 'a size between two checks neither');
+  // The richest seat's menu holds 12 items or fewer, none of them a danger; nothing is drawn in the simple view.
+  const admin = plain(C.items('header', SEATS.admin, HEADER)).filter((i) => !i.sep);
+  assert.ok(admin.length <= 12 && admin.every((i) => i.group !== '9_danger'), JSON.stringify(admin.map((i) => i.id)));
+  assert.equal(admin[admin.length - 1].id, 'header.leave', 'the way out is last');
+  assert.deepEqual([ids('header', SEATS.boardSimple, HEADER), ids('header', SEATS.boardAccountSimple, HEADER)], [[], []], 'the simple view has no menu door: its sheet is its own');
+  // While the page is down, what acts on this page alone acts, and Screens… (which reads the screens' list) and the code's
+  // switch and renewal say why not.
+  const offline = Object.fromEntries(plain(C.items('header', SEATS.adminOffline, HEADER)).filter((i) => !i.sep).map((i) => [i.id, i.disabled]));
+  assert.deepEqual(offline, { 'header.people': '', 'header.screens': C.WORDS.offline, 'header.size': '', 'header.theme': '', 'header.code': '', 'header.copy': '', 'header.codeToggle': C.WORDS.offline, 'header.newCode': C.WORDS.offline, 'header.leave': '' });
+  // The support view: the person's menu, every item disabled with whose view it is.
+  const sv = plain(C.items('header', SEATS.support, HEADER)).filter((i) => !i.sep);
+  assert.ok(sv.length >= 6 && sv.every((i) => i.disabled === C.supportWords('Kim')), JSON.stringify(sv.map((i) => [i.id, i.disabled])));
+});
+
+test('the marks: one table, each mark one name, one meaning and a colour role of the tokens; a chip\'s mark is the table\'s, and a name that is none is refused', () => {
+  const table = plain(AGM.MARKS);
+  assert.deepEqual(Object.keys(table), ['ok', 'partly', 'unseen', 'minimised', 'off', 'withdrawn', 'waiting', 'couldNot', 'fault', 'urgent', 'coming', 'note', 'soon']);
+  assert.deepEqual(Object.values(table).map((m) => m.mark).join(''), '✓◐◇▭○⊘◷△✕■▶●▲');
+  assert.equal(new Set(Object.values(table).map((m) => m.mark)).size, 13, 'no mark is given two names');
+  const css = readSource(path.join(ROOT, 'public', 'styles.css'));
+  for (const [name, m] of Object.entries(table)) {
+    assert.ok(['ok', 'warn', 'info', 'fault', 'off'].includes(m.role) && css.includes('--c-' + m.role + ':'), name + ': its colour role is a token (--c-' + m.role + ')');
+    assert.ok(typeof m.means === 'string' && m.means.length > 3, name + ': its meaning');
+    assert.equal(AGM.mark(name), m.mark);
+    assert.equal(AGM.markOf(m.mark), name, 'its name read back from its mark');
+  }
+  assert.equal(table.fault.role, 'fault', 'red is a fault\'s');
+  assert.deepEqual(Object.entries(table).filter(([, m]) => m.role === 'fault').map(([n]) => n), ['fault', 'urgent'], 'and only a fault\'s or an urgent wait\'s');
+  assert.throws(() => AGM.mark('sending'), /No mark is named sending/);
+  assert.throws(() => AGM.mark('toString'), /No mark is named toString/, 'only the table\'s own names');
+  // A chip and a status line hold to the same names: a chip named for no mark, an inherited name included, is refused
+  // before anything is drawn; a line's colour is the role of the table's mark it starts with, and none for words alone.
+  const el = () => ({ textContent: '', dataset: {}, classList: { add() {} }, querySelector() { return null; } });
+  for (const name of ['toString', 'constructor', 'sending']) assert.throws(() => AGM.chip(el(), name, 'x'), (e) => e.message === 'No mark is named ' + name, name);
+  const line = (text) => { const l = el(); AGM.toned(l, text); return [l.textContent, l.dataset.tone]; };
+  assert.deepEqual([line(AGM.mark('couldNot') + ' Approved but it failed'), line(AGM.mark('coming') + ' Ana is on the way'), line('Sent to Stagewatch'), line('✔ not the table\'s')],
+    [[AGM.mark('couldNot') + ' Approved but it failed', 'warn'], [AGM.mark('coming') + ' Ana is on the way', 'info'], ['Sent to Stagewatch', undefined], ['✔ not the table\'s', undefined]]);
+  assert.equal(AGM.markOf('…'), '', 'a retired mark is none of them');
+  // The catalogue's own words name their marks from the table: an act held by the outbox says ◷.
+  assert.equal(C.WORDS.held.split(' ')[0], AGM.mark('waiting'));
+  for (const f of Object.values(C.FOLDS)) assert.ok(!MARKS.includes(f.icon), 'a fold\'s icon is no mark: ' + f.icon);
 });
 
 // ---------------------------------------------------------------- the admin page, the halls board, the Accounts page

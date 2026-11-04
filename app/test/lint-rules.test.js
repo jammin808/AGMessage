@@ -1,10 +1,12 @@
 'use strict';
 // The fence on the fence: agm/no-unescaped-html refuses an unescaped value on its way into a page's HTML and lets the
 // escaped shapes through, and the page floor's rules refuse what Safari lacks unless it is reached through its helper, so
-// a refactor of a rule or of the config cannot quietly stop catching the defect it is there for.
+// a refactor of a rule or of the config cannot quietly stop catching the defect it is there for. No page script writes a
+// status mark of its own: each is AGM.MARKS'.
 const test = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
+const vm = require('vm');
 const { Linter, ESLint } = require('eslint');
 const { readSource } = require('./helpers');
 const rule = require('../eslint-rules/no-unescaped-html');
@@ -82,6 +84,35 @@ test('no native dialog in the lint: alert, confirm and prompt are refused on eve
   assert.deepEqual(await found('export const ask = () => window.prompt(\'x\');\n', 'app/public/planted.mjs'), ['no-alert'], 'and on a page module');
   assert.deepEqual(await found('AGM.ask(null, { title: \'Remove it?\' });\nAGM.toast(\'Not saved.\', true);\n', 'app/public/planted.js'), [], 'an ask in place and a toast pass');
   assert.deepEqual(await found('(function () { const confirm = [1]; AGM.x = confirm.length; })();\n', 'app/public/planted.js'), [], 'a value named confirm is no dialog');
+});
+
+// Every status a page draws is a mark of the one table, AGM.MARKS (public/common.js): no page script writes a mark of its
+// own in a string or a template, nor one of the marks the table retired, so a mark keeps one meaning on every page.
+test('the marks in the lint: a status mark written by a page script is refused, every mark of AGM.MARKS and every retired one; AGM.mark passes; common.js and the screen page hold their own', async () => {
+  const repo = path.join(__dirname, '..', '..');
+  const eslint = new ESLint({ cwd: repo });
+  const found = async (code, file) => (await eslint.lintText(code, { filePath: path.join(repo, file) }))[0].messages.map((m) => m.ruleId || (m.fatal ? 'parse' : m.message));
+  const ctx = vm.createContext({});
+  vm.runInContext('globalThis.window = globalThis;', ctx);
+  vm.runInContext(readSource('app/public/common.js'), ctx, { filename: 'common.js' });
+  const marks = Object.values(ctx.AGM.MARKS).map((m) => m.mark);
+  assert.equal(marks.length, 13, 'the table\'s marks are read');
+  for (const glyph of [...marks, '✗', '⚠', '⏳', '⏸']) {
+    for (const file of ['app/public/app.js', 'app/public/halls.js', 'app/public/admin.js', 'app/public/admin-plus.js', 'app/public/users.js', 'app/public/audit-export.js', 'app/public/catalog.js', 'app/public/planted.js']) {
+      assert.deepEqual(await found('AGM.x = \'' + glyph + ' Sent\';\n', file), ['no-restricted-syntax'], file + ' writes ' + glyph + ' in a string');
+    }
+    assert.deepEqual(await found('AGM.x = `' + glyph + ' $' + '{AGM.y}`;\n', 'app/public/app.js'), ['no-restricted-syntax'], 'and in a template: ' + glyph);
+    // Written as its escape, it is the same mark: in a string (its value) and in a template (its text as it reads).
+    const escaped = '\\u' + glyph.codePointAt(0).toString(16).padStart(4, '0');
+    assert.deepEqual(await found('AGM.x = \'' + escaped + ' Sent\';\n', 'app/public/app.js'), ['no-restricted-syntax'], 'and escaped in a string: ' + escaped);
+    assert.deepEqual(await found('AGM.x = `' + escaped + ' $' + '{AGM.y}`;\n', 'app/public/app.js'), ['no-restricted-syntax'], 'and escaped in a template: ' + escaped);
+    assert.deepEqual(await found('export const x = \'' + glyph + '\';\n', 'app/public/planted.mjs'), ['no-restricted-syntax'], 'and in a page module: ' + glyph);
+  }
+  assert.deepEqual(await found('AGM.x = AGM.mark(\'ok\') + \' Sent\';\nAGM.chip(AGM.el, \'waiting\', \'Sending\');\n', 'app/public/app.js'), [], 'a mark by its name passes');
+  assert.deepEqual(await found('AGM.x = \'Sent ↗ to Legal · 📺\';\n', 'app/public/app.js'), [], 'an act\'s icon is no mark');
+  assert.deepEqual(await found('AGM.ua = navigator.userAgent;\n', 'app/public/app.js'), ['no-restricted-syntax'], 'the page floor\'s rules still hold beside it');
+  assert.deepEqual(await found('AGM.x = \'✓\';\n', 'app/public/common.js'), [], 'common.js holds the table');
+  assert.deepEqual(await found('window.x = \'●\';\n', 'app/public/display.js'), [], 'the screen page loads none of the people\'s pages\' scripts: its tones are held by test/modules.test.js');
 });
 
 // A test reads the checkout's text through readSource and finds a free port through test/helpers.js (agm/test-helpers):

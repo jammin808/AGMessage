@@ -8,7 +8,9 @@
 // Text only: nothing from the server is put into markup.
 (function () {
   'use strict';
-  const SHAPE = { intact: '✓ Intact', linked: '◇ Linked', unvouched: '△ Not vouched for', broken: '✕ Broken' };
+  // Each verdict's mark is one of the one table (AGM.MARKS, common.js): ◇ Linked is reached and not seen into.
+  const mark = (name, words) => AGM.mark(name) + ' ' + words;
+  const SHAPE = { intact: mark('ok', 'Intact'), linked: mark('unseen', 'Linked'), unvouched: mark('couldNot', 'Not vouched for'), broken: mark('fault', 'Broken') };
   const grouped = (fp) => String(fp || '').match(/.{1,4}/g) || [];
   const shortKey = (fp) => grouped(fp).slice(0, 4).join(' ') + ' …';
   const size = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
@@ -50,7 +52,7 @@
     dlg.addEventListener('close', () => { if (making) making.abort(); });
   }
 
-  const CANCELLED = '✕ Not exported: cancelled before it was whole. Nothing was handed to your browser to save.';
+  const CANCELLED = mark('fault', 'Not exported: cancelled before it was whole. Nothing was handed to your browser to save.');
 
   /** Make the export and save it, unless `signal` aborts first; resolves the words said at its end. */
   async function run(say, signal) {
@@ -59,12 +61,12 @@
       r = await fetch('/api/audit/export', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}', signal });
     } catch (e) {
       if (signal.aborted) return say('broken', CANCELLED);
-      return say('broken', '✕ Not exported: the export stopped before it was whole (' + (e && e.message ? e.message : e) + '). Do not use a file it left.');
+      return say('broken', mark('fault', 'Not exported: the export stopped before it was whole (' + (e && e.message ? e.message : e) + '). Do not use a file it left.'));
     }
     if (!r.ok || (r.headers.get('content-type') || '').indexOf('application/zip') !== 0) {
       let why = 'the server answered ' + r.status;
       try { const j = await r.json(); if (j && typeof j.error === 'string') why = j.error.replace(/^not exported: /i, ''); } catch { /* no JSON: its status says it */ }
-      return say('broken', '✕ Not exported: ' + why);
+      return say('broken', mark('fault', 'Not exported: ' + why));
     }
     const head = {};
     for (const part of String(r.headers.get('X-AGM-Export') || '').split(';')) { const [k, v] = part.trim().split('='); if (k && v) head[k] = v; }
@@ -82,14 +84,14 @@
       }
     } catch (e) {
       if (signal.aborted) return say('broken', CANCELLED);
-      return say('broken', '✕ Not exported: the export stopped before it was whole (' + (e && e.message ? e.message : e) + '). Do not use a file it left.');
+      return say('broken', mark('fault', 'Not exported: the export stopped before it was whole (' + (e && e.message ? e.message : e) + '). Do not use a file it left.'));
     }
     if (signal.aborted) return say('broken', CANCELLED);
     const blob = new Blob(parts, { type: 'application/zip' });
     const tail = new Uint8Array(await blob.slice(-22).arrayBuffer());
     // A zip AGMessage writes ends with its end-of-central-directory record (no comment): 50 4b 05 06.
     if (blob.size < 22 || tail[0] !== 0x50 || tail[1] !== 0x4b || tail[2] !== 0x05 || tail[3] !== 0x06) {
-      return say('broken', '✕ Not exported: the export stopped before it was whole (it ended without its last part). Do not use a file it left.');
+      return say('broken', mark('fault', 'Not exported: the export stopped before it was whole (it ended without its last part). Do not use a file it left.'));
     }
     if (signal.aborted) return say('broken', CANCELLED);
     const url = URL.createObjectURL(blob);
@@ -100,9 +102,9 @@
     a.click();
     a.remove();
     setTimeout(() => { URL.revokeObjectURL(url); }, 40000);
-    const mark = SHAPE[head.mark] || '✕ Broken';
-    return say(head.mark === 'intact' ? 'intact' : head.mark || 'broken', '✓ Exported ' + (head.entries ? 'entries ' + head.entries.replace('-', '–') : 'the log') + ', signed with ' + shortKey(head.key)
-      + ': it arrived whole (' + size(blob.size) + ') and was handed to your browser to save — check your downloads. The log read ' + mark + ' when it was made'
+    const verdict = SHAPE[head.mark] || SHAPE.broken;
+    return say(head.mark === 'intact' ? 'intact' : head.mark || 'broken', mark('ok', 'Exported ') + (head.entries ? 'entries ' + head.entries.replace('-', '–') : 'the log') + ', signed with ' + shortKey(head.key)
+      + ': it arrived whole (' + size(blob.size) + ') and was handed to your browser to save — check your downloads. The log read ' + verdict + ' when it was made'
       + (head.mark === 'intact' ? '.' : '; the export says so.') + (atLaptop() ? ' It is saved on this laptop: move it off, then delete it here.' : ''));
   }
 

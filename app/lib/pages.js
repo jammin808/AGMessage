@@ -52,8 +52,11 @@ const reportsOf = (kind) => (kind === 'chat' ? CHAT_REPORTS : DRAWN_REPORTS);
 const ANSWERS = Object.freeze(['dismissed', 'minimised']);
 /** A guest's chat view: '' (by their seat), Simple or Full, as an account's (lib/accounts.js VIEWS). */
 const VIEWS = Object.freeze(['', 'simple', 'full']);
-/** The marks a take's status is drawn with, each with one meaning (the plan's table of marks). */
-const MARKS = Object.freeze(['✓', '◐', '◇', '▭', '○', '◷', '△', '✕']);
+/**
+ * The marks a take's status is drawn with, by their names in the pages' one table (public/common.js AGM.MARKS), each with
+ * its one meaning there; test/modules.test.js holds each to that table, name and mark.
+ */
+const MARKS = Object.freeze({ ok: '✓', partly: '◐', unseen: '◇', minimised: '▭', off: '○', waiting: '◷', couldNot: '△', fault: '✕' });
 const BOUNDS = Object.freeze({ views: 5000, personTakes: 200, answers: 500 });
 
 const HALL = /^[A-Z0-9]{4,12}$/;
@@ -352,14 +355,14 @@ class Pages {
     const list = Array.isArray(pages) ? pages : [];
     const n = list.length;
     const out = (mark, words) => ({ seq: take ? take.seq : 0, showing: describePage(take && take.content, { hallHolding }), mark, words, pages: n });
-    if (!n) return out('✕', board ? 'Nobody on the Board is online' : name ? name + ' has no page open in this hall' : 'No page of theirs is open in this hall');
-    if (!take) return out('○', 'Nothing shown yet');
+    if (!n) return out(MARKS.fault, board ? 'Nobody on the Board is online' : name ? name + ' has no page open in this hall' : 'No page of theirs is open in this hall');
+    if (!take) return out(MARKS.off, 'Nothing shown yet');
     const of = (state) => list.filter((p) => p.state === state);
     const pagesWords = (k) => k + (k === 1 ? ' page' : ' pages');
     const failed = of('failed');
-    if (failed.length) return out('△', 'Couldn\'t show it' + (n > 1 ? ' on ' + failed.length + ' of ' + pagesWords(n) : '') + (failed[0].words ? ': ' + failed[0].words : ''));
+    if (failed.length) return out(MARKS.couldNot, 'Couldn\'t show it' + (n > 1 ? ' on ' + failed.length + ' of ' + pagesWords(n) : '') + (failed[0].words ? ': ' + failed[0].words : ''));
     const waiting = of('waiting').length;
-    if (waiting) return out('◷', 'Sending' + (waiting < n ? ' · on ' + (n - waiting) + ' of ' + pagesWords(n) : ''));
+    if (waiting) return out(MARKS.waiting, 'Sending' + (waiting < n ? ' · on ' + (n - waiting) + ' of ' + pagesWords(n) : ''));
     const said = (rows, words) => {
       const names = rows.map((p) => p.name);
       const one = new Set(names).size === 1;
@@ -367,16 +370,16 @@ class Pages {
     };
     const dismissed = of('dismissed');
     const minimised = of('minimised');
-    if (dismissed.length === n) return out('○', said(dismissed, 'went back to chat'));
-    if (minimised.length === n) return out('▭', said(minimised, 'minimised it'));
+    if (dismissed.length === n) return out(MARKS.off, said(dismissed, 'went back to chat'));
+    if (minimised.length === n) return out(MARKS.minimised, said(minimised, 'minimised it'));
     const opened = of('opened').length;
     const showing = of('shown').length + opened;
     const chat = isRecord(take.content) && take.content.kind === 'chat';
     if (showing === n) {
-      if (opened) return out('◇', 'Opened · AGMessage can\'t see inside web pages');
+      if (opened) return out(MARKS.unseen, 'Opened · AGMessage can\'t see inside web pages');
       const whose = name ? name + '\'s' : 'their';
       const where = board ? (n === 1 ? 'the 1 Board page' : 'all ' + n + ' Board pages') : n === 1 ? whose + ' page' : 'all ' + n + ' of ' + whose + ' pages';
-      return chat ? out('○', 'Back to chat on ' + where) : out('✓', 'On ' + where);
+      return chat ? out(MARKS.off, 'Back to chat on ' + where) : out(MARKS.ok, 'On ' + where);
     }
     const why = [];
     const hidden = of('hidden').length;
@@ -385,7 +388,7 @@ class Pages {
     if (minimised.length) why.push(namesWords(minimised.map((p) => p.name)) + ' minimised it');
     const other = of('other').length;
     if (other) why.push(other + ' showing something else');
-    return out('◐', showing + ' of ' + n + (chat ? ' back to chat · ' : ' showing · ') + why.join(' · '));
+    return out(MARKS.partly, showing + ' of ' + n + (chat ? ' back to chat · ' : ' showing · ') + why.join(' · '));
   }
 
   /** A guest's chat view ('' by their seat, 'simple' or 'full'), kept by their uid. */

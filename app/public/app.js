@@ -55,6 +55,8 @@ let ROOMS = [];
 // into (the catalogue's compose.sendTo). It goes back to this room after every send.
 let sendTo = '';
 const RUN = {};
+/** A status's words after its mark: every mark this page draws is one of AGM.MARKS (common.js), never one of its own. */
+const marked = (name, words) => AGM.mark(name) + ' ' + words;
 
 // ---------------- UI sync state (declared early to avoid TDZ traps) ----------------
 // These are accessed by pushUserState / setStageCollapsed / setZoom / applyTheme,
@@ -67,29 +69,23 @@ let _applyingRemote = false;
 if (!ROOM || (!NAME && !AS_ACCOUNT)) location.href = '/';
 
 document.body.dataset.role = ROLE;
-// The code chip shows the room's guest code as the server tells this page it (the join's answer, and each change of it),
-// and nothing until then: the address's code is how the page names its room (an account's, its key), not a code it is told.
-const _roomChip = document.getElementById('roomChip');
-_roomChip.hidden = true;
+// The room's guest code is the server's to tell this page (the join's answer, and each change of it), and none until then:
+// the address's code is how the page names its room (an account's, its key), not a code it is told. The header's ⋯ copies it.
 document.getElementById('whoami').textContent = AS_ACCOUNT ? '' : `${NAME} · ${roleLabel(ROLE)}`;
 document.querySelectorAll('a[href="/"].btn').forEach((a) => { a.href = HOME; if (AS_ACCOUNT) a.textContent = 'All halls'; });
 
-// ---------------- Theme (dark mode) ----------------
-const themeBtn = document.getElementById('themeBtn');
+// ---------------- Theme (dark mode): the header's ⋯, Dark theme ----------------
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
-  if (themeBtn) {
-    themeBtn.textContent = t === 'dark' ? '☀️' : '🌙';
-    themeBtn.title = t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
-  }
 }
 applyTheme(localStorage.getItem('agm.theme') || 'light');
-themeBtn?.addEventListener('click', () => {
+/** Dark theme on or off, kept for this browser and handed to this person's other pages. */
+function toggleTheme() {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('agm.theme', next);
+  try { localStorage.setItem('agm.theme', next); } catch { /* storage blocked: this page only */ }
   applyTheme(next);
   if (!_applyingRemote) pushUserState('theme', next);
-});
+}
 
 // ---------------- Message text zoom ----------------
 const ZOOM_KEY = 'agm.zoom';
@@ -104,9 +100,6 @@ function setZoom(z) {
   if (!_applyingRemote) pushUserState('zoom', currentZoom);
 }
 applyZoom();
-document.getElementById('zoomInBtn')?.addEventListener('click', () => setZoom(currentZoom + 0.1));
-document.getElementById('zoomOutBtn')?.addEventListener('click', () => setZoom(currentZoom - 0.1));
-document.getElementById('zoomResetBtn')?.addEventListener('click', () => setZoom(1));
 
 
 
@@ -118,12 +111,17 @@ if (ROLE === 'research') document.getElementById('researchCompose').hidden = fal
 // page is shown again or the browser is back online. The page is back once its join is answered: the strip says
 // "Reconnecting…" after 2 s without it, the dot's words after 5 s, and both go at the answer.
 const socket = io({ transports: ['websocket', 'polling'], auth: AGM.reconnect.auth(), ...AGM.reconnect.OPTIONS });
+const connChip = document.getElementById('connChip');
 const connDot = document.getElementById('connDot');
 const connWords = document.getElementById('connWords');
 const connection = AGM.reconnect.attach(socket, { join: true, down: true, strip: document.getElementById('connStrip'), onChange: drawConnection });
-/** The dot: its colour, its name for a screen reader (what is true now), and its words once the page has been down 5 s. */
+/**
+ * The connection's chip: its mark (✓ back in the hall; ◷ connecting, or down less than 5 s; ✕ down 5 s or more, or not
+ * coming back), its name for a screen reader (what is true now), and its words once the page has been down 5 s.
+ */
 function drawConnection(st) {
   const name = AGM.reconnect.dotName(st);
+  AGM.chip(connChip, st.back ? 'ok' : st.stopped || st.dot ? 'fault' : 'waiting');
   connDot.classList.toggle('ok', st.back);
   connDot.setAttribute('aria-label', name);
   connDot.title = name;
@@ -289,14 +287,12 @@ socket.on('sendsChanged', () => askTargets(false));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') askForwardable(); });
 
 /** The room as the header names it (a hall's Main room by the hall's name; a rename arrives as a numbered change, like
- * everything else): the header's title, the code chip's title, and the name of Send (the catalogue's compose.send), which
- * says where a message goes (its word "Send" first, the word a person sees on it). */
+ * everything else): the header's title, its menu's line, and the name of Send (the catalogue's compose.send), which says
+ * where a message goes (its word "Send" first, the word a person sees on it). */
 let ROOM_NAME = '';
 function setRoomTitle(name) {
   if (!name) return;
   ROOM_NAME = name;
-  const chip = document.getElementById('roomChip');
-  if (chip) chip.title = name;
   drawTitle();
   drawComposers();
   refreshOpenMenu();
@@ -487,7 +483,7 @@ function outOfHall(words, to) {
   AGM.menu.close();
   AGM.ask.close();
   HelpChip.close(false);
-  for (const id of ['helpBtn', 'screensBtn', 'peopleBtn', 'stageToggleBtn', 'skipLink']) document.getElementById(id).hidden = true;
+  for (const id of ['helpBtn', 'headerMore', 'skipLink']) document.getElementById(id).hidden = true;
   drawChips();
   drawSwitcher();
   document.querySelector('.main-row').hidden = true;
@@ -525,14 +521,14 @@ function proposalLineText(p) {
   if (!p) return '';
   const by = p.by ? ' by ' + p.by : '';
   switch (p.state) {
-    case 'pending': return '📝 Waiting for the show desk to approve' + (p.to ? ' — for ' + p.to : '');
-    case 'approved': return '✓ Approved' + by + ' — running';
-    case 'rejected': return '✗ Not approved' + by;
-    case 'done': return '✓ Approved' + by + ' and done' + (p.words ? ': ' + p.words : '');
-    case 'failed': return '⚠ Approved' + by + ' but it failed' + (p.words ? ': ' + p.words : '');
-    case 'undelivered': return '⚠ Approved' + by + ' but not delivered' + (p.words ? ': ' + p.words : '');
-    case 'unknown': return '⚠ Stagewatch\'s answer about this request is not one AGMessage can read — see the show desk' + (p.words ? ' (' + p.words + ')' : '');
-    case 'lost': return '⚠ ' + (p.words || 'Stagewatch no longer has this request — ask again if it is still wanted');
+    case 'pending': return marked('waiting', 'Waiting for the show desk to approve' + (p.to ? ' — for ' + p.to : ''));
+    case 'approved': return marked('ok', 'Approved' + by + ' — running');
+    case 'rejected': return marked('fault', 'Not approved' + by);
+    case 'done': return marked('ok', 'Approved' + by + ' and done' + (p.words ? ': ' + p.words : ''));
+    case 'failed': return marked('couldNot', 'Approved' + by + ' but it failed' + (p.words ? ': ' + p.words : ''));
+    case 'undelivered': return marked('couldNot', 'Approved' + by + ' but not delivered' + (p.words ? ': ' + p.words : ''));
+    case 'unknown': return marked('couldNot', 'Stagewatch\'s answer about this request is not one AGMessage can read — see the show desk' + (p.words ? ' (' + p.words + ')' : ''));
+    case 'lost': return marked('couldNot', p.words || 'Stagewatch no longer has this request — ask again if it is still wanted');
     default: return '';
   }
 }
@@ -545,7 +541,8 @@ function renderProposalLine(host, p) {
     line.className = 'stage-line proposal-line';
     (host.querySelector('.body') || host).appendChild(line);
   }
-  line.textContent = text;
+  // Its colour is its mark's role (common.js AGM.toned), as every line with a mark of the table draws it.
+  AGM.toned(line, text);
   line.dataset.state = (p && p.state) || '';
 }
 // The hall's receipts that moved, in one frame per second at most: each applied, then the lines drawn once.
@@ -581,11 +578,11 @@ function setStage(messageId, stage) {
 function stageLineText(st) {
   if (!st) return '';
   const by = st.by ? ' by ' + st.by : '';
-  if (st.ack === 'done') return '✓ Acknowledged on stage' + by;
-  if (st.ack === 'seen') return '✓ Seen on stage' + by;
-  if (st.ack === 'lost') return '✕ No longer followed: that Stagewatch restarted, or this hall now follows another — the speaker\'s acknowledgement cannot be read';
-  if (st.ack === 'sent') return st.receipt === 'applied' ? '⏳ On the speaker\'s screen — waiting for them to acknowledge' : '⏳ Stagewatch took it — waiting for the speaker';
-  return st.receipt === 'applied' ? 'On the speaker\'s screen' : 'Sent to Stagewatch (not confirmed on screen)';
+  if (st.ack === 'done') return marked('ok', 'Acknowledged on stage' + by);
+  if (st.ack === 'seen') return marked('ok', 'Seen on stage' + by);
+  if (st.ack === 'lost') return marked('fault', 'No longer followed: that Stagewatch restarted, or this hall now follows another — the speaker\'s acknowledgement cannot be read');
+  if (st.ack === 'sent') return marked('waiting', st.receipt === 'applied' ? 'On the speaker\'s screen — waiting for them to acknowledge' : 'Stagewatch took it — waiting for the speaker');
+  return st.receipt === 'applied' ? marked('ok', 'On the speaker\'s screen') : marked('waiting', 'Sent to Stagewatch (not confirmed on screen)');
 }
 function renderStageLine(host, stage) {
   let line = host.querySelector(':scope > .stage-line, :scope .body > .stage-line');
@@ -596,7 +593,7 @@ function renderStageLine(host, stage) {
     line.className = 'stage-line';
     (host.querySelector('.body') || host).appendChild(line);
   }
-  line.textContent = text;
+  AGM.toned(line, text);
   line.dataset.ack = (stage && stage.ack) || '';
 }
 function setReactions(messageId, reactions) {
@@ -634,7 +631,7 @@ function refreshSeenLines() {
     let line = node.querySelector('.seen-line');
     if (!who.length) { if (line) line.remove(); continue; }
     if (!line) { line = document.createElement('div'); line.className = 'seen-line'; node.appendChild(line); }
-    const text = '✓ Seen by ' + (who.length <= 3 ? who.join(', ') : who.slice(0, 3).join(', ') + ' +' + (who.length - 3));
+    const text = marked('ok', 'Seen by ') + (who.length <= 3 ? who.join(', ') : who.slice(0, 3).join(', ') + ' +' + (who.length - 3));
     if (line.textContent !== text) line.textContent = text;
   }
 }
@@ -642,34 +639,62 @@ function refreshSeenLines() {
 // ---------------- Stage (Stagewatch): the live timer, for everyone in the hall ----------------
 /** The stage chip's object (catalog.js, kind `chip`): the link's last state that had a time, or null while it shows none. */
 let stageNow = null;
+/** Stagewatch's phases that are near the end or past it: the countdown's ▲ (soon), with its words saying which. */
+const STAGE_SOON = ['warning', 'wrapup', 'overtime'];
+/**
+ * The countdown's chip: Stagewatch's time and title, and its state as a mark of the one table: none while the time is
+ * live, ▲ near the end or past it, ◷ while Stagewatch has not accepted this AGMessage's key, ✕ with the last time known
+ * (in muted ink, never faded) while the link is lost. Stagewatch's own colour is the chip's left edge, never the digits'
+ * ink, so the digits keep their contrast whatever colour it sends.
+ */
 function renderStage(v) {
   const chip = document.getElementById('stageChip');
   if (!chip) return;
   if (!v || !v.text) { chip.hidden = true; stageNow = null; drawChips(); refreshOpenMenu(); return; }
   chip.hidden = false;
   const live = !v.stale && (v.status === 'connected' || v.status === 'viewing');
+  const checking = v.status === 'checking key';
+  const soon = live && STAGE_SOON.includes(v.phase);
+  AGM.chip(chip, checking ? 'waiting' : !live ? 'fault' : soon ? 'soon' : '');
+  // What the mark says, said to a screen reader before the time (the mark itself is aria-hidden).
+  let said = chip.querySelector(':scope > .chip-said');
+  if (!said) { said = document.createElement('span'); said.className = 'sr-only chip-said'; chip.querySelector(':scope > .chip-mark').after(said); }
+  said.textContent = checking ? 'Waiting for Stagewatch to accept the key, ' : !live ? 'Link lost, last known ' : soon ? (v.phase === 'overtime' ? 'Over time ' : 'Near the end ') : '';
   document.getElementById('stageTime').textContent = v.text;
-  // Stagewatch's colour while the time is live; the last time known reads in the chip's dim ink, never faded
-  document.getElementById('stageTime').style.color = live ? v.color || '' : '';
   document.getElementById('stageTitle').textContent = v.title || '';
+  const edge = live && /^#[0-9A-Fa-f]{6}$/.test(v.color || '') && !/^#ffffff$/i.test(v.color) ? v.color : '';
+  chip.style.borderLeftColor = edge;
   chip.classList.toggle('stale', !live);
-  chip.title = (v.status === 'checking key' ? 'Stagewatch has not accepted this AGMessage\'s key yet: ' : live ? 'Live from Stagewatch: ' : 'Stagewatch link lost — last known: ') + (v.title || '') + (v.next ? ' · Next: ' + v.next : '') +
+  chip.title = (checking ? 'Stagewatch has not accepted this AGMessage\'s key yet: ' : live ? (v.phase === 'overtime' ? 'Over time — live from Stagewatch: ' : 'Live from Stagewatch: ') : 'Stagewatch link lost — last known: ') + (v.title || '') + (v.next ? ' · Next: ' + v.next : '') +
     (v.messageAck === 'done' ? ' · Speaker acknowledged the message' : '');
   stageNow = { id: 'stage', live, text: v.text, words: chip.title };
   drawChips();
   refreshOpenMenu();
 }
 
-// ---------------- The header's chips: the code (kind `code`) and the stage chip (kind `chip`) ----------------
-// A chip with acts for this seat is a button that opens its menu (a click, Enter or Space, a right-click, Shift+F10 or the
-// menu key); one without stays words, so nothing is drawn as a button that does nothing.
+// ---------------- The header: its ⋯ (kind `header`) and the countdown's chip (kind `chip`) ----------------
+// The ⋯ opens the header's menu, and so do a right-click anywhere else on the header's row and Shift+F10 or the menu key
+// on the ⋯: People, Screens, the text size, the theme, the room's guest code and the way out, set once and seldom looked
+// at, so the row keeps the room's name, its status, Help and the ⋯ at every width. The countdown's chip, where this seat
+// has acts on it, is a button that opens its own menu (a click, Enter or Space, a right-click, Shift+F10 or the menu key);
+// without, it stays words, so nothing is drawn as a button that does nothing. The switcher's rooms keep their own menus,
+// and Help its own ask.
 const stageChipEl = document.getElementById('stageChip');
-/** The code chip's object: the room's guest code as this page is told it, whether it admits guests, and the room's name. */
-const codeObject = () => ({ id: 'code', code: pageFacts.guestCode, on: !!pageFacts.codeOn, hall: ROOM_NAME || 'this room' });
-const CHIPS = {
-  roomChip: { kind: 'code', get: codeObject, label: 'Guest code actions', header: (o) => 'Guest code ' + o.code + (ROOM_NAME ? ' · ' + ROOM_NAME : '') },
-  stageChip: { kind: 'chip', get: () => stageNow, label: 'Countdown actions', header: (o) => o.words },
-};
+const headerMore = document.getElementById('headerMore');
+const headerBar = document.querySelector('.app-bar');
+/**
+ * The header as the catalogue reads it: how many are in the room and whether the People panel is open, the text size, the
+ * theme, the room's guest code as the server tells this page ('' for none) and whether it admits guests, the room as an
+ * ask names it, and the way out (an account's halls, else the sign-in page); null out of the hall.
+ */
+function headerObject() {
+  if (outOf) return null;
+  return { id: 'header', people: people.length, peopleShown: !peoplePanel.hidden, zoom: currentZoom, dark: document.documentElement.dataset.theme === 'dark',
+    code: pageFacts.guestCode, on: !!pageFacts.codeOn, hall: ROOM_NAME || 'this room', account: AS_ACCOUNT, away: HOME };
+}
+/** The header menu's line: the room, and who this is in it. */
+const headerLine = () => [ROOM_NAME ? titleOf(MAIN, ROOM_NAME) : '', document.getElementById('whoami').textContent].filter(Boolean).join(' · ');
+const openHeaderMenu = (at) => openObjectMenu('header', headerObject, { node: headerMore, more: headerMore, at, opener: headerMore, label: 'Room menu', header: headerLine });
 function chipIsDoor(el, on) {
   if (on) {
     el.setAttribute('role', 'button');
@@ -678,50 +703,59 @@ function chipIsDoor(el, on) {
     if (!el.hasAttribute('aria-expanded')) el.setAttribute('aria-expanded', 'false');
   } else for (const a of ['role', 'tabindex', 'aria-haspopup', 'aria-expanded']) el.removeAttribute(a);
 }
-/** The chips as the page stands: shown and a door where this seat has acts on them; out of the hall, neither. */
+/** The header as the page stands: the countdown's chip a door where this seat has acts on it; out of the hall, neither it nor the ⋯. */
 function drawChips() {
-  _roomChip.hidden = outOf || !F.mayKnowCode;
-  // Its code, and "(off)" while it admits nobody new.
-  const words = pageFacts.guestCode + (pageFacts.codeOn ? '' : ' (off)');
-  if (_roomChip.textContent !== words) _roomChip.textContent = words;
   if (outOf) stageChipEl.hidden = true;
-  chipIsDoor(_roomChip, !outOf && !_roomChip.hidden && AGM.catalog.items('code', F, codeObject()).length > 0);
+  headerMore.hidden = outOf;
   chipIsDoor(stageChipEl, !outOf && !!stageNow && AGM.catalog.items('chip', F, stageNow).length > 0);
 }
-function chipDoor(t) {
-  const el = t.closest && t.closest('#roomChip, #stageChip');
-  if (!el || el.getAttribute('aria-haspopup') !== 'menu') return null;
-  const c = CHIPS[el.id];
-  return { el, more: el, open: (at) => openObjectMenu(c.kind, c.get, { node: el, more: el, at, opener: el, label: c.label, header: c.header }) };
+const stageDoor = () => ({ el: stageChipEl, more: stageChipEl, open: (at) => openObjectMenu('chip', () => stageNow, { node: stageChipEl, more: stageChipEl, at, opener: stageChipEl, label: 'Countdown actions', header: (o) => o.words }) });
+/** The door of what a right-click or Shift+F10 on the header meets: the countdown's chip that is a door, else the header's menu. */
+function headerDoor(t) {
+  if (outOf || !t.closest || t.closest('#roomSwitcher, #helpBtn, .agm-ask')) return null;
+  if (t.closest('#stageChip') && stageChipEl.getAttribute('aria-haspopup') === 'menu') return stageDoor();
+  return { el: headerBar, more: headerMore, open: (at) => openHeaderMenu(at) };
 }
 function onChip(e) {
   if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
-  const door = chipDoor(e.target);
-  if (!door) return;
+  if (stageChipEl.getAttribute('aria-haspopup') !== 'menu') return;
   e.preventDefault();
-  if (openOn && openOn.node === door.el) { AGM.menu.close(); return; }
-  door.open({ anchor: door.el });
+  if (openOn && openOn.node === stageChipEl) { AGM.menu.close(); return; }
+  stageDoor().open({ anchor: stageChipEl });
 }
-for (const el of [_roomChip, stageChipEl]) { el.addEventListener('click', onChip); el.addEventListener('keydown', onChip); }
-AGM.menu.door(document.querySelector('.app-meta'), chipDoor);
+stageChipEl.addEventListener('click', onChip);
+stageChipEl.addEventListener('keydown', onChip);
+headerMore.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (openOn && openOn.kind === 'header') { AGM.menu.close(); return; }
+  openHeaderMenu({ anchor: headerMore });
+});
+AGM.menu.door(document.querySelector('.app-header'), headerDoor);
 Object.assign(RUN, {
   // Speaker's screen…: the line box, empty, to write a line and send it or ask the operator for it.
   'chip.speaker': () => ToStagewatch.open(null),
   'chip.screens': () => Screens.countdown(),
-  'code.code': (o, { anchor }) => copyText(o.code, 'Copied the guest code, ' + o.code + '.', anchor),
-  'code.copy': (o, { anchor }) => copyText(new URL('/?code=' + encodeURIComponent(o.code), location.href).href, 'Copied the join link: it opens the join page with this code.', anchor),
+  'header.people': () => { peoplePanel.hidden = !peoplePanel.hidden; },
+  'header.screens': () => Screens.show(),
+  'header.size': (o, { value }) => { if (typeof value === 'number' && Number.isFinite(value)) setZoom(value); },
+  'header.theme': () => toggleTheme(),
+  'header.code': (o, { anchor }) => copyText(o.code, 'Copied the guest code, ' + o.code + '.', anchor),
+  'header.copy': (o, { anchor }) => copyText(new URL('/?code=' + encodeURIComponent(o.code), location.href).href, 'Copied the join link: it opens the join page with this code.', anchor),
   // The admin switches the room's code and renews it from here, naming the room by its key (the address it opened);
   // what the room's pages are told comes back as each page's `guestCode` (below).
-  'code.toggle': (o, c) => AGM.outbox.now('room:update', o.on ? { code: ROOM, codeOn: false, keepGuests: c.choice !== 'out' } : { code: ROOM, codeOn: true }, (r) => {
+  'header.codeToggle': (o, c) => AGM.outbox.now('room:update', o.on ? { code: ROOM, codeOn: false, keepGuests: c.choice !== 'out' } : { code: ROOM, codeOn: true }, (r) => {
     if (!r || !r.ok) { AGM.toast((r && r.error) || 'Not changed.', true); return; }
     AGM.toast(r.codeOn ? 'The guest code is on: guests join with ' + o.code + '.'
       : Number.isInteger(r.sentOut) ? 'The guest code is off: ' + r.sentOut + (r.sentOut === 1 ? ' guest page was' : ' guest pages were') + ' sent out.'
         : 'The guest code is off: the guests in stay, and nobody new joins with it.');
   }),
-  'code.new': () => AGM.outbox.now('room:update', { code: ROOM, newCode: true }, (r) => {
+  'header.newCode': () => AGM.outbox.now('room:update', { code: ROOM, newCode: true }, (r) => {
     if (!r || !r.ok) { AGM.toast((r && r.error) || 'No new code.', true); return; }
     AGM.toast('The new guest code is ' + r.guestCode + '.');
   }),
+  // The way out: what this person wrote here and has not sent is kept for this tab, back in its composer when they come
+  // back to this room, as a move to another room keeps it.
+  'header.leave': (o) => { keepDraft(); location.href = o.away; },
 });
 // The room's guest code changed (switched, renewed): this page is told it as it may know it ('' when it may not).
 socket.on('guestCode', ({ guestCode, codeOn } = {}) => {
@@ -867,7 +901,7 @@ function rerenderMessage(node, msg) {
     rt.className = 'reply-quote';
     // A quote of a message withdrawn from this room since keeps no word of it (the server took them out): it says so.
     rt.innerHTML = '↩ <strong>' + escapeHtml(msg.replyTo.name) + '</strong>: ' +
-      '<em>' + escapeHtml(msg.replyTo.withdrawn ? '⊘ withdrawn' : (msg.replyTo.snippet || '').slice(0, 120)) + '</em>';
+      '<em>' + escapeHtml(msg.replyTo.withdrawn ? marked('withdrawn', 'withdrawn') : (msg.replyTo.snippet || '').slice(0, 120)) + '</em>';
     rt.title = 'Click to scroll to original';
     rt.dataset.goto = msg.replyTo.id;
     body.appendChild(rt);
@@ -911,7 +945,7 @@ function rerenderMessage(node, msg) {
     meta.className = 'sent-meta';
     meta.textContent = msg.sentFrom
       ? '↘ From ' + AGM.catalog.placeOf(msg.sentFrom) + (msg.sentFrom.originalAuthor ? ' · originally by ' + msg.sentFrom.originalAuthor : '')
-      : msg.sentTo.withdrawn ? '⊘ Withdrawn from ' + AGM.catalog.placeOf(msg.sentTo) + ' after ' + AGM.catalog.lasted(msg.sentTo.withdrawn - msg.at)
+      : msg.sentTo.withdrawn ? marked('withdrawn', 'Withdrawn from ') + AGM.catalog.placeOf(msg.sentTo) + ' after ' + AGM.catalog.lasted(msg.sentTo.withdrawn - msg.at)
         : '↗ Sent to ' + AGM.catalog.placeOf(msg.sentTo) + ' — delivered';
     body.prepend(meta);
   }
@@ -1043,7 +1077,8 @@ function objectNow(kind, o) {
   if (kind === 'compose') return composeObject(o.form);
   if (kind === 'chip') return stageNow;
   if (kind === 'room') return switcherObject(o.key);
-  return codeObject();
+  if (kind === 'header') return headerObject();
+  return null;
 }
 /**
  * The focus, when what held it is gone (its row drawn again, its message removed): the object's element as it is drawn
@@ -1374,9 +1409,9 @@ function echoWords(a) {
   return a.text || '';
 }
 function echoState(item) {
-  if (item.state === 'refused') return '△ Not sent: ' + item.words;
-  if (item.state === 'lost') return '△ ' + item.words;
-  return !AGM.outbox.online ? '◷ Waiting — it goes when the connection is back' : '◷ Sending';
+  if (item.state === 'refused') return marked('couldNot', 'Not sent: ' + item.words);
+  if (item.state === 'lost') return marked('couldNot', item.words);
+  return marked('waiting', !AGM.outbox.online ? 'Waiting — it goes when the connection is back' : 'Sending');
 }
 
 function drawEcho(item) {
@@ -1516,14 +1551,14 @@ function drawHeldAnswer(item) {
 /** A message of this room sent into another (Send to ▸): held while the page is down, then said, or its refusal. */
 function drawHeldSend(item) {
   const to = (item.tag && item.tag.sendTo) || 'the other room';
-  if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) AGM.toast('◷ Held — it is sent to ' + to + ' when the connection is back.');
+  if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) AGM.toast(marked('waiting', 'Held — it is sent to ' + to + ' when the connection is back.'));
   else if (item.state === 'done') AGM.toast('Sent to ' + to + ' — a copy stays here.');
   else if (item.state === 'gone') AGM.toast('Sent to ' + to + '.');
   else if (item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
 }
 function drawHeldForward(item) {
   const to = (item.tag && item.tag.forward) || 'the other hall';
-  if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) AGM.toast('◷ Held — it is forwarded to ' + to + ' when the connection is back.');
+  if (item.state === 'waiting' && item.attempt === 0 && !AGM.outbox.online) AGM.toast(marked('waiting', 'Held — it is forwarded to ' + to + ' when the connection is back.'));
   else if (item.state === 'done' || item.state === 'gone') AGM.toast('Forwarded to ' + to);
   else if (item.state === 'refused') { AGM.toast(item.words, true); AGM.outbox.drop(item.cid); }
 }
@@ -1549,7 +1584,7 @@ function renderHelpBody(msg) {
   const line = document.createElement('div');
   line.className = 'help-line';
   line.dataset.state = h.state;
-  line.textContent = (h.state === 'resolved' ? '✓ ' : h.state === 'coming' ? '▶ ' : '■ ') + HELP_WORDS[h.state] + (h.by ? ' — ' + h.by : '') + (h.at && h.state !== 'open' ? ' at ' + formatTime(h.at) : '');
+  AGM.toned(line, marked(h.state === 'resolved' ? 'ok' : h.state === 'coming' ? 'coming' : 'urgent', HELP_WORDS[h.state] + (h.by ? ' — ' + h.by : '') + (h.at && h.state !== 'open' ? ' at ' + formatTime(h.at) : '')));
   wrap.appendChild(line);
   // Its answers are the catalogue's (On my way, Resolved): the backstage team answers anyone's, and a seat On stage
   // marks only its own request resolved, as the server refuses otherwise (owner answer B1).
@@ -1562,7 +1597,7 @@ function renderHelpBody(msg) {
       const state = e.id === 'msg.helpRespond' ? 'coming' : 'resolved';
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'btn small' + (state === 'coming' ? ' primary' : ''); b.dataset.action = e.id;
-      b.textContent = (held && held.option === state ? '◷ ' : '') + e.label;
+      b.textContent = held && held.option === state ? marked('waiting', e.label) : e.label;
       if (held && held.option === state) b.dataset.state = 'sending';
       row.appendChild(b);
     }
@@ -1653,7 +1688,7 @@ function renderActionBody(msg) {
     b.dataset.value = String(i);
     b.textContent = opt;
     const held = heldAnswers.get('answer|' + msg.id);
-    if (held && held.option === i) { b.textContent = '◷ ' + opt; b.dataset.state = 'sending'; }
+    if (held && held.option === i) { b.textContent = marked('waiting', opt); b.dataset.state = 'sending'; }
     btnRow.appendChild(b);
   });
   if (shown.has('msg.answerWords')) {
@@ -2172,11 +2207,9 @@ Object.assign(RUN, {
   'file.close': () => dismissDoc(),
 });
 
-// ---------------- Stage panel collapse/expand ----------------
-const stageToggleBtn = document.getElementById('stageToggleBtn');
+// ---------------- Stage panel collapse/expand: the panel's own ⇥ and its rail ----------------
 const docCollapseBtn = document.getElementById('docCollapseBtn');
 const docExpandRail = document.getElementById('docExpandRail');
-if (HAS_STAGE && stageToggleBtn) stageToggleBtn.hidden = false;
 
 function setStageCollapsed(collapsed) {
   if (collapsed) {
@@ -2201,7 +2234,6 @@ function setStageCollapsed(collapsed) {
 }
 function toggleStage() { setStageCollapsed(!docPanel.classList.contains('collapsed')); }
 
-stageToggleBtn?.addEventListener('click', toggleStage);
 docCollapseBtn?.addEventListener('click', toggleStage);
 docExpandRail?.addEventListener('click', () => setStageCollapsed(false));
 
@@ -2303,10 +2335,8 @@ splitResizer?.addEventListener('dblclick', () => {
   localStorage.setItem('agm.splitPct', '50');
 });
 
-// ---------------- People panel ----------------
-const peopleBtn = document.getElementById('peopleBtn');
+// ---------------- People panel: shown and hidden from the header's ⋯ (People · n) ----------------
 const peoplePanel = document.getElementById('peoplePanel');
-peopleBtn.onclick = () => { peoplePanel.hidden = !peoplePanel.hidden; };
 
 // Who is in the room, a row each (kind `person`): its seat, its name, and its ⋯ where this seat has acts on them. Rows are
 // drawn again in place by the person's id, so a people frame never takes the focus or an open menu's opener away.
@@ -2343,8 +2373,7 @@ function renderUsers(users) {
     prev = li;
   }
   for (const gone of have.values()) gone.remove();
-  peopleBtn.textContent = `People · ${people.length}`;
-  if (openOn && openOn.kind === 'person') refreshOpenMenu();
+  if (openOn && (openOn.kind === 'person' || openOn.kind === 'header')) refreshOpenMenu();
 }
 function drawPersonRow(li) {
   const p = personNow(li.dataset.key);
@@ -3099,6 +3128,8 @@ socket.on('userState:push', ({ key, value }) => {
     }
   } catch (e) { /* ignore */ }
   _applyingRemote = false;
+  // The header's menu, open, says the theme and the text size as they are now.
+  refreshOpenMenu();
 });
 
 // ---------- Mentions: highlight @Name in rendered text ----------
@@ -3250,17 +3281,17 @@ const HelpChip = (function () {
     }
     return null;
   }
-  /** [state, mark, words] for the chip: '' at rest. */
+  /** [state, the mark's name in AGM.MARKS, words] for the chip: '' at rest. */
   function chipOf(m) {
-    if (m && m.help && m.help.state === 'coming') return ['coming', '▶', (m.help.by || 'Someone') + ' is on the way'];
-    if (m) return ['open', '■', 'Help asked'];
-    if (resolved) return ['resolved', '✓', 'Resolved'];
+    if (m && m.help && m.help.state === 'coming') return ['coming', 'coming', (m.help.by || 'Someone') + ' is on the way'];
+    if (m) return ['open', 'urgent', 'Help asked'];
+    if (resolved) return ['resolved', 'ok', 'Resolved'];
     return ['', '', 'Help'];
   }
   /** The ask's words: its request and where it stands, then what each answer does to it for everyone. */
   function askWords(m) {
     const h = m.help || { state: 'open' };
-    return [m.category + (m.text ? ': ' + m.text : '') + ' · ' + (h.state === 'coming' ? '▶ ' + (h.by || 'Someone') + ' is on the way' : '■ ' + HELP_WORDS.open), ASK_THEN];
+    return [m.category + (m.text ? ': ' + m.text : '') + ' · ' + (h.state === 'coming' ? AGM.mark('coming') + ' ' + (h.by || 'Someone') + ' is on the way' : AGM.mark('urgent') + ' ' + HELP_WORDS.open), ASK_THEN];
   }
   function draw() {
     if (resolved && !findMessage(resolved.id)) forgetResolved();
@@ -3269,14 +3300,8 @@ const HelpChip = (function () {
     const key = state + '|' + words;
     if (key !== drawn) {
       drawn = key;
-      btn.textContent = '';
-      if (mark) {
-        const span = document.createElement('span');
-        span.setAttribute('aria-hidden', 'true');
-        span.textContent = mark + ' ';
-        btn.appendChild(span);
-      }
-      btn.appendChild(document.createTextNode(words));
+      // One status chip: the mark, its words and its colour (the open request on the fault red, so red means something).
+      AGM.chip(btn, mark, words);
       if (state) btn.dataset.state = state; else delete btn.dataset.state;
       // Said once to a screen reader as it changes: the chip is a button, not a live region.
       status.textContent = state ? 'Your help request: ' + words : '';
@@ -3355,7 +3380,6 @@ const Screens = (function () {
       if (!r || !r.ok) return;
       const first = !CAN_SCREENS;
       CAN_SCREENS = true;
-      $('screensBtn').hidden = false;
       list = r.displays; manage = r.manage; holding = r.holding || '';
       if (first) for (const d of list) ticked.add(d.id);
       // The screens this page may drive are a fact of the catalogue: ⧉ on a message, and each screen's own acts.
@@ -3379,11 +3403,13 @@ const Screens = (function () {
       pick.type = 'checkbox'; pick.checked = ticked.has(d.id); pick.setAttribute('aria-label', 'Show on ' + d.name);
       pick.onchange = () => { if (pick.checked) ticked.add(d.id); else ticked.delete(d.id); syncAll(); };
       const name = document.createElement('strong'); name.textContent = d.name;
-      const st = document.createElement('span'); st.className = 'screen-state'; st.textContent = d.mark + ' ' + d.words;
+      // Its state as one status chip: the server's mark (one of the table's, test/modules.test.js), its words and its colour;
+      // a mark that is none of the table's reads as a fault, as the halls board draws it, never as a chip at rest.
+      const st = AGM.chip(Object.assign(document.createElement('span'), { className: 'screen-state status-chip' }), AGM.markOf(d.mark) || 'fault', d.words);
       const what = document.createElement('span'); what.className = 'screen-showing'; what.textContent = d.showing;
       const head = document.createElement('div'); head.className = 'screen-line';
       head.append(pick, name, st);
-      if (refused.has(d.id)) { const no = document.createElement('span'); no.className = 'screen-refused'; no.textContent = '✕ the last take did not reach it: ' + refused.get(d.id); head.append(no); }
+      if (refused.has(d.id)) { const no = document.createElement('span'); no.className = 'screen-refused'; no.textContent = AGM.mark('fault') + ' the last take did not reach it: ' + refused.get(d.id); head.append(no); }
       // Identify on the row, and the rest of the screen's acts (the catalogue's kind `screen`) in its ⋯.
       const acts = document.createElement('div'); acts.className = 'screen-acts';
       drawBar(acts, 'screen', d, { words: true, more: 'More for ' + d.name });
@@ -3463,7 +3489,7 @@ const Screens = (function () {
       refused.clear();
       for (const x of results) if (!x.ok) refused.set(x.id, x.error || 'not sent');
       const sent = results.length - refused.size;
-      if (!refused.size) AGM.toast('Sent to ' + sent + ' screen' + (sent === 1 ? '' : 's') + ' — each shows ✓ once it is on screen.');
+      if (!refused.size) AGM.toast('Sent to ' + sent + ' screen' + (sent === 1 ? '' : 's') + ' — each shows ' + AGM.mark('ok') + ' once it is on screen.');
       else AGM.toast('Sent to ' + sent + ' of ' + results.length + ' screens. Not to ' + Array.from(refused.keys(), (id) => names.get(id) || id).join(', ') + ': ' + refused.values().next().value, true);
       render();
     });
@@ -3492,7 +3518,6 @@ const Screens = (function () {
     $('pendingPageWrap').hidden = !pdf;
   }
 
-  $('screensBtn').addEventListener('click', () => { open(); load(); });
   $('screensClose').addEventListener('click', () => dlg.close());
   $('screensAll').addEventListener('change', () => { ticked.clear(); if ($('screensAll').checked) for (const d of list) ticked.add(d.id); render(); });
   for (const b of document.querySelectorAll('.screens-bar [data-take]')) b.addEventListener('click', () => take({ kind: b.dataset.take }));
@@ -3528,7 +3553,9 @@ const Screens = (function () {
   socket.on('displays:changed', ({ code } = {}) => { if (code === ROOM && CAN_SCREENS) load(); });
   // The countdown on the ticked screens (every screen, until a person unticks one in Screens): the stage chip's act.
   const countdown = () => take({ kind: 'countdown' }, 'No screen is ticked in Screens: tick the ones for the countdown there.');
-  return { load, offer, redraw, of: screenOf, countdown };
+  /** The console, opened from the header's ⋯ (Screens…): its list read again as it opens. */
+  const show = () => { open(); load(); };
+  return { load, offer, redraw, of: screenOf, countdown, show };
 })();
 
 // ---------------- Send to Stagewatch: where a message goes — sent now (the speaker's screen), or asked of the operator ----------------

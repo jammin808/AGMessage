@@ -422,12 +422,13 @@
   $('newUserBtn').addEventListener('click', () => openEditor(null));
 
   // ---------------------------------------------------------------- the audit log
-  // The four marks, each a shape and words, never a colour alone.
+  // The four marks, each a shape of the one table (AGM.MARKS) and words, never a colour alone: linked is ◇, reached and
+  // not seen into (accepted on the AGMessage laptop, not checkable under its key).
   const MARKS = {
-    intact: { shape: '✓', words: 'checked under this laptop\'s key' },
-    linked: { shape: '◇', words: 'linked, and accepted on the AGMessage laptop' },
-    unvouched: { shape: '△', words: 'not vouched for yet: accept it on the AGMessage laptop (Admin → Health)' },
-    broken: { shape: '✕', words: 'did not check' },
+    intact: { shape: AGM.mark('ok'), words: 'checked under this laptop\'s key' },
+    linked: { shape: AGM.mark('unseen'), words: 'linked, and accepted on the AGMessage laptop' },
+    unvouched: { shape: AGM.mark('couldNot'), words: 'not vouched for yet: accept it on the AGMessage laptop (Admin → Health)' },
+    broken: { shape: AGM.mark('fault'), words: 'did not check' },
   };
   const markHtml = (m) => { const k = MARKS[m] ? m : 'broken'; return '<span class="audit-mark" data-mark="' + esc(k) + '" title="' + esc(MARKS[k].words) + '"><span aria-hidden="true">' + esc(MARKS[k].shape) + '</span><span class="sr-only">' + esc(MARKS[k].words) + '</span></span>'; };
   let signKey = '';   // the signing key's fingerprint, which an export is checked against
@@ -473,7 +474,7 @@
       // A line that is not a whole entry is said as one, never drawn as an entry.
       if (!e.actor) {
         li.dataset.action = 'bad';
-        li.innerHTML = markHtml('broken') + '<span class="audit-words audit-bad">✕ ' + esc(e.words || 'a line that is not a whole entry') + '</span><span class="obj-bar"></span>';
+        li.innerHTML = markHtml('broken') + '<span class="audit-words audit-bad">' + esc(MARKS.broken.shape) + ' ' + esc(e.words || 'a line that is not a whole entry') + '</span><span class="obj-bar"></span>';
         ol.appendChild(li);
         continue;
       }
@@ -505,8 +506,8 @@
       const r = await AGM.api('GET', '/api/audit/verify');
       const mark = r && MARKS[r.mark] && typeof r.words === 'string' ? r.mark : '';
       el.dataset.mark = mark || 'broken';
-      if (!mark) el.textContent = '✕ Not checked: ' + ((r && r.error) || 'no answer from the server');
-      else el.textContent = MARKS[mark].shape + ' ' + r.words + (r.unwritten ? ' · △ ' + r.unwritten + ' newer not yet on disk (the disk would not take them; they are tried again with the next entry)' : '');
+      if (!mark) el.textContent = MARKS.broken.shape + ' Not checked: ' + ((r && r.error) || 'no answer from the server');
+      else el.textContent = MARKS[mark].shape + ' ' + r.words + (r.unwritten ? ' · ' + MARKS.unvouched.shape + ' ' + r.unwritten + ' newer not yet on disk (the disk would not take them; they are tried again with the next entry)' : '');
       if (mark) await loadAudit();   // the rows' marks, as this check found the spans now
     } finally { btn.disabled = false; }
   }
@@ -524,8 +525,8 @@
       if (String((c.values && c.values.word) || '').toLowerCase() !== 'split') { say('Not split: type the word split to split there.', true); return; }
       say('Splitting… the files before entry ' + e.seq + ' are moved into the archive and signed.');
       AGM.api('POST', '/api/audit/split', { seq: e.seq }).then((r) => {
-        if (!r.ok && !r.waits) say('✕ ' + (r.error || 'Not split.'), true);
-        else say(r.waits ? '△ ' + (r.words || r.error) : r.words, !!r.waits);
+        if (!r.ok && !r.waits) say(MARKS.broken.shape + ' ' + (r.error || 'Not split.'), true);
+        else say(r.waits ? MARKS.unvouched.shape + ' ' + (r.words || r.error) : r.words, !!r.waits);
         loadAudit();
       });
     },
@@ -547,7 +548,7 @@
     const shape = document.createElement('span');
     shape.className = 'audit-mark';
     shape.setAttribute('aria-hidden', 'true');
-    shape.textContent = mark ? MARKS[mark].shape : '○';
+    shape.textContent = mark ? MARKS[mark].shape : AGM.mark('off');
     const what = document.createElement('span');
     what.className = 'archive-words';
     what.textContent = text;
@@ -564,7 +565,7 @@
         const a = await AGM.api('GET', '/api/audit/verify?archive=' + encodeURIComponent(name));
         const m = a && MARKS[a.mark] && typeof a.words === 'string' ? a.mark : '';
         said.dataset.mark = m || 'broken';
-        said.textContent = m ? MARKS[m].shape + ' ' + a.words : '✕ Not checked: ' + ((a && a.error) || 'no answer from the server');
+        said.textContent = m ? MARKS[m].shape + ' ' + a.words : MARKS.broken.shape + ' Not checked: ' + ((a && a.error) || 'no answer from the server');
       } finally { btn.disabled = false; }
     });
     li.append(shape, what, btn, said);

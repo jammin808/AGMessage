@@ -210,6 +210,8 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The pages | `app/public/` (`index` sign-in and codes, `halls` the board, `users` accounts and audit, `app` a hall, `admin`, `display`) |
 | The browser libraries the pages load, byte for byte as published, their list, licences and notices; the SBOM's vendored part | `app/public/vendor/`, `VENDOR.json`, `THIRD-PARTY-NOTICES.md`, `licenses/`, `tools/vendor-sbom.js`, `tools/vendor-audit.js`; test `vendor` |
 | The page floor (Safari 14.1, Chrome 84): its probe, the helpers for what a browser may lack, every page's one toast | `app/public/theme-init.js`, `app/public/common.js`, `docs/DEVICES.md`; test `pagefloor` |
+| Every status's mark: one table, each mark one meaning and one colour, drawn by name as one status chip or a status line; the server's marks named from it | `app/public/common.js` (`AGM.MARKS`), `app/lib/pages.js`, `app/lib/displays.js`, `eslint.config.mjs`; tests `modules`, `catalog`, `lint-rules` |
+| The hall page's header: the room's name, its status, Help and a ⋯ at every width, the switcher under it | `app/public/app.html`, `app/public/app.js`, `app/public/catalog.js` (kind `header`) |
 | What AGMessage loads and runs: only what it ships, only by its absolute path | `app/test/loads.test.js`, `app/test/resolve-preload.js` |
 | The house lint rules: an unescaped value into a page's HTML; a test's own text read of the checkout or port picker | `app/eslint-rules/`; test `lint-rules` |
 | The module fence: the server's layers, the handler modules held narrow, no new verb in `server.js` | `app/test/modules.test.js` |
