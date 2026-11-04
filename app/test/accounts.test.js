@@ -239,7 +239,7 @@ test('rbac: the rights and the roles say "screens", the word every page uses for
   const words = [...Object.values(rbac.CAPS), ...Object.values(rbac.ROLES).map((r) => r.words)];
   assert.deepEqual(words.filter((w) => /display/i.test(w)), [], 'no right or role says "displays"');
   assert.deepEqual([rbac.CAPS['hall.view'], rbac.CAPS['display.control'], rbac.CAPS['display.manage']],
-    ['See a hall: its messages, files, countdown and screens', 'Change what a hall\'s screens show', 'Create, rename, move and revoke screens']);
+    ['See a hall: its messages, files, countdown and screens', 'Change what a hall\'s screens and people\'s pages show', 'Create, rename, move and revoke screens']);
   assert.deepEqual(['manager', 'senior', 'tech'].map((r) => rbac.ROLES[r].words), [
     'Every hall: messages, files, screens, Stagewatch, show network; sets halls up',
     'Every hall: messages, files, screens, Stagewatch, show network',

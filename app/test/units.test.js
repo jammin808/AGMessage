@@ -1698,7 +1698,7 @@ test('peaks: per show day (06:00 to 06:00 by the laptop\'s clock), raised and ne
   const today = p.view()[0];
   assert.deepEqual({ ...today, auditPutMs: undefined }, {
     day: '2026-10-31', loopMs: 7, elu: 0.123, socketsPerAddress: { venue: 4, tunnel: 3 }, tunnelSockets: 1, tunnelRefused: { rate: 0, share: 1, full: 2, idle: 1, wrongCode: 0 }, hallMessages: 1250, hallKb: 340.3, joinBurst: 12,
-    compactMs: { max: 0, messages: 0 }, auditPutMs: undefined, at: at(31, 11), sleeps: 0, sleptMs: 0,
+    compactMs: { max: 0, messages: 0 }, auditPutMs: undefined, at: at(31, 11), sleeps: 0, sleptMs: 0, pageHiddenMs: 0,
   });
   assert.deepEqual(p.refusedOn(at(31, 23)), today.tunnelRefused, 'the show day\'s refusals, read');
   assert.deepEqual(p.refusedOn(at(30, 12)), { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, 'a day with no record: none, and none made');
@@ -1759,6 +1759,26 @@ test('peaks: an audit append counts toward the day\'s p99 and max; a snapshot ke
   assert.equal(p.dirty, true, 'every append timed asks for a save at the window\'s end');
 });
 
+test('peaks: the longest a Board page was out of view with a take drawn on it, kept per show day, read back by type (reading 5)', () => {
+  const at = new Date(2026, 9, 31, 20).getTime();
+  const p = new readings.Peaks();
+  assert.equal(p.pageHidden(12_400, at), true);
+  assert.equal(p.dirty, true);
+  p.dirty = false;
+  assert.equal(p.pageHidden(9_000, at), false, 'a shorter one is not the day\'s');
+  assert.equal(p.pageHidden(12_400, at), false, 'nor the same');
+  for (const nonsense of [-5, Number.NaN, Infinity, '40000', null]) assert.equal(p.pageHidden(nonsense, at), false, String(nonsense));
+  assert.equal(p.dirty, false, 'nothing rose: no save asked');
+  assert.equal(p.pageHidden(31_000.8, at), true, 'over reading 5\'s 30 s');
+  assert.equal(p.view()[0].pageHiddenMs, 31_000, 'whole milliseconds');
+  assert.equal(p.pageHidden(5_000, new Date(2026, 10, 1, 12).getTime()), true, 'the next show day keeps its own');
+  assert.deepEqual(p.view().map((d) => [d.day, d.pageHiddenMs]), [['2026-10-31', 31_000], ['2026-11-01', 5_000]]);
+  const back = new readings.Peaks().load(JSON.parse(JSON.stringify(p.toJSON())));
+  assert.deepEqual(back.view().map((d) => d.pageHiddenMs), [31_000, 5_000], 'kept across a restart');
+  const odd = new readings.Peaks().load({ days: [{ day: '2026-10-30', pageHiddenMs: 'long' }, { day: '2026-10-29', pageHiddenMs: 7.9 }] });
+  assert.deepEqual(odd.view().map((d) => d.pageHiddenMs), [7, 0], 'read by type');
+});
+
 test('peaks: saved with each day\'s buckets, so a restart counts on; what is not a day is left out', () => {
   const at = new Date(2026, 9, 31, 20).getTime();
   const p = new readings.Peaks();
@@ -1779,7 +1799,7 @@ test('peaks: saved with each day\'s buckets, so a restart counts on; what is not
   ] });
   assert.deepEqual(odd.view(), [{
     day: '2026-10-30', loopMs: 0, elu: 0, socketsPerAddress: { venue: 0, tunnel: 0 }, tunnelSockets: 0, tunnelRefused: { rate: 0, share: 0, full: 0, idle: 0, wrongCode: 0 }, hallMessages: 3, hallKb: 0, joinBurst: 0,
-    compactMs: { max: 0, messages: 0 }, auditPutMs: { count: 0, p99: null, max: null }, at: 0, sleeps: 0, sleptMs: 0,
+    compactMs: { max: 0, messages: 0 }, auditPutMs: { count: 0, p99: null, max: null }, at: 0, sleeps: 0, sleptMs: 0, pageHiddenMs: 0,
   }], 'a day named twice is its last record; a count the buckets cannot account for is none');
   // Per lane, by type: a build that counted every address in one number is read as the venue's; anything else is none.
   const lanes = (v) => new readings.Peaks().load({ days: [{ day: '2026-10-29', socketsPerAddress: v, tunnelRefused: 4.7 }] }).view()[0];

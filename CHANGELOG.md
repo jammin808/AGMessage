@@ -3637,6 +3637,129 @@ push, its console and the layer are units 17 and 18)
   pages with it while another hall's and a guest's view stay.
 - The papers: `docs/DESIGN.md`, `docs/ANALYSIS.md`, `CLAUDE.md`.
 
+**A take on the Board's pages or one person's, confirmed page by page** (the plan's Part 1, unit 17, its §2.6, §2.7's
+`page.push` row, §3.3 (`page`, `canPush`, `now`, `tz`, `viewOf`), §5.2-§5.5 and §9's row 17, as Part 4 §0 (the Board
+is everyone seated On stage in Main), Part 5 §0 (§5.3: a `cid`, `pages:changed` a `Latest`, the handlers in
+`lib/handlers/takes.js`, the person-first words), §13.3.4, §13.3.6 (`peaks.pageHiddenMs`, reading 5), §13.6, §14.2 and
+§9's row 17, and Part 7 §0.1 (§2.6: the seat limit cuts `canPush`) amend them; the tree as the evidence: what people's
+pages are shown was a store nobody could reach, and nothing of it is drawn on a page yet: the layer and the console are
+unit 18's)
+- **`page:push {code, to, content, cid}`** (the takes module, behind the gate): `code` the hall's key, `to` the Board
+  (`'board'`: every page seated On stage in the hall's Main room, Board accounts and code guests alike) or one person
+  (`{uid}`, their key as `page:status` lists them: `a:<account id>`, every device of an account; `u:<uid>`, a guest's
+  device), `content` one of the kinds the store's vocabulary cleans (back to chat, Stagewatch, the clock, holding,
+  blank). A repeat with its client id is answered with what the first push did before the rate, never made a second
+  take or a second row (the last 200 a hall, for halls still here, in memory: after a restart a repeat is a second take
+  of the same content, which latest wins makes harmless); a socket that is no account, admin or seated guest keeps none.
+  Every other push takes one `writes` token before anything refuses it, then is refused, in order: a key that is no
+  hall's, or a hall where it may not push, in one answer ("Do that from a backstage page." On stage, the admin's seat
+  included; "This is someone else's view — act from your own page." from the support view; "Your account may not change
+  what people's pages show in this hall." for an account without `display.control` there; "In an open hall, showing the
+  Board needs an invite link or an account — ask the admin." for a guest backstage in its own open hall's Main room;
+  "Showing the Board is for the backstage team." for any other guest, a socket that joined nothing included): a hall's
+  key is its guest code until New code, so neither `page:push` nor `page:status` says whether a code is real, and only
+  the admin, who sees every hall, is told "No such hall."; no target ("Show the Board (to: 'board') or one person (to: {uid})."); content the store
+  refuses, in its words; a person not seated now in a room of the hall the pusher may read ("That person is not in this
+  hall now.", which also hides who sits in a room the pusher cannot read; the Board's own word given as a person's key
+  is no person). Then the store numbers it, every page whose take or answer it moved is sent `page:take` by its socket's
+  id, never a room's op or broadcast (the Board's pages; or every page of that person in any room of the hall and the
+  admin's view of them; and, for a Board take, the pages of those seated On stage now whose own take it put away), one
+  `page.push` row is written ("the Board (6 pages) → the clock", "Ana Silva → blank"), the consoles are told, and the
+  answer is `{ok, seq, results: [{key, name, ok, status}]}` with its status "◷ Sending" (or "✕ Nobody on the Board is
+  online", the take kept for whoever comes On stage), never on screen.
+- **Who may push** (`canPush`, on the connection): the admin; an account with `display.control` in the hall, from any
+  room of it; a code guest seated backstage in the hall's Main room while its seats are locked, so the seat came from an
+  invite or was kept by the lock. Never a page seated On stage (its seat holds messages only) and never the admin's
+  support view. `display.control`'s words are "Change what a hall's screens and people's pages show", on the Accounts
+  page and in `rbac.CAPS`.
+- **`page:take {seq, content, by, at, hallName, holding, now, tz, answer}`**, to a page by its socket's id: the take it
+  is shown now, who put it up and when, the hall's name and holding picture (a holding slide with none of its own shows
+  the hall's), AGMessage's clock and zone (a clock take is drawn in them), and the person's answer to it ('dismissed',
+  'minimised' or null); `seq: 0` and no content when a page is shown nothing now. It carries no key or code. It is sent
+  again, as the join would tell it, to each page shown a holding slide with no picture of its own when the hall's
+  holding image is set or cleared (as the hall's screens are), and to each page shown a take when the hall is renamed;
+  the consoles are told then too, and when a side room is renamed (its name is in their rows).
+- **`page:report {seq, state, words, again}`** acks `{ok: true}` or a refusal in words: one `chatter` token; refused
+  from the admin's support view ("This is someone else's view: it reports nothing.") and from a page seated nowhere;
+  counted only for the take that page is shown now ("That is not what this page is shown now."), in a state a take of its
+  kind has. Back to chat and Minimise are the person's answer: each page of theirs in the hall, and the admin's view of
+  them, is sent `page:take` with it, and so is a Show again (`again: true`) that takes a Minimise back. A Board page that
+  said it was out of view while a take was drawn on it says, once it is back in view or gone, for how long: the show
+  day keeps the longest (`peaks.pageHiddenMs`, reading 5).
+- **`page:status {code}`**, for whoever may push there (refused otherwise, in the same words as the push): `{ok, board:
+  {seq, showing, mark, words, pages}, people: [{uid, name, room, seq, showing, mark, words, pages}]}`, the Board's take
+  read from each Board page's report and each person seated in a room of the hall the asker may read (a guest pusher's:
+  Main), with theirs; the support views are no one's pages. The Board's people are named only to one who may read the
+  hall's Main room: an account that may push there but not read it (`display.control` with `hall.view` revoked) reads
+  "Someone went back to chat" and no person's row.
+- **`pages:changed {}`**, a signal with no content, a `Latest` of 150 ms keyed by the hall (health's `latest.pages`):
+  sent to each page in the hall's rooms whose push held at its join, when a take is pushed, a page reports, a page comes
+  or goes, or a seat moves. A console reads `page:status` again, so latest wins; a burst of reports is at most two
+  frames.
+- **The join** answers, at the end, `page` (the take this page is shown now with the person's answer, or null: a page
+  back from a drop, a reload or a restart, and one that comes On stage later, is shown the Board's take as it joins),
+  `canPush` (whether its console may push and hears `pages:changed`), `now` and `tz`. The admin's support view names the
+  person it shows (`viewOf`, their uid, passed by the admin page's View from the person's row): it is given that
+  person's `page`, is sent their `page:take`s and their chat view as it changes (`view`, the view their seat there
+  draws), pushes nothing and reports nothing. Its join answers, at the end, that person's facts as their page there
+  holds them now (`person: {role, view, canPush, sends, forwardable}`, or null for a view of nobody seated there), so it
+  can draw exactly their doors (R8); `canShow` joins them with its unit, and the hall page's support view draws its
+  doors from them with unit 18, whose People doors read `canPush`. No other page's join carries `person`, and a page's
+  own `sends` and `forwardable` are read by the same rule as the facts its support view is told.
+- **A seat moved** to or from On stage (`admin:setRole`) sends each moved page what it is shown now, before the page
+  reloads, and the consoles are told; a moved page hears `pages:changed` again only from its next join.
+- The busy line counts `page:push` and `page:report` as input (a person's Back to chat, Minimise and Show again ride
+  `page:report`), and `page:status` as a read.
+- The module fence's wire words gain an allow-list of verbs no page sends yet, each with its reason, beside the events
+  no page hears: `page:push`, `page:report` and `page:status`, and the events `page:take` and `pages:changed`, are the
+  hall page's with unit 18, whose layer and console send and hear them; a row fails once a page sends or hears its word,
+  or once the server no longer registers or sends it.
+- Choices where the plan left room: a push names the Board by `'board'` alone and a person by their key in `{uid}`, so
+  neither is read as the other; the answer's `results` holds the one target with its status over the pages the pusher
+  may read (a person's take still reaches their pages in rooms the pusher cannot read); a push the store would not keep
+  is refused ("That could not be kept: nothing was shown."); the repeat memory is the hall's by who pushed and the client
+  id, checked before the rate as `room:send`'s is, and a socket that is no one keeps none; `pages:changed` follows the
+  join's `canPush` as the plan says, so a lock or a seat moved since changes who hears it at the next join, while
+  `page:status` and `page:push` ask `canPush` afresh; the support view's own `canPush` is false (it acts on nothing and
+  may read no console), and it shows the person's takes and is told their facts only when that person sits in the room
+  as it opens; a guest seated backstage before the room's seats were locked pushes once they are, the lock keeping that
+  seat as the admin left it (the admin sees and may move each seat it keeps); a
+  report's refusals are words, and a report from a page that hears of a newer take is refused, never counted for it; a
+  Board page's time out of view runs from its first report out of view, across a newer take, to the report or the leave
+  that ends it, and counts only while a take is drawn (never on a page handed back to its chat).
+- Tests: `test/takes.test.js` (new, end to end): a Board take reaching Gil's and Bea's (a Board account's) pages only,
+  never a backstage, observer, Legal or console page, the consoles told with no content and nobody else; its repeat
+  with its client id one take and one row; "◷ Sending" until each page reports that take shown, a support view's report,
+  reports of other takes and a page out of view never ✓, then ✓ "On all 2 Board pages"; the day's peaks keeping Bea's
+  time out of view; `pages.json` and health's `pages` lane holding it; the halls board and the context the same as
+  before it; a page coming On stage later shown the Board's take as it joins; five reports at once at most two frames
+  (`latest.pages`); a person's take reaching Tom's pages in Main and Legal and the admin's view of him and nobody else,
+  his Back to chat told to all three, his row "○ Tom Tech went back to chat at …", and kept across a reload; whom a push
+  may name and what it may show refused in words, nothing numbered; every seat that may not push refused, its console's
+  read too, with no row; the locked hall's backstage guest pushing, her console listing Main's people alone, a person
+  only in Legal not hers to name, her take to Tom reaching his Legal page; a seat moved On stage told the Board's take
+  and one moved off told it is shown nothing; one row per push; an anonymous socket, a guest of another hall and an
+  account of another hall each answered the same for the hall's key and two made-up ones by both verbs, and no row; the
+  support view's `person` facts (Bea's On stage, Tom's backstage with his console's push, null for a view of nobody
+  seated there) and no `person` on a page of one's own; Bea's chat view set and cleared reaching her two pages and the
+  view of her, by seat (simple On stage, full in Legal), and never the view of Tom; the hall's holding image set and
+  cleared telling each holding slide (the view of Bea among them) and the consoles, and nobody shown something else; the
+  hall renamed and named back telling each page shown a take, and none shown nothing; a Board take putting away Bea's
+  own, her Legal page told it is shown nothing; Gil's Back to chat named to the admin and nameless to Vic, who may push
+  but not read Main and reads nobody's row; Ria a console after the lock (her join's `canPush`) and none once moved to
+  Observer; the admin's views of someone no consoles; a restart keeping Tom's Back to chat and Gil's on the Board's take.
+  `test/inputs.test.js`: the take verbs' fields sent in every type, each refused in its words, nothing numbered or
+  audited. `test/pages.test.js`: a Board page's time out of view, from its first report out of view to the report or the
+  leave that ends it, across a newer take, and none on a page in a side room or handed back to its chat.
+  `test/units.test.js`: `pageHiddenMs` per show day, raised only, read back by type. `test/modules.test.js`: `canPush`
+  in `conn`, the takes context's parts, the allow-list of verbs no page sends yet, planted both ways, and the takes
+  module's any-room reader with its reason. `test/server.test.js`: `latest.pages` and `pageHiddenMs` in health. Moved on
+  purpose: `test/menus.test.js` (the join's keys appended at the end: `page`, `canPush`, `now`, `tz`),
+  `test/resilience.test.js` (the state frames' `Latest`s gain `pages`), `test/accounts.test.js` and the browser smoke
+  (`display.control`'s words).
+- The papers: `docs/DISPLAYS.md` (People's screens), `docs/ACCOUNTS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`,
+  `SECURITY.md`, `CLAUDE.md`.
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after

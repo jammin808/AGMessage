@@ -570,19 +570,21 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function openUserView(code, name, role) {
+/** The support view's page for a person: their room, name and seat, and their uid, so it is told what their pages are shown. */
+const userViewParams = (code, name, role, uid) => new URLSearchParams({ code, name, role, adminView: '1', ...(uid ? { viewOf: uid } : {}), t: String(Date.now()) });
+function openUserView(code, name, role, uid) {
   const modal = document.getElementById('userViewModal');
   const frame = document.getElementById('userViewFrame');
   const title = document.getElementById('userViewTitle');
   // Cache-bust so each open is a fresh load (avoids stale iframe state)
-  const params = new URLSearchParams({ code, name, role, adminView: '1', t: String(Date.now()) });
-  frame.src = '/app.html?' + params.toString();
+  frame.src = '/app.html?' + userViewParams(code, name, role, uid).toString();
   title.textContent = 'Viewing ' + name + ' (' + seatWord(role) + ') in ' + (roomNameForCode(code) || code);
   modal.hidden = false;
   // Stash for the Resync button
   modal.dataset.code = code;
   modal.dataset.name = name;
   modal.dataset.role = role;
+  modal.dataset.uid = uid || '';
 }
 function closeUserView() {
   const modal = document.getElementById('userViewModal');
@@ -603,10 +605,7 @@ document.getElementById('userViewResync')?.addEventListener('click', () => {
   // Hard path: reload the iframe with a fresh cache-bust after a moment
   setTimeout(() => {
     const code = modal.dataset.code, name = modal.dataset.name, role = modal.dataset.role;
-    if (code && name && role) {
-      const params = new URLSearchParams({ code, name, role, adminView: '1', t: String(Date.now()) });
-      frame.src = '/app.html?' + params.toString();
-    }
+    if (code && name && role) frame.src = '/app.html?' + userViewParams(code, name, role, modal.dataset.uid).toString();
   }, 1200);
 });
 document.addEventListener('keydown', (e) => {
@@ -703,7 +702,7 @@ Object.assign(ADMIN_RUN, {
     else forwardInto(o, c.value, true);
   },
   'person.unforward': (o, c) => { if (c.value) forwardInto(o, c.value, false); },
-  'person.view': (o) => openUserView(currentRoom.code, o.name, o.role),
+  'person.view': (o) => openUserView(currentRoom.code, o.name, o.role, o.uid),
   'person.kick': (o) => AGM.outbox.now('admin:kick', { socketId: o.socketId }, (res) => { if (!res || !res.ok) say((res && res.error) || 'Not logged out.', true); else say(o.name + ' is logged out of ' + o.hall + '.'); }),
   'adminMsg.copy': (o, c) => AGM.copy(o.text, { said: 'Copied.', anchor: c.anchor, say }),
   'adminMsg.delete': (o) => AGM.outbox.now('admin:deleteMessage', { roomCode: currentRoom.code, messageId: o.id }, saidIfNot('Not deleted.')),

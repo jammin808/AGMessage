@@ -61,7 +61,7 @@ const roomVerbs = require('./lib/handlers/rooms');
 const takeVerbs = require('./lib/handlers/takes');
 const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
-const { Pages } = require('./lib/pages');
+const { Pages, personKey } = require('./lib/pages');
 const readings = require('./lib/peaks');
 const startup = require('./lib/startup');
 const laptop = require('./lib/laptop');
@@ -433,6 +433,9 @@ const frames = {
   // The rooms a room's pages may send into changed (keyed by the room): a list set, a room it sends into renamed or its
   // hall renamed. Each page is told to ask again (room:sendTargets), and told nothing of any list.
   sends: new Latest({ name: 'sends', delayMs: 300, flush: (rooms) => eachRoom('sends', rooms, (r) => io.to(r.code).emit('sendsChanged')) }),
+  // What a hall's people's pages show changed, or the pages that hold it (keyed by the hall): each console of the hall
+  // re-reads it (page:status), so a push to 6 Board pages and their 6 reports are one re-read per console, not seven.
+  pages: new Latest({ name: 'pages', delayMs: 150, flush: (halls) => eachRoom('pages', halls, (r) => tellPushers(r.code)) }),
 };
 /**
  * Each room of a frame's batch that is still here (a hall's key names its Main room), given to `send` with its value;
@@ -1595,6 +1598,10 @@ function renameRoom(room, name) {
   const op = apply(room, { o: 'meta', name });
   if (op && store.isMain(room)) for (const d of displays.ofHall(room.code)) io.to('display:' + d.id).emit('display:state', displayState(d));
   if (op) frames.rooms.mark(room.hall);
+  // Every take names its hall (a holding slide with no picture draws the name): a Main room renamed tells each page shown
+  // one again. A side room's name is in its hall's consoles' rows, read again.
+  if (op && store.isMain(room)) retell(room.hall, () => true);
+  else if (op) pagesChanged(room.hall);
   // The rooms that send into it name it by its name and its hall's: a Main room's name is its hall's, so the rooms that
   // send into any room of its hall are told to ask again too.
   if (op) for (const r of store.isMain(room) ? store.roomsOf(room.hall) : [room]) for (const k of sendersOf(r.code)) frames.sends.mark(k);
@@ -1855,6 +1862,12 @@ function guardHandlers(socket) {
   return socket;
 }
 
+/**
+ * Each hall page's own facts, read now (its connection's `ownFacts`), by its socket: the admin's support view of a person
+ * is told them as that person's (plan R8). A socket that has gone is let go with it.
+ */
+const factsOfPage = new WeakMap();
+
 io.on('connection', (socket) => {
   guardHandlers(socket);
   // A display's browser: it may only receive what its own display shows and say what it showed — nothing else is
@@ -1926,6 +1939,17 @@ io.on('connection', (socket) => {
     if (me.acct) return canIn(cap, room);
     return rbac.guestCaps(me.role, kindOf(room)).includes(cap);
   };
+  // Whether this page may change what people's pages show in a hall (`hall`, its Main room), asked when it asks: the admin;
+  // an account with display.control in the hall (its rights there: a hall's right, in every room of it); a code guest
+  // seated backstage in that hall's Main room while its seats are locked, so its seat came from an invite (in an open
+  // hall anyone with the code may sit backstage). Never from an On stage page, whose seat holds messages only (the seat's
+  // limit cuts display.control, rbac.SEAT_LIMITS), and never from the admin's support view, which acts on nothing.
+  const canPush = (hall) => {
+    if (!hall || !store.isMain(hall) || socket.data.adminView || onStage()) return false;
+    if (socket.data.isAdmin) return true;
+    if (socket.data.account) return canIn('display.control', hall);
+    return !!me && room === hall && me.role === 'research' && hall.settings.lockRoles === true;
+  };
   // Who an audit row names for what this socket does: the admin token, the account, or a code guest by the name they joined with.
   const actor = () => socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
   // The one gate (lib/gate.js): seated in a room that is still here, then a token of the verb's bucket, then the admin,
@@ -1936,7 +1960,7 @@ io.on('connection', (socket) => {
 
   socket.on('join', (args, ack) => {
     ack = ok(ack);
-    const { roomCode, name, role, adminView, uid, since, invite } = args || {};
+    const { roomCode, name, role, adminView, uid, since, invite, viewOf } = args || {};
     const network = socket.data.key;   // the lock counts per network (guard.limitKey)
     if (joinLock.locked(network)) {
       if (socket.data.lane !== 'tunnel') return ack({ ok: false, error: 'Too many attempts — wait a minute.' });
@@ -2042,6 +2066,14 @@ io.on('connection', (socket) => {
     // A verb that names its own room so is read as the room it sits in (help:respond), and a guest is told that code alone.
     socket.data.joinedAs = code;
     socket.join(r.code);
+    // The person a support view shows (`viewOf`: their uid among this room's people), told that person's take and chat
+    // view as their own pages are, and their facts as it joins (R8); it reports nothing. None for any other page, nor
+    // for a person not seated here.
+    const shows = isAdminView ? Array.from(r.users.values()).find((u) => u.uid === guard.str(viewOf)) : null;
+    const showsKey = shows ? personKey(shows.uid, !!shows.acct) : '';
+    socket.data.viewOf = showsKey ? { uid: shows.uid, key: showsKey, name: shows.name } : null;
+    // Whether this page may change what its hall's people's pages show, as it joins: its console hears pages:changed.
+    socket.data.pushes = canPush(store.get(r.hall)) ? r.hall : '';
 
     // A page back after the restart this process booted from names the last change it holds, and this hall has it: the
     // restart line already says what happened, so it is not announced again. Presence words only: no right reads it.
@@ -2083,6 +2115,12 @@ io.on('connection', (socket) => {
     // Every room of a hall follows its hall's Stagewatch: its countdown, and its sends and proposals by this seat's rights
     // there (a side room's guest holds none; an account its stage.send in the hall), as the frames sent to it do.
     const sw = linkFor(r.hall);
+    const shownHere = hallPages(r.hall).find((p) => p.sid === socket.id);
+    // This page's own facts, or, for the support view, none of its own and those of the person it shows, read from their
+    // page here now (null when it shows nobody seated here).
+    const mine = isAdminView ? null : ownFacts();
+    const theirSid = socket.data.viewOf ? Array.from(r.users).find(([, u]) => u.uid === socket.data.viewOf.uid) : null;
+    const theirs = theirSid && factsOfPage.get(io.sockets.sockets.get(theirSid[0]));
     ack({
       ok: true, roomCode: code, roomName: r.name || '', role: cleanRole, name: cleanName, adminView: isAdminView,
       identity, uid: id, note, uploadToken, seq: r.seq,
@@ -2095,7 +2133,7 @@ io.on('connection', (socket) => {
       seen: seenFor(r),
       // Whether a message here could be sent to another hall (the forward picker would list one): a fact the page's
       // ↗ Send to reads, false On stage, where nothing leaves the room. The support view is unseated: it has none.
-      forwardable: !isAdminView && forwardTargets(null).rooms.length > 0,
+      forwardable: !!mine && mine.forwardable,
       // Whether this is the hall's Main room: a side room's seats are a Member's and an observer's, said so on its page.
       main: store.isMain(r),
       // The room's guest code for its code chip, only for one who may know it ('' else: codeFor; the support view the
@@ -2112,10 +2150,18 @@ io.on('connection', (socket) => {
       // Whether a message here could be sent into another room by its list (room:sendTargets would list one): the page
       // offers To: and the rooms of ↗ Send to only then. False On stage, where nothing leaves the room, for a seat that
       // may not post, and for the support view, which is unseated.
-      sends: !isAdminView && !onStage() && allowed('hall.post') && sendsInto(r).length > 0,
+      sends: !!mine && mine.sends,
       // Whether this is the admin's own page (never its support view): the admin takes back any send this room made
       // (room:withdraw), wherever it does not sit On stage, where its seat's limit holds it as anyone's.
       admin: !!socket.data.isAdmin && !isAdminView,
+      // What this page is shown over its chat now and the person's answer to it (takeTold; null: its chat), so a page back
+      // from a drop or a restart shows what it showed; the support view the person's it shows. Whether this page may
+      // change what its hall's people's pages show (canPush: its console's), and AGMessage's clock and zone.
+      page: shownHere && shownHere.current.take ? takeTold(r.hall, shownHere.current) : null,
+      canPush: !!socket.data.pushes, now: Date.now(), tz: TIME_ZONE,
+      // The admin's support view: the facts of the person it shows (their seat, chat view, canPush, sends and
+      // forwardable), so it draws exactly their doors (R8); null when it shows nobody. No other page is told any.
+      ...(isAdminView ? { person: theirs ? theirs() : null } : {}),
     });
 
     if (!isAdminView) {
@@ -2123,6 +2169,7 @@ io.on('connection', (socket) => {
       if (!returning) systemMessage(r, `${cleanName} ${joinedWords(r, cleanRole)}`);
       emitUsers(r);
       boardDirty();
+      pagesChanged(r.hall);   // a page came: what its hall's people's pages show is read again
     } else {
       io.in(r.code).fetchSockets().then((peers) => {
         for (const p of peers) if (p.id !== socket.id && p.data.userName === cleanName && !p.data.adminView) p.emit('userState:request');
@@ -2294,6 +2341,19 @@ io.on('connection', (socket) => {
     });
     return !rooms.length && askedOnStage ? { rooms, why: ASKS_BACKSTAGE } : { rooms };
   };
+  // The facts this page's own doors are drawn from, as its join tells them, read now (plan R8): its seat, the chat view
+  // it draws, whether its console may push in its hall (as its join found), whether a message here may be sent into
+  // another room by its list (none On stage, where nothing leaves the room, nor for a seat that may not post), and
+  // whether one may be sent to another hall. The admin's support view of this person is told them as the person's
+  // (`person`), so it draws exactly their doors, each disabled; it has none of its own.
+  const ownFacts = () => ({
+    role: me ? me.role : '',
+    view: drawnView(socket.data.accountId ? accounts.get(socket.data.accountId) : null, socket.data.seat),
+    canPush: !!socket.data.pushes,
+    sends: !!room && !onStage() && allowed('hall.post') && sendsInto(room).length > 0,
+    forwardable: !!me && !!room && forwardTargets(null).rooms.length > 0,
+  });
+  factsOfPage.set(socket, ownFacts);
   // The page's ↗ Send to ▸: the halls the forward of this message (`messageId`; none: a text) would be taken in. A list
   // emptied by a rule of this room says which (`why`), so the page names the rule instead of asking for a hall the person
   // already has open.
@@ -2617,6 +2677,8 @@ io.on('connection', (socket) => {
     if (h.error) return ack({ ok: false, error: h.error });
     displays.setHallHolding(c, h.image || '');
     for (const d of displays.ofHall(c)) io.to('display:' + d.id).emit('display:state', displayState(d));
+    // A person's page shown a holding slide with no picture of its own draws the hall's, as the hall's screens do.
+    retell(c, (x) => x.kind === 'holding' && !x.image);
     audit.write(actor(), 'hall.holding', c, h.image ? 'holding image set' : 'holding image cleared', socket.data.ip);
     displaysChanged(c);
     ack({ ok: true });
@@ -3003,15 +3065,21 @@ io.on('connection', (socket) => {
     const prev = target.role;
     const seats = seatsOf(r, target.uid);
     const from = Array.from(new Set(seats.map(([, seat]) => seat.role))).filter((x) => x !== role);   // the roles this changes
+    // What the hall's people's pages are shown before the seats move: a page moved to or from On stage in Main is shown
+    // the Board's take, or no longer, and is told so below.
+    const shownBefore = hallPages(r.hall);
     // Each page's seat moves in this tick, with what it allows, without waiting for the page to reload: an upload token
-    // of a page whose new seat shares no file ends now (its page's join after the reload takes a new one where it may).
+    // of a page whose new seat shares no file ends now (its page's join after the reload takes a new one where it may),
+    // and so does its console's signal, which its join after the reload asks for again (fail closed).
     for (const [sid, seat] of seats) {
       seat.role = role;
       const s = io.sockets.sockets.get(sid);
-      if (s) { s.data.seat = role; s.emit('roleChanged', { role }); }
+      if (s) { s.data.seat = role; s.data.pushes = ''; s.emit('roleChanged', { role }); }
     }
     const moved = new Set(seats.map(([sid]) => sid));
     for (const t of uploadTokens.values()) if (moved.has(t.sid) && !t.may()) t.revoked = true;
+    for (const { sid, take } of takeSends(r.hall, shownBefore)) { const s = io.sockets.sockets.get(sid); if (s) s.emit('page:take', take); }
+    pagesChanged(r.hall);
     emitUsers(r);
     syncSeats(r);
     systemMessage(r, `The admin moved ${target.name} from ${seatWords(r, prev)} to ${seatWords(r, role)}.`);
@@ -3264,7 +3332,7 @@ io.on('connection', (socket) => {
   // page's socket but a screen's (a screen's returned at the top): the hall page's, the admin page's and the halls
   // board's. The rooms module is given the server's context, the takes module the takes context, which holds nothing
   // that makes a room's op or sends to a room (`ctx`, at the end of this file).
-  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, onStage, canIn, admin, actor, canManageHall, codeTold, gate });
+  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, onStage, canIn, canPush, admin, actor, canManageHall, codeTold, gate });
   roomVerbs.register(socket, conn, ctx);
   takeVerbs.register(socket, conn, takesCtx);
 
@@ -3279,6 +3347,10 @@ io.on('connection', (socket) => {
     r.users.delete(socket.id);
     emitUsers(r);
     boardDirty();
+    // Its report on what it was shown goes with it (a Board page's time out of view, ended here, read by the day's peaks).
+    const reported = pages.left(socket.id);
+    if (reported && reported.hiddenMs !== undefined) pageHidden(reported.hiddenMs);
+    pagesChanged(r.hall);
     const still = Array.from(r.users.values()).some((x) => x.uid === u.uid);
     if (!still) {
       trackLeave(u.uid, r.code);
@@ -3389,6 +3461,90 @@ function displaysChanged(code) {
   boardDirty();
   frames.screens.mark(code);
 }
+
+// ---------------------------------------------------------------- people's pages
+// What a person's hall page is shown over its chat (lib/pages.js): a take to the Board (every page seated On stage in
+// the hall's Main room) or to one person, numbered, each page saying what it did with it (lib/handlers/takes.js). A take
+// reaches a page by its socket's id, never by a room's broadcast or a room's op.
+/**
+ * The pages open now in a hall's rooms, as people's pages read them, each with the take it is shown now (pages.current)
+ * and the person's answer to it: each page seated in a room ({sid, key, board, name, room, support: false}) and each
+ * admin's support view of a person seated in that room ({…, support: true}: shown that person's take, it never reports).
+ * `key` is the person's (an account's `a:<id>`, every device of it; a guest's `u:<uid>`, that device); `board`, whether
+ * the person sits On stage in the hall's Main room there. A page that has gone is among none: a room's seats are its
+ * pages open now.
+ */
+function hallPages(hall) {
+  const out = [];
+  for (const r of store.roomsOf(hall)) {
+    const main = store.isMain(r);
+    const add = (sid, key, board, name, support) => {
+      const current = pages.current(hall, key, { board });
+      out.push({ sid, key, board, name, room: r, support, seq: current.take ? current.take.seq : 0, answer: current.answer ? current.answer.state : null, current });
+    };
+    for (const [sid, u] of r.users) { const key = personKey(u.uid, !!u.acct); if (key) add(sid, key, main && u.role === 'board', u.name, false); }
+    for (const sid of io.sockets.adapter.rooms.get(r.code) || []) {
+      const s = io.sockets.sockets.get(sid);
+      const v = s && s.data.adminView && s.data.userRoom === r.code ? s.data.viewOf : null;
+      if (v) add(sid, v.key, main && Array.from(r.users.values()).some((u) => u.uid === v.uid && u.role === 'board'), v.name, true);
+    }
+  }
+  return out;
+}
+/**
+ * What a page is told of the take it is shown now (`page:take`, and the join's `page`): its number, what it shows, who put
+ * it up and when, the hall's name and holding picture (a holding slide with no picture of its own shows the hall's),
+ * AGMessage's clock and zone (a clock take is drawn in them), and the person's answer to it ('dismissed', 'minimised' or
+ * null). Shown nothing (no take, or none since a seat moved): number 0 and no content, the page's chat. No key or code.
+ */
+function takeTold(hall, { take, answer }) {
+  const h = store.get(hall);
+  return {
+    seq: take ? take.seq : 0, content: take ? take.content : null, by: take ? take.by : null, at: take ? take.at : 0,
+    hallName: (h && h.name) || '', holding: displays.hallHolding(hall), now: Date.now(), tz: TIME_ZONE, answer: answer ? answer.state : null,
+  };
+}
+/**
+ * The pages of `before` (hallPages, read before a change) still open whose take, or their person's answer to it, is not
+ * what they were shown: each with what to tell it now ({sid, take}). One the change did not move is told nothing.
+ */
+function takeSends(hall, before) {
+  const now = new Map(hallPages(hall).map((p) => [p.sid, p]));
+  const out = [];
+  for (const was of before) {
+    const p = now.get(was.sid);
+    if (p && (p.seq !== was.seq || p.answer !== was.answer)) out.push({ sid: p.sid, take: takeTold(hall, p.current) });
+  }
+  return out;
+}
+/**
+ * Each page of a hall shown a take whose content `which` reads (one that draws the hall's holding picture or its name)
+ * told it again as its join would tell it now (takeTold), the admin's views of a person among them, and the hall's
+ * consoles told: no page keeps a picture or a name the hall no longer has. A page shown nothing is told nothing.
+ */
+function retell(hall, which) {
+  for (const p of hallPages(hall)) {
+    const s = p.current.take && which(p.current.take.content) ? io.sockets.sockets.get(p.sid) : null;
+    if (s) s.emit('page:take', takeTold(hall, p.current));
+  }
+  pagesChanged(hall);
+}
+/** A hall's holding picture, which a holding slide with no picture of its own shows ('' for none). */
+const holdingOf = (hall) => displays.hallHolding(hall);
+/**
+ * What a hall's people's pages show, or the pages that hold it, changed: its consoles are told once per 150 ms at most
+ * (`frames.pages`), and each reads `page:status` again, so the newest state is what it reads.
+ */
+function pagesChanged(hall) { frames.pages.mark(hall); }
+/** `pages:changed` to each page in a room of the hall whose push held for it at its join (`pushes`): a signal, no content. */
+function tellPushers(hall) {
+  for (const p of hallPages(hall)) {
+    const s = io.sockets.sockets.get(p.sid);
+    if (s && s.data.pushes === hall) s.emit('pages:changed', {});
+  }
+}
+/** A Board page was out of view for `ms` while a take was drawn on it: the show day keeps its longest (reading 5). */
+function pageHidden(ms) { peaks.pageHidden(ms, Date.now()); }
 /** A Stagewatch's frame moved: the displays of every hall that follows it get the frame. */
 function stageChanged(link) {
   const payload = stagePayload(link);
@@ -3490,18 +3646,30 @@ function accountChanged(id, what) {
 }
 /**
  * The chat view a page draws (plan 1-§6, "How it is chosen"): the person's own, an account's `view`, when one is chosen;
- * else the simple view for a seat On stage (a hall's Main room's alone), else the full view. A view is no right: no
- * check reads it.
+ * else the simple view for the seat it is drawn for when that is On stage (a hall's Main room's alone), else the full
+ * view; a page seated nowhere (the admin's support view, for itself) holds no seat. A view is no right: no check reads it.
  */
-function drawnView(account, s) {
+function drawnView(account, seat) {
   if (account && (account.view === 'simple' || account.view === 'full')) return account.view;
-  return s.data.seat === 'board' && !s.data.adminView ? 'simple' : 'full';
+  return seat === 'board' ? 'simple' : 'full';
 }
-/** An account's chat view changed: each of its pages seated in a room is told the view to draw, live; nothing is closed. */
+/** The seat a person (`uid`) holds in the room `key` names now, or '' where they hold none. */
+function seatHeld(key, uid) {
+  const r = store.room(key);
+  const u = r ? Array.from(r.users.values()).find((x) => x.uid === uid) : null;
+  return u ? u.role : '';
+}
+/**
+ * An account's chat view changed: each of its pages seated in a room is told the view to draw, live, and so is the
+ * admin's view of that person (`viewOf`), the view the person's seat there draws (plan 1-§5.5); nothing is closed.
+ */
 function viewChanged(id) {
   const account = accounts.get(id);
+  const key = personKey(id, true);
   for (const [, s] of io.sockets.sockets) {
-    if (s.data && s.data.accountId === id && s.data.userRoom && !s.data.adminView) s.emit('view', { view: drawnView(account, s) });
+    if (!s.data || !s.data.userRoom) continue;
+    if (s.data.accountId === id && !s.data.adminView) s.emit('view', { view: drawnView(account, s.data.seat) });
+    else if (s.data.adminView && s.data.viewOf && s.data.viewOf.key === key) s.emit('view', { view: drawnView(account, seatHeld(s.data.userRoom, s.data.viewOf.uid)) });
   }
 }
 
@@ -4807,12 +4975,15 @@ function firstWrites() {
 // effects, `settings` to read (a handler module never writes it: test/modules.test.js (j)), a message made from what a page
 // sent (`readSend`, `messageOf`, its file on disk `uploadOnDisk`, a new id `makeMessageId`), the rooms that may send into
 // a room (`sendersOf`, read, and `sendsInto`, the rooms a room may send into; `setRoomSends`, its one writer, the rooms
-// module's alone), the Stagewatch a hall follows
-// and its frame, and `io` for the rooms module. The takes module's holds no io, apply or systemMessage: it reaches a page
+// module's alone), the Stagewatch a hall follows and its frame, what people's pages are shown (the `pages` store, the
+// pages open in a hall with what each is shown, `hallPages`, those a change moved, `takeSends`, the hall's holding
+// picture, `holdingOf`, the consoles told, `pagesChanged`, and a Board page's time out of view kept in the day's peaks,
+// `pageHidden`), and `io` for the rooms module. The takes module's holds no io, apply or systemMessage: it reaches a page
 // by its socket's id alone (`sendTo`, over io's open sockets, read by the gate's module and never handed in), never a
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
-  store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload, io,
+  store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
+  pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, io,
 });
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.

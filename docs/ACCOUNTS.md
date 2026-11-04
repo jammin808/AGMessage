@@ -31,7 +31,7 @@ rights, as the server checks them:
 | `hall.view` | see a hall: its messages, files, countdown and screens; in a side room (Legal, Media), only one the account is given |
 | `hall.post` | send messages, replies, action prompts and help requests; answer a prompt, pin, react; forward into the hall; send a message from the room into one whose list names it; in a side room, only one the account is given |
 | `hall.files` | share files and push them to a hall, or forward one into it, or send one from the room into one whose list names it; in a side room, only one the account is given |
-| `display.control` | change what a hall's screens show |
+| `display.control` | change what a hall's screens and people's pages show: a take on the Board's pages or one person's, from any room of the hall (`docs/DISPLAYS.md`, People's screens); never from a page seated On stage |
 | `display.manage` | add, rename, move, re-link and remove screens; the hall's holding image |
 | `stage.send` | send to Stagewatch: the speaker's screen, or to the operator to pass on |
 | `nodes.control` | propose commands to Patterns and PlayMap (to the show desk; never sent to them directly) |
@@ -437,7 +437,10 @@ file (pdf, 2.1 MB) from …"; never its words or a file's name), each send withd
 room it went to and was taken from: "a message sent from Legal (Hall 2), there 40 s", "a file …", the admin's "a message by Lou sent
 from …"; never its words or a file's name),
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
-(28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), settings (which ones,
+(28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), every take on people's
+pages (`page.push`, by the hall's key: whom, "the Board (6 pages)" or the person's name, and what kind of thing, "the
+clock", "a holding slide"; one row per take, none for its repeat or for a person's Back to chat or Minimise, which their
+own page says to the console), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and
 the desk's number, never the words), every line Stagewatch takes for the speaker's screen sent straight to it
 (`stagewatch.send`: who sent it and how many characters, never the words; an emoji counts as one character in both),

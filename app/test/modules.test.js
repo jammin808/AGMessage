@@ -679,7 +679,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   assert.ok(inClosure(made), 'conn is made in the connection');
   const conn = groupAt(server, made + 'const conn = Object.freeze('.length);
   const keys = conn.entries.map(keyOf);
-  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'onStage', 'canIn', 'admin', 'actor', 'canManageHall', 'codeTold', 'gate']);
+  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'onStage', 'canIn', 'canPush', 'admin', 'actor', 'canManageHall', 'codeTold', 'gate']);
   assert.deepEqual(keys.filter((k) => k.value !== null).map((k) => [k.key, k.value]), [['room', '() => room'], ['me', '() => me']]);
   for (const { key } of keys.filter((k) => k.value === null && k.key !== 'socket')) {
     const decl = server.indexOf('  const ' + key + ' = ', at);
@@ -705,7 +705,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'io']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -972,6 +972,17 @@ const PAGE_NAMED_BY_EXPRESSION = {
  */
 const UNHEARD = {
   view: 'an account\'s chat view changed alone, told to its pages in a room, which stay open (the plan\'s Part 1 unit 9): the hall page draws the simple view, and hears this, with Part 7 unit 20a (#55)',
+  'page:take': 'what a person\'s page is shown over its chat, sent to that page by its socket\'s id (the plan\'s Part 1 unit 17): the hall page draws it in its layer, and hears this, with Part 1 unit 18 (#53)',
+  'pages:changed': 'a hall\'s people\'s pages changed, told to the pages that may push there (Part 1 unit 17): the hall page\'s console (Screens & pages, the Board chip) hears it with Part 1 unit 18 (#53)',
+};
+/**
+ * A verb a handler file registers that no page sends yet, with why. The fence fails on a row a page sends, or that no
+ * handler file registers. The hall page sends each with Part 1 unit 18 (#53), whose layer and console are its pages.
+ */
+const UNSENT = {
+  'page:push': 'a take on the Board\'s pages or one person\'s (Part 1 unit 17): the hall page\'s console and its Board chip send it with Part 1 unit 18 (#53)',
+  'page:report': 'what a person\'s page did with its take (Part 1 unit 17): the hall page\'s layer reports it with Part 1 unit 18 (#53)',
+  'page:status': 'where a hall\'s people\'s pages stand (Part 1 unit 17): the hall page\'s console reads it with Part 1 unit 18 (#53)',
 };
 
 const literal = (re, src) => [...src.matchAll(re)].map((m) => m[2]);
@@ -1021,7 +1032,7 @@ function wireWords(handlers, pages) {
 }
 
 /** What leaves the wire's words open, in either direction. Sorted. */
-function wireProblems(handlers, pages, { named = NAMED_BY_EXPRESSION, pageNamed = PAGE_NAMED_BY_EXPRESSION, unheard = UNHEARD } = {}) {
+function wireProblems(handlers, pages, { named = NAMED_BY_EXPRESSION, pageNamed = PAGE_NAMED_BY_EXPRESSION, unheard = UNHEARD, unsent = UNSENT } = {}) {
   const w = wireWords(handlers, pages);
   const problems = [...w.unread];
   for (const [expr, file] of w.computed) {
@@ -1035,12 +1046,16 @@ function wireProblems(handlers, pages, { named = NAMED_BY_EXPRESSION, pageNamed 
   }
   for (const key of Object.keys(pageNamed)) if (!w.pageComputed.has(key)) problems.push('no page script holds `' + key + '`: its row goes');
   for (const [v, file] of w.sends) if (!w.verbs.has(v)) problems.push(file + " sends '" + v + "', which no handler file registers");
-  for (const [v, file] of w.verbs) if (!SERVER_OWN.includes(v) && !w.sends.has(v)) problems.push(file + " registers '" + v + "', which no page sends");
+  for (const [v, file] of w.verbs) if (!SERVER_OWN.includes(v) && !w.sends.has(v) && !Object.hasOwn(unsent, v)) problems.push(file + " registers '" + v + "', which no page sends");
   for (const [e, file] of w.emits) if (!w.hears.has(e) && !Object.hasOwn(unheard, e)) problems.push(file + " sends '" + e + "', which no page hears");
   for (const [e, file] of w.hears) if (!CLIENT_OWN.includes(e) && !w.emits.has(e)) problems.push(file + " hears '" + e + "', which no handler file sends");
   for (const e of Object.keys(unheard)) {
     if (w.hears.has(e)) problems.push("'" + e + "' is heard now (" + w.hears.get(e) + '): its row in UNHEARD goes');
     else if (!w.emits.has(e)) problems.push("'" + e + "' is no longer sent: its row in UNHEARD goes");
+  }
+  for (const v of Object.keys(unsent)) {
+    if (w.sends.has(v)) problems.push("'" + v + "' is sent now (" + w.sends.get(v) + '): its row in UNSENT goes');
+    else if (!w.verbs.has(v)) problems.push("'" + v + "' is no longer registered: its row in UNSENT goes");
   }
   return problems.sort();
 }
@@ -1084,7 +1099,7 @@ test('(f) a planted word left open, in either direction, fails it', () => {
   };
   // A planted allow-list row: an emit no page of the planted tree hears, with its reason.
   const unheard = { linkedRoomsChanged: 'told to a guest\'s pages when the admin links them to another hall; no planted page hears it' };
-  const run = ({ handlers = {}, pages = {} } = {}, opts = {}) => wireProblems(new Map(Object.entries({ ...base.handlers, ...handlers })), new Map(Object.entries({ ...base.pages, ...pages })), { named, pageNamed: {}, unheard, ...opts });
+  const run = ({ handlers = {}, pages = {} } = {}, opts = {}) => wireProblems(new Map(Object.entries({ ...base.handlers, ...handlers })), new Map(Object.entries({ ...base.pages, ...pages })), { named, pageNamed: {}, unheard, unsent: {}, ...opts });
   const plus = (side, f, line) => ({ [side]: { [f]: (base[side][f] || '') + '\n' + line } });
   assert.deepEqual(run(), [], 'the planted tree passes');
 
@@ -1130,6 +1145,13 @@ test('(f) a planted word left open, in either direction, fails it', () => {
   // The allow-list's rows go with their reasons.
   assert.deepEqual(run(plus('pages', 'public/app.js', "socket.on('linkedRoomsChanged', f);")), ["'linkedRoomsChanged' is heard now (public/app.js): its row in UNHEARD goes"]);
   assert.deepEqual(run({ handlers: { 'server.js': base.handlers['server.js'].replace("s.emit('linkedRoomsChanged', { added: code });", '') } }), ["'linkedRoomsChanged' is no longer sent: its row in UNHEARD goes"]);
+  // A verb no page sends yet passes only by a row with its reason, and the row goes once a page sends it or it goes.
+  const pushVerb = { handlers: { 'lib/handlers/takes.js': "socket.on('page:push', (a, ack) => {});" } };
+  const unsent = { 'page:push': 'the hall page\'s console sends it with a later unit' };
+  assert.deepEqual(run(pushVerb), ["lib/handlers/takes.js registers 'page:push', which no page sends"], 'no row, open');
+  assert.deepEqual(run(pushVerb, { unsent }), [], 'its row with its reason');
+  assert.deepEqual(run({ ...pushVerb, ...plus('pages', 'public/app.js', "AGM.outbox.now('page:push', {});") }, { unsent }), ["'page:push' is sent now (public/app.js): its row in UNSENT goes"]);
+  assert.deepEqual(run({}, { unsent }), ["'page:push' is no longer registered: its row in UNSENT goes"]);
   assert.deepEqual(run({ handlers: { 'server.js': base.handlers['server.js'].replace(ternary, "io.to(room.code).emit('message', op.m);") } }),
     ["no handler file sends `op.m.type === 'system' ? 'system' : 'message'`: its row goes", "public/app.js hears 'system', which no handler file sends"]);
 });
@@ -1520,6 +1542,8 @@ const ANY_ROOM = {
     'a hall\'s rooms told again to each page in any of them, when one is made, renamed or removed',
     'the rooms a room may send into: each room here, Main or side, of any hall, whose list names it',
     'a Main room renamed renames its hall: the rooms that send into any room of the hall are told to ask again',
+    'people\'s pages: a person\'s take reaches every page of theirs in any room of the hall, and a Board take the hall\'s Main room',
+    'the admin\'s view of a person is told the chat view their seat draws in the room it shows, Main or side',
   ],
   'lib/handlers/rooms.js': [
     'a hall full of rooms says how many it holds',
@@ -1527,6 +1551,9 @@ const ANY_ROOM = {
     'a room\'s settings: its hall\'s rooms, Main first',
     'and, for the admin, every hall\'s rooms, Main first: the rooms a list of rooms that may send in may name',
     'every room here, Main or side, of every hall: each list a room\'s ↔s set it on, or take it off',
+  ],
+  'lib/handlers/takes.js': [
+    'the rooms of a hall a pusher may read, Main or side: a holding picture shared in them, and the people a push names or a console lists seated in them',
   ],
 };
 /** A call to one of the store's any-room readers, however it is spaced. */

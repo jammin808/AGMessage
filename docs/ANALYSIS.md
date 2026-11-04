@@ -393,11 +393,16 @@ each be a new dev dependency (audit, signatures, SBOM) for rules a node:test rea
 | (l) the any-room readers | every call in a shipped server file (`server.js`, `supervise.js`, `lib/` and `verify/`) to the store's any-room readers, `store.room`, `hasRoom`, `allRooms` and `roomsOf`, which reach a hall's side rooms as well as its Main room, is counted per file, each with why it reads any room and not a hall (`store.get`, `has`, `rooms`), in `ANY_ROOM`, as the guard rail counts synchronous calls; the store's side rooms are reached through those readers only | a file whose count of those calls is not its reasons' (a reader added, or one gone, without its words moving); `store.side` or `store.sideByHall` (the side rooms by key, and by hall) read outside the store; a row for a file that is not there |
 | (n) the kinds in step | the kinds a person's page may be shown, `lib/pages.js`'s `KINDS`, and the cases `describePage` gives words for, read from its source, are one set, each case once, and each kind's words its own; no catalogue row sends a take (`page:push`) yet: the Board chip's rows join the set when the catalogue draws them | a kind without its words, words for a kind that is not one, a kind's words given twice, two kinds sharing words, `describePage` gone; a catalogue row that sends `page:push` before its ids are held to the kinds |
 
-The allow-list of (f), of events no page hears, holds one row: `view`, an account's chat view changed alone, told live to
-its pages in a room, which stay open (the plan's Part 1 unit 9); the hall page draws the simple view, and hears it, with
-Part 7's unit 20a, which takes the row out. Its row before, `linkedRoomsChanged`, sent to a guest's pages when the admin
-lets them forward into another hall or takes it back, went once the hall page heard it, to keep its `forwardable` fact
-live (§3.6). A row fails the fence once a page hears it, or once the server stops sending it, and a planted tree holds
+The allow-list of (f), of events no page hears, holds three rows: `view`, an account's chat view changed alone, told live
+to its pages in a room, which stay open (the plan's Part 1 unit 9); the hall page draws the simple view, and hears it,
+with Part 7's unit 20a, which takes the row out; and `page:take` and `pages:changed`, what a person's page is shown,
+sent to that page by its socket's id, and a hall's consoles told that its people's pages changed (Part 1 unit 17), which
+the hall page's layer and console hear with Part 1 unit 18. Its row before, `linkedRoomsChanged`, sent to a guest's
+pages when the admin lets them forward into another hall or takes it back, went once the hall page heard it, to keep its
+`forwardable` fact live (§3.6). A row fails the fence once a page hears it, or once the server stops sending it, and a
+planted tree holds both. Beside it, the allow-list of verbs no page sends yet holds three rows, each with its reason:
+`page:push`, `page:report` and `page:status` (Part 1 unit 17), which that layer and console send with Part 1 unit 18. A
+row there fails the fence once a page sends its verb, or once no handler file registers it, and a planted tree holds
 both. On the tree before 0.6.0 the fence failed on two words, both `typing`'s: a verb no page sent,
 and an event no page heard. `typing` was removed (the owner's answer 26 wants no typing indicator), which lowered the fuzz's count of
 events by one, to 55.

@@ -257,7 +257,8 @@ class Pages {
    * chat is final for it. A Minimise is taken back only by the person's Show again (`again`, a `shown` report): a page
    * that drew the take and says so (`shown`, as it first draws or comes back into view) before it hears of the Minimise
    * keeps it, so one device never undoes what the person did on another. Returns {ok, answer}, the person's answer to
-   * that take as it now stands, or {ok: false, error}; a report of no person, at no time, keeps nothing.
+   * that take as it now stands, and `hiddenMs` when this report ends a Board page's time out of view with a take drawn
+   * on it; or {ok: false, error}; a report of no person, at no time, keeps nothing.
    */
   report(hall, sid, { key, board = false, seq, state, again = false, words = '', at = Date.now() } = {}) {
     if (!REPORTS.includes(state)) return { ok: false, error: 'A report is one of: ' + REPORTS.join(', ') + '.' };
@@ -274,21 +275,40 @@ class Pages {
     if (ANSWERS.includes(state) && !(answer && answer.state === state)) kept = this._answer(book, key, layer, { seq, state, at });
     else if (state === 'shown' && again === true && answer && answer.state === 'minimised') { this._drop(book.answers, key, layer); kept = null; }
     if (kept !== answer) { this._trim(book); this.save(); }
-    this.left(sid);
+    // A Board page out of view (asleep, or another app in front) while a take is drawn on it: how long, from its first
+    // such report to the report or the leave that ends it, a take that replaces another while it stays out of view
+    // included (health's peaks, `pageHiddenMs`).
+    const was = this._forget(sid);
+    const out = state === 'hidden' && board === true && take.content.kind !== 'chat';
+    const hiddenSince = out ? (was && was.hiddenSince) || at : 0;
     if (!this.live.has(hall)) this.live.set(hall, new Map());
-    this.live.get(hall).set(sid, { key, seq, state, words: guard.cleanText(words, 160), at });
+    this.live.get(hall).set(sid, { key, seq, state, words: guard.cleanText(words, 160), at, hiddenSince });
     this.liveHall.set(sid, hall);
-    return { ok: true, answer: kept || null };
+    const ended = !out && was && was.hiddenSince ? Math.max(0, at - was.hiddenSince) : -1;
+    return { ok: true, answer: kept || null, ...(ended >= 0 ? { hiddenMs: ended } : {}) };
   }
 
-  /** A page went (its socket closed): its report goes with it. */
-  left(sid) {
+  /**
+   * A page went (its socket closed, or it moved to another room): its report goes with it. Returns the hall it reported
+   * in and, when it was a Board page out of view while a take was drawn on it, for how long (`hiddenMs`); or null when it
+   * had reported nothing.
+   */
+  left(sid, at = Date.now()) {
+    const was = this._forget(sid);
+    if (!was) return null;
+    return { hall: was.hall, ...(was.hiddenSince && Number.isFinite(at) ? { hiddenMs: Math.max(0, at - was.hiddenSince) } : {}) };
+  }
+
+  /** A page's report taken out of the run's reports, with the hall it was in; null when it had none. */
+  _forget(sid) {
     const hall = this.liveHall.get(sid);
-    if (hall === undefined) return;
+    if (hall === undefined) return null;
     this.liveHall.delete(sid);
     const reports = this.live.get(hall);
+    const r = reports.get(sid);
     reports.delete(sid);
     if (!reports.size) this.live.delete(hall);
+    return { ...r, hall };
   }
 
   /**

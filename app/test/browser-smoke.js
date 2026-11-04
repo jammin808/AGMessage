@@ -1544,7 +1544,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(!!(await users.until(`document.querySelectorAll('#userRows tr').length === 1`)), 'the accounts page lists the admin');
     await readOldWords('the Accounts page', users);
     const rightsWords = await users.eval(`(async () => { const r = await AGM.api('GET', '/api/users'); return JSON.stringify([r.caps['display.control'], r.roles.find((x) => x.id === 'tech').words]); })()`);
-    report(rightsWords === JSON.stringify(['Change what a hall\'s screens show', 'Their halls: messages, files, screens, Stagewatch']), `the Accounts page's rights and roles say "screens" (${rightsWords})`);
+    report(rightsWords === JSON.stringify(['Change what a hall\'s screens and people\'s pages show', 'Their halls: messages, files, screens, Stagewatch']), `the Accounts page's rights and roles say "screens" (${rightsWords})`);
     await users.eval(`document.getElementById('tabAudit').click()`);
     await users.eval(`document.getElementById('verifyBtn').click()`);
     report(!!(await users.until(`document.getElementById('chainState').dataset.mark === 'intact' && /^✓ Intact — \\d+ entries, all keyed on this machine$/.test(document.getElementById('chainState').textContent) && !document.getElementById('verifyBtn').disabled`)), 'Check the log reads the whole chain and says it is intact: ✓');

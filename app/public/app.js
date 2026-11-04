@@ -15,6 +15,9 @@ const ROLE = qs.get('role') || 'observer';
 // it from there, and going back must never bounce.
 const HOME = AS_ACCOUNT ? '/halls.html?stay=1' : '/';
 const ADMIN_VIEW = qs.get('adminView') === '1';
+// The person the admin's support view shows (their uid in the room's people): the server tells it what that person's pages
+// are shown. Only the support view names one.
+const VIEW_OF = ADMIN_VIEW ? (qs.get('viewOf') || '') : '';
 // Identity: issued and signed by the server on first join, kept on this device, so nobody can
 // pick someone else's. MY_UID is the id inside it (what messages and reactions carry).
 let IDENTITY = localStorage.getItem('agm.id') || '';
@@ -137,7 +140,7 @@ socket.on('connect', rejoin);
 /** Join (or rejoin after a drop): the server sends only what we missed when it still has it. */
 function rejoin() {
   const who = AS_ACCOUNT ? { as: 'account' } : { name: NAME, role: ROLE, uid: IDENTITY, invite: INVITE };
-  socket.emit('join', { roomCode: ROOM, adminView: ADMIN_VIEW, since: joined ? lastSeq : undefined, ...who }, (res) => {
+  socket.emit('join', { roomCode: ROOM, adminView: ADMIN_VIEW, ...(VIEW_OF ? { viewOf: VIEW_OF } : {}), since: joined ? lastSeq : undefined, ...who }, (res) => {
     if (!res || !res.ok) {
       // Signing in is the way into this hall: the sign-in page opens, and brings the person back here after.
       if (res && res.signIn) {

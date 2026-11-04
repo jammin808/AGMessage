@@ -239,11 +239,13 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   // The same person backstage in B too: from A, B takes a message; the answer says so, its keys appended at the end in
   // the order they landed (the build serving now, which a page on another build reloads for; then the hall's facts; then
   // whether a message here may be sent into another room by its list, `sends`: no list names Hall A, so it may not; then
-  // whether the page is the admin's own, `admin`, which a guest's is not).
+  // whether the page is the admin's own, `admin`, which a guest's is not; then what the page is shown over its chat,
+  // `page`, whether it may push to people's pages, `canPush`, and AGMessage's clock and zone, `now` and `tz`).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-11), again.sends, again.admin], [true, [hallB], ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin'], false, false]);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-15), again.sends, again.admin, again.page, again.canPush], [true, [hallB],
+    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz'], false, false, null, false]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board');

@@ -13,7 +13,8 @@
  *   Hist         : durations in fixed buckets; its p99 is the bucket bound it falls under (never above the max), its max exact
  *   Peaks        : one record per show day (06:00 to 06:00), the newest 14; a reading only ever raises its day's value,
  *                  and the day's refusals through the tunnel, by what was refused, only ever add up; the sleeps the
- *                  watchdog recorded, counted on the day each woke in (its longest kept), the newest 20 kept whole
+ *                  watchdog recorded, counted on the day each woke in (its longest kept), the newest 20 kept whole;
+ *                  the longest a Board page was out of view while a take was drawn on it
  *   Refusals     : today's refusals, by lane and by what was refused, and one log line a minute at most while refusing
  *   linkCheck    : the internet link's check, from the round trips of its tries
  */
@@ -203,6 +204,7 @@ class Peaks {
       rec.at = num(d.at);
       rec.sleeps = Math.floor(num(d.sleeps));
       rec.sleptMs = Math.floor(num(d.sleptMs));
+      rec.pageHiddenMs = Math.floor(num(d.pageHiddenMs));
       byDay.set(rec.day, rec);
     }
     this.days = Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? -1 : 1)).slice(-this.keepDays);
@@ -212,7 +214,7 @@ class Peaks {
   }
 
   _blank(day) {
-    return { day, loopMs: 0, elu: 0, socketsPerAddress: { venue: 0, tunnel: 0 }, tunnelSockets: 0, tunnelRefused: zero(REFUSED.tunnel), hallMessages: 0, hallKb: 0, joinBurst: 0, compactMs: { max: 0, messages: 0 }, auditPutMs: new Hist(), at: 0, sleeps: 0, sleptMs: 0 };
+    return { day, loopMs: 0, elu: 0, socketsPerAddress: { venue: 0, tunnel: 0 }, tunnelSockets: 0, tunnelRefused: zero(REFUSED.tunnel), hallMessages: 0, hallKb: 0, joinBurst: 0, compactMs: { max: 0, messages: 0 }, auditPutMs: new Hist(), at: 0, sleeps: 0, sleptMs: 0, pageHiddenMs: 0 };
   }
 
   /** The record of the day `at` falls on, made when it is the first reading of that day; only the newest days are kept. */
@@ -283,6 +285,20 @@ class Peaks {
   auditPut(ms, at) {
     const rec = this._day(at);
     rec.auditPutMs.add(ms);
+    rec.at = at;
+    this.dirty = true;
+    return true;
+  }
+
+  /**
+   * A Board page out of view (asleep, or another app in front) while a take was drawn on it, for `ms`, from its first
+   * report out of view to the report or the leave that ended it (lib/pages.js): the day keeps its longest (reading 5).
+   */
+  pageHidden(ms, at) {
+    const v = Math.floor(num(ms));
+    const rec = this._day(at);
+    if (v <= rec.pageHiddenMs) return false;
+    rec.pageHiddenMs = v;
     rec.at = at;
     this.dirty = true;
     return true;

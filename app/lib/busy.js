@@ -48,11 +48,14 @@ const INPUT = new Set([
   'display:rotate', 'display:take', 'display:update', 'forward', 'hall:acceptCertificate', 'hall:configure', 'help:respond',
   'message', 'nodes:acceptCertificate', 'nodes:command', 'nodes:link', 'nodes:unlink', 'pin', 'react', 'room:create',
   'room:send', 'room:update', 'room:withdraw', 'stage:propose', 'stage:send',
+  // A take on people's pages, and what a page says of one: the person's Back to chat, Minimise and Show again, and its
+  // page's reports while a take is up on it, which a show running on the Board's tablets is.
+  'page:push', 'page:report',
 ]);
 const READS = new Set([
   'join', 'seen', 'myRooms', 'board:watch', 'userState:push', 'userState:requestPeers', 'stage:targets', 'display:list',
   'display:shown', 'hall:settings', 'nodes:list', 'admin:invites', 'admin:listRooms', 'admin:watchRoom', 'admin:laptop',
-  'admin:tunnelStatus', 'room:settings', 'room:sendTargets', 'disconnect',
+  'admin:tunnelStatus', 'room:settings', 'room:sendTargets', 'page:status', 'disconnect',
 ]);
 
 /** A count as the line keeps it: a whole number from 0, anything else 0. */

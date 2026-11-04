@@ -434,6 +434,38 @@ test('status read from the store: each page\'s report on the take it is shown no
   assert.equal(p.pageState(OTHER, { sid: 'x', key: BEN }).state, 'waiting');
 });
 
+test('a Board page out of view while a take is drawn on it: from its first report out of view to the report or the leave that ends it', () => {
+  const p = store();
+  const t = p.take(HALL, 'board', { kind: 'clock' }, { name: 'Ada' }, { at: 1 });
+  const rep = (sid, state, at, o = {}) => p.report(HALL, sid, { key: BEN, board: true, seq: t.seq, state, at, ...o });
+  assert.deepEqual(rep('s1', 'shown', 1000), { ok: true, answer: null }, 'in view: no time out of view to say');
+  assert.deepEqual(rep('s1', 'hidden', 2000), { ok: true, answer: null }, 'out of view: its time begins, said once it ends');
+  assert.deepEqual(rep('s1', 'hidden', 2500), { ok: true, answer: null }, 'still out of view: it goes on from the first');
+  // A newer take while it is out of view: the page says it is hidden on that one too, and the time goes on.
+  const next = p.take(HALL, 'board', { kind: 'blank' }, { name: 'Ada' }, { at: 2600 });
+  assert.deepEqual(p.report(HALL, 's1', { key: BEN, board: true, seq: next.seq, state: 'hidden', at: 9000 }), { ok: true, answer: null });
+  assert.deepEqual(p.report(HALL, 's1', { key: BEN, board: true, seq: next.seq, state: 'shown', at: 34_000 }), { ok: true, answer: null, hiddenMs: 32_000 }, 'back in view: 2,000 to 34,000');
+  // A leave ends it too; a page that reported nothing, or was in view, leaves with nothing to say.
+  assert.ok(p.report(HALL, 's2', { key: BEN, board: true, seq: next.seq, state: 'hidden', at: 40_000 }).ok);
+  assert.deepEqual(p.left('s2', 52_500), { hall: HALL, hiddenMs: 12_500 });
+  assert.deepEqual(p.left('s1', 60_000), { hall: HALL }, 'in view as it went');
+  assert.equal(p.left('never-here'), null);
+  // Only a Board page, and only while a take is drawn: a person's page in a side room, and a page handed back to its
+  // chat, are no reading of the Board's tablets with a take up.
+  const mine = p.take(HALL, CY, { kind: 'clock' }, { name: 'Ada' }, { at: 60_100 });
+  assert.ok(p.report(HALL, 's3', { key: CY, seq: mine.seq, state: 'hidden', at: 61_000 }).ok);
+  assert.deepEqual(p.report(HALL, 's3', { key: CY, seq: mine.seq, state: 'shown', at: 99_000 }), { ok: true, answer: null }, 'not On stage');
+  const back = p.take(HALL, 'board', { kind: 'chat' }, { name: 'Ada' }, { at: 100_000 });
+  assert.ok(p.report(HALL, 's4', { key: BEN, board: true, seq: back.seq, state: 'hidden', at: 101_000 }).ok);
+  assert.deepEqual(p.left('s4', 200_000), { hall: HALL }, 'back on its chat');
+  // A report refused (another take's number) neither begins nor ends it.
+  assert.ok(p.report(HALL, 's5', { key: BEN, board: true, seq: back.seq, state: 'shown', at: 1 }).ok);
+  const drawn = p.take(HALL, 'board', { kind: 'clock' }, { name: 'Ada' }, { at: 300_000 });
+  assert.ok(p.report(HALL, 's5', { key: BEN, board: true, seq: drawn.seq, state: 'hidden', at: 300_500 }).ok);
+  assert.equal(p.report(HALL, 's5', { key: BEN, board: true, seq: back.seq, state: 'shown', at: 301_000 }).ok, false);
+  assert.deepEqual(p.report(HALL, 's5', { key: BEN, board: true, seq: drawn.seq, state: 'shown', at: 302_000 }), { ok: true, answer: null, hiddenMs: 1_500 });
+});
+
 test('a hall closed takes what its people\'s pages were shown with it', () => {
   const p = store();
   const t = p.take(HALL, 'board', { kind: 'clock' }, { name: 'Ada' });

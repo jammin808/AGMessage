@@ -65,7 +65,8 @@ reliability (`docs/DESIGN.md` says which practice lives where). Every build is v
   and none is added there (`SERVER_VERBS` only shrinks).
   `test/inputs.test.js` reads the event names from `handlerFiles()` (`server.js` and each module in `lib/handlers/`) and
   sends each every shape, so a new handler is held to it; `test/modules.test.js` holds every verb to a page that sends
-  it and every event to a page that hears it, and fails on a socket listener in any other shipped file or in a form the
+  it and every event to a page that hears it (one no page uses yet only by an allow-list row with its reason, which fails
+  once a page uses it), and fails on a socket listener in any other shipped file or in a form the
   fuzz does not read.
 - **Every store** on disk goes through a `WriteLane` that is in `saveLanes()` (flushed at stop and crash, named in
   health; health's `saves.built` counts the lanes made and `saves.named` the distinct lanes in that list, and a test
@@ -193,7 +194,7 @@ A sentence and the files; the detail is the code's and the CHANGELOG's. A test n
 | The room choice and the switcher: an account with one room goes straight into it; a hall page names its room ("Hall 2 › Legal") and moves between its hall's rooms | `app/public/halls.js` (`waysIn`), `app/public/app.js` (the switcher), `app/server.js` (`switcherFor`, `frames.rooms`); test `halls` |
 | Uploads: a token per page's join, checked again at use; a file message posted only in the room it was made for, reaching another only by a forward | `app/server.js` (`/api/upload`, `fileRefusal`), `app/lib/guard.js`; test `uploads` |
 | Screens (display URLs) | `app/lib/displays.js`, `app/public/display.*` |
-| People's pages: what a person's hall page is shown over its chat (numbered takes to the Board or one person, their answers, the status read from each page's report) and guests' chat views, kept in `pages.json` through the `pages` lane | `app/lib/pages.js`; test `pages` |
+| People's pages: what a person's hall page is shown over its chat (numbered takes to the Board or one person, their answers, the status read from each page's report) and guests' chat views, kept in `pages.json` through the `pages` lane; the take verbs (a push, a page's report, a console's read), each take sent to a page by its socket's id, and who may push | `app/lib/pages.js`, `app/lib/handlers/takes.js`, `app/server.js`; tests `pages`, `takes` |
 | Stagewatch links, peers, hello; what a send says (Stagewatch's grammar as the oracle) | `app/lib/nodes.js`, `app/lib/stagelines.js` |
 | Patterns and PlayMap links; the context other show systems read | `app/lib/peerlinks.js`, `app/lib/context.js` |
 | HTTPS and certificate pins; the machine key, sealed secrets and the keys derived from it | `app/lib/tls.js`, `app/lib/secretbox.js` |

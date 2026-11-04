@@ -614,7 +614,7 @@ test('guard rails: the timers the handler files start are counted, each with its
   assert.equal(count('clearTimeout(t); clearInterval(t); resetTimeout(t); const { setTimeout } = timers; new Latest({ name: "x", delayMs: 100, flush });'), 0);
   // The state frames that exist go through the one primitive, each by its name in health's `latest`.
   const server = readSource(path.join(ROOT, 'server.js'));
-  assert.deepEqual([...server.matchAll(/new Latest\(\{\s*name: '([^']+)'/g)].map((m) => m[1]), ['board', 'screens', 'people', 'seen', 'rooms', 'sends']);
+  assert.deepEqual([...server.matchAll(/new Latest\(\{\s*name: '([^']+)'/g)].map((m) => m[1]), ['board', 'screens', 'people', 'seen', 'rooms', 'sends', 'pages']);
 });
 
 // ---------------------------------------------------------------- the stylesheet's tokens

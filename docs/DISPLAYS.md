@@ -67,6 +67,43 @@ row keeps **Identify**; the rest, with **Tick only this one**, is in its ⋯, wh
 open too. Rename… is a field in place; New link… and Remove… ask in place, naming the screen, inside the console, which
 stays open. The halls board shows every hall's screens and their state, in the same words as the console.
 
+## People's screens
+
+Beside the hall's screens, a hall's people's own pages can be shown something over their chat: **the Board's** (every
+page seated On stage in the hall's Main room, the presenters' and Board accounts' alike) or **one person's** (every page
+of theirs in any room of the hall). A take is one of: back to chat, the hall's Stagewatch countdown (only where the hall
+has one linked), the clock (AGMessage's time and zone), holding (a picture shared in a room of the hall the operator
+may read, else the hall's holding image, else the AGMessage mark and the hall's name on black) or blank (black).
+
+Who may show people's pages: the admin; an account with `display.control` in the hall ("Change what a hall's screens and
+people's pages show"), from any room of it; and a guest seated backstage in the hall's Main room while its seats are
+locked: the seat came from an invite, or is one the admin kept by locking the room (Lock seats keeps the seats taken at
+that moment, and the admin sees and may move each). Never a page seated On stage, never the admin's view of someone,
+and never a guest of an open hall, where anyone with the code may sit backstage. A person is named only while they sit
+in a room of the hall the operator may read; anyone else is "not in this hall now". The console names the Board's
+people only to one who may read the hall's Main room.
+
+Every take is numbered, one count per hall, and a page shows the newest take addressed to it: its person's, or the
+Board's on a page On stage, so **back to chat** is how a page is handed back. A page that comes On stage later, comes
+back from a drop or a reload, or after a restart, is shown what it was shown, with no backlog. Each page says what it
+did with its take, and only those reports make its status, person first: **◷ Sending** until every page has said;
+**✓ On all 6 Board pages** / **On Ana's page** once each said it showed that take; **◐ 5 of 6 showing · 1 asleep or in
+another app**; **△ Couldn't show it** and why; **▭ Ana minimised it at 14:02**; **○ Ana went back to chat at 14:02**, or
+**Back to chat on all 6 Board pages** for a hand-back (never ✓); **✕ Nobody on the Board is online**. A report of an
+older take, or from the admin's view of someone, counts for nothing.
+
+A person's **Back to chat** is theirs on every page they have in the hall: each goes back to its chat, and the take
+does not come back on a reload or a restart; a newer take shows again. **Minimise** is kept the same way, until they
+show it again. A seat moved to or from On stage is told at once what it is shown now, and so is every page shown a
+holding slide with no picture of its own when the hall's holding image is set or cleared, and every page shown a take
+when the hall is renamed. The longest a Board page said it
+was asleep or behind another app while a take was on it is kept for the show day (health's `peaks.pageHiddenMs`).
+
+Each take is one `page.push` row in the audit log: who, whom ("the Board (6 pages)", or the person's name) and what
+kind of thing ("the clock", "a holding slide"), never a file. Nothing of a take is on the halls board, in the context
+another show system reads, or in the AI's brief. The hall page draws a take and its console with the next 0.6.0 unit;
+in this build a take reaches people's pages over the wire alone (below).
+
 ## The link is a capability
 
 `/d/<token>`: 256 random bits. It follows the W3C's good practice for capability URLs:
@@ -89,4 +126,17 @@ Anyone with a screen's link can see that screen, so give it only to the machine 
 `display:take {ids, content}` (or `{id, content}` for one screen), answered `{ok, results: [{id, ok, seq, status} or
 {id, ok: false, error}]}`; a hall's operators hear `displays:changed` at once for a lone change, and at most once per
 150 ms in a burst (`lib/latest.js`), then re-read the list.
-Tests: `app/test/displays.test.js` and the browser smoke.
+People's screens: `app/lib/pages.js` (the store, what may be shown, its words and the states),
+`app/lib/handlers/takes.js` (the verbs) and `server.js` (who may push, the pages open in a hall, `pages:changed`). A
+take is `page:push {code, to: 'board' | {uid}, content, cid}` (`uid` a person's key as `page:status` lists them:
+`a:<account id>`, `u:<uid>`), answered `{ok, seq, results: [{key, name, ok, status}]}` with "◷ Sending", never on
+screen; a repeat with its client id is answered with what the first push did, in memory, so a restart between the push
+and its repeat makes a second take of the same content. Each page is sent `page:take {seq, content, by, at, hallName,
+holding, now, tz, answer}` by its socket's id, never as a room's broadcast, and answers `page:report {seq, state, words,
+again}` (`shown`, `hidden`, `failed`, `dismissed`, `minimised`; acked). A hall's consoles hear `pages:changed {}` at
+most once per 150 ms in a burst and read `page:status {code}` again. A page's join answers `page` (what it is shown now)
+and `canPush`; the admin's view of someone names them (`viewOf`), is shown what they are shown and told their chat view
+as it changes, and its join answers, at the end, their facts as their page holds them (`person: {role, view, canPush,
+sends, forwardable}`, or null), so it can draw exactly their doors. A key that is no hall's is refused in the words a
+hall the asker may not push in gets, by `page:push` and `page:status` alike; only the admin is told "No such hall."
+Tests: `app/test/displays.test.js`, `app/test/pages.test.js`, `app/test/takes.test.js` and the browser smoke.

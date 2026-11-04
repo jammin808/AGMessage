@@ -25,7 +25,7 @@ const CAPS = Object.freeze({
   'hall.view': 'See a hall: its messages, files, countdown and screens',
   'hall.post': 'Send messages, replies, action prompts and help requests',
   'hall.files': 'Share files and push them to a hall',
-  'display.control': 'Change what a hall\'s screens show',
+  'display.control': 'Change what a hall\'s screens and people\'s pages show',
   'display.manage': 'Create, rename, move and revoke screens',
   'stage.send': 'Send to Stagewatch: the speaker\'s screen, or to the operator to pass on',
   'nodes.control': 'Propose commands to Patterns and PlayMap (to the show desk)',

@@ -128,6 +128,24 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   downloaded, or a copy someone there forwarded or sent on into another room, and a file's link keeps working while any
   room (the copy here among them) or screen holds it. Each withdrawal is one `room.withdraw` row, never the words or a
   file's name; a repeat changes nothing and writes none.
+- A take on people's pages (`page:push`) is the admin's, an account's with `display.control` in the hall, or a code
+  guest's seated backstage in the hall's Main room while its seats are locked (the seat came from an invite, or was one
+  the admin kept by locking the room, who sees and may move each seat kept): never a page seated On stage, the admin's
+  view of someone or a guest of an open hall, where anyone with the code may sit backstage. A push takes its rate before
+  it looks the hall up, and a key that is no hall's is refused, by the push and by the console's read alike, in the words
+  a hall the asker may not push in gets (only the admin, who sees every hall, is told there is none): a hall's key is its
+  guest code until New code, so neither verb tells anyone whether a code is real, and the join's lockout stays the only
+  way to try one. A push names a person only while they sit in a room of the hall the pusher may read, and is refused in
+  the same words for anyone else, so it tells nobody who sits in a room they cannot read; a console's read of the hall's
+  pages (`page:status`, the same rights) lists only those rooms' people, and names the Board's people only to one who may
+  read the hall's Main room ("Someone went back to chat" to anyone else). What
+  may be shown is cleaned on the server, fail closed (a picture must be one of AGMessage's uploads shared in a room of the
+  hall the pusher may read). A take reaches a page by its socket's id alone, never as a room's op or broadcast (the
+  takes module holds neither), and carries no key or code; consoles are told only that something changed. A page's own
+  report is the only thing that makes it "on screen", counted only for the take that page is shown now and never from
+  the admin's view of someone. Each push is one `page.push` row naming whom and what kind of thing, never a file; a
+  repeat of a push (its client id) is answered with what it did and writes none. Nothing of a take reaches the halls
+  board, the context or the AI.
 - Room keys and guest codes are two things. A guest joins by a room's guest code alone, each room its own: a side room's
   is made with it and is never its key, and a hall's Main room's is its key until the admin renews it (New code), so a
   0.5.1 hall keeps the code its guests know. A code is one room's (no live code, earlier code or key shared). The admin
