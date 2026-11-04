@@ -19,7 +19,8 @@
 //          a drop it is sent again with its cid only where the server answers a repeat (REPEATS), and otherwise the
 //          person is told to check.
 //   self   what a person does on their own page: the page acts at once; its report is queued, the newest per key, and
-//          sent once the page is connected and joined.
+//          sent once the page is connected and joined, with its answer where the page asks for one (a report replaced
+//          before it went is never sent, and its answer never called).
 //   local  nothing on the wire.
 //
 // It touches no DOM: what it holds is drawn by the page, told of each change through `onChange`.
@@ -39,8 +40,9 @@
   };
   // The `now` verbs the server answers a repeat of with what the first one did: a pin carries its state, a reaction with
   // `on` sets one, a second delete answers `already`, a room made is answered with that room by its cid, a send withdrawn
-  // already answers `already`. Any other is never sent twice.
-  const REPEATS = new Set(['pin', 'react', 'delete', 'room:create', 'room:withdraw']);
+  // already answers `already`, a take on people's pages is answered with the first push's answer by its cid. Any other is
+  // never sent twice.
+  const REPEATS = new Set(['pin', 'react', 'delete', 'room:create', 'room:withdraw', 'page:push']);
   const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
   /** 16 random bytes as base64url, 22 characters, from getRandomValues: randomUUID exists only in a secure context. */
@@ -242,7 +244,7 @@
 
     function flushSelves() {
       if (!isReady()) return;
-      for (const [k, r] of Array.from(selves)) { selves.delete(k); emit(r.verb, r.wire); }
+      for (const [k, r] of Array.from(selves)) { selves.delete(k); emit(r.verb, r.wire, r.answer); }
     }
 
     return {
@@ -339,9 +341,12 @@
         n.go();
       },
 
-      /** A report of what the person did on their own page: the newest per key is sent once connected and joined. */
-      self(verb, args, k) {
-        selves.set(verb + '|' + (k === undefined ? '' : k), { verb, wire: args === undefined ? [] : [args] });
+      /**
+       * A report of what the person did on their own page: the newest per key is sent once connected and joined, its
+       * answer (`answer`, when given) the server's to it.
+       */
+      self(verb, args, k, answer) {
+        selves.set(verb + '|' + (k === undefined ? '' : k), { verb, wire: args === undefined ? [] : [args], answer: typeof answer === 'function' ? answer : null });
         flushSelves();
       },
 

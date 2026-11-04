@@ -52,6 +52,8 @@ const ON_STAGE_WORDS = {
   'room:withdraw': 'Only its sender or the admin withdraws it.',
   // A room's guest code is the admin's to switch and renew, whatever the seat: refused as every seat but the admin is.
   'room:update': 'Not admin',
+  // What people's pages show is changed from a backstage page (the Board chip, a person's Show them ▸).
+  'page:push': 'Do that from a backstage page.',
 };
 
 test('every act hidden from a seat by its rights is refused by the server as that seat, with words, and changes nothing', async (t) => {
@@ -143,11 +145,17 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   // The rest of the hall page: each composer, the stage chip (the link up), the header's ⋯, and the people of the room as
   // the server lists them (a person: `person`'s hall half; the admin's rows fit the admin page alone).
   const composer = (form) => ({ id: 'compose:' + form, form, room: 'Hall A', file: form === 'file' ? 'capex.pdf' : '', replying: '', priority: false });
-  const people = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallA })).users.map((u) => ({ id: 'person:' + u.uid, uid: u.uid, name: u.name, role: u.role }));
+  const people = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallA })).users.map((u) => ({ id: 'person:' + u.uid, uid: u.uid, name: u.name, role: u.role, key: (u.account ? 'a:' : 'u:') + u.uid, kind: 'clock' }));
+  // What people's pages show: the Board as the console reads it (the clock up, so every other kind may be chosen), a
+  // take on a page and its card (a page's own report, every seat's: no right hides it).
+  const boardNow = (await emit(seats.admin.s, 'page:status', { code: hallA })).board;
+  assert.ok(boardNow, 'the admin reads the console');
   const objects = {
     msg: messages, file: [fileOf('list'), fileOf('preview')], screen: [screen],
     compose: ['director', 'text', 'action', 'file'].map(composer), chip: [{ id: 'stage', live: true, text: '04:30', words: 'Live from Stagewatch' }],
     header: [{ id: 'header', people: people.length, peopleShown: false, zoom: 1, dark: false, code: hallA, on: true, hall: 'Hall A', account: false, away: '/' }], person: people,
+    take: [{ id: 'take', seq: 1, kind: 'clock', strip: true, full: false }], card: [{ id: 'card', seq: 1, kind: 'clock' }],
+    board: [{ id: 'board', seq: 1, kind: 'clock', pages: boardNow.pages, on: 0, mark: '◷', words: 'Sending', showing: 'the clock', mine: { seq: 1, previous: { kind: 'chat' }, time: '14:02' } }],
   };
   assert.ok(people.length >= 7, 'the room\'s people, as the join lists them');
 
@@ -174,6 +182,19 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     message: () => ({ type: 'text', text: 'From a seat that may not post' }),
     'room:update': (o, e) => (e.id === 'header.newCode' ? { code: hallA, newCode: true } : { code: hallA, codeOn: false, keepGuests: false }),
     'display:list': () => ({ code: hallA }),
+    // A show kind on the Board, or on the person; Back to over the take the object names (ifSeq).
+    'page:push': (o, e) => (e.id.startsWith('person.') ? { code: hallA, to: { uid: o.key }, content: { kind: e.id === 'person.chat' ? 'chat' : 'blank' } }
+      : { code: hallA, to: 'board', content: e.id === 'board.back' ? o.mine.previous : { kind: e.id.slice('board.'.length) }, ...(e.id === 'board.back' ? { ifSeq: o.seq } : {}) }),
+    // A page's word on the take it is shown (the layer's acts, a card's): Back to chat on the object's take.
+    'page:report': (o) => ({ seq: o.seq, state: 'dismissed' }),
+  };
+  // The verbs no right hides from any seat, so none is sent below as a seat it is hidden from, each with why. Every entry
+  // is still iterated by its `may` alone: one of these an entry hides from a seat by a right is refused like any other,
+  // and this list is then wrong (asserted below).
+  const OPEN_TO_EVERY_SEAT = {
+    // A page's report on its own take: every seated page's, whatever its rights; the server refuses it from the support
+    // view and from a page seated nowhere (test/takes.test.js).
+    'page:report': 'every seated page reports on its own take',
   };
   // The acts the hall page draws: each that fits some seat's facts and some object here (a kind's rows another page draws
   // never fit this one).
@@ -213,12 +234,15 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   }
   assert.deepEqual(wrong, [], 'each hidden act is refused with words');
   for (const [name, verbs] of Object.entries(onStage)) assert.deepEqual([...verbs].sort(), Object.keys(ON_STAGE_WORDS).sort(), 'every verb of the On stage table was sent as ' + name);
-  // Every verb was refused to some seat, so none passes by never being sent.
-  assert.deepEqual([...sent].filter((v) => !refused.get(v)), [], 'every verb is sent as a seat it is hidden from: ' + JSON.stringify(Object.fromEntries(refused)));
+  // Every verb was refused to some seat, so none passes by never being sent; those no right hides, none, and only they.
+  assert.deepEqual([...sent].filter((v) => !refused.get(v) && !OPEN_TO_EVERY_SEAT[v]), [], 'every verb is sent as a seat it is hidden from: ' + JSON.stringify(Object.fromEntries(refused)));
+  assert.deepEqual(Object.keys(OPEN_TO_EVERY_SEAT).filter((v) => !sent.has(v) || refused.get(v)), [], 'a verb no right hides is one an act sends, and no seat was refused it');
   // And nothing changed: no message pinned, reacted to, answered, removed or moved on; the screen as it was.
   const after = await hallNow();
   const brief = (h) => ({ messages: h.messages.map((m) => [m.id, !!m.pinned, (m.reactions || []).length, (m.responses || []).length, (m.help && m.help.state) || '']), displays: h.displays.map((d) => [d.id, d.name, d.path, d.content && d.content.kind]) });
   assert.deepEqual(brief(after), brief(before));
+  const pagesAfter = await emit(seats.admin.s, 'page:status', { code: hallA });
+  assert.deepEqual([pagesAfter.board.seq, pagesAfter.people.map((p) => p.seq).filter(Boolean)], [0, []], 'no take was put up on anyone\'s page');
   const inB = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallB })).messages.filter((m) => m.type !== 'system');
   assert.deepEqual(inB, [], 'nothing was forwarded into hall B');
   const inC = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallC })).messages.filter((m) => m.type !== 'system');
@@ -400,7 +424,10 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
   // The halls board draws a hall's rooms in its Set up (kind adminRoom, the same rooms as the admin page's), and its room
   // buttons (kind room: its hall's Set up from there).
   const KINDS = { admin: ['adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop'], board: ['hall', 'room', 'help', 'adminRoom'], accounts: ['account', 'audit'] };
-  const verbsOf = Object.values(KINDS).flat().flatMap((k) => C.KINDS[k]).filter((e) => e.verb !== 'local');
+  // The acts these pages draw: each that fits some seat's facts and some object here (a kind's rows the hall page draws, a
+  // person's Show them ▸ among them, never fit these pages).
+  const fitsOn = (page, k, e) => Object.values(seats[page]).some((seat) => ((seat.objects && seat.objects[k]) || objects[k]).some((o) => e.fits(seat.f, o)));
+  const verbsOf = Object.entries(KINDS).flatMap(([page, kinds]) => kinds.flatMap((k) => C.KINDS[k].filter((e) => e.verb !== 'local' && fitsOn(page, k, e))));
   assert.deepEqual([...new Set(verbsOf.filter((e) => !e.verb.startsWith('http:') && !(e.verb in PAYLOADS)).map((e) => e.verb))], [], 'every socket verb an act sends has its refusal case');
   const say = (s, verb, payload) => new Promise((resolve) => { if (payload === null) s.emit(verb, resolve); else s.emit(verb, payload, resolve); });
   const refusal = async (s, verb, payload) => {

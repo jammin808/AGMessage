@@ -416,8 +416,9 @@ const frames = {
   // Every halls board watcher, with the halls it may see (one key: the board is rebuilt for every watcher). A hall's
   // people, screens and Stagewatch mark it, which are what make a hall live: the power request follows it then.
   board: new Latest({ name: 'board', delayMs: 300, flush: () => { sendBoards(); keepAwake(); } }),
-  // A hall's screens console re-reads its list (keyed by the hall): a take on 50 screens is one re-read per console.
-  screens: new Latest({ name: 'screens', delayMs: 150, flush: (halls) => eachRoom('screens', halls, (r) => io.to(r.code).emit('displays:changed', { code: r.code })) }),
+  // A hall's screens console re-reads its list (keyed by the hall): a take on 50 screens is one re-read per console. Told
+  // to every room of the hall, a signal with no content, so a console in a side room hears it and no page is sent a key.
+  screens: new Latest({ name: 'screens', delayMs: 150, flush: (halls) => eachRoom('screens', halls, (r) => { for (const room of store.roomsOf(r.code)) io.to(room.code).emit('displays:changed', {}); }) }),
   // A room's people list (keyed by the room, a hall's Main room or a side room): a join storm is one list per window, not
   // one per join to every page.
   people: new Latest({ name: 'people', delayMs: 100, flush: (rooms) => eachRoom('people', rooms, (r) => sendPeople(r)) }),

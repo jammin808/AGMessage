@@ -48,8 +48,13 @@ const REPORTS = Object.freeze(['shown', 'hidden', 'opened', 'failed', 'dismissed
 const CHAT_REPORTS = Object.freeze(['shown', 'hidden']);
 const DRAWN_REPORTS = Object.freeze(['shown', 'hidden', 'failed', 'dismissed', 'minimised']);
 const reportsOf = (kind) => (kind === 'chat' ? CHAT_REPORTS : DRAWN_REPORTS);
-/** A person's answer to a take, kept with the take it answered: Back to chat (final for that take) and Minimise. */
+/**
+ * A person's answer to a take, kept with the take it answered: Back to chat and Minimise. Back to chat is final for that
+ * take but for AGAIN_MS after it is chosen: then the same person's Show it again (a `shown` report with `again`) takes it
+ * back, and so does a card's Undo (a `minimised` report), which puts the take back in the person's side bar.
+ */
 const ANSWERS = Object.freeze(['dismissed', 'minimised']);
+const AGAIN_MS = 10_000;
 /** A guest's chat view: '' (by their seat), Simple or Full, as an account's (lib/accounts.js VIEWS). */
 const VIEWS = Object.freeze(['', 'simple', 'full']);
 /**
@@ -256,12 +261,13 @@ class Pages {
   /**
    * One page says what it did with a take (its socket's id `sid`, its person's `key`, `board` when it sits On stage in
    * Main, at `at`): counted only for the take that page is shown now, never an older one, and only in a state a take of
-   * its kind has. Back to chat and Minimise are the person's answer, kept with that take for all their pages; Back to
-   * chat is final for it. A Minimise is taken back only by the person's Show again (`again`, a `shown` report): a page
-   * that drew the take and says so (`shown`, as it first draws or comes back into view) before it hears of the Minimise
-   * keeps it, so one device never undoes what the person did on another. Returns {ok, answer}, the person's answer to
-   * that take as it now stands, and `hiddenMs` when this report ends a Board page's time out of view with a take drawn
-   * on it; or {ok: false, error}; a report of no person, at no time, keeps nothing.
+   * its kind has. Back to chat and Minimise are the person's answer, kept with that take for all their pages. Back to
+   * chat is final for it once AGAIN_MS have passed; until then the person's Show it again (`again`) takes it back, and a
+   * card's Undo (`minimised`) makes it a Minimise again. A Minimise is taken back only by the person's Show again
+   * (`again`, a `shown` report): a page that drew the take and says so (`shown`, as it first draws or comes back into
+   * view) before it hears of the Minimise keeps it, so one device never undoes what the person did on another. Returns
+   * {ok, answer}, the person's answer to that take as it now stands, and `hiddenMs` when this report ends a Board page's
+   * time out of view with a take drawn on it; or {ok: false, error}; a report of no person, at no time, keeps nothing.
    */
   report(hall, sid, { key, board = false, seq, state, again = false, words = '', at = Date.now() } = {}) {
     if (!REPORTS.includes(state)) return { ok: false, error: 'A report is one of: ' + REPORTS.join(', ') + '.' };
@@ -272,11 +278,16 @@ class Pages {
     const states = reportsOf(take.content.kind);
     if (!states.includes(state)) return { ok: false, error: 'A page shown ' + describePage(take.content) + ' reports one of: ' + states.join(', ') + '.' };
     const layer = layerOf(take.content.kind);
-    if (answer && answer.state === 'dismissed' && state !== 'dismissed') return { ok: false, error: 'Back to chat was chosen for that one: a newer take shows again.' };
+    // Back to chat taken back: Show it again (shown, `again`) or a card's Undo (minimised), within AGAIN_MS of it.
+    const undo = (state === 'shown' && again === true) || state === 'minimised';
+    if (answer && answer.state === 'dismissed' && state !== 'dismissed') {
+      if (!undo) return { ok: false, error: 'Back to chat was chosen for that one: a newer take shows again.' };
+      if (at - answer.at > AGAIN_MS) return { ok: false, error: 'Back to chat was chosen for that one more than 10 s ago: a newer take shows again.' };
+    }
     const book = this.halls[hall];
     let kept = answer;
     if (ANSWERS.includes(state) && !(answer && answer.state === state)) kept = this._answer(book, key, layer, { seq, state, at });
-    else if (state === 'shown' && again === true && answer && answer.state === 'minimised') { this._drop(book.answers, key, layer); kept = null; }
+    else if (state === 'shown' && again === true && answer) { this._drop(book.answers, key, layer); kept = null; }
     if (kept !== answer) { this._trim(book); this.save(); }
     // A Board page out of view (asleep, or another app in front) while a take is drawn on it: how long, from its first
     // such report to the report or the leave that ends it, a take that replaces another while it stays out of view
@@ -316,14 +327,16 @@ class Pages {
 
   /**
    * Where one page stands on the take it is shown now ({sid, key, board}): {seq, state, words, at}, its state the
-   * person's answer to that take, else the page's report on it, else `waiting`.
+   * person's answer to that take, else the page's report on it, else `waiting`. A page's report of an answer (Back to
+   * chat, Minimise) is the person's answer, and counts only while that answer stands: once taken back (Show it again),
+   * the page is waiting until it says what it does with the take again.
    */
   pageState(hall, { sid, key, board = false } = {}) {
     const { take, answer } = this.current(hall, key, { board });
     const seq = take ? take.seq : 0;
     if (answer) return { seq, state: answer.state, words: '', at: answer.at };
     const r = this.live.has(hall) ? this.live.get(hall).get(sid) : undefined;
-    if (r && r.key === key && r.seq === seq) return { seq, state: r.state, words: r.words, at: r.at };
+    if (r && r.key === key && r.seq === seq && !ANSWERS.includes(r.state)) return { seq, state: r.state, words: r.words, at: r.at };
     return { seq, state: 'waiting', words: '', at: 0 };
   }
 
@@ -349,12 +362,14 @@ class Pages {
    * until every page has said; ○ every page went back to chat, or every page handed back to its chat by a `chat` take
    * said it is there (back to chat is never "on screen"); ▭ every page minimised it; ◇ opened (a web page, which cannot
    * be seen into); ✓ on every page; else ◐, how many show it (or, for a `chat` take, are back to chat) and why the rest
-   * do not.
+   * do not. With them, what it shows (`showing`, in words, and its `kind`), and of its `pages` how many show it now (`on`).
    */
   static status(take, pages, { board = false, name = '', hallHolding = '', clock = clockOf } = {}) {
     const list = Array.isArray(pages) ? pages : [];
     const n = list.length;
-    const out = (mark, words) => ({ seq: take ? take.seq : 0, showing: describePage(take && take.content, { hallHolding }), mark, words, pages: n });
+    // `kind`, what it shows ('' for nothing), and `on`, how many of its pages show it now (a hand-back: are back on chat).
+    const on = take ? list.filter((p) => p.state === 'shown' || p.state === 'opened').length : 0;
+    const out = (mark, words) => ({ seq: take ? take.seq : 0, showing: describePage(take && take.content, { hallHolding }), kind: take && isRecord(take.content) ? take.content.kind : '', mark, words, pages: n, on });
     if (!n) return out(MARKS.fault, board ? 'Nobody on the Board is online' : name ? name + ' has no page open in this hall' : 'No page of theirs is open in this hall');
     if (!take) return out(MARKS.off, 'Nothing shown yet');
     const of = (state) => list.filter((p) => p.state === state);
@@ -468,4 +483,4 @@ class Pages {
   }
 }
 
-module.exports = { Pages, cleanPage, describePage, personKey, layerOf, reportsOf, KINDS, LAYERS, IMAGE_EXT, REPORTS, ANSWERS, VIEWS, MARKS, BOUNDS };
+module.exports = { Pages, cleanPage, describePage, personKey, layerOf, reportsOf, KINDS, LAYERS, IMAGE_EXT, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS };

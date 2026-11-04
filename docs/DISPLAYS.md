@@ -21,7 +21,7 @@ to a red square (`?status=hide` hides it). The screen keeps itself awake where t
 
 ## Driving screens
 
-In a hall (as an account with `display.control`): the header's ⋯ → **Screens…**. Tick the screens, then take Holding, Countdown, Clock,
+In a hall (as an account with `display.control`): the header's ⋯ → **Screens & pages…**, its **Screens** tab. Tick the screens, then take Holding, Countdown, Clock,
 Black, or type a message and choose **Show** (tick "Under the countdown" to put it in the countdown's strip). On any
 message, or any image or PDF shared in the hall, **⧉** offers it to the ticked screens (a PDF from its first page).
 A take goes to every ticked screen in one request — all 50 of a hall's screens if they are ticked; a screen it could
@@ -101,8 +101,55 @@ was asleep or behind another app while a take was on it is kept for the show day
 
 Each take is one `page.push` row in the audit log: who, whom ("the Board (6 pages)", or the person's name) and what
 kind of thing ("the clock", "a holding slide"), never a file. Nothing of a take is on the halls board, in the context
-another show system reads, or in the AI's brief. The hall page draws a take and its console with the next 0.6.0 unit;
-in this build a take reaches people's pages over the wire alone (below).
+another show system reads, or in the AI's brief.
+
+### Showing it: the Board chip and the console
+
+A page that may show people's pages has the **Board chip** in its header: what the Board's pages show and how many show
+it ("Board · 🕐 Clock ✓ 6/6"; "Board · ✕ nobody on stage" with no Board page open). A click on it, a right-click or
+Shift+F10 opens its menu: **Back to chat · Show Stagewatch · Show the clock · Show holding · Show blank**, the one the
+Board shows checked (choosing it again says "Already showing the clock."; Stagewatch is greyed where the hall has none
+linked), then **↶ Back to …** and **Screens & pages…**. A choice goes at once, and the toast names whom it reached
+("The clock on 6 Board pages.") with **Undo** for 10 s, which puts back what was shown before as a take of its own (none
+is offered where that was a picture shared in a room this page may not read). After
+that, the chip's **↶ Back to Stagewatch (undo your Clock, 14:02)** does the same while this page's take is still the
+Board's: it is sent over that take, so it never undoes someone else's later take, and a take made by an Undo or a Back to
+offers no undo of its own.
+
+The header's ⋯ → **Screens & pages…** is the hall's console: its **Screens** tab (above) for a page that drives the
+hall's screens, and its **People's pages** tab for one that may show people's pages, each tab where the page may use
+it. People's pages lists **On stage (Board) — all 6** first, with a button for each kind, then each person in the
+hall's rooms the operator may read, with their room, each with its status (mark and words) and what it shows now; a
+person's ⋯ (and a right-click, and Shift+F10) holds **📺 Show them ▸** (Stagewatch, Clock, Holding, Blank) and **Back
+to chat on their pages**. The same two acts are on a person in the room's People list and on a message's sender's name.
+It reads where the pages stand as it opens and each time it is told they changed.
+
+### On the person's page
+
+A take is drawn over the hall page, the header and the side bar included (under the menus, the asks and the toast), on
+black: Stagewatch's countdown (its time, title, next and the speaker's line; `--:--` while the link is lost, its key not
+accepted, or the page not connected), the clock (AGMessage's time and zone), the holding picture (a picture that does
+not load leaves black, and says so), the AGMessage mark and the hall's name, or black, whose bar shows once the screen
+is touched or a key pressed. Its bar names what it is and who put it up, and holds **💬 Back to chat**, **🔽 Minimise**
+and, where the device can, **⛶ Full screen**, 48 px, in words as well as icons (in the full view its ⋯, a right-click
+and Shift+F10 hold the same). **Escape minimises; it never goes back to chat.** The page says what it drew only while it
+is in view (shown, or hidden while asleep or behind another app, and again when that changes), so the console's ✓ means
+someone could see it.
+
+- **Back to chat** takes it off every page of the person's in the hall; the toast offers **Show it again** for 10 s,
+  which brings it back on all of them (after 10 s the server refuses it, and a newer take shows again).
+- **Minimise** puts it at the top of the side bar (📺 On stage) as a card, "⏱ Stagewatch" with its live time, "🕐 Clock"
+  with the time, "🖼 Holding" or "🌑 Blank", who put it up and when, and **⤴ Show again** and **Remove** (which is Back to
+  chat, with Undo for 10 s). The side bar opens itself for it, and while it is collapsed its rail reads "📺 On stage •
+  1". An observer or a Viewer account, who has no side bar, is given one while a take of theirs is minimised, so a
+  Minimise always has somewhere to go. While a card is there a new document does not open itself over it.
+- **Nothing reaches the stage by surprise, and nothing is lost.** A take never takes the focus from a field being written
+  in: it waits until the field is left, at most 3 s, and the field keeps its words under it. While a take covers the
+  page, a 🔥 message from someone else breaks through in a strip at its foot, with its sender, its words and **Open
+  chat** (which minimises the take and brings the message into view), and other new messages are counted on its bar
+  ("2 new").
+- The admin's view of someone draws what they are shown, every door disabled with whose view it is, and says nothing to
+  the server.
 
 ## The link is a capability
 
@@ -122,10 +169,10 @@ Anyone with a screen's link can see that screen, so give it only to the machine 
 ## Where it lives
 
 `app/lib/displays.js` (the store, what may be shown, the states), `server.js` (`/d/:token`, `serveDisplay`, the
-`display:*` events), `app/public/display.html|css|js` (the screen), `app/public/app.js` (Screens). A take is
+`display:*` events), `app/public/display.html|css|js` (the screen), `app/public/app.js` (Screens & pages). A take is
 `display:take {ids, content}` (or `{id, content}` for one screen), answered `{ok, results: [{id, ok, seq, status} or
-{id, ok: false, error}]}`; a hall's operators hear `displays:changed` at once for a lone change, and at most once per
-150 ms in a burst (`lib/latest.js`), then re-read the list.
+{id, ok: false, error}]}`; a hall's operators hear `displays:changed {}` at once for a lone change, and at most once
+per 150 ms in a burst (`lib/latest.js`), then re-read the list.
 People's screens: `app/lib/pages.js` (the store, what may be shown, its words and the states),
 `app/lib/handlers/takes.js` (the verbs) and `server.js` (who may push, the pages open in a hall, `pages:changed`). A
 take is `page:push {code, to: 'board' | {uid}, content, cid}` (`uid` a person's key as `page:status` lists them:
@@ -133,8 +180,18 @@ take is `page:push {code, to: 'board' | {uid}, content, cid}` (`uid` a person's 
 screen; a repeat with its client id is answered with what the first push did, in memory, so a restart between the push
 and its repeat makes a second take of the same content. Each page is sent `page:take {seq, content, by, at, hallName,
 holding, now, tz, answer}` by its socket's id, never as a room's broadcast, and answers `page:report {seq, state, words,
-again}` (`shown`, `hidden`, `failed`, `dismissed`, `minimised`; acked). A hall's consoles hear `pages:changed {}` at
-most once per 150 ms in a burst and read `page:status {code}` again. A page's join answers `page` (what it is shown now)
+again}` (`shown`, `hidden`, `failed`, `dismissed`, `minimised`; acked); a `shown` with `again` or a `minimised` within
+10 s of a `dismissed` takes Back to chat back, and a person's act refused (after 10 s) tells that page again what it is
+shown. A push may name the take it goes over (`ifSeq`: Undo and ↶ Back to), refused "Something newer is showing there
+now: nothing changed." once a newer take is up, and its answer gives back what was shown before (`previous: {seq,
+content}`, or null), its content only as the pusher could show it itself: a picture shared in a room it may not read
+comes back as `content: null`, and that page offers no Undo. A guest's console names its hall by the code it joined
+with, and a repeat of its push by that code is answered with what the first did. A hall's consoles hear `pages:changed
+{}` at most once per 150 ms in a burst and read `page:status {code}` again (each row also giving what it shows, `kind`,
+and how many of its pages show it, `on`); a hall's screens consoles hear `displays:changed {}`, in every room of the
+hall, naming nothing, and read their hall's list again. The hall page draws a take with `app/public/pagelayer.mjs`
+(loaded at its first take; it draws and answers what it drew, holding no socket) and its console and the Board chip in
+`app/public/app.js` (`Takes`, `Console`). A page's join answers `page` (what it is shown now)
 and `canPush`; the admin's view of someone names them (`viewOf`), is shown what they are shown and told their chat view
 as it changes, and its join answers, at the end, their facts as their page holds them (`person: {role, view, canPush,
 sends, forwardable}`, or null), so it can draw exactly their doors. A key that is no hall's is refused in the words a

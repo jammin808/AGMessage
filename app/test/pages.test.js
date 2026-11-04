@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Pages, cleanPage, describePage, personKey, layerOf, reportsOf, KINDS, LAYERS, IMAGE_EXT, REPORTS, ANSWERS, VIEWS, MARKS, BOUNDS } = require('../lib/pages');
+const { Pages, cleanPage, describePage, personKey, layerOf, reportsOf, KINDS, LAYERS, IMAGE_EXT, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS } = require('../lib/pages');
 const { cleanContent } = require('../lib/displays');
 const guard = require('../lib/guard');
 const { VIEWS: ACCOUNT_VIEWS } = require('../lib/accounts');
@@ -155,6 +155,45 @@ test('a take the store does not keep is not numbered: a hall, a target or a cont
   assert.equal(p.take(HALL, 'board', { kind: 'blank' }, 'Ada').by.name, '', 'a pusher that is not a record has no name');
 });
 
+test('Back to chat taken back within 10 s: Show it again clears it, a card\'s Undo makes it a Minimise; after 10 s each is refused', () => {
+  const p = store();
+  const t = p.take(HALL, ANA, { kind: 'clock' }, { name: 'Ada' });
+  assert.deepEqual(p.report(HALL, 'phone', { key: ANA, seq: t.seq, state: 'dismissed', at: 1000 }).answer, { seq: t.seq, state: 'dismissed', at: 1000 });
+  // A routine word from her tablet (it drew the take, it went out of view) is still refused: only her acts take it back.
+  for (const [state, again] of [['shown', false], ['hidden', true], ['failed', false]]) {
+    assert.deepEqual(p.report(HALL, 'tablet', { key: ANA, seq: t.seq, state, again, at: 2000 }), { ok: false, error: 'Back to chat was chosen for that one: a newer take shows again.' }, state);
+  }
+  // Show it again, 10 s after to the millisecond: the answer goes, on every page of hers.
+  assert.deepEqual(p.report(HALL, 'phone', { key: ANA, seq: t.seq, state: 'shown', again: true, at: 1000 + AGAIN_MS }), { ok: true, answer: null });
+  assert.deepEqual(p.current(HALL, ANA), { take: t, answer: null });
+  assert.deepEqual(p.pageState(HALL, { sid: 'phone', key: ANA }), { seq: t.seq, state: 'shown', words: '', at: 1000 + AGAIN_MS });
+  // A card's Remove (Back to chat from her side bar), then its Undo within the window: a Minimise again, its time the Undo's.
+  assert.equal(p.report(HALL, 'phone', { key: ANA, seq: t.seq, state: 'dismissed', at: 20_000 }).answer.state, 'dismissed');
+  assert.deepEqual(p.report(HALL, 'tablet', { key: ANA, seq: t.seq, state: 'minimised', at: 29_999 }), { ok: true, answer: { seq: t.seq, state: 'minimised', at: 29_999 } });
+  assert.deepEqual(p.current(HALL, ANA).answer, { seq: t.seq, state: 'minimised', at: 29_999 });
+  // After the window: final. Neither act changes the answer, and nothing is written for them.
+  assert.equal(p.report(HALL, 'phone', { key: ANA, seq: t.seq, state: 'dismissed', at: 40_000 }).answer.state, 'dismissed');
+  let saves = 0;
+  const save = p.save.bind(p);
+  p.save = () => { saves++; save(); };
+  for (const [state, again] of [['shown', true], ['minimised', false]]) {
+    assert.deepEqual(p.report(HALL, 'phone', { key: ANA, seq: t.seq, state, again, at: 40_000 + AGAIN_MS + 1 }), { ok: false, error: 'Back to chat was chosen for that one more than 10 s ago: a newer take shows again.' }, state);
+  }
+  assert.deepEqual(p.current(HALL, ANA).answer, { seq: t.seq, state: 'dismissed', at: 40_000 });
+  assert.equal(saves, 0, 'a refused act saves nothing');
+  // A Board take's answer by a person On stage, alike: their Show it again on their Board page.
+  const board = p.take(HALL, 'board', { kind: 'blank' }, { name: 'Ada' });
+  assert.equal(p.report(HALL, 'ben', { key: BEN, board: true, seq: board.seq, state: 'dismissed', at: 50_000 }).answer.state, 'dismissed');
+  assert.deepEqual(p.report(HALL, 'ben-phone', { key: BEN, board: true, seq: board.seq, state: 'shown', again: true, at: 55_000 }), { ok: true, answer: null });
+  // His page that said Back to chat is waiting again, not "went back to chat": its word was his answer, now taken back.
+  assert.deepEqual(p.pageState(HALL, { sid: 'ben', key: BEN, board: true }), { seq: board.seq, state: 'waiting', words: '', at: 0 });
+  p.left('ben-phone');
+  assert.deepEqual(p.report(HALL, 'ben', { key: BEN, board: true, seq: board.seq, state: 'shown', at: 56_000 }), { ok: true, answer: null });
+  // Status reads it: what the take shows by its kind, and how many of its pages show it now.
+  assert.deepEqual(p.status(HALL, 'board', [{ sid: 'ben', key: BEN, board: true, name: 'Ben' }, { sid: 'cy', key: CY, board: true, name: 'Cy' }]),
+    { seq: board.seq, showing: 'blank', kind: 'blank', mark: '◷', words: 'Sending · on 1 of 2 pages', pages: 2, on: 1 });
+});
+
 test('answers only on the current take: Back to chat for all of a person\'s pages, final for that take; a newer take shows again', () => {
   const p = store();
   const t = p.take(HALL, ANA, { kind: 'clock' }, { name: 'Ada' });
@@ -170,8 +209,11 @@ test('answers only on the current take: Back to chat for all of a person\'s page
   assert.deepEqual(p.report(HALL, 'phone', { key: ANA, seq: 1, state: 'dismissed', at: 5000 }), { ok: true, answer: { seq: 1, state: 'dismissed', at: 5000 } });
   assert.deepEqual(p.current(HALL, ANA).answer, { seq: 1, state: 'dismissed', at: 5000 });
   assert.deepEqual(p.pageState(HALL, { sid: 'tablet', key: ANA }), { seq: 1, state: 'dismissed', words: '', at: 5000 });
-  // Final for that take: shown again or minimised is refused; Back to chat again is answered as done.
-  for (const state of ['shown', 'minimised', 'hidden']) assert.deepEqual(p.report(HALL, 'tablet', { key: ANA, seq: 1, state }), { ok: false, error: 'Back to chat was chosen for that one: a newer take shows again.' }, state);
+  // Final for that take: shown or out of view is refused; Show it again and a card's Undo only within 10 s of it (below);
+  // Back to chat again is answered as done.
+  for (const state of ['shown', 'hidden']) assert.deepEqual(p.report(HALL, 'tablet', { key: ANA, seq: 1, state }), { ok: false, error: 'Back to chat was chosen for that one: a newer take shows again.' }, state);
+  for (const [state, again] of [['shown', true], ['minimised', false]]) assert.deepEqual(p.report(HALL, 'tablet', { key: ANA, seq: 1, state, again, at: 15_001 }), { ok: false, error: 'Back to chat was chosen for that one more than 10 s ago: a newer take shows again.' }, state);
+  assert.equal(AGAIN_MS, 10_000);
   assert.deepEqual(p.report(HALL, 'tablet', { key: ANA, seq: 1, state: 'dismissed', at: 6000 }), { ok: true, answer: { seq: 1, state: 'dismissed', at: 5000 } });
   // A newer take shows again: the old answer answers nothing now, and is put away.
   const again = p.take(HALL, ANA, { kind: 'clock' }, { name: 'Ada' });
@@ -346,7 +388,7 @@ test('status: a mark and its words, person first, from each page\'s report on th
   const pg = (state, name = 'Ana', more = {}) => ({ state, name, words: '', at, ...more });
   const st = (pages, o = {}) => Pages.status(take, pages, o);
   const said = (r) => [r.mark, r.words];
-  assert.deepEqual(st([pg('shown')], { name: 'Ana' }), { seq: 4, showing: 'the clock', mark: '✓', words: 'On Ana\'s page', pages: 1 });
+  assert.deepEqual(st([pg('shown')], { name: 'Ana' }), { seq: 4, showing: 'the clock', kind: 'clock', mark: '✓', words: 'On Ana\'s page', pages: 1, on: 1 });
   assert.deepEqual(said(st([pg('shown'), pg('shown')], { name: 'Ana' })), ['✓', 'On all 2 of Ana\'s pages']);
   assert.deepEqual(said(st([1, 2, 3, 4, 5, 6].map(() => pg('shown')), { board: true })), ['✓', 'On all 6 Board pages']);
   assert.deepEqual(said(st([pg('shown')], { board: true })), ['✓', 'On the 1 Board page']);
@@ -366,16 +408,16 @@ test('status: a mark and its words, person first, from each page\'s report on th
   assert.deepEqual(said(st([pg('shown'), pg('shown'), pg('shown'), pg('shown'), pg('shown'), pg('hidden')], { board: true })), ['◐', '5 of 6 showing · 1 asleep or in another app']);
   assert.deepEqual(said(st([pg('shown', 'Cy'), pg('dismissed', 'Ana'), pg('minimised', 'Ben'), pg('other', 'Di')], { board: true })), ['◐', '1 of 4 showing · Ana went back to chat · Ben minimised it · 1 showing something else']);
   // ✕ no page open; ○ nothing shown yet.
-  assert.deepEqual(st([], { board: true }), { seq: 4, showing: 'the clock', mark: '✕', words: 'Nobody on the Board is online', pages: 0 });
+  assert.deepEqual(st([], { board: true }), { seq: 4, showing: 'the clock', kind: 'clock', mark: '✕', words: 'Nobody on the Board is online', pages: 0, on: 0 });
   assert.deepEqual(said(st([], { name: 'Ana' })), ['✕', 'Ana has no page open in this hall']);
   assert.deepEqual(said(st(undefined)), ['✕', 'No page of theirs is open in this hall'], 'no list, no name');
   assert.deepEqual(said(st([pg('shown'), pg('shown')])), ['✓', 'On all 2 of their pages']);
   assert.deepEqual(said(st([pg('shown')])), ['✓', 'On their page']);
-  assert.deepEqual(Pages.status(null, [pg('waiting')], { board: true }), { seq: 0, showing: 'the chat', mark: '○', words: 'Nothing shown yet', pages: 1 });
+  assert.deepEqual(Pages.status(null, [pg('waiting')], { board: true }), { seq: 0, showing: 'the chat', kind: '', mark: '○', words: 'Nothing shown yet', pages: 1, on: 0 });
   assert.equal(Pages.status({ seq: 1, content: { kind: 'holding' } }, [pg('shown')], { hallHolding: PIC }).showing, 'a holding slide');
   // A hand-back (`chat`) every page says it is back on: ○ back to chat, never ✓ on screen; ◷ until each has said.
   const back = (pages, o) => said(Pages.status({ seq: 5, content: { kind: 'chat' } }, pages, o));
-  assert.deepEqual(Pages.status({ seq: 5, content: { kind: 'chat' } }, [pg('shown'), pg('shown')], { board: true }), { seq: 5, showing: 'back to chat', mark: '○', words: 'Back to chat on all 2 Board pages', pages: 2 });
+  assert.deepEqual(Pages.status({ seq: 5, content: { kind: 'chat' } }, [pg('shown'), pg('shown')], { board: true }), { seq: 5, showing: 'back to chat', kind: 'chat', mark: '○', words: 'Back to chat on all 2 Board pages', pages: 2, on: 2 });
   assert.deepEqual(back([pg('shown')], { board: true }), ['○', 'Back to chat on the 1 Board page']);
   assert.deepEqual(back([pg('shown')], { name: 'Ana' }), ['○', 'Back to chat on Ana\'s page']);
   assert.deepEqual(back([pg('shown'), pg('shown')], { name: 'Ana' }), ['○', 'Back to chat on all 2 of Ana\'s pages']);
@@ -408,7 +450,7 @@ test('status read from the store: each page\'s report on the take it is shown no
   const there = board.slice(0, 2);
   assert.equal(p.status(OTHER, 'board', there).mark, '◷');
   for (const pg of there) assert.ok(p.report(OTHER, pg.sid, { key: pg.key, board: true, seq: handBack.seq, state: 'shown' }).ok);
-  assert.deepEqual(p.status(OTHER, 'board', there), { seq: handBack.seq, showing: 'back to chat', mark: '○', words: 'Back to chat on all 2 Board pages', pages: 2 });
+  assert.deepEqual(p.status(OTHER, 'board', there), { seq: handBack.seq, showing: 'back to chat', kind: 'chat', mark: '○', words: 'Back to chat on all 2 Board pages', pages: 2, on: 2 });
   p.forgetHall(OTHER);
   assert.ok(p.report(HALL, 's-ana', { key: ANA, board: true, seq: t.seq, state: 'shown' }).ok, 'its pages report in this hall again');
   assert.ok(p.report(HALL, 's-ben', { key: BEN, board: true, seq: t.seq, state: 'shown' }).ok);
@@ -417,7 +459,7 @@ test('status read from the store: each page\'s report on the take it is shown no
   assert.ok(p.report(HALL, 's-ben2', { key: BEN, board: true, seq: t.seq, state: 'shown' }).ok);
   assert.deepEqual(look(), [t.seq, '◐', '2 of 3 showing · 1 showing something else']);
   const ana = [{ sid: 's-ana', key: ANA, board: true, name: 'Ana' }, { sid: 's-ana-legal', key: ANA, board: false, name: 'Ana' }];
-  assert.deepEqual(p.status(HALL, ANA, ana, { name: 'Ana' }), { seq: mine.seq, showing: 'blank', mark: '◷', words: 'Sending', pages: 2 });
+  assert.deepEqual(p.status(HALL, ANA, ana, { name: 'Ana' }), { seq: mine.seq, showing: 'blank', kind: 'blank', mark: '◷', words: 'Sending', pages: 2, on: 0 });
   assert.ok(p.report(HALL, 's-ana-legal', { key: ANA, seq: mine.seq, state: 'dismissed', at: 3 }).ok);
   assert.equal(p.status(HALL, ANA, ana, { name: 'Ana' }).words, 'Ana went back to chat at ' + clockOf(3), 'her Back to chat holds on her Board page too');
   assert.deepEqual(p.pageState(HALL, { sid: 's-ana', key: ANA, board: true }), { seq: mine.seq, state: 'dismissed', words: '', at: 3 });
@@ -427,7 +469,7 @@ test('status read from the store: each page\'s report on the take it is shown no
   assert.ok(p.report(OTHER, 'x', { key: BEN, seq: c.seq, state: 'failed', words: '\u202Ebad ' + 'w'.repeat(300) }).ok);
   assert.equal(p.pageState(OTHER, { sid: 'x', key: BEN }).words, ('bad ' + 'w'.repeat(300)).slice(0, 160));
   assert.equal(p.pageState(OTHER, { sid: 'x', key: CY }).state, 'waiting', 'nothing for Cy, and Ben\'s report is not Cy\'s');
-  assert.deepEqual(p.status(OTHER, 'board', []), { seq: 0, showing: 'the chat', mark: '✕', words: 'Nobody on the Board is online', pages: 0 });
+  assert.deepEqual(p.status(OTHER, 'board', []), { seq: 0, showing: 'the chat', kind: '', mark: '✕', words: 'Nobody on the Board is online', pages: 0, on: 0 });
   assert.equal(p.status(HALL, 'board', 'not a list').mark, '✕');
   // A page that moved to another hall reports there: its report in the first is gone.
   assert.ok(p.report(HALL, 'x', { key: BEN, board: true, seq: t.seq, state: 'shown' }).ok);

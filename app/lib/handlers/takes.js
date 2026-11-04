@@ -35,6 +35,11 @@
  * each page says what it did with the take (`page:report`), and only those reports make the status (lib/pages.js
  * `Pages.status`), which a console reads (`page:status`) whenever it is told the hall's pages changed (`pages:changed`).
  * A push asked again with its client id (the outbox sends one again after a drop) is answered with what the first did.
+ * The answer gives back what the target was shown before (`previous`), which the pusher's Undo puts up again as a take of
+ * its own, and only as this pusher could show it itself: a picture shared in a room it may not read comes back as no
+ * content (a file's path is its capability), so that take is never handed to it nor put back by it. A push that names
+ * the take it goes over (`ifSeq`: the Board chip's ↶ Back to) is refused once anything newer is up, so it never undoes
+ * someone else's later take.
  */
 const { str } = require('../guard');
 const { cleanPage, describePage } = require('../pages');
@@ -56,16 +61,20 @@ const NOT_HERE = 'That person is not in this hall now.';
 const TARGETS = 'Show the Board (to: \'board\') or one person (to: {uid}).';
 /** A take the store would not keep (a part of it it does not read back): nothing was shown or numbered. */
 const NOT_KEPT = 'That could not be kept: nothing was shown.';
+/** A push asked for over a take (`ifSeq`, ↶ Back to) that is no longer what its target is shown: nothing changed. */
+const NEWER = 'Something newer is showing there now: nothing changed.';
+const IF_SEQ = 'That act\'s take could not be read.';
 /** What the support view is told of a report: it shows a person's page, and says nothing for it. */
 const SUPPORT_REPORTS = 'This is someone else\'s view: it reports nothing.';
 const NOT_SEATED = 'This page is not seated here: it reports nothing.';
 /** A client id as a page makes one (public/outbox.js), as a send's is read (server.js `CID_RE`). */
 const CID = /^[A-Za-z0-9_-]{1,40}$/;
 /**
- * The answers of the pushes made lately in each hall, by who asked and the client id their page gave the act, so a
- * `page:push` sent again with its id is answered with what the first did, never made a second take. The newest
- * PUSHED_KEEP a hall, the oldest let go, and only for halls still here (a hall's book goes at the next push once the
- * hall is gone), in memory: after a restart a repeat is a new take of the same content, which latest wins makes harmless.
+ * The answers of the pushes made lately in each hall, by the hall's key, who asked and the client id their page gave the
+ * act, so a `page:push` sent again with its id is answered with what the first did, never made a second take. The
+ * newest PUSHED_KEEP a hall, the oldest let go, and only for halls still here (a hall's book goes at the next push once
+ * the hall is gone), in memory: after a restart a repeat is a new take of the same content, which latest wins makes
+ * harmless.
  */
 const PUSHED_KEEP = 200;
 const pushed = new Map();
@@ -99,12 +108,24 @@ function register(socket, conn, ctx) {
     const me = conn.me();
     return !!hall && conn.room() === hall && me && me.role === 'research' ? OPEN_HALL : BACKSTAGE_TEAM;
   };
-  /** The hall a page asks of by its key, when it may push there; else null, with why answered (whyNot). */
+  /**
+   * The hall a page asks of by its key, or by the guest code it joined its Main room with (a guest's page knows its room
+   * by that code alone once New code parted it from the key), when it may push there; else null, with why answered
+   * (whyNot).
+   */
   const pushHall = (code, answer) => {
-    const hall = store.get(code) || null;
+    const hall = store.get(code) || joinedHall(code);
     if (hall && conn.canPush(hall)) return hall;
     answer({ ok: false, error: whyNot(hall) });
     return null;
+  };
+  /**
+   * The Main room this page sits in, where the code it names is the guest code it joined with; else null. A comparison
+   * with the socket's own data, never a lookup of what it names, so a repeat's book is found by it before the rate.
+   */
+  const joinedHall = (code) => {
+    const own = conn.room();
+    return !!code && code === socket.data.joinedAs && !!own && store.isMain(own) ? own : null;
   };
   /**
    * The Board's pages as the asker's answer names them: by their people's names for one who may read the hall's Main
@@ -141,7 +162,10 @@ function register(socket, conn, ctx) {
     const who = socket.data.actor || conn.me() ? conn.actor() : null;
     const asked = cid === null || !who ? '' : who.t + ':' + who.id + '|' + cid;
     const code = keyOf(a.code);
-    const kept = asked && pushed.has(code) ? pushed.get(code).get(asked) : undefined;
+    // The book is the hall's, by its key: a guest's page that names its hall by the code it joined with reads its own.
+    const own = joinedHall(code);
+    const bookKey = own ? own.code : code;
+    const kept = asked && pushed.has(bookKey) ? pushed.get(bookKey).get(asked) : undefined;
     if (kept) return answer(kept);
     if (!conn.writes.take()) return conn.limited(ack);
     const hall = pushHall(code, answer);
@@ -151,10 +175,11 @@ function register(socket, conn, ctx) {
     const person = !board && isRecord(a.to) ? str(a.to.uid) : '';
     if (!board && !person) return answer({ ok: false, error: TARGETS });
     const rooms = readable(hall);
-    const content = cleanPage(a.content, {
+    const facts = {
       stagewatch: !!linkFor(hall.code).base,
       readable: (url) => rooms.some((r) => r.messages.some((m) => m.type === 'file' && m.url === url)),
-    });
+    };
+    const content = cleanPage(a.content, facts);
     if (content.error) return answer({ ok: false, error: content.error });
     const before = hallPages(hall.code);
     const seated = before.filter((p) => !p.support);
@@ -163,6 +188,16 @@ function register(socket, conn, ctx) {
     if (!board && !target.length) return answer({ ok: false, error: NOT_HERE });
     const to = board ? 'board' : person;
     const name = board ? 'the Board' : target[0].name;
+    // What the target is shown before this take: the Board's own take, or the newest of the person's pages. The answer
+    // gives it back (`previous`), so the pusher's Undo puts it up again as a take of its own; a push that names the take
+    // it goes over (`ifSeq`, ↶ Back to) is refused once anything newer is up, so it never undoes someone else's take.
+    // Its content is given back only as this pusher could push it itself (cleanPage, its own facts): a picture shared in
+    // a room it may not read, or Stagewatch once the hall has none, comes back as no content, and its page offers no Undo.
+    const was = board ? pages.current(hall.code, '', { board: true }).take : target.reduce((t, p) => (p.current.take && (!t || p.current.take.seq > t.seq) ? p.current.take : t), null);
+    if (a.ifSeq !== undefined && a.ifSeq !== null) {
+      if (!Number.isInteger(a.ifSeq) || a.ifSeq < 0) return answer({ ok: false, error: IF_SEQ });
+      if (a.ifSeq !== (was ? was.seq : 0)) return answer({ ok: false, error: NEWER });
+    }
     const onStage = [...new Set(seated.filter((p) => p.board).map((p) => p.key))];
     const take = pages.take(hall.code, to, content, { name: byName() }, { onStage });
     if (!take) return answer({ ok: false, error: NOT_KEPT });
@@ -172,11 +207,12 @@ function register(socket, conn, ctx) {
     write('page.push', hall.code, (board ? 'the Board (' + pagesWords(target.length) + ')' : name) + ' → ' + describePage(take.content, { hallHolding: holding }));
     pagesChanged(hall.code);
     const status = pages.status(hall.code, to, target, { name: board ? '' : name, hallHolding: holding });
-    const res = { ok: true, seq: take.seq, results: [{ key: to, name, ok: true, status }] };
+    const back = was ? cleanPage(was.content, facts) : null;
+    const res = { ok: true, seq: take.seq, results: [{ key: to, name, ok: true, status }], previous: was ? { seq: was.seq, content: back.error ? null : back } : null };
     if (asked) {
       for (const k of pushed.keys()) if (!store.get(k)) pushed.delete(k);
-      if (!pushed.has(code)) pushed.set(code, new Map());
-      const book = pushed.get(code);
+      if (!pushed.has(hall.code)) pushed.set(hall.code, new Map());
+      const book = pushed.get(hall.code);
       book.set(asked, res);
       if (book.size > PUSHED_KEEP) book.delete(book.keys().next().value);
     }
@@ -200,7 +236,14 @@ function register(socket, conn, ctx) {
     const r = pages.report(hall, socket.id, {
       key: mine.key, board: mine.board, seq: Number.isInteger(a.seq) ? a.seq : 0, state: str(a.state), again: a.again === true, words: str(a.words),
     });
-    if (!r.ok) return answer({ ok: false, error: r.error });
+    // A person's act refused (Back to chat, Minimise, Show again, a card's Undo): the page acted at once on its own screen
+    // (it draws before it reports), so it is told again what it is shown now, back in step with every page of its person.
+    // A page's routine word of what it drew, refused, is told nothing: the take it is behind is on its way to it.
+    if (!r.ok) {
+      const acted = a.state === 'dismissed' || a.state === 'minimised' || (a.state === 'shown' && a.again === true);
+      if (acted) for (const s of takeSends(hall, [{ sid: socket.id, seq: -1, answer: null }])) sendTo([s.sid], 'page:take', s.take);
+      return answer({ ok: false, error: r.error });
+    }
     if (r.hiddenMs !== undefined) pageHidden(r.hiddenMs);
     tell(hall, before);
     pagesChanged(hall);

@@ -970,22 +970,18 @@ const PAGE_NAMED_BY_EXPRESSION = {
 };
 /**
  * A server emit that no page hears, with why. The fence fails on a row a page hears, or that no handler file sends. The
- * hall page hears linkedRoomsChanged, which keeps its `forwardable` fact live.
+ * hall page hears linkedRoomsChanged, which keeps its `forwardable` fact live, and page:take and pages:changed, which its
+ * take layer and its console draw.
  */
 const UNHEARD = {
   view: 'an account\'s chat view changed alone, told to its pages in a room, which stay open (the plan\'s Part 1 unit 9): the hall page draws the simple view, and hears this, with Part 7 unit 20a (#55)',
-  'page:take': 'what a person\'s page is shown over its chat, sent to that page by its socket\'s id (the plan\'s Part 1 unit 17): the hall page draws it in its layer, and hears this, with Part 1 unit 18 (#53)',
-  'pages:changed': 'a hall\'s people\'s pages changed, told to the pages that may push there (Part 1 unit 17): the hall page\'s console (Screens & pages, the Board chip) hears it with Part 1 unit 18 (#53)',
 };
 /**
  * A verb a handler file registers that no page sends yet, with why. The fence fails on a row a page sends, or that no
- * handler file registers. The hall page sends each with Part 1 unit 18 (#53), whose layer and console are its pages.
+ * handler file registers. None now: the hall page's take layer reports (page:report), and its console reads and pushes
+ * (page:status, page:push).
  */
-const UNSENT = {
-  'page:push': 'a take on the Board\'s pages or one person\'s (Part 1 unit 17): the hall page\'s console and its Board chip send it with Part 1 unit 18 (#53)',
-  'page:report': 'what a person\'s page did with its take (Part 1 unit 17): the hall page\'s layer reports it with Part 1 unit 18 (#53)',
-  'page:status': 'where a hall\'s people\'s pages stand (Part 1 unit 17): the hall page\'s console reads it with Part 1 unit 18 (#53)',
-};
+const UNSENT = {};
 
 const literal = (re, src) => [...src.matchAll(re)].map((m) => m[2]);
 /** Every way a listener is added to a socket, its first argument as written. The fuzz reads one: `socket.on('x'`. */
@@ -1488,6 +1484,7 @@ const ANY_ROOM = {
   'server.js': [
     'a stop\'s halls left unwritten: a side room left unwritten counts as its hall',
     'a people list and seen receipts are a room\'s, Main or side (a screens frame names a hall, its Main room)',
+    'a hall\'s screens changed: every room of it is told, so a console in a side room reads its hall\'s list again',
     'the power request: a hall is live with a page seated in any of its rooms, a side room alone included',
     'the busy line: a message any room holds from the window, keyed by the room its page is in',
     'a locked room\'s saved seats follow its seats while it is still here, Main or side',
@@ -1601,11 +1598,37 @@ test('(l) a planted any-room call without its reason, a row without its call, an
   assert.deepEqual(run({ 'lib/board.js': 'store.get(c); store.has(c); store.rooms.values(); this.room(k); hall.roomsOf; r.side; displays.room(k);' }), []);
 });
 
+// ---------------------------------------------------------------- (m) the renderer has no socket
+/**
+ * What a page's ES modules (every `public/*.mjs` outside vendor/: a take's renderer, pagelayer.mjs, and the documents'
+ * readers that join it) name of the wire, once their comments are taken out: a socket, `io(` or `.emit(`. They draw what
+ * they are given and answer what they drew; the page that loads them alone says it to the server, so what a page did
+ * with a take is said in one place.
+ */
+function rendererProblems(files) {
+  const problems = [];
+  for (const [file, src] of files) {
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+    for (const [re, what] of [[/\bsocket\b/, 'a socket'], [/\bio\s*\(/, 'io('], [/\.emit\s*\(/, '.emit(']]) if (re.test(code)) problems.push(file + ' names ' + what + ': a renderer draws, and the page says what it drew');
+  }
+  return problems;
+}
+test('(m) the renderer has no socket: a page\'s ES modules name no socket, io( or .emit(', () => {
+  const modules = pageScripts().filter((f) => f.endsWith('.mjs'));
+  assert.ok(modules.includes('public/pagelayer.mjs'), 'the take\'s renderer is read: ' + modules.join(', '));
+  assert.deepEqual(rendererProblems(sourcesOf(modules)), []);
+  // Planted: a socket, io( and .emit( each fail it; the words in a comment, and a URL's //, do not.
+  const ok = "// it holds no socket: io() and .emit() are the page's\n/* socket */ const u = 'https://x/y'; export const f = () => u;\n";
+  assert.deepEqual(rendererProblems(new Map([['public/a.mjs', ok]])), []);
+  assert.deepEqual(rendererProblems(new Map([['public/b.mjs', 'export function r(socket) { return 1; }'], ['public/c.mjs', 'const s = io({});'], ['public/d.mjs', 'window.s.emit("page:report", {});']])),
+    ['public/b.mjs names a socket: a renderer draws, and the page says what it drew', 'public/c.mjs names io(: a renderer draws, and the page says what it drew', 'public/d.mjs names .emit(: a renderer draws, and the page says what it drew']);
+});
+
 // ---------------------------------------------------------------- (n) the kinds in step
 /**
  * What breaks the kinds' agreement in lib/pages.js's source `src`, whose kinds are `kinds` (its KINDS): describePage
- * gives words for each kind, once, and for no other. The take catalogue's ids join the set when the catalogue draws a
- * take (the Board chip's kinds, the plan's unit 18); until then no catalogue row sends one.
+ * gives words for each kind, once, and for no other. The take catalogue's ids (the Board chip's show kinds, `board.<kind>`)
+ * and the page's names of the kinds (catalog.js SHOW_KINDS) are the same set (below).
  */
 function kindsProblems(src, kinds) {
   const at = src.indexOf('function describePage(');
@@ -1626,9 +1649,29 @@ test('(n) the kinds in step: lib/pages.js\'s KINDS and describePage\'s words are
   const words = pagesLib.KINDS.map((kind) => pagesLib.describePage({ kind }));
   assert.ok(words.every((w) => typeof w === 'string' && w), 'each kind has words: ' + words.join(', '));
   assert.equal(new Set(words).size, words.length, 'no two kinds share words: ' + words.join(', '));
-  // No catalogue row sends a take yet: the Board chip's rows bring the take catalogue's ids into this set.
-  assert.ok(!/verb:\s*'page:push'/.test(read('public/catalog.js')), 'a catalogue row sends page:push: its take ids join (n)');
+  // The take catalogue: the Board chip's show kinds are one entry each, `board.<kind>`, exactly the store's kinds in its
+  // order, and the page's names of them (SHOW_KINDS, which the console, a person's Show them ▸ and the take layer read).
+  const C = catalogOf();
+  const boardKinds = [...C.KINDS.board.filter((e) => e.verb === 'page:push' && e.radio).map((e) => e.id)];
+  assert.deepEqual(boardKinds, pagesLib.KINDS.map((k) => 'board.' + k));
+  assert.deepEqual([...C.SHOW_KINDS.map((k) => k[0])], [...pagesLib.KINDS]);
+  assert.deepEqual(kindsCatalogueProblems(C, pagesLib.KINDS), []);
+  assert.deepEqual(kindsCatalogueProblems(C, ['chat', 'clock']), ['the store\'s kinds and the Board chip\'s are not one set: board.chat, board.stage, board.clock, board.holding, board.blank against board.chat, board.clock'], 'a kind the store has not fails it');
 });
+/** The catalogue as a page loads it (after common.js, which holds the marks' table). */
+function catalogOf() {
+  const ctx = vm.createContext({});
+  vm.runInContext('globalThis.window = globalThis;', ctx);
+  vm.runInContext(read('public/common.js'), ctx, { filename: 'common.js' });
+  vm.runInContext(read('public/catalog.js'), ctx, { filename: 'catalog.js' });
+  return ctx.AGM.catalog;
+}
+/** The Board chip's show kinds against `kinds`: one set, in order. */
+function kindsCatalogueProblems(C, kinds) {
+  const ids = C.KINDS.board.filter((e) => e.verb === 'page:push' && e.radio).map((e) => e.id);
+  const want = kinds.map((k) => 'board.' + k);
+  return JSON.stringify(ids) === JSON.stringify(want) ? [] : ['the store\'s kinds and the Board chip\'s are not one set: ' + ids.join(', ') + ' against ' + want.join(', ')];
+}
 
 test('(n) a planted kind without words, words without a kind, and words given twice each fail it', () => {
   const src = "function describePage(c) {\n  switch (c.kind) {\n    case 'chat': return 'back to chat';\n    case 'clock': return 'the clock';\n    default: return '';\n  }\n}\nfunction other() { switch (x) { case 'brand': return 1; } }\n";

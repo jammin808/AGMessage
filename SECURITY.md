@@ -145,7 +145,15 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   report is the only thing that makes it "on screen", counted only for the take that page is shown now and never from
   the admin's view of someone. Each push is one `page.push` row naming whom and what kind of thing, never a file; a
   repeat of a push (its client id) is answered with what it did and writes none. Nothing of a take reaches the halls
-  board, the context or the AI.
+  board, the context or the AI. A guest's console names its hall by the guest code it joined with, which the server reads
+  as that page's own Main room only (a code it holds already, so it learns nothing). A push may name the take it goes
+  over (`ifSeq`), and is refused once a newer one is up, so an Undo never takes down someone else's take. Its answer
+  gives back what the target was shown before only as the pusher could show it itself: a holding picture shared in a
+  room it may not read (an upload's path is the file's capability) comes back as no content, never its path. A hall's
+  screens consoles are told their list changed with a signal that names nothing (`displays:changed {}`), in every room of
+  the hall, so no side room's page is sent the hall's key that way. The page draws a take with a module that holds no
+  socket (`public/pagelayer.mjs`, held by the module fence), from plain values: a holding picture only of AGMessage's
+  own uploads, and every word with `textContent`.
 - Room keys and guest codes are two things. A guest joins by a room's guest code alone, each room its own: a side room's
   is made with it and is never its key, and a hall's Main room's is its key until the admin renews it (New code), so a
   0.5.1 hall keeps the code its guests know. A code is one room's (no live code, earlier code or key shared). The admin

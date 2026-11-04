@@ -433,10 +433,23 @@ test('outbox self and local: a report goes once joined, the newest per key; loca
   assert.equal(t.s.sent.length, 0);
   t.join();
   assert.deepEqual(t.s.sent.map((x) => [x.verb, x.args[0].state, x.ack]), [['page:report', 'closed', null], ['page:report', 'shown', null]]);
+  // A report with an answer is sent with it as its acknowledgement; one replaced before it went is never sent, nor answered.
+  const answers = [];
+  t.ob.self('page:report', { seq: 3, state: 'shown', again: true }, 'take', (r) => answers.push(['again', r]));
+  assert.equal(t.s.sent.length, 3, 'joined: sent at once');
+  t.s.sent[2].ack({ ok: false, error: 'too late' });
+  assert.deepEqual(answers, [['again', { ok: false, error: 'too late' }]]);
+  t.s.drop();
+  t.ob.self('page:report', { seq: 3, state: 'minimised' }, 'take', (r) => answers.push(['first', r]));
+  t.ob.self('page:report', { seq: 3, state: 'dismissed' }, 'take', (r) => answers.push(['newest', r]));
+  t.join();
+  assert.deepEqual(t.s.sent.slice(3).map((x) => [x.args[0].state, typeof x.ack]), [['dismissed', 'function']], 'the newest alone, with its answer');
+  t.s.sent[3].ack({ ok: true });
+  assert.deepEqual(answers.slice(1), [['newest', { ok: true }]], 'the replaced report\'s answer is never called');
   let ran = 0;
   t.ob.local(() => { ran++; });
   assert.equal(ran, 1);
-  assert.equal(t.s.sent.length, 2);
+  assert.equal(t.s.sent.length, 4, 'local is nothing on the wire');
 });
 
 // ---------------------------------------------------------------- the server's half, end to end

@@ -3868,6 +3868,124 @@ Leave, the code, the countdown), and the countdown, Help and a screen's state we
   `docs/DEVICES.md`, `docs/DISPLAYS.md` (◷ sending; the header's ⋯ → Screens…), `docs/NODES.md` (△ for a show-desk
   request whose state cannot be read), `CLAUDE.md`.
 
+**A take on the hall page, minimised, shown again; the Board chip and the console** (the plan's Part 1, unit 18, its
+§5.4, §5.5, §5.7, §5.8, §7.5 and §9's row 18, as Part 4 §0, Part 5 §0 (§5.4: Show it again within 10 s, the card
+icons, both ways out kept and Escape minimising, owner answer 32; §5.7: a renderer of plain values with no socket; §7.5:
+the Board chip's Undo and ↶ Back to), §14.4's fence (m), §16.6, §16.7's `take`, `card`, `board` and `person` rows and
+§16.10, and Part 7 §0.1 (§5.4: Full screen only where the device has it) and §0.2 (the Escape order) amend them; the tree
+as the evidence: a take reached people's pages over the wire alone, and nothing drew it, said what was drawn or offered a
+way to show it)
+- **The take layer** (`#pageLayer`, drawn by `public/pagelayer.mjs`, an ES module loaded with `import()` at the page's
+  first take): over the whole hall page, the header and the side bar included, under the menus, the asks and the toast
+  (`--z-layer`), on black (`--c-take`), never a modal dialog. Stagewatch's countdown (time, title, next, the speaker's
+  line; `--:--` while the link is lost, its key not accepted or the page not connected), the clock (AGMessage's clock and
+  zone), the holding picture (one that does not load leaves black and says "the image did not load"), the AGMessage mark
+  enlarged and the hall's name when there is no picture (owner answer 31), or black, whose bar shows once the screen is
+  touched or a key is pressed. Its bar says what it is and who put it up, and holds 💬 Back to chat, 🔽 Minimise and, only
+  where the device has the Fullscreen API, ⛶ Full screen, 48 px, in words and icons; in the full view its ⋯, a
+  right-click and Shift+F10 open the same, and Open chat while a 🔥 message is in its strip. **Escape minimises, never
+  goes back to chat**, first in the Escape order after an open menu and an open ask. The renderer answers what it drew
+  and the page alone says it (`page:report`): `shown` only while the page is in view, `hidden` otherwise and again when
+  that changes, `failed` with why; each join says it again (a new socket has said nothing). The focus goes to the layer,
+  unless a field holds it.
+- **Back to chat** takes the take off every page of the person's in the hall; the toast's **Show it again** within 10 s
+  brings it back on all of them. **Minimise** puts it as a card at the top of the side bar (📺 On stage), "⏱ Stagewatch"
+  with its live time, "🕐 Clock" with the time, "🖼 Holding" or "🌑 Blank", with who put it up and when, ⤴ Show again and
+  Remove (Back to chat, with Undo for 10 s; the full view only); the side bar opens itself for it, its rail reads "📺 On
+  stage • 1" while collapsed, and no document opens itself over the card. An observer or a Viewer account, who has no
+  side bar, is given one, its cards alone, while a take of theirs is minimised (`body[data-pushed]`, on an observer's
+  page alone: every other seat's side bar keeps its size at every width). Every one of these is the person's
+  act on their own page: the page acts at once and says so after (`self`), and a refused one is said in the toast.
+- **Nothing reaches the stage by surprise, and nothing is lost:** a take never takes the focus from a field being written
+  in; it waits until the field is left, at most 3 s, and the field keeps its words under it (the person's own Show again
+  draws at once). While a take covers the page, a 🔥 message from someone else breaks through in a strip at its foot
+  (its sender, its words, **Open chat**, which minimises the take and brings the message into view with the focus on
+  it), and other new messages are counted on its bar ("2 new").
+- **The Board chip**, in the header's status for a page that may change what people's pages show (`canPush`): "Board ·
+  🕐 Clock ✓ 6/6" (what the Board's pages show and how many show it), "Board · ✕ nobody on stage" with no Board page
+  open, its words for a screen reader. A click, a right-click and Shift+F10 open its menu: Back to chat · Show
+  Stagewatch · Show the clock · Show holding · Show blank, as radio items, the one the Board shows checked and disabled
+  ("Already showing the clock.", "Already on chat."; Stagewatch "This hall has no Stagewatch linked — link one in Set
+  up." where the hall has none), then ↶ Back to … and Screens & pages…; its header names the pages and their status, or
+  "No Board page is open: what you show arrives when one joins.". A choice goes at once, the toast naming whom it reached
+  ("The clock on 6 Board pages.") with **Undo** for 10 s, which puts back what was shown before as a take of its own,
+  sent over the one it undoes; beyond the toast, **↶ Back to Stagewatch (undo your Clock, 14:02)** does the same while
+  this page's take is still the Board's. A take made by either offers no undo of its own, and another operator's chip
+  offers none.
+- **Screens & pages** (the header's ⋯, which read Screens…; and the Board chip): the hall's console, a **Screens** tab
+  for a page that drives the hall's screens and a **People's pages** tab for one that may show people's pages, each tab
+  where the page may use it. People's pages: **On stage (Board) — all 6** first, with a button for each kind, then each
+  person in the hall's rooms the operator may read, with their room, each with its status chip and what it shows; a
+  person's ⋯ holds **📺 Show them ▸** (Stagewatch, Clock, Holding, Blank) and **Back to chat on their pages**, which a
+  person in the People list and a message's sender's name offer too. It reads `page:status` as the page joins, as it
+  opens and on each `pages:changed`. It names the hall by its key from any room of it, so it works from a side room, and
+  a locked hall's backstage guest has one, no longer gated on an account. The support view draws the person's doors
+  from their facts (`person`: their seat, sends, forward and push), every one disabled, and draws their take.
+- **The server**: `page:report`'s `shown` with `again` (Show it again) or `minimised` (a card's Undo), within 10 s of the
+  same person's Back to chat for that take, takes Back to chat back, every page of theirs told; after 10 s each is
+  refused ("Back to chat was chosen for that one more than 10 s ago: a newer take shows again."), and a page whose own
+  act (Back to chat, Minimise, Show again, Undo) is refused is told again what it is shown, so a page that drew at once is
+  back in step; a routine report refused tells it nothing. A page's report of an answer counts only while that answer
+  stands: once taken back the page is waiting until it says what it does again. `page:push` takes `ifSeq` (the take it
+  goes over: Undo and ↶ Back to), refused "Something newer is showing there now: nothing changed." once anything newer
+  is up and "That act's take could not be read." for anything but a whole number, and answers, at the end, `previous`,
+  what its target was shown before (`{seq, content}`, or null), its content only as this pusher could push it itself
+  (`cleanPage` with its own facts): a holding picture shared in a room it may not read, whose upload path is the file's
+  capability, comes back as `content: null`, and the page then offers no Undo and no ↶ Back to. A guest's page names its
+  hall by the guest code it joined with, which `page:push` and `page:status` read as that page's own Main room, so a
+  locked hall's backstage guest keeps a console after New code; the book of pushes a repeat is answered from is kept by
+  the hall's key, so its repeat by that code finds the first push. `page:status`'s rows gain `kind` (what the take shows) and `on` (how many of its pages
+  show it now). `displays:changed` is `{}`, sent to every room of the hall, naming nothing, and the console reads its
+  hall's list again on it (a side room's console included). The outbox's `self` takes an answer for a report, and
+  `page:push` is answered on a repeat by its client id (`REPEATS`). The toast's Undo can carry its own words
+  (`undoLabel`: Show it again).
+- **The catalogue** gains the kinds `take`, `card` and `board` and `person.show` and `person.chat`: an act that puts
+  something on people's pages says Show, one that undoes it Back to; "Full screen" is the device's mode, no screen of the
+  hall's; a bar may hold more than two acts (the layer's, the Board's row); an entry may be a radio item. The facts gain
+  `canPush`, `stagewatch` (the hall has a Stagewatch linked) and `fullscreen` (the page's probe).
+- **The fences**: (m), new (`test/modules.test.js`): a page's ES modules (`public/*.mjs` outside `vendor/`) name no
+  socket, `io(` or `.emit(`, read as code, planted three ways. (n) holds the Board chip's show kinds (`board.<kind>`) and
+  the page's names of them (`SHOW_KINDS`) to `lib/pages.js`'s `KINDS`, in order. (f)'s allow-lists lose `page:push`,
+  `page:report`, `page:status`, `page:take` and `pages:changed`, which the hall page now sends and hears.
+  `test/menus.test.js` sends `page:push` as every seat its rights hide it from (On stage: "Do that from a backstage
+  page."), nothing put up; `page:report` has its refusal case and is iterated by `may` like every verb, the one verb no
+  right hides from any seat (`OPEN_TO_EVERY_SEAT`, with why), which the test holds to being sent and refused to none. The any-room readers' count in
+  `server.js` gains the screens frame's.
+- Choices where the plan left room: the take's icons are no status marks (💬 Back to chat, 🔽 Minimise, ⛶ Full screen,
+  🗨 Open chat; ✕ and ▭ are the table's), and the chip's kinds read "Show the clock" (the one-verb rule: Show puts
+  something on people's pages); "Already showing …" holds while the Board's take is that kind and not every page went back
+  to chat, so a take everyone put away can be shown again; a blank take's bar shows at a touch and stays; Remove and
+  Show it again are the toast's, its Undo for 10 s by the page's clock, refused by the server after; a minimise opens
+  the side bar each time the person minimises (not at a reload); the layer's focus goes back to the feed, never to a
+  field, so a tablet's keyboard never rises over the chat; Open chat is a Minimise; the People's pages tab draws one
+  button per kind on the Board's row and a person's two acts in their ⋯; a person's Show them ▸ is offered on any person
+  of the hall the page knows the key of, oneself included, and never on an AI's line (the Minutes); until the console's
+  first read the Board's kinds and a person's acts say "Reading where their pages stand…", nothing checked, and a person
+  the read lists on no page in the hall "They have no page open in this hall now."; the admin page's people rows gain no
+  Show them ▸ here.
+- Tests: `test/pages.test.js` (Show it again and a card's Undo within 10 s, refused after, nothing saved for a refusal;
+  a report of an answer waiting once the answer is taken back; a status's `kind` and `on`), `test/takes.test.js` (end to
+  end, the server's clock moved on by `test/clock-preload.js`: Back to chat on one of Gil's two devices and Show it again
+  from the other, both told; a card's Undo; after 10 s both refused and the page told again, a routine word not;
+  `ifSeq` refused for a stale take and for anything not a whole number, with no row, accepted over the take up, and
+  `previous` for the Board and a person; a guest pushing by the code it joined with after New code, and its repeat by
+  that code, after another push, answered with the first take and one row; a Legal picture on the Board and on a person,
+  pushed over by a Main-only guest and a Main-only Tech, given back to neither, and to the admin whole;
+  `displays:changed {}` heard in Legal and in Main), `test/outbox.test.js` (`self` with an answer, the replaced report never sent nor
+  answered), `test/inputs.test.js` (`ifSeq` typed), `test/displays.test.js` (the signal names nothing),
+  `test/catalog.test.js` (the three kinds and the person's two acts by seat, the radio items and their reasons, ↶ Back to
+  only over this page's take, the simple view's buttons, the support view's), `test/menus.test.js`,
+  `test/modules.test.js`. The browser smoke, in a hall of its own with Bea On stage and Obi observing on browsers of
+  their own (a smoke tab may now be a browser of its own, `alone`): the Board chip's doors and Show the clock reaching
+  Bea's page with ✓ 1/1; Screens & pages… and its People's pages; holding, blank (its bar at a touch) and Stagewatch
+  drawn; Escape minimising into a card whose doors are in step, Bea's side bar keeping the Board's half of the row with
+  the card in it, Show again, the layer's doors in step; Back to chat and
+  Show it again; Undo putting back what was there and ↶ Back to offered only over the page's own take; a 🔥 message
+  breaking through and Open chat; a draft keeping its words and focus; the observer's side bar; no console error.
+- The papers: `README.md`, `README.txt`, `docs/DISPLAYS.md` (people's screens as drawn: the chip, the console, the layer,
+  the card), `docs/DESIGN.md`, `docs/ANALYSIS.md` (fences (m), (n), (f)'s allow-lists, the catalogue's new kinds, the
+  Escape order), `SECURITY.md`, `CLAUDE.md`.
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after

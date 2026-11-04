@@ -102,7 +102,7 @@ test('a take on the Board\'s pages or one person\'s, numbered and confirmed page
   // A Board take, from the admin page: numbered, "sending" over the Board's two pages (Gil's and Bea's, an account's).
   const status = async (s = ctl) => act(s, 'page:status', { code: hall });
   const pushed = await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'clock' }, cid: 'push-clock-1' });
-  assert.deepEqual(pushed, { ok: true, seq: 1, results: [{ key: 'board', name: 'the Board', ok: true, status: { seq: 1, showing: 'the clock', mark: '◷', words: 'Sending', pages: 2 } }] });
+  assert.deepEqual(pushed, { ok: true, seq: 1, results: [{ key: 'board', name: 'the Board', ok: true, status: { seq: 1, showing: 'the clock', kind: 'clock', mark: '◷', words: 'Sending', pages: 2, on: 0 } }], previous: null });
   await until(() => takes(gil).length === 1 && takes(beaPage).length === 1, 4000, 'the Board\'s pages told their take');
   const clockTake = { seq: 1, content: { kind: 'clock' }, by: { name: 'Ana Admin' }, hallName: 'Hall 2', holding: '', answer: null };
   assert.deepEqual(told(takes(gil)[0]), clockTake);
@@ -120,9 +120,9 @@ test('a take on the Board\'s pages or one person\'s, numbered and confirmed page
 
   // ✓ only once each page said it showed that take: a support view's report, a report of another take and a page out of
   // view are not.
-  assert.deepEqual((await status()).board, { seq: 1, showing: 'the clock', mark: '◷', words: 'Sending', pages: 2 });
+  assert.deepEqual((await status()).board, { seq: 1, showing: 'the clock', kind: 'clock', mark: '◷', words: 'Sending', pages: 2, on: 0 });
   assert.deepEqual(await act(gil, 'page:report', { seq: 1, state: 'shown' }), { ok: true });
-  assert.deepEqual((await status()).board, { seq: 1, showing: 'the clock', mark: '◷', words: 'Sending · on 1 of 2 pages', pages: 2 });
+  assert.deepEqual((await status()).board, { seq: 1, showing: 'the clock', kind: 'clock', mark: '◷', words: 'Sending · on 1 of 2 pages', pages: 2, on: 1 });
   const beaView = await page(admin, 'the admin\'s view of Bea');
   const beaViewJoin = await joined(beaView, { roomCode: hall, name: 'Bea Board', role: 'board', adminView: true, viewOf: bea.id });
   assert.deepEqual([told(beaViewJoin.page), beaViewJoin.canPush], [clockTake, false], 'the support view is shown what Bea is shown, and pushes nothing');
@@ -134,10 +134,10 @@ test('a take on the Board\'s pages or one person\'s, numbered and confirmed page
   for (const seq of [0, 2, '1']) assert.deepEqual(await act(beaPage, 'page:report', { seq, state: 'shown' }), { ok: false, error: 'That is not what this page is shown now.' }, JSON.stringify(seq));
   assert.deepEqual((await status()).board.words, 'Sending · on 1 of 2 pages', 'nothing of those counted');
   assert.deepEqual(await act(beaPage, 'page:report', { seq: 1, state: 'hidden' }), { ok: true });
-  assert.deepEqual((await status()).board, { seq: 1, showing: 'the clock', mark: '◐', words: '1 of 2 showing · 1 asleep or in another app', pages: 2 });
+  assert.deepEqual((await status()).board, { seq: 1, showing: 'the clock', kind: 'clock', mark: '◐', words: '1 of 2 showing · 1 asleep or in another app', pages: 2, on: 1 });
   await wait(250);
   assert.deepEqual(await act(beaPage, 'page:report', { seq: 1, state: 'shown' }), { ok: true });
-  assert.deepEqual((await status()).board, { seq: 1, showing: 'the clock', mark: '✓', words: 'On all 2 Board pages', pages: 2 });
+  assert.deepEqual((await status()).board, { seq: 1, showing: 'the clock', kind: 'clock', mark: '✓', words: 'On all 2 Board pages', pages: 2, on: 2 });
   // The day's peaks keep how long a Board page was out of view with the take on it (reading 5).
   const health = (await api(srv.base, 'GET', '/api/health', undefined, { cookie: admin })).body;
   const today = health.peaks.find((d) => d.day === health.showDay);
@@ -153,7 +153,7 @@ test('a take on the Board\'s pages or one person\'s, numbered and confirmed page
   const kit = await page(undefined, 'Kit On stage');
   const kitJoin = await joined(kit, { roomCode: hall, name: 'Kit', role: 'board' });
   assert.deepEqual(told(kitJoin.page), clockTake);
-  assert.deepEqual((await status()).board, { seq: 1, showing: 'the clock', mark: '◷', words: 'Sending · on 2 of 3 pages', pages: 3 });
+  assert.deepEqual((await status()).board, { seq: 1, showing: 'the clock', kind: 'clock', mark: '◷', words: 'Sending · on 2 of 3 pages', pages: 3, on: 2 });
   // A burst of reports is at most two frames to each console (a Latest of 150 ms).
   const latest = async () => (await api(srv.base, 'GET', '/api/health', undefined, { cookie: admin })).body.latest.pages;
   await wait(400);
@@ -187,7 +187,7 @@ test('a take on the Board\'s pages or one person\'s, numbered and confirmed page
   assert.deepEqual([views(beaView), views(beaPage), views(beaLegal)], [[{ view: 'full' }, { view: 'simple' }], [{ view: 'full' }, { view: 'simple' }], [{ view: 'full' }, { view: 'full' }]], 'by seat: simple On stage, full where she is a Member');
   assert.deepEqual(views(tomView), [], 'the view of Tom is told nothing of Bea\'s');
   const toTom = await act(ctl, 'page:push', { code: hall, to: { uid: 'a:' + tom.id }, content: { kind: 'blank' }, cid: 'push-tom-1' });
-  assert.deepEqual(toTom, { ok: true, seq: 2, results: [{ key: 'a:' + tom.id, name: 'Tom Tech', ok: true, status: { seq: 2, showing: 'blank', mark: '◷', words: 'Sending', pages: 2 } }] });
+  assert.deepEqual(toTom, { ok: true, seq: 2, results: [{ key: 'a:' + tom.id, name: 'Tom Tech', ok: true, status: { seq: 2, showing: 'blank', kind: 'blank', mark: '◷', words: 'Sending', pages: 2, on: 0 } }], previous: null });
   await until(() => [tomMain, tomLegal, tomView].every((s) => takes(s).length === 1), 4000, 'Tom\'s pages told');
   const blankTake = { seq: 2, content: { kind: 'blank' }, by: { name: 'Ana Admin' }, hallName: 'Hall 2', holding: '', answer: null };
   for (const s of [tomMain, tomLegal, tomView]) assert.deepEqual(told(takes(s)[0]), blankTake, s.who);
@@ -254,7 +254,7 @@ test('a take on the Board\'s pages or one person\'s, numbered and confirmed page
   // Her page joined again with the seat the lock kept is a console now: its join says so, and it hears pages:changed.
   assert.equal((await joined(ria, { roomCode: hall, name: 'Ria', role: 'research', uid: riaJoin.identity })).canPush, true);
   const holding = await act(ria, 'page:push', { code: hall, to: 'board', content: { kind: 'holding' }, cid: 'ria-hold-1' });
-  assert.deepEqual(holding, { ok: true, seq: 3, results: [{ key: 'board', name: 'the Board', ok: true, status: { seq: 3, showing: 'a holding slide with the AGMessage mark', mark: '◷', words: 'Sending', pages: 3 } }] });
+  assert.deepEqual(holding, { ok: true, seq: 3, results: [{ key: 'board', name: 'the Board', ok: true, status: { seq: 3, showing: 'a holding slide with the AGMessage mark', kind: 'holding', mark: '◷', words: 'Sending', pages: 3, on: 0 } }], previous: { seq: 1, content: { kind: 'clock' } } });
   const riaStatus = await status(ria);
   assert.deepEqual(riaStatus.people.map((p) => p.name).sort(), ['Bea Board', 'Gil', 'Kit', 'Oli', 'Ria', 'Sue Staff', 'Tom Tech'], 'a guest\'s console lists Main\'s people alone');
   assert.deepEqual(await act(ria, 'page:push', { code: hall, to: { uid: 'a:' + len.id }, content: { kind: 'clock' } }), { ok: false, error: 'That person is not in this hall now.' }, 'Len sits in Legal, which Ria cannot read');
@@ -350,4 +350,143 @@ test('a take on the Board\'s pages or one person\'s, numbered and confirmed page
   assert.deepEqual(told((await joined(tomBack, { roomCode: LEGAL, as: 'account' })).page), { seq: 4, content: { kind: 'clock' }, by: { name: 'Ria' }, hallName: 'Hall 2', holding: '', answer: 'dismissed' });
   const gilBack = await page(undefined, 'Gil after the restart');
   assert.deepEqual(told((await joined(gilBack, { roomCode: hall, name: 'Gil', role: 'board', uid: gilJoin.identity })).page), { seq: 6, content: { kind: 'blank' }, by: { name: 'Ana Admin' }, hallName: 'Hall 2', holding: '', answer: 'dismissed' });
+});
+
+// ---------------------------------------------------------------- the hall page's acts on a take (plan 1-§5.4, unit 18)
+const CLOCK = path.join(__dirname, 'clock-preload.js');
+test('the person\'s acts on a take: Show it again within 10 s of Back to chat brings it back on every page of theirs, and after 10 s is refused and the page told again; a card\'s Undo makes it a Minimise again; a push over a take is refused once something newer is up, and says what was shown before; a guest pushes by the code it joined with; a hall\'s screens told to every room of it, with no key', { timeout: 120_000 }, async (t) => {
+  const offsetFile = path.join(fs.mkdtempSync(path.join(require('os').tmpdir(), 'agm-clock-')), 'offset');
+  fs.writeFileSync(offsetFile, '0');
+  const srv = await startServer({ NODE_OPTIONS: [process.env.NODE_OPTIONS, '--require "' + CLOCK.split(path.sep).join('/') + '"'].filter(Boolean).join(' '), AGM_TEST_CLOCK: offsetFile });
+  t.after(() => stopServer(srv.child));
+  /** The server's wall clock moved on by `ms` (test/clock-preload.js), once the server says it runs on it. */
+  const clockOn = async (ms) => {
+    fs.writeFileSync(offsetFile, String(ms));
+    await until(() => { try { return fs.readFileSync(offsetFile + '.ack', 'utf8') === String(ms); } catch { return false; } }, 3000, 'the server on the moved clock');
+  };
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const heard = new Map();
+  const page = async (cookie) => {
+    const s = await connect(srv.base, cookie);
+    sockets.push(s);
+    heard.set(s, []);
+    s.onAny((ev, ...args) => heard.get(s).push([ev, args[0]]));
+    return s;
+  };
+  const takes = (s) => heard.get(s).filter(([ev]) => ev === 'page:take').map(([, v]) => v);
+  const answerOf = (s) => { const x = takes(s).at(-1); return x ? [x.seq, x.answer] : null; };
+  const joined = async (s, args) => { const r = await emit(s, 'join', args); assert.equal(r.ok, true, JSON.stringify(r)); return r; };
+
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
+  const ctl = await page(admin);
+  const LEGAL = (await act(ctl, 'room:create', { hall, name: 'Legal' })).key;
+  await joined(ctl, { roomCode: hall, as: 'account' });
+  const inLegal = await page(admin);
+  const legalJoin = await joined(inLegal, { roomCode: LEGAL, as: 'account' });
+
+  // Gil On stage on two devices (one identity): a Board take reaches both.
+  const gilA = await page();
+  const gil = await joined(gilA, { roomCode: hall, name: 'Gil', role: 'board' });
+  const gilB = await page();
+  await joined(gilB, { roomCode: hall, name: 'Gil', role: 'board', uid: gil.identity });
+  const clock = await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'clock' } });
+  assert.deepEqual([clock.seq, clock.previous], [1, null], 'nothing was shown before it');
+  await until(() => answerOf(gilA) && answerOf(gilB), 4000, 'both told the take');
+  // Back to chat on one device is his answer on both; Show it again from the other, within 10 s, brings it back on both.
+  assert.deepEqual(await act(gilA, 'page:report', { seq: 1, state: 'dismissed' }), { ok: true });
+  await until(() => [gilA, gilB].every((s) => JSON.stringify(answerOf(s)) === '[1,"dismissed"]'), 4000, 'both told Back to chat');
+  await clockOn(9_000);
+  assert.deepEqual(await act(gilB, 'page:report', { seq: 1, state: 'shown', again: true }), { ok: true });
+  await until(() => [gilA, gilB].every((s) => JSON.stringify(answerOf(s)) === '[1,null]'), 4000, 'both told it shows again');
+  assert.equal((await act(ctl, 'page:status', { code: hall })).board.mark, '◷', 'Gil\'s other page says again what it does with it');
+  // Back to chat, then a card's Undo within 10 s: a Minimise again, on both.
+  assert.deepEqual(await act(gilA, 'page:report', { seq: 1, state: 'dismissed' }), { ok: true });
+  await clockOn(18_000);
+  assert.deepEqual(await act(gilB, 'page:report', { seq: 1, state: 'minimised' }), { ok: true });
+  await until(() => [gilA, gilB].every((s) => JSON.stringify(answerOf(s)) === '[1,"minimised"]'), 4000, 'both told it is minimised');
+  // After 10 s, Back to chat is final: Show it again is refused with words, and that page is told again that it went
+  // back to chat (it acted at once on its own screen); a routine word of what it drew is refused and tells it nothing.
+  assert.deepEqual(await act(gilA, 'page:report', { seq: 1, state: 'dismissed' }), { ok: true });
+  await until(() => [gilA, gilB].every((s) => JSON.stringify(answerOf(s)) === '[1,"dismissed"]'), 4000, 'both told Back to chat again');
+  await clockOn(18_000 + 10_001);
+  const toldB = takes(gilB).length;
+  for (const [state, again] of [['shown', true], ['minimised', false]]) {
+    assert.deepEqual(await act(gilB, 'page:report', { seq: 1, state, again }), { ok: false, error: 'Back to chat was chosen for that one more than 10 s ago: a newer take shows again.' }, state);
+  }
+  await until(() => takes(gilB).length === toldB + 2, 4000, 'the page told again for each act refused');
+  assert.deepEqual(takes(gilB).slice(-2).map((x) => [x.seq, x.answer]), [[1, 'dismissed'], [1, 'dismissed']]);
+  assert.deepEqual(await act(gilB, 'page:report', { seq: 1, state: 'shown' }), { ok: false, error: 'Back to chat was chosen for that one: a newer take shows again.' });
+  await wait(300);
+  assert.equal(takes(gilB).length, toldB + 2, 'a routine word refused tells the page nothing');
+
+  // A push over a take (the Board chip's ↶ Back to, `ifSeq`): refused once something newer is up, nothing numbered and no
+  // row; over the take up now, it goes, and its answer gives back what was shown before.
+  const rows = () => fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter((l) => l.includes('"page.push"')).length;
+  const rowsWere = rows();
+  for (const [ifSeq, error] of [[0, 'Something newer is showing there now: nothing changed.'], [2, 'Something newer is showing there now: nothing changed.'], ['1', 'That act\'s take could not be read.'], [-1, 'That act\'s take could not be read.'], [1.5, 'That act\'s take could not be read.']]) {
+    assert.deepEqual(await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'chat' }, ifSeq }), { ok: false, error }, JSON.stringify(ifSeq));
+  }
+  assert.equal(rows(), rowsWere, 'refusals write no row');
+  const back = await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'chat' }, ifSeq: 1 });
+  assert.deepEqual([back.ok, back.seq, back.previous], [true, 2, { seq: 1, content: { kind: 'clock' } }]);
+  assert.deepEqual((await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'blank' }, ifSeq: 1 })).error, 'Something newer is showing there now: nothing changed.', 'the take it went over is gone');
+  // A person's: what that person was shown before, the newest of their pages.
+  const toGil = await act(ctl, 'page:push', { code: hall, to: { uid: 'u:' + gil.uid }, content: { kind: 'blank' }, ifSeq: 2 });
+  assert.deepEqual([toGil.ok, toGil.seq, toGil.previous], [true, 3, { seq: 2, content: { kind: 'chat' } }]);
+  assert.equal(rows(), rowsWere + 2);
+
+  // A guest backstage in the locked hall, whose page knows it by the guest code it joined with once New code parted the
+  // code from the key: it pushes by that code, as by the key; a code that is no hall's is refused in the words it was.
+  const ria = await page();
+  const riaIn = await joined(ria, { roomCode: hall, name: 'Ria', role: 'research' });
+  assert.equal((await act(ctl, 'admin:lockRoles', { roomCode: hall, on: true })).ok, true);
+  const renewed = await act(ctl, 'room:update', { code: hall, newCode: true });
+  assert.ok(renewed.ok && renewed.guestCode && renewed.guestCode !== hall, JSON.stringify(renewed));
+  const riaTab = await page();
+  assert.equal((await joined(riaTab, { roomCode: renewed.guestCode, name: 'Ria', role: 'research', uid: riaIn.identity })).canPush, true);
+  const byCode = await act(riaTab, 'page:push', { code: renewed.guestCode, to: 'board', content: { kind: 'clock' }, cid: 'ria-code-1' });
+  assert.deepEqual([byCode.ok, byCode.seq], [true, 4], JSON.stringify(byCode));
+  assert.equal((await act(riaTab, 'page:status', { code: renewed.guestCode })).board.seq, 4);
+  assert.deepEqual(await act(riaTab, 'page:push', { code: 'ZZZZZZ', to: 'board', content: { kind: 'clock' } }), { ok: false, error: 'Showing the Board is for the backstage team.' });
+  // Her push asked again by that code with its client id (the outbox after a drop), after another push in the hall, is
+  // answered with what the first did: one take, one row.
+  assert.equal(rows(), rowsWere + 3);
+  assert.equal((await act(ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'blank' }, cid: 'ana-blank-1' })).seq, 5);
+  assert.deepEqual(await act(riaTab, 'page:push', { code: renewed.guestCode, to: 'board', content: { kind: 'clock' }, cid: 'ria-code-1' }), byCode);
+  assert.equal(rows(), rowsWere + 4, 'the repeat wrote no row');
+  assert.equal((await act(ctl, 'page:status', { code: hall })).board.seq, 5, 'and put up no take');
+
+  // What a push gives back of what was shown before is only what its pusher could show itself: a picture shared in Legal,
+  // on the Board and on Gil, pushed over by Ria (a guest of Main) and by Tia (a Tech of Main alone), comes back to neither
+  // (its path is the file's capability), and whole to the admin, who reads Legal.
+  const f = new FormData();
+  f.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], { type: 'image/png' }), 'legal-only.png');
+  const up = await (await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': legalJoin.uploadToken }, body: f })).json();
+  assert.ok(typeof up.url === 'string' && up.url.startsWith('/uploads/'), JSON.stringify(up));
+  assert.equal((await act(inLegal, 'message', { type: 'file', url: up.url, filename: 'legal-only.png' })).ok, true);
+  const picture = { kind: 'holding', image: up.url };
+  const tiaMade = await api(srv.base, 'POST', '/api/users', { username: 'tia', name: 'Tia Tech', role: 'tech', password: PASSWORD, halls: [hall] }, { cookie: admin });
+  assert.equal(tiaMade.status, 200, JSON.stringify(tiaMade.body));
+  const tia = await page((await api(srv.base, 'POST', '/api/auth/login', { username: 'tia', password: PASSWORD })).cookie);
+  assert.equal((await joined(tia, { roomCode: hall, as: 'account' })).canPush, true);
+  const toGilPerson = { uid: 'u:' + gil.uid };
+  for (const [s, code, to] of [[riaTab, renewed.guestCode, 'board'], [tia, hall, 'board'], [riaTab, renewed.guestCode, toGilPerson], [tia, hall, toGilPerson]]) {
+    const up1 = await act(ctl, 'page:push', { code: hall, to, content: picture });
+    assert.equal(up1.ok, true, JSON.stringify(up1));
+    const over = await act(s, 'page:push', { code, to, content: { kind: 'clock' } });
+    assert.deepEqual([over.ok, over.previous], [true, { seq: up1.seq, content: null }], JSON.stringify([to, over]));
+    assert.ok(!JSON.stringify(over).includes('/uploads/'), 'no upload path in the answer');
+    // The admin's push over the picture is given it whole.
+    const again = await act(ctl, 'page:push', { code: hall, to, content: picture });
+    assert.deepEqual((await act(ctl, 'page:push', { code: hall, to, content: { kind: 'blank' } })).previous, { seq: again.seq, content: picture });
+  }
+
+  // A hall's screens changed: every room of it is told, Legal's console too, with nothing in it (no key).
+  const screens = (s) => heard.get(s).filter(([ev]) => ev === 'displays:changed').map(([, v]) => v);
+  const made = await act(ctl, 'display:create', { code: hall, name: 'Lectern monitor' });
+  assert.equal(made.ok, true, JSON.stringify(made));
+  await until(() => screens(inLegal).length > 0 && screens(ctl).length > 0, 4000, 'both rooms told');
+  assert.deepEqual([screens(inLegal).at(-1), screens(ctl).at(-1)], [{}, {}]);
 });

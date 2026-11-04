@@ -186,11 +186,14 @@ async function launchEdge() {
      * A tab on `url`: `init` runs before the page's own scripts, `workerInit` before each worker's (the worker held at
      * its start until it has run; `workers` lists each worker still running, with what `workerInit` answered there),
      * `metrics` {width, height} is its viewport (`phone: true` makes it a phone's: a mobile viewport at 2× with a touch
-     * screen), `timezone` its zone, `headers` HTTP headers every request it makes carries (its WebSocket's included).
+     * screen), `timezone` its zone, `headers` HTTP headers every request it makes carries (its WebSocket's included),
+     * `alone` a browser of its own (no cookie, sign-in or stored identity of the other tabs': another device).
      */
-    async tab(url, { init, workerInit, metrics, timezone, headers } = {}) {
+    async tab(url, { init, workerInit, metrics, timezone, headers, alone } = {}) {
+      const own = alone ? (await browser.send('Target.createBrowserContext', {})).result : null;
+      if (alone && !own) throw new Error('no browser of its own for ' + url);
       // A window of its own, so its page is always the one in front (never a hidden tab behind another).
-      const made = await browser.send('Target.createTarget', { url: 'about:blank', newWindow: true, width: 1400, height: 900 });
+      const made = await browser.send('Target.createTarget', { url: 'about:blank', newWindow: true, width: 1400, height: 900, ...(own ? { browserContextId: own.browserContextId } : {}) });
       if (!made.result) throw new Error('no new window: ' + (made.error ? made.error.message : 'no answer'));
       const problems = []; const listeners = new Map(); const expected = []; const logs = []; const workers = [];
       const { ws, send: call } = await devtools(`ws://127.0.0.1:${port}/devtools/page/${made.result.targetId}`, (m) => {
@@ -262,7 +265,7 @@ async function launchEdge() {
           if (s.result) fs.writeFileSync(file, Buffer.from(s.result.data, 'base64'));
           else report(false, 'screenshot ' + path.basename(file) + ': ' + (s.error ? s.error.message : 'no answer'));
         },
-        close: () => ws.close(),
+        close: () => { ws.close(); if (own) browser.send('Target.disposeBrowserContext', { browserContextId: own.browserContextId }); },
       };
     },
     close() { try { browser.ws.close(); proc.kill(); } catch { /* ignore */ } setTimeout(() => { try { fs.rmSync(prof, { recursive: true, force: true }); } catch { /* ignore */ } }, 1500); },
@@ -532,7 +535,7 @@ const middleOf = (tab, el) => tab.eval(`(() => { const n = ${el}; n.scrollIntoVi
 /** The ids of the open menu, as drawn: each row's act, a fold's entries in its place; '' while none is open. */
 const MENU_IDS = `(() => { const m = document.querySelector('.agm-menu:not(.agm-sub)'); return m ? JSON.stringify([...m.querySelectorAll(':scope > .agm-mi')].flatMap((b) => b.dataset.children ? b.dataset.children.split(' ') : b.dataset.action ? [b.dataset.action] : [])) : ''; })()`;
 const NO_MENU = `!document.querySelector('.agm-menu')`;
-/** The hall page's Screens console, opened as a person opens it: the header's ⋯, then Screens…. False where it is not offered. */
+/** The hall page's console, opened as a person opens it: the header's ⋯, then Screens & pages…. False where it is not offered. */
 const OPEN_SCREENS = `(() => { document.getElementById('headerMore').click(); const b = document.querySelector('.agm-menu [data-action="header.screens"]'); if (b) b.click(); else AGM.menu.close(); return !!b; })()`;
 /**
  * An object's doors on a page, each opened and read: right-click (at its name), its ⋯, and Shift+F10 on the focused
@@ -1825,7 +1828,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
 
     // Screens: the account adds one from the hall's Screens console; its link opens a display page that shows a message
     // (fitted to the screen) and the countdown, and confirms each — the console then reads ✓ on screen.
-    report(!!(await hallView.until(`AGM.catalog.ids('header', F, headerObject()).includes('header.screens')`)), 'the hall view offers Screens… in its header\'s ⋯ to an account that may drive them');
+    report(!!(await hallView.until(`AGM.catalog.ids('header', F, headerObject()).includes('header.screens')`)), 'the hall view offers Screens & pages… in its header\'s ⋯ to an account that may drive them');
     const made = await hallView.eval(`new Promise((r) => socket.emit('display:create', { code: ROOM, name: 'Lectern monitor' }, r))`);
     const screen = await edge.tab(`${base}${made.display.path}`);
     report(!!(await screen.until(`document.body.dataset.kind === 'holding' && document.getElementById('idleName').textContent.includes('Lectern monitor')`)), 'a display link opens a holding screen named for the crew');
@@ -2614,6 +2617,170 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await pressTab.send('Page.navigate', { url: 'about:blank' });
     await pressTab.close();
 
+    // ---------------- People's pages: a take on the Board's and a person's pages, minimised, shown again; the console (unit 18) ----------------
+    // In a hall of its own, so no take covers a page the other steps read: the admin account's page (the operator: its
+    // Board chip and its console's People's pages), Bea On stage and Obi observing, each on a browser of its own (a device
+    // of their own, as the Board's tablets are). The hall follows the smoke's Stagewatch, so every kind draws.
+    const tkHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Takes hall' }) })).json()).code;
+    const op = await edge.tab(`${base}/app.html?code=${tkHall}&as=account&role=research`);
+    await op.until(`typeof joined !== 'undefined' && joined && F.canPush && !document.getElementById('boardChip').hidden`, 10000);
+    await op.eval(`new Promise((r) => socket.emit('hall:configure', { code: ROOM, stagewatchUrl: ${codeLiteral(sw.url)}, stagewatchKey: ${codeLiteral(KEY)} }, r))`);
+    const beaPad = await edge.tab(`${base}/app.html?code=${tkHall}&name=Bea&role=board`, { alone: true });
+    const obiPad = await edge.tab(`${base}/app.html?code=${tkHall}&name=Obi&role=observer`, { alone: true });
+    for (const t of [beaPad, obiPad]) await t.until(`typeof joined !== 'undefined' && joined`, 10000);
+    const unsay = (t) => t.eval(`(() => { const x = document.getElementById('agmToast'); if (x) { x.textContent = ''; x.classList.remove('show'); } return true; })()`);
+    // The Board chip: "Board · Chat" with one Board page and nothing shown; a click, a right-click and Shift+F10 open its
+    // menu alike.
+    const BOARD_CHIP = `(() => { const c = document.getElementById('boardChip'); const st = document.getElementById('boardState'); return c.hidden ? '' : (document.getElementById('boardWhat').textContent + (st.hidden ? '' : ' ' + st.textContent)).trim(); })()`;
+    const chipAtStart = await op.until(`${BOARD_CHIP} === 'Board · Chat' && ${BOARD_CHIP}`, 8000);
+    const chipDoors = await selfDoors(op, 'board', `document.getElementById('boardChip')`, 'Console.board()');
+    const chipPick = async (id) => {
+      await unsay(op);
+      await op.eval(`document.getElementById('boardChip').click()`);
+      await op.until(`!!document.querySelector('.agm-menu [data-action="${id}"]')`, 3000);
+      const row = await op.eval(`(() => { const b = document.querySelector('.agm-menu [data-action="${id}"]'); return JSON.stringify({ label: b.querySelector('.mi-label').textContent, role: b.getAttribute('role'), checked: b.getAttribute('aria-checked'), why: b.querySelector('.mi-why').textContent }); })()`);
+      await op.eval(`document.querySelector('.agm-menu [data-action="${id}"]').click()`);
+      return JSON.parse(row);
+    };
+    // Show the clock from the chip: the toast names the audience, with Undo; Bea's page draws the clock over her chat, by
+    // AGMessage's clock, and says so: the chip reads ✓ 1/1.
+    const TAKE_LAYER = `(() => { const l = document.getElementById('pageLayer'); if (l.hidden) return ''; const b = document.getElementById('layerBox');
+      return JSON.stringify({ kind: l.dataset.kind, time: (b.querySelector('.take-time') || {}).textContent || '', title: (b.querySelector('.take-title') || {}).textContent || '', hall: (b.querySelector('.take-hall') || {}).textContent || '',
+        mark: !!b.querySelector('.take-mark'), what: document.getElementById('layerWhat').textContent, acts: [...document.querySelectorAll('#layerActs > [data-action]')].map((x) => x.dataset.action), bar: getComputedStyle(document.getElementById('layerBar')).visibility, focus: document.activeElement === l }); })()`;
+    const layerOf = async (t, ok, ms = 8000) => JSON.parse((await t.until(`(() => { const v = ${TAKE_LAYER}; return v && (${ok})(JSON.parse(v)) && v; })()`, ms)) || 'null');
+    const clockPick = await chipPick('board.clock');
+    const TOAST_SAID = `(() => { const x = document.getElementById('agmToast'); return x && x.classList.contains('show') && x.textContent; })()`;
+    const clockSaid = await op.until(TOAST_SAID, 5000);
+    const beaClock = await layerOf(beaPad, `(v) => v.kind === 'clock' && /^\\d\\d:\\d\\d:\\d\\d$/.test(v.time)`);
+    const chipClock = await op.until(`${BOARD_CHIP} === 'Board · 🕐 Clock ✓ 1/1' && ${BOARD_CHIP}`, 8000);
+    await beaPad.shot(path.join(OUT, 'take-clock.png'));
+    await op.shot(path.join(OUT, 'board-chip.png'));
+    report(chipAtStart === 'Board · Chat' && selfInStep(chipDoors) && chipDoors.want === JSON.stringify(['board.chat', 'board.stage', 'board.clock', 'board.holding', 'board.blank', 'board.screens'])
+      && clockPick.label === 'Show the clock' && clockPick.role === 'menuitemradio' && clockPick.checked === 'false' && clockSaid === 'The clock on 1 Board page. · Undo'
+      && !!beaClock && beaClock.focus && JSON.stringify(beaClock.acts.filter((a) => a !== 'take.fullscreen')) === '["take.chat","take.minimise"]' && /^Shown to you: the clock · from Ana Admin/.test(beaClock.what || '') && chipClock === 'Board · 🕐 Clock ✓ 1/1',
+      `the Board chip reads "Board · Chat", opens its menu by a click, a right-click and Shift+F10 alike; Show the clock is put on Bea's page at once ("${clockSaid}"), drawn over her chat by AGMessage's clock with Back to chat and Minimise, the focus on it, and the chip reads ✓ when her page says so (${JSON.stringify({ chipAtStart, want: chipDoors.want, clockPick, beaClock, chipClock })}${selfInStep(chipDoors) ? '' : '; ' + JSON.stringify(chipDoors)})`);
+
+    // The console, Screens & pages: its People's pages list the Board first, then each person in the hall; each kind drawn
+    // from the Board's row: holding (no picture: the AGMessage mark and the hall's name on black), blank (its bar only once
+    // touched), Stagewatch (its countdown live, its kind not chosen twice).
+    await op.eval(`document.getElementById('headerMore').click()`);
+    await op.until(`!!document.querySelector('.agm-menu [data-action="header.screens"]')`, 3000);
+    const consoleItem = await op.eval(`document.querySelector('.agm-menu [data-action="header.screens"] .mi-label').textContent`);
+    await op.eval(`document.querySelector('.agm-menu [data-action="header.screens"]').click()`);
+    await op.until(`document.getElementById('screensDialog').open && !document.getElementById('consoleTabs').hidden`, 5000);
+    await op.eval(`document.getElementById('tabPeople').click()`);
+    const PAGE_ROWS = `JSON.stringify([...document.querySelectorAll('#peoplePages > li[data-key]')].map((li) => [li.dataset.key === 'board' ? 'board' : li.querySelector('.page-who').textContent.replace(/ ·.*$/, ''), li.querySelector('.page-state').textContent, li.querySelector('.page-showing').textContent]))`;
+    const consoleRows = JSON.parse(await op.until(`(() => { const r = JSON.parse(${PAGE_ROWS}); return r.length >= 3 && r.some((x) => x[0] === 'Obi') && JSON.stringify(r); })()`, 5000) || '[]');
+    await op.shot(path.join(OUT, 'console-people.png'));
+    const boardRow = (id) => op.eval(`(() => { const b = document.querySelector('#peoplePages li[data-key="board"] [data-action="${id}"]'); if (!b) return 'none'; if (b.getAttribute('aria-disabled') === 'true') return 'disabled: ' + b.title; b.click(); return 'pushed'; })()`);
+    const holdingPushed = await boardRow('board.holding');
+    const beaHolding = await layerOf(beaPad, `(v) => v.kind === 'holding' && v.mark && v.hall === 'Takes hall'`);
+    const blankPushed = await boardRow('board.blank');
+    const beaBlank = await layerOf(beaPad, `(v) => v.kind === 'blank' && v.bar === 'hidden'`);
+    await leftClick(beaPad, { x: 700, y: 500 });
+    const beaTouched = await layerOf(beaPad, `(v) => v.kind === 'blank' && v.bar === 'visible'`, 3000);
+    const stagePushed = await boardRow('board.stage');
+    const beaStage = await layerOf(beaPad, `(v) => v.kind === 'stage' && /\\d/.test(v.time)`, 12000);
+    const stageAgain = await op.until(`(() => { const b = document.querySelector('#peoplePages li[data-key="board"] [data-action="board.stage"]'); return b && b.getAttribute('aria-disabled') === 'true' && b.title; })()`, 5000);
+    report(consoleItem === 'Screens & pages…' && consoleRows.length >= 3 && consoleRows[0][0] === 'board' && consoleRows.some((r) => r[0] === 'Bea') && consoleRows.some((r) => r[0] === 'Obi')
+      && holdingPushed === 'pushed' && !!beaHolding && blankPushed === 'pushed' && !!beaBlank && !!beaTouched && stagePushed === 'pushed' && !!beaStage && stageAgain === 'Already showing Stagewatch.',
+      `Screens & pages… lists the Board first and each person in the hall; from the Board's row each kind draws on Bea's page: holding (the mark and the hall's name), blank (its bar once touched), Stagewatch (its countdown), not chosen twice (${JSON.stringify({ consoleItem, consoleRows, beaHolding, beaBlank, beaTouched, beaStage, stageAgain })})`);
+
+    // Escape minimises (never Back to chat): the take is a card at the top of Bea's side bar, whose doors are in step, and
+    // the console reads ▭; the card's Show again draws it over her chat again, and the console reads ✓. Her side bar keeps
+    // the Board's size with the card in it (half the row): only an observer's is made for a card.
+    const BEA_PANEL = `(() => { const p = document.getElementById('docPanel'); const row = p.parentElement.getBoundingClientRect().width; return p.classList.contains('collapsed') ? 'collapsed' : JSON.stringify({ basis: getComputedStyle(p).flexBasis, half: Math.abs(p.getBoundingClientRect().width - row / 2) <= 2 }); })()`;
+    const beaPanelBefore = await beaPad.eval(BEA_PANEL);
+    await beaPad.eval(`document.getElementById('pageLayer').focus()`);
+    await press(beaPad, 'Escape');
+    const TAKE_CARD = `(() => { const c = document.querySelector('#takeCards .take-card'); return c && !document.getElementById('takeCards').hidden ? JSON.stringify({ text: c.querySelector('.take-card-what').textContent, pushed: document.body.dataset.pushed || '', layer: !document.getElementById('pageLayer').hidden }) : ''; })()`;
+    const beaCard = JSON.parse(await beaPad.until(TAKE_CARD, 5000) || 'null');
+    const beaPanelCarded = await beaPad.eval(BEA_PANEL);
+    const minimisedSaid = await beaPad.until(TOAST_SAID, 3000);
+    const boardState = `(() => { const li = document.querySelector('#peoplePages li[data-key="board"]'); return li ? li.querySelector('.page-state').textContent : ''; })()`;
+    const consoleMinimised = await op.until(`/^▭ Bea minimised it/.test(${boardState}) && ${boardState}`, 6000);
+    const cardDoors = await doorsOf(beaPad, 'card', `document.querySelector('#takeCards .take-card')`, 'Takes.cardObject()', { bar: '.take-card-acts > .msg-act', hit: '.take-card-name' });
+    await beaPad.eval(`document.querySelector('#takeCards [data-action="card.show"]').click()`);
+    const beaAgain = await layerOf(beaPad, `(v) => v.kind === 'stage'`, 5000);
+    const consoleAgain = await op.until(`/^✓ /.test(${boardState}) && ${boardState}`, 6000);
+    const takeDoors = await doorsOf(beaPad, 'take', `document.getElementById('pageLayer')`, 'Takes.object()', { bar: '#layerActs > .msg-act', hit: '#layerWhat' });
+    const beaPanelAgain = await beaPad.eval(BEA_PANEL);
+    const panelKept = JSON.stringify({ basis: '50%', half: true });
+    report(!!beaCard && /Stagewatch/.test(beaCard.text) && beaCard.pushed === '1' && !beaCard.layer && minimisedSaid === 'Minimised to 📺 On stage. · Undo' && !!consoleMinimised
+      && doorsInStep(cardDoors) && cardDoors.want === '["card.show","card.remove"]' && !!beaAgain && !!consoleAgain && doorsInStep(takeDoors) && JSON.parse(takeDoors.want).slice(0, 2).join() === 'take.chat,take.minimise'
+      && beaPanelCarded === panelKept && [beaPanelBefore, beaPanelAgain].every((x) => x === panelKept || x === 'collapsed'),
+      `Escape minimises the take into a card in Bea's side bar ("${minimisedSaid}"; the console: ${consoleMinimised}), its doors in step, the side bar the Board's half of the row before, with the card and after; Show again draws it over her chat again (the console: ${consoleAgain}), and the layer's doors are in step (${JSON.stringify({ beaCard, card: cardDoors.want, take: takeDoors.want, panel: [beaPanelBefore, beaPanelCarded, beaPanelAgain] })}${doorsInStep(cardDoors) ? '' : '; ' + JSON.stringify(cardDoors)}${doorsInStep(takeDoors) ? '' : '; ' + JSON.stringify(takeDoors)})`);
+
+    // Back to chat: the layer goes, no card is left, and the console reads ○ in her name; the toast's Show it again, within
+    // 10 s, brings it back (the server takes Back to chat back), and the console reads ✓.
+    await unsay(beaPad);
+    await beaPad.eval(`document.querySelector('#layerActs [data-action="take.chat"]').click()`);
+    const backSaid = await beaPad.until(`(() => { const x = document.getElementById('agmToast'); return x && x.classList.contains('show') && document.getElementById('pageLayer').hidden && document.getElementById('takeCards').hidden && x.textContent; })()`, 3000);
+    const consoleBack = await op.until(`/^○ Bea went back to chat/.test(${boardState}) && ${boardState}`, 6000);
+    await beaPad.eval(`document.querySelector('#agmToast .toast-undo').click()`);
+    const beaShownAgain = await layerOf(beaPad, `(v) => v.kind === 'stage'`, 5000);
+    const consoleShownAgain = await op.until(`/^✓ /.test(${boardState}) && ${boardState}`, 6000);
+    report(backSaid === 'Back to chat. · Show it again' && !!consoleBack && !!beaShownAgain && !!consoleShownAgain,
+      `Back to chat takes the take off Bea's page and leaves no card (the console: ${consoleBack}); "Show it again" within 10 s brings it back (the console: ${consoleShownAgain}) (${JSON.stringify({ backSaid })})`);
+
+    // Undo pushes again: Show the clock from the Board's row, then the toast's Undo puts Stagewatch back as a take of its
+    // own over it; before the Undo the chip offers ↶ Back to Stagewatch, after it none (a take made by it undoes nothing).
+    const seqNow = () => op.eval(`Console.board().seq`);
+    const seqBefore = await seqNow();
+    await unsay(op);
+    await boardRow('board.clock');
+    await layerOf(beaPad, `(v) => v.kind === 'clock'`, 5000);
+    await op.until(`Console.board().seq === ${seqBefore + 1}`, 5000);
+    const tkBackOffered = await op.eval(`(() => { const i = AGM.catalog.items('board', F, Console.board()).find((x) => x.id === 'board.back'); return i ? i.label : ''; })()`);
+    await op.until(`!!document.querySelector('#agmToast.show .toast-undo')`, 3000);
+    await op.eval(`document.querySelector('#agmToast .toast-undo').click()`);
+    const beaUndone = await layerOf(beaPad, `(v) => v.kind === 'stage'`, 5000);
+    const afterUndo = await op.until(`Console.board().seq === ${seqBefore + 2} && Console.board().kind === 'stage' && JSON.stringify(AGM.catalog.ids('board', F, Console.board()))`, 6000);
+    report(/^Back to Stagewatch \(undo your Clock, \d{1,2}:\d{2}/.test(tkBackOffered) && !!beaUndone && afterUndo === JSON.stringify(['board.chat', 'board.stage', 'board.clock', 'board.holding', 'board.blank', 'board.screens']),
+      `the toast's Undo puts what was shown before back as a new take, and Bea's page draws it; ↶ Back to was offered over this page's own take ("${tkBackOffered}"), and none over the one the Undo made (${afterUndo})`);
+
+    // While the take covers her page, a 🔥 message breaks through in its strip, and another is counted on its bar; Open
+    // chat minimises the take and brings the 🔥 message into view.
+    await op.eval(`new Promise((r) => socket.emit('message', { type: 'text', text: 'Doors in five' }, r))`);
+    await op.eval(`new Promise((r) => socket.emit('message', { type: 'text', text: 'Wrap up now', priority: true }, r))`);
+    const stripRead = await beaPad.until(`(() => { const s = document.getElementById('layerStrip'); return !s.hidden && JSON.stringify({ strip: s.textContent.replace(/\\s+/g, ' ').trim(), count: document.getElementById('layerNew').textContent, open: AGM.catalog.ids('take', F, Takes.object()).includes('take.openChat') }); })()`, 5000);
+    await beaPad.eval(`document.getElementById('layerOpenChat').click()`);
+    const openedChat = await beaPad.until(`(() => { const m = allMessages.find((x) => x.text === 'Wrap up now'); const n = m && messagesById.get(m.id); return document.getElementById('pageLayer').hidden && !!document.querySelector('#takeCards .take-card') && n && document.activeElement === n && 'opened'; })()`, 5000);
+    report(stripRead === JSON.stringify({ strip: '🔥 Ana Admin: Wrap up now Open chat', count: '1 new', open: true }) && openedChat === 'opened',
+      `a 🔥 message breaks through the take in its strip, another is counted on its bar, and Open chat minimises the take and brings the 🔥 message into view with the focus on it (${stripRead}; ${openedChat})`);
+
+    // A draft keeps its words and its focus: Bea writing when a take arrives keeps the focus in her field while she writes
+    // (at most 3 s), and the take then draws over it, her words still there and the focus still hers.
+    await beaPad.eval(`(() => { const i = document.getElementById('directorInput'); i.focus(); i.value = 'Half a thought'; return true; })()`);
+    await boardRow('board.blank');
+    await sleep(1200);
+    const whileWriting = await beaPad.eval(`JSON.stringify({ layer: !document.getElementById('pageLayer').hidden, focus: document.activeElement && document.activeElement.id })`);
+    const draftKept = await beaPad.until(`(() => { const l = document.getElementById('pageLayer'); const i = document.getElementById('directorInput'); return !l.hidden && l.dataset.kind === 'blank' && JSON.stringify({ value: i.value, focus: document.activeElement === i }); })()`, 5000);
+    report(whileWriting === JSON.stringify({ layer: false, focus: 'directorInput' }) && draftKept === JSON.stringify({ value: 'Half a thought', focus: true }),
+      `a take never takes the focus from a field being written in: it waits (${whileWriting}), then draws over it, the words and the focus kept (${draftKept})`);
+
+    // The observer's rail: an observer has no side bar, until a take shown to them is minimised. From the console, Obi's
+    // row: Show them ▸ Clock; on Obi's page, Minimise puts it in a side bar of its own, with its card.
+    const obiPanelBefore = await obiPad.eval(`document.getElementById('docPanel').getClientRects().length > 0`);
+    const obiKey = await op.eval(`(() => { const li = [...document.querySelectorAll('#peoplePages > li[data-key]')].find((x) => /^Obi/.test(x.querySelector('.page-who').textContent)); return li ? li.dataset.key : ''; })()`);
+    await op.eval(`document.querySelector('#peoplePages li[data-key="${obiKey}"] .obj-more').click()`);
+    await op.until(`!!document.querySelector('.agm-menu [data-action="person.show"]')`, 3000);
+    const obiMenu = await op.eval(MENU_IDS);
+    await op.eval(`document.querySelector('.agm-menu [data-action="person.show"]').click()`);
+    await op.until(`!!document.querySelector('.agm-sub [data-value="clock"]')`, 3000);
+    await op.eval(`document.querySelector('.agm-sub [data-value="clock"]').click()`);
+    const obiClock = await layerOf(obiPad, `(v) => v.kind === 'clock'`);
+    await obiPad.eval(`document.querySelector('#layerActs [data-action="take.minimise"]').click()`);
+    const obiRail = await obiPad.until(`(() => { const p = document.getElementById('docPanel'); return p.getClientRects().length > 0 && !!document.querySelector('#takeCards .take-card') && document.body.dataset.pushed === '1' && JSON.stringify({ card: document.querySelector('#takeCards .take-card .take-card-name').textContent, doc: getComputedStyle(document.getElementById('docDisplay')).display }); })()`, 5000);
+    await obiPad.shot(path.join(OUT, 'take-card-observer.png'));
+    report(obiPanelBefore === false && obiMenu === JSON.stringify(['person.show', 'person.chat']) && !!obiClock && obiRail === JSON.stringify({ card: 'Clock', doc: 'none' }),
+      `an observer has no side bar until a take shown to them is minimised: from the console's row, Show them ▸ Clock reaches Obi's page, and Minimise puts it in a side bar of its own with its card (${JSON.stringify({ obiPanelBefore, obiMenu, obiRail })})`);
+
+    const takesProblems = [['op', op], ['bea', beaPad], ['obi', obiPad]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
+    report(takesProblems.length === 0, `the takes hall's pages: no console error and no CSP violation${takesProblems.length ? ' — ' + takesProblems.slice(0, 4).join(' | ') : ''}`);
+    await op.eval(`document.getElementById('screensDialog').close()`);
+    for (const t of [beaPad, obiPad, op]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
+
     // The header's countdown chip is its own door (the account's: the speaker's screen and the countdown on its screens).
     await hallView.until(`!document.getElementById('stageChip').hidden && document.getElementById('stageChip').getAttribute('role') === 'button'`, 8000);
     const stageDoors = await selfDoors(hallView, 'chip', `document.getElementById('stageChip')`, 'stageNow');
@@ -2648,7 +2815,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     if (joinLink === 'field') await press(research, 'Escape');
     report(selfInStep(headerDoors) && headerDoors.want === JSON.stringify(HEADER_WANT) && byTitle === headerDoors.want && !!joinLink,
       `the header's ⋯ opens its menu by a click, a right-click and Shift+F10 alike, and so does a right-click on the room's name; Copy join link copies the join page's link with the code (${JSON.stringify({ want: headerDoors.want, byTitle, joinLink })}${selfInStep(headerDoors) ? '' : '; ' + JSON.stringify(headerDoors)})`);
-    // The admin's own page: the header's ⋯ adds Screens…, Turn the code off… and New code…. Turn off asks which way (the
+    // The admin's own page: the header's ⋯ adds Screens & pages…, Turn the code off… and New code…. Turn off asks which way (the
     // guests in stay, or are sent out), its safe answer focused; chosen to keep them, every page's Copy guest code says
     // "(off)" as the server tells it, the guest's too; Turn the code on asks nothing and puts it back.
     const adminHeaderDoors = await selfDoors(hallView, 'header', `document.getElementById('headerMore')`, 'headerObject()');
@@ -2671,12 +2838,12 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       && toggleOffWords === 'Turn the code off…' && onWords === 'Turn the code on'
       && offAsk === JSON.stringify({ title: 'Turn off the guest code of Smoke AGM?', answers: ['keep:Turn off', 'out:Turn off and send them out', 'no:Keep it on'], focus: true })
       && JSON.stringify(codesOff) === JSON.stringify(['Copy guest code ' + code + ' (off)', 'Copy guest code ' + code + ' (off)']) && JSON.stringify(codesOn) === '["on","on"]',
-    `the admin's ⋯ adds Screens…, Turn the code off… and New code…; off asks which way, keeps the guests and every page's Copy guest code says "(off)", and on asks nothing (${JSON.stringify({ want: adminHeaderDoors.want, toggleOffWords, offAsk, codesOff, onWords, codesOn })}${selfInStep(adminHeaderDoors) ? '' : '; ' + JSON.stringify(adminHeaderDoors)})`);
+    `the admin's ⋯ adds Screens & pages…, Turn the code off… and New code…; off asks which way, keeps the guests and every page's Copy guest code says "(off)", and on asks nothing (${JSON.stringify({ want: adminHeaderDoors.want, toggleOffWords, offAsk, codesOff, onWords, codesOn })}${selfInStep(adminHeaderDoors) ? '' : '; ' + JSON.stringify(adminHeaderDoors)})`);
 
     // The header is one model at every width: row 1 the room's name, its status, Help and the ⋯, at most 6 controls at 1440
     // and 1024 px (and on a phone), on one line, each 44 px; row 2 the switcher, its rooms 44 px under a mouse too, only
     // with two rooms or more (the admin account's page, whose hall has side rooms; a guest's page has one room). The ⋯
-    // holds People, Screens…, Text size,
+    // holds People, Screens & pages…, Text size,
     // Dark theme, the guest code and the way out, and each acts: the panel, the text size, the theme. Every status in the
     // header is one chip: its mark the table's for its name, its colour that name's role.
     const HEADER_READ = `(() => { const vis = (n) => n.getClientRects().length > 0 && getComputedStyle(n).visibility !== 'hidden';
@@ -2729,11 +2896,11 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       return [c.id, c.dataset.mark, mark.textContent === m.mark + ' ' && c.dataset.tone === m.role && (c.classList.contains('help-btn') || getComputedStyle(mark).color === role)]; }))`;
     const headerChips = [JSON.parse(await hallView.eval(CHIPS_READ)), JSON.parse(await research.eval(CHIPS_READ))];
     report(headers.admin.every((h) => headerOk(h, true)) && headers.guest.every((h) => headerOk(h, false))
-      && adminMenu === JSON.stringify(['People · N', 'Screens…', 'Text size', 'Dark theme', 'Copy guest code ' + code, 'Copy join link', 'Turn the code off…', 'New code…', 'All halls'])
+      && adminMenu === JSON.stringify(['People · N', 'Screens & pages…', 'Text size', 'Dark theme', 'Copy guest code ' + code, 'Copy join link', 'Turn the code off…', 'New code…', 'All halls'])
       && headerWas === JSON.stringify({ people: true, theme: 'light' }) && headerActed === JSON.stringify({ people: true, zoom: '1.15', theme: 'dark', checked: ['header.people', 'header.theme'], size: ['Large'] })
       && headerBack === JSON.stringify({ people: true, theme: 'light', zoom: 1 })
       && headerChips.every((list) => list.some(([id, mark]) => id === 'connChip' && mark === 'ok') && list.every(([, , same]) => same)),
-      `the header is one model at every width: at most 6 controls on one row at 1440 and 1024 px and on a phone, each 44 px, the switcher on a row of its own only with two rooms; the ⋯ holds People, Screens…, Text size, Dark theme, the guest code and the way out, and each acts; every status in it is one chip of the table's mark and colour (${JSON.stringify({ headers, adminMenu, headerWas, headerActed, headerBack, headerChips })})`);
+      `the header is one model at every width: at most 6 controls on one row at 1440 and 1024 px and on a phone, each 44 px, the switcher on a row of its own only with two rooms; the ⋯ holds People, Screens & pages…, Text size, Dark theme, the guest code and the way out, and each acts; every status in it is one chip of the table's mark and colour (${JSON.stringify({ headers, adminMenu, headerWas, headerActed, headerBack, headerChips })})`);
 
     // The skip link: the first Tab of a fresh page; Enter takes the focus to the message box, or, for an observer (who
     // has none), to the newest message. An observer reads a question's options as words, with no button.

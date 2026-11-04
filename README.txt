@@ -487,8 +487,8 @@ Priority, Attach a file..., Remove the file and Cancel the reply (Escape
 in the message box or on Send does that too). The header is the same on
 a phone and a laptop: the room's name, the connection and the countdown,
 Help, and a ⋯ (or right-click the header, or Shift+F10 on the ⋯) that
-holds People, Screens..., Text size, Dark theme, the guest code and
-Leave (All halls for an account). Copy guest code there copies the code,
+holds People, Screens & pages..., Text size, Dark theme, the guest code
+and Leave (All halls for an account). Copy guest code there copies the code,
 Copy join link the join page's link, and for the admin it turns the code
 off or on or makes a new one; it says "(off)" while the code admits
 nobody new, and is not there for a page that may not know it. The
@@ -526,7 +526,7 @@ rows.
 
 Screens (projector PC, lectern monitor, foyer TV)
 -------------------------------------------------
-In a hall, the header's ⋯ -> Screens... -> Add screen. The screen's link
+In a hall, the header's ⋯ -> Screens & pages... -> Add screen. The screen's link
 is copied: open it in the browser on that screen (double-click for full
 screen) and leave it. From the hall you can then show on it: the holding
 image, a message, an image or PDF page shared in the hall, the hall's
@@ -536,6 +536,21 @@ confirms it. Each screen's row keeps Identify; its ⋯ (or a right-click
 on it) has Tick only this one, Copy link, Open, Rename..., New link...
 and Remove.... Anyone with a screen's link can see that screen: give it
 only to that machine. "New link..." stops the old one at once.
+
+People's screens (the Board's tablets, or one person's pages)
+-------------------------------------------------------------
+Whoever may drive the hall's screens (and a backstage guest of a locked
+hall) can also show the Board's pages, or one person's, something over
+their chat: Stagewatch's countdown, the clock, the holding slide, or
+black. The Board chip in the header ("Board · Clock ✓ 6/6") opens the
+choices; the toast's Undo (10 s) puts back what was there, and later
+"Back to ..." in the chip does, while it is still yours. The header's
+⋯ -> Screens & pages... -> People's pages lists the Board and each
+person, with what each page says it shows: a tick only once it is on the
+screen in front of them. On the tablet, Back to chat ends it (Show it
+again within 10 s brings it back), Minimise or Escape puts it in the
+side bar's On stage, and Show again there brings it back. A take waits
+while someone is typing, and a priority message still shows over it.
 
 Stagewatch (the countdown) for each hall
 ----------------------------------------

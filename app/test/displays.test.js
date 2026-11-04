@@ -436,7 +436,8 @@ test('displays end to end, a hall of screens: every browser counts, one take rea
       if (i) sockets.push(c);
       assert.ok((await emit(c, 'join', { roomCode: big, as: 'account' })).ok);
       const stats = { events: 0, lists: 0, last: null };
-      c.on('displays:changed', ({ code }) => { stats.events++; if (code === big) c.emit('display:list', { code: big }, (r) => { stats.lists++; stats.last = r; }); });
+      // The signal names nothing (no hall's key reaches a page this way): a console reads its own hall's list again.
+      c.on('displays:changed', (said) => { stats.events++; stats.said = said; c.emit('display:list', { code: big }, (r) => { stats.lists++; stats.last = r; }); });
       consoles.push(stats);
     }
     await wait(1500);
@@ -447,6 +448,7 @@ test('displays end to end, a hall of screens: every browser counts, one take rea
     for (const s of consoles) {
       assert.ok(s.events >= 1 && s.events <= 3, 'each console heard of the change a bounded number of times: ' + consoles.map((x) => x.events).join(', '));
       assert.ok(s.last && s.last.displays.length === 20 && s.last.displays.every((d) => d.state === 'shown' && d.content.kind === 'black'), 'the last read is the newest state');
+      assert.deepEqual(s.said, {}, 'the signal carries nothing');
     }
   });
 });

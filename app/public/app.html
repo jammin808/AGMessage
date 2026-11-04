@@ -24,6 +24,8 @@
         <span class="app-status">
           <span class="status-chip conn-chip" id="connChip"><span class="chip-mark" id="connDot" role="img" aria-label="Connecting" title="Connecting">◷</span><span class="conn-words" id="connWords" hidden>Offline · reconnecting</span></span>
           <span class="status-chip stage-chip" id="stageChip" hidden title="Live from Stagewatch"><b id="stageTime">--:--</b> <span id="stageTitle"></span></span>
+          <!-- What the Board's pages show, for a seat that may change it (app.js, kind `board`): its menu puts a kind on them. -->
+          <button class="status-chip board-chip" id="boardChip" type="button" aria-haspopup="menu" aria-expanded="false" hidden><span class="board-what" id="boardWhat">Board</span><span class="board-state" id="boardState"></span></button>
         </span>
         <button id="helpBtn" class="btn small help-btn status-chip" type="button" aria-haspopup="dialog" title="Ask this room and the hall's crew for help" hidden><span class="chip-mark" aria-hidden="true" hidden></span><span class="chip-words">Help</span></button>
         <span class="sr-only" id="helpStatus" role="status"></span>
@@ -146,6 +148,9 @@
         <button id="docCollapseBtn" class="doc-collapse-btn" type="button" title="Collapse / expand">⇥</button>
       </header>
 
+      <!-- A take this person minimised, as a card at the top of the panel: Show again, Remove (app.js, kind `card`). -->
+      <ul class="take-cards" id="takeCards" aria-label="Shown to you" hidden></ul>
+
       <div class="doc-display" id="docDisplay">
         <div class="empty-state">
           <p>No document on stage yet.</p>
@@ -166,6 +171,22 @@
     </aside>
   </div>
 
+  <!-- What this person's page is shown over its chat (a take), drawn by pagelayer.mjs: over the header and the panels, under
+       the menus, the asks and the toast; never a modal dialog. Its bar's buttons are the catalogue's kind `take` (app.js);
+       a 🔥 message in the room breaks through in its strip, and other new messages are counted on its bar. -->
+  <section class="page-layer" id="pageLayer" role="dialog" aria-modal="false" aria-labelledby="layerWhat" tabindex="-1" hidden>
+    <div class="layer-bar" id="layerBar">
+      <span class="layer-what" id="layerWhat">Shown to you</span>
+      <span class="layer-new" id="layerNew" role="status"></span>
+      <span class="layer-acts" id="layerActs"></span>
+    </div>
+    <div class="layer-box" id="layerBox"></div>
+    <div class="layer-strip" id="layerStrip" role="alert" hidden>
+      <span class="layer-strip-words"><strong id="layerStripFrom"></strong> <span id="layerStripText"></span></span>
+      <button class="btn small layer-strip-open" id="layerOpenChat" type="button" data-action="take.openChat">Open chat</button>
+    </div>
+  </section>
+
   <!-- Help in two taps: Help, then what it is about. The heading takes the focus, so a phone's keyboard does not cover the
        categories; the words come first and are optional; a category sends at once, and none is chosen for the person. -->
   <dialog id="helpDialog" class="agm-dialog help-dialog" aria-labelledby="helpTitle">
@@ -179,11 +200,23 @@
     </form>
   </dialog>
 
+  <!-- Screens & pages: the hall's screens (display.control) and what people's pages show (canPush), a tab each. -->
   <dialog id="screensDialog" class="agm-dialog wide screens-dialog" aria-labelledby="screensTitle">
     <div class="screens-head">
-      <h2 id="screensTitle">Screens in this hall</h2>
+      <h2 id="screensTitle">Screens &amp; pages</h2>
       <button class="btn ghost small" type="button" id="screensClose">Close</button>
     </div>
+    <div class="screens-tabs" role="tablist" aria-label="What to show on" id="consoleTabs" hidden>
+      <button class="tab active" type="button" role="tab" id="tabScreens" aria-selected="true" aria-controls="screensPane">Screens</button>
+      <button class="tab" type="button" role="tab" id="tabPeople" aria-selected="false" aria-controls="peoplePane" tabindex="-1">People's pages</button>
+    </div>
+    <!-- People's pages: the Board's row first ("On stage (Board) — all n"), then each person the console lists, each with
+         its status chip and what it shows; the Board's row puts a kind on every Board page, a person's ⋯ on theirs. -->
+    <div class="console-pane" id="peoplePane" role="tabpanel" aria-labelledby="tabPeople" hidden>
+      <ul class="people-pages" id="peoplePages"></ul>
+      <p class="hint" id="peoplePagesWords"></p>
+    </div>
+    <div class="console-pane" id="screensPane" role="tabpanel" aria-labelledby="tabScreens">
     <div class="screens-pending" id="screensPending" hidden>
       <span id="pendingWords"></span>
       <label class="inline-field" id="pendingPageWrap" hidden>page <input id="pendingPage" type="number" min="1" max="9999" value="1" /></label>
@@ -215,6 +248,7 @@
         <select id="holdingPick" aria-label="Holding image"><option value="">None (black)</option></select>
         <button class="btn small" type="button" id="holdingSave">Use it</button></div>
       <p class="hint">A screen's link opens it in any browser: a projector PC, a TV's browser, a tablet on the lectern. Anyone with the link can see that screen, so give it only to the machine that shows it — and choose "New link" if it went further.</p>
+    </div>
     </div>
   </dialog>
 

@@ -26,7 +26,8 @@
 // by its facts and the room's hall key) fits each page's rows only on that page (`page`, a fact of each page's facts, or
 // what only that page's facts and objects carry), so a page never draws a row whose runner is another page's, and no row
 // is hidden by a right the server would not refuse.
-// An entry with `checked` is a toggle, drawn as a menu item that is checked or not (🔥 Priority).
+// An entry with `checked` is a toggle, drawn as a menu item that is checked or not (🔥 Priority); one with `radio` is one
+// of a set of which one is chosen (the Board chip's show kinds), checked where it is the one.
 // A status its words carry is a mark of AGM.MARKS (common.js, which every page loads before this script).
 (function (root) {
   'use strict';
@@ -42,7 +43,11 @@
     offline: 'Not connected — AGMessage is reconnecting.',
     held: root.AGM.mark('waiting') + ' sent when the connection is back',
     gone: 'Not available any more.',
-    noScreens: 'No screens in this hall yet — add one in Screens.',
+    noScreens: 'No screens in this hall yet — add one in Screens & pages.',
+    noStagewatch: 'This hall has no Stagewatch linked — link one in Set up.',
+    onChat: 'Already on chat.',
+    reading: 'Reading where their pages stand…',
+    noPage: 'They have no page open in this hall now.',
     linkDown: 'Stagewatch is not connected right now — nothing is queued; try again when it is.',
     linkKey: 'Stagewatch has not accepted this AGMessage\'s key yet — nothing is queued; try again in a moment.',
     linkRefused: 'Stagewatch refused this AGMessage\'s key — nothing can be sent until an admin enters a node key it lists (Halls → Set up).',
@@ -54,6 +59,32 @@
   /** The support view's words (R8): every door the person has, drawn, and none of them acts. */
   const supportWords = (name) => 'This is ' + name + '\'s view — act from your own page.';
   const FOLDS = Object.freeze({ speaker: Object.freeze({ label: 'Speaker\'s screen', icon: '🖥' }) });
+  /**
+   * The kinds a take on people's pages may show (lib/pages.js KINDS, held to them by test/modules.test.js (n)), each by
+   * the name a person reads in a menu, and as "Already showing …" says it. `chat` hands the pages back to their chat.
+   */
+  const SHOW_KINDS = Object.freeze([['chat', 'Chat', 'chat'], ['stage', 'Stagewatch', 'Stagewatch'], ['clock', 'Clock', 'the clock'], ['holding', 'Holding', 'holding'], ['blank', 'Blank', 'blank']].map((x) => Object.freeze(x)));
+  const kindName = (kind) => { const k = SHOW_KINDS.find((x) => x[0] === kind); return k ? k[1] : 'Chat'; };
+  /**
+   * What a take's target shows now, as its object carries it (`kind`, the console's read): a kind of SHOW_KINDS, chat for
+   * their chat; '' where the read lists no page of theirs open in the hall, and where nothing has been read yet (no
+   * `kind`), so nothing is checked that nobody read.
+   */
+  const showsNow = (o) => (o && typeof o.kind === 'string' ? o.kind : '');
+  /**
+   * Why a show kind cannot be put on a target now: no Stagewatch to show, where they stand not read yet, no page of theirs
+   * open in the hall, or it shows that already; else true.
+   */
+  const kindWhy = (f, o, kind) => {
+    if (kind === 'stage' && !f.stagewatch) return WORDS.noStagewatch;
+    if (!o || typeof o.kind !== 'string') return WORDS.reading;
+    if (!o.kind) return WORDS.noPage;
+    if (o.kind === kind) return kind === 'chat' ? WORDS.onChat : 'Already showing ' + SHOW_KINDS.find((x) => x[0] === kind)[2] + '.';
+    return true;
+  };
+  /** One of the Board chip's show kinds: radio, the kind the Board's pages show now checked (and not chosen twice). */
+  const boardKind = (kind, label, icon, rank) => ({ id: 'board.' + kind, label, icon, group: '2_send', inline: () => rank, verb: 'page:push', mode: 'now', radio: (f, o) => showsNow(o) === kind,
+    may: (f) => f.canPush, fits: () => true, ready: (f, o) => kindWhy(f, o, kind) });
 
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const mine = (f, o) => !!f.uid && !!o.from && o.from.uid === f.uid;
@@ -325,8 +356,9 @@
     header: [
       { id: 'header.people', label: (f, o) => 'People · ' + o.people, icon: '👫', group: '3_keep', verb: 'local', mode: 'local',
         checked: (f, o) => !!o.peopleShown, may: () => true, fits: () => true },
-      // Screens…: the hall's screens console, which reads their list (display:list) as it opens.
-      { id: 'header.screens', label: 'Screens…', icon: '⧉', group: '3_keep', verb: 'display:list', mode: 'now', may: (f) => f.canScreens, fits: () => true },
+      // Screens & pages…: the hall's console, its screens (read with display:list as it opens) for a seat that drives them,
+      // and its people's pages for one that may change what they show.
+      { id: 'header.screens', label: 'Screens & pages…', icon: '⧉', group: '3_keep', verb: 'display:list', mode: 'now', may: (f) => f.canScreens || f.canPush, fits: () => true },
       { id: 'header.size', label: 'Text size', icon: 'Aa', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true,
         submenu: (f, o) => TEXT_SIZES.map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: Math.round(o.zoom * 100) === Math.round(value * 100) })) },
       { id: 'header.theme', label: 'Dark theme', icon: '🌙', group: '3_keep', verb: 'local', mode: 'local', checked: (f, o) => !!o.dark, may: () => true, fits: () => true },
@@ -340,6 +372,43 @@
         may: (f) => f.setsCode, fits: () => true, confirm: (f, o) => newCodeAsk(o) },
       // The way out: last, a separator before it; it loses nothing (a send held for this room stays held for this tab).
       { id: 'header.leave', label: (f, o) => (o.account ? 'All halls' : 'Leave'), icon: '←', group: '4_manage', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+    ],
+
+    // What this person's page is shown over its chat (a take), drawn as a layer over the page: its bar's buttons are its
+    // doors, and in the full view its ⋯, a right-click on it and Shift+F10 open the same acts. `seq`, `kind`, `strip` (a 🔥
+    // message out of view, in the layer's strip: Open chat), `full` (the layer fills the device's screen now). Every act is
+    // the person's on their own page: the page acts at once, and says what it did (page:report, `self`).
+    take: [
+      { id: 'take.chat', label: 'Back to chat', icon: '💬', group: '1_respond', inline: () => 1, verb: 'page:report', mode: 'self', may: () => true, fits: () => true },
+      // Escape minimises, never sends back to chat: a key pressed by mistake loses nothing.
+      { id: 'take.minimise', label: 'Minimise', icon: '🔽', key: 'Escape', group: '1_respond', inline: () => 2, verb: 'page:report', mode: 'self', may: () => true, fits: () => true },
+      { id: 'take.openChat', label: 'Open chat', icon: '🗨', group: '1_respond', verb: 'page:report', mode: 'self', may: () => true, fits: (f, o) => !!o.strip },
+      // The person's own gesture, where the device has the Fullscreen API (`fullscreen`, a probe at load): a take never
+      // enters it by itself.
+      { id: 'take.fullscreen', label: (f, o) => (o.full ? 'Leave full screen' : 'Full screen'), icon: '⛶', group: '3_keep', inline: () => 3, verb: 'local', mode: 'local',
+        may: () => true, fits: (f) => f.fullscreen },
+    ],
+    // A take minimised into the side bar (📺 On stage), as a card: Show again draws it over the page again; Remove puts it
+    // away (Back to chat), with Undo for 10 s (the server takes Back to chat back within 10 s). `seq`, `kind`.
+    card: [
+      { id: 'card.show', label: 'Show again', icon: '⤴', group: '1_respond', inline: () => 1, verb: 'page:report', mode: 'self', may: () => true, fits: () => true },
+      { id: 'card.remove', label: 'Remove', icon: '🗑', group: '9_danger', inline: () => 2, verb: 'page:report', mode: 'self', undo: 'card.remove', may: () => true, fits: (f) => full(f) },
+    ],
+    // The Board chip (the header's, for a seat that may change what people's pages show: canPush): what the Board's pages
+    // show, as the console reads it. Its menu (a click on it, a right-click, Shift+F10) puts a show kind on every Board
+    // page at once, each a take of its own, with Undo for 10 s; beyond it, ↶ Back to puts back what was shown before the
+    // take this page put up, while it is still the Board's (sent over that take: `ifSeq`). `seq`, `kind` (what the Board's
+    // pages show: 'chat' for their chat; none until the console has read it), `pages` (Board pages open), `mine` (this
+    // page's own take on the Board: {seq, previous, time}).
+    board: [
+      boardKind('chat', 'Back to chat', '💬', 1),
+      boardKind('stage', 'Show Stagewatch', '⏱', 2),
+      boardKind('clock', 'Show the clock', '🕐', 3),
+      boardKind('holding', 'Show holding', '🖼', 4),
+      boardKind('blank', 'Show blank', '🌑', 5),
+      { id: 'board.back', label: (f, o) => 'Back to ' + kindName(o.mine && o.mine.previous && o.mine.previous.kind) + ' (undo your ' + kindName(o.kind) + ', ' + String((o.mine && o.mine.time) || '') + ')', icon: '↶', group: '3_keep', verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush, fits: (f, o) => !!o.mine && o.mine.seq === o.seq },
+      { id: 'board.screens', label: 'Screens & pages…', icon: '⧉', group: '4_manage', verb: 'display:list', mode: 'now', may: (f) => f.canPush, fits: () => true },
     ],
 
     // ------------------------------------------------------------ the admin page (adminFacts) and Set up's Rooms (boardFacts)
@@ -396,7 +465,9 @@
           : { title: 'Remove room ' + hallOf(o) + '?', words: 'Everyone in it is sent out and its saved history is deleted; the hall and its other rooms stay. Open its transcript first if you need it.',
             fields: [{ name: 'purge', type: 'checkbox', label: 'Also delete the files shared only in this room', value: true }], yes: 'Remove and delete', no: 'Keep it', danger: true }) },
     ],
-    // A person: on the hall page, a row of its People panel and a message's sender (`uid`, `name`, `role`); on the admin
+    // A person: on the hall page, a row of its People panel, a message's sender and a row of the console's People's pages
+    // (`where: 'console'`, a person anywhere in the hall's rooms the page may read: no Mention there) (`uid`, `name`, `role`,
+    // and `key` and `kind`, their key on people's pages and what those show now); on the admin
     // page, a person in the watched hall (`socketId`, `name`, `role`, `account`: signs in with an account, so its seat
     // follows its rights, `linkedRooms`, `hall`: its name, `main`: false in a side room, whose seats are a Member's and an
     // observer's). Each page draws its own half: the hall page's acts are a seat's in its room, the admin page's the
@@ -404,7 +475,16 @@
     person: [
       // @ Mention puts the person's name in this page's composer, to be sent with what follows it.
       { id: 'person.mention', label: 'Mention', icon: '@', group: '1_respond', verb: 'local', mode: 'local',
-        may: (f) => f.post, fits: (f, o) => onHall(f) && full(f) && typeof o.name === 'string' && o.name.length > 0 && o.uid !== f.uid },
+        may: (f) => f.post, fits: (f, o) => onHall(f) && full(f) && typeof o.name === 'string' && o.name.length > 0 && o.uid !== f.uid && o.where !== 'console' },
+      // 📺 Show them ▸ puts a show kind on every page of theirs in the hall; Back to chat on their pages hands them back. For
+      // a seat that may change what people's pages show (canPush), on a person whose key the page knows (`key`: none for an
+      // AI's line), with what their pages show now (`kind`, the console's read: '' where it lists no page of theirs open in
+      // the hall, none until it has read).
+      { id: 'person.show', label: 'Show them', icon: '📺', group: '2_send', verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, ''),
+        submenu: (f, o) => SHOW_KINDS.filter((x) => x[0] !== 'chat').map(([value, label]) => { const why = kindWhy(f, o, value); return { value, label, role: 'menuitemradio', checked: showsNow(o) === value, ...(why === true ? {} : { disabled: why }) }; }) },
+      { id: 'person.chat', label: 'Back to chat on their pages', icon: '💬', group: '2_send', verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, 'chat') },
       { id: 'person.seat', label: 'Seat', icon: '💺', group: '4_manage', verb: 'admin:setRole', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => onAdmin(f) && !o.account,
         submenu: (f, o) => (o.main === false ? SEATS_SIDE : SEATS).map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: seatOf(o.role) === value })) },
@@ -656,6 +736,10 @@
       admin: s.admin === true,
       connected: !!s.connected,
       support: s.adminView ? String(s.name || 'this person') : '',
+      // Whether this page may change what its hall's people's pages show (the join's `canPush`; for the support view, the
+      // person's): the console's People and the Board chip. The hall's Stagewatch, which a take may show, as the page is
+      // told it; and the device's Fullscreen API, a probe the page made at load.
+      canPush: s.canPush === true, stagewatch: !!s.stage && s.stage.status !== 'off', fullscreen: s.fullscreen === true,
     });
   }
 
@@ -724,6 +808,7 @@
       submenu: typeof e.submenu === 'function', asks: !!(e.confirm && e.confirm(f, o)),
     };
     if (e.checked) { item.role = 'menuitemcheckbox'; item.checked = !!e.checked(f, o); }
+    if (e.radio) { item.role = 'menuitemradio'; item.checked = !!e.radio(f, o); }
     return item;
   }
 
@@ -754,13 +839,16 @@
   /** The ids a menu holds, a fold's entries in its place: what every door of the object must show alike. */
   const ids = (kind, f, o) => items(kind, f, o).filter((i) => !i.sep).flatMap((i) => (i.children ? i.children.map((c) => c.id) : [i.id]));
 
-  /** The object's own bar: the two shown entries of lowest inline rank, in rank order, each with its full label. */
-  function inline(kind, f, o) {
+  /**
+   * The object's own bar: the two shown entries of lowest inline rank (`max` of them where the object's bar holds more:
+   * a take's layer, the Board's row of show kinds), in rank order, each with its full label.
+   */
+  function inline(kind, f, o, max = 2) {
     return shown(kind, f, o)
       .map((e) => ({ e, rank: e.inline ? e.inline(f, o) : false }))
       .filter((x) => typeof x.rank === 'number')
       .sort((a, b) => a.rank - b.rank)
-      .slice(0, 2)
+      .slice(0, max)
       .map((x) => itemOf(kind, x.e, f, o, false));
   }
 
@@ -777,6 +865,6 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, KINDS, supportWords, stageWhy, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, KINDS, supportWords, stageWhy, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
   Object.assign(root.AGM = root.AGM || {}, { catalog });
 })(typeof window !== 'undefined' ? window : globalThis);

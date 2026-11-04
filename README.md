@@ -82,11 +82,17 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   browser: holding image, a message (note / soon / urgent), an image or PDF page from the hall, the hall's countdown
   with a message under it (the speaker's comfort monitor), the clock, or black. Each screen confirms what it showed.
   [docs/DISPLAYS.md](docs/DISPLAYS.md)
+- **People's screens.** The Board's pages (everyone seated On stage) or one person's can be shown Stagewatch's
+  countdown, the clock, a holding slide or black over their chat, from the header's Board chip ("Board · 🕐 Clock ✓
+  6/6", Undo for 10 s) or the console's People's pages, each page confirming what it showed only while it is in view.
+  The person keeps the way out: Back to chat (with Show it again for 10 s), Minimise into the side bar's 📺 On stage
+  (Escape does that), Show again from there; a 🔥 message breaks through, and a take never takes the focus from words
+  being written. [docs/DISPLAYS.md](docs/DISPLAYS.md)
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, images) shared and
   pushed to the on-stage panel or to screens, PDFs on iPads from iPadOS 16.4 (pdf.js's legacy build); pins, replies,
   reactions, priority, seen receipts. The hall page fits a phone, its words and icons at WCAG AA contrast in light and
   dark. Its header is the same at every width: the room's name, its status (the connection, the countdown), Help and a
-  ⋯ that holds People, Screens…, the text size, the theme, the guest code and Leave, with the room switcher on a row of
+  ⋯ that holds People, Screens & pages…, the text size, the theme, the guest code and Leave, with the room switcher on a row of
   its own. Every status on every page — a screen, a help request, a send held or refused, a link, the countdown — is a
   mark of one table, each mark with one meaning, beside its word and in its colour, never the colour alone (✓ on screen
   or resolved, ◷ sending or waiting, △ could not, ✕ none or a fault, ■ waiting for someone, ▶ on the way, ▲ soon, ○ off,
@@ -132,9 +138,11 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   renews it. The installed node's next start says why the start before was refused.
 - **Right-click.** Every act on a message, on a file in the panel, on a screen, on a person (a sender's name, a row of
   People: @ Mention), on the composer's Send (✨ Draft a reply, 🔥 Priority, Attach a file…, Cancel the reply), on the
-  header (its ⋯: People, Screens…, Text size, Dark theme, Copy guest code, Copy join link, for the admin Turn the code
-  off… or on and New code…, and Leave, or All halls for an account) and on its countdown (Speaker's screen…, Show the
-  countdown on screens)
+  header (its ⋯: People, Screens & pages…, Text size, Dark theme, Copy guest code, Copy join link, for the admin Turn the code
+  off… or on and New code…, and Leave, or All halls for an account), on its countdown (Speaker's screen…, Show the
+  countdown on screens) and its Board chip (Back to chat, Show Stagewatch, the clock, holding or blank, ↶ Back to,
+  Screens & pages…), on a take shown to you (Back to chat, Minimise, Full screen) and its card (Show again, Remove), and
+  on a person for whoever may show people's pages (📺 Show them ▸, Back to chat on their pages)
   is on its ⋯ (the countdown is its own), its right-click and Shift+F10 (or the menu key) — one list, drawn from one
   catalogue, so the buttons and the menus never disagree. A message keeps two acts on its row: ↩ Reply and the one the
   seat uses most (Ask the operator, Send now or Show on screens). What a seat may not do is not offered; what it cannot

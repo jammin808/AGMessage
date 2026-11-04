@@ -46,6 +46,7 @@ html[data-floor="old"] body > .agm-floor { display: block !important; max-width:
   --success: var(--c-ok); --danger: var(--c-fault); --ok: var(--c-ok); --warn: var(--c-warn);
   --director: var(--c-seat-board); --research: #0ea5e9; --observer: var(--c-seat-observer);
   --stage: #0d1526; --stage-ink: #e8edf7; --stage-dim: #8c98b1;
+  --c-take: #000000;   /* a take on a person's page: drawn on black, as a screen's, in both themes */
   --mine-ink: #4863c0; --mine-name: #1c3f9e;   /* one's own message's header and name */
   --radius: var(--radius-md);
   --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.04);
@@ -629,7 +630,7 @@ html[data-theme="dark"] {
   --c-seat-board: #a78bfa; --c-seat-backstage: #7dd3fc; --c-seat-observer: #94a3b8;
   --c-other-room: #5eead4;
   --brand-dark: #3a6cdf; --card: #1a2032; --accent: #f0a14a; --accent-soft: #2a2010; --research: #38bdf8;
-  --stage: #070c18;
+  --stage: #070c18; --c-take: #000000;
   --mine-ink: #b8c8ff; --mine-name: #b8c8ff;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.3);
   color-scheme: dark;
@@ -1925,3 +1926,83 @@ h1[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 
 /* The words a copy without the clipboard API selects, out of sight */
 .copy-source { position: fixed; top: 0; left: -10000px; width: 1px; height: 1px; }
+
+/* ---------- People's pages: what a person's hall page is shown over its chat (a take), and its console ----------
+   The layer covers the page (the header and the panels; z --z-layer) under the menus, the asks and the toast, on black
+   as a screen is, its words in the stage's ink. Its bar's buttons say their words beside their icons, 48 px each; a blank
+   take shows its bar once the person touches the screen or presses a key. A 🔥 message breaks through at its foot. */
+.page-layer { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: var(--z-layer); display: flex; flex-direction: column;
+  background: var(--c-take); color: var(--stage-ink); }
+.page-layer[hidden] { display: none; }
+.page-layer:focus { outline: none; }
+.layer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); padding-top: max(var(--sp-2), env(safe-area-inset-top));
+  border-bottom: 1px solid var(--stage-dim); background: var(--stage); }
+.page-layer[data-kind="blank"]:not([data-touched]) .layer-bar { visibility: hidden; }
+.layer-what { flex: 1 1 12rem; min-width: 0; font-size: var(--fs-md); font-weight: 600; overflow-wrap: anywhere; }
+.layer-new { font-size: var(--fs-sm); color: var(--stage-ink); }
+.layer-new:empty { display: none; }
+.layer-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.layer-acts .msg-act, .layer-acts .obj-more { min-height: var(--target-answer); min-width: var(--target-answer); padding: 0 var(--sp-3); gap: var(--sp-1);
+  border: 1px solid var(--stage-ink); border-radius: var(--radius-md); background: var(--stage); color: var(--stage-ink); font-size: var(--fs-md); cursor: pointer; }
+.layer-acts .msg-act:focus-visible, .layer-acts .obj-more:focus-visible, .layer-strip-open:focus-visible { outline: 3px solid var(--stage-ink); outline-offset: 2px; }
+.layer-box { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: var(--sp-4); overflow: hidden; text-align: center; }
+.take-stage, .take-clock, .take-holding { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); max-width: 100%; }
+.take-time { font-size: var(--fs-stage); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.take-stage.stale .take-time { color: var(--stage-dim); }
+.take-title, .take-date { font-size: var(--fs-xl); overflow-wrap: anywhere; }
+.take-next { font-size: var(--fs-lg); color: var(--stage-dim); }
+.take-next:empty, .take-title:empty { display: none; }
+.take-message { margin: var(--sp-2) 0 0; font-size: var(--fs-xl); font-weight: 600; overflow-wrap: anywhere; }
+.take-image { max-width: 100%; max-height: 100%; object-fit: contain; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.take-mark { width: min(40vmin, 16rem); height: min(40vmin, 16rem); border-radius: var(--radius-md); margin: 0; font-size: min(16vmin, 6.5rem); }
+.take-hall { font-size: var(--fs-2xl); font-weight: 600; overflow-wrap: anywhere; }
+.layer-strip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); padding-bottom: max(var(--sp-2), env(safe-area-inset-bottom));
+  background: var(--c-fault); color: var(--c-on-fault); font-size: var(--fs-lg); }
+.layer-strip[hidden] { display: none; }
+.layer-strip-words { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+.layer-strip-open { min-height: var(--target-answer); border-color: var(--c-on-fault); background: var(--c-on-fault); color: var(--c-fault); font-weight: 700; }
+
+/* A minimised take: a card at the top of the side bar (📺 On stage), with Show again and Remove. The one seat with no side
+   bar of its own (an observer, a Viewer account's seat too) is given one, its cards alone, while it holds one, so a
+   minimise has somewhere to go; every other seat's side bar keeps its own size at every width. */
+.take-cards { list-style: none; margin: 0; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--c-border); flex: 0 0 auto; }
+.take-cards[hidden] { display: none; }
+.take-card { display: grid; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--c-border); border-left: 4px solid var(--c-info); border-radius: var(--radius-md);
+  background: var(--c-surface-raised); color: var(--c-ink); }
+.take-card:focus { outline: none; }
+.take-card:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+.take-card-what { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.take-card-live .take-time { font-size: var(--fs-lg); }
+.take-card-by { font-size: var(--fs-sm); color: var(--c-ink-muted); }
+.take-card-by:empty { display: none; }
+.take-card-acts { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.doc-panel.collapsed .take-cards { display: none; }
+body[data-pushed][data-role="observer"] .doc-panel { display: flex; flex-direction: column; flex: 0 0 min(22rem, 40%); min-width: 0; background: var(--card); border-left: 1px solid var(--c-border); overflow: hidden; }
+@media (max-width: 800px) {
+  body[data-pushed][data-role="observer"] .doc-panel { flex: 0 0 auto; max-height: 40%; border-left: 0; border-top: 1px solid var(--c-border); }
+}
+body[data-pushed][data-role="observer"] .doc-panel .doc-display, body[data-pushed][data-role="observer"] .doc-panel .doc-caption,
+body[data-pushed][data-role="observer"] .doc-panel .doc-actions, body[data-pushed][data-role="observer"] .doc-panel .doc-pinned { display: none; }
+
+/* The Board chip in the header: what the Board's pages show and how many show it, a button that opens its menu */
+.board-chip { flex: 0 1 auto; min-height: var(--target-touch); min-width: var(--target-touch); padding: 0 var(--sp-2); gap: var(--sp-1); border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); font: inherit; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; cursor: pointer; }
+.board-chip[hidden] { display: none; }
+.board-chip:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+.board-chip .board-state[hidden] { display: none; }
+.board-chip .board-state { font-variant-numeric: tabular-nums; }
+
+/* The console's tabs (Screens · People's pages), and its People's pages: the Board's row, then each person's */
+.screens-tabs { display: flex; gap: var(--sp-1); margin: var(--sp-2) 0 0; border-bottom: 1px solid var(--c-border); }
+.screens-tabs[hidden] { display: none; }
+.screens-tabs .tab { min-height: var(--target-touch); padding: 0 var(--sp-3); border: 0; border-bottom: 2px solid transparent; background: none; color: var(--c-ink-muted); font-weight: 600; cursor: pointer; }
+.screens-tabs .tab.active { color: var(--c-ink); border-bottom-color: var(--c-action); }
+.console-pane[hidden] { display: none; }
+.people-pages { list-style: none; margin: var(--sp-3) 0 0; padding: 0; border-top: 1px solid var(--c-border); }
+.page-row { display: grid; gap: var(--sp-1); padding: var(--sp-2) 0; border-bottom: 1px solid var(--c-border); }
+.page-row:focus { outline: none; }
+.page-row:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+.page-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.page-state { font-size: var(--fs-sm); font-weight: 600; }
+.page-showing { font-size: var(--fs-sm); color: var(--c-ink-muted); }
+.page-acts { display: flex; flex-wrap: wrap; gap: var(--sp-1); }

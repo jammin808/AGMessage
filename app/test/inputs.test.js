@@ -14,10 +14,10 @@ const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.joi
   .filter((e) => e !== 'disconnect');
 // Not sent from the admin socket: they start cloudflared or make a new certificate — real work, not an argument check.
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
-const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null };
+const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null };
 // An object whose toString is not a function: String() throws on it, so a handler must never call String() on input.
 const U = { toString: 1 };
-const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U };
+const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U };
 const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode: 5, messageId: {}, content: 'x', text: {} }, UNCONVERTIBLE];
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
@@ -104,6 +104,7 @@ test('client values are read by their type: a value String() cannot convert reac
     [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'holding', image: U } }], [ctl, 'page:push', { code: hall, to: 'board', content: U }],
     [ctl, 'page:push', { code: hall, to: { uid: U }, content: { kind: 'clock' } }], [ctl, 'page:push', { code: hall, to: U, content: { kind: 'clock' } }],
     [ctl, 'page:push', { code: U, to: 'board', content: { kind: 'clock' } }], [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'clock' }, cid: U }],
+    [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'clock' }, ifSeq: U }],
     [ctl, 'page:status', { code: U }], [guest, 'page:report', { seq: U, state: U, words: U }], [guest, 'page:report', { seq: 1, state: 'shown', words: U, again: U }],
   ];
   // What each is answered: the field it could not read named, and nothing shown, numbered or reported.
@@ -113,6 +114,7 @@ test('client values are read by their type: a value String() cannot convert reac
     if (ev === 'page:report') return arg.state === U ? 'A report is one of: shown, hidden, opened, failed, dismissed, minimised.' : 'That is not what this page is shown now.';
     if (arg.code === U) return 'No such hall.';
     if (arg.cid === U) return 'That act\'s id could not be read.';
+    if (arg.ifSeq === U) return 'That act\'s take could not be read.';
     return arg.to === 'board' ? KINDS : TARGETS;
   };
   // A room's code acts read by type: each a refusal in its own words, and nothing switched or renewed.
