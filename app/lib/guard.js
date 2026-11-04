@@ -266,7 +266,8 @@ function isHostMachine(req) {
 }
 
 // ---------- page headers ----------
-const CSP = [
+/** Every page's policy but for what it may frame: AGMessage's own pages and blob: documents, or those and any https page. */
+const policy = (frames) => [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
@@ -274,15 +275,23 @@ const CSP = [
   "font-src 'self' data:",
   "connect-src 'self' ws: wss:",
   "worker-src 'self' blob:",
-  "frame-src 'self' blob:",
+  'frame-src ' + frames,
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'self'",
   "frame-ancestors 'self'",
 ].join('; ');
+const CSP = policy("'self' blob:");
+/**
+ * The hall page's policy: CSP, and it may frame an https page, a web page shown to a person (a take) or previewed by the
+ * one who shows it, in the one frame its page makes (public/pagelayer.mjs framePage: sandboxed, no referrer). Every
+ * other page, the screen page and the transcript among them, frames nothing but AGMessage's own.
+ */
+const CSP_HALL = policy("'self' blob: https:");
 
-function pageHeaders(_req, res, next) {
-  res.setHeader('Content-Security-Policy', CSP);
+/** A page's headers: the hall page (`/app.html`) frames https pages (CSP_HALL), every other answer only AGMessage's own (CSP). */
+function pageHeaders(req, res, next) {
+  res.setHeader('Content-Security-Policy', req.path === '/app.html' ? CSP_HALL : CSP);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -330,6 +339,6 @@ function validUploadUrl(url) {
 
 module.exports = {
   readSecret, makeSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
-  Bucket, Buckets, Places, Lockout, limitKey, laneOf, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, str,
+  Bucket, Buckets, Places, Lockout, limitKey, laneOf, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, CSP_HALL, str,
   UPLOAD_TYPES, uploadType, validUploadUrl, extOf,
 };

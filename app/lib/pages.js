@@ -19,8 +19,14 @@
  * its report with it.
  *
  *   cleanPage(c, facts)  : a take a pusher asked for, made safe, or {error} (pure, fail closed)
+ *   webUrl(v, selfHosts) : a web page's address made safe, {url, host}, or {error} (pure, fail closed)
  *   describePage(c, o)   : what a take shows, in a few words (pure)
  *   Pages.status(...)    : a take's status over the pages that hold it: a mark and its words, person first (pure)
+ *
+ * A web page (`web`) is a take of its own: an https address a person's page frames (public/pagelayer.mjs framePage).
+ * The server never fetches it. At rest it is sealed (`urlSealed`, this machine's key: lib/secretbox.js) beside its host;
+ * the address is opened only to be sent to the pages it is shown on (`told`), and everything else that names a web take,
+ * the audit, the console's words and the halls board among them, names its host alone.
  */
 const { WriteLane, readJsonWhole } = require('./resilience');
 const guard = require('./guard');
@@ -29,10 +35,10 @@ const { clockOf } = require('./tunnelend');
 /**
  * The kinds a take may be, each a kind of the show layer: back to the chat; Stagewatch's countdown; AGMessage's clock;
  * a holding slide (the picture given, the hall's holding picture, or the AGMessage mark and the hall's name on black);
- * black. Anything else is refused, never defaulted.
+ * black; a web page (an https address, framed by the page). Anything else is refused, never defaulted.
  */
-const KINDS = Object.freeze(['chat', 'stage', 'clock', 'holding', 'blank']);
-const KINDS_WORDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding or blank.';
+const KINDS = Object.freeze(['chat', 'stage', 'clock', 'holding', 'blank', 'web']);
+const KINDS_WORDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.';
 /** The layers a page holds, each with its own take and its own answer. Every kind of KINDS is the show layer's. */
 const LAYERS = Object.freeze(['show']);
 const layerOf = (kind) => (KINDS.includes(kind) ? 'show' : '');
@@ -42,12 +48,33 @@ const IMAGE_EXT = Object.freeze(['png', 'jpg', 'jpeg', 'gif', 'webp']);
 const REPORTS = Object.freeze(['shown', 'hidden', 'opened', 'failed', 'dismissed', 'minimised']);
 /**
  * What a page may report of a take of each kind: back on its chat, a page is in view or not, and has nothing to fail,
- * put away or minimise; a take drawn over the chat may also fail, be put away or be minimised. `opened` is a web page's
- * alone, and no kind here is one, so no take here is ever read as opened.
+ * put away or minimise; a take drawn over the chat may also fail, be put away or be minimised. A web page is never
+ * `shown`: its page cannot see inside the frame (a site that refuses to be framed still fires its `load`), so in view it
+ * is `opened`, and `opened` is a web page's alone.
  */
 const CHAT_REPORTS = Object.freeze(['shown', 'hidden']);
 const DRAWN_REPORTS = Object.freeze(['shown', 'hidden', 'failed', 'dismissed', 'minimised']);
-const reportsOf = (kind) => (kind === 'chat' ? CHAT_REPORTS : DRAWN_REPORTS);
+const WEB_REPORTS = Object.freeze(['opened', 'hidden', 'failed', 'dismissed', 'minimised']);
+const reportsOf = (kind) => (kind === 'chat' ? CHAT_REPORTS : kind === 'web' ? WEB_REPORTS : DRAWN_REPORTS);
+/** The report a page makes of a take of `kind` drawn and in view: `opened` for a web page, `shown` for every other. */
+const inViewOf = (kind) => (kind === 'web' ? 'opened' : 'shown');
+/**
+ * A web page's address: at most WEB_MAX characters, https alone (http would be mixed content under HTTPS and the tunnel,
+ * and javascript:, data:, blob: and file: are no page of the web), no user name or password, and a host that is not
+ * AGMessage itself (this machine by any name or address, or the tunnel's host: a frame of AGMessage's own origin, with the
+ * scripts a web page is allowed, would own the page around it).
+ */
+const WEB_MAX = 2048;
+const WEB_WORDS = 'A web page is shown by its https address, as a browser shows it.';
+const WEB_SELF = 'That address is AGMessage itself: show a page of another site.';
+/**
+ * Whether a host is one a web take keeps: a name or an IPv4 address in lower case (labels of letters, digits, `-` and
+ * `_`, at most 253 characters, a trailing dot allowed), or an IPv6 address in brackets.
+ */
+const LABEL = /^[a-z0-9_-]{1,63}$/;
+const isHost = (h) => typeof h === 'string' && h.length <= 253 && (/^\[[0-9a-f:.]{2,45}\]$/.test(h) || h.replace(/\.$/, '').split('.').every((l) => LABEL.test(l)));
+/** What a sealed address looks like (lib/secretbox.js): read only by the machine that sealed it. */
+const SEALED = /^enc1:[A-Za-z0-9+/]+=*$/;
 /**
  * A person's answer to a take, kept with the take it answered: Back to chat and Minimise. Back to chat is final for that
  * take but for AGAIN_MS after it is chosen: then the same person's Show it again (a `shown` report with `again`) takes it
@@ -78,11 +105,48 @@ function personKey(uid, account = false) {
 }
 
 /**
+ * Whether a URL's host is this machine by a name every machine gives itself: localhost (and a name under it), an
+ * address of 127.0.0.0/8 or 0.0.0.0/8, the IPv6 loopback or unspecified address, or an IPv4 one written as IPv6. The
+ * URL parser has already written each in its one form (`127.1` and `2130706433` are `127.0.0.1`).
+ */
+function loopback(host) {
+  // A name's trailing dot (`localhost.`, `app.localhost.`) names the same machine: the URL parser keeps it on a name.
+  const h = host.replace(/\.+$/, '');
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  if (/^(?:127|0)\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  if (!h.startsWith('[')) return false;
+  const v6 = h.slice(1, -1);
+  return v6 === '::1' || v6 === '::' || /^::ffff:/.test(v6);
+}
+
+/**
+ * A web page's address made safe (pure): {url, host}, the address as the URL parser writes it (its fragment kept) and
+ * its host, or {error} in words. `v` is read as a string only (a client's object is none), and `selfHosts` are the other
+ * names and addresses this AGMessage answers on (its machine's name, its network addresses, the tunnel's host), each
+ * compared in lower case and without brackets.
+ */
+function webUrl(v, selfHosts = []) {
+  const raw = typeof v === 'string' ? v.trim() : '';
+  if (!raw || raw.length > WEB_MAX) return { error: raw ? 'That address is longer than ' + WEB_MAX + ' characters.' : WEB_WORDS };
+  let u;
+  try { u = new URL(raw); } catch { return { error: WEB_WORDS }; }
+  if (u.protocol !== 'https:' || !u.hostname || !isHost(u.hostname) || u.href.length > WEB_MAX) return { error: WEB_WORDS };
+  if (u.username || u.password) return { error: 'An address with a user name or a password is not shown: show the page without them.' };
+  const host = u.hostname;
+  const bare = (h) => String(h || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  const self = new Set((Array.isArray(selfHosts) ? selfHosts : []).filter((h) => typeof h === 'string' && h).map(bare));
+  if (loopback(host) || self.has(bare(host))) return { error: WEB_SELF };
+  return { url: u.href, host };
+}
+
+/**
  * A take a pusher asked for, made safe, or {error} (pure). `facts` are the server's: `stagewatch`, whether the hall
- * has a Stagewatch linked; `readable(url)`, whether the file is in a message of a room of the hall the pusher may read.
- * Every result is a fresh object. An unknown kind, or a known key of the wrong type, refuses the whole take with the
- * kinds in words; a key it does not know is ignored. A `chat` that names a layer is refused: the store keeps the show
- * layer alone, so a hand-back of one layer is never widened to every layer. Missing facts refuse what needs them.
+ * has a Stagewatch linked; `readable(url)`, whether the file is in a message of a room of the hall the pusher may read;
+ * `web`, true when this pusher may show a web page here (its own right, `stage.web`), else the words that say why not;
+ * `selfHosts`, the names this AGMessage answers on (webUrl). Every result is a fresh object. An unknown kind, or a known
+ * key of the wrong type, refuses the whole take with the kinds in words; a key it does not know is ignored. A `chat`
+ * that names a layer is refused: the store keeps the show layer alone, so a hand-back of one layer is never widened to
+ * every layer. Missing facts refuse what needs them: a web page's right is read before its address.
  */
 function cleanPage(c, facts = {}) {
   const kind = isRecord(c) ? own(c, 'kind') : undefined;
@@ -102,14 +166,30 @@ function cleanPage(c, facts = {}) {
       if (!(facts && typeof facts.readable === 'function' && facts.readable(image) === true)) return { error: 'That picture is in no room of this hall you can read — share it there first.' };
       return { kind, image };
     }
+    case 'web': {
+      const may = facts ? facts.web : undefined;
+      if (may !== true) return { error: typeof may === 'string' && may ? may : 'Web pages on the stage need their own right — ask an admin.' };
+      const url = own(c, 'url');
+      if (typeof url !== 'string') return { error: WEB_WORDS };
+      const w = webUrl(url, facts.selfHosts);
+      return w.error ? { error: w.error } : { kind, url: w.url, host: w.host };
+    }
     default: return { kind };
   }
 }
 
-/** A take as it is stored, read back: a fresh object of a kind of KINDS in its clean shape, or null. */
+/**
+ * A take as it is stored, read back: a fresh object of a kind of KINDS in its clean shape, or null. A web page is kept
+ * as its host and its sealed address ({kind, host, urlSealed}), never its address in clear.
+ */
 function storedPage(c) {
   const kind = isRecord(c) ? own(c, 'kind') : undefined;
   if (typeof kind !== 'string' || !KINDS.includes(kind)) return null;
+  if (kind === 'web') {
+    const host = own(c, 'host');
+    const urlSealed = own(c, 'urlSealed');
+    return isHost(host) && typeof urlSealed === 'string' && urlSealed.length <= 4 * WEB_MAX && SEALED.test(urlSealed) ? { kind, host, urlSealed } : null;
+  }
   if (kind !== 'holding') return { kind };
   const image = own(c, 'image');
   if (image === undefined) return { kind };
@@ -129,15 +209,28 @@ function describePage(c, { hallHolding = '' } = {}) {
     case 'clock': return 'the clock';
     case 'holding': return own(c, 'image') || hallHolding ? 'a holding slide' : 'a holding slide with the AGMessage mark';
     case 'blank': return 'blank';
+    case 'web': return typeof own(c, 'host') === 'string' && own(c, 'host') ? 'a web page on ' + own(c, 'host') : 'a web page';
     default: return '';
   }
 }
 
-/** A take read back: {seq, content, by: {name}, at}, its number at most the hall's, or null. */
+/**
+ * Who put a take up, as the store keeps it: their name; `guest` when a code guest did (a web page a guest showed is
+ * counted when the admin stops guests showing them: Pages#guestWeb); and `who`, the pusher by its actor's kind and id
+ * (`account:a…`, `code:u…`, `admin:host`), kept for a web page alone, whose address a push's answer gives back to its own
+ * pusher and to no other (lib/handlers/takes.js). Neither goes to a page: a page is told the name alone.
+ */
+const WHO = /^(?:account|code|admin):[A-Za-z0-9_-]{1,64}$/;
+const byOf = (by) => ({
+  name: guard.cleanText(isRecord(by) ? by.name : '', 60),
+  ...(isRecord(by) && by.guest === true ? { guest: true } : {}),
+  ...(isRecord(by) && typeof by.who === 'string' && WHO.test(by.who) ? { who: by.who } : {}),
+});
+/** A take read back: {seq, content, by: {name, guest?, who?}, at}, its number at most the hall's, or null. */
 function storedTake(t, top) {
   if (!isRecord(t) || !whole(t.seq) || t.seq > top || !Number.isFinite(t.at) || !isRecord(t.by) || typeof t.by.name !== 'string') return null;
   const content = storedPage(t.content);
-  return content ? { seq: t.seq, content, by: { name: guard.cleanText(t.by.name, 60) }, at: t.at } : null;
+  return content ? { seq: t.seq, content, by: byOf(t.by), at: t.at } : null;
 }
 /** An answer read back: {seq, state, at}, or null. */
 function storedAnswer(a, top) {
@@ -177,8 +270,12 @@ class Pages {
   /**
    * The store at `file`, read now and written only once `hold()` is called: until then a change is kept and marks the
    * store to be saved. `unread` is why the file itself could not be read (EBUSY, EACCES), or '' (it was, or is not there).
+   * `seal` and `open` keep a web page's address at rest (lib/secretbox.js): `seal` throws or answers '' where this run
+   * cannot seal, and then no web take is kept; `open` answers '' for an address it cannot read.
    */
-  constructor(file) {
+  constructor(file, { seal = () => '', open = () => '' } = {}) {
+    this.seal = seal;
+    this.open = open;
     this.lane = new WriteLane(file, { delayMs: 100, keepBak: true, mode: 0o600 });
     const read = readJsonWhole(file);
     this.unread = read.codes[0] && read.codes[0] !== 'ENOENT' ? read.codes[0] : '';
@@ -219,15 +316,16 @@ class Pages {
    * A take: `content` as cleanPage made it, to `'board'` or a person's key, numbered next in its hall. A Board take puts
    * away the older takes and answers, in its layer, of everyone seated On stage now (`onStage`, their keys): a Board page
    * shows the highest-numbered take, so none of theirs could show there again. A person's take puts away that person's
-   * answer to an older one. Returns the take, or null when a part is not one the store keeps.
+   * answer to an older one. A web page's address is kept sealed (`_kept`); `by.guest` marks a code guest's take. Returns
+   * the take, or null when a part is not one the store keeps (a web page this run cannot seal among them).
    */
   take(hall, to, content, by = {}, { onStage = [], at = Date.now() } = {}) {
-    const clean = storedPage(content);
+    const clean = storedPage(this._kept(content));
     if (!HALL.test(guard.str(hall)) || !(to === 'board' || PERSON.test(guard.str(to))) || !clean || !Number.isFinite(at)) return null;
     const layer = layerOf(clean.kind);
     const book = this.halls[hall] || (this.halls[hall] = { seq: 0, board: {}, people: {}, answers: {} });
     book.seq += 1;
-    const t = { seq: book.seq, content: clean, by: { name: guard.cleanText(isRecord(by) ? by.name : '', 60) }, at };
+    const t = { seq: book.seq, content: clean, by: byOf(by), at };
     if (to === 'board') {
       book.board[layer] = t;
       for (const k of Array.isArray(onStage) ? onStage : []) {
@@ -242,6 +340,59 @@ class Pages {
     this._trim(book);
     this.save();
     return t;
+  }
+
+  /**
+   * A take as cleanPage made it, as the store keeps it: a web page's address sealed beside its host ({kind, host,
+   * urlSealed}; null where this run cannot seal it), every other kind as it is.
+   */
+  _kept(content) {
+    if (!isRecord(content) || content.kind !== 'web') return content;
+    const w = webUrl(content.url);
+    if (w.error) return null;
+    let urlSealed;
+    try { urlSealed = this.seal(w.url); } catch { return null; }   // this run has no machine key: nothing is kept in clear
+    return { kind: 'web', host: w.host, urlSealed };
+  }
+
+  /**
+   * A take's content as a page it is shown on is told it (and as its pusher may read it back): a web page's address
+   * opened ({kind, url, host}, `url` '' where this machine cannot open it), every other kind as it is kept.
+   */
+  told(content) {
+    if (!isRecord(content) || content.kind !== 'web') return content;
+    return { kind: 'web', url: guard.str(this.open(content.urlSealed)), host: content.host };
+  }
+
+  /**
+   * The web pages a code guest put up in a hall that stay up: the Board's take, and each person's not put away by them
+   * (Back to chat), whether or not a page of theirs is open now (one that comes back is shown it again), each as {to:
+   * 'board' or the person's key, seq}.
+   */
+  guestWeb(hall) {
+    const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
+    if (!book) return [];
+    const theirs = (t) => !!t && t.content.kind === 'web' && t.by.guest === true;
+    const out = [];
+    const board = own(book.board, 'show');
+    if (theirs(board)) out.push({ to: 'board', seq: board.seq });
+    for (const [key, r] of Object.entries(book.people)) {
+      const t = own(r, 'show');
+      const a = own(book.answers, key) && own(book.answers[key], 'show');
+      if (theirs(t) && !(a && a.seq === t.seq && a.state === 'dismissed')) out.push({ to: key, seq: t.seq });
+    }
+    return out;
+  }
+
+  /**
+   * The web pages guests put up in a hall that stay up, as the admin is told them once guests may no longer show any (the
+   * switch turned off, or the hall unlocked): {up}, their count, and while there are any `upWords` ("1 web page a guest
+   * showed is still up") and `takeDown`, the takes (Pages#guestWeb) the admin's Take it down hands back to chat.
+   */
+  guestWebLeft(hall) {
+    const up = this.guestWeb(hall);
+    const n = up.length;
+    return n ? { up: n, upWords: n === 1 ? '1 web page a guest showed is still up' : n + ' web pages guests showed are still up', takeDown: up } : { up: 0 };
   }
 
   /**
@@ -278,8 +429,9 @@ class Pages {
     const states = reportsOf(take.content.kind);
     if (!states.includes(state)) return { ok: false, error: 'A page shown ' + describePage(take.content) + ' reports one of: ' + states.join(', ') + '.' };
     const layer = layerOf(take.content.kind);
-    // Back to chat taken back: Show it again (shown, `again`) or a card's Undo (minimised), within AGAIN_MS of it.
-    const undo = (state === 'shown' && again === true) || state === 'minimised';
+    const inView = inViewOf(take.content.kind);
+    // Back to chat taken back: Show it again (in view, `again`) or a card's Undo (minimised), within AGAIN_MS of it.
+    const undo = (state === inView && again === true) || state === 'minimised';
     if (answer && answer.state === 'dismissed' && state !== 'dismissed') {
       if (!undo) return { ok: false, error: 'Back to chat was chosen for that one: a newer take shows again.' };
       if (at - answer.at > AGAIN_MS) return { ok: false, error: 'Back to chat was chosen for that one more than 10 s ago: a newer take shows again.' };
@@ -287,7 +439,7 @@ class Pages {
     const book = this.halls[hall];
     let kept = answer;
     if (ANSWERS.includes(state) && !(answer && answer.state === state)) kept = this._answer(book, key, layer, { seq, state, at });
-    else if (state === 'shown' && again === true && answer) { this._drop(book.answers, key, layer); kept = null; }
+    else if (state === inView && again === true && answer) { this._drop(book.answers, key, layer); kept = null; }
     if (kept !== answer) { this._trim(book); this.save(); }
     // A Board page out of view (asleep, or another app in front) while a take is drawn on it: how long, from its first
     // such report to the report or the leave that ends it, a take that replaces another while it stays out of view
@@ -483,4 +635,4 @@ class Pages {
   }
 }
 
-module.exports = { Pages, cleanPage, describePage, personKey, layerOf, reportsOf, KINDS, LAYERS, IMAGE_EXT, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS };
+module.exports = { Pages, cleanPage, describePage, webUrl, personKey, layerOf, reportsOf, inViewOf, KINDS, LAYERS, IMAGE_EXT, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX };

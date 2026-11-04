@@ -276,8 +276,9 @@ auditExporter.archiver = auditArchiver;
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
 const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secretbox.seal, open: secretbox.open });
 // What people's pages are shown over their chat, their answers and guests' chat views (lib/pages.js): read now, written
-// through its lane only once this copy holds its data folder (`firstWrites` calls `hold`).
-const pages = new Pages(path.join(DATA_DIR, 'pages.json'));
+// through its lane only once this copy holds its data folder (`firstWrites` calls `hold`). A web page's address is kept
+// sealed with this machine's key, as a screen's link is.
+const pages = new Pages(path.join(DATA_DIR, 'pages.json'), { seal: secretbox.seal, open: secretbox.open });
 // The results of approved show-desk proposals this AGMessage ran that Stagewatch has not taken yet (lib/deskresults.js):
 // read now, written only by the desk loop, which runs once this copy holds the data folder and its port. In memory too:
 // the tries (attempts, posts), when the next is due, the last answer, and the link's generation it was collected under
@@ -369,6 +370,18 @@ function renewalWords() {
 }
 /** This laptop's LAN addresses now, or none while the system will not list its adapters: an answer that names them is drawn all the same. */
 function lanNow() { try { return tlsmod.lanAddresses(); } catch { return []; } }
+/**
+ * The names and addresses this AGMessage answers on beyond loopback, which lib/pages.js webUrl refuses as a web take's
+ * host as it refuses loopback (a frame of AGMessage's own origin would own the hall page around it): this machine's
+ * name, its network addresses, and the tunnel's host while it runs.
+ */
+function selfHosts() {
+  const out = [os.hostname(), ...lanNow()];
+  if (tunnelUrl) {
+    try { out.push(new URL(tunnelUrl).hostname); } catch { /* the tunnel's address as cloudflared printed it is always a URL; none is added otherwise */ }
+  }
+  return out;
+}
 /** Why HTTPS is off this run, in words, or '' while it is on: what the banner's HTTPS line says, for the admin page too. */
 function httpsOff() {
   if (cert) return '';
@@ -1951,6 +1964,15 @@ io.on('connection', (socket) => {
     if (socket.data.account) return canIn('display.control', hall);
     return !!me && room === hall && me.role === 'research' && hall.settings.lockRoles === true;
   };
+  // Whether this page may show a web page on people's pages in a hall (`hall`, its Main room): canPush, and the right of
+  // its own, stage.web (plan 4-§5.9.2.2). The admin holds it; an account by its rights in the hall; a code guest, whom
+  // canPush admits only backstage in a locked Main room, only while the admin lets that hall's backstage guests show web
+  // pages (`guestWeb`, which an unlock turns off). Read when asked, as canPush is.
+  const canWeb = (hall) => canPush(hall) && (!!socket.data.isAdmin || (socket.data.account ? canIn('stage.web', hall) : hall.settings.guestWeb === true));
+  // "The admin" the owner's answers name (plan §0.8 C14): the laptop's token, or an account whose role is admin, through
+  // the tunnel only where admins may sign in there (isAdmin's rule). An account an admin granted settings.manage passes
+  // the admin page's gate (`admin`) and is not this.
+  const theAdmin = () => !!socket.data.adminSid || (!!socket.data.account && socket.data.account.role === 'admin' && !!socket.data.isAdmin);
   // Who an audit row names for what this socket does: the admin token, the account, or a code guest by the name they joined with.
   const actor = () => socket.data.actor || (me ? { t: 'code', id: me.uid, name: me.name } : HOST_ACTOR);
   // The one gate (lib/gate.js): seated in a room that is still here, then a token of the verb's bucket, then the admin,
@@ -2160,6 +2182,9 @@ io.on('connection', (socket) => {
       // change what its hall's people's pages show (canPush: its console's), and AGMessage's clock and zone.
       page: shownHere && shownHere.current.take ? takeTold(r.hall, shownHere.current) : null,
       canPush: !!socket.data.pushes, now: Date.now(), tz: TIME_ZONE,
+      // Whether a web page pushed from this page would be taken (canWeb: canPush and stage.web); a code guest's follows
+      // the admin's switch for its hall live (`pages:rights`).
+      canWeb: canWeb(store.get(r.hall)),
       // The admin's support view: the facts of the person it shows (their seat, chat view, canPush, sends and
       // forwardable), so it draws exactly their doors (R8); null when it shows nobody. No other page is told any.
       ...(isAdminView ? { person: theirs ? theirs() : null } : {}),
@@ -2351,6 +2376,7 @@ io.on('connection', (socket) => {
     role: me ? me.role : '',
     view: drawnView(socket.data.accountId ? accounts.get(socket.data.accountId) : null, socket.data.seat),
     canPush: !!socket.data.pushes,
+    canWeb: !!room && canWeb(store.get(room.hall)),
     sends: !!room && !onStage() && allowed('hall.post') && sendsInto(room).length > 0,
     forwardable: !!me && !!room && forwardTargets(null).rooms.length > 0,
   });
@@ -2929,7 +2955,8 @@ io.on('connection', (socket) => {
     // guest code (the admin is told every one), whether it admits guests and the guest pages in it now, and a hall whose
     // code is still its key (`codeIsKey`: never renewed, so anyone its address reaches reads its code) said so.
     const row = (r) => ({ name: r.name || '', createdAt: r.createdAt, users: roomUserSummary(r, { links: true }), messageCount: r.messages.length, locked: !!r.settings.lockRoles, guestCode: store.guestCodeOf(r), codeOn: store.codeOn(r), guests: guestPagesOf(r) });
-    ok(ack)({ ok: true, rooms: Array.from(store.rooms.values()).map((r) => ({ code: r.code, ...row(r), side: store.roomsOf(r.code).slice(1).map((x) => ({ key: x.code, ...row(x) })), codeIsKey: store.guestCodeOf(r) === r.code })) });
+    // A hall's Main room says whether its backstage guests may show web pages (S4's switch, on its Roles & invites panel).
+    ok(ack)({ ok: true, rooms: Array.from(store.rooms.values()).map((r) => ({ code: r.code, ...row(r), side: store.roomsOf(r.code).slice(1).map((x) => ({ key: x.code, ...row(x) })), codeIsKey: store.guestCodeOf(r) === r.code, guestWeb: r.settings.guestWeb === true })) });
   });
   socket.on('admin:watchRoom', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
@@ -3096,9 +3123,18 @@ io.on('connection', (socket) => {
     // A change is the lock switched, or a lock that keeps other seats than it kept (compared as syncSeats compares them,
     // so seats saved in another order are no change); an unlock is a change only for a locked room.
     const changed = on ? !r.settings.lockRoles || !seatsSaved(r, seats) : !!r.settings.lockRoles;
-    if (!apply(r, { o: 'meta', settings: { lockRoles: !!on, seats } })) return ok(ack)(OP_REFUSED);
-    if (changed) auditRoom('room.lock', r.code, on ? 'roles locked (' + plural(Object.keys(seats).length, 'seat') + ' kept)' : 'roles unlocked');
-    ok(ack)({ ok: true, locked: !!on, invites: on ? invitesFor(r) : null, codeOn: store.codeOn(r) });
+    // An unlock turns the hall's backstage guests' web pages off in the same op (S4): a lock keeps whoever sits backstage
+    // then, guests who joined by the bare code while the hall was open among them, so a switch kept across an unlock would
+    // reach guests the admin never chose. Locking again leaves it off. As the switch turned off does, the answer counts the
+    // web pages guests put up that stay up (`up`, `upWords`, `takeDown`: Pages#guestWebLeft), for the admin's Take it down.
+    const webOff = !on && store.isMain(r);
+    const webWas = r.settings.guestWeb === true;
+    if (!apply(r, { o: 'meta', settings: { lockRoles: !!on, seats, ...(webOff ? { guestWeb: false } : {}) } })) return ok(ack)(OP_REFUSED);
+    const left = webOff ? pages.guestWebLeft(r.code) : null;
+    const stays = left && left.up ? ' (' + left.up + ' shown now ' + (left.up === 1 ? 'stays' : 'stay') + ' until taken down)' : '';
+    if (changed) auditRoom('room.lock', r.code, on ? 'roles locked (' + plural(Object.keys(seats).length, 'seat') + ' kept)' : 'roles unlocked' + (webOff && webWas ? ', guests\' web pages off' + stays : ''));
+    if (webOff) tellWebRights(r.code);
+    ok(ack)({ ok: true, locked: !!on, invites: on ? invitesFor(r) : null, codeOn: store.codeOn(r), ...(store.isMain(r) ? { guestWeb: r.settings.guestWeb === true } : {}), ...(left || {}) });
   });
   socket.on('admin:invites', ({ roomCode } = {}, ack) => {
     if (!admin(ack)) return;
@@ -3333,7 +3369,7 @@ io.on('connection', (socket) => {
   // page's socket but a screen's (a screen's returned at the top): the hall page's, the admin page's and the halls
   // board's. The rooms module is given the server's context, the takes module the takes context, which holds nothing
   // that makes a room's op or sends to a room (`ctx`, at the end of this file).
-  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, onStage, canIn, canPush, admin, actor, canManageHall, codeTold, gate });
+  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, onStage, canIn, canPush, canWeb, theAdmin, admin, actor, canManageHall, codeTold, gate });
   roomVerbs.register(socket, conn, ctx);
   takeVerbs.register(socket, conn, takesCtx);
 
@@ -3497,11 +3533,12 @@ function hallPages(hall) {
  * it up and when, the hall's name and holding picture (a holding slide with no picture of its own shows the hall's),
  * AGMessage's clock and zone (a clock take is drawn in them), and the person's answer to it ('dismissed', 'minimised' or
  * null). Shown nothing (no take, or none since a seat moved): number 0 and no content, the page's chat. No key or code.
+ * A web page's address is opened here, for the page it is shown on and nothing else (pages.told).
  */
 function takeTold(hall, { take, answer }) {
   const h = store.get(hall);
   return {
-    seq: take ? take.seq : 0, content: take ? take.content : null, by: take ? take.by : null, at: take ? take.at : 0,
+    seq: take ? take.seq : 0, content: take ? pages.told(take.content) : null, by: take ? { name: take.by.name } : null, at: take ? take.at : 0,
     hallName: (h && h.name) || '', holding: displays.hallHolding(hall), now: Date.now(), tz: TIME_ZONE, answer: answer ? answer.state : null,
   };
 }
@@ -3542,6 +3579,19 @@ function tellPushers(hall) {
   for (const p of hallPages(hall)) {
     const s = io.sockets.sockets.get(p.sid);
     if (s && s.data.pushes === hall) s.emit('pages:changed', {});
+  }
+}
+/**
+ * Each code guest's page seated backstage in a hall's Main room (`code`) told whether it may show a web page there now
+ * (`pages:rights {canWeb}`, its own connection's canWeb): the admin's switch for the hall's backstage guests, or the lock
+ * it needs, changed. A signal to each page by itself, never a room's broadcast; an account's right is its own, and moves
+ * with neither.
+ */
+function tellWebRights(code) {
+  for (const sid of io.sockets.adapter.rooms.get(code) || []) {
+    const s = io.sockets.sockets.get(sid);
+    const facts = s && !s.data.adminView && !s.data.account && !s.data.isAdmin && s.data.userRoom === code && s.data.seat === 'research' ? factsOfPage.get(s) : null;
+    if (facts) s.emit('pages:rights', { canWeb: facts().canWeb });
   }
 }
 /** A Board page was out of view for `ms` while a take was drawn on it: the show day keeps its longest (reading 5). */
@@ -4984,7 +5034,7 @@ function firstWrites() {
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
   store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
-  pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, io,
+  pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, io,
 });
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.

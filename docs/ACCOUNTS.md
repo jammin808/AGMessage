@@ -13,16 +13,16 @@ AGMessage has two ways in, and both are first-class:
 | Role | Halls | Can |
 |---|---|---|
 | Admin | every hall | everything: accounts, rights, settings, the audit log |
-| Project manager | every hall | messages, files, screens (drive and manage), Stagewatch, Patterns / PlayMap, set halls up, the audit log |
-| Senior tech | every hall | messages, files, drive screens, Stagewatch, Patterns / PlayMap |
-| Tech | their halls | messages, files, drive screens, Stagewatch |
+| Project manager | every hall | messages, files, screens (drive and manage), web pages on people's pages, Stagewatch, Patterns / PlayMap, set halls up, the audit log |
+| Senior tech | every hall | messages, files, drive screens, web pages on people's pages, Stagewatch, Patterns / PlayMap |
+| Tech | their halls | messages, files, drive screens, web pages on people's pages, Stagewatch |
 | Staff | their halls | messages and files |
 | Viewer | their halls | read only |
 
 An admin can make an exception for one person — tick or untick a single right on the Accounts page — and choose their
 halls (or "every hall's Main room, including new ones", which reaches no hall's other rooms). The page draws the rights in
 three groups (`rbac.CAP_GROUPS`, told by the Accounts route as `capGroups`): **In the room** (`hall.view`, `hall.post`,
-`hall.files`), **Show** (`display.control`, `display.manage`, `stage.send`, `nodes.control`) and **Run AGMessage**
+`hall.files`), **Show** (`display.control`, `display.manage`, `stage.send`, `stage.web`, `nodes.control`) and **Run AGMessage**
 (`halls.manage`, `users.manage`, `settings.manage`, `audit.read`, `audit.export`); every right is in one group. The
 rights, as the server checks them:
 
@@ -34,6 +34,7 @@ rights, as the server checks them:
 | `display.control` | change what a hall's screens and people's pages show: a take on the Board's pages or one person's, from any room of the hall (`docs/DISPLAYS.md`, People's screens); never from a page seated On stage |
 | `display.manage` | add, rename, move, re-link and remove screens; the hall's holding image |
 | `stage.send` | send to Stagewatch: the speaker's screen, or to the operator to pass on |
+| `stage.web` | show a web page on people's pages (the Board's or one person's), beside `display.control`, which a take of any kind needs: a web page needs both. Held by the Tech, Senior tech and Manager presets (and the admin), not Staff or Viewer; given or taken back per account. A code guest holds it only by its hall's switch (below) |
 | `nodes.control` | propose commands to Patterns and PlayMap (to the show desk; never sent to them directly) |
 | `halls.manage` | create halls and set them up (their own Stagewatch); make rooms beside a hall and rename a room |
 | `users.manage` | create accounts and set roles, halls and rights |
@@ -219,6 +220,21 @@ one-time password not yet changed included: its code join is refused ("You are s
 halls, or sign out to join with a code."), so an account never takes a guest's seat, and the rights that come with it,
 beside its own; the refusal spends nothing of the code lockout. The admin's support view, and the host token's admin
 (who has no account), are not code joins. Screens, halls and other show systems need an account.
+
+**Web pages from backstage guests** (the owner's answer S4, "Admin defined"). A code guest holds no `stage.web` of its
+own. A locked hall's backstage guest (its seat from the invite link, or kept by the lock) changes what people's pages
+show, and shows a web page only while the admin has that hall's **Backstage guests may show web pages on people's
+pages** on (Admin → the hall → Roles & invites; `admin:guestWeb`, the hall's `settings.guestWeb`). It is off by default,
+for a hall made before 0.6.0 too; it is offered on a hall's Main room only, and only while the roles are locked ("Lock the
+roles first: in an open hall, code guests show nothing."); and it is "the admin's" alone: the laptop's token or an
+account whose role is admin. A manager an admin granted `settings.manage` opens the admin page and is refused this
+switch ("Only an admin may let backstage guests show web pages."). Unlocking the hall turns it off in the same change, and
+locking again leaves it off: a lock keeps whoever sits backstage then, guests who joined by the bare code while it was open
+included. While it is off a guest's web page is refused ("Web pages from backstage guests are off in this hall — ask the
+admin."); turned off, or the hall unlocked, a web page a guest already put up stays until someone takes it down, and
+the admin's answer counts them with Take it down (a person's whether or not a page of theirs is open: the admin's
+take-down reaches the store without one). A guest's page hears a change at once (`pages:rights {canWeb}`). An open hall's code
+guest, an On stage or observer seat and a side room's Member never show one.
 
 **Inside a hall.** Reading is `hall.view`; everything that changes what the others see — a message, a reply, a help
 request, an answer to an action prompt, a pin, a reaction — is `hall.post`, so an observer or a Viewer reads, sees a
@@ -439,8 +455,11 @@ from …"; never its words or a file's name),
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), every take on people's
 pages (`page.push`, by the hall's key: whom, "the Board (6 pages)" or the person's name, and what kind of thing, "the
-clock", "a holding slide"; one row per take, none for its repeat or for a person's Back to chat or Minimise, which their
-own page says to the console), settings (which ones,
+clock", "a holding slide", "a web page on vote.example.com", a web page by its host alone; one row per take, none for its
+repeat or for a person's Back to chat or Minimise, which their own page says to the console), the hall's switch for its
+backstage guests' web pages (`room.guestWeb`, by the hall's key: "backstage guests may show web pages", "backstage
+guests may no longer show web pages (1 shown now stays until taken down)"; an unlock that turned it off says so in its
+`room.lock` row, "roles unlocked, guests' web pages off", with the same count of those that stay), settings (which ones,
 never their values), every proposal Stagewatch's show desk takes (who asked, for which screen, how many characters and
 the desk's number, never the words), every line Stagewatch takes for the speaker's screen sent straight to it
 (`stagewatch.send`: who sent it and how many characters, never the words; an emoji counts as one character in both),

@@ -73,7 +73,8 @@ Beside the hall's screens, a hall's people's own pages can be shown something ov
 page seated On stage in the hall's Main room, the presenters' and Board accounts' alike) or **one person's** (every page
 of theirs in any room of the hall). A take is one of: back to chat, the hall's Stagewatch countdown (only where the hall
 has one linked), the clock (AGMessage's time and zone), holding (a picture shared in a room of the hall the operator
-may read, else the hall's holding image, else the AGMessage mark and the hall's name on black) or blank (black).
+may read, else the hall's holding image, else the AGMessage mark and the hall's name on black), blank (black) or a
+**web page** (below).
 
 Who may show people's pages: the admin; an account with `display.control` in the hall ("Change what a hall's screens and
 people's pages show"), from any room of it; and a guest seated backstage in the hall's Main room while its seats are
@@ -82,6 +83,45 @@ that moment, and the admin sees and may move each). Never a page seated On stage
 and never a guest of an open hall, where anyone with the code may sit backstage. A person is named only while they sit
 in a room of the hall the operator may read; anyone else is "not in this hall now". The console names the Board's
 people only to one who may read the hall's Main room.
+
+### A web page
+
+A web page is shown by its https address: a voting page, a live document, a site the Board should look at. It needs a
+right of its own beside the one every take needs: **`stage.web`** ("Show web pages on people's pages"), which Tech,
+Senior tech and Manager accounts and the admin hold, Staff and Viewers do not unless an admin gives it; without it a web
+page is refused, "Web pages on the stage need their own right — ask an admin.", whatever its address. A code guest holds
+it only in a locked hall whose admin has turned on **Backstage guests may show web pages on people's pages** (Roles &
+invites; off by default, turned off by an unlock: `docs/ACCOUNTS.md`), and is refused otherwise with "Web pages from
+backstage guests are off in this hall — ask the admin."
+
+- **The address**: at most 2,048 characters, https alone (http would be mixed content under HTTPS and through the
+  tunnel; `javascript:`, `data:`, `blob:` and `file:` are no page of the web), no user name or password, and never
+  AGMessage itself: `localhost` (a trailing dot included), a loopback address, this laptop's name, its network addresses and the tunnel's host are
+  refused ("That address is AGMessage itself: show a page of another site."), since a frame of AGMessage's own origin
+  would own the page around it. The server checks it, and the page again before it frames it. **The server never
+  fetches it**: a check of its headers would be a request from the laptop into the venue's network, and would not see
+  what the tablet sees.
+- **Where it goes**: the address is sent only to the pages it is shown on (and the admin's view of them), and given
+  back in a later push's answer, for its Undo, only to whoever put it up and to the admin: any other pusher is given no
+  content there, and no Undo. At rest it is sealed with this laptop's key beside its host (`pages.json` holds `{host,
+  urlSealed}`, and who put it up); a run without its key shows none. The console, the audit row ("the Board (6 pages) →
+  a web page on vote.example.com"), the halls board, the context and the AI's brief name its host alone, or nothing of
+  it.
+- **The frame** is the one frame a page makes (`framePage`, `public/pagelayer.mjs`): `sandbox="allow-scripts
+  allow-same-origin"` (scripts, but no forms, popups, top navigation, modal dialogs or downloads: owner question 6),
+  `referrerpolicy="no-referrer"` (the hall page's address carries its code and its invite), `allow=""`,
+  `credentialless` where the browser has it, and a title naming its host. Only the hall page may frame an https page
+  (its Content-Security-Policy's `frame-src 'self' blob: https:`); every other page, the screen page and the transcript
+  frame none. Above it, in AGMessage's own words: "A web page chosen by Ana (vote.example.com). Don't type passwords
+  here."; its bar keeps **Back to chat** and **Minimise**, and in the full view its ⋯ (and a right-click) adds **🗗 Open
+  in a new tab**, outside the frame, for a site that refuses to be framed or asks for a sign-in; the simple view keeps
+  the layer's buttons alone. Minimised, its card reads "🌍 vote.example.com".
+- **What can be known**: nothing inside the frame. A site that refuses to be framed (its X-Frame-Options or
+  frame-ancestors) still fires `load`. So a loaded web page reads **◇ Opened · AGMessage can't see inside web pages**,
+  never ✓, and one that has not loaded in 15 s reads **△ Couldn't show it: the page did not load**. The person can
+  always go back to chat.
+- **Preview**: Show a web page… asks for the address, then **Preview** frames it with the same `framePage` on the
+  operator's own page first (only they see it; **Show it** there sends it), or **Show it** at once.
 
 Every take is numbered, one count per hall, and a page shows the newest take addressed to it: its person's, or the
 Board's on a page On stage, so **back to chat** is how a page is handed back. A page that comes On stage later, comes
@@ -100,15 +140,15 @@ when the hall is renamed. The longest a Board page said it
 was asleep or behind another app while a take was on it is kept for the show day (health's `peaks.pageHiddenMs`).
 
 Each take is one `page.push` row in the audit log: who, whom ("the Board (6 pages)", or the person's name) and what
-kind of thing ("the clock", "a holding slide"), never a file. Nothing of a take is on the halls board, in the context
+kind of thing ("the clock", "a holding slide", "a web page on vote.example.com"), never a file or an address. Nothing of a take is on the halls board, in the context
 another show system reads, or in the AI's brief.
 
 ### Showing it: the Board chip and the console
 
 A page that may show people's pages has the **Board chip** in its header: what the Board's pages show and how many show
 it ("Board · 🕐 Clock ✓ 6/6"; "Board · ✕ nobody on stage" with no Board page open). A click on it, a right-click or
-Shift+F10 opens its menu: **Back to chat · Show Stagewatch · Show the clock · Show holding · Show blank**, the one the
-Board shows checked (choosing it again says "Already showing the clock."; Stagewatch is greyed where the hall has none
+Shift+F10 opens its menu: **Back to chat · Show Stagewatch · Show the clock · Show holding · Show blank**, and **Show a
+web page…** for a page that may show one, the one the Board shows checked (choosing it again says "Already showing the clock."; Stagewatch is greyed where the hall has none
 linked), then **↶ Back to …** and **Screens & pages…**. A choice goes at once, and the toast names whom it reached
 ("The clock on 6 Board pages.") with **Undo** for 10 s, which puts back what was shown before as a take of its own (none
 is offered where that was a picture shared in a room this page may not read). After
@@ -120,8 +160,8 @@ The header's ⋯ → **Screens & pages…** is the hall's console: its **Screens
 hall's screens, and its **People's pages** tab for one that may show people's pages, each tab where the page may use
 it. People's pages lists **On stage (Board) — all 6** first, with a button for each kind, then each person in the
 hall's rooms the operator may read, with their room, each with its status (mark and words) and what it shows now; a
-person's ⋯ (and a right-click, and Shift+F10) holds **📺 Show them ▸** (Stagewatch, Clock, Holding, Blank) and **Back
-to chat on their pages**. The same two acts are on a person in the room's People list and on a message's sender's name.
+person's ⋯ (and a right-click, and Shift+F10) holds **📺 Show them ▸** (Stagewatch, Clock, Holding, Blank), **Show them
+a web page…** for a page that may show one, and **Back to chat on their pages**. The same two acts are on a person in the room's People list and on a message's sender's name.
 It reads where the pages stand as it opens and each time it is told they changed.
 
 ### On the person's page

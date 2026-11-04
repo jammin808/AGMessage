@@ -852,6 +852,22 @@ test('guard rails: one page script hears the context menu, menus.js, so every ob
   assert.deepEqual(clonesIn('const c = node.cloneNode(true); tpl.content.firstElementChild.cloneNode(true); x.cloneNodes(); el().cloneNode(false);'), ['node', 'tpl.content.firstElementChild', 'el()']);
 });
 
+/** Where a source makes a frame by script: each `createElement('iframe')` however it is quoted or cased, comments out. */
+const framesMade = (src) => (src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1').match(/createElement\(\s*['"`]iframe['"`]\s*\)/gi) || []).length;
+test('guard rails: a page makes one frame by script, framePage\'s (pagelayer.mjs): sandboxed, no referrer, no feature, its host in its title', () => {
+  const made = Object.fromEntries(pageScripts().map((f) => [f, framesMade(readSource(path.join(ROOT, f)))]).filter(([, n]) => n));
+  assert.deepEqual(made, { 'public/pagelayer.mjs': 1 }, 'createElement(\'iframe\') once in public/, in pagelayer.mjs');
+  // And there, inside framePage, with the attributes a web page is framed with, set before its address is given it.
+  const src = readSource(path.join(ROOT, 'public', 'pagelayer.mjs'));
+  const at = src.indexOf('export function framePage(');
+  const body = src.slice(at, src.indexOf('\n}\n', at));
+  assert.ok(at > 0 && framesMade(body) === 1, 'the frame is made in framePage');
+  const order = ["createElement('iframe')", "setAttribute('sandbox', 'allow-scripts allow-same-origin')", "setAttribute('referrerpolicy', 'no-referrer')", "setAttribute('allow', '')", 'frame.src = w.url'].map((x) => body.indexOf(x));
+  assert.ok(order.every((i, n) => i > 0 && (n === 0 || i > order[n - 1])), 'sandbox, referrer policy and allow set, in that order, before the address: ' + order.join(', '));
+  // The read sees a frame made however it is written, and nothing that only names one.
+  assert.equal(framesMade("document.createElement('iframe'); d.createElement( \"IFRAME\" ); x.createElement(`iframe`); // createElement('iframe')\n/* createElement('iframe') */ const t = 'iframe';"), 3);
+});
+
 test('guard rails: a page posts a message only to its own origin, and hears one only after checking who sent it', () => {
   let posts = 0, listeners = 0;
   for (const f of pageScripts()) {

@@ -1343,12 +1343,12 @@ test('the contexts: ctx holds every part and io, takesCtx the same parts but tho
   };
   const store = { kind: 'store' }, settings = { roomSends: [] };
   const linkFor = () => null, apply = () => null, systemMessage = () => null, newSideRoom = () => null, renameRoom = () => null, roomNameRefused = () => '';
-  const newGuestCode = () => 'K3TW9A', sendGuestsOut = () => 0, codeChanged = () => null, sendersOf = () => [], setRoomSends = () => '';
-  const { ctx, takesCtx } = gate.contexts({ store, apply, systemMessage, newSideRoom, renameRoom, roomNameRefused, newGuestCode, sendGuestsOut, codeChanged, settings, sendersOf, setRoomSends, linkFor, io });
+  const newGuestCode = () => 'K3TW9A', sendGuestsOut = () => 0, codeChanged = () => null, sendersOf = () => [], setRoomSends = () => '', tellWebRights = () => null;
+  const { ctx, takesCtx } = gate.contexts({ store, apply, systemMessage, newSideRoom, renameRoom, roomNameRefused, newGuestCode, sendGuestsOut, codeChanged, settings, sendersOf, setRoomSends, tellWebRights, linkFor, io });
   assert.ok(Object.isFrozen(ctx) && Object.isFrozen(takesCtx));
-  assert.deepStrictEqual(Object.keys(ctx), ['store', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'setRoomSends', 'linkFor', 'io']);
-  assert.deepStrictEqual(Object.keys(takesCtx), ['store', 'roomNameRefused', 'newGuestCode', 'settings', 'sendersOf', 'linkFor', 'sendTo'], 'no io, apply, systemMessage, newSideRoom, renameRoom, sendGuestsOut, codeChanged or setRoomSends: a take makes no room or room\'s op, sends to no room and sets no room\'s list; it may read one');
-  assert.deepStrictEqual([...gate.ROOM_SENDS], ['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'sendGuestsOut', 'codeChanged', 'setRoomSends']);
+  assert.deepStrictEqual(Object.keys(ctx), ['store', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'setRoomSends', 'tellWebRights', 'linkFor', 'io']);
+  assert.deepStrictEqual(Object.keys(takesCtx), ['store', 'roomNameRefused', 'newGuestCode', 'settings', 'sendersOf', 'linkFor', 'sendTo'], 'no io, apply, systemMessage, newSideRoom, renameRoom, sendGuestsOut, codeChanged, setRoomSends or tellWebRights: a take makes no room or room\'s op, sends to no room and sets no room\'s list; it may read one');
+  assert.deepStrictEqual([...gate.ROOM_SENDS], ['io', 'apply', 'systemMessage', 'newSideRoom', 'renameRoom', 'sendGuestsOut', 'codeChanged', 'setRoomSends', 'tellWebRights']);
   assert.ok(Object.isFrozen(gate.ROOM_SENDS));
   assert.ok(ctx.store === store && takesCtx.store === store && takesCtx.settings === settings && ctx.io === io && ctx.apply === apply, 'the parts themselves, not copies');
   assert.throws(() => { ctx.io = null; }, TypeError, 'a handler module cannot replace a part');

@@ -44,7 +44,7 @@ const readOnly = () => document.body.dataset.role === 'observer';
 // drawn from the catalogue's entries for them. A page binds only what each act does: RUN, by the entry's id.
 // Whether this device can show a take full screen (the Fullscreen API: an iPhone has none), read once here and sent nowhere.
 const FULLSCREEN = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled) && (typeof document.documentElement.requestFullscreen === 'function' || typeof document.documentElement.webkitRequestFullscreen === 'function');
-const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false, canPush: false, fullscreen: FULLSCREEN };
+const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false, canPush: false, canWeb: false, fullscreen: FULLSCREEN };
 let F = AGM.catalog.facts(pageFacts);
 // Whether this page's room is its hall's Main room (the join's `main`; a hall until it answers): its seat words follow it
 // (roleLabel).
@@ -189,7 +189,7 @@ function rejoin() {
     factsChanged({ role: (them && them.role) || res.role || ROLE, uid: MY_UID, account: res.account || null, uploadToken: UPLOAD_TOKEN, canSendToStage: CAN_STAGE, canPropose: CAN_PROPOSE, ai: AI_ON, stage: res.stage || null,
       forwardable: them ? them.forwardable === true : !!res.forwardable, name: NAME,
       guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode, sends: them ? them.sends === true : !!res.sends, ...((them ? them.sends : res.sends) ? {} : { targets: [] }), admin: res.admin === true,
-      canPush: them ? them.canPush === true : res.canPush === true });
+      canPush: them ? them.canPush === true : res.canPush === true, canWeb: them ? them.canWeb === true : res.canWeb === true });
     drawChips();
     drawAiButtons();
     if (res.note) AGM.toast(res.note);
@@ -397,6 +397,9 @@ Object.assign(RUN, {
   'room.code': (o, { anchor }) => copyText(o.guestCode, 'Copied the guest code of ' + o.title + ', ' + o.guestCode + '.', anchor),
 });
 socket.on('rooms:changed', (f) => { if (f && typeof f === 'object' && !outOf) { hallTold(f); refreshOpenMenu(); } });
+// Whether a web page shown from this page would be taken now (a code guest's: the admin let its hall's backstage guests
+// show web pages, or stopped them, or the hall was unlocked): Show a web page… comes or goes on the Board chip and a person.
+socket.on('pages:rights', (r) => { if (r && typeof r.canWeb === 'boolean' && !ADMIN_VIEW) factsChanged({ canWeb: r.canWeb }); });
 // A page the browser kept and shows again (Back, from its cache) draws its own room again, not the one it was left for,
 // and holds its words itself: what was kept of them for its next load is let go, so a send from here never comes back.
 window.addEventListener('pageshow', (e) => { if (e.persisted) { drawTitle(); drawSwitcher(); dropDraft(); } });
@@ -1077,8 +1080,10 @@ function act(kind, id, o, ctx) {
   if (!e || !run || !AGM.catalog.shown(kind, F, o).some((x) => x.id === id)) { AGM.toast(AGM.catalog.WORDS.gone, true); return; }
   const r = AGM.catalog.ready(kind, id, F, o);
   if (r !== true) { AGM.toast(r, true); return; }
-  // An act asks first where its row says so for this object (Turn the code off… asks, Turn the code on does not).
+  // An act asks first where its row says so for this object (Turn the code off… asks, Turn the code on does not). One
+  // whose ask was answered already, a step before it is sent (a web page's Preview, then Show it), runs with that answer.
   const spec = e.confirm ? e.confirm(F, o) : null;
+  if (spec && c.answered) { run(o, Object.assign({}, c, { values: c.answered.values, choice: c.answered.choice })); return; }
   if (spec) {
     // The ask is about this object: should it go meanwhile, the ask goes with it (refreshOpenMenu).
     const asked = { kind, get: () => objectNow(kind, o) };
@@ -3657,6 +3662,7 @@ const Takes = (function () {
   let tz = '';
   let stage = null;        // Stagewatch's frame, as this page is told it
   let drawnKey = '';       // the take the layer holds, drawn ('' for none)
+  let drawing = '';        // a web page the layer holds while it loads, not yet said ('' for none)
   let cardKey = '';        // the take the card holds
   let result = null;       // what the layer's drawing said: {state, words}
   let turn = 0;            // each draw's number: a draw a newer one overtook is let go
@@ -3672,7 +3678,7 @@ const Takes = (function () {
     if (!loading) loading = import('/pagelayer.mjs').then((m) => { renderer = m; return m; }, (e) => { loading = null; throw e; });
     return loading;
   };
-  const ctx = () => ({ stage, offset, tz, hallName: (told && told.hallName) || HALL_NAME, holding: (told && told.holding) || '', connected: socket.connected });
+  const ctx = () => ({ stage, offset, tz, hallName: (told && told.hallName) || HALL_NAME, holding: (told && told.holding) || '', connected: socket.connected, by: (told && told.by && told.by.name) || '' });
   const visible = () => document.visibilityState === 'visible';
   const keyOf = (t) => [t.seq, JSON.stringify(t.content), t.holding || '', t.hallName || ''].join('|');
   /** A take's kind as a person reads it: "the clock", "Stagewatch". */
@@ -3723,9 +3729,10 @@ const Takes = (function () {
     let state;
     if (t.content.kind === 'chat') state = visible() ? 'shown' : 'hidden';
     else if (t.answer || drawnKey !== keyOf(t) || !result) return;
-    else state = result.state === 'failed' ? 'failed' : visible() ? 'shown' : 'hidden';
+    // A web page is never said to be seen: in view, it opened (nothing inside its frame can be read).
+    else state = result.state === 'failed' ? 'failed' : !visible() ? 'hidden' : result.state === 'opened' ? 'opened' : 'shown';
     const words = state === 'failed' ? result.words : '';
-    const asked = again === t.seq && state === 'shown';
+    const asked = again === t.seq && (state === 'shown' || state === 'opened');
     if (asked) again = 0;
     report({ seq: t.seq, state, words, ...(asked ? { again: true } : {}) }, asked);
   }
@@ -3743,7 +3750,7 @@ const Takes = (function () {
   function showLayer(asked) {
     const t = told;
     const key = keyOf(t);
-    if (drawnKey === key && !layer.hidden) { drawBarNow(); say(); return; }
+    if ((drawnKey === key || drawing === key) && !layer.hidden) { drawBarNow(); say(); return; }
     if (waiting && waiting.key === key && !asked) return;
     if (waiting) waiting.cancel();
     const go = () => { waiting = null; draw(t, key); };
@@ -3757,8 +3764,14 @@ const Takes = (function () {
   }
   function draw(t, key) {
     const n = ++turn;
-    load().then((m) => m.render(box, t.content, ctx())).then((r) => {
+    load().then((m) => {
+      const drawn = m.render(box, t.content, ctx());
+      // A web page is on the layer as it loads (up to 15 s): the person sees it come, and it is said once it has.
+      if (t.content.kind === 'web' && n === turn && told && keyOf(told) === key) { drawing = key; open(t); }
+      return drawn;
+    }).then((r) => {
       if (n !== turn || !told || keyOf(told) !== key) return;
+      drawing = '';
       result = r && typeof r === 'object' ? r : { state: 'failed', words: 'it could not be drawn' };
       drawnKey = key;
       delete layer.dataset.touched;   // a new take: a blank one's bar waits for a touch again
@@ -3796,6 +3809,7 @@ const Takes = (function () {
     delete document.body.dataset.take;
     delete layer.dataset.kind;
     drawnKey = '';
+    drawing = '';
     result = null;
     box.textContent = '';
     unread = 0;
@@ -3853,7 +3867,9 @@ const Takes = (function () {
   }
 
   // ---- the objects the catalogue reads, and their bars
-  const object = () => (!layer.hidden && told ? { id: 'take', seq: told.seq, kind: told.content.kind, strip: !!hot, full: fullNow() === layer } : null);
+  /** A web page's address as the take carries it ('' for any other kind): Open in a new tab opens it. */
+  const urlOf = (t) => (t && t.content.kind === 'web' && typeof t.content.url === 'string' ? t.content.url : '');
+  const object = () => (!layer.hidden && told ? { id: 'take', seq: told.seq, kind: told.content.kind, strip: !!hot, full: fullNow() === layer, url: urlOf(told) } : null);
   const cardObject = () => (cardKey && told && told.answer === 'minimised' ? { id: 'card', seq: told.seq, kind: told.content.kind } : null);
   function drawBarNow() {
     const o = object();
@@ -3979,7 +3995,17 @@ const Takes = (function () {
     if (ask) Promise.resolve(ask.call(layer)).catch(() => AGM.toast('This device did not go full screen.', true));
   }
   for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, () => { drawBarNow(); refreshOpenMenu(); });
+  /**
+   * A web page in a tab of the person's own, outside AGMessage: its address checked as a frame's is (pagelayer.mjs), and
+   * opened with no opener and no referrer, so the page there can neither reach this one nor read its address.
+   */
+  function openTab(o) {
+    const w = renderer ? renderer.webAddress(o.url) : { error: 'This page could not load what draws a take: reload it.' };
+    if (w.error) { AGM.toast(w.error, true); return; }
+    window.open(w.url, '_blank', 'noopener,noreferrer');
+  }
   Object.assign(RUN, {
+    'take.tab': (o) => openTab(o),
     'take.chat': () => backToChat('layer'),
     'take.minimise': () => minimise(),
     'take.openChat': () => openChat(),
@@ -4021,7 +4047,7 @@ const Takes = (function () {
   /** The page's facts changed (connected, the support view): the bars drawn again. */
   function redraw() { drawBarNow(); drawCardBar(); }
 
-  return { joined, stage: stageFrame, heard, redraw, object, cardObject, carded: () => !!cardKey, current: () => told };
+  return { joined, stage: stageFrame, heard, redraw, object, cardObject, carded: () => !!cardKey, current: () => told, load };
 })();
 
 // ---------------- What people's pages show: the console's People's pages, and the Board chip ----------------
@@ -4036,7 +4062,7 @@ const Console = (function () {
   const chip = $('boardChip');
   const list = $('peoplePages');
   /** How a choice is said, by its kind: "The clock on 6 Board pages." */
-  const SAID = { chat: 'Back to chat', stage: 'Stagewatch', clock: 'The clock', holding: 'Holding', blank: 'Blank' };
+  const SAID = { chat: 'Back to chat', stage: 'Stagewatch', clock: 'The clock', holding: 'Holding', blank: 'Blank', web: 'The web page' };
   let status = null;       // page:status's answer: {board, people}
   let mine = null;         // this page's own take on the Board: {seq, previous, time}
   let asking = false;
@@ -4093,13 +4119,29 @@ const Console = (function () {
       read();
     });
   }
+  /**
+   * A web page by the address its ask was answered with: checked first as a frame checks it (pagelayer.mjs webAddress),
+   * then shown (Show it), or framed on this page alone first (Preview), whose own Show it runs the act again with that
+   * answer, through the one checked path (act), on the object as it is then.
+   */
+  function web(to, kind, id, get, { values, choice, opener }, name = '') {
+    const url = values && typeof values.url === 'string' ? values.url : '';
+    Takes.load().then((m) => {
+      const w = m.webAddress(url);
+      if (w.error) { AGM.toast(w.error, true); return; }
+      if (choice === 'preview') { Preview.open(m, w.url, () => { const o = get(); if (o) act(kind, id, o, { opener, answered: { values: { url: w.url }, choice: 'show' } }); else AGM.toast(AGM.catalog.WORDS.gone, true); }); return; }
+      push(to, { kind: 'web', url: w.url }, { name });
+    }, () => AGM.toast('This page could not load what draws a web page: reload it.', true));
+  }
   Object.assign(RUN, {
     'board.back': (o) => push('board', o.mine.previous, { ifSeq: o.seq, undoable: false }),
     'board.screens': () => Screens.show('people'),
     'person.show': (p, { value }) => { if (typeof value === 'string') push({ uid: p.key }, { kind: value }, { name: p.name }); },
     'person.chat': (p) => push({ uid: p.key }, { kind: 'chat' }, { name: p.name }),
+    'person.web': (p, c) => web({ uid: p.key }, 'person', 'person.web', () => (p.where === 'console' ? rowOf(p.key) : personNow(p.uid)), c, p.name),
   });
   for (const [kind] of AGM.catalog.SHOW_KINDS) RUN['board.' + kind] = () => push('board', { kind });
+  RUN['board.web'] = (o, c) => web('board', 'board', 'board.web', board, c);
 
   // ---- the Board chip, in the header: "Board · 🕐 Clock ✓ 6/6"; a click on it, a right-click and Shift+F10 open its menu
   const chipDoor = () => (chip.hidden ? null : { el: chip, more: chip, open: (at) => openObjectMenu('board', board, { node: chip, more: chip, at, opener: chip, label: 'The Board', header: boardHeader }) });
@@ -4211,6 +4253,32 @@ const Console = (function () {
     refreshOpenMenu();
   }
   return { read, draw, board, kindOf, chipDoor };
+})();
+
+// ---------------- A web page previewed: framed on this page alone, before it is shown on anyone's ----------------
+// The address its ask was answered with, framed by the one frame a page makes (pagelayer.mjs framePage), in a dialog of
+// its own; Show it there runs the act with that answer, and closing it takes the frame away.
+const Preview = (function () {
+  const $ = (id) => document.getElementById(id);
+  const dlg = $('webPreview');
+  const box = $('webPreviewBox');
+  let then = null;
+  function open(m, url, show) {
+    const made = m.framePage(url);
+    if (made.error) { AGM.toast(made.error, true); return; }
+    box.textContent = '';
+    box.append(made.frame);
+    $('webPreviewHost').textContent = made.host;
+    then = show;
+    AGM.openDialog(dlg);
+  }
+  dlg.addEventListener('close', () => { box.textContent = ''; then = null; });
+  $('webPreviewShow').addEventListener('click', () => {
+    const go = then;
+    dlg.close();
+    if (go) go();
+  });
+  return { open };
 })();
 
 // ---------------- Send to Stagewatch: where a message goes — sent now (the speaker's screen), or asked of the operator ----------------

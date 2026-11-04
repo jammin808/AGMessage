@@ -966,7 +966,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       // too; every seat has the header's ⋯, and a seat that writes in the full view the composer's ⋯.
       const chipOk = light.doors.some((d) => d.door === 'headerMore');
       const doorsOk = light.doors.every((d) => d.size >= 44) && chipOk && (!writes || !light.full || light.doors.some((d) => /compose-more/.test(d.door)));
-      report(light.fits && dark.fits && Array.isArray(dialogs) && dialogs.length === 3 && dialogs.every((d) => d.buttons > 0 && d.missed.length === 0) && (dialogs[0].via === 'Help') === writes &&
+      report(light.fits && dark.fits && Array.isArray(dialogs) && dialogs.length === 4 && dialogs.every((d) => d.buttons > 0 && d.missed.length === 0) && (dialogs[0].via === 'Help') === writes &&
         sendOk && light.coarse && light.header >= 44 && doorsOk,
         `the hall page fits a 390 px phone as ${seat}: no wider than the screen (${light.width}), every dialog's buttons on the screen and reached by a tap, Send a 44 px button named for where it sends, the header's controls and the doors (the header's ⋯, a sender's name, the composer's ⋯) 44 px under a finger (${JSON.stringify({ dialogs, send: light.send, header: light.header, doors: light.doors })})`);
       // 🔥 Priority pressed is filled with the fault red and says it is pressed; unpressed it is neither; each click turns it.
@@ -1603,7 +1603,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await users.eval(`(() => { document.getElementById('agmToast').textContent = ''; document.getElementById('userSave').click(); })()`);
     const kimUntouched = await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — nothing changed.' && !document.getElementById('userDialog').open`, 5000);
     report(tree === JSON.stringify({ hall: `Smoke AGM — Main room and hall rights (${code})`, board: 'On stage (Board member)', rooms: ['Press:false'], every: 'Every hall\'s Main room, including new ones (not their other rooms)',
-      views: ['By seat', 'Simple', 'Full'], view: '', groups: ['In the room:3', 'Show:4', 'Run AGMessage:5'], foot: 'sticky' }),
+      views: ['By seat', 'Simple', 'Full'], view: '', groups: ['In the room:3', 'Show:5', 'Run AGMessage:5'], foot: 'sticky' }),
       `the Accounts page's editor: each hall's Main room with On stage beside it and its rooms under it, Chat view, the rights in three groups, the footer in sight (${tree})`);
     report(!!kimGiven && kimNow === JSON.stringify({ rooms: [pressKey], board: [code], view: 'simple' }) && kimCell === 'GONE01 (Main); Smoke AGM (Main, Press) · On stage' && kimShown === JSON.stringify([true, true, 'simple'])
       && linkedTicks === JSON.stringify([[false, false], [true, true]]) && !!kimUntouched,
@@ -2655,7 +2655,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const chipClock = await op.until(`${BOARD_CHIP} === 'Board · 🕐 Clock ✓ 1/1' && ${BOARD_CHIP}`, 8000);
     await beaPad.shot(path.join(OUT, 'take-clock.png'));
     await op.shot(path.join(OUT, 'board-chip.png'));
-    report(chipAtStart === 'Board · Chat' && selfInStep(chipDoors) && chipDoors.want === JSON.stringify(['board.chat', 'board.stage', 'board.clock', 'board.holding', 'board.blank', 'board.screens'])
+    report(chipAtStart === 'Board · Chat' && selfInStep(chipDoors) && chipDoors.want === JSON.stringify(['board.chat', 'board.stage', 'board.clock', 'board.holding', 'board.blank', 'board.web', 'board.screens'])
       && clockPick.label === 'Show the clock' && clockPick.role === 'menuitemradio' && clockPick.checked === 'false' && clockSaid === 'The clock on 1 Board page. · Undo'
       && !!beaClock && beaClock.focus && JSON.stringify(beaClock.acts.filter((a) => a !== 'take.fullscreen')) === '["take.chat","take.minimise"]' && /^Shown to you: the clock · from Ana Admin/.test(beaClock.what || '') && chipClock === 'Board · 🕐 Clock ✓ 1/1',
       `the Board chip reads "Board · Chat", opens its menu by a click, a right-click and Shift+F10 alike; Show the clock is put on Bea's page at once ("${clockSaid}"), drawn over her chat by AGMessage's clock with Back to chat and Minimise, the focus on it, and the chip reads ✓ when her page says so (${JSON.stringify({ chipAtStart, want: chipDoors.want, clockPick, beaClock, chipClock })}${selfInStep(chipDoors) ? '' : '; ' + JSON.stringify(chipDoors)})`);
@@ -2736,7 +2736,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await op.eval(`document.querySelector('#agmToast .toast-undo').click()`);
     const beaUndone = await layerOf(beaPad, `(v) => v.kind === 'stage'`, 5000);
     const afterUndo = await op.until(`Console.board().seq === ${seqBefore + 2} && Console.board().kind === 'stage' && JSON.stringify(AGM.catalog.ids('board', F, Console.board()))`, 6000);
-    report(/^Back to Stagewatch \(undo your Clock, \d{1,2}:\d{2}/.test(tkBackOffered) && !!beaUndone && afterUndo === JSON.stringify(['board.chat', 'board.stage', 'board.clock', 'board.holding', 'board.blank', 'board.screens']),
+    report(/^Back to Stagewatch \(undo your Clock, \d{1,2}:\d{2}/.test(tkBackOffered) && !!beaUndone && afterUndo === JSON.stringify(['board.chat', 'board.stage', 'board.clock', 'board.holding', 'board.blank', 'board.web', 'board.screens']),
       `the toast's Undo puts what was shown before back as a new take, and Bea's page draws it; ↶ Back to was offered over this page's own take ("${tkBackOffered}"), and none over the one the Undo made (${afterUndo})`);
 
     // While the take covers her page, a 🔥 message breaks through in its strip, and another is counted on its bar; Open
@@ -2773,13 +2773,113 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await obiPad.eval(`document.querySelector('#layerActs [data-action="take.minimise"]').click()`);
     const obiRail = await obiPad.until(`(() => { const p = document.getElementById('docPanel'); return p.getClientRects().length > 0 && !!document.querySelector('#takeCards .take-card') && document.body.dataset.pushed === '1' && JSON.stringify({ card: document.querySelector('#takeCards .take-card .take-card-name').textContent, doc: getComputedStyle(document.getElementById('docDisplay')).display }); })()`, 5000);
     await obiPad.shot(path.join(OUT, 'take-card-observer.png'));
-    report(obiPanelBefore === false && obiMenu === JSON.stringify(['person.show', 'person.chat']) && !!obiClock && obiRail === JSON.stringify({ card: 'Clock', doc: 'none' }),
+    report(obiPanelBefore === false && obiMenu === JSON.stringify(['person.show', 'person.web', 'person.chat']) && !!obiClock && obiRail === JSON.stringify({ card: 'Clock', doc: 'none' }),
       `an observer has no side bar until a take shown to them is minimised: from the console's row, Show them ▸ Clock reaches Obi's page, and Minimise puts it in a side bar of its own with its card (${JSON.stringify({ obiPanelBefore, obiMenu, obiRail })})`);
 
-    const takesProblems = [['op', op], ['bea', beaPad], ['obi', obiPad]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
+    // ---------------- A web page on people's pages (unit 19): its own right, the one frame, opened or not loaded ----------------
+    // The browser answers the venue's web page itself (agm-web.invalid: a page of a few words) and never answers the stuck
+    // one (agm-test.invalid) before the page's 15 s are up: what each frame then does is what a real site's would.
+    const WEB_OK = 'https://agm-web.invalid/vote';
+    const WEB_STUCK = 'https://agm-test.invalid/';
+    for (const t of [op, beaPad, obiPad]) {
+      t.on('Fetch.requestPaused', (p) => {
+        if (p.request.url.startsWith('https://agm-web.invalid/')) t.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'text/html; charset=utf-8' }], body: Buffer.from('<!doctype html><title>Vote</title><p>Vote now</p>').toString('base64') });
+        else setTimeout(() => { t.send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'NameNotResolved' }); }, 18000);
+      });
+      await t.send('Fetch.enable', { patterns: [{ urlPattern: 'https://agm-web.invalid/*', requestStage: 'Request' }, { urlPattern: 'https://agm-test.invalid/*', requestStage: 'Request' }] });
+      t.expectFailure(/agm-test\.invalid/);   // the stuck page's own load error, once it is let go
+    }
+    /** The ask Show a web page… opened: its title and answers read, its address typed, and one answer chosen. */
+    const askWeb = async (url, answer) => {
+      await op.until(`!!document.querySelector('.agm-ask input[name="url"]')`, 3000);
+      return op.eval(`(() => { const box = document.querySelector('.agm-ask'); box.querySelector('input[name="url"]').value = ${codeLiteral(url)};
+        const said = JSON.stringify({ title: box.querySelector('.agm-ask-title').textContent, answers: [...box.querySelectorAll('[data-answer]')].map((b) => b.dataset.answer + '=' + b.textContent) });
+        box.querySelector('[data-answer="${answer}"]').click(); return said; })()`);
+    };
+    /** A frame as a page drew it: its attributes, where it points, how many frames the page holds, the strip's words. */
+    const FRAME = (sel) => `(() => { const f = document.querySelector(${codeLiteral(sel)}); return f ? JSON.stringify({ sandbox: f.getAttribute('sandbox'), referrer: f.getAttribute('referrerpolicy'), allow: f.getAttribute('allow'),
+      credentialless: f.credentialless === true, title: f.title, src: f.src, frames: document.querySelectorAll('iframe').length }) : ''; })()`;
+    const FRAMED = (url, host) => ({ sandbox: 'allow-scripts allow-same-origin', referrer: 'no-referrer', allow: '', credentialless: true, title: 'Web page from ' + host, src: url, frames: 1 });
+    // From the console's Board row: Show a web page… asks for the address; Preview frames it on the operator's own page
+    // first, in the one frame; Show it there puts it on Bea's page, which reports ◇ opened once it loads (never ✓).
+    await unsay(op);
+    const webPushed = await boardRow('board.web');
+    const webAsked = JSON.parse(await askWeb(WEB_OK, 'preview'));
+    const previewFrame = JSON.parse(await op.until(`document.getElementById('webPreview').open && ${FRAME('#webPreviewBox iframe')}`, 5000) || 'null');
+    const previewHost = await op.eval(`document.getElementById('webPreviewHost').textContent`);
+    await op.shot(path.join(OUT, 'web-preview.png'));
+    const beaBeforeShow = await beaPad.eval(`document.getElementById('pageLayer').dataset.kind || 'chat'`);
+    await op.eval(`document.getElementById('webPreviewShow').click()`);
+    const beaWeb = JSON.parse(await beaPad.until(`document.getElementById('pageLayer').dataset.kind === 'web' && ${FRAME('#layerBox iframe')}`, 8000) || 'null');
+    const beaWebBar = await beaPad.eval(`JSON.stringify({ note: document.querySelector('#layerBox .take-web-note').textContent, acts: [...document.querySelectorAll('#layerActs > [data-action]')].map((x) => x.dataset.action).filter((a) => a !== 'take.fullscreen'), what: document.getElementById('layerWhat').textContent.replace(/ · \\d.*$/, '') })`);
+    const webOpened = await op.until(`/^◇ /.test(${boardState}) && ${boardState}`, 10000);
+    const chipWeb = await op.until(`${BOARD_CHIP} === 'Board · 🌍 Web page ◇ 1/1' && ${BOARD_CHIP}`, 6000);
+    const previewGone = await op.eval(`!document.getElementById('webPreview').open && !document.querySelector('#webPreviewBox iframe')`);
+    await beaPad.shot(path.join(OUT, 'take-web.png'));
+    report(webPushed === 'pushed' && JSON.stringify(webAsked) === JSON.stringify({ title: 'Show a web page on the Board\'s pages', answers: ['preview=Preview', 'show=Show it', 'no=Cancel'] })
+      && JSON.stringify(previewFrame) === JSON.stringify(FRAMED(WEB_OK, 'agm-web.invalid')) && previewHost === 'agm-web.invalid' && beaBeforeShow !== 'web'
+      && JSON.stringify(beaWeb) === JSON.stringify(FRAMED(WEB_OK, 'agm-web.invalid')) && previewGone
+      && beaWebBar === JSON.stringify({ note: 'A web page chosen by Ana Admin (agm-web.invalid). Don\'t type passwords here.', acts: ['take.chat', 'take.minimise'], what: 'Shown to you: a web page · from Ana Admin' })
+      && webOpened === '◇ Opened · AGMessage can\'t see inside web pages' && chipWeb === 'Board · 🌍 Web page ◇ 1/1',
+      `Show a web page… asks for its address; Preview frames it on the operator's page alone, and Show it there puts it on Bea's page in the one frame (sandboxed for scripts alone, no referrer, no feature, no cookies, its host in its title), with AGMessage's strip and, in her simple view, the layer's buttons alone; it reads ◇ opened once it loads, never ✓ (${JSON.stringify({ webAsked, previewFrame, beaWeb, beaWebBar, webOpened, chipWeb })})`);
+    // In the full view, Open in a new tab is in the layer's ⋯ (and its right-click), never on its bar: from the console,
+    // Obi's row, Show them a web page… puts it on his page.
+    await unsay(op);
+    await op.eval(`document.querySelector('#peoplePages li[data-key="${obiKey}"] .obj-more').click()`);
+    await op.until(`!!document.querySelector('.agm-menu [data-action="person.web"]')`, 3000);
+    await op.eval(`document.querySelector('.agm-menu [data-action="person.web"]').click()`);
+    const obiAsked = JSON.parse(await askWeb(WEB_OK, 'show'));
+    const obiWebBar = await obiPad.until(`document.getElementById('pageLayer').dataset.kind === 'web' && !!document.querySelector('#layerBox iframe') && JSON.stringify([...document.querySelectorAll('#layerActs > [data-action]')].map((x) => x.dataset.action).filter((a) => a !== 'take.fullscreen'))`, 8000);
+    await obiPad.eval(`document.querySelector('#layerActs .obj-more').click()`);
+    const obiWebMenu = await obiPad.until(`!!document.querySelector('.agm-menu [data-action="take.tab"]') && ${MENU_IDS}`, 3000);
+    await obiPad.eval(`AGM.menu.close()`);
+    report(obiAsked.title === 'Show a web page on Obi\'s pages' && obiWebBar === JSON.stringify(['take.chat', 'take.minimise']) && !!obiWebMenu && JSON.parse(obiWebMenu).filter((a) => a !== 'take.fullscreen').join() === 'take.chat,take.minimise,take.tab',
+      `in the full view a web page's Open in a new tab is in the layer's ⋯, never on its bar: Show them a web page… from Obi's row (${JSON.stringify({ obiAsked, obiWebBar, obiWebMenu })})`);
+    // One that never loads: on Bea's page at once as it loads, and △ once its 15 s are up, Back to chat and Open in a new
+    // tab still there.
+    await unsay(op);
+    await boardRow('board.web');
+    await askWeb(WEB_STUCK, 'show');
+    const stuckUp = JSON.parse(await beaPad.until(`(() => { const f = document.querySelector('#layerBox iframe'); return f && f.src === ${codeLiteral(WEB_STUCK)} && ${FRAME('#layerBox iframe')}; })()`, 4000) || 'null');
+    const stuckWaiting = await op.until(`/^◷ /.test(${boardState}) && ${boardState}`, 4000);
+    const stuckFailed = await op.until(`/^△ /.test(${boardState}) && ${boardState}`, 25000);
+    const stuckBar = await beaPad.eval(`JSON.stringify([...document.querySelectorAll('#layerActs > [data-action]')].map((x) => x.dataset.action).filter((a) => a !== 'take.fullscreen'))`);
+    report(!!stuckUp && stuckUp.src === WEB_STUCK && /^◷ /.test(stuckWaiting) && stuckFailed === '△ Couldn\'t show it: the page did not load' && stuckBar === JSON.stringify(['take.chat', 'take.minimise']),
+      `a web page that never loads is on Bea's page at once (${stuckWaiting}), and reads △ once its 15 s are up (${stuckFailed}), Back to chat still on its bar (${stuckBar})`);
+
+    // A locked hall's backstage guest shows web pages only while the admin lets the hall's guests (S4): the Roles & invites
+    // panel's switch, off and disabled with its words while the roles are open; locked, turned on, Rex's Board chip offers
+    // Show a web page… at once, without a reload.
+    const rexPad = await edge.tab(`${base}/app.html?code=${tkHall}&name=Rex&role=research`, { alone: true });
+    await rexPad.until(`typeof joined !== 'undefined' && joined`, 10000);
+    const GUEST_WEB = `(() => { const row = document.getElementById('guestWebRow'); const box = document.getElementById('guestWeb'); return row.hidden || document.getElementById('invitesPanel').hidden ? '' : JSON.stringify({ label: box.parentElement.textContent.trim(), on: box.checked, disabled: box.disabled, words: document.getElementById('guestWebWords').textContent }); })()`;
+    await admin.eval(`ADMIN_RUN['adminRoom.invites']({ code: '${tkHall}' })`);
+    const switchOpen = JSON.parse(await admin.until(GUEST_WEB, 5000) || 'null');
+    await admin.eval(`document.getElementById('lockRoles').click()`);
+    const switchLocked = JSON.parse(await admin.until(`(() => { const v = ${GUEST_WEB}; return v && !JSON.parse(v).disabled && v; })()`, 5000) || 'null');
+    await rexPad.send('Page.reload');
+    await rexPad.until(`typeof joined !== 'undefined' && joined && F.canPush && !document.getElementById('boardChip').hidden`, 10000);
+    const rexBefore = await rexPad.eval(`window.rexStays = 1; JSON.stringify({ canWeb: F.canWeb, web: AGM.catalog.ids('board', F, Console.board()).includes('board.web') })`);
+    await admin.eval(`document.getElementById('guestWeb').click()`);
+    const switchOn = JSON.parse(await admin.until(`(() => { const v = ${GUEST_WEB}; return v && JSON.parse(v).on && v; })()`, 5000) || 'null');
+    const rexAfter = await rexPad.until(`F.canWeb && AGM.catalog.ids('board', F, Console.board()).includes('board.web') && JSON.stringify({ canWeb: F.canWeb, web: true, samePage: window.rexStays === 1 })`, 5000);
+    await admin.shot(path.join(OUT, 'guest-web-switch.png'));
+    report(!!switchOpen && switchOpen.label === 'Backstage guests may show web pages on people\'s pages' && !switchOpen.on && switchOpen.disabled && switchOpen.words === 'Lock the roles first: in an open hall, code guests show nothing.'
+      && !!switchLocked && !switchLocked.on && /^Off by default\./.test(switchLocked.words) && rexBefore === JSON.stringify({ canWeb: false, web: false })
+      && !!switchOn && rexAfter === JSON.stringify({ canWeb: true, web: true, samePage: true }),
+      `the Roles & invites panel's switch for the hall's backstage guests' web pages: off and disabled with its words while the roles are open, offered once locked; turned on, a backstage guest's Board chip offers Show a web page… without a reload, absent before (${JSON.stringify({ switchOpen, switchLocked, rexBefore, switchOn, rexAfter })})`);
+    // Unlocking the hall turns it off: the switch says so at once, and Rex's chip loses Show a web page… without a reload.
+    await admin.eval(`document.getElementById('lockRoles').click()`);
+    const switchUnlocked = JSON.parse(await admin.until(`(() => { const v = ${GUEST_WEB}; return v && JSON.parse(v).disabled && v; })()`, 5000) || 'null');
+    const rexUnlocked = await rexPad.until(`!F.canWeb && JSON.stringify({ canWeb: F.canWeb, web: AGM.catalog.ids('board', F, Console.board()).includes('board.web'), samePage: window.rexStays === 1 })`, 5000);
+    report(!!switchUnlocked && !switchUnlocked.on && switchUnlocked.words === 'Lock the roles first: in an open hall, code guests show nothing.' && rexUnlocked === JSON.stringify({ canWeb: false, web: false, samePage: true }),
+      `unlocking the hall turns its backstage guests' web pages off: the switch off and disabled again, and Rex's chip without Show a web page… (${JSON.stringify({ switchUnlocked, rexUnlocked })})`);
+    await admin.eval(`document.getElementById('closeInvitesBtn').click()`);
+
+    const takesProblems = [['op', op], ['bea', beaPad], ['obi', obiPad], ['rex', rexPad]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
     report(takesProblems.length === 0, `the takes hall's pages: no console error and no CSP violation${takesProblems.length ? ' — ' + takesProblems.slice(0, 4).join(' | ') : ''}`);
     await op.eval(`document.getElementById('screensDialog').close()`);
-    for (const t of [beaPad, obiPad, op]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
+    for (const t of [beaPad, obiPad, rexPad, op]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
 
     // The header's countdown chip is its own door (the account's: the speaker's screen and the countdown on its screens).
     await hallView.until(`!document.getElementById('stageChip').hidden && document.getElementById('stageChip').getAttribute('role') === 'button'`, 8000);

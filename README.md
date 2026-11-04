@@ -83,11 +83,16 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   with a message under it (the speaker's comfort monitor), the clock, or black. Each screen confirms what it showed.
   [docs/DISPLAYS.md](docs/DISPLAYS.md)
 - **People's screens.** The Board's pages (everyone seated On stage) or one person's can be shown Stagewatch's
-  countdown, the clock, a holding slide or black over their chat, from the header's Board chip ("Board · 🕐 Clock ✓
-  6/6", Undo for 10 s) or the console's People's pages, each page confirming what it showed only while it is in view.
-  The person keeps the way out: Back to chat (with Show it again for 10 s), Minimise into the side bar's 📺 On stage
-  (Escape does that), Show again from there; a 🔥 message breaks through, and a take never takes the focus from words
-  being written. [docs/DISPLAYS.md](docs/DISPLAYS.md)
+  countdown, the clock, a holding slide, black or a **web page** over their chat, from the header's Board chip ("Board ·
+  🕐 Clock ✓ 6/6", Undo for 10 s) or the console's People's pages, each page confirming what it showed only while it is
+  in view. A web page (an https address, previewed on the operator's own page first if they like) needs a right of its
+  own, **Web pages** (`stage.web`: Tech, Senior and Manager accounts hold it); it opens in a sandboxed frame with no
+  referrer, under a strip saying who chose it and not to type passwords there, and reads ◇ opened, never ✓, since
+  AGMessage cannot see inside it. A locked hall's backstage code guests show web pages only while the admin turns on
+  **Backstage guests may show web pages** for that hall (off by default; unlocking turns it off). The person keeps the
+  way out: Back to chat (with Show it again for 10 s), Minimise into the side bar's 📺 On stage (Escape does that), Show
+  again from there, and for a web page, in the full view, Open in a new tab; a 🔥 message breaks through, and a take never takes the focus
+  from words being written. [docs/DISPLAYS.md](docs/DISPLAYS.md)
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, images) shared and
   pushed to the on-stage panel or to screens, PDFs on iPads from iPadOS 16.4 (pdf.js's legacy build); pins, replies,
   reactions, priority, seen receipts. The hall page fits a phone, its words and icons at WCAG AA contrast in light and
@@ -140,9 +145,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   People: @ Mention), on the composer's Send (✨ Draft a reply, 🔥 Priority, Attach a file…, Cancel the reply), on the
   header (its ⋯: People, Screens & pages…, Text size, Dark theme, Copy guest code, Copy join link, for the admin Turn the code
   off… or on and New code…, and Leave, or All halls for an account), on its countdown (Speaker's screen…, Show the
-  countdown on screens) and its Board chip (Back to chat, Show Stagewatch, the clock, holding or blank, ↶ Back to,
-  Screens & pages…), on a take shown to you (Back to chat, Minimise, Full screen) and its card (Show again, Remove), and
-  on a person for whoever may show people's pages (📺 Show them ▸, Back to chat on their pages)
+  countdown on screens) and its Board chip (Back to chat, Show Stagewatch, the clock, holding or blank, Show a web page…,
+  ↶ Back to, Screens & pages…), on a take shown to you (Back to chat, Minimise, Full screen, and in the full view Open in
+  a new tab for a web page) and its card (Show again, Remove), and on a person for whoever may show people's pages (📺 Show them ▸, Show
+  them a web page…, Back to chat on their pages)
   is on its ⋯ (the countdown is its own), its right-click and Shift+F10 (or the menu key) — one list, drawn from one
   catalogue, so the buttons and the menus never disagree. A message keeps two acts on its row: ↩ Reply and the one the
   seat uses most (Ask the operator, Send now or Show on screens). What a seat may not do is not offered; what it cannot

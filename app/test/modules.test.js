@@ -681,7 +681,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   assert.ok(inClosure(made), 'conn is made in the connection');
   const conn = groupAt(server, made + 'const conn = Object.freeze('.length);
   const keys = conn.entries.map(keyOf);
-  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'onStage', 'canIn', 'canPush', 'admin', 'actor', 'canManageHall', 'codeTold', 'gate']);
+  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'onStage', 'canIn', 'canPush', 'canWeb', 'theAdmin', 'admin', 'actor', 'canManageHall', 'codeTold', 'gate']);
   assert.deepEqual(keys.filter((k) => k.value !== null).map((k) => [k.key, k.value]), [['room', '() => room'], ['me', '() => me']]);
   for (const { key } of keys.filter((k) => k.value === null && k.key !== 'socket')) {
     const decl = server.indexOf('  const ' + key + ' = ', at);
@@ -707,7 +707,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'io']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -1656,7 +1656,7 @@ test('(n) the kinds in step: lib/pages.js\'s KINDS and describePage\'s words are
   assert.deepEqual(boardKinds, pagesLib.KINDS.map((k) => 'board.' + k));
   assert.deepEqual([...C.SHOW_KINDS.map((k) => k[0])], [...pagesLib.KINDS]);
   assert.deepEqual(kindsCatalogueProblems(C, pagesLib.KINDS), []);
-  assert.deepEqual(kindsCatalogueProblems(C, ['chat', 'clock']), ['the store\'s kinds and the Board chip\'s are not one set: board.chat, board.stage, board.clock, board.holding, board.blank against board.chat, board.clock'], 'a kind the store has not fails it');
+  assert.deepEqual(kindsCatalogueProblems(C, ['chat', 'clock']), ['the store\'s kinds and the Board chip\'s are not one set: board.chat, board.stage, board.clock, board.holding, board.blank, board.web against board.chat, board.clock'], 'a kind the store has not fails it');
 });
 /** The catalogue as a page loads it (after common.js, which holds the marks' table). */
 function catalogOf() {

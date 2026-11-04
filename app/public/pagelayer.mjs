@@ -1,13 +1,17 @@
-// What a person's page is shown over its chat (a take), drawn: Stagewatch's countdown, AGMessage's clock, a holding slide
-// and black. The hall page (app.js) loads this module with import() at its first take, hands it a box and plain values
-// (Stagewatch's frame, AGMessage's clock offset and zone, the hall's name and holding picture, whether the page is
-// connected) and reads back what it drew; the page alone says so to the server (page:report), so what was drawn is said in
-// one place, from the drawing. Nothing here holds a socket, and every node is built with the DOM and textContent.
+// What a person's page is shown over its chat (a take), drawn: Stagewatch's countdown, AGMessage's clock, a holding slide,
+// black and a web page. The hall page (app.js) loads this module with import() at its first take, hands it a box and plain
+// values (Stagewatch's frame, AGMessage's clock offset and zone, the hall's name and holding picture, who put the take up,
+// whether the page is connected) and reads back what it drew; the page alone says so to the server (page:report), so what
+// was drawn is said in one place, from the drawing. Nothing here holds a socket, and every node is built with the DOM and
+// textContent.
 //
-//   render(box, content, ctx) → Promise<{state, words}>   the take drawn into box: 'shown', or 'failed' and why
+//   render(box, content, ctx) → Promise<{state, words}>   the take drawn into box: 'shown' (a web page: 'opened'), or
+//                                                          'failed' and why
 //   card(content, ctx)        → element                   the take as a card in the side bar: its icon, its name, and its
 //                                                          live words (the countdown's time, the clock's)
 //   tick(root, ctx)                                        the live parts under root drawn again (the clock, Stagewatch)
+//   webAddress(url)           → {url, host} | {error}      a web page's address as a frame may be given it
+//   framePage(url)            → {frame, url, host} | {error}  the one frame a page makes, for a web page (a take, a Preview)
 
 /** Each kind's card: its icon (no status mark: each mark has one meaning, common.js AGM.MARKS) and its name. */
 const KINDS = Object.freeze({
@@ -15,7 +19,15 @@ const KINDS = Object.freeze({
   clock: Object.freeze({ icon: '🕐', name: 'Clock' }),
   holding: Object.freeze({ icon: '🖼', name: 'Holding' }),
   blank: Object.freeze({ icon: '🌑', name: 'Blank' }),
+  web: Object.freeze({ icon: '🌍', name: 'Web page' }),
 });
+/**
+ * How long a web page has to load before its take says it did not (`failed`). A frame the site refuses (its
+ * X-Frame-Options or frame-ancestors) still fires `load`, and nothing inside it can be read, so `load` is all that is
+ * known: the page opened.
+ */
+const WEB_WAIT_MS = 15000;
+const WEB_MAX = 2048;
 
 const make = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -76,6 +88,69 @@ function drawClock(root, ctx) {
   if (time) time.textContent = f[0].format(now);
   const date = root.querySelector('.take-date');
   if (date) date.textContent = f[1].format(now);
+}
+
+/**
+ * A web page's address as a frame may be given it, checked again in the page (the server's rules, lib/pages.js webUrl):
+ * a string of at most WEB_MAX characters that parses, https alone, no user name or password, and not this page's own
+ * origin nor this device by a loopback name. {url, host}, or {error} in words.
+ */
+export function webAddress(v) {
+  const raw = typeof v === 'string' ? v.trim() : '';
+  if (!raw || raw.length > WEB_MAX) return { error: raw ? 'That address is longer than ' + WEB_MAX + ' characters.' : 'A web page is shown by its https address, as a browser shows it.' };
+  let u;
+  try { u = new URL(raw); } catch { return { error: 'A web page is shown by its https address, as a browser shows it.' }; }
+  if (u.protocol !== 'https:' || !u.hostname) return { error: 'A web page is shown by its https address, as a browser shows it.' };
+  if (u.username || u.password) return { error: 'An address with a user name or a password is not shown: show the page without them.' };
+  const h = u.hostname;
+  // A name's trailing dot (`localhost.`) names the same machine: the URL parser keeps it on a name.
+  const b = h.replace(/\.+$/, '');
+  const loop = b === 'localhost' || b.endsWith('.localhost') || /^(?:127|0)\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(b) || b === '[::1]' || b === '[::]' || /^\[::ffff:/.test(b);
+  if (u.origin === location.origin || loop) return { error: 'That address is AGMessage itself: show a page of another site.' };
+  return { url: u.href, host: h };
+}
+
+/**
+ * The one frame a page makes (a web page shown to a person, or previewed by the one who shows it): scripts but no forms,
+ * popups, top navigation, modal dialogs or downloads (sandbox: owner question 6), no referrer (the hall page's address
+ * carries its code and its invite), no feature the page itself may use (`allow`), no cookies of the site's own where
+ * the browser offers that (`credentialless`), and a title naming its host. {frame, url, host}, or {error} for an address
+ * webAddress refuses.
+ */
+export function framePage(url) {
+  const w = webAddress(url);
+  if (w.error) return w;
+  const frame = document.createElement('iframe');
+  frame.className = 'take-web-frame';
+  frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.setAttribute('allow', '');
+  if ('credentialless' in frame) frame.credentialless = true;
+  frame.title = 'Web page from ' + w.host;
+  frame.src = w.url;
+  return { frame, url: w.url, host: w.host };
+}
+
+/**
+ * A web page drawn into `box`: a strip in AGMessage's own words (who chose it, its host, and not to type a password), and
+ * the page framed under it. 'opened' once the frame loads, or 'failed' when it has not in WEB_WAIT_MS or its address is
+ * refused; the frame is left in place either way, so a page that loads late is still seen.
+ */
+function drawWeb(box, content, ctx) {
+  const by = (ctx && ctx.by) || 'someone';
+  const made = framePage(content && content.url);
+  const w = make('div', 'take-web');
+  const note = make('p', 'take-web-note', 'A web page chosen by ' + by + ' (' + (made.host || (content && content.host) || 'no address') + '). Don\'t type passwords here.');
+  w.append(note);
+  box.append(w);
+  if (made.error) return Promise.resolve({ state: 'failed', words: made.error });
+  return new Promise((resolve) => {
+    let done = false;
+    const end = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
+    const timer = setTimeout(() => end({ state: 'failed', words: 'the page did not load' }), WEB_WAIT_MS);
+    made.frame.addEventListener('load', () => end({ state: 'opened', words: '' }), { once: true });
+    w.append(made.frame);
+  });
 }
 
 /** The live parts under `root` drawn again: each clock and each Stagewatch time, a take's and a card's alike. */
@@ -139,6 +214,8 @@ export function render(box, content, ctx) {
     }
     case 'blank':
       return Promise.resolve({ state: 'shown', words: '' });
+    case 'web':
+      return drawWeb(box, content, ctx);
     default:
       return Promise.resolve({ state: 'failed', words: 'this page cannot show that' });
   }
@@ -150,7 +227,9 @@ export function card(content, ctx) {
   const c = make('div', 'take-card-what');
   const icon = make('span', 'take-card-icon', k.icon);
   icon.setAttribute('aria-hidden', 'true');
-  c.append(icon, make('strong', 'take-card-name', k.name));
+  // A web page's card names its host ("🌍 vote.example.com"), never its address.
+  const name = content && content.kind === 'web' && typeof content.host === 'string' && content.host ? content.host : k.name;
+  c.append(icon, make('strong', 'take-card-name', name));
   if (content && content.kind === 'stage') {
     const live = make('span', 'take-card-live');
     live.dataset.live = 'stage';

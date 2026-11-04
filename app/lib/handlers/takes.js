@@ -34,12 +34,19 @@
  * what it shows in a few words (lib/pages.js describePage), never a file. The answer is "sending", never "on screen":
  * each page says what it did with the take (`page:report`), and only those reports make the status (lib/pages.js
  * `Pages.status`), which a console reads (`page:status`) whenever it is told the hall's pages changed (`pages:changed`).
+ * A web page (`web`, an https address its target's page frames) needs a right of its own beside canPush, stage.web
+ * (conn.canWeb: an account's by its rights in the hall, a code guest's only while the admin lets the hall's backstage
+ * guests show web pages); refused without it in words that say which, before its address is read. Its address goes to
+ * the pages it is shown on, and back to the one who put it up: the answer, the console's status and the row name its host.
  * A push asked again with its client id (the outbox sends one again after a drop) is answered with what the first did.
  * The answer gives back what the target was shown before (`previous`), which the pusher's Undo puts up again as a take of
  * its own, and only as this pusher could show it itself: a picture shared in a room it may not read comes back as no
- * content (a file's path is its capability), so that take is never handed to it nor put back by it. A push that names
- * the take it goes over (`ifSeq`: the Board chip's ↶ Back to) is refused once anything newer is up, so it never undoes
- * someone else's later take.
+ * content (a file's path is its capability), so that take is never handed to it nor put back by it; a web page comes back
+ * only to whoever put it up (the take keeps its pusher, `by.who`) and to the admin, so a pusher never reads another's
+ * address (a query's token among it). A push that names the take it goes over (`ifSeq`: the Board chip's ↶ Back to) is
+ * refused once anything newer is up, so it never undoes someone else's later take. The admin's take-down of a person's
+ * take (back to chat over it, by its number) is taken with no page of theirs open: what a guest put up for them would
+ * otherwise show again when they come back (lib/pages.js Pages#guestWeb counts it).
  */
 const { str } = require('../guard');
 const { cleanPage, describePage } = require('../pages');
@@ -52,15 +59,23 @@ const BACKSTAGE = 'Do that from a backstage page.';
 const NO_RIGHT = 'Your account may not change what people\'s pages show in this hall.';
 /** What a code guest seated backstage in an open hall's Main room is told: anyone with the code may sit there. */
 const OPEN_HALL = 'In an open hall, showing the Board needs an invite link or an account — ask the admin.';
+/** What an account that may change what people's pages show, but not show a web page there, is told (stage.web). */
+const NO_WEB = 'Web pages on the stage need their own right — ask an admin.';
+/** What a code guest seated backstage in a locked hall is told while the admin has its guests' web pages off (S4). */
+const GUESTS_WEB_OFF = 'Web pages from backstage guests are off in this hall — ask the admin.';
 /** What any other code guest is told: an observer, a Member of a side room, or a page of another hall. */
 const BACKSTAGE_TEAM = 'Showing the Board is for the backstage team.';
 /** What the admin, who sees every hall, is told of a key that is none. Anyone else is told what a hall they may not push in tells them. */
 const NO_HALL = 'No such hall.';
 /** A person named who has no page open in a room of the hall the pusher may read (it hides who sits in the others). */
 const NOT_HERE = 'That person is not in this hall now.';
+/** Whom the audit row names for the admin's take-down of a person's take with no page of theirs open. */
+const AWAY = 'a person with no page open';
 const TARGETS = 'Show the Board (to: \'board\') or one person (to: {uid}).';
 /** A take the store would not keep (a part of it it does not read back): nothing was shown or numbered. */
 const NOT_KEPT = 'That could not be kept: nothing was shown.';
+/** A web page the store could not keep: its address is kept only sealed, with the machine key this run has not. */
+const WEB_NOT_KEPT = 'A web page\'s address is kept sealed with this laptop\'s key, which this run has not: nothing was shown.';
 /** A push asked for over a take (`ifSeq`, ↶ Back to) that is no longer what its target is shown: nothing changed. */
 const NEWER = 'Something newer is showing there now: nothing changed.';
 const IF_SEQ = 'That act\'s take could not be read.';
@@ -91,7 +106,7 @@ const pagesWords = (n) => n + ' page' + (n === 1 ? '' : 's');
  * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, linkFor, pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, sendTo } = ctx;
+  const { store, audit, linkFor, pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, sendTo } = ctx;
 
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
   /**
@@ -144,6 +159,11 @@ function register(socket, conn, ctx) {
   const readable = (hall) => store.roomsOf(hall.code).filter((r) => conn.canIn('hall.view', r) || r === conn.room());
   /** Who a take says put it up: the name this page sits under, else the account's, else the actor's (the laptop). */
   const byName = () => { const me = conn.me(); const a = socket.data.account; return me ? me.name : a ? a.name || a.username : conn.actor().name; };
+  /**
+   * Whether this page may show a web page in `hall` (which it may push in): true, or why not, in the words of who it is:
+   * a code guest's hall has its guests' web pages off; anyone else lacks the right.
+   */
+  const webOf = (hall) => conn.canWeb(hall) || (conn.actor().t === 'code' ? GUESTS_WEB_OFF : NO_WEB);
   /** Each page whose take moved told what it is shown now, by its socket's id: never a room, never a broadcast. */
   const tell = (hall, before) => { for (const s of takeSends(hall, before)) sendTo([s.sid], 'page:take', s.take); };
 
@@ -160,7 +180,8 @@ function register(socket, conn, ctx) {
     // Whose acts the repeats are kept by: the account, the admin's token, or the code guest seated here; a socket that is
     // none of them has pushed nothing, so nothing of anyone's is read back for it.
     const who = socket.data.actor || conn.me() ? conn.actor() : null;
-    const asked = cid === null || !who ? '' : who.t + ':' + who.id + '|' + cid;
+    const whoKey = who ? who.t + ':' + who.id : '';
+    const asked = cid === null || !who ? '' : whoKey + '|' + cid;
     const code = keyOf(a.code);
     // The book is the hall's, by its key: a guest's page that names its hall by the code it joined with reads its own.
     const own = joinedHall(code);
@@ -178,6 +199,8 @@ function register(socket, conn, ctx) {
     const facts = {
       stagewatch: !!linkFor(hall.code).base,
       readable: (url) => rooms.some((r) => r.messages.some((m) => m.type === 'file' && m.url === url)),
+      web: webOf(hall),
+      selfHosts: selfHosts(),
     };
     const content = cleanPage(a.content, facts);
     if (content.error) return answer({ ok: false, error: content.error });
@@ -185,30 +208,37 @@ function register(socket, conn, ctx) {
     const seated = before.filter((p) => !p.support);
     // Whom it is for: the Board's pages, or the person's pages in the rooms this page may read (one of theirs open there).
     const target = board ? boardOf(hall, seated, rooms) : seated.filter((p) => p.key === person && rooms.includes(p.room));
-    if (!board && !target.length) return answer({ ok: false, error: NOT_HERE });
+    // A person with no page open is the admin's to take a take down from alone (back to chat over their own take, named by
+    // its number, which is read below as any `ifSeq` is): the admin reads every room, and the take is the store's, so
+    // nothing names who sits where.
+    const away = !board && !target.length && socket.data.isAdmin && content.kind === 'chat' && Number.isInteger(a.ifSeq) ? pages.current(hall.code, person).take : null;
+    if (!board && !target.length && !away) return answer({ ok: false, error: NOT_HERE });
     const to = board ? 'board' : person;
-    const name = board ? 'the Board' : target[0].name;
+    const name = board ? 'the Board' : target.length ? target[0].name : '';
     // What the target is shown before this take: the Board's own take, or the newest of the person's pages. The answer
     // gives it back (`previous`), so the pusher's Undo puts it up again as a take of its own; a push that names the take
     // it goes over (`ifSeq`, ↶ Back to) is refused once anything newer is up, so it never undoes someone else's take.
     // Its content is given back only as this pusher could push it itself (cleanPage, its own facts): a picture shared in
     // a room it may not read, or Stagewatch once the hall has none, comes back as no content, and its page offers no Undo.
-    const was = board ? pages.current(hall.code, '', { board: true }).take : target.reduce((t, p) => (p.current.take && (!t || p.current.take.seq > t.seq) ? p.current.take : t), null);
+    const was = board ? pages.current(hall.code, '', { board: true }).take : away || target.reduce((t, p) => (p.current.take && (!t || p.current.take.seq > t.seq) ? p.current.take : t), null);
     if (a.ifSeq !== undefined && a.ifSeq !== null) {
       if (!Number.isInteger(a.ifSeq) || a.ifSeq < 0) return answer({ ok: false, error: IF_SEQ });
       if (a.ifSeq !== (was ? was.seq : 0)) return answer({ ok: false, error: NEWER });
     }
     const onStage = [...new Set(seated.filter((p) => p.board).map((p) => p.key))];
-    const take = pages.take(hall.code, to, content, { name: byName() }, { onStage });
-    if (!take) return answer({ ok: false, error: NOT_KEPT });
+    // A code guest's take is kept as one (`guest`): the web pages guests put up are counted when the admin turns them off.
+    // A web page keeps who put it up (`who`): a later push's answer gives its address back to them alone, and the admin.
+    const take = pages.take(hall.code, to, content, { name: byName(), guest: conn.actor().t === 'code', ...(content.kind === 'web' && whoKey ? { who: whoKey } : {}) }, { onStage });
+    if (!take) return answer({ ok: false, error: content.kind === 'web' ? WEB_NOT_KEPT : NOT_KEPT });
     tell(hall.code, before);
     const holding = holdingOf(hall.code);
     // In the audit's voice: whom, how many of the Board's pages it reached, and what it shows in a few words, never a file.
-    write('page.push', hall.code, (board ? 'the Board (' + pagesWords(target.length) + ')' : name) + ' → ' + describePage(take.content, { hallHolding: holding }));
+    write('page.push', hall.code, (board ? 'the Board (' + pagesWords(target.length) + ')' : name || AWAY) + ' → ' + describePage(take.content, { hallHolding: holding }));
     pagesChanged(hall.code);
     const status = pages.status(hall.code, to, target, { name: board ? '' : name, hallHolding: holding });
-    const back = was ? cleanPage(was.content, facts) : null;
-    const res = { ok: true, seq: take.seq, results: [{ key: to, name, ok: true, status }], previous: was ? { seq: was.seq, content: back.error ? null : back } : null };
+    // A web page's address comes back to whoever put it up and to the admin alone: to any other pusher, no content.
+    const back = was && (was.content.kind !== 'web' || conn.theAdmin() || (!!whoKey && was.by.who === whoKey)) ? cleanPage(pages.told(was.content), facts) : null;
+    const res = { ok: true, seq: take.seq, results: [{ key: to, name, ok: true, status }], previous: was ? { seq: was.seq, content: !back || back.error ? null : back } : null };
     if (asked) {
       for (const k of pushed.keys()) if (!store.get(k)) pushed.delete(k);
       if (!pushed.has(hall.code)) pushed.set(hall.code, new Map());

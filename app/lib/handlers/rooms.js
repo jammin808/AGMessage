@@ -40,6 +40,13 @@
  * It goes from T, which says so in a line of its own; a reply in T that quoted it keeps no word of it (its quote marked
  * `withdrawn`, an op T's pages hear as `replyUpdate`); and the copy keeps when (`sentTo.withdrawn`, an op S's pages hear
  * as `sentUpdate`), so S reads how long it was there: people there may have read it. One `room.withdraw` row.
+ *
+ * Whether a locked hall's backstage guests may show web pages on people's pages (owner answer S4, plan 4-§5.9.2.2):
+ * `admin:guestWeb`, the admin's alone ("the admin": `conn.theAdmin`, which an account an admin granted settings.manage is
+ * not), on a hall's Main room, while its roles are locked, off by default. It is a setting of the room's (a meta op, so
+ * its log keeps it across a restart, and an unlock turns it off in its own op), one `room.guestWeb` row, and each guest
+ * page seated backstage there told at once what it may now show (`tellWebRights`). Turned off, a web page a guest put up
+ * stays until someone takes it down: the answer counts them and names their targets, for the admin's Take it down.
  */
 const { str, cleanText } = require('../guard');
 const { placeOf, lasted } = require('../ops');
@@ -84,8 +91,13 @@ const BACKSTAGE = 'Do that from a backstage page.';
 const OP_REFUSED = 'That change could not be made: nothing was saved.';
 /** What a guest page sent out as its room's code is switched off is told. */
 const FOR_ACCOUNTS = 'This room is for signed-in accounts now.';
+/** What anyone the admin page's gate admits but "the admin" is told of the hall's guests' web pages (plan §0.8 C14). */
+const ONLY_ADMIN_WEB = 'Only an admin may let backstage guests show web pages.';
+/** What the switch answers on a side room, and on an open hall, where no code guest shows anything. */
+const WEB_ON_MAIN = 'This is set on the hall\'s Main room.';
+const WEB_LOCK_FIRST = 'Lock the roles first: in an open hall, code guests show nothing.';
 /** "3 guest pages", "1 guest page": a count of pages, never who. */
-const pages = (n) => n + ' guest page' + (n === 1 ? '' : 's');
+const guestPagesWords = (n) => n + ' guest page' + (n === 1 ? '' : 's');
 
 const isRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 /** A key a client named, as the store keys rooms: upper case, or '' for anything that is no string. */
@@ -125,7 +137,7 @@ const made = new Map();
  * @param {object} ctx    the server's context, frozen (lib/gate.js `contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, sendersOf, sendsInto, setRoomSends } = ctx;
+  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, sendersOf, sendsInto, setRoomSends, pages, tellWebRights } = ctx;
 
   /** A hall as a refusal names it: its name, or "This hall" when it has none. */
   const hallSaid = (hall) => hall.name || 'This hall';
@@ -234,7 +246,7 @@ function register(socket, conn, ctx) {
     // Sent out, the switch and the seats that go are the one op sendGuestsOut commits before it closes a page.
     const out = on || keep ? 0 : sendGuestsOut(room, { codeOff: true }, FOR_ACCOUNTS);
     if (out === null || ((on || keep) && !apply(room, { o: 'meta', settings: { codeOff: !on } }))) return answer({ ok: false, error: OP_REFUSED });
-    write('room.code', room.code, on ? 'code on' : keep ? 'code off (' + pages(now) + ' kept)' : 'code off (' + pages(out) + ' sent home)');
+    write('room.code', room.code, on ? 'code on' : keep ? 'code off (' + guestPagesWords(now) + ' kept)' : 'code off (' + guestPagesWords(out) + ' sent home)');
     codeChanged(room);
     answer({ ok: true, codeOn: on, ...(on ? {} : keep ? { kept: now } : { sentOut: out }) });
   }
@@ -487,6 +499,29 @@ function register(socket, conn, ctx) {
     if (!apply(room, { o: 'upd', id: copy.id, f: { sentTo: mark } })) return answer({ ok: false, error: 'It went from ' + place + ', but this copy could not say so.' });
     removeUnused(fileNamesOf([there])).catch(() => { /* a file left behind is only space */ });
     answer({ ok: true });
+  });
+
+  // A locked hall's backstage guests may show web pages, or no longer (S4): `{roomCode, on}`, the admin's alone, on a
+  // hall's Main room while its roles are locked. Asked again as it is, it is answered `already` and writes nothing.
+  socket.on('admin:guestWeb', (args, ack) => {
+    if (!conn.gate(ack, { joined: false, bucket: conn.writes, admin: true })) return;
+    const answer = conn.ok(ack);
+    if (!conn.theAdmin()) return answer({ ok: false, error: ONLY_ADMIN_WEB });
+    const a = isRecord(args) ? args : {};
+    if (typeof a.on !== 'boolean') return answer({ ok: false, error: 'Say whether backstage guests may show web pages: on (true) or off (false).' });
+    const room = roomOf(keyOf(a.roomCode));
+    if (!room) return answer({ ok: false, error: 'No such room.' });
+    if (!store.isMain(room)) return answer({ ok: false, error: WEB_ON_MAIN });
+    if (room.settings.lockRoles !== true) return answer({ ok: false, error: WEB_LOCK_FIRST });
+    // The web pages a guest put up that stay up when this is turned off (Pages#guestWebLeft), for the admin's Take it down.
+    const left = a.on ? { up: 0 } : pages.guestWebLeft(room.code);
+    const told = { on: a.on, ...left };
+    if ((room.settings.guestWeb === true) === a.on) return answer({ ok: true, already: true, ...told });
+    if (!apply(room, { o: 'meta', settings: { guestWeb: a.on } })) return answer({ ok: false, error: OP_REFUSED });
+    write('room.guestWeb', room.code, a.on ? 'backstage guests may show web pages'
+      : 'backstage guests may no longer show web pages' + (left.up ? ' (' + left.up + ' shown now ' + (left.up === 1 ? 'stays' : 'stay') + ' until taken down)' : ''));
+    tellWebRights(room.code);
+    answer({ ok: true, ...told });
   });
 }
 

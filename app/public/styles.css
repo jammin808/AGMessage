@@ -47,6 +47,7 @@ html[data-floor="old"] body > .agm-floor { display: block !important; max-width:
   --director: var(--c-seat-board); --research: #0ea5e9; --observer: var(--c-seat-observer);
   --stage: #0d1526; --stage-ink: #e8edf7; --stage-dim: #8c98b1;
   --c-take: #000000;   /* a take on a person's page: drawn on black, as a screen's, in both themes */
+  --c-web-page: #ffffff;   /* a web page framed in a take or a Preview: on white, as a browser draws a page with no background of its own */
   --mine-ink: #4863c0; --mine-name: #1c3f9e;   /* one's own message's header and name */
   --radius: var(--radius-md);
   --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.04);
@@ -630,7 +631,7 @@ html[data-theme="dark"] {
   --c-seat-board: #a78bfa; --c-seat-backstage: #7dd3fc; --c-seat-observer: #94a3b8;
   --c-other-room: #5eead4;
   --brand-dark: #3a6cdf; --card: #1a2032; --accent: #f0a14a; --accent-soft: #2a2010; --research: #38bdf8;
-  --stage: #070c18; --c-take: #000000;
+  --stage: #070c18; --c-take: #000000; --c-web-page: #ffffff;
   --mine-ink: #b8c8ff; --mine-name: #b8c8ff;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.3);
   color-scheme: dark;
@@ -1956,6 +1957,15 @@ h1[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 .take-image { max-width: 100%; max-height: 100%; object-fit: contain; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .take-mark { width: min(40vmin, 16rem); height: min(40vmin, 16rem); border-radius: var(--radius-md); margin: 0; font-size: min(16vmin, 6.5rem); }
 .take-hall { font-size: var(--fs-2xl); font-weight: 600; overflow-wrap: anywhere; }
+/* A web page in a take, edge to edge: AGMessage's own strip over it (who chose it, its host, no passwords), and the page
+   framed under it, on white. The layer's bar keeps Back to chat and Open in a new tab outside the frame. */
+.layer-box[data-kind="web"] { padding: 0; align-items: stretch; justify-content: stretch; text-align: left; }
+.take-web { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.take-web-note { margin: 0; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-md); border-bottom: 1px solid var(--stage-dim); overflow-wrap: anywhere; }
+.take-web-frame { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; background: var(--c-web-page); }
+/* The same frame previewed on the operator's own page, in its dialog. */
+.web-preview { width: min(64rem, 96vw); }
+.web-preview-box { display: flex; height: min(60vh, 40rem); margin: var(--sp-3) 0; border: 1px solid var(--c-border); border-radius: var(--radius-md); overflow: hidden; }
 .layer-strip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); padding-bottom: max(var(--sp-2), env(safe-area-inset-bottom));
   background: var(--c-fault); color: var(--c-on-fault); font-size: var(--fs-lg); }
 .layer-strip[hidden] { display: none; }

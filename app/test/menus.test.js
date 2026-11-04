@@ -75,6 +75,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   const vic = await account('vic', 'viewer', [hallA, hallB], 'only looking at screens');
   const sid = await account('sid', 'staff', [hallA], 'cable ties and gaffer');
   const tia = await account('tia', 'tech', [hallA], 'mixing desk on stage left');
+  // A Tech whose web pages right is revoked: it changes what people's pages show, and shows them no web page.
+  const tom = await account('tom', 'tech', [hallA], 'faders and a torch', { revoke: ['stage.web'] });
   // A Tech of hall A given its On stage seat: the Board's account, whose rights hold what the seat does not.
   const kib = await account('kib', 'tech', [hallA, hallB], 'board pack on the lectern', { board: [hallA] });
   // Hall A's Stagewatch, with a show desk: the speaker's screen is there for every seat whose rights allow it.
@@ -101,13 +103,17 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     viewer: await seatOf({ as: 'account' }, vic),
     staff: await seatOf({ as: 'account' }, sid),
     tech: await seatOf({ as: 'account' }, tia),
+    techNoWeb: await seatOf({ as: 'account' }, tom),
     admin: await seatOf({ as: 'account' }, root),
     boardAccount: await seatOf({ as: 'account' }, kib),
   };
-  assert.deepEqual(Object.fromEntries(Object.entries(seats).map(([k, v]) => [k, v.f.role])), { research: 'research', board: 'board', observer: 'observer', viewer: 'observer', staff: 'research', tech: 'research', admin: 'research', boardAccount: 'board' });
+  assert.deepEqual(Object.fromEntries(Object.entries(seats).map(([k, v]) => [k, v.f.role])), { research: 'research', board: 'board', observer: 'observer', viewer: 'observer', staff: 'research', tech: 'research', techNoWeb: 'research', admin: 'research', boardAccount: 'board' });
+  assert.deepEqual(Object.fromEntries(Object.entries(seats).map(([k, v]) => [k, [v.f.canPush, v.f.canWeb]])),
+    { research: [false, false], board: [false, false], observer: [false, false], viewer: [false, false], staff: [false, false], tech: [true, true], techNoWeb: [true, false], admin: [true, true], boardAccount: [false, false] },
+    'who may change what people\'s pages show, and who may show a web page there, from the join');
   assert.deepEqual([seats.tech.f.canScreens, seats.tech.f.screensManage, seats.admin.f.screensManage, seats.staff.f.canScreens], [true, false, true, false], 'the screens each may drive, from display:list');
   assert.deepEqual(Object.fromEntries(Object.entries(seats).map(([k, v]) => [k, [v.f.canSendToStage, v.f.canPropose]])),
-    { research: [true, true], board: [false, false], observer: [false, false], viewer: [false, false], staff: [false, false], tech: [true, true], admin: [true, true], boardAccount: [false, false] },
+    { research: [true, true], board: [false, false], observer: [false, false], viewer: [false, false], staff: [false, false], tech: [true, true], techNoWeb: [true, true], admin: [true, true], boardAccount: [false, false] },
     'the speaker\'s screen, by each seat\'s rights, with the link up');
 
   // The objects: Ana's text, file, question and help request, the Chair's text and help request, and a screen.
@@ -183,8 +189,12 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'room:update': (o, e) => (e.id === 'header.newCode' ? { code: hallA, newCode: true } : { code: hallA, codeOn: false, keepGuests: false }),
     'display:list': () => ({ code: hallA }),
     // A show kind on the Board, or on the person; Back to over the take the object names (ifSeq).
-    'page:push': (o, e) => (e.id.startsWith('person.') ? { code: hallA, to: { uid: o.key }, content: { kind: e.id === 'person.chat' ? 'chat' : 'blank' } }
-      : { code: hallA, to: 'board', content: e.id === 'board.back' ? o.mine.previous : { kind: e.id.slice('board.'.length) }, ...(e.id === 'board.back' ? { ifSeq: o.seq } : {}) }),
+    // A web page by an address of its own (Show a web page…, Show them a web page…).
+    'page:push': (o, e) => {
+      const web = { kind: 'web', url: 'https://vote.example.com/poll/7' };
+      if (e.id.startsWith('person.')) return { code: hallA, to: { uid: o.key }, content: e.id === 'person.web' ? web : { kind: e.id === 'person.chat' ? 'chat' : 'blank' } };
+      return { code: hallA, to: 'board', content: e.id === 'board.back' ? o.mine.previous : e.id === 'board.web' ? web : { kind: e.id.slice('board.'.length) }, ...(e.id === 'board.back' ? { ifSeq: o.seq } : {}) };
+    },
     // A page's word on the take it is shown (the layer's acts, a card's): Back to chat on the object's take.
     'page:report': (o) => ({ seq: o.seq, state: 'dismissed' }),
   };
@@ -233,6 +243,12 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     }
   }
   assert.deepEqual(wrong, [], 'each hidden act is refused with words');
+  // Hidden by the web page's own right alone (its seat may change what people's pages show): refused in that right's words.
+  for (const id of ['board.web', 'person.web']) {
+    const kind = id.split('.')[0];
+    assert.ok(!seats.techNoWeb.f.canWeb && C.entry(kind, id).may(seats.techNoWeb.f) === false && C.entry(kind, id).may(seats.tech.f) === true, id + ' is hidden by canWeb alone');
+    assert.deepEqual(await refusal(seats.techNoWeb.s, 'page:push', PAYLOADS['page:push'](objects[kind][0], C.entry(kind, id))), { ok: false, error: 'Web pages on the stage need their own right — ask an admin.' }, id);
+  }
   for (const [name, verbs] of Object.entries(onStage)) assert.deepEqual([...verbs].sort(), Object.keys(ON_STAGE_WORDS).sort(), 'every verb of the On stage table was sent as ' + name);
   // Every verb was refused to some seat, so none passes by never being sent; those no right hides, none, and only they.
   assert.deepEqual([...sent].filter((v) => !refused.get(v) && !OPEN_TO_EVERY_SEAT[v]), [], 'every verb is sent as a seat it is hidden from: ' + JSON.stringify(Object.fromEntries(refused)));
@@ -269,12 +285,13 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   // the order they landed (the build serving now, which a page on another build reloads for; then the hall's facts; then
   // whether a message here may be sent into another room by its list, `sends`: no list names Hall A, so it may not; then
   // whether the page is the admin's own, `admin`, which a guest's is not; then what the page is shown over its chat,
-  // `page`, whether it may push to people's pages, `canPush`, and AGMessage's clock and zone, `now` and `tz`).
+  // `page`, whether it may push to people's pages, `canPush`, AGMessage's clock and zone, `now` and `tz`, and whether a web
+  // page pushed from it would be taken, `canWeb`).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-15), again.sends, again.admin, again.page, again.canPush], [true, [hallB],
-    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz'], false, false, null, false]);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-16), again.sends, again.admin, again.page, again.canPush, again.canWeb], [true, [hallB],
+    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb'], false, false, null, false, false]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board');

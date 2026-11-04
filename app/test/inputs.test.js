@@ -106,15 +106,18 @@ test('client values are read by their type: a value String() cannot convert reac
     [ctl, 'page:push', { code: U, to: 'board', content: { kind: 'clock' } }], [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'clock' }, cid: U }],
     [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'clock' }, ifSeq: U }],
     [ctl, 'page:status', { code: U }], [guest, 'page:report', { seq: U, state: U, words: U }], [guest, 'page:report', { seq: 1, state: 'shown', words: U, again: U }],
+    // The admin's switch for a hall's backstage guests' web pages, each field by type.
+    [ctl, 'admin:guestWeb', { roomCode: U, on: U }], [ctl, 'admin:guestWeb', { roomCode: U, on: true }], [ctl, 'admin:guestWeb', { roomCode: hall, on: U }],
   ];
   // What each is answered: the field it could not read named, and nothing shown, numbered or reported.
-  const KINDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding or blank.';
+  const KINDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.';
   const TARGETS = 'Show the Board (to: \'board\') or one person (to: {uid}).';
   const pageWords = (ev, arg) => {
     if (ev === 'page:report') return arg.state === U ? 'A report is one of: shown, hidden, opened, failed, dismissed, minimised.' : 'That is not what this page is shown now.';
     if (arg.code === U) return 'No such hall.';
     if (arg.cid === U) return 'That act\'s id could not be read.';
     if (arg.ifSeq === U) return 'That act\'s take could not be read.';
+    if (arg.to === 'board' && arg.content && arg.content.kind === 'web') return 'A web page is shown by its https address, as a browser shows it.';
     return arg.to === 'board' ? KINDS : TARGETS;
   };
   // A room's code acts read by type: each a refusal in its own words, and nothing switched or renewed.
@@ -133,6 +136,11 @@ test('client values are read by their type: a value String() cannot convert reac
     // A room's hall, key and name that are no strings are read as none, and refused for it: no room is made or named.
     // A send into another room names its room, its message and its words by type: each refused for what it lacks.
     if (ev === 'room:sendTargets') assert.deepEqual(r, { ok: true, targets: [{ ref, name: 'Legal', hallName: 'Hall 3' }] }, 'a read takes no argument');
+    if (ev === 'admin:guestWeb') {
+      assert.deepEqual(r, { ok: false, error: arg.on === U ? 'Say whether backstage guests may show web pages: on (true) or off (false).' : 'No such room.' }, ev + ' ' + JSON.stringify(arg));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
     if (ev.startsWith('page:')) {
       assert.deepEqual(r, { ok: false, error: pageWords(ev, arg) }, ev + ' ' + JSON.stringify(arg));
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -165,6 +173,7 @@ test('client values are read by their type: a value String() cannot convert reac
   assert.ok(!audit.body.entries.some((e) => e.action === 'room.send'), 'a send in the wrong type sends nothing, and so is not audited');
   assert.ok(!audit.body.entries.some((e) => e.action === 'room.withdraw'), 'a withdrawal in the wrong type takes nothing back, and so is not audited');
   assert.ok(!audit.body.entries.some((e) => e.action === 'page.push'), 'a take in the wrong type shows nothing, and so is not audited');
+  assert.ok(!audit.body.entries.some((e) => e.action === 'room.guestWeb'), 'a switch in the wrong type switches nothing, and so is not audited');
   assert.equal((await send(ctl, 'page:status', { code: hall })).board.seq, 0, 'and nothing was numbered');
   assert.deepEqual((await send(ctl, 'room:settings', { code: hall })).sendFrom, [], 'and no room may send into the hall');
 });

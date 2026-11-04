@@ -252,6 +252,20 @@
     </div>
   </dialog>
 
+  <!-- A web page previewed on this page alone before it is shown on anyone's (Web page…'s Preview): its one frame made by
+       pagelayer.mjs framePage, as a take's is; Show it sends it as the act's ask was answered. -->
+  <dialog id="webPreview" class="agm-dialog web-preview" aria-labelledby="webPreviewTitle">
+    <form id="webPreviewForm" method="dialog">
+      <h2 id="webPreviewTitle">Preview: <span id="webPreviewHost"></span></h2>
+      <p class="hint">Only you see it here. Show it puts it on their pages; nothing is sent until then.</p>
+      <div class="web-preview-box" id="webPreviewBox"></div>
+      <div class="row end">
+        <button class="btn ghost" value="cancel" formnovalidate>Close</button>
+        <button class="btn primary" type="button" id="webPreviewShow">Show it</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="swDialog" class="agm-dialog" aria-labelledby="swTitle">
     <form id="swForm" method="dialog">
       <h2 id="swTitle">Send to Stagewatch</h2>

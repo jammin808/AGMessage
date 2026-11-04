@@ -29,6 +29,23 @@ test('agm/no-unescaped-html: unescaped values are refused at every sink', () => 
   ]) assert.deepEqual(findings(code), ['agm/no-unescaped-html'], code);
 });
 
+// Four sinks no escape makes safe are refused whatever they are given: a frame's srcdoc (by property, by a computed key or
+// by setAttribute, in any case), setHTMLUnsafe(), createContextualFragment(), and innerHTML or outerHTML named by a
+// computed key, which the rule could not otherwise read. A page's one frame is framePage's, from an https address.
+test('agm/no-unescaped-html: srcdoc, setHTMLUnsafe(), createContextualFragment() and a computed innerHTML are refused, escaped or not', () => {
+  for (const code of [
+    'frame.srcdoc = html;', 'frame.srcdoc = "";', 'frame.srcdoc = escapeHtml(x);', 'frame["srcdoc"] = "<b>x</b>";',
+    'frame.setAttribute("srcdoc", html);', 'frame.setAttribute("SrcDoc", "");', 'frame.setAttribute(`srcdoc`, x);',
+    'el.setHTMLUnsafe(html);', 'el.setHTMLUnsafe("");', 'el["setHTMLUnsafe"](x);', 'Document.parseHTMLUnsafe; el.setHTMLUnsafe(escapeHtml(x));',
+    'range.createContextualFragment(html);', 'document.createRange().createContextualFragment("<p>x</p>");',
+    'el["innerHTML"] = html;', 'el["innerHTML"] = "";', "el['outerHTML'] = escapeHtml(x);", 'el[`innerHTML`] = x;',
+  ]) assert.deepEqual(findings(code), ['agm/no-unescaped-html'], code);
+  // What only names them, and the frame's other attributes, pass: a value written as text, an attribute that is no sink.
+  for (const code of ['el.textContent = "srcdoc";', 'frame.setAttribute("sandbox", "allow-scripts allow-same-origin");', 'frame.src = url;', 'const k = "innerHTML"; log(k);', 'el[key] = value;']) {
+    assert.deepEqual(findings(code), [], code);
+  }
+});
+
 test('agm/no-unescaped-html: escaped, literal, counted and named-safe values pass', () => {
   for (const code of [
     'el.innerHTML = "";',

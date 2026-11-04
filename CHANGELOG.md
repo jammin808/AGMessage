@@ -3986,6 +3986,123 @@ way to show it)
   the card), `docs/DESIGN.md`, `docs/ANALYSIS.md` (fences (m), (n), (f)'s allow-lists, the catalogue's new kinds, the
   Escape order), `SECURITY.md`, `CLAUDE.md`.
 
+**A web page on a person's screen, with a right of its own** (the plan's Part 1, unit 19, its §5.1's `web` row, §5.3,
+§5.6 and §9's row 19, as Part 4 §0, §5.9.2.2, §5.9.9, §5.11, §7.7 and §11 amend it (`stage.web`; the owner's answer S4,
+"Admin defined", confirmed "S4" on 2026-10-31: `guestWeb`), with Part 0 §0.8 C14 ("the admin" is one predicate) and the
+owner's design question 6 ("Defaults": scripts but no forms, popups or navigation); the tree as the evidence: a `web`
+take was refused as no kind, every page carried one strict policy, and no page could frame a site)
+- **A web page is a take of its own** (`web`, the sixth kind): an https address the person's page frames over its chat,
+  shown from the Board chip's **Show a web page…** or a person's **Show them a web page…** (the console's People's pages
+  too). It asks for the address, then **Preview**, which frames it on the operator's own page alone first (a dialog,
+  whose **Show it** sends it), or **Show it** at once. The address: at most 2,048 characters, https only (http would be
+  mixed content under HTTPS and through the tunnel; `javascript:`, `data:`, `blob:` and `file:` are no web page), no
+  user name or password, and never AGMessage itself (`localhost` and every loopback form, a trailing dot included
+  (`localhost.`), this laptop's name and network addresses, the tunnel's host): "That address is AGMessage itself: show a page of another site." It is checked on the
+  server (`lib/pages.js` `webUrl`) and again in the page before the frame is given it. **The server never fetches it.**
+- **Its address goes only to the pages it is shown on** (and the admin's view of them): kept sealed with this laptop's
+  key beside its host (`pages.json`'s `{kind: 'web', host, urlSealed}`, with who put it up), opened to be sent; the
+  push's answer, the console's status, the `page.push` row ("the Board (6 pages) → a web page on vote.example.com"), the
+  halls board, the context and the AI's brief name its host alone, or nothing of it. A later push's answer gives a web
+  page back (`previous`, its Undo) only to whoever put it up and to the admin: any other pusher, a backstage guest
+  included, is given no content and offered no Undo, so nobody reads another's address, a token in its query among it. A run without its machine key keeps no web page ("A
+  web page's address is kept sealed with this laptop's key, which this run has not: nothing was shown."); a store read
+  by another machine opens none, and the page says it could not load it.
+- **On the person's page**: the one frame a page makes (`framePage`, `public/pagelayer.mjs`), `sandbox="allow-scripts
+  allow-same-origin"` (no forms, popups, top navigation, modal dialogs or downloads), `referrerpolicy="no-referrer"`
+  (the hall page's address carries its code and its invite), `allow=""`, `credentialless` where the browser has it, its
+  title "Web page from vote.example.com"; above it, in AGMessage's words, "A web page chosen by Ana (vote.example.com).
+  Don't type passwords here."; on its bar Back to chat and Minimise, and in the full view, in its ⋯ and its right-click,
+  **🗗 Open in a new tab** (no opener, no referrer), outside the frame; the simple view keeps the layer's buttons alone. It is drawn as it loads. A frame a site refuses still fires `load` and nothing inside can be read,
+  so a loaded web page reports `opened` and reads **◇ Opened · AGMessage can't see inside web pages**, never ✓; one not
+  loaded in 15 s reports `failed` and reads **△ Couldn't show it: the page did not load**. A web page is never `shown`:
+  its reports are opened, hidden, failed, dismissed and minimised, and Show it again says `opened` with `again`.
+  Minimised, its card reads "🌍 vote.example.com".
+- **Only the hall page frames an https page.** `/app.html`'s Content-Security-Policy is the strict one with `frame-src
+  'self' blob: https:` (`guard.CSP_HALL`); every other page, the screen page and every file keep `frame-src 'self'
+  blob:`, the transcript its own policy, which frames nothing, and `frame-ancestors 'self'` and `X-Frame-Options:
+  SAMEORIGIN` stay everywhere.
+- **`stage.web`, a right of its own**: "Show web pages on people's pages (the Board's or one person's)", a hall's right
+  in the Show group, in the presets of **Tech, Senior tech and Manager** (and the admin), not Staff or Viewer; given and
+  taken back per account on the Accounts page. A web page needs it beside what every take needs: without it, "Web pages
+  on the stage need their own right — ask an admin.", read before the address. **On upgrade**, Tech, Senior tech and
+  Manager accounts hold it; an account whose rights an admin narrowed by hand is unchanged otherwise. The join answer
+  appends **`canWeb`** after `now` and `tz` (a web page from this page would be taken), and the support view's `person`
+  facts carry it.
+- **A locked hall's backstage code guests show web pages only while the admin lets them** (S4): the admin page's Roles
+  & invites panel gains **Backstage guests may show web pages on people's pages**, on a hall's Main room, off by default
+  (a hall made before 0.6.0 too), offered only while the roles are locked ("Lock the roles first: in an open hall, code
+  guests show nothing.") and only to "the admin": the laptop's token, or an account whose role is admin. A manager an
+  admin granted `settings.manage` reaches the admin page and is refused it ("Only an admin may let backstage guests show
+  web pages.", the switch drawn disabled with those words). The verb `admin:guestWeb {roomCode, on}` (in
+  `lib/handlers/rooms.js`, behind the gate's admin step and then `theAdmin()`, which this unit adds to the connection's
+  context) writes `{o: 'meta', settings: {guestWeb}}` (the room's op log keeps it across a restart), one `room.guestWeb`
+  row, and tells each guest page seated backstage there at once (`pages:rights {canWeb}`), so its Board chip's Show a web
+  page… comes or goes without a reload; asked again as it stands it answers `already` and writes nothing. It is an admin's
+  act, so the busy line counts it as input (`lib/busy.js`). Refused for a
+  side room ("This is set on the hall's Main room.") and an open hall. While it is off a guest's web page is refused
+  ("Web pages from backstage guests are off in this hall — ask the admin."). **Unlocking turns it off** in the same op as
+  the unlock, its `room.lock` row reads "roles unlocked, guests' web pages off", and locking again leaves it off: a lock
+  keeps whoever sits backstage then, code guests who joined by the bare code while the hall was open included. Turned
+  off, or the hall unlocked, a web page a guest already put up stays: the answer counts it ("1 web page a guest showed is
+  still up", the row "(1 shown now stays until taken down)") with its targets, a person's whether or not a page of theirs
+  is open (one who comes back is shown it again), and the panel offers **Take it down** (back to chat over that take
+  alone). The admin's take-down of a person's take is taken with no page of theirs open too (back to chat over it, by its
+  number; the row reads "a person with no page open → back to chat"); anyone else is still told "That person is not in
+  this hall now.". An open hall's guest, an On stage or observer seat and a side room's Member never show one.
+  `admin:listRooms`' hall rows and `admin:lockRoles`' answer say `guestWeb`. `tellWebRights`, which walks a room's pages
+  to tell them, is one of the parts the takes context never holds (`lib/gate.js` `ROOM_SENDS`).
+- **The lint** (`agm/no-unescaped-html`) refuses four sinks whatever they are given: a frame's `srcdoc` (as a property,
+  by a computed key or through `setAttribute`), `setHTMLUnsafe(`, `createContextualFragment(`, and a computed
+  `el['innerHTML']`. **A source guard** (`test/resilience.test.js`) holds `createElement('iframe')` to once in `public/`,
+  in `framePage`, which sets the sandbox, the referrer policy and `allow` before the address.
+- **The catalogue**: `board.web` (Show a web page…, the Board chip's sixth radio kind, asked first) and `person.web`
+  (Show them a web page…), each for a page with `canWeb` (a new fact: the join's, a code guest's as `pages:rights` says
+  it); `take.tab` (🗗 Open in a new tab) in a web page's layer's ⋯, in the full view only (Part 5 §16.7's `take` row,
+  which outranks Part 1 §5.6's strip); `SHOW_KINDS` gains the web page. Another address may follow
+  the one shown, so a web page is never "already showing". `Show them ▸` keeps its four show kinds.
+- Rolling back to 0.5.1: a `pages.json` holding a web take is ignored as 0.5.1 ignores the whole file, and a hall's
+  `guestWeb` setting is kept and read by nothing. Going forward again, both are as they were.
+- Choices where the plan left room: the web page is the show layer's kind, as the design has it (Part 4's information
+  layer, unit 24, moves it); the console reads a web take by its host alone (the address goes to the pages it is shown on,
+  not to the console's status); the admin page has no Preview of its own (its policy stays strict) and pushes only Take it
+  down; the switch's words for an `on` that is no boolean are "Say whether backstage guests may show web pages: on (true)
+  or off (false)."; the address also refuses `0.0.0.0/8`, names under `localhost` and an IPv4 address written as IPv6;
+  the push's answer gives a web page's address back to its own pusher and the admin alone, narrower than the plan's
+  "the pushers' console", since a pusher's Undo needs no one else's;
+  the web page's icon is 🌍 (🌐 is the internet link's); "Show a web page…" on the Board chip (the catalogue's rule:
+  an act that puts something on people's pages says Show).
+- Tests: `test/pages.test.js` (`webUrl`'s refusals: other schemes, user names, every loopback form and this machine's
+  names, a trailing dot included, 2,049 characters, none, a value of another type; `cleanPage`'s right before the
+  address; the web take kept sealed with who put it up, `pages.json` read for no clear address, told opened, refused
+  where it cannot be sealed, a record of another shape dropped; `opened` never `shown`, ◇ and △; the web pages a guest put
+  up, and their count in words), `test/takes.test.js` (end to end: the
+  address told to the Board's page alone, the row, the console, the halls board, the context, the audit log and the
+  console's output naming the host or nothing; a push's `previous` over a web page: its own pusher's and the admin's
+  given it, another Tech's, a Tech's without the right and a backstage guest's given no content; a Tech with `stage.web`
+  revoked refused before the address; the switch
+  refused as "Not admin" to a Tech and a guest and with its words to a manager with `settings.manage`, a side room and an
+  open hall; turned on, one row and `pages:rights` to the guest alone, then the guest's web page taken, On stage,
+  observing, Legal's Member and an open hall's guest still refused; kept across a restart with the guest's web page,
+  opened again; turned off over it, counted, the next refused and Take it down; a guest's web page on a person who then
+  leaves, a guest's take-down of it refused; an unlock writing both in one op, its row and its answer counting the web
+  page left up, the guest told, the admin's take-down with no page of the person's open, locking again leaving it off),
+  `test/units.test.js` (`tellWebRights` out of the takes context), `test/server.test.js` (the hall page's `frame-src` and every other
+  page's, the transcript's), `test/accounts.test.js` (`stage.web` in the presets, grant and revoke, never On stage or a
+  code guest's; `giveable` gains it, on purpose), `test/lint-rules.test.js` (seventeen shapes of the four sinks),
+  `test/resilience.test.js` (the one frame), `test/menus.test.js` (a Tech with `stage.web` revoked: Show a web page… and
+  Show them a web page… hidden by `canWeb` alone, and refused in the right's words; the join's `canWeb`),
+  `test/inputs.test.js` (`admin:guestWeb` and a web address by type), `test/catalog.test.js`, `test/modules.test.js`
+  (`canWeb` and `theAdmin` in the connection's context, `selfHosts` and `tellWebRights` in the server's, the kinds in
+  step). The browser smoke: Show a web page… from the console's Board row, Preview framing it on the operator's page,
+  Show it putting it on Bea's page in the one frame with its sandbox, no referrer, no feature and no cookies, its strip
+  and, in her simple view, the layer's buttons alone, ◇ once it loads (the browser answering it); Show them a web page…
+  on Obi's page, whose full view has Open in a new tab in the layer's ⋯ and not on its bar; one that never loads on her
+  page at once and △ after 15 s; the Roles & invites switch disabled with its words while open, turned on once locked, a guest's chip
+  gaining Show a web page… without a reload, and an unlock taking it off; no console error or CSP violation.
+- The papers: `README.md`, `README.txt`, `docs/DISPLAYS.md` (A web page), `docs/ACCOUNTS.md` (`stage.web`, the guests'
+  switch, `room.guestWeb`), `docs/DESIGN.md`, `SECURITY.md` (the hall page's https frames, what the sandbox does not
+  stop), `docs/ANALYSIS.md` (the lint's four sinks, the one frame, the inputs), `CLAUDE.md`.
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after

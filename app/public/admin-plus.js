@@ -523,6 +523,30 @@
     });
   }
 
+  /**
+   * The hall's switch for its backstage guests' web pages (S4), on its Main room's panel: off by default; offered while
+   * the roles are locked, to the admin alone (the laptop's token, or an account whose role is admin), and otherwise drawn
+   * disabled with why. `up`, after it is turned off or the hall unlocked over a web page a guest put up: how many stay,
+   * with Take it down.
+   */
+  const GUEST_WEB_WORDS = 'Off by default. Guests who joined Backstage with the invite link may then show web pages, as accounts with the Web pages right do.';
+  let guestWebDown = [];
+  function drawGuestWeb({ locked, on, up } = {}) {
+    const row = $('guestWebRow');
+    row.hidden = !currentRoom || currentRoom.main === false;
+    if (row.hidden) return;
+    const box = $('guestWeb');
+    box.checked = !!on;
+    const why = !theAdmin ? 'Only an admin may let backstage guests show web pages.' : !locked ? 'Lock the roles first: in an open hall, code guests show nothing.' : '';
+    box.disabled = !!why;
+    $('guestWebWords').textContent = why || GUEST_WEB_WORDS;
+    if (up !== undefined) {
+      guestWebDown = up && Array.isArray(up.takeDown) ? up.takeDown : [];
+      $('guestWebUp').textContent = guestWebDown.length ? up.upWords : '';
+    }
+    $('guestWebUp').hidden = !guestWebDown.length;
+    $('guestWebDown').hidden = !guestWebDown.length;
+  }
   // Roles & invites and ✨ Minutes open their panel under the watched hall's header (the hall is watched first).
   Object.assign(ADMIN_RUN, {
     'adminRoom.invites': (o) => watching(o, () => {
@@ -532,6 +556,7 @@
         const r = rooms.flatMap((x) => [x, ...(x.side || [])]).find((x) => (x.code || x.key) === currentRoom.code);
         $('lockRoles').checked = !!(r && r.locked);
         $('lockWords').textContent = currentRoom.main === false ? 'Member seats need an invite link (anyone else joins as an observer)' : 'On stage and Backstage seats need an invite link (anyone else joins as an observer)';
+        drawGuestWeb({ locked: !!(r && r.locked), on: !!(r && r.guestWeb), up: null });
         showInvites(r && r.locked);
       });
     }),
@@ -616,7 +641,38 @@
 
     $('closeInvitesBtn').onclick = () => panel(null);
     $('lockRoles').onchange = () => {
-      AGM.outbox.now('admin:lockRoles', { roomCode: currentRoom.code, on: $('lockRoles').checked }, (res) => { if (!res || !res.ok) say((res && res.error) || 'Not changed.', true); showInvites(res && res.locked); });
+      AGM.outbox.now('admin:lockRoles', { roomCode: currentRoom.code, on: $('lockRoles').checked }, (res) => {
+        if (!res || !res.ok) say((res && res.error) || 'Not changed.', true);
+        showInvites(res && res.locked);
+        // An unlock turns the guests' web pages off: the switch follows, disabled until the roles are locked again, and the
+        // web pages guests put up that stay are counted with Take it down, as when the switch is turned off.
+        drawGuestWeb({ locked: !!(res && res.locked), on: !!(res && res.guestWeb), ...(res && res.ok && typeof res.up === 'number' ? { up: res } : {}) });
+      });
+    };
+    $('guestWeb').onchange = () => {
+      const on = $('guestWeb').checked;
+      AGM.outbox.now('admin:guestWeb', { roomCode: currentRoom.code, on }, (res) => {
+        if (!res || !res.ok) { say((res && res.error) || 'Not changed.', true); drawGuestWeb({ locked: $('lockRoles').checked, on: !on }); return; }
+        drawGuestWeb({ locked: true, on: res.on, up: res });
+        say(res.on ? 'Backstage guests may show web pages in this hall.' : 'Backstage guests may no longer show web pages in this hall.' + (res.up ? ' ' + res.upWords + '.' : ''));
+      });
+    };
+    // Take it down: each web page a guest put up that stays after the switch went off, handed back to the chat of the
+    // pages it is on, over that take alone (`ifSeq`), so nothing put up since is taken down with it.
+    $('guestWebDown').onclick = () => {
+      const list = guestWebDown.slice();
+      const hall = currentRoom.code;
+      let left = list.length;
+      const refused = [];
+      for (const t of list) {
+        AGM.outbox.now('page:push', { code: hall, to: t.to === 'board' ? 'board' : { uid: t.to }, content: { kind: 'chat' }, ifSeq: t.seq }, (r) => {
+          if (!r || !r.ok) refused.push((r && r.error) || 'Not taken down.');
+          if (--left) return;
+          guestWebDown = [];
+          drawGuestWeb({ locked: $('lockRoles').checked, on: $('guestWeb').checked });
+          if (refused.length) say(refused[0], true); else say(list.length === 1 ? 'The web page is taken down: their pages are back on chat.' : 'The web pages are taken down: their pages are back on chat.');
+        });
+      }
     };
     $('postMinutesBtn').onclick = () => {
       if (!lastMinutes || !currentRoom) return;

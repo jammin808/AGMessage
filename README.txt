@@ -541,16 +541,41 @@ People's screens (the Board's tablets, or one person's pages)
 -------------------------------------------------------------
 Whoever may drive the hall's screens (and a backstage guest of a locked
 hall) can also show the Board's pages, or one person's, something over
-their chat: Stagewatch's countdown, the clock, the holding slide, or
-black. The Board chip in the header ("Board · Clock ✓ 6/6") opens the
-choices; the toast's Undo (10 s) puts back what was there, and later
-"Back to ..." in the chip does, while it is still yours. The header's
-⋯ -> Screens & pages... -> People's pages lists the Board and each
-person, with what each page says it shows: a tick only once it is on the
-screen in front of them. On the tablet, Back to chat ends it (Show it
-again within 10 s brings it back), Minimise or Escape puts it in the
-side bar's On stage, and Show again there brings it back. A take waits
-while someone is typing, and a priority message still shows over it.
+their chat: Stagewatch's countdown, the clock, the holding slide,
+black, or a web page. The Board chip in the header ("Board · Clock ✓
+6/6") opens the choices; the toast's Undo (10 s) puts back what was
+there, and later "Back to ..." in the chip does, while it is still
+yours. The header's ⋯ -> Screens & pages... -> People's pages lists the
+Board and each person, with what each page says it shows: a tick only
+once it is on the screen in front of them. On the tablet, Back to chat
+ends it (Show it again within 10 s brings it back), Minimise or Escape
+puts it in the side bar's On stage, and Show again there brings it back.
+A take waits while someone is typing, and a priority message still shows
+over it.
+
+A web page (a voting page, a live document) is shown by its https
+address: Show a web page... on the Board chip, or Show them a web
+page... on a person, then Preview to see it on your own page first, or
+Show it. It needs the Web pages right of its own: Tech, Senior and
+Manager accounts have it, Staff and Viewers do not unless an admin gives
+it on the Accounts page. AGMessage never fetches the page and cannot see
+inside it, so the console reads "opened", never a tick; a page that has
+not loaded in 15 s reads "couldn't show it". On the tablet it opens in a
+frame under a line saying who chose it and "Don't type passwords here",
+with Back to chat and, in the full view's ... menu, Open in a new tab
+(for a site that refuses to be shown inside another page, or asks for a
+sign-in). The address is kept locked with this laptop's key, and every
+list, log and summary names only its site; it goes back to whoever
+showed it (for Undo) and to the admin, never to another operator.
+
+A locked hall's backstage guests (who joined with the code and the
+Backstage invite link) show web pages only while the admin allows it:
+Admin -> a hall -> Roles & invites -> "Backstage guests may show web
+pages on people's pages", off by default, only on a hall's Main room
+and only while its roles are locked. Unlocking the hall turns it off.
+Turning it off, or unlocking, stops their next web page; one already up
+stays until someone takes it down, and the panel offers Take it down,
+even for a person who has no page open now.
 
 Stagewatch (the countdown) for each hall
 ----------------------------------------
@@ -943,7 +968,12 @@ Security
     someone else or delete their messages.
   - Optional lock: Admin -> Roles & invites. On stage and Backstage seats
     then need the invite link for that seat; anyone else joins as an
-    observer.
+    observer. Only then, and only if the admin ticks it there, may the
+    hall's backstage guests show web pages on people's pages.
+  - A web page shown on people's pages is framed only on the hall page,
+    sandboxed (no forms, pop-ups or navigation of the page around it) and
+    sent no address of AGMessage's; it is the site's own page all the
+    same, so nobody should type a password into it.
   - Guessing codes, wrong admin tokens and message floods are
     rate-limited and locked out. Admin login never works through the tunnel.
   - Through the tunnel the limits count a network, an IPv6 phone by its

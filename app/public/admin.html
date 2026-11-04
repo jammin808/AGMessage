@@ -76,6 +76,12 @@
         <section class="admin-tools" id="roomTools" hidden>
           <div id="invitesPanel" hidden>
             <label class="admin-inline"><input type="checkbox" id="lockRoles" /> <span id="lockWords">On stage and Backstage seats need an invite link (anyone else joins as an observer)</span></label>
+            <div id="guestWebRow" class="guest-web" hidden>
+              <label class="admin-inline"><input type="checkbox" id="guestWeb" aria-describedby="guestWebWords" /> <span>Backstage guests may show web pages on people's pages</span></label>
+              <p class="hint" id="guestWebWords"></p>
+              <p class="hint" id="guestWebUp" role="status" hidden></p>
+              <button id="guestWebDown" class="btn small" type="button" hidden>Take it down</button>
+            </div>
             <div id="inviteLinks" class="invite-links"></div>
             <div class="row end"><button id="closeInvitesBtn" class="btn ghost small" type="button">Close</button></div>
           </div>

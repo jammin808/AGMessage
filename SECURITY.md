@@ -154,6 +154,35 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   the hall, so no side room's page is sent the hall's key that way. The page draws a take with a module that holds no
   socket (`public/pagelayer.mjs`, held by the module fence), from plain values: a holding picture only of AGMessage's
   own uploads, and every word with `textContent`.
+- A web page on people's pages needs a right of its own, `stage.web`, beside the right every take needs: the admin's,
+  an account's in the hall (the Tech, Senior tech and Manager presets hold it; Staff and Viewers do not unless given it),
+  and a code guest's only in a locked hall whose admin turned on its backstage guests' web pages (`admin:guestWeb`, off
+  by default, "the admin's" alone, never a manager given `settings.manage`, and turned off by an unlock in the same
+  change). It is refused without it before its address is read. The address is https only, at most 2,048 characters,
+  with no user name or password, and never AGMessage itself (loopback by any name, a trailing dot included, this
+  laptop's name and addresses, the tunnel's host): checked on the server and again in the page before the frame is
+  given it. **The server never fetches it**, which would be a request from this laptop into the venue's network. It is
+  sent only to the pages it is shown on, and given back in a later push's answer (its Undo) only to whoever put it up
+  and to the admin: any other pusher, a backstage guest among them, is given no content, so nobody reads another's
+  address (a token in its query). At rest it is sealed with the machine key beside its host and who put it up
+  (`pages.json`'s `urlSealed`), and the audit row, the console, the halls board, the context and the AI's brief name the
+  host alone, or nothing of it; a run without its key keeps no web page. A guest's web page left up when the switch goes
+  off, or the hall is unlocked, is counted to the admin with Take it down, a person's whether or not a page of theirs is
+  open.
+- **The hall page's https frames.** Only the hall page (`/app.html`) may frame an https page (its CSP's `frame-src 'self'
+  blob: https:`); every other page, the screen page and the transcript keep `frame-src 'self' blob:` or none, and
+  `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN` are unchanged everywhere. The one frame a page makes
+  (`framePage`, a source guard holds it to one `createElement('iframe')` in `public/`) is `sandbox="allow-scripts
+  allow-same-origin"`: the site's scripts run in its own origin, but it submits no form, opens no popup, navigates
+  neither itself away from its frame nor the hall page, opens no modal dialog and downloads nothing. It is sent no
+  referrer (the hall page's address carries its code and its invite), no feature (`allow=""`) and, where the browser has
+  it, no cookie of its own (`credentialless`). The page refuses to frame its own origin as a second check, so the site
+  can never be AGMessage with the scripts a web page is allowed. **What the sandbox does not stop**: the site itself.
+  It can show anything, ask for anything, and read what is typed into it, so the strip above it says who chose it and
+  "Don't type passwords here.", and the person can always go back to chat (and, in the full view, open it in a tab of
+  their own from the layer's ⋯). Nothing
+  inside it can be seen, so it reads "opened", never "on screen". A message from it reaches nothing: the hall page hears
+  a message only from its own parent's origin.
 - Room keys and guest codes are two things. A guest joins by a room's guest code alone, each room its own: a side room's
   is made with it and is never its key, and a hall's Main room's is its key until the admin renews it (New code), so a
   0.5.1 hall keeps the code its guests know. A code is one room's (no live code, earlier code or key shared). The admin
@@ -333,7 +362,9 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   may open a link they were given. A screen's take and a hall's holding image are not held to it yet: whoever may drive
   a hall's screens can show any upload's link there (the stage's source check, the plan's Part 4 unit 25, holds them to
   the hall's own files).
-- Pages carry a strict Content-Security-Policy with no inline script.
+- Pages carry a strict Content-Security-Policy with no inline script. The page lint (`agm/no-unescaped-html`) refuses,
+  whatever they are given, a frame's `srcdoc`, `setHTMLUnsafe(`, `createContextualFragment(` and a computed
+  `el['innerHTML']`.
 - Links to Stagewatch, Patterns and PlayMap pin each peer's certificate; keys travel in headers, never in a URL. A
   Stagewatch certificate is pinned only once Stagewatch accepted the link's key; the key goes in no request but the one
   that asks for that verdict until then; and refused keys are asked again at most once a minute, shared by every link

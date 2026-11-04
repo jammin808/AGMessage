@@ -61,9 +61,10 @@
   const FOLDS = Object.freeze({ speaker: Object.freeze({ label: 'Speaker\'s screen', icon: '🖥' }) });
   /**
    * The kinds a take on people's pages may show (lib/pages.js KINDS, held to them by test/modules.test.js (n)), each by
-   * the name a person reads in a menu, and as "Already showing …" says it. `chat` hands the pages back to their chat.
+   * the name a person reads in a menu, and as "Already showing …" says it. `chat` hands the pages back to their chat; a
+   * web page is shown by its address, asked first (webAsk), and needs a right of its own (`canWeb`).
    */
-  const SHOW_KINDS = Object.freeze([['chat', 'Chat', 'chat'], ['stage', 'Stagewatch', 'Stagewatch'], ['clock', 'Clock', 'the clock'], ['holding', 'Holding', 'holding'], ['blank', 'Blank', 'blank']].map((x) => Object.freeze(x)));
+  const SHOW_KINDS = Object.freeze([['chat', 'Chat', 'chat'], ['stage', 'Stagewatch', 'Stagewatch'], ['clock', 'Clock', 'the clock'], ['holding', 'Holding', 'holding'], ['blank', 'Blank', 'blank'], ['web', 'Web page', 'a web page']].map((x) => Object.freeze(x)));
   const kindName = (kind) => { const k = SHOW_KINDS.find((x) => x[0] === kind); return k ? k[1] : 'Chat'; };
   /**
    * What a take's target shows now, as its object carries it (`kind`, the console's read): a kind of SHOW_KINDS, chat for
@@ -79,12 +80,24 @@
     if (kind === 'stage' && !f.stagewatch) return WORDS.noStagewatch;
     if (!o || typeof o.kind !== 'string') return WORDS.reading;
     if (!o.kind) return WORDS.noPage;
-    if (o.kind === kind) return kind === 'chat' ? WORDS.onChat : 'Already showing ' + SHOW_KINDS.find((x) => x[0] === kind)[2] + '.';
+    // A web page is chosen by its address: another may follow the one shown.
+    if (o.kind === kind && kind !== 'web') return kind === 'chat' ? WORDS.onChat : 'Already showing ' + SHOW_KINDS.find((x) => x[0] === kind)[2] + '.';
     return true;
   };
   /** One of the Board chip's show kinds: radio, the kind the Board's pages show now checked (and not chosen twice). */
   const boardKind = (kind, label, icon, rank) => ({ id: 'board.' + kind, label, icon, group: '2_send', inline: () => rank, verb: 'page:push', mode: 'now', radio: (f, o) => showsNow(o) === kind,
     may: (f) => f.canPush, fits: () => true, ready: (f, o) => kindWhy(f, o, kind) });
+  /**
+   * The ask before a web page is shown (`whom`: "on the Board's pages"): its address, then Preview, which frames it on
+   * this page alone first, or Show it. The page checks the address before it frames or sends it, and the server again.
+   */
+  const webAsk = (whom) => ({
+    title: 'Show a web page ' + whom,
+    words: 'Its https address. It opens on their pages as it is: AGMessage can\'t see inside it, and they can go back to chat at any time.',
+    fields: [{ name: 'url', label: 'Web address (https://…)', max: 2048 }],
+    choices: [{ answer: 'preview', label: 'Preview' }, { answer: 'show', label: 'Show it', primary: true }],
+    no: 'Cancel',
+  });
 
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const mine = (f, o) => !!f.uid && !!o.from && o.from.uid === f.uid;
@@ -383,6 +396,11 @@
       // Escape minimises, never sends back to chat: a key pressed by mistake loses nothing.
       { id: 'take.minimise', label: 'Minimise', icon: '🔽', key: 'Escape', group: '1_respond', inline: () => 2, verb: 'page:report', mode: 'self', may: () => true, fits: () => true },
       { id: 'take.openChat', label: 'Open chat', icon: '🗨', group: '1_respond', verb: 'page:report', mode: 'self', may: () => true, fits: (f, o) => !!o.strip },
+      // A web page, opened by the person in a tab of its own, outside AGMessage (its address, `url`): where a site refuses
+      // to be framed, or a password is asked for, the person's browser is the place for it. In the layer's ⋯ and its
+      // right-click, in the full view only: the simple view keeps the layer's buttons alone.
+      { id: 'take.tab', label: 'Open in a new tab', icon: '🗗', group: '3_keep', verb: 'local', mode: 'local',
+        may: () => true, fits: (f, o) => full(f) && o.kind === 'web' && typeof o.url === 'string' && o.url.length > 0 },
       // The person's own gesture, where the device has the Fullscreen API (`fullscreen`, a probe at load): a take never
       // enters it by itself.
       { id: 'take.fullscreen', label: (f, o) => (o.full ? 'Leave full screen' : 'Full screen'), icon: '⛶', group: '3_keep', inline: () => 3, verb: 'local', mode: 'local',
@@ -406,6 +424,8 @@
       boardKind('clock', 'Show the clock', '🕐', 3),
       boardKind('holding', 'Show holding', '🖼', 4),
       boardKind('blank', 'Show blank', '🌑', 5),
+      // A web page on every Board page: for a seat that may show one (`canWeb`: canPush and stage.web), by its address.
+      { ...boardKind('web', 'Show a web page…', '🌍', 6), may: (f) => f.canPush && f.canWeb, confirm: () => webAsk('on the Board\'s pages') },
       { id: 'board.back', label: (f, o) => 'Back to ' + kindName(o.mine && o.mine.previous && o.mine.previous.kind) + ' (undo your ' + kindName(o.kind) + ', ' + String((o.mine && o.mine.time) || '') + ')', icon: '↶', group: '3_keep', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush, fits: (f, o) => !!o.mine && o.mine.seq === o.seq },
       { id: 'board.screens', label: 'Screens & pages…', icon: '⧉', group: '4_manage', verb: 'display:list', mode: 'now', may: (f) => f.canPush, fits: () => true },
@@ -482,7 +502,11 @@
       // the hall, none until it has read).
       { id: 'person.show', label: 'Show them', icon: '📺', group: '2_send', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, ''),
-        submenu: (f, o) => SHOW_KINDS.filter((x) => x[0] !== 'chat').map(([value, label]) => { const why = kindWhy(f, o, value); return { value, label, role: 'menuitemradio', checked: showsNow(o) === value, ...(why === true ? {} : { disabled: why }) }; }) },
+        submenu: (f, o) => SHOW_KINDS.filter((x) => x[0] !== 'chat' && x[0] !== 'web').map(([value, label]) => { const why = kindWhy(f, o, value); return { value, label, role: 'menuitemradio', checked: showsNow(o) === value, ...(why === true ? {} : { disabled: why }) }; }) },
+      // A web page on every page of theirs in the hall, by its address: for a seat that may show one (`canWeb`).
+      { id: 'person.web', label: 'Show them a web page…', icon: '🌍', group: '2_send', verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush && f.canWeb, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, 'web'),
+        confirm: (f, o) => webAsk('on ' + (o.name ? o.name + '\'s' : 'their') + ' pages') },
       { id: 'person.chat', label: 'Back to chat on their pages', icon: '💬', group: '2_send', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, 'chat') },
       { id: 'person.seat', label: 'Seat', icon: '💺', group: '4_manage', verb: 'admin:setRole', mode: 'now',
@@ -740,6 +764,9 @@
       // person's): the console's People and the Board chip. The hall's Stagewatch, which a take may show, as the page is
       // told it; and the device's Fullscreen API, a probe the page made at load.
       canPush: s.canPush === true, stagewatch: !!s.stage && s.stage.status !== 'off', fullscreen: s.fullscreen === true,
+      // Whether a web page shown from this page would be taken (the join's `canWeb`, a code guest's as `pages:rights`
+      // says it now; for the support view, the person's): Show a web page… on the Board chip, Show them a web page… on a person.
+      canWeb: s.canWeb === true,
     });
   }
 

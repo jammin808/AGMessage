@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Pages, cleanPage, describePage, personKey, layerOf, reportsOf, KINDS, LAYERS, IMAGE_EXT, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS } = require('../lib/pages');
+const { Pages, cleanPage, describePage, webUrl, personKey, layerOf, reportsOf, inViewOf, KINDS, LAYERS, IMAGE_EXT, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX } = require('../lib/pages');
 const { cleanContent } = require('../lib/displays');
 const guard = require('../lib/guard');
 const { VIEWS: ACCOUNT_VIEWS } = require('../lib/accounts');
@@ -21,7 +21,7 @@ const ANA = 'a:aanaaccount01';
 const BEN = 'u:ubenguest0001';
 const CY = 'u:ucyguest00001';
 const PIC = '/uploads/1730000000000-abcdefghijkl-stage.png';
-const KINDS_WORDS = { error: 'Choose what to show: back to chat, Stagewatch, the clock, holding or blank.' };
+const KINDS_WORDS = { error: 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.' };
 const dirs = [];
 const folder = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-pages-')); dirs.push(d); return d; };
 test.after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
@@ -35,8 +35,8 @@ function store({ held = true, file = path.join(folder(), 'pages.json') } = {}) {
 const onDisk = (p) => (p.flush(), JSON.parse(fs.readFileSync(p.file, 'utf8')));
 
 test('cleanPage: an unknown kind, or none, is refused with the kinds in words, never defaulted', () => {
-  // `brand` went (the owner's answer 31: one Holding page with the logo); the web page and the documents are later units'.
-  for (const kind of ['brand', 'web', 'doc', 'image', 'snippet', 'iframe', 'message', 'black', 'CLOCK', '', ' clock']) assert.deepEqual(cleanPage({ kind }), KINDS_WORDS, kind);
+  // `brand` went (the owner's answer 31: one Holding page with the logo); the documents are later units'.
+  for (const kind of ['brand', 'doc', 'image', 'snippet', 'iframe', 'message', 'black', 'CLOCK', 'WEB', '', ' clock']) assert.deepEqual(cleanPage({ kind }), KINDS_WORDS, kind);
   for (const c of [undefined, null, 'clock', 5, ['clock'], {}, { kind: 5 }, { kind: ['clock'] }, { kind: { toString: () => 'clock' } }, { kind: null }]) assert.deepEqual(cleanPage(c), KINDS_WORDS, JSON.stringify(c));
   // Only its own kind: one it inherits is not read.
   assert.deepEqual(cleanPage(Object.create({ kind: 'clock' })), KINDS_WORDS);
@@ -53,7 +53,7 @@ test('cleanPage: each kind in its clean shape, a fresh object, with the keys it 
   // Back to chat of one layer is a hand-back the store does not keep: refused, never widened to every layer.
   for (const layer of ['info', 'show', null, 5, '']) assert.deepEqual(cleanPage({ kind: 'chat', layer }), KINDS_WORDS, JSON.stringify(layer));
   assert.deepEqual(cleanPage({ kind: 'clock', layer: 'info' }), { kind: 'clock' }, 'a layer is chat\'s word alone: on another kind it is a key not known');
-  assert.deepEqual(KINDS, ['chat', 'stage', 'clock', 'holding', 'blank']);
+  assert.deepEqual(KINDS, ['chat', 'stage', 'clock', 'holding', 'blank', 'web']);
   assert.ok(Object.isFrozen(KINDS) && KINDS.every((k) => layerOf(k) === 'show'), 'every kind is the show layer\'s');
   assert.deepEqual(LAYERS, ['show']);
   assert.equal(layerOf('brand'), '');
@@ -96,7 +96,7 @@ test('cleanPage: the holding rules: no picture, or a picture of ours in a room o
 
 test('describePage: the words for each kind, the same for the console and the audit; KINDS and the words are one set', () => {
   const words = KINDS.map((kind) => describePage({ kind }, { hallHolding: '/uploads/x.png' }));
-  assert.deepEqual(words, ['back to chat', 'Stagewatch', 'the clock', 'a holding slide', 'blank']);
+  assert.deepEqual(words, ['back to chat', 'Stagewatch', 'the clock', 'a holding slide', 'blank', 'a web page']);
   assert.equal(new Set(words).size, KINDS.length, 'one kind, one set of words');
   // A holding slide with no picture of its own, in a hall with none, draws the AGMessage mark (owner answer 31).
   assert.equal(describePage({ kind: 'holding' }), 'a holding slide with the AGMessage mark');
@@ -104,9 +104,11 @@ test('describePage: the words for each kind, the same for the console and the au
   assert.equal(describePage({ kind: 'holding' }, { hallHolding: PIC }), 'a holding slide');
   // No take: the page shows its chat. A kind that is not one has no words.
   assert.equal(describePage(null), 'the chat');
-  for (const c of [{ kind: 'brand' }, { kind: 'web', url: 'https://example.com/' }, 'clock', { kind: 5 }]) assert.equal(describePage(c), '', JSON.stringify(c));
-  // No words name a file or carry its address.
+  for (const c of [{ kind: 'brand' }, 'clock', { kind: 5 }]) assert.equal(describePage(c), '', JSON.stringify(c));
+  // No words name a file or carry its address; a web page is named by its host alone, as it is kept and as it is told.
   assert.ok(!describePage({ kind: 'holding', image: PIC }).includes('stage.png'));
+  assert.equal(describePage({ kind: 'web', host: 'vote.example.com', urlSealed: 'enc1:AAAA' }), 'a web page on vote.example.com');
+  assert.equal(describePage({ kind: 'web', url: 'https://vote.example.com/poll/7?token=abc#q2', host: 'vote.example.com' }), 'a web page on vote.example.com');
 });
 
 test('personKey: an account\'s pages by its id, a guest\'s device by its uid', () => {
@@ -264,10 +266,13 @@ test('a report of no person, at no time, keeps nothing: no answer, no report, no
   assert.equal(JSON.stringify(onDisk(p)), before, 'nothing written');
 });
 
-test('a page reports only what a take of its kind can be: back on its chat in view or not; opened, a web page\'s alone, by none', () => {
+test('a page reports only what a take of its kind can be: back on its chat in view or not; opened, a web page\'s alone, which is never shown', () => {
   assert.deepEqual(reportsOf('chat'), ['shown', 'hidden']);
-  for (const kind of KINDS.filter((k) => k !== 'chat')) assert.deepEqual(reportsOf(kind), ['shown', 'hidden', 'failed', 'dismissed', 'minimised'], kind);
-  assert.ok(KINDS.every((k) => !reportsOf(k).includes('opened')), 'no kind here is a web page');
+  for (const kind of KINDS.filter((k) => k !== 'chat' && k !== 'web')) assert.deepEqual(reportsOf(kind), ['shown', 'hidden', 'failed', 'dismissed', 'minimised'], kind);
+  // A web page is never seen into: in view it opened, and nothing else reports opened.
+  assert.deepEqual(reportsOf('web'), ['opened', 'hidden', 'failed', 'dismissed', 'minimised']);
+  assert.deepEqual(KINDS.filter((k) => reportsOf(k).includes('opened')), ['web'], 'opened is a web page\'s alone');
+  assert.deepEqual(KINDS.map(inViewOf), ['shown', 'shown', 'shown', 'shown', 'shown', 'opened']);
   assert.ok(KINDS.every((k) => reportsOf(k).every((s) => REPORTS.includes(s))));
   const p = store();
   const clock = p.take(HALL, ANA, { kind: 'clock' }, { name: 'Ada' });
@@ -604,4 +609,149 @@ test('the store\'s hall keys are the rooms\' keys', () => {
     const p = store({ held: false });
     assert.equal(p.take(code, 'board', { kind: 'clock' }, {}) !== null, RoomStore.validCode(code), code);
   }
+});
+
+// ---------------------------------------------------------------- a web page (plan 1-§5.6, 4-§5.9.2.2, 4-§5.9.9)
+const secretbox = require('../lib/secretbox');
+const WEB_WORDS = { error: 'A web page is shown by its https address, as a browser shows it.' };
+const WEB_SELF = { error: 'That address is AGMessage itself: show a page of another site.' };
+const VOTE = 'https://vote.example.com/poll/7?token=abc#q2';
+/** A store that seals a web page's address with a machine key of its own (lib/secretbox.js, as the server's store does). */
+function sealing({ file = path.join(folder(), 'pages.json') } = {}) {
+  const p = new Pages(file, { seal: secretbox.seal, open: secretbox.open });
+  p.hold();
+  p.file = file;
+  return p;
+}
+test.before(() => { process.env.AGM_KEY_DIR = folder(); secretbox._reset(); });
+
+test('webUrl: an https address as the URL parser writes it, with its host; another scheme, a user name or password, AGMessage itself, an address too long or none, refused in words', () => {
+  assert.deepEqual(webUrl('https://Vote.Example.com/poll?q=1#:~:text=net%20revenue'), { url: 'https://vote.example.com/poll?q=1#:~:text=net%20revenue', host: 'vote.example.com' }, 'its fragment kept, its host in lower case');
+  assert.deepEqual(webUrl('  https://example.com  '), { url: 'https://example.com/', host: 'example.com' });
+  assert.deepEqual(webUrl('https://bücher.example/'), { url: 'https://xn--bcher-kva.example/', host: 'xn--bcher-kva.example' });
+  assert.deepEqual(webUrl('https://[2001:db8::7]:8443/x'), { url: 'https://[2001:db8::7]:8443/x', host: '[2001:db8::7]' });
+  // eslint-disable-next-line no-script-url -- a hostile input this test proves is refused
+  for (const v of ['http://example.com/', 'javascript:alert(1)', 'data:text/html,<b>x</b>', 'blob:https://example.com/1', 'file:///etc/passwd', 'ftp://example.com/', 'wss://example.com/',
+    'example.com', '//example.com/', 'https://', 'https:', 'https://exa mple.com/', 'https://a..b/', '', '   ', 5, null, undefined, true, { toString: 1 }, { toString: () => 'https://example.com/' }, ['https://example.com/']]) {
+    assert.deepEqual(webUrl(v), WEB_WORDS, JSON.stringify(v) + '');
+  }
+  for (const v of ['https://ana@example.com/', 'https://ana:pw@example.com/', 'https://:pw@example.com/']) assert.deepEqual(webUrl(v), { error: 'An address with a user name or a password is not shown: show the page without them.' }, v);
+  // This machine, by every name a machine gives itself, however it is written: the URL parser writes each in one form.
+  for (const v of ['https://localhost/', 'https://LOCALHOST:8443/', 'https://app.localhost/', 'https://127.0.0.1/', 'https://127.1/', 'https://2130706433/', 'https://0x7f000001/', 'https://127.255.255.254/',
+    'https://0.0.0.0/', 'https://[::1]/', 'https://[0:0:0:0:0:0:0:1]/', 'https://[::]/', 'https://[::ffff:127.0.0.1]/',
+    // A name's trailing dot names the same machine (the parser keeps it on a name, and drops it from an address).
+    'https://localhost./', 'https://LocalHost.:8443/x', 'https://app.localhost./', 'https://127.0.0.1./']) assert.deepEqual(webUrl(v), WEB_SELF, v);
+  // And by the names and addresses this AGMessage answers on: its machine's name, its network addresses, the tunnel.
+  const self = ['AGM-Laptop', '192.168.1.20', 'abc-def.trycloudflare.com'];
+  for (const v of ['https://agm-laptop/', 'https://AGM-LAPTOP.:443/', 'https://192.168.1.20/admin.html', 'https://abc-def.trycloudflare.com/app.html']) assert.deepEqual(webUrl(v, self), WEB_SELF, v);
+  assert.deepEqual(webUrl('https://192.168.1.21/', self), { url: 'https://192.168.1.21/', host: '192.168.1.21' }, 'another machine of the venue is not this one');
+  assert.deepEqual(webUrl('https://agm-laptop/', [5, null, '']), { url: 'https://agm-laptop/', host: 'agm-laptop' }, 'a name that is not one is not read');
+  // At most WEB_MAX characters, as typed and as the parser writes it.
+  const head = 'https://example.com/';
+  assert.equal(webUrl(head + 'a'.repeat(WEB_MAX - head.length)).url.length, WEB_MAX);
+  assert.deepEqual(webUrl(head + 'a'.repeat(WEB_MAX - head.length + 1)), { error: 'That address is longer than 2048 characters.' });
+  assert.deepEqual(webUrl(head + ' '.repeat(10) + 'a'.repeat(WEB_MAX - head.length - 10)), WEB_WORDS, 'written out by the parser, longer than the bound');
+});
+
+test('cleanPage: a web page needs its right before its address is read, then the address rules; {kind, url, host}, nothing else kept', () => {
+  const facts = { web: true, selfHosts: ['agm-laptop'] };
+  assert.deepEqual(cleanPage({ kind: 'web', url: VOTE, host: 'evil.example', urlSealed: 'enc1:AAAA', extra: 1 }, facts), { kind: 'web', url: VOTE, host: 'vote.example.com' }, 'the host is the address\'s, never the asker\'s');
+  // The right first, in the words the server gives for who asks (or its own), whatever the address.
+  const noRight = { error: 'Web pages on the stage need their own right — ask an admin.' };
+  for (const f of [undefined, null, {}, { web: false }, { web: 1 }, { web: '' }, { web: () => true }]) assert.deepEqual(cleanPage({ kind: 'web', url: VOTE }, f), noRight, JSON.stringify(f));
+  const off = 'Web pages from backstage guests are off in this hall — ask the admin.';
+  assert.deepEqual(cleanPage({ kind: 'web', url: 'javascript:x' }, { web: off }), { error: off }, 'the right is read before the address');   // eslint-disable-line no-script-url
+  // Then the address, read by its type: a field of another type refused with the address's words.
+  for (const url of [undefined, null, 5, { toString: () => VOTE }, [VOTE]]) assert.deepEqual(cleanPage({ kind: 'web', url }, facts), WEB_WORDS, JSON.stringify(url));
+  assert.deepEqual(cleanPage({ kind: 'web', url: 'https://agm-laptop/' }, facts), WEB_SELF, 'the server\'s own names, from its facts');
+  assert.deepEqual(cleanPage({ kind: 'web', url: 'http://vote.example.com/' }, facts), WEB_WORDS);
+});
+
+test('a web take is kept sealed beside its host, never its address in clear; told to the pages it is shown on opened; a run that cannot seal keeps none', () => {
+  const p = sealing();
+  const content = cleanPage({ kind: 'web', url: VOTE }, { web: true });
+  const t = p.take(HALL, 'board', content, { name: 'Gil', guest: true, id: 'secret', who: 'code:ugil0000001' });
+  assert.deepEqual([t.content.kind, t.content.host, Object.keys(t.content)], ['web', 'vote.example.com', ['kind', 'host', 'urlSealed']]);
+  assert.match(t.content.urlSealed, /^enc1:/);
+  assert.deepEqual(t.by, { name: 'Gil', guest: true, who: 'code:ugil0000001' }, 'a code guest\'s take is kept as one, with who put it up');
+  // Who put it up is kept only as an actor's kind and id: anything else is not kept.
+  for (const who of ['ugil0000001', 'guest:ugil0000001', 'code:', 'code:u g', 'code:' + 'u'.repeat(65), 5, null, { t: 'code' }]) {
+    assert.deepEqual(p.take(OTHER, 'board', content, { name: 'Gil', who }).by, { name: 'Gil' }, JSON.stringify(who));
+  }
+  for (const who of ['account:a1b2c3', 'admin:host']) assert.deepEqual(p.take(OTHER, 'board', content, { name: 'Ana', who }).by, { name: 'Ana', who });
+  assert.deepEqual(p.told(t.content), { kind: 'web', url: VOTE, host: 'vote.example.com' }, 'opened for a page it is shown on');
+  assert.deepEqual(p.told({ kind: 'clock' }), { kind: 'clock' }, 'every other kind told as it is kept');
+  assert.equal(describePage(t.content), 'a web page on vote.example.com');
+  // The file: the host, and no part of the address in clear (read the file).
+  const text = (p.flush(), fs.readFileSync(p.file, 'utf8'));
+  for (const part of ['https://', 'poll/7', 'token=abc', '#q2']) assert.ok(!text.includes(part), 'pages.json holds no clear address: ' + part);
+  assert.ok(text.includes('"host":"vote.example.com"'));
+  // Read back by this machine: the take as it was; by a store whose key is another's, its address opens as none.
+  const again = new Pages(p.file, { seal: secretbox.seal, open: secretbox.open });
+  assert.deepEqual(again.current(HALL, '', { board: true }).take, t);
+  const elsewhere = new Pages(p.file);
+  assert.deepEqual(elsewhere.told(elsewhere.current(HALL, '', { board: true }).take.content), { kind: 'web', url: '', host: 'vote.example.com' });
+  // A run that cannot seal (no machine key: seal throws, or seals nothing) keeps no web take, and numbers none.
+  for (const seal of [() => { throw new Error('no machine key'); }, () => '', () => 'plain https://x/']) {
+    const q = new Pages(path.join(folder(), 'pages.json'), { seal, open: secretbox.open });
+    assert.equal(q.take(HALL, 'board', content, { name: 'Gil' }), null);
+    assert.deepEqual(q.halls, {}, 'nothing numbered');
+  }
+  // Only what cleanPage made is kept: a sealed address handed in, an http one, none, a host alone.
+  for (const c of [{ kind: 'web', host: 'example.com', urlSealed: t.content.urlSealed }, { kind: 'web', url: 'http://example.com/', host: 'example.com' }, { kind: 'web' }, { kind: 'web', host: 'example.com' }]) {
+    assert.equal(p.take(HALL, ANA, c, { name: 'Gil' }), null, JSON.stringify(c));
+  }
+  assert.equal(p.halls[HALL].seq, 1);
+  // A web take read from a file in a shape no store of ours writes is dropped: an address in clear, a host that is not one, a seal that is not one.
+  const file = path.join(folder(), 'pages.json');
+  const take = (seq, c) => ({ seq, content: c, by: { name: 'Gil' }, at: 5 });
+  fs.writeFileSync(file, JSON.stringify({ v: 1, halls: { [HALL]: { seq: 5, board: { show: take(5, t.content) }, people: {
+    [ANA]: { show: take(1, { kind: 'web', url: VOTE, host: 'vote.example.com' }) }, [BEN]: { show: take(2, { kind: 'web', host: 'Vote.Example.com', urlSealed: t.content.urlSealed }) },
+    [CY]: { show: take(3, { kind: 'web', host: 'vote.example.com', urlSealed: VOTE }) }, 'u:uok0000001': { show: take(4, { ...t.content, extra: VOTE }) },
+  }, answers: {} } } }));
+  const read = new Pages(file, { seal: secretbox.seal, open: secretbox.open });
+  assert.deepEqual(read.halls[HALL].board, { show: take(5, t.content) });
+  assert.deepEqual(read.halls[HALL].people, { 'u:uok0000001': { show: take(4, t.content) } }, 'the keys it does not know left behind');
+});
+
+test('a web page reports opened, never shown: in view it opened (◇, never ✓), and Show it again says opened', () => {
+  const p = sealing();
+  const content = cleanPage({ kind: 'web', url: VOTE }, { web: true });
+  const t = p.take(HALL, ANA, content, { name: 'Tom' }, { at: 100 });
+  assert.deepEqual(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'shown', at: 101 }), { ok: false, error: 'A page shown a web page on vote.example.com reports one of: opened, hidden, failed, dismissed, minimised.' });
+  const page = { sid: 's1', key: ANA, board: false, name: 'Ana' };
+  assert.deepEqual(p.status(HALL, ANA, [page], { name: 'Ana' }).mark, MARKS.waiting, 'sending until the page says');
+  assert.deepEqual(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'opened', at: 102 }), { ok: true, answer: null });
+  const st = p.status(HALL, ANA, [page], { name: 'Ana' });
+  assert.deepEqual([st.mark, st.words, st.showing, st.kind, st.on], [MARKS.unseen, 'Opened · AGMessage can\'t see inside web pages', 'a web page on vote.example.com', 'web', 1]);
+  assert.ok(!JSON.stringify(st).includes('poll/7'), 'the status names the host alone');
+  // Not loaded in time: △ with its words. Back to chat, then Show it again within 10 s: said opened, with `again`.
+  assert.ok(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'failed', words: 'the page did not load', at: 103 }).ok);
+  assert.deepEqual([p.status(HALL, ANA, [page]).mark, p.status(HALL, ANA, [page]).words], [MARKS.couldNot, 'Couldn\'t show it: the page did not load']);
+  assert.equal(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'dismissed', at: 104 }).answer.state, 'dismissed');
+  assert.deepEqual(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'shown', again: true, at: 105 }).ok, false, 'shown is no web page\'s word, even to show it again');
+  assert.deepEqual(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'opened', again: true, at: 106 }), { ok: true, answer: null });
+  assert.equal(p.status(HALL, ANA, [page]).mark, MARKS.unseen);
+});
+
+test('the web pages a guest put up that stay up: the Board\'s, and each person\'s not put away, a page of theirs open or not; an account\'s and an older one are not; counted in words for the admin', () => {
+  const p = sealing();
+  const content = cleanPage({ kind: 'web', url: VOTE }, { web: true });
+  assert.deepEqual(p.guestWeb(HALL), [], 'a hall with no book has none');
+  const board = p.take(HALL, 'board', content, { name: 'Gil', guest: true });
+  const ben = p.take(HALL, BEN, content, { name: 'Gil', guest: true });
+  const cy = p.take(HALL, CY, content, { name: 'Gil', guest: true });
+  p.take(HALL, ANA, content, { name: 'Tom' });
+  p.take(OTHER, 'board', content, { name: 'Gil', guest: true });
+  assert.deepEqual(p.guestWeb(HALL), [{ to: 'board', seq: board.seq }, { to: BEN, seq: ben.seq }, { to: CY, seq: cy.seq }]);
+  // Put away by its person (Back to chat): no longer up for them. A take after it: the guest's is no longer shown.
+  assert.ok(p.report(HALL, 's1', { key: CY, seq: cy.seq, state: 'dismissed' }).ok);
+  p.take(HALL, 'board', { kind: 'clock' }, { name: 'Tom' });
+  assert.deepEqual(p.guestWeb(HALL), [{ to: BEN, seq: ben.seq }]);
+  assert.deepEqual(p.guestWeb('__proto__'), []);
+  // As the admin is told them once guests may no longer show web pages: a count, and while any stay, words and the takes.
+  assert.deepEqual(p.guestWebLeft(HALL), { up: 1, upWords: '1 web page a guest showed is still up', takeDown: [{ to: BEN, seq: ben.seq }] });
+  const ana = p.take(HALL, ANA, content, { name: 'Gil', guest: true });
+  assert.deepEqual(p.guestWebLeft(HALL), { up: 2, upWords: '2 web pages guests showed are still up', takeDown: [{ to: BEN, seq: ben.seq }, { to: ANA, seq: ana.seq }] });
+  assert.deepEqual([p.guestWebLeft('HALLC3'), p.guestWebLeft('__proto__')], [{ up: 0 }, { up: 0 }]);
 });

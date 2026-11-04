@@ -28,6 +28,7 @@ const CAPS = Object.freeze({
   'display.control': 'Change what a hall\'s screens and people\'s pages show',
   'display.manage': 'Create, rename, move and revoke screens',
   'stage.send': 'Send to Stagewatch: the speaker\'s screen, or to the operator to pass on',
+  'stage.web': 'Show web pages on people\'s pages (the Board\'s or one person\'s)',
   'nodes.control': 'Propose commands to Patterns and PlayMap (to the show desk)',
   'halls.manage': 'Create halls and their rooms, set them up (names, Stagewatch link, holding image) and hand out their guest codes',
   'users.manage': 'Create accounts and set their roles, halls and rights',
@@ -43,11 +44,11 @@ const CAPS = Object.freeze({
  */
 const CAP_GROUPS = Object.freeze([
   Object.freeze({ id: 'room', label: 'In the room', caps: Object.freeze(['hall.view', 'hall.post', 'hall.files']) }),
-  Object.freeze({ id: 'show', label: 'Show', caps: Object.freeze(['display.control', 'display.manage', 'stage.send', 'nodes.control']) }),
+  Object.freeze({ id: 'show', label: 'Show', caps: Object.freeze(['display.control', 'display.manage', 'stage.send', 'stage.web', 'nodes.control']) }),
   Object.freeze({ id: 'run', label: 'Run AGMessage', caps: Object.freeze(['halls.manage', 'users.manage', 'settings.manage', 'audit.read', 'audit.export']) }),
 ]);
 
-const HALL_SCOPED = new Set(['hall.view', 'hall.post', 'hall.files', 'display.control', 'display.manage', 'stage.send', 'nodes.control']);
+const HALL_SCOPED = new Set(['hall.view', 'hall.post', 'hall.files', 'display.control', 'display.manage', 'stage.send', 'stage.web', 'nodes.control']);
 // The rights a room holds, not its hall: what a person reads, writes and shares there. Answered by canIn alone.
 const ROOM_SCOPED = new Set(['hall.view', 'hall.post', 'hall.files']);
 // The rights only an admin hands out. An account holding one is admin-level: changed only by an admin, and kept off the
@@ -58,17 +59,17 @@ const ROLES = Object.freeze({
   admin: { label: 'Admin', allHalls: true, caps: Object.keys(CAPS), words: 'Everything, every hall: accounts, rights and settings' },
   manager: {
     label: 'Project manager', allHalls: true,
-    caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'display.manage', 'stage.send', 'nodes.control', 'halls.manage', 'audit.read'],
+    caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'display.manage', 'stage.send', 'stage.web', 'nodes.control', 'halls.manage', 'audit.read'],
     words: 'Every hall: messages, files, screens, Stagewatch, show network; sets halls up',
   },
   senior: {
     label: 'Senior tech', allHalls: true,
-    caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'stage.send', 'nodes.control'],
+    caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'stage.send', 'stage.web', 'nodes.control'],
     words: 'Every hall: messages, files, screens, Stagewatch, show network',
   },
   tech: {
     label: 'Tech', allHalls: false,
-    caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'stage.send'],
+    caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'stage.send', 'stage.web'],
     words: 'Their halls: messages, files, screens, Stagewatch',
   },
   staff: { label: 'Staff', allHalls: false, caps: ['hall.view', 'hall.post', 'hall.files'], words: 'Their halls: messages and files' },

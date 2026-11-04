@@ -247,11 +247,25 @@ test('rbac: the rights and the roles say "screens", the word every page uses for
   ]);
 });
 
+test('rbac: stage.web, web pages on people\'s pages, is a hall\'s right of its own: Tech, Senior and Manager hold it, Staff and Viewers do not, a grant gives it and a revoke takes it off', () => {
+  // Plan 4-§5.9.2.2: its words name what it shows, and it sits in the Show group beside the speaker's screen.
+  assert.equal(rbac.CAPS['stage.web'], 'Show web pages on people\'s pages (the Board\'s or one person\'s)');
+  assert.deepEqual(Object.keys(rbac.ROLES).filter((r) => rbac.ROLES[r].caps.includes('stage.web')), ['admin', 'manager', 'senior', 'tech']);
+  assert.ok(rbac.HALL_SCOPED.has('stage.web') && !rbac.ROOM_SCOPED.has('stage.web') && !rbac.ADMIN_ONLY.has('stage.web'));
+  assert.ok(rbac.CAP_GROUPS.find((g) => g.id === 'show').caps.includes('stage.web'));
+  const tech = { id: 't1', role: 'tech', halls: ['HALL01'] };
+  assert.deepEqual([rbac.can(tech, 'stage.web', 'HALL01'), rbac.can(tech, 'stage.web', 'HALL02'), rbac.can({ ...tech, revoke: ['stage.web'] }, 'stage.web', 'HALL01'),
+    rbac.can({ id: 's1', role: 'staff', halls: ['HALL01'] }, 'stage.web', 'HALL01'), rbac.can({ id: 's1', role: 'staff', halls: ['HALL01'], grant: ['stage.web'] }, 'stage.web', 'HALL01'),
+    rbac.can({ id: 'v1', role: 'viewer', halls: ['HALL01'] }, 'stage.web', 'HALL01')], [true, false, false, false, true, false], 'a revoke takes it off, a grant gives it');
+  assert.deepEqual([rbac.canIn(tech, 'stage.web', { code: 'LEGAL123', hall: 'HALL01', main: false }), rbac.seatAllows('board', 'stage.web'), rbac.guestCaps('research', 'main').includes('stage.web')], [true, false, false],
+    'a hall\'s right, in each of its rooms; never On stage; no code guest holds it of its own');
+});
+
 test('rbac: the Accounts page\'s three groups of rights hold every right once, in the rights\' own order, and nothing else', () => {
   assert.deepEqual(rbac.CAP_GROUPS.map((g) => [g.id, g.label]), [['room', 'In the room'], ['show', 'Show'], ['run', 'Run AGMessage']]);
   const grouped = rbac.CAP_GROUPS.flatMap((g) => g.caps);
   assert.deepEqual(grouped, Object.keys(rbac.CAPS), 'each right once, in CAPS\'s order, a new right given its group as it is added');
-  assert.deepEqual(rbac.CAP_GROUPS.map((g) => g.caps.length), [3, 4, 5]);
+  assert.deepEqual(rbac.CAP_GROUPS.map((g) => g.caps.length), [3, 5, 5]);
   assert.ok(rbac.CAP_GROUPS[0].caps.every((c) => rbac.ROOM_SCOPED.has(c)), 'In the room: a room\'s own rights');
   assert.ok(rbac.CAP_GROUPS[2].caps.every((c) => !rbac.HALL_SCOPED.has(c)), 'Run AGMessage: no hall\'s right');
   assert.ok(Object.isFrozen(rbac.CAP_GROUPS) && rbac.CAP_GROUPS.every((g) => Object.isFrozen(g) && Object.isFrozen(g.caps)));
@@ -278,7 +292,7 @@ test('rbac: a holder of users.manage who is not an admin makes, widens and takes
   assert.equal(rbac.mayChange(lead, null, { role: 'senior', allHalls: false, halls: ['HALLA1'], revoke: ['nodes.control'] }), null, 'a richer role with what it lacks taken off');
   assert.equal(rbac.mayChange({ id: 'a2', role: 'manager', grant: ['users.manage'] }, crew, { allHalls: true, grant: ['nodes.control'] }), null, 'a project manager holds every hall');
   // What the Accounts page offers: exactly what mayChange allows.
-  assert.deepEqual(rbac.giveable(lead), { admin: false, caps: ['display.control', 'hall.files', 'hall.post', 'hall.view', 'stage.send'], allHalls: false, halls: ['HALLA1'] });
+  assert.deepEqual(rbac.giveable(lead), { admin: false, caps: ['display.control', 'hall.files', 'hall.post', 'hall.view', 'stage.send', 'stage.web'], allHalls: false, halls: ['HALLA1'] });
   assert.deepEqual(rbac.giveable({ id: 'a1', role: 'admin' }), { admin: true, caps: Object.keys(rbac.CAPS), allHalls: true, halls: [] });
   assert.deepEqual(rbac.giveable({ id: 'a2', role: 'manager', grant: ['users.manage'] }).halls, [], 'every hall: no list');
 });
@@ -320,7 +334,7 @@ test('rbac: an account\'s side rooms, On stage halls and chat view: a side room 
   assert.deepEqual(rbac.giveableRooms({ ...pm, rooms: [MEDIA, LEGAL, 7] }), { all: false, rooms: [LEGAL, MEDIA] });
   assert.deepEqual(rbac.giveableRooms(pm), { all: false, rooms: [] }, 'every hall: no room');
   assert.deepEqual(rbac.giveableRooms({ ...admin, disabled: true }), { all: false, rooms: [] });
-  assert.deepEqual(rbac.giveable(lead), { admin: false, caps: ['display.control', 'hall.files', 'hall.post', 'hall.view', 'stage.send'], allHalls: false, halls: ['HALLA1'] }, 'giveable keeps its shape');
+  assert.deepEqual(rbac.giveable(lead), { admin: false, caps: ['display.control', 'hall.files', 'hall.post', 'hall.view', 'stage.send', 'stage.web'], allHalls: false, halls: ['HALLA1'] }, 'giveable keeps its shape');
   // A page is told an account's side rooms and On stage halls with its rights, last.
   const v = rbac.rightsView({ ...crew, rooms: [MEDIA, LEGAL], board: ['HALLA1'] });
   assert.deepEqual([Object.keys(v).slice(-2), v.rooms, v.board], [['rooms', 'board'], [LEGAL, MEDIA], ['HALLA1']]);
@@ -1340,7 +1354,7 @@ test('a one-hall tech given users.manage manages only accounts within its own ri
   const row = (name) => view.users.find((u) => u.username === name);
   assert.match(row('pat').locked, /hold yourself/, 'the page shows the richer account locked');
   assert.equal(row('cam').locked, '');
-  assert.deepEqual(view.giveable, { admin: false, caps: ['display.control', 'hall.files', 'hall.post', 'hall.view', 'stage.send'], allHalls: false, halls: [hallA] });
+  assert.deepEqual(view.giveable, { admin: false, caps: ['display.control', 'hall.files', 'hall.post', 'hall.view', 'stage.send', 'stage.web'], allHalls: false, halls: [hallA] });
   // The page groups the rights as the server does, and the admin page is told who may give rooms there (Members…): an
   // account the Accounts routes let manage accounts, never one they refuse, nor the laptop's token, which is no account.
   assert.deepEqual(view.capGroups, JSON.parse(JSON.stringify(rbac.CAP_GROUPS)));

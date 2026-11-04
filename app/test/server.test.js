@@ -65,6 +65,30 @@ test('AGMessage server: security, resume, persistence', async (t) => {
   const { code } = await roomRes.json();
   assert.match(code, /^[A-Z0-9]{6}$/);
 
+  await t.test('the hall page alone frames https pages (a web page on a person\'s page); every other page, the screen page and the transcript frame nothing but AGMessage\'s own', async () => {
+    const frameSrc = (csp) => { const m = /(?:^|;\s*)frame-src ([^;]+)/.exec(csp || ''); return m ? m[1] : null; };
+    const hallPage = await fetch(base + '/app.html');
+    const hallCsp = hallPage.headers.get('content-security-policy');
+    assert.equal(frameSrc(hallCsp), "'self' blob: https:");
+    assert.match(hallCsp, /frame-ancestors 'self'/);
+    assert.equal(hallPage.headers.get('x-frame-options'), 'SAMEORIGIN');
+    // The same policy but its frames: the hall page's and the others' differ in frame-src alone.
+    const others = ['/', '/index.html', '/halls.html', '/users.html', '/admin.html', '/d/' + 'a'.repeat(43), '/app.js', '/pagelayer.mjs'];
+    for (const p of others) {
+      const r = await fetch(base + p);
+      const csp = r.headers.get('content-security-policy');
+      assert.equal(frameSrc(csp), "'self' blob:", p);
+      assert.equal(csp, hallCsp.replace("frame-src 'self' blob: https:", "frame-src 'self' blob:"), p + ': the strict policy, whole');
+      assert.equal(r.headers.get('x-frame-options'), 'SAMEORIGIN', p);
+    }
+    // The transcript keeps a policy of its own, stricter still: no frame-src, so default-src 'none' frames nothing.
+    const tr = await fetch(base + '/api/admin/transcript/' + code, { headers: { cookie } });
+    assert.equal(tr.status, 200);
+    const trCsp = tr.headers.get('content-security-policy');
+    assert.equal(frameSrc(trCsp), null);
+    assert.match(trCsp, /^default-src 'none'/);
+  });
+
   await t.test('admin login refuses requests that came through the tunnel', async () => {
     const r = await fetch(base + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.9' }, body: JSON.stringify({ token: TOKEN }) });
     assert.equal(r.status, 403);
