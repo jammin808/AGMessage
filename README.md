@@ -116,8 +116,25 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   let go with the take, uploads are served `no-store` and never saved by their address, AGMessage's menu stands in for
   the browser's on what is shown (Shift+right-click too), nothing is dragged out, and printing leaves the stage out. A
   picture drawn for the stage lives while a take or Earlier names it, then goes. [docs/DISPLAYS.md](docs/DISPLAYS.md)
+- **Files: 📎 Share for download, or 📺 Show the Board — two acts.** A file attached to a message (📎 in its row, or dropped
+  or pasted on the feed or the composer) opens backstage in the **👁 Preview — the Board does not see this**, from the
+  copy on the device, nothing uploaded until it is shared or shown. **📎 Share for download** puts a card in the room's
+  chat ("📎 Board pack.pdf · PDF · 2.1 MB", its name the uploaded file's, never the poster's); **nothing opens itself on
+  anyone's panel**. **📺 Picture of p. 12** (a new picture of that page alone) and **📺 Document at p. 12** (the whole
+  file, the Board pages through it) sit side by side on the Preview's bar, with **☐ Let them download it** under the
+  document's alone (never for a file with hidden parts: hidden sheets, rows, columns, slides or shapes, Word's hidden
+  text); a file's ⋯ (**📺 Show the Board ▸**) and a person's **Show them a
+  document…** open the same short bar. **Downloads are for the backstage team, by a ticket the server gives each seat**:
+  ⬇ Download for the admin and the backstage seats, never an observer or a Viewer account (their pages are never given a
+  file's link: they see the card without its picture); **a Board tablet keeps no copy and downloads nothing, but an item
+  shown with Download ticked**, from its card, its layer and Earlier; the page says "⬇ Downloading…", then "✓ … reached
+  this browser". A share says "Shared in Main — the backstage team can download it; the Board can open it." A file
+  moves to another room only from a seat that may download it. **Files to transfer take more types**: zip, MP4, M4A, MOV,
+  MP3, WAV, OpenDocument and password-protected Word, Excel and PowerPoint files, their first bytes checked, download
+  only ("📦 … · download only"), never opened, previewed or shown by AGMessage.
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, PowerPoint, CSV,
-  Markdown, text, images) shared and pushed to the on-stage panel or to screens, PDFs on iPads from iPadOS 16.4 (pdf.js's
+  Markdown, text, images) shared for download, opened in a person's own panel (👁 Look, 👁 Preview), shown to the Board or
+  on screens, PDFs on iPads from iPadOS 16.4 (pdf.js's
   legacy build), JPEG 2000 pictures in them included. The panel reads each file on the device, by bounded readers (Word,
   Excel and PowerPoint in a worker with a 15 s deadline), with a page box, zoom, find and the place kept; **Word has page
   numbers**, Word's own ("≈" where its layout is missing); a CSV is a grid, PowerPoint an outline, and Word and Excel keep

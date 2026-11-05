@@ -257,7 +257,7 @@ test('outbox hold: a file is held in memory only, uploaded with the message, and
   const t = rig({ store });
   t.join();
   const uploads = [];
-  const answers = [{ network: true }, { status: 403, error: 'Join a room to share files.' }, { url: '/uploads/1-aaaaaaaaaaaa-a.pdf', mime: 'application/pdf' }, { url: '/uploads/2-bbbbbbbbbbbb-a.pdf', mime: 'application/pdf' }];
+  const answers = [{ network: true }, { status: 403, error: 'Join a room to share files.' }, { status: 429, error: 'Slow down — one file at a time.' }, { url: '/uploads/1-aaaaaaaaaaaa-a.pdf', mime: 'application/pdf' }, { url: '/uploads/2-bbbbbbbbbbbb-a.pdf', mime: 'application/pdf' }];
   const file = { name: 'a.pdf' };
   const a = t.ob.hold('message', { type: 'file', url: '', filename: 'a.pdf', caption: 'the deck' }, { file, upload: (f) => { uploads.push(f); return answers.shift(); } });
   const settle = () => new Promise((r) => setImmediate(r));
@@ -269,16 +269,47 @@ test('outbox hold: a file is held in memory only, uploaded with the message, and
   assert.equal(a.state, 'waiting', 'a token a join renewed: once more');
   t.c.advance(2000); await settle();
   assert.equal(uploads.length, 3);
+  assert.equal(a.state, 'waiting', 'the uploads\' rate turned it away: it waits its turn');
+  assert.equal(t.s.sent.length, 0);
+  t.c.advance(1999); await settle();
+  assert.equal(uploads.length, 3, 'not before its wait');
+  t.c.advance(1); await settle();
+  assert.equal(uploads.length, 4);
   assert.equal(t.s.sent.length, 1);
   assert.equal(t.s.sent[0].args[0].url, '/uploads/1-aaaaaaaaaaaa-a.pdf');
   assert.equal(JSON.parse(store.map.get(KEY))[0].file, true, 'its bytes are not in the store');
   t.s.sent[0].ack({ ok: false, error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true });
   await settle();
-  assert.equal(uploads.length, 4, 'the server no longer has it: uploaded once more');
+  assert.equal(uploads.length, 5, 'the server no longer has it: uploaded once more');
   assert.equal(t.s.sent[1].args[0].url, '/uploads/2-bbbbbbbbbbbb-a.pdf');
   assert.equal(t.s.sent[1].args[0].cid, a.cid);
   t.s.sent[1].ack({ ok: false, error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true });
   assert.equal(a.state, 'refused', 'once more, not again and again');
+
+  // The uploads' rate turning it away again and again: three more tries, 2 s apart, then refused with the server's words;
+  // Retry sends it again, its tries counted afresh.
+  t.ob.drop(a.cid);
+  const SLOW = { status: 429, error: 'Slow down — one file at a time.' };
+  const rated = [SLOW, SLOW, SLOW, SLOW, SLOW, { url: '/uploads/4-dddddddddddd-a.pdf', mime: 'application/pdf' }];
+  let ratedAsked = 0;
+  const r = t.ob.hold('message', { type: 'file', url: '', filename: 'r.pdf' }, { file, upload: () => { ratedAsked++; return rated.shift(); } });
+  await settle();
+  for (let i = 1; i <= 3; i++) {
+    assert.deepEqual([ratedAsked, r.state], [i, 'waiting'], 'turned away ' + i + ' times: it waits');
+    t.c.advance(2000); await settle();
+  }
+  assert.deepEqual([ratedAsked, r.state, r.words], [4, 'refused', 'Slow down — one file at a time.'], 'a fourth time: the server\'s words');
+  t.c.advance(10_000); await settle();
+  assert.equal(ratedAsked, 4, 'never again by itself');
+  const sentBefore = t.s.sent.length;
+  t.ob.retry(r.cid); await settle();
+  assert.deepEqual([ratedAsked, r.state], [5, 'waiting'], 'Retry: its tries counted afresh');
+  t.c.advance(2000); await settle();
+  assert.equal(ratedAsked, 6);
+  assert.equal(t.s.sent.length, sentBefore + 1);
+  assert.equal(t.s.sent.at(-1).args[0].url, '/uploads/4-dddddddddddd-a.pdf');
+  t.s.sent.at(-1).ack({ ok: true, id: 'm9', seq: 9 });
+  assert.equal(r.state, 'done');
 
   // After a reload a file never uploaded is not there to send: its echo says so, and it is not sent. One uploaded goes
   // by its link with its cid, and is "choose it again" only when the laptop no longer has the upload.

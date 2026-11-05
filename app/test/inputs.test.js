@@ -126,6 +126,10 @@ test('client values are read by their type: a value String() cannot convert reac
     // and one of them read by an id that is none.
     [guest, 'history:before', { beforeSeq: U }], [guest, 'history:before', U], [ctl, 'history:before', { beforeSeq: U }],
     [guest, 'history:message', { messageId: U }], [guest, 'history:message', U], [ctl, 'history:message', { messageId: U }],
+    // A download ticket, its message and its number by type (and from the admin's page, which sits in no room and watches
+    // none here): no ticket given.
+    [guest, 'file:download', { messageId: U, seq: U }], [guest, 'file:download', { messageId: U }], [guest, 'file:download', { seq: U }],
+    [guest, 'file:download', U], [ctl, 'file:download', { messageId: U }],
   ];
   // What each is answered: the field it could not read named, and nothing shown, numbered or reported.
   const KINDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document or a picture.';
@@ -173,6 +177,12 @@ test('client values are read by their type: a value String() cannot convert reac
     if (ev === 'admin:guestWeb') {
       assert.deepEqual(r, { ok: false, error: arg.on === U ? 'Say whether backstage guests may show web pages: on (true) or off (false).' : 'No such room.' }, ev + ' ' + JSON.stringify(arg));
       await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+    if (ev === 'file:download') {
+      const which = 'Say what to download: a file of this room (messageId), or something shown to you with Download (seq).';
+      const words = s === ctl ? 'Not joined' : arg && Object.hasOwn(arg, 'messageId') && !Object.hasOwn(arg, 'seq') ? 'Message not found' : which;
+      assert.deepEqual(r, { ok: false, error: words }, ev + ' ' + JSON.stringify(arg));
       continue;
     }
     if (ev === 'history:before' || ev === 'history:message') {

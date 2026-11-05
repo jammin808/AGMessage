@@ -24,7 +24,7 @@
 const CAPS = Object.freeze({
   'hall.view': 'See a hall: its messages, files, countdown and screens',
   'hall.post': 'Send messages, replies, action prompts and help requests',
-  'hall.files': 'Share files and push them to a hall',
+  'hall.files': 'Share files for download, or forward one into a hall',
   'display.control': 'Change what a hall\'s screens and people\'s pages show',
   'display.manage': 'Create, rename, move and revoke screens',
   'stage.send': 'Send to Stagewatch: the speaker\'s screen, or to the operator to pass on',
@@ -61,19 +61,19 @@ const ROLES = Object.freeze({
   manager: {
     label: 'Project manager', allHalls: true,
     caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'display.manage', 'stage.send', 'stage.show', 'stage.web', 'nodes.control', 'halls.manage', 'audit.read'],
-    words: 'Every hall: messages, files, screens, Stagewatch, show network; sets halls up',
+    words: 'Every hall: messages, files, screens, the Board\'s pages, Stagewatch, show network; sets halls up',
   },
   senior: {
     label: 'Senior tech', allHalls: true,
     caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'stage.send', 'stage.show', 'stage.web', 'nodes.control'],
-    words: 'Every hall: messages, files, screens, Stagewatch, show network',
+    words: 'Every hall: messages, files, screens, the Board\'s pages, Stagewatch, show network',
   },
   tech: {
     label: 'Tech', allHalls: false,
     caps: ['hall.view', 'hall.post', 'hall.files', 'display.control', 'stage.send', 'stage.show', 'stage.web'],
-    words: 'Their halls: messages, files, screens, Stagewatch',
+    words: 'Their halls: messages, files, screens, the Board\'s pages, Stagewatch',
   },
-  staff: { label: 'Staff', allHalls: false, caps: ['hall.view', 'hall.post', 'hall.files', 'stage.show'], words: 'Their halls: messages and files, and what they show the people on stage' },
+  staff: { label: 'Staff', allHalls: false, caps: ['hall.view', 'hall.post', 'hall.files', 'stage.show'], words: 'Their halls: messages, files, and information for the Board\'s pages' },
   viewer: { label: 'Viewer', allHalls: false, caps: ['hall.view'], words: 'Their halls: read only' },
 });
 

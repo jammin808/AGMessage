@@ -5075,6 +5075,179 @@ owner's answers 11, 12 and 20 as confirmed, and the reading S14, "Defaults"; glo
   `attachment`, navigations refused; what a Board tablet keeps and what cannot be prevented; the stage files' lifetime),
   `docs/DESIGN.md`, `docs/ANALYSIS.md` (`pagelayer.mjs` in the inert-HTML fence; the inputs), `CLAUDE.md`.
 
+**A shared file is a download for the backstage team, by a ticket; nothing opens itself; files to transfer take more
+types** (the plan's Part 4, unit 26, its §4.6 as Part 5 §0 and Part 7 §0.3 amend it; the owner's asks "Separate files to
+transfer from files to send to stage." and "It also needs file transfer between rooms for users to download.", and the
+owner's answers 12, 18 and 20 as confirmed: "A board tablet can have a feature to tick to enable it to be downloaded.",
+and the readings S1, S2, S11 and S15)
+- **Two acts, not one.** A file message is a transfer: **📎 Share for download** puts a card in the room's chat, and **it
+  opens itself on nobody's panel** (0.5.1 opened every file on every Board and backstage page; 0.6.0 had narrowed that to
+  files posted in the room). What the backstage team shows the Board is a take (📺), never a file in the chat.
+- **The card, per seat**: "📎 Board pack.pdf · PDF · 2.1 MB" (its kind, and its size where the message has it; a file
+  shared before 0.6.0 has none), "📦 … · download only" for a file AGMessage never opens; a picture keeps its inline
+  picture, drawn from its bytes fetched `no-store` through an object URL revoked as the card leaves the page; **👁 Look**
+  on a Board page, **👁 Preview** backstage (a tap on the card), in the person's own panel, reporting nothing; **⬇
+  Download** for the admin and the backstage seats that are not Viewer accounts, in the full view; **📺 Show the Board ▸**
+  for a seat that may show (a picture of p. 1, a picture of a page…, the document…); ⧉ Show on screens as before, never for
+  a file for download only.
+- **A file message carries the server's name, its size and whether it is for download only.** Its name is the upload's
+  own (or the name the room's first message of the file gave it), never the poster's, so a post again cannot rename a file
+  ("Final approved budget.pdf"); its `size` in bytes; and `transferOnly: true` for a file AGMessage never opens. A
+  forward and a send into another room carry them; the room's file index (`files`) says which are for download only.
+- **A download is the server's act, by a ticket per seat** (`file:download {messageId}` or `{seq}`, one chatter token, in
+  `lib/handlers/rooms.js`; `lib/downloads.js`; `lib/pages.js` `mayDownload`, pure). A ticket is given to the admin's own
+  page (where it does not sit On stage, and from the admin page for the room it watches) and to a seat backstage whose
+  account is not a Viewer; **never to an observer or a Viewer account** ("Downloads are for the backstage team."); **On
+  stage, a file of the room is a Look only** ("On stage tablets keep no copies — ask the backstage team to show it to you
+  with Download ticked."), and **a document shown with Let them download it ticked** is downloaded there, by the take's
+  number, current or under Earlier ("This was shown without Download." otherwise; "This was withdrawn." for one
+  withdrawn, whose tickets are voided). A ticket is 18 random bytes, single use, 60 s, bound to the person, the file and
+  the address; at most **4 live for one page and 8 for one person** ("Finish the downloads already started first."), read
+  before the 1,000 kept in all, the oldest going first. **`POST /uploads/:name/download`** with the form field `t`
+  answers the file as an `attachment` under the message's name with the stored file's own extension ("Agenda.cmd" for a
+  `.txt` saves as "Agenda.txt"; Windows' reserved characters dropped; the true name in `filename*`, an ASCII fallback
+  beside it), `no-store`, `nosniff` and the sandbox policy, streamed from the disk; **every other outcome is 204 No
+  Content** (a ticket unknown, spent, expired, for another file or address, and the form's own refusals: `t` twice, a body
+  over 1 KB, a third field), so the hall page stays where it was. The page builds the form with the DOM and says
+  "⬇ Downloading Board pack.pdf…", then "✓ Board pack.pdf reached this browser" when the server says the whole file went
+  (`file:sent`; `file:sending` when it starts), or "The download did not start — try again." after 5 s with nothing;
+  when the stream ends before the whole file went (the browser's download cancelled, the connection lost) the server says
+  so (`file:sent {whole: false}`) and the page says it stopped; a page that loses its connection with a download in
+  flight says it cannot tell whether all of it arrived. The admin page's ⬇ Download on a file of the room it watches
+  works the same way. Not audited, as a person reading what their room shows them (a confidential file's download is the
+  mark's unit's: its `file.download` row, written at `file:sent` and never for a ticket not spent, lands with the mark).
+- **An observer's page, and a Viewer account's, is never given a file message's link** (S2). Such pages sit in an io
+  room of their own (`ro:<key>`) and are sent each file message without its address (no `url` key at all): live, in a
+  join's history, older messages and file index, in a resume and in `history:before` and `history:message`. Withheld at
+  delivery, never in the stored message, so a 0.5.1 message is withheld the same way. **The admin's seat change moves a
+  page in or out in the same tick, before it is told**, so a page that ignores `roleChanged` is split by its new seat all
+  the same. A page joining another room on its own socket leaves the room it was in.
+- **A file moves to another room only from a seat that may download it where it is** (`forward`, `room:send`, a new
+  file or one of the room's): a code guest seated as an observer in one hall and backstage in another, or a Viewer
+  account granted the rights to post and share, is refused: "Files are moved by the backstage team." The forward's
+  picker answers by the same rule, offering such a seat no hall for a file and saying why. An On stage seat is refused
+  every forward first, text included ("Messages from On stage stay in this room.").
+- **Files to transfer take more types** (`lib/guard.js` `TRANSFER_TYPES`; `lib/pages.js` `TRANSFER_ONLY`): zip, MP4,
+  M4A, MOV, MP3, WAV, OpenDocument text, spreadsheet and presentation, each by its first bytes (a zip's signature, an
+  `ftyp` box at bytes 4-7, an ID3 tag or an MPEG audio frame header, RIFF and WAVE, an ODF's `mimetype` entry first,
+  stored, holding its type), and **Word, Excel and PowerPoint files protected with a password**: a compound file whose
+  directory (`lib/cfbcheck.js`, read through `fs.promises` within 64 KB) holds `EncryptionInfo` and `EncryptedPackage` and
+  none of `WordDocument`, `Workbook`, `PowerPoint Document`, `Macros` or `_VBA_PROJECT_CUR`, so a Word 97 document with a
+  macro renamed `Agenda.docx` is refused ("That file's contents don't match its type, so it wasn't shared."). Their type
+  is `application/octet-stream`; AGMessage never opens, draws, previews, parses, shows or sends one to the AI; **a `GET`
+  answers 404** (a transfer type by its extension, a protected Office file by its first eight bytes, read at each `GET`,
+  so after a restart too); a take of one is refused ("That file is for download only: AGMessage does not open it."),
+  `sourceOk` reading the upload's and the messages' word and the take's check its first bytes; and it is downloaded only
+  by a ticket. A zip is never inflated. An upload of another type says which are taken. A `GET` of a Word, Excel or
+  PowerPoint file whose first bytes cannot be read (held by another program) is 404 too, never served unchecked.
+- **The composer's 📎** (Part 5 §0): the File tab goes. 📎 in the Message row, or a file dropped or pasted on the feed or
+  the composer, attaches a file to the next message: a chip ("📎 Board pack.pdf · 2.1 MB", Remove), Send reads **📎 Share
+  for download** (**Share in Legal** with To: set), its words the caption; it is uploaded as it is sent, never before.
+  Backstage, the file opens in the panel's **👁 Preview — the Board does not see this** from the copy on the device:
+  nothing reaches AGMessage until it is shared or shown. The message box reads "Type a message to the Board…" (in a side
+  room, "Type a message to Legal…"). A share the uploads' rate turns away (429: a burst of four, then one every 2 s, which
+  a picture, the document and two shares in a row reach) is held by the outbox and uploaded again up to three times, 2 s
+  apart (§5.9.7's steps), then refused with the server's words and its Retry. Once the server has a share, the page says
+  **"Shared in Main — the backstage team can download it; the Board can open it."** ("Shared in Legal — the backstage team
+  can download it." in a side room, which has no Board, and for a file for download only, which the Board does not open).
+  A file attached on the device that is only ever transferred, a password-protected Word, Excel or PowerPoint file
+  included (its first eight bytes read on the device), is a "download only" chip and never opens in the Preview.
+- **The action prompt's button reads "❓ Ask the Board"** ("❓ Ask Legal" in a side room), in place of Send.
+- **The Preview's bar**, for a seat that may show the Board: **📺 Picture of p. 12** (a PDF's page drawn on this page into
+  a new picture, its long edge 2,048 px, never over 4,096 px a side or 5,242,880 pixels, and uploaded as it is shown, saying
+  it is a picture of the file or of the pusher's own copy; for an image, **Show this picture**) and **📺 Document at p. 12**
+  (the whole file, the Board pages through it; a file on the device uploaded as it is shown), side by side, one click each,
+  with **☐ Let them download it** under the document's alone, **disabled for a file whose reader found hidden parts**
+  (hidden sheets, rows, columns, slides or a slide's hidden shapes, Word's hidden text; `docmodel.mjs` `hiddenPartsOf`,
+  the deck's outline counting the shapes it leaves out): "This file has hidden parts: Download would hand them over. Share
+  a copy without them for download instead." The bar is offered only over a file its reader drew. The place is the
+  Preview's own. A file's ⋯ (**📺 Show the Board ▸** a picture of p. 1, a picture of a page…,
+  the document…) and a person's **Show them a document…** (People: for the operator, any person; for a seat that may only
+  show, a person On stage) open **the short document bar**: the file (where none is named), its place, Let them download
+  it and where it arrives.
+- **The panel's two readers**: on a Board page **📺 On stage** ("Nothing on stage. What the backstage team shows you
+  appears over the chat or here; ▭ Minimise keeps it here."), and backstage **👁 Preview — the Board does not see this**.
+  A take shown with Download ticked has **⬇ Download** on its card (in the simple view's Shown to you beside 👁 Look; in
+  the full view's ⋯), on the layer's bar in either view (and its ⋯ in the full view), and under Earlier once it is taken
+  down, until it is withdrawn.
+- **On an On stage seat, in either view**, the panel's reader, the side bar's cards and the feed's pictures are On stage
+  content: AGMessage's menu in place of the browser's (Shift+right-click too), no picture dragged out, no long-press "Save
+  to Photos".
+- **The support view opens nothing on a person's panel**: a file a person opens (`userState 'doc'`) follows them to
+  their own pages and to the admin's support view of them, and one the support view opens reaches nobody.
+- **Every reader** (§4.6.5): the halls board's line reads "📎 Board pack.pdf — caption"; the transcript "📎 *name*
+  (shared for download) — caption" (", download only" for a file AGMessage never opens); the AI's thread `shared "name"
+  for download: caption`; the admin page's room view "📎 name — caption" (📦 and "· download only") with ⬇ Download; a
+  reply's quote of a file "📎 name".
+- **The words** (§4.6.2): `hall.files` reads "Share files for download, or forward one into a hall"; the Project manager,
+  Senior tech and Tech roles add "the Board's pages", and Staff reads "Their halls: messages, files, and information for
+  the Board's pages".
+- Rolling back to 0.5.1: observers are given file links again and there are no download tickets; a file's address
+  saves an Office file again; the composer's File tab is back; a transfer-only file is unreachable (0.5.1's `GET`
+  refuses an extension it does not list, and serves a protected `.docx` as a Word file, which no reader opens); a file's
+  `size` and `transferOnly` are kept on its message and ignored.
+- Choices where the plan left room: the File tab goes as Part 5 amends §4.6.3 (📎 in the Message row, the attached file a
+  chip, Send reading Share for download), so "the File pane" of the unit is the composer's 📎 and the Preview's bar; the
+  Preview's picture button is offered for a PDF and an image alone (a picture of a DOM reader's view, "Show what you see",
+  is sent as data, which is the quotes' unit), and the Document button for every type the stage shows; a Word document
+  shown from the bar opens at its top (its place is a paragraph, which the Preview's page does not name); the short bar
+  is an ask in place, its file chosen from the room's files (the Preview's own copy first) where it is opened from a
+  person; the full view's take card keeps its two buttons (Show again, Remove) and offers ⬇ Download in its ⋯, the simple
+  view's card shows Look and Download; the admin page downloads a file of the room it watches; a transfer-only file is
+  told on its message (`transferOnly`) and `sourceOk` refuses it by that word too, the first-bytes check backing it; a
+  file message's caption from 📎 is its words, at most 500 characters as before; the pages' file types (the stage's and
+  those only ever transferred) are one copy in the catalogue, held to the server's tables by a test, the take layer's own
+  copy of the stage's too. Bench: the bytes a busy hall's reload fetches with `no-store` are not recorded — no
+  measurement this round (no venue Wi-Fi or busy hall on the bench); every picture is fetched again on a reload, by
+  design.
+- Tests: `test/downloads.test.js` (new: each transfer type taken by its first bytes and refused with the wrong ones, a
+  `.mov` starting `moov`, an ODF whose `mimetype` is another type's, not first or compressed; a compound file decided by its
+  directory, a renamed Word 97 document, macros, `_VBA_PROJECT_CUR`, a directory past 64 KB, a loop and a chain past the
+  file refused; the tickets' one use, address, file, 60 s, four a page and eight a person while another person's stays
+  live, the 1,001st pushing out the oldest, a withdrawn take's voided; the attachment's names; `mayDownload`'s table and
+  `linkless`; end to end: the server's name and size on a file message, an observer's and a Viewer account's live
+  message, join history, files, resume and read-back without `url`, the tickets for each seat and their refusals, the
+  file by its ticket with its headers and `file:sending` and `file:sent` to the page that asked, a second use, another
+  address, another file, `t` twice, a body over 1 KB, three fields, no field and JSON each 204 with no body; a seat
+  moved to observer sent the next file without its link; forward refused to a code guest observing here and backstage
+  there and to a Viewer account, an On stage forward refused first, the admin's forward carrying the name and the size; the
+  forward's picker offering a Viewer account no hall for a file, with why; a zip forwarded transfer-only with its size;
+  `room:send` of a file refused to a Viewer account (a text sent), a research page's file sent into a hall reaching the
+  observer seated there and the copy kept here reaching this hall's observer without `url`; `history:before` withheld
+  the same way; the admin page's download of a file of the room it watches;
+  the `doc` relay to the support view and the person's own pages, none from the support view; `{seq}` tickets for a take
+  shown with Download ticked, refused without it, to an observer, to one not shown it and once withdrawn, its tickets
+  voided; each transfer type accepted `transferOnly` and refused with the wrong bytes, a renamed Word 97 document, macros,
+  `_VBA_PROJECT_CUR` and a directory past 64 KB refused and nothing kept, 404 on `GET`, refused as a take and on a
+  screen (a file or a holding image),
+  `application/octet-stream` by its ticket, a protected Word file's `GET` 404 after a restart), `test/pages.test.js` (the
+  transfer-only types, no key in both tables, `sourceOk`'s refusal by extension and by an upload's or a message's word),
+  `test/server.test.js` (an observer's first open: every file without its link, on purpose), `test/inputs.test.js`
+  (`file:download` by type), `test/outbox.test.js` (an upload the rate turned away waits 2 s and goes again, at most three
+  times, then refused with the server's words, and Retry counts afresh), `test/docmodel.test.js` (a deck counts its hidden
+  shapes; `hiddenPartsOf` for each kind),
+  `test/menus.test.js` (`file:download` refused to every seat its rights hide it from),
+  `test/catalog.test.js` (the facts `download` and `takeDownloads`; Look and Preview, Download, Show the Board ▸ and its
+  choices, a file for download only and a linkless file in the seat matrix; ⬇ Download on a take and a card shown with
+  Download, on the layer's bar in either view and under Earlier; Show them a document…; the composer's 📎 and Share for
+  download, Ask the Board and Ask Legal; the admin page's Download; the pages' file types the server's), `lib/busy.js`
+  (`file:download` is input, as `test/busy.test.js` holds every verb a handler registers), `test/modules.test.js` (the
+  connection's helpers, the context's parts), `test/accounts.test.js` (the roles' words, on purpose), `test/halls.test.js` (the board's 📎, on purpose), `test/resilience.test.js` (the hex
+  count lowered to 239). The browser smoke: the hall page's backstage words (the message box, 📎, the Preview); D on a
+  focused file saving it whole under its name by its ticket, the page fetching nothing of it and saying it reached this
+  browser; a file dropped on the composer attached and drawn in the Preview with nothing uploaded; Picture of p. 1 and
+  Document at p. 1 each one click to a ✓ take; Download ticked showing ⬇ on the Board's card, which saves it; Share putting a
+  card in the feed and nothing on the Board's page, a zip "download only" with no Look, Show or screen, Look and no Download
+  On stage, an observer's card with no link, picture or act; a Board seat's Look read `no-store` and its object URLs revoked;
+  a file of before 0.6.0 as a card; the feed's ⋯ → The document… and the People tab's Show them a document… opening the
+  short bar; Let them download it disabled for a spreadsheet with a hidden sheet; the console's person menu with Show them
+  a document…, on purpose; the Board's chat view upright at 820×1180 brought its tabs by a document arriving in its side
+  bar, a file shared in the chat showing nothing, on purpose; the panel's heading Shown to you in the simple view and the
+  seat's in the full view, whichever draws last.
+- The papers: `README.md`, `README.txt` (sharing and showing, downloads, files to transfer), `SECURITY.md` (downloads by
+  ticket, links withheld, files moved, files to transfer only), `docs/ACCOUNTS.md` (who may download and who may move a
+  file, `hall.files`' words), `docs/DISPLAYS.md`, `docs/DESIGN.md`, `docs/ANALYSIS.md`, `CLAUDE.md`.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

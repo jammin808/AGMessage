@@ -12,7 +12,8 @@
 //          is not sent again; another person's are dropped, never sent as them, and `clear()` (sent out of the hall)
 //          drops them all. A file's bytes are held in memory only: one not yet uploaded is "choose the file again"
 //          after a reload, and one uploaded goes with its cid; it is uploaded once more when the server no longer has
-//          it or its upload token was renewed.
+//          it or its upload token was renewed, and up to three times more, 2 s apart, when the uploads' rate turned it
+//          away, then refused with the server's words.
 //   now    what a person does to something: pin, react, delete, a screen's take, the stage, the admin's acts. Refused at
 //          once while the page is not connected and joined, so a click is never sent late; an answer not back in 5 s is
 //          "No answer", and the server's own answer, when it comes after that, is given too, once, marked `late`; after
@@ -29,6 +30,7 @@
   const HELD_MAX_MS = 86400000;
   const ACK_MS = 5000;
   const BUSY_MS = 1000;
+  const RATE_TRIES = 3;      // an upload the uploads' rate turned away goes again at most this many times, 2 s apart
   const PREFIX = 'agm.outbox|';
   const WORDS = {
     offline: 'Not connected — AGMessage is reconnecting.',
@@ -189,16 +191,22 @@
       Promise.resolve().then(() => item.upload(item.file)).then((r) => r, () => ({ network: true })).then((r) => {
         if (item.attempt !== attempt || item.state !== 'sending') return;
         if (r && typeof r.url === 'string' && r.url) {
+          item.rated = 0;
           item.args = Object.assign({}, item.args, { url: r.url }, typeof r.mime === 'string' ? { mime: r.mime } : {});
           save();   // its link from now on, so a reload sends it by that link rather than asking for the file again
           if (isReady()) { send(item); return; }
           item.state = 'waiting'; inflight = null; tell(item); return;
         }
-        // An upload refused for its token, which a join renews, goes once more; one that never reached AGMessage waits.
-        if (r && (r.network || (r.status === 403 && !item.retoken))) {
-          if (!r.network) item.retoken = true;
+        // An upload refused for its token, which a join renews, goes once more; one that never reached AGMessage waits and
+        // goes again; one the uploads' rate turned away (429: one file every 2 s past a burst) goes again 2 s apart, at
+        // most RATE_TRIES times, then is refused with the server's words (Retry sends it again).
+        const rated = !!r && r.status === 429 && (item.rated || 0) < RATE_TRIES;
+        if (r && (r.network || rated || (r.status === 403 && !item.retoken))) {
+          if (r.status === 403) item.retoken = true;
+          if (rated) item.rated = (item.rated || 0) + 1;
           item.state = 'waiting'; inflight = null; tell(item); later(BUSY_MS * 2); return;
         }
+        item.rated = 0;
         settle(item, 'refused', (r && r.error) || WORDS.refused);
       });
     }

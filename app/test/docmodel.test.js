@@ -202,7 +202,8 @@ test('pptxOutline: slides in the presentation\'s order — a title, items by lev
     { xml: slide(tableFrame) },
   ]);
   const out = M.pptxOutline(parts);
-  assert.deepEqual(out.slides.map((s) => [s.n, s.hidden]), [[1, false], [2, true], [3, false]]);
+  assert.deepEqual(out.slides.map((s) => [s.n, s.hidden, s.hiddenShapes || 0]), [[1, false, 3], [2, true, 0], [3, false, 0]], 'a slide counts the hidden shapes, pictures and groups it skipped');
+  assert.ok(!Object.hasOwn(out.slides[2], 'hiddenShapes'), 'a slide with none says nothing of them');
   assert.deepEqual(out.slides[0].blocks.map((b) => [b.kind, b.text, b.level || 0, b.src || '']), [
     ['h', 'Q3 results', 1, ''], ['li', 'Revenue up', 1, ''], ['li', 'Costs flat', 1, ''], ['li', 'Detail', 2, ''], ['img', '', 0, 'ppt/media/chart.png'], ['p', 'in a group', 0, ''], ['p', 'A text box', 0, ''],
   ]);
@@ -216,6 +217,19 @@ test('pptxOutline: slides in the presentation\'s order — a title, items by lev
   assert.deepEqual(M.planSlides(out, 'research'), { slides: out.slides, notShown: '' });
   const text = M.documentText({ kind: 'deck', slides: out.slides });
   assert.ok(text.includes('Q3 results') && !text.includes('Only for questions'), 'the AI\'s text leaves the hidden slide out');
+});
+
+test('hiddenPartsOf: a file with a hidden sheet, row, column, slide or shape, or Word\'s hidden text, is one the page never shows with Download ticked', () => {
+  const shapeOnly = M.pptxOutline(deckParts([{ xml: slide(sp('Agenda', { ph: 'title' }) + sp('SALARIES', { hidden: true })) }]));
+  assert.deepEqual(shapeOnly.slides.map((s) => [s.hidden, s.hiddenShapes]), [[false, 1]], 'a deck with a hidden shape and no hidden slide');
+  const plain = M.pptxOutline(deckParts([{ xml: slide(sp('Agenda', { ph: 'title' })) }]));
+  const sheet = (o) => ({ name: 'S', rows: [['a']], ...o });
+  assert.deepEqual([
+    M.hiddenPartsOf({ kind: 'deck', slides: shapeOnly.slides }), M.hiddenPartsOf({ kind: 'deck', slides: [{ n: 1, hidden: true, blocks: [] }] }), M.hiddenPartsOf({ kind: 'deck', slides: plain.slides }),
+    M.hiddenPartsOf({ kind: 'word', blocks: [], hidden: 2 }), M.hiddenPartsOf({ kind: 'word', blocks: [], hidden: 0 }),
+    M.hiddenPartsOf({ kind: 'book', sheets: [sheet({ hidden: 2 })] }), M.hiddenPartsOf({ kind: 'book', sheets: [sheet({ hiddenRows: [3] })] }), M.hiddenPartsOf({ kind: 'book', sheets: [sheet({ hiddenCols: [0] })] }), M.hiddenPartsOf({ kind: 'book', sheets: [sheet({ hidden: 0, hiddenRows: [], hiddenCols: [] })] }),
+    M.hiddenPartsOf({ kind: 'md', blocks: [] }), M.hiddenPartsOf({ kind: 'text', blocks: [] }), M.hiddenPartsOf(null),
+  ], [true, true, false, true, false, true, true, true, false, false, false, false]);
 });
 
 test('the document worker: a deck\'s slides, their relationships and the pictures they name come back as text and bytes; its notes are never read out', async () => {

@@ -66,7 +66,6 @@
     linkCert: 'Stagewatch\'s certificate changed — nothing can be sent until an admin accepts it (Halls → Set up, or Admin → Show network).',
     noAi: 'AI drafts are off: no Anthropic API key — add one under ✨ AI drafts.',
     aiOff: 'AI drafts are off: they need an Anthropic key (admin) and the internet. Everything else works without them.',
-    noFile: 'Choose a file first.',
   });
   /** The support view's words (R8): every door the person has, drawn, and none of them acts. */
   const supportWords = (name) => 'This is ' + name + '\'s view — act from your own page.';
@@ -183,6 +182,33 @@
   // A Viewer account's pages hold no file's link, whatever its seat: no Look and no Download (the server's half is the
   // stage's withheld link).
   const seesFiles = (f) => (f.role === 'research' || f.role === 'board') && !f.viewer;
+  /** A file the page holds the link of (an observer's and a Viewer account's hold none: the server withholds it). */
+  const linked = (o) => typeof o.url === 'string' && /^\/uploads\/[\w.-]+$/.test(o.url);
+  /** A file AGMessage opens: one it holds the link of that is not for download only (a transfer-only file never is). */
+  const opens = (o) => linked(o) && o.transferOnly !== true;
+  /**
+   * The file types the stage shows (lib/pages.js STAGE_TYPES), by a file's address, and the types AGMessage only ever
+   * transfers (lib/guard.js TRANSFER_TYPES), never previewed or shown: the pages' one copy of each, held equal to the
+   * server's by test/catalog.test.js.
+   */
+  const STAGE_EXT = Object.freeze(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'md', 'csv', 'xlsx', 'xls', 'docx', 'pptx']);
+  const TRANSFER_EXT = Object.freeze(['zip', 'mp4', 'm4a', 'mov', 'mp3', 'wav', 'odt', 'ods', 'odp']);
+  const extOf = (u) => { const x = /\.([A-Za-z0-9]{1,5})$/.exec(String(u || '')); return x ? x[1].toLowerCase() : ''; };
+  /** A file the stage may show: one AGMessage opens, of a type the stage shows. */
+  const stageFile = (o) => opens(o) && STAGE_EXT.includes(extOf(o.url));
+  /**
+   * 📺 Show the Board ▸ on a file: a picture of its first page or of a page asked for (a PDF), the picture itself (an
+   * image), and the document, which opens the short bar (its place, Let them download it, where it arrives).
+   */
+  const stageChoices = (o) => {
+    const ext = extOf(o.url);
+    const pic = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+    return [
+      ...(ext === 'pdf' ? [{ value: 'picture1', label: 'A picture of p. 1' }, { value: 'picture', label: 'A picture of a page…' }] : []),
+      ...(pic ? [{ value: 'picture1', label: 'This picture' }] : []),
+      { value: 'doc', label: 'The document…' },
+    ];
+  };
   const full = (f) => f.view !== 'simple';
   /** The page an object's row is drawn on: the hall page's facts say 'hall', the admin page's 'admin'. */
   const onHall = (f) => f.page === 'hall';
@@ -336,14 +362,19 @@
         may: (f) => backstage(f) && (f.canPropose || f.canSendToStage), fits: (f, o) => full(f) && said(o), ready: (f) => f.stageWhy || true },
       { id: 'msg.sendNow', label: 'Send now to the speaker\'s screen', short: 'Send now', icon: '🖥', group: '2_send', fold: 'speaker', inline: () => 3,
         verb: 'stage:send', mode: 'now', may: (f) => backstage(f) && f.canSendToStage, fits: (f, o) => full(f) && said(o), ready: (f) => f.stageWhy || true },
+      // 📺 Show the Board ▸ on a file of a type the stage shows: a picture of a page, or the document (a take on the Board's
+      // pages, never a file in the chat); for a seat that may show on them (canPush, or canShow by a right of its own).
+      { id: 'msg.stage', label: 'Show the Board', icon: '📺', key: 'S', group: '2_send', inline: (f, o) => (o.type === 'file' ? 2 : false), verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush || f.canShow, fits: (f, o) => full(f) && o.type === 'file' && stageFile(o), submenu: (f, o) => stageChoices(o) },
       { id: 'msg.screens', label: 'Show on screens…', icon: '⧉', group: '2_send', inline: () => 4, verb: 'display:take', mode: 'now',
         may: (f) => f.canScreens, fits: (f, o) => full(f) && showable(o), ready: (f) => f.screens > 0 || WORDS.noScreens },
       // ↗ Send to ▸: one list of rooms, asked of the server as it opens: first those whose list lets this room send into
       // them (a copy stays here), then the other rooms this person may forward into. The runner sends by room:send to the
       // first, and by its verb, forward, to the rest; the person never chooses between two verbs. A file moves only from a
-      // seat that shares files here; a question is forwarded, never sent by a list; a help request stays in its room.
+      // seat that shares files here and may download them (lib/pages.js mayDownload); a question is forwarded, never sent by
+      // a list; a help request stays in its room.
       { id: 'msg.send', label: 'Send to', icon: '↗', key: 'F', group: '2_send', verb: 'forward', mode: 'hold',
-        may: (f, o) => (o.type === 'action' ? f.forwardable : f.forwardable || f.sends) && (o.type !== 'file' || f.files),
+        may: (f, o) => (o.type === 'action' ? f.forwardable : f.forwardable || f.sends) && (o.type !== 'file' || (f.files && f.download)),
         fits: (f, o) => full(f) && (o.type === 'text' || o.type === 'file' || o.type === 'action'),
         submenu: () => null },
       // ↗ Send back to Hall 2 › Legal: on a message another room sent here, while this room may send into that one; the
@@ -353,10 +384,14 @@
       // The room's pin; the simple view keeps it off (its pinned place is read-only there).
       { id: 'msg.pin', label: (f, o) => (o.pinned ? 'Unpin' : 'Pin'), icon: '📌', key: 'P', group: '3_keep', verb: 'pin', mode: 'now',
         may: (f) => f.pin, fits: (f) => full(f), undo: 'msg.pin' },
-      { id: 'msg.look', label: 'Look', icon: '👁', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local',
-        may: (f) => seesFiles(f), fits: (f, o) => o.type === 'file' },
-      { id: 'msg.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', verb: 'local', mode: 'local',
-        may: (f) => backstage(f) && !f.viewer, fits: (f, o) => o.type === 'file' && typeof o.url === 'string' && o.url.length > 0 },
+      // 👁 Look (On stage) or Preview (backstage): the file opened in the person's own panel, nothing reported or pushed;
+      // never a file for download only, which AGMessage does not open.
+      { id: 'msg.look', label: (f) => (f.role === 'research' ? 'Preview' : 'Look'), icon: '👁', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local',
+        may: (f) => seesFiles(f), fits: (f, o) => o.type === 'file' && opens(o) },
+      // ⬇ Download: the server's act, by a ticket for a seat that may download (the admin, the backstage team but a Viewer
+      // account), in the full view; On stage a file is a Look, and only a take shown with Download ticked downloads there.
+      { id: 'msg.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', verb: 'file:download', mode: 'now',
+        may: (f) => f.download, fits: (f, o) => full(f) && o.type === 'file' && linked(o) },
       { id: 'msg.copy', label: 'Copy text', icon: '📋', group: '3_keep', verb: 'local', mode: 'local',
         may: () => true, fits: (f, o) => full(f) && typeof o.text === 'string' && o.text.length > 0 },
       // ⊘ is the withdrawn line's mark, so the act has an icon of its own. Its sender or the admin takes back what this
@@ -374,12 +409,14 @@
 
     // A file: an entry of the panel's pinned list, and the file open in the panel (the Preview's header).
     file: [
+      { id: 'file.stage', label: 'Show the Board', icon: '📺', key: 'S', group: '2_send', verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush || f.canShow, fits: (f, o) => full(f) && stageFile(o), submenu: (f, o) => stageChoices(o) },
       { id: 'file.screens', label: 'Show on screens…', icon: '⧉', group: '2_send', verb: 'display:take', mode: 'now',
         may: (f) => f.canScreens, fits: (f, o) => showable(o), ready: (f) => f.screens > 0 || WORDS.noScreens },
-      { id: 'file.look', label: 'Look', icon: '👁', key: 'Enter', group: '3_keep', inline: () => 1, verb: 'local', mode: 'local',
-        may: (f) => seesFiles(f), fits: (f, o) => o.where === 'list' },
-      { id: 'file.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', verb: 'local', mode: 'local',
-        may: (f) => backstage(f) && !f.viewer, fits: (f, o) => typeof o.url === 'string' && o.url.length > 0 },
+      { id: 'file.look', label: (f) => (f.role === 'research' ? 'Preview' : 'Look'), icon: '👁', key: 'Enter', group: '3_keep', inline: () => 1, verb: 'local', mode: 'local',
+        may: (f) => seesFiles(f), fits: (f, o) => o.where === 'list' && opens(o) },
+      { id: 'file.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', verb: 'file:download', mode: 'now',
+        may: (f) => f.download, fits: (f, o) => full(f) && linked(o) },
       { id: 'file.pin', label: (f, o) => (o.pinned ? 'Unpin' : 'Pin'), icon: '📌', key: 'P', group: '3_keep', inline: () => 2, verb: 'pin', mode: 'now',
         may: (f) => f.pin, fits: () => true, undo: 'file.pin' },
       { id: 'file.close', label: 'Close', group: '4_manage', inline: () => 3, verb: 'local', mode: 'local',
@@ -408,29 +445,35 @@
     ],
 
     // The composer: its Send button (its one act on the row) and its ⋯, never its text field, where the browser's own
-    // menu stays (spelling, paste). `form` is the composer shown ('director' On stage; 'text', 'action' or 'file'
-    // backstage), `room` the name of the room its next send goes to (this room's, or the one To: is set to), `file` the
-    // name of the file chosen to send ('' for none), `replying` whom the next send answers ('' for nobody), `priority`
-    // whether 🔥 is pressed, `to` the reference of the room To: is set to ('' for this room).
+    // menu stays (spelling, paste). `form` is the composer shown ('director' On stage; 'text' or 'action' backstage),
+    // `room` the name of the room its next send goes to (this room's, or the one To: is set to), `file` the name of the
+    // file chosen to send ('' for none), `replying` whom the next send answers ('' for nobody), `priority` whether 🔥 is
+    // pressed, `to` the reference of the room To: is set to ('' for this room), `askWho` whom a question asks ('' for the
+    // Board, in a Main room; a side room's name, where there is no Board).
     compose: [
       // ✨ A draft of a reply, from the thread and the document on stage, into the composer: a person edits and sends it.
       // AI drafts off (no key, no internet) is the laptop's state, not a right: shown, with why.
       { id: 'compose.draft', label: 'Draft a reply', icon: '✨', group: '1_respond', verb: 'ai:draft', mode: 'now',
         may: (f) => backstage(f), fits: (f, o) => full(f) && o.form === 'text', ready: (f) => f.ai || WORDS.aiOff },
-      { id: 'compose.send', label: (f, o) => (o.room ? 'Send to ' + o.room : 'Send'), icon: '➤', group: '2_send', inline: () => 1, verb: 'message', mode: 'hold',
-        may: (f) => f.post, fits: () => true, ready: (f, o) => (o.form === 'file' && !o.file ? WORDS.noFile : true) },
+      // Send; with a file attached, 📎 Share for download (Share in Legal with To: set), its words the file's caption; on a
+      // question, ❓ Ask the Board (Ask Legal in a side room).
+      { id: 'compose.send', label: (f, o) => (o.form === 'action' ? 'Ask ' + (o.askWho || 'the Board') : o.file ? (o.to ? 'Share in ' + o.room : 'Share for download') : o.room ? 'Send to ' + o.room : 'Send'),
+        icon: (f, o) => (o.form === 'action' ? '❓' : o.file ? '📎' : '➤'), group: '2_send', inline: () => 1, verb: 'message', mode: 'hold',
+        may: (f) => f.post, fits: () => true },
       // To ▸: where the next message or file goes, this room or a room whose list lets this room send into it (by
       // room:send, a copy kept here). It goes back to this room after every send.
       { id: 'compose.sendTo', label: 'To', icon: '↗', group: '2_send', verb: 'room:send', mode: 'hold',
-        may: (f) => f.sends && f.post, fits: (f, o) => full(f) && (o.form === 'text' || o.form === 'file'),
+        may: (f) => f.sends && f.post, fits: (f, o) => full(f) && o.form === 'text',
         submenu: (f, o) => [{ value: '', label: 'This room', role: 'menuitemradio', checked: !o.to }]
           .concat(f.targets.map((t) => ({ value: t.ref, label: placeOf(t), role: 'menuitemradio', checked: o.to === t.ref }))) },
       { id: 'compose.priority', label: 'Priority', icon: '🔥', group: '2_send', verb: 'local', mode: 'local', checked: (f, o) => !!o.priority,
         may: (f) => f.post, fits: () => true },
+      // 📎 in the message row: a file chosen, dropped or pasted is attached to the next message, opened in the Preview from
+      // the copy on this device; nothing reaches AGMessage until it is shared or shown.
       { id: 'compose.attach', label: 'Attach a file…', icon: '📎', group: '2_send', verb: 'local', mode: 'local',
-        may: (f) => f.files, fits: (f, o) => o.form !== 'director' },
+        may: (f) => f.files, fits: (f, o) => o.form === 'text' },
       { id: 'compose.removeFile', label: 'Remove the file', group: '4_manage', verb: 'local', mode: 'local',
-        may: (f) => f.files, fits: (f, o) => o.form === 'file' && !!o.file },
+        may: (f) => f.files, fits: (f, o) => o.form === 'text' && !!o.file },
       { id: 'compose.cancelReply', label: 'Cancel the reply', key: 'Escape', group: '4_manage', verb: 'local', mode: 'local',
         may: (f) => f.post, fits: (f, o) => !!o.replying },
     ],
@@ -491,6 +534,11 @@
       // right-click, in the full view only: the simple view keeps the layer's buttons alone.
       { id: 'take.tab', label: 'Open in a new tab', icon: '🗗', group: '3_keep', verb: 'local', mode: 'local',
         may: () => true, fits: (f, o) => full(f) && o.kind === 'web' && typeof o.url === 'string' && o.url.length > 0 },
+      // ⬇ Download: a document shown with Let them download it ticked, and only that take, on the layer's bar in either
+      // view (and its ⋯ in the full view); never for an observer or a Viewer account (no ticket is given them). The
+      // server's act, by the take's number.
+      { id: 'take.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', inline: () => 3, verb: 'file:download', mode: 'now',
+        may: (f) => f.takeDownloads, fits: (f, o) => o.kind === 'doc' && o.download === true },
       // The person's own gesture, where the device has the Fullscreen API (`fullscreen`, a probe at load): a take never
       // enters it by itself.
       { id: 'take.fullscreen', label: (f, o) => (o.full ? 'Leave full screen' : 'Full screen'), icon: '⛶', group: '3_keep', inline: () => 3, verb: 'local', mode: 'local',
@@ -503,12 +551,18 @@
       // In the simple view a card's one act is 👁 Look (Shown to you); the full view keeps ⤴ Show again (an arrival in the
       // side bar: Show over the chat).
       { id: 'card.show', label: (f, o) => (!full(f) ? 'Look' : o.side ? 'Show over the chat' : 'Show again'), icon: (f) => (full(f) ? '⤴' : '👁'), group: '1_respond', inline: () => 1, verb: 'page:report', mode: 'self', may: () => true, fits: () => true },
+      // ⬇ Download on the card of a document shown with Let them download it ticked, in either view: that item alone.
+      { id: 'card.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', inline: () => 3, verb: 'file:download', mode: 'now',
+        may: (f) => f.takeDownloads, fits: (f, o) => o.kind === 'doc' && o.download === true },
       { id: 'card.remove', label: 'Remove', icon: '🗑', group: '9_danger', inline: () => 2, verb: 'page:report', mode: 'self', undo: 'card.remove', may: () => true, fits: (f) => full(f) },
     ],
     // Earlier: information taken off this person's page lately (superseded, handed back, put away), in its side bar under
-    // the cards. Opening one is a Look on this page alone: no report, no take. `seq`, `kind`, `url` (a web page's).
+    // the cards. Opening one is a Look on this page alone: no report, no take. `seq`, `kind`, `url` (a web page's),
+    // `download` (a document shown with Let them download it ticked, which keeps its ⬇ there until it is withdrawn).
     past: [
       { id: 'past.look', label: 'Look', icon: '👁', group: '1_respond', inline: () => 1, verb: 'local', mode: 'local', may: () => true, fits: () => true },
+      { id: 'past.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', inline: () => 2, verb: 'file:download', mode: 'now',
+        may: (f) => f.takeDownloads, fits: (f, o) => o.kind === 'doc' && o.download === true },
     ],
     // The simple view's ⋯ sheet: what is set once a session, each a row of its own, never a menu (the simple view has
     // none). `zoom` (the text size), `dark` (the theme), `full` (the device's screen is full now), `hall` (as Leave's ask
@@ -639,6 +693,10 @@
       { id: 'person.web', label: 'Show them a web page…', icon: '🌍', group: '2_send', verb: 'page:push', mode: 'now',
         may: (f) => (f.canPush || f.canShow) && f.canWeb, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0 && (f.canPush || o.where === 'console' || o.role === 'board'),
         ready: (f, o) => kindWhy(f, o, 'web'), confirm: (f, o) => webAsk('on ' + (o.name ? o.name + '\'s' : 'their') + ' pages') },
+      // A document on every page of theirs in the hall, by the short bar (the file, its place, Let them download it, where
+      // it arrives): for a seat that may show (canPush, any person; canShow, a person On stage).
+      { id: 'person.doc', label: 'Show them a document…', icon: '📄', group: '2_send', verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush || f.canShow, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0 && (f.canPush || o.where === 'console' || o.role === 'board') },
       { id: 'person.chat', label: 'Back to chat on their pages', icon: '💬', group: '2_send', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, 'chat') },
       // Take down: the information on their pages handed back alone (their `info` over the show, or `beside` it, as the
@@ -681,6 +739,9 @@
     ],
     // A message in the admin page's live feed: `id`, `type`, `text`, `from`, `hall` (its name).
     adminMsg: [
+      // ⬇ Download a file of the room the admin page watches: the server's act, by a ticket, as on the hall page.
+      { id: 'adminMsg.download', label: 'Download', icon: '⬇', key: 'D', group: '3_keep', inline: () => 1, verb: 'file:download', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => o.type === 'file' && typeof o.url === 'string' && /^\/uploads\/[\w.-]+$/.test(o.url) },
       { id: 'adminMsg.copy', label: 'Copy text', icon: '📋', group: '3_keep', verb: 'local', mode: 'local',
         may: (f) => f.admin, fits: (f, o) => typeof o.text === 'string' && o.text.length > 0 },
       { id: 'adminMsg.delete', label: 'Delete for everyone…', icon: '🗑', key: 'Delete', group: '9_danger', verb: 'admin:deleteMessage', mode: 'now',
@@ -906,6 +967,11 @@
       files: typeof s.uploadToken === 'string' && s.uploadToken.length > 0,
       canSendToStage: !!s.canSendToStage, canPropose: !!s.canPropose, stageWhy: stageWhy(s.stage),
       ai: !!s.ai,
+      // Whether this page may download a file of its room (lib/pages.js mayDownload, as the server answers the seat): the
+      // admin's own page where it does not sit On stage, a seat backstage that is not a Viewer account; and a take shown
+      // with Download ticked (`takeDownloads`), On stage too, but never an observer or a Viewer account.
+      download: !(s.account && s.account.role === 'viewer') && (role === 'research' || (s.admin === true && role !== 'board')),
+      takeDownloads: !(s.account && s.account.role === 'viewer') && role !== 'observer',
       canScreens: !!screens, screensManage: !!(screens && screens.manage), screens: screens && Array.isArray(screens.displays) ? screens.displays.length : 0,
       forwardable: !!s.forwardable,
       // Whether a message here may be sent into another room by its list (the join's `sends`), and those rooms as
@@ -1054,6 +1120,6 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, STAGE_EXT, TRANSFER_EXT, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
   Object.assign(root.AGM = root.AGM || {}, { catalog });
 })(typeof window !== 'undefined' ? window : globalThis);

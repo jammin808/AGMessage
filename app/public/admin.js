@@ -129,6 +129,12 @@ function showDashboard() {
   socket.on('disconnect', () => {
     document.getElementById('adminStatus').textContent = 'disconnected — reconnecting…';
     adminFactsChanged({ connected: false });
+    // A download in flight can no longer be told of: said so, never left waiting.
+    for (const [ticket, d] of downloading) {
+      clearTimeout(d.timer);
+      downloading.delete(ticket);
+      say('This page lost its connection while ' + d.name + ' downloaded, so it cannot say whether all of it arrived.', true);
+    }
   });
   socket.on('connect', () => {
     document.getElementById('adminStatus').textContent = 'connected';
@@ -161,6 +167,17 @@ function showDashboard() {
   // Another admin tab closed the hall this one is watching: show what is left.
   socket.on('roomClosed', ({ code } = {}) => { if (currentRoom && currentRoom.code === code) location.reload(); else refreshRooms(); });
   socket.on('pinUpdate', () => { /* same */ });
+  // A download this page asked for: begun (`file:sending`), then "reached this browser" once the server has sent the whole
+  // file, or "stopped" when its stream ended before that (`whole: false`).
+  socket.on('file:sending', ({ ticket } = {}) => { const d = downloading.get(ticket); if (d) d.began = true; });
+  socket.on('file:sent', ({ ticket, whole } = {}) => {
+    const d = downloading.get(ticket);
+    if (!d) return;
+    clearTimeout(d.timer);
+    downloading.delete(ticket);
+    if (whole === false) say('The download of ' + d.name + ' stopped before all of it was sent — try again.', true);
+    else say(AGM.mark('ok') + ' ' + d.name + ' reached this browser');
+  });
   // The tunnel's card hears this socket: its status pushed, and asked at each connection (which also checks the link
   // when its newest check is over a minute old).
   wireTunnel();
@@ -521,7 +538,8 @@ function buildAdminMessage(m) {
     : '—';
   let bodyHtml = '';
   if (m.type === 'text') bodyHtml = `<p>${escapeHtml(m.text)}</p>`;
-  else if (m.type === 'file') bodyHtml = `<p>📄 ${escapeHtml(m.filename)}${m.caption ? ` — <em>${escapeHtml(m.caption)}</em>` : ''}</p>`;
+  // A file message is a file shared for download (📎; 📦 one AGMessage never opens), downloaded from its ⬇.
+  else if (m.type === 'file') bodyHtml = `<p>${m.transferOnly ? '📦' : '📎'} ${escapeHtml(m.filename)}${m.transferOnly ? ' · download only' : ''}${m.caption ? ` — <em>${escapeHtml(m.caption)}</em>` : ''}</p>`;
   else if (m.type === 'action') {
     bodyHtml = `<p>🟧 <strong>${escapeHtml(m.text)}</strong></p>` +
            `<p class="muted">Options: ${escapeHtml((m.options || []).join(' · '))}</p>`;
@@ -539,6 +557,40 @@ function buildAdminMessage(m) {
     '<div class="admin-msg-foot obj-bar"></div>';
   ADMIN.draw(div.querySelector('.obj-bar'), 'adminMsg', { ...m, hall: hallName() }, { more: 'Message actions', keysOn: div });
   return div;
+}
+
+/**
+ * A file of the watched room downloaded (plan 4-§4.6.6): a ticket the server gives this page for it, posted in a form built
+ * with the DOM; the server answers the post with the file, or with nothing (204) where the ticket does not hold. Attempts
+ * are not facts, as on the hall page: "did not start" when it never began within DOWNLOAD_START_MS, and, for one in
+ * flight as this page loses its connection, that it cannot say.
+ */
+const DOWNLOAD_START_MS = 5000;
+const downloading = new Map();   // ticket -> {name, timer, began}
+function downloadFile(o) {
+  if (typeof o.url !== 'string' || !/^\/uploads\/[\w.-]+$/.test(o.url)) return;
+  AGM.outbox.now('file:download', { messageId: o.id }, (r) => {
+    if (!r || !r.ok || typeof r.ticket !== 'string') { say((r && r.error) || 'Not downloaded.', true); return; }
+    const name = (typeof r.name === 'string' && r.name) || o.filename || 'the file';
+    const timer = setTimeout(() => {
+      const d = downloading.get(r.ticket);
+      if (d && !d.began) { downloading.delete(r.ticket); say('The download did not start — try again.', true); }
+    }, DOWNLOAD_START_MS);
+    downloading.set(r.ticket, { name, timer, began: false });
+    say('⬇ Downloading ' + name + '…');
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = o.url + '/download';
+    form.hidden = true;
+    const t = document.createElement('input');
+    t.type = 'hidden';
+    t.name = 't';
+    t.value = r.ticket;
+    form.appendChild(t);
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+  });
 }
 
 function onLiveMessage(m) {
@@ -736,6 +788,7 @@ Object.assign(ADMIN_RUN, {
   'person.view': (o) => openUserView(currentRoom.code, o.name, o.role, o.uid),
   'person.kick': (o) => AGM.outbox.now('admin:kick', { socketId: o.socketId }, (res) => { if (!res || !res.ok) say((res && res.error) || 'Not logged out.', true); else say(o.name + ' is logged out of ' + o.hall + '.'); }),
   'adminMsg.copy': (o, c) => AGM.copy(o.text, { said: 'Copied.', anchor: c.anchor, say }),
+  'adminMsg.download': (o) => downloadFile(o),
   // A file on people's pages now is asked about first (the server's answer is the question): take it down too, or leave
   // it up there, then deleted with that answer.
   'adminMsg.delete': (o, c) => {

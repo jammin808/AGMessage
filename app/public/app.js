@@ -231,6 +231,10 @@ function rejoin() {
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
     drawComposerSeat();
     drawSkip();
+    // The panel says whose it is: the Board's 📺 On stage, or the backstage team's 👁 Preview; and, in a side room (no
+    // Board there), the composer whom a message reaches.
+    if (!previewing) drawPanelWords();
+    textInput.placeholder = MAIN === false ? 'Type a message to ' + (ROOM_NAME || 'this room') + '…' : 'Type a message to the Board…';
     // What this person wrote here and had not sent when they moved to another room of the hall, back in its composer.
     if (!joined) takeDraft();
     drawComposers();
@@ -290,10 +294,10 @@ function keepJoin() {
  * hall, nothing written and not sent (the outbox holding nothing and waiting on no act's answer, every composer empty, no
  * file chosen), no dialog, menu or ask open, no document on its stage, and untouched for a few seconds (or not shown).
  */
-const COMPOSER_FIELDS = ['directorInput', 'textInput', 'actionText', 'actionOptionInput', 'fileCaption'];
+const COMPOSER_FIELDS = ['directorInput', 'textInput', 'actionText', 'actionOptionInput'];
 function hallQuiet(t) {
   return AGM.reconnect.QUIET.hall({
-    ...t, online: AGM.outbox.online, out: outOf, held: AGM.outbox.items().length > 0 || AGM.outbox.acting() > 0, document: currentDocMsgId !== null,
+    ...t, online: AGM.outbox.online, out: outOf, held: AGM.outbox.items().length > 0 || AGM.outbox.acting() > 0, document: previewing !== null,
     draft: !!pendingFile || COMPOSER_FIELDS.some((id) => { const el = document.getElementById(id); return !!el && el.value.trim() !== ''; }),
     dialog: !!document.querySelector('dialog[open]') || AGM.menu.isOpen() || AGM.ask.isOpen(),
   });
@@ -998,10 +1002,13 @@ function isMine(msg) { return !!(msg.from && (MY_UID ? msg.from.uid === MY_UID :
 // Every file of the room by its message's id, held or not: the first open's index (`files`), then each file that comes and
 // goes. What the page lists of the room's files (Holding's pictures) reads it, never only the messages it holds.
 const roomFiles = new Map();
-/** A file of the index, read by type: its id, address, name and kind, or null. */
+/**
+ * A file of the index, read by type: its id, address, name and kind, and whether it is for download only; null for one
+ * this page holds no link of (an observer's and a Viewer account's hold none).
+ */
 function fileEntry(f) {
   if (!f || typeof f.id !== 'string' || !f.id || typeof f.url !== 'string' || !f.url) return null;
-  return { id: f.id, url: f.url, filename: typeof f.filename === 'string' ? f.filename : '', mime: typeof f.mime === 'string' ? f.mime : '' };
+  return { id: f.id, url: f.url, filename: typeof f.filename === 'string' ? f.filename : '', mime: typeof f.mime === 'string' ? f.mime : '', ...(f.transferOnly === true ? { transferOnly: true } : {}) };
 }
 /** A file message heard (or held), into the room's files. */
 function noteFile(msg) { const f = msg && msg.type === 'file' ? fileEntry(msg) : null; if (f) roomFiles.set(f.id, f); }
@@ -1063,7 +1070,7 @@ function addMessage(msg, { silent = false, arrived = false } = {}) {
   drawAtEnd(msg, { silent, arrived });
 }
 /** A message held now drawn below everything the hall has drawn (what this page holds for sending stays below it). */
-function drawAtEnd(msg, { silent = false, arrived = false } = {}) {
+function drawAtEnd(msg, { arrived = false } = {}) {
   // Comings and goings fold into one quiet line instead of burying the conversation. What this page holds for sending
   // stays below everything the hall has.
   const oldest = echoes.size ? echoes.values().next().value : null;
@@ -1085,9 +1092,8 @@ function drawAtEnd(msg, { silent = false, arrived = false } = {}) {
   if (arrived) keepPlace(el, msg, follow);
   if (arrived) Takes.heard(msg);
   if (msg.pinned) refreshPinned();
-  // A file another room sent or forwarded here never opens itself on the panel: someone in the room opens or pins it; nor
-  // does any file while a take this person minimised waits at the panel's top.
-  if (!silent && msg.type === 'file' && HAS_STAGE && !msg.sentFrom && !msg.forwardedFrom && !Takes.carded()) openDocInPanel(msg, { fromPush: true });
+  // A file shared is a transfer (a download): it opens itself on nobody's panel. A person opens it with Look (Preview
+  // backstage); what the backstage team shows the Board is a take, never a file in the chat.
   if (msg.type === 'file') refreshDocPinnedList();
   // What waits for this person's answer, read again (the simple view): a message, or a reply of theirs that answers one.
   Simple.waits();
@@ -1956,41 +1962,71 @@ function onMsgKey(e) {
   if (entry.submenu) { openSubmenu(node, more, entry.id); return; }
   act('msg', entry.id, msg, { anchor: more || node, node, opener: node });
 }
+// On an On stage seat the feed's pictures are On stage content: AGMessage's menu in place of the browser's on them,
+// Shift+right-click too, so its "Save image as" is never offered (plan 4-§4.6.6).
 for (const host of [document.getElementById('feed'), document.getElementById('pinnedList')]) {
   host.addEventListener('click', onMsgClick);
   host.addEventListener('keydown', onMsgKey);
-  AGM.menu.door(host, findMsgDoor);
+  AGM.menu.door(host, findMsgDoor, { stage: () => F.role === 'board' });
 }
 AGM.roving(document.getElementById('pinnedList'), { item: '.msg[data-key]' });
 
 // What each act on a message does. The server decides; every write goes through the outbox in its entry's mode.
 const isFileUrl = (u) => typeof u === 'string' && /^\/uploads\/[\w.-]+$/.test(u);
 /**
- * A file of this hall handed to the browser to save, under its own name. The server opens an upload to no navigation (a
- * link's download is one), so the page fetches it as its readers do (`no-store`, kept in no cache) and hands the browser
- * the bytes through an object URL, let go 40 s after, once the browser has taken them; it says when the file could not be
- * read.
+ * A download (plan 4-§4.6.6): the server's own act, by a ticket it gives this page's seat for one file (`file:download`:
+ * `{messageId}` a file of this room, `{seq}` a take shown with Download ticked). The page posts the ticket in a form built
+ * with the DOM, never a link, and the server answers that post with the file as an attachment (or 204, which leaves the
+ * page as it is). Attempts are not facts: "Downloading…" once the ticket is given, "reached this browser" once the server
+ * says the whole file went (`file:sent`), "stopped" when its stream ended before that (`whole: false`), "did not start"
+ * when it never began within DOWNLOAD_START_MS, and, for one in flight as this page loses its connection (the server
+ * can no longer tell it), that it cannot say. Whether the browser then kept it is the browser's.
  */
-async function download(m) {
-  if (!isFileUrl(m.url)) return;
-  let blob;
-  try {
-    const res = await fetch(m.url, { cache: 'no-store', credentials: 'same-origin' });
-    if (!res.ok) throw new Error(String(res.status));
-    blob = await res.blob();
-  } catch {
-    AGM.toast('Not downloaded: ' + (m.filename || 'the file') + ' could not be read — try again.', true);
-    return;
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = m.filename || '';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => { URL.revokeObjectURL(url); }, 40000);
+const DOWNLOAD_START_MS = 5000;
+const downloading = new Map();   // ticket -> {name, timer, began}
+function downloadBy(args, url, name) {
+  if (!isFileUrl(url)) return;
+  AGM.outbox.now('file:download', args, (r) => {
+    if (!r || !r.ok || typeof r.ticket !== 'string') { AGM.toast((r && r.error) || 'Not downloaded.', true); return; }
+    const said = (typeof r.name === 'string' && r.name) || name || 'the file';
+    AGM.toast('⬇ Downloading ' + said + '…');
+    const timer = setTimeout(() => {
+      const d = downloading.get(r.ticket);
+      if (d && !d.began) { downloading.delete(r.ticket); AGM.toast('The download did not start — try again.', true); }
+    }, DOWNLOAD_START_MS);
+    downloading.set(r.ticket, { name: said, timer, began: false });
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = url + '/download';
+    form.hidden = true;
+    const t = document.createElement('input');
+    t.type = 'hidden';
+    t.name = 't';
+    t.value = r.ticket;
+    form.appendChild(t);
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+  });
 }
+socket.on('file:sending', (p) => { const d = p && downloading.get(p.ticket); if (d) d.began = true; });
+socket.on('file:sent', (p) => {
+  const d = p && downloading.get(p.ticket);
+  if (!d) return;
+  clearTimeout(d.timer);
+  downloading.delete(p.ticket);
+  if (p.whole === false) AGM.toast('The download of ' + d.name + ' stopped before all of it was sent — try again.', true);
+  else AGM.toast(marked('ok', d.name + ' reached this browser'));
+});
+socket.on('disconnect', () => {
+  for (const [ticket, d] of downloading) {
+    clearTimeout(d.timer);
+    downloading.delete(ticket);
+    AGM.toast('This page lost its connection while ' + d.name + ' downloaded, so it cannot say whether all of it arrived.', true);
+  }
+});
+/** A file of this room downloaded: its message's ticket. */
+const download = (m) => downloadBy({ messageId: m.id }, m.url, m.filename);
 /** Words to the clipboard (AGM.copy: over plain http too), said in the toast; the focus goes back where it was. */
 const copyText = (text, said, anchor) => AGM.copy(text, { said, anchor, say: (w) => AGM.toast(w) });
 /** Pin or unpin, with Undo for 10 s: the opposite op of the same kind. */
@@ -2055,6 +2091,7 @@ Object.assign(RUN, {
   'msg.pin': (m) => pinWithUndo(m),
   'msg.look': (m) => openDocInPanel(m),
   'msg.download': (m) => download(m),
+  'msg.stage': (m, c) => Show.fromMenu(m, c),
   'msg.copy': (m, { anchor }) => copyText(m.text || '', 'Copied.', anchor),
   // Taken back from the room it went to: this copy stays, and its line says so once the server has done it (sentUpdate).
   'msg.withdraw': (m) => AGM.outbox.now('room:withdraw', { messageId: m.id }, (r) => {
@@ -2077,7 +2114,7 @@ Object.assign(RUN, {
 const echoes = new Map();        // cid -> the echo of a held message, in the feed
 const heldAnswers = new Map();   // 'answer|<id>' or 'help|<id>' -> {cid, option}: what this person's held answer chose
 const composerCids = {};         // a composer -> the cid of the message it wrote and holds until the server takes it
-const COMPOSER_FORMS = { director: () => dForm, text: () => textPane, action: () => actionPane, file: () => filePane };
+const COMPOSER_FORMS = { director: () => dForm, text: () => textPane, action: () => actionPane };
 const SENDING = new Set(['waiting', 'sending']);
 
 /** "written 14:02 · sent 14:06 (offline)" for a message its page held before sending it, else ''. */
@@ -2102,7 +2139,7 @@ function echoText(a, item) {
 function echoWords(a) {
   if (a.type === 'help') return 'Help — ' + (a.category || 'Other') + (a.text ? ': ' + a.text : '');
   if (a.type === 'action') return '❓ ' + (a.text || '');
-  if (a.type === 'file') return '📄 ' + (a.filename || 'a file') + (a.caption ? ' — ' + a.caption : '');
+  if (a.type === 'file') return '📎 ' + (a.filename || 'a file') + (a.caption ? ' — ' + a.caption : '');
   return a.text || '';
 }
 function echoState(item) {
@@ -2163,8 +2200,21 @@ function composerFollows(item) {
   if (SENDING.has(item.state)) { composerCids[c] = item.cid; lockComposer(c, true); return; }
   if (composerCids[c] !== item.cid) return;
   if (item.state === 'done' || item.state === 'gone') clearComposer(c, item);
+  // A file shared in this room is said once the server has it, naming who may take it (one sent into another room is
+  // said by its own toast, drawHeldSend).
+  if (item.state === 'done' && item.verb === 'message' && item.args.type === 'file') AGM.toast(sharedWords(item.args));
   if (item.state !== 'refused') delete composerCids[c];
   lockComposer(c, false);
+}
+/**
+ * What a share says once the server has it: where it is, and who may take it. The backstage team downloads it; the Board
+ * opens it with Look in a Main room, never a file to transfer only (its type is application/octet-stream, whatever it
+ * is); a side room has no Board.
+ */
+function sharedWords(a) {
+  const where = MAIN === false ? ROOM_NAME || 'this room' : 'Main';
+  const opens = MAIN !== false && a.mime !== 'application/octet-stream';
+  return 'Shared in ' + where + ' — the backstage team can download it' + (opens ? '; the Board can open it.' : '.');
 }
 function composerHeld(c) {
   const cid = composerCids[c];
@@ -2177,7 +2227,7 @@ function composerHeld(c) {
  */
 function holdMessage(c, args, opts) {
   if (composerCids[c]) AGM.outbox.drop(composerCids[c]);
-  const t = (c === 'text' || c === 'file') ? targetNow() : null;
+  const t = c === 'text' ? targetNow() : null;
   if (t) {
     AGM.outbox.hold('room:send', { ...args, to: t.ref }, { ...(opts || {}), tag: { composer: c, to: t.name || t.hallName || 'another room', toRef: t.ref } });
     setSendTo('');
@@ -2197,11 +2247,12 @@ function lockComposer(c, on) {
 function clearComposer(c, item) {
   const a = item.args;
   if (c === 'director' && dInput.value.trim() === a.text) dInput.value = '';
-  if (c === 'text' && textInput.value.trim() === a.text) { textInput.value = ''; aiDrafted = false; setAiHint(''); }
+  if (c === 'text' && a.type !== 'file' && textInput.value.trim() === a.text) { textInput.value = ''; aiDrafted = false; setAiHint(''); }
   if (c === 'action' && actionText.value.trim() === a.text) { actionText.value = ''; currentOptions = ['Yes', 'No']; renderOptionChips(); }
-  if (c === 'file' && pendingFile && pendingFile.file === item.file) {
-    fileCaption.value = '';
-    removePendingFile();
+  // A file shared: its chip goes, and its caption, the words it went with (the Preview keeps the file open on this page).
+  if (a.type === 'file' && pendingFile && pendingFile.file === item.file) {
+    if (textInput.value.trim() === (a.caption || '')) textInput.value = '';
+    removePendingFile({ keepPreview: true });
   }
 }
 /**
@@ -2215,7 +2266,7 @@ function editHeld(item) {
   AGM.outbox.drop(item.cid);
   // One that was going into another room goes there again, while this room may still send there.
   if (item.verb === 'room:send' && item.tag && typeof item.tag.toRef === 'string') setSendTo(item.tag.toRef);
-  if (c) setPriority({ director: dirPriBtn, text: textPriBtn, action: actionPriBtn, file: filePriBtn }[c], !!a.priority);
+  if (c) setPriority({ director: dirPriBtn, text: textPriBtn, action: actionPriBtn, file: textPriBtn }[c], !!a.priority);
   if (typeof a.replyTo === 'string' && a.replyTo) {
     const parent = findMessage(a.replyTo);
     replyState = { id: a.replyTo, name: parent ? (parent.from && parent.from.name) || 'system' : 'an earlier message', snippet: parent ? parent.text || parent.filename || '' : '' };
@@ -2225,7 +2276,7 @@ function editHeld(item) {
   // A help request: its words back in the dialog, where a category's tap sends it again (none is chosen for the person).
   if (a.type === 'help') { openHelpDialog(a.text || ''); return; }
   if (a.type === 'action') { tab('action'); if (!kept) { actionText.value = a.text || ''; currentOptions = Array.isArray(a.options) ? a.options.slice(0, 6) : ['Yes', 'No']; renderOptionChips(); } actionText.focus(); return; }
-  if (a.type === 'file') { tab('file'); if (!kept) fileCaption.value = a.caption || ''; AGM.toast('Choose the file again to send it.'); return; }
+  if (a.type === 'file') { tab('text'); if (!kept) textInput.value = a.caption || ''; AGM.toast('Attach the file again (📎) to share it.'); return; }
   const field = c === 'director' || document.getElementById('researchCompose').hidden ? dInput : textInput;
   if (c !== 'director') tab('text');
   if (field && !kept) field.value = a.text || '';
@@ -2327,36 +2378,103 @@ function setHelp(messageId, help) {
   if (msg) HelpChip.changed(msg, was);
 }
 
+/** A file's kind, as its card says it: by its extension (its upload's address, else its name). */
+const FILE_KINDS_SAID = { pdf: 'PDF', png: 'PNG', jpg: 'JPEG', jpeg: 'JPEG', gif: 'GIF', webp: 'WebP', txt: 'Text', md: 'Markdown', csv: 'CSV', xlsx: 'Excel', xls: 'Excel', docx: 'Word', pptx: 'PowerPoint',
+  zip: 'ZIP', mp4: 'MP4 video', m4a: 'M4A audio', mov: 'QuickTime video', mp3: 'MP3 audio', wav: 'WAV audio', odt: 'OpenDocument text', ods: 'OpenDocument spreadsheet', odp: 'OpenDocument presentation' };
+const extOfName = (name) => { const x = /\.([A-Za-z0-9]{1,5})$/.exec(String(name || '')); return x ? x[1].toLowerCase() : ''; };
+const fileKindOf = (m) => FILE_KINDS_SAID[extOfName(m.url) || extOfName(m.filename)] || 'File';
+/** A size in bytes as a card says it: "340 KB", "2.1 MB"; '' for none (a file shared before sizes were kept). */
+const sizeWords = (n) => (!Number.isInteger(n) || n < 0 ? '' : n < 1024 ? n + ' bytes' : n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB');
+/** A file message's line on its card: "📎 Board pack.pdf · PDF · 2.1 MB", a transfer-only one "📦 … · download only". */
+const fileLine = (m) => [(m.transferOnly ? '📦 ' : '📎 ') + (m.filename || 'a file'), fileKindOf(m), sizeWords(m.size), m.transferOnly ? 'download only' : ''].filter(Boolean).join(' · ');
+/**
+ * A file's card (a transfer, plan 4-§4.6.3): its name, kind and size, a picture's inline picture, its caption, and the
+ * acts this seat has on it (the catalogue's): 👁 Look or Preview (a tap on it), ⬇ Download. An observer's and a Viewer
+ * account's card has no link, so no picture and no act on the file. A picture is drawn from its bytes, fetched `no-store`,
+ * through an object URL let go as the card leaves the page (FeedPictures).
+ */
 function renderFileBody(msg) {
   const wrap = document.createElement('div');
   wrap.className = 'file';
-  const isImage = msg.mime && msg.mime.startsWith('image/');
-  if (isImage) {
-    const img = document.createElement('img');
-    img.src = msg.url;
-    img.alt = msg.filename;
-    img.loading = 'lazy';
-    wrap.appendChild(img);
-  } else {
-    const card = document.createElement('div');
-    card.className = 'file-link';
-    card.textContent = `📄 ${msg.filename}`;
-    wrap.appendChild(card);
-  }
+  const isImage = !msg.transferOnly && isFileUrl(msg.url) && /^image\/(png|jpeg|gif|webp)$/.test(msg.mime || '');
+  if (isImage) wrap.appendChild(FeedPictures.picture(msg));
+  const card = document.createElement('div');
+  card.className = 'file-link';
+  card.textContent = fileLine(msg);
+  wrap.appendChild(card);
   if (msg.caption) {
     const c = document.createElement('p');
     c.className = 'caption';
     c.textContent = msg.caption;
     wrap.appendChild(c);
   }
+  const shown = new Set(AGM.catalog.shown('msg', F, msg).map((e) => e.id));
   // A tap on the file is its Look (the catalogue's msg.look), where this seat has one.
-  if (AGM.catalog.shown('msg', F, msg).some((e) => e.id === 'msg.look')) {
+  if (shown.has('msg.look')) {
     wrap.classList.add('clickable');
-    wrap.title = 'Look: open it in the panel';
+    wrap.title = AGM.catalog.entry('msg', 'msg.look').label(F) + ': open it in your own panel';
     wrap.dataset.action = 'msg.look';
+  }
+  // ⬇ Download, for a seat that may download it (the admin, the backstage team but a Viewer account), in the full view.
+  if (shown.has('msg.download')) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn ghost small file-download';
+    b.dataset.action = 'msg.download';
+    b.textContent = '⬇ ' + AGM.catalog.entry('msg', 'msg.download').label;
+    wrap.appendChild(b);
   }
   return wrap;
 }
+
+/**
+ * The feed's pictures: each drawn from its bytes, fetched `no-store` when its card comes into view (never into the
+ * browser's cache), through an object URL that is revoked as its card leaves the page; never dragged out. A picture that
+ * cannot be read says so on its card.
+ */
+const FeedPictures = (() => {
+  const made = new Map();   // img -> object URL
+  const seen = typeof IntersectionObserver === 'function' ? new IntersectionObserver((list) => {
+    for (const e of list) if (e.isIntersecting) { seen.unobserve(e.target); load(e.target); }
+  }, { rootMargin: '200px' }) : null;
+  async function load(img) {
+    if (made.has(img) || !img.isConnected) return;
+    made.set(img, '');
+    try {
+      const res = await fetch(img.dataset.src, { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      if (!img.isConnected) { made.delete(img); return; }
+      const url = URL.createObjectURL(blob);
+      made.set(img, url);
+      img.src = url;
+    } catch {
+      made.delete(img);
+      img.alt = 'This picture could not be read.';
+    }
+  }
+  /** The picture of a file message, drawn when it comes into view. */
+  function picture(msg) {
+    const img = document.createElement('img');
+    img.alt = msg.filename || 'A picture';
+    img.dataset.src = msg.url;
+    img.setAttribute('draggable', 'false');
+    if (seen) seen.observe(img); else setTimeout(() => load(img), 0);
+    return img;
+  }
+  /** Each picture no longer on the page, its object URL let go. */
+  function sweep() {
+    for (const [img, url] of made) {
+      if (img.isConnected) continue;
+      made.delete(img);
+      if (url) URL.revokeObjectURL(url);
+      if (seen) seen.unobserve(img);
+    }
+  }
+  const watch = new MutationObserver(() => sweep());
+  for (const id of ['feed', 'pinnedList']) watch.observe(document.getElementById(id), { childList: true, subtree: true });
+  return { picture, sweep, count: () => made.size };
+})();
 
 function renderActionBody(msg) {
   const wrap = document.createElement('div');
@@ -2560,32 +2678,42 @@ const docPinnedSection = document.getElementById('docPinnedSection');
 const docPinnedCount = document.getElementById('docPinnedCount');
 
 let currentDocMsgId = null;
+/** The file open in the panel now: {msg} for a file of the room, {file} for the copy on this device; null for none. */
+let previewing = null;
 
-function openDocInPanel(msg, opts) {
-  if (!msg || msg.type !== 'file') return;
-  opts = opts || {};
+/**
+ * A file of the room opened in this person's own panel (👁 Look On stage, 👁 Preview backstage): it reports nothing and
+ * pushes nothing but to the person's own devices and the admin's support view of them (`userState 'doc'`). A file for
+ * download only is never opened.
+ */
+function openDocInPanel(msg) {
+  if (!msg || msg.type !== 'file' || msg.transferOnly || !isFileUrl(msg.url)) return;
   currentDocMsgId = msg.id;
+  previewing = { msg };
+  openPanel(msg.filename || '', msg.caption || '', !!msg.priority);
+  drawDoc({ url: msg.url }, msg.filename, msg.mime, null);
+  if (!_applyingRemote) pushUserState('doc', { messageId: msg.id });
+  drawDocActs();
+}
+/**
+ * A file on this device opened in the Preview from its own copy (`File`): instant, private, and nothing uploaded. It is on
+ * this device only: no other page of the person's follows it until it is shared.
+ */
+function openLocalInPanel(file) {
+  currentDocMsgId = null;
+  previewing = { file };
+  openPanel(file.name || '', '', false);
+  drawDoc({ file }, file.name, file.type, null);
+  drawDocActs();
+}
+function openPanel(title, caption, priority) {
   docPanel.dataset.state = 'live';
   setStageCollapsed && setStageCollapsed(false);
-  // When a brand-new file is pushed in stacked layout, expand the panel
-  // to ~75% so the document is clearly visible while leaving 25% of the
-  // height for chat. Matches the splitter's drag maximum.
-  if (opts.fromPush && HAS_STAGE && window.innerWidth <= 800) {
-    if (typeof applySplit === 'function') applySplit(25);
-  }
-  docPanel.classList.toggle('priority', !!msg.priority);
-  docTitleEl.textContent = msg.filename || '';
-  drawDoc(msg, null);
-  if (msg.caption) {
-    docCaptionEl.textContent = msg.caption;
-    docCaptionEl.hidden = false;
-  } else {
-    docCaptionEl.hidden = true;
-    docCaptionEl.textContent = '';
-  }
+  docPanel.classList.toggle('priority', priority);
+  docTitleEl.textContent = title;
+  docCaptionEl.hidden = !caption;
+  docCaptionEl.textContent = caption;
   docActions.hidden = false;
-  if (!_applyingRemote && !opts.fromPush) pushUserState('doc', { messageId: msg.id });
-  drawDocActs();
 }
 
 // The panel's document is drawn by docview.mjs (imported at the first file opened): the readers, the page box, zoom,
@@ -2596,19 +2724,27 @@ const docSeat = () => (ADMIN_VIEW || pageFacts.role === 'research' ? 'research' 
 let docViewMod = null;     // docview.mjs, once imported
 let docView = null;        // the view drawing the panel's document now
 let docDrawing = 0;        // each drawing numbered: only the newest may draw or set the AI's text
+let docShown = false;      // whether the panel's reader drew the file it opened (its ready said 'shown')
 /** The document on stage as plain text, for AI drafts (capped by the reader, hidden parts left out). */
 const docForAi = { id: null, name: '', text: '' };
-async function drawDoc(msg, at) {
+/** The document reader (docview.mjs), imported once. */
+async function docReader() {
+  if (!docViewMod) docViewMod = await import('/docview.mjs');
+  return docViewMod;
+}
+async function drawDoc(source, name, mime, at) {
   const n = ++docDrawing;
+  docShown = false;
   if (docView) { docView.destroy(); docView = null; }
   docForAi.id = null; docForAi.name = ''; docForAi.text = '';
   docDisplay.textContent = '';
+  PreviewBar.draw();
   const wait = document.createElement('p');
   wait.className = 'muted';
-  wait.textContent = 'Opening ' + (msg.filename || 'the file') + '…';
+  wait.textContent = 'Opening ' + (name || 'the file') + '…';
   docDisplay.appendChild(wait);
   try {
-    if (!docViewMod) docViewMod = await import('/docview.mjs');
+    await docReader();
   } catch {
     if (n !== docDrawing) return;
     wait.className = 'error';
@@ -2617,30 +2753,55 @@ async function drawDoc(msg, at) {
   }
   if (n !== docDrawing) return;
   docDisplay.textContent = '';
-  const view = docViewMod.open(docDisplay, { url: msg.url }, { at, seat: docSeat(), name: msg.filename, mime: msg.mime });
+  const view = docViewMod.open(docDisplay, source, { at, seat: docSeat(), name, mime });
   docView = view;
   const drawn = await view.ready;
-  if (n !== docDrawing || drawn.state !== 'shown') return;
+  if (n !== docDrawing) return;
+  docShown = drawn.state === 'shown';
+  PreviewBar.draw();
+  if (!docShown) return;
   const text = await view.text();
   if (n !== docDrawing || !text) return;
-  docForAi.id = msg.id; docForAi.name = msg.filename || ''; docForAi.text = text;
+  // A file on this device is the researcher's own to draft from; a file of the room by its message.
+  docForAi.id = previewing && previewing.msg ? previewing.msg.id : null; docForAi.name = name || ''; docForAi.text = text;
+}
+
+/** What the panel says when nothing is open in it, by the seat it is drawn for: the Board's 📺 On stage, the Preview. */
+const PANEL_WORDS = {
+  board: ['📺 On stage', 'Nothing on stage.', 'What the backstage team shows you appears over the chat or here; ' + AGM.mark('minimised') + ' Minimise keeps it here.'],
+  research: ['👁 Preview — the Board does not see this', 'Nothing in your preview.', 'Attach a file (📎) or open one with Preview to page through it, then show the Board a picture of a page or the document.'],
+};
+/** The panel's heading: 📺 Shown to you in the simple view; else the seat's (the Board's 📺 On stage, the Preview backstage). */
+const panelHeading = () => (document.body.dataset.view === 'simple' ? '📺 Shown to you' : (PANEL_WORDS[docSeat()] || PANEL_WORDS.board)[0]);
+/** The panel's heading and its empty words, by this page's seat and view (drawn as the page joins and as its view changes). */
+function drawPanelWords() {
+  const w = PANEL_WORDS[docSeat()] || PANEL_WORDS.board;
+  document.getElementById('docPanelTitle').textContent = panelHeading();
+  docPanel.setAttribute('aria-label', panelHeading());
+  const empty = docDisplay.querySelector('.empty-state');
+  if (empty) { empty.textContent = ''; const p = document.createElement('p'); p.textContent = w[1]; const h = document.createElement('p'); h.className = 'hint'; h.textContent = w[2]; empty.append(p, h); }
 }
 
 function dismissDoc() {
   currentDocMsgId = null;
+  previewing = null;
   docDrawing++;
+  docShown = false;
   if (docView) { docView.destroy(); docView = null; }
   drawDocActs();
   docForAi.id = null; docForAi.name = ''; docForAi.text = '';
   docPanel.dataset.state = 'empty';
   docPanel.classList.remove('priority');
-  docDisplay.innerHTML =
-    `<div class="empty-state"><p>No document on stage.</p>` +
-    `<p class="hint">When the backstage team shares a file, it appears here automatically.</p></div>`;
+  docDisplay.textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'empty-state';
+  docDisplay.appendChild(empty);
+  drawPanelWords();
   docCaptionEl.hidden = true;
   docCaptionEl.textContent = '';
   docTitleEl.textContent = '';
   docActions.hidden = true;
+  PreviewBar.draw();
 }
 
 // ---------------- The panel's files: the file open in it (the Preview's header) and its pinned list (kind `file`) ----------------
@@ -2723,6 +2884,7 @@ Object.assign(RUN, {
   'file.screens': (o) => Screens.offer(o),
   'file.look': (o) => openDocInPanel(findMessage(o.id) || o),
   'file.download': (o) => download(o),
+  'file.stage': (o, c) => Show.fromMenu(findMessage(o.id) || o, c),
   'file.pin': (o) => pinWithUndo(o),
   'file.close': () => dismissDoc(),
 });
@@ -2767,7 +2929,7 @@ if (HAS_STAGE && localStorage.getItem('agm.stageCollapsed') === '1') {
 
 /** The panel's document laid out again for its new size (a resize, a collapse, the splitter), at the place it was. */
 function rerenderCurrentDoc() {
-  if (currentDocMsgId && docView) docView.refit();
+  if (previewing && docView) docView.refit();
 }
 
 
@@ -2962,14 +3124,13 @@ function consumePriority(btn) {
 const dirPriBtn = wirePriority('dirPriorityBtn', 'director');
 const textPriBtn = wirePriority('textPriorityBtn', 'text');
 const actionPriBtn = wirePriority('actionPriorityBtn', 'action');
-const filePriBtn = wirePriority('filePriorityBtn', 'file');
-const PRIORITY = { director: () => dirPriBtn, text: () => textPriBtn, action: () => actionPriBtn, file: () => filePriBtn };
+const PRIORITY = { director: () => dirPriBtn, text: () => textPriBtn, action: () => actionPriBtn };
 
 // ---------------- The composer's doors (catalog.js, kind `compose`) ----------------
 // Its Send button is its one act on the row and its ⋯ the door to the rest (✨ Draft a reply, 🔥 Priority, Attach a
 // file…, Remove the file, Cancel the reply); a right-click or Shift+F10 on either (or on the file chosen) opens the same
 // list, while the text field keeps the browser's own menu. A send, from Send, Enter or the menu, runs through act().
-/** The composer shown: 'director' On stage; backstage the open tab's, 'text', 'action' or 'file'; '' for none. */
+/** The composer shown: 'director' On stage; backstage the open tab's, 'text' or 'action'; '' for none. */
 function activeComposer() {
   if (!document.getElementById('directorCompose').hidden) return 'director';
   if (document.getElementById('researchCompose').hidden) return '';
@@ -2982,8 +3143,10 @@ function composeObject(form) {
   if (!f || !COMPOSER_FORMS[f] || !COMPOSER_FORMS[f]()) return null;
   const pri = PRIORITY[f]();
   // A message or a file goes where To: is set; a question and the On stage composer's message, to this room.
-  const t = f === 'text' || f === 'file' ? targetNow() : null;
-  return { id: 'compose:' + f, form: f, room: t ? t.name || t.hallName : ROOM_NAME, to: t ? t.ref : '', file: f === 'file' && pendingFile ? pendingFile.filename : '', replying: replyState ? replyState.name : '', priority: !!pri && pri.dataset.priority === '1' };
+  const t = f === 'text' ? targetNow() : null;
+  // A question is asked of the Board in a Main room, and of the room by its name in a side room, which has no Board.
+  const askWho = f === 'action' && MAIN === false ? ROOM_NAME || 'this room' : '';
+  return { id: 'compose:' + f, form: f, room: t ? t.name || t.hallName : ROOM_NAME, to: t ? t.ref : '', file: f === 'text' && pendingFile ? pendingFile.filename : '', replying: replyState ? replyState.name : '', priority: !!pri && pri.dataset.priority === '1', askWho };
 }
 /** The room To: is set to, as room:sendTargets told it, or null for this room (or one no longer offered). */
 function targetNow() { return sendTo ? F.targets.find((t) => t.ref === sendTo) || null : null; }
@@ -3036,7 +3199,7 @@ function composerField({ text = false } = {}) {
   if (form === 'director') return dInput;
   if (text && form !== 'text') selectTab('text');
   const now = text ? 'text' : form;
-  return now === 'text' ? textInput : now === 'action' ? actionText : pickFileBtn;
+  return now === 'text' ? textInput : actionText;
 }
 /** Open a tab of the backstage composer. */
 function selectTab(name) {
@@ -3054,13 +3217,20 @@ function drawCompose(form) {
   if (inl) {
     send.dataset.action = inl.id;
     send.setAttribute('aria-label', inl.label);
-    // Its word says where it goes when that is another room: "Send to Legal".
+    // Its word says where it goes when that is another room ("Send to Legal"), with a file attached that it is shared
+    // for download ("📎 Share for download", "📎 Share in Legal"), and on a question whom it asks ("❓ Ask the Board").
     const word = send.querySelector('.send-word');
-    const said = o.to ? inl.label : 'Send';
+    const said = o.to || o.file || form === 'action' ? inl.label : 'Send';
     if (word && word.textContent !== said) word.textContent = said;
+    const icon = send.querySelector('.send-icon');
+    const glyph = inl.icon || '➤';
+    if (icon && icon.textContent !== glyph) icon.textContent = glyph;
     send.title = inl.disabled || inl.label;
     if (inl.disabled) send.setAttribute('aria-disabled', 'true'); else send.removeAttribute('aria-disabled');
   }
+  // 📎 in the message row, where this seat attaches files.
+  const clip = form === 'text' ? document.getElementById('attachBtn') : null;
+  if (clip) clip.hidden = !AGM.catalog.shown('compose', F, o).some((e) => e.id === 'compose.attach');
   const menu = AGM.catalog.items('compose', F, o).length > 0;
   let more = el.querySelector('.compose-more');
   if (menu && !more) {
@@ -3075,7 +3245,7 @@ const FORM_OF = new Map();   // a composer's form element → its name
 function composeDoor(t) {
   const formEl = t.closest('form');
   const form = formEl && FORM_OF.get(formEl);
-  if (!form || !t.closest('.send-btn, .compose-more, #filePreview')) return null;
+  if (!form || !t.closest('.send-btn, .compose-more, #fileChip')) return null;
   const more = formEl.querySelector('.compose-more');
   const opener = t.closest('button') || more || formEl.querySelector('.send-btn');
   return { el: formEl, more, form, open: (at) => openObjectMenu('compose', () => composeObject(form), { node: formEl, more, at, opener, label: 'Message actions', header: composeHeader }) };
@@ -3106,25 +3276,23 @@ const SENDS = {
   },
   text: () => {
     const text = textInput.value.trim();
-    if (!text || composerHeld('text')) return;
+    if (composerHeld('text')) return;
+    // A file attached is shared for download, its words its caption; it is uploaded as it is sent (the outbox's), never
+    // before: the copy on this device is all there is until then.
+    if (pendingFile) {
+      holdMessage('text', {
+        type: 'file', url: pendingFile.url || '', filename: pendingFile.filename, mime: pendingFile.mime, caption: text.slice(0, 500),
+        priority: consumePriority(textPriBtn), replyTo: consumeReplyTo(),
+      }, { file: pendingFile.file, upload: uploadFile });
+      return;
+    }
+    if (!text) return;
     holdMessage('text', { type: 'text', text, priority: consumePriority(textPriBtn), replyTo: consumeReplyTo(), aiDraft: aiDrafted });
   },
   action: () => {
     const text = actionText.value.trim();
     if (!text || composerHeld('action')) return;
     holdMessage('action', { type: 'action', text, options: currentOptions.slice(), priority: consumePriority(actionPriBtn), replyTo: consumeReplyTo() });
-  },
-  file: () => {
-    if (!pendingFile || composerHeld('file')) return;
-    holdMessage('file', {
-      type: 'file',
-      url: pendingFile.url,
-      filename: pendingFile.filename,
-      mime: pendingFile.mime,
-      caption: fileCaption.value.trim(),
-      priority: consumePriority(filePriBtn),
-      replyTo: consumeReplyTo(),
-    }, { file: pendingFile.file, upload: uploadFile });
   },
 };
 Object.assign(RUN, {
@@ -3136,8 +3304,8 @@ Object.assign(RUN, {
   },
   'compose.priority': (o) => setPriority(PRIORITY[o.form](), !o.priority),
   'compose.sendTo': (o, { value }) => { setSendTo(typeof value === 'string' ? value : ''); const field = composerField(); if (field) field.focus(); },
-  'compose.attach': () => { selectTab('file'); fileInput.click(); },
-  'compose.removeFile': () => { removePendingFile(); pickFileBtn.focus(); },
+  'compose.attach': () => { selectTab('text'); fileInput.click(); },
+  'compose.removeFile': () => { removePendingFile(); textInput.focus(); },
   'compose.cancelReply': () => { cancelReply(); const field = composerField(); if (field) field.focus(); },
 });
 
@@ -3308,34 +3476,46 @@ document.getElementById('aiOptionsBtn')?.addEventListener('click', () => {
 
 actionPane?.addEventListener('submit', (e) => { e.preventDefault(); sendFrom('action', e.submitter); });
 
-const filePane = document.getElementById('filePane');
+// ---------------- A file attached to the next message: 📎, or dropped or pasted on the feed or the composer ----------------
+// It is a chip in the composer and opens in the Preview from the copy on this device (backstage): nothing reaches
+// AGMessage until it is shared (📎 Share for download, the words its caption) or shown (the Preview's bar). The outbox
+// uploads it as it is sent.
 const fileInput = document.getElementById('fileInput');
-const dropzone = document.getElementById('dropzone');
-const filePreview = document.getElementById('filePreview');
-const fileCaption = document.getElementById('fileCaption');
-const pickFileBtn = document.getElementById('pickFileBtn');
-let pendingFile = null;
+const fileChip = document.getElementById('fileChip');
+const attachBtn = document.getElementById('attachBtn');
+let pendingFile = null;   // {file, filename, size, mime, url: '' until uploaded, transfer: whether it is only ever transferred}
 
-pickFileBtn?.addEventListener('click', () => fileInput.click());
-fileInput?.addEventListener('change', () => handleFiles(fileInput.files));
-dropzone?.addEventListener('dragover', (e) => {
+fileInput?.addEventListener('change', () => { attachFile(fileInput.files && fileInput.files[0]); fileInput.value = ''; });
+attachBtn?.addEventListener('click', () => { const o = composeObject('text'); if (o) act('compose', 'compose.attach', o, { opener: attachBtn, anchor: attachBtn }); });
+/** Whether this page may attach a file now: the backstage composer is drawn, and its seat shares files here. */
+const attaches = () => { const o = composeObject('text'); return !!o && AGM.catalog.shown('compose', F, o).some((e) => e.id === 'compose.attach'); };
+// A file dropped or pasted on the feed or the composer attaches it, as 📎 does.
+for (const host of [document.getElementById('feed'), document.getElementById('researchCompose')]) {
+  host.addEventListener('dragover', (e) => { if (attaches() && e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files')) { e.preventDefault(); host.classList.add('drop-hover'); } });
+  host.addEventListener('dragleave', () => host.classList.remove('drop-hover'));
+  host.addEventListener('drop', (e) => {
+    host.classList.remove('drop-hover');
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f || !attaches()) return;
+    e.preventDefault();
+    attachFile(f);
+  });
+}
+document.getElementById('researchCompose').addEventListener('paste', (e) => {
+  const f = e.clipboardData && e.clipboardData.files && e.clipboardData.files[0];
+  if (!f || !attaches()) return;
   e.preventDefault();
-  dropzone.classList.add('hover');
-});
-dropzone?.addEventListener('dragleave', () => dropzone.classList.remove('hover'));
-dropzone?.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropzone.classList.remove('hover');
-  handleFiles(e.dataTransfer.files);
+  attachFile(f);
 });
 
 /**
- * A file to this hall's uploads, with the upload token of the page's newest join: `{url, filename, mime}`, or why not —
- * `{status, error}` when the server refused it, `{network: true}` when it never reached AGMessage.
+ * A file to this hall's uploads, with the upload token of the page's newest join: `{url, filename, mime, size,
+ * transferOnly}`, or why not — `{status, error}` when the server refused it, `{network: true}` when it never reached
+ * AGMessage.
  */
 async function uploadFile(file) {
   const fd = new FormData();
-  fd.append('file', file);
+  fd.append('file', file, file.name);
   let res;
   try { res = await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-AGM-Upload': UPLOAD_TOKEN } }); } catch { return { network: true, error: 'Can\'t reach AGMessage — the file goes when the connection is back.' }; }
   let body = null;
@@ -3344,61 +3524,71 @@ async function uploadFile(file) {
   return body;
 }
 
-async function handleFiles(files) {
-  if (!files || !files.length) return;
-  const file = files[0];
-  filePreview.hidden = false;
-  filePreview.textContent = `Uploading ${file.name}…`;
-  const up = await uploadFile(file);
-  if (up.url) {
-    pendingFile = { ...up, file };
-  } else if (up.network) {
-    // Not uploaded yet: the outbox uploads it with the message, once the connection is back.
-    pendingFile = { url: '', filename: file.name, mime: file.type || '', file, waiting: true };
-  } else {
-    filePreview.textContent = up.error;
-    pendingFile = null;
-    drawCompose('file');
-    return;
+/** The Compound File header (lib/guard.js isCompoundFile): a Word, Excel or PowerPoint file protected with a password starts so. */
+const CFB_HEAD = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+/**
+ * Whether a file on this device is only ever transferred, as the server will take it: a transfer type by its name
+ * (AGM.catalog.TRANSFER_EXT), or a Word, Excel or PowerPoint name whose first eight bytes are a compound file's (a file
+ * protected with a password, which no reader opens). Bytes that cannot be read are not opened here either.
+ */
+async function transferOnlyOnDevice(file) {
+  const ext = extOfName(file.name);
+  if (AGM.catalog.TRANSFER_EXT.includes(ext)) return true;
+  if (!['docx', 'xlsx', 'pptx'].includes(ext)) return false;
+  try {
+    const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    return head.length === 8 && CFB_HEAD.every((b, i) => head[i] === b);
+  } catch {
+    return true;   // unread: kept for download, never opened here
   }
-  renderFilePreview();
-  drawCompose('file');
 }
-/** The file chosen to send is put down: nothing to send until another is chosen. */
-function removePendingFile() {
+/**
+ * A file attached to the next message: its chip drawn, and, backstage, opened in the Preview from the copy on this
+ * device, unless it is only ever transferred (its chip then says "download only").
+ */
+function attachFile(file) {
+  if (!file) return;
+  selectTab('text');
+  const held = { file, filename: file.name, size: file.size, mime: file.type || '', url: '', transfer: AGM.catalog.TRANSFER_EXT.includes(extOfName(file.name)) };
+  pendingFile = held;
+  renderFileChip();
+  drawCompose('text');
+  textInput.focus();
+  if (held.transfer) return;
+  transferOnlyOnDevice(file).then((only) => {
+    if (pendingFile !== held) return;
+    if (only) { held.transfer = true; renderFileChip(); } else if (docSeat() === 'research') openLocalInPanel(file);
+  });
+}
+/** The file attached is put down: nothing to share until another is attached. The Preview keeps it open when asked to. */
+function removePendingFile({ keepPreview = false } = {}) {
+  const was = pendingFile;
   pendingFile = null;
-  filePreview.hidden = true;
-  filePreview.innerHTML = '';
-  fileInput.value = '';
-  drawCompose('file');
+  fileChip.hidden = true;
+  fileChip.textContent = '';
+  drawCompose('text');
+  if (!keepPreview && was && previewing && previewing.file === was.file) dismissDoc();
 }
-
-function renderFilePreview() {
-  if (!pendingFile) return;
-  filePreview.innerHTML = '';
-  if (pendingFile.url && pendingFile.mime.startsWith('image/')) {
-    const img = document.createElement('img');
-    img.src = pendingFile.url;
-    img.alt = pendingFile.filename;
-    img.className = 'preview-img';
-    filePreview.appendChild(img);
-  } else {
-    const p = document.createElement('p');
-    p.textContent = `📄 ${pendingFile.filename}` + (pendingFile.waiting ? ' — not uploaded yet: it goes with the message when the connection is back' : '');
-    filePreview.appendChild(p);
-  }
+/** The attached file's chip: its name, kind and size ("download only" for a type AGMessage never opens), and Remove. */
+function renderFileChip() {
+  fileChip.textContent = '';
+  if (!pendingFile) { fileChip.hidden = true; return; }
+  const transfer = pendingFile.transfer === true;
+  const words = document.createElement('span');
+  words.className = 'file-chip-words';
+  words.textContent = [(transfer ? '📦 ' : '📎 ') + pendingFile.filename, sizeWords(pendingFile.size), transfer ? 'download only' : ''].filter(Boolean).join(' · ');
   // Its Remove is the catalogue's compose.removeFile, named as its menu item is.
   const rm = document.createElement('button');
   rm.type = 'button';
   rm.className = 'btn ghost small';
   rm.textContent = 'Remove';
   rm.setAttribute('aria-label', AGM.catalog.entry('compose', 'compose.removeFile').label);
-  rm.addEventListener('click', () => { const o = composeObject('file'); if (o) act('compose', 'compose.removeFile', o, { opener: rm, anchor: rm }); });
-  filePreview.appendChild(rm);
+  rm.addEventListener('click', () => { const o = composeObject('text'); if (o) act('compose', 'compose.removeFile', o, { opener: rm, anchor: rm }); });
+  fileChip.append(words, rm);
+  fileChip.hidden = false;
 }
 
-filePane?.addEventListener('submit', (e) => { e.preventDefault(); sendFrom('file', e.submitter); });
-for (const [name, el] of [['director', dForm], ['text', textPane], ['action', actionPane], ['file', filePane]]) if (el) FORM_OF.set(el, name);
+for (const [name, el] of [['director', dForm], ['text', textPane], ['action', actionPane]]) if (el) FORM_OF.set(el, name);
 
 // The skip link: the page's first Tab, "Skip to message box" for a seat with a composer (it takes the focus to the
 // composer's field) and "Skip to messages" for one without (to the feed's one stop, the newest message).
@@ -4548,7 +4738,9 @@ const Takes = (function () {
       drawPastBars();
     }, () => AGM.toast('This page could not load what draws a take: reload it.', true));
   }
-  const pastObject = (seq) => { const e = pastNow().find((x) => x.seq === seq); return e ? { id: 'past:' + e.seq, seq: e.seq, kind: e.content.kind, url: e.content.kind === 'web' && typeof e.content.url === 'string' ? e.content.url : '' } : null; };
+  /** A document's file as its ⬇ Download reads it: its address, its name, and whether it was shown with Download ticked. */
+  const fileOfTake = (t) => (t && t.content.kind === 'doc' ? { file: typeof t.content.url === 'string' ? t.content.url : '', name: t.content.name || '', download: t.content.download === true } : {});
+  const pastObject = (seq) => { const e = pastNow().find((x) => x.seq === seq); return e ? { id: 'past:' + e.seq, seq: e.seq, kind: e.content.kind, url: e.content.kind === 'web' && typeof e.content.url === 'string' ? e.content.url : '', ...fileOfTake(e) } : null; };
   /** An Earlier entry this page is told, whole (what a Look draws), or null. */
   const pastEntry = (seq) => pastNow().find((x) => x.seq === seq) || null;
   function drawPastBars() {
@@ -4603,7 +4795,7 @@ const Takes = (function () {
     if (layer.hidden) return null;
     const p = plan();
     const t = p.over;
-    return t && keyOf(t) === (drawnKey || drawing) ? { id: 'take', seq: t.seq, kind: t.content.kind, layer: p.layer, strip: !!hot, full: fullNow() === layer, url: urlOf(t), held: p.held ? 1 : 0 } : null;
+    return t && keyOf(t) === (drawnKey || drawing) ? { id: 'take', seq: t.seq, kind: t.content.kind, layer: p.layer, strip: !!hot, full: fullNow() === layer, url: urlOf(t), held: p.held ? 1 : 0, ...fileOfTake(t) } : null;
   };
   /** A card as the catalogue reads it: `seq`, `kind`, `layer`, `side` (arrived in the side bar, not minimised). */
   const cardObject = (l) => {
@@ -4611,7 +4803,7 @@ const Takes = (function () {
     for (const x of which) {
       const c = cardOf[x];
       const t = told[x];
-      if (c && t && c.key === keyOf(t)) return { id: 'card', seq: t.seq, kind: t.content.kind, layer: x, side: c.side };
+      if (c && t && c.key === keyOf(t)) return { id: 'card', seq: t.seq, kind: t.content.kind, layer: x, side: c.side, ...fileOfTake(t) };
     }
     return null;
   };
@@ -4790,6 +4982,10 @@ const Takes = (function () {
     'take.held': () => unhold(),
     'card.show': (o) => showAgain(o.layer),
     'card.remove': (o) => backToChat('card', o.layer),
+    // ⬇ Download of a document shown with Let them download it ticked: the server's act, by the take's number.
+    'card.download': (o) => downloadBy({ seq: o.seq }, o.file, o.name),
+    'take.download': (o) => downloadBy({ seq: o.seq }, o.file, o.name),
+    'past.download': (o) => downloadBy({ seq: o.seq }, o.file, o.name),
     'past.look': (o) => look(o),
   });
 
@@ -4987,7 +5183,18 @@ const Console = (function () {
     'person.show': (p, { value }) => { if (typeof value === 'string') push({ uid: p.key }, { kind: value }, { name: p.name }); },
     'person.chat': (p) => push({ uid: p.key }, { kind: 'chat' }, { name: p.name }),
     'person.web': (p, c) => web({ uid: p.key }, 'person', 'person.web', () => (p.where === 'console' ? rowOf(p.key) : personNow(p.uid)), c, p.name),
+    'person.doc': (p, c) => Show.document(null, { to: { uid: p.key }, name: p.name, anchor: c.anchor, opener: c.opener }),
   });
+  /**
+   * A file shown on the Board's pages or one person's (a document, a picture): over their chat, or in their side bar
+   * where it is asked to arrive there, or where the operator's information is up there and this page may only show (the
+   * server refuses it over that).
+   */
+  function showFile(to, content, { name = '', arrive = '' } = {}) {
+    const o = to === 'board' ? board() : rowOf(to.uid);
+    const side = arrive === 'side' || (!F.canPush && !!o && ((!!o.info && o.info.op) || !!o.opOn));
+    push(to, content, { name, ...(side ? { arrive: 'side' } : {}) });
+  }
   for (const [kind] of AGM.catalog.SHOW_KINDS) if (AGM.catalog.entry('board', 'board.' + kind)) RUN['board.' + kind] = () => push('board', { kind });
   RUN['board.web'] = (o, c) => web('board', 'board', 'board.web', board, c);
 
@@ -5127,7 +5334,173 @@ const Console = (function () {
     Screens.tabs();
     refreshOpenMenu();
   }
-  return { read, draw, board, kindOf, takesOf, chipDoor };
+  return { read, draw, board, kindOf, takesOf, chipDoor, showFile };
+})();
+
+/**
+ * Showing a file on the Board's pages or one person's (plan 4-§5.9.7, §5.9.8; owner answer 11, "Both as options"): a
+ * picture of a page, which hands over that picture alone, or the document opened at a place, which the Board pages
+ * through, with Let them download it under it alone (owner answers 12 and 20). From the Preview's bar, the feed's ⋯ on a
+ * file (📺 Show the Board ▸) and the People tab (Show them a document…, its short bar). A file on this device is uploaded
+ * for this room as it is shown, never before; a file of the room is shown by its address.
+ */
+const Show = (() => {
+  const IMAGE = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+  /** A document's place by its type (lib/pages.js placeOf): a page, a slide, a sheet, a line (a CSV's row); a Word document opens at its top. */
+  const PLACE = { pdf: 'page', pptx: 'slide', xlsx: 'sheet', xls: 'sheet', csv: 'line', txt: 'line', md: 'line' };
+  const PLACE_SAID = { page: 'Page', slide: 'Slide', sheet: 'Sheet', line: 'Line' };
+  const STAGE = AGM.catalog.STAGE_EXT;
+  /** Why ☐ Let them download it is disabled for a file whose reader found hidden parts (plan 4-§5.10.3). */
+  const HIDDEN_PARTS = 'This file has hidden parts: Download would hand them over. Share a copy without them for download instead.';
+  /** A file as a source to show: {url, name, mime} of the room's, or {file, name, mime} on this device; its extension. */
+  const extOf = (src) => extOfName(src.url || src.name);
+  const sourceOf = (m) => (m && m.file ? { file: m.file, name: m.file.name, mime: m.file.type || '' } : m && isFileUrl(m.url) ? { url: m.url, name: m.filename || m.name || '', mime: m.mime || '' } : null);
+  /** The place `n` of a file of type `ext`, as a take's `at` names it, or none (a Word document opens at its top). */
+  const atOf = (ext, n) => (PLACE[ext] && n >= 1 ? { [PLACE[ext]]: n } : null);
+  /** The words of a step, said in the toast. */
+  const say = (words) => AGM.toast(words);
+  /** A file on this device uploaded for this room now: its address, or null with the server's words said. */
+  async function upload(file, what) {
+    say('Uploading ' + what + (sizeWords(file.size) ? ' (' + sizeWords(file.size) + ')' : '') + '…');
+    const up = await uploadFile(file);
+    if (!up || typeof up.url !== 'string') { AGM.toast((up && up.error) || 'Not uploaded.', true); return null; }
+    return up.url;
+  }
+  /**
+   * A picture of page `page` of `src` (a PDF), or the picture itself (an image), shown to `to`: a PDF's page is drawn here
+   * into a new picture and uploaded, saying what it is a picture of; an image of the room is shown by its address, one on
+   * this device uploaded first.
+   */
+  async function picture(src, page, to, { name = '', view = null } = {}) {
+    const ext = extOf(src);
+    if (IMAGE.includes(ext)) {
+      const url = src.url || await upload(src.file, 'the picture');
+      if (url) Console.showFile(to, { kind: 'image', url }, { name });
+      return;
+    }
+    if (ext !== 'pdf') { AGM.toast('A picture is made of a PDF\'s page or of an image: show this file as the document.', true); return; }
+    say('Drawing p. ' + page + '…');
+    let blob;
+    try {
+      const mod = await docReader();
+      blob = view ? await view.pagePicture(page) : await mod.pagePictureOf(src.url ? { url: src.url } : { file: src.file }, page);
+    } catch { blob = null; }
+    if (!blob) { AGM.toast('p. ' + page + ' could not be drawn.', true); return; }
+    const stem = (src.name || 'page').replace(/\.[A-Za-z0-9]{1,5}$/, '');
+    const url = await upload(new File([blob], stem + ' p' + page + '.png', { type: 'image/png' }), 'the picture');
+    if (!url) return;
+    const from = src.url ? { url: src.url, at: { page } } : { local: true, name: src.name, at: { page } };
+    Console.showFile(to, { kind: 'image', url, from }, { name });
+  }
+  /** `src` shown whole to `to`, opened at `at`, with Download when ticked: one of this device's uploaded first. */
+  async function whole(src, at, download, to, { name = '', arrive = '' } = {}) {
+    const url = src.url || await upload(src.file, 'the document');
+    if (!url) return;
+    Console.showFile(to, { kind: 'doc', url, ...(at ? { at } : {}), download: download === true }, { name, arrive });
+  }
+  /** Whether the Preview has `src` open now and its reader found hidden parts in it (never shown with Download). */
+  const hiddenIn = (src) => !!docView && !!previewing && (previewing.file ? previewing.file === src.file : !!previewing.msg && previewing.msg.url === src.url) && docView.hiddenParts();
+  /** The room's files the stage may show, as the short bar lists them: the Preview's own first. */
+  function choices() {
+    const out = [];
+    if (previewing && previewing.file && STAGE.includes(extOfName(previewing.file.name))) out.push({ value: 'local', label: previewing.file.name + ' (your copy)', src: sourceOf(previewing) });
+    for (const m of roomFiles.values()) {
+      if (m.transferOnly || !isFileUrl(m.url) || !STAGE.includes(extOfName(m.url))) continue;
+      out.push({ value: m.id, label: m.filename || 'a file', src: sourceOf(m) });
+    }
+    return out;
+  }
+  /**
+   * The short document bar (plan 4-§5.9.7): which file (asked only where none is named), its place, ☐ Let them download it
+   * (disabled, with why, for a file whose reader found hidden parts), and where it arrives; then Show the Board / Show Ana.
+   */
+  async function docAsk(src0, { to = 'board', name = '', page = 1, anchor = null, opener = null } = {}) {
+    const files = src0 ? null : choices();
+    if (files && !files.length) { AGM.toast('No file here the stage can show yet: share one (📎) or attach one to preview it.', true); return; }
+    const first = src0 || files[0].src;
+    const ext = extOf(first);
+    const hidden = src0 ? hiddenIn(src0) : false;
+    const fields = [
+      ...(files ? [{ name: 'file', label: 'File', type: 'select', options: files.map((f) => ({ value: f.value, label: f.label })), value: files[0].value }] : []),
+      ...(src0 && !PLACE[ext] ? [] : [{ name: 'at', label: src0 ? PLACE_SAID[PLACE[ext]] : 'Page, slide, sheet or line', value: String(page), max: 6 }]),
+      { name: 'download', label: 'Let them download it', type: 'checkbox', value: false, ...(hidden ? { disabled: HIDDEN_PARTS } : {}) },
+      { name: 'arrive', label: 'Where', type: 'select', options: [{ value: 'over', label: 'Over their chat' }, { value: 'side', label: 'In their side bar' }], value: 'over' },
+    ];
+    const r = await AGM.ask(anchor, { title: 'Show ' + (to === 'board' ? 'the Board' : name || 'them') + ' the document', words: (src0 ? (src0.name || 'The file') : 'The file') + ', whole: they can page through it.', fields, yes: to === 'board' ? 'Show the Board' : 'Show ' + (name || 'them'), no: 'Cancel' }, { opener });
+    if (!r.yes) return;
+    const src = files ? (files.find((f) => f.value === r.values.file) || files[0]).src : src0;
+    const n = parseInt(r.values.at, 10);
+    const ticked = r.values.download === true && !hiddenIn(src);
+    whole(src, atOf(extOf(src), n >= 1 && n <= 999999 ? n : 1), ticked, to, { name, arrive: r.values.arrive === 'side' ? 'side' : '' });
+  }
+  /** 📺 Show the Board ▸ on a file of the room (the feed's ⋯, the panel's list): a picture of p. 1 or of a page asked for, or the document. */
+  async function fromMenu(m, { value, anchor, opener } = {}) {
+    const src = sourceOf(m);
+    if (!src) return;
+    if (value === 'picture1') { picture(src, 1, 'board'); return; }
+    if (value === 'picture') {
+      const r = await AGM.ask(anchor, { title: 'A picture of a page', words: 'The page is drawn here and sent as a picture: nothing else of the file goes.', fields: [{ name: 'page', label: 'Page', value: '1', max: 4 }], yes: 'Show the Board', no: 'Cancel' }, { opener });
+      const n = r.yes ? parseInt(r.values.page, 10) : 0;
+      if (n >= 1 && n <= 9999) picture(src, n, 'board');
+      return;
+    }
+    if (value === 'doc') docAsk(src, { anchor, opener });
+  }
+  return { picture, whole, document: docAsk, fromMenu, sourceOf, atOf, hiddenIn, IMAGE, PLACE, STAGE, HIDDEN_PARTS };
+})();
+
+/**
+ * The Preview's bar (backstage, for a seat that may show the Board): 📺 Picture of p. 12 (a PDF; "Show this picture" for an
+ * image) and 📺 Document at p. 12 side by side, neither behind the other (owner answer 11), with ☐ Let them download it
+ * under the document's alone, disabled for a file whose reader found hidden parts. The place is the Preview's own, read
+ * as it scrolls. One click each, to the Board.
+ */
+const PreviewBar = (() => {
+  const $ = (id) => document.getElementById(id);
+  const bar = $('previewBar');
+  const pic = $('showPicture');
+  const docBtn = $('showDocument');
+  const tick = $('letDownload');
+  const why = $('letDownloadWhy');
+  const note = $('previewNote');
+  const may = () => docSeat() === 'research' && !ADMIN_VIEW && (F.canPush || F.canShow) && F.view !== 'simple';
+  const src = () => (previewing ? Show.sourceOf(previewing.msg || previewing) : null);
+  const pageNow = () => { const p = docView ? docView.place() : null; return p && p.page >= 1 ? p.page : 1; };
+  // Offered only over a file the reader drew: one it could not read (a password-protected Office file, a broken one) is
+  // shown nowhere, and its hidden parts are known only once it is read.
+  function draw() {
+    const s = src();
+    const ext = s ? extOfName(s.url || s.name) : '';
+    const show = !!s && may() && docShown && Show.STAGE.includes(ext);
+    bar.hidden = !show;
+    if (!show) return;
+    const n = pageNow();
+    const image = Show.IMAGE.includes(ext);
+    pic.hidden = !(image || ext === 'pdf');
+    pic.textContent = image ? '📺 Show this picture' : '📺 Picture of p. ' + n;
+    const place = Show.PLACE[ext];
+    docBtn.textContent = '📺 Document' + (place ? ' at ' + (place === 'page' ? 'p.' : place) + ' ' + n : '');
+    const hidden = !!docView && docView.hiddenParts();
+    tick.disabled = hidden;
+    if (hidden) tick.checked = false;
+    why.hidden = !hidden;
+    why.textContent = hidden ? Show.HIDDEN_PARTS : '';
+    note.textContent = 'Show the Board ' + (image ? 'this picture' : ext === 'pdf' ? 'a picture of this page only, or the whole file opened here' : 'the whole file, opened here') + (s.file ? ' — it is uploaded as you show it.' : '.');
+  }
+  let queued = false;
+  docDisplay.addEventListener('scroll', () => {
+    if (bar.hidden || queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; draw(); });
+  }, { passive: true, capture: true });
+  pic.addEventListener('click', () => { const s = src(); if (s) Show.picture(s, pageNow(), 'board', { view: docView }); });
+  docBtn.addEventListener('click', () => {
+    const s = src();
+    if (!s) return;
+    Show.whole(s, Show.atOf(extOfName(s.url || s.name), pageNow()), tick.checked && !tick.disabled, 'board');
+    tick.checked = false;
+  });
+  return { draw };
 })();
 
 // ---------------- A web page previewed, or what was shown looked at again: on this page alone ----------------
@@ -5313,8 +5686,8 @@ const Simple = (function () {
       drawNewBelow(place.unread, place.asks);
       if (atEnd) { feed.scrollTop = feed.scrollHeight; place.atEnd = true; }
     }
-    const head = document.querySelector('.doc-panel-header strong');
-    if (head) head.textContent = next === 'simple' ? '📺 Shown to you' : '📺 On stage';
+    const head = document.getElementById('docPanelTitle');
+    if (head) { head.textContent = panelHeading(); docPanel.setAttribute('aria-label', head.textContent); }
     // The full view's split, dragged and kept, is not the simple view's: its column follows the screen's size.
     if (was !== next) { if (next === 'simple') applySplit(0); else restoreSplit(); }
     if (next === 'simple' && !ADMIN_VIEW && !stopAwake) stopAwake = AGM.awake((st) => { awake = st; if (sheetOpen()) drawSheet(); });
@@ -5465,7 +5838,7 @@ const Simple = (function () {
 
   // ---- what is shown to this person: a column at 900 px wide or more, a tab below, drawn only while it holds something
   /** How many things are shown to this person now: the takes in the side bar's cards, its Earlier, a file open there. */
-  const shownCount = () => Takes.carded() + Takes.earlier() + (currentDocMsgId ? 1 : 0);
+  const shownCount = () => Takes.carded() + Takes.earlier() + (previewing ? 1 : 0);
   function layout() {
     const n = isSimple() ? shownCount() : 0;
     body.dataset.shown = String(n);
@@ -5477,7 +5850,7 @@ const Simple = (function () {
     // What is shown is On stage content: in the simple view it is never dragged out or saved by a long press. The full
     // view's pictures drag as they always have (the take layer's own never do: pagelayer.mjs), so only what this marked
     // is let go again.
-    const simple = isSimple();
+    const simple = isSimple() || F.role === 'board';
     for (const img of document.querySelectorAll('#takeCards img, #docDisplay img, #pageLayer img')) {
       if (simple && img.getAttribute('draggable') !== 'false') { img.setAttribute('draggable', 'false'); img.dataset.bvDrag = '1'; }
       else if (!simple && img.dataset.bvDrag) { img.removeAttribute('draggable'); delete img.dataset.bvDrag; }
@@ -5498,12 +5871,14 @@ const Simple = (function () {
   shownWatch.observe($('takeCards'), { childList: true, attributes: true, attributeFilter: ['hidden'] });
   shownWatch.observe($('takeEarlier'), { childList: true, attributes: true, attributeFilter: ['hidden'] });
   shownWatch.observe($('docDisplay'), { childList: true });
-  // On stage content keeps no copy: in the simple view a long press or a right-click on it opens no menu, the browser's
-  // own included (its door answers as a menu that is open, and opens none), and nothing is dragged out.
+  // On stage content keeps no copy: in the simple view, and on an On stage seat in either view, a long press or a
+  // right-click on it opens no menu of the browser's (its door answers as a menu that is open, and opens none: the cards'
+  // own menus are theirs), and nothing is dragged out.
+  const stageSeat = () => isSimple() || F.role === 'board';
   for (const id of ['takeCards', 'takeEarlier', 'docDisplay', 'pageLayer']) {
     const el = $(id);
-    AGM.menu.door(el, () => (isSimple() ? { el, more: null, open: () => true } : null), { stage: true });
-    el.addEventListener('dragstart', (e) => { if (isSimple()) e.preventDefault(); });
+    AGM.menu.door(el, () => (stageSeat() ? { el, more: null, open: () => true } : null), { stage: true });
+    el.addEventListener('dragstart', (e) => { if (stageSeat()) e.preventDefault(); });
   }
 
   // ---- the composer's placeholder: its long words where they fit the field, measured in the field's own font

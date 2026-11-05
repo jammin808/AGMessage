@@ -47,7 +47,7 @@ function threadText(messages, max = 60) {
       + (m.sentFrom ? ` [sent here from ${placeOf(m.sentFrom)}]` : m.sentTo ? ` [sent to ${placeOf(m.sentTo)}${m.sentTo.withdrawn ? ` and withdrawn from there after ${lasted(m.sentTo.withdrawn - m.at)}` : ''}, a copy kept here]` : '');
     const t = hhmm(m.at) + (Number.isInteger(m.held) && m.held > 0 ? `, written ${hhmm(m.at - m.held * 1000)} and sent when the connection was back` : '');
     if (m.type === 'text') return `[${t}] ${who}: ${m.text}`;
-    if (m.type === 'file') return `[${t}] ${who} shared file "${m.filename}"${m.caption ? ': ' + m.caption : ''}`;
+    if (m.type === 'file') return `[${t}] ${who} shared "${m.filename}" for download${m.caption ? ': ' + m.caption : ''}`;
     if (m.type === 'action') {
       const answers = (m.responses || []).map((r) => `${r.name} → ${r.optionIndex >= 0 ? (m.options || [])[r.optionIndex] : r.note}`).join('; ');
       return `[${t}] ${who} asked: ${m.text} [options: ${(m.options || []).join(' / ')}]${answers ? ' answers: ' + answers : ''}`;

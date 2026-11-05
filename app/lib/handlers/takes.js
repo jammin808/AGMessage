@@ -148,7 +148,7 @@ const pagesWords = (n) => n + ' page' + (n === 1 ? '' : 's');
  * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, accounts, linkFor, sendersOf, pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, sendTo } = ctx;
+  const { store, audit, accounts, linkFor, sendersOf, pages, tickets, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, sendTo } = ctx;
 
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
   /**
@@ -469,6 +469,8 @@ function register(socket, conn, ctx) {
     if (!operator && !(whoKey && found.take.by.who === whoKey)) return answer({ ok: false, error: NOT_YOURS });
     const before = hallPages(hall.code);
     pages.withdraw(hall.code, a.seq, { who: whoKey });
+    // Its download tickets are void, and none is given for it again ("This was withdrawn.", file:download).
+    tickets.voidTake(hall.code, a.seq);
     tell(hall.code, before);
     // Every page of whom it was for (the Board's, or each person's), by its socket, lets go of it: a Look of it included.
     const pagesNow = hallPages(hall.code);

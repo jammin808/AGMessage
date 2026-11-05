@@ -14,6 +14,8 @@
 //     frames and groups with all they hold; presenter notes, which no reader opens.
 //   - Hidden sheets, rows and columns and hidden slides are drawn only on the research seat, marked, and never on a
 //     Board or observer seat (`seat` is the page's own); the AI's text leaves them out on every seat.
+//   - A file the readers found hidden parts in (hiddenPartsOf: those, a slide's hidden shapes, Word's hidden text) is
+//     never shown with Download ticked: a download hands over the whole file, hidden parts and all.
 //   - Every reader is bounded: BOUNDS.rows rows a sheet or a CSV, BOUNDS.cols columns of any grid or table, BOUNDS.cells
 //     cells of one (its rows cut to fit at its width), BOUNDS.lines lines of text, each said where it cut.
 
@@ -570,10 +572,11 @@ const paraText = (p) => elements(p).map((k) => {
 
 /**
  * A deck's outline from its parts' text (`parts`: {name: xml}, the document worker's): slides in `p:sldIdLst`'s order,
- * each {n, hidden, blocks}: a title as a heading, a placeholder's or a bulleted paragraph as an item at its level, any
- * other text as a paragraph, a table as a table, a picture as a picture (`src` its part name). A slide marked
- * `show="0"` is `hidden`; a shape, picture, frame or group marked hidden is skipped with all it holds; presenter notes
- * are never read. Throws, with `why`, on a part it cannot read.
+ * each {n, hidden, blocks, hiddenShapes?}: a title as a heading, a placeholder's or a bulleted paragraph as an item at
+ * its level, any other text as a paragraph, a table as a table, a picture as a picture (`src` its part name). A slide
+ * marked `show="0"` is `hidden`; a shape, picture, frame or group marked hidden is skipped with all it holds, and counted
+ * (`hiddenShapes`, only on a slide with one), since the file still holds it; presenter notes are never read. Throws,
+ * with `why`, on a part it cannot read.
  */
 export function pptxOutline(parts) {
   const get = (n) => (Object.prototype.hasOwnProperty.call(parts, n) ? parts[n] : '');
@@ -592,10 +595,11 @@ export function pptxOutline(parts) {
     const n = k + 1;
     const blocks = [];
     const at = { slide: n };
+    let hiddenShapes = 0;
     const walkShapes = (tree) => {
       for (const el of elements(tree)) {
         const kind = local(el.name);
-        if (['sp', 'pic', 'graphicFrame', 'grpSp', 'cxnSp'].includes(kind) && hiddenShape(el)) continue;
+        if (['sp', 'pic', 'graphicFrame', 'grpSp', 'cxnSp'].includes(kind) && hiddenShape(el)) { hiddenShapes++; continue; }
         if (kind === 'grpSp') walkShapes(el);
         else if (kind === 'AlternateContent') { const choice = child(el, 'Choice'); if (choice) walkShapes(choice); }
         else if (kind === 'sp') shape(el);
@@ -643,7 +647,7 @@ export function pptxOutline(parts) {
       blocks.push({ kind: 'table', text: grid.rows.map((r) => r.map((c) => c.text).join('\t')).join('\n'), rows: grid.rows, width: grid.width, cut: grid.cut, at });
     };
     walkShapes(child(child(sld, 'cSld') || { kids: [] }, 'spTree'));
-    slides.push({ n, hidden: sld.attrs.show === '0' || sld.attrs.show === 'false', blocks });
+    slides.push({ n, hidden: sld.attrs.show === '0' || sld.attrs.show === 'false', blocks, ...(hiddenShapes ? { hiddenShapes } : {}) });
   });
   return { slides };
 }
@@ -693,6 +697,19 @@ export function planSlides(deck, seat) {
   const slides = deck.slides.filter((s) => research || !s.hidden);
   const left = deck.slides.length - slides.length;
   return { slides, notShown: left ? plural(left, 'hidden slide', 'hidden slides') + ' not shown' : '' };
+}
+
+/**
+ * Whether a reader's model of a file found hidden parts in it (pure): a hidden sheet ("very hidden" alike), row or column,
+ * a hidden slide or shape, or Word's hidden text (removed before the file was read, and counted). The file still holds
+ * them, so a file with one is never shown with Download ticked; the server never parses a document, so this is the
+ * researcher's page's guard. Any other model (a PDF, a picture, text, Markdown) has none.
+ */
+export function hiddenPartsOf(m) {
+  if (!m) return false;
+  if (m.kind === 'word') return m.hidden > 0;
+  if (m.kind === 'deck') return (m.slides || []).some((s) => !!s.hidden || s.hiddenShapes > 0);
+  return Array.isArray(m.sheets) && m.sheets.some((s) => !!s.hidden || (s.hiddenRows || []).length > 0 || (s.hiddenCols || []).length > 0);
 }
 
 // ---------------------------------------------------------------- the AI's text

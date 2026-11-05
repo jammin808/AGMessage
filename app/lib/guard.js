@@ -341,15 +341,81 @@ function isText(b) {
   const s = b.slice(0, 4096).toString('utf8');
   return !s.includes('\u0000') && !/<\s*(script|html|svg|iframe|object|embed)\b/i.test(s);
 }
+/** An ISO base media file (MP4, M4A, QuickTime): its first box is `ftyp`, named at bytes 4-7. */
+const isFtyp = (b) => b.length >= 8 && b.slice(4, 8).toString('latin1') === 'ftyp';
+/**
+ * An MP3: an ID3 tag, or an MPEG audio frame's header (eleven sync bits, then a version, a layer, a bitrate and a sample
+ * rate that are not the reserved values), as the WHATWG's MIME sniffing matches one.
+ */
+function isMp3(b) {
+  if (b.length >= 3 && b.slice(0, 3).toString('latin1') === 'ID3') return true;
+  if (b.length < 4 || b[0] !== 0xff || (b[1] & 0xe0) !== 0xe0) return false;
+  return ((b[1] >> 3) & 3) !== 1 && ((b[1] >> 1) & 3) !== 0 && ((b[2] >> 4) & 0x0f) !== 0x0f && ((b[2] >> 2) & 3) !== 3;
+}
+/**
+ * An OpenDocument file: a zip whose first entry is `mimetype`, stored (not compressed), holding the type's own string
+ * whole, read at its fixed place in the first bytes (ODF 1.2 Part 3 §3.3).
+ */
+function isOdf(type) {
+  return (b) => {
+    if (!isZip(b) || b.length < 38 + type.length) return false;
+    const method = b.readUInt16LE(8);
+    const size = b.readUInt32LE(22);
+    const nameLength = b.readUInt16LE(26);
+    const extra = b.readUInt16LE(28);
+    if (method !== 0 || nameLength !== 8 || size !== type.length || b.slice(30, 38).toString('latin1') !== 'mimetype') return false;
+    const at = 38 + extra;
+    return b.length >= at + type.length && b.slice(at, at + type.length).toString('latin1') === type;
+  };
+}
+/**
+ * The file types that are only ever transfers (owner answer 18): downloaded through a ticket, never opened, parsed,
+ * drawn, previewed or shown by AGMessage, and served only as `application/octet-stream`. Each is checked by its first
+ * bytes at upload, nothing more. No key is an UPLOAD_TYPES key: those are the types the stage can show.
+ */
+const OCTET = 'application/octet-stream';
+const TRANSFER_TYPES = {
+  zip: { mime: OCTET, magic: isZip },
+  mp4: { mime: OCTET, magic: isFtyp },
+  m4a: { mime: OCTET, magic: isFtyp },
+  mov: { mime: OCTET, magic: isFtyp },
+  mp3: { mime: OCTET, magic: isMp3 },
+  wav: { mime: OCTET, magic: (b) => b.length >= 12 && b.slice(0, 4).toString('latin1') === 'RIFF' && b.slice(8, 12).toString('latin1') === 'WAVE' },
+  odt: { mime: OCTET, magic: isOdf('application/vnd.oasis.opendocument.text') },
+  ods: { mime: OCTET, magic: isOdf('application/vnd.oasis.opendocument.spreadsheet') },
+  odp: { mime: OCTET, magic: isOdf('application/vnd.oasis.opendocument.presentation') },
+};
+/** A compound file's first eight bytes ([MS-CFB] §2.2): a Word, Excel or PowerPoint file protected with a password starts so. */
+const CFB_HEAD = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+const isCompoundFile = (b) => !!b && b.length >= 8 && b.slice(0, 8).equals(CFB_HEAD);
+/**
+ * The Office types a password-protected file of is a compound file holding the encrypted package (lib/cfbcheck.js
+ * decides, per file): a second shape of three UPLOAD_TYPES keys, transfer-only.
+ */
+const PROTECTED_OFFICE = Object.freeze(['docx', 'xlsx', 'pptx']);
 function extOf(name) {
   const m = /\.([A-Za-z0-9]{1,5})$/.exec(String(name || ''));
   return m ? m[1].toLowerCase() : '';
 }
-/** The upload's type if its name and its first bytes agree, else null. */
+/**
+ * Whether an upload of this name may be taken at all: a type the stage can show, or one only ever transferred. Its first
+ * bytes are read after (uploadType).
+ */
+const uploadable = (filename) => { const ext = extOf(filename); return Object.hasOwn(UPLOAD_TYPES, ext) || Object.hasOwn(TRANSFER_TYPES, ext); };
+/**
+ * The upload's type if its name and its first bytes agree, else null: `{ext, mime, transferOnly}`. A transfer type's mime
+ * is `application/octet-stream`. A Word, Excel or PowerPoint name whose first bytes are a compound file's is
+ * `{transferOnly: true, compound: true}`: a password-protected file only when lib/cfbcheck.js finds its directory holds
+ * the encrypted package and nothing else Office runs, which the caller asks before keeping it.
+ */
 function uploadType(filename, head) {
   const ext = extOf(filename);
+  if (!head || head.length < 4) return null;
+  if (Object.hasOwn(TRANSFER_TYPES, ext)) return TRANSFER_TYPES[ext].magic(head) ? { ext, mime: OCTET, transferOnly: true } : null;
+  if (!Object.hasOwn(UPLOAD_TYPES, ext)) return null;
   const t = UPLOAD_TYPES[ext];
-  return t && head && head.length >= 4 && t.magic(head) ? { ext, ...t } : null;
+  if (PROTECTED_OFFICE.includes(ext) && isCompoundFile(head)) return { ext, mime: OCTET, transferOnly: true, compound: true };
+  return t.magic(head) ? { ext, ...t, transferOnly: false } : null;
 }
 const UPLOAD_NAME = /^[0-9]{10,16}-[a-z0-9]{12}-[A-Za-z0-9._-]{1,60}$/;
 /** A file message's URL must point at one of our uploads. */
@@ -360,5 +426,5 @@ function validUploadUrl(url) {
 module.exports = {
   readSecret, makeSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
   Bucket, Buckets, Places, Lockout, limitKey, laneOf, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, CSP_HALL, CSP_PDF_WORKER, PDF_WORKERS, str,
-  UPLOAD_TYPES, uploadType, validUploadUrl, extOf,
+  UPLOAD_TYPES, TRANSFER_TYPES, PROTECTED_OFFICE, uploadType, uploadable, isCompoundFile, validUploadUrl, extOf,
 };

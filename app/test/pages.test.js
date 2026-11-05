@@ -31,12 +31,22 @@ const KINDS_WORDS = { error: 'Choose what to show: back to chat, Stagewatch, the
 const dirs = [];
 const folder = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-pages-')); dirs.push(d); return d; };
 test.after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
-test('the stage\'s file types: every upload type is one the stage can show, and none is only a transfer yet', () => {
+test('the stage\'s file types: every upload type is one the stage can show, every transfer type is transfer-only, and none is both', () => {
   // A type added to the uploads is a stage type, checked at upload and parsed on the Board's pages, unless it is listed
-  // as a transfer only: then it is never opened. No upload type is a transfer only until the transfer types land.
+  // as a transfer only (lib/guard.js TRANSFER_TYPES, owner answer 18): then it is never opened, so a type added for
+  // transfer is never parsed on the Board's devices unasked.
   assert.deepEqual([...STAGE_TYPES].sort(), Object.keys(guard.UPLOAD_TYPES).sort(), 'the stage types are the upload types');
-  assert.deepEqual(TRANSFER_ONLY, [], 'no transfer-only type yet');
+  assert.deepEqual([...TRANSFER_ONLY].sort(), Object.keys(guard.TRANSFER_TYPES).sort(), 'the transfer-only types are the transfer types');
+  assert.deepEqual([...TRANSFER_ONLY].sort(), ['m4a', 'mov', 'mp3', 'mp4', 'odp', 'ods', 'odt', 'wav', 'zip']);
+  assert.ok(Object.keys(guard.UPLOAD_TYPES).every((ext) => !Object.hasOwn(guard.TRANSFER_TYPES, ext)), 'no key in both tables');
   assert.ok(STAGE_TYPES.every((ext) => !TRANSFER_ONLY.includes(ext)), 'no type is both');
+  // sourceOk refuses a transfer-only file: a transfer type by its extension, and a protected Office file by its upload's or
+  // its message's word.
+  const refused = { error: 'That file is for download only: AGMessage does not open it.' };
+  assert.deepEqual(sourceOk('/uploads/1700000000000-abcdefghijkl-pack.zip', { main: 'HALL01' }), refused);
+  assert.deepEqual(sourceOk('/uploads/1700000000000-abcdefghijkl-agenda.docx', { main: 'HALL01', uid: 'u1', fresh: () => ({ room: 'HALL01', uid: 'u1', name: 'Agenda.docx', transferOnly: true }) }), refused);
+  assert.deepEqual(sourceOk('/uploads/1700000000000-abcdefghijkl-agenda.docx', { main: 'HALL01', holders: () => [{ key: 'HALL01', at: 1, name: 'Agenda.docx', transferOnly: true }] }), refused);
+  assert.deepEqual(sourceOk('/uploads/1700000000000-abcdefghijkl-agenda.docx', { main: 'HALL01', holders: () => [{ key: 'HALL01', at: 1, name: 'Agenda.docx' }] }), { name: 'Agenda.docx', room: '', roomName: '' }, 'the same type as a zip is a stage type');
   assert.ok(IMAGE_EXT.every((ext) => STAGE_TYPES.includes(ext)), 'a holding slide\'s picture is a stage type');
   assert.ok(Object.isFrozen(STAGE_TYPES) && Object.isFrozen(TRANSFER_ONLY));
 });

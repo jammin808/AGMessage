@@ -85,8 +85,11 @@ const WINDOW = 200;
 const keptInView = (m) => !!m && (!!m.pinned
   || (m.type === 'help' && !(m.help && m.help.state === 'resolved'))
   || (m.type === 'action' && !(Array.isArray(m.responses) && m.responses.length > 0)));
-/** A file as the first open's index names it: its message's id, its address, its name and its kind. */
-const fileEntry = (m) => ({ id: m.id, url: m.url, filename: m.filename, mime: m.mime });
+/**
+ * A file as the first open's index names it: its message's id, its address, its name and its kind, and whether it is
+ * transfer-only (one AGMessage never opens).
+ */
+const fileEntry = (m) => ({ id: m.id, url: m.url, filename: m.filename, mime: m.mime, ...(m.transferOnly === true ? { transferOnly: true } : {}) });
 /**
  * A message as a page reading the room is sent it (a first open, a read back, one message read): a reply whose quoted
  * message is no longer in the room (removed; a withdrawn one's quote says so already) is a copy whose quote says it has

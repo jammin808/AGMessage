@@ -61,8 +61,9 @@ const roomVerbs = require('./lib/handlers/rooms');
 const takeVerbs = require('./lib/handlers/takes');
 const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
-const { Pages, personKey, sourceOk, FILE_KINDS } = require('./lib/pages');
+const { Pages, personKey, sourceOk, mayDownload: seatMayDownload, FILE_KINDS } = require('./lib/pages');
 const uploadcheck = require('./lib/uploadcheck');
+const downloads = require('./lib/downloads');
 const readings = require('./lib/peaks');
 const startup = require('./lib/startup');
 const laptop = require('./lib/laptop');
@@ -473,6 +474,13 @@ const frames = {
  */
 const WATCH = 'watch:';
 /**
+ * The io room of a room's pages that are given no file's link (`ro:<key>`, plan 4-§4.6.6, S2): an observer's, and a
+ * Viewer account's whatever its seat. A file message is sent twice: whole to the room but these, and without its address
+ * to these (lib/ops.js linkless). A page joins it as it joins its room, and the admin's seat change moves it in or out in
+ * the same tick as the change, so a page that ignores `roleChanged` is split by its new seat all the same.
+ */
+const LINKLESS = 'ro:';
+/**
  * Each room of a frame's batch that is still here (a hall's key names its Main room), given to `send` with its value;
  * one that faults holds back no other.
  */
@@ -816,7 +824,11 @@ const apply = ops.applier({
   // A message that is not a system line, a removal and a clear are news for the room's watchers on its hall's other
   // rooms (ops.newsOf, `frames.activity`).
   send: (room, opEvent, payload) => {
-    io.to(room.code).emit(opEvent, payload);
+    // A file message to the room's pages whole, and without its address to those given no file's link (LINKLESS).
+    if (opEvent === 'message' && payload && payload.type === 'file') {
+      io.to(room.code).except(LINKLESS + room.code).emit(opEvent, payload);
+      io.to(LINKLESS + room.code).emit(opEvent, ops.linkless(payload));
+    } else io.to(room.code).emit(opEvent, payload);
     const news = ops.newsOf(opEvent, payload);
     if (news) frames.activity.mark(room.code, news);
   },
@@ -981,7 +993,10 @@ const uploadBuckets = new guard.Buckets(0.5, 8, 5000);
 // its upload token was issued for and the person it was issued to (its provenance, read by `fileRefusal`): a file message
 // names an upload made for its room by the person who posts it, or one a message of that room already holds. The record is
 // this run's alone, so an upload not yet posted when the server stops is uploaded again after the restart.
-const freshUploads = new Map();    // file name -> {at, room (its key), uid, name (as uploaded, cleaned)}; a refused file not yet removed: at 0, room and uid null
+const freshUploads = new Map();    // file name -> {at, room (its key), uid, name (as uploaded, cleaned), transferOnly}; a refused file not yet removed: at 0, room and uid null
+// Download tickets (plan 4-§4.6.6): issued to a socket for a seat that may download (`file:download`, lib/handlers/rooms.js)
+// and taken by the download itself (`POST /uploads/:name/download`); in memory only, bounded, single use, 60 s each.
+const tickets = new downloads.Tickets();
 
 /**
  * What the admin is told when a room's files could not all be removed (lib/store.js `remove`'s `kept`: another program
@@ -1180,6 +1195,38 @@ app.post(machinewire.PATHS.events, machineBody, (req, res) => {
   res.json({ ok: true, read: 0, words: 'Heard. This AGMessage keeps no machine events to read.' });
 });
 
+// A download, by its ticket (plan 4-§4.6.6): the form field `t`, a ticket `file:download` gave the page's socket, for this
+// file, at this address, within its time, taken out at its first use. Only then is the file sent: as an attachment
+// under the message's name with the stored file's extension (lib/downloads.js attachment), its type (a transfer-only
+// file's `application/octet-stream`), `nosniff`, the sandbox policy and `no-store`, streamed from the disk. Every other
+// outcome, the form's own refusals included (a field twice, a body over 1 KB, a third field), is 204 No Content, so the
+// hall page that posted it stays as it was, never a JSON answer in its place; it is mounted before the JSON parser, so
+// no body reaches the parser that answers in JSON. The page is told when the file starts (`file:sending`) and when its
+// stream ends (`file:sent`), by the ticket, `whole: false` when it ended before the whole file went (the browser's
+// download cancelled, the connection lost): whether the browser kept it is the browser's.
+const downloadForm = express.urlencoded({ extended: false, limit: '1kb', parameterLimit: 2 });
+app.post('/uploads/:name/download', downloadForm, (req, res) => {
+  const name = String(req.params.name || '');
+  const t = req.body && typeof req.body.t === 'string' ? req.body.t : '';
+  const rec = t && guard.validUploadUrl('/uploads/' + name) ? tickets.take(t, { name, address: guard.clientIp(req) }) : null;
+  if (!rec) return res.status(204).end();
+  const ext = guard.extOf(name);
+  const type = rec.transferOnly ? null : guard.UPLOAD_TYPES[ext];
+  const page = () => io.sockets.sockets.get(rec.sid);
+  res.setHeader('Content-Type', type ? type.mime : 'application/octet-stream');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+  res.setHeader('Content-Disposition', downloads.attachment(rec.filename, ext));
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.once('pipe', () => { const s = page(); if (s) s.emit('file:sending', { ticket: t }); });
+  res.sendFile(path.join(UPLOAD_DIR, name), { dotfiles: 'deny', cacheControl: false, etag: false, lastModified: false, acceptRanges: false }, (err) => {
+    if (!err) { const s = page(); if (s) s.emit('file:sent', { ticket: t }); return; }
+    if (res.headersSent) { const s = page(); if (s) s.emit('file:sent', { ticket: t, whole: false }); return; }
+    res.removeHeader('Content-Disposition');
+    res.status(204).end();
+  });
+}, (_err, _req, res, _next) => { if (!res.headersSent) res.status(204).end(); });
+
 app.use(express.json({ limit: '256kb' }));
 const web = mountAccounts(app, {
   accounts, sessions, audit, settings, isEncrypted, isLoopback,
@@ -1213,17 +1260,40 @@ app.get('/build.js', (_req, res) => { CHECKED(res); res.type('application/javasc
 app.use(express.static(PUBLIC_DIR, { index: 'index.html', cacheControl: false, setHeaders: CHECKED }));
 
 // Uploads: only allow-listed names, served so they can't run script (sandbox CSP, nosniff) and kept by no device: never in
-// a browser's cache (`no-store`), never saved by a GET (`inline` for every type: a download is the server's own act), and
-// never opened by a navigation (the address bar, a link, a frame: Fetch Metadata's mode and destination), which would give
-// the browser's own viewer and its Save. AGMessage's readers fetch an upload, and its pages draw a picture with <img>; a
-// browser that sends no Fetch Metadata is served, as before it.
+// a browser's cache (`no-store`), never saved by a GET (`inline` for every type: a download is the server's own act, by a
+// ticket), and never opened by a navigation (the address bar, a link, a frame: Fetch Metadata's mode and destination),
+// which would give the browser's own viewer and its Save. AGMessage's readers fetch an upload, and its pages draw a
+// picture with <img>; a browser that sends no Fetch Metadata is served, as before it. A transfer-only file is never
+// answered here (nothing in AGMessage reads it: only a download ticket reaches it): a transfer type by its extension, and
+// a Word, Excel or PowerPoint file protected with a password by its first eight bytes, read at each GET, so the answer
+// holds after a restart and for a room not loaded, with no record to drift.
 const NAVIGATED = new Set(['document', 'iframe', 'frame', 'embed', 'object']);
-app.get('/uploads/:name', (req, res) => {
+/**
+ * Whether the stored Word, Excel or PowerPoint upload `name` is not answered on a GET: it starts as a compound file does
+ * (a protected Office file), or its first bytes could not be read (not there, or held by another program), since a file
+ * not read is never served as an Office file unchecked. Read now, never kept.
+ */
+async function officeUnserved(name) {
+  let handle;
+  try {
+    handle = await fs.promises.open(path.join(UPLOAD_DIR, name), 'r');
+    const head = Buffer.alloc(8);
+    const { bytesRead } = await handle.read(head, 0, 8, 0);
+    return guard.isCompoundFile(head.subarray(0, bytesRead));
+  } catch {
+    return true;   // unread, whatever the reason: answered 404, as a missing file is
+  } finally {
+    if (handle) await handle.close().catch(() => { /* closed */ });
+  }
+}
+app.get('/uploads/:name', async (req, res) => {
   const name = String(req.params.name || '');
   if (!guard.validUploadUrl('/uploads/' + name)) return res.status(404).end();
-  const t = guard.UPLOAD_TYPES[guard.extOf(name)];
+  const ext = guard.extOf(name);
+  const t = guard.UPLOAD_TYPES[ext];
   if (!t) return res.status(404).end();
   if (String(req.headers['sec-fetch-mode'] || '') === 'navigate' || NAVIGATED.has(String(req.headers['sec-fetch-dest'] || ''))) return res.status(404).end();
+  if (guard.PROTECTED_OFFICE.includes(ext) && await officeUnserved(name)) return res.status(404).end();
   res.setHeader('Content-Type', t.mime);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
@@ -1745,10 +1815,13 @@ const upload = multer({
     },
   }),
   limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 4 },
-  fileFilter: (req, file, cb) => cb(null, !!guard.UPLOAD_TYPES[guard.extOf(file.originalname)]),
+  // A type the stage can show, or one only ever transferred (lib/guard.js UPLOAD_TYPES, TRANSFER_TYPES).
+  fileFilter: (req, file, cb) => cb(null, guard.uploadable(file.originalname)),
 });
 
 let statfsWarned = false;
+/** What an upload of a type AGMessage takes neither for the stage nor for transfer is told. */
+const UNSUPPORTED = 'That file type isn\'t supported. PDF, images, Word, Excel, PowerPoint, CSV and text work, and zip, MP4, M4A, MOV, MP3, WAV and OpenDocument files can be shared for download.';
 app.post('/api/upload', async (req, res, next) => {
   const given = String(req.headers['x-agm-upload'] || '');
   const t = uploadTokens.get(given);
@@ -1770,7 +1843,7 @@ app.post('/api/upload', async (req, res, next) => {
 }, (req, res) => {
   upload.single('file')(req, res, (err) => {
     if (err) return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Files can be up to 25 MB.' : 'Upload failed.' });
-    if (!req.file) return res.status(400).json({ error: 'That file type isn\'t supported. PDF, images, Word, Excel, PowerPoint, CSV and text work.' });
+    if (!req.file) return res.status(400).json({ error: UNSUPPORTED });
     // The stored file, by the name multer gave it (ours, from a cleaned name), held inside the uploads folder.
     const uploadsRoot = path.resolve(UPLOAD_DIR);
     const stored = path.resolve(uploadsRoot, req.file.filename);
@@ -1786,12 +1859,12 @@ app.post('/api/upload', async (req, res, next) => {
     const type = guard.uploadType(req.file.originalname, head);
     if (!type) {
       try { fs.unlinkSync(stored); } catch { /* ignore */ }
-      return res.status(400).json({ error: 'That file\'s contents don\'t match its type, so it wasn\'t shared.' });
+      return res.status(400).json({ error: uploadcheck.MISMATCH });
     }
     // Checked before it is kept or named to anyone (lib/uploadcheck.js): a refused file leaves the disk, with one audit
     // row in the hall by its uploader, at the upload's own address (its token is a bearer's: not always the socket's).
     const t = req.agmUploader;
-    uploadcheck.refusalOf(stored, type.ext, req.file.filename).then(async (refused) => {
+    uploadcheck.refusalOf(stored, type.ext, req.file.filename, { transferOnly: type.transferOnly, compound: !!type.compound }).then(async (refused) => {
       if (refused) {
         if (refused.failed) console.warn('  [uploads] an upload (' + type.ext + ') could not be checked (' + refused.failed + '), so it was not kept');
         // One another program holds (an antivirus) is the sweep's at its next pass, in no room and by nobody, so it is
@@ -1804,8 +1877,8 @@ app.post('/api/upload', async (req, res, next) => {
         audit.write(t.actor(), 'upload.refused', t.hall, refused.words, guard.clientIp(req));
         return res.status(refused.status).json({ error: refused.error });
       }
-      freshUploads.set(req.file.filename, { at: Date.now(), room: t.room, uid: t.uid, name: guard.cleanText(req.file.originalname, 120) });
-      res.json({ url: `/uploads/${req.file.filename}`, filename: String(req.file.originalname).slice(0, 120), mime: type.mime.split(';')[0], size: req.file.size });
+      freshUploads.set(req.file.filename, { at: Date.now(), room: t.room, uid: t.uid, name: guard.cleanText(req.file.originalname, 120), transferOnly: type.transferOnly });
+      res.json({ url: `/uploads/${req.file.filename}`, filename: String(req.file.originalname).slice(0, 120), mime: type.mime.split(';')[0], size: req.file.size, transferOnly: type.transferOnly });
     }).catch((e) => {
       console.error('  [uploads] ' + (e && e.stack ? e.stack : e));
       if (!res.headersSent) res.status(500).json({ error: 'Upload failed.' });
@@ -2200,7 +2273,11 @@ io.on('connection', (socket) => {
     // A page seated in a room that joins another room of its hall on its own socket, as the same person (its identity and
     // its name), moves: said in neither room. Anyone else it now names is a person of their own, said as they join.
     const moved = !!room && room !== r && room.hall === r.hall && !!me && me.uid === id && me.name === cleanName && !socket.data.adminView && !isAdminView;
-    if (room && room !== r) leaveRoom(true, false, moved);
+    if (room && room !== r) {
+      leaveRoom(true, false, moved);
+      // One socket, one room (plan 1-§3.4): the room it leaves is no longer sent to it.
+      socket.leave(room.code);
+    }
     if (!stillSeated) me = { uid: id, name: cleanName, role: cleanRole, joinedAt: Date.now(), ...(acct ? { acct: acct.username } : {}) };
     room = r;
     socket.data.adminView = isAdminView;
@@ -2213,6 +2290,9 @@ io.on('connection', (socket) => {
     // A verb that names its own room so is read as the room it sits in (help:respond), and a guest is told that code alone.
     socket.data.joinedAs = code;
     socket.join(r.code);
+    // A page given no file's link (an observer's, a Viewer account's) is sent each file message without its address.
+    for (const n of Array.from(socket.rooms)) if (n.startsWith(LINKLESS) && n !== LINKLESS + r.code) socket.leave(n);
+    if (linklessPage()) socket.join(LINKLESS + r.code); else socket.leave(LINKLESS + r.code);
     // The person a support view shows (`viewOf`: their uid among this room's people), told that person's take and chat
     // view as their own pages are, and their facts as it joins (R8); it reports nothing. None for any other page, nor
     // for a person not seated here.
@@ -2264,6 +2344,8 @@ io.on('connection', (socket) => {
     // the link it went to, which names the hall's key.
     const missed = Number.isInteger(since) ? store.opsSince(r, since) : null;
     const opened = missed ? null : store.firstOpen(r);
+    // What a page given no file's link reads of a message: a file message without its address (lib/ops.js linkless).
+    const seen = linklessPage() ? ops.linkless : (m) => m;
     // Every room of a hall follows its hall's Stagewatch: its countdown, and its sends and proposals by this seat's rights
     // there (a side room's guest holds none; an account its stage.send in the hall), as the frames sent to it do.
     const sw = linkFor(r.hall);
@@ -2279,7 +2361,7 @@ io.on('connection', (socket) => {
     ack({
       ok: true, roomCode: code, roomName: r.name || '', role: cleanRole, name: cleanName, adminView: isAdminView,
       identity, uid: id, note, uploadToken, seq: r.seq,
-      ...(missed ? { ops: missed.map(ops.opForPage) } : { history: opened.history.map(ops.forPage) }),
+      ...(missed ? { ops: missed.map(ops.opForPage).map(linklessPage() ? ops.opLinkless : (op) => op) } : { history: opened.history.map(ops.forPage).map(seen) }),
       users: roomUserSummary(r, { links: socket.data.isAdmin }),
       ai: !!aiKey(), stage: stagePayload(sw),
       canSendToStage: !!(sw.base && sw.key && sw.keyState !== 'refused') && allowed('stage.send'),
@@ -2336,7 +2418,7 @@ io.on('connection', (socket) => {
       // A first open's bounds (never a resume's): whether the room holds messages before `history` that it did not carry
       // (`more`: Show earlier asks for them), the older ones a page keeps in view however old (`older`: pinned, help not
       // resolved, questions not answered), and every file of the room (`files`), so its lists are whole.
-      ...(opened ? { more: opened.more, older: opened.older.map(ops.forPage), files: opened.files } : {}),
+      ...(opened ? { more: opened.more, older: opened.older.map(ops.forPage).map(seen), files: opened.files.map(seen === ops.linkless ? (f) => { const { url, ...rest } = f; return rest; } : (f) => f) } : {}),
     });
 
     if (!isAdminView) {
@@ -2372,6 +2454,15 @@ io.on('connection', (socket) => {
   const STAYS_HERE = 'Messages from On stage stay in this room.';
   // The two rules of the room a forward comes from, in the words the forward and its picker both answer with.
   const FILES_BACKSTAGE = 'Files are moved by the backstage team.';
+  // Whether this page's account reads only: a Viewer account, which never downloads and is never given a file's link,
+  // whatever its seat (a Viewer granted hall.post sits backstage).
+  const viewerAccount = () => !!(socket.data.account && socket.data.account.role === 'viewer');
+  // Whether this page may download a file of its room, or a take's shown with Download ticked (`take`): lib/pages.js
+  // mayDownload over its seat. The admin is the admin wherever its seat is not On stage, whose limit holds it as anyone's.
+  // A file moves to another room (forward, room:send) only from a seat that may download it here.
+  const mayDownload = (take = null) => !!me && seatMayDownload({ admin: !!socket.data.isAdmin && !onStage(), seat: me.role, viewer: viewerAccount() }, take);
+  // Whether this page is given no file's link (LINKLESS): seated as an observer, or a Viewer account's.
+  const linklessPage = () => !!me && (me.role === 'observer' || viewerAccount());
   const ASKS_BACKSTAGE = 'Questions for the Board come from the backstage team.';
   // A message another room sent here stays while this room holds it: its author removes no message here by `delete`, but
   // takes it back from the room it came from (room:withdraw, on that room's copy), and the admin removes it here.
@@ -2397,7 +2488,7 @@ io.on('connection', (socket) => {
       if (parent) {
         msg.replyTo = {
           id: parent.id, name: (parent.from && parent.from.name) || 'system',
-          snippet: parent.text ? parent.text.slice(0, 120) : parent.filename ? '📄 ' + parent.filename : '',
+          snippet: parent.text ? parent.text.slice(0, 120) : parent.filename ? '📎 ' + parent.filename : '',
         };
       }
     }
@@ -2501,13 +2592,13 @@ io.on('connection', (socket) => {
   };
   /**
    * The other halls the forward of `src` (a message of this room; null: a text) would be taken in, by the forward's own
-   * rules: a file needs hall.files there too and moves only from a seat that may share files here; a question never goes
-   * where this person sits On stage; On stage, nothing leaves this room. `why`: the rule of this room that emptied the
-   * list, in the forward's own words.
+   * rules: a file needs hall.files there too and moves only from a seat that may share and download files here; a
+   * question never goes where this person sits On stage; On stage, nothing leaves this room. `why`: the rule of this
+   * room that emptied the list, in the forward's own words.
    */
   const forwardTargets = (src) => {
     if (onStage()) return { rooms: [] };
-    if (src && src.type === 'file' && !allowed('hall.files')) return { rooms: [], why: FILES_BACKSTAGE };
+    if (src && src.type === 'file' && !(allowed('hall.files') && mayDownload())) return { rooms: [], why: FILES_BACKSTAGE };
     const needs = src && src.type === 'file' ? ['hall.post', 'hall.files'] : ['hall.post'];
     const linked = me.linkedRooms instanceof Set ? Array.from(me.linkedRooms) : [];
     let askedOnStage = false;
@@ -2570,9 +2661,9 @@ io.on('connection', (socket) => {
     const src = room.byId.get(messageId);
     // Only what stands on its own in another hall; a help request is tracked and answered in its own hall.
     if (!src || !FORWARDABLE.has(src.type)) return ok(ack)({ ok: false, error: src && src.type === 'help' ? 'A help request belongs to its hall — ask in the other hall instead.' : 'Cannot forward this message' });
-    // A file moves only from a seat that may share files where it is: a seat that may only read here takes none of this
-    // hall's files into one where it sits backstage.
-    if (src.type === 'file' && !allowed('hall.files')) return ok(ack)({ ok: false, error: FILES_BACKSTAGE });
+    // A file moves only from a seat that may share files and download it where it is: a seat that may only read here (an
+    // observer, a Viewer account) takes none of this hall's files into one where it sits backstage and could download them.
+    if (src.type === 'file' && !(allowed('hall.files') && mayDownload())) return ok(ack)({ ok: false, error: FILES_BACKSTAGE });
     const there = rightsIn(dst);
     if (!there.may('hall.post')) return ok(ack)({ ok: false, error: 'You may read that hall but not post in it.' });
     if (src.type === 'file' && !there.may('hall.files')) return ok(ack)({ ok: false, error: 'You may not share files in that hall.' });
@@ -2585,7 +2676,7 @@ io.on('connection', (socket) => {
       forwardedFrom: { roomName: room.name || '', originalAuthor: (src.from && src.from.name) || 'unknown', originalAt: src.at },
     };
     if (src.type === 'text') fwd.text = src.text;
-    else if (src.type === 'file') Object.assign(fwd, { url: src.url, filename: src.filename, mime: src.mime, caption: src.caption || '' });
+    else if (src.type === 'file') Object.assign(fwd, fileCopy(src));
     else if (src.type === 'action') Object.assign(fwd, { text: src.text, options: src.options, responses: [] });
     if (!apply(dst, { o: 'add', m: fwd })) return ok(ack)(OP_REFUSED);
     ok(ack)({ ok: true, id: fwd.id });
@@ -2606,7 +2697,11 @@ io.on('connection', (socket) => {
     // A state relayed from the admin's support view says so (`support`): the person's simple view takes no theme from it,
     // so only the person turns a Board page light.
     const sent = socket.data.adminView ? { ...state, support: true } : state;
-    try { for (const p of await io.in(room.code).fetchSockets()) if (syncPeer(p)) p.emit('userState:push', sent); } catch { /* ignore */ }
+    // The file a person opens on their own panel (`doc`) follows them one way only (plan 4-§4.6.3): to their other pages
+    // and to the admin's support view of them; the support view opens nothing on a person's panel (the admin shows a
+    // person something only by a take, which is confirmed).
+    const to = state.key === 'doc' ? (p) => !socket.data.adminView && p.id !== socket.id && (p.data.adminView ? p.data.userName === me.name : p.data.uid === me.uid) : syncPeer;
+    try { for (const p of await io.in(room.code).fetchSockets()) if (to(p)) p.emit('userState:push', sent); } catch { /* ignore */ }
   });
 
   // ----- AI (the backstage team and the admin): drafts only
@@ -3270,10 +3365,14 @@ io.on('connection', (socket) => {
     // Each page's seat moves in this tick, with what it allows, without waiting for the page to reload: an upload token
     // of a page whose new seat shares no file ends now (its page's join after the reload takes a new one where it may),
     // and so does its console's signal, which its join after the reload asks for again (fail closed).
+    // A page moved to or from an observer's seat leaves or joins the room's linkless pages (LINKLESS) before it is told, so
+    // the next file message reaches it by its new seat whatever its page does (a guest's: an account is not moved here).
     for (const [sid, seat] of seats) {
       seat.role = role;
       const s = io.sockets.sockets.get(sid);
-      if (s) { s.data.seat = role; s.data.pushes = ''; s.data.shows = ''; s.emit('roleChanged', { role }); }
+      if (!s) continue;
+      if (role === 'observer') s.join(LINKLESS + r.code); else s.leave(LINKLESS + r.code);
+      s.data.seat = role; s.data.pushes = ''; s.data.shows = ''; s.emit('roleChanged', { role });
     }
     const moved = new Set(seats.map(([sid]) => sid));
     for (const t of uploadTokens.values()) if (moved.has(t.sid) && !t.may()) t.revoked = true;
@@ -3541,7 +3640,7 @@ io.on('connection', (socket) => {
   // page's socket but a screen's (a screen's returned at the top): the hall page's, the admin page's and the halls
   // board's. The rooms module is given the server's context, the takes module the takes context, which holds nothing
   // that makes a room's op or sends to a room (`ctx`, at the end of this file).
-  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, onStage, canIn, canPush, canWeb, canShow, theAdmin, admin, actor, canManageHall, codeTold, gate });
+  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, onStage, canIn, canPush, canWeb, canShow, theAdmin, admin, actor, canManageHall, codeTold, gate, mayDownload, viewerAccount, linklessPage });
   roomVerbs.register(socket, conn, ctx);
   takeVerbs.register(socket, conn, takesCtx);
 
@@ -3800,7 +3899,7 @@ function sourceFacts(hall, uid, { reads, files }) {
   const room = (k) => rooms.find((x) => x.code === k) || null;
   return {
     main: hall.code, uid,
-    holders: (url) => rooms.map((x) => { const m = x.messages.find((y) => y.type === 'file' && y.url === url); return m ? { key: x.code, at: m.at, name: m.filename } : null; }).filter(Boolean),
+    holders: (url) => rooms.map((x) => { const m = x.messages.find((y) => y.type === 'file' && y.url === url); return m ? { key: x.code, at: m.at, name: m.filename, transferOnly: m.transferOnly === true } : null; }).filter(Boolean),
     fresh: (name) => { const f = freshUploads.get(name); return f && room(f.room) ? f : null; },
     recorded: (name) => pages.recordOf(hall.code, name),
     reads: (k) => !!room(k) && reads(room(k)) === true,
@@ -4086,6 +4185,14 @@ function fileRefusal(user, url, room) {
   return uploadsOnScreens().has(name) ? FILE_REFUSED.onScreen : FILE_REFUSED.expired;
 }
 
+/**
+ * A file message's file, as a copy of it in another room carries it (a forward, a send into a room): its address, the
+ * server's name for it, its type, its caption, its size and whether it is transfer-only, as the message holds them.
+ */
+const fileCopy = (m) => ({
+  url: m.url, filename: m.filename, mime: m.mime, caption: m.caption || '',
+  ...(Number.isInteger(m.size) && m.size >= 0 ? { size: m.size } : {}), ...(m.transferOnly === true ? { transferOnly: true } : {}),
+});
 /** An upload on this laptop's disk, by its link: its size in bytes, or -1 when it is not there (or no upload's link). */
 function uploadOnDisk(url) {
   if (!guard.validUploadUrl(url)) return -1;
@@ -4107,7 +4214,7 @@ function messageOf(user, payload, room, sent) {
   if (upload && size < 0) return { refused: { error: 'That file is no longer on the AGMessage laptop: choose it again.', reupload: true } };
   const refused = upload ? fileRefusal(user, upload, room) : null;
   if (refused) return { refused };
-  const msg = buildMessage(user, payload, { ...sent, room });
+  const msg = buildMessage(user, payload, { ...sent, room, size });
   return msg ? { msg, size } : { refused: { error: 'Invalid message' } };
 }
 
@@ -4116,8 +4223,14 @@ function messageOf(user, payload, room, sent) {
  * readSend's); null when the payload is no message, and for a file whose provenance does not let it into `room`
  * (`fileRefusal`, which a caller that answers with the reason asks first). Only a message or null comes back, so no
  * caller can post a refusal, or spread one into a message of its own.
+ *
+ * A file message is a transfer (plan 4-§4.6.1): a file shared for download, which opens itself on nobody's page. Its name
+ * is the server's, never the poster's: the upload's record of it (`freshUploads`), or the name the room's earlier message
+ * holding the same file gave it, so a post again cannot rename a file ("Final approved budget.pdf"). It carries its size
+ * in bytes (`size`, read when the caller has not) and, for a file AGMessage never opens (a transfer type, or a Word,
+ * Excel or PowerPoint file protected with a password), `transferOnly: true`, whose type is `application/octet-stream`.
  */
-function buildMessage(user, payload, { room, cid, held } = {}) {
+function buildMessage(user, payload, { room, cid, held, size } = {}) {
   if (!payload || typeof payload !== 'object') return null;
   const base = {
     id: makeMessageId(), at: Date.now(), from: { uid: user.uid, name: user.name, role: user.role, ...(user.acct ? { acct: true } : {}) }, pinned: false, priority: !!payload.priority,
@@ -4129,14 +4242,22 @@ function buildMessage(user, payload, { room, cid, held } = {}) {
   }
   if (payload.type === 'file') {
     if (!guard.validUploadUrl(payload.url) || !room) return null;
-    const t = guard.UPLOAD_TYPES[guard.extOf(payload.url)];
+    const ext = guard.extOf(payload.url);
+    const t = guard.UPLOAD_TYPES[ext] || guard.TRANSFER_TYPES[ext];
     if (!t) return null;   // the message handler has checked that the upload is here
     if (fileRefusal(user, payload.url, room)) return null;
+    const stored = payload.url.slice(9);
+    const earlier = room.messages.find((m) => m.type === 'file' && m.url === payload.url) || null;
+    const fresh = earlier ? null : freshUploads.get(stored) || null;
+    const bytes = Number.isInteger(size) && size >= 0 ? size : uploadOnDisk(payload.url);
+    const transferOnly = !!guard.TRANSFER_TYPES[ext] || (earlier ? earlier.transferOnly === true : !!(fresh && fresh.transferOnly === true));
     return {
       ...base, type: 'file', url: payload.url,
-      filename: guard.cleanText(payload.filename, 120) || 'file',
-      mime: t.mime.split(';')[0],
+      filename: (earlier ? guard.cleanText(earlier.filename, 120) : fresh ? guard.cleanText(fresh.name, 120) : '') || stored.replace(/^[0-9]+-[a-z0-9]+-/, '') || 'file',
+      mime: transferOnly ? 'application/octet-stream' : t.mime.split(';')[0],
       caption: guard.str(payload.caption).slice(0, 500),
+      ...(bytes >= 0 ? { size: bytes } : {}),
+      ...(transferOnly ? { transferOnly: true } : {}),
     };
   }
   if (payload.type === 'help') return board.helpMessage(base, payload, guard.cleanText);
@@ -4158,7 +4279,7 @@ function renderTranscriptHtml(room) {
     const who = m.from ? esc(m.from.name) + ' <span class="role">' + esc(m.from.role) + '</span>' : '—';
     let content = '';
     if (m.type === 'text') content = '<p>' + esc(m.text).replace(/\n/g, '<br>') + '</p>';
-    else if (m.type === 'file') content = '<p>📄 <em>' + esc(m.filename) + '</em>' + (m.caption ? ' — ' + esc(m.caption) : '') + '</p>';
+    else if (m.type === 'file') content = '<p>📎 <em>' + esc(m.filename) + '</em> (shared for download' + (m.transferOnly ? ', download only' : '') + ')' + (m.caption ? ' — ' + esc(m.caption) : '') + '</p>';
     else if (m.type === 'help') content = '<p><strong>Help — ' + esc(m.category) + ':</strong> ' + esc(m.text || '') + '</p>' +
       (m.help ? '<p class="responses">' + esc(m.help.state === 'open' ? 'open' : (m.help.state === 'coming' ? 'on the way' : 'resolved') + (m.help.by ? ' — ' + m.help.by : '') + (m.help.at ? ', ' + fmt(m.help.at) : '')) + '</p>' : '');
     else if (m.type === 'action') {
@@ -5316,7 +5437,8 @@ function firstWrites() {
 // The server's contexts for the handler modules (lib/gate.js `contexts`), built once, last, after every part they name
 // exists, and before this copy holds its port, so the first connection reads them whole: the stores and their named
 // effects, `settings` to read (a handler module never writes it: test/modules.test.js (j)), a message made from what a page
-// sent (`readSend`, `messageOf`, its file on disk `uploadOnDisk`, a new id `makeMessageId`), the rooms that may send into
+// sent (`readSend`, `messageOf`, its file on disk `uploadOnDisk`, a file message's file as a copy carries it `fileCopy`, a
+// new id `makeMessageId`), the download tickets (`tickets`, issued by `file:download` and voided with a withdrawn take), the rooms that may send into
 // a room (`sendersOf`, read, and `sendsInto`, the rooms a room may send into; `setRoomSends`, its one writer, the rooms
 // module's alone), a room's invite links (`invitesFor`, made with the server's secret), the Stagewatch a hall follows and
 // its frame, what people's pages are shown (the `pages` store, the
@@ -5328,7 +5450,7 @@ function firstWrites() {
 // by its socket's id alone (`sendTo`, over io's open sockets, read by the gate's module and never handed in), never a
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
-  store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
+  store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
   pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, io,
 });
 

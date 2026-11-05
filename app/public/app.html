@@ -102,7 +102,6 @@
         <div class="compose-tabs" role="tablist">
           <button class="tab active" data-tab="text" role="tab">Message</button>
           <button class="tab" data-tab="action" role="tab">Action prompt</button>
-          <button class="tab" data-tab="file" role="tab">File / image</button>
         </div>
         <!-- To: where the next message or file goes (the catalogue's compose.sendTo); set to another room, its line stays
              above the field at every width -->
@@ -112,8 +111,13 @@
         </div>
 
         <form class="pane" id="textPane" data-pane="text">
-          <textarea id="textInput" rows="1" placeholder="Type a message to the stage…"></textarea>
+          <!-- The file attached to the next message (📎, or dropped or pasted on the feed or here): a chip, opened in the
+               Preview from the copy on this device; Send reads 📎 Share for download, and the words are its caption. -->
+          <div class="file-chip" id="fileChip" hidden></div>
+          <input type="file" id="fileInput" hidden />
+          <textarea id="textInput" rows="1" placeholder="Type a message to the Board…"></textarea>
           <div class="row end">
+            <button type="button" class="btn ghost attach-btn" id="attachBtn" data-action="compose.attach" aria-label="Attach a file…" title="Attach a file to share for download, or to show the Board">📎</button>
             <button type="button" class="btn ghost ai-btn" id="aiDraftBtn" title="Claude drafts an answer to the board's latest question (or the one you're replying to) from the thread and the document on stage. You edit it; nothing is sent until you press Send." hidden>✨ Draft a reply</button>
             <button type="button" class="btn ghost priority-btn" id="textPriorityBtn" data-priority="0" aria-pressed="false" title="Mark as high priority">🔥 Priority</button>
             <button class="btn primary send-btn" type="submit" aria-label="Send"><span class="send-icon" aria-hidden="true">➤</span><span class="send-word">Send</span></button>
@@ -138,26 +142,10 @@
           </label>
           <div class="row end">
             <button type="button" class="btn ghost priority-btn" id="actionPriorityBtn" data-priority="0" aria-pressed="false" title="Mark as high priority">🔥 Priority</button>
-            <button class="btn primary send-btn" type="submit" aria-label="Send"><span class="send-icon" aria-hidden="true">➤</span><span class="send-word">Send</span></button>
+            <button class="btn primary send-btn" type="submit" aria-label="Ask the Board"><span class="send-icon" aria-hidden="true">❓</span><span class="send-word">Ask the Board</span></button>
           </div>
         </form>
 
-        <form class="pane hidden" id="filePane" data-pane="file">
-          <div class="dropzone" id="dropzone">
-            <input type="file" id="fileInput" hidden accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.docx,.xlsx,.xls,.pptx,.csv,.txt,.md" />
-            <p><strong>Drop a file here</strong> or <button type="button" class="link" id="pickFileBtn">choose</button>.</p>
-            <p class="hint">Max 25 MB. Files show on the Board's On stage panel.</p>
-          </div>
-          <div id="filePreview" hidden></div>
-          <label class="field">
-            <span>Optional caption</span>
-            <input id="fileCaption" maxlength="120" placeholder="e.g. 'Slide with the 2025 capex breakdown.'" />
-          </label>
-          <div class="row end">
-            <button type="button" class="btn ghost priority-btn" id="filePriorityBtn" data-priority="0" aria-pressed="false" title="Mark as high priority">🔥 Priority</button>
-            <button class="btn primary send-btn" type="submit" aria-label="Send"><span class="send-icon" aria-hidden="true">➤</span><span class="send-word">Send</span></button>
-          </div>
-        </form>
       </section>
     </section>
 
@@ -168,7 +156,7 @@
     <aside class="doc-panel" id="docPanel" data-state="empty" aria-label="Document on stage">
       <button id="docExpandRail" class="doc-expand-rail" type="button" title="Expand stage panel" hidden>📺 On stage ⇤</button>
       <header class="doc-panel-header">
-        <strong>📺 On stage</strong>
+        <strong id="docPanelTitle">📺 On stage</strong>
         <span id="docTitle" class="doc-title"></span>
         <button id="docCollapseBtn" class="doc-collapse-btn" type="button" title="Collapse / expand">⇥</button>
       </header>
@@ -180,8 +168,22 @@
 
       <div class="doc-display" id="docDisplay">
         <div class="empty-state">
-          <p>No document on stage yet.</p>
-          <p class="hint">When the backstage team shares a file, it appears here automatically.</p>
+          <p>Nothing on stage.</p>
+          <p class="hint">What the backstage team shows you appears over the chat or here; ▭ Minimise keeps it here.</p>
+        </div>
+      </div>
+
+      <!-- The Preview's bar (backstage, for a seat that may show the Board): a picture of the page in view, or the document
+           opened there, side by side; Let them download it under the document's button alone. -->
+      <div class="preview-bar" id="previewBar" hidden>
+        <p class="preview-note muted" id="previewNote"></p>
+        <div class="row">
+          <button type="button" class="btn ghost" id="showPicture">📺 Picture of p. 1</button>
+          <span class="preview-doc">
+            <button type="button" class="btn ghost" id="showDocument">📺 Document at p. 1</button>
+            <label class="preview-tick"><input type="checkbox" id="letDownload" /> Let them download it</label>
+            <small class="muted" id="letDownloadWhy" hidden></small>
+          </span>
         </div>
       </div>
 

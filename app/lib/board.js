@@ -23,7 +23,8 @@ function lineOf(m) {
   if (!m) return '';
   const cut = (t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 120);
   if (m.type === 'text') return cut(m.text);
-  if (m.type === 'file') return cut('📄 ' + (m.filename || 'a file') + (m.caption ? ' — ' + m.caption : ''));
+  // A file message is a file shared for download (📎), never something shown on the stage.
+  if (m.type === 'file') return cut('📎 ' + (m.filename || 'a file') + (m.caption ? ' — ' + m.caption : ''));
   if (m.type === 'action') return cut('❓ ' + m.text);
   if (m.type === 'help') return cut('Help: ' + m.category + (m.text ? ' — ' + m.text : ''));
   return '';

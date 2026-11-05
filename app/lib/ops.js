@@ -63,6 +63,23 @@ function opForPage(op) {
   if (op.o === 'upd') { const f = forPage(op.f); return f === op.f ? op : { ...op, f }; }
   return op;
 }
+/**
+ * What a page that is given no file's link is sent of a message (an observer's, a Viewer account's: plan 4-§4.6.6, S2): a
+ * file message as a copy without its address (no `url` key at all), so the card names the file and nothing on the page
+ * can fetch or save it; every other message, and the record itself, as it is. Withheld at delivery, never in the stored
+ * message, so a message of 0.5.1 is withheld the same way.
+ */
+function linkless(m) {
+  if (!isRecord(m) || m.type !== 'file' || !Object.hasOwn(m, 'url')) return m;
+  const { url, ...rest } = m;
+  return rest;
+}
+/** A resumed op as linkless sends it: an added file message without its address. */
+function opLinkless(op) {
+  if (!isRecord(op) || op.o !== 'add') return op;
+  const m = linkless(op.m);
+  return m === op.m ? op : { ...op, m };
+}
 /** A key as a log line may carry it: a few of them, each cut short, nothing but a name's characters. */
 const named = (keys) => keys.slice(0, 5).map((k) => k.replace(/[^\w$-]/g, '?').slice(0, 40)).join(', ') + (keys.length > 5 ? ' and ' + (keys.length - 5) + ' more' : '');
 
@@ -156,4 +173,4 @@ function lasted(ms) {
   return Math.floor(s / 86400) + ' d' + and(Math.floor((s % 86400) / 3600), 'h');
 }
 
-module.exports = { UPD_EVENTS, KINDS, EVENTS, LINKED, NEWS_EVENTS, refusal, eventsOf, applier, newsOf, mergeNews, forPage, opForPage, unlinked, placeOf, lasted };
+module.exports = { UPD_EVENTS, KINDS, EVENTS, LINKED, NEWS_EVENTS, refusal, eventsOf, applier, newsOf, mergeNews, forPage, opForPage, linkless, opLinkless, unlinked, placeOf, lasted };

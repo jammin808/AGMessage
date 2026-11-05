@@ -242,8 +242,8 @@ async function launchEdge() {
       if (headers) { await send('Network.enable'); await send('Network.setExtraHTTPHeaders', { headers }); }
       await send('Page.navigate', { url });
       return {
-        /** `logs`: what the tab's frames wrote with console.log, in order. */
-        problems, send, logs, workers,
+        /** `logs`: what the tab's frames wrote with console.log, in order. `context`: its browser's own (`alone`), else ''. */
+        problems, send, logs, workers, context: own ? own.browserContextId : '',
         /** An expression's value in one of `workers`. */
         workerEval: async (sessionId, expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, sessionId)).result?.result?.value,
         /** A resource this tab is made to fail on purpose: its load error is not a problem. */
@@ -1200,11 +1200,14 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     for (const [seat, tab] of Object.entries(phones)) await readOldWords('the hall page on a phone, ' + { board: 'On stage', research: 'Backstage', observer: 'Observer' }[seat], tab);
     const hallDeck = JSON.parse(await phones.board.eval(`JSON.stringify({ chip: document.querySelector('.app-title strong').textContent, people: document.querySelector('#peoplePanel h3').textContent,
       placeholder: document.getElementById('directorInput').placeholder, label: document.getElementById('directorInput').getAttribute('aria-label') })`));
+    // Backstage: the message goes to the Board, a file is attached with 📎 (no File tab), and the panel is the Preview.
     const backDeck = JSON.parse(await phones.research.eval(`JSON.stringify({ ask: document.querySelector('#actionPane .field > span').textContent,
-      files: document.querySelector('#filePane .dropzone .hint').textContent, panel: document.querySelector('#docDisplay .empty-state .hint').textContent })`));
+      askBtn: document.querySelector('#actionPane .send-icon').textContent + ' ' + document.querySelector('#actionPane .send-word').textContent, placeholder: document.getElementById('textInput').placeholder, attach: document.getElementById('attachBtn').getAttribute('aria-label'), fileTab: !!document.querySelector('.compose-tabs .tab[data-tab="file"]'),
+      panelTitle: document.getElementById('docPanelTitle').textContent, panel: document.querySelector('#docDisplay .empty-state .hint').textContent })`));
     report(JSON.stringify(hallDeck) === JSON.stringify({ chip: 'Phone hall', people: 'In this room', placeholder: 'Message everyone here…', label: 'Message everyone here…' })
-      && JSON.stringify(backDeck) === JSON.stringify({ ask: 'Question for the Board', files: 'Max 25 MB. Files show on the Board\'s On stage panel.', panel: 'When the backstage team shares a file, it appears here automatically.' }),
-      `the hall page says room, the Board and the backstage team: the header names the room, "In this room", "Message everyone here…", "Question for the Board" (${JSON.stringify({ hallDeck, backDeck })})`);
+      && JSON.stringify(backDeck) === JSON.stringify({ ask: 'Question for the Board', askBtn: '❓ Ask the Board', placeholder: 'Type a message to the Board…', attach: 'Attach a file…', fileTab: false, panelTitle: '👁 Preview — the Board does not see this',
+        panel: 'Attach a file (📎) or open one with Preview to page through it, then show the Board a picture of a page or the document.' }),
+      `the hall page says room, the Board and the backstage team: the header names the room, "In this room", "Message everyone here…", "Question for the Board" asked with "❓ Ask the Board", "Type a message to the Board…", 📎 in the message row and the panel the Preview (${JSON.stringify({ hallDeck, backDeck })})`);
     // Nobody touches Oli's page from here to the end of the smoke: no tap, no key, no wheel.
     await post(pat, { type: 'text', text: 'First new' });
     const firstNew = Date.now();
@@ -1814,7 +1817,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(!!(await users.until(`document.querySelectorAll('#userRows tr').length === 1`)), 'the accounts page lists the admin');
     await readOldWords('the Accounts page', users);
     const rightsWords = await users.eval(`(async () => { const r = await AGM.api('GET', '/api/users'); return JSON.stringify([r.caps['display.control'], r.roles.find((x) => x.id === 'tech').words]); })()`);
-    report(rightsWords === JSON.stringify(['Change what a hall\'s screens and people\'s pages show', 'Their halls: messages, files, screens, Stagewatch']), `the Accounts page's rights and roles say "screens" (${rightsWords})`);
+    report(rightsWords === JSON.stringify(['Change what a hall\'s screens and people\'s pages show', 'Their halls: messages, files, screens, the Board\'s pages, Stagewatch']), `the Accounts page's rights and roles say "screens" (${rightsWords})`);
     await users.eval(`document.getElementById('tabAudit').click()`);
     await users.eval(`document.getElementById('verifyBtn').click()`);
     report(!!(await users.until(`document.getElementById('chainState').dataset.mark === 'intact' && /^✓ Intact — \\d+ entries, all keyed on this machine$/.test(document.getElementById('chainState').textContent) && !document.getElementById('verifyBtn').disabled`)), 'Check the log reads the whole chain and says it is intact: ✓');
@@ -2632,8 +2635,9 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const reactedByKey = await research.until(`(${ownNow}.reactions || []).some((r) => r.uid === MY_UID && r.emoji === ${codeLiteral(reactFirst || '👍')}) && ${NO_MENU} && 'reacted'`, 5000);
     report(reactFirst === '👍' && checkedInPlace === 'checked' && reactedByKey === 'reacted', `E opens React ▸ on its first reaction, a reaction made elsewhere checks its row in place, and Enter reacts (${JSON.stringify({ reactFirst, checkedInPlace, reactedByKey })})`);
 
-    // D and Enter on a focused file: its download, which the browser saves whole under its name (the server opens an upload
-    // to no navigation, so the page fetches it no-store and hands the browser the bytes), and its Look in the panel.
+    // D and Enter on a focused file: its download, the server's act by a ticket (file:download), posted in a form and
+    // answered with the file as an attachment, which the browser saves whole under its name, the page saying it reached
+    // this browser once the server sent it all; the page itself fetches nothing of it. Enter is its Preview in the panel.
     await research.eval(`dismissDoc()`);
     const capexUrl = await research.eval(`(allMessages.find((m) => m.id === ${codeLiteral(capexId)}) || {}).url || ''`);
     const dlBefore = new Set(downloads.keys());
@@ -2643,12 +2647,13 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     let savedCapex = null;
     for (const end = Date.now() + 15000; Date.now() < end && !savedCapex; await sleep(100)) savedCapex = [...downloads].find(([g, d]) => !dlBefore.has(g) && d.state === 'completed');
     const capexBytes = Buffer.from(await (await fetch(base + capexUrl)).arrayBuffer());
+    const reached = await research.until(`(() => { const t = document.getElementById('agmToast'); return !!t && t.textContent.includes('capex.pdf reached this browser') && 'reached'; })()`, 5000);
     const downloadedByKey = JSON.stringify({ name: savedCapex ? savedCapex[1].name : '', whole: !!savedCapex && fs.readFileSync(path.join(dlDir, savedCapex[0])).equals(capexBytes),
-      fetched: JSON.parse(await research.eval(`(() => { window.fetch = window.__fetch0; return JSON.stringify(window.__dlFetched.filter((x) => x[0] === ${codeLiteral(capexUrl)}).map((x) => x[1])); })()`)) });
+      fetched: JSON.parse(await research.eval(`(() => { window.fetch = window.__fetch0; return JSON.stringify(window.__dlFetched.filter((x) => x[0] === ${codeLiteral(capexUrl)}).map((x) => x[1])); })()`)), reached });
     await research.eval(`messagesById.get(${codeLiteral(capexId)}).focus()`);
     await pressEnter(research);
     const lookedByKey = await research.until(`currentDocMsgId === ${codeLiteral(capexId)} && 'open'`, 3000);
-    report(downloadedByKey === JSON.stringify({ name: 'capex.pdf', whole: true, fetched: ['no-store'] }) && lookedByKey === 'open', `D on a focused file downloads it (fetched no-store, saved whole under its name) and Enter opens it in the panel (${JSON.stringify({ downloadedByKey, lookedByKey })})`);
+    report(downloadedByKey === JSON.stringify({ name: 'capex.pdf', whole: true, fetched: [], reached: 'reached' }) && lookedByKey === 'open', `D on a focused file downloads it by its ticket (saved whole under its name, the page fetching nothing of it, "reached this browser") and Enter opens it in the panel (${JSON.stringify({ downloadedByKey, lookedByKey })})`);
 
     // Answer in words… is a field in place: focused, held to 200 characters, Enter sends the answer.
     await research.eval(`messagesById.get(${codeLiteral(doorMsgs.adminAsk)}).querySelector('.answer-words-btn').click()`);
@@ -3184,7 +3189,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await obiPad.eval(`document.querySelector('#layerActs [data-action="take.minimise"]').click()`);
     const obiRail = await obiPad.until(`(() => { const p = document.getElementById('docPanel'); return p.getClientRects().length > 0 && !!document.querySelector('#takeCards .take-card') && document.body.dataset.pushed === '1' && JSON.stringify({ card: document.querySelector('#takeCards .take-card .take-card-name').textContent, doc: getComputedStyle(document.getElementById('docDisplay')).display }); })()`, 5000);
     await obiPad.shot(path.join(OUT, 'take-card-observer.png'));
-    report(obiPanelBefore === false && obiMenu === JSON.stringify(['person.show', 'person.web', 'person.chat']) && !!obiClock && obiRail === JSON.stringify({ card: 'Clock', doc: 'none' }),
+    report(obiPanelBefore === false && obiMenu === JSON.stringify(['person.show', 'person.web', 'person.doc', 'person.chat']) && !!obiClock && obiRail === JSON.stringify({ card: 'Clock', doc: 'none' }),
       `an observer has no side bar until a take shown to them is minimised: from the console's row, Show them ▸ Clock reaches Obi's page, and Minimise puts it in a side bar of its own with its card (${JSON.stringify({ obiPanelBefore, obiMenu, obiRail })})`);
 
     // ---------------- A web page on people's pages (unit 19): its own right, the one frame, opened or not loaded ----------------
@@ -3579,6 +3584,121 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       report(filesProblems.length === 0, `the files hall's pages: no console error and no CSP violation${filesProblems.length ? ' — ' + filesProblems.slice(0, 4).join(' | ') : ''}`);
       fsOp.close();
       for (const t of [bo, oz]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
+    }
+
+    // ---------------- A shared file is a download for the backstage team, by a ticket; nothing opens itself (unit 26) ----------------
+    // In a hall of its own: the admin account's page backstage (the operator, who may download and show the Board), Cy On
+    // stage (the simple view, by her seat) and Ox observing, Cy and Ox each a device of its own whose fetches and object
+    // URLs are counted from before its own scripts. Cy's browser saves what it downloads where the smoke reads it.
+    {
+      const shHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Share hall' }) })).json()).code;
+      const FETCHES = `(() => { const f = window.fetch; window.__fetched = []; window.fetch = function (u, o) { window.__fetched.push([String(u && u.url ? u.url : u), (o && o.cache) || '']); return f.apply(this, arguments); }; })();`;
+      const desk = await edge.tab(`${base}/app.html?code=${shHall}&as=account&role=research`, { init: DOC_PROBE + FETCHES });
+      await desk.until(`typeof joined !== 'undefined' && joined && F.canPush && F.download`, 10000);
+      desk.expectFailure(/\/api\/upload$/);   // the uploads' rate (a burst of 4, then one every 2 s) turns a fifth file away: the outbox waits it out
+      const cy = await edge.tab(`${base}/app.html?code=${shHall}&name=Cy&role=board&invite=${inviteOf(dataDir, shHall)}`, { init: DOC_PROBE + FETCHES, alone: true });
+      const ox = await edge.tab(`${base}/app.html?code=${shHall}&name=Ox&role=observer`, { init: DOC_PROBE + FETCHES, alone: true });
+      for (const t of [cy, ox]) await t.until(`typeof joined !== 'undefined' && joined`, 10000);
+      await edge.browserSend('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: dlDir, eventsEnabled: true, browserContextId: cy.context });
+      const PANEL = `JSON.stringify({ state: document.getElementById('docPanel').dataset.state, layer: !document.getElementById('pageLayer').hidden })`;
+      const cyPanel0 = await cy.eval(PANEL);
+      const uploadsAsked = () => desk.eval(`window.__fetched.filter((x) => /\\/api\\/upload$/.test(x[0])).length`);
+
+      // A file dropped on the composer is attached and opens in the Preview from the copy on this device: nothing uploaded.
+      const pdfB64 = fixture('board-pack-tagged.pdf').toString('base64');
+      await desk.eval(`(() => { const bytes = Uint8Array.from(atob('${pdfB64}'), (c) => c.charCodeAt(0)); window.__pack = new File([bytes], 'board pack.pdf', { type: 'application/pdf' });
+        const dt = new DataTransfer(); dt.items.add(window.__pack); document.getElementById('researchCompose').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); return true; })()`);
+      const previewed = JSON.parse(await desk.until(`(() => { const c = document.querySelector('#docDisplay canvas.pdf-page:not(.pdf-page-pending)'); return c && !document.getElementById('previewBar').hidden && JSON.stringify({ chip: document.getElementById('fileChip').textContent,
+        send: document.querySelector('#textPane .send-word').textContent, title: document.getElementById('docPanelTitle').textContent, picture: document.getElementById('showPicture').textContent, document: document.getElementById('showDocument').textContent, tick: !document.getElementById('letDownload').disabled }); })()`, 20000) || 'null');
+      const uploadsAfterPreview = await uploadsAsked();
+      report(!!previewed && previewed.chip.startsWith('📎 board pack.pdf') && previewed.send === 'Share for download' && previewed.title === '👁 Preview — the Board does not see this' && previewed.picture === '📺 Picture of p. 1' && previewed.document === '📺 Document at p. 1' && previewed.tick && uploadsAfterPreview === 0,
+        `a file dropped on the composer is attached (its chip; Send reads Share for download) and drawn in the Preview from the copy on this device, its bar offering a picture of p. 1 and the document at p. 1 side by side, with nothing uploaded (${JSON.stringify({ previewed, uploadsAfterPreview })})`);
+
+      // Picture of p. 1: one click, a ✓ take of a new picture on Cy's page; then Document at p. 1 with Let them download it
+      // ticked: one click, a ✓ take of the document, and ⬇ Download on Cy's card, which her browser saves whole.
+      const boardMark = async () => { for (let i = 0; i < 60; i++) { await desk.eval(`Console.read()`); const m = await desk.eval(`(() => { const b = Console.board(); return b && b.info ? b.info.mark + '|' + b.info.kind : ''; })()`); if (m && m.startsWith('✓')) return m; await sleep(250); } return ''; };
+      await desk.eval(`document.getElementById('showPicture').click()`);
+      const cyPicture = await cy.until(`document.getElementById('pageLayer').dataset.kind === 'image' && !!document.querySelector('#layerBox img') && document.querySelector('#layerBox img').naturalWidth > 0 && (document.querySelector('#layerBox .take-file-line') || {}).textContent`, 20000);
+      const pictureMark = await boardMark();
+      const uploadsAfterPicture = await uploadsAsked();
+      await desk.eval(`document.getElementById('letDownload').checked = true; document.getElementById('showDocument').click()`);
+      const cyDocument = await cy.until(`document.getElementById('pageLayer').dataset.kind === 'doc' && !!document.querySelector('#layerBox canvas:not(.pdf-page-pending)') && 'doc'`, 20000);
+      const documentMark = await boardMark();
+      const cyLayerBar = await cy.until(`(() => { const a = [...document.querySelectorAll('#layerActs [data-action]')].map((b) => b.dataset.action); return a.includes('take.download') && JSON.stringify(a); })()`, 5000);
+      report(!!cyPicture && pictureMark === '✓|image' && uploadsAfterPicture === 1 && cyDocument === 'doc' && documentMark === '✓|doc' && !!cyLayerBar,
+        `Picture of p. 1 is one click to a ✓ take of a new picture on the Board's page, and Document at p. 1 one click to a ✓ take of the document, ⬇ Download on its layer's bar in the simple view (${JSON.stringify({ cyPicture, pictureMark, uploadsAfterPicture, cyDocument, documentMark, cyLayerBar })})`);
+      // Minimised, it is a card in Shown to you, with 👁 Look and ⬇ Download (that item alone, ticked); the download is the
+      // server's by the take's number, and her browser saves it whole under its name.
+      await cy.eval(`document.querySelector('#layerActs [data-action="take.minimise"]').click()`);
+      const cyCard = await cy.until(`(() => { const c = document.querySelector('#takeCards .take-card'); return c && JSON.stringify([...c.querySelectorAll('[data-action]')].map((b) => b.dataset.action)); })()`, 5000);
+      const cyBefore = new Set(downloads.keys());
+      await cy.eval(`document.querySelector('#takeCards [data-action="card.download"]').click()`);
+      let cySaved = null;
+      for (const end = Date.now() + 15000; Date.now() < end && !cySaved; await sleep(100)) cySaved = [...downloads].find(([g, d]) => !cyBefore.has(g) && d.state === 'completed');
+      const cyReached = await cy.until(`(() => { const t = document.getElementById('agmToast'); return !!t && t.textContent.includes('reached this browser') && 'reached'; })()`, 5000);
+      report(cyCard === JSON.stringify(['card.show', 'card.download']) && !!cySaved && cySaved[1].name === 'board pack.pdf' && fs.readFileSync(path.join(dlDir, cySaved[0])).equals(fixture('board-pack-tagged.pdf')) && cyReached === 'reached',
+        `Download ticked on the document shows ⬇ on the Board's card beside Look, and it downloads: saved whole under its name, the page saying it reached this browser (${JSON.stringify({ cyCard, saved: cySaved ? cySaved[1].name : '', cyReached })})`);
+
+      // Shared for download: a card in the feed and nothing on any Board page; On stage a Look and no Download; an
+      // observer's card has no picture and no link; a zip reads "download only", with no Look, no Show and no screen.
+      await desk.eval(`(() => { const t = document.getElementById('agmToast'); if (t) t.textContent = ''; document.getElementById('textInput').value = 'The plan, for download'; document.querySelector('#textPane .send-btn').click(); return true; })()`);
+      const sharedSaid = await desk.until(`(() => { const t = (document.getElementById('agmToast') || {}).textContent || ''; return t.startsWith('Shared in') && t; })()`, 15000);
+      const shared = await desk.until(`(() => { const m = allMessages.find((x) => x.type === 'file' && x.caption === 'The plan, for download'); return m && messagesById.get(m.id) && JSON.stringify({ id: m.id, size: m.size, line: messagesById.get(m.id).querySelector('.file-link').textContent }); })()`, 15000);
+      const sharedMsg = JSON.parse(shared || '{}');
+      await desk.eval(`(async () => { const f = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 20, 0, 0, 0, 0, 0])], 'stage pack.zip', { type: 'application/zip' }); attachFile(f); document.getElementById('textInput').value = 'Load-in files'; document.querySelector('#textPane .send-btn').click(); return true; })()`);
+      const zipLine = await desk.until(`(() => { const m = allMessages.find((x) => x.type === 'file' && x.transferOnly); return m && messagesById.get(m.id) && JSON.stringify({ id: m.id, line: messagesById.get(m.id).querySelector('.file-link').textContent }); })()`, 15000);
+      const zipMsg = JSON.parse(zipLine || '{}');
+      const zipMenu = JSON.parse(await desk.eval(`JSON.stringify(AGM.catalog.ids('msg', F, findMessage(${codeLiteral(zipMsg.id || '')})))`));
+      // A picture shared for download too: its card draws it backstage, and an observer's card has none.
+      await desk.eval(`(() => { attachFile(new File([Uint8Array.from(atob('${pngOf(64, 48).toString('base64')}'), (c) => c.charCodeAt(0))], 'stage plan.png', { type: 'image/png' })); document.getElementById('textInput').value = 'The stage plan'; document.querySelector('#textPane .send-btn').click(); return true; })()`);
+      const planId = await desk.until(`(() => { const m = allMessages.find((x) => x.type === 'file' && x.caption === 'The stage plan'); const n = m && messagesById.get(m.id); const img = n && n.querySelector('.file img'); return img && img.src.startsWith('blob:') && img.naturalWidth > 0 && m.id; })()`, 15000);
+      const cyCards = await cy.until(`(() => { const a = messagesById.get(${codeLiteral(sharedMsg.id || '')}); const z = messagesById.get(${codeLiteral(zipMsg.id || '')}); return a && z && JSON.stringify({
+        pdf: [...a.querySelectorAll('[data-action]')].map((b) => b.dataset.action).filter((x) => x === 'msg.look' || x === 'msg.download'), zip: [...z.querySelectorAll('[data-action]')].map((b) => b.dataset.action).filter((x) => x === 'msg.look' || x === 'msg.download') }); })()`, 8000);
+      const cyPanel1 = await cy.eval(`JSON.stringify({ state: document.getElementById('docPanel').dataset.state, layer: !document.getElementById('pageLayer').hidden })`);
+      const oxCard = await ox.until(`(() => { const a = messagesById.get(${codeLiteral(planId || '')}); return a && JSON.stringify({ url: Object.prototype.hasOwnProperty.call(findMessage(${codeLiteral(planId || '')}), 'url'), img: a.querySelectorAll('img').length, links: document.querySelectorAll('[src*="/uploads/"], [href*="/uploads/"], [data-src*="/uploads/"]').length, acts: [...a.querySelectorAll('.file [data-action], .file[data-action]')].length }); })()`, 8000);
+      report(!!sharedMsg.id && sharedMsg.size > 0 && !!planId && /^📎 board pack\.pdf · PDF · /.test(sharedMsg.line) && zipMsg.line === '📦 stage pack.zip · ZIP · 10 bytes · download only'
+        && sharedSaid === 'Shared in Main — the backstage team can download it; the Board can open it.'
+        && ['msg.stage', 'msg.look', 'msg.screens'].every((x) => !zipMenu.includes(x)) && zipMenu.includes('msg.download')
+        && cyCards === JSON.stringify({ pdf: ['msg.look'], zip: [] }) && cyPanel1 === JSON.stringify({ state: JSON.parse(cyPanel0).state, layer: false })
+        && oxCard === JSON.stringify({ url: false, img: 0, links: 0, acts: 0 }),
+        `Share puts a file card in the feed ("📎 … · PDF · size"; a zip "📦 … · download only" with no Look, no Show and no screen), says "Shared in Main — the backstage team can download it; the Board can open it." and changes nothing on the Board's page; On stage a Look and no Download; an observer's card holds no link, no picture and no act (${JSON.stringify({ sharedSaid, sharedMsg, zipMsg, zipMenu, cyCards, cyPanel0, cyPanel1, oxCard })})`);
+
+      // A Board seat's Look: the file opens in her own panel, read no-store, its object URLs revoked as the panel closes.
+      await cy.eval(`(() => { window.__lookFrom = window.__urls.made.length; window.__fetchFrom = window.__fetched.length; act('msg', 'msg.look', findMessage(${codeLiteral(planId || '')}), {}); return true; })()`);
+      await cy.until(`(() => { const i = document.querySelector('#docDisplay img.dv-img'); return !!i && i.naturalWidth > 0 && 'drawn'; })()`, 15000);
+      await cy.eval(`dismissDoc()`);
+      const cyLook = await cy.until(`(() => { const f = window.__fetched.slice(window.__fetchFrom).filter((x) => /\\/uploads\\//.test(x[0])); return JSON.stringify({ fetched: f.length > 0 && f.every((x) => x[1] === 'no-store'), revoked: window.__urls.made.slice(window.__lookFrom).every((u) => window.__urls.revoked.includes(u)) }); })()`, 5000);
+      report(cyLook === JSON.stringify({ fetched: true, revoked: true }), `a Board seat's Look at a file shared for download is read no-store, and every object URL it made is revoked as the panel closes (${cyLook})`);
+
+      // A file of before 0.6.0 (no size): drawn as a card all the same.
+      const oldCard = await desk.eval(`(() => { const b = renderFileBody({ id: 'old1', type: 'file', url: ${codeLiteral('/uploads/1700000000000-abcdefghijkl-old.pdf')}, filename: 'old.pdf', mime: 'application/pdf', from: { uid: 'x', name: 'Old', role: 'research' }, at: Date.now() }); return b.querySelector('.file-link').textContent; })()`);
+      report(oldCard === '📎 old.pdf · PDF', `a file message from before 0.6.0, with no size, draws as a card (${oldCard})`);
+
+      // The feed's ⋯ → 📺 Show the Board ▸ The document… opens the short bar; Download ticked there shows ⬇ on the Board's
+      // card. The People tab's Show them a document… opens the same bar.
+      await desk.eval(`(() => { act('msg', 'msg.stage', findMessage(${codeLiteral(sharedMsg.id || '')}), { value: 'doc' }); return true; })()`);
+      const shortBar = await desk.until(`(() => { const a = document.querySelector('.agm-ask'); return a && JSON.stringify({ title: a.querySelector('.agm-ask-title').textContent, fields: [...a.querySelectorAll('input, select')].map((i) => i.name), yes: [...a.querySelectorAll('[data-answer]')].map((b) => b.textContent) }); })()`, 5000);
+      await desk.eval(`(() => { const a = document.querySelector('.agm-ask'); a.querySelector('input[name="download"]').checked = true; a.querySelector('[data-answer="yes"]').click(); return true; })()`);
+      const cyTicked = await cy.until(`document.getElementById('pageLayer').dataset.kind === 'doc' && 'doc'`, 15000);
+      await cy.eval(`document.querySelector('#layerActs [data-action="take.minimise"]').click()`);
+      const cyTickedCard = await cy.until(`!!document.querySelector('#takeCards [data-action="card.download"]') && 'download'`, 5000);
+      const cyKey = await cy.eval(`'u:' + pageFacts.uid`);
+      await desk.eval(`(() => { act('person', 'person.doc', { id: 'person:' + ${codeLiteral(cyKey)}, key: ${codeLiteral(cyKey)}, uid: ${codeLiteral(cyKey.slice(2))}, name: 'Cy', role: 'board', where: 'console' }, {}); return true; })()`);
+      const peopleBar = await desk.until(`(() => { const a = document.querySelector('.agm-ask'); return a && JSON.stringify({ title: a.querySelector('.agm-ask-title').textContent, fields: [...a.querySelectorAll('input, select')].map((i) => i.name) }); })()`, 5000);
+      await desk.eval(`(() => { const a = document.querySelector('.agm-ask [data-answer="no"]'); if (a) a.click(); return true; })()`);
+      report(shortBar === JSON.stringify({ title: 'Show the Board the document', fields: ['at', 'download', 'arrive'], yes: ['Cancel', 'Show the Board'] }) && cyTicked === 'doc' && cyTickedCard === 'download'
+        && peopleBar === JSON.stringify({ title: 'Show Cy the document', fields: ['file', 'at', 'download', 'arrive'] }),
+        `the feed's ⋯ → The document… opens the short bar (its page, Let them download it, where it arrives), and Download ticked there shows ⬇ on the Board's card; the People tab's Show them a document… opens the same bar with the file to choose (${JSON.stringify({ shortBar, cyTicked, cyTickedCard, peopleBar })})`);
+
+      // A spreadsheet with a hidden sheet open in the Preview: Let them download it is disabled, with its words.
+      await desk.eval(`(() => { window.__book = new File([Uint8Array.from(atob('${officeZip(workbookParts()).toString('base64')}'), (c) => c.charCodeAt(0))], 'budget.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }); attachFile(window.__book); return true; })()`);
+      const hiddenTick = await desk.until(`(() => { const t = document.getElementById('letDownload'); const w = document.getElementById('letDownloadWhy'); return !!document.querySelector('#docDisplay table.dv-grid') && !document.getElementById('previewBar').hidden && JSON.stringify({ disabled: t.disabled, why: w.hidden ? '' : w.textContent }); })()`, 15000);
+      await desk.eval(`removePendingFile()`);
+      report(hiddenTick === JSON.stringify({ disabled: true, why: 'This file has hidden parts: Download would hand them over. Share a copy without them for download instead.' }), `with a spreadsheet holding a hidden sheet open in the Preview, Let them download it is disabled with its words (${hiddenTick})`);
+
+      const shareProblems = [['desk', desk], ['cy', cy], ['ox', ox]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
+      report(shareProblems.length === 0, `the share hall's pages: no console error and no CSP violation${shareProblems.length ? ' — ' + shareProblems.slice(0, 4).join(' | ') : ''}`);
+      for (const t of [desk, cy, ox]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
     }
 
     // The header's countdown chip is its own door (the account's: the speaker's screen and the countdown on its screens).
@@ -4894,17 +5014,24 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         `down 5 s, "Offline · reconnecting" is the phone's second header row (the name, Help and ⋯ on the first) and sits before Help on a tablet's one row (${JSON.stringify({ downPhone, backPhone, downTablet })})`);
       report(Object.entries(bvLegs).every(([k, r]) => { const [wh, theme] = k.split(' '); const [w, h] = wh.split('x').map(Number); return legOk(r, w, h, theme); }),
         `the Board's chat view on the device legs (1180×820 and 390×844 in both themes, 820×1180 in dark; touch, a mobile viewport): dark until chosen, the header Help and ⋯ alone, 👍 Got all 3 and ↩ Reply after the newest plain message's words and none on an older one, Got it and Reply on the 🔥 one, a question's three answers and Answer in words…, the composer 🔥 Priority, the field and Send, nothing of the backstage team's (no 📎 ✨ ❓ 😊 ↗ To: ↩ Send back 📌 🗑 ⧉ 🖥 📝, no ⋯ on a message, no reactions or presence lines), 22 px text on a tablet and 20 px on a phone, each response after its words, a 44 px band through each control hitting it, the placeholder whole in its field, no sideways scroll, and the body, a name, a time, the cue words and a response at 4.5:1 or more (${JSON.stringify(bvLegs)})`);
-      // At 820×1180 a file shown to the Board (opened on the panel as it arrives) brings the tabs, and no side column.
+      // At 820×1180 a file shown to the Board (a document arriving in the side bar: a file shared in the chat opens nothing
+      // of itself) brings the tabs, and no side column.
       const up = await (async () => { const f = new FormData(); f.append('file', new Blob([tinyPdf()], { type: 'application/pdf' }), 'proxies.pdf'); return (await fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': anaJoin.uploadToken }, body: f })).json(); })();
       const filed = await say({ type: 'file', url: up.url, filename: 'proxies.pdf', mime: 'application/pdf' });
       const upright = bvTabs[4];
-      const uprightShown = JSON.parse(await upright.until(`allMessages.some((m) => m.type === 'file') && document.body.dataset.shown === '1' && JSON.stringify({ tabs: !document.getElementById('bvTabs').hidden && getComputedStyle(document.getElementById('bvTabs')).display !== 'none',
+      await upright.until(`allMessages.some((m) => m.type === 'file')`, 10000);
+      const filedPlain = await upright.eval(`document.body.dataset.shown`);
+      const sideDoc = await emit(bvAdmin, 'page:push', { code: bvHall, to: 'board', content: { kind: 'doc', url: up.url }, arrive: 'side' });
+      const uprightShown = JSON.parse(await upright.until(`document.body.dataset.shown === '1' && JSON.stringify({ tabs: !document.getElementById('bvTabs').hidden && getComputedStyle(document.getElementById('bvTabs')).display !== 'none',
         pressed: [...document.querySelectorAll('#bvTabs button')].map((b) => b.textContent + ':' + b.getAttribute('aria-pressed')), side: document.getElementById('docPanel').getClientRects().length > 0 })`, 10000) || 'null');
       await upright.eval(`document.getElementById('tabShown').click()`);
       const uprightTab = JSON.parse(await upright.until(`document.body.dataset.tab === 'shown' && JSON.stringify({ chat: document.getElementById('leftCol').getClientRects().length > 0, panel: document.getElementById('docPanel').getClientRects().length > 0, head: document.querySelector('.doc-panel-header strong').textContent })`, 5000) || 'null');
       await upright.eval(`document.getElementById('tabChat').click()`);
-      report(!!filed && JSON.stringify(uprightShown) === JSON.stringify({ tabs: true, pressed: ['Chat:true', '📺 Shown to you · 1:false'], side: false }) && JSON.stringify(uprightTab) === JSON.stringify({ chat: false, panel: true, head: '📺 Shown to you' }),
-        `at 820×1180 (a tablet upright) what is shown is a tab, not a column: Chat and 📺 Shown to you · 1, two pressed buttons, the second showing the panel in the chat's place (${JSON.stringify({ uprightShown, uprightTab })})`);
+      // Withdrawn, it leaves every Board page: the steps below start from nothing shown.
+      const sideGone = sideDoc && sideDoc.ok ? await emit(bvAdmin, 'page:withdraw', { code: bvHall, seq: sideDoc.seq }) : null;
+      const uprightAfter = await upright.until(`document.body.dataset.shown === '0' && 'none'`, 5000);
+      report(!!filed && filedPlain === '0' && !!sideGone && sideGone.ok && uprightAfter === 'none' && !!sideDoc && sideDoc.ok && sideDoc.arrive === 'side' && JSON.stringify(uprightShown) === JSON.stringify({ tabs: true, pressed: ['Chat:true', '📺 Shown to you · 1:false'], side: false }) && JSON.stringify(uprightTab) === JSON.stringify({ chat: false, panel: true, head: '📺 Shown to you' }),
+        `at 820×1180 (a tablet upright) a file shared in the chat shows nothing, and what is shown is a tab, not a column: Chat and 📺 Shown to you · 1, two pressed buttons, the second showing the panel in the chat's place (${JSON.stringify({ filedPlain, sideDoc: sideDoc && (sideDoc.ok ? sideDoc.arrive : sideDoc.error), uprightShown, uprightTab })})`);
 
       // A Board account (a Tech given Board hall's On stage seat), on a device of its own at 1180×820: the same view. It is
       // made by the admin account (the laptop's token makes none), signed in as every sign-in from this address is, a

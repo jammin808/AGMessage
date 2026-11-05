@@ -17,7 +17,7 @@ AGMessage has two ways in, and both are first-class:
 | Project manager | every hall | messages, files, screens (drive and manage), information and web pages on people's pages, Stagewatch, Patterns / PlayMap, set halls up, the audit log |
 | Senior tech | every hall | messages, files, drive screens, information and web pages on people's pages, Stagewatch, Patterns / PlayMap |
 | Tech | their halls | messages, files, drive screens, information and web pages on people's pages, Stagewatch |
-| Staff | their halls | messages and files, and information shown to the people On stage |
+| Staff | their halls | messages and files, and information for the Board's pages |
 | Viewer | their halls | read only |
 
 An admin can make an exception for one person — tick or untick a single right on the Accounts page — and choose their
@@ -31,7 +31,7 @@ rights, as the server checks them:
 |---|---|
 | `hall.view` | see a hall: its messages, files, countdown and screens; in a side room (Legal, Media), only one the account is given |
 | `hall.post` | send messages, replies, action prompts and help requests; answer a prompt, pin, react; forward into the hall; send a message from the room into one whose list names it; in a side room, only one the account is given |
-| `hall.files` | share files and push them to a hall, or forward one into it, or send one from the room into one whose list names it; in a side room, only one the account is given |
+| `hall.files` | share files for download, or forward one into a hall, or send one from the room into one whose list names it (moving a file also needs the right to download it where it is, below); in a side room, only one the account is given |
 | `display.control` | change what a hall's screens and people's pages show: a take on the Board's pages or one person's, from any room of the hall (`docs/DISPLAYS.md`, People's screens); never from a page seated On stage |
 | `display.manage` | add, rename, move, re-link and remove screens; the hall's holding image |
 | `stage.send` | send to Stagewatch: the speaker's screen, or to the operator to pass on |
@@ -292,6 +292,22 @@ admin."); turned off, or the hall unlocked, a web page a guest already put up st
 the admin's answer counts them with Take it down (a person's whether or not a page of theirs is open: the admin's
 take-down reaches the store without one). A guest's page hears a change at once (`pages:rights {canWeb}`). An open hall's code
 guest, an On stage or observer seat and a side room's Member never show one.
+
+**Who may download, and who may move a file** (plan 4-§4.6.6; owner answers 12 and 20). A download is the server's act,
+by a ticket it gives a seat that may download (`lib/pages.js` `mayDownload`), never a `GET`:
+
+| Seat | A file shared for download | A document shown with "Let them download it" | A quote or a picture of a page |
+|---|---|---|---|
+| The admin (not On stage) | ⬇ | ⬇ | never |
+| Backstage: accounts and code guests, a side room's Members | ⬇ | ⬇ | never |
+| On stage, either view | 👁 Look only ("On stage tablets keep no copies — ask the backstage team to show it to you with Download ticked.") | ⬇, on that take's card and layer alone | never |
+| Observer | the card alone: no link, no picture, no Look, no ⬇ | a document is never shown to one | never |
+| A Viewer account, whatever its seat (a Viewer granted `hall.post` sits backstage) | the card alone, as an observer's | never ⬇ | never |
+
+An observer and a Viewer account are refused every ticket ("Downloads are for the backstage team."), and their pages are
+never given a file message's link. A file moves to another room (`forward`, `room:send`) only from a seat that may
+download it where it is, besides `hall.post` and `hall.files` there and where it goes: "Files are moved by the backstage
+team." A download of a file that is not confidential writes no audit row (a person reading what their room shows them).
 
 **Inside a hall.** Reading is `hall.view`; everything that changes what the others see — a message, a reply, a help
 request, an answer to an action prompt, a pin, a reaction — is `hall.post`, so an observer or a Viewer reads, sees a

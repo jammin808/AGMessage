@@ -36,6 +36,8 @@ const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:
   'room:send',
   // people's pages: a take pushed (the Board chip, a person's Show them ▸) and a page's report on its own (the layer, a card)
   'page:push', 'page:report',
+  // a download, by a ticket (msg.download, file.download, take.download, card.download, adminMsg.download)
+  'file:download',
   // a room's earlier messages (earlier: Show earlier, and a reply's Show it)
   'history:before',
   // the admin page, the halls board and the Accounts page (adminRoom, person, adminMsg, link, tunnel, hall, help, account, audit)
@@ -57,9 +59,10 @@ const RESERVED_ICONS = { '↩': ['reply'], '↗': ['send', 'sendBack', 'sendTo']
  * composer's To ▸); ▷ and 🏁 answer a help request, on a message or on the
  * halls board; ⚙ sets a link up (a node's, or the default Stagewatch's).
  */
-const ONE_ACT = [['send', 'sendBack', 'sendTo'], ['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode']];
-/** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export) and so end their label with "…" as an ask does. */
-const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'header.screens', 'board.screens', 'compose.attach', 'hall.setup', 'hall.network', 'room.setup', 'account.edit', 'audit.export', 'adminRoom.members', 'adminRoom.sendFrom']);
+// 📺 Show the Board ▸ on a file (msg.stage, file.stage) and Show them ▸ on a person are one act: showing on people's pages.
+const ONE_ACT = [['send', 'sendBack', 'sendTo'], ['delete', 'remove'], ['draft', 'minutes'], ['helpRespond', 'respond'], ['helpResolve', 'resolve'], ['setup', 'configure'], ['toggle', 'codeToggle'], ['new', 'newCode'], ['stage', 'show']];
+/** Acts that open a dialog of their own (Stagewatch's, the Screens console, a hall's set-up, the show network, the editor, the export, the short document bar) and so end their label with "…" as an ask does. */
+const OPENS_DIALOG = new Set(['msg.speaker', 'msg.screens', 'file.screens', 'chip.speaker', 'header.screens', 'board.screens', 'compose.attach', 'hall.setup', 'hall.network', 'room.setup', 'account.edit', 'audit.export', 'adminRoom.members', 'adminRoom.sendFrom', 'person.doc']);
 /** The keys a single key may be: a letter or a digit that needs no Shift (shown upper case), or one of these named keys. */
 const NAMED_KEYS = ['Enter', 'Delete', 'Escape'];
 
@@ -148,6 +151,10 @@ const OBJECTS = {
   sentThere: { id: 'm13', type: 'file', url: '/uploads/2-brief.pdf', filename: 'brief.pdf', mime: 'application/pdf', from: from('u-lou', 'research', 'Lou'), at, sentTo: { roomName: 'Hall 2', hallName: 'Hall 2', ref: 'rH2aaaaaaaaaaaaaaa', id: 'm1' } },
   // This room's copy of what it sent into Hall 2's Legal, withdrawn from there 40 s after it went.
   sentWithdrawn: { id: 'm15', type: 'text', text: 'Wrong room', from: from('u-lou', 'research', 'Lou'), at, reactions: [], sentTo: { roomName: 'Legal', hallName: 'Hall 2', ref: 'rLGcccccccccccccccc', id: 'm2', withdrawn: at + 40_000 } },
+  // A file for download only (a zip): AGMessage never opens it, so no Look, no Show, no screen; it is downloaded, moved.
+  anaZip: { id: 'm16', type: 'file', url: '/uploads/1-pack.zip', filename: 'pack.zip', mime: 'application/octet-stream', size: 2048, transferOnly: true, from: from(ANA, 'research', 'Ana'), at },
+  // A file as an observer's or a Viewer account's page is sent it: no link (the server withholds it).
+  anaFileLinkless: { id: 'm17', type: 'file', filename: 'capex.pdf', mime: 'application/pdf', from: from(ANA, 'research', 'Ana'), at },
 };
 const ids = (kind, f, o) => plain(C.ids(kind, f, o));
 // The rest of the hall page's objects: its composers (`form`, `room`, the `file` chosen, whom it is `replying` to, 🔥
@@ -156,8 +163,8 @@ const COMPOSE = {
   text: { id: 'compose:text', form: 'text', room: 'Hall 2', file: '', replying: '', priority: false },
   replying: { id: 'compose:text', form: 'text', room: 'Hall 2', file: '', replying: 'Chair', priority: true },
   action: { id: 'compose:action', form: 'action', room: 'Hall 2', file: '', replying: '', priority: false },
-  fileEmpty: { id: 'compose:file', form: 'file', room: 'Hall 2', file: '', replying: '', priority: false },
-  fileChosen: { id: 'compose:file', form: 'file', room: 'Hall 2', file: 'capex.pdf', replying: '', priority: false },
+  // A file attached to the next message (📎): the message composer, its words the file's caption.
+  fileChosen: { id: 'compose:text', form: 'text', room: 'Hall 2', file: 'capex.pdf', replying: '', priority: false },
   director: { id: 'compose:director', form: 'director', room: 'Hall 2', file: '', replying: '', priority: false },
   directorReplying: { id: 'compose:director', form: 'director', room: '', file: '', replying: 'Ana', priority: false },
 };
@@ -175,12 +182,18 @@ const TAKE_FULL = { ...TAKE, full: true };
 // A web page shown to this page, with its address: Open in a new tab.
 const TAKE_WEB = { ...TAKE, kind: 'web', url: 'https://vote.example.com/poll/7' };
 const CARD = { id: 'card', seq: 4, kind: 'stage', layer: 'show', side: false };
+// A document shown with Let them download it ticked: ⬇ Download on its layer's bar (the full view's menu) and its card.
+const TAKE_DOC = { ...TAKE, kind: 'doc', file: '/uploads/1-capex.pdf', name: 'capex.pdf', download: true };
+const TAKE_DOC_PLAIN = { ...TAKE_DOC, download: false };
+const CARD_DOC = { id: 'card', seq: 9, kind: 'doc', layer: 'info', side: false, file: '/uploads/1-capex.pdf', name: 'capex.pdf', download: true };
 // Information that arrived in the side bar, as a card: Show over the chat, Remove.
 const CARD_SIDE = { id: 'card', seq: 6, kind: 'web', layer: 'info', side: true };
 // Blank, with information from backstage held under it: a touch shows it.
 const TAKE_HELD = { ...TAKE, kind: 'blank', held: 1 };
 // An Earlier entry: information taken off this page lately, a Look.
 const PAST = { id: 'past:5', seq: 5, kind: 'web', url: 'https://vote.example.com/poll/7' };
+// A document under Earlier that was shown with Let them download it ticked.
+const PAST_DOC = { id: 'past:6', seq: 6, kind: 'doc', url: '', file: '/uploads/1700000000000-abcdefghijkl-capex.pdf', name: 'capex.pdf', download: true };
 // The Board as the console reads it: on its chat, nothing shown yet; showing the clock on all 6 pages (this page's take,
 // over a Stagewatch take before it); the clock put up by someone else since; nobody On stage.
 const BOARD_CHAT = { id: 'board', seq: 0, kind: 'chat', pages: 6, on: 0, mark: '○', words: 'Nothing shown yet', showing: 'the chat', mine: null };
@@ -206,7 +219,7 @@ const SHEET_FULL = { ...SHEET, zoom: 2.2, full: true };
 const EARLIER = { id: 'earlier', more: true, find: '' };
 const EARLIER_NONE = { ...EARLIER, more: false };
 const QUOTE_EARLIER = { id: 'earlier:m8', more: true, find: 'm8' };
-const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB, TAKE_HELD], card: [CARD, CARD_SIDE], past: [PAST], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY, BOARD_INFO, BOARD_OPERATOR, BOARD_BESIDE, BOARD_BESIDE_ONLY, BOARD_OP_ON], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER] };
+const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB, TAKE_HELD, TAKE_DOC, TAKE_DOC_PLAIN], card: [CARD, CARD_SIDE, CARD_DOC], past: [PAST, PAST_DOC], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY, BOARD_INFO, BOARD_OPERATOR, BOARD_BESIDE, BOARD_BESIDE_ONLY, BOARD_OP_ON], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER] };
 
 // ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
 const HALLS = [{ code: 'K7P2QX', name: 'Hall 2' }, { code: 'M3N4PQ', name: 'Legal' }];
@@ -254,7 +267,7 @@ const PAGE_OBJECTS = {
   },
   adminMsg: {
     text: { id: 'm1', type: 'text', text: 'Capex is on slide 14', from: from(ANA, 'research', 'Ana'), at, hall: 'Hall 2' },
-    file: { id: 'm2', type: 'file', filename: 'capex.pdf', from: from(ANA, 'research', 'Ana'), at, hall: 'Hall 2' },
+    file: { id: 'm2', type: 'file', url: '/uploads/1-capex.pdf', filename: 'capex.pdf', from: from(ANA, 'research', 'Ana'), at, hall: 'Hall 2' },
   },
   link: {
     stagewatch: { t: 'main', name: 'Stagewatch', url: '10.0.4.21:9924', changed: false },
@@ -336,6 +349,22 @@ function pairsOf(kind) {
       : kind === 'screen' ? [SCREEN] : Object.values(OBJECTS);
   return KIND_SEATS[kind].flatMap((f) => objs.map((o) => [f, o]));
 }
+
+test('the file types: the pages\' one copy of the types the stage shows and of those only ever transferred is the server\'s, and the pages read no other', () => {
+  const STAGE_TYPES = [...require('../lib/pages').STAGE_TYPES];
+  assert.deepEqual(plain(C.STAGE_EXT), STAGE_TYPES);
+  assert.deepEqual(plain(C.TRANSFER_EXT), Object.keys(require('../lib/guard').TRANSFER_TYPES));
+  // The take layer (pagelayer.mjs), a module that reads nothing of the page's, keeps the stage's types of its own: held to
+  // the server's too.
+  const layer = /const STAGE_TYPES = Object\.freeze\((\[[^\]]*\])\)/.exec(readSource(path.join(ROOT, 'public', 'pagelayer.mjs')));
+  assert.ok(layer, 'pagelayer.mjs names the stage\'s types');
+  assert.deepEqual(JSON.parse(layer[1].replace(/'/g, '"')), STAGE_TYPES);
+  // No other page script names a table of its own: a type list is read from the catalogue's.
+  for (const f of ['app.js', 'admin.js', 'admin-plus.js', 'halls.js', 'users.js', 'menus.js', 'docview.mjs']) {
+    const src = readSource(path.join(ROOT, 'public', f));
+    assert.ok(!/\[\s*'zip',\s*'mp4'/.test(src) && !/\[\s*'pdf',[^\]]*'pptx'\s*\]/.test(src), f + ' names a file type table of its own');
+  }
+});
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
   assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'past', 'sheet', 'board', 'earlier', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
@@ -444,7 +473,13 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false });
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, download: false, takeDownloads: true, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false });
+  // Who may download (lib/pages.js mayDownload, as the server answers the seat): a seat backstage that is not a Viewer
+  // account, and the admin's own page where it does not sit On stage; a take shown with Download ticked, On stage too,
+  // never an observer or a Viewer account.
+  const dl = (o) => { const x = C.facts(o); return [x.download, x.takeDownloads]; };
+  assert.deepEqual([dl({ role: 'research' }), dl({ role: 'research', account: { role: 'viewer' } }), dl({ role: 'board' }), dl({ role: 'board', admin: true }), dl({ role: 'observer' }), dl({ role: 'observer', admin: true }), dl({ role: 'board', account: { role: 'viewer' } })],
+    [[true, true], [false, false], [false, true], [false, true], [false, false], [true, false], [false, false]]);
   // Whether the page may change what people's pages show, true alone; the hall's Stagewatch as the page is told it (none,
   // or switched off); the device's Fullscreen API, the page's own probe.
   assert.deepEqual([C.facts({ canPush: true }).canPush, C.facts({ canPush: 'yes' }).canPush, C.facts({ canPush: 1 }).canPush], [true, false, false]);
@@ -493,6 +528,8 @@ test('the seat matrix: what each seat is shown on each message', () => {
       boardText: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy', 'msg.delete'],
       anaText: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'],
       anaFile: ['msg.reply', 'msg.react', 'msg.pin', 'msg.look'],
+      // On stage a file for download only is a card alone: no Look (AGMessage never opens it), no Download.
+      anaZip: ['msg.reply', 'msg.react', 'msg.pin'],
       anaQuestion: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pin', 'msg.copy'],
       chairHelp: ['msg.reply', 'msg.react', 'msg.helpResolve', 'msg.pin', 'msg.copy', 'msg.delete'],
       cyHelp: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'],
@@ -514,14 +551,21 @@ test('the seat matrix: what each seat is shown on each message', () => {
     boardSimpleChanging: { anaAnswered: ['msg.answer', 'msg.answerWords'], anaQuestion: ['msg.answer', 'msg.answerWords'] },
     // An observer and a Viewer: Copy, and Send to only for text where they may post elsewhere; no pin, no Look, no
     // Download (their pages hold no file's link).
-    observer: { boardText: ['msg.copy'], anaFile: [], anaQuestion: ['msg.copy'], chairHelp: ['msg.copy'] },
-    observerElsewhere: { boardText: ['msg.send', 'msg.copy'], anaFile: [], anaQuestion: ['msg.send', 'msg.copy'] },
-    viewer: { boardText: ['msg.copy'], anaFile: [], anaQuestion: ['msg.copy'] },
-    viewerPost: { anaFile: ['msg.reply', 'msg.react', 'msg.pin'], anaText: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'] },
+    observer: { boardText: ['msg.copy'], anaFile: [], anaFileLinkless: [], anaQuestion: ['msg.copy'], chairHelp: ['msg.copy'] },
+    observerElsewhere: { boardText: ['msg.send', 'msg.copy'], anaFile: [], anaFileLinkless: [], anaQuestion: ['msg.send', 'msg.copy'] },
+    viewer: { boardText: ['msg.copy'], anaFile: [], anaFileLinkless: [], anaQuestion: ['msg.copy'] },
+    // A Viewer granted hall.post sits backstage, and still never downloads nor moves a file (mayDownload).
+    viewerPost: { anaFile: ['msg.reply', 'msg.react', 'msg.pin'], anaFileLinkless: ['msg.reply', 'msg.react', 'msg.pin'], anaText: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'] },
     // Staff: messages and files, no Stagewatch: neither 📝 nor 🖥. Tech: Stagewatch's speaker's screen (no show desk), and
     // the hall's screens.
     // (What this room sent into another, by someone else, is not Staff's to withdraw.)
-    staff: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.send', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'], sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'] },
+    staff: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.send', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'], sentThere: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'],
+      // A file for download only: downloaded and moved, never opened.
+      anaZip: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.download'] },
+    // A seat that may show the Board (canShow): 📺 Show the Board ▸ on a file the stage shows, never on one for download
+    // only; the operator (canPush) too.
+    staffShow: { anaFile: ['msg.reply', 'msg.react', 'msg.stage', 'msg.send', 'msg.pin', 'msg.look', 'msg.download'], anaZip: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.download'], anaText: ['msg.reply', 'msg.react', 'msg.send', 'msg.pin', 'msg.copy'] },
+    techPush: { anaFile: ['msg.reply', 'msg.react', 'msg.stage', 'msg.screens', 'msg.pin', 'msg.look', 'msg.download'] },
     tech: { boardText: ['msg.reply', 'msg.react', 'msg.draft', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.pin', 'msg.copy'], anaFile: ['msg.reply', 'msg.react', 'msg.screens', 'msg.pin', 'msg.look', 'msg.download'] },
     // A question is not a thing a screen shows: no ⧉ on it.
     // The admin withdraws any send this room made, and deletes only its own.
@@ -556,7 +600,7 @@ test('the seat matrix: what each seat is shown on each message', () => {
   }
   // The Board, either view, a guest's page or an account's: none of what §17.1 keeps from an On stage seat, by right or by
   // its view.
-  const NEVER_ON_STAGE = ['msg.helpRespond', 'msg.send', 'msg.sendBack', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.download', 'msg.draft', 'msg.withdraw'];
+  const NEVER_ON_STAGE = ['msg.helpRespond', 'msg.send', 'msg.sendBack', 'msg.speaker', 'msg.sendNow', 'msg.screens', 'msg.download', 'msg.draft', 'msg.withdraw', 'msg.stage'];
   // The admin seated there too, who withdraws any send of this room's from a backstage page.
   for (const s of ['board', 'boardSimple', 'boardAccount', 'boardAccountSimple', 'adminOnStage']) for (const o of Object.keys(OBJECTS)) {
     const set = plain(C.shown('msg', SEATS[s], OBJECTS[o])).map((e) => e.id);
@@ -745,7 +789,20 @@ test('a file and a screen: what each seat is shown, its bar, and its asks', () =
   assert.deepEqual(ids('file', SEATS.board, list), ['file.look', 'file.pin'], 'On stage: no Download');
   assert.deepEqual(ids('file', SEATS.observer, list), [], 'an observer: nothing of a file');
   assert.deepEqual(ids('file', SEATS.viewerPost, list), ['file.pin'], 'a Viewer granted hall.post: no Look and no Download');
-  assert.deepEqual(plain(C.inline('file', SEATS.research, list)).map((i) => [i.id, i.label]), [['file.look', 'Look'], ['file.pin', 'Unpin']]);
+  // Backstage a file opens in the Preview; On stage it is a Look.
+  assert.deepEqual(plain(C.inline('file', SEATS.research, list)).map((i) => [i.id, i.label]), [['file.look', 'Preview'], ['file.pin', 'Unpin']]);
+  assert.deepEqual(plain(C.inline('file', SEATS.board, list)).map((i) => [i.id, i.label]), [['file.look', 'Look'], ['file.pin', 'Unpin']]);
+  // A seat that may show the Board: 📺 Show the Board ▸ a picture of p. 1, of a page, or the document (a PDF); the picture
+  // (an image); the document (any other type); never on a file for download only, which opens nowhere and downloads alone.
+  assert.deepEqual(ids('file', SEATS.staffShow, list), ['file.stage', 'file.look', 'file.download', 'file.pin']);
+  assert.deepEqual(plain(C.submenu('file', 'file.stage', SEATS.staffShow, list)).map((v) => [v.value, v.label]), [['picture1', 'A picture of p. 1'], ['picture', 'A picture of a page…'], ['doc', 'The document…']]);
+  const png = Object.assign({}, list, { url: '/uploads/1-plan.png', filename: 'plan.png', mime: 'image/png' });
+  const xlsx = Object.assign({}, list, { url: '/uploads/1-q3.xlsx', filename: 'q3.xlsx', mime: 'application/octet-stream' });
+  assert.deepEqual([png, xlsx].map((o) => plain(C.submenu('file', 'file.stage', SEATS.staffShow, o)).map((v) => v.label)), [['This picture', 'The document…'], ['The document…']]);
+  const zip = Object.assign({}, OBJECTS.anaZip, { where: 'list', pinned: true });
+  assert.deepEqual(ids('file', SEATS.staffShow, zip), ['file.download', 'file.pin'], 'a file for download only');
+  assert.deepEqual(ids('file', SEATS.board, zip), ['file.pin'], 'On stage: neither Look nor Download');
+  assert.deepEqual(plain(C.submenu('msg', 'msg.stage', SEATS.staffShow, OBJECTS.anaFile)).map((v) => v.value), ['picture1', 'picture', 'doc']);
   assert.deepEqual(plain(C.inline('file', SEATS.research, preview)).map((i) => [i.id, i.label]), [['file.pin', 'Unpin'], ['file.close', 'Close']]);
 
   const noPath = Object.assign({}, SCREEN, { path: undefined });
@@ -785,22 +842,22 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
   const PERSON = { id: 'person:u-kim', uid: 'u-kim', name: 'Kim', role: 'research' };
   const SELF = { id: 'person:' + ANA, uid: ANA, name: 'Ana', role: 'research' };
   const M = [
-    // Backstage: ✨ Draft a reply in the Message tab, Send, 🔥 Priority and Attach a file… in every tab; Remove the file
-    // once one is chosen; Cancel the reply while replying. Send is the composer's one act on its row.
+    // Backstage: ✨ Draft a reply, Send, 🔥 Priority and 📎 Attach a file… in the Message tab (a question attaches none);
+    // Remove the file once one is attached; Cancel the reply while replying. Send is the composer's one act on its row.
     ['compose', 'research', COMPOSE.text, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach']],
     ['compose', 'research', COMPOSE.replying, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach', 'compose.cancelReply']],
-    ['compose', 'research', COMPOSE.action, ['compose.send', 'compose.priority', 'compose.attach']],
-    ['compose', 'research', COMPOSE.fileChosen, ['compose.send', 'compose.priority', 'compose.attach', 'compose.removeFile']],
+    ['compose', 'research', COMPOSE.action, ['compose.send', 'compose.priority']],
+    ['compose', 'research', COMPOSE.fileChosen, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach', 'compose.removeFile']],
     // On stage: its words, 🔥 and Send, no file and no draft.
     ['compose', 'board', COMPOSE.director, ['compose.send', 'compose.priority']],
     ['compose', 'board', COMPOSE.directorReplying, ['compose.send', 'compose.priority', 'compose.cancelReply']],
     // A Viewer granted posting sits backstage: it drafts, sends and attaches.
     ['compose', 'viewerPost', COMPOSE.text, ['compose.draft', 'compose.send', 'compose.priority', 'compose.attach']],
     ['compose', 'observer', COMPOSE.text, []],
-    // A room that may send into others: To ▸ on the message and the file composer, never on a question's.
+    // A room that may send into others: To ▸ on the message composer (a file attached to it too), never on a question's.
     ['compose', 'researchSends', COMPOSE.text, ['compose.draft', 'compose.send', 'compose.sendTo', 'compose.priority', 'compose.attach']],
-    ['compose', 'researchSends', COMPOSE.fileChosen, ['compose.send', 'compose.sendTo', 'compose.priority', 'compose.attach', 'compose.removeFile']],
-    ['compose', 'researchSends', COMPOSE.action, ['compose.send', 'compose.priority', 'compose.attach']],
+    ['compose', 'researchSends', COMPOSE.fileChosen, ['compose.draft', 'compose.send', 'compose.sendTo', 'compose.priority', 'compose.attach', 'compose.removeFile']],
+    ['compose', 'researchSends', COMPOSE.action, ['compose.send', 'compose.priority']],
     // The stage chip: the speaker's screen for a seat with its rights, the countdown on screens for one that drives them.
     ['chip', 'research', STAGE, ['chip.speaker']],
     ['chip', 'tech', STAGE, ['chip.speaker', 'chip.screens']],
@@ -842,6 +899,10 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
 
   // The bar: Send alone, named for where it sends (its aria-label and its menu item alike).
   assert.deepEqual(plain(C.inline('compose', SEATS.research, COMPOSE.text)).map((i) => [i.id, i.label]), [['compose.send', 'Send to Hall 2']]);
+  // A question asks the Board in a Main room, and the room by its name in a side room; a file attached is shared.
+  assert.deepEqual(plain(C.inline('compose', SEATS.research, COMPOSE.action)).map((i) => [i.label, i.icon]), [['Ask the Board', '❓']]);
+  assert.deepEqual(plain(C.inline('compose', SEATS.research, { ...COMPOSE.action, askWho: 'Legal' })).map((i) => [i.label, i.icon]), [['Ask Legal', '❓']]);
+  assert.deepEqual(plain(C.inline('compose', SEATS.research, COMPOSE.fileChosen)).map((i) => [i.label, i.icon]), [['Share for download', '📎']]);
   // To ▸: This room, then each room this room may send into, by its reference, named as a room is named; the one chosen
   // checked, and Send named for it.
   const toMedia = { ...COMPOSE.text, room: 'Media', to: 'rMDbbbbbbbbbbbbbbb' };
@@ -864,12 +925,14 @@ test('the rest of the hall page: what each seat is shown on the composer, the st
   assert.deepEqual(spans.map((ms) => C.lasted(ms)), ['0 s', '0 s', '0 s', '1 s', '40 s', '59 s', '1 min', '59 min', '1 h', '1 h 2 min', '23 h 59 min', '1 d', '1 d 3 h', '1 d 1 h', '0 s', '0 s', '0 s', '0 s']);
   for (const ms of spans) assert.equal(ops.lasted(ms), C.lasted(ms), String(ms));
   assert.deepEqual(plain(C.inline('compose', SEATS.board, COMPOSE.directorReplying)).map((i) => [i.id, i.label]), [['compose.send', 'Send']], 'before the room is named: Send');
+  // With a file attached, Send reads 📎 Share for download, and Share in Legal with To: set.
+  assert.deepEqual(plain(C.inline('compose', SEATS.research, COMPOSE.fileChosen)).map((i) => [i.id, i.label, i.icon]), [['compose.send', 'Share for download', '📎']]);
+  assert.deepEqual(plain(C.inline('compose', SEATS.researchSends, { ...COMPOSE.fileChosen, room: 'Legal', to: 'rLGcccccccccccccccc' })).map((i) => i.label), ['Share in Legal']);
   for (const [kind, o] of [['chip', STAGE], ['header', HEADER], ['person', PERSON]]) assert.deepEqual(plain(C.inline(kind, SEATS.admin, o)), [], kind + ': no act on a row, only the menu');
 
-  // Disabled, with the reason: a file not chosen, AI drafts off, the link down, no screens, not connected; a send held
-  // by the outbox stays live; the support view acts on nothing.
+  // Disabled, with the reason: AI drafts off, the link down, no screens, not connected; a send held by the outbox stays
+  // live; the support view acts on nothing.
   const why = (seat, kind, o) => Object.fromEntries(plain(C.items(kind, SEATS[seat], o)).filter((i) => !i.sep).map((i) => [i.id, i.disabled || i.held || '']));
-  assert.deepEqual(why('research', 'compose', COMPOSE.fileEmpty), { 'compose.send': C.WORDS.noFile, 'compose.priority': '', 'compose.attach': '' });
   assert.equal(why('researchAlone', 'compose', COMPOSE.text)['compose.draft'], C.WORDS.aiOff, 'AI drafts off: shown, with why');
   assert.deepEqual(why('researchLinkDown', 'chip', STAGE), { 'chip.speaker': C.WORDS.linkDown });
   assert.deepEqual(why('techNoScreens', 'chip', STAGE), { 'chip.speaker': '', 'chip.screens': C.WORDS.noScreens });
@@ -1006,7 +1069,9 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['person', 'admin', O.person.account, ['person.chatView', 'person.forward', 'person.unforward', 'person.view', 'person.kick']],
     ['person', 'notAdmin', O.person.guest, []],
     ['adminMsg', 'admin', O.adminMsg.text, ['adminMsg.copy', 'adminMsg.delete']],
-    ['adminMsg', 'admin', O.adminMsg.file, ['adminMsg.delete']],
+    // A file of the watched room: ⬇ Download, the server's act by a ticket, as on the hall page.
+    ['adminMsg', 'admin', O.adminMsg.file, ['adminMsg.download', 'adminMsg.delete']],
+    ['adminMsg', 'admin', { ...O.adminMsg.file, url: undefined }, ['adminMsg.delete']],
     ['adminMsg', 'notAdmin', O.adminMsg.text, []],
     // The links: the default Stagewatch (set up in one form, its certificate accepted only when it changed), one heard (its
     // address used), a Patterns or PlayMap heard (linked with its token) and linked (proposed to, set up, confirmed,
@@ -1083,13 +1148,14 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
   // The person kind's other half, the hall page's (a seat there, read by its facts): it mentions a person; a seat that may
   // change what people's pages show shows them a take, or hands them back to their chat, once the page knows their key.
   M.push(['person', 'research', O.person.guest, ['person.mention']]);
-  M.push(['person', 'techPush', { ...O.person.guest, key: 'u:u-kim', kind: 'clock' }, ['person.mention', 'person.show', 'person.chat']]);
+  // A document on their pages too, by the short bar (Show them a document…).
+  M.push(['person', 'techPush', { ...O.person.guest, key: 'u:u-kim', kind: 'clock' }, ['person.mention', 'person.show', 'person.doc', 'person.chat']]);
   // A web page on their pages too, for a seat that may show one (canWeb).
-  M.push(['person', 'guestWeb', { ...O.person.guest, key: 'u:u-kim', kind: 'clock' }, ['person.mention', 'person.show', 'person.web', 'person.chat']]);
+  M.push(['person', 'guestWeb', { ...O.person.guest, key: 'u:u-kim', kind: 'clock' }, ['person.mention', 'person.show', 'person.web', 'person.doc', 'person.chat']]);
   // Information over their show: Take down, for the operator (canPush), and for a seat that may only show, on a person On
   // stage alone (the console lists no one else to it).
-  M.push(['person', 'techPush', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.show', 'person.chat', 'person.takeDown', 'person.withdraw']]);
-  M.push(['person', 'staffShowWeb', { ...O.person.guest, role: 'board', key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.web', 'person.takeDown', 'person.withdraw']]);
+  M.push(['person', 'techPush', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.show', 'person.doc', 'person.chat', 'person.takeDown', 'person.withdraw']]);
+  M.push(['person', 'staffShowWeb', { ...O.person.guest, role: 'board', key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.web', 'person.doc', 'person.takeDown', 'person.withdraw']]);
   M.push(['person', 'staffShowWeb', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention']]);
   const facts = (seat) => PAGE[seat] || SEATS[seat];
   for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, facts(seat), o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
@@ -1280,7 +1346,15 @@ test('a take on this page: Back to chat and Minimise on its bar, Full screen onl
   assert.deepEqual(plain(C.shown('take', SEATS.boardSimpleFull, TAKE_HOT)).map((e) => e.id), ['take.chat', 'take.minimise', 'take.openChat', 'take.fullscreen']);
   // Escape minimises, never Back to chat; each act is the person's on their own page (self), Full screen the page's own.
   assert.equal(C.byKey('take', SEATS.board, TAKE, 'Escape').id, 'take.minimise');
-  assert.deepEqual(plain(C.KINDS.take.map((e) => [e.id, e.verb, e.mode])), [['take.chat', 'page:report', 'self'], ['take.minimise', 'page:report', 'self'], ['take.openChat', 'page:report', 'self'], ['take.held', 'local', 'local'], ['take.tab', 'local', 'local'], ['take.fullscreen', 'local', 'local']]);
+  assert.deepEqual(plain(C.KINDS.take.map((e) => [e.id, e.verb, e.mode])), [['take.chat', 'page:report', 'self'], ['take.minimise', 'page:report', 'self'], ['take.openChat', 'page:report', 'self'], ['take.held', 'local', 'local'], ['take.tab', 'local', 'local'], ['take.download', 'file:download', 'now'], ['take.fullscreen', 'local', 'local']]);
+  // A document shown with Let them download it ticked: ⬇ Download on the layer's bar in either view, and in its ⋯ in the
+  // full view, On stage too; never on one shown without it, never for an observer or a Viewer account (no ticket is given
+  // them).
+  assert.deepEqual([menu('board', TAKE_DOC), menu('research', TAKE_DOC), menu('board', TAKE_DOC_PLAIN), menu('observer', TAKE_DOC), menu('viewer', TAKE_DOC)],
+    [['take.chat', 'take.minimise', 'take.download'], ['take.chat', 'take.minimise', 'take.download'], ['take.chat', 'take.minimise'], ['take.chat', 'take.minimise'], ['take.chat', 'take.minimise']]);
+  assert.deepEqual([SEATS.boardSimple, SEATS.board].map((f) => plain(C.inline('take', f, TAKE_DOC, Infinity)).map((i) => [i.id, i.label, i.icon])),
+    [[['take.chat', 'Back to chat', '💬'], ['take.minimise', 'Minimise', '🔽'], ['take.download', 'Download', '⬇']], [['take.chat', 'Back to chat', '💬'], ['take.minimise', 'Minimise', '🔽'], ['take.download', 'Download', '⬇']]], 'on the layer\'s bar, the simple view\'s and the full view\'s');
+  assert.deepEqual([plain(C.inline('take', SEATS.boardSimple, TAKE_DOC_PLAIN, Infinity)).map((i) => i.id), plain(C.inline('take', SEATS.observer, TAKE_DOC, Infinity)).map((i) => i.id)], [['take.chat', 'take.minimise'], ['take.chat', 'take.minimise']]);
   // Information held under the operator's blank: "1 from backstage" on blank's bar, the person's touch shows it; on no
   // other kind, and never while nothing is held.
   assert.deepEqual(plain(C.inline('take', SEATS.boardSimple, TAKE_HELD, Infinity)).map((i) => [i.id, i.label]), [['take.chat', 'Back to chat'], ['take.minimise', 'Minimise'], ['take.held', '1 from backstage']]);
@@ -1301,6 +1375,10 @@ test('a take on this page: Back to chat and Minimise on its bar, Full screen onl
 
 test('a take minimised, as a card in the side bar: Show again, and Remove with Undo in the full view; an observer has both; the support view acts on none', () => {
   assert.deepEqual(ids('card', SEATS.board, CARD), ['card.show', 'card.remove']);
+  // ⬇ Download on the card of a document shown with Download ticked, in either view: that item alone; never an observer's.
+  assert.deepEqual([ids('card', SEATS.board, CARD_DOC), plain(C.shown('card', SEATS.boardSimple, CARD_DOC)).map((e) => e.id), ids('card', SEATS.observer, CARD_DOC), ids('card', SEATS.board, { ...CARD_DOC, download: false })],
+    [['card.show', 'card.download', 'card.remove'], ['card.show', 'card.download'], ['card.show', 'card.remove'], ['card.show', 'card.remove']]);
+  assert.deepEqual(plain(C.inline('card', SEATS.boardSimple, CARD_DOC)).map((i) => [i.id, i.label]), [['card.show', 'Look'], ['card.download', 'Download']]);
   assert.deepEqual(ids('card', SEATS.observer, CARD), ['card.show', 'card.remove'], 'an observer\'s minimised take has its card too');
   assert.deepEqual(plain(C.shown('card', SEATS.boardSimple, CARD)).map((e) => e.id), ['card.show'], 'no Remove in the simple view');
   assert.deepEqual(plain(C.inline('card', SEATS.board, CARD)).map((i) => [i.id, i.label, i.icon]), [['card.show', 'Show again', '⤴'], ['card.remove', 'Remove', '🗑']]);
@@ -1311,10 +1389,15 @@ test('a take minimised, as a card in the side bar: Show again, and Remove with U
   assert.deepEqual(plain(C.inline('card', SEATS.boardSimple, CARD_SIDE, Infinity)).map((i) => [i.id, i.label]), [['card.show', 'Look']]);
 });
 
-test('Earlier: the information taken off this page lately, each a Look on this page alone, for every seat; the support view acts on none', () => {
+test('Earlier: the information taken off this page lately, each a Look on this page alone, for every seat, and ⬇ on a document shown with Download ticked; the support view acts on none', () => {
   for (const s of ['board', 'observer', 'research']) assert.deepEqual(ids('past', SEATS[s], PAST), ['past.look'], s);
   assert.deepEqual(plain(C.inline('past', SEATS.boardSimple, PAST, Infinity)).map((i) => [i.id, i.label, i.icon]), [['past.look', 'Look', '👁']], 'the simple view: its button');
-  assert.deepEqual(plain(C.KINDS.past.map((e) => [e.id, e.label, e.verb, e.mode])), [['past.look', 'Look', 'local', 'local']], 'a Look: no report, no take');
+  assert.deepEqual(plain(C.KINDS.past.map((e) => [e.id, e.label, e.verb, e.mode])), [['past.look', 'Look', 'local', 'local'], ['past.download', 'Download', 'file:download', 'now']], 'a Look: no report, no take');
+  // A document shown with Let them download it ticked keeps its ⬇ under Earlier, in either view, until it is withdrawn;
+  // never one shown without it, never for an observer or a Viewer account.
+  assert.deepEqual([ids('past', SEATS.board, PAST_DOC), ids('past', SEATS.research, PAST_DOC), ids('past', SEATS.board, { ...PAST_DOC, download: false }), ids('past', SEATS.observer, PAST_DOC), ids('past', SEATS.viewer, PAST_DOC)],
+    [['past.look', 'past.download'], ['past.look', 'past.download'], ['past.look'], ['past.look'], ['past.look']]);
+  assert.deepEqual(plain(C.inline('past', SEATS.boardSimple, PAST_DOC, Infinity)).map((i) => [i.id, i.label, i.icon]), [['past.look', 'Look', '👁'], ['past.download', 'Download', '⬇']], 'the simple view: both its buttons');
   assert.ok(plain(C.items('past', SEATS.supportBoard, PAST)).every((i) => i.disabled === C.supportWords('Kim')));
 });
 
@@ -1392,16 +1475,17 @@ test('the Board chip for a seat that may only show (canShow): Take down over its
   assert.equal(C.withdrawOf(SEATS.staffShowWeb, { ...BOARD_OPERATOR, beside: { ...BESIDE, mine: true } }).seq, 10, 'its own beside the operator\'s');
   assert.deepEqual([C.ready('person', 'person.withdraw', SEATS.staffShowWeb, { ...gil, info: { ...INFO_SHOWN, mine: true } }), C.ready('person', 'person.withdraw', SEATS.staffShowWeb, gil)], [true, 'Only who showed it, the operator or the admin can withdraw it.']);
   assert.deepEqual(['staffShow', 'staffShowWeb'].map((s) => ids('header', SEATS[s], HEADER).includes('header.screens')), [true, true], 'its console');
-  // A person: Show them a web page… with its right, on a person On stage alone (the console lists no one else to it).
+  // A person: Show them a web page… with its right, and a document by the short bar, on a person On stage alone (the
+  // console lists no one else to it).
   const kim = PAGE_OBJECTS.person.keyed;
   assert.deepEqual([ids('person', SEATS.staffShowWeb, { ...kim, role: 'board' }), ids('person', SEATS.staffShowWeb, { ...kim, role: 'research' }), ids('person', SEATS.staffShow, { ...kim, role: 'board' })],
-    [['person.mention', 'person.web'], ['person.mention'], ['person.mention']]);
+    [['person.mention', 'person.web', 'person.doc'], ['person.mention'], ['person.mention', 'person.doc']]);
 });
 
 test('a person, from a seat that may change what people\'s pages show: 📺 Show them ▸ the show kinds, the one their pages show checked; Back to chat on their pages, said already where they are', () => {
   const kim = PAGE_OBJECTS.person.keyed;
-  assert.deepEqual(ids('person', SEATS.guestPush, kim), ['person.mention', 'person.show', 'person.chat']);
-  assert.deepEqual(ids('person', SEATS.guestPush, { ...kim, where: 'console' }), ['person.show', 'person.chat'], 'in the console: no Mention');
+  assert.deepEqual(ids('person', SEATS.guestPush, kim), ['person.mention', 'person.show', 'person.doc', 'person.chat']);
+  assert.deepEqual(ids('person', SEATS.guestPush, { ...kim, where: 'console' }), ['person.show', 'person.doc', 'person.chat'], 'in the console: no Mention');
   assert.deepEqual(ids('person', SEATS.research, kim), ['person.mention'], 'nothing of their pages without canPush');
   assert.deepEqual(plain(C.submenu('person', 'person.show', SEATS.guestPush, kim)), [
     { value: 'stage', label: 'Stagewatch', role: 'menuitemradio', checked: false }, { value: 'clock', label: 'Clock', role: 'menuitemradio', checked: true, disabled: 'Already showing the clock.' },
@@ -1421,7 +1505,7 @@ test('a person, from a seat that may change what people\'s pages show: 📺 Show
   assert.deepEqual(ids('person', SEATS.guestPush, { id: 'person:minutes', uid: 'minutes', name: 'Minutes', role: 'observer', key: '', kind: '' }), ['person.mention']);
   // A web page on their pages, for a seat that may show one (canWeb), asked by its address; Show them ▸ keeps the show
   // kinds, a web page never among them. Another address may follow one they are shown; no page of theirs open, it says so.
-  assert.deepEqual(ids('person', SEATS.guestWeb, kim), ['person.mention', 'person.show', 'person.web', 'person.chat']);
+  assert.deepEqual(ids('person', SEATS.guestWeb, kim), ['person.mention', 'person.show', 'person.web', 'person.doc', 'person.chat']);
   assert.deepEqual(plain(C.submenu('person', 'person.show', SEATS.guestWeb, kim)).map((i) => i.value), ['stage', 'clock', 'holding', 'blank']);
   const web = (o) => C.ready('person', 'person.web', SEATS.guestWeb, o);
   assert.deepEqual([web(kim), web({ ...kim, kind: 'web' }), web({ ...kim, kind: '' }), web({ ...kim, kind: undefined })], [true, true, 'They have no page open in this hall now.', 'Reading where their pages stand…']);

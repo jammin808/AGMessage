@@ -241,9 +241,9 @@ test('rbac: the rights and the roles say "screens", the word every page uses for
   assert.deepEqual([rbac.CAPS['hall.view'], rbac.CAPS['display.control'], rbac.CAPS['display.manage']],
     ['See a hall: its messages, files, countdown and screens', 'Change what a hall\'s screens and people\'s pages show', 'Create, rename, move and revoke screens']);
   assert.deepEqual(['manager', 'senior', 'tech'].map((r) => rbac.ROLES[r].words), [
-    'Every hall: messages, files, screens, Stagewatch, show network; sets halls up',
-    'Every hall: messages, files, screens, Stagewatch, show network',
-    'Their halls: messages, files, screens, Stagewatch',
+    'Every hall: messages, files, screens, the Board\'s pages, Stagewatch, show network; sets halls up',
+    'Every hall: messages, files, screens, the Board\'s pages, Stagewatch, show network',
+    'Their halls: messages, files, screens, the Board\'s pages, Stagewatch',
   ]);
 });
 
@@ -274,7 +274,7 @@ test('rbac: stage.show, files, pages and quotes shown to the people on stage, is
     rbac.can({ id: 't1', role: 'tech', halls: ['HALL01'], revoke: ['stage.show'] }, 'stage.show', 'HALL01')], [true, false, false, false, true, false], 'a revoke takes it off, a grant gives it');
   assert.deepEqual([rbac.canIn(staff, 'stage.show', { code: 'LEGAL123', hall: 'HALL01', main: false }), rbac.seatAllows('board', 'stage.show'), rbac.guestCaps('research', 'main').includes('stage.show')], [true, false, false],
     'a hall\'s right, in each of its rooms; never On stage; no code guest holds it');
-  assert.equal(rbac.ROLES.staff.words, 'Their halls: messages and files, and what they show the people on stage');
+  assert.equal(rbac.ROLES.staff.words, 'Their halls: messages, files, and information for the Board\'s pages');
 });
 
 test('rbac: the Accounts page\'s three groups of rights hold every right once, in the rights\' own order, and nothing else', () => {

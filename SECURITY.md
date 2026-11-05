@@ -475,9 +475,49 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   object: Fetch Metadata's `Sec-Fetch-Mode: navigate`, or that destination) is answered 404, so the browser's own viewer
   and its Save are never offered. A browser that sends no Fetch Metadata (an iPad before 16.4 among them) is served, as
   before. What a take shows is drawn from memory: fetched `no-store`, a picture through an object URL revoked when the
-  take goes, a document's reader and its pdf.js document destroyed then (a PDF read by its pages' ranges alone). A
-  backstage seat's and the admin's ⬇ Download of a file message is no navigation either: the page fetches the file
-  `no-store` and hands the browser its bytes through an object URL, let go 40 s after (until the ticketed download).
+  take goes, a document's reader and its pdf.js document destroyed then (a PDF read by its pages' ranges alone); a
+  picture on a file's card in the chat likewise, its object URL revoked as the card leaves the page.
+- **A download is the server's act, by a ticket per seat** (`file:download`, then `POST /uploads/:name/download`). A
+  ticket is given only to a seat that may download (`lib/pages.js` `mayDownload`): the admin's own page (where it does
+  not sit On stage), and a seat backstage whose account is not a Viewer; On stage, only a document shown with **Let them
+  download it** ticked, that item alone; **never an observer and never a Viewer account**, whatever its seat. A ticket is
+  18 random bytes, single use, good for 60 s, bound to the person, the file and the address the socket had; at most 4
+  live for one page and 8 for one person (read before the 1,000 kept in all, so one page cannot push out another
+  person's), held in memory only (a restart voids them), and voided with a take that is withdrawn. The download answers
+  `attachment` under the message's name with the stored file's own extension ("Agenda.cmd" for a `.txt` saves as
+  "Agenda.txt"; Windows' reserved characters dropped; the true name in `filename*`), `no-store`, `nosniff` and the
+  sandbox policy, streamed from the disk; **every other outcome is 204 No Content** (a ticket unknown, spent, expired, for
+  another file or address, and the form's own refusals: a field sent twice, a body over 1 KB, a third field), so the
+  hall page that posted it stays where it is. A download of a file that is not confidential is not audited: it is a
+  person reading what their room already shows them. A downloaded copy stays on the device that saved it. **A file with
+  hidden parts is never shown with Download ticked** (hidden sheets, rows or columns, hidden slides or shapes, Word's
+  hidden text): a download hands over the whole file, so a hidden "Salaries" sheet would be one Unhide away on every
+  tablet that saved it. This is the researcher's page's guard, read by its own reader as it opens the file: **the server
+  never parses a document, so it cannot hold it**; a page that does not hold it (one rewritten, or a client of its own)
+  could push such a file with the tick.
+- **An observer's page, and a Viewer account's, is never given a file message's link** (S2): such pages sit in an io room
+  of their own (`ro:<key>`) and are sent each file message without its address, live, in a join's history and files, in
+  a resume and in a read back; the admin's seat change moves a page in or out in the same tick, before the page is told,
+  so a page that ignores the change is split by its new seat all the same. Withheld at delivery, never in the stored
+  message, so a message from before 0.6.0 is withheld the same way. **A file moves to another room** (`forward`,
+  `room:send`) **only from a seat that may download it where it is**, so a seat that may only read there (an observer,
+  a Viewer account granted the rights to post and share) never carries a file into a room where it could download it:
+  "Files are moved by the backstage team." A file's name is the server's (its upload's, or the name the room's first
+  message of it gave it), never the poster's, so a post again cannot rename a file. **Nothing opens itself**: a file
+  shared in a room opens on nobody's panel, and the admin's support view opens nothing on a person's (a file a person
+  opens follows them to their own devices and the support view of them, never the other way).
+- **Files to transfer only** (owner answer 18): zip, MP4, M4A, MOV, MP3, WAV, OpenDocument (ODT, ODS, ODP) and Word,
+  Excel and PowerPoint files protected with a password are taken for download alone. AGMessage reads their first bytes
+  at upload (a zip's signature, an `ftyp` box, an ID3 tag or an MPEG frame header, RIFF/WAVE, an ODF's `mimetype` first
+  and stored; a protected Office file's compound-file directory, read within 64 KB, holding `EncryptionInfo` and
+  `EncryptedPackage` and none of `WordDocument`, `Workbook`, `PowerPoint Document`, `Macros` or `_VBA_PROJECT_CUR`, so
+  a Word 97 document with a macro renamed `Agenda.docx` is refused) and never opens, draws, previews, parses, shows or
+  sends them to the AI. They are never answered on a `GET` (404, by the extension, or by a protected file's first eight
+  bytes, read again at each `GET` so the answer holds after a restart), never shown on the stage or a screen, and served
+  only through a download ticket, as `attachment`, `application/octet-stream`, `nosniff`, the sandbox policy and
+  `no-store`, at most 25 MB. **A zip is never inflated by AGMessage**: a zip bomb harms only a machine that extracts it,
+  as an email attachment would, so open a downloaded zip as you would an attachment. RTF, executables, scripts, HTML and
+  SVG are not taken.
 - **What a Board tablet keeps: nothing AGMessage writes or offers.** On every seat's take layer, its cards and a Look,
   AGMessage's menu stands in for the browser's, Shift+right-click included (so "Save image as" is never offered), no
   picture is draggable, iOS's long-press "Save to Photos" is off, and printing leaves the stage out ("What is shown on
@@ -487,7 +527,8 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   the browser's own "save page" for what the page still shows; copying or retyping the words; Firefox's own menu on
   Shift+right-click, which Firefox shows without telling the page. "Keeps no copy" means AGMessage writes none and offers
   none, not that a person cannot make one. "Not offered" is not "not reachable" for a seat that was shown a file: its
-  link is the capability.
+  link is the capability (a Board tablet that Looks at a file shared in its room holds its link). On an On stage seat the
+  same measures hold, in either view, on its panel's reader, its side bar's cards and the feed's pictures.
 - **The stage's files live while a take names them.** A fresh upload a take named that no message holds (a picture drawn
   of a page, a holding slide's picture) is kept in the hall's stage record while a take or an Earlier entry names it, and
   for an hour after (`AGM_UPLOAD_ORPHAN_MS`); then it leaves the disk unless a message, a screen or the hall's holding

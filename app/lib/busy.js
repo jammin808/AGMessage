@@ -53,6 +53,8 @@ const INPUT = new Set([
   'page:push', 'page:report', 'page:withdraw',
   // The admin's choice of the view a person's pages draw: an admin's act.
   'admin:setView',
+  // A download asked for: a person's act on a file.
+  'file:download',
 ]);
 const READS = new Set([
   'join', 'seen', 'myRooms', 'board:watch', 'userState:push', 'userState:requestPeers', 'stage:targets', 'display:list',

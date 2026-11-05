@@ -543,10 +543,20 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 .chip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0; }
 
 /* Dropzone */
-.dropzone { border: 2px dashed #c9d2e0; border-radius: var(--radius); padding: 1rem; text-align: center; background: #fafbfd; color: var(--muted); }
-.dropzone.hover { background: #eef2fb; border-color: var(--brand); color: var(--brand); }
-.dropzone p { margin: .2rem 0; }
-.preview-img { max-width: 100%; max-height: 200px; border-radius: 8px; border: 1px solid var(--border); display: block; }
+/* A file attached to the next message: a chip above the field, its name, kind and size, and Remove */
+.file-chip { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); margin-bottom: var(--sp-1); border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface-raised); color: var(--c-ink); }
+.file-chip .file-chip-words { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.attach-btn { font-size: 1.1rem; }
+/* A file dropped on the feed or the composer: the place it lands, outlined */
+.drop-hover { outline: 2px dashed var(--c-action); outline-offset: -4px; }
+/* A file's card: its ⬇ Download, beside its line */
+.file .file-download { margin-top: var(--sp-1); }
+/* The Preview's bar: a picture of the page or the document, side by side; Let them download it under the document's */
+.preview-bar { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2); border-top: 1px solid var(--c-border); }
+.preview-bar .row { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: flex-start; }
+.preview-bar .preview-doc { display: inline-flex; flex-direction: column; gap: var(--sp-1); }
+.preview-bar .preview-tick { display: inline-flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-sm); }
+.preview-bar .preview-note, .preview-bar small { color: var(--c-ink-muted); font-size: var(--fs-sm); margin: 0; }
 
 /* DIRECTOR-MODE: bigger text on stage */
 /* Director overrides use `em` so the message zoom variable on .feed
@@ -740,11 +750,9 @@ html[data-theme="dark"] .action-btn:hover { background: var(--accent); color: #0
 html[data-theme="dark"] .btn:hover { border-color: #4a5675; }
 html[data-theme="dark"] .btn.primary:hover { background: var(--brand-dark); color: #fff; }
 
-/* Compose tabs / dropzone / chips */
+/* Compose tabs / chips */
 html[data-theme="dark"] .compose-tabs .tab { color: var(--muted); }
 html[data-theme="dark"] .compose-tabs .tab.active { color: var(--ink); }
-html[data-theme="dark"] .dropzone { background: #131a2a; border-color: #3a4360; color: var(--muted); }
-html[data-theme="dark"] .dropzone.hover { background: #243054; color: #b8c8ff; }
 html[data-theme="dark"] .chip { background: #1f2942; border-color: #2c3450; color: #b8c8ff; }
 
 /* Doc panel: pinned section + items */
@@ -2110,8 +2118,10 @@ body[data-view="simple"] .doc-panel .doc-display { background: var(--c-surface);
   body[data-view="simple"][data-tab="shown"] .doc-panel { display: flex; flex: 1 1 auto; max-width: none; max-height: none; border-left: 0; }
   body[data-view="simple"][data-tab="shown"] .left-col { display: none; }
 }
-/* On stage content keeps no copy: a long press on iOS offers no save, and nothing is dragged out */
-body[data-view="simple"] .take-cards, body[data-view="simple"] .doc-display, body[data-view="simple"] .page-layer { -webkit-touch-callout: none; }
+/* On stage content keeps no copy: a long press on iOS offers no save, and nothing is dragged out (in either view on an On
+   stage seat: the side bar, its reader and the feed's pictures) */
+body[data-view="simple"] .take-cards, body[data-view="simple"] .doc-display, body[data-view="simple"] .page-layer,
+body[data-role="board"] .take-cards, body[data-role="board"] .doc-display, body[data-role="board"] .msg .file img { -webkit-touch-callout: none; }
 
 /* The feed: one reading column, at most 46 rem, centred, no card, no border, no badge */
 body[data-view="simple"] .feed { padding: var(--sp-3) max(16px, env(safe-area-inset-left)); gap: var(--sp-4); align-items: stretch; }

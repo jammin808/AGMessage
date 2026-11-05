@@ -851,7 +851,8 @@ test('a first open carries the newest 200 messages, what a page keeps in view fr
     assert.equal((await watch()).at(-1).text, 'Reader joined as an observer');
     assert.deepEqual(ids(j.history), ids(now.slice(-200)), 'the newest 200, oldest first');
     assert.deepEqual([ids(j.older), j.more], [[agenda, asked, help], true], 'pinned, help not resolved and questions not answered, in the room\'s order');
-    assert.deepEqual(j.files, [{ id: picture, url: up.url, filename: 'stage.png', mime: 'image/png' }], 'every file of the room, its message held or not');
+    // An observer's page is given no file's link (plan 4-§4.6.6): every file of the room, each without its address.
+    assert.deepEqual(j.files, [{ id: picture, filename: 'stage.png', mime: 'image/png' }], 'every file of the room, its message held or not, and no link for an observer');
     assert.ok(!j.history.some((m) => m.id === quoted) && j.history.at(-1).id === reply && j.history.at(-1).replyTo.id === quoted && !j.history.at(-1).replyTo.gone, 'a reply whose quoted message is earlier than the window');
     assert.deepEqual(j.history.find((m) => m.id === toDoomed).replyTo, { id: doomed, name: 'Chair', snippet: 'Is the lectern mic on?', gone: true }, 'a reply whose quoted message has gone says so');
     assert.deepEqual(Object.keys(j).slice(-3), ['more', 'older', 'files'], 'appended at the end of the answer');

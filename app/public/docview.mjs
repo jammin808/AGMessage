@@ -12,8 +12,13 @@
 //              Only the research seat draws hidden rows, columns, sheets and slides (dimmed and marked) and reads the
 //              AI's text; every other seat gets the Board's drawing, without them.
 //     view     {ready: Promise<{state: 'shown'|'failed', words}>, place(), goto(at), visible(), text(), find(words),
-//               placeWords(), refit(), destroy()}
+//               placeWords(), refit(), hiddenParts(), pagePicture(n), destroy()}
+//     hiddenParts()   whether the reader found hidden parts in the file (hidden sheets, rows, columns, slides or shapes,
+//                     Word's hidden text): such a file is never shown with Download ticked
+//     pagePicture(n)  a PDF's page n drawn into a new picture (a PNG Blob, its long edge 2,048 px, never over 4,096 px a
+//                     side nor PICTURE_PIXELS in all), or null for any other kind
 //   loadPdfJs()   pdf.js, imported once for the page's life
+//   pagePictureOf(source, n)  a PDF's page n drawn into a new picture, from a file not open in a view
 //   pdfState()    {workers, open}: the pdf.js workers this page made, and the PDF documents open now
 //
 // Invariants:
@@ -30,7 +35,7 @@
 //     the box has no layout (a collapsed panel) the view is left as it was and the last place seen stands; once the box
 //     is laid out again the view returns to it.
 //   - Closing a view ends its document worker at once, whatever it is reading.
-import { BOUNDS, WORDS, decodeText, textLines, parseCsv, markdownBlocks, parseInert, inertText, pptxOutline, planSheet, planBook, planSlides, documentText, pageWords, readInWorker, seatOf, columnName, rowsWords, tableWords } from './docmodel.mjs';
+import { BOUNDS, WORDS, decodeText, textLines, parseCsv, markdownBlocks, parseInert, inertText, pptxOutline, planSheet, planBook, planSlides, hiddenPartsOf, documentText, pageWords, readInWorker, seatOf, columnName, rowsWords, tableWords } from './docmodel.mjs';
 import './wordpages.js';
 import './imagecore.js';
 
@@ -105,8 +110,65 @@ export function open(box, source, opts) {
     find: (words) => v.find(words),
     placeWords: () => v.placeWords(),
     refit: () => v.refit(),
+    hiddenParts: () => v.hiddenParts(),
+    pagePicture: (n) => v.pagePicture(n),
     destroy: () => v.destroy(),
   };
+}
+/** A page picture's backing store, at most: what pdf.js's own viewer sets on a phone or a tablet (maxCanvasPixels). */
+const PICTURE_PIXELS = 5242880;
+/** A page picture's long edge, and the most a side may be. */
+const PICTURE_EDGE = 2048;
+const PICTURE_SIDE = 4096;
+/**
+ * A pdf.js page drawn into a new picture: a PNG Blob on white, its long edge PICTURE_EDGE px, never over PICTURE_SIDE a
+ * side nor PICTURE_PIXELS in all. Its drawing is held in `renders` while it runs, so a view that closes cancels it.
+ */
+async function drawPicture(page, renders) {
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.min(PICTURE_EDGE / Math.max(base.width, base.height), PICTURE_SIDE / base.width, PICTURE_SIDE / base.height, Math.sqrt(PICTURE_PIXELS / Math.max(1, base.width * base.height)));
+  const vp = page.getViewport({ scale });
+  const c = make('canvas');
+  c.width = Math.max(1, Math.floor(vp.width));
+  c.height = Math.max(1, Math.floor(vp.height));
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, c.width, c.height);
+  const task = page.render({ canvasContext: ctx, viewport: vp });
+  if (renders) renders.add(task);
+  try { await task.promise; } finally { if (renders) renders.delete(task); }
+  return new Promise((resolve) => c.toBlob((b) => resolve(b || null), 'image/png'));
+}
+/**
+ * Page `n` of a PDF not open in a view (`source`: {url}, fetched no-store, or {file}, a copy on this device) drawn into a
+ * new picture (drawPicture), the document destroyed once it is drawn; null for a page it does not hold or a file that
+ * cannot be read.
+ */
+export async function pagePictureOf(source, n) {
+  const lib = await loadPdfJs();
+  let data;
+  try {
+    if (source && source.file) data = new Uint8Array(await source.file.arrayBuffer());
+    else {
+      const res = await fetch(source.url, { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) return null;
+      data = new Uint8Array(await res.arrayBuffer());
+    }
+  } catch {
+    return null;
+  }
+  const task = lib.getDocument({ data, worker: sharedWorker(lib), withCredentials: false, isEvalSupported: false, enableXfa: false, maxImageSize: PDF_MAX_IMAGE });
+  openPdfs.add(task);
+  try {
+    const doc = await task.promise;
+    if (!(n >= 1) || n > doc.numPages) return null;
+    return await drawPicture(await doc.getPage(n), null);
+  } catch {
+    return null;
+  } finally {
+    openPdfs.delete(task);
+    try { task.destroy(); } catch { /* already gone */ }
+  }
 }
 
 class View {
@@ -687,7 +749,7 @@ class View {
     const scan = { ok: true, basis: r.scan.basis, pages: r.scan.pages, approx: r.scan.approx, paras: r.scan.paras };
     const pages = W.place(blocks.map((b) => (b.kind === 'img' ? '' : b.text)), scan);
     blocks.forEach((b, i) => { b.page = pages[i].page; b.pageApprox = pages[i].approx; b.differs = pages[i].differs; });
-    this.model = { kind: 'word', blocks, scan };
+    this.model = { kind: 'word', blocks, scan, hidden: Number.isInteger(r.hidden) ? r.hidden : 0 };
     this.pageOf = new Map();
     const host = make('div', 'doc-html');
     let page = 0;
@@ -843,6 +905,29 @@ class View {
       }
       this.keep();
     });
+  }
+  /**
+   * Whether the reader found hidden parts in the file: a hidden sheet, row or column, a hidden slide or shape, or Word's
+   * hidden text (removed before the file was read). Whichever seat draws it, a file with one is never shown with Download
+   * ticked.
+   */
+  hiddenParts() {
+    return hiddenPartsOf(this.model);
+  }
+  /**
+   * A PDF's page `n` drawn into a new picture, nothing else of the file in it: a PNG Blob whose long edge is
+   * PICTURE_EDGE px, never over PICTURE_SIDE a side nor PICTURE_PIXELS in all; null for another kind, a page it does not
+   * hold, or a drawing that failed.
+   */
+  async pagePicture(n) {
+    if (this.kind !== 'pdf' || !this.doc || !(n >= 1) || n > this.doc.numPages) return null;
+    try {
+      const page = this.pages.get(n) || await this.doc.getPage(n);
+      const blob = await drawPicture(page, this.renders);
+      return this.dead ? null : blob;
+    } catch {
+      return null;
+    }
   }
   /** Where the view is: {page, zoom, offset}, `offset` how far into its unit the view's top is (0 to 1). */
   place() {

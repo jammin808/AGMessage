@@ -55,7 +55,7 @@
  * says so (`store.readMessage`'s reading).
  */
 const { str, cleanText } = require('../guard');
-const { placeOf, lasted, forPage } = require('../ops');
+const { placeOf, lasted, forPage, linkless } = require('../ops');
 
 /** What a seat On stage is told of a send out of its room: what it writes stays in its room's feed (owner answer B2). */
 const STAYS_HERE = 'Messages from On stage stay in this room.';
@@ -67,6 +67,8 @@ const NOT_YOURS = 'Only its sender or the admin withdraws it.';
 const SUPPORT = 'This is someone else\'s view — act from your own page.';
 /** What `room:send` answers a client id a message of another kind holds here: no send of this person's carries it. */
 const CID_HELD = 'That message\'s id is another message\'s.';
+/** What a seat that may not download a file here is told of moving it into another room. */
+const FILES_BACKSTAGE = 'Files are moved by the backstage team.';
 /** What `room:send` sends: a message's words, or a file. A question and a help request are asked in their own room. */
 const SENDABLE = Object.freeze(['text', 'file']);
 /** A file's size as a row says it: "340 KB", "2.1 MB". */
@@ -74,7 +76,7 @@ const sizeWords = (n) => (n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB
 /** A file's kind as a row says it: its upload's extension (an upload is named by the server, `<id>.<ext>`). */
 const kindWords = (url) => url.slice(url.lastIndexOf('.') + 1).toLowerCase();
 /** A message quoted by a reply: who wrote it and its first words, as the message verb quotes one (server.js). */
-const quoteOf = (m) => ({ id: m.id, name: (m.from && m.from.name) || 'system', snippet: m.text ? m.text.slice(0, 120) : m.filename ? '📄 ' + m.filename : '' });
+const quoteOf = (m) => ({ id: m.id, name: (m.from && m.from.name) || 'system', snippet: m.text ? m.text.slice(0, 120) : m.filename ? '📎 ' + m.filename : '' });
 
 /**
  * What `room:update` reads: the room's key, one change, each read by its type, and the client id every act from a page
@@ -109,6 +111,13 @@ const NO_LINK = 'Choose the link to replace: On stage, or Backstage (a side room
 const NO_CODE = 'This room has no guest code: its links are made once it has one.';
 /** What `history:before` answers where it is not told where to read back from. */
 const EARLIER_FROM = 'Say where to read back from: beforeSeq, the change number of the oldest message this page holds.';
+/** What a download ticket is refused with, by why (plan 4-§4.6.6). */
+const BACKSTAGE_DOWNLOADS = 'Downloads are for the backstage team.';
+const ON_STAGE_COPIES = 'On stage tablets keep no copies — ask the backstage team to show it to you with Download ticked.';
+const WITHOUT_DOWNLOAD = 'This was shown without Download.';
+const WITHDRAWN = 'This was withdrawn.';
+const NOT_SHOWN = 'That is not on your pages now.';
+const WHICH_DOWNLOAD = 'Say what to download: a file of this room (messageId), or something shown to you with Download (seq).';
 /** What `history:message` answers for an id the room holds no message by. */
 const NOT_IN_ROOM = 'That message is not in this room any more.';
 /** "3 guest pages", "1 guest page": a count of pages, never who. */
@@ -152,7 +161,7 @@ const made = new Map();
  * @param {object} ctx    the server's context, frozen (lib/gate.js `contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, sendersOf, sendsInto, setRoomSends, pages, tellWebRights } = ctx;
+  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, fileCopy, tickets, hallPages, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, sendersOf, sendsInto, setRoomSends, pages, tellWebRights } = ctx;
 
   /** A hall as a refusal names it: its name, or "This hall" when it has none. */
   const hallSaid = (hall) => hall.name || 'This hall';
@@ -423,6 +432,9 @@ function register(socket, conn, ctx) {
     const type = src ? src.type : a.type;
     if (!SENDABLE.includes(type)) return answer({ ok: false, error: type === 'help' ? 'A help request belongs to its room — ask in the other room instead.' : 'Only a message or a file is sent into another room.' });
     if (type === 'file' && !conn.allowed('hall.files')) return answer({ ok: false, error: 'Your account may not share files here.' });
+    // A file moves only from a seat that may download it here (lib/pages.js mayDownload): an observer, or a Viewer account
+    // granted the rights to post and share, carries no file of this room into one where it could download it.
+    if (type === 'file' && !conn.mayDownload()) return answer({ ok: false, error: FILES_BACKSTAGE });
     const into = store.byRef(str(a.to));
     if (!into || into === room) return answer({ ok: false, error: 'That room is gone.' });
     if (!targetsNow().includes(into)) return answer({ ok: false, error: 'This room may not send there — ask an admin.' });
@@ -434,7 +446,7 @@ function register(socket, conn, ctx) {
         size = uploadOnDisk(src.url);
         if (size < 0) return answer({ ok: false, error: 'That file is no longer on the AGMessage laptop.' });
       }
-      body = { type: src.type, priority: !!src.priority, ...(src.type === 'text' ? { text: src.text } : { url: src.url, filename: src.filename, mime: src.mime, caption: src.caption || '' }) };
+      body = { type: src.type, priority: !!src.priority, ...(src.type === 'text' ? { text: src.text } : fileCopy(src)) };
     } else {
       const built = messageOf(me, a, room, {});
       if (built.refused) return answer({ ok: false, ...built.refused });
@@ -573,7 +585,8 @@ function register(socket, conn, ctx) {
     const a = isRecord(args) ? args : {};
     if (!Number.isInteger(a.beforeSeq) || a.beforeSeq < 1) return answer({ ok: false, error: EARLIER_FROM });
     const got = store.before(conn.room(), a.beforeSeq);
-    answer({ ok: true, history: got.history.map(forPage), more: got.more });
+    const seen = conn.linklessPage() ? linkless : (m) => m;
+    answer({ ok: true, history: got.history.map(forPage).map(seen), more: got.more });
   });
 
   // One message of this page's room (`{messageId}`), as a page is sent it: a message a page keeps in view however old,
@@ -583,7 +596,54 @@ function register(socket, conn, ctx) {
     if (!conn.gate(ack, { bucket: conn.chatter })) return;
     const answer = conn.ok(ack);
     const m = store.readMessage(conn.room(), str((isRecord(args) ? args : {}).messageId));
-    answer(m ? { ok: true, message: forPage(m) } : { ok: false, error: NOT_IN_ROOM });
+    answer(m ? { ok: true, message: conn.linklessPage() ? linkless(forPage(m)) : forPage(m) } : { ok: false, error: NOT_IN_ROOM });
+  });
+
+  // A download ticket (plan 4-§4.6.6): `{messageId}`, a file message of this page's room (the admin page's: of the room it
+  // watches), or `{seq}`, a take of its hall shown with Download ticked to this page's person or to the Board it sits On
+  // stage in, on its pages now or under Earlier. Who may is lib/pages.js mayDownload, read through the connection: the
+  // admin, never an observer or a Viewer account; On stage, a take's alone. A ticket is the page's leave to download that one file once, within 60 s, from the address
+  // its socket has (lib/downloads.js); the page posts it in a form, and the server answers that post with the file. Its
+  // bounds, a page's and a person's, are read before the bound in all. The admin's support view acts on nothing. Not
+  // audited: a person reading what their room already shows them (a confidential file's download is written as it ends).
+  socket.on('file:download', (args, ack) => {
+    if (!conn.gate(ack, { joined: false, bucket: conn.chatter })) return;   // the admin page downloads from the room it watches, seated nowhere: seated or watching is read below
+    const answer = conn.ok(ack);
+    const a = isRecord(args) ? args : {};
+    // The admin page (conn.admin, asked with no acknowledgement, only reads whether this page is the admin's) reads the room
+    // it watches, a file of it by its message alone; every other page, the room it is seated in.
+    const watched = !conn.room() && conn.admin() && typeof socket.data.watching === 'string' ? roomOf(socket.data.watching) : null;
+    const room = watched || conn.room();
+    if (!room || roomOf(room.code) !== room) return answer({ ok: false, error: conn.room() ? 'Room gone' : 'Not joined' });
+    if (socket.data.adminView) return answer({ ok: false, error: SUPPORT });
+    if (Object.hasOwn(a, 'messageId') === Object.hasOwn(a, 'seq') || (watched && !Object.hasOwn(a, 'messageId'))) return answer({ ok: false, error: WHICH_DOWNLOAD });
+    // Never an observer nor a Viewer account, whatever it asks for: a take shown with Download ticked is the widest leave.
+    if (!watched && !conn.mayDownload({ download: true })) return answer({ ok: false, error: BACKSTAGE_DOWNLOADS });
+    const who = watched ? conn.actor() : null;
+    const me = watched ? { uid: who.t + ':' + who.id } : conn.me();
+    let file;
+    if (Object.hasOwn(a, 'messageId')) {
+      if (!watched && !conn.mayDownload()) return answer({ ok: false, error: ON_STAGE_COPIES });
+      const m = room.byId.get(str(a.messageId));
+      if (!m || m.type !== 'file') return answer({ ok: false, error: 'Message not found' });
+      file = { url: m.url, filename: m.filename, transferOnly: m.transferOnly === true, seq: 0 };
+    } else {
+      const seq = Number.isInteger(a.seq) && a.seq >= 1 ? a.seq : 0;
+      if (!seq) return answer({ ok: false, error: WHICH_DOWNLOAD });
+      if (pages.withdrawnOf(room.hall, seq)) return answer({ ok: false, error: WITHDRAWN });
+      const mine = hallPages(room.hall).find((p) => p.sid === socket.id && !p.support);
+      const found = mine ? pages.find(room.hall, seq) : null;
+      const take = found && (found.to.includes(mine.key) || (mine.board && found.to.includes('board'))) ? found.take.content : null;
+      if (!take) return answer({ ok: false, error: NOT_SHOWN });
+      if (take.kind !== 'doc' || take.download !== true || !conn.mayDownload(take)) return answer({ ok: false, error: WITHOUT_DOWNLOAD });
+      file = { url: take.url, filename: take.name, transferOnly: false, seq };
+    }
+    const size = uploadOnDisk(file.url);
+    if (size < 0) return answer({ ok: false, error: 'That file is no longer on the AGMessage laptop.' });
+    const name = file.url.slice(9);
+    const got = tickets.issue({ name, filename: file.filename, transferOnly: file.transferOnly, uid: me.uid, address: socket.data.ip, sid: socket.id, hall: room.hall, seq: file.seq });
+    if (got.error) return answer({ ok: false, error: got.error });
+    answer({ ok: true, ticket: got.ticket, name: file.filename, size });
   });
 }
 

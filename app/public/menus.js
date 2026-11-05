@@ -520,8 +520,10 @@
    */
   const KEEPS_BROWSERS = FIELD + ', a[href]:not([data-object-link])';
   menu.door = function door(container, find, opts) {
-    const stage = !!(opts && opts.stage);
+    // `stage`: true, or a function asked at each right-click (a seat that sits On stage now).
+    const onStage = opts && typeof opts.stage === 'function' ? opts.stage : () => !!(opts && opts.stage);
     container.addEventListener('contextmenu', (e) => {
+      const stage = !!onStage();
       if (e.shiftKey && !stage) return;   // Shift+right-click: the browser's own menu, but on the stage
       const t = e.target;
       if (!t || !t.closest || t.closest(KEEPS_BROWSERS)) return;
@@ -561,7 +563,7 @@
     if (ids.length) box.setAttribute('aria-describedby', ids.join(' ')); else box.removeAttribute('aria-describedby');
   }
   /**
-   * Ask in place before an act: `spec` {title, words, fields: [{name, label, value, max, type, options, hint}], yes, no,
+   * Ask in place before an act: `spec` {title, words, fields: [{name, label, value, max, type, options, hint, disabled}], yes, no,
    * choices, danger}. `words` is one paragraph or a list of them; a field's `type` 'text' (the default), 'password',
    * 'checkbox' (its value true or false), 'select' (its `options` [{value, label}]) or 'time' (a time of day, its value
    * "HH:MM" whatever the browser shows; one that has no time field takes it typed). `choices` [{answer, label,
@@ -612,8 +614,12 @@
         }
       }
       input.name = f.name;
+      // A field that cannot be used now is drawn disabled, with why (`disabled`, its words) as its hint.
+      const off = typeof f.disabled === 'string' && f.disabled ? f.disabled : '';
+      if (off) input.disabled = true;
       if (type === 'checkbox') lab.append(input, span); else lab.append(span, input);
-      if (f.hint) { const h = make('small', 'hint', f.hint); h.id = id + '-h' + inputs.length; input.setAttribute('aria-describedby', h.id); lab.appendChild(h); }
+      const hint = off || f.hint;
+      if (hint) { const h = make('small', 'hint', hint); h.id = id + '-h' + inputs.length; input.setAttribute('aria-describedby', h.id); lab.appendChild(h); }
       box.appendChild(lab);
       inputs.push(input);
     }

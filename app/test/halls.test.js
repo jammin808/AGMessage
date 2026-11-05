@@ -28,7 +28,7 @@ const KEY_B = 'swk_hallB_node_key_0002';   // secret-scan: fixture
 
 test('board: a message in one line, the last message, open help, a hall row', () => {
   assert.equal(board.lineOf({ type: 'text', text: 'Radio mic 3\nbattery low' }), 'Radio mic 3 battery low');
-  assert.equal(board.lineOf({ type: 'file', filename: 'run.pdf', caption: 'v4' }), '📄 run.pdf — v4');
+  assert.equal(board.lineOf({ type: 'file', filename: 'run.pdf', caption: 'v4' }), '📎 run.pdf — v4', 'a file is a file shared for download');
   assert.equal(board.lineOf({ type: 'help', category: 'Sound', text: 'no signal' }), 'Help: Sound — no signal');
   assert.equal(board.lineOf({ type: 'text', text: 'x'.repeat(500) }).length, 120);
   const base = { id: 'm1', at: 1000, from: { uid: 'u', name: 'Sam', role: 'research' }, pinned: false, priority: false };
@@ -665,7 +665,7 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     const b = (await emit(ctl, 'board:watch', {})).board;
     assert.deepEqual(b.help.map((h) => [h.code, h.category, h.text]), [[hallA, 'Sound', 'radio mic 3 dead']], 'one request, in its own hall');
     const last = b.halls.find((h) => h.code === hallB).last;
-    assert.deepEqual([last.name, last.text], ['Stu Staff', '📄 plot.png'], 'hall B\'s last line is not a hollow help request');
+    assert.deepEqual([last.name, last.text], ['Stu Staff', '📎 plot.png'], 'hall B\'s last line is not a hollow help request');
   });
 
   await t.test('a Viewer follows a help request from the board into a hall it may only read', async () => {

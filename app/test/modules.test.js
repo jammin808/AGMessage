@@ -698,7 +698,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   assert.ok(inClosure(made), 'conn is made in the connection');
   const conn = groupAt(server, made + 'const conn = Object.freeze('.length);
   const keys = conn.entries.map(keyOf);
-  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'onStage', 'canIn', 'canPush', 'canWeb', 'canShow', 'theAdmin', 'admin', 'actor', 'canManageHall', 'codeTold', 'gate']);
+  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'onStage', 'canIn', 'canPush', 'canWeb', 'canShow', 'theAdmin', 'admin', 'actor', 'canManageHall', 'codeTold', 'gate', 'mayDownload', 'viewerAccount', 'linklessPage']);
   assert.deepEqual(keys.filter((k) => k.value !== null).map((k) => [k.key, k.value]), [['room', '() => room'], ['me', '() => me']]);
   for (const { key } of keys.filter((k) => k.value === null && k.key !== 'socket')) {
     const decl = server.indexOf('  const ' + key + ' = ', at);
@@ -724,7 +724,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'stageSource', 'stageCheck', 'freshUpload', 'stageDropped', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'fileCopy', 'tickets', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'stageSource', 'stageCheck', 'freshUpload', 'stageDropped', 'io']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);

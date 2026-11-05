@@ -521,7 +521,8 @@ Screens have one too. Something you may do but not now is greyed, with
 the reason under it ("Not connected — AGMessage is reconnecting.").
 On a message with the focus (click it first):
   R reply, E react, F send to another hall, P pin (the note at the bottom
-  offers Undo for 10 seconds), D download a file, Enter look at a file,
+  offers Undo for 10 seconds), D download a file (backstage), Enter open
+  a file in your own panel (Look, or Preview backstage),
   Delete or Backspace delete your own (it asks first).
 Shift+right-click opens the browser's own menu (Copy, spelling). No page
 opens a browser pop-up: what cannot be undone asks in place, beside what
@@ -530,7 +531,8 @@ it acts on, and Escape answers no.
 The rest of the hall page works the same way. A person's name on a
 message, and each person under People, opens a small menu: Mention puts
 "@Kim " in your message box. The ⋯ beside Send holds Draft a reply,
-Priority, Attach a file..., Remove the file and Cancel the reply (Escape
+Priority, Attach a file... (the paper clip in the message row too),
+Remove the file and Cancel the reply (Escape
 in the message box or on Send does that too). The header is the same on
 a phone and a laptop: the room's name, the connection and the countdown,
 Help, and a ⋯ (or right-click the header, or Shift+F10 on the ⋯) that
@@ -726,9 +728,48 @@ the stage out. What cannot be prevented: a screenshot, a screen
 recording or a photo of the screen; a desktop browser's developer tools;
 copying or retyping the words; Firefox's own menu on Shift+right-click.
 A picture drawn for the stage lives while a take or Earlier shows it,
-and for an hour after; then it leaves the laptop. Download on a file
-(the backstage team's and the admin's) still saves it under its name:
-the page reads the file and hands it to the browser to save.
+and for an hour after; then it leaves the laptop.
+
+Files: share for download, or show the Board
+--------------------------------------------
+Two different things:
+- Share for download: attach a file to a message (the paper clip in the
+  message row, or drop or paste it on the messages or the message box),
+  write a caption if you like, and press Share for download (Share in
+  Legal when To: is set). It becomes a card in the chat:
+  "Board pack.pdf - PDF - 2.1 MB", and the page says "Shared in Main -
+  the backstage team can download it; the Board can open it." It opens
+  on nobody's panel.
+- Show the Board: while the file is attached it opens backstage in your
+  Preview ("the Board does not see this"), from the copy on your device:
+  nothing is uploaded yet. Under it, side by side:
+    Picture of p. 12   - a picture of that page alone (a PDF; for a
+                         picture, Show this picture)
+    Document at p. 12  - the whole file, opened there; the Board pages
+                         through it. Tick "Let them download it" under
+                         it to let them save it (never offered for a
+                         file with hidden sheets, rows, columns, slides
+                         or shapes, or Word hidden text).
+  A file already in the chat: its ... -> Show the Board -> a picture of
+  p. 1, a picture of a page..., or The document... (the page, the
+  download tick and where it arrives). A person's Show them a
+  document... does the same for one person.
+Downloads are for the backstage team: Download (D on a file) on a
+backstage page or the admin's. The page says "Downloading Board
+pack.pdf...", then "Board pack.pdf reached this browser" (or "The
+download did not start - try again.", or that it stopped before all of
+it was sent). On a Board tablet a file in the chat opens with Look only;
+the one exception is a document shown with "Let them download it"
+ticked, which has Download on its card in Shown to you, on what is shown
+over the chat, and under Earlier once it is taken down. Observers and
+Viewer accounts never download, and see a file as its card alone (no
+picture). A file moves to another room (Send to) only from a seat that
+may download it: "Files are moved by the backstage team."
+Files to transfer only: zip, MP4, M4A, MOV, MP3, WAV, OpenDocument
+(.odt, .ods, .odp) and Word, Excel or PowerPoint files protected with a
+password. AGMessage checks their first bytes and never opens them: their
+card says "download only" and they are only ever downloaded. Open a
+downloaded zip as you would an email attachment. Files are up to 25 MB.
 
 Stagewatch (the countdown) for each hall
 ----------------------------------------

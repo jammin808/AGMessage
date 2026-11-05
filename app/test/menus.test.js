@@ -58,6 +58,8 @@ const ON_STAGE_WORDS = {
   'admin:setView': 'Not admin',
   // A take is withdrawn from a backstage page (the Board chip's, a person's Withdraw…).
   'page:withdraw': 'Do that from a backstage page.',
+  // On stage a file of the room is a Look: only a take shown with Download ticked is downloaded there.
+  'file:download': 'On stage tablets keep no copies — ask the backstage team to show it to you with Download ticked.',
 };
 
 test('every act hidden from a seat by its rights is refused by the server as that seat, with words, and changes nothing', async (t) => {
@@ -207,12 +209,17 @@ test('every act hidden from a seat by its rights is refused by the server as tha
       const web = { kind: 'web', url: 'https://vote.example.com/poll/7' };
       const down = { content: { kind: 'chat', layer: 'info' }, ifSeq: o.info ? o.info.seq : 0 };
       if (e.id === 'person.takeDown') return { code: hallA, to: { uid: o.key }, ...down };
+      // A file shown whole (📺 Show the Board ▸ The document…, Show them a document…).
+      if (e.id === 'msg.stage' || e.id === 'file.stage') return { code: hallA, to: 'board', content: { kind: 'doc', url: o.url } };
+      if (e.id === 'person.doc') return { code: hallA, to: { uid: o.key }, content: { kind: 'doc', url: '/uploads/1700000000000-abcdefghijkl-capex.pdf' } };
       if (e.id.startsWith('person.')) return { code: hallA, to: { uid: o.key }, content: e.id === 'person.web' ? web : { kind: e.id === 'person.chat' ? 'chat' : 'blank' } };
       if (e.id === 'board.takeDown') return { code: hallA, to: 'board', ...down };
       return { code: hallA, to: 'board', content: e.id === 'board.back' ? o.mine.previous : e.id === 'board.web' ? web : { kind: e.id.slice('board.'.length) }, ...(e.id === 'board.back' ? { ifSeq: o.seq } : {}) };
     },
     // Withdraw: the take the object's information names.
     'page:withdraw': (o) => ({ code: hallA, seq: (o.info || o.beside || { seq: 1 }).seq }),
+    // A download ticket: a file of the room by its message, a take shown with Download by its number.
+    'file:download': (o, e) => (['take.download', 'card.download', 'past.download'].includes(e.id) ? { seq: o.seq } : { messageId: o.id }),
     // A page's word on the take it is shown (the layer's acts, a card's): Back to chat on the object's take.
     'page:report': (o) => ({ seq: o.seq, state: 'dismissed' }),
     // The person's chat view, the admin's (Chat view ▸ in the People panel).

@@ -78,7 +78,11 @@ AGMessage itself · uploads allow-listed and checked by content, an Office file'
 before anyone opens them (and again at a file's first take on the stage), served so they cannot run script, `no-store`,
 never as `attachment` and never to a navigation (Fetch Metadata), so a device keeps no copy and a `GET` never saves · a
 file shown on people's pages only from a place the stage may show it from, a document never to an observer, drawn from
-memory and let go with its take, a stage-only picture living while a take names it · HTML built only
+memory and let go with its take, a stage-only picture living while a take names it · a download a ticketed server act
+(per seat, single use, 60 s, bound to its person, file and address) and a `GET` never one; an observer's page and a
+Viewer account's never given a file's link, withheld at delivery; a file opening itself on nobody's panel, and moved to
+another room only by a seat that may download it · files to transfer only (zip, media, OpenDocument, protected Office)
+checked by their first bytes (a protected Office file by its compound file's directory) and never opened · HTML built only
 from escaped parts (a lint rule, which refuses `srcdoc`, `setHTMLUnsafe`, `createContextualFragment` and a computed
 `innerHTML` outright) · names stripped of control and bidirectional characters · pinned certificates
 between show systems, keys in headers and never in URLs · capability links for screens · CodeQL, a dependency audit and

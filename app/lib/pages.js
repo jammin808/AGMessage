@@ -40,6 +40,7 @@
  *   canShow(f, k, to, a) : whether a push of a kind to a target may be made: true, or why not in words (pure)
  *   cleanPage(c, facts)  : a take a pusher asked for, made safe, or {error} (pure, fail closed)
  *   sourceOk(url, facts) : where a file shown on the stage may come from: its name and room, or {error} (pure)
+ *   mayDownload(who, t)  : whether a seat may download a file shared in its room, or a take's (pure)
  *   placeOf(at, ext)     : a document's place made safe for its file's type (pure)
  *   fileOf(c)            : the upload a take's content shows (a document's, a picture's, a holding slide's), or '' (pure)
  *   webUrl(v, selfHosts) : a web page's address made safe, {url, host}, or {error} (pure, fail closed)
@@ -125,11 +126,12 @@ const IMAGE_EXT = Object.freeze(['png', 'jpg', 'jpeg', 'gif', 'webp']);
  */
 const STAGE_TYPES = Object.freeze(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'md', 'csv', 'xlsx', 'xls', 'docx', 'pptx']);
 /**
- * The file types that are only ever transfers: downloaded, never opened, parsed, drawn or shown, and not in STAGE_TYPES.
- * None is taken yet; each that is lists its key of lib/guard.js's transfer types here, so a type added for transfer is
- * never parsed on the Board's devices unasked.
+ * The file types that are only ever transfers (lib/guard.js TRANSFER_TYPES, owner answer 18): downloaded through a
+ * ticket, never opened, parsed, drawn or shown, and none in STAGE_TYPES, so a type added for transfer is never parsed on
+ * the Board's devices unasked. A Word, Excel or PowerPoint file protected with a password is transfer-only too, decided
+ * per file (its upload's `transferOnly`, its message's, and its first bytes: lib/uploadcheck.js transferOnlyFile).
  */
-const TRANSFER_ONLY = Object.freeze([]);
+const TRANSFER_ONLY = Object.freeze(Object.keys(guard.TRANSFER_TYPES));
 /**
  * Where a document opens, by its file's type: the keys of a place each type reads, its own key first (the one a place of
  * that type must name), each a whole number up to its bound. A Word document's place is a paragraph (`block`), with the
@@ -314,11 +316,12 @@ function placeWords(at, ext) {
  *   3. a file in a message of a side room the pusher may read, on Main's list;
  *   4. a file the hall's stage records (a stage file, or one a take or Earlier names), when the room it was recorded for
  *      passes rule 2 or 3.
- * Never a transfer-only file. A refusal names the room the file belongs to only to one who may read it.
+ * Never a transfer-only file: a transfer type by its extension, or one its upload or a message holding it says is
+ * (`transferOnly`). A refusal names the room the file belongs to only to one who may read it.
  *
  * `facts`, the server's: `main` (the Main room's key), `uid` (the pusher's), `holders(url)` (the rooms of the hall whose
- * messages hold the file, each {key, at, name}: the room, the oldest such message's time and its file's name),
- * `fresh(name)` (this run's record of an upload, {room, uid, name}, or null), `recorded(name)` (the hall's record of it,
+ * messages hold the file, each {key, at, name, transferOnly?}: the room, the oldest such message's time, its file's name
+ * and whether it is transfer-only), `fresh(name)` (this run's record of an upload, {room, uid, name, transferOnly}, or null), `recorded(name)` (the hall's record of it,
  * {room, name}, or null), `reads(key)`, `listed(key)` (the Main room, or on its list), `files(key)` (the pusher may post
  * with files there), `roomName(key)`.
  */
@@ -339,6 +342,8 @@ function sourceOk(url, facts = {}) {
   // Rule 1 is an upload no message holds yet: one posted is its room's (rules 2 and 3), never the stage's to keep.
   const holders = (Array.isArray(fn('holders')(url)) ? fn('holders')(url) : []).filter((h) => isRecord(h) && typeof h.key === 'string');
   const fresh = fn('fresh')(file);
+  // A file whose upload or message says it is transfer-only (a Word, Excel or PowerPoint file protected with a password).
+  if ((isRecord(fresh) && fresh.transferOnly === true) || holders.some((h) => h.transferOnly === true)) return { error: FOR_DOWNLOAD };
   const mine = isRecord(fresh) && typeof fresh.uid === 'string' && fresh.uid === f.uid && typeof fresh.room === 'string';
   if (mine && !holders.length && (fresh.room === main || (listed(fresh.room) && fn('files')(fresh.room) === true))) return { ...named(fresh.room, fresh.name), fresh: true };
   const held = holders.filter((h) => passes(h.key)).sort((x, y) => (Number(x.at) || 0) - (Number(y.at) || 0))[0];
@@ -350,6 +355,21 @@ function sourceOk(url, facts = {}) {
   if (!owner) return { error: NOT_HELD };
   if (owner !== main && reads(owner)) return { error: 'That file belongs to ' + (guard.cleanText(fn('roomName')(owner), 60) || 'another room') + ', which may not send into the Main room — send it there first, or ask an admin.' };
   return { error: OTHER_ROOM };
+}
+
+/**
+ * Whether a seat may download a file (pure; plan 4-§4.6.6, owner answers 12 and 20): the admin; a seat backstage
+ * (`research`) whose account, if it has one, is not a Viewer; and, for a take shown with Download ticked (`take.download`
+ * true), a target seated On stage too. Never an observer, and never a Viewer account, whatever its seat (a Viewer granted
+ * hall.post sits backstage). `who`: `{admin, seat, viewer}`, the server's. Every download ticket reads it, and so do the
+ * moves of a file to another room (`forward`, `room:send`) and the pages' `download` fact.
+ */
+function mayDownload(who, take = null) {
+  const w = isRecord(who) ? who : {};
+  if (w.admin === true) return true;
+  if (w.viewer === true) return false;
+  if (w.seat === 'research') return true;
+  return w.seat === 'board' && isRecord(take) && take.download === true;
 }
 
 /**
@@ -1457,6 +1477,6 @@ class Pages {
 }
 
 module.exports = {
-  Pages, cleanPage, askedOf, canShow, describePage, sourceOk, placeOf, placeWords, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER,
+  Pages, cleanPage, askedOf, canShow, describePage, sourceOk, mayDownload, FOR_DOWNLOAD, placeOf, placeWords, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER,
   FILE_KINDS, fileOf, ARRIVALS, EARLIER_TOLD, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, PLACES, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
 };

@@ -298,10 +298,12 @@ async function word(bytes) {
   let table;
   try { table = AGMWord.styles(styles); } catch (e) { refusedBy(e); }
   const replaced = {};
+  let hidden = 0;
   for (const name of new Set([parts.main, parts.footnotes, parts.endnotes, parts.comments])) {
     if (!has(name)) continue;
     const s = AGMWord.stripHidden(await read(name), table);
     if (!s.ok) throw new Refusal(s.why);
+    hidden += s.removed;
     replaced[name] = new TextEncoder().encode(s.xml);
   }
   const scan = AGMWord.scan({ document: await read(parts.main), styles, app: await read(parts.app) });
@@ -326,7 +328,8 @@ async function word(bytes) {
   });
   const ab = copy.bytes.buffer.slice(copy.bytes.byteOffset, copy.bytes.byteOffset + copy.bytes.byteLength);
   const r = await mammoth.convertToHtml({ arrayBuffer: ab }, { convertImage, externalFileAccess: false });
-  return { ok: true, html: String(r.value || ''), scan: { basis: scan.basis, pages: scan.pages, approx: scan.approx, paras: scan.paras }, pictures, transfer: pictures.map((p) => p.bytes).filter(Boolean) };
+  // `hidden`: how many hidden runs were removed, so the page knows the file has hidden parts (never shown with Download).
+  return { ok: true, html: String(r.value || ''), scan: { basis: scan.basis, pages: scan.pages, approx: scan.approx, paras: scan.paras }, hidden, pictures, transfer: pictures.map((p) => p.bytes).filter(Boolean) };
 }
 
 // ---------------------------------------------------------------- slides
