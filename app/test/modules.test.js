@@ -26,6 +26,13 @@ const serverCode = () => ['server.js', 'supervise.js', ...filesUnder('lib', /\.[
 const PURE = ['lib/board.js', 'lib/busy.js', 'lib/context.js', 'lib/deskresults.js', 'lib/gate.js', 'lib/latest.js', 'lib/ops.js', 'lib/rbac.js', 'lib/stagelines.js', 'lib/tunnelend.js'];
 /** What reaches a disk, a network, the machine or another process: a pure module names none of them. */
 const IO_BUILTINS = ['fs', 'net', 'http', 'https', 'dgram', 'tls', 'os', 'dns', 'child_process', 'ws'];
+/**
+ * The page scripts a server file requires, each with why: a core the server and a page's worker share, so the two cannot
+ * answer differently. Each is pure: it requires nothing and reads no `process`.
+ */
+const PAGE_CORES = Object.freeze({
+  'lib/zipcheck.js → public/zipcore.js': 'the archive check: one core for the upload and the page\'s document worker',
+});
 /** Only the composition root, server.js, requires these: the HTTP domain and the handler modules. */
 const ROOT_ONLY = (f) => f === 'lib/http-accounts.js' || /^lib\/handlers\/[^/]+\.js$/.test(f);
 
@@ -125,6 +132,15 @@ test('(a)-(c) the server\'s layers: the pure set requires only itself, nothing r
   assert.ok(to('test/resilience.test.js').includes('lib/resilience.js'));
   for (const f of PURE) assert.ok(graph.has(f), f + ' is read');
   assert.ok(files.includes('supervise.js') && files.includes('verify/verify-audit.js'), 'both processes and the verifier are read');
+  // A server file reaches a page script only by a row of PAGE_CORES, and each such script is pure.
+  const fromPages = [...graph].flatMap(([f, edges]) => (f.startsWith('test/') ? [] : edges.filter((e) => e.to && e.to.startsWith('public/')).map((e) => f + ' → ' + e.to)));
+  assert.deepEqual(fromPages.sort(), Object.keys(PAGE_CORES).sort(), 'a page script is required by a server file only by a row of PAGE_CORES');
+  for (const row of Object.keys(PAGE_CORES)) {
+    const core = row.split(' → ')[1];
+    const src = read(core);
+    assert.ok(!/\brequire\s*\(/.test(src) && !/\bimport\s*[(\s'"{*]/.test(src) && !/\bprocess\s*\./.test(src), core + ' is pure: it loads nothing and reads no process');
+    assert.match(src, /if \(typeof module === 'object' && module && module\.exports\) module\.exports = api;\s*else scope\.\w+ = api;/, core + ' is a classic script that Node requires too');
+  }
 });
 
 test('(a)-(c) a planted breach of each layer rule fails it', () => {

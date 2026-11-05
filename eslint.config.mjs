@@ -142,6 +142,19 @@ export default [
   },
   { files: ['app/public/**/*.mjs'], languageOptions: { sourceType: 'module', globals: { ...globals.browser } }, rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor } },
   { files: ['app/public/**/*.js', 'app/public/**/*.mjs'], ignores: ['app/public/common.js', 'app/public/display.js'], rules: marksFromTable },
+  // The archive check's one core, for the server (lib/zipcheck.js, by require) and the page's document worker (a classic
+  // script): pure over the bytes it is handed, so no global of Node's or of a page's but the language's own (the pages'
+  // own names and libraries' included), `module` there only to be exported where there is one, and nothing loaded.
+  {
+    files: ['app/public/zipcore.js'],
+    languageOptions: { globals: { ...Object.fromEntries([...Object.keys(globals.node), ...Object.keys(globals.browser), 'io', 'pdfjsLib', 'mammoth', 'XLSX', 'AGM'].map((name) => [name, 'off'])), module: 'writable' } },
+    rules: {
+      'no-restricted-syntax': ['error', ...marksFromTable['no-restricted-syntax'].slice(1),
+        { selector: "MemberExpression[object.name='module'][property.name!='exports']", message: 'zipcore.js is pure: `module` is there only to export it' },
+        { selector: 'ImportExpression', message: 'zipcore.js is pure: it loads nothing' },
+        { selector: "CallExpression[callee.name='require']", message: 'zipcore.js is pure: it loads nothing' }],
+    },
+  },
   // The first script of every page with people says the floor's words below it, so it parses there: ES5 only (a newer
   // syntax is a parse error), `var` with it.
   { files: ['app/public/theme-init.js'], languageOptions: { ecmaVersion: 5 }, rules: { 'no-var': 'off', 'prefer-const': 'off' } },

@@ -11,7 +11,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { io } = require('socket.io-client');
-const { startServer, stopServer, restartServer, api, connect, emit, until, TOKEN } = require('./helpers');
+const { startServer, stopServer, restartServer, api, connect, emit, until, pngOf, TOKEN } = require('./helpers');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const form = (name, bytes) => { const f = new FormData(); f.append('file', new Blob([bytes], { type: 'text/plain' }), name); return f; };
@@ -110,7 +110,7 @@ test('a reset or a deletion removes the hall\'s files from the disk, except thos
   };
   const shared = await put('shared.txt');
   const own = await put('own.txt');
-  const holding = await put('holding.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]));
+  const holding = await put('holding.png', pngOf());
   const deleted = await put('deleted.txt');
   // Hall B shares one of them: its link posted there directly is hall A's file, refused; it crosses by Ana's forward.
   assert.deepEqual(await emit(gb.s, 'message', { type: 'file', url: shared.url, filename: 'shared.txt' }), { ok: false, error: OTHER_ROOM });
@@ -227,7 +227,7 @@ test('after a restart a posted file keeps to the rooms that hold it: its link is
   // deleted, so a screen alone holds it.
   const notes = await urlOf('notes.txt');
   assert.ok((await post(ana.s, notes, 'notes.txt')).ok);
-  const poster = await urlOf('poster.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]));
+  const poster = await urlOf('poster.png', pngOf());
   const shown = await post(ana.s, poster, 'poster.png');
   assert.ok(shown.ok, JSON.stringify(shown));
   const adm = await connect(srv.base, admin); sockets.push(adm);

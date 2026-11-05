@@ -44,6 +44,17 @@ const LAYERS = Object.freeze(['show']);
 const layerOf = (kind) => (KINDS.includes(kind) ? 'show' : '');
 /** A holding slide's picture: an image shared in AGMessage, of the types a screen shows (lib/displays.js). */
 const IMAGE_EXT = Object.freeze(['png', 'jpg', 'jpeg', 'gif', 'webp']);
+/**
+ * The file types the stage can show: a file of one of them may be read and drawn on the Board's pages, and is checked at
+ * upload (its archive, its pixels) before anyone opens it. Every type an upload may be (lib/guard.js UPLOAD_TYPES) is one.
+ */
+const STAGE_TYPES = Object.freeze(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'md', 'csv', 'xlsx', 'xls', 'docx', 'pptx']);
+/**
+ * The file types that are only ever transfers: downloaded, never opened, parsed, drawn or shown, and not in STAGE_TYPES.
+ * None is taken yet; each that is lists its key of lib/guard.js's transfer types here, so a type added for transfer is
+ * never parsed on the Board's devices unasked.
+ */
+const TRANSFER_ONLY = Object.freeze([]);
 /** What a page reports of a take: drawn and in view, drawn out of view, a web page opened, not drawn, put away, minimised. */
 const REPORTS = Object.freeze(['shown', 'hidden', 'opened', 'failed', 'dismissed', 'minimised']);
 /**
@@ -635,4 +646,4 @@ class Pages {
   }
 }
 
-module.exports = { Pages, cleanPage, describePage, webUrl, personKey, layerOf, reportsOf, inViewOf, KINDS, LAYERS, IMAGE_EXT, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX };
+module.exports = { Pages, cleanPage, describePage, webUrl, personKey, layerOf, reportsOf, inViewOf, KINDS, LAYERS, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX };

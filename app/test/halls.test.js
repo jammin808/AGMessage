@@ -19,7 +19,7 @@ const tlsmod = require('../lib/tls');
 const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
 const { io } = require('socket.io-client');
-const { startServer, restartServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, fakeNode, freePort, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, fakeNode, freePort, pngOf, TOKEN } = require('./helpers');
 const wire = require('../lib/machinewire');
 
 // Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
@@ -574,7 +574,7 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
   const myRooms = (s) => ask(s, 'myRooms');
   const png = async (uploadToken) => {
     const f = new FormData();
-    f.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], { type: 'image/png' }), 'plot.png');
+    f.append('file', new Blob([pngOf()], { type: 'image/png' }), 'plot.png');
     return (await fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': uploadToken }, body: f })).json();
   };
 

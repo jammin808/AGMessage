@@ -11,7 +11,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { startServer, restartServer, stopServer, api, connect, emit, wait, until, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, wait, until, pngOf, TOKEN } = require('./helpers');
 
 const PASSWORD = 'clipboard and coffee';
 /** The `page.push` rows as the tests read them: the hall, the words, who (an account by its user name). */
@@ -463,7 +463,7 @@ test('the person\'s acts on a take: Show it again within 10 s of Back to chat br
   // on the Board and on Gil, pushed over by Ria (a guest of Main) and by Tia (a Tech of Main alone), comes back to neither
   // (its path is the file's capability), and whole to the admin, who reads Legal.
   const f = new FormData();
-  f.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], { type: 'image/png' }), 'legal-only.png');
+  f.append('file', new Blob([pngOf()], { type: 'image/png' }), 'legal-only.png');
   const up = await (await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': legalJoin.uploadToken }, body: f })).json();
   assert.ok(typeof up.url === 'string' && up.url.startsWith('/uploads/'), JSON.stringify(up));
   assert.equal((await act(inLegal, 'message', { type: 'file', url: up.url, filename: 'legal-only.png' })).ok, true);

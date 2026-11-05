@@ -550,6 +550,9 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   // The export, the split and the verifier run beside the show or on another computer, all asynchronous: none may hold
   // the loop. (The split's four small files go through writeFileAtomic, once per split.)
   for (const f of ['lib/auditexport.js', 'lib/auditarchive.js', 'lib/zip.js', 'verify/verify-audit.js', 'verify/page.js']) assert.ok(files.includes(f), f + ' is read, at 0 synchronous calls');
+  // The upload checks run on every upload of a type the stage can show, before its answer: each reads its file through
+  // fs.promises, so neither the archive's directory nor an image's header holds the loop.
+  for (const f of ['lib/uploadcheck.js', 'lib/zipcheck.js', 'lib/imagesize.js', 'public/zipcore.js']) assert.ok(files.includes(f), f + ' is read, at 0 synchronous calls');
   // Synchronous fs calls block every meeting on the server while they run. These are allowed — each with its reason —
   // and the count may not grow without someone deciding it here.
   const allowed = {

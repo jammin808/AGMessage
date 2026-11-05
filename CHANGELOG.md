@@ -4409,6 +4409,115 @@ switch at the largest hall's size, and keeps or changes the 200 with it)
   earlier and lists the files of what it was sent. A 0.5.1 page cached across the upgrade draws the newest 200 alone,
   without the older ones kept in view, until it reloads onto 0.6.0 (it is told to, 5 minutes after the start).
 
+**An archive or an image is checked at upload, before anyone opens it** (the plan's Part 4, unit 22, its §5.10.1
+(`public/zipcore.js` and `lib/zipcheck.js`, one check with two callers), §5.10.3's refusals and bounds, §5.11's
+`upload.refused` row and its 0 synchronous calls, §5.9.3's `STAGE_TYPES` and §4.6.7's `TRANSFER_ONLY`; global #58)
+- **A Word, Excel or PowerPoint file** (docx, xlsx, pptx) has its archive read before it is kept: its end record, its
+  ZIP64 end records where it has them, and its central directory, read through `fs.promises` with nothing inflated
+  (`lib/zipcheck.js` over `public/zipcore.js`). It is refused with "That file is packed in a way AGMessage will not open.
+  Share it as a PDF." when it declares more than 2,000 parts (refused before its directory is read), a directory over
+  1 MB (likewise), more than 200 MB unpacked in all, a part of more than 100 MB unpacked or packed more than 200:1 (a
+  ZIP64 size held to the same, one past what a double holds read as past every bound), an encrypted part, two parts
+  whose data overlap (one compressed stream read as several files), sizes its bytes cannot hold (a stored part whose two
+  sizes differ, a part whose data would run into the directory), a method other than stored or deflate, a second disk,
+  an end record whose counts or offsets disagree with its directory, or no `[Content_Types].xml`; and with "That file
+  carries macros. Save it without them, or as a PDF." when it holds a `vbaProject.bin` (a `.docm`, `.xlsm` or `.pptm`
+  renamed). 0.5.1 checked only its first four bytes.
+- **The directory checked is the one the pages' readers open.** SheetJS's zip reader and JSZip (inside mammoth) take
+  the last end record signature in the file, JSZip the last ZIP64 locator too, and JSZip reads a gap between a
+  directory's records and its end record as bytes before the archive, moving every offset by it. So the check reads only
+  the archive's last 98 bytes for its records and refuses, in the "packed" words, an end record that does not end the
+  file or carries a comment (Office and LibreOffice write none; none of the files measured has one), an end record or
+  locator signature after the one it chose, a ZIP64 end record that is not right before its locator or carries
+  extensible data, ZIP64 records under an end record that marks none of its fields as held there, and a part with two
+  ZIP64 fields (readers differ on which they take). A test runs the vendored SheetJS and mammoth over every archive the
+  check passes and finds the parts its directory names, and no others.
+- **A picture** (png, jpg, jpeg, gif, webp) has its size read from its header (`lib/imagesize.js`): PNG's IHDR, WebP's
+  VP8, VP8L or VP8X header, a JPEG's frame header (SOF0 to SOF15) found by a walk over its segments' markers, each read
+  at its offset, so 80 KiB of metadata before it is skipped unread, and a GIF's logical screen grown to hold its first
+  frame, found by a walk past its colour table and its extensions' sub-blocks, read in windows of 64 KiB: a browser's
+  decoder grows the image so, and a 1 × 1 screen would otherwise hide a 20,000 × 20,000 frame. Each walk takes at most
+  64 segments or blocks and reads nothing past the file's first megabyte. Over 100 megapixels it is refused with "That
+  image is too large to show."; a size that cannot be read (a header the reader does not know, a size of 0, a scan
+  before any frame, a GIF that ends before its first frame, a walk past its bounds) with "That image cannot be read."
+  0.5.1 kept any file whose first bytes matched.
+- **A refused upload is not kept**: it leaves the disk before the answer, the page shows the server's words where the
+  file would have been, and the hall's audit log has one `upload.refused` row by its uploader at the upload's own
+  address (its token is a bearer's, so not always the page's socket's), its target the hall's key, its words what the
+  file was refused for and the bound it broke ("a docx: 12,000 parts (bound 2,000)", "a docx with macros", "an xlsx: a
+  part packed 1,016:1 (bound 200:1)", "a png of 400 MP (bound 100)", "a jpg whose size cannot be read"), never the
+  file's name. One another program holds (an antivirus) is the uploads' sweep's at its next pass, within a minute, in
+  no room and posted by nobody; that record is the run's, so a restart before the pass leaves the file on disk, named
+  nowhere, until the boot sweep (the stage file's unit) removes it.
+- **A check that cannot finish** (the stored file could not be read) refuses the file rather than keep it unread, in
+  words of its own: 503 and "That file could not be checked, so it wasn't shared. Try sending it again.", its row "a
+  docx that could not be checked", never the words of a check that found something. Which check a type has, and these
+  refusals, are `lib/uploadcheck.js`'s (new), so a test reaches the case.
+- **The archive's bounds, measured:** the plan's numbers, each at four times or more the largest of Office's samples
+  measured for it, written in `test/zipcheck.test.js`: Word's and PowerPoint's own templates (as python-docx and
+  python-pptx ship them; 36 parts the most, its largest part 438,677 bytes, its highest ratio 32:1, its largest
+  directory 2,834 bytes) and mammoth's 17 Word test documents. Three files made for the measurement, generated words,
+  numbers and pictures saved by LibreOffice 24.2.7 (a 60-slide deck, a 150-page paper, and a 60,000-row budget from
+  random numbers whose sheet is 38.1 MB), are stress rows, not board packs: each passes every bound, and none sets one.
+  Every file measured passes, and the server's reader and a reader over the bytes held agree on each. Not measured: the
+  owner's own board packs, and whether ZIP64 appears in machine-written Office files (none of those measured used it);
+  when the owner's packs are measured, their rows set the bounds.
+- **The image bench** (the largest picture the device matrix's D1 and D2 decode and draw) is a record in
+  `docs/DEVICES.md` §7, not measured: it sets the stage's bound on a picture shown to the Board (40 megapixels until it
+  is read, the stage's file unit), not the upload's.
+- **The stage's file types:** `lib/pages.js` names `STAGE_TYPES` (pdf, png, jpg, jpeg, gif, webp, txt, md, csv, xlsx,
+  xls, docx and pptx: every upload type) and `TRANSFER_ONLY` (none yet: the files to transfer only come with their own
+  unit). The checks run on a stage type that is not a transfer-only one.
+- Choices where the plan left room: a refusal answers 400, as a file whose contents do not match its type does (503
+  for a check that could not finish); the audit row's target is the hall's key whichever of its rooms the upload was
+  for; "lying sizes" read as sizes the archive's own bytes cannot hold (the check inflates nothing, so a directory that
+  understates what a part inflates to, its local header agreeing, is the document reader's bound to stop, unit 23's
+  counting reader), and those refusals, an unread end record and the like, say the one "packed" line; the JPEG walk's
+  "1 MB read" read as nothing read past the file's first megabyte (each segment's marker is a few bytes read at its
+  offset); the plan's "GIF's screen" read as the screen a browser draws, grown to hold the first frame; the archive core
+  is under the coverage gate through `require`, as `lib/` is.
+- Tests: `test/zipcheck.test.js` (new; every zip built in the test with `node:zlib`, no binary fixture: Word, Excel
+  (streamed with data descriptors) and PowerPoint files laid out as their applications lay them out, one in ZIP64 and
+  one whose ZIP64 field follows another extra field, pass; 10,000 entries, a directory declared at 2 MB, a part running
+  into the directory, a stored part whose sizes differ, three parts on one stream, a 1,016:1 part, an encrypted part,
+  no `[Content_Types].xml`, a `vbaProject.bin`, 270 MB declared in all, a 170 MB part, ZIP64 parts of 1 TB and of 2^60
+  bytes, an end record with a comment, an end record signature inside the end record's own fields, ZIP64 records under
+  an end record that marks no field, a ZIP64 end record with extensible data, bytes between it and its locator, a part
+  with two ZIP64 fields, and every shape above each get their verdict, the same through `lib/zipcheck.js`'s file reader,
+  the worker's byte reader over a Buffer and over an ArrayBuffer, and the core run as a classic script with no `module`
+  (as the worker will load it, `AGMZip`); 10,000 entries and the 2 MB directory refused with only the archive's last 98
+  bytes read; the measured table, the bounds at four times Office's samples or more and every made file within them;
+  every upload type whose first bytes are a zip's and which the stage shows checked as an archive; the words; a check
+  that cannot finish (a file gone before it, a folder where the file was) refused with its own words, and the types no
+  check reads left unread; the vendored SheetJS and mammoth, run in the test as a page runs them, reading every archive
+  the check passes as the parts its directory names; and end to end, the seven refusals of the plan's list and a
+  comment's each answered 400 with its words, nothing kept, one `upload.refused` row each by its uploader in the hall at
+  the upload's own address, no row naming a file, and the four that pass kept whole), `test/imagesize.test.js` (new:
+  PNG, GIF (89a and 87a, with and without a colour table, after an animated GIF's extensions, a frame inside its
+  screen), WebP's VP8, VP8L and VP8X, a JPEG whose frame header follows 80 KiB of APP1 (its walk reading the markers at
+  their offsets and 29 bytes in all), a progressive JPEG and fill bytes read; twenty-one unreadable headers refused, a
+  GIF's frame of no width, a GIF that ends before its frame and one cut short among them; 63 segments or extensions
+  before the frame read and 64 not, the JPEG's walk reading SOI and 64 segments and no more; a frame past the first
+  megabyte refused with nothing read past it, a GIF's in windows, and one after 200 KiB of metadata found; a GIF whose
+  1 × 1 screen holds a 20,000 × 20,000 first frame (89a and 87a) read as the frame, and a frame past its screen's edge
+  growing it; 100 MP passing and one row more refused, 400 MP PNG and JPEG refused; every picture upload type read; and
+  end to end, the 400 MP PNG, JPEG and GIF and an unreadable JPEG answered 400 with their words, nothing kept, one row
+  each naming no file, and a PNG, a WebP, a GIF and a JPEG within the bound kept whole), `test/pages.test.js` (the
+  stage's types are the upload types, none transfer-only yet), `test/resilience.test.js` (`lib/uploadcheck.js`,
+  `lib/zipcheck.js`, `lib/imagesize.js` and `public/zipcore.js` named at 0 synchronous calls; `server.js` where it was),
+  `test/modules.test.js` (a server file
+  requires a page script only by a row of `PAGE_CORES`, `lib/zipcheck.js` → `public/zipcore.js`, and that core loads
+  nothing and exports itself both ways). The tests that upload a picture upload a whole one (`test/helpers.js`
+  `pngOf`), since a picture's size is now read: `test/halls.test.js`, `test/onstage.test.js`, `test/server.test.js`,
+  `test/takes.test.js` and `test/uploads.test.js` move on purpose; the browser smoke's pictures and Word file were whole
+  already. ESLint gives `public/zipcore.js` a block of its own: no Node or page global (the pages' own names and their
+  libraries' included), `module` for its export only, nothing loaded.
+- The papers: `README.md`, `README.txt` (the refusals' words), `SECURITY.md`, `docs/DESIGN.md` (checked before it is
+  opened), `docs/ACCOUNTS.md` (`upload.refused`), `docs/ANALYSIS.md` (the guard's files, the core's lint block, the page
+  core in the module fence), `docs/DEVICES.md` (§7, the benches), `CLAUDE.md`.
+- Rolling back: 0.5.1 checks no archive or picture past its first bytes, and reads no `upload.refused` row (the audit
+  log keeps it, as every row). A file 0.6.0 refused was never kept; one it kept is the bytes uploaded.
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after

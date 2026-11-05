@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Pages, cleanPage, describePage, webUrl, personKey, layerOf, reportsOf, inViewOf, KINDS, LAYERS, IMAGE_EXT, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX } = require('../lib/pages');
+const { Pages, cleanPage, describePage, webUrl, personKey, layerOf, reportsOf, inViewOf, KINDS, LAYERS, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX } = require('../lib/pages');
 const { cleanContent } = require('../lib/displays');
 const guard = require('../lib/guard');
 const { VIEWS: ACCOUNT_VIEWS } = require('../lib/accounts');
@@ -25,6 +25,16 @@ const KINDS_WORDS = { error: 'Choose what to show: back to chat, Stagewatch, the
 const dirs = [];
 const folder = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-pages-')); dirs.push(d); return d; };
 test.after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
+test('the stage\'s file types: every upload type is one the stage can show, and none is only a transfer yet', () => {
+  // A type added to the uploads is a stage type, checked at upload and parsed on the Board's pages, unless it is listed
+  // as a transfer only: then it is never opened. No upload type is a transfer only until the transfer types land.
+  assert.deepEqual([...STAGE_TYPES].sort(), Object.keys(guard.UPLOAD_TYPES).sort(), 'the stage types are the upload types');
+  assert.deepEqual(TRANSFER_ONLY, [], 'no transfer-only type yet');
+  assert.ok(STAGE_TYPES.every((ext) => !TRANSFER_ONLY.includes(ext)), 'no type is both');
+  assert.ok(IMAGE_EXT.every((ext) => STAGE_TYPES.includes(ext)), 'a holding slide\'s picture is a stage type');
+  assert.ok(Object.isFrozen(STAGE_TYPES) && Object.isFrozen(TRANSFER_ONLY));
+});
+
 /** A store in a folder of its own, held (so it writes) unless asked not to be. */
 function store({ held = true, file = path.join(folder(), 'pages.json') } = {}) {
   const p = new Pages(file);

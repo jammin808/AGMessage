@@ -369,7 +369,24 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   it goes to by its code, takes from the sender's rate before the code is looked up, so whether a code names a hall is
   told no faster than a send goes.
 - Saved keys and tokens are sealed at rest (AES-256-GCM) with a machine key kept outside the app folder.
-- Uploads are allow-listed by type and checked by content; they are served so they cannot run script. A file message
+- Uploads are allow-listed by type and checked by content; they are served so they cannot run script. Before an
+  upload of a type the stage can show is kept, it is checked, and nothing it holds is inflated or drawn: a Word, Excel or
+  PowerPoint file's archive (its end records and central directory, `lib/zipcheck.js` over `public/zipcore.js`, the one
+  core the page's document worker reads a file through too) is held to at most 2,000 parts, 200 MB unpacked in all and
+  100 MB in one part, 200:1 for any part, a directory of 1 MB (refused unread past it), its ZIP64 sizes to the same,
+  and refused with an encrypted part, two parts whose data overlap (one compressed stream read as many files), sizes
+  its bytes cannot hold, no `[Content_Types].xml`, or a macro part (`vbaProject.bin`, which a `.docm` renamed `.docx`
+  carries). The directory it checks is the one the pages' readers open (SheetJS's and JSZip's, which take the last end
+  record signature in the file): an end record that does not end the file or carries a comment, a record signature after
+  the one chosen, ZIP64 records out of their place or unmarked, and a part with two ZIP64 fields are refused, and a test
+  runs the vendored readers over every archive the check passes. The check reads declared sizes only: a directory that
+  understates what a part inflates to is the document reader's to stop as it inflates. A picture's size is read from
+  its header (`lib/imagesize.js`: PNG, WebP, a GIF's screen grown to hold its first frame as browsers draw it, and a
+  JPEG's frame header, each walk of at most 64 segments or blocks, never past the first megabyte) and refused over 100
+  megapixels or where it cannot be read. A check that cannot finish refuses the file. A refused file leaves the disk and
+  is one `upload.refused` audit row in its hall, at the upload's own address, which names the type and the bound, never
+  the file. Formulas, external references and links inside a file are the readers' (they are never
+  computed, fetched or live on the stage); the upload checks bound what the readers are handed. A file message
   is posted only in the room its upload was made for, by the person it was made by (the upload token's room and person,
   kept with the upload for its hour in memory, `freshUploads`), or again in a room a message of which holds it already;
   any other link is refused and nothing posted (another room's file or upload, another person's upload not yet posted,

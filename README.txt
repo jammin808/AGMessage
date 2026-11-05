@@ -866,6 +866,19 @@ Troubleshooting
   screen, not in a room: choose the file again.": no room holds that
   file any more (only a screen or a hall's holding image shows it);
   choose the file again to post it.
+  "That file carries macros. Save it without them, or as a PDF.": a
+  Word, Excel or PowerPoint file holds macros (a .docm saved as .docx,
+  say); save a copy without them, or as a PDF, and share that. "That
+  file is packed in a way AGMessage will not open. Share it as a PDF.":
+  the file is beyond what AGMessage opens (more than 2,000 parts, more
+  than 200 MB unpacked, an encrypted part, or packed oddly); share it as
+  a PDF. "That image is too large to show." (over 100 megapixels) or
+  "That image cannot be read.": save a smaller copy, or save it again
+  as PNG or JPEG, and share that. "That file could not be checked, so
+  it wasn't shared. Try sending it again.": AGMessage could not read
+  the file it was sent to check it; send it again. Each refusal is a
+  row of the audit log (upload.refused), which says why and never
+  names the file.
   "Not connected — AGMessage is reconnecting." on a pin, a reaction, a
   screen's take or an admin's act: it was not sent; do it again once the
   page is back. "No answer — check the connection.": AGMessage did not

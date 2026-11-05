@@ -221,7 +221,9 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 - **AI drafts (optional, Claude).** Answers for the backstage team from the thread and the document on stage, buttons
   for action prompts, the minutes — always a draft a person edits and sends. Everything else works offline.
 - **Secure by default.** Encrypted connections (HTTPS on the same port, `/tls` to trust it), pinned links between show
-  systems, sealed keys, a strict Content-Security-Policy, uploads checked by content, rate limits and lockouts. It
+  systems, sealed keys, a strict Content-Security-Policy, uploads checked by content (and a Word, Excel or PowerPoint
+  file's archive and a picture's size checked before anyone opens them: one with macros, packed past AGMessage's bounds,
+  or a picture over 100 megapixels or that cannot be read is refused in words), rate limits and lockouts. It
   loads only what it ships (never a module from a folder above `app`, where another account may have planted one) and
   runs only what it names by its absolute path: its own `bin\cloudflared.exe`, and Windows' programs under `SystemRoot`.
   [SECURITY.md](SECURITY.md) · [docs/DESIGN.md](docs/DESIGN.md)

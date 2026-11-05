@@ -212,3 +212,15 @@ the viewport's size and each feature by a probe, never by the device's name: the
 
 The clock or countdown's rows (🕐 HH:MM in the hall's zone; the countdown's words, mark and edge) join this table with
 the clock's unit.
+
+## 7. The benches
+
+Each a record, not a test: read on the rows it names, its number written here and in the test of the bound it sets. A
+row the owner has no device for reads "not measured", as the walk's reads "not walked".
+
+| Bench | Rows | What it sets | D1 | D2 |
+|---|---|---|---|---|
+| The largest picture the device decodes and draws: an image of a known size opened (`naturalWidth` × `naturalHeight` read) and drawn into a canvas, doubled until one fails | D1, D2 | the bound on a picture shown on the Board's pages, 40 megapixels until it is read | not measured | not measured |
+
+A picture is held to 100 megapixels at upload (`lib/imagesize.js`) whatever this reads: that bound is the server's, on
+what it keeps, and the one this bench sets is the stage's, on what a Board device is handed.

@@ -5,7 +5,7 @@
 // account), on that page alone. The seat's limit itself is pure (rbac.seatAllows, in test/accounts.test.js).
 const test = require('node:test');
 const assert = require('node:assert');
-const { startServer, stopServer, api, connect, emit, answer, until, wait, fakeStagewatch, TOKEN } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, answer, until, wait, fakeStagewatch, pngOf, TOKEN } = require('./helpers');
 
 const STAYS = 'Messages from On stage stay in this room.';
 const BACKSTAGE = 'Do that from a backstage page.';
@@ -32,7 +32,7 @@ test('an On stage seat chats, answers and asks for help; it shares no file, asks
   const seqOf = async (l) => (await emit(l.s, 'join', { roomCode: l.j.roomCode, name: l.j.name, role: l.j.role, uid: l.j.identity })).seq;
   const upload = async (token, name = 'plot.png') => {
     const f = new FormData();
-    f.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], { type: 'image/png' }), name);
+    f.append('file', new Blob([pngOf()], { type: 'image/png' }), name);
     const r = await fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': token }, body: f });
     return { status: r.status, body: await r.json() };
   };
@@ -292,7 +292,7 @@ test('a Board account is held to the On stage seat on its On stage page alone: i
   const seqOf = async (code) => (await emit(ctl, 'admin:watchRoom', { roomCode: code })).seq;
   const upload = async (token, name) => {
     const f = new FormData();
-    f.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], { type: 'image/png' }), name);
+    f.append('file', new Blob([pngOf()], { type: 'image/png' }), name);
     const r = await fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': token }, body: f });
     return { status: r.status, body: await r.json() };
   };

@@ -62,6 +62,7 @@ const takeVerbs = require('./lib/handlers/takes');
 const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
 const { Pages, personKey } = require('./lib/pages');
+const uploadcheck = require('./lib/uploadcheck');
 const readings = require('./lib/peaks');
 const startup = require('./lib/startup');
 const laptop = require('./lib/laptop');
@@ -963,7 +964,7 @@ setTimeout(() => { for (const room of store.allRooms()) if (Object.keys(room.set
 // network's (`guard.limitKey`: an address on the venue, a /64 for an IPv6 phone through the tunnel), not the token's, so
 // joining again, opening more sockets or taking the next address refills nothing. The network buckets are never reset:
 // past 5,000 the fullest go first, so a flood of new addresses hands no drained one its burst back.
-const uploadTokens = new Map();    // token -> {room, uid, sid, bucket (the connection's), key (its network), may(), seat(), revoked}
+const uploadTokens = new Map();    // token -> {room, hall, uid, sid, bucket (the connection's), key (its network), may(), seat(), actor(), revoked}
 // A token whose socket no longer holds hall.files, or that a move of its seat ended (`revoked`), is refused at its next
 // use in the words of the seat its page holds then, and goes; a revoked one never uploads again, whatever seat follows.
 const UPLOAD_REFUSED = Object.freeze({ board: 'On stage seats send messages, not files.', observer: 'Observers can read but not post.' });
@@ -972,7 +973,7 @@ const uploadBuckets = new guard.Buckets(0.5, 8, 5000);
 // its upload token was issued for and the person it was issued to (its provenance, read by `fileRefusal`): a file message
 // names an upload made for its room by the person who posts it, or one a message of that room already holds. The record is
 // this run's alone, so an upload not yet posted when the server stops is uploaded again after the restart.
-const freshUploads = new Map();    // file name -> {at, room (its key), uid}
+const freshUploads = new Map();    // file name -> {at, room (its key), uid}; a refused file not yet removed: at 0, room and uid null
 
 /**
  * What the admin is told when a room's files could not all be removed (lib/store.js `remove`'s `kept`: another program
@@ -1752,8 +1753,28 @@ app.post('/api/upload', async (req, res, next) => {
       try { fs.unlinkSync(stored); } catch { /* ignore */ }
       return res.status(400).json({ error: 'That file\'s contents don\'t match its type, so it wasn\'t shared.' });
     }
-    freshUploads.set(req.file.filename, { at: Date.now(), room: req.agmUploader.room, uid: req.agmUploader.uid });
-    res.json({ url: `/uploads/${req.file.filename}`, filename: String(req.file.originalname).slice(0, 120), mime: type.mime.split(';')[0], size: req.file.size });
+    // Checked before it is kept or named to anyone (lib/uploadcheck.js): a refused file leaves the disk, with one audit
+    // row in the hall by its uploader, at the upload's own address (its token is a bearer's: not always the socket's).
+    const t = req.agmUploader;
+    uploadcheck.refusalOf(stored, type.ext).then(async (refused) => {
+      if (refused) {
+        if (refused.failed) console.warn('  [uploads] an upload (' + type.ext + ') could not be checked (' + refused.failed + '), so it was not kept');
+        // One another program holds (an antivirus) is the sweep's at its next pass, in no room and by nobody, so it is
+        // never posted; the record is this run's, so a restart before that pass leaves it on disk, named nowhere.
+        await fs.promises.unlink(stored).catch((e) => {
+          if (e.code === 'ENOENT') return;
+          console.warn('  [uploads] a refused file could not be removed (' + e.code + '): the sweep tries again');
+          freshUploads.set(req.file.filename, { at: 0, room: null, uid: null });
+        });
+        audit.write(t.actor(), 'upload.refused', t.hall, refused.words, guard.clientIp(req));
+        return res.status(refused.status).json({ error: refused.error });
+      }
+      freshUploads.set(req.file.filename, { at: Date.now(), room: t.room, uid: t.uid });
+      res.json({ url: `/uploads/${req.file.filename}`, filename: String(req.file.originalname).slice(0, 120), mime: type.mime.split(';')[0], size: req.file.size });
+    }).catch((e) => {
+      console.error('  [uploads] ' + (e && e.stack ? e.stack : e));
+      if (!res.headersSent) res.status(500).json({ error: 'Upload failed.' });
+    });
   });
 });
 
@@ -2181,7 +2202,7 @@ io.on('connection', (socket) => {
     if (allowed('hall.files')) {
       uploadToken = crypto.randomBytes(18).toString('base64url');
       // Checked again at use, and ended by admin:setRole's move to a seat that shares no file (found by `sid`).
-      uploadTokens.set(uploadToken, { room: r.code, uid: id, sid: socket.id, bucket: uploadBucket, key: socket.data.key, may: () => allowed('hall.files'), seat: () => socket.data.seat, revoked: false });
+      uploadTokens.set(uploadToken, { room: r.code, hall: r.hall, uid: id, sid: socket.id, bucket: uploadBucket, key: socket.data.key, may: () => allowed('hall.files'), seat: () => socket.data.seat, actor, revoked: false });
     }
 
     // The admin entering a side room it is not given reads it: one row for a page's first join, never for a resume (a

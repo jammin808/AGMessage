@@ -122,13 +122,34 @@ async function api(base, method, url, body, { cookie, headers = {} } = {}) {
  * `build` says otherwise; `build: null` is a 0.5.1 page, which names none. `on` ({event: fn}) is heard from the first
  * packet, as a page's listeners are: one added once this resolves misses what the server sends with the connection.
  */
-const connect = (base, cookie, { build = BUILD.full, on = {} } = {}) => new Promise((resolve, reject) => {
-  const s = io(base, { transports: ['websocket'], forceNew: true, reconnection: false, extraHeaders: cookie ? { cookie } : {}, auth: build === null ? {} : { build } });
+const connect = (base, cookie, { build = BUILD.full, on = {}, headers = {} } = {}) => new Promise((resolve, reject) => {
+  const s = io(base, { transports: ['websocket'], forceNew: true, reconnection: false, extraHeaders: { ...headers, ...(cookie ? { cookie } : {}) }, auth: build === null ? {} : { build } });
   for (const [event, fn] of Object.entries(on)) s.on(event, fn);
   s.once('connect', () => resolve(s));
   s.once('connect_error', reject);
 });
 const emit = (s, ev, arg) => new Promise((resolve) => { s.emit(ev, arg, resolve); });
+
+/**
+ * A whole PNG of `width` × `height` black pixels (8-bit RGB): its signature, IHDR, one IDAT and IEND, each chunk with its
+ * CRC-32. An upload reads a picture's size from its header before it keeps it (lib/imagesize.js), so a test's picture
+ * is a whole one.
+ */
+function pngOf(width = 1, height = 1) {
+  const zlib = require('zlib');
+  const chunk = (type, data) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt32BE(data.length, 0);
+    head.write(type, 4, 'latin1');
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(Buffer.concat([head.subarray(4), data])), 0);
+    return Buffer.concat([head, data, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const rows = Buffer.alloc((width * 3 + 1) * height);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
 /** An emit whose answer must come within `ms`: a handler that never answers fails the test instead of hanging it. */
 const answer = (s, ev, arg, ms = 3000) => Promise.race([emit(s, ev, arg), new Promise((resolve, reject) => { setTimeout(() => reject(new Error('no answer to ' + ev + ' within ' + ms + ' ms')), ms).unref(); })]);
 const once = (s, ev, ms = 4000) => new Promise((resolve, reject) => { const t = setTimeout(() => reject(new Error('no ' + ev + ' within ' + ms + ' ms')), ms); s.once(ev, (v) => { clearTimeout(t); resolve(v); }); });
@@ -604,7 +625,7 @@ function unzipTo(buf, dir) {
 }
 
 module.exports = {
-  stagewatchQuery, ROOT, REPO, TOKEN, readSource, freePort, freeUdpPort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, fakeStagewatch, fakeNode,
+  stagewatchQuery, ROOT, REPO, TOKEN, readSource, freePort, freeUdpPort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, pngOf, fakeStagewatch, fakeNode,
   filesUnder, handlerFiles, pageScripts,
   FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, auditMeter, acceptAll, brief,
   readZip, unzipTo, SEED_WORDS,

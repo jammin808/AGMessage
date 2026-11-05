@@ -466,6 +466,10 @@ not open now"; each room by its name and its hall's, never a key), each message 
 file (pdf, 2.1 MB) from …"; never its words or a file's name), each send withdrawn (`room.withdraw`, by the key of the
 room it went to and was taken from: "a message sent from Legal (Hall 2), there 40 s", "a file …", the admin's "a message by Lou sent
 from …"; never its words or a file's name),
+each upload its check refused (`upload.refused`, by the hall's key, the uploader's row: what the file was refused for and
+the bound it broke, "a docx: 12,000 parts (bound 2,000)", "a docx with macros", "an xlsx: a part packed 1,016:1 (bound
+200:1)", "a png of 400 MP (bound 100)", "a jpg whose size cannot be read", "a docx that could not be checked"; at the
+upload's own address; never the file's name),
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), every take on people's
 pages (`page.push`, by the hall's key: whom, "the Board (6 pages)" or the person's name, and what kind of thing, "the

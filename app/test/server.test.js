@@ -29,7 +29,7 @@ async function startServer(dataDir, port) {
   child.kill();
   throw new Error('server did not start:\n' + out);
 }
-const { stopServer: stop, freePort } = require('./helpers');   // asked over IPC, so it saves first on Windows too
+const { stopServer: stop, freePort, pngOf } = require('./helpers');   // asked over IPC, so it saves first on Windows too
 
 const emit = (s, ev, arg) => new Promise((resolve) => s.emit(ev, arg, resolve));
 const connect = (base, cookie) => new Promise((resolve, reject) => {
@@ -149,7 +149,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.equal(fakePdf.status, 400, 'a pdf that is not a pdf');
     const svgTxt = await fetch(base + '/api/upload', { method: 'POST', headers: h, body: form('x.txt', '<svg onload=alert(1)>', 'text/plain') });
     assert.equal(svgTxt.status, 400, 'markup in a text file');
-    const png = await fetch(base + '/api/upload', { method: 'POST', headers: h, body: form('chart.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]), 'image/png') });
+    const png = await fetch(base + '/api/upload', { method: 'POST', headers: h, body: form('chart.png', pngOf(), 'image/png') });
     assert.equal(png.status, 200);
     const up = await png.json();
     const served = await fetch(base + up.url);
@@ -785,7 +785,7 @@ test('a first open carries the newest 200 messages, what a page keeps in view fr
   const agenda = await say(ana, { type: 'text', text: 'The agenda: item 4 is the capex review' });
   assert.ok((await helpers.emit(ana, 'pin', { messageId: agenda, pinned: true })).ok);
   const f = new FormData();
-  f.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], { type: 'image/png' }), 'stage.png');
+  f.append('file', new Blob([pngOf()], { type: 'image/png' }), 'stage.png');
   const up = await (await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': anaIn.uploadToken }, body: f })).json();
   const picture = await say(ana, { type: 'file', url: up.url, filename: 'stage.png', mime: 'image/png' });
   const asked = await say(ana, { type: 'action', text: 'Ready for questions?', options: ['Yes', 'No'] });
