@@ -736,7 +736,19 @@ Object.assign(ADMIN_RUN, {
   'person.view': (o) => openUserView(currentRoom.code, o.name, o.role, o.uid),
   'person.kick': (o) => AGM.outbox.now('admin:kick', { socketId: o.socketId }, (res) => { if (!res || !res.ok) say((res && res.error) || 'Not logged out.', true); else say(o.name + ' is logged out of ' + o.hall + '.'); }),
   'adminMsg.copy': (o, c) => AGM.copy(o.text, { said: 'Copied.', anchor: c.anchor, say }),
-  'adminMsg.delete': (o) => AGM.outbox.now('admin:deleteMessage', { roomCode: currentRoom.code, messageId: o.id }, saidIfNot('Not deleted.')),
+  // A file on people's pages now is asked about first (the server's answer is the question): take it down too, or leave
+  // it up there, then deleted with that answer.
+  'adminMsg.delete': (o, c) => {
+    const del = (extra) => AGM.outbox.now('admin:deleteMessage', { roomCode: currentRoom.code, messageId: o.id, ...extra }, (res) => {
+      if (res && res.onStage && !extra) {
+        AGM.ask(c && c.anchor ? c.anchor : null, { title: 'Delete for everyone', words: res.error, choices: [{ answer: 'down', label: 'Delete and take it down', danger: true }, { answer: 'up', label: 'Delete, leave it up' }], no: 'Keep it' }, { opener: c && c.opener ? c.opener : null })
+          .then((a) => { if (a && a.yes && (a.choice === 'down' || a.choice === 'up')) del({ takeDown: a.choice === 'down' }); });
+        return;
+      }
+      saidIfNot('Not deleted.')(res);
+    });
+    del(null);
+  },
 });
 const objectSpec = (kind, sel, get, more, gone) => ({ kind, find: (el) => el.closest(sel), get, label: more, gone });
 ADMIN.bind(document.getElementById('roomList'), objectSpec('adminRoom', '#roomList > li[data-key]', roomObject, actionsOf, 'That hall or room is gone.'));

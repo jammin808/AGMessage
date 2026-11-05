@@ -458,8 +458,45 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   person is in, each by its own rules. A
   file's link stays the capability to read it, for whoever holds it: provenance governs where a file is posted, not who
   may open a link they were given. A screen's take and a hall's holding image are not held to it yet: whoever may drive
-  a hall's screens can show any upload's link there (the stage's source check, the plan's Part 4 unit 25, holds them to
-  the hall's own files).
+  a hall's screens can show any upload's link there. People's pages are (below).
+- **A file shown on people's pages** (a document, a picture, a holding slide's picture) must come from a place the stage
+  may show it from (`sourceOk`): the pusher's own fresh upload, made for the Main room or for a side room on its list
+  where the pusher posts files; a file in a message of the Main room; a file in a message of a side room the pusher reads
+  that is on the Main room's list; or one the hall's stage records, when the room it was recorded for passes again.
+  Never another person's fresh upload. A refusal names the room only to one who may read it. A document hands over the
+  whole file, so it is never shown to a person seated as an observer in any room of the hall (a person's take reaches
+  every page of theirs, one in a room the pusher cannot read included), and a page seated as an observer is told one
+  without its address. A picture's source is kept by its name and place, never its address. The page checks a take's
+  address again before it fetches anything: an upload of AGMessage's, of a type the stage shows. A picture over 40
+  megapixels, and an Office file that never had the archive check, are refused at their first take.
+- **Uploads are kept by no device and saved by no `GET`.** Every upload is served `private, no-store` (no browser keeps
+  it in its HTTP cache), always `inline` (never `attachment`, which saved an Office file from its address with no
+  record), with `nosniff` and the sandbox policy; a navigation to one (the address bar, a link, a frame, an embed or an
+  object: Fetch Metadata's `Sec-Fetch-Mode: navigate`, or that destination) is answered 404, so the browser's own viewer
+  and its Save are never offered. A browser that sends no Fetch Metadata (an iPad before 16.4 among them) is served, as
+  before. What a take shows is drawn from memory: fetched `no-store`, a picture through an object URL revoked when the
+  take goes, a document's reader and its pdf.js document destroyed then (a PDF read by its pages' ranges alone). A
+  backstage seat's and the admin's ⬇ Download of a file message is no navigation either: the page fetches the file
+  `no-store` and hands the browser its bytes through an object URL, let go 40 s after (until the ticketed download).
+- **What a Board tablet keeps: nothing AGMessage writes or offers.** On every seat's take layer, its cards and a Look,
+  AGMessage's menu stands in for the browser's, Shift+right-click included (so "Save image as" is never offered), no
+  picture is draggable, iOS's long-press "Save to Photos" is off, and printing leaves the stage out ("What is shown on
+  stage is not printed."). Words stay selectable. **What cannot be prevented**: a screenshot, a screen recording or a
+  photo of the screen; a desktop browser's developer tools, which read the page's memory and can fetch any link the page
+  was given (the navigation guard stops only the address bar, links and frames); a browser that sends no Fetch Metadata;
+  the browser's own "save page" for what the page still shows; copying or retyping the words; Firefox's own menu on
+  Shift+right-click, which Firefox shows without telling the page. "Keeps no copy" means AGMessage writes none and offers
+  none, not that a person cannot make one. "Not offered" is not "not reachable" for a seat that was shown a file: its
+  link is the capability.
+- **The stage's files live while a take names them.** A fresh upload a take named that no message holds (a picture drawn
+  of a page, a holding slide's picture) is kept in the hall's stage record while a take or an Earlier entry names it, and
+  for an hour after (`AGM_UPLOAD_ORPHAN_MS`); then it leaves the disk unless a message, a screen or the hall's holding
+  image holds it. A file whose message goes while only the stage still shows it (a holding slide's picture, a picture the
+  admin's delete left up) becomes a stage file then, and leaves the disk the same way, never kept for good. The boot sweep
+  removes those whose hour ran out while AGMessage was stopped, by the names the stage recorded alone, never any other
+  file in the folder; a hall removed takes its stage files with it, purged or not. A Main room's reset ends every
+  information take of the hall, a side room's what shows its files, a file's message deleted what shows that file, and a
+  take shown by mistake is **withdrawn** (from every page and from Earlier) by who showed it, the operator or the admin.
 - Pages carry a strict Content-Security-Policy with no inline script. The page lint (`agm/no-unescaped-html`) refuses,
   whatever they are given, a frame's `srcdoc`, `setHTMLUnsafe(`, `createContextualFragment(` and a computed
   `el['innerHTML']`; in the documents' modules (`agm/inert-html`) every parse of HTML outside `parseInert` (`innerHTML`,

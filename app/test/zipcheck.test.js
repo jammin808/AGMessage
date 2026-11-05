@@ -462,3 +462,29 @@ test('every archive the check passes is read by the pages\' readers as the parts
   }
   assert.ok(read >= 3, 'SheetJS read the Word, Excel and PowerPoint files');
 });
+
+// A file shown on the stage is checked again at its take (plan 4-§5.10.3): a picture against what the Board's devices
+// draw (40 megapixels), and a file this run never checked by its check as at upload; what a check found is kept by the
+// upload's name, so a file is read once; a file that cannot be read is not shown.
+test('a stage file\'s check at its first take: its upload\'s check where none is on record, kept by its name; a picture held to 40 MP; an unreadable file not shown', async () => {
+  const dir = tmp('agm-stagecheck-');
+  try {
+    const png = (w, h) => { const b = Buffer.alloc(33); Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b); b.writeUInt32BE(13, 8); b.write('IHDR', 12, 'latin1'); b.writeUInt32BE(w, 16); b.writeUInt32BE(h, 20); b[24] = 8; b[25] = 2; return b; };
+    const at = (name, bytes) => { const f = path.join(dir, name); fs.writeFileSync(f, bytes); return f; };
+    assert.equal(uploadcheck.STAGE_PIXELS, 40 * 1000 * 1000);
+    assert.equal(await uploadcheck.stageRefusalOf(at('1730000000000-aaaaaaaaaaaa-ok.png', png(6000, 6000)), 'png', '1730000000000-aaaaaaaaaaaa-ok.png'), null, '36 MP');
+    assert.deepEqual(await uploadcheck.stageRefusalOf(at('1730000000000-bbbbbbbbbbbb-big.png', png(8000, 6000)), 'png', '1730000000000-bbbbbbbbbbbb-big.png'), { error: 'Too large for the Board\'s devices — send a region.' }, '48 MP');
+    assert.deepEqual(await uploadcheck.stageRefusalOf(at('1730000000000-cccccccccccc-huge.png', png(20000, 20000)), 'png', '1730000000000-cccccccccccc-huge.png'), { error: 'Too large for the Board\'s devices — send a region.' }, 'over the upload\'s own bound too');
+    // A Word file with no check on record has it now; one checked at upload is not read again (its verdict kept).
+    const fresh = at('1730000000000-dddddddddddd-m.docx', fixtures()['a vbaProject.bin'].bytes);
+    assert.deepEqual(await uploadcheck.stageRefusalOf(fresh, 'docx', '1730000000000-dddddddddddd-m.docx'), { error: zipcheck.MACROS });
+    const kept = at('1730000000000-eeeeeeeeeeee-k.docx', zipOf(docxParts()));
+    assert.equal(await uploadcheck.refusalOf(kept, 'docx', '1730000000000-eeeeeeeeeeee-k.docx'), null);
+    fs.writeFileSync(kept, fixtures()['a vbaProject.bin'].bytes);
+    assert.equal(await uploadcheck.stageRefusalOf(kept, 'docx', '1730000000000-eeeeeeeeeeee-k.docx'), null, 'checked at upload: not read again');
+    // A file gone, or a type with no check.
+    const gone = await uploadcheck.stageRefusalOf(path.join(dir, 'gone.png'), 'png', '1730000000000-ffffffffffff-gone.png');
+    assert.deepEqual([gone.error, gone.failed], ['That file could not be read, so it was not shown.', 'ENOENT']);
+    for (const ext of ['pdf', 'txt', 'csv', 'md', 'xls']) assert.equal(await uploadcheck.stageRefusalOf(path.join(dir, 'gone.' + ext), ext, 'x'), null, ext);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

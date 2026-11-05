@@ -9,8 +9,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  Pages, cleanPage, askedOf, canShow, describePage, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SHOW_LAYER, INFO_LAYER, ARRIVALS, EARLIER_TOLD,
-  IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX,
+  Pages, cleanPage, askedOf, canShow, describePage, sourceOk, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SHOW_LAYER, INFO_LAYER, ARRIVALS, EARLIER_TOLD,
+  IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
+  fileOf,
 } = require('../lib/pages');
 const { cleanContent } = require('../lib/displays');
 const guard = require('../lib/guard');
@@ -26,7 +27,7 @@ const CY = 'u:ucyguest00001';
 const PIC = '/uploads/1730000000000-abcdefghijkl-stage.png';
 /** A web take as the store keeps it: its host and its address sealed (lib/secretbox.js's shape). */
 const WEB_KEPT = { kind: 'web', host: 'vote.example.com', urlSealed: 'enc1:c2VhbGVk' };
-const KINDS_WORDS = { error: 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.' };
+const KINDS_WORDS = { error: 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document or a picture.' };
 const dirs = [];
 const folder = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-pages-')); dirs.push(d); return d; };
 test.after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
@@ -50,8 +51,8 @@ function store({ held = true, file = path.join(folder(), 'pages.json') } = {}) {
 const onDisk = (p) => (p.flush(), JSON.parse(fs.readFileSync(p.file, 'utf8')));
 
 test('cleanPage: an unknown kind, or none, is refused with the kinds in words, never defaulted', () => {
-  // `brand` went (the owner's answer 31: one Holding page with the logo); the documents are later units'.
-  for (const kind of ['brand', 'doc', 'image', 'snippet', 'iframe', 'message', 'black', 'CLOCK', 'WEB', '', ' clock']) assert.deepEqual(cleanPage({ kind }), KINDS_WORDS, kind);
+  // `brand` went (the owner's answer 31: one Holding page with the logo); the quote is a later unit's.
+  for (const kind of ['brand', 'snippet', 'iframe', 'message', 'black', 'CLOCK', 'WEB', 'DOC', 'region', '', ' clock']) assert.deepEqual(cleanPage({ kind }), KINDS_WORDS, kind);
   for (const c of [undefined, null, 'clock', 5, ['clock'], {}, { kind: 5 }, { kind: ['clock'] }, { kind: { toString: () => 'clock' } }, { kind: null }]) assert.deepEqual(cleanPage(c), KINDS_WORDS, JSON.stringify(c));
   // Only its own kind: one it inherits is not read.
   assert.deepEqual(cleanPage(Object.create({ kind: 'clock' })), KINDS_WORDS);
@@ -70,11 +71,11 @@ test('cleanPage: each kind in its clean shape, a fresh object, with the keys it 
   assert.deepEqual(cleanPage({ kind: 'chat', layer: 'info', seq: 3 }), { kind: 'chat', layer: 'info' });
   for (const layer of ['show', null, 5, '', 'INFO', ['info']]) assert.deepEqual(cleanPage({ kind: 'chat', layer }), KINDS_WORDS, JSON.stringify(layer));
   assert.deepEqual(cleanPage({ kind: 'clock', layer: 'info' }), { kind: 'clock' }, 'a layer is chat\'s word alone: on another kind it is a key not known');
-  assert.deepEqual(KINDS, ['chat', 'stage', 'clock', 'holding', 'blank', 'web']);
+  assert.deepEqual(KINDS, ['chat', 'stage', 'clock', 'holding', 'blank', 'web', 'doc', 'image']);
   // Two layers: the show (the operator's) and the information drawn over it; a hand-back's are its own.
   assert.deepEqual(LAYERS, ['show', 'info']);
   assert.ok(Object.isFrozen(KINDS) && Object.isFrozen(LAYERS));
-  assert.deepEqual(KINDS.map((k) => [k, layerOf(k)]), [['chat', ''], ['stage', 'show'], ['clock', 'show'], ['holding', 'show'], ['blank', 'show'], ['web', 'info']]);
+  assert.deepEqual(KINDS.map((k) => [k, layerOf(k)]), [['chat', ''], ['stage', 'show'], ['clock', 'show'], ['holding', 'show'], ['blank', 'show'], ['web', 'info'], ['doc', 'info'], ['image', 'info']]);
   assert.deepEqual([layersOf({ kind: 'chat' }), layersOf({ kind: 'chat', layer: 'info' }), layersOf({ kind: 'clock' }), layersOf({ kind: 'web' }), layersOf({ kind: 'brand' })], [['show', 'info'], ['info'], ['show'], ['info'], []]);
   assert.deepEqual([SHOW_LAYER, INFO_LAYER, ARRIVALS], [['stage', 'clock', 'holding', 'blank'], ['web', 'doc', 'image', 'snippet'], ['over', 'side']]);
   assert.equal(layerOf('brand'), '');
@@ -89,38 +90,39 @@ test('cleanPage: Stagewatch only where the hall has one linked', () => {
   for (const facts of [undefined, {}, { stagewatch: false }, { stagewatch: 'yes' }, { stagewatch: 1 }, null]) assert.deepEqual(cleanPage({ kind: 'stage' }, facts), none, JSON.stringify(facts));
 });
 
-test('cleanPage: the holding rules: no picture, or a picture of ours in a room of the hall the pusher may read', () => {
+test('cleanPage: the holding rules: no picture, or a picture of ours from a place the stage may show it from (sourceOk)', () => {
   const asked = [];
-  const readable = (url) => { asked.push(url); return url === PIC; };
+  const source = (url) => { asked.push(url); return url === PIC ? { name: 'stage.png', room: '' } : { error: 'That file belongs to another room — send it from there.' }; };
   assert.deepEqual(cleanPage({ kind: 'holding' }, {}), { kind: 'holding' }, 'no picture needs no facts');
-  assert.deepEqual(cleanPage({ kind: 'holding', image: PIC }, { readable }), { kind: 'holding', image: PIC });
+  assert.deepEqual(cleanPage({ kind: 'holding', image: PIC }, { source }), { kind: 'holding', image: PIC });
   assert.deepEqual(asked, [PIC], 'the file is asked of the server\'s facts by its address');
   // Not a picture of ours: a type a screen does not show, or an address that is not an upload.
   const notOurs = { error: 'A holding image is a PNG, JPEG, GIF or WebP shared in AGMessage.' };
+  const anywhere = () => ({ name: 'p', room: '' });
   for (const image of ['/uploads/1730000000000-abcdefghijkl-deck.pdf', '/uploads/1730000000000-abcdefghijkl-notes.txt', 'https://example.com/a.png', '/uploads/../1730000000000-abcdefghijkl-a.png', '/uploads/a.png', '']) {
-    assert.deepEqual(cleanPage({ kind: 'holding', image }, { readable: () => true }), notOurs, JSON.stringify(image));
+    assert.deepEqual(cleanPage({ kind: 'holding', image }, { source: anywhere }), notOurs, JSON.stringify(image));
   }
   // A picture that is not a string is a field of the wrong type: the whole take refused with the kinds in words.
-  for (const image of [null, 5, true, { toString: () => PIC }, [PIC]]) assert.deepEqual(cleanPage({ kind: 'holding', image }, { readable: () => true }), KINDS_WORDS, JSON.stringify(image));
-  for (const ext of IMAGE_EXT) assert.deepEqual(cleanPage({ kind: 'holding', image: '/uploads/1730000000000-abcdefghijkl-p.' + ext }, { readable: () => true }).image, '/uploads/1730000000000-abcdefghijkl-p.' + ext);
+  for (const image of [null, 5, true, { toString: () => PIC }, [PIC]]) assert.deepEqual(cleanPage({ kind: 'holding', image }, { source: anywhere }), KINDS_WORDS, JSON.stringify(image));
+  for (const ext of IMAGE_EXT) assert.deepEqual(cleanPage({ kind: 'holding', image: '/uploads/1730000000000-abcdefghijkl-p.' + ext }, { source: anywhere }).image, '/uploads/1730000000000-abcdefghijkl-p.' + ext);
   // The rule is a screen's (lib/displays.js), upload type by upload type: what a screen holds as its holding picture, a
   // person's page does, and nothing else.
   for (const ext of Object.keys(guard.UPLOAD_TYPES)) {
     const image = '/uploads/1730000000000-abcdefghijkl-p.' + ext;
-    assert.equal('error' in cleanPage({ kind: 'holding', image }, { readable: () => true }), 'error' in cleanContent({ kind: 'holding', image }), ext);
+    assert.equal('error' in cleanPage({ kind: 'holding', image }, { source: anywhere }), 'error' in cleanContent({ kind: 'holding', image }), ext);
   }
-  // Ours, but in no message of a room of the hall the pusher may read; and facts that cannot say so refuse it too.
-  const unread = { error: 'That picture is in no room of this hall you can read — share it there first.' };
+  // From a place sourceOk refuses, in its words; and facts that cannot say so refuse it in the words of a file held nowhere.
   const other = '/uploads/1730000000000-zyxwvutsrqpo-other.jpg';
-  assert.deepEqual(cleanPage({ kind: 'holding', image: other }, { readable }), unread);
-  for (const facts of [undefined, {}, { readable: true }, { readable: () => 'yes' }, { readable: () => 1 }]) assert.deepEqual(cleanPage({ kind: 'holding', image: PIC }, facts), unread);
+  assert.deepEqual(cleanPage({ kind: 'holding', image: other }, { source }), { error: 'That file belongs to another room — send it from there.' });
+  const unread = { error: 'That file is in no room of this hall you can read — share it there first.' };
+  for (const facts of [undefined, {}, { source: true }, { source: () => 'yes' }, { source: () => null }, { readable: () => true }]) assert.deepEqual(cleanPage({ kind: 'holding', image: PIC }, facts), unread, JSON.stringify(facts));
   // The picture types are the uploads' image types.
   for (const ext of IMAGE_EXT) assert.match(guard.UPLOAD_TYPES[ext].mime, /^image\//, ext);
 });
 
-test('describePage: the words for each kind, the same for the console and the audit; KINDS and the words are one set', () => {
+test('describePage: the words for each kind; KINDS and the words are one set', () => {
   const words = KINDS.map((kind) => describePage({ kind }, { hallHolding: '/uploads/x.png' }));
-  assert.deepEqual(words, ['back to chat', 'Stagewatch', 'the clock', 'a holding slide', 'blank', 'a web page']);
+  assert.deepEqual(words, ['back to chat', 'Stagewatch', 'the clock', 'a holding slide', 'blank', 'a web page', 'a document', 'a picture']);
   assert.equal(new Set(words).size, KINDS.length, 'one kind, one set of words');
   // A holding slide with no picture of its own, in a hall with none, draws the AGMessage mark (owner answer 31).
   assert.equal(describePage({ kind: 'holding' }), 'a holding slide with the AGMessage mark');
@@ -296,7 +298,7 @@ test('a page reports only what a take of its kind can be: back on its chat in vi
   // A web page is never seen into: in view it opened, and nothing else reports opened.
   assert.deepEqual(reportsOf('web'), ['opened', 'hidden', 'failed', 'dismissed', 'minimised']);
   assert.deepEqual(KINDS.filter((k) => reportsOf(k).includes('opened')), ['web'], 'opened is a web page\'s alone');
-  assert.deepEqual(KINDS.map(inViewOf), ['shown', 'shown', 'shown', 'shown', 'shown', 'opened']);
+  assert.deepEqual(KINDS.map(inViewOf), ['shown', 'shown', 'shown', 'shown', 'shown', 'opened', 'shown', 'shown']);
   assert.ok(KINDS.every((k) => reportsOf(k).every((s) => REPORTS.includes(s))));
   const p = store();
   const clock = p.take(HALL, ANA, { kind: 'clock' }, { name: 'Ada' });
@@ -335,7 +337,7 @@ test('a Board take puts away the older takes and answers of everyone seated On s
 });
 
 test('the bounds: 200 person takes and 500 answers a hall, 5,000 guests\' views, the oldest going first', () => {
-  assert.deepEqual(BOUNDS, { views: 5000, personTakes: 200, answers: 500, earlier: 20 });
+  assert.deepEqual(BOUNDS, { views: 5000, personTakes: 200, answers: 500, earlier: 20, stageFiles: 200, withdrawn: 200 });
   const p = store();
   const key = (i) => 'u:ubound' + String(i).padStart(6, '0');
   for (let i = 0; i < 201; i++) {
@@ -542,9 +544,9 @@ test('a hall closed takes what its people\'s pages were shown with it', () => {
   const t = p.take(HALL, 'board', { kind: 'clock' }, { name: 'Ada' });
   p.take(OTHER, 'board', { kind: 'blank' }, { name: 'Ada' });
   assert.ok(p.report(HALL, 's1', { key: ANA, board: true, seq: t.seq, state: 'shown' }).ok);
-  assert.equal(p.forgetHall(HALL), true);
-  assert.equal(p.forgetHall(HALL), false, 'once');
-  assert.equal(p.forgetHall('__proto__'), false);
+  assert.deepEqual(p.forgetHall(HALL), [], 'it held no stage file');
+  assert.equal(p.forgetHall(HALL), null, 'once');
+  assert.equal(p.forgetHall('__proto__'), null);
   assert.deepEqual(Object.keys(onDisk(p).halls), [OTHER]);
   assert.equal(p.live.has(HALL) || p.liveHall.has('s1'), false, 'its pages\' reports too');
   p.left('s1');
@@ -652,8 +654,8 @@ const WEB_WORDS = { error: 'A web page is shown by its https address, as a brows
 const WEB_SELF = { error: 'That address is AGMessage itself: show a page of another site.' };
 const VOTE = 'https://vote.example.com/poll/7?token=abc#q2';
 /** A store that seals a web page's address with a machine key of its own (lib/secretbox.js, as the server's store does). */
-function sealing({ file = path.join(folder(), 'pages.json') } = {}) {
-  const p = new Pages(file, { seal: secretbox.seal, open: secretbox.open });
+function sealing({ file = path.join(folder(), 'pages.json'), wait } = {}) {
+  const p = new Pages(file, { seal: secretbox.seal, open: secretbox.open, ...(wait ? { wait } : {}) });
   p.hold();
   p.file = file;
   return p;
@@ -1023,4 +1025,237 @@ test('canShow: who may show what on the Board\'s pages, each row of the table an
   // Facts that are none refuse.
   assert.equal(canShow(null, 'web', 'board'), TEAM);
   assert.equal(canShow({}, 'clock', 'board'), TEAM);
+});
+
+// ---------------------------------------------------------------- a document and a picture (plan 4-§5.9.3, §5.9.5)
+const PDF = '/uploads/1730000000000-abcdefghijkl-pack.pdf';
+const DOCX = '/uploads/1730000000000-abcdefghijkl-minutes.docx';
+const XLSX = '/uploads/1730000000000-abcdefghijkl-q3.xlsx';
+/** A source the server's facts would answer for every file: the Main room's, by the name AGMessage holds for it. */
+const held = (name = 'Board pack.pdf', room = '') => () => ({ name, room, roomName: room ? 'Legal' : '' });
+/** Two web takes, as a pusher asks for them (a store that seals their addresses keeps them: sealing). */
+const VOTE_PAGE = { kind: 'web', url: 'https://vote.example.com/' };
+const POLL_PAGE = { kind: 'web', url: 'https://poll.example.com/' };
+
+test('cleanPage: a document is the whole file, its place its type\'s, Download only when sent as true, never to an observer; no region is read', () => {
+  const facts = { source: held() };
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PDF, at: { page: 12 }, name: 'Final approved budget.pdf', download: true, note: '  Look at the totals  ', region: { x: 1 } }, facts),
+    { kind: 'doc', url: PDF, name: 'Board pack.pdf', at: { page: 12 }, download: true, note: 'Look at the totals' }, 'the name is the server\'s, a region is no key of it');
+  for (const download of [undefined, 'true', 1, null, false]) assert.equal(cleanPage({ kind: 'doc', url: PDF, download }, facts).download, false, JSON.stringify(download));
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PDF }, facts), { kind: 'doc', url: PDF, name: 'Board pack.pdf', download: false }, 'no place: opened at its start');
+  // Each type's own place, in its range; a place of another type, or past it, refuses the whole take.
+  const AT = { error: 'That place cannot be read for this file: a page or a slide (1-9999), a sheet (1-64), a paragraph or a line (1-999999).' };
+  const place = (url, at) => cleanPage({ kind: 'doc', url, at }, facts);
+  assert.deepEqual(place(DOCX, { block: 40, page: 3, approx: true }).at, { block: 40, page: 3, approx: true });
+  assert.deepEqual(place(DOCX, { block: 40, page: 3, approx: false }).at, { block: 40, page: 3 });
+  assert.deepEqual(place(XLSX, { sheet: 64 }).at, { sheet: 64 });
+  assert.deepEqual(place('/uploads/1730000000000-abcdefghijkl-n.md', { line: 999999 }).at, { line: 999999 });
+  assert.deepEqual(place('/uploads/1730000000000-abcdefghijkl-d.pptx', { slide: 9999 }).at, { slide: 9999 });
+  for (const [url, at] of [[PDF, { page: 0 }], [PDF, { page: 10000 }], [PDF, { page: 1.5 }], [PDF, { page: '3' }], [PDF, { slide: 2 }], [PDF, { page: 2, approx: true }], [PDF, {}],
+    [XLSX, { sheet: 65 }], [DOCX, { page: 3 }], [DOCX, { block: 2, approx: true }], [DOCX, { block: 2, page: 1, approx: 'yes' }], [PIC, { page: 1 }], [PDF, 5], [PDF, null], [PDF, [1]]]) {
+    assert.deepEqual(place(url, at), AT, url.slice(-5) + ' ' + JSON.stringify(at));
+  }
+  assert.deepEqual(place(PIC, {}), { kind: 'doc', url: PIC, name: 'Board pack.pdf', download: false }, 'a picture opens whole: no place');
+  // A document hands over the whole file: never to a person seated as an observer.
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PDF }, { ...facts, observer: true }), { error: 'Observers are shown pictures and quotes, not documents.' });
+  // An address of ours of a type the stage shows, by where it may come from; a note is a string.
+  const FILE = { error: 'A document or a picture is a file shared in AGMessage.' };
+  for (const url of ['https://example.com/a.pdf', '/uploads/a.pdf', '/uploads/../1730000000000-abcdefghijkl-a.pdf', 5, null, undefined]) assert.deepEqual(cleanPage({ kind: 'doc', url }, facts), FILE, JSON.stringify(url));
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PDF, note: 5 }, facts), KINDS_WORDS);
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PDF }, { source: () => ({ error: 'That file belongs to another room — send it from there.' }) }), { error: 'That file belongs to another room — send it from there.' });
+  for (const f of [undefined, {}, { source: true }, { source: () => null }]) assert.deepEqual(cleanPage({ kind: 'doc', url: PDF }, f), { error: 'That file is in no room of this hall you can read — share it there first.' }, JSON.stringify(f));
+  // A side room's file keeps the room it belongs to (its key on this laptop alone) and its name.
+  assert.deepEqual(cleanPage({ kind: 'doc', url: PDF }, { source: held('Q3.pdf', 'LEGAL1') }), { kind: 'doc', url: PDF, name: 'Q3.pdf', download: false, room: 'LEGAL1', roomName: 'Legal' });
+});
+
+test('cleanPage: a picture is an image of ours, and says what it is a picture of: a file\'s place (by its source, never its address) or the pusher\'s own copy', () => {
+  const sources = { [PDF]: { name: 'Board pack.pdf', room: '' }, [PIC]: { name: 'p12.png', room: '' } };
+  const facts = { source: (url) => sources[url] || { error: 'That file is in no room of this hall you can read — share it there first.' } };
+  assert.deepEqual(cleanPage({ kind: 'image', url: PIC, from: { url: PDF, at: { page: 12 } }, note: 'p. 12' }, facts),
+    { kind: 'image', url: PIC, name: 'p12.png', from: { name: 'Board pack.pdf', type: 'pdf', at: { page: 12 } }, note: 'p. 12' });
+  assert.deepEqual(cleanPage({ kind: 'image', url: PIC, from: { local: true, name: 'Board pack.pdf', at: { page: 3 } } }, facts),
+    { kind: 'image', url: PIC, name: 'p12.png', from: { local: true, name: 'Board pack.pdf', type: 'pdf', at: { page: 3 } } });
+  assert.deepEqual(cleanPage({ kind: 'image', url: PIC }, facts), { kind: 'image', url: PIC, name: 'p12.png' }, 'shown whole');
+  // Never a file that is not an image; a source that may not be shown refuses the picture; a source's place is its own type's.
+  for (const url of [PDF, DOCX, '/uploads/a.png']) assert.deepEqual(cleanPage({ kind: 'image', url }, facts), { error: 'A picture is a PNG, JPEG, GIF or WebP shared in AGMessage.' }, url);
+  assert.deepEqual(cleanPage({ kind: 'image', url: PIC, from: { url: XLSX } }, facts), { error: 'That file is in no room of this hall you can read — share it there first.' });
+  assert.equal(cleanPage({ kind: 'image', url: PIC, from: { url: PDF, at: { slide: 2 } } }, facts).error.startsWith('That place cannot be read'), true);
+  for (const from of [5, 'x', null, { url: 5 }, { local: 'yes', name: 'a.pdf' }, { local: true }, { local: true, name: 5 }]) assert.ok(cleanPage({ kind: 'image', url: PIC, from }, facts).error, JSON.stringify(from));
+  assert.deepEqual(cleanPage({ kind: 'image', url: PIC, from: { local: true, name: 'setup.exe' } }, facts), { error: 'AGMessage does not show that kind of file on the stage: share it for download.' });
+  // What a page is told of it: no side room's key, and a source's address never there to tell.
+  const p = new Pages(path.join(folder(), 'pages.json'));
+  const told = p.told({ kind: 'image', url: PIC, name: 'p12.png', from: { name: 'Q3.pdf', type: 'pdf', at: { page: 2 }, room: 'LEGAL1', roomName: 'Legal' }, room: 'LEGAL1', roomName: 'Legal' });
+  assert.deepEqual(told, { kind: 'image', url: PIC, name: 'p12.png', from: { name: 'Q3.pdf', type: 'pdf', at: { page: 2 }, roomName: 'Legal' }, roomName: 'Legal' });
+});
+
+test('sourceOk: a fresh upload of the pusher\'s for Main or a listed room it posts files in; a Main file; a listed side room\'s it reads; the stage\'s own record by its room; never another\'s fresh upload, a transfer-only file or a room off Main\'s list', () => {
+  const MAIN = 'HALLA1';
+  const LEGAL = 'LEGAL1';
+  const MEDIA = 'MEDIA1';
+  const rooms = { [LEGAL]: 'Legal', [MEDIA]: 'Media' };
+  const facts = (o = {}) => ({
+    main: MAIN, uid: 'uana', holders: () => [], fresh: () => null, recorded: () => null, reads: (k) => k === LEGAL, listed: () => false, files: () => true, roomName: (k) => rooms[k] || '', ...o,
+  });
+  const LEGAL_OFF = { error: 'That file belongs to Legal, which may not send into the Main room — send it there first, or ask an admin.' };
+  const OTHER = { error: 'That file belongs to another room — send it from there.' };
+  // Rule 2: a file in a message of the Main room passes, by the oldest message's name.
+  assert.deepEqual(sourceOk(PDF, facts({ holders: () => [{ key: MAIN, at: 2, name: 'Renamed.pdf' }, { key: MAIN, at: 1, name: 'Board pack.pdf' }] })), { name: 'Board pack.pdf', room: '', roomName: '' }, 'a re-post under a new name keeps the first');
+  // Rule 3: a side room's, refused off Main's list (naming Legal to a reader of it, "another room" to anyone else), passed on it.
+  assert.deepEqual(sourceOk(PDF, facts({ holders: () => [{ key: LEGAL, at: 1, name: 'Q3.pdf' }] })), LEGAL_OFF);
+  assert.deepEqual(sourceOk(PDF, facts({ holders: () => [{ key: MEDIA, at: 1, name: 'Q3.pdf' }] })), OTHER, 'Media is not read: not named');
+  assert.deepEqual(sourceOk(PDF, facts({ holders: () => [{ key: LEGAL, at: 1, name: 'Q3.pdf' }], listed: (k) => k === LEGAL })), { name: 'Q3.pdf', room: LEGAL, roomName: 'Legal' });
+  assert.deepEqual(sourceOk(PDF, facts({ holders: () => [{ key: MEDIA, at: 1, name: 'Q3.pdf' }], listed: () => true })), OTHER, 'on the list, but not read');
+  // Rule 1: the pusher's own fresh upload, for Main, or for a listed room where it posts files; never another's.
+  const mine = (room) => () => ({ room, uid: 'uana', name: 'p. 12.png' });
+  assert.deepEqual(sourceOk(PIC, facts({ fresh: mine(MAIN) })), { name: 'p. 12.png', room: '', roomName: '', fresh: true });
+  assert.deepEqual(sourceOk(PIC, facts({ fresh: mine(LEGAL) })), LEGAL_OFF, 'made from a Legal page while Legal is off the list');
+  assert.deepEqual(sourceOk(PIC, facts({ fresh: mine(LEGAL), listed: (k) => k === LEGAL })), { name: 'p. 12.png', room: LEGAL, roomName: 'Legal', fresh: true });
+  assert.deepEqual(sourceOk(PIC, facts({ fresh: mine(LEGAL), listed: (k) => k === LEGAL, files: () => false, reads: () => false })), OTHER, 'a room it may not post files in');
+  assert.deepEqual(sourceOk(PIC, facts({ fresh: () => ({ room: MAIN, uid: 'uben', name: 'x.png' }) })), { error: 'That file is in no room of this hall you can read — share it there first.' }, 'another\'s fresh upload');
+  // Once posted, the pusher's own upload is its room's (rule 2), never fresh: the stage does not keep a message's file.
+  assert.deepEqual(sourceOk(PIC, facts({ fresh: mine(MAIN), holders: () => [{ key: MAIN, at: 1, name: 'p. 12.png' }] })), { name: 'p. 12.png', room: '', roomName: '' });
+  // Rule 4: what the stage recorded, by the room it was recorded for (passing rule 2 or 3 now).
+  assert.deepEqual(sourceOk(PIC, facts({ recorded: () => ({ room: MAIN, name: 'p. 12.png' }) })), { name: 'p. 12.png', room: '', roomName: '' });
+  assert.deepEqual(sourceOk(PIC, facts({ recorded: () => ({ room: LEGAL, name: 'p. 12.png' }) })), LEGAL_OFF, 'its room checked again');
+  // Not ours, not a stage type, held nowhere.
+  assert.deepEqual(sourceOk('https://example.com/a.pdf', facts()), { error: 'A document or a picture is a file shared in AGMessage.' });
+  assert.deepEqual(sourceOk('/uploads/1730000000000-abcdefghijkl-a.exe', facts()), { error: 'AGMessage does not show that kind of file on the stage: share it for download.' });
+  assert.deepEqual(sourceOk(PDF, facts()), { error: 'That file is in no room of this hall you can read — share it there first.' });
+  assert.deepEqual(sourceOk(PDF, null), { error: 'That file is in no room of this hall you can read — share it there first.' });
+});
+
+test('describePage: a document and a picture in two voices, the console\'s by name and place, the audit\'s by type alone; a side room and a push sent from one said', () => {
+  const doc = { kind: 'doc', url: PDF, name: 'Board pack.pdf', at: { page: 12 }, download: false };
+  const word = { kind: 'doc', url: DOCX, name: 'Minutes.docx', at: { block: 9, page: 3, approx: true }, download: false };
+  assert.deepEqual([describePage(doc), describePage(doc, { voice: 'audit' })], ['Board pack.pdf at p. 12', 'a PDF at p. 12']);
+  assert.deepEqual([describePage(word), describePage(word, { voice: 'audit' })], ['Minutes.docx at ≈ p. 3', 'a Word document at ≈ p. 3']);
+  assert.equal(describePage({ ...word, at: { block: 9, page: 3 } }, { voice: 'audit' }), 'a Word document at p. 3');
+  const page = { kind: 'image', url: PIC, name: 'p12.png', from: { name: 'Board pack.pdf', type: 'pdf', at: { page: 12 } } };
+  assert.deepEqual([describePage(page, { by: 'Ana' }), describePage(page, { voice: 'audit', by: 'Ana' })], ['Ana\'s picture of Board pack.pdf, p. 12', 'a picture of a PDF page (p. 12)']);
+  const part = { kind: 'image', url: PIC, name: 'crop.png', from: { name: 'Stage plan.png', type: 'png' } };
+  assert.deepEqual([describePage(part, { by: 'Ana' }), describePage(part, { voice: 'audit' })], ['Ana\'s picture of part of Stage plan.png', 'a picture of part of an image']);
+  const local = { kind: 'image', url: PIC, name: 'p12.png', from: { local: true, name: 'Board pack.pdf', type: 'pdf', at: { page: 12 } } };
+  assert.deepEqual([describePage(local, { by: 'Ana' }), describePage(local, { voice: 'audit' })], ['Ana\'s picture of their copy of Board pack.pdf, p. 12', 'a picture of a PDF page (p. 12), from a local copy']);
+  const legal = { kind: 'doc', url: XLSX, name: 'Q3.xlsx', at: { sheet: 2 }, download: false, room: 'LEGAL1', roomName: 'Legal' };
+  assert.deepEqual([describePage(legal, { sent: 'Legal' }), describePage(legal, { voice: 'audit', sent: 'Legal' })], ['Q3.xlsx in Legal at sheet 2, sent from Legal', 'a spreadsheet in Legal at sheet 2, sent from Legal']);
+  // The audit's voice never names a file nor carries its path.
+  for (const c of [doc, word, page, part, local, legal]) {
+    const w = describePage(c, { voice: 'audit', by: 'Ana' });
+    assert.ok(!/pack|Minutes|Q3|plan|\/uploads|\.pdf|\.png|\.xlsx|\.docx/.test(w), w);
+  }
+});
+
+test('the stage\'s files: kept while a take or Earlier names them and for the wait after, 200 in use a hall, the oldest in use no longer let go past it, a hall\'s gone with it; a withdrawal starts its wait', () => {
+  const WAIT = 60_000;
+  const p = sealing({ wait: WAIT });
+  const name = (i) => '1730000000' + String(i).padStart(3, '0') + '-abcdefghijkl-p' + i + '.png';
+  const url = (i) => '/uploads/' + name(i);
+  const pic = (i) => ({ kind: 'image', url: url(i), name: 'p' + i + '.png' });
+  const files = () => p.halls[HALL].files;
+  // A take naming a fresh upload keeps it as the hall's stage file, named while it is up and under Earlier.
+  const t1 = p.take(HALL, 'board', pic(1), { name: 'Ana', who: 'account:aana' }, { at: 1000 });
+  assert.deepEqual(p.recordFile(HALL, name(1), { at: 900, room: HALL, uid: 'uana', name: 'p1.png' }, 1000), []);
+  assert.deepEqual(files(), { [name(1)]: { at: 900, room: HALL, uid: 'uana', name: 'p1.png', named: true } });
+  assert.deepEqual(p.recordOf(HALL, name(1)), { room: HALL, name: 'p1.png' });
+  assert.equal(p.namesUrl(HALL, url(1)), true);
+  // Superseded, it is under Earlier: still named, still in use long after its upload's hour.
+  assert.ok(p.take(HALL, 'board', VOTE_PAGE, { name: 'Ana' }, { at: 5000 }));
+  assert.ok(p.stageInUse(10 * WAIT).has(name(1)));
+  // Withdrawn: gone from Earlier, so its wait starts then; in use for the wait, let go after it, its record gone.
+  assert.equal(p.withdraw(HALL, t1.seq, { at: 20_000, who: 'account:aana' }).take.seq, t1.seq);
+  assert.deepEqual(p.withdrawnOf(HALL, t1.seq), { who: 'account:aana' });
+  assert.equal(p.find(HALL, t1.seq), null);
+  assert.deepEqual(files()[name(1)], { at: 20_000, room: HALL, uid: 'uana', name: 'p1.png' });
+  assert.ok(p.stageInUse(20_000 + WAIT - 1).has(name(1)), 'inside its wait');
+  assert.deepEqual(p.stageGone(20_000 + WAIT - 1), []);
+  assert.deepEqual(p.stageGone(20_000 + WAIT), [name(1)], 'past it');
+  assert.equal(p.recordOf(HALL, name(1)), null);
+  assert.ok(!Object.hasOwn(p.halls[HALL], 'files'), 'no stage file kept: none written');
+  // The bound: 200 in use a hall (named, or inside their wait); a new one then has no room until one is in use no longer,
+  // the oldest of which goes.
+  const T = 100_000;
+  for (let i = 10; i < 210; i++) p.recordFile(HALL, name(i), { at: T + i, room: HALL, uid: 'uana', name: 'p.png' }, T + i);
+  assert.equal(Object.keys(files()).length, 200);
+  assert.equal(p.fileRoom(HALL, name(300), T + 300), false, '200 in use: no room');
+  assert.equal(p.fileRoom(HALL, name(10), T + 300), true, 'one it holds');
+  assert.equal(p.fileRoom(HALL, name(300), T + 10 + WAIT), true, 'the oldest past its wait');
+  assert.deepEqual(p.recordFile(HALL, name(300), { at: T + 10 + WAIT, room: HALL, uid: 'uana', name: 'p.png' }, T + 10 + WAIT), [name(10)]);
+  assert.equal(Object.keys(files()).length, 200);
+  assert.equal(STAGE_FULL, 'This hall\'s stage holds 200 files — take some down.');
+  // A hall closed returns its stage files' names, for the server to remove with or without its rooms' files.
+  assert.equal(p.forgetHall(HALL).length, 200);
+});
+
+test('a holding slide\'s picture is the stage\'s while the slide is up (fileOf), never a take-down\'s; a file only the stage still holds is adopted as a stage file, its author\'s or none, and let go after its wait', () => {
+  const WAIT = 60_000;
+  const p = sealing({ wait: WAIT });
+  const name = '1730000000001-abcdefghijkl-slide.png';
+  const url = '/uploads/' + name;
+  assert.deepEqual([fileOf({ kind: 'holding', image: url }), fileOf({ kind: 'image', url }), fileOf({ kind: 'doc', url: PDF }), fileOf({ kind: 'holding' }), fileOf({ kind: 'web', url: 'https://example.com/a.png' }), fileOf({ kind: 'holding', image: 'https://example.com/a.png' }), fileOf(null)],
+    [url, url, PDF, '', '', '', '']);
+  const slide = p.take(HALL, 'board', { kind: 'holding', image: url }, { name: 'Op' }, { at: 1000 });
+  assert.ok(slide);
+  assert.ok(p.stageInUse(10 * WAIT).has(name), 'the slide names it');
+  assert.equal(p.namesUrl(HALL, url), false, 'no information take names it: the admin\'s delete asks nothing');
+  // Its message gone while the slide is up: the stage keeps it as its own from then (a message's author, or none known).
+  assert.deepEqual(p.adopt(name, { room: HALL, uid: '', name: 'slide.png' }, 2000), []);
+  assert.deepEqual(p.halls[HALL].files, { [name]: { at: 2000, room: HALL, uid: '', name: 'slide.png', named: true } });
+  assert.deepEqual(onDisk(p).halls[HALL].files[name], { at: 2000, room: HALL, uid: '', name: 'slide.png', named: true });
+  assert.deepEqual(new Pages(p.file).halls[HALL].files[name], { at: 2000, room: HALL, uid: '', name: 'slide.png', named: true }, 'read back: an author none knew');
+  assert.deepEqual(p.adopt(name, { room: HALL, uid: 'uben', name: 'other.png' }, 3000), [], 'kept once');
+  assert.equal(p.halls[HALL].files[name].name, 'slide.png');
+  assert.deepEqual(p.adopt('1730000000002-abcdefghijkl-none.png', { room: HALL, uid: '', name: 'x.png' }, 3000), [], 'one nothing names is not the stage\'s');
+  assert.ok(!Object.hasOwn(p.halls[HALL].files, '1730000000002-abcdefghijkl-none.png'));
+  // The slide put away: its wait starts, and the file is let go after it.
+  assert.ok(p.take(HALL, 'board', { kind: 'clock' }, { name: 'Op' }, { at: 5000 }));
+  assert.deepEqual(p.stageGone(5000), []);
+  assert.deepEqual(p.stageGone(5000 + WAIT), [name]);
+});
+
+test('what ends a take: every information take of a hall (a Main reset, Earlier emptied), those a side room holds the source of, those showing a file; handed back on the pages that show them, the show left', () => {
+  const p = sealing();
+  const clock = p.take(HALL, 'board', { kind: 'clock' }, { name: 'Op' }, { at: 1 });
+  const legal = p.take(HALL, 'board', { kind: 'doc', url: PDF, name: 'Q3.pdf', download: false, room: 'LEGAL1', roomName: 'Legal' }, { name: 'Ana' }, { at: 2 });
+  assert.ok(p.take(HALL, ANA, VOTE_PAGE, { name: 'Len' }, { at: 3, sent: { key: 'LEGAL1', name: 'Legal' } }));
+  const mainDoc = p.take(HALL, BEN, { kind: 'doc', url: DOCX, name: 'Minutes.docx', download: false }, { name: 'Ana' }, { at: 4 });
+  assert.deepEqual(p.find(HALL, legal.seq).to, ['board']);
+  // A side room's reset: what it holds the source of, or sent; the Main room's and the show stay.
+  const sourced = (t) => t.content.room === 'LEGAL1' || (!!t.sent && t.sent.key === 'LEGAL1');
+  assert.equal(p.endTakes(HALL, sourced, { at: 10 }), 2);
+  assert.equal(p.current(HALL, '', { board: true, layer: 'info' }).take.content.kind, 'chat', 'handed back');
+  assert.equal(p.current(HALL, ANA, { layer: 'info' }).take.content.kind, 'chat');
+  assert.equal(p.current(HALL, BEN, { layer: 'info' }).take.seq, mainDoc.seq);
+  assert.equal(p.current(HALL, '', { board: true }).take.seq, clock.seq, 'the show left');
+  assert.equal(p.endTakes(HALL, sourced, { at: 11 }), 0, 'nothing more of it');
+  // A file's message deleted: what shows that file.
+  assert.equal(p.endTakes(HALL, (t) => t.content.url === DOCX, { at: 12 }), 1);
+  assert.equal(p.find(HALL, mainDoc.seq), null);
+  // A Main reset: every information take, and Earlier emptied whole.
+  const web = p.take(HALL, 'board', VOTE_PAGE, { name: 'Op' }, { at: 13 });
+  p.take(HALL, 'board', POLL_PAGE, { name: 'Op' }, { at: 14 });
+  assert.equal(p.earlierOf(HALL, '', { board: true })[0].seq, web.seq);
+  assert.equal(p.endTakes(HALL, () => true, { at: 15, earlier: 'all' }), 2);
+  assert.deepEqual(p.halls[HALL].earlier, []);
+  assert.equal(p.current(HALL, '', { board: true }).take.seq, clock.seq);
+});
+
+test('a document is told a page seated as an observer without its address, under Earlier too; a document and a picture are read back as they were kept, and a wrong shape is dropped', () => {
+  const file = path.join(folder(), 'pages.json');
+  const p = store({ file });
+  const doc = { kind: 'doc', url: PDF, name: 'Board pack.pdf', at: { page: 12 }, download: true, room: 'LEGAL1', roomName: 'Legal' };
+  const t = p.take(HALL, BEN, doc, { name: 'Ana' });
+  assert.deepEqual(p.told(t.content, { observer: true }), { kind: 'doc', name: 'Board pack.pdf', at: { page: 12 }, withheld: true, roomName: 'Legal' });
+  assert.deepEqual(p.told(t.content), { kind: 'doc', url: PDF, name: 'Board pack.pdf', at: { page: 12 }, download: true, roomName: 'Legal' });
+  p.take(HALL, BEN, { kind: 'chat', layer: 'info' }, { name: 'Ana' });
+  assert.deepEqual(p.earlierOf(HALL, BEN, { observer: true })[0].content, { kind: 'doc', name: 'Board pack.pdf', at: { page: 12 }, withheld: true, roomName: 'Legal' });
+  p.flush();
+  const again = new Pages(file);
+  assert.deepEqual(again.halls[HALL].earlier[0].content, doc, 'read back whole');
+  // A stored document or picture of the wrong shape is no take.
+  const bad = JSON.parse(fs.readFileSync(file, 'utf8'));
+  bad.halls[HALL].people[ANA] = { info: { seq: 1, content: { kind: 'doc', url: PDF, name: 'x', at: { slide: 2 }, download: false }, by: { name: 'A' }, at: 1 } };
+  bad.halls[HALL].people[CY] = { info: { seq: 1, content: { kind: 'image', url: PDF, name: 'x' }, by: { name: 'A' }, at: 1 } };
+  fs.writeFileSync(file, JSON.stringify(bad));
+  const read = new Pages(file);
+  assert.deepEqual(Object.keys(read.halls[HALL].people), [BEN], 'a place of another type, a picture that is no image: dropped');
 });

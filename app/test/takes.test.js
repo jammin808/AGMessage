@@ -233,10 +233,10 @@ test('a take on the Board\'s pages or one person\'s, numbered and confirmed page
   // What may be shown is the server's: a kind it does not know, Stagewatch where the hall has none, a picture shared in
   // no room of the hall.
   for (const [content, error] of [
-    [{ kind: 'brand' }, 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.'],
+    [{ kind: 'brand' }, 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document or a picture.'],
     [{ kind: 'web', url: 'http://vote.example.com/' }, 'A web page is shown by its https address, as a browser shows it.'],
     [{ kind: 'stage' }, 'This hall has no Stagewatch linked — link one in Set up.'],
-    [{ kind: 'holding', image: '/uploads/1777424589360-onmqm0a3ew2r-holding.png' }, 'That picture is in no room of this hall you can read — share it there first.'],
+    [{ kind: 'holding', image: '/uploads/1777424589360-onmqm0a3ew2r-holding.png' }, 'That file is in no room of this hall you can read — share it there first.'],
   ]) assert.deepEqual(await act(ctl, 'page:push', { code: hall, to: 'board', content }), { ok: false, error }, JSON.stringify(content));
   assert.deepEqual(await act(ctl, 'page:push', { code: 'NOHALL', to: 'board', content: { kind: 'clock' } }), { ok: false, error: 'No such hall.' });
 
@@ -493,6 +493,10 @@ test('the person\'s acts on a take: Show it again within 10 s of Back to chat br
   assert.ok(typeof up.url === 'string' && up.url.startsWith('/uploads/'), JSON.stringify(up));
   assert.equal((await act(inLegal, 'message', { type: 'file', url: up.url, filename: 'legal-only.png' })).ok, true);
   const picture = { kind: 'holding', image: up.url };
+  // A picture of a side room reaches the Board's pages only from a room on the Main room's list (sourceOk): refused while
+  // Legal is off it, in words that name Legal to the admin, who reads it; shown once it is on.
+  assert.deepEqual(await act(ctl, 'page:push', { code: hall, to: 'board', content: picture }), { ok: false, error: 'That file belongs to Legal, which may not send into the Main room — send it there first, or ask an admin.' });
+  assert.equal((await act(ctl, 'room:update', { code: hall, sendFrom: [LEGAL] })).ok, true);
   const tiaMade = await api(srv.base, 'POST', '/api/users', { username: 'tia', name: 'Tia Tech', role: 'tech', password: PASSWORD, halls: [hall] }, { cookie: admin });
   assert.equal(tiaMade.status, 200, JSON.stringify(tiaMade.body));
   const tia = await page((await api(srv.base, 'POST', '/api/auth/login', { username: 'tia', password: PASSWORD })).cookie);
@@ -1065,4 +1069,200 @@ test('information over the show: a researcher\'s web page over the Board\'s cloc
   assert.deepEqual([last.over.seq, last.over.layer, last.beside.seq, last.beside.layer, last.beside.arrive, last.beside.content], [opLast.seq, 'info', asideLast.seq, 'beside', 'side', { kind: 'web', url: NEWS, host: 'news.example.org' }]);
   const lastKeys = Object.keys(last);
   assert.deepEqual(lastKeys.slice(lastKeys.indexOf('canShow'), lastKeys.indexOf('canShow') + 4), ['canShow', 'over', 'earlier', 'beside']);
+});
+
+// A document and a picture on the stage (plan 4-§5.9.3, §5.9.5, §5.9.7, §5.10.3, §5.11): a file the hall holds shown
+// as a take of its own kind, by where it may come from, its name the server's; "sending" until each page reports; Download
+// kept only when ticked; never a document to an observer, nor its address told to a page seated as one; the pixel and
+// archive checks at a file's first take; a fresh upload kept as the hall's stage file; Withdraw by its pusher, the
+// operator or the admin, from every page and Earlier; one row per target, never a file's name.
+test('a document and a picture on the stage: by where the file may come from, its name the server\'s, confirmed page by page, Download only when ticked, never a document to an observer, the checks at a first take, Withdraw', { timeout: 120_000 }, async (t) => {
+  const { officeZip, wordParts } = require('./helpers');
+  let srv = await startServer();
+  t.after(() => stopServer(srv.child));
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const heard = new Map();
+  const page = async (cookie, who) => {
+    const s = await connect(srv.base, cookie);
+    sockets.push(s);
+    heard.set(s, []);
+    s.onAny((ev, ...args) => heard.get(s).push([ev, args[0]]));
+    s.who = who;
+    return s;
+  };
+  const info = (s) => heard.get(s).filter(([ev, v]) => ev === 'page:take' && v.layer === 'info').map(([, v]) => v);
+  const withdrawals = (s) => heard.get(s).filter(([ev, v]) => ev === 'page:take' && Number.isInteger(v.withdrawn)).map(([, v]) => v);
+  const joined = async (s, args) => { const r = await emit(s, 'join', invited(srv.dataDir, args)); assert.equal(r.ok, true, s.who + ': ' + JSON.stringify(r)); return r; };
+  const upload = async (token, name, bytes, type) => {
+    const f = new FormData();
+    f.append('file', new Blob([bytes], { type }), name);
+    const r = await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': token }, body: f });
+    return { status: r.status, ...(await r.json()) };
+  };
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n', 'latin1');
+  /** A JPEG's header alone, its frame `w` × `h` (lib/imagesize.js reads its size from it; nothing decodes it here). */
+  const jpeg = (w, h) => Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, h >> 8, h & 255, w >> 8, w & 255, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9]);
+
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 4' }, { cookie: admin })).body.code;
+  const ctl = await page(admin, 'the admin page');
+  await joined(ctl, { roomCode: hall, as: 'account' });
+  const LEGAL = (await act(ctl, 'room:create', { hall, name: 'Legal' })).key;
+  const account = async (username, name, role, extra) => {
+    const made = await api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, ...extra }, { cookie: admin });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    return (await api(srv.base, 'POST', '/api/auth/login', { username, password: PASSWORD })).cookie;
+  };
+  const sueCookie = await account('sue', 'Sue Staff', 'staff', { halls: [hall], rooms: [LEGAL] });   // stage.show: shows by a right of its own
+  const sidCookie = await account('sid', 'Sid Staff', 'staff', { halls: [hall] });
+  const tomCookie = await account('tom', 'Tom Tech', 'tech', { halls: [hall] });   // display.control: the operator
+  const sue = await page(sueCookie, 'Sue backstage');
+  const sueJoin = await joined(sue, { roomCode: hall, as: 'account' });
+  const sueLegal = await page(sueCookie, 'Sue in Legal');
+  const sueLegalJoin = await joined(sueLegal, { roomCode: LEGAL, as: 'account' });
+  const sid = await page(sidCookie, 'Sid backstage');
+  await joined(sid, { roomCode: hall, as: 'account' });
+  const tom = await page(tomCookie, 'Tom backstage');
+  const tomJoin = await joined(tom, { roomCode: hall, as: 'account' });
+  const gil = await page(undefined, 'Gil On stage');
+  const gilJoin = await joined(gil, { roomCode: hall, name: 'Gil', role: 'board' });
+  const kim = await page(undefined, 'Kim On stage');
+  await joined(kim, { roomCode: hall, name: 'Kim', role: 'board' });
+  const oli = await page(undefined, 'Oli observing');
+  const oliJoin = await joined(oli, { roomCode: hall, name: 'Oli', role: 'observer' });
+  const rex = await page(undefined, 'Rex backstage');
+  const rexJoin = await joined(rex, { roomCode: hall, name: 'Rex', role: 'research' });
+  assert.deepEqual([sueJoin.canShow, tomJoin.canPush], [true, true]);
+
+  // A PDF shared in Main, then posted again under another name: the take names the file as its first message did.
+  const up = await upload(sueJoin.uploadToken, 'Board pack.pdf', pdf, 'application/pdf');
+  assert.equal(up.status, 200, JSON.stringify(up));
+  assert.equal((await act(sue, 'message', { type: 'file', url: up.url, filename: 'Board pack.pdf', mime: 'application/pdf' })).ok, true);
+  assert.equal((await act(sue, 'message', { type: 'file', url: up.url, filename: 'Final approved budget.pdf', mime: 'application/pdf' })).ok, true);
+  const pushed = await act(sue, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: up.url, name: 'Final approved budget.pdf', at: { page: 2 } } });
+  assert.deepEqual([pushed.ok, pushed.results[0].status.mark, pushed.results[0].status.words, pushed.results[0].status.pages, pushed.results[0].status.showing], [true, '◷', 'Sending', 2, 'Board pack.pdf at p. 2'], JSON.stringify(pushed));
+  const docContent = { kind: 'doc', url: up.url, name: 'Board pack.pdf', at: { page: 2 }, download: false };
+  await until(() => info(gil).some((x) => x.seq === pushed.seq) && info(kim).some((x) => x.seq === pushed.seq), 4000, 'the Board\'s pages told the document');
+  for (const s of [gil, kim]) assert.deepEqual(info(s).find((x) => x.seq === pushed.seq).content, docContent, s.who);
+  await wait(300);
+  for (const s of [sue, tom, oli, rex, ctl]) assert.ok(!info(s).some((x) => x.seq === pushed.seq), s.who + ' is not On stage: not told');
+  // ✓ only once each Board page said it drew it.
+  const boardInfo = async () => (await act(tom, 'page:status', { code: hall })).board.info;
+  assert.ok((await act(gil, 'page:report', { seq: pushed.seq, state: 'shown' })).ok);
+  assert.deepEqual([(await boardInfo()).mark, (await boardInfo()).words], ['◷', 'Sending · on 1 of 2 pages']);
+  assert.ok((await act(kim, 'page:report', { seq: pushed.seq, state: 'shown' })).ok);
+  assert.deepEqual([(await boardInfo()).mark, (await boardInfo()).words], ['✓', 'On all 2 Board pages']);
+  // The row: whom, how many pages, the file's kind and place, never its name.
+  const rows = () => rowsOf(srv.dataDir).filter(([h]) => h === hall);
+  assert.deepEqual(rows().at(-1), [hall, 'the Board (2 pages) → a PDF at p. 2', 'sue']);
+  // Download ticked is kept; anything else is no Download.
+  const ticked = await act(sue, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: up.url, download: true } });
+  assert.equal(ticked.ok, true, JSON.stringify(ticked));
+  await until(() => info(gil).some((x) => x.seq === ticked.seq), 4000, 'told');
+  assert.equal(info(gil).find((x) => x.seq === ticked.seq).content.download, true);
+  const kept = () => JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'pages.json'), 'utf8')).halls[hall];
+  await until(() => fs.existsSync(path.join(srv.dataDir, 'pages.json')) && kept().board.info.seq === ticked.seq, 4000, 'saved');
+  assert.equal(kept().board.info.content.download, true);
+  // The first is under Earlier now, told to each Board page as a Look.
+  assert.deepEqual(info(gil).find((x) => x.seq === ticked.seq).earlier.map((e) => [e.seq, e.content.kind, e.content.name]), [[pushed.seq, 'doc', 'Board pack.pdf']]);
+
+  // Never a document to a person seated as an observer; a picture, yes.
+  assert.deepEqual(await act(tom, 'page:push', { code: hall, to: { uid: 'u:' + oliJoin.uid }, content: { kind: 'doc', url: up.url } }), { ok: false, error: 'Observers are shown pictures and quotes, not documents.' });
+  const png = await upload(tomJoin.uploadToken, 'Stage plan.png', pngOf(40, 30), 'image/png');
+  assert.equal((await act(tom, 'message', { type: 'file', url: png.url, filename: 'Stage plan.png', mime: 'image/png' })).ok, true);
+  const toOli = await act(tom, 'page:push', { code: hall, to: { uid: 'u:' + oliJoin.uid }, content: { kind: 'image', url: png.url } });
+  assert.equal(toOli.ok, true, JSON.stringify(toOli));
+  await until(() => info(oli).some((x) => x.seq === toOli.seq), 4000, 'Oli told the picture');
+  assert.deepEqual(info(oli).find((x) => x.seq === toOli.seq).content, { kind: 'image', url: png.url, name: 'Stage plan.png' });
+  // Pat backstage in Main and observing in Legal, a room Tom cannot read: a person's take reaches every page of theirs, so
+  // a document to Pat is refused all the same, in the same words.
+  const pat = await page(undefined, 'Pat backstage');
+  const patJoin = await joined(pat, { roomCode: hall, name: 'Pat', role: 'research' });
+  assert.equal((await act(ctl, 'room:update', { code: LEGAL, codeOn: true })).ok, true);
+  const patLegal = await page(undefined, 'Pat observing in Legal');
+  const legalCode = (await new Promise((r) => { ctl.emit('admin:listRooms', r); })).rooms.find((h) => h.code === hall).side[0].guestCode;
+  await joined(patLegal, { roomCode: legalCode, name: 'Pat', role: 'observer', uid: patJoin.identity });
+  assert.deepEqual(await act(tom, 'page:push', { code: hall, to: { uid: 'u:' + patJoin.uid }, content: { kind: 'doc', url: up.url } }), { ok: false, error: 'Observers are shown pictures and quotes, not documents.' });
+  pat.close();
+  patLegal.close();
+  assert.equal((await act(ctl, 'room:update', { code: LEGAL, codeOn: false })).ok, true);
+  // A document to Rex backstage, then Rex seated as an observer: his page is told it without its address, and so is his join.
+  const toRex = await act(tom, 'page:push', { code: hall, to: { uid: 'u:' + rexJoin.uid }, content: { kind: 'doc', url: up.url } });
+  assert.equal(toRex.ok, true, JSON.stringify(toRex));
+  await until(() => info(rex).some((x) => x.seq === toRex.seq && x.content.url === up.url), 4000, 'Rex told the document');
+  const rexSid = (await act(ctl, 'admin:watchRoom', { roomCode: hall })).users.find((u) => u.name === 'Rex').socketId;
+  assert.equal((await act(ctl, 'admin:setRole', { roomCode: hall, socketId: rexSid, role: 'observer' })).ok, true);
+  await until(() => info(rex).some((x) => x.seq === toRex.seq && x.content.withheld === true), 4000, 'Rex told it withheld');
+  assert.deepEqual(info(rex).at(-1).content, { kind: 'doc', name: 'Board pack.pdf', withheld: true });
+  const rexBack = await page(undefined, 'Rex again');
+  const rexAgain = await joined(rexBack, { roomCode: hall, name: 'Rex', role: 'observer', uid: rexJoin.identity });
+  assert.ok(!JSON.stringify(rexAgain.over).includes('/uploads/') && rexAgain.over.content.withheld === true, JSON.stringify(rexAgain.over));
+
+  // A picture over what the Board's devices draw is refused at its take (40 MP), as a picture and as a document alike.
+  const big = await upload(tomJoin.uploadToken, 'crowd.jpg', jpeg(8000, 6250), 'image/jpeg');
+  assert.equal(big.status, 200, JSON.stringify(big));
+  assert.equal((await act(tom, 'message', { type: 'file', url: big.url, filename: 'crowd.jpg', mime: 'image/jpeg' })).ok, true);
+  for (const kind of ['image', 'doc']) assert.deepEqual(await act(tom, 'page:push', { code: hall, to: 'board', content: { kind, url: big.url } }), { ok: false, error: 'Too large for the Board\'s devices — send a region.' }, kind);
+
+  // A fresh upload of the pusher's own is shown, and kept as the hall's stage file; another's is refused; one made from a
+  // Legal page is refused while Legal is off Main's list, naming Legal, and shown once it is on.
+  const fresh = await upload(sueJoin.uploadToken, 'p2.png', pngOf(20, 20), 'image/png');
+  assert.deepEqual(await act(tom, 'page:push', { code: hall, to: 'board', content: { kind: 'image', url: fresh.url } }), { ok: false, error: 'That file is in no room of this hall you can read — share it there first.' });
+  const pic = await act(sue, 'page:push', { code: hall, to: 'board', content: { kind: 'image', url: fresh.url, from: { url: up.url, at: { page: 2 } } } });
+  assert.equal(pic.ok, true, JSON.stringify(pic));
+  assert.equal(pic.results[0].status.showing, 'Sue Staff\'s picture of Board pack.pdf, p. 2');
+  assert.deepEqual(rows().at(-1), [hall, 'the Board (2 pages) → a picture of a PDF page (p. 2)', 'sue']);
+  await until(() => kept().files && kept().files[fresh.url.slice(9)], 4000, 'the stage file kept');
+  assert.deepEqual(kept().files[fresh.url.slice(9)], { at: kept().files[fresh.url.slice(9)].at, room: hall, uid: kept().files[fresh.url.slice(9)].uid, name: 'p2.png', named: true });
+  const legalPic = await upload(sueLegalJoin.uploadToken, 'legal.png', pngOf(10, 10), 'image/png');
+  assert.deepEqual(await act(sue, 'page:push', { code: hall, to: 'board', content: { kind: 'image', url: legalPic.url } }), { ok: false, error: 'That file belongs to Legal, which may not send into the Main room — send it there first, or ask an admin.' });
+  assert.equal((await act(ctl, 'room:update', { code: hall, sendFrom: [LEGAL] })).ok, true);
+  const fromLegal = await act(sue, 'page:push', { code: hall, to: 'board', content: { kind: 'image', url: legalPic.url } });
+  assert.equal(fromLegal.ok, true, JSON.stringify(fromLegal));
+  assert.equal(fromLegal.results[0].status.showing, 'legal.png in Legal');
+
+  // Withdraw: refused to a seat that may only show for a take it did not put up; by its pusher, from every Board page and
+  // from Earlier, each told; one row; asked again, done.
+  assert.deepEqual(await act(sid, 'page:withdraw', { code: hall, seq: pushed.seq }), { ok: false, error: 'Only who showed it, the operator or the admin can withdraw it.' });
+  const before = withdrawals(gil).length;
+  assert.deepEqual(await act(sue, 'page:withdraw', { code: hall, seq: pushed.seq }), { ok: true, withdrawn: pushed.seq, words: 'Withdrawn from 2 Board pages — it is no longer under Earlier.' });
+  await until(() => withdrawals(gil).length > before && withdrawals(kim).some((x) => x.withdrawn === pushed.seq), 4000, 'each Board page told');
+  assert.deepEqual(withdrawals(gil).at(-1), { withdrawn: pushed.seq });
+  assert.deepEqual(rows().at(-1), [hall, 'the Board (2 pages) → a PDF at p. 2, withdrawn', 'sue']);
+  assert.deepEqual(await act(sue, 'page:withdraw', { code: hall, seq: pushed.seq }), { ok: true, already: true, withdrawn: pushed.seq });
+  const gilBack = await page(undefined, 'Gil again');
+  const gilAgain = await joined(gilBack, { roomCode: hall, name: 'Gil', role: 'board', uid: gilJoin.identity });
+  assert.ok(!gilAgain.earlier.some((e) => e.seq === pushed.seq), 'no longer under Earlier');
+  // The operator withdraws a researcher's take; a take that is no information, or none, is not one to withdraw.
+  assert.equal((await act(tom, 'page:withdraw', { code: hall, seq: fromLegal.seq })).ok, true);
+  const clock = await act(tom, 'page:push', { code: hall, to: 'board', content: { kind: 'clock' } });
+  assert.deepEqual(await act(tom, 'page:withdraw', { code: hall, seq: clock.seq }), { ok: false, error: 'That is not on anyone\'s pages or under Earlier now.' });
+  assert.deepEqual(await act(tom, 'page:withdraw', { code: hall, seq: 'x' }), { ok: false, error: 'Withdraw names the take it withdraws.' });
+  assert.deepEqual(await act(gil, 'page:withdraw', { code: hall, seq: ticked.seq }), { ok: false, error: 'Do that from a backstage page.' });
+  assert.equal((await act(ctl, 'page:withdraw', { code: hall, seq: ticked.seq })).ok, true, 'the admin');
+
+  // A Word file that never had its check (one shared before the checks, or before a restart: its file swapped here for one
+  // with a macro part) has it at its first take, and is refused in its words.
+  const word = officeZip(wordParts({ body: '<w:p><w:r><w:t>Minutes</w:t></w:r></w:p>' }));
+  const docx = await upload(sueJoin.uploadToken, 'minutes.docx', word, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  assert.equal(docx.status, 200, JSON.stringify(docx));
+  assert.equal((await act(sue, 'message', { type: 'file', url: docx.url, filename: 'Minutes.docx' })).ok, true);
+  const twice = await upload(tomJoin.uploadToken, 'twice.png', pngOf(12, 12), 'image/png');
+  assert.equal((await act(tom, 'message', { type: 'file', url: twice.url, filename: 'twice.png', mime: 'image/png' })).ok, true);
+  srv = await restartServer(srv);
+  fs.writeFileSync(path.join(srv.dataDir + '-uploads', docx.url.slice(9)), officeZip({ ...wordParts({ body: '<w:p/>' }), 'word/vbaProject.bin': Buffer.from('macro') }));
+  const tomAfter = await page(tomCookie, 'Tom after the restart');
+  await joined(tomAfter, { roomCode: hall, as: 'account' });
+  assert.deepEqual(await act(tomAfter, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: docx.url } }), { ok: false, error: 'That file carries macros. Save it without them, or as a PDF.' });
+  // A push sent again while the first is still being made (its picture's first check this run under way, off the socket's
+  // turn) waits for it and is answered with what it did: one take, one row.
+  const rowsBefore = rows().length;
+  const asked = { code: hall, to: 'board', content: { kind: 'image', url: twice.url }, cid: 'twice-1' };
+  const [once, again] = await Promise.all([act(tomAfter, 'page:push', asked), act(tomAfter, 'page:push', asked)]);
+  assert.equal(once.ok, true, JSON.stringify(once));
+  assert.deepEqual(again, once);
+  assert.equal(rows().length, rowsBefore + 1, 'one row');
+  assert.deepEqual(await act(tomAfter, 'page:push', asked), once, 'and once it is made, from what it kept');
+  for (const [, words] of rows()) assert.ok(!/Board pack|Minutes|Stage plan|p2\.png|legal\.png|\/uploads\//.test(words), words);
 });

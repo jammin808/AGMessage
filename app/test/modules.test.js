@@ -192,7 +192,7 @@ const HANDLER_MAY = {
 /** A store or an edge one handler module requires by name, for the pure functions it holds, with why. */
 const HANDLER_ROWS = {
   'lib/handlers/takes.js': {
-    'lib/pages.js': { names: ['cleanPage', 'askedOf', 'describePage', 'canShow', 'cleanSnippet', 'personKey', 'layerOf', 'ARRIVALS'], why: 'the pages\' pure vocabulary, kept where it is tested (a person\'s key, what a pusher asked for, a kind\'s layer and the arrivals among it); the store itself reaches the module through its context' },
+    'lib/pages.js': { names: ['cleanPage', 'askedOf', 'describePage', 'canShow', 'cleanSnippet', 'personKey', 'layerOf', 'fileOf', 'ARRIVALS', 'FILE_KINDS', 'STAGE_FULL'], why: 'the pages\' pure vocabulary, kept where it is tested (a person\'s key, what a pusher asked for, a kind\'s layer and the arrivals among it, the kinds that show a file, the upload a take shows and the stage\'s bound in words); the store itself reaches the module through its context' },
   },
 };
 
@@ -724,7 +724,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'stageSource', 'stageCheck', 'freshUpload', 'stageDropped', 'io']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -754,7 +754,7 @@ test('(d) a planted handler module that requires past its row, or makes what it 
   assert.deepEqual(rooms("const { ...all } = require('../guard');"), ['lib/handlers/rooms.js:6: takes ... from lib/guard.js, which is not among its pure helpers (str, cleanText, mac, Bucket)']);
   // The one row: the takes module takes the pages' pure vocabulary by name; no other module requires the store.
   assert.deepEqual(run('lib/handlers/takes.js', "const { cleanPage, canShow } = require('../pages');"), []);
-  assert.deepEqual(run('lib/handlers/takes.js', "const { PagesStore } = require('../pages');"), ['lib/handlers/takes.js:6: takes PagesStore from lib/pages.js, which is not among its pure helpers (cleanPage, askedOf, describePage, canShow, cleanSnippet, personKey, layerOf, ARRIVALS)']);
+  assert.deepEqual(run('lib/handlers/takes.js', "const { PagesStore } = require('../pages');"), ['lib/handlers/takes.js:6: takes PagesStore from lib/pages.js, which is not among its pure helpers (cleanPage, askedOf, describePage, canShow, cleanSnippet, personKey, layerOf, fileOf, ARRIVALS, FILE_KINDS, STAGE_FULL)']);
   assert.deepEqual(rooms("const { cleanPage } = require('../pages');"), ['lib/handlers/rooms.js:6: requires lib/pages.js: a store, a link or an edge reaches a handler module only through its context']);
   // Nothing it requires is made in it, however it is reached; a word in a comment or a string is not code.
   assert.deepEqual(rooms("const { Bucket } = require('../guard');\nconst b = new Bucket(5, 15);"), ['lib/handlers/rooms.js:7: makes what it requires (new Bucket): it is given the server\'s, through its context']);
@@ -1559,6 +1559,8 @@ const ANY_ROOM = {
     'people\'s pages: a person\'s take reaches every page of theirs in any room of the hall, and a Board take the hall\'s Main room',
     'the admin\'s view of a person is told the chat view their seat draws in the room it shows, Main or side',
     'a room\'s people list told again, by its key, Main or side, when what its admin\'s rows say of a person changed (their chat view)',
+    'a file on people\'s pages ends with its message only where no other message of the hall, in any of its rooms, holds it',
+    'a file a take would show: the rooms of its hall, Main or side, whose messages hold it, and the room a fresh upload was made for',
   ],
   'lib/handlers/rooms.js': [
     'a hall full of rooms says how many it holds',
@@ -1674,6 +1676,9 @@ test('(n) the kinds in step: lib/pages.js\'s KINDS and describePage\'s words are
   const boardKinds = [...C.KINDS.board.filter((e) => e.verb === 'page:push' && e.radio).map((e) => e.id)];
   assert.deepEqual(boardKinds, ['chat', ...pagesLib.SHOW_LAYER].map((k) => 'board.' + k));
   assert.deepEqual([...C.SHOW_KINDS.map((k) => k[0])], [...pagesLib.KINDS]);
+  // A document and a picture are shown from a file, never from the chip, which names none: the page's file kinds are the
+  // store's.
+  assert.deepEqual([...C.FILE_KINDS], [...pagesLib.FILE_KINDS]);
   assert.deepEqual(kindsCatalogueProblems(C, pagesLib.KINDS), []);
   assert.deepEqual(kindsCatalogueProblems(C, ['chat', 'clock']), ['the store\'s kinds and the Board chip\'s are not one set: board.chat, board.stage, board.clock, board.holding, board.blank, board.web against board.chat, board.clock'], 'a kind the store has not fails it');
 });
@@ -1685,13 +1690,13 @@ function catalogOf() {
   vm.runInContext(read('public/catalog.js'), ctx, { filename: 'catalog.js' });
   return ctx.AGM.catalog;
 }
-/** The Board chip's show kinds against `kinds`: one set, in order. */
+/** The Board chip's show kinds against `kinds` (but the kinds shown from a file, FILE_KINDS): one set, in order. */
 function kindsCatalogueProblems(C, kinds) {
   // The show's kinds, a radio each (the Board's pages show one at a time), then the information's, an entry each.
   const radio = C.KINDS.board.filter((e) => e.verb === 'page:push' && e.radio).map((e) => e.id);
   const info = C.KINDS.board.filter((e) => e.verb === 'page:push' && !e.radio && C.SHOW_KINDS.some((k) => 'board.' + k[0] === e.id)).map((e) => e.id);
   const ids = [...radio, ...info];
-  const want = kinds.map((k) => 'board.' + k);
+  const want = kinds.filter((k) => !C.FILE_KINDS.includes(k)).map((k) => 'board.' + k);
   return JSON.stringify(ids) === JSON.stringify(want) ? [] : ['the store\'s kinds and the Board chip\'s are not one set: ' + ids.join(', ') + ' against ' + want.join(', ')];
 }
 

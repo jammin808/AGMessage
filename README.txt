@@ -648,8 +648,8 @@ puts it in the side bar's On stage, and Show again there brings it back.
 A take waits while someone is typing, and a priority message still shows
 over it.
 
-Information (a web page now; files, pictures and quotes as they come) is
-drawn over the show, never in its place: a web page goes over the clock,
+Information (a web page, a document or a picture; quotes as they come)
+is drawn over the show, never in its place: a web page goes over the clock,
 the console's Board row reads the clock "under a web page", and Back to
 chat on the web page brings the clock back. Over the operator's blank it
 waits: the tablet stays dark, its bar (once touched) reads "1 from
@@ -694,6 +694,41 @@ Turning it off, or unlocking, stops their next web page; one already up
 stays until someone takes it down, and the panel offers Take it down,
 even for a person who has no page open now: it takes the web page down
 and leaves the show under it.
+
+A document or a picture shown on people's pages
+-----------------------------------------------
+A document is the whole file, opened at a page (a slide, a sheet, a
+line): the tablet pages, zooms and finds in it, with the same drawing
+the side bar's reader gives (hidden rows, sheets and Word's hidden text
+left out). A picture is fitted, with zoom, and says what it is a picture
+of ("Ana's picture of Board pack.pdf, p. 12"). Only a file of the Main
+room, of a side room on the Main room's list, or the sender's own fresh
+upload is shown, and a document never to an observer (observers are
+shown pictures and quotes). A very large picture is refused ("Too large
+for the Board's devices - send a region."), and so is a Word, Excel or
+PowerPoint file that fails the checks it had at upload.
+
+Shown by mistake? Withdraw it: the toast offers Take down and Withdraw
+for 10 seconds, and later the Board chip's (or the person's) Withdraw...
+does it. Take down leaves it under Earlier; Withdraw takes it from every
+page and from Earlier too. Clearing the Main room's messages ends every
+document, picture and web page on the Board's pages (the show stays);
+clearing a side room ends what came from it; deleting a file's message
+ends what shows that file (the admin is asked first).
+
+What a Board tablet keeps: nothing AGMessage writes or offers. What is
+shown is drawn from memory and let go when it goes; files are never kept
+in the browser's cache, and opening a file's address does not save it or
+open it. On what is shown, a right-click (Shift+right-click too) opens
+AGMessage's menu, which has no Save; pictures cannot be dragged out, a
+long press on an iPad offers no "Save to Photos", and printing leaves
+the stage out. What cannot be prevented: a screenshot, a screen
+recording or a photo of the screen; a desktop browser's developer tools;
+copying or retyping the words; Firefox's own menu on Shift+right-click.
+A picture drawn for the stage lives while a take or Earlier shows it,
+and for an hour after; then it leaves the laptop. Download on a file
+(the backstage team's and the admin's) still saves it under its name:
+the page reads the file and hands it to the browser to save.
 
 Stagewatch (the countdown) for each hall
 ----------------------------------------

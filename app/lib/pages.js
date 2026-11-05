@@ -8,7 +8,7 @@
  * person's, or the Board's when it sits On stage in Main. Latest wins, and `chat` hands a page back to its chat.
  *
  * A page holds two layers (plan 4-§5.9.1): the show (Stagewatch, the clock, holding, blank: the operator's, canPush's
- * alone) and information over it (a web page; files, pictures and quotes as they land), drawn over the show take and never
+ * alone) and information over it (a web page, a document, a picture; quotes as they land), drawn over the show take and never
  * replacing it. `chat` hands back both; `{kind: 'chat', layer: 'info'}` the information alone, which is all `canShow` may
  * hand back, and only over a take `canShow` put up. An information take keeps whether its pusher held canPush (`by.op`),
  * so a researcher's push never covers or takes down what the operator put over the Board's chat, on the Board's take or
@@ -25,17 +25,25 @@
  * to chat) or minimised said so in the person's name. A page reports only what a take of its kind can be. A person's
  * answer (Back to chat, Minimise) counts only for the take it answered: a newer take shows again.
  *
+ * A document or a picture shows a file the hall holds, from a place the stage may show it from (sourceOk, pure); a
+ * fresh upload one names is kept as the hall's stage file while a take or Earlier names it and for the wait after
+ * (`files`); a take shown by mistake is withdrawn, from its pages and Earlier, and kept by its number (`withdrawn`); a
+ * reset or a deleted file ends the takes it names (endTakes).
+ *
  * Stored in `pages.json` (one write lane, written only once this copy holds its data folder: `hold()`): the takes by
- * hall and layer, the persons' answers, each hall's Earlier list, and the guests' chat views; each bounded, the oldest
- * going first. A record of
+ * hall and layer, the persons' answers, each hall's Earlier list, stage files and withdrawn takes, and the guests' chat
+ * views; each bounded, the oldest going first. A record of
  * the wrong shape is dropped when it is read. The reports are the run's alone: never saved, and a page that goes takes
  * its report with it.
  *
  *   askedOf(c)           : the kind and layer a pusher asked for, read before anything else of it, or null (pure)
  *   canShow(f, k, to, a) : whether a push of a kind to a target may be made: true, or why not in words (pure)
  *   cleanPage(c, facts)  : a take a pusher asked for, made safe, or {error} (pure, fail closed)
+ *   sourceOk(url, facts) : where a file shown on the stage may come from: its name and room, or {error} (pure)
+ *   placeOf(at, ext)     : a document's place made safe for its file's type (pure)
+ *   fileOf(c)            : the upload a take's content shows (a document's, a picture's, a holding slide's), or '' (pure)
  *   webUrl(v, selfHosts) : a web page's address made safe, {url, host}, or {error} (pure, fail closed)
- *   describePage(c, o)   : what a take shows, in a few words (pure)
+ *   describePage(c, o)   : what a take shows, in a few words, in the console's voice or the audit's (pure)
  *   Pages.status(...)    : a take's status over the pages that hold it: a mark and its words, person first (pure)
  *
  * A web page (`web`) is a take of its own: an https address a person's page frames (public/pagelayer.mjs framePage).
@@ -50,10 +58,12 @@ const { clockOf } = require('./tunnelend');
 /**
  * The kinds a take may be: back to the chat; Stagewatch's countdown; AGMessage's clock; a holding slide (the picture given,
  * the hall's holding picture, or the AGMessage mark and the hall's name on black); black; a web page (an https address,
- * framed by the page). Anything else is refused, never defaulted.
+ * framed by the page); a document (a file shared in AGMessage, the whole of it, opened at a place, which its target pages
+ * through); a picture (an image shared in AGMessage, or one drawn of a page or a part of one). Anything else is refused,
+ * never defaulted.
  */
-const KINDS = Object.freeze(['chat', 'stage', 'clock', 'holding', 'blank', 'web']);
-const KINDS_WORDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.';
+const KINDS = Object.freeze(['chat', 'stage', 'clock', 'holding', 'blank', 'web', 'doc', 'image']);
+const KINDS_WORDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document or a picture.';
 /** The layers a page holds, each with its own take and its own answer: the show, and information drawn over it. */
 const LAYERS = Object.freeze(['show', 'info']);
 /**
@@ -66,10 +76,21 @@ const SLOTS = Object.freeze(['show', 'info', 'beside']);
 /** The show layer's kinds: the operator's (canPush's alone). */
 const SHOW_LAYER = Object.freeze(['stage', 'clock', 'holding', 'blank']);
 /**
- * The information layer's kinds, by name: a web page, and the document, picture and quote kinds whose rights `canShow`
- * reads already (they are refused by cleanPage, as unknown kinds, until their kinds land).
+ * The information layer's kinds, by name: a web page, a document, a picture, and the quote kind whose rights `canShow`
+ * reads already (refused by cleanPage, as an unknown kind, until it lands).
  */
 const INFO_LAYER = Object.freeze(['web', 'doc', 'image', 'snippet']);
+/** The kinds that show a file the hall holds (a document, a picture): each names its upload, and the stage keeps it while it does. */
+const FILE_KINDS = Object.freeze(['doc', 'image']);
+/**
+ * The upload a take's content shows, by its address ('' for none): a document's or a picture's file, and a holding slide's
+ * own picture, which the stage keeps while a take names it as it keeps a document's.
+ */
+const fileOf = (c) => {
+  if (!isRecord(c)) return '';
+  const url = FILE_KINDS.includes(own(c, 'kind')) ? own(c, 'url') : own(c, 'kind') === 'holding' ? own(c, 'image') : undefined;
+  return typeof url === 'string' && guard.validUploadUrl(url) ? url : '';
+};
 /** A kind's layer: 'show' or 'info'; '' for `chat`, whose layers are its own (layersOf), and for anything else. */
 const layerOf = (kind) => (SHOW_LAYER.includes(kind) ? 'show' : INFO_LAYER.includes(kind) ? 'info' : '');
 /** The layers a take's content changes: `chat` both, or the information alone (`layer: 'info'`); any other its kind's. */
@@ -109,6 +130,34 @@ const STAGE_TYPES = Object.freeze(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', '
  * never parsed on the Board's devices unasked.
  */
 const TRANSFER_ONLY = Object.freeze([]);
+/**
+ * Where a document opens, by its file's type: the keys of a place each type reads, its own key first (the one a place of
+ * that type must name), each a whole number up to its bound. A Word document's place is a paragraph (`block`), with the
+ * page it is on where the researcher's reader knew it (`page`) and whether that page is Word's own or a guess (`approx`,
+ * only with a page); a CSV's is a row, kept as its `line`. A picture has no place: it is shown whole.
+ */
+const PLACES = Object.freeze({
+  pdf: ['page'], pptx: ['slide'], xlsx: ['sheet'], xls: ['sheet'], docx: ['block', 'page', 'approx'], txt: ['line'], md: ['line'], csv: ['line'],
+  png: [], jpg: [], jpeg: [], gif: [], webp: [],
+});
+const PLACE_KEYS = Object.freeze(['page', 'slide', 'sheet', 'block', 'line', 'approx']);
+const PLACE_MAX = Object.freeze({ page: 9999, slide: 9999, sheet: 64, block: 999999, line: 999999 });
+const AT_WORDS = 'That place cannot be read for this file: a page or a slide (1-9999), a sheet (1-64), a paragraph or a line (1-999999).';
+/** A file's type in the audit's words ("a PDF at p. 12"), never its name. */
+const TYPE_SAID = Object.freeze({
+  pdf: 'a PDF', docx: 'a Word document', xlsx: 'a spreadsheet', xls: 'a spreadsheet', pptx: 'a slide deck', csv: 'a table', txt: 'a text file',
+  md: 'a Markdown file', png: 'an image', jpg: 'an image', jpeg: 'an image', gif: 'an image', webp: 'an image',
+});
+/** The words a file the stage shows is refused in (plan 4-§5.9.3, §5.9.5). */
+const FILE_WORDS = 'A document or a picture is a file shared in AGMessage.';
+const IMAGE_WORDS = 'A picture is a PNG, JPEG, GIF or WebP shared in AGMessage.';
+const NOT_STAGE = 'AGMessage does not show that kind of file on the stage: share it for download.';
+const FOR_DOWNLOAD = 'That file is for download only: AGMessage does not open it.';
+const NOT_HELD = 'That file is in no room of this hall you can read — share it there first.';
+const OTHER_ROOM = 'That file belongs to another room — send it from there.';
+const OBSERVERS = 'Observers are shown pictures and quotes, not documents.';
+/** The stage's files a hall keeps at most, and the words a new one is refused in once that many are on its pages. */
+const STAGE_FULL = 'This hall\'s stage holds 200 files — take some down.';
 /** What a page reports of a take: drawn and in view, drawn out of view, a web page opened, not drawn, put away, minimised. */
 const REPORTS = Object.freeze(['shown', 'hidden', 'opened', 'failed', 'dismissed', 'minimised']);
 /**
@@ -154,7 +203,7 @@ const VIEWS = Object.freeze(['', 'simple', 'full']);
  * its one meaning there; test/modules.test.js holds each to that table, name and mark.
  */
 const MARKS = Object.freeze({ ok: '✓', partly: '◐', unseen: '◇', minimised: '▭', off: '○', waiting: '◷', couldNot: '△', fault: '✕' });
-const BOUNDS = Object.freeze({ views: 5000, personTakes: 200, answers: 500, earlier: 20 });
+const BOUNDS = Object.freeze({ views: 5000, personTakes: 200, answers: 500, earlier: 20, stageFiles: 200, withdrawn: 200 });
 
 const HALL = /^[A-Z0-9]{4,12}$/;
 const PERSON = /^[au]:[A-Za-z0-9_-]{1,64}$/;
@@ -218,13 +267,134 @@ function askedOf(c) {
 }
 
 /**
+ * A place a document opens at, made safe for its file's type `ext` (pure): {at} (a fresh object of the keys that type reads,
+ * each a whole number in its range, `approx` kept only as true, with a Word document's page), {} for none asked, or {error}.
+ * A key of another type's place, or one out of its range, refuses it; a type with a place of its own must name it.
+ */
+function placeOf(at, ext) {
+  if (at === undefined) return {};
+  if (!isRecord(at)) return { error: AT_WORDS };
+  const keys = Object.hasOwn(PLACES, ext) ? PLACES[ext] : [];
+  if (PLACE_KEYS.some((k) => Object.hasOwn(at, k) && !keys.includes(k))) return { error: AT_WORDS };
+  const out = {};
+  for (const k of keys) {
+    if (!Object.hasOwn(at, k)) continue;
+    const v = at[k];
+    if (k === 'approx') { if (typeof v !== 'boolean') return { error: AT_WORDS }; continue; }
+    if (!whole(v) || v > PLACE_MAX[k]) return { error: AT_WORDS };
+    out[k] = v;
+  }
+  if (Object.hasOwn(at, 'approx') && !Object.hasOwn(out, 'page')) return { error: AT_WORDS };
+  if (at.approx === true) out.approx = true;
+  if (keys.length && !Object.hasOwn(out, keys[0])) return { error: AT_WORDS };
+  return keys.length ? { at: out } : {};
+}
+
+/**
+ * A place in words, for a file of type `ext` (pure): "p. 12", "≈ p. 3" (a Word page that is a guess), "slide 3", "sheet 2",
+ * "line 40", "row 4" (a CSV's), "¶ 12" (a Word paragraph whose page was not known); '' for none.
+ */
+function placeWords(at, ext) {
+  if (!isRecord(at)) return '';
+  if (whole(at.page)) return (at.approx === true ? '≈ p. ' : 'p. ') + at.page;
+  if (whole(at.slide)) return 'slide ' + at.slide;
+  if (whole(at.sheet)) return 'sheet ' + at.sheet;
+  if (whole(at.block)) return '¶ ' + at.block;
+  if (whole(at.line)) return (ext === 'csv' ? 'row ' : 'line ') + at.line;
+  return '';
+}
+
+/**
+ * Where a file the stage would show may come from (pure; plan 4-§5.9.5): {name, room, roomName, fresh?} (`name`, the
+ * file's name as AGMessage holds it, never the pusher's; `room`, the side room it belongs to, '' for the Main room;
+ * `fresh`, its record when it is this pusher's own upload, not yet in any message), or {error} in words. One of:
+ *   1. a fresh upload by this pusher no message holds yet, made for the hall's Main room, or for a side room on Main's
+ *      list where the pusher may post with files;
+ *   2. a file in a message of the Main room;
+ *   3. a file in a message of a side room the pusher may read, on Main's list;
+ *   4. a file the hall's stage records (a stage file, or one a take or Earlier names), when the room it was recorded for
+ *      passes rule 2 or 3.
+ * Never a transfer-only file. A refusal names the room the file belongs to only to one who may read it.
+ *
+ * `facts`, the server's: `main` (the Main room's key), `uid` (the pusher's), `holders(url)` (the rooms of the hall whose
+ * messages hold the file, each {key, at, name}: the room, the oldest such message's time and its file's name),
+ * `fresh(name)` (this run's record of an upload, {room, uid, name}, or null), `recorded(name)` (the hall's record of it,
+ * {room, name}, or null), `reads(key)`, `listed(key)` (the Main room, or on its list), `files(key)` (the pusher may post
+ * with files there), `roomName(key)`.
+ */
+function sourceOk(url, facts = {}) {
+  const f = isRecord(facts) ? facts : {};
+  const fn = (k) => (typeof f[k] === 'function' ? f[k] : () => null);
+  if (!guard.validUploadUrl(url)) return { error: FILE_WORDS };
+  const file = url.slice(9);
+  const ext = guard.extOf(file);
+  if (TRANSFER_ONLY.includes(ext)) return { error: FOR_DOWNLOAD };
+  if (!STAGE_TYPES.includes(ext)) return { error: NOT_STAGE };
+  const main = typeof f.main === 'string' ? f.main : '';
+  const reads = (k) => fn('reads')(k) === true;
+  const listed = (k) => k === main || fn('listed')(k) === true;
+  // Rules 2 and 3: the Main room's, or a side room's the pusher reads that is on Main's list.
+  const passes = (k) => !!k && (k === main || (reads(k) && listed(k)));
+  const named = (k, name) => ({ name: guard.cleanText(name, 120) || file.replace(/^[0-9]+-[a-z0-9]+-/, ''), room: k === main ? '' : k, roomName: k === main ? '' : guard.cleanText(fn('roomName')(k), 60) });
+  // Rule 1 is an upload no message holds yet: one posted is its room's (rules 2 and 3), never the stage's to keep.
+  const holders = (Array.isArray(fn('holders')(url)) ? fn('holders')(url) : []).filter((h) => isRecord(h) && typeof h.key === 'string');
+  const fresh = fn('fresh')(file);
+  const mine = isRecord(fresh) && typeof fresh.uid === 'string' && fresh.uid === f.uid && typeof fresh.room === 'string';
+  if (mine && !holders.length && (fresh.room === main || (listed(fresh.room) && fn('files')(fresh.room) === true))) return { ...named(fresh.room, fresh.name), fresh: true };
+  const held = holders.filter((h) => passes(h.key)).sort((x, y) => (Number(x.at) || 0) - (Number(y.at) || 0))[0];
+  if (held) return named(held.key, held.name);
+  const rec = fn('recorded')(file);
+  if (isRecord(rec) && passes(rec.room)) return named(rec.room, rec.name);
+  // Refused: by the room it belongs to (a message's, the pusher's own upload's, the stage's record), named only to a reader.
+  const owner = (holders[0] && holders[0].key) || (mine ? fresh.room : '') || (isRecord(rec) && typeof rec.room === 'string' ? rec.room : '');
+  if (!owner) return { error: NOT_HELD };
+  if (owner !== main && reads(owner)) return { error: 'That file belongs to ' + (guard.cleanText(fn('roomName')(owner), 60) || 'another room') + ', which may not send into the Main room — send it there first, or ask an admin.' };
+  return { error: OTHER_ROOM };
+}
+
+/**
+ * A picture's source, as a page is told it and the store keeps it (pure): `from` as the pusher sent it, {url, at} of a
+ * file (read through `source`, sourceOk's verdict on it) or {local: true, name, at} for the researcher's own copy, made
+ * {name, type, at?, room?, roomName?} or {local: true, name, type, at?} (`type`, the source file's type, which its place
+ * is read for): never the source's address. {from}, {} for none, or {error}.
+ */
+function fromOf(from, source) {
+  if (from === undefined) return {};
+  if (!isRecord(from)) return { error: FILE_WORDS };
+  if (own(from, 'local') !== undefined) {
+    if (own(from, 'local') !== true || typeof own(from, 'name') !== 'string') return { error: FILE_WORDS };
+    const name = guard.cleanText(from.name, 120);
+    const ext = guard.extOf(name);
+    if (!name || !STAGE_TYPES.includes(ext)) return { error: NOT_STAGE };
+    const p = placeOf(own(from, 'at'), ext);
+    return p.error ? p : { from: { local: true, name, type: ext, ...(p.at ? { at: p.at } : {}) } };
+  }
+  const url = own(from, 'url');
+  if (typeof url !== 'string') return { error: FILE_WORDS };
+  const src = typeof source === 'function' ? source(url) : null;
+  if (!isRecord(src) || src.error) return { error: isRecord(src) && src.error ? src.error : NOT_HELD };
+  const type = guard.extOf(url);
+  const p = placeOf(own(from, 'at'), type);
+  if (p.error) return p;
+  return { from: { name: src.name, type, ...(p.at ? { at: p.at } : {}), ...(src.room ? { room: src.room, roomName: src.roomName } : {}) } };
+}
+
+/**
  * A take a pusher asked for, made safe, or {error} (pure). `facts` are the server's: `stagewatch`, whether the hall
- * has a Stagewatch linked; `readable(url)`, whether the file is in a message of a room of the hall the pusher may read;
- * `web`, true when this pusher may show a web page here (its own right, `stage.web`), else the words that say why not;
- * `selfHosts`, the names this AGMessage answers on (webUrl). Every result is a fresh object. An unknown kind, or a known
- * key of the wrong type, refuses the whole take with the kinds in words; a key it does not know is ignored. A `chat`
- * names the information layer alone (`layer: 'info'`) or no layer (both): any other layer is refused, never widened to
- * both. Missing facts refuse what needs them: a web page's right is read before its address.
+ * has a Stagewatch linked; `source(url)`, sourceOk's verdict on a file the take would show (a holding slide's picture, a
+ * document, a picture and the file a picture was drawn of); `observer`, whether the target sits as an observer on a page
+ * of theirs (a document hands over the whole file, which observers are never given); `web`, true when this pusher may
+ * show a web page here (its own right, `stage.web`), else the words that say why not; `selfHosts`, the names this
+ * AGMessage answers on (webUrl). Every result is a fresh object. An unknown kind, or a known key of the wrong type,
+ * refuses the whole take with the kinds in words; a key it does not know is ignored. A `chat` names the information layer
+ * alone (`layer: 'info'`) or no layer (both): any other layer is refused, never widened to both. Missing facts refuse what
+ * needs them: a web page's right is read before its address, a file's source before anything is kept of it.
+ *
+ * A document is {kind: 'doc', url, name, at?, download, note?, room?, roomName?}: the file whole, opened at a place of its
+ * type (placeOf), `download` true only when sent as true, `note` the pusher's line above it. A picture is {kind: 'image',
+ * url, name, from?, note?, room?, roomName?}: an image shared in AGMessage, and what it is a picture of (fromOf). There
+ * is no region: a part of a page or a picture is drawn into a picture of its own on the pusher's page. `name`, `room` (a
+ * side room's key the file belongs to, kept on this laptop alone) and `roomName` are the server's, from the file's source.
  */
 function cleanPage(c, facts = {}) {
   const kind = isRecord(c) ? own(c, 'kind') : undefined;
@@ -243,9 +413,12 @@ function cleanPage(c, facts = {}) {
       if (image === undefined) return { kind };
       if (typeof image !== 'string') return { error: KINDS_WORDS };
       if (!guard.validUploadUrl(image) || !IMAGE_EXT.includes(guard.extOf(image))) return { error: 'A holding image is a PNG, JPEG, GIF or WebP shared in AGMessage.' };
-      if (!(facts && typeof facts.readable === 'function' && facts.readable(image) === true)) return { error: 'That picture is in no room of this hall you can read — share it there first.' };
+      const src = facts && typeof facts.source === 'function' ? facts.source(image) : null;
+      if (!isRecord(src) || src.error) return { error: isRecord(src) && src.error ? src.error : NOT_HELD };
       return { kind, image };
     }
+    case 'doc':
+    case 'image': return cleanFile(kind, c, facts);
     case 'web': {
       const may = facts ? facts.web : undefined;
       if (may !== true) return { error: typeof may === 'string' && may ? may : 'Web pages on the stage need their own right — ask an admin.' };
@@ -259,8 +432,74 @@ function cleanPage(c, facts = {}) {
 }
 
 /**
+ * A document or a picture a pusher asked for, made safe (cleanPage's `doc` and `image`): its address an upload of a type
+ * the stage shows (a picture's an image's), its source passed (facts.source), a document never to an observer, its place
+ * one of its type's, its note a line of at most 200 characters, and for a picture what it is a picture of.
+ */
+function cleanFile(kind, c, facts) {
+  const f = isRecord(facts) ? facts : {};
+  const url = own(c, 'url');
+  if (typeof url !== 'string' || !guard.validUploadUrl(url)) return { error: kind === 'image' ? IMAGE_WORDS : FILE_WORDS };
+  const ext = guard.extOf(url);
+  if (kind === 'image' && !IMAGE_EXT.includes(ext)) return { error: IMAGE_WORDS };
+  if (kind === 'doc' && f.observer === true) return { error: OBSERVERS };
+  const note = own(c, 'note');
+  if (note !== undefined && typeof note !== 'string') return { error: KINDS_WORDS };
+  const src = typeof f.source === 'function' ? f.source(url) : null;
+  if (!isRecord(src) || src.error) return { error: isRecord(src) && src.error ? src.error : NOT_HELD };
+  const room = src.room ? { room: src.room, roomName: src.roomName } : {};
+  const said = note !== undefined && guard.cleanText(note, 200) ? { note: guard.cleanText(note, 200) } : {};
+  if (kind === 'doc') {
+    const p = placeOf(own(c, 'at'), ext);
+    if (p.error) return p;
+    return { kind, url, name: src.name, ...(p.at ? { at: p.at } : {}), download: own(c, 'download') === true, ...said, ...room };
+  }
+  const from = fromOf(own(c, 'from'), f.source);
+  if (from.error) return from;
+  return { kind, url, name: src.name, ...(from.from ? { from: from.from } : {}), ...said, ...room };
+}
+
+/** A stored place for a file of type `ext`, read back: {at} or {} (none), or null for one that is not its type's. */
+const storedPlace = (at, ext) => { const p = placeOf(at, ext); return p.error ? null : p; };
+/** A stored side room of a file ({room, roomName}), read back: {} for the Main room's, or null for one of the wrong shape. */
+function storedRoom(c) {
+  const room = own(c, 'room');
+  if (room === undefined) return own(c, 'roomName') === undefined ? {} : null;
+  return HALL.test(guard.str(room)) && typeof own(c, 'roomName') === 'string' && c.roomName.length <= 60 ? { room, roomName: c.roomName } : null;
+}
+/** A stored document or picture, read back in its clean shape, or null. */
+function storedFile(c) {
+  const kind = own(c, 'kind');
+  const url = own(c, 'url');
+  const name = own(c, 'name');
+  if (!guard.validUploadUrl(url) || typeof name !== 'string' || name.length > 120) return null;
+  const ext = guard.extOf(url);
+  if (!STAGE_TYPES.includes(ext) || (kind === 'image' && !IMAGE_EXT.includes(ext))) return null;
+  const note = own(c, 'note');
+  if (note !== undefined && !(typeof note === 'string' && note.length <= 200)) return null;
+  const room = storedRoom(c);
+  if (!room) return null;
+  const said = note !== undefined ? { note } : {};
+  if (kind === 'doc') {
+    const p = storedPlace(own(c, 'at'), ext);
+    if (!p || typeof own(c, 'download') !== 'boolean') return null;
+    return { kind, url, name, ...(p.at ? { at: p.at } : {}), download: c.download, ...said, ...room };
+  }
+  const from = own(c, 'from');
+  if (from === undefined) return { kind, url, name, ...said, ...room };
+  if (!isRecord(from) || typeof from.name !== 'string' || from.name.length > 120 || !STAGE_TYPES.includes(own(from, 'type'))) return null;
+  const local = own(from, 'local');
+  if (local !== undefined && local !== true) return null;
+  const p = storedPlace(own(from, 'at'), from.type);
+  const fromRoom = local ? {} : storedRoom(from);
+  if (!p || !fromRoom || (local && own(from, 'room') !== undefined)) return null;
+  return { kind, url, name, from: { ...(local ? { local: true } : {}), name: from.name, type: from.type, ...(p.at ? { at: p.at } : {}), ...fromRoom }, ...said, ...room };
+}
+
+/**
  * A take as it is stored, read back: a fresh object of a kind of KINDS in its clean shape, or null. A web page is kept
- * as its host and its sealed address ({kind, host, urlSealed}), never its address in clear.
+ * as its host and its sealed address ({kind, host, urlSealed}), never its address in clear; a document and a picture as
+ * cleanPage made them (storedFile).
  */
 function storedPage(c) {
   const kind = isRecord(c) ? own(c, 'kind') : undefined;
@@ -271,6 +510,7 @@ function storedPage(c) {
     const urlSealed = own(c, 'urlSealed');
     return isHost(host) && typeof urlSealed === 'string' && urlSealed.length <= 4 * WEB_MAX && SEALED.test(urlSealed) ? { kind, host, urlSealed } : null;
   }
+  if (FILE_KINDS.includes(kind)) return storedFile(c);
   if (kind !== 'holding') return { kind };
   const image = own(c, 'image');
   if (image === undefined) return { kind };
@@ -284,21 +524,60 @@ function storedPage(c) {
 const handBack = (c) => (own(c, 'layer') === 'info' ? 'the information taken down' : 'back to chat');
 
 /**
- * What a take shows, in a few words, for the console and the audit alike (pure): no kind names a file or carries a
- * path. A holding slide with no picture of its own shows the hall's (`hallHolding`) when the hall has one, else the
- * AGMessage mark. No take is the chat; anything else, ''.
+ * A document in a few words: in the console's voice by its name ("Board pack.pdf at p. 12"), in the audit's by its type
+ * ("a PDF at p. 12"); a side room's file adds its room ("… in Legal").
  */
-function describePage(c, { hallHolding = '' } = {}) {
+function docSaid(c, voice) {
+  const ext = guard.extOf(typeof own(c, 'url') === 'string' ? c.url : guard.str(own(c, 'name')));
+  const place = placeWords(own(c, 'at'), ext);
+  const what = voice === 'audit' ? (Object.hasOwn(TYPE_SAID, ext) ? TYPE_SAID[ext] : 'a document') : guard.str(own(c, 'name')) || 'a document';
+  return what + (typeof own(c, 'roomName') === 'string' && c.roomName ? ' in ' + c.roomName : '') + (place ? ' at ' + place : '');
+}
+/**
+ * A picture in a few words: in the console's voice by whose picture it is and of what ("Ana's picture of Board pack.pdf,
+ * p. 12", "… of part of Stage plan.png", "… of their copy of Board pack.pdf, p. 12"), or, shown whole, by its name; in the
+ * audit's by kinds alone ("a picture of a PDF page (p. 12)", "a picture of part of an image", "…, from a local copy").
+ */
+function imageSaid(c, voice, by) {
+  const from = isRecord(own(c, 'from')) ? c.from : null;
+  const audit = voice === 'audit';
+  const inRoom = (o) => (typeof own(o, 'roomName') === 'string' && o.roomName ? ' in ' + o.roomName : '');
+  if (!from) return (audit ? 'a picture' : guard.str(own(c, 'name')) || 'a picture') + inRoom(c);
+  const type = guard.str(own(from, 'type'));
+  const place = placeWords(own(from, 'at'), type);
+  const local = own(from, 'local') === true;
+  const part = IMAGE_EXT.includes(type);
+  if (audit) {
+    const of = part ? 'part of an image' : (Object.hasOwn(TYPE_SAID, type) ? TYPE_SAID[type] : 'a file') + (type === 'pdf' ? ' page' : '');
+    return 'a picture of ' + of + (place && !part ? ' (' + place + ')' : '') + inRoom(from) + (local ? ', from a local copy' : '');
+  }
+  const who = (by ? by + '\'s picture' : 'a picture') + ' of ' + (part ? 'part of ' : '') + (local ? 'their copy of ' : '');
+  return who + guard.str(own(from, 'name')) + inRoom(from) + (place && !part ? ', ' + place : '');
+}
+
+/**
+ * What a take shows, in a few words (pure), in one of two voices (`voice`): the console's ('console', what a pusher reads:
+ * a document or a picture by its file's name and place) and the audit's ('audit', which never names a file, quotes a text
+ * or carries a path: a file by its type). A web page is named by its host in both. A holding slide with no picture of its
+ * own shows the hall's (`hallHolding`) when the hall has one, else the AGMessage mark. `by` names who put a picture up
+ * ("Ana's picture of …"), and a take sent from a side room says so (`sent`, its name: "…, sent from Legal"). No take is
+ * the chat; anything else, ''.
+ */
+function describePage(c, { hallHolding = '', voice = 'console', by = '', sent = '' } = {}) {
   if (!c) return 'the chat';
+  let words;
   switch (isRecord(c) ? own(c, 'kind') : undefined) {
-    case 'chat': return handBack(c);
-    case 'stage': return 'Stagewatch';
-    case 'clock': return 'the clock';
-    case 'holding': return own(c, 'image') || hallHolding ? 'a holding slide' : 'a holding slide with the AGMessage mark';
-    case 'blank': return 'blank';
-    case 'web': return typeof own(c, 'host') === 'string' && own(c, 'host') ? 'a web page on ' + own(c, 'host') : 'a web page';
+    case 'chat': words = handBack(c); break;
+    case 'stage': words = 'Stagewatch'; break;
+    case 'clock': words = 'the clock'; break;
+    case 'holding': words = own(c, 'image') || hallHolding ? 'a holding slide' : 'a holding slide with the AGMessage mark'; break;
+    case 'blank': words = 'blank'; break;
+    case 'web': words = typeof own(c, 'host') === 'string' && own(c, 'host') ? 'a web page on ' + own(c, 'host') : 'a web page'; break;
+    case 'doc': words = docSaid(c, voice); break;
+    case 'image': words = imageSaid(c, voice, guard.cleanText(by, 60)); break;
     default: return '';
   }
+  return sent ? words + ', sent from ' + guard.cleanText(sent, 60) : words;
 }
 
 // ---------------------------------------------------------------- who may show what (plan 4-§5.9.2.2)
@@ -386,8 +665,9 @@ function canShow(facts, kind, to, arrive = 'over') {
  * Who put a take up, as the store keeps it: their name; `guest` when a code guest did (a web page a guest showed is
  * counted when the admin stops guests showing them: Pages#guestWeb); `op` when its pusher held canPush (the operator's
  * information stays up: canShow); and `who`, the pusher by its actor's kind and id (`account:a…`, `code:u…`,
- * `admin:host`), kept for a web page alone, whose address a push's answer gives back to its own pusher and to no other
- * (lib/handlers/takes.js). None of `guest`, `op` or `who` goes to a page: a page is told the name alone.
+ * `admin:host`), kept for an information take: its pusher may withdraw it, and a web page's address a push's answer gives
+ * back to its own pusher and to no other (lib/handlers/takes.js). None of `guest`, `op` or `who` goes to a page: a page is
+ * told the name alone.
  */
 const WHO = /^(?:account|code|admin):[A-Za-z0-9_-]{1,64}$/;
 const byOf = (by) => ({
@@ -406,8 +686,20 @@ function storedTake(t, top) {
   const content = storedPage(t.content);
   if (!content || (t.arrive !== undefined && !(t.arrive === 'side' && layerOf(content.kind) === 'info'))) return null;
   if (t.aside !== undefined && !(t.aside === true && t.arrive === 'side')) return null;
-  return { seq: t.seq, content, by: byOf(t.by), at: t.at, ...(t.arrive === 'side' ? { arrive: 'side' } : {}), ...(t.aside === true ? { aside: true } : {}) };
+  const sent = sentOf(t.sent);
+  if (t.sent !== undefined && !sent) return null;
+  return { seq: t.seq, content, by: byOf(t.by), at: t.at, ...(t.arrive === 'side' ? { arrive: 'side' } : {}), ...(t.aside === true ? { aside: true } : {}), ...(sent ? { sent } : {}) };
 }
+/**
+ * The side room a take was sent from ({key, name}: kept on this laptop, said by its name, "…, sent from Legal"), read
+ * back, or null for none.
+ */
+const sentOf = (v) => (isRecord(v) && HALL.test(guard.str(v.key)) && typeof v.name === 'string' ? { key: v.key, name: guard.cleanText(v.name, 60) } : null);
+/** A stage file read back: the upload a take named, {at, room, uid, name, named?}, or null. */
+const storedStageFile = (f) => (isRecord(f) && Number.isFinite(f.at) && HALL.test(guard.str(f.room)) && (f.uid === '' || GUEST.test(guard.str(f.uid))) && typeof f.name === 'string' && f.name.length <= 120
+  ? { at: f.at, room: f.room, uid: f.uid, name: f.name, ...(f.named === true ? { named: true } : {}) } : null);
+/** A withdrawn take read back: its number and who withdrew it (an actor's kind and id), or null. */
+const storedWithdrawn = (w, top) => (isRecord(w) && whole(w.seq) && w.seq <= top ? { seq: w.seq, ...(typeof w.who === 'string' && WHO.test(w.who) ? { who: w.who } : {}) } : null);
 /** Whether a take read back belongs in a place (SLOTS): one of its layers, the information's never a take put beside. */
 const fitsSlot = (t, slot) => (slot === 'beside' ? layersOf(t.content).includes('info') : layersOf(t.content).includes(slot) && !(slot === 'info' && t.aside === true));
 /** An Earlier entry read back: a take of the information layer with whom it was for (`to`: 'board' or a person's key). */
@@ -440,9 +732,14 @@ function storedHall(book) {
     if (isRecord(o)) for (const [k, v] of Object.entries(o)) { const r = PERSON.test(k) ? readLayers(v, read) : null; if (r) out[k] = r; }
     return out;
   };
+  // A hall's stage files and its withdrawn takes are kept only once it has any.
+  const files = {};
+  if (isRecord(book.files)) for (const [name, f] of Object.entries(book.files)) { const r = guard.validUploadUrl('/uploads/' + name) ? storedStageFile(f) : null; if (r) files[name] = r; }
+  const withdrawn = Array.isArray(book.withdrawn) ? book.withdrawn.slice(-BOUNDS.withdrawn).map((w) => storedWithdrawn(w, book.seq)).filter(Boolean) : [];
   return {
     seq: book.seq, board: readLayers(book.board, take) || {}, people: keyed(book.people, take), answers: keyed(book.answers, answer),
     earlier: Array.isArray(book.earlier) ? book.earlier.slice(-BOUNDS.earlier).map((e) => storedEarlier(e, book.seq)).filter(Boolean) : [],
+    ...(Object.keys(files).length ? { files } : {}), ...(withdrawn.length ? { withdrawn } : {}),
   };
 }
 
@@ -460,9 +757,11 @@ class Pages {
    * `seal` and `open` keep a web page's address at rest (lib/secretbox.js): `seal` throws or answers '' where this run
    * cannot seal, and then no web take is kept; `open` answers '' for an address it cannot read.
    */
-  constructor(file, { seal = () => '', open = () => '' } = {}) {
+  constructor(file, { seal = () => '', open = () => '', wait = 60 * 60_000 } = {}) {
     this.seal = seal;
     this.open = open;
+    // How long a stage file is kept once nothing names it (the server's UPLOAD_ORPHAN_MS).
+    this.wait = Number.isFinite(wait) && wait >= 0 ? wait : 60 * 60_000;
     this.lane = new WriteLane(file, { delayMs: 100, keepBak: true, mode: 0o600 });
     const read = readJsonWhole(file);
     this.unread = read.codes[0] && read.codes[0] !== 'ENOENT' ? read.codes[0] : '';
@@ -513,15 +812,16 @@ class Pages {
    * `by.guest` marks a code guest's take, `by.op` one its pusher held canPush for. Returns the take, or null when a part is
    * not one the store keeps (a web page this run cannot seal among them).
    */
-  take(hall, to, content, by = {}, { onStage = [], at = Date.now(), arrive = 'over', aside = false, slot = '' } = {}) {
+  take(hall, to, content, by = {}, { onStage = [], at = Date.now(), arrive = 'over', aside = false, slot = '', sent = null } = {}) {
     const clean = storedPage(this._kept(content));
     if (!HALL.test(guard.str(hall)) || !(to === 'board' || PERSON.test(guard.str(to))) || !clean || !Number.isFinite(at) || !ARRIVALS.includes(arrive)) return null;
     const side = arrive === 'side' && layerOf(clean.kind) === 'info';
     const beside = aside === true && side;
     const slots = slotsOf(clean, { aside: beside, slot });
-    const book = this.halls[hall] || (this.halls[hall] = { seq: 0, board: {}, people: {}, answers: {}, earlier: [] });
+    const from = sentOf(sent);
+    const book = this._book(hall);
     book.seq += 1;
-    const t = { seq: book.seq, content: clean, by: byOf(by), at, ...(side ? { arrive: 'side' } : {}), ...(beside ? { aside: true } : {}) };
+    const t = { seq: book.seq, content: clean, by: byOf(by), at, ...(side ? { arrive: 'side' } : {}), ...(beside ? { aside: true } : {}), ...(from ? { sent: from } : {}) };
     const kept = (s) => (s === 'beside' && !beside && clean.kind !== 'chat' ? { seq: t.seq, content: { kind: 'chat', layer: 'info' }, by: t.by, at } : t);
     for (const s of slots) {
       const k = kept(s);
@@ -540,9 +840,14 @@ class Pages {
         this._drop(book.answers, to, s);
       }
     }
-    this._trim(book);
+    this._trim(book, at);
     this.save();
     return t;
+  }
+
+  /** A hall's book, made empty where it has none yet. */
+  _book(hall) {
+    return this.halls[hall] || (this.halls[hall] = { seq: 0, board: {}, people: {}, answers: {}, earlier: [] });
   }
 
   /**
@@ -561,8 +866,8 @@ class Pages {
    * Main (`board`), the Board's, the newest EARLIER_TOLD, the newest first, each as {seq, content, by: {name}, at}: its
    * content as the pages it was shown on are told it (`told`: a web page's address opened).
    */
-  earlierOf(hall, key, { board = false } = {}) {
-    return this._earlierFor(hall, key, board).map((e) => ({ seq: e.seq, content: this.told(e.content), by: { name: e.by.name }, at: e.at }));
+  earlierOf(hall, key, { board = false, observer = false } = {}) {
+    return this._earlierFor(hall, key, board).map((e) => ({ seq: e.seq, content: this.told(e.content, { observer }), by: { name: e.by.name }, at: e.at }));
   }
   /** The numbers of the Earlier entries a page is told, as one word: what moved there, read without opening an address. */
   earlierSaid(hall, key, { board = false } = {}) {
@@ -591,11 +896,225 @@ class Pages {
 
   /**
    * A take's content as a page it is shown on is told it (and as its pusher may read it back): a web page's address
-   * opened ({kind, url, host}, `url` '' where this machine cannot open it), every other kind as it is kept.
+   * opened ({kind, url, host}, `url` '' where this machine cannot open it); a document or a picture without the key of
+   * the side room it belongs to (a room's key is its guest code: its name is said); a document to a page seated as an
+   * observer (`observer`) without its address, which would hand over the whole file (`withheld`): that page draws
+   * nothing of it. Every other kind as it is kept.
    */
-  told(content) {
-    if (!isRecord(content) || content.kind !== 'web') return content;
-    return { kind: 'web', url: guard.str(this.open(content.urlSealed)), host: content.host };
+  told(content, { observer = false } = {}) {
+    if (!isRecord(content)) return content;
+    if (content.kind === 'web') return { kind: 'web', url: guard.str(this.open(content.urlSealed)), host: content.host };
+    if (!FILE_KINDS.includes(content.kind)) return content;
+    const { room, roomName, from, ...rest } = content;
+    const named = room ? { roomName } : {};
+    const of = isRecord(from) ? { from: Object.fromEntries(Object.entries(from).filter(([k]) => k !== 'room')) } : {};
+    if (content.kind === 'doc' && observer === true) return { kind: 'doc', name: rest.name, ...(rest.at ? { at: rest.at } : {}), withheld: true, ...named };
+    return { ...rest, ...of, ...named };
+  }
+
+  // ---------------------------------------------------------------- the stage's files (plan 4-§5.11)
+  // A stage file is an upload a take of the hall named that no message holds (a picture drawn of a page, a document or a
+  // holding slide's picture shown before it was shared, a file whose message went while a take still named it): kept by the
+  // hall ({at, room, uid, name}) while a take or an Earlier entry names it, and for its wait (this.wait, the server's
+  // UPLOAD_ORPHAN_MS) once nothing does (`named` gone, `at` then), so a push within that wait finds it again; then it is
+  // the server's to remove, unless a message, a screen or a hall's holding image holds it. At most BOUNDS.stageFiles a
+  // hall in use.
+
+  /**
+   * The uploads a hall's takes now and its Earlier entries name, by their file names: a document's, a picture's and a
+   * holding slide's own picture (fileOf); `info` true, the information's alone (a document's, a picture's: what a take-down
+   * ends).
+   */
+  _namedIn(book, { info = false } = {}) {
+    const out = new Set();
+    const add = (t) => {
+      const url = t ? fileOf(t.content) : '';
+      if (url && (!info || FILE_KINDS.includes(t.content.kind))) out.add(url.slice(9));
+    };
+    for (const s of SLOTS) add(own(book.board, s));
+    for (const r of Object.values(book.people || {})) for (const s of SLOTS) add(own(r, s));
+    for (const e of book.earlier || []) add(e);
+    return out;
+  }
+  /** Each stage file of a hall marked named or not, as its takes and Earlier stand now: one no longer named starts its wait `at`. */
+  _settle(book, at) {
+    if (!isRecord(book.files)) return;
+    const named = this._namedIn(book);
+    for (const [name, f] of Object.entries(book.files)) {
+      if (named.has(name)) f.named = true;
+      else if (f.named) { delete f.named; f.at = at; }
+    }
+  }
+  /** Whether a stage file is in use at `now`: a take or Earlier names it, or nothing has for less than the wait. */
+  _inUse(f, now) { return f.named === true || now - f.at < this.wait; }
+  /**
+   * Whether a hall's stage may keep the upload `name` at `now` (a take naming it is refused otherwise: "… holds 200 files"):
+   * it holds it, it holds fewer than BOUNDS.stageFiles, or one it holds is in use no longer.
+   */
+  fileRoom(hall, name, now = Date.now()) {
+    const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
+    const files = book && isRecord(book.files) ? book.files : {};
+    return Object.hasOwn(files, name) || Object.keys(files).length < BOUNDS.stageFiles || Object.values(files).some((f) => !this._inUse(f, now));
+  }
+  /**
+   * The upload `name` a take of the hall named kept as a stage file ({at: its upload's time, room: the room it was made for,
+   * uid: who made it, '' where none is known, name: its name}), once that take is kept; past the bound, the oldest in use
+   * no longer goes. Returns the names that went, for the server to remove.
+   */
+  recordFile(hall, name, rec, at = Date.now()) {
+    if (!HALL.test(guard.str(hall)) || !guard.validUploadUrl('/uploads/' + name)) return [];
+    const book = this._book(hall);
+    const r = storedStageFile({ at: isRecord(rec) && Number.isFinite(rec.at) ? rec.at : at, room: isRecord(rec) ? rec.room : '', uid: isRecord(rec) ? rec.uid : '', name: isRecord(rec) ? guard.cleanText(rec.name, 120) : '' });
+    if (!r) return [];
+    if (!isRecord(book.files)) book.files = {};
+    if (!Object.hasOwn(book.files, name)) book.files[name] = r;
+    const gone = [];
+    while (Object.keys(book.files).length > BOUNDS.stageFiles) {
+      const oldest = Object.entries(book.files).filter(([n, f]) => n !== name && !this._inUse(f, at)).sort((x, y) => x[1].at - y[1].at)[0];
+      if (!oldest) break;
+      delete book.files[oldest[0]];
+      gone.push(oldest[0]);
+    }
+    this._settle(book, at);
+    this.save();
+    return gone;
+  }
+  /**
+   * What the hall's stage records of the upload `name`, for a push that names it (sourceOk's rule 4): {room, name}, the
+   * room it was recorded for and its name, from its stage file, or from a take or an Earlier entry that names it; or null.
+   */
+  recordOf(hall, name) {
+    const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
+    if (!book) return null;
+    const f = isRecord(book.files) ? own(book.files, name) : undefined;
+    if (f) return { room: f.room, name: f.name };
+    const t = this._takes(book).find((x) => FILE_KINDS.includes(x.content.kind) && x.content.url === '/uploads/' + name);
+    return t ? { room: t.content.room || hall, name: t.content.name } : null;
+  }
+  /**
+   * Whether an information take of the hall now, or an Earlier entry of it, names the upload at `url` (a document or a
+   * picture of it: what a take-down of it ends). A holding slide's picture is the show's: it is kept on the disk while the
+   * slide is up (stageInUse), and the operator takes the slide down.
+   */
+  namesUrl(hall, url) {
+    const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
+    return !!book && guard.validUploadUrl(url) && this._namedIn(book, { info: true }).has(url.slice(9));
+  }
+  /**
+   * The upload `name` kept as a stage file of each hall whose takes or Earlier name it and whose stage holds no record of
+   * it ({room, uid, name}: the room it belonged to, who shared it, its name), once nothing else holds it (its message
+   * deleted, its room reset): its wait then starts when nothing names it, and the sweeps remove it after. Returns the
+   * names that went past a hall's bound, for the server to remove.
+   */
+  adopt(name, rec, at = Date.now()) {
+    const gone = [];
+    for (const [hall, book] of Object.entries(this.halls)) {
+      if (this._namedIn(book).has(name) && !(isRecord(book.files) && Object.hasOwn(book.files, name))) gone.push(...this.recordFile(hall, name, rec, at));
+    }
+    return gone;
+  }
+  /**
+   * The uploads the stage keeps now, by their file names, in every hall: each a take or an Earlier entry names, and each
+   * stage file inside its wait (this.wait since nothing named it).
+   */
+  stageInUse(now = Date.now()) {
+    const out = new Set();
+    for (const book of Object.values(this.halls)) {
+      for (const n of this._namedIn(book)) out.add(n);
+      for (const [n, f] of Object.entries(book.files || {})) if (this._inUse(f, now)) out.add(n);
+    }
+    return out;
+  }
+  /** The stage files past their wait (since nothing named them) let go, in every hall: their names, for removal. */
+  stageGone(now = Date.now()) {
+    const gone = [];
+    for (const book of Object.values(this.halls)) {
+      this._settle(book, now);
+      for (const [n, f] of Object.entries(book.files || {})) if (!this._inUse(f, now)) { delete book.files[n]; gone.push(n); }
+      if (isRecord(book.files) && !Object.keys(book.files).length) delete book.files;
+    }
+    if (gone.length) this.save();
+    return gone;
+  }
+
+  // ---------------------------------------------------------------- what ends a take (plan 4-§5.9.7, §5.11)
+
+  /** Every take a hall holds, current or Earlier: the Board's, each person's, and its Earlier entries. */
+  _takes(book) {
+    const out = [];
+    for (const s of SLOTS) { const t = own(book.board, s); if (t) out.push(t); }
+    for (const r of Object.values(book.people || {})) for (const s of SLOTS) { const t = own(r, s); if (t) out.push(t); }
+    for (const e of book.earlier || []) out.push(e);
+    return out;
+  }
+  /**
+   * The information take numbered `seq` in a hall, on a page now or under Earlier: {take, to}, `to` whom it was for ('board'
+   * or each person's key); null when there is none.
+   */
+  find(hall, seq) {
+    const book = HALL.test(guard.str(hall)) && whole(seq) ? own(this.halls, hall) : undefined;
+    if (!book) return null;
+    const to = new Set();
+    let take = null;
+    const see = (t, who) => { if (t && t.seq === seq && layerOf(t.content.kind) === 'info') { take = take || t; to.add(who); } };
+    for (const s of SLOTS) see(own(book.board, s), 'board');
+    for (const [key, r] of Object.entries(book.people || {})) for (const s of SLOTS) see(own(r, s), key);
+    for (const e of book.earlier || []) see(e, e.to);
+    return take ? { take, to: [...to] } : null;
+  }
+  /** Who withdrew the take numbered `seq` in a hall, when it was ({who?}), or null. */
+  withdrawnOf(hall, seq) {
+    const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
+    const w = book && Array.isArray(book.withdrawn) ? book.withdrawn.find((x) => x.seq === seq) : null;
+    return w ? { ...(w.who ? { who: w.who } : {}) } : null;
+  }
+  /**
+   * Every information take of a hall `which` says (a function of a take), on its pages now and under Earlier, ended: each
+   * place that shows one handed back (one hand-back of the information, numbered next, by nobody) and its answers let go,
+   * and each Earlier entry it names gone (`earlier: 'all'` empties Earlier whole). The stage files they named start their
+   * wait. Returns how many takes ended.
+   */
+  endTakes(hall, which, { at = Date.now(), earlier = '' } = {}) {
+    const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
+    if (!book || typeof which !== 'function') return 0;
+    const ended = new Set();
+    let hand = null;
+    const handBack = () => hand || (hand = { seq: (book.seq += 1), content: { kind: 'chat', layer: 'info' }, by: { name: '' }, at });
+    const end = (holder, key, s) => {
+      const t = own(holder, s);
+      if (!t || t.content.kind === 'chat' || layerOf(t.content.kind) !== 'info' || !which(t)) return false;
+      ended.add(t.seq);
+      holder[s] = handBack();
+      if (key) this._drop(book.answers, key, s);
+      return true;
+    };
+    for (const s of ['info', 'beside']) {
+      if (end(book.board, '', s)) for (const key of Object.keys(book.answers)) { const a = own(book.answers[key], s); if (a && ended.has(a.seq)) this._drop(book.answers, key, s); }
+      for (const [key, r] of Object.entries(book.people)) end(r, key, s);
+    }
+    const kept = [];
+    for (const e of book.earlier || []) { if (earlier === 'all' || which(e)) ended.add(e.seq); else kept.push(e); }
+    book.earlier = kept;
+    if (!ended.size) return 0;
+    this._trim(book, at);
+    this.save();
+    return ended.size;
+  }
+  /**
+   * The information take numbered `seq` withdrawn (a take shown by mistake): handed back wherever a page shows it now (one
+   * hand-back, numbered next), gone from Earlier, its answers let go, and kept as withdrawn (with `who`, who withdrew it),
+   * so a repeat is told it is done. Returns {take, to} as find() found it, or null when there is none.
+   */
+  withdraw(hall, seq, { at = Date.now(), who = '' } = {}) {
+    const found = this.find(hall, seq);
+    if (!found) return null;
+    const book = this.halls[hall];
+    this.endTakes(hall, (t) => t.seq === seq, { at });
+    book.withdrawn = (book.withdrawn || []).filter((w) => w.seq !== seq);
+    book.withdrawn.push({ seq, ...(WHO.test(guard.str(who)) ? { who } : {}) });
+    this._trim(book, at);
+    this.save();
+    return found;
   }
 
   /**
@@ -765,9 +1284,10 @@ class Pages {
    * information layer, nothing over the show (no take, or the layer handed back) is said so, and a take there says how it
    * arrived (`arrive`) and whether the operator put it up (`op`): a researcher's Take down is only over its own kind.
    * Beside it (`beside`), a take put there is read as any other, from the reports on it ("In the side bar on …"); with
-   * none, nothing is beside it (number 0).
+   * none, nothing is beside it (number 0). An information take says too whether the asker (`who`, an actor's kind and
+   * id) put it up (`mine`): its pusher may withdraw it.
    */
-  status(hall, to, pages = [], { name = '', hallHolding = '', layer = 'show' } = {}) {
+  status(hall, to, pages = [], { name = '', hallHolding = '', layer = 'show', who = '' } = {}) {
     const list = Array.isArray(pages) ? pages : [];
     const states = list.map((p) => ({ ...this.pageState(hall, p, layer), name: p.name }));
     let take = null;
@@ -776,7 +1296,7 @@ class Pages {
     const seq = take ? take.seq : 0;
     if (layer !== 'show' && (!take || take.content.kind === 'chat')) return { ...Pages.nothingOver(take, list.length, { board: to === 'board', name, beside: layer === 'beside' }), arrive: layer === 'beside' ? 'side' : 'over', op: false };
     const st = Pages.status(take, states.map((s) => (s.seq === seq ? s : { ...s, state: 'other' })), { board: to === 'board', name, hallHolding });
-    return layer !== 'show' ? { ...st, arrive: take.arrive === 'side' ? 'side' : 'over', op: take.by.op === true } : st;
+    return layer !== 'show' ? { ...st, arrive: take.arrive === 'side' ? 'side' : 'over', op: take.by.op === true, ...(who ? { mine: take.by.who === who } : {}) } : st;
   }
 
   /**
@@ -805,7 +1325,8 @@ class Pages {
     const n = list.length;
     // `kind`, what it shows ('' for nothing), and `on`, how many of its pages show it now (a hand-back: are back on chat).
     const on = take ? list.filter((p) => p.state === 'shown' || p.state === 'opened').length : 0;
-    const out = (mark, words) => ({ seq: take ? take.seq : 0, showing: describePage(take && take.content, { hallHolding }), kind: take && isRecord(take.content) ? take.content.kind : '', mark, words, pages: n, on });
+    const showing = describePage(take && take.content, { hallHolding, by: take && isRecord(take.by) ? take.by.name : '', sent: take && isRecord(take.sent) ? take.sent.name : '' });
+    const out = (mark, words) => ({ seq: take ? take.seq : 0, showing, kind: take && isRecord(take.content) ? take.content.kind : '', mark, words, pages: n, on });
     if (!n) return out(MARKS.fault, board ? 'Nobody on the Board is online' : name ? name + ' has no page open in this hall' : 'No page of theirs is open in this hall');
     if (!take) return out(MARKS.off, 'Nothing shown yet');
     const of = (state) => list.filter((p) => p.state === state);
@@ -828,9 +1349,9 @@ class Pages {
     const away = of('hidden').length - under.length;
     if (under.length === n && new Set(under.map((p) => p.words)).size === 1) return out(MARKS.partly, under[0].words.charAt(0).toUpperCase() + under[0].words.slice(1));
     const opened = of('opened').length;
-    const showing = of('shown').length + opened;
+    const seen = of('shown').length + opened;
     const chat = isRecord(take.content) && take.content.kind === 'chat';
-    if (showing === n) {
+    if (seen === n) {
       if (opened) return out(MARKS.unseen, 'Opened · AGMessage can\'t see inside web pages');
       const whose = name ? name + '\'s' : 'their';
       const where = board ? (n === 1 ? 'the 1 Board page' : 'all ' + n + ' Board pages') : n === 1 ? whose + ' page' : 'all ' + n + ' of ' + whose + ' pages';
@@ -846,7 +1367,7 @@ class Pages {
     if (minimised.length) why.push(namesWords(minimised.map((p) => p.name)) + ' minimised it');
     const other = of('other').length;
     if (other) why.push(other + ' showing something else');
-    return out(MARKS.partly, showing + ' of ' + n + (chat ? ' back to chat · ' : ' showing · ') + why.join(' · '));
+    return out(MARKS.partly, seen + ' of ' + n + (chat ? ' back to chat · ' : ' showing · ') + why.join(' · '));
   }
 
   /** A guest's chat view ('' by their seat, 'simple' or 'full'), kept by their uid. */
@@ -868,15 +1389,20 @@ class Pages {
     return true;
   }
 
-  /** A hall closed: everything its people's pages were shown goes with it. True when it held any. */
+  /**
+   * A hall closed: everything its people's pages were shown goes with it. Returns the names of its stage files (uploads a
+   * take of it named that no message holds), which go with it whether or not its rooms' files are purged; [] when it held
+   * none, and null when it held nothing at all.
+   */
   forgetHall(hall) {
-    if (!HALL.test(guard.str(hall))) return false;
+    if (!HALL.test(guard.str(hall))) return null;
     const reports = this.live.get(hall);
     if (reports) { for (const sid of reports.keys()) this.liveHall.delete(sid); this.live.delete(hall); }
-    if (!Object.hasOwn(this.halls, hall)) return false;
+    if (!Object.hasOwn(this.halls, hall)) return null;
+    const files = Object.keys(this.halls[hall].files || {});
     delete this.halls[hall];
     this.save();
-    return true;
+    return files;
   }
 
   /**
@@ -903,7 +1429,7 @@ class Pages {
    * then the answers given longest ago (in the order given: an answer to the Board's take is as old as the moment it was
    * given, not as the take). Neither reads the laptop's clock, so the answer just given is never the one that goes.
    */
-  _trim(book) {
+  _trim(book, at = Date.now()) {
     const rows = (map) => Object.entries(map).flatMap(([key, r]) => Object.entries(r).map(([layer, v]) => ({ key, layer, seq: v.seq })));
     const takes = rows(book.people);
     if (takes.length > BOUNDS.personTakes) {
@@ -916,6 +1442,9 @@ class Pages {
     const answers = rows(book.answers);
     if (answers.length > BOUNDS.answers) for (const a of answers.slice(0, answers.length - BOUNDS.answers)) this._drop(book.answers, a.key, a.layer);
     if (Array.isArray(book.earlier) && book.earlier.length > BOUNDS.earlier) book.earlier = book.earlier.slice(-BOUNDS.earlier);
+    if (Array.isArray(book.withdrawn) && book.withdrawn.length > BOUNDS.withdrawn) book.withdrawn = book.withdrawn.slice(-BOUNDS.withdrawn);
+    // A stage file named by nothing kept now starts its wait.
+    this._settle(book, at);
   }
 
   /** The guests' views held to their bound: the one set longest ago goes first. */
@@ -928,6 +1457,6 @@ class Pages {
 }
 
 module.exports = {
-  Pages, cleanPage, askedOf, canShow, describePage, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER, ARRIVALS, EARLIER_TOLD,
-  IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX,
+  Pages, cleanPage, askedOf, canShow, describePage, sourceOk, placeOf, placeWords, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER,
+  FILE_KINDS, fileOf, ARRIVALS, EARLIER_TOLD, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, PLACES, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX, STAGE_FULL,
 };

@@ -24,9 +24,10 @@
   }
 
   // The toast: one per page, a role=status live region, so what an act did, or why not, is said to a screen reader as it
-  // is shown, and it never blocks. `badOrOpts` is whether it is a problem (true, false), or {bad, undo, undoLabel}: with
-  // `undo`, a function, it carries Undo (or `undoLabel`'s words: Show it again), a button inside it, and holds for 10 s
-  // while it is neither hovered nor focused, so it is there to press; a newer toast takes its place (and its Undo with it).
+  // is shown, and it never blocks. `badOrOpts` is whether it is a problem (true, false), or {bad, undo, undoLabel, also}:
+  // with `undo`, a function, it carries Undo (or `undoLabel`'s words: Show it again), a button inside it, and beside it
+  // `also`'s ({label, act}: Take down's Withdraw), and holds for 10 s while it is neither hovered nor focused, so it is
+  // there to press; a newer toast takes its place (and its buttons with it).
   const TOAST_MS = 4000;
   const TOAST_BAD_MS = 6000;
   const TOAST_UNDO_MS = 10000;
@@ -60,6 +61,15 @@
       b.textContent = typeof o.undoLabel === 'string' && o.undoLabel ? o.undoLabel : 'Undo';
       b.addEventListener('click', () => { clearTimeout(toastTimer); box.classList.remove('show'); delete box.dataset.undo; undo(); });
       box.append(' · ', b);
+      const also = o.also && typeof o.also.act === 'function' && typeof o.also.label === 'string' ? o.also : null;
+      if (also) {
+        const c = document.createElement('button');
+        c.type = 'button';
+        c.className = 'toast-undo';
+        c.textContent = also.label;
+        c.addEventListener('click', () => { clearTimeout(toastTimer); box.classList.remove('show'); delete box.dataset.undo; also.act(); });
+        box.append(' · ', c);
+      }
       box.dataset.undo = '1';
     } else delete box.dataset.undo;
     box.classList.toggle('bad', !!o.bad);

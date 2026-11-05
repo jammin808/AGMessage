@@ -1,17 +1,32 @@
 // What a person's page is shown over its chat (a take), drawn: Stagewatch's countdown, AGMessage's clock, a holding slide,
-// black and a web page. The hall page (app.js) loads this module with import() at its first take, hands it a box and plain
-// values (Stagewatch's frame, AGMessage's clock offset and zone, the hall's name and holding picture, who put the take up,
-// whether the page is connected) and reads back what it drew; the page alone says so to the server (page:report), so what
-// was drawn is said in one place, from the drawing. Nothing here holds a socket, and every node is built with the DOM and
-// textContent.
+// black, a web page, a document (the whole file, opened at its place, paged and zoomed: docview.mjs, the drawing the page's
+// seat draws) and a picture (with zoom). The hall page (app.js) loads this module with import() 2 s after a Board page's
+// join, or at its first take, hands it a box and plain values (Stagewatch's frame, AGMessage's clock offset and zone, the
+// hall's name and holding picture, who put the take up, the page's seat, whether the page is connected) and reads back
+// what it drew; the page alone says so to the server (page:report), so what was drawn is said in one place, from the
+// drawing. Nothing here holds a socket, and every node is built with the DOM and textContent.
 //
-//   render(box, content, ctx) → Promise<{state, words}>   the take drawn into box: 'shown' (a web page: 'opened'), or
-//                                                          'failed' and why
+//   render(box, content, ctx) → Promise<{state, words}>   the take drawn into box (what it held before let go first):
+//                                                          'shown' (a web page: 'opened'), or 'failed' and why
+//   clear(box)                                             what box holds let go: a document's reader destroyed, its
+//                                                          object URLs revoked, the box emptied
 //   card(content, ctx)        → element                   the take as a card in the side bar: its icon, its name, and its
 //                                                          live words (the countdown's time, the clock's)
 //   tick(root, ctx)                                        the live parts under root drawn again (the clock, Stagewatch)
+//   prepare()                 → Promise                    the document reader imported ahead of a first document
 //   webAddress(url)           → {url, host} | {error}      a web page's address as a frame may be given it
 //   framePage(url)            → {frame, url, host} | {error}  the one frame a page makes, for a web page (a take, a Preview)
+//
+// Invariants for a file a take shows (a document, a picture):
+//   - Checked again here: its address is an upload of AGMessage's (/uploads/<name>) of a type the stage shows (a
+//     picture's an image's), or nothing of it is fetched and the take is `failed`; a document told without its address
+//     (a page seated as an observer) draws nothing of it.
+//   - Drawn from memory and kept by no device: fetched `no-store`, a picture through an object URL revoked when the take
+//     goes, a document's reader (its pdf.js document among it) destroyed then (clear), as docview.mjs keeps them.
+//   - Never dragged out: every picture in the box is `draggable=false` and a drag that starts in it is cancelled; the page
+//     holds the box's menus (AGMessage's, Shift+right-click included) and hides it from print.
+//   - docview.mjs is imported with import() only, never statically, so a device that cannot load it loses documents and
+//     pictures alone, and says so.
 
 /** Each kind's card: its icon (no status mark: each mark has one meaning, common.js AGM.MARKS) and its name. */
 const KINDS = Object.freeze({
@@ -20,7 +35,16 @@ const KINDS = Object.freeze({
   holding: Object.freeze({ icon: '🖼', name: 'Holding' }),
   blank: Object.freeze({ icon: '🌑', name: 'Blank' }),
   web: Object.freeze({ icon: '🌍', name: 'Web page' }),
+  doc: Object.freeze({ icon: '📄', name: 'Document' }),
+  image: Object.freeze({ icon: '🖼', name: 'Picture' }),
 });
+/** An upload's address as AGMessage makes one (lib/guard.js validUploadUrl), and the file types the stage shows. */
+const UPLOAD = /^\/uploads\/[0-9]{10,16}-[a-z0-9]{12}-[A-Za-z0-9._-]{1,60}$/;
+const STAGE_TYPES = Object.freeze(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'md', 'csv', 'xlsx', 'xls', 'docx', 'pptx']);
+const IMAGES = Object.freeze(['png', 'jpg', 'jpeg', 'gif', 'webp']);
+const extOf = (url) => { const m = /\.([A-Za-z0-9]{1,5})$/.exec(String(url || '')); return m ? m[1].toLowerCase() : ''; };
+/** The readers' seats (docview.mjs): the page's own, never the take's. */
+const SEATS = Object.freeze(['research', 'board', 'observer']);
 /**
  * How long a web page has to load before its take says it did not (`failed`). A frame the site refuses (its
  * X-Frame-Options or frame-ancestors) still fires `load`, and nothing inside it can be read, so `load` is all that is
@@ -153,6 +177,108 @@ function drawWeb(box, content, ctx) {
   });
 }
 
+// ---------------------------------------------------------------- a document, a picture
+/** docview.mjs, imported once: the document reader the Preview and the panel draw with. */
+let reader = null;
+export function prepare() {
+  if (!reader) reader = import('./docview.mjs').catch((e) => { reader = null; throw e; });
+  return reader;
+}
+/** Each box's document or picture now: its reader, destroyed when the box is let go (clear). */
+const views = new WeakMap();
+/** The boxes whose drags are cancelled: a picture is never dragged out of a take. */
+const guarded = new WeakSet();
+
+/** A place in words: "p. 12", "≈ p. 3", "slide 3", "sheet 2", "line 40", "row 4" (a CSV's), "¶ 12"; '' for none. */
+function placeSaid(at, ext) {
+  if (!at || typeof at !== 'object') return '';
+  const n = (k) => (Number.isInteger(at[k]) && at[k] > 0 ? at[k] : 0);
+  if (n('page')) return (at.approx === true ? '≈ p. ' : 'p. ') + n('page');
+  if (n('slide')) return 'slide ' + n('slide');
+  if (n('sheet')) return 'sheet ' + n('sheet');
+  if (n('block')) return '¶ ' + n('block');
+  if (n('line')) return (ext === 'csv' ? 'row ' : 'line ') + n('line');
+  return '';
+}
+/**
+ * Where docview opens a place: its unit by number (a page, a slide, a sheet, a line or row), and a Word paragraph by its
+ * number (¶), at which the view opens, on its page where one is given.
+ */
+function placeAt(at) {
+  if (!at || typeof at !== 'object') return null;
+  const block = Number.isInteger(at.block) && at.block > 0 ? { block: at.block } : {};
+  for (const k of ['page', 'slide', 'sheet', 'line']) if (Number.isInteger(at[k]) && at[k] > 0) return { page: at[k], ...block };
+  return block.block ? block : null;
+}
+const text = (v) => (typeof v === 'string' ? v : '');
+/** Whose picture, of what: "Ana's picture of Board pack.pdf, p. 12", "… of part of Stage plan.png", "… of their copy of …". */
+function pictureSaid(content, by) {
+  const from = content.from && typeof content.from === 'object' ? content.from : null;
+  if (!from) return text(content.name) || 'A picture';
+  const type = text(from.type);
+  const part = IMAGES.includes(type);
+  const room = text(from.roomName) ? ' (' + from.roomName + ')' : '';
+  const place = part ? '' : placeSaid(from.at, type);
+  return (by ? by + '\'s picture' : 'A picture') + ' of ' + (part ? 'part of ' : '') + (from.local === true ? 'their copy of ' : '') + text(from.name) + room + (place ? ', ' + place : '');
+}
+/** What a file's take says under its drawing: its name and place, a side room's in brackets; a picture, whose and of what. */
+function fileSaid(content, ctx) {
+  if (content.kind === 'image') return pictureSaid(content, (ctx && ctx.by) || '');
+  const place = placeSaid(content.at, extOf(content.url) || extOf(content.name));
+  return (text(content.name) || 'A document') + (text(content.roomName) ? ' (' + content.roomName + ')' : '') + (place ? ' · ' + place : '');
+}
+/** A reader's failure in the take's words (plan 4-§5.9.11): a picture's, or a document's. */
+function failedSaid(kind, words) {
+  const w = text(words);
+  if (kind === 'image') return /too big/i.test(w) ? 'too big for this device' : 'the picture did not load';
+  if (/fetch/.test(w)) return 'the file could not be read';
+  return w || 'the file could not be read';
+}
+/** No picture in `box` is dragged out: each is draggable=false, and a drag that starts in the box is cancelled. */
+function noDrag(box) {
+  for (const img of box.querySelectorAll('img')) img.setAttribute('draggable', 'false');
+  if (guarded.has(box)) return;
+  guarded.add(box);
+  box.addEventListener('dragstart', (e) => e.preventDefault());
+}
+/**
+ * A document or a picture drawn into `box` through docview.mjs, at its place, as the page's seat draws it (`ctx.seat`),
+ * with its line under it (its name and place, or whose picture of what) and the pusher's note above it. 'shown' once its
+ * place has drawn, or 'failed' with why: an address that is not an upload of a type the stage shows, a document told
+ * without its address, a reader this device cannot load, or the reader's own failure.
+ */
+async function drawFile(box, content, ctx) {
+  const url = text(content.url);
+  const ext = extOf(url);
+  if (content.kind === 'doc' && content.withheld === true) return { state: 'failed', words: 'observers are shown pictures and quotes, not documents' };
+  if (!UPLOAD.test(url) || !STAGE_TYPES.includes(ext) || (content.kind === 'image' && !IMAGES.includes(ext))) return { state: 'failed', words: 'the file is not one of this hall\'s' };
+  const wrap = make('div', 'take-file');
+  wrap.dataset.kind = content.kind;
+  if (text(content.note)) wrap.append(make('p', 'take-file-note', content.note));
+  const inner = make('div', 'take-file-box');
+  wrap.append(inner, make('p', 'take-file-line', fileSaid(content, ctx)));
+  box.append(wrap);
+  noDrag(box);
+  let dv;
+  try { dv = await prepare(); } catch { return { state: 'failed', words: 'this page could not load the document reader — reload' }; }
+  if (!box.contains(wrap)) return { state: 'failed', words: 'closed' };
+  const seat = ctx && SEATS.includes(ctx.seat) ? ctx.seat : 'observer';
+  const view = dv.open(inner, { url }, { at: placeAt(content.at), seat, name: text(content.name), ext, ranged: true });
+  views.set(box, view);
+  const r = await view.ready;
+  if (views.get(box) !== view) return { state: 'failed', words: 'closed' };
+  noDrag(box);
+  return r && r.state === 'shown' ? { state: 'shown', words: '' } : { state: 'failed', words: failedSaid(content.kind, r && r.words) };
+}
+
+/** What `box` holds let go: a document's or a picture's reader destroyed (its object URLs revoked), the box emptied. */
+export function clear(box) {
+  if (!box) return;
+  const view = views.get(box);
+  if (view) { views.delete(box); view.destroy(); }
+  box.textContent = '';
+}
+
 /** The live parts under `root` drawn again: each clock and each Stagewatch time, a take's and a card's alike. */
 export function tick(root, ctx) {
   if (!root) return;
@@ -165,7 +291,7 @@ export function tick(root, ctx) {
  * not load leaves black, never the picture before it.
  */
 export function render(box, content, ctx) {
-  box.textContent = '';
+  clear(box);
   const kind = content && content.kind;
   box.dataset.kind = kind || '';
   switch (kind) {
@@ -216,6 +342,9 @@ export function render(box, content, ctx) {
       return Promise.resolve({ state: 'shown', words: '' });
     case 'web':
       return drawWeb(box, content, ctx);
+    case 'doc':
+    case 'image':
+      return drawFile(box, content, ctx);
     default:
       return Promise.resolve({ state: 'failed', words: 'this page cannot show that' });
   }
@@ -227,8 +356,15 @@ export function card(content, ctx) {
   const c = make('div', 'take-card-what');
   const icon = make('span', 'take-card-icon', k.icon);
   icon.setAttribute('aria-hidden', 'true');
-  // A web page's card names its host ("🌍 vote.example.com"), never its address.
-  const name = content && content.kind === 'web' && typeof content.host === 'string' && content.host ? content.host : k.name;
+  // A web page's card names its host ("🌍 vote.example.com"), never its address; a document its name and place ("📄 Board
+  // pack.pdf · p. 12"); a picture whose it is and its place ("🖼 Ana's picture · p. 12"), or its name when shown whole.
+  const kind = content && content.kind;
+  const from = kind === 'image' && content.from && typeof content.from === 'object' ? content.from : null;
+  const fromPlace = from && !IMAGES.includes(text(from.type)) ? placeSaid(from.at, text(from.type)) : '';
+  const name = kind === 'web' && text(content.host) ? content.host
+    : kind === 'doc' ? fileSaid(content, ctx)
+    : kind === 'image' ? (from ? ((ctx && ctx.by) ? ctx.by + '\'s picture' : 'A picture') + (fromPlace ? ' · ' + fromPlace : '') : text(content.name) || k.name)
+    : k.name;
   c.append(icon, make('strong', 'take-card-name', name));
   if (content && content.kind === 'stage') {
     const live = make('span', 'take-card-live');

@@ -163,8 +163,9 @@ export default [
     files: ['app/public/docworker.js'],
     languageOptions: { globals: { ...Object.fromEntries([...Object.keys(globals.browser), 'io', 'pdfjsLib', 'AGM'].map((name) => [name, 'off'])), ...globals.worker, AGMZip: 'readonly', AGMWord: 'readonly', AGMImage: 'readonly', XLSX: 'readonly', mammoth: 'readonly' } },
   },
-  // The documents' modules parse HTML in one place, parseInert, and adopt nothing parsed into the page (agm/inert-html).
-  { files: ['app/public/docmodel.mjs', 'app/public/docview.mjs', 'app/public/docworker.js'], rules: { 'agm/inert-html': 'error' } },
+  // The documents' modules, and the take layer that draws a document or a picture through them, parse HTML in one place,
+  // parseInert, and adopt nothing parsed into the page (agm/inert-html).
+  { files: ['app/public/docmodel.mjs', 'app/public/docview.mjs', 'app/public/docworker.js', 'app/public/pagelayer.mjs'], rules: { 'agm/inert-html': 'error' } },
   // The first script of every page with people says the floor's words below it, so it parses there: ES5 only (a newer
   // syntax is a parse error), `var` with it.
   { files: ['app/public/theme-init.js'], languageOptions: { ecmaVersion: 5 }, rules: { 'no-var': 'off', 'prefer-const': 'off' } },

@@ -1,6 +1,7 @@
 'use strict';
 /**
- * agm/inert-html — in the documents' modules (docmodel.mjs, docview.mjs, docworker.js), HTML is parsed in one place:
+ * agm/inert-html — in the documents' modules (docmodel.mjs, docview.mjs, docworker.js) and the take layer that draws a
+ * document or a picture through them (pagelayer.mjs), HTML is parsed in one place:
  * parseInert (public/docmodel.mjs), an inert <template> walked into plain data. Outside a function named parseInert,
  * each way of turning markup into nodes, or of moving parsed nodes into the page, is refused:
  *   - writing `innerHTML` or `outerHTML`, `insertAdjacentHTML(`, `setHTMLUnsafe(`, `parseHTMLUnsafe(`,

@@ -1088,8 +1088,8 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
   M.push(['person', 'guestWeb', { ...O.person.guest, key: 'u:u-kim', kind: 'clock' }, ['person.mention', 'person.show', 'person.web', 'person.chat']]);
   // Information over their show: Take down, for the operator (canPush), and for a seat that may only show, on a person On
   // stage alone (the console lists no one else to it).
-  M.push(['person', 'techPush', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.show', 'person.chat', 'person.takeDown']]);
-  M.push(['person', 'staffShowWeb', { ...O.person.guest, role: 'board', key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.web', 'person.takeDown']]);
+  M.push(['person', 'techPush', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.show', 'person.chat', 'person.takeDown', 'person.withdraw']]);
+  M.push(['person', 'staffShowWeb', { ...O.person.guest, role: 'board', key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.web', 'person.takeDown', 'person.withdraw']]);
   M.push(['person', 'staffShowWeb', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention']]);
   const facts = (seat) => PAGE[seat] || SEATS[seat];
   for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, facts(seat), o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
@@ -1359,14 +1359,23 @@ test('the Board chip: the show kinds as radio, the one the Board shows checked a
   assert.deepEqual([C.ready('board', 'board.takeDown', SEATS.adminPush, BOARD_INFO), C.ready('board', 'board.takeDown', SEATS.adminPush, BOARD_OPERATOR)], [true, true]);
   assert.deepEqual([C.downOf(SEATS.adminPush, BOARD_BESIDE).seq, C.downOf(SEATS.adminPush, BOARD_BESIDE_ONLY).seq, C.downOf(SEATS.adminPush, BOARD_MINE)], [9, 10, null]);
   assert.equal(C.ready('board', 'board.takeDown', SEATS.techPush, { ...BOARD_INFO, show: false }), 'Showing files, pages and quotes on the stage needs its own right — ask an admin.');
+  // Withdraw (a take shown by mistake: from their pages and from Earlier), the operator's on any information, last of
+  // the menu and asked first, naming what goes; nothing to withdraw, no Withdraw.
+  assert.deepEqual(menu('adminPush', BOARD_INFO).filter((i) => i !== '—').at(-1), ['board.withdraw', 'Withdraw…', '', false, '']);
+  assert.ok(!ids('board', SEATS.adminPush, BOARD_MINE).includes('board.withdraw'));
+  assert.deepEqual([C.withdrawOf(SEATS.adminPush, BOARD_INFO).seq, C.withdrawOf(SEATS.adminPush, BOARD_BESIDE_ONLY).seq, C.withdrawOf(SEATS.adminPush, BOARD_MINE)], [9, 10, null]);
+  const gone = plain(C.entry('board', 'board.withdraw').confirm(SEATS.adminPush, BOARD_INFO));
+  assert.deepEqual([gone.title, gone.yes, gone.no, gone.danger], ['Withdraw it from the Board\'s pages?', 'Withdraw', 'Keep it', true]);
+  assert.match(gone.words, /^“a web page on vote\.example\.com” goes from their pages and from Earlier now/);
 });
 
 test('the Board chip for a seat that may only show (canShow): Take down over its own kind of take, the operator\'s disabled with why; a web page with its right; no show kind, no ↶ Back to; Screens & pages…', () => {
   const menu = (s, o) => plain(C.items('board', SEATS[s], o)).filter((i) => !i.sep).map((i) => [i.id, i.disabled]);
   // A researcher's web page: taken down by a seat with its web right, greyed for one without (it could not have put it up).
-  assert.deepEqual(menu('staffShowWeb', BOARD_INFO), [['board.web', ''], ['board.takeDown', ''], ['board.screens', '']]);
-  assert.deepEqual(menu('staffShow', BOARD_INFO), [['board.takeDown', 'Web pages on the stage need their own right — ask an admin.'], ['board.screens', '']]);
-  assert.deepEqual(menu('staffShow', BOARD_OPERATOR), [['board.takeDown', 'The operator put this up — ask them.'], ['board.screens', '']]);
+  // Withdraw, last, is greyed on a take this seat did not put up (the server refuses it in those words).
+  assert.deepEqual(menu('staffShowWeb', BOARD_INFO), [['board.web', ''], ['board.takeDown', ''], ['board.screens', ''], ['board.withdraw', 'Only who showed it, the operator or the admin can withdraw it.']]);
+  assert.deepEqual(menu('staffShow', BOARD_INFO), [['board.takeDown', 'Web pages on the stage need their own right — ask an admin.'], ['board.screens', ''], ['board.withdraw', 'Only who showed it, the operator or the admin can withdraw it.']]);
+  assert.deepEqual(menu('staffShow', BOARD_OPERATOR), [['board.takeDown', 'The operator put this up — ask them.'], ['board.screens', ''], ['board.withdraw', 'Only who showed it, the operator or the admin can withdraw it.']]);
   assert.deepEqual(menu('staffShow', BOARD_MINE), [['board.screens', '']], 'nothing over the show: nothing to take down');
   // Beside the operator's, in their side bar: its own Take down names it, the operator's over the show left; the
   // operator's on one Board member's page holds the Board's Take down back.
@@ -1378,6 +1387,10 @@ test('the Board chip for a seat that may only show (canShow): Take down over its
   assert.deepEqual([C.ready('person', 'person.takeDown', SEATS.staffShowWeb, gil), C.ready('person', 'person.takeDown', SEATS.staffShowWeb, { ...gil, info: { ...INFO_SHOWN, op: true } })], [true, 'The operator put this up — ask them.']);
   assert.equal(C.downOf(SEATS.staffShowWeb, { ...gil, info: { ...INFO_SHOWN, op: true }, beside: BESIDE }).seq, 10, 'what is beside the operator\'s is its own');
   assert.deepEqual(menu('staffShowWeb', BOARD_MINE).map((i) => i[0]), ['board.web', 'board.screens'], 'its stage.web: Show a web page…');
+  // Withdraw: what this seat put up itself (`mine`, the console's read), over the show or beside it; another's greyed.
+  assert.deepEqual(menu('staffShowWeb', { ...BOARD_MINE, info: { ...INFO_SHOWN, mine: true } }), [['board.web', ''], ['board.takeDown', ''], ['board.screens', ''], ['board.withdraw', '']]);
+  assert.equal(C.withdrawOf(SEATS.staffShowWeb, { ...BOARD_OPERATOR, beside: { ...BESIDE, mine: true } }).seq, 10, 'its own beside the operator\'s');
+  assert.deepEqual([C.ready('person', 'person.withdraw', SEATS.staffShowWeb, { ...gil, info: { ...INFO_SHOWN, mine: true } }), C.ready('person', 'person.withdraw', SEATS.staffShowWeb, gil)], [true, 'Only who showed it, the operator or the admin can withdraw it.']);
   assert.deepEqual(['staffShow', 'staffShowWeb'].map((s) => ids('header', SEATS[s], HEADER).includes('header.screens')), [true, true], 'its console');
   // A person: Show them a web page… with its right, on a person On stage alone (the console lists no one else to it).
   const kim = PAGE_OBJECTS.person.keyed;

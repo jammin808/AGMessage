@@ -14,10 +14,10 @@ const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.joi
   .filter((e) => e !== 'disconnect');
 // Not sent from the admin socket: they start cloudflared or make a new certificate — real work, not an argument check.
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
-const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null, view: null, beforeSeq: null, layer: null, arrive: null, role: null };
+const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null, view: null, beforeSeq: null, layer: null, arrive: null, role: null, at: null, from: null, note: null, download: null, takeDown: null };
 // An object whose toString is not a function: String() throws on it, so a handler must never call String() on input.
 const U = { toString: 1 };
-const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U, view: U, beforeSeq: U, layer: U, arrive: U, role: U };
+const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U, view: U, beforeSeq: U, layer: U, arrive: U, role: U, at: { page: U, approx: U }, from: { url: U }, note: U, download: U, takeDown: U };
 const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode: 5, messageId: {}, content: 'x', text: {} }, UNCONVERTIBLE];
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
@@ -109,6 +109,12 @@ test('client values are read by their type: a value String() cannot convert reac
     [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'chat', layer: U }, ifSeq: U }], [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'chat', layer: U } }],
     [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'web', url: 'https://vote.example.com/' }, arrive: U }],
     [ctl, 'page:status', { code: U }], [guest, 'page:report', { seq: U, state: U, words: U }], [guest, 'page:report', { seq: 1, state: 'shown', words: U, again: U }],
+    // A document and a picture, each field by type: its file, its place, its note, its Download, what it is a picture of.
+    [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: U, at: { page: U } } }], [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'image', url: U, from: { url: U } } }],
+    [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'doc', url: '/uploads/1730000000000-abcdefghijkl-a.pdf', at: { page: U, approx: U }, note: U, download: U } }],
+    // A take withdrawn, its hall and its number by type; the admin's delete of a file on people's pages, its answer by type.
+    [ctl, 'page:withdraw', { code: U, seq: U }], [ctl, 'page:withdraw', { code: hall, seq: U }], [ctl, 'page:withdraw', U],
+    [ctl, 'admin:deleteMessage', { roomCode: hall, messageId: U, takeDown: U }],
     // A new invite link, its room and its seat by type: no room, and no seat that has a link.
     [ctl, 'admin:newInvite', { roomCode: U, role: U }], [ctl, 'admin:newInvite', { roomCode: hall, role: U }], [ctl, 'admin:newInvite', U],
     // The admin's switch for a hall's backstage guests' web pages, each field by type.
@@ -122,12 +128,15 @@ test('client values are read by their type: a value String() cannot convert reac
     [guest, 'history:message', { messageId: U }], [guest, 'history:message', U], [ctl, 'history:message', { messageId: U }],
   ];
   // What each is answered: the field it could not read named, and nothing shown, numbered or reported.
-  const KINDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.';
+  const KINDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank, a web page, a document or a picture.';
   const TARGETS = 'Show the Board (to: \'board\') or one person (to: {uid}).';
   const pageWords = (ev, arg) => {
     if (ev === 'page:report') return arg.state === U ? 'A report is one of: shown, hidden, opened, failed, dismissed, minimised.' : 'That is not what this page is shown now.';
+    if (ev === 'page:withdraw') return arg.code === hall ? 'Withdraw names the take it withdraws.' : 'No such hall.';
     if (arg.code === U) return 'No such hall.';
     if (arg.cid === U) return 'That act\'s id could not be read.';
+    if (arg.content && arg.content.kind === 'doc') return arg.content.url === U ? 'A document or a picture is a file shared in AGMessage.' : KINDS;
+    if (arg.content && arg.content.kind === 'image') return 'A picture is a PNG, JPEG, GIF or WebP shared in AGMessage.';
     if (arg.to === 'board' && arg.content && arg.content.kind === 'chat') return KINDS;
     if (arg.arrive === U) return 'Information arrives over their chat or in their side bar.';
     if (arg.ifSeq === U) return 'That act\'s take could not be read.';

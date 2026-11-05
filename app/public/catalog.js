@@ -58,6 +58,8 @@
     noWeb: 'Web pages on the stage need their own right — ask an admin.',
     operatorUp: 'The operator put this up — ask them.',
     operatorOn: 'The operator is showing something on a Board page — ask them.',
+    // Withdraw (board.withdraw, person.withdraw), refused as the server words it (lib/handlers/takes.js page:withdraw).
+    notYours: 'Only who showed it, the operator or the admin can withdraw it.',
     linkDown: 'Stagewatch is not connected right now — nothing is queued; try again when it is.',
     linkKey: 'Stagewatch has not accepted this AGMessage\'s key yet — nothing is queued; try again in a moment.',
     linkRefused: 'Stagewatch refused this AGMessage\'s key — nothing can be sent until an admin enters a node key it lists (Halls → Set up).',
@@ -72,9 +74,18 @@
   /**
    * The kinds a take on people's pages may show (lib/pages.js KINDS, held to them by test/modules.test.js (n)), each by
    * the name a person reads in a menu, and as "Already showing …" says it. `chat` hands the pages back to their chat; a
-   * web page is shown by its address, asked first (webAsk), and needs a right of its own (`canWeb`).
+   * web page is shown by its address, asked first (webAsk), and needs a right of its own (`canWeb`); a document and a
+   * picture are shown from a file (FILE_KINDS).
    */
-  const SHOW_KINDS = Object.freeze([['chat', 'Chat', 'chat'], ['stage', 'Stagewatch', 'Stagewatch'], ['clock', 'Clock', 'the clock'], ['holding', 'Holding', 'holding'], ['blank', 'Blank', 'blank'], ['web', 'Web page', 'a web page']].map((x) => Object.freeze(x)));
+  const SHOW_KINDS = Object.freeze([['chat', 'Chat', 'chat'], ['stage', 'Stagewatch', 'Stagewatch'], ['clock', 'Clock', 'the clock'], ['holding', 'Holding', 'holding'], ['blank', 'Blank', 'blank'], ['web', 'Web page', 'a web page'],
+    ['doc', 'Document', 'a document'], ['image', 'Picture', 'a picture']].map((x) => Object.freeze(x)));
+  /**
+   * The kinds that show a file the hall holds (lib/pages.js FILE_KINDS): shown from that file, never from the Board chip's
+   * menu or Show them ▸, which name no file.
+   */
+  const FILE_KINDS = Object.freeze(['doc', 'image']);
+  /** The kinds Show them ▸ offers a person: the show's (a hand-back, a web page and a file are acts of their own). */
+  const SHOW_THEM = Object.freeze(SHOW_KINDS.filter((x) => x[0] !== 'chat' && x[0] !== 'web' && !FILE_KINDS.includes(x[0])));
   const kindName = (kind) => { const k = SHOW_KINDS.find((x) => x[0] === kind); return k ? k[1] : 'Chat'; };
   /**
    * What a take's target shows now, as its object carries it (`kind`, the console's read): a kind of SHOW_KINDS, chat for
@@ -119,6 +130,27 @@
     if (o.opOn && t === o.info) return WORDS.operatorOn;
     if (t.kind === 'web') return f.canWeb ? true : WORDS.noWeb;
     return o.show === false ? WORDS.noShow : true;
+  };
+  /**
+   * The information Withdraw names on a target, as the console reads it (`info`, over the show; `beside`, in their side
+   * bar; each {seq, kind, mine}): for the operator (canPush), what is over the show, else what is beside it; for a seat
+   * that may only show, its own first (`mine`), else what is there (offered disabled); null for none.
+   */
+  const withdrawOf = (f, o) => {
+    const info = o && o.info ? o.info : null;
+    const beside = o && o.beside ? o.beside : null;
+    if (f.canPush) return info || beside || null;
+    return (info && info.mine ? info : beside && beside.mine ? beside : info || beside) || null;
+  };
+  /** Why Withdraw cannot take that back, or true: a seat that may only show withdraws only what it put up itself. */
+  const withdrawWhy = (f, o) => {
+    const t = withdrawOf(f, o);
+    return !t || f.canPush || t.mine ? true : WORDS.notYours;
+  };
+  /** The ask before a take is withdrawn (`whom`: "the Board's pages"): it goes from their pages and from Earlier now. */
+  const withdrawAsk = (o, whom) => {
+    const t = withdrawOf({ canPush: true }, o) || {};
+    return { title: 'Withdraw it from ' + whom + '?', words: (t.showing ? '“' + t.showing + '”' : 'It') + ' goes from their pages and from Earlier now, and cannot be shown again from there. They may have read it.', yes: 'Withdraw', no: 'Keep it', danger: true };
   };
   /** One of the Board chip's show kinds: radio, the kind the Board's pages show now checked (and not chosen twice). */
   const boardKind = (kind, label, icon, rank) => ({ id: 'board.' + kind, label, icon, group: '2_send', inline: () => rank, verb: 'page:push', mode: 'now', radio: (f, o) => showsNow(o) === kind,
@@ -515,6 +547,11 @@
       { id: 'board.takeDown', label: 'Take down', icon: '⤵', group: '3_keep', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush || f.canShow, fits: (f, o) => !!downOf(f, o), ready: (f, o) => downWhy(f, o) },
       { id: 'board.screens', label: 'Screens & pages…', icon: '⧉', group: '4_manage', verb: 'display:list', mode: 'now', may: (f) => f.canPush || f.canShow, fits: () => true },
+      // Withdraw, for a take shown by mistake: it goes from the Board's pages and from Earlier (Take down leaves it there),
+      // for the operator any information, for a seat that may only show its own (another's offered disabled, as the server
+      // refuses it); asked first.
+      { id: 'board.withdraw', label: 'Withdraw…', icon: '🔙', group: '9_danger', verb: 'page:withdraw', mode: 'now',
+        may: (f) => f.canPush || f.canShow, fits: (f, o) => !!withdrawOf(f, o), ready: (f, o) => withdrawWhy(f, o), confirm: (f, o) => withdrawAsk(o, 'the Board\'s pages') },
     ],
     // The room's earlier messages: a page opens a room with its newest (the join's first open) and reads further back a
     // page at a time (history:before), at the top of what it holds (Show earlier: `more`, the server's word that there
@@ -596,7 +633,7 @@
       // the hall, none until it has read).
       { id: 'person.show', label: 'Show them', icon: '📺', group: '2_send', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, ''),
-        submenu: (f, o) => SHOW_KINDS.filter((x) => x[0] !== 'chat' && x[0] !== 'web').map(([value, label]) => { const why = kindWhy(f, o, value); return { value, label, role: 'menuitemradio', checked: showsNow(o) === value, ...(why === true ? {} : { disabled: why }) }; }) },
+        submenu: (f, o) => SHOW_THEM.map(([value, label]) => { const why = kindWhy(f, o, value); return { value, label, role: 'menuitemradio', checked: showsNow(o) === value, ...(why === true ? {} : { disabled: why }) }; }) },
       // A web page on every page of theirs in the hall, by its address: for a seat that may show one (`canWeb`); one that
       // may only show is listed the people On stage alone.
       { id: 'person.web', label: 'Show them a web page…', icon: '🌍', group: '2_send', verb: 'page:push', mode: 'now',
@@ -636,6 +673,11 @@
             ? o.name + '\'s account still has ' + hallOf(o) + ' and can open it again. To keep ' + o.name + ' out, take ' + hallOf(o) + ' off the account on the Accounts page.'
             : o.name + ' can join again with the code.'),
           yes: 'Log out', no: 'Keep ' + o.name + ' in', danger: true }) },
+      // Withdraw: the information on their pages withdrawn, gone from their Earlier too; for a seat that may only show, its
+      // own, on a person On stage.
+      { id: 'person.withdraw', label: 'Withdraw…', icon: '🔙', group: '9_danger', verb: 'page:withdraw', mode: 'now',
+        may: (f) => f.canPush || f.canShow, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0 && !!withdrawOf(f, o) && (f.canPush || o.where === 'console' || o.role === 'board'),
+        ready: (f, o) => withdrawWhy(f, o), confirm: (f, o) => withdrawAsk(o, (o.name ? o.name + '\'s' : 'their') + ' pages') },
     ],
     // A message in the admin page's live feed: `id`, `type`, `text`, `from`, `hall` (its name).
     adminMsg: [
@@ -1012,6 +1054,6 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, FILE_KINDS, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, withdrawOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
   Object.assign(root.AGM = root.AGM || {}, { catalog });
 })(typeof window !== 'undefined' ? window : globalThis);

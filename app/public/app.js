@@ -1965,16 +1965,31 @@ AGM.roving(document.getElementById('pinnedList'), { item: '.msg[data-key]' });
 
 // What each act on a message does. The server decides; every write goes through the outbox in its entry's mode.
 const isFileUrl = (u) => typeof u === 'string' && /^\/uploads\/[\w.-]+$/.test(u);
-/** A file of this hall saved by the browser, under its own name. */
-function download(m) {
+/**
+ * A file of this hall handed to the browser to save, under its own name. The server opens an upload to no navigation (a
+ * link's download is one), so the page fetches it as its readers do (`no-store`, kept in no cache) and hands the browser
+ * the bytes through an object URL, let go 40 s after, once the browser has taken them; it says when the file could not be
+ * read.
+ */
+async function download(m) {
   if (!isFileUrl(m.url)) return;
+  let blob;
+  try {
+    const res = await fetch(m.url, { cache: 'no-store', credentials: 'same-origin' });
+    if (!res.ok) throw new Error(String(res.status));
+    blob = await res.blob();
+  } catch {
+    AGM.toast('Not downloaded: ' + (m.filename || 'the file') + ' could not be read — try again.', true);
+    return;
+  }
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = m.url;
+  a.href = url;
   a.download = m.filename || '';
-  a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
   a.remove();
+  setTimeout(() => { URL.revokeObjectURL(url); }, 40000);
 }
 /** Words to the clipboard (AGM.copy: over plain http too), said in the toast; the focus goes back where it was. */
 const copyText = (text, said, anchor) => AGM.copy(text, { said, anchor, say: (w) => AGM.toast(w) });
@@ -4119,7 +4134,8 @@ const Screens = (function () {
 
 // ---------------- What this page is shown over its chat: a take, as a layer over the page or a card in its side bar ----------------
 // A take is the server's to number and send (page:take, and the join's `page`); this page draws it (pagelayer.mjs, loaded
-// at its first take) and says what it drew (page:report), never before: `shown` only while the page is in view, `hidden`
+// 2 s after a Board page's join, else at its first take; a document or a picture through docview.mjs, let go with the
+// take and on a withdrawal, `page:take {withdrawn}`) and says what it drew (page:report), never before: `shown` only while the page is in view, `hidden`
 // while it is not, and again when that changes; `failed` with why. Back to chat and Minimise are the person's answers, on
 // every page of theirs (the server tells each); the page acts at once and says so after, and the server tells it again
 // where it refused. A take never moves the focus from a field being written in: it waits for the field to be left, at
@@ -4147,6 +4163,7 @@ const Takes = (function () {
   const LAYERS = ['show', 'info', 'beside'];
   let renderer = null;     // pagelayer.mjs, once imported
   let loading = null;
+  let readied = false;     // a Board page's timed import, asked once
   // The takes this page is told now, one in each place (the show, information over it, information beside it): {seq,
   // content, by, at, hallName, holding, answer, arrive}, or null for none.
   const told = { show: null, info: null, beside: null };
@@ -4177,7 +4194,10 @@ const Takes = (function () {
     if (!loading) loading = import('/pagelayer.mjs').then((m) => { renderer = m; return m; }, (e) => { loading = null; throw e; });
     return loading;
   };
-  const ctxOf = (t) => ({ stage, offset, tz, hallName: (t && t.hallName) || HALL_NAME, holding: (t && t.holding) || '', connected: socket.connected, by: (t && t.by && t.by.name) || '' });
+  // The page's own seat draws a document as that seat does (docview.mjs): never the take's.
+  const ctxOf = (t) => ({ stage, offset, tz, hallName: (t && t.hallName) || HALL_NAME, holding: (t && t.holding) || '', connected: socket.connected, by: (t && t.by && t.by.name) || '', seat: docSeat() });
+  /** What a box holds let go: a document's reader destroyed and its object URLs revoked (pagelayer.mjs clear). */
+  const clearBox = (b) => { if (renderer) renderer.clear(b); else b.textContent = ''; };
   const visible = () => document.visibilityState === 'visible';
   const keyOf = (t) => [t.seq, JSON.stringify(t.content), t.holding || '', t.hallName || '', t.arrive || ''].join('|');
   /** A take's kind as a person reads it: "the clock", "Stagewatch", "a web page". */
@@ -4239,12 +4259,31 @@ const Takes = (function () {
     past = readPast(res.earlier);
     settle();
     apply();
+    // A Board page imports what draws a take, and the document reader, 2 s after its join is drawn, so its first
+    // document or picture is not held up by an import on the venue's Wi-Fi: a timer and import(), which every device of
+    // the Board's has (no modulepreload, no idle callback). A device that cannot load them says so at its first take.
+    if (!readied && (res.role || ROLE) === 'board') {
+      readied = true;
+      setTimeout(() => { load().then((m) => m.prepare()).catch(() => { /* said at the first take that needs it */ }); }, 2000);
+    }
   }
   /** What this page is shown now in a place, as the server tells it: a take, or (number 0, no content) nothing there. */
   function tell(t) {
+    if (t && Number.isInteger(t.withdrawn)) { withdrawn(t.withdrawn); return; }
     const layerName = t && (t.layer === 'info' || t.layer === 'beside') ? t.layer : 'show';
     told[layerName] = read(t, layerName);
     if (layerName === 'info' && t && Array.isArray(t.earlier)) past = readPast(t.earlier);
+    settle();
+    apply();
+  }
+  /**
+   * A take withdrawn (`page:take {withdrawn: seq}`): this page lets go of whatever it drew of it, on the layer, in a card,
+   * under Earlier or in a Look, its reader destroyed and its pictures' object URLs revoked; what it is shown now follows.
+   */
+  function withdrawn(seq) {
+    for (const l of LAYERS) if (told[l] && told[l].seq === seq) told[l] = null;
+    past = past.filter((e) => e.seq !== seq);
+    Preview.letGo(seq);
     settle();
     apply();
   }
@@ -4254,6 +4293,8 @@ const Takes = (function () {
     if (again && !seqs.includes(again)) again = 0;
     for (const l of ['info', 'beside']) if (raised[l] && (!told[l] || told[l].seq !== raised[l])) raised[l] = 0;
     if (unheld && (!told.info || told.info.seq !== unheld)) unheld = 0;
+    // A Look at an Earlier entry no longer under Earlier (taken off by a reset, a delete or a withdrawal) closes.
+    for (const seq of Preview.looking()) if (!past.some((e) => e.seq === seq)) Preview.letGo(seq);
   }
   socket.on('page:take', (t) => tell(t));
 
@@ -4354,7 +4395,7 @@ const Takes = (function () {
       sayAll();
     }, () => {
       if (n !== turn) return;
-      box.textContent = '';
+      clearBox(box);
       result = { state: 'failed', words: 'this page could not load what draws it' };
       drawnKey = key;
       open(t);
@@ -4386,7 +4427,7 @@ const Takes = (function () {
     drawnKey = '';
     drawing = '';
     result = null;
-    box.textContent = '';
+    clearBox(box);
     unread = 0;
     hot = null;
     drawNews();
@@ -4451,6 +4492,9 @@ const Takes = (function () {
     const c = cardOf[l];
     if (!c) return;
     const had = c.li.contains(document.activeElement);
+    // A document or a picture drawn in the card is let go with it.
+    const inner = c.li.querySelector('.take-card-box');
+    if (inner) clearBox(inner);
     c.li.remove();
     cardOf[l] = null;
     if (!cards.children.length) { cards.hidden = true; if (!past.length) delete document.body.dataset.pushed; }
@@ -4505,14 +4549,24 @@ const Takes = (function () {
     }, () => AGM.toast('This page could not load what draws a take: reload it.', true));
   }
   const pastObject = (seq) => { const e = pastNow().find((x) => x.seq === seq); return e ? { id: 'past:' + e.seq, seq: e.seq, kind: e.content.kind, url: e.content.kind === 'web' && typeof e.content.url === 'string' ? e.content.url : '' } : null; };
+  /** An Earlier entry this page is told, whole (what a Look draws), or null. */
+  const pastEntry = (seq) => pastNow().find((x) => x.seq === seq) || null;
   function drawPastBars() {
     for (const li of pastList.querySelectorAll('.take-earlier-item')) {
       const o = pastObject(Number(li.dataset.key.slice(5)));
       if (o) drawBar(li.querySelector('.take-card-acts'), 'past', o, { words: true, more: 'More for this', keysOn: li });
     }
   }
-  /** A Look at an Earlier entry: a web page framed on this page alone (Preview), with nothing to show from it. */
+  /**
+   * A Look at an Earlier entry, on this page alone, with nothing to show from it and no report: a web page framed (Preview),
+   * a document or a picture drawn as the take was (its reader let go as the Look closes).
+   */
   function look(o) {
+    const e = pastEntry(o.seq);
+    if (e && (e.content.kind === 'doc' || e.content.kind === 'image')) {
+      load().then((m) => Preview.look(m, e, ctxOf(e)), () => AGM.toast('This page could not load what draws a take: reload it.', true));
+      return;
+    }
     if (o.kind !== 'web' || !o.url) { AGM.toast('This page cannot open that one again.', true); return; }
     load().then((m) => Preview.open(m, o.url, null), () => AGM.toast('This page could not load what draws a web page: reload it.', true));
   }
@@ -4536,7 +4590,7 @@ const Takes = (function () {
     const o = pastObject(Number(door.el.dataset.key.slice(5)));
     if (o) act('past', el.dataset.action, o, { anchor: door.more || el, node: door.el, opener: el });
   });
-  AGM.menu.door(pastList, pastDoor);
+  AGM.menu.door(pastList, pastDoor, { stage: true });
 
   // ---- the objects the catalogue reads, and their bars
   /** A web page's address as the take carries it ('' for any other kind): Open in a new tab opens it. */
@@ -4608,7 +4662,7 @@ const Takes = (function () {
   });
   // A blank take draws nothing but black: its bar shows once the person touches the screen or presses a key.
   for (const ev of ['pointerdown', 'keydown']) layer.addEventListener(ev, () => { layer.dataset.touched = '1'; });
-  AGM.menu.door(layer, takeDoor);
+  AGM.menu.door(layer, takeDoor, { stage: true });
   cards.addEventListener('click', (e) => {
     const el = e.target.closest('[data-action^="card."], [data-more]');
     const door = el && cardDoor(el);
@@ -4622,7 +4676,7 @@ const Takes = (function () {
     const o = cardObject(door.layer);
     if (o) act('card', el.dataset.action, o, { anchor: door.more || el, node: door.el, opener: el });
   });
-  AGM.menu.door(cards, cardDoor);
+  AGM.menu.door(cards, cardDoor, { stage: true });
   // Escape minimises the layer (the Escape order: an open menu, an open ask, then the layer), before a field under it
   // takes it back from a reply; never inside a dialog, whose Escape is its own.
   document.addEventListener('keydown', (e) => {
@@ -4809,10 +4863,10 @@ const Console = (function () {
   const chip = $('boardChip');
   const list = $('peoplePages');
   /** How a choice is said, by its kind: "The clock on 6 Board pages." */
-  const SAID = { chat: 'Back to chat', stage: 'Stagewatch', clock: 'The clock', holding: 'Holding', blank: 'Blank', web: 'The web page' };
+  const SAID = { chat: 'Back to chat', stage: 'Stagewatch', clock: 'The clock', holding: 'Holding', blank: 'Blank', web: 'The web page', doc: 'The document', image: 'The picture' };
   const said = (content) => (content.kind === 'chat' && content.layer === 'info' ? 'Taken down' : SAID[content.kind] || 'It');
   /** The information layer's kinds (lib/pages.js), which a take of draws over the show. */
-  const INFO = ['web'];
+  const INFO = ['web', 'doc', 'image'];
   let status = null;       // page:status's answer: {board, people}
   let mine = null;         // this page's own take on the Board: {seq, previous, time}
   let asking = false;
@@ -4840,7 +4894,7 @@ const Console = (function () {
    * (`info`), or in their side bar beside the operator's (`beside`); what Take down hands back, and whether the operator put
    * it up (`op`: a researcher's Take down is only over its own kind).
    */
-  const takeIn = (i) => (i && i.seq && i.kind && i.kind !== 'chat' ? { seq: i.seq, kind: i.kind, mark: i.mark, words: i.words, showing: i.showing, arrive: i.arrive === 'side' ? 'side' : 'over', op: i.op === true, on: i.on, pages: i.pages } : null);
+  const takeIn = (i) => (i && i.seq && i.kind && i.kind !== 'chat' ? { seq: i.seq, kind: i.kind, mark: i.mark, words: i.words, showing: i.showing, arrive: i.arrive === 'side' ? 'side' : 'over', op: i.op === true, mine: i.mine === true, on: i.on, pages: i.pages } : null);
   const infoOf = (row) => takeIn(row && row.info);
   const besideOf = (row) => takeIn(row && row.beside);
   /**
@@ -4891,8 +4945,17 @@ const Console = (function () {
       const n = st ? st.pages : 0;
       const whom = onBoard ? (n ? ' on ' + n + (n === 1 ? ' Board page' : ' Board pages') : ': no Board page is open — it arrives when one joins') : ' on ' + (name || 'their') + '\'s pages';
       const where = r.aside ? ' — in their side bar, beside what the operator is showing' : r.arrive === 'side' ? ' — in their side bar' : '';
-      const down = info && undoable ? { undoLabel: 'Take down', undo: () => push(to, { kind: 'chat', layer: 'info' }, { ifSeq: r.seq, undoable: false, name }) } : undefined;
+      // Information offers Take down, and beside it Withdraw (a take shown by mistake: from Earlier too), for 10 s.
+      const down = info && undoable ? { undoLabel: 'Take down', undo: () => push(to, { kind: 'chat', layer: 'info' }, { ifSeq: r.seq, undoable: false, name }), also: { label: 'Withdraw', act: () => withdraw(r.seq) } } : undefined;
       AGM.toast(said(content) + whom + where + '.', undo ? { undo: () => push(to, was, { ifSeq: r.seq, undoable: false, name }) } : down);
+      read();
+    });
+  }
+  /** A take withdrawn (page:withdraw): from every page it was for and from Earlier, said as the server words it. */
+  function withdraw(seq) {
+    AGM.outbox.now('page:withdraw', { code: HALL_KEY, seq }, (r) => {
+      if (!r || !r.ok) { AGM.toast((r && r.error) || 'Not withdrawn.', true); read(); return; }
+      AGM.toast(r.already ? 'Already withdrawn.' : r.words || 'Withdrawn.');
       read();
     });
   }
@@ -4918,12 +4981,14 @@ const Console = (function () {
     'board.back': (o) => push('board', o.mine.previous, { ifSeq: o.seq, undoable: false }),
     'board.takeDown': (o) => { const t = AGM.catalog.downOf(F, o); if (t) push('board', { kind: 'chat', layer: 'info' }, { ifSeq: t.seq, undoable: false }); },
     'person.takeDown': (p) => { const t = AGM.catalog.downOf(F, p); if (t) push({ uid: p.key }, { kind: 'chat', layer: 'info' }, { ifSeq: t.seq, undoable: false, name: p.name }); },
+    'board.withdraw': (o) => { const t = AGM.catalog.withdrawOf(F, o); if (t) withdraw(t.seq); },
+    'person.withdraw': (p) => { const t = AGM.catalog.withdrawOf(F, p); if (t) withdraw(t.seq); },
     'board.screens': () => Screens.show('people'),
     'person.show': (p, { value }) => { if (typeof value === 'string') push({ uid: p.key }, { kind: value }, { name: p.name }); },
     'person.chat': (p) => push({ uid: p.key }, { kind: 'chat' }, { name: p.name }),
     'person.web': (p, c) => web({ uid: p.key }, 'person', 'person.web', () => (p.where === 'console' ? rowOf(p.key) : personNow(p.uid)), c, p.name),
   });
-  for (const [kind] of AGM.catalog.SHOW_KINDS) RUN['board.' + kind] = () => push('board', { kind });
+  for (const [kind] of AGM.catalog.SHOW_KINDS) if (AGM.catalog.entry('board', 'board.' + kind)) RUN['board.' + kind] = () => push('board', { kind });
   RUN['board.web'] = (o, c) => web('board', 'board', 'board.web', board, c);
 
   // ---- the Board chip, in the header: "Board · 🕐 Clock ✓ 6/6"; a click on it, a right-click and Shift+F10 open its menu
@@ -5065,32 +5130,60 @@ const Console = (function () {
   return { read, draw, board, kindOf, takesOf, chipDoor };
 })();
 
-// ---------------- A web page previewed: framed on this page alone, before it is shown on anyone's ----------------
-// The address its ask was answered with, framed by the one frame a page makes (pagelayer.mjs framePage), in a dialog of
-// its own; Show it there runs the act with that answer, and closing it takes the frame away.
+// ---------------- A web page previewed, or what was shown looked at again: on this page alone ----------------
+// A web page's Preview: the address its ask was answered with, framed by the one frame a page makes (pagelayer.mjs
+// framePage), in a dialog of its own; Show it there runs the act with that answer, and closing it takes the frame away. A
+// Look (an Earlier entry's): the same dialog, with nothing to show from it, the web page framed or a document or a picture
+// drawn as its take was (pagelayer.mjs render), its reader let go and its pictures' object URLs revoked as it closes, and
+// as the entry leaves Earlier. Neither reports anything: it is this person's own look.
 const Preview = (function () {
   const $ = (id) => document.getElementById(id);
   const dlg = $('webPreview');
   const box = $('webPreviewBox');
   let then = null;
-  function open(m, url, show) {
-    const made = m.framePage(url);
-    if (made.error) { AGM.toast(made.error, true); return; }
-    box.textContent = '';
-    box.append(made.frame);
-    $('webPreviewHost').textContent = made.host;
-    then = typeof show === 'function' ? show : null;
+  let drawer = null;       // pagelayer.mjs, as the open dialog was drawn by it
+  let seq = 0;             // the Earlier entry the dialog shows now, 0 for none
+  function show(what, name, hint, go) {
+    $('webPreviewWhat').textContent = what;
+    $('webPreviewHost').textContent = name;
+    $('webPreviewHint').textContent = hint;
+    then = typeof go === 'function' ? go : null;
     // A Look (an Earlier entry's) shows nothing from here: no Show it.
     $('webPreviewShow').hidden = !then;
-    AGM.openDialog(dlg);
+    if (!dlg.open) AGM.openDialog(dlg);
   }
-  dlg.addEventListener('close', () => { box.textContent = ''; then = null; });
+  const LOOK = 'Only you see it here: looking at it again tells nobody.';
+  function letBoxGo() { if (drawer) drawer.clear(box); else box.textContent = ''; drawer = null; seq = 0; }
+  function open(m, url, go) {
+    const made = m.framePage(url);
+    if (made.error) { AGM.toast(made.error, true); return; }
+    letBoxGo();
+    box.append(made.frame);
+    show(go ? 'Preview' : 'Look', made.host, go ? 'Only you see it here. Show it puts it on their pages; nothing is sent until then.' : LOOK, go);
+  }
+  /** A document or a picture an Earlier entry (`e`) showed, drawn again here alone, as the take was. */
+  function look(m, e, ctx) {
+    letBoxGo();
+    drawer = m;
+    seq = e.seq;
+    show('Look', (e.content && (e.content.name || '')) || 'Shown earlier', LOOK, null);
+    Promise.resolve(m.render(box, e.content, ctx)).then((r) => {
+      if (seq === e.seq && r && r.state === 'failed') AGM.toast('This could not be shown again: ' + r.words + '.', true);
+    }, () => AGM.toast('This page could not load what draws it: reload it.', true));
+  }
+  /** The Earlier entries the dialog shows now (a Look's), by number. */
+  const looking = () => (dlg.open && seq ? [seq] : []);
+  /** The Look of `n` closed, its reader let go: the entry is gone (withdrawn, ended). */
+  function letGo(n) { if (seq && seq === n) { if (dlg.open) dlg.close(); letBoxGo(); } }
+  dlg.addEventListener('close', () => { letBoxGo(); then = null; });
+  // What a Look draws is On stage content: AGMessage's menu (none, here) in place of the browser's, Shift+right-click too.
+  AGM.menu.door(box, () => ({ el: box, more: null, open: () => true }), { stage: true });
   $('webPreviewShow').addEventListener('click', () => {
     const go = then;
     dlg.close();
     if (go) go();
   });
-  return { open };
+  return { open, look, looking, letGo };
 })();
 
 // ---------------- Send to Stagewatch: where a message goes — sent now (the speaker's screen), or asked of the operator ----------------
@@ -5409,7 +5502,7 @@ const Simple = (function () {
   // own included (its door answers as a menu that is open, and opens none), and nothing is dragged out.
   for (const id of ['takeCards', 'takeEarlier', 'docDisplay', 'pageLayer']) {
     const el = $(id);
-    AGM.menu.door(el, () => (isSimple() ? { el, more: null, open: () => true } : null));
+    AGM.menu.door(el, () => (isSimple() ? { el, more: null, open: () => true } : null), { stage: true });
     el.addEventListener('dragstart', (e) => { if (isSimple()) e.preventDefault(); });
   }
 

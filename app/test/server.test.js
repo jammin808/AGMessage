@@ -1015,3 +1015,36 @@ test('On stage seats come from an invite, in open halls too: the code seats nobo
   assert.deepEqual([back.ok, back.invites.board, new URL(srv.base + back.invites.research).searchParams.get('invite')], [true, renewed.invites.board, helpers.inviteOf(srv.dataDir, code, 'research', 1)]);
   assert.deepEqual(rows('room.invite').at(-1).words, 'a new Backstage link (the old one no longer admits)');
 });
+
+// An upload is kept by no device and saved by no GET (plan 4-§4.6.3): every type answers `private, no-store` and `inline`,
+// never `attachment`; a navigation to it (the address bar, a link, a frame, an embed: Fetch Metadata) is refused as if it
+// were not there, while AGMessage's readers (a fetch, an <img>) and a browser that sends no Fetch Metadata are served.
+test('uploads are served no-store and inline for every type, never as attachment; a navigation to one is refused by Fetch Metadata, a fetch, a picture and a browser that sends none are served', async (t) => {
+  const srv = await helpers.startServer();
+  t.after(() => helpers.stopServer(srv.child));
+  const dir = srv.dataDir + '-uploads';
+  fs.mkdirSync(dir, { recursive: true });
+  const types = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'docx', 'xlsx', 'pptx', 'xls', 'csv', 'txt', 'md'];
+  // A request with exactly these headers (fetch writes its own Sec-Fetch-* where a browser would): its status and disposition.
+  const asked = (url, headers) => new Promise((resolve, reject) => {
+    require('http').get(url, { headers }, (res) => { res.resume(); res.on('end', () => resolve({ status: res.statusCode, disposition: String(res.headers['content-disposition'] || '') })); }).on('error', reject);
+  });
+  for (const ext of types) fs.writeFileSync(path.join(dir, '1730000000000-abcdefghijkl-f.' + ext), 'x');
+  for (const ext of types) {
+    const url = srv.base + '/uploads/1730000000000-abcdefghijkl-f.' + ext;
+    const plain = await fetch(url);
+    assert.equal(plain.status, 200, ext);
+    assert.equal(plain.headers.get('cache-control'), 'private, no-store', ext);
+    assert.match(plain.headers.get('content-disposition'), /^inline; /, ext);
+    assert.equal(plain.headers.get('x-content-type-options'), 'nosniff', ext);
+    await plain.arrayBuffer();
+    for (const headers of [{ 'sec-fetch-mode': 'navigate' }, { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' }, ...['document', 'iframe', 'frame', 'embed', 'object'].map((d) => ({ 'sec-fetch-mode': 'no-cors', 'sec-fetch-dest': d }))]) {
+      assert.equal((await asked(url, headers)).status, 404, ext + ' ' + JSON.stringify(headers));
+    }
+    for (const headers of [{ 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty' }, { 'sec-fetch-mode': 'no-cors', 'sec-fetch-dest': 'image' }, {}]) {
+      const r = await asked(url, headers);
+      assert.equal(r.status, 200, ext + ' ' + JSON.stringify(headers));
+      assert.ok(!/attachment/.test(r.disposition), ext);
+    }
+  }
+});

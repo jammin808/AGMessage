@@ -34,8 +34,11 @@
  * what it shows in a few words (lib/pages.js describePage), never a file. The answer is "sending", never "on screen":
  * each page says what it did with the take (`page:report`), and only those reports make the status (lib/pages.js
  * `Pages.status`), which a console reads (`page:status`) whenever it is told the hall's pages changed (`pages:changed`).
- * Two layers (plan 4-§5.9.1): the show (Stagewatch, the clock, holding, blank) and information drawn over it (a web page
- * now); `chat` hands back both, `{chat, layer: 'info'}` the information alone (Take down). Who may push which kind to
+ * Two layers (plan 4-§5.9.1): the show (Stagewatch, the clock, holding, blank) and information drawn over it (a web page,
+ * a document, a picture); `chat` hands back both, `{chat, layer: 'info'}` the information alone (Take down). A document or
+ * a picture shows a file the hall holds, from a place the stage may show it from (lib/pages.js sourceOk), checked off the
+ * socket's turn at its first take (`stageCheck`), and a fresh upload it shows is kept as the hall's stage file; a take
+ * shown by mistake is withdrawn (`page:withdraw`) by who put it up, the operator or the admin. Who may push which kind to
  * whom, over what is up there now, is lib/pages.js `canShow` (pure): the operator (canPush) every kind, an account's
  * information with stage.show; and an account seated backstage in a room of the hall (a side room on the Main room's
  * list) by a right of its own (`conn.canShow`): information alone, to the people On stage alone, never over what the
@@ -62,7 +65,7 @@
  * server's named effect (`viewChanged`), which reaches each page of theirs by its socket alone.
  */
 const { str } = require('../guard');
-const { cleanPage, askedOf, canShow, describePage, personKey, layerOf, ARRIVALS } = require('../pages');
+const { cleanPage, askedOf, canShow, describePage, personKey, layerOf, fileOf, ARRIVALS, FILE_KINDS, STAGE_FULL } = require('../pages');
 const { mayChange } = require('../rbac');
 
 /** What the admin's support view is told of an act: it shows the person's page, and acts on nothing (as its doors say). */
@@ -91,6 +94,10 @@ const NOT_HERE = 'That person is not in this hall now.';
 /** Whom the audit row names for the admin's take-down of a person's take with no page of theirs open. */
 const AWAY = 'a person with no page open';
 const TARGETS = 'Show the Board (to: \'board\') or one person (to: {uid}).';
+/** A withdrawal that names no take, one no page shows and no Earlier list holds, and one its asker did not put up. */
+const WITHDRAW_NAMES = 'Withdraw names the take it withdraws.';
+const NO_SUCH_TAKE = 'That is not on anyone\'s pages or under Earlier now.';
+const NOT_YOURS = 'Only who showed it, the operator or the admin can withdraw it.';
 /** A take the store would not keep (a part of it it does not read back): nothing was shown or numbered. */
 const NOT_KEPT = 'That could not be kept: nothing was shown.';
 /** A web page the store could not keep: its address is kept only sealed, with the machine key this run has not. */
@@ -122,6 +129,12 @@ const CID = /^[A-Za-z0-9_-]{1,40}$/;
  */
 const PUSHED_KEEP = 200;
 const pushed = new Map();
+/**
+ * The pushes being made now (a file's check is awaited off the socket's turn), by the hall's book, who asked and the client
+ * id: a repeat that arrives meanwhile waits for the first and is answered with what it did, never made a second take.
+ * Each is let go once its answer is given (and kept in `pushed`), so it holds no more than the pushes under way.
+ */
+const making = new Map();
 
 const isRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 /** A key a client named, as the store keys rooms: upper case, or '' for anything that is no string. */
@@ -135,7 +148,7 @@ const pagesWords = (n) => n + ' page' + (n === 1 ? '' : 's');
  * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, accounts, linkFor, sendersOf, pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, sendTo } = ctx;
+  const { store, audit, accounts, linkFor, sendersOf, pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, sendTo } = ctx;
 
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
   /**
@@ -217,14 +230,19 @@ function register(socket, conn, ctx) {
   const tell = (hall, before) => { for (const s of takeSends(hall, before)) sendTo([s.sid], 'page:take', s.take); };
 
   // A take on the Board's pages or one person's (plan 1-§5.3, 4-§5.9): the repeat of a push its client id names is
-  // answered with what the first did, before the rate; then the rate, then the hall and who may push or show there (one
+  // answered with what the first did, before the rate (one that arrives while the first is still being made waits for it
+  // and is answered the same); then the rate, then the hall and who may push or show there (one
   // answer for both), whom it is for, what it asks to show and how it arrives, then who may push that kind to them over
   // what is there now (lib/pages.js canShow: the operator's information stays up, a researcher's goes to the side bar),
-  // then what is shown, made safe. The store numbers it in its layers (a Board take puts away the older takes and
-  // answers, in its places, of those seated On stage now; an information take put away so joins Earlier; a researcher's
-  // side-bar push over the operator's information is kept beside it), each page it moved is told, one row per target,
-  // the consoles are told, and the answer is "sending", read from the place it went to.
-  socket.on('page:push', (args, ack) => {
+  // then what is shown, made safe: a file it shows by where it may come from (sourceOk), never a document to an observer.
+  // A file it shows (a document, a picture, a holding slide's own picture) is then checked off the socket's turn (its
+  // archive or its pixels, as the Board's devices draw it: stageCheck),
+  // and everything is read again as it stands after the check. The store numbers it in its layers (a Board take puts away
+  // the older takes and answers, in its places, of those seated On stage now; an information take put away so joins
+  // Earlier; a researcher's side-bar push over the operator's information is kept beside it), a fresh upload it shows is
+  // kept as the hall's stage file, each page it moved is told, one row per target, the consoles are told, and the answer
+  // is "sending", read from the place it went to.
+  socket.on('page:push', async (args, ack) => {
     if (!conn.gate(ack, { joined: false, bucket: null })) return;   // a repeat is answered as done before the rate: the token is taken below, before any lookup of the hall
     const answer = conn.ok(ack);
     const a = isRecord(args) ? args : {};
@@ -241,22 +259,97 @@ function register(socket, conn, ctx) {
     const bookKey = own ? own.code : code;
     const kept = asked && pushed.has(bookKey) ? pushed.get(bookKey).get(asked) : undefined;
     if (kept) return answer(kept);
+    // A repeat of a push still being made waits for it, and is answered with what it did.
+    const under = asked ? bookKey + '\n' + asked : '';
+    if (under && making.has(under)) return answer(await making.get(under));
     if (!conn.writes.take()) return conn.limited(ack);
-    const hall = pushHall(code, answer);
-    if (!hall) return;
+    const run = pushNow(code, a, { whoKey, asked });
+    if (under) making.set(under, run);
+    let res;
+    try { res = await run; } finally { if (making.get(under) === run) making.delete(under); }
+    answer(res);
+  });
+
+  /**
+   * The push of `page:push` made, past its repeat and its rate: the answer it is given, `asked` (who asked and the act's
+   * client id, '' for none) keeping it for a repeat when it was taken.
+   */
+  async function pushNow(code, a, { whoKey, asked }) {
+    let refused = null;
+    const hall = pushHall(code, (r) => { refused = r; });
+    if (!hall) return refused;
+    let made = plan(hall, a);
+    if (made.error) return { ok: false, error: made.error };
+    // A file it shows (a document's, a picture's, a holding slide's picture) is checked off the socket's turn at its first
+    // take, then everything is read again as it stands after the check.
+    if (made.shown) {
+      const why = await stageCheck(made.shown.url);
+      if (why) return { ok: false, error: why };
+      if (!store.get(hall.code)) return { ok: false, error: whyNot(null) };
+      made = plan(hall, a);
+      if (made.error) return { ok: false, error: made.error };
+    }
+    const { board, target, to, name, content, onStage, layer, arrive, aside, named, was, before, facts, shown, sent } = made;
+    // A fresh upload it shows is kept by the hall as a stage file while a take names it (and a while after): the hall's
+    // stage holds a bound of them, past which a new one is refused.
+    const file = shown && shown.fresh ? shown.url.slice(9) : '';
+    if (file && !pages.fileRoom(hall.code, file)) return { ok: false, error: STAGE_FULL };
+    // The operator's information (canPush) stays up: a researcher's side-bar push over it is kept beside it, superseding
+    // nothing over the show.
+    const op = conn.canPush(hall);
+    // A code guest's take is kept as one (`guest`): the web pages guests put up are counted when the admin turns them off.
+    // An information take keeps who put it up (`who`): its pusher may withdraw it, and a later push's answer gives a web
+    // page's address back to them alone, and the admin. It keeps whether its pusher held canPush (`op`).
+    const by = { name: byName(), guest: conn.actor().t === 'code', ...(layer !== 'show' && op ? { op: true } : {}), ...(layer !== 'show' && whoKey ? { who: whoKey } : {}) };
+    const take = pages.take(hall.code, to, content, by, { onStage, arrive, aside, slot: named, sent });
+    if (!take) return { ok: false, error: content.kind === 'web' ? WEB_NOT_KEPT : NOT_KEPT };
+    if (file) { const up = freshUpload(file); stageDropped(pages.recordFile(hall.code, file, { at: up ? up.at : take.at, room: up ? up.room : hall.code, uid: up ? up.uid : '', name: shown.name }, take.at)); }
+    tell(hall.code, before);
+    const holding = holdingOf(hall.code);
+    // In the audit's voice: whom, how many of the Board's pages it reached, what it shows in a few words (never a file's
+    // name, a text or a path), and an arrival in the side bar.
+    const side = take.arrive === 'side' ? ', in their side bar' + (aside ? ', beside the operator\'s' : '') : named === 'beside' ? ', from their side bar' : '';
+    write('page.push', hall.code, (board ? 'the Board (' + pagesWords(target.length) + ')' : name || AWAY) + ' → ' + describePage(take.content, { hallHolding: holding, voice: 'audit', sent: sent ? sent.name : '' }) + side);
+    pagesChanged(hall.code);
+    // The status of the place it went to: beside the operator's, over the show, or the show.
+    const status = pages.status(hall.code, to, target, { name: board ? '' : name, hallHolding: holding, layer: aside || named === 'beside' ? 'beside' : layer === 'info' ? 'info' : 'show' });
+    // What was shown before comes back as this pusher could show it: a web page's address to whoever put it up and to the
+    // admin alone; a document's or a picture's never (information is taken down, never put back).
+    const back = was && !FILE_KINDS.includes(was.content.kind) && (was.content.kind !== 'web' || conn.theAdmin() || (!!whoKey && was.by.who === whoKey)) ? cleanPage(pages.told(was.content), facts) : null;
+    const res = {
+      ok: true, seq: take.seq, ...(take.arrive === 'side' ? { arrive: 'side' } : {}), ...(aside ? { aside: true } : {}),
+      results: [{ key: to, name, ok: true, status }], previous: was && !aside ? { seq: was.seq, content: !back || back.error ? null : back } : null,
+    };
+    if (asked) {
+      for (const k of pushed.keys()) if (!store.get(k)) pushed.delete(k);
+      if (!pushed.has(hall.code)) pushed.set(hall.code, new Map());
+      const book = pushed.get(hall.code);
+      book.set(asked, res);
+      if (book.size > PUSHED_KEEP) book.delete(book.keys().next().value);
+    }
+    return res;
+  }
+
+  /**
+   * A push made ready (page:push), read as everything stands now: {error} in words, or what the take is, for whom, and
+   * over what. Whom it is for (the Board's pages, or a person's in the rooms this page may read), what it asks to show and
+   * how it arrives, who may push that kind to them over what is up there now (canShow), and what is shown, made safe
+   * (cleanPage: a file by where it may come from, sourceOk; a document never to a person seated as an observer).
+   */
+  function plan(hall, a) {
     // The Board, by its word alone, or one person by their key ({uid}: `a:<account id>`, `u:<uid>`), never one for the other.
     const board = a.to === 'board';
     const person = !board && isRecord(a.to) ? str(a.to.uid) : '';
-    if (!board && !person) return answer({ ok: false, error: TARGETS });
+    if (!board && !person) return { error: TARGETS };
     // What it asks to show (its kind, and a hand-back's layer), read before anything else of it; then its layer: the show,
     // the information, or both (a hand-back of both); and how an information take arrives (over their chat by default).
     const want = askedOf(a.content);
-    if (!want) return answer({ ok: false, error: cleanPage(a.content).error });
+    if (!want) return { error: cleanPage(a.content).error };
     const layer = want.kind === 'chat' ? (want.layer === 'info' ? 'info' : 'both') : layerOf(want.kind);
     const arrive = a.arrive === undefined || a.arrive === null ? 'over' : a.arrive;
-    if (!ARRIVALS.includes(arrive)) return answer({ ok: false, error: ARRIVE_WORDS });
-    if (arrive === 'side' && (layer !== 'info' || want.kind === 'chat')) return answer({ ok: false, error: SHOW_OVER });
-    if (a.ifSeq !== undefined && a.ifSeq !== null && (!Number.isInteger(a.ifSeq) || a.ifSeq < 0)) return answer({ ok: false, error: IF_SEQ });
+    if (!ARRIVALS.includes(arrive)) return { error: ARRIVE_WORDS };
+    if (arrive === 'side' && (layer !== 'info' || want.kind === 'chat')) return { error: SHOW_OVER };
+    if (a.ifSeq !== undefined && a.ifSeq !== null && (!Number.isInteger(a.ifSeq) || a.ifSeq < 0)) return { error: IF_SEQ };
     const rooms = readable(hall);
     const before = hallPages(hall.code);
     const seated = before.filter((p) => !p.support);
@@ -266,7 +359,7 @@ function register(socket, conn, ctx) {
     // its number, which is read below as any `ifSeq` is): the admin reads every room, and the take is the store's, so
     // nothing names who sits where.
     const away = !board && !target.length && socket.data.isAdmin && want.kind === 'chat' && Number.isInteger(a.ifSeq);
-    if (!board && !target.length && !away) return answer({ ok: false, error: NOT_HERE });
+    if (!board && !target.length && !away) return { error: NOT_HERE };
     const to = board ? 'board' : person;
     const name = board ? 'the Board' : target.length ? target[0].name : '';
     // What the target is shown now in a place (the show, the information over it, beside it): the Board's own take, or the
@@ -288,57 +381,38 @@ function register(socket, conn, ctx) {
     // Who may push this kind to them over what is up there now: the operator (canPush) as before; a researcher by a right
     // of its own (canShow), never over the operator's information (its side bar instead), and taking down only its own.
     const may = canShow({ ...showFacts(hall, named === 'beside' ? beside : info, a.ifSeq), ...(opOn && named !== 'beside' ? { opOn: { kind: opOn.content.kind } } : {}) }, want, board ? 'board' : { onStage: target.some((p) => p.board) }, arrive);
-    if (may !== true) return answer({ ok: false, error: may });
+    if (may !== true) return { error: may };
     // A push that names the take it goes over (`ifSeq`: ↶ Back to, a Take down) is refused once anything newer is up in its
     // place (a hand-back of both, in any; of the information, over the show or beside it), so it never undoes someone
     // else's later take.
     if (a.ifSeq !== undefined && a.ifSeq !== null) {
       const up = (layer === 'both' ? [was, info, beside] : layer === 'info' ? [info, beside] : [was]).filter(Boolean);
-      if (!(up.length ? up : [null]).some((t) => (t ? t.seq : 0) === a.ifSeq)) return answer({ ok: false, error: NEWER });
+      if (!(up.length ? up : [null]).some((t) => (t ? t.seq : 0) === a.ifSeq)) return { error: NEWER };
     }
+    const me = conn.me();
+    const source = stageSource(hall, me ? me.uid : '', { reads: (r) => conn.canIn('hall.view', r) || r === conn.room(), files: (r) => conn.canIn('hall.post', r) && conn.canIn('hall.files', r) });
     const facts = {
       stagewatch: !!linkFor(hall.code).base,
-      readable: (url) => rooms.some((r) => r.messages.some((m) => m.type === 'file' && m.url === url)),
+      source,
+      // A document hands over the whole file: never to a person seated as an observer on any page of theirs, in a room this
+      // page may read or not (a person's take reaches every page of theirs in the hall).
+      observer: !board && seated.some((p) => p.key === person && p.observer),
       web: webOf(hall),
       selfHosts: selfHosts(),
     };
     const content = cleanPage(a.content, facts);
-    if (content.error) return answer({ ok: false, error: content.error });
+    if (content.error) return { error: content.error };
+    // The upload it shows, with its name and whether it is this pusher's fresh upload (kept as a stage file once taken).
+    const url = fileOf(content);
+    const src = url ? source(url) : null;
+    const shown = url ? { url, name: content.name || src.name || '', fresh: src.fresh === true } : null;
     const onStage = [...new Set(seated.filter((p) => p.board).map((p) => p.key))];
-    // The operator's information (canPush) stays up: a researcher's side-bar push over it is kept beside it, superseding
-    // nothing over the show.
-    const op = conn.canPush(hall);
-    const aside = layer === 'info' && want.kind !== 'chat' && arrive === 'side' && !op && (opOf(info) || !!opOn);
-    // A code guest's take is kept as one (`guest`): the web pages guests put up are counted when the admin turns them off.
-    // A web page keeps who put it up (`who`): a later push's answer gives its address back to them alone, and the admin.
-    // An information take keeps whether its pusher held canPush (`op`).
-    const by = { name: byName(), guest: conn.actor().t === 'code', ...(layer !== 'show' && op ? { op: true } : {}), ...(content.kind === 'web' && whoKey ? { who: whoKey } : {}) };
-    const take = pages.take(hall.code, to, content, by, { onStage, arrive, aside, slot: named });
-    if (!take) return answer({ ok: false, error: content.kind === 'web' ? WEB_NOT_KEPT : NOT_KEPT });
-    tell(hall.code, before);
-    const holding = holdingOf(hall.code);
-    // In the audit's voice: whom, how many of the Board's pages it reached, what it shows in a few words (never a file),
-    // and an arrival in the side bar.
-    const side = take.arrive === 'side' ? ', in their side bar' + (aside ? ', beside the operator\'s' : '') : named === 'beside' ? ', from their side bar' : '';
-    write('page.push', hall.code, (board ? 'the Board (' + pagesWords(target.length) + ')' : name || AWAY) + ' → ' + describePage(take.content, { hallHolding: holding }) + side);
-    pagesChanged(hall.code);
-    // The status of the place it went to: beside the operator's, over the show, or the show.
-    const status = pages.status(hall.code, to, target, { name: board ? '' : name, hallHolding: holding, layer: aside || named === 'beside' ? 'beside' : layer === 'info' ? 'info' : 'show' });
-    // A web page's address comes back to whoever put it up and to the admin alone: to any other pusher, no content.
-    const back = was && (was.content.kind !== 'web' || conn.theAdmin() || (!!whoKey && was.by.who === whoKey)) ? cleanPage(pages.told(was.content), facts) : null;
-    const res = {
-      ok: true, seq: take.seq, ...(take.arrive === 'side' ? { arrive: 'side' } : {}), ...(aside ? { aside: true } : {}),
-      results: [{ key: to, name, ok: true, status }], previous: was && !aside ? { seq: was.seq, content: !back || back.error ? null : back } : null,
-    };
-    if (asked) {
-      for (const k of pushed.keys()) if (!store.get(k)) pushed.delete(k);
-      if (!pushed.has(hall.code)) pushed.set(hall.code, new Map());
-      const book = pushed.get(hall.code);
-      book.set(asked, res);
-      if (book.size > PUSHED_KEEP) book.delete(book.keys().next().value);
-    }
-    answer(res);
-  });
+    const aside = layer === 'info' && want.kind !== 'chat' && arrive === 'side' && !conn.canPush(hall) && (opOf(info) || !!opOn);
+    // A push sent from a side room says so ("…, sent from Legal"): its key is kept to end it with that room's reset.
+    const here = conn.room();
+    const sent = here && here.hall === hall.code && here !== hall ? { key: here.code, name: here.name || '' } : null;
+    return { board, target, to, name, content, onStage, layer, arrive, aside, named, was, before, facts, shown, sent };
+  }
 
   // What a page did with the take it is shown now (plan 1-§5.3, §5.4): `{seq, state, words, again}`, counted only for
   // that take, never an older one (lib/pages.js report). Back to chat and Minimise are the person's answer, for every page
@@ -371,6 +445,46 @@ function register(socket, conn, ctx) {
     answer({ ok: true });
   });
 
+  // A take shown by mistake withdrawn (plan 4-§5.9.7): `page:withdraw {code, seq}`, an information take on people's pages
+  // now or under Earlier, by who put it up, the operator (canPush) or the admin; anyone else who may show there is refused
+  // in words. It is handed back wherever a page shows it and leaves Earlier (lib/pages.js withdraw), each page it was for
+  // is told (`page:take {withdrawn: seq}`: the page lets go of whatever it drew of it), a stage file it named starts its
+  // wait, one `page.push` row is written per target ("…, withdrawn"), and the consoles are told. Asked again it is done.
+  socket.on('page:withdraw', (args, ack) => {
+    if (!conn.gate(ack, { joined: false, bucket: conn.writes })) return;
+    const answer = conn.ok(ack);
+    const a = isRecord(args) ? args : {};
+    const hall = pushHall(keyOf(a.code), answer);
+    if (!hall) return;
+    if (!Number.isInteger(a.seq) || a.seq < 1) return answer({ ok: false, error: WITHDRAW_NAMES });
+    const who = socket.data.actor || conn.me() ? conn.actor() : null;
+    const whoKey = who ? who.t + ':' + who.id : '';
+    const operator = conn.canPush(hall) || !!socket.data.isAdmin;
+    const found = pages.find(hall.code, a.seq);
+    if (!found) {
+      const gone = pages.withdrawnOf(hall.code, a.seq);
+      if (gone && (operator || (!!whoKey && gone.who === whoKey))) return answer({ ok: true, already: true, withdrawn: a.seq });
+      return answer({ ok: false, error: NO_SUCH_TAKE });
+    }
+    if (!operator && !(whoKey && found.take.by.who === whoKey)) return answer({ ok: false, error: NOT_YOURS });
+    const before = hallPages(hall.code);
+    pages.withdraw(hall.code, a.seq, { who: whoKey });
+    tell(hall.code, before);
+    // Every page of whom it was for (the Board's, or each person's), by its socket, lets go of it: a Look of it included.
+    const pagesNow = hallPages(hall.code);
+    const theirs = pagesNow.filter((p) => found.to.includes(p.key) || (found.to.includes('board') && p.board));
+    for (const p of theirs) sendTo([p.sid], 'page:take', { withdrawn: a.seq });
+    const holding = holdingOf(hall.code);
+    const said = describePage(found.take.content, { hallHolding: holding, voice: 'audit', sent: found.take.sent ? found.take.sent.name : '' });
+    const seated = pagesNow.filter((p) => !p.support);
+    const whom = found.to.map((to) => (to === 'board' ? { to, n: seated.filter((p) => p.board).length, name: 'the Board' } : { to, n: seated.filter((p) => p.key === to).length, name: (seated.find((p) => p.key === to) || {}).name || '' }));
+    for (const w of whom) write('page.push', hall.code, (w.to === 'board' ? 'the Board (' + pagesWords(w.n) + ')' : w.name || AWAY) + ' → ' + said + ', withdrawn');
+    pagesChanged(hall.code);
+    const one = whom.length === 1 ? whom[0] : null;
+    const where = !one ? pagesWords(theirs.filter((p) => !p.support).length) : one.to === 'board' ? pagesWords(one.n).replace(/ pages?$/, (x) => ' Board' + x) : (one.name ? one.name + '\'s' : 'their') + ' pages';
+    answer({ ok: true, withdrawn: a.seq, words: 'Withdrawn from ' + where + ' — it is no longer under Earlier.' });
+  });
+
   // Where a hall's people's pages stand (plan 1-§5.3, 4-§5.9.1): the Board's take in each layer, read from each Board
   // page's report (its people named only to one who may read the Main room), and each person seated in a room of the hall
   // this page may read, with theirs: the show take's status, and the information over it (`info`, with how it arrived and
@@ -395,9 +509,12 @@ function register(socket, conn, ctx) {
     }
     // Each target's show take, the information over it (`info`) and, while one is there, the information beside it
     // (`beside`, in their side bar beside the operator's).
+    // Whether this asker put each information take up (`mine`): its pusher may withdraw it.
+    const asker = socket.data.actor || conn.me() ? conn.actor() : null;
+    const who = asker ? asker.t + ':' + asker.id : '';
     const both = (to, list, o) => {
-      const beside = pages.status(hall.code, to, list, { ...o, layer: 'beside' });
-      return { ...pages.status(hall.code, to, list, o), info: pages.status(hall.code, to, list, { ...o, layer: 'info' }), ...(beside.seq ? { beside } : {}) };
+      const beside = pages.status(hall.code, to, list, { ...o, who, layer: 'beside' });
+      return { ...pages.status(hall.code, to, list, o), info: pages.status(hall.code, to, list, { ...o, who, layer: 'info' }), ...(beside.seq ? { beside } : {}) };
     };
     answer({
       ok: true,

@@ -1,9 +1,13 @@
-// A document drawn into a box: the research page's Preview and the Board's panel (and, with the takes of a later unit,
-// the take layer) draw through this one module, so the researcher and the Board see one drawing. It holds no socket:
-// the page that opens a document says what it drew.
+// A document drawn into a box: the research page's Preview, the Board's panel and the take layer (a document or a picture
+// shown on people's pages, pagelayer.mjs) draw through this one module, so the researcher and the Board see one drawing.
+// It holds no socket: the page that opens a document says what it drew.
 //
-//   open(box, source, {at, seat, name, mime, deadline}) → view
+//   open(box, source, {at, seat, name, mime, ext, ranged, deadline}) → view
 //     source   {url} (fetched no-store) or {file} (a local File)
+//     at       the place it opens at: {page} (a page, a slide, a sheet, a line), and for a Word document {block}, the
+//              paragraph by its number, which the view opens at
+//     ext      the file's own type (an upload's, read from its address), which chooses the reader over its name
+//     ranged   a PDF read by its pages' ranges alone, never streamed or fetched ahead (a take on the Board's devices)
 //     seat     the page's own seat: 'research' (the admin's support view reads as research), 'board' or 'observer'.
 //              Only the research seat draws hidden rows, columns, sheets and slides (dimmed and marked) and reads the
 //              AI's text; every other seat gets the Board's drawing, without them.
@@ -111,8 +115,9 @@ class View {
     this.source = source;
     this.seat = seatOf(opts.seat);
     this.name = String(opts.name || (source.file && source.file.name) || '');
-    this.kind = kindOf(this.name, opts.mime || (source.file && source.file.type));
+    this.kind = kindOf(typeof opts.ext === 'string' && opts.ext ? 'file.' + opts.ext : this.name, opts.ext ? '' : opts.mime || (source.file && source.file.type));
     this.deadline = opts.deadline > 0 ? opts.deadline : BOUNDS.pdfMs;
+    this.ranged = opts.ranged === true;
     this.want = opts.at || null;
     this.dead = false;
     this.urls = [];
@@ -340,6 +345,8 @@ class View {
     const params = { worker: sharedWorker(lib), withCredentials: false, isEvalSupported: false, enableXfa: false, maxImageSize: PDF_MAX_IMAGE };
     if (this.source.file) params.data = new Uint8Array(await this.source.file.arrayBuffer());
     else params.url = this.source.url;
+    // pdf.js stops fetching ahead only with streaming off too: then only what is drawn is fetched, each range `no-store`.
+    if (this.ranged && params.url) { params.disableStream = true; params.disableAutoFetch = true; }
     const task = lib.getDocument(params);
     this.task = task;
     openPdfs.add(task);
@@ -689,7 +696,10 @@ class View {
     this.differsNote.hidden = true;
     this.bar.appendChild(this.differsNote);
     this.findBox();
+    // Each paragraph's place by its number (¶, `at.block`), where a take opens a Word document at one.
+    this.blockAt = new Map();
     this.drawBlocks(host, blocks, (b, el) => {
+      if (b.at && b.at.block > 0) this.blockAt.set(b.at.block, { el, page: b.page });
       if (b.page !== page) {
         page = b.page;
         const mark = make('div', 'dv-pagemark', (b.pageApprox ? '≈ p. ' : 'p. ') + page);
@@ -855,7 +865,7 @@ class View {
     // the box is laid out again.
     if ((this.kind === 'book' ? this.sheets : this.units.length) && !this.laidOut()) {
       const was = this.kept || {};
-      this.kept = { page: a.page > 0 ? a.page : was.page || 1, zoom: a.zoom || was.zoom || null, offset: typeof a.offset === 'number' ? a.offset : 0 };
+      this.kept = { page: a.page > 0 ? a.page : was.page || 1, zoom: a.zoom || was.zoom || null, offset: typeof a.offset === 'number' ? a.offset : 0, ...(a.block > 0 ? { block: a.block } : {}) };
       this.frozen = true;
       return;
     }
@@ -868,6 +878,15 @@ class View {
     if (this.kind === 'book') {
       if (a.page > 0 && a.page !== this.current) this.showSheet(Math.min(a.page, this.total));
       if (typeof a.offset === 'number') this.box.scrollTop = a.offset;
+      this.keep();
+      return;
+    }
+    // A Word paragraph by its number: the view at that paragraph, its page the place.
+    const para = a.block > 0 && this.blockAt ? this.blockAt.get(a.block) : null;
+    if (para) {
+      this.box.scrollTop = Math.max(0, this.topIn(para.el) - (this.bar.offsetHeight || 0));
+      this.current = para.page;
+      this.showPlace();
       this.keep();
       return;
     }

@@ -108,7 +108,14 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   **Backstage guests may show web pages** for that hall (off by default; unlocking turns it off). The person keeps the
   way out: Back to chat (with Show it again for 10 s), Minimise into the side bar's 📺 On stage (Escape does that), Show
   again from there, and for a web page, in the full view, Open in a new tab; a 🔥 message breaks through, and a take never takes the focus
-  from words being written. [docs/DISPLAYS.md](docs/DISPLAYS.md)
+  from words being written. **A document or a picture** is shown the same way: the whole file opened at its page (the
+  Board pages, zooms and finds on through the same drawing as the panel's), or a picture fitted, with zoom, saying what
+  it is a picture of; only a file of the Main room, of a side room on its list, or the pusher's own fresh upload, and a
+  document never to an observer. A take shown by mistake is **withdrawn** (🔙 Withdraw…, beside Take down in its toast
+  for 10 s), from every page and from Earlier. **A Board tablet keeps no copy**: a take's file is drawn from memory and
+  let go with the take, uploads are served `no-store` and never saved by their address, AGMessage's menu stands in for
+  the browser's on what is shown (Shift+right-click too), nothing is dragged out, and printing leaves the stage out. A
+  picture drawn for the stage lives while a take or Earlier names it, then goes. [docs/DISPLAYS.md](docs/DISPLAYS.md)
 - **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, PowerPoint, CSV,
   Markdown, text, images) shared and pushed to the on-stage panel or to screens, PDFs on iPads from iPadOS 16.4 (pdf.js's
   legacy build), JPEG 2000 pictures in them included. The panel reads each file on the device, by bounded readers (Word,

@@ -56,6 +56,8 @@ const ON_STAGE_WORDS = {
   'page:push': 'Do that from a backstage page.',
   // A person's chat view is the admin's to choose, whatever the seat: refused as every seat but the admin is.
   'admin:setView': 'Not admin',
+  // A take is withdrawn from a backstage page (the Board chip's, a person's Withdraw…).
+  'page:withdraw': 'Do that from a backstage page.',
 };
 
 test('every act hidden from a seat by its rights is refused by the server as that seat, with words, and changes nothing', async (t) => {
@@ -209,6 +211,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
       if (e.id === 'board.takeDown') return { code: hallA, to: 'board', ...down };
       return { code: hallA, to: 'board', content: e.id === 'board.back' ? o.mine.previous : e.id === 'board.web' ? web : { kind: e.id.slice('board.'.length) }, ...(e.id === 'board.back' ? { ifSeq: o.seq } : {}) };
     },
+    // Withdraw: the take the object's information names.
+    'page:withdraw': (o) => ({ code: hallA, seq: (o.info || o.beside || { seq: 1 }).seq }),
     // A page's word on the take it is shown (the layer's acts, a card's): Back to chat on the object's take.
     'page:report': (o) => ({ seq: o.seq, state: 'dismissed' }),
     // The person's chat view, the admin's (Chat view ▸ in the People panel).

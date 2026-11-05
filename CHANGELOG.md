@@ -4896,6 +4896,185 @@ Web pages need rights of their own.", confirmed "Right", the readings S5 and S13
   both out of the portable folder). Dependabot's update of `main` (jammin808/AGMessage#5), carried on this branch with
   the same lockfile entries. The fences find nothing new; nothing that ships changed.
 
+**A file, or a picture of part of one, is shown on the stage as a take; a stage file lives while a take names it; a Board
+tablet keeps no copy** (the plan's Part 4, unit 25, its §5.9.3 (`doc`, `image`), §5.9.5 (`sourceOk`), §5.9.7 (Withdraw),
+§5.9.11 (the take on the target's page), §4.6.3 and §4.6.6 (reading a file, what a Board tablet keeps), §5.10.3 (the
+checks at a file's first take) and §5.11 (the stage files, what ends a take, `page.push`'s words) and §9's row 25; the
+owner's answers 11, 12 and 20 as confirmed, and the reading S14, "Defaults"; global #61)
+- **Two new kinds of take, on the information layer.** **A document** (`{kind: 'doc', url, at?, download, note?}`): a
+  file the hall holds, the whole of it, opened at its place (a PDF's page, a deck's slide, a spreadsheet's sheet, a Word
+  document's paragraph with its page where known, `approx` when Word's own breaks were missing, a text or Markdown
+  file's line, a CSV's row) and paged, zoomed and searched on the target's own page through the drawing the page's seat
+  draws (docview.mjs: the Board's without hidden parts). **A picture** (`{kind: 'image', url, from?, note?}`): an image
+  shared in AGMessage, fitted, with zoom, saying what it is a picture of (`from`: a file's place, by its name and never
+  its address, or the researcher's own copy). There is no region: a part of a page or a picture is drawn into a picture
+  of its own on the pusher's page. A place of another type, or out of its range, refuses the take with words; `download`
+  is true only when sent as true, and is kept with the take for the ticketed download a later unit adds; a note is a line
+  of at most 200 characters. The take's `name` is the server's: the upload's own name for a fresh upload, else the name
+  the hall's oldest message holding the file gave it, so a re-post under a new name never renames what the Board is shown.
+- **Where a stage file may come from (`sourceOk`, pure, in `lib/pages.js`).** A fresh upload of the pusher's own, made
+  for the Main room or for a side room on the Main room's list where it posts files; a file in a message of the Main
+  room; a file in a message of a side room the pusher reads that is on the list; or one the hall's stage records (its
+  stage file, a take or an Earlier entry), when the room it was recorded for passes again. Never another person's fresh
+  upload. The refusal names the room only to a reader of it ("That file belongs to Legal, which may not send into the
+  Main room — send it there first, or ask an admin."; else "That file belongs to another room — send it from there."). **A
+  holding picture is held to the same rule**: in 0.5.1, and until now, a holding picture shared in a side room off the
+  Main room's list could be put on the Board's pages; it is refused now in those words.
+- **Never a document to an observer.** A document hands over the whole file, so a person seated as an observer is never
+  pushed one ("Observers are shown pictures and quotes, not documents."), in any room of the hall, one the pusher cannot
+  read included (a person's take reaches every page of theirs), and a page seated as an observer is told a
+  document (a take that reached it before its seat moved, or under Earlier) without its address (`withheld`), drawing
+  nothing of it. A picture is shown to an observer as to anyone.
+- **The checks a file has not had run at its first take**, off the socket's turn, and everything is read again as it
+  stands after them: a picture, and an image shown as a document, at most **40 megapixels** (provisional, until the
+  device matrix's oldest rows are measured): "Too large for the Board's devices — send a region."; a Word, Excel or
+  PowerPoint file that never had the archive check (one shared before 0.6.0, or before a restart) has it then, refused
+  in the upload's words. What each check found is kept by the upload's name for the run, so a file is read once.
+- **A stage file lives while a take names it** (`pages.json`'s `halls[H].files`, written only once a hall has one): a
+  fresh upload a take named that no message holds yet (a picture drawn of a page, a document or a holding slide's
+  picture shown before it was shared) is kept while a take or an Earlier entry names it, past its upload's own hour, and
+  for `UPLOAD_ORPHAN_MS` once nothing does, so a push within that wait finds it again; then it is removed, unless a
+  message, a screen or the hall's holding image holds it. An upload already posted is its room's, never a stage file.
+  **What is in use** (`uploadsInUse`) now counts every file a take or an Earlier entry names, **a holding slide's own
+  picture on people's pages among them**, so a reset or a delete never removes a file the Board is shown; and **a file
+  only the stage still holds once its message goes** (deleted by its author while a holding slide shows it, its room
+  reset under a holding slide, the admin's **Delete, leave it up**) becomes the hall's stage file then, so it leaves the
+  disk once nothing names it and its wait is over, never stays for good. A holding slide's own picture has the checks of
+  a file's first take too. **The boot sweep** removes, once after the start, the stage files whose wait ran out while
+  AGMessage was stopped, by the names the stage recorded alone: no other file in the folder is read, and a file a screen,
+  the hall's holding image or an Earlier entry holds stays. **At most 200 in use a hall**; a new one past that: "This
+  hall's stage holds 200 files — take some down." **A hall removed takes its stage files with it**, with or without its
+  rooms' files purged.
+- **What ends a take.** A **Main room's reset** ends every information take of the hall and empties its Earlier (each
+  page told: the information handed back, the show left as it was), its `room.reset` row ending "…, 3 takes ended"; a
+  **side room's reset**, or its removal, ends those showing a file of it, a picture of one, or what was sent from it.
+  **The author's delete** of a file message ends the takes and Earlier entries of its file, where no other message of
+  the hall holds it. **The admin's delete** of such a message asks first, "On the Board's pages now — take it down too?"
+  (`admin:deleteMessage` answers `onStage` and the question; the admin page asks in place, **Delete and take it down**
+  or **Delete, leave it up**, and sends `takeDown`), its `message.remove` row saying so when it did.
+- **Withdraw, for a take shown by mistake** (`page:withdraw {code, seq}`, one `writes` token, in `lib/handlers/takes.js`):
+  an information take on people's pages or under Earlier, by who put it up, the operator (`canPush`) or the admin
+  (anyone else who may show there: "Only who showed it, the operator or the admin can withdraw it."; On stage: "Do that
+  from a backstage page."). It is handed back wherever it is up, leaves Earlier (Take down leaves it there), each page
+  it was for is told (`page:take {withdrawn: seq}`: the page lets go of what it drew of it, a Look included), a stage
+  file it named starts its wait, one `page.push` row per target reads "…, withdrawn", and the answer says "Withdrawn from
+  6 Board pages — it is no longer under Earlier."; asked again, it is done (`already`). A page offline then is told at
+  its next join, whose answer no longer holds it. In the console, **🔙 Withdraw…** on the Board chip and on a person
+  (`board.withdraw`, `person.withdraw`), asked first, the operator's on any information, a seat that may only show its
+  own (another's greyed with the server's words); an information push's toast offers **Take down · Withdraw** for 10 s.
+  `page:status` says of each information take whether the asker put it up (`mine`).
+- **The take on the target's page** (`pagelayer.mjs`, drawn through `docview.mjs`): a document at its place with its
+  page box, zoom and find, its controls the Board's 48 px in the simple view; a picture fitted, with zoom; the pusher's
+  note above and a line under it ("Board pack.pdf · p. 12", "Ana's picture of Board pack.pdf, p. 12"); a card in the
+  side bar ("📄 Board pack.pdf · p. 12", "🖼 Ana's picture · p. 12"), and under Earlier a **Look** that draws it again on
+  this page alone, in the dialog a web page's Look uses, saying nothing to the server. **The page checks again**: an
+  address that is not an upload of AGMessage's of a type the stage shows draws nothing, fetches nothing, and is
+  `failed`. Reports: `shown` once its place has drawn and the page is in view, `failed` with the reader's words ("the
+  file could not be read", "too big for this device", "the picture did not load", the deadline's). A take's PDF is read
+  by its pages' ranges alone (pdf.js's streaming and fetching ahead off).
+- **A push asked again while the first is still being made** (a file's first check is awaited off the socket's turn,
+  and the outbox sends `page:push` again after a drop) waits for it and is answered with what it did: one take, one row,
+  one stage file.
+- **⬇ Download, until the ticketed download.** A file message's Download (the backstage seats' and the admin's, as the
+  catalogue's rows have it) no longer follows a link to the file, which is a navigation the guard below refuses: the page
+  fetches the file `no-store`, as its readers do, and hands the browser its bytes through an object URL let go 40 s
+  after, saved under the message's name; a file that cannot be read says "Not downloaded: … could not be read — try
+  again.". The next unit replaces it with a ticket and the server's own attachment, streamed from disk.
+- **Ready before the first take.** A Board page imports the take layer and the document reader with `import()` 2 s after
+  its join, a timer and no `modulepreload` (which Safari has only from 17) nor an idle callback (which it lacks); the
+  readers' heavy parts load at the first document. A device that cannot load them says so at the take.
+- **What a Board tablet keeps: nothing AGMessage writes or offers.** **Every upload is served `private, no-store`** (it
+  was `private, max-age=3600`), so no device keeps one in its HTTP cache; a reload fetches pictures again. **A `GET`
+  never saves**: every type is served `inline` (Word, Excel and PowerPoint files were served as `attachment`, which saved
+  them from their address with no record). **A navigation to an upload is refused** (404) by Fetch Metadata: the address
+  bar, a link, a frame or an embed (`Sec-Fetch-Mode: navigate`, or a destination of `document`, `iframe`, `frame`,
+  `embed`, `object`), which would give the browser's own viewer and its Save; AGMessage's readers fetch (`empty`) and its
+  pages draw pictures with `<img>` (`image`), and a browser that sends no Fetch Metadata is served as before. A take's
+  file is fetched `no-store` and drawn from memory: a picture through an object URL revoked when the take goes (Back to
+  chat, a newer take, a withdrawal, a Look closed), a document's reader and its pdf.js document destroyed then. On every
+  seat's take layer (an observer's included), its cards and a Look: **AGMessage's menu in place of the browser's,
+  Shift+right-click included** (a selection keeps the browser's Copy, off a picture; Firefox's own Shift+right-click
+  menu cannot be stopped by any page, and SECURITY.md says so), no picture draggable, no long-press "Save to Photos" on
+  iOS, and **printing leaves the stage out**, "What is shown on stage is not printed." in its place. Text stays
+  selectable.
+- **The words** (`describePage`'s two voices): the console names the file and its place ("Board pack.pdf at p. 12",
+  "Minutes.docx at ≈ p. 3", "Ana's picture of part of Stage plan.png", "…, sent from Legal" for a push from a side room,
+  "… in Legal" for a side room's file); **the audit never names a file, quotes a text or carries a path** ("the Board (6
+  pages) → a PDF at p. 12", "a picture of a PDF page (p. 12)", "a picture of part of an image", "…, from a local copy").
+- The lint fence over `pagelayer.mjs`: HTML is parsed in one place there too (`agm/inert-html`), and the four modules
+  hold one `innerHTML` site between them.
+- Rolling back to 0.5.1: `pages.json` is ignored as 0.5.1 ignores it; stage-only files are in no message, so 0.5.1
+  neither counts nor removes them (they stay on disk, unused, and 0.6 names them again from `pages.json`); 0.5.1's
+  `uploadsInUse` does not read takes, so under it a reset or a delete can remove a file a 0.6 take names, which back on
+  0.6 reports "the file could not be read"; a file's address saves an Office file again (`attachment` on `GET`), uploads
+  are cached for an hour, and a navigation to one opens it.
+- Choices where the plan left room: a CSV's place is its row, kept as `line`; a Word document's place needs its paragraph
+  (`block`), its page optional, and the target's page opens at that paragraph; a picture shown whole needs no `from`,
+  and is named by its own name; "her copy of"
+  reads "their copy of"; a side room's file and a push sent from one keep the room's key on this laptop alone (to end
+  them with that room's reset) and are told by its name; a side room's reset ends what shows its files and what was sent
+  from it, and so does its removal; the stage's 200 are counted by what is in use (named, or inside its wait), as
+  `uploadsInUse` counts them, and the oldest no longer in use goes past it; the admin's question before a delete is
+  asked of what a take-down ends (a document or a picture), not of a holding slide, which is the operator's show and
+  keeps its picture on the disk while it is up; Withdraw is the Board chip's and a person's
+  (`board.withdraw`, `person.withdraw`: the console's takes are those objects), greyed on another's take for a seat that
+  may only show, and asked first; the toast's Take down and Withdraw sit side by side (the toast gains a second button);
+  a withdrawn take is kept by its number and who withdrew it (at most 200 a hall) so a repeat is told it is done and a
+  later download ticket can be refused; an Earlier entry's Look of a document or a picture opens in the Look dialog,
+  every seat alike (the panel's two readers are unit 26's); the Fetch Metadata guard refuses `navigate` whatever the
+  destination; the page's check refuses an address that is not an upload's shape before anything is fetched; a hall's
+  stage files are written only once it has one. Download tickets (and ⬇ on a take shown with Download), and the
+  doors that show a document or a picture from a file (a file message's 📺 Show the Board ▸, the File pane, the
+  Preview's bar), are the next units': until then they are shown by `page:push` on the wire, and Withdraw and Take down
+  work on them from the console.
+- Tests: `test/pages.test.js` (a document's clean shape, Download only when true, each type's place and its range, `approx`
+  with a Word page alone, never to an observer, no region read, a side room's file; a picture of a file's place by its
+  source, of a local copy, whole; `sourceOk`'s four rules, a Legal file named to its reader and "another room" to anyone
+  else, another's fresh upload, the stage's record checked again, a re-post's name; a holding picture through
+  `sourceOk`; `describePage`'s two voices, the audit's with no name or path, "≈ p. 3"; the stage files kept, under
+  Earlier, withdrawn, inside and past their wait, the bound of 200 in use, a hall's names on its removal; a holding
+  slide's picture in use and never a take-down's, a file only the stage holds adopted once, read back with no author
+  known, let go after its wait; a posted upload no fresh one; what ends a take; a document told an observer without its
+  address; read back, and a wrong shape dropped), `test/takes.test.js`
+  (end to end: a Staff researcher's document reaching the Board's pages alone, "sending" until each reports, its name the
+  first message's, Download kept, one row per target with no name, Earlier; a document to an observer refused and a
+  picture shown; a page moved to an observer told it withheld, at its rejoin too; a 50 MP JPEG refused as a picture and
+  as a document; a fresh upload of the pusher's shown and kept, another's refused, a Legal one refused off the list and
+  shown on it; a document to a person observing in a room the pusher cannot read refused all the same; Withdraw refused
+  to another researcher, by its pusher with each page told, its row, a repeat done, gone from Earlier; by the operator
+  and the admin; a show take and a number that is none; a Word file swapped for one with macros refused at its first take
+  after a restart; a push asked again while its first check is under way answered with the first's take, one row; the
+  holding picture of a side room held to Main's list, moved on purpose), `test/uploads.test.js` (a stage-only picture
+  past its upload's hour while a take and then Earlier name it, removed after its wait once withdrawn; the boot sweep
+  removing one whose wait ran out while stopped, keeping one a take names, one a message holds and a file it never
+  recorded, and one a screen, the hall's holding image or an Earlier entry holds; a fresh upload as a holding slide kept
+  past its hour while the slide is up and gone after; a message's picture as a holding slide kept through its author's
+  delete and a Main reset, gone once the slide is put away; the admin's Delete, leave it up, gone once withdrawn; the
+  201st stage file refused end to end, and nothing shown; a Main reset ending the hall's information, each Board page
+  told, and keeping the clock, a side room's its own, the author's delete of a document's file, the admin's delete
+  asking), `test/server.test.js` (every type
+  `private, no-store` and `inline`, never `attachment`; refused to a navigation and to a frame, an embed or an object's
+  request; served to a fetch, an `<img>` and a request with no Fetch Metadata), `test/zipcheck.test.js` (a stage file's check at its first take: its upload's check where none is on record and
+  not again where one is, a picture held to 40 MP, a file gone not shown), `test/inputs.test.js` (a document's and
+  a picture's fields, `page:withdraw` and `takeDown` by type), `test/menus.test.js` (Withdraw refused to every seat whose
+  rights hide it), `test/catalog.test.js` (Withdraw on the chip and a person, the operator's, a seat that may only show
+  its own and another's greyed, its ask; the seat matrix), `test/modules.test.js` (the file kinds shown from a file, not
+  the chip; the takes module's helpers; the new parts of the takes context; the any-room readers), `test/lint-rules.test.js`
+  (`pagelayer.mjs` held to `agm/inert-html`), and the kinds' words moved on purpose. The browser smoke: a Board page
+  imports the take layer and the reader 2 s after its join, with no modulepreload; a picture on Bo's page fetched
+  `no-store`, drawn through an object URL, not draggable, no download link, ✓ once she says so; a right-click and a
+  Shift+right-click open no browser menu, and print leaves the stage out; on an observer's picture the same, AGMessage's
+  menu for both clicks; Back to chat revoking every URL made for it; its Look under Earlier saying nothing to the server;
+  a document in the simple view paged and zoomed at 48 px, then withdrawn, its reader gone and its pdf.js document
+  destroyed; a Word document opened at its paragraph; a take whose address is not ours drawing and fetching nothing; D
+  on a focused file saving it whole under its name in the browser (fetched `no-store`), where it only read the link
+  before; and the Staff step's toast and Board chip read Withdraw beside Take down, moved on purpose.
+- The papers: `README.md`, `README.txt` (documents and pictures on the stage, Withdraw, what a Board tablet keeps and
+  what cannot be prevented), `docs/DISPLAYS.md` (the two kinds, where a file may come from, the stage files, what ends a
+  take, Withdraw), `docs/ACCOUNTS.md` (`page.push`'s words, Withdraw), `SECURITY.md` (uploads `no-store`, never
+  `attachment`, navigations refused; what a Board tablet keeps and what cannot be prevented; the stage files' lifetime),
+  `docs/DESIGN.md`, `docs/ANALYSIS.md` (`pagelayer.mjs` in the inert-HTML fence; the inputs), `CLAUDE.md`.
+
 **Fixed**
 - An upload whose stored path is no file (a folder in its place) is refused as one that could not be checked, on every
   platform. The archive's check opened it and, on Windows, read a folder as an empty file, so it was refused in the

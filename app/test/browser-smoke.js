@@ -18,7 +18,7 @@ const path = require('path');
 const http = require('http');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
-const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort, readSource, officeZip, wordParts, wordPicture, deckParts, deckShape, deckPicture, deckSlide, workbookParts, inviteOf } = require('./helpers');
+const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort, readSource, officeZip, wordParts, wordPicture, deckParts, deckShape, deckPicture, deckSlide, workbookParts, inviteOf, pngOf } = require('./helpers');
 const { io: ioClient } = require('socket.io-client');
 const ops = require('../lib/ops');
 
@@ -2632,15 +2632,23 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const reactedByKey = await research.until(`(${ownNow}.reactions || []).some((r) => r.uid === MY_UID && r.emoji === ${codeLiteral(reactFirst || '👍')}) && ${NO_MENU} && 'reacted'`, 5000);
     report(reactFirst === '👍' && checkedInPlace === 'checked' && reactedByKey === 'reacted', `E opens React ▸ on its first reaction, a reaction made elsewhere checks its row in place, and Enter reacts (${JSON.stringify({ reactFirst, checkedInPlace, reactedByKey })})`);
 
-    // D and Enter on a focused file: its download (held here, so nothing is saved), and its Look in the panel.
-    await research.eval(`(() => { window.__dl = ''; document.addEventListener('click', (e) => { const a = e.target.closest && e.target.closest('a[download]'); if (a) { window.__dl = a.getAttribute('href'); e.preventDefault(); } }, true); dismissDoc(); })()`);
+    // D and Enter on a focused file: its download, which the browser saves whole under its name (the server opens an upload
+    // to no navigation, so the page fetches it no-store and hands the browser the bytes), and its Look in the panel.
+    await research.eval(`dismissDoc()`);
+    const capexUrl = await research.eval(`(allMessages.find((m) => m.id === ${codeLiteral(capexId)}) || {}).url || ''`);
+    const dlBefore = new Set(downloads.keys());
+    await research.eval(`(() => { window.__dlFetched = []; const f = window.__fetch0 = window.fetch; window.fetch = function (u, o) { window.__dlFetched.push([String(u), (o && o.cache) || '']); return f.apply(this, arguments); }; return true; })()`);
     await research.eval(`messagesById.get(${codeLiteral(capexId)}).focus()`);
     await press(research, 'd');
-    const downloadedByKey = await research.until('window.__dl', 3000);
+    let savedCapex = null;
+    for (const end = Date.now() + 15000; Date.now() < end && !savedCapex; await sleep(100)) savedCapex = [...downloads].find(([g, d]) => !dlBefore.has(g) && d.state === 'completed');
+    const capexBytes = Buffer.from(await (await fetch(base + capexUrl)).arrayBuffer());
+    const downloadedByKey = JSON.stringify({ name: savedCapex ? savedCapex[1].name : '', whole: !!savedCapex && fs.readFileSync(path.join(dlDir, savedCapex[0])).equals(capexBytes),
+      fetched: JSON.parse(await research.eval(`(() => { window.fetch = window.__fetch0; return JSON.stringify(window.__dlFetched.filter((x) => x[0] === ${codeLiteral(capexUrl)}).map((x) => x[1])); })()`)) });
     await research.eval(`messagesById.get(${codeLiteral(capexId)}).focus()`);
     await pressEnter(research);
     const lookedByKey = await research.until(`currentDocMsgId === ${codeLiteral(capexId)} && 'open'`, 3000);
-    report(/^\/uploads\/.*capex\.pdf$/.test(downloadedByKey || '') && lookedByKey === 'open', `D on a focused file downloads it and Enter opens it in the panel (${JSON.stringify({ downloadedByKey, lookedByKey })})`);
+    report(downloadedByKey === JSON.stringify({ name: 'capex.pdf', whole: true, fetched: ['no-store'] }) && lookedByKey === 'open', `D on a focused file downloads it (fetched no-store, saved whole under its name) and Enter opens it in the panel (${JSON.stringify({ downloadedByKey, lookedByKey })})`);
 
     // Answer in words… is a field in place: focused, held to 200 characters, Enter sends the answer.
     await research.eval(`messagesById.get(${codeLiteral(doorMsgs.adminAsk)}).querySelector('.answer-words-btn').click()`);
@@ -3363,14 +3371,14 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const sueAfter = await sueChip();
     await sueTab.eval(`AGM.menu.close()`);
     report(sueMade === 200 && sueIn === 200 && sueReady === 'ready'
-      && JSON.stringify(sueMenu) === JSON.stringify([['board.web', ''], ['board.takeDown', 'The operator put this up — ask them.'], ['board.screens', '']]) && JSON.stringify(sueRows) === JSON.stringify(['board', 'Bea'])
-      && sueSaid === 'The web page on 1 Board page — in their side bar, beside what the operator is showing. · Take down'
+      && JSON.stringify(sueMenu) === JSON.stringify([['board.web', ''], ['board.takeDown', 'The operator put this up — ask them.'], ['board.screens', ''], ['board.withdraw', 'Only who showed it, the operator or the admin can withdraw it.']]) && JSON.stringify(sueRows) === JSON.stringify(['board', 'Bea'])
+      && sueSaid === 'The web page on 1 Board page — in their side bar, beside what the operator is showing. · Take down · Withdraw'
       && !!beaBeside && JSON.stringify(beaBeside) === JSON.stringify({ ...FRAMED(WEB_NOTES, 'agm-web.invalid'), frames: undefined, open: true, rail: '📺 On stage • 1', over: WEB_OK, acts: ['card.show', 'card.remove'] })
       && !!sueUnder && JSON.stringify(sueUnder) === JSON.stringify({ beside: ['◐', 'Under a web page', 'side', false], info: ['◇', 'Opened · AGMessage can\'t see inside web pages', true] })
       && !!sueOpened && JSON.stringify(sueOpened.beside) === JSON.stringify(['◇', 'Opened · AGMessage can\'t see inside web pages', 'side', false]) && /^▭ Bea minimised it/.test(sueOpened.info.slice(0, 2).join(' ')) && sueChipWords === '· 🌍 Web page ▭ 0/1'
       && beaRaised === 'over the chat' && JSON.stringify(sueDownMenu.find((x) => x[0] === 'board.takeDown')) === JSON.stringify(['board.takeDown', ''])
       && sueDownSaid === 'Taken down on 1 Board page.' && beaBack === 'back' && JSON.stringify(sueAfter.find((x) => x[0] === 'board.takeDown')) === JSON.stringify(['board.takeDown', 'The operator put this up — ask them.']),
-      `a Staff account granted stage.web reads the Board and the people On stage alone; over the operator's web page its Take down is disabled with why, and its own web page goes beside it, in Bea's side bar in the one frame, the panel opened, its toast offering Take down; under the operator's page on her layer it reads ◐ under it, and ◇ opened in her side bar once she minimises that; Show over the chat draws it on her layer, and its Take down takes it off there alone, the operator's left (${JSON.stringify({ sueMade, sueIn, sueReady, sueMenu, sueRows, sueSaid, beaBeside, sueUnder, sueOpened, sueChipWords, beaRaised, sueDownMenu, sueDownSaid, beaBack, sueAfter })})`);
+      `a Staff account granted stage.web reads the Board and the people On stage alone; over the operator's web page its Take down and Withdraw are disabled with why, and its own web page goes beside it, in Bea's side bar in the one frame, the panel opened, its toast offering Take down and Withdraw; under the operator's page on her layer it reads ◐ under it, and ◇ opened in her side bar once she minimises that; Show over the chat draws it on her layer, and its Take down takes it off there alone, the operator's left (${JSON.stringify({ sueMade, sueIn, sueReady, sueMenu, sueRows, sueSaid, beaBeside, sueUnder, sueOpened, sueChipWords, beaRaised, sueDownMenu, sueDownSaid, beaBack, sueAfter })})`);
     await chipPick('board.takeDown');
     await beaPad.until(`!document.querySelector('#takeCards li[data-layer="info"]') && 'gone'`, 5000);
 
@@ -3419,6 +3427,159 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(takesProblems.length === 0, `the takes hall's pages: no console error and no CSP violation${takesProblems.length ? ' — ' + takesProblems.slice(0, 4).join(' | ') : ''}`);
     await op.eval(`document.getElementById('screensDialog').close()`);
     for (const t of [beaPad, obiPad, rexPad, sueTab, op]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
+
+    // ---------------- A document and a picture on the stage (unit 25): drawn from memory, kept by no device ----------------
+    // In a hall of its own: the admin as the operator, from a socket of its own, its files uploaded fresh (never
+    // posted, so no page opens them itself); Bo On stage (the simple view, by her seat) and Oz observing (the full view),
+    // each a device of its own whose fetches and object URLs are counted from before its own scripts.
+    {
+      const fsHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Files hall' }) })).json()).code;
+      const fsOp = await connect(base, cookie);
+      // An act asked again while the server says this address is busy (the smoke's many pages share one address).
+      const asked = async (ev, args) => { let r = null; for (let i = 0; i < 40; i++) { r = await emit(fsOp, ev, args); if (!(r && r.busy)) return r; await sleep(Math.min(2000, (r && r.retryMs) || 500)); } return r; };
+      const fsJoin = await asked('join', { roomCode: fsHall, name: 'Desk', role: 'research' });
+      const fresh = async (name, type, bytes) => {
+        for (let i = 0; i < 8; i++) {
+          const fd = new FormData();
+          fd.append('file', new Blob([bytes], { type }), name);
+          const r = await fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': fsJoin.uploadToken }, body: fd });
+          if (r.status !== 429) return (await r.json()).url;
+          await sleep(2500);
+        }
+        return '';
+      };
+      const picUrl = await fresh('stage plan.png', 'image/png', pngOf(64, 48));
+      const pdfUrl = await fresh('board pack.pdf', 'application/pdf', fixture('board-pack-tagged.pdf'));
+      const FETCHES = `(() => { const f = window.fetch; window.__fetched = []; window.fetch = function (u, o) { window.__fetched.push([String(u && u.url ? u.url : u), (o && o.cache) || '']); return f.apply(this, arguments); }; })();`;
+      const bo = await edge.tab(`${base}/app.html?code=${fsHall}&name=Bo&role=board&invite=${inviteOf(dataDir, fsHall)}`, { init: DOC_PROBE + FETCHES, alone: true });
+      const oz = await edge.tab(`${base}/app.html?code=${fsHall}&name=Oz&role=observer`, { init: DOC_PROBE + FETCHES, alone: true });
+      for (const t of [bo, oz]) await t.until(`typeof joined !== 'undefined' && joined`, 10000);
+      // Ready before its first take: a Board page imports what draws one and the document reader 2 s after its join, with
+      // import() and a timer, and no modulepreload; an observer's page waits for its first take.
+      const IMPORTED = `JSON.stringify({ layer: performance.getEntriesByType('resource').some((e) => /\\/pagelayer\\.mjs$/.test(e.name)), reader: performance.getEntriesByType('resource').some((e) => /\\/docview\\.mjs$/.test(e.name)), preload: document.querySelectorAll('link[rel=modulepreload]').length })`;
+      const boEarly = JSON.parse(await bo.eval(IMPORTED));
+      const boReady = await bo.until(`(() => { const v = ${IMPORTED}; const x = JSON.parse(v); return x.layer && x.reader && v; })()`, 6000);
+      const ozReady = JSON.parse(await oz.eval(IMPORTED));
+      report(!!boReady && JSON.stringify(JSON.parse(boReady)) === JSON.stringify({ layer: true, reader: true, preload: 0 }) && !boEarly.layer && !ozReady.layer,
+        `a Board page imports the take layer and the document reader 2 s after its join, with no modulepreload; an observer's page imports none before a take (${JSON.stringify({ boEarly, boReady, ozReady })})`);
+
+      // A picture over the Board's chat: fetched no-store and drawn through an object URL, never draggable, no download link.
+      const push = (to, content) => asked('page:push', { code: fsHall, to, content });
+      const urlsNow = (t) => t.eval(`JSON.stringify({ made: window.__urls.made.length, revoked: window.__urls.revoked.length })`).then(JSON.parse);
+      const boUrls0 = await urlsNow(bo);
+      const picTake = await push('board', { kind: 'image', url: picUrl });
+      const LAYER_FILE = `(() => { const l = document.getElementById('pageLayer'); const b = document.getElementById('layerBox'); const img = b.querySelector('img');
+        return !l.hidden && l.dataset.kind && JSON.stringify({ kind: l.dataset.kind, img: !!img && img.complete && img.naturalWidth > 0, blob: !!img && img.src.startsWith('blob:'), drag: img ? img.getAttribute('draggable') : null,
+          line: (b.querySelector('.take-file-line') || {}).textContent || '', download: document.querySelectorAll('a[download], [download]').length,
+          fetched: window.__fetched.filter((x) => /\\/uploads\\//.test(x[0])).map((x) => x[1]) }); })()`;
+      const boPic = JSON.parse(await bo.until(`(() => { const v = ${LAYER_FILE}; return v && JSON.parse(v).img && v; })()`, 8000) || 'null');
+      const boPicStatus = await (async () => { for (let i = 0; i < 40; i++) { const st = await asked('page:status', { code: fsHall }); if (st && st.ok && st.board.info.mark === '✓') return st.board.info.words; await sleep(150); } return ''; })();
+      report(picTake.ok && !!boPic && boPic.kind === 'image' && boPic.blob && boPic.drag === 'false' && boPic.line === 'stage plan.png' && boPic.download === 0 && boPic.fetched.length > 0 && boPic.fetched.every((c) => c === 'no-store') && boPicStatus === 'On the 1 Board page',
+        `a picture shown to the Board is drawn on Bo's page from bytes fetched no-store through an object URL, never draggable, with its line and no download link, and reads ✓ once her page says so (${JSON.stringify({ joined: [fsJoin.ok, fsJoin.error || ''], picUrl, picTake: picTake.ok ? true : picTake, boPic, boPicStatus })})`);
+      // A right-click and a Shift+right-click on it open no menu of the browser's: on Bo's simple view none at all.
+      const MENU_HEARD = `(() => { window.__menus = []; window.addEventListener('contextmenu', (e) => { window.__menus.push([e.shiftKey, e.defaultPrevented]); }); return true; })()`;
+      const clickOn = async (t, sel, shift) => {
+        const at = await middleOf(t, `document.querySelector('${sel}')`);
+        for (const type of ['mousePressed', 'mouseReleased']) await t.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'right', buttons: type === 'mousePressed' ? 2 : 0, clickCount: 1, modifiers: shift ? 8 : 0 });
+        await sleep(150);
+      };
+      await bo.eval(MENU_HEARD);
+      await clickOn(bo, '#layerBox img', false);
+      await clickOn(bo, '#layerBox img', true);
+      const boMenus = await bo.eval(`JSON.stringify({ heard: window.__menus, menu: !!document.querySelector('.agm-menu:not([hidden])') })`);
+      // Printed, the stage is left out and says so.
+      await bo.send('Emulation.setEmulatedMedia', { media: 'print' });
+      const boPrint = await bo.eval(`JSON.stringify({ layer: getComputedStyle(document.getElementById('pageLayer')).display, note: getComputedStyle(document.getElementById('stagePrintNote')).display })`);
+      await bo.send('Emulation.setEmulatedMedia', { media: '' });
+      report(boMenus === JSON.stringify({ heard: [[false, true], [true, true]], menu: false }) && boPrint === JSON.stringify({ layer: 'none', note: 'block' }),
+        `on Bo's picture a right-click and a Shift+right-click open no browser menu (her simple view has no menu), and printing leaves the stage out with its words (${boMenus}; ${boPrint})`);
+
+      // The same on an observer's picture layer: AGMessage's menu for a right-click and a Shift+right-click alike, with no
+      // save in it, never draggable, left out of print.
+      const toOz = await push({ uid: 'u:' + (await oz.eval('pageFacts.uid')) }, { kind: 'image', url: picUrl });
+      const ozPic = JSON.parse(await oz.until(`(() => { const v = ${LAYER_FILE}; return v && JSON.parse(v).img && v; })()`, 8000) || 'null');
+      await oz.eval(MENU_HEARD);
+      const ozMenu = async (shift) => {
+        await clickOn(oz, '#layerBox img', shift);
+        const items = await oz.until(`(() => { const m = document.querySelector('.agm-menu'); return m && m.querySelectorAll('[data-action]').length && JSON.stringify([...m.querySelectorAll('[data-action]')].map((x) => x.dataset.action)); })()`, 3000);
+        await oz.eval(`AGM.menu.close()`);
+        return JSON.parse(items || '[]');
+      };
+      const ozPlain = await ozMenu(false);
+      const ozShift = await ozMenu(true);
+      await oz.send('Emulation.setEmulatedMedia', { media: 'print' });
+      const ozPrint = await oz.eval(`getComputedStyle(document.getElementById('pageLayer')).display`);
+      await oz.send('Emulation.setEmulatedMedia', { media: '' });
+      const ozHeard = await oz.eval(`JSON.stringify(window.__menus)`);
+      report(toOz.ok && !!ozPic && ozPic.drag === 'false' && ozPic.fetched.every((c) => c === 'no-store') && ozPlain.length > 0 && ozPlain.every((a) => a.startsWith('take.')) && JSON.stringify(ozShift) === JSON.stringify(ozPlain)
+        && ozHeard === JSON.stringify([[false, true], [true, true]]) && ozPrint === 'none',
+        `on Oz's observer page the picture is drawn the same way; a right-click and a Shift+right-click open AGMessage's menu alike, the take's acts and no save, and printing leaves it out (${JSON.stringify({ ozPic, ozPlain, ozShift, ozHeard, ozPrint })})`);
+      await oz.eval(`document.querySelector('#layerActs [data-action="take.chat"]').click()`);
+
+      // Back to chat: every object URL made for the picture revoked; under Earlier it is a Look, drawn again on this page
+      // alone with nothing said to the server, its URL revoked as the Look closes.
+      await bo.eval(`document.querySelector('#layerActs [data-action="take.chat"]').click()`);
+      await bo.until(`document.getElementById('pageLayer').hidden && 'chat'`, 5000);
+      const boUrls1 = await bo.eval(`JSON.stringify(window.__urls.made.slice(${boUrls0.made}).every((u) => window.__urls.revoked.includes(u)) && window.__urls.made.length > ${boUrls0.made})`);
+      await bo.eval(`(() => { window.__said = []; const e = socket.emit; socket.emit = function (ev, ...a) { window.__said.push(ev); return e.call(this, ev, ...a); }; return true; })()`);
+      await bo.eval(`document.getElementById('tabShown') && !document.getElementById('bvTabs').hidden && document.getElementById('tabShown').click()`);
+      await bo.until(`!!document.querySelector('#takeEarlier [data-action="past.look"]')`, 5000);
+      const lookFrom = await urlsNow(bo);
+      await bo.eval(`document.querySelector('#takeEarlier [data-action="past.look"]').click()`);
+      const boLook = await bo.until(`document.getElementById('webPreview').open && (() => { const img = document.querySelector('#webPreviewBox img'); return img && img.complete && img.naturalWidth > 0 && JSON.stringify({ what: document.getElementById('webPreviewWhat').textContent, show: !document.getElementById('webPreviewShow').hidden, drag: img.getAttribute('draggable') }); })()`, 8000);
+      await bo.eval(`document.getElementById('webPreview').close()`);
+      const lookAfter = await bo.eval(`JSON.stringify({ revoked: window.__urls.made.slice(${lookFrom.made}).every((u) => window.__urls.revoked.includes(u)), said: window.__said.filter((e) => e === 'page:report').length })`);
+      report(boUrls1 === 'true' && boLook === JSON.stringify({ what: 'Look', show: false, drag: 'false' }) && lookAfter === JSON.stringify({ revoked: true, said: 0 }),
+        `Back to chat revokes every object URL made for the picture; under Earlier its Look draws it again on Bo's page alone, says nothing to the server, and revokes its own URL as it closes (${JSON.stringify({ boUrls1, boLook, lookAfter })})`);
+
+      // A document at its place, in the simple view: its page box and zoom at 48 px, paged and zoomed; then withdrawn, its
+      // reader gone and its pdf.js document destroyed.
+      const docTake = await push('board', { kind: 'doc', url: pdfUrl, at: { page: 1 } });
+      const DOC_LAYER = `(() => { const b = document.getElementById('layerBox'); const v = b.querySelector('.dv'); const n = b.querySelector('.dv-n'); const zoom = [...b.querySelectorAll('.dv-zoom .btn')];
+        return v && n && b.querySelector('canvas:not(.pdf-page-pending)') && JSON.stringify({ kind: v.dataset.kind, page: n.value, of: (b.querySelector('.dv-of') || {}).textContent, small: Math.min(...[...b.querySelectorAll('.dv-bar .btn')].map((x) => Math.min(x.getBoundingClientRect().width, x.getBoundingClientRect().height))), zoom: zoom.length }); })()`;
+      const boDoc = JSON.parse(await bo.until(DOC_LAYER, 20000) || 'null');
+      const width0 = await bo.eval(`document.querySelector('#layerBox .dv-page').getBoundingClientRect().width`);
+      await bo.eval(`document.querySelector('#layerBox .dv-zoom .btn[aria-label="Zoom in"]').click()`);
+      const zoomed = await bo.until(`document.querySelector('#layerBox .dv-page').getBoundingClientRect().width > ${width0} && 'zoomed'`, 5000);
+      await bo.eval(`document.querySelector('#layerBox .dv-next').click()`);
+      const paged = await bo.until(`document.querySelector('#layerBox .dv-n').value === '2' && 'paged'`, 5000);
+      const reader = () => bo.eval(`import('/docview.mjs').then((m) => JSON.stringify(m.pdfState()))`);
+      const openBefore = JSON.parse(await reader());
+      const withdrawn = await asked('page:withdraw', { code: fsHall, seq: docTake.seq });
+      const boGone = await bo.until(`document.getElementById('pageLayer').hidden && !document.querySelector('.dv') && 'gone'`, 8000);
+      const openAfter = JSON.parse(await bo.until(`import('/docview.mjs').then((m) => m.pdfState().open === 0 && JSON.stringify(m.pdfState()))`, 8000) || 'null');
+      const boAll = await bo.eval(`JSON.stringify({ revoked: window.__urls.made.every((u) => window.__urls.revoked.includes(u)), earlier: [...document.querySelectorAll('#takeEarlier .take-earlier-item')].length })`);
+      await bo.shot(path.join(OUT, 'take-document.png'));
+      report(docTake.ok && !!boDoc && boDoc.kind === 'pdf' && boDoc.page === '1' && boDoc.small >= 48 && boDoc.zoom === 4 && zoomed === 'zoomed' && paged === 'paged'
+        && openBefore.open === 1 && withdrawn.ok && boGone === 'gone' && !!openAfter && boAll === JSON.stringify({ revoked: true, earlier: 1 }),
+        `a document at its place on Bo's simple view: its page box and zoom at 48 px, zoomed and paged on; withdrawn, its reader is gone, its pdf.js document destroyed, every object URL revoked, and it is not under Earlier (${JSON.stringify({ boDoc, zoomed, paged, openBefore, withdrawn, boGone, openAfter, boAll })})`);
+
+      // A Word document opened at its paragraph (¶ 40, no page given): the view opens there, and its line names the place.
+      const minutes = officeZip(wordParts({ body: Array.from({ length: 60 }, (_, i) => '<w:p><w:r><w:t>Paragraph ' + (i + 1) + '</w:t></w:r></w:p>').join('') }));
+      const docxUrl = await fresh('minutes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', minutes);
+      const paraTake = await push('board', { kind: 'doc', url: docxUrl, at: { block: 40 } });
+      const atPara = await bo.until(`(() => {
+        const box = document.querySelector('#layerBox .take-file-box'); const v = box && box.querySelector('.dv[data-kind="word"]');
+        const p = v && [...v.querySelectorAll('.doc-html p')].find((x) => x.textContent === 'Paragraph 40');
+        if (!p || !box.scrollTop) return '';
+        const top = box.getBoundingClientRect().top, bottom = box.getBoundingClientRect().bottom, at = p.getBoundingClientRect().top;
+        return JSON.stringify({ inView: at >= top && at < top + (bottom - top) / 2, line: (document.querySelector('#layerBox .take-file-line') || {}).textContent || '' });
+      })()`, 20000);
+      const paraDone = await asked('page:withdraw', { code: fsHall, seq: paraTake.seq });
+      await bo.until(`document.getElementById('pageLayer').hidden && 'gone'`, 8000);
+      report(paraTake.ok && atPara === JSON.stringify({ inView: true, line: 'minutes.docx · ¶ 40' }) && paraDone.ok,
+        `a Word document shown at its paragraph opens on Bo's page at that paragraph, its line naming it (${JSON.stringify({ paraTake: paraTake.ok || paraTake, atPara })})`);
+
+      // The page checks again: a take whose address is not an upload of ours draws nothing and fetches nothing.
+      const before = await bo.eval(`window.__fetched.length`);
+      await bo.eval(`socket.listeners('page:take').forEach((f) => f({ layer: 'info', seq: 99999, content: { kind: 'image', url: 'https://agm-files.invalid/stage.png' }, by: { name: 'Someone' }, at: Date.now(), hallName: '', holding: '', now: Date.now(), tz: '', answer: null, arrive: 'over' }))`);
+      const refused = await bo.until(`!document.getElementById('pageLayer').hidden && document.getElementById('pageLayer').dataset.kind === 'image' && JSON.stringify({ img: !!document.querySelector('#layerBox img'), fetched: window.__fetched.slice(${before}).filter((x) => /agm-files/.test(x[0])).length })`, 5000);
+      report(refused === JSON.stringify({ img: false, fetched: 0 }), `a take whose address is not one of the hall's uploads is refused by the page itself: nothing drawn, nothing fetched (${refused})`);
+      const filesProblems = [['bo', bo], ['oz', oz]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
+      report(filesProblems.length === 0, `the files hall's pages: no console error and no CSP violation${filesProblems.length ? ' — ' + filesProblems.slice(0, 4).join(' | ') : ''}`);
+      fsOp.close();
+      for (const t of [bo, oz]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
+    }
 
     // The header's countdown chip is its own door (the account's: the speaker's screen and the countdown on its screens).
     await hallView.until(`!document.getElementById('stageChip').hidden && document.getElementById('stageChip').getAttribute('role') === 'button'`, 8000);

@@ -238,7 +238,7 @@ beside its own; the refusal spends nothing of the code lockout. The admin's supp
 **Who may show what on people's pages** (the owner's answer 10: "Board pages should be more secure and not available to
 guests in an open hall. Web pages need rights of their own."). A page holds two layers: the show (Stagewatch, the clock,
 holding, blank), which only the operator puts up (`display.control`, the admin, a locked hall's backstage guest), and
-information over it (a web page now; files, pictures and quotes as they land), drawn over the show and never in its
+information over it (a web page, a document, a picture; quotes as they land), drawn over the show and never in its
 place. An account seated backstage in a room of the hall may show information by a right of its own (`canShow`): with
 `stage.show` (and `stage.web` for a web page), to the Board or one person seated On stage, and never anyone else ("Only
 the people on stage can be shown this."). From a side room it does so only while that room is on the Main room's list
@@ -249,7 +249,12 @@ it replaces nothing; its Take down takes down only what such a seat put up, by t
 own rights would put up (a web page by `stage.web`, the others by `stage.show`). A page whose push holds as the
 operator's reads `canShow` false: its information goes by `canPush`. A code guest of an open hall shows nothing ("In an open hall, showing the Board needs an
 invite link or an account — ask the admin."), and an observer seat (a Viewer's, a Staff account's without `hall.post`)
-nothing, whatever it was granted.
+nothing, whatever it was granted. A document or a picture also needs `hall.files` where the account sits ("Your account
+may not share files here, so it shows quotes only."), and its file a place the stage may show it from: the pusher's own
+fresh upload, a file of the Main room, or of a side room the pusher reads that is on the Main room's list. A document is
+never shown to a person seated as an observer. **Withdraw** (a take shown by mistake, from every page and from Earlier)
+is for who put the take up, the operator and the admin ("Only who showed it, the operator or the admin can withdraw
+it.").
 
 | Who | Seat | The show | Information |
 |---|---|---|---|
@@ -513,8 +518,10 @@ upload's own address; never the file's name),
 screens (made, renamed, re-linked, removed, and every take: which screen, by whom, and what kind of thing — "a warning
 (28 characters)", "a PDF at p. 3", "an image" — never the message's words or the file's name), every take on people's
 pages (`page.push`, by the hall's key: whom, "the Board (6 pages)" or the person's name, and what kind of thing, "the
-clock", "a holding slide", "a web page on vote.example.com", a web page by its host alone, "the information taken down",
-", in their side bar" for an arrival there; one row per take, none for its
+clock", "a holding slide", "a web page on vote.example.com", a web page by its host alone, "a PDF at p. 12", "a picture
+of a PDF page (p. 12)", "a Word document at ≈ p. 3", a file by its kind alone, never its name, "the information taken
+down", ", in their side bar" for an arrival there, ", sent from Legal" from a side room, ", withdrawn" for a withdrawal,
+one row for each of whom it was for; one row per take, none for its
 repeat or for a person's Back to chat or Minimise, which their own page says to the console), the hall's switch for its
 backstage guests' web pages (`room.guestWeb`, by the hall's key: "backstage guests may show web pages", "backstage
 guests may no longer show web pages (1 shown now stays until taken down)"; an unlock that turned it off says so in its

@@ -514,17 +514,22 @@
    * the browser's own menu stays. A key's menu is anchored at the object's ⋯ (`more`), a pointer's at the pointer. A
    * field, and a link that is not an object's own (a hall's name: `data-object-link`), keep the browser's menu at every
    * door alike: a link inside an object (a room button on a hall's row) never opens the object's menu by a key either.
+   * Shift+right-click keeps the browser's menu, but on what is shown on the stage (`stage`: a take, its cards, a Look),
+   * whose browser's menu would offer to save a picture: there AGMessage's menu opens for it too, and a selection keeps the
+   * browser's menu (Copy) only off a picture.
    */
   const KEEPS_BROWSERS = FIELD + ', a[href]:not([data-object-link])';
-  menu.door = function door(container, find) {
+  menu.door = function door(container, find, opts) {
+    const stage = !!(opts && opts.stage);
     container.addEventListener('contextmenu', (e) => {
-      if (e.shiftKey) return;   // Shift+right-click: the browser's own menu, always
+      if (e.shiftKey && !stage) return;   // Shift+right-click: the browser's own menu, but on the stage
       const t = e.target;
       if (!t || !t.closest || t.closest(KEEPS_BROWSERS)) return;
       const obj = find(t);
       if (!obj) return;
       const sel = window.getSelection ? window.getSelection() : null;
-      if (sel && !sel.isCollapsed && sel.anchorNode && obj.el.contains(sel.anchorNode)) return;   // Copy: the browser's
+      const picture = stage && !!t.closest('img, canvas');
+      if (sel && !sel.isCollapsed && sel.anchorNode && obj.el.contains(sel.anchorNode) && !picture) return;   // Copy: the browser's
       const byKey = e.pointerType === '' || (e.button === 0 && e.clientX === 0 && e.clientY === 0);
       if (!obj.open(byKey ? { anchor: obj.more || obj.el } : { x: e.clientX, y: e.clientY })) return;
       e.preventDefault();

@@ -61,7 +61,7 @@ const roomVerbs = require('./lib/handlers/rooms');
 const takeVerbs = require('./lib/handlers/takes');
 const { Latest, sendEach } = require('./lib/latest');
 const { Displays, cleanContent, describe: describeContent } = require('./lib/displays');
-const { Pages, personKey } = require('./lib/pages');
+const { Pages, personKey, sourceOk, FILE_KINDS } = require('./lib/pages');
 const uploadcheck = require('./lib/uploadcheck');
 const readings = require('./lib/peaks');
 const startup = require('./lib/startup');
@@ -279,7 +279,7 @@ const displays = new Displays(path.join(DATA_DIR, 'displays.json'), { seal: secr
 // What people's pages are shown over their chat, their answers and guests' chat views (lib/pages.js): read now, written
 // through its lane only once this copy holds its data folder (`firstWrites` calls `hold`). A web page's address is kept
 // sealed with this machine's key, as a screen's link is.
-const pages = new Pages(path.join(DATA_DIR, 'pages.json'), { seal: secretbox.seal, open: secretbox.open });
+const pages = new Pages(path.join(DATA_DIR, 'pages.json'), { seal: secretbox.seal, open: secretbox.open, wait: UPLOAD_ORPHAN_MS });
 // The results of approved show-desk proposals this AGMessage ran that Stagewatch has not taken yet (lib/deskresults.js):
 // read now, written only by the desk loop, which runs once this copy holds the data folder and its port. In memory too:
 // the tries (attempts, posts), when the next is due, the last answer, and the link's generation it was collected under
@@ -981,7 +981,7 @@ const uploadBuckets = new guard.Buckets(0.5, 8, 5000);
 // its upload token was issued for and the person it was issued to (its provenance, read by `fileRefusal`): a file message
 // names an upload made for its room by the person who posts it, or one a message of that room already holds. The record is
 // this run's alone, so an upload not yet posted when the server stops is uploaded again after the restart.
-const freshUploads = new Map();    // file name -> {at, room (its key), uid}; a refused file not yet removed: at 0, room and uid null
+const freshUploads = new Map();    // file name -> {at, room (its key), uid, name (as uploaded, cleaned)}; a refused file not yet removed: at 0, room and uid null
 
 /**
  * What the admin is told when a room's files could not all be removed (lib/store.js `remove`'s `kept`: another program
@@ -1006,27 +1006,48 @@ function uploadsOnScreens() {
   for (const code of Object.keys(displays.halls)) urls.push(displays.hallHolding(code));
   return uploadNamesOf(urls);
 }
-/** Every upload something still points at: a message in any room of any hall, what a screen shows, a hall's holding image. */
+/**
+ * Every upload something still points at: a message in any room of any hall, what a screen shows, a hall's holding image,
+ * and the stage's (a take on people's pages or an Earlier entry names it, or it is a stage file inside its wait).
+ */
 function uploadsInUse() {
   const used = uploadsInRooms();
   for (const f of uploadsOnScreens()) used.add(f);
+  for (const f of pages.stageInUse(Date.now())) used.add(f);
   return used;
 }
-/** Remove those of `names` nothing points at any more (a reset, a deletion, a hall removed). Resolves to how many went. */
-async function removeUnused(names) {
+/**
+ * Remove those of `names` nothing points at any more (a reset, a deletion, a hall removed). Resolves to how many went.
+ * `from` (fileRecordsOf: each name's room, author and name, as the messages that went held it) names files that left their
+ * messages: one of them that only the stage still holds (a take or an Earlier entry names it, a holding slide's picture
+ * among them) is kept as that hall's stage file (lib/pages.js adopt), so it goes once nothing names it and its wait is
+ * over, never left on the disk for good.
+ */
+async function removeUnused(names, from = null) {
   const used = uploadsInUse();
+  const held = from ? new Set([...uploadsInRooms(), ...uploadsOnScreens()]) : null;
   let n = 0;
   for (const f of new Set(names)) {
-    if (used.has(f) || !guard.validUploadUrl('/uploads/' + f)) continue;
+    if (!guard.validUploadUrl('/uploads/' + f)) continue;
+    if (used.has(f)) {
+      if (held && !held.has(f) && from.has(f)) stageDropped(pages.adopt(f, from.get(f), Date.now()));
+      continue;
+    }
     freshUploads.delete(f);
     try { await fs.promises.unlink(path.join(UPLOAD_DIR, f)); n++; } catch { /* already gone */ }
   }
   return n;
 }
 const fileNamesOf = (messages) => messages.filter((m) => m && m.type === 'file' && guard.validUploadUrl(m.url)).map((m) => m.url.slice(9));
+/** The files of `messages` of the room `key`, by their names: each {room, uid, name}, as a stage file would record it. */
+const fileRecordsOf = (messages, key) => new Map(messages.filter((m) => m && m.type === 'file' && guard.validUploadUrl(m.url))
+  .map((m) => [m.url.slice(9), { room: key, uid: (m.from && typeof m.from.uid === 'string' && m.from.uid) || '', name: guard.cleanText(m.filename, 120) }]));
+// Uploads past their wait: one nobody posted, and a stage file nothing on people's pages names any more (lib/pages.js), each
+// removed unless something else still holds it (removeUnused). The stage's are its records alone: no other file is read.
 setInterval(() => {
   const due = Array.from(freshUploads).filter(([, up]) => Date.now() - up.at >= UPLOAD_ORPHAN_MS).map(([f]) => f);
   for (const f of due) freshUploads.delete(f);
+  if (serving) due.push(...pages.stageGone(Date.now()));
   if (due.length) removeUnused(due).catch(() => { /* the next sweep tries the rest */ });
 }, Math.max(100, Math.min(60_000, UPLOAD_ORPHAN_MS))).unref();
 
@@ -1191,18 +1212,24 @@ const CHECKED = (res) => res.setHeader('Cache-Control', 'no-cache');
 app.get('/build.js', (_req, res) => { CHECKED(res); res.type('application/javascript').send(BUILD_JS); });
 app.use(express.static(PUBLIC_DIR, { index: 'index.html', cacheControl: false, setHeaders: CHECKED }));
 
-// Uploads: only allow-listed names, served so they can't run script (sandbox CSP, nosniff, attachment for office files).
+// Uploads: only allow-listed names, served so they can't run script (sandbox CSP, nosniff) and kept by no device: never in
+// a browser's cache (`no-store`), never saved by a GET (`inline` for every type: a download is the server's own act), and
+// never opened by a navigation (the address bar, a link, a frame: Fetch Metadata's mode and destination), which would give
+// the browser's own viewer and its Save. AGMessage's readers fetch an upload, and its pages draw a picture with <img>; a
+// browser that sends no Fetch Metadata is served, as before it.
+const NAVIGATED = new Set(['document', 'iframe', 'frame', 'embed', 'object']);
 app.get('/uploads/:name', (req, res) => {
   const name = String(req.params.name || '');
   if (!guard.validUploadUrl('/uploads/' + name)) return res.status(404).end();
   const t = guard.UPLOAD_TYPES[guard.extOf(name)];
   if (!t) return res.status(404).end();
+  if (String(req.headers['sec-fetch-mode'] || '') === 'navigate' || NAVIGATED.has(String(req.headers['sec-fetch-dest'] || ''))) return res.status(404).end();
   res.setHeader('Content-Type', t.mime);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
-  res.setHeader('Content-Disposition', (t.inline ? 'inline' : 'attachment') + '; filename="' + name.replace(/^[0-9]+-[a-z0-9]+-/, '') + '"');
-  res.setHeader('Cache-Control', 'private, max-age=3600');
-  res.sendFile(path.join(UPLOAD_DIR, name), { dotfiles: 'deny' }, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+  res.setHeader('Content-Disposition', 'inline; filename="' + name.replace(/^[0-9]+-[a-z0-9]+-/, '') + '"');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.sendFile(path.join(UPLOAD_DIR, name), { dotfiles: 'deny', cacheControl: false }, (err) => { if (err && !res.headersSent) res.status(404).end(); });
 });
 
 // ----- admin auth
@@ -1764,7 +1791,7 @@ app.post('/api/upload', async (req, res, next) => {
     // Checked before it is kept or named to anyone (lib/uploadcheck.js): a refused file leaves the disk, with one audit
     // row in the hall by its uploader, at the upload's own address (its token is a bearer's: not always the socket's).
     const t = req.agmUploader;
-    uploadcheck.refusalOf(stored, type.ext).then(async (refused) => {
+    uploadcheck.refusalOf(stored, type.ext, req.file.filename).then(async (refused) => {
       if (refused) {
         if (refused.failed) console.warn('  [uploads] an upload (' + type.ext + ') could not be checked (' + refused.failed + '), so it was not kept');
         // One another program holds (an antivirus) is the sweep's at its next pass, in no room and by nobody, so it is
@@ -1777,7 +1804,7 @@ app.post('/api/upload', async (req, res, next) => {
         audit.write(t.actor(), 'upload.refused', t.hall, refused.words, guard.clientIp(req));
         return res.status(refused.status).json({ error: refused.error });
       }
-      freshUploads.set(req.file.filename, { at: Date.now(), room: t.room, uid: t.uid });
+      freshUploads.set(req.file.filename, { at: Date.now(), room: t.room, uid: t.uid, name: guard.cleanText(req.file.originalname, 120) });
       res.json({ url: `/uploads/${req.file.filename}`, filename: String(req.file.originalname).slice(0, 120), mime: type.mime.split(';')[0], size: req.file.size });
     }).catch((e) => {
       console.error('  [uploads] ' + (e && e.stack ? e.stack : e));
@@ -2295,10 +2322,10 @@ io.on('connection', (socket) => {
       // and On stage people); the information drawn over its show take now (`over`, as `page` is told: null for none); and
       // the information taken off its pages lately, the newest first (`earlier`, its side bar's Earlier: a Look each).
       canShow: !!socket.data.shows,
-      over: shownHere && shownHere.info.take && shownHere.info.take.content.kind !== 'chat' ? takeTold(r.hall, shownHere.info, 'info') : null,
-      earlier: shownHere ? pages.earlierOf(r.hall, shownHere.key, { board: shownHere.board }) : [],
+      over: shownHere && shownHere.info.take && shownHere.info.take.content.kind !== 'chat' ? takeTold(r.hall, shownHere.info, 'info', null, { observer: shownHere.observer }) : null,
+      earlier: shownHere ? pages.earlierOf(r.hall, shownHere.key, { board: shownHere.board, observer: shownHere.observer }) : [],
       // The information beside it, in its side bar beside the operator's (as `over` is told: null for none).
-      beside: shownHere && shownHere.beside.take ? takeTold(r.hall, shownHere.beside, 'beside') : null,
+      beside: shownHere && shownHere.beside.take ? takeTold(r.hall, shownHere.beside, 'beside', null, { observer: shownHere.observer }) : null,
       // The chat view this page draws (plan 1-§6): the person's own choice, else the simple view On stage and the full
       // view elsewhere; told again live (`view`) when the admin or the Accounts page changes it. The support view draws
       // the person's, which its `person` says.
@@ -2414,7 +2441,9 @@ io.on('connection', (socket) => {
     if (msg.sentFrom) return ok(ack)({ ok: false, error: SENT_STAYS });
     if (!msg.from || !msg.from.uid || msg.from.uid !== me.uid) return ok(ack)({ ok: false, error: 'Only the author can delete this message' });
     if (!apply(room, { o: 'del', id: messageId })) return ok(ack)(OP_REFUSED);
-    removeUnused(fileNamesOf([msg])).catch(() => { /* a file left behind is only space */ });
+    // Its file leaves people's pages with it (a take of it, an Earlier entry), where no other message of the hall holds it.
+    if (msg.type === 'file' && !heldElsewhere(room.hall, msg.url, msg.id)) endTakesWhere(room.hall, showsUpload(msg.url));
+    removeUnused(fileNamesOf([msg]), fileRecordsOf([msg], room.code)).catch(() => { /* a file left behind is only space */ });
     ok(ack)({ ok: true });
   });
 
@@ -3108,16 +3137,20 @@ io.on('connection', (socket) => {
     const r = store.room(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
     const files = fileNamesOf(r.messages);
+    const records = fileRecordsOf(r.messages, r.code);
     if (!apply(r, { o: 'reset' })) return ok(ack)(OP_REFUSED);
     systemMessage(r, '— Messages cleared by the admin —');
+    // What its people's pages are shown of it ends too (lib/pages.js endTakes), the show left as it is: a Main room's reset
+    // ends every information take of the hall and empties its Earlier; a side room's, those showing what it holds or sent.
+    const ended = store.isMain(r) ? endTakesWhere(r.hall, () => true, { earlier: 'all' }) : endTakesWhere(r.hall, sourcedFrom(r.code));
     // Its documents leave the disk too, unless another hall or a screen still shows them. The row counts the files that
     // left, so it is written once their removal has run, before the answer: a stop while they are being removed keeps
     // the reset and loses its row — the price of a count that says what happened rather than what was meant to.
     const done = (n) => {
-      auditRoom('room.reset', r.code, 'messages and documents cleared, ' + plural(n, 'file') + ' removed');
-      ok(ack)({ ok: true, removed: n });
+      auditRoom('room.reset', r.code, 'messages and documents cleared, ' + plural(n, 'file') + ' removed' + (ended ? ', ' + plural(ended, 'take') + ' ended' : ''));
+      ok(ack)({ ok: true, removed: n, ...(ended ? { ended } : {}) });
     };
-    removeUnused(files).then(done, () => done(0));
+    removeUnused(files, records).then(done, () => done(0));
   });
   socket.on('admin:deleteRoom', async ({ roomCode, purgeFiles } = {}, ack) => {
     if (!admin(ack)) return;
@@ -3161,8 +3194,10 @@ io.on('connection', (socket) => {
       const gone = said(removed);
       const pruned = removed.back.includes(r.code) ? [] : accounts.prune({ rooms: [r.code] });
       if (!removed.back.includes(r.code)) forgetRoomSends([r.code]);
+      // What the hall's people's pages are shown of it ends with it (a file of it, a picture of one, a push sent from it).
+      if (!removed.back.includes(r.code)) endTakesWhere(r.hall, sourcedFrom(r.code));
       audit.write(by, 'room.remove', r.code, (r.name || '(no name)') + ' (' + hallWords(r.hall) + ')' + gone.row + updated(pruned.length), socket.data.ip);
-      const purged = gone.purge ? await removeUnused(files) : 0;
+      const purged = gone.purge ? await removeUnused(files, fileRecordsOf(r.messages, r.code)) : 0;
       return ok(ack)({ ok: true, purged, ...gone.answer });
     }
     const removed = store.removeHall(r.code);
@@ -3182,8 +3217,9 @@ io.on('connection', (socket) => {
     if (hallStagewatch(r.code)) { delete settings.hallStagewatch[r.code]; saveSettings(); }
     for (const d of displays.ofHall(r.code)) revokeDisplaySockets(d.id, 'This screen\'s hall was closed.');
     displays.removeHall(r.code);
-    // What its people's pages were shown goes too, unless the hall comes back at the next start.
-    if (!removed.back.includes(r.code)) pages.forgetHall(r.code);
+    // What its people's pages were shown goes too, unless the hall comes back at the next start, and its stage files
+    // (uploads a take named that no message holds) leave the disk with it, purged or not: nothing could keep them.
+    const stageFiles = (!removed.back.includes(r.code) && pages.forgetHall(r.code)) || [];
     // Its own Stagewatch's address goes with it, and so do that Stagewatch's pins: read while the link still has its
     // address, and kept when another link follows the same one.
     if (hallLinks.has(r.code)) forgetStagewatchPins(hallLinks.get(r.code));
@@ -3194,18 +3230,26 @@ io.on('connection', (socket) => {
     const head = hallName + (sides.length ? ' with ' + plural(sides.length, 'other room') : '') + gone.row + updated(touched.size);
     audit.write(by, 'hall.remove', r.code, wordsWithList(head, sides.map((x) => (x.name || 'no name') + ' · ' + x.code)), socket.data.ip);
     const purged = gone.purge ? await removeUnused(files) : 0;
+    if (stageFiles.length) await removeUnused(stageFiles);
     ok(ack)({ ok: true, purged, ...gone.answer });
   });
-  socket.on('admin:deleteMessage', ({ roomCode, messageId } = {}, ack) => {
+  // A file on people's pages now (a take or an Earlier entry names it, and no other message of the hall holds it) is asked
+  // about first: the answer is the question (`onStage`), and the admin page asks it in place and sends its answer, whether
+  // the takes of it end too (`takeDown`, true or false), which a page that asked nothing never sends.
+  socket.on('admin:deleteMessage', ({ roomCode, messageId, takeDown } = {}, ack) => {
     if (!admin(ack)) return;
     const r = store.room(roomCode);
     if (!r || !r.byId.has(messageId)) return ok(ack)({ ok: false, error: 'Message not found' });
     const m = r.byId.get(messageId);
+    const shown = m.type === 'file' && pages.namesUrl(r.hall, m.url) && !heldElsewhere(r.hall, m.url, m.id);
+    if (shown && typeof takeDown !== 'boolean') return ok(ack)({ ok: false, onStage: true, error: ON_STAGE_ASK });
     const files = fileNamesOf([m]);
     if (!apply(r, { o: 'del', id: messageId })) return ok(ack)(OP_REFUSED);
+    const ended = shown && takeDown === true ? endTakesWhere(r.hall, showsUpload(m.url)) : 0;
+    // Left up, its file is the stage's from now on (removeUnused): it goes once nothing names it and its wait is over.
     // Whose it was and its kind, never its text or a file's name.
-    auditRoom('message.remove', r.code, m.type === 'system' ? 'a system line' : 'a message by ' + ((m.from && m.from.name) || 'someone') + ' (' + m.type + ')');
-    removeUnused(files).then(() => ok(ack)({ ok: true }), () => ok(ack)({ ok: true }));
+    auditRoom('message.remove', r.code, (m.type === 'system' ? 'a system line' : 'a message by ' + ((m.from && m.from.name) || 'someone') + ' (' + m.type + ')') + (ended ? ', taken down from people\'s pages (' + plural(ended, 'take') + ' ended)' : ''));
+    removeUnused(files, fileRecordsOf([m], r.code)).then(() => ok(ack)({ ok: true, ...(ended ? { ended } : {}) }), () => ok(ack)({ ok: true, ...(ended ? { ended } : {}) }));
   });
   socket.on('admin:setRole', ({ roomCode, socketId, role } = {}, ack) => {
     if (!admin(ack)) return;
@@ -3637,8 +3681,9 @@ function displaysChanged(code) {
 /**
  * The pages open now in a hall's rooms, as people's pages read them, each with the takes it is shown now in each layer
  * (pages.current) and the person's answer to each: each page seated in a room ({sid, key, board, name, room, support:
- * false}) and each admin's support view of a person seated in that room ({…, support: true}: shown that person's takes,
- * it never reports). `current` (with `seq` and `answer`) is the show layer's, `info` the information layer's, `beside`
+ * false, observer}) and each admin's support view of a person seated in that room ({…, support: true}: shown that
+ * person's takes, it never reports); `observer`, whether the page (or the person it shows) sits there as an observer, who
+ * is never handed a document's address. `current` (with `seq` and `answer`) is the show layer's, `info` the information layer's, `beside`
  * the information beside it (in its side bar, beside the operator's), and `earlier` the newest of its Earlier entries, as
  * a page is told them (pages.earlierOf), their numbers in a word. `key` is
  * the person's (an account's `a:<id>`, every device of it; a guest's `u:<uid>`, that device); `board`, whether the person
@@ -3648,18 +3693,19 @@ function hallPages(hall) {
   const out = [];
   for (const r of store.roomsOf(hall)) {
     const main = store.isMain(r);
-    const add = (sid, key, board, name, support) => {
+    const add = (sid, key, board, name, support, observer) => {
       const current = pages.current(hall, key, { board });
       const info = pages.current(hall, key, { board, layer: 'info' });
       const beside = pages.current(hall, key, { board, layer: 'beside' });
       const earlier = pages.earlierSaid(hall, key, { board });
-      out.push({ sid, key, board, name, room: r, support, seq: current.take ? current.take.seq : 0, answer: current.answer ? current.answer.state : null, current, info, beside, earlier });
+      out.push({ sid, key, board, name, room: r, support, observer, seq: current.take ? current.take.seq : 0, answer: current.answer ? current.answer.state : null, current, info, beside, earlier });
     };
-    for (const [sid, u] of r.users) { const key = personKey(u.uid, !!u.acct); if (key) add(sid, key, main && u.role === 'board', u.name, false); }
+    for (const [sid, u] of r.users) { const key = personKey(u.uid, !!u.acct); if (key) add(sid, key, main && u.role === 'board', u.name, false, u.role === 'observer'); }
     for (const sid of io.sockets.adapter.rooms.get(r.code) || []) {
       const s = io.sockets.sockets.get(sid);
       const v = s && s.data.adminView && s.data.userRoom === r.code ? s.data.viewOf : null;
-      if (v) add(sid, v.key, main && Array.from(r.users.values()).some((u) => u.uid === v.uid && u.role === 'board'), v.name, true);
+      const seat = v ? Array.from(r.users.values()).find((u) => u.uid === v.uid) : null;
+      if (v) add(sid, v.key, main && Array.from(r.users.values()).some((u) => u.uid === v.uid && u.role === 'board'), v.name, true, !!seat && seat.role === 'observer');
     }
   }
   return out;
@@ -3674,12 +3720,13 @@ const layerSaid = (c) => (c.take ? c.take.seq : 0) + '|' + (c.answer ? c.answer.
  * page's chat, or nothing over the show. An information take says how it arrives (`arrive`: 'over' or 'side'; beside the
  * operator's, `layer: 'beside'`, always 'side'), and the information layer's word carries the page's Earlier entries
  * (`earlier`, given as pages.earlierOf gives them). No key or
- * code. A web page's address is opened here, for the page it is shown on and nothing else (pages.told).
+ * code. A web page's address is opened here, for the page it is shown on and nothing else (pages.told); a document is told
+ * a page seated as an observer (`observer`) without its address.
  */
-function takeTold(hall, { take, answer }, layer = 'show', earlier = null) {
+function takeTold(hall, { take, answer }, layer = 'show', earlier = null, { observer = false } = {}) {
   const h = store.get(hall);
   return {
-    layer, seq: take ? take.seq : 0, content: take ? pages.told(take.content) : null, by: take ? { name: take.by.name } : null, at: take ? take.at : 0,
+    layer, seq: take ? take.seq : 0, content: take ? pages.told(take.content, { observer }) : null, by: take ? { name: take.by.name } : null, at: take ? take.at : 0,
     hallName: (h && h.name) || '', holding: displays.hallHolding(hall), now: Date.now(), tz: TIME_ZONE, answer: answer ? answer.state : null,
     ...(layer !== 'show' ? { arrive: take && take.arrive === 'side' ? 'side' : 'over' } : {}),
     ...(earlier ? { earlier } : {}),
@@ -3699,9 +3746,10 @@ function takeSends(hall, before) {
     if (!p) continue;
     // A page told again from nothing (`seq: -1`) is told both layers.
     const fresh = was.seq === -1;
+    const seat = { observer: p.observer };
     if (fresh || p.seq !== was.seq || p.answer !== was.answer) out.push({ sid: p.sid, take: takeTold(hall, p.current, 'show') });
-    if (fresh || !was.info || layerSaid(p.info) !== layerSaid(was.info) || p.earlier !== was.earlier) out.push({ sid: p.sid, take: takeTold(hall, p.info, 'info', pages.earlierOf(hall, p.key, { board: p.board })) });
-    if (fresh || !was.beside || layerSaid(p.beside) !== layerSaid(was.beside)) out.push({ sid: p.sid, take: takeTold(hall, p.beside, 'beside') });
+    if (fresh || !was.info || layerSaid(p.info) !== layerSaid(was.info) || p.earlier !== was.earlier || p.observer !== was.observer) out.push({ sid: p.sid, take: takeTold(hall, p.info, 'info', pages.earlierOf(hall, p.key, { board: p.board, ...seat }), seat) });
+    if (fresh || !was.beside || layerSaid(p.beside) !== layerSaid(was.beside) || p.observer !== was.observer) out.push({ sid: p.sid, take: takeTold(hall, p.beside, 'beside', null, seat) });
   }
   return out;
 }
@@ -3717,8 +3765,68 @@ function retell(hall, which) {
   }
   pagesChanged(hall);
 }
+/** What the admin is asked before a message whose file is on people's pages now is deleted. */
+const ON_STAGE_ASK = 'On the Board\'s pages now — take it down too?';
 /** A hall's holding picture, which a holding slide with no picture of its own shows ('' for none). */
 const holdingOf = (hall) => displays.hallHolding(hall);
+/**
+ * The information takes of a hall that `which` (a function of a take) says end (lib/pages.js endTakes: handed back on
+ * every page that shows one, gone from Earlier), each page they moved told what it is shown now and the consoles told.
+ * Returns how many ended.
+ */
+function endTakesWhere(hall, which, opts) {
+  const before = hallPages(hall);
+  const n = pages.endTakes(hall, which, opts);
+  if (!n) return 0;
+  for (const { sid, take } of takeSends(hall, before)) { const s = io.sockets.sockets.get(sid); if (s) s.emit('page:take', take); }
+  pagesChanged(hall);
+  return n;
+}
+/** Whether a take shows what a side room (`key`) holds: a file of it, a picture drawn of one, or what was sent from it. */
+const sourcedFrom = (key) => (t) => t.content.room === key || (!!t.content.from && t.content.from.room === key) || (!!t.sent && t.sent.key === key);
+/** Whether a take shows the upload at `url` (a document or a picture of it, as the file itself). */
+const showsUpload = (url) => (t) => FILE_KINDS.includes(t.content.kind) && t.content.url === url;
+/** Whether a message of a hall's rooms other than `but` (a message's id) holds the upload at `url`. */
+const heldElsewhere = (hall, url, but) => store.roomsOf(hall).some((x) => x.messages.some((m) => m.type === 'file' && m.url === url && m.id !== but));
+
+/**
+ * The facts a push reads of where a file it would show may come from (lib/pages.js sourceOk), for a pusher in `hall` (its
+ * Main room) whose uid is `uid`: the rooms of the hall holding it in a message (each with the oldest such message's time
+ * and its name), this run's fresh uploads made for a room of the hall, the stage's own record of it, Main's list, and the
+ * pusher's own answers of a room of the hall: whether it may read it (`reads`) and post files there (`files`).
+ */
+function sourceFacts(hall, uid, { reads, files }) {
+  const rooms = store.roomsOf(hall.code);
+  const room = (k) => rooms.find((x) => x.code === k) || null;
+  return {
+    main: hall.code, uid,
+    holders: (url) => rooms.map((x) => { const m = x.messages.find((y) => y.type === 'file' && y.url === url); return m ? { key: x.code, at: m.at, name: m.filename } : null; }).filter(Boolean),
+    fresh: (name) => { const f = freshUploads.get(name); return f && room(f.room) ? f : null; },
+    recorded: (name) => pages.recordOf(hall.code, name),
+    reads: (k) => !!room(k) && reads(room(k)) === true,
+    files: (k) => !!room(k) && files(room(k)) === true,
+    listed: (k) => sendersOf(hall.code).includes(k),
+    roomName: (k) => (room(k) && room(k).name) || '',
+  };
+}
+/** sourceOk's verdict on a file a push names in `hall`, for its pusher (sourceFacts). */
+const stageSource = (hall, uid, may) => { const f = sourceFacts(hall, uid, may); return (url) => sourceOk(url, f); };
+/** This run's record of a fresh upload by its name ({at, room, uid, name}), or null. */
+const freshUpload = (name) => freshUploads.get(name) || null;
+/**
+ * Why the upload at `url` may not be shown on the stage now, in words, or '' (lib/uploadcheck.js stageRefusalOf: its
+ * check as at upload where this run has none on record, and a picture held to what the Board's devices draw). A file that
+ * could not be read is said on the console.
+ */
+async function stageCheck(url) {
+  if (!guard.validUploadUrl(url)) return '';
+  const name = url.slice(9);
+  const why = await uploadcheck.stageRefusalOf(path.join(UPLOAD_DIR, name), guard.extOf(name), name);
+  if (why && why.failed) console.warn('  [uploads] a file shown on the stage could not be read (' + why.failed + '), so it was not shown');
+  return why ? why.error : '';
+}
+/** Upload files the stage let go (a stage file past its bound), removed unless something else holds them. */
+const stageDropped = (names) => { if (names.length) removeUnused(names).catch(() => { /* a file left behind is only space */ }); };
 /**
  * What a hall's people's pages show, or the pages that hold it, changed: its consoles are told once per 150 ms at most
  * (`frames.pages`), and each reads `page:status` again, so the newest state is what it reads.
@@ -5190,6 +5298,10 @@ function firstWrites() {
   }
   if (settingsDue) saveSettings();
   pages.hold();
+  // The boot sweep: the stage files past their wait at the stop before (nothing on people's pages named them), by the names
+  // the stage recorded alone, removed unless something else holds them.
+  const staleStage = pages.stageGone(Date.now());
+  if (staleStage.length) removeUnused(staleStage).catch(() => { /* a file left behind is only space */ });
   if (watchdogBefore) { try { fs.renameSync(path.join(DATA_DIR, 'watchdog.json'), path.join(DATA_DIR, 'watchdog.seen.json')); } catch { /* shown once anyway */ } }
   // How the copy before this one stopped, its record moved aside now, so a crash or a kill of this one is never read as
   // a stop that saved; and the temporary files a stop cut short left (a process no longer running), removed.
@@ -5209,13 +5321,15 @@ function firstWrites() {
 // module's alone), a room's invite links (`invitesFor`, made with the server's secret), the Stagewatch a hall follows and
 // its frame, what people's pages are shown (the `pages` store, the
 // pages open in a hall with what each is shown, `hallPages`, those a change moved, `takeSends`, the hall's holding
-// picture, `holdingOf`, the consoles told, `pagesChanged`, and a Board page's time out of view kept in the day's peaks,
-// `pageHidden`), and `io` for the rooms module. The takes module's holds no io, apply or systemMessage: it reaches a page
+// picture, `holdingOf`, the consoles told, `pagesChanged`, a Board page's time out of view kept in the day's peaks,
+// `pageHidden`, where a file shown may come from, `stageSource`, its check at its first take, `stageCheck`, this run's
+// record of a fresh upload, `freshUpload`, and the stage files let go past their bound, `stageDropped`), and `io` for the
+// rooms module. The takes module's holds no io, apply or systemMessage: it reaches a page
 // by its socket's id alone (`sendTo`, over io's open sockets, read by the gate's module and never handed in), never a
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
   store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
-  pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, io,
+  pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, stageSource, stageCheck, freshUpload, stageDropped, io,
 });
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.

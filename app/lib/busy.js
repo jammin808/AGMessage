@@ -49,8 +49,8 @@ const INPUT = new Set([
   'message', 'nodes:acceptCertificate', 'nodes:command', 'nodes:link', 'nodes:unlink', 'pin', 'react', 'room:create',
   'room:send', 'room:update', 'room:withdraw', 'stage:propose', 'stage:send',
   // A take on people's pages, and what a page says of one: the person's Back to chat, Minimise and Show again, and its
-  // page's reports while a take is up on it, which a show running on the Board's tablets is.
-  'page:push', 'page:report',
+  // page's reports while a take is up on it, which a show running on the Board's tablets is; a take withdrawn.
+  'page:push', 'page:report', 'page:withdraw',
   // The admin's choice of the view a person's pages draw: an admin's act.
   'admin:setView',
 ]);

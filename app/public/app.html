@@ -201,6 +201,7 @@
   <!-- What this person's page is shown over its chat (a take), drawn by pagelayer.mjs: over the header and the panels, under
        the menus, the asks and the toast; never a modal dialog. Its bar's buttons are the catalogue's kind `take` (app.js);
        a 🔥 message in the room breaks through in its strip, and other new messages are counted on its bar. -->
+  <p class="stage-print-note" id="stagePrintNote">What is shown on stage is not printed.</p>
   <section class="page-layer" id="pageLayer" role="dialog" aria-modal="false" aria-labelledby="layerWhat" tabindex="-1" hidden>
     <div class="layer-bar" id="layerBar">
       <span class="layer-what" id="layerWhat">Shown to you</span>
@@ -282,11 +283,12 @@
   </dialog>
 
   <!-- A web page previewed on this page alone before it is shown on anyone's (Web page…'s Preview): its one frame made by
-       pagelayer.mjs framePage, as a take's is; Show it sends it as the act's ask was answered. -->
+       pagelayer.mjs framePage, as a take's is; Show it sends it as the act's ask was answered. An Earlier entry looked at
+       again (a Look) is drawn here too, on this page alone, with no Show it. -->
   <dialog id="webPreview" class="agm-dialog web-preview" aria-labelledby="webPreviewTitle">
     <form id="webPreviewForm" method="dialog">
-      <h2 id="webPreviewTitle">Preview: <span id="webPreviewHost"></span></h2>
-      <p class="hint">Only you see it here. Show it puts it on their pages; nothing is sent until then.</p>
+      <h2 id="webPreviewTitle"><span id="webPreviewWhat">Preview</span>: <span id="webPreviewHost"></span></h2>
+      <p class="hint" id="webPreviewHint">Only you see it here. Show it puts it on their pages; nothing is sent until then.</p>
       <div class="web-preview-box" id="webPreviewBox"></div>
       <div class="row end">
         <button class="btn ghost" value="cancel" formnovalidate>Close</button>

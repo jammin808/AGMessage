@@ -91,7 +91,7 @@ people only to one who may read the hall's Main room.
 ### Two layers: the show, and information over it
 
 A page holds two takes at once. **The show** is the operator's: Stagewatch, the clock, holding, blank. **Information** is
-drawn over it: a web page now, and files, pictures and quotes as they land. Each layer is numbered by the hall's one
+drawn over it: a web page, a document or a picture (below), and quotes as they land. Each layer is numbered by the hall's one
 counter, answered by the person on its own, and told to the page in its own word (`page:take` names its `layer`); the
 join answers the show (`page`), the information over it (`over`), the page's Earlier (`earlier`) and the information
 beside the operator's in its side bar (`beside`).
@@ -184,9 +184,55 @@ when the hall is renamed. The longest a Board page said it
 was asleep or behind another app while a take was on it is kept for the show day (health's `peaks.pageHiddenMs`).
 
 Each take is one `page.push` row in the audit log: who, whom ("the Board (6 pages)", or the person's name) and what
-kind of thing ("the clock", "a holding slide", "a web page on vote.example.com", "the information taken down", with ",
-in their side bar" for an arrival there), never a file or an address. Nothing of a take is on the halls board, in the context
+kind of thing ("the clock", "a holding slide", "a web page on vote.example.com", "a PDF at p. 12", "a picture of a PDF page
+(p. 12)", "the information taken down", with ", in their side bar" for an arrival there, ", sent from Legal" for a push
+from a side room and ", withdrawn" for a withdrawal), never a file's name or an address. Nothing of a take is on the halls board, in the context
 another show system reads, or in the AI's brief.
+
+### A document, a picture
+
+**A document** (`{kind: 'doc', url, at?, download, note?}`) is a file the hall holds, the whole of it, opened at its
+place: a PDF's page, a deck's slide, a spreadsheet's sheet, a Word document's paragraph (with its page where the reader
+knew it, "≈" where Word's own breaks were missing), a text or Markdown file's line, a CSV's row. The target's page draws
+it with the same reader as the side bar's (`docview.mjs`), as its own seat draws it (the Board's and an observer's
+without hidden rows, sheets, slides or Word's hidden text), with its page box, zoom and find, 48 px in the simple view.
+**A picture** (`{kind: 'image', url, from?, note?}`) is an image shared in AGMessage, fitted, with zoom, and says what it
+is a picture of (`from`: a file's place, by its name, never its address; or the pusher's own copy, said as theirs):
+"Ana's picture of Board pack.pdf, p. 12". There is no region: a part of a page or a picture is drawn into a picture of
+its own on the pusher's page, so a target is never handed the original. A note is the pusher's line above it.
+
+- **Where the file may come from** (`sourceOk`): the pusher's own fresh upload, made for the Main room or for a side
+  room on its list where the pusher posts files; a file in a message of the Main room; a file in a message of a side
+  room the pusher reads that is on the Main room's list; or one the hall's stage records, when the room it was recorded
+  for passes again. A holding picture is held to the same rule. A refusal names the room only to one who may read it
+  ("That file belongs to Legal, which may not send into the Main room — send it there first, or ask an admin."). The
+  take's name is AGMessage's: the upload's, or the one the hall's oldest message holding the file gave it.
+- **Never a document to an observer** ("Observers are shown pictures and quotes, not documents."), seated so in any room of
+  the hall: it hands over the whole file. A page seated as an observer is told a document without its address and draws
+  nothing of it.
+- **Checked at its first take**: a picture, or an image as a document, at most 40 megapixels ("Too large for the Board's
+  devices — send a region."); a Word, Excel or PowerPoint file that never had the archive check has it then.
+- **The page checks again**: an address that is not one of the hall's uploads, of a type the stage shows, draws nothing
+  and fetches nothing. A document reports `shown` once its place has drawn, a picture once it has decoded, each in view;
+  `failed` with the reader's words otherwise.
+- **Kept by no device**: fetched `no-store`, drawn from memory (a picture through an object URL revoked when the take
+  goes, a document's reader and its pdf.js document destroyed then; a PDF read by its pages' ranges alone); on every
+  seat's layer, its cards and a Look, AGMessage's menu stands in for the browser's (Shift+right-click too), no picture is
+  dragged out or saved by a long press, and printing leaves the stage out. Words stay selectable.
+- **A stage file** (a fresh upload a take named that no message holds: a picture drawn of a page, a holding slide's
+  picture) lives while a take or an Earlier entry names it, and for an hour after (`AGM_UPLOAD_ORPHAN_MS`); then it leaves
+  the disk, unless a message, a screen or the hall's holding image holds it, at the latest at the next start (the boot
+  sweep, by the names the stage recorded alone). A file whose message goes while only the stage still shows it (a
+  holding slide's picture, a picture the admin's delete left up) becomes a stage file then. At most 200 in use a hall
+  ("This hall's stage holds 200 files — take some down."); a hall removed takes its stage files with it.
+- **What ends a take**: clearing the Main room's messages ends every information take of the hall and empties its
+  Earlier (the show stays; its `room.reset` row counts them); clearing or removing a side room ends what shows its files
+  or was sent from it; the author's delete of a file message ends what shows its file, where no other message of the
+  hall holds it; the admin's delete of one asks first, "On the Board's pages now — take it down too?".
+- **Withdraw**, for a take shown by mistake (`page:withdraw {code, seq}`): by who put it up, the operator or the admin.
+  It goes from every page it is on and from Earlier (Take down leaves it there), each page lets go of what it drew of it
+  (`page:take {withdrawn}`), and its row says "…, withdrawn". The toast after information offers **Take down** and
+  **Withdraw** for 10 s; later, **🔙 Withdraw…** on the Board chip or a person, asked first.
 
 ### Showing it: the Board chip and the console
 

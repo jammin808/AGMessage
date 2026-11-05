@@ -11,7 +11,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { io } = require('socket.io-client');
-const { startServer, stopServer, restartServer, api, connect, emit, until, pngOf, TOKEN } = require('./helpers');
+const { startServer, stopServer, restartServer, api, connect, emit, until, wait, pngOf, TOKEN } = require('./helpers');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const form = (name, bytes) => { const f = new FormData(); f.append('file', new Blob([bytes], { type: 'text/plain' }), name); return f; };
@@ -373,4 +373,262 @@ test('a file nobody posted is removed after a while; a posted one stays', async 
   await until(() => files(uploads).length === 1, 5000, 'the orphan removed');
   assert.ok(posted.url.endsWith(files(uploads)[0]), 'the posted file stays');
   assert.equal((await fetch(srv.base + orphan.url)).status, 404);
+});
+
+// The stage's files (plan 4-§5.11): an upload a take named that no message holds is kept while a take or an Earlier entry
+// names it, past its upload's own hour, and for the wait once nothing does; then removed, by the running server's sweep
+// or by the boot sweep after a restart, which reads only the names the stage recorded and never removes a file anything
+// else holds.
+test('a stage-only picture lives while a take or Earlier names it, past its upload\'s hour, for the wait after; then goes, by the sweep or the boot sweep, which removes only what it recorded and nothing else holds', { timeout: 60_000 }, async (t) => {
+  const WAIT = 1500;
+  let { srv, uploads, admin, hall } = await hallServer(t, { AGM_UPLOAD_ORPHAN_MS: String(WAIT) });
+  const code = await hall('Stage hall');
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const op = async () => { const s = await connect(srv.base, admin); sockets.push(s); const j = await emit(s, 'join', { roomCode: code, name: 'Op', role: 'research' }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
+  const { s, j } = await op();
+  const picture = async (name) => {
+    const f = new FormData();
+    f.append('file', new Blob([pngOf(4, 4)], { type: 'image/png' }), name);
+    return (await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': j.uploadToken }, body: f })).json();
+  };
+  const on = (url) => fs.existsSync(path.join(uploads, url.slice(9)));
+  const first = await picture('p1.png');
+  const shown = await emit(s, 'page:push', { code, to: 'board', content: { kind: 'image', url: first.url } });
+  assert.equal(shown.ok, true, JSON.stringify(shown));
+  // Past its upload's own wait it stays: a take names it; superseded, Earlier does.
+  await wait(WAIT * 2);
+  assert.ok(on(first.url), 'named by the take');
+  assert.equal((await emit(s, 'page:push', { code, to: 'board', content: { kind: 'chat', layer: 'info' }, ifSeq: shown.seq })).ok, true);
+  await wait(WAIT * 2);
+  assert.ok(on(first.url), 'named under Earlier');
+  // Withdrawn: nothing names it; its wait starts, and once past it the sweep removes it.
+  assert.equal((await emit(s, 'page:withdraw', { code, seq: shown.seq })).ok, true);
+  assert.ok(on(first.url), 'inside its wait');
+  await until(() => !on(first.url), WAIT * 4, 'removed after its wait');
+  // The boot sweep: a stage file whose wait ran out while AGMessage was stopped goes at the next start, by its record alone;
+  // a stage file a take names, a file a message holds and a file the stage never recorded are kept.
+  const gone = await picture('p2.png');
+  const second = await emit(s, 'page:push', { code, to: 'board', content: { kind: 'image', url: gone.url } });
+  assert.equal((await emit(s, 'page:withdraw', { code, seq: second.seq })).ok, true);
+  const kept = await picture('p3.png');
+  assert.equal((await emit(s, 'page:push', { code, to: 'board', content: { kind: 'image', url: kept.url } })).ok, true);
+  const posted = await picture('p4.png');
+  assert.equal((await emit(s, 'message', { type: 'file', url: posted.url, filename: 'p4.png' })).ok, true);
+  assert.equal((await emit(s, 'page:push', { code, to: { uid: 'u:' + j.uid }, content: { kind: 'image', url: posted.url } })).ok, true);
+  assert.equal((await emit(s, 'page:withdraw', { code, seq: (await emit(s, 'page:status', { code })).people[0].info.seq })).ok, true);
+  fs.writeFileSync(path.join(uploads, '1730000000000-abcdefghijkl-stray.png'), pngOf(1, 1));
+  s.close();
+  await stopServer(srv.child);
+  // The wait past while stopped: the record's time moved back (the next start reads an hour's wait from it).
+  const file = path.join(srv.dataDir, 'pages.json');
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const f of Object.values(data.halls[code].files)) if (!f.named) f.at = 0;
+  fs.writeFileSync(file, JSON.stringify(data));
+  srv = await startServer({ AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port), AGM_UPLOAD_DIR: uploads });
+  t.after(() => stopServer(srv.child));
+  await until(() => !on(gone.url), 3000, 'the boot sweep');
+  assert.deepEqual([on(kept.url), on(posted.url), fs.existsSync(path.join(uploads, '1730000000000-abcdefghijkl-stray.png'))], [true, true, true]);
+  const records = () => JSON.stringify(Object.keys(JSON.parse(fs.readFileSync(file, 'utf8')).halls[code].files || {}));
+  await until(() => records() === JSON.stringify([kept.url.slice(9)]), 3000, 'the records of those past their wait gone, the rest kept: ' + records());
+});
+
+// What ends a take (plan 4-§5.11): a Main room's reset ends every information take of the hall (each page told) and keeps
+// the show; a side room's reset ends only what it holds the source of; a file's message deleted by its author ends the
+// takes of it; the admin's delete asks first, and takes it down too, or leaves it up, as answered.
+test('what ends a take: a Main reset ends the hall\'s information and keeps the clock, a side room\'s its own; the author\'s delete ends a take of its file; the admin\'s delete asks', { timeout: 60_000 }, async (t) => {
+  const { srv, uploads, admin, hall } = await hallServer(t);
+  const code = await hall('Reset hall');
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const { inviteOf } = require('./helpers');
+  const open = async (cookie, args) => { const s = await connect(srv.base, cookie); sockets.push(s); const j = await emit(s, 'join', args); assert.ok(j.ok, JSON.stringify(j)); s.heard = []; s.onAny((ev, v) => s.heard.push([ev, v])); return { s, j }; };
+  const { s: op, j: opJoin } = await open(admin, { roomCode: code, name: 'Op', role: 'research' });
+  const { s: gil, j: gilJoin } = await open(undefined, { roomCode: code, name: 'Gil', role: 'board', invite: inviteOf(srv.dataDir, code) });
+  const LEGAL = (await emit(op, 'room:create', { hall: code, name: 'Legal' })).key;
+  const { s: inLegal, j: legalJoin } = await open(admin, { roomCode: LEGAL, name: 'Op', role: 'research' });
+  const share = async (s, token, name) => {
+    const f = new FormData();
+    f.append('file', new Blob([pngOf(4, 4)], { type: 'image/png' }), name);
+    const up = await (await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': token }, body: f })).json();
+    const m = await emit(s, 'message', { type: 'file', url: up.url, filename: name });
+    assert.ok(m.ok, JSON.stringify(m));
+    return up.url;
+  };
+  const push = async (to, content) => { const r = await emit(op, 'page:push', { code, to, content }); assert.equal(r.ok, true, JSON.stringify(r)); return r.seq; };
+  const status = async () => (await emit(op, 'page:status', { code })).board;
+  const rows = () => fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action === 'room.reset').map((e) => e.words);
+  // The clock, a Main picture on the Board, one of Legal's (Legal on Main's list) to Gil alone.
+  await push('board', { kind: 'clock' });
+  const mainPic = await share(op, opJoin.uploadToken, 'main.png');
+  await push('board', { kind: 'image', url: mainPic });
+  assert.equal((await emit(op, 'room:update', { code, sendFrom: [LEGAL] })).ok, true);
+  const legalPic = await share(inLegal, legalJoin.uploadToken, 'legal.png');
+  const gilKey = (await emit(op, 'page:status', { code })).people.find((p) => p.name === 'Gil').uid;
+  const toGil = await push({ uid: gilKey }, { kind: 'doc', url: legalPic });
+  // Legal's reset: Gil's take of Legal's picture ends, his page told; the Board's picture of Main's stays.
+  const reset = await emit(op, 'admin:resetRoom', { roomCode: LEGAL });
+  assert.deepEqual([reset.ok, reset.ended], [true, 1], JSON.stringify(reset));
+  assert.match(rows().at(-1), /, 1 take ended$/);
+  await until(() => gil.heard.some(([ev, v]) => ev === 'page:take' && v.layer === 'info' && v.seq > toGil && v.content && v.content.kind === 'chat'), 4000, 'Gil told it ended');
+  assert.equal((await status()).info.kind, 'image');
+  // Main's reset: every information take of the hall ends, and Earlier with them, each page it was on told; the clock stays.
+  const mainSeq = await push('board', { kind: 'image', url: mainPic });
+  await until(() => gil.heard.some(([ev, v]) => ev === 'page:take' && v.seq === mainSeq), 4000, 'Gil shown it');
+  const main = await emit(op, 'admin:resetRoom', { roomCode: code });
+  assert.equal(main.ok, true, JSON.stringify(main));
+  assert.match(rows().at(-1), /^messages and documents cleared, \d+ files? removed, 2 takes ended$/);
+  await until(() => gil.heard.some(([ev, v]) => ev === 'page:take' && v.layer === 'info' && v.seq > mainSeq && v.content && v.content.kind === 'chat'), 4000, 'Gil told the information ended');
+  const after = await status();
+  assert.deepEqual([after.kind, after.info.kind], ['clock', 'chat']);
+  const gilAgain = await open(undefined, { roomCode: code, name: 'Gil', role: 'board', uid: gilJoin.identity, invite: inviteOf(srv.dataDir, code) });
+  assert.deepEqual([gilAgain.j.over, gilAgain.j.earlier], [null, []]);
+  // A file's message deleted by its author: the document shown of it ends, and the file leaves the disk.
+  const pic = await share(op, opJoin.uploadToken, 'again.png');
+  const message = (url) => op.heard.filter(([ev, v]) => ev === 'message' && v.url === url).map(([, v]) => v).at(-1);
+  await until(() => message(pic), 4000, 'heard');
+  await push('board', { kind: 'doc', url: pic });
+  assert.equal((await status()).info.kind, 'doc');
+  assert.ok((await emit(op, 'delete', { messageId: message(pic).id })).ok);
+  assert.equal((await status()).info.kind, 'chat');
+  await until(() => !fs.existsSync(path.join(uploads, pic.slice(9))), 4000, 'its file gone');
+  // The admin's delete of a file on people's pages asks first; leaving it up keeps the take, taking it down ends it.
+  const asked = await share(op, opJoin.uploadToken, 'asked.png');
+  await until(() => message(asked), 4000, 'heard');
+  await push('board', { kind: 'image', url: asked });
+  assert.deepEqual(await emit(op, 'admin:deleteMessage', { roomCode: code, messageId: message(asked).id }), { ok: false, onStage: true, error: 'On the Board\'s pages now — take it down too?' });
+  assert.deepEqual(await emit(op, 'admin:deleteMessage', { roomCode: code, messageId: message(asked).id, takeDown: false }), { ok: true });
+  assert.equal((await status()).info.kind, 'image', 'left up');
+  const third = await share(op, opJoin.uploadToken, 'third.png');
+  await until(() => message(third), 4000, 'heard');
+  await push('board', { kind: 'image', url: third });
+  assert.deepEqual(await emit(op, 'admin:deleteMessage', { roomCode: code, messageId: message(third).id, takeDown: true }), { ok: true, ended: 1 });
+  assert.equal((await status()).info.kind, 'chat', 'taken down');
+});
+
+// What else holds a stage file (plan 4-§5.11): a holding slide's picture on people's pages is the stage's as a document's
+// is (a fresh upload shown as one outlives its upload's own wait; a message's file shown as one outlives its message's
+// delete and its room's reset while the slide is up), a file the admin's delete leaves up goes once nothing names it, and
+// the boot sweep never removes a stage file a screen, the hall's holding image or an Earlier entry still holds.
+test('a holding slide\'s picture lives while the slide is up (a fresh upload, or a message\'s through its delete and its room\'s reset), a file left up by the admin\'s delete goes once nothing names it, and the boot sweep keeps what a screen, the hall\'s holding image or Earlier holds', { timeout: 90_000 }, async (t) => {
+  const WAIT = 1500;
+  let { srv, uploads, admin, hall } = await hallServer(t, { AGM_UPLOAD_ORPHAN_MS: String(WAIT) });
+  const code = await hall('Holding hall');
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const s = await connect(srv.base, admin);
+  sockets.push(s);
+  const j = await emit(s, 'join', { roomCode: code, name: 'Op', role: 'research' });
+  assert.ok(j.ok, JSON.stringify(j));
+  const heard = [];
+  s.on('message', (m) => heard.push(m));
+  const picture = async (name) => {
+    for (let i = 0; i < 12; i++) {
+      const f = new FormData();
+      f.append('file', new Blob([pngOf(4, 4)], { type: 'image/png' }), name);
+      const r = await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': j.uploadToken }, body: f });
+      if (r.status !== 429) return r.json();
+      await wait(2100);
+    }
+    throw new Error('the upload rate never let ' + name + ' through');
+  };
+  const posted = async (name) => {
+    const up = await picture(name);
+    assert.equal((await emit(s, 'message', { type: 'file', url: up.url, filename: name })).ok, true);
+    await until(() => heard.some((m) => m.url === up.url), 4000, name + ' posted');
+    return { url: up.url, id: heard.find((m) => m.url === up.url).id };
+  };
+  const push = async (content) => { const r = await emit(s, 'page:push', { code, to: 'board', content }); assert.equal(r.ok, true, JSON.stringify(r)); return r.seq; };
+  const on = (url) => fs.existsSync(path.join(uploads, url.slice(9)));
+  const file = path.join(srv.dataDir, 'pages.json');
+  const records = () => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).halls[code].files || {} : {});
+
+  // A fresh upload shown as a holding slide: kept as the hall's stage file, past its upload's own wait; once the slide is
+  // put away, gone after the wait.
+  const fresh = await picture('fresh.png');
+  await push({ kind: 'holding', image: fresh.url });
+  await until(() => records()[fresh.url.slice(9)], 4000, 'recorded as a stage file');
+  await wait(WAIT * 3);
+  assert.ok(on(fresh.url), 'the slide is up: kept past its upload\'s wait');
+  await push({ kind: 'clock' });
+  await until(() => !on(fresh.url), WAIT * 5, 'gone once the slide is put away and its wait is over');
+
+  // A message's picture shown as a holding slide: its message deleted by its author, the picture stays while the slide is
+  // up, then goes; the same through a reset of the Main room, which leaves the show as it is.
+  const deleted = await posted('deleted.png');
+  await push({ kind: 'holding', image: deleted.url });
+  assert.equal((await emit(s, 'delete', { messageId: deleted.id })).ok, true);
+  await wait(WAIT * 3);
+  assert.ok(on(deleted.url), 'kept while the slide is up, its message gone');
+  await push({ kind: 'clock' });
+  await until(() => !on(deleted.url), WAIT * 5, 'gone once the slide is put away');
+  const reset = await posted('reset.png');
+  await push({ kind: 'holding', image: reset.url });
+  const r = await emit(s, 'admin:resetRoom', { roomCode: code });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal((await emit(s, 'page:status', { code })).board.kind, 'holding', 'the show is left as it is');
+  await wait(WAIT * 3);
+  assert.ok(on(reset.url), 'kept through the reset while the slide is up');
+  await push({ kind: 'clock' });
+  await until(() => !on(reset.url), WAIT * 5, 'gone once the slide is put away');
+
+  // The admin's delete leaves a picture up: it is the stage's from then, and goes once withdrawn and past its wait.
+  const left = await posted('left.png');
+  const leftSeq = await push({ kind: 'image', url: left.url });
+  assert.deepEqual(await emit(s, 'admin:deleteMessage', { roomCode: code, messageId: left.id, takeDown: false }), { ok: true });
+  await wait(WAIT * 3);
+  assert.ok(on(left.url), 'left up: kept');
+  assert.equal((await emit(s, 'page:withdraw', { code, seq: leftSeq })).ok, true);
+  await until(() => !on(left.url), WAIT * 5, 'withdrawn: gone after its wait');
+
+  // The boot sweep: stage files past their wait are removed at the next start unless something else holds them: a screen,
+  // the hall's holding image, an Earlier entry. One nothing holds goes, which says the sweep ran.
+  const screen = await picture('screen.png');
+  const holding = await picture('holding.png');
+  const earlier = await picture('earlier.png');
+  const control = await picture('control.png');
+  for (const up of [screen, holding, control]) assert.equal((await emit(s, 'page:withdraw', { code, seq: await push({ kind: 'image', url: up.url }) })).ok, true);
+  const shown = await push({ kind: 'image', url: earlier.url });
+  assert.equal((await emit(s, 'page:push', { code, to: 'board', content: { kind: 'chat', layer: 'info' }, ifSeq: shown })).ok, true);
+  const d = (await emit(s, 'display:create', { code, name: 'Lectern' })).display;
+  assert.equal((await emit(s, 'display:take', { id: d.id, content: { kind: 'file', url: screen.url, name: 'screen.png' } })).ok, true);
+  assert.equal((await emit(s, 'display:hallHolding', { code, image: holding.url })).ok, true);
+  await until(() => [screen, holding, earlier, control].every((up) => records()[up.url.slice(9)]), 4000, 'each recorded');
+  s.close();
+  await stopServer(srv.child);
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const f of Object.values(data.halls[code].files)) f.at = 0;
+  fs.writeFileSync(file, JSON.stringify(data));
+  srv = await startServer({ AGM_DATA_DIR: srv.dataDir, PORT: String(srv.port), AGM_UPLOAD_DIR: uploads });
+  t.after(() => stopServer(srv.child));
+  await until(() => !on(control.url), 4000, 'the boot sweep removed the one nothing holds');
+  assert.deepEqual([screen, holding, earlier].map((up) => on(up.url)), [true, true, true], 'a screen\'s, the hall\'s holding image and an Earlier entry\'s stay');
+  assert.ok(records()[earlier.url.slice(9)], 'Earlier names it: its record stays');
+});
+
+// The stage holds 200 files a hall in use (plan 4-§5.11): a fresh upload shown past them is refused with the words, and
+// nothing is shown.
+test('a hall\'s stage holds 200 files in use: the next fresh upload shown is refused, and nothing is shown', { timeout: 60_000 }, async (t) => {
+  const first = await hallServer(t);
+  const code = await first.hall('Full hall');
+  await stopServer(first.srv.child);
+  // 200 stage files inside their wait, as a busy day leaves them, written before the start.
+  const files = {};
+  for (let i = 0; i < 200; i++) files['1730000000000-abcdefghijkl-p' + i + '.png'] = { at: Date.now(), room: code, uid: 'someone', name: 'p' + i + '.png' };
+  fs.writeFileSync(path.join(first.srv.dataDir, 'pages.json'), JSON.stringify({ views: {}, halls: { [code]: { seq: 0, board: {}, people: {}, answers: {}, earlier: [], files } } }));
+  const srv = await startServer({ AGM_DATA_DIR: first.srv.dataDir, PORT: String(first.srv.port), AGM_UPLOAD_DIR: first.uploads });
+  t.after(() => stopServer(srv.child));
+  const s = await connect(srv.base, first.admin);
+  t.after(() => s.close());
+  const j = await emit(s, 'join', { roomCode: code, name: 'Op', role: 'research' });
+  assert.ok(j.ok, JSON.stringify(j));
+  const f = new FormData();
+  f.append('file', new Blob([pngOf(4, 4)], { type: 'image/png' }), 'one more.png');
+  const up = await (await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': j.uploadToken }, body: f })).json();
+  assert.deepEqual(await emit(s, 'page:push', { code, to: 'board', content: { kind: 'image', url: up.url } }), { ok: false, error: 'This hall\'s stage holds 200 files — take some down.' });
+  assert.equal((await emit(s, 'page:status', { code })).board.info.seq, 0, 'nothing shown');
+  // Posted in the room, the same file is a message's, no stage file: it is shown.
+  const posted = await emit(s, 'message', { type: 'file', url: up.url, filename: 'one more.png' });
+  assert.equal(posted.ok, true, JSON.stringify(posted));
+  assert.equal((await emit(s, 'page:push', { code, to: 'board', content: { kind: 'image', url: up.url } })).ok, true, 'a message\'s file is no stage file');
 });
