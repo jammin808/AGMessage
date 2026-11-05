@@ -27,7 +27,10 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   else to do on the board, goes straight into it on sign-in; each room opens seated as the server seats it (a Board
   member On stage at once). **Rooms:** a hall page's header names its room ("Hall 2 › Legal") and, with two rooms or more,
   a **switcher** under it moves between the hall's rooms the person may enter, keeping what they wrote and had not sent;
-  a room's right-click offers Open in a new tab, Copy link and Copy guest code. Moving between a hall's rooms writes no
+  a room there with a message the person has not read carries a dot (● for news, 🔥 where a priority message came, its
+  words "Legal, new messages" for a screen reader), lit live, off again when that message is removed, and taken off by a
+  visit or by Mark as read; what has been read is kept in the browser, by room and person; a room's right-click offers Open in a new tab, Copy link, Mark as read
+  and Copy guest code. Moving between a hall's rooms writes no
   "joined" or "left" line in either room; a second device or tab opened in another room is said there. A file is posted
   only in the room it was uploaded for, by whoever uploaded it (or again in a room that already holds it): another
   room's file posted by its link is refused ("That file belongs to another room — send it from there."); it goes there
@@ -101,7 +104,7 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   its own. Every status on every page — a screen, a help request, a send held or refused, a link, the countdown — is a
   mark of one table, each mark with one meaning, beside its word and in its colour, never the colour alone (✓ on screen
   or resolved, ◷ sending or waiting, △ could not, ✕ none or a fault, ■ waiting for someone, ▶ on the way, ▲ soon, ○ off,
-  ◐ not fully seen, ◇ reached but not seen into, ▭ minimised, ⊘ withdrawn, ● a note). A new message never moves a feed you have scrolled up — "↓ 3 new" says how many came below — and a New line
+  ◐ not fully seen, ◇ reached but not seen into, ▭ minimised, ⊘ withdrawn, ● a note, or news in a room of the switcher). A new message never moves a feed you have scrolled up — "↓ 3 new" says how many came below — and a New line
   marks the first that arrived since you last touched the page, instead of a fill that fades. A sent message shows "◷
   Sending" until AGMessage has it, and is never posted twice; one written while the connection is down waits on the
   page, a reload included, and is sent when it is back, marked with its wait ("written 14:02 · sent 14:06 (offline)").

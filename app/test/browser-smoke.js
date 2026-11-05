@@ -3541,7 +3541,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       return ana === 200 && given.status === 200 ? signIn('kim', 'mixing desk on stage left') : 'ana ' + ana + ', given ' + given.status; })()`);
     const LOADS = `(() => { if (location.pathname !== '/app.html') return;
       try { sessionStorage.setItem('agm.smokeLoads', String(Number(sessionStorage.getItem('agm.smokeLoads') || 0) + 1)); } catch { /* none kept */ }
-      addEventListener('pagehide', () => { try { const c = document.querySelector('#roomSwitcher [aria-current="page"]'); sessionStorage.setItem('agm.smokeLeft', JSON.stringify({ title: document.querySelector('.app-title strong').textContent, tab: document.title, current: c ? c.textContent : '' })); } catch { /* none kept */ } }); })();`;
+      addEventListener('pagehide', () => { try { const c = document.querySelector('#roomSwitcher [aria-current="page"] .room-seg-name'); sessionStorage.setItem('agm.smokeLeft', JSON.stringify({ title: document.querySelector('.app-title strong').textContent, tab: document.title, current: c ? c.textContent : '' })); } catch { /* none kept */ } }); })();`;
     const kimTab = await edge.tab(`${base}/halls.html`, { init: LOADS });
     const kimBoard = await kimTab.until(`location.pathname === '/halls.html' && document.getElementById('linkState').dataset.ok === '1' && (() => { const row = document.querySelector('.hall-row[data-code="${code}"]'); const a = row && row.querySelector('a.room-btn[data-key="${pressKey}"]');
       return !!a && JSON.stringify({ rows: document.querySelectorAll('.hall-row').length, hall: row.querySelector('a.hall-open').getAttribute('href'), press: a.getAttribute('href') }); })()`, 10000);
@@ -3549,7 +3549,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       `an account with two rooms stays on the halls page, which lists both: its hall seated On stage, its side room backstage (${kimIn}; ${kimBoard})`);
     await kimTab.eval(`document.querySelector('.hall-row[data-code="${code}"] a.hall-open').click()`);
     const SWITCHER = `JSON.stringify({ code: new URLSearchParams(location.search).get('code'), role: new URLSearchParams(location.search).get('role'), loads: sessionStorage.getItem('agm.smokeLoads'), title: document.querySelector('.app-title strong').textContent, tab: document.title,
-      shown: !document.getElementById('roomSwitcher').hidden, rooms: [...document.querySelectorAll('#roomSwitcher > a')].map((a) => a.textContent + (a.getAttribute('aria-current') === 'page' ? '*' : '')) })`;
+      shown: !document.getElementById('roomSwitcher').hidden, rooms: [...document.querySelectorAll('#roomSwitcher > a')].map((a) => a.querySelector('.room-seg-name').textContent + (a.getAttribute('aria-current') === 'page' ? '*' : '')) })`;
     const JOINED_HERE = (key) => `location.pathname === '/app.html' && new URLSearchParams(location.search).get('code') === '${key}' && typeof joined !== 'undefined' && joined`;
     const kimMain = await kimTab.until(`${JOINED_HERE(code)} && ${SWITCHER}`, 10000);
     report(kimMain === JSON.stringify({ code, role: 'board', loads: '1', title: 'Smoke AGM', tab: 'AGMessage · Smoke AGM', shown: true, rooms: ['Main*', 'Press'] }),
@@ -3563,8 +3563,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const SEG = (key) => `document.querySelector('#roomSwitcher > a[data-key="${key}"]')`;
     const segDoors = await ownLinkDoors(kimTab, 'room', SEG(pressKey), `switcherObject('${pressKey}')`);
     const hereDoors = await ownLinkDoors(kimTab, 'room', SEG(code), `switcherObject('${code}')`);
-    report(linkInStep(segDoors) && segDoors.want === JSON.stringify(['room.open', 'room.tab', 'room.copy']) && linkInStep(hereDoors) && hereDoors.want === JSON.stringify(['room.tab', 'room.copy']),
-      `the switcher's rooms: right-click = Shift+F10 = Open, Open in a new tab, Copy link; this room's, no Open and (On stage) no code (${segDoors.want} ${segDoors.right} / ${segDoors.key}; ${hereDoors.want} ${hereDoors.right} / ${hereDoors.key})`);
+    // Press holds messages Kim has never read in this browser: its dot is lit, and its menu offers Mark as read.
+    const segNews = await kimTab.eval(`${SEG(pressKey)}.dataset.news`);
+    report(linkInStep(segDoors) && segDoors.want === JSON.stringify(['room.open', 'room.tab', 'room.copy', 'room.markRead']) && ['news', 'priority'].includes(segNews) && linkInStep(hereDoors) && hereDoors.want === JSON.stringify(['room.tab', 'room.copy']),
+      `the switcher's rooms: right-click = Shift+F10 = Open, Open in a new tab, Copy link, and Mark as read on Press, never read here; this room's, no Open and (On stage) no code (${segDoors.want} ${segDoors.right} / ${segDoors.key}; ${segNews}; ${hereDoors.want} ${hereDoors.right} / ${hereDoors.key})`);
     await kimTab.eval(`document.getElementById('directorInput').value = 'Half a thought'`);
     await leftClick(kimTab, await middleOf(kimTab, SEG(pressKey)));
     const kimPress = await kimTab.until(`${JOINED_HERE(pressKey)} && JSON.stringify({ left: JSON.parse(sessionStorage.getItem('agm.smokeLeft')), here: JSON.parse(${SWITCHER}) })`, 10000);
@@ -3589,6 +3591,66 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const kimMainSaid = await research.eval(KIM_LINES);
     report(kimReturned === JSON.stringify({ listed: true, lines: ['Kim Tech joined On stage'] }) && kimMainSaid === JSON.stringify(['Kim Tech joined On stage']),
       `back in Main by the switcher: listed again, and the move said in neither room (${kimReturned}; ${kimMainSaid})`);
+    // ---------------- Unread dots on the switcher (unit 21) ----------------
+    // Kim read Press as she was in it above, so back in Main its segment has no dot. A message there lights it within the
+    // frame's window: the note's mark in its colour role, its words the room's name and "new messages" (its accessible
+    // name, and its tooltip after the room's); a 🔥 there makes it 🔥, "priority". The room's menu offers Mark as read,
+    // set apart after its ways in, which takes the dot off, and its toast's Undo puts it back; a visit takes it off too.
+    const DOT = (key) => `(() => { const a = ${SEG(key)}; const d = a && a.querySelector('.room-dot'); return !!d && JSON.stringify({ dot: d.hidden ? '' : d.textContent, tone: d.dataset.tone || '', label: a.getAttribute('aria-label') || '', title: a.title, news: a.dataset.news }); })()`;
+    const dotOf = (tab, key, want) => tab.until(`(() => { const v = ${DOT(key)}; return v && JSON.parse(v).news === ${codeLiteral(want)} ? v : ''; })()`, 6000).then((v) => v || tab.eval(DOT(key)));
+    const dotBefore = await kimTab.eval(DOT(pressKey));
+    const ctlDots = await connect(base, cookie);
+    // The laptop's token admin writes there, its own page joining Press by its key with a name and a seat.
+    const anaInPress = await emit(ctlDots, 'join', { roomCode: pressKey, name: 'Front desk', role: 'research' });
+    const plainSaid = await emit(ctlDots, 'message', { type: 'text', text: 'The press pack is on the table' });
+    const dotLit = await dotOf(kimTab, pressKey, 'news');
+    const hotSaid = await emit(ctlDots, 'message', { type: 'text', text: 'Photographers to the front now', priority: true });
+    const dotHot = await dotOf(kimTab, pressKey, 'priority');
+    report(anaInPress.ok && plainSaid.ok && hotSaid.ok && dotBefore === JSON.stringify({ dot: '', tone: '', label: '', title: 'Smoke AGM › Press', news: '' })
+      && dotLit === JSON.stringify({ dot: '●', tone: 'info', label: 'Press, new messages', title: 'Smoke AGM › Press · new messages', news: 'news' })
+      && dotHot === JSON.stringify({ dot: '🔥', tone: '', label: 'Press, priority', title: 'Smoke AGM › Press · priority', news: 'priority' }),
+      `a message in Press lights its dot on Kim's switcher in Main, its words its accessible name; a 🔥 there makes it 🔥, "priority" (${[anaInPress, plainSaid, hotSaid].map((r) => (r.ok ? 'ok' : r.error)).join(', ')}; ${dotBefore}; ${dotLit}; ${dotHot})`);
+    const dotDoors = await ownLinkDoors(kimTab, 'room', SEG(pressKey), `switcherObject('${pressKey}')`);
+    await rightClick(kimTab, await middleOf(kimTab, SEG(pressKey)));
+    await kimTab.until(MENU_IDS, 3000);
+    await kimTab.eval(`document.querySelector('.agm-menu [data-action="room.markRead"]').click()`);
+    const dotRead = await dotOf(kimTab, pressKey, '');
+    const readSaid = await kimTab.eval(`(document.getElementById('agmToast') || {}).textContent || ''`);
+    await kimTab.eval(`document.querySelector('#agmToast .toast-undo').click()`);
+    const dotUndone = await dotOf(kimTab, pressKey, 'priority');
+    report(linkInStep(dotDoors) && dotDoors.want === JSON.stringify(['room.open', 'room.tab', 'room.copy', 'room.markRead']) && JSON.parse(dotRead).dot === '' && JSON.parse(dotRead).label === ''
+      && readSaid === 'Marked Smoke AGM › Press as read. · Undo' && JSON.parse(dotUndone).dot === '🔥',
+      `a room with a dot: right-click = Shift+F10 = Open, Open in a new tab, Copy link, Mark as read; Mark as read takes the dot off, and Undo puts it back (${dotDoors.want} ${dotDoors.right} / ${dotDoors.key}; ${dotRead}; ${readSaid}; ${dotUndone})`);
+    // A visit reads the room: the dot is off as the switcher is tapped, and off on Main's switcher once Kim is back. No
+    // other room is lit meanwhile: Main took no message.
+    await leftClick(kimTab, await middleOf(kimTab, SEG(pressKey)));
+    const pressRead = await kimTab.until(`${JOINED_HERE(pressKey)} && (() => { const v = ${DOT(code)}; return v && JSON.stringify({ main: JSON.parse(v).news, left: JSON.parse(sessionStorage.getItem('agm.smokeLeft')).current }); })()`, 10000);
+    await sleep(1000);
+    await leftClick(kimTab, await middleOf(kimTab, SEG(code)));
+    const dotVisited = await kimTab.until(`${JOINED_HERE(code)} && ${DOT(pressKey)}`, 10000);
+    report(pressRead === JSON.stringify({ main: '', left: 'Press' }) && JSON.parse(dotVisited).news === '' && JSON.parse(dotVisited).dot === '',
+      `a visit to Press reads it: back in Main its dot is off, and Main, which took no message, has none in Press (${pressRead}; ${dotVisited})`);
+    // Where this browser keeps nothing (its storage refuses every save: a full store, a private window that keeps none), a
+    // page holds what is read itself, from what its join told it: Kim's page opened so has no dot on Press, whatever Press
+    // holds, lights it for a message that comes while it is open, and its Mark as read says the dot is off on this page
+    // alone. The page reads nothing this browser kept.
+    const kimBlocked = await edge.tab(`${base}/app.html?code=${code}&as=account&role=board`,
+      { init: `Storage.prototype.setItem = function () { throw new DOMException('The quota has been exceeded.', 'QuotaExceededError'); };` });
+    const blockedFirst = await kimBlocked.until(`${JOINED_HERE(code)} && ${DOT(pressKey)}`, 10000);
+    const blockedSaid = await emit(ctlDots, 'message', { type: 'text', text: 'Badges at the side door' });
+    const blockedLit = await dotOf(kimBlocked, pressKey, 'news');
+    await rightClick(kimBlocked, await middleOf(kimBlocked, SEG(pressKey)));
+    await kimBlocked.until(MENU_IDS, 3000);
+    await kimBlocked.eval(`document.querySelector('.agm-menu [data-action="room.markRead"]').click()`);
+    const blockedRead = await dotOf(kimBlocked, pressKey, '');
+    const blockedToast = await kimBlocked.eval(`(document.getElementById('agmToast') || {}).textContent || ''`);
+    const blockedProblems = kimBlocked.problems.slice();
+    await kimBlocked.send('Page.navigate', { url: 'about:blank' });
+    kimBlocked.close();
+    report(!!blockedFirst && JSON.parse(blockedFirst).news === '' && blockedSaid.ok && JSON.parse(blockedLit || '{}').news === 'news' && JSON.parse(blockedRead || '{}').dot === ''
+      && blockedToast === 'Marked Smoke AGM › Press as read on this page alone: this browser keeps nothing (its storage is blocked). · Undo' && blockedProblems.length === 0,
+      `with storage that keeps nothing, a page's dots are the news that came while it is open, and Mark as read says it holds for this page alone (${blockedFirst}; ${blockedSaid.ok ? 'ok' : blockedSaid.error}; ${blockedLit}; ${blockedRead}; ${blockedToast}${blockedProblems.length ? '; ' + blockedProblems.slice(0, 3).join(' | ') : ''})`);
+    ctlDots.close();
     await kimTab.shot(path.join(OUT, 'hall-switcher.png'));
     // A Staff account (messages and files, no Stagewatch) is seated backstage: while the hall's Stagewatch keeps a show
     // desk and its frames move, it is offered neither 📝 nor 🖥 — the server would refuse both.

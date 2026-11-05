@@ -226,6 +226,7 @@ class RoomStore {
     return {
       code, hall, name, createdAt, guestCode, retired, ref: this.refOf ? this.refOf(code) : '', messages: [], byId: new Map(), byCid: new Map(), gone: new Map(), goneKeys: new Map(), seq: 0, ring: [],
       users: new Map(), settings: {}, logCount: 0, logFd: null, unsaved: false, ragged: false, snapKb: null, snapWhole: false, marked: false,
+      news: null,   // news(): what is new here, read when first asked
     };
   }
 
@@ -379,6 +380,28 @@ class RoomStore {
     return typeof id === 'string' ? room.gone.get(id) || null : null;
   }
 
+  /**
+   * What is new in a room, as the hall page's switcher reads it for a dot: `seq`, the seq of its newest message that is
+   * not a system line, and `prioritySeq`, of its newest priority (🔥) one; each 0 for none (a message kept from before
+   * messages carried their seq counts as none). A presence line, a reaction or a pin is no news. Read from the messages
+   * once, then kept as each is added; a removal or a clear has it read again, so no dot stands for a message that has
+   * gone.
+   */
+  news(room) {
+    if (!room.news) {
+      let seq = 0;
+      let prioritySeq = 0;
+      for (let i = room.messages.length - 1; i >= 0 && !prioritySeq; i--) {
+        const m = room.messages[i];
+        if (!m || m.type === 'system' || !Number.isInteger(m.seq)) continue;
+        if (!seq) seq = m.seq;
+        if (m.priority) prioritySeq = m.seq;
+      }
+      room.news = { seq, prioritySeq };
+    }
+    return room.news;
+  }
+
   /** Keep a tombstone, the newest last; past GONE_KEEP the oldest goes, and its client id with it. */
   _bury(room, tomb) {
     room.gone.delete(tomb.id);
@@ -439,6 +462,7 @@ class RoomStore {
         room.byId.set(op.m.id, op.m);
         const key = cidKey(op.m);
         if (key) room.byCid.set(key, { id: op.m.id, seq: op.m.seq });
+        if (room.news && op.m.type !== 'system' && Number.isInteger(op.m.seq)) room.news = { seq: op.m.seq, prioritySeq: op.m.priority ? op.m.seq : room.news.prioritySeq };
         break;
       }
       case 'upd': {
@@ -450,6 +474,7 @@ class RoomStore {
         const i = room.messages.findIndex((m) => m.id === op.id);
         if (i >= 0) this._tomb(room, room.messages.splice(i, 1)[0]);
         room.byId.delete(op.id);
+        room.news = null;
         break;
       }
       case 'reset':
@@ -459,6 +484,7 @@ class RoomStore {
         room.messages = [];
         room.byId.clear();
         room.byCid.clear();
+        room.news = null;
         break;
       case 'meta':
         if (typeof op.name === 'string') room.name = op.name;

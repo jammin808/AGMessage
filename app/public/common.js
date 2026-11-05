@@ -102,7 +102,7 @@
     fault: Object.freeze({ mark: '✕', role: 'fault', means: 'none, or a fault' }),
     urgent: Object.freeze({ mark: '■', role: 'fault', means: 'waiting for someone, urgent' }),
     coming: Object.freeze({ mark: '▶', role: 'info', means: 'on the way' }),
-    note: Object.freeze({ mark: '●', role: 'info', means: 'a note' }),
+    note: Object.freeze({ mark: '●', role: 'info', means: 'a note: something to read, not urgent (a screen\'s message; new messages in a room of the switcher)' }),
     soon: Object.freeze({ mark: '▲', role: 'warn', means: 'soon' }),
   });
   /** The table's entry by its own name (never one it inherits, `toString`); a name that is none throws. */

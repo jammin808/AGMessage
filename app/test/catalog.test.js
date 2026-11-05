@@ -265,6 +265,9 @@ const PAGE_OBJECTS = {
     yours: { key: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2', href: '/app.html?code=LGQ4MZP8&as=account&role=observer', current: false, guestCode: '', hallKey: '' },
     here: { id: 'room:LGQ4MZP8', key: 'LGQ4MZP8', name: 'Legal', hall: 'Hall 2', title: 'Hall 2 › Legal', href: '/app.html?code=LGQ4MZP8&as=account&role=research', current: true, guestCode: 'K3TW9A', hallKey: '' },
     there: { id: 'room:K7P2QX', key: 'K7P2QX', name: 'Main', hall: 'Hall 2', title: 'Hall 2', href: '/app.html?code=K7P2QX&as=account&role=board', current: false, guestCode: '', hallKey: '' },
+    // The switcher's other rooms with news this person has not read there: a message, and a priority one among them.
+    news: { id: 'room:K7P2QX', key: 'K7P2QX', name: 'Main', hall: 'Hall 2', title: 'Hall 2', href: '/app.html?code=K7P2QX&as=account&role=board', current: false, guestCode: '', hallKey: '', news: 'news' },
+    hot: { id: 'room:MDR7VX2C', key: 'MDR7VX2C', name: 'Media', hall: 'Hall 2', title: 'Hall 2 › Media', href: '/app.html?code=MDR7VX2C&as=account&role=research', current: false, guestCode: '', hallKey: '', news: 'priority' },
   },
   // A help request on the board: its room's key, whether this watcher answers it and may open its room (a side room's
   // reaches the hall's crew who may not read it, to answer from the board), and a side room's name (`room`).
@@ -1005,6 +1008,14 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['room', 'board', { ...O.room.here, guestCode: '' }, ['room.tab', 'room.copy']],
     ['room', 'admin', O.room.there, ['room.open', 'room.tab', 'room.copy']],
     ['room', 'boardSimple', O.room.there, []],
+    // A room of the switcher with news this person has not read there (its dot, or 🔥): Mark as read, a local act that
+    // goes on offline. Never on this room, which is read as it is shown; never on the halls board, whose rooms carry no
+    // news; no menu in the simple view.
+    ['room', 'research', O.room.news, ['room.open', 'room.tab', 'room.copy', 'room.markRead']],
+    ['room', 'researchOffline', O.room.hot, ['room.open', 'room.tab', 'room.copy', 'room.markRead']],
+    ['room', 'research', { ...O.room.here, news: 'news' }, ['room.tab', 'room.copy', 'room.code']],
+    ['room', 'board', { ...O.room.button, news: 'priority' }, ['room.open', 'room.tab', 'room.copy', 'room.code', 'room.setup']],
+    ['room', 'boardSimple', O.room.hot, []],
     ['help', 'board', O.help.open, ['help.respond', 'help.resolve', 'help.open']],
     ['help', 'board', O.help.coming, ['help.resolve', 'help.open']],
     ['help', 'boardCrew', O.help.notTheirs, ['help.open']],
@@ -1093,6 +1104,15 @@ test('the other pages: the inline bar, the asks and their words, the caps and th
   // Its menu: its ways in, then what one hands out or sets up for it (Open · Open in a new tab · Copy link — Copy guest
   // code · Set up…).
   assert.deepEqual(plain(C.items('room', PAGE.board, O.room.button)).map((i) => (i.sep ? '—' : i.id)), ['room.open', 'room.tab', 'room.copy', '—', 'room.code', 'room.setup']);
+  // On the switcher, a room with news: its ways in, then Mark as read set apart (Open · Open in a new tab · Copy link —
+  // Mark as read), its words the plan's; offline it goes on, a local act.
+  assert.deepEqual(plain(C.items('room', SEATS.research, O.room.news)).map((i) => (i.sep ? '—' : i.id + ':' + i.label)), ['room.open:Open', 'room.tab:Open in a new tab', 'room.copy:Copy link', '—', 'room.markRead:Mark as read']);
+  assert.equal(plain(C.items('room', SEATS.researchOffline, O.room.hot)).find((i) => i.id === 'room.markRead').disabled, '');
+  // Mark as read is a group of its own: were a room's guest code and its Set up ever to fit beside it, the menu would still
+  // read as the plan draws it (Open · Open in a new tab · Copy link — Mark as read — Copy guest code · Set up…).
+  const every = { ...O.room.news, guestCode: 'K3TW9A', hallKey: 'K7P2QX' };
+  assert.deepEqual(plain(C.items('room', { ...SEATS.research, manageHalls: true }, every)).map((i) => (i.sep ? '—' : i.id)), ['room.open', 'room.tab', 'room.copy', '—', 'room.markRead', '—', 'room.code', 'room.setup']);
+  assert.ok(C.GROUPS.indexOf('3_keep') < C.GROUPS.indexOf('3_mark') && C.GROUPS.indexOf('3_mark') < C.GROUPS.indexOf('4_manage'));
   // The support view draws the switcher's doors, every one disabled with whose view it is; offline, Set up says so and
   // the local acts go on.
   assert.deepEqual([...new Set(plain(C.items('room', SEATS.support, O.room.there)).filter((i) => !i.sep).map((i) => i.disabled))], [C.supportWords('Kim')]);

@@ -178,8 +178,14 @@ Every day of the event
   hall's name alone in its Main room). With two rooms or more you may
   enter, the row under it moves between them ("Main · Legal · Media", this
   room marked): a tap opens the room, and what you typed and had not sent
-  waits in its box for when you come back. Right-click a room (or
-  Shift+F10) for Open in a new tab, Copy link and Copy guest code. Moving
+  waits in its box for when you come back. A room with a message you
+  have not read shows a dot after its name ("Legal ●"; "Legal 🔥" when a
+  priority message came); opening the room takes it off. What you have
+  read is kept in this browser, so another device shows its own dots; a
+  browser that keeps nothing (storage blocked) shows only what came while
+  the page is open.
+  Right-click a room (or Shift+F10) for Open in a new tab, Copy link,
+  Mark as read (the dot off without opening it) and Copy guest code. Moving
   between a hall's rooms writes no "joined" or "left" line in either
   room; a second phone or tab opened in another room is said there.
 - Sending into another room: where "May send in..." lets your room send

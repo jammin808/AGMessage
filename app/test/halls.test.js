@@ -1796,7 +1796,8 @@ test('the room choice and the switcher: a page is told its hall and the rooms it
   const onBoard = async (cookie) => { const b = (await api(srv.base, 'GET', '/api/halls', undefined, { cookie })).body; return [b.answersOnBoard, Object.keys(b).pop()]; };
   assert.deepStrictEqual(await Promise.all([tom, ned, lou, kim, admin].map(onBoard)), [[true, 'answersOnBoard'], [false, 'answersOnBoard'], [false, 'answersOnBoard'], [false, 'answersOnBoard'], [false, 'answersOnBoard']]);
   const hallOf = (j) => ({ ok: j.ok, hall: j.hall, hallName: j.hallName, rooms: j.rooms });
-  const room = (key, name, main, seat) => ({ key, name, main, seat });
+  // Nobody writes a message in this hall: its presence lines are no news, so every room has none (seq 0).
+  const room = (key, name, main, seat) => ({ key, name, main, seat, seq: 0, prioritySeq: 0 });
 
   // Each account's page is told its hall and the rooms of it its account may enter, the Main room first, each with the seat
   // the account would join with there: Tom backstage in both; Kim On stage in the Main room and backstage in Legal.
@@ -1882,4 +1883,167 @@ test('the room choice and the switcher: a page is told its hall and the rooms it
   await until(() => last(anaHeard).rooms.length === 3, 4000, 'Press removed');
   assert.deepStrictEqual(last(anaHeard).rooms.map((r) => [r.key, r.name]), [[HALL, 'Hall Alpha'], [LEGAL, 'Lawyers'], [MEDIA, 'Media']]);
   assert.ok(!JSON.stringify(louHeard).includes(HALL), 'no frame to Lou names the hall\'s key');
+});
+
+test('unread dots: a page watches the other rooms of its switcher, and is told each message there by its seq and whether it was a priority one, never its words or its sender; a member of one room hears nothing of another; a burst is at most two frames a window, a 🔥 among it carried; the join and the rooms frame tell each room\'s newest message and priority message', async (t) => {
+  const srv = await startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await stopServer(srv.child); });
+  const page = async (cookie) => { const s = await connect(srv.base, cookie); sockets.push(s); return s; };
+  const PW = 'clipboard and coffee';
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const HALL = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall A' }, { cookie: admin })).body.code;
+  const ctl = await page(admin);
+  const asked = async (s, verb, args) => { for (;;) { const r = await emit(s, verb, args); if (!r.busy) return r; await wait(250); } };
+  const LEGAL = (await asked(ctl, 'room:create', { hall: HALL, name: 'Legal' })).key;
+  const MEDIA = (await asked(ctl, 'room:create', { hall: HALL, name: 'Media' })).key;
+  // Tom: Hall A's crew, given Legal. Mia: Hall A's crew alone, a Main-only member. Lou: given Legal alone.
+  for (const [username, role, extra] of [['tom', 'tech', { halls: [HALL], rooms: [LEGAL] }], ['mia', 'tech', { halls: [HALL], rooms: [] }], ['lou', 'staff', { halls: [], rooms: [LEGAL] }]]) {
+    const made = await api(srv.base, 'POST', '/api/users', { username, name: username, role, password: PW, ...extra }, { cookie: admin });
+    assert.equal(made.status, 200, username + ': ' + JSON.stringify(made.body));
+  }
+  const signIn = async (username) => {
+    let r;
+    for (let i = 0; i < 4; i++) {
+      r = await api(srv.base, 'POST', '/api/auth/login', { username, password: PW });
+      if (r.status !== 429 || r.body.busy) break;
+      await wait(2100);
+    }
+    assert.equal(r.status, 200, username + ' signs in: ' + JSON.stringify(r.body));
+    return r.cookie;
+  };
+  const [tom, mia, lou] = [await signIn('tom'), await signIn('mia'), await signIn('lou')];
+  // Each page in its room, with the activity frames it hears.
+  const heard = new Map();
+  const seated = async (cookie, key, who) => {
+    const s = await page(cookie);
+    const got = [];
+    s.on('rooms:activity', (f) => got.push(f));
+    heard.set(s, got);
+    const j = await emit(s, 'join', { roomCode: key, ...(who || { as: 'account' }) });
+    assert.ok(j.ok, JSON.stringify(j));
+    return Object.assign(s, { joined: j });
+  };
+  const tomLegal = await seated(tom, LEGAL);
+  const miaMain = await seated(mia, HALL);
+  const louLegal = await seated(lou, LEGAL);
+  const anaMain = await seated(admin, HALL);
+  const anaMedia = await seated(admin, MEDIA);
+  const gus = await seated(undefined, HALL, { name: 'Gus', role: 'research' });
+  const frames = (s, key) => heard.get(s).filter((f) => f.key === key);
+  const say = (s, text, priority = false) => emit(s, 'message', { type: 'text', text, priority });
+
+  // A message in the Main room: Tom's Legal page, whose switcher lists the Main room, is told the room's newest message's
+  // seq and its newest priority one's (none) and that no priority one came, and nothing else: no words, no sender, no
+  // people. Ana's Main page is in it, and Ana's Media page watches it as the admin.
+  const doors = await say(anaMain, 'Doors at seven');
+  assert.ok(doors.ok && Number.isInteger(doors.seq), JSON.stringify(doors));
+  await until(() => frames(tomLegal, HALL).length > 0 && frames(anaMedia, HALL).length > 0, 4000, 'the Main room\'s message told to its watchers');
+  assert.deepStrictEqual(frames(tomLegal, HALL), [{ key: HALL, seq: doors.seq, priority: false, prioritySeq: 0 }]);
+  assert.deepStrictEqual(frames(anaMedia, HALL), [{ key: HALL, seq: doors.seq, priority: false, prioritySeq: 0 }]);
+  assert.ok(!/Doors|Ana|ana/.test(JSON.stringify(heard.get(tomLegal))), 'no words and no name in a frame');
+
+  // A message in Legal: the admin's Main and Media pages are told; Mia, a member of the Main room alone, and Lou, who has
+  // Legal alone (no other room to move to), hear nothing of it, nor does the room it was written in.
+  const legal = await say(louLegal, 'Contract signed', true);
+  assert.ok(legal.ok, JSON.stringify(legal));
+  await until(() => frames(anaMain, LEGAL).length > 0 && frames(anaMedia, LEGAL).length > 0, 4000, 'Legal\'s message told to the admin\'s pages');
+  assert.deepStrictEqual(frames(anaMain, LEGAL), [{ key: LEGAL, seq: legal.seq, priority: true, prioritySeq: legal.seq }]);
+  // A message in Media: only the admin may enter it, so only the admin's Main page is told; Tom is not given Media.
+  const media = await say(anaMedia, 'Camera two is live');
+  await until(() => frames(anaMain, MEDIA).length > 0, 4000, 'Media\'s message told to the admin\'s Main page');
+  // Presence lines are no news: a guest who comes and goes in the Main room is told to nobody's switcher.
+  const pat = await seated(undefined, HALL, { name: 'Pat', role: 'research' });
+  pat.close();
+  await wait(1200);
+  assert.deepStrictEqual(heard.get(miaMain), [], 'a member of the Main room alone hears nothing of Legal or Media');
+  assert.deepStrictEqual(heard.get(louLegal), [], 'nor does one given Legal alone, of the hall it does not see');
+  assert.deepStrictEqual(heard.get(gus), [], 'nor a code guest, whose page moves nowhere');
+  assert.deepStrictEqual([heard.get(tomLegal), frames(anaMain, HALL), frames(anaMedia, MEDIA), frames(louLegal, LEGAL)],
+    [[{ key: HALL, seq: doors.seq, priority: false, prioritySeq: 0 }], [], [], []], 'Tom hears the Main room alone, and no page its own room; nor a presence line');
+  assert.ok(media.ok);
+
+  // A join is told what is new in each room of its switcher: its newest message's seq and its newest priority one's.
+  // A reaction, a pin and a presence line are no news.
+  assert.ok((await emit(anaMain, 'react', { messageId: doors.id, emoji: '👍', on: true })).ok);
+  assert.ok((await emit(anaMain, 'pin', { messageId: doors.id, pinned: true })).ok);
+  const news = (j) => j.rooms.map((r) => [r.name, r.seq, r.prioritySeq]);
+  const tomMain = await seated(tom, HALL);
+  assert.deepStrictEqual(news(tomMain.joined), [['Hall A', doors.seq, 0], ['Legal', legal.seq, legal.seq]]);
+  const anaAgain = await seated(admin, LEGAL);
+  assert.deepStrictEqual(news(anaAgain.joined), [['Hall A', doors.seq, 0], ['Legal', legal.seq, legal.seq], ['Media', media.seq, 0]]);
+  assert.deepStrictEqual([news(miaMain.joined), gus.joined.rooms], [[['Hall A', 0, 0]], []], 'Mia joined before any message; a code page is told no rooms');
+
+  // A burst of ten messages in the Main room, the fifth a priority one: Tom's Legal page is told it in at most one frame
+  // per window after the first (two, when the burst fits in one window), the last saying the newest seq, and the frame
+  // that holds the 🔥 says so: it is never folded away.
+  heard.get(tomLegal).length = 0;
+  const burst = await page(admin);
+  assert.ok((await emit(burst, 'join', { roomCode: HALL, as: 'account' })).ok);
+  await wait(700);   // the window the join's own frames opened is over
+  heard.get(tomLegal).length = 0;
+  const t0 = Date.now();
+  const sent = await Promise.all(Array.from({ length: 10 }, (_, i) => say(burst, 'Cue ' + (i + 1), i === 4)));
+  const elapsed = Date.now() - t0;
+  assert.ok(sent.every((r) => r.ok), JSON.stringify(sent));
+  const seqs = sent.map((r) => r.seq);
+  const newest = Math.max(...seqs);
+  await until(() => frames(tomLegal, HALL).some((f) => f.seq === newest), 4000, 'the burst\'s newest seq told');
+  await wait(700);
+  const got = frames(tomLegal, HALL);
+  assert.ok(got.length >= 1 && got.length <= Math.ceil(elapsed / 500) + 1, 'at most one frame a window after the first: ' + got.length + ' in ' + elapsed + ' ms');
+  assert.equal(got[got.length - 1].seq, newest, 'the last frame says the newest seq');
+  assert.deepStrictEqual(got.map((f) => f.seq), [...got.map((f) => f.seq)].sort((a, b) => a - b), 'in order');
+  const hot = sent[4].seq;
+  const holding = got.find((f) => f.seq >= hot);
+  assert.equal(holding.priority, true, 'the frame that holds the 🔥 carries it: ' + JSON.stringify(got));
+  assert.ok(got.filter((f) => f.seq < hot).every((f) => f.priority === false && f.prioritySeq === 0), 'a frame before it says none');
+  assert.ok(got.filter((f) => f.seq >= hot).every((f) => f.prioritySeq === hot), 'from it on, each frame says the 🔥\'s seq: ' + JSON.stringify(got));
+  const tomAgain = await seated(tom, LEGAL);
+  assert.deepStrictEqual(news(tomAgain.joined)[0], ['Hall A', newest, hot], 'the join is told the newest message and the newest priority one');
+
+  // A room made in the hall: the admin's pages are told it, and watch it from then; the newest message removed, the join
+  // reads the room again, and no seq stands for a message that has gone.
+  const anaHeard = [];
+  anaMain.on('rooms:changed', (f) => anaHeard.push(f));
+  const PRESS = (await asked(ctl, 'room:create', { hall: HALL, name: 'Press' })).key;
+  await until(() => anaHeard.some((f) => f.rooms.some((r) => r.key === PRESS)), 4000, 'Press told to the admin\'s page');
+  assert.deepStrictEqual(anaHeard[anaHeard.length - 1].rooms.map((r) => [r.name, r.seq, r.prioritySeq]), [['Hall A', newest, hot], ['Legal', legal.seq, legal.seq], ['Media', media.seq, 0], ['Press', 0, 0]]);
+  const anaPress = await seated(admin, PRESS);
+  const press = await say(anaPress, 'Press pack ready');
+  await until(() => frames(anaMain, PRESS).length > 0, 4000, 'a room made is watched from then');
+  assert.deepStrictEqual(frames(anaMain, PRESS), [{ key: PRESS, seq: press.seq, priority: false, prioritySeq: 0 }]);
+
+  // A message removed takes its number back, live as at a join, so no dot stands for a message that has gone: the newest
+  // deleted, Tom's Legal page is told the one before it; the 🔥 deleted too, its priority number goes back to none.
+  await wait(600);
+  heard.get(tomLegal).length = 0;
+  const last = sent[sent.length - 1];
+  assert.ok((await emit(burst, 'delete', { messageId: last.id })).ok);
+  const before = Math.max(...seqs.filter((x) => x !== last.seq));
+  await until(() => frames(tomLegal, HALL).length > 0, 4000, 'a removal told to the room\'s watchers');
+  assert.deepStrictEqual(frames(tomLegal, HALL), [{ key: HALL, seq: before, priority: false, prioritySeq: hot }]);
+  const after = await seated(tom, LEGAL);
+  assert.deepStrictEqual(news(after.joined)[0], ['Hall A', before, hot], 'the newest message deleted: the one before it is the newest');
+  assert.ok((await emit(burst, 'delete', { messageId: sent[4].id })).ok);
+  await until(() => frames(tomLegal, HALL).some((f) => f.prioritySeq === 0), 4000, 'the 🔥 removed, told');
+  assert.deepStrictEqual(frames(tomLegal, HALL).at(-1), { key: HALL, seq: before, priority: false, prioritySeq: 0 }, 'the 🔥 gone: no priority message in the Main room');
+
+  // A page that moves to another room on its own socket watches its new switcher's rooms, never its own: Tom's first
+  // Legal page, moved into the Main room, is told Legal's next message and nothing of the Main room's.
+  heard.get(tomLegal).length = 0;
+  assert.ok((await emit(tomLegal, 'join', { roomCode: HALL, as: 'account' })).ok);
+  const signed = await say(louLegal, 'Signed copy scanned');
+  const five = await say(anaMain, 'Doors in five');
+  assert.ok(signed.ok && five.ok, JSON.stringify([signed, five]));
+  await until(() => frames(tomLegal, LEGAL).length > 0 && frames(after, HALL).some((f) => f.seq === five.seq), 4000, 'Legal\'s message told to the moved page, the Main room\'s to Legal\'s');
+  await wait(600);
+  assert.deepStrictEqual([frames(tomLegal, LEGAL), frames(tomLegal, HALL)], [[{ key: LEGAL, seq: signed.seq, priority: false, prioritySeq: legal.seq }], []],
+    'the moved page watches Legal now, and no longer the room it is in');
+
+  // A room cleared has no news: the admin clears the Main room, and Tom's Legal page is told its numbers are none (the
+  // clear's own line is no news).
+  assert.ok((await emit(ctl, 'admin:resetRoom', { roomCode: HALL })).ok);
+  await until(() => frames(after, HALL).some((f) => f.seq === 0), 4000, 'the clear told to the room\'s watchers');
+  assert.deepStrictEqual(frames(after, HALL).at(-1), { key: HALL, seq: 0, priority: false, prioritySeq: 0 });
 });

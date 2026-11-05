@@ -350,7 +350,15 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   never beyond the tab; another person's held messages are dropped at the join, never sent as them, and being sent out
   of a hall drops them all. The words a person wrote in a room and had not sent when the switcher moved them to
   another room of its hall are kept the same way, in that tab's `sessionStorage` under the room and the person, until
-  they come back to that room, so another account signed in on the tab is never handed them. A file's bytes waiting are
+  they come back to that room, so another account signed in on the tab is never handed them. What a person has read of
+  each room, for the switcher's dot, is a room's key (for a hall's Main room, its guest code until New code, as the
+  page's own address already holds it) and a change number in the browser's `localStorage` under the room and the
+  person, never a word of a message or a secret; where the browser keeps nothing, the page holds it for itself alone. A
+  page is told of a change in another room only where its switcher lists that room (an account's page, an admin's
+  account's included, joined to that room's watchers, which it leaves when the room leaves its switcher; a code page,
+  the laptop's token admin's own page among them, and the support view watch none), and only the room's key it already
+  holds, the change numbers of the room's newest message and newest priority one and whether a priority message came:
+  no words, no sender, no people. A member of one room learns nothing of a room it may not enter. A file's bytes waiting are
   held in memory only (the link of one already uploaded is kept with its message). Nothing an act on something carries (a pin, a take, a setting, a node's token) is ever stored by
   the page. A repeat is answered before the rate only for a send of that person's own: a forward, which names the hall
   it goes to by its code, takes from the sender's rate before the code is looked up, so whether a code names a hall is

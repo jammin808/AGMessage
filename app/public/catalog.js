@@ -32,7 +32,9 @@
 (function (root) {
   'use strict';
 
-  const GROUPS = Object.freeze(['1_respond', '2_send', '3_keep', '4_manage', '9_danger']);
+  // The groups, in order, a separator between each two drawn: `3_mark` holds what a person marks for themselves alone
+  // (a room's Mark as read), set apart from the ways in before it and what one hands out or sets up after it.
+  const GROUPS = Object.freeze(['1_respond', '2_send', '3_keep', '3_mark', '4_manage', '9_danger']);
   /**
    * The text sizes the header offers, each a factor of the messages' type (`--zoom-msg`) and its word: from a little under
    * standard to twice it, for a reader at a glance under lights (the page's own bounds are 0.7 and 2.2, app.js setZoom).
@@ -680,11 +682,16 @@
     // guest code where this page is told it, '' else: the hall page is told its own room's alone) and `hallKey` (its
     // hall's key where this page may open the hall's Set up: the halls board's rows of halls this account sees, '' else).
     // The room is its own link: a click, Enter or a middle click opens it, so it has no bar of its own. Its ways in come
-    // first; its guest code and its Set up, what one hands out or sets up for the room, after them.
+    // first; its guest code and its Set up, what one hands out or sets up for the room, last. Between them, a group of its
+    // own: on the hall page's switcher a room of the hall with news this person has not read (`news`: 'news', or
+    // 'priority' where a 🔥 came; '' or none on every other page) is marked read there without opening it, Mark as read.
+    // Never this room, which is read as it is shown.
     room: [
       { id: 'room.open', label: 'Open', icon: '🚪', key: 'Enter', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: (f, o) => !o.current },
       { id: 'room.tab', label: 'Open in a new tab', icon: '🗗', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
       { id: 'room.copy', label: 'Copy link', icon: '🔗', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true },
+      { id: 'room.markRead', label: 'Mark as read', icon: '📭', group: '3_mark', verb: 'local', mode: 'local', may: () => true,
+        fits: (f, o) => f.page === 'hall' && !o.current && (o.news === 'news' || o.news === 'priority') },
       { id: 'room.code', label: 'Copy guest code', icon: '🔢', group: '4_manage', verb: 'local', mode: 'local',
         may: (f, o) => typeof o.guestCode === 'string' && o.guestCode.length > 0, fits: () => true },
       { id: 'room.setup', label: 'Set up…', icon: '⚙', group: '4_manage', verb: 'hall:settings', mode: 'now', may: (f) => !!f.manageHalls, fits: (f, o) => typeof o.hallKey === 'string' && o.hallKey.length > 0 },

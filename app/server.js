@@ -450,7 +450,27 @@ const frames = {
   // What a hall's people's pages show changed, or the pages that hold it (keyed by the hall): each console of the hall
   // re-reads it (page:status), so a push to 6 Board pages and their 6 reports are one re-read per console, not seven.
   pages: new Latest({ name: 'pages', delayMs: 150, flush: (halls) => eachRoom('pages', halls, (r) => tellPushers(r.code)) }),
+  // What is new in a room changed (keyed by the room; lib/ops.js newsOf: a message came, one was removed, the room was
+  // cleared): the pages that may move into it from another room of its hall, its watchers (watchRooms), are told the
+  // room's news as it stands when the frame goes (store.news: its newest message's seq and its newest priority one's,
+  // `prioritySeq`) and whether a priority message came since the last frame (`priority`, ops.mergeNews: a 🔥 is never
+  // folded away), for the switcher's dot. A burst is at most two frames to each; a message removed or a room cleared
+  // takes its number back, so no dot stands for a message that has gone. Nothing of the message goes: no text, no name,
+  // no people.
+  activity: new Latest({
+    name: 'activity', delayMs: 500, merge: ops.mergeNews,
+    flush: (rooms) => eachRoom('activity', rooms, (r, n) => {
+      const now = store.news(r);
+      io.to(WATCH + r.code).emit('rooms:activity', { key: r.code, seq: now.seq, priority: n.priority, prioritySeq: now.prioritySeq });
+    }),
+  }),
 };
+/**
+ * The io room of a room's watchers (`watch:<key>`): each account's page in another room of the hall that may move into
+ * it, as its switcher lists it (watchRooms; the laptop's token admin's own page has no switcher and watches none). A key
+ * is [A-Z0-9], so no room's own io room is one.
+ */
+const WATCH = 'watch:';
 /**
  * Each room of a frame's batch that is still here (a hall's key names its Main room), given to `send` with its value;
  * one that faults holds back no other.
@@ -792,7 +812,13 @@ if (restored) console.log('  Restored', restored, 'room(s) from', ROOMS_DIR);
  */
 const apply = ops.applier({
   commit: (room, op) => store.commit(room, op),
-  send: (room, opEvent, payload) => io.to(room.code).emit(opEvent, payload),
+  // A message that is not a system line, a removal and a clear are news for the room's watchers on its hall's other
+  // rooms (ops.newsOf, `frames.activity`).
+  send: (room, opEvent, payload) => {
+    io.to(room.code).emit(opEvent, payload);
+    const news = ops.newsOf(opEvent, payload);
+    if (news) frames.activity.mark(room.code, news);
+  },
   changed: () => boardDirty(),
   refused: (why) => console.error('  [ops] refused, nothing saved or sent: ' + why),
 });
@@ -1513,13 +1539,25 @@ function hallFacts(who, room, { page }) {
 /**
  * The rooms of `hall` an account's page may move between, as the join admits them (the admin every one; an account its
  * hall's Main room by its halls, a side room only where it is given: rbac.seesRoom), the Main room first, each by its key
- * (an address, never a guest code), its name (a Main room's is its hall's), whether it is the Main room, and the seat the
- * account would join with there (seatIn), so its way in opens seated as the join will seat it.
+ * (an address, never a guest code), its name (a Main room's is its hall's), whether it is the Main room, the seat the
+ * account would join with there (seatIn), so its way in opens seated as the join will seat it, and what is new there
+ * (store.news: its newest message's seq and its newest priority one's, which the page holds against what this person
+ * has read there, for the switcher's dot).
  */
 function switcherFor(who, hall) {
   if (!who.account) return [];
   return store.roomsOf(hall.code).filter((r) => who.isAdmin || rbac.seesRoom(who.account, store.scopeOf(r)))
-    .map((r) => ({ key: r.code, name: r.name || '', main: store.isMain(r), seat: seatIn(who, r) }));
+    .map((r) => { const n = store.news(r); return { key: r.code, name: r.name || '', main: store.isMain(r), seat: seatIn(who, r), seq: n.seq, prioritySeq: n.prioritySeq }; });
+}
+/**
+ * The page `s` watches the rooms of its switcher (`rooms`, switcherFor) but its own, and no other: it joins each one's
+ * watchers (`watch:<key>`, told rooms:activity) and leaves the rest. A code page and the support view are told no rooms,
+ * so they watch none. Set as the page joins its room and each time its hall's rooms are told again.
+ */
+function watchRooms(s, rooms) {
+  const want = new Set(rooms.filter((x) => x.key !== s.data.userRoom).map((x) => WATCH + x.key));
+  for (const name of Array.from(s.rooms)) if (name.startsWith(WATCH) && !want.has(name)) s.leave(name);
+  for (const name of want) if (!s.rooms.has(name)) s.join(name);
 }
 /**
  * The side rooms of `hall` that `who` may enter, as the join admits it: the admin every one, an account the rooms it is
@@ -2163,6 +2201,9 @@ io.on('connection', (socket) => {
     const mine = isAdminView ? null : ownFacts();
     const theirSid = socket.data.viewOf ? Array.from(r.users).find(([, u]) => u.uid === socket.data.viewOf.uid) : null;
     const theirs = theirSid && factsOfPage.get(io.sockets.sockets.get(theirSid[0]));
+    // The room's hall, as its header names it, and its switcher's rooms (hallFacts); this page watches those rooms for news.
+    const told = hallFacts(askerOf(socket), r, { page: !!acct && !isAdminView });
+    watchRooms(socket, told.rooms);
     ack({
       ok: true, roomCode: code, roomName: r.name || '', role: cleanRole, name: cleanName, adminView: isAdminView,
       identity, uid: id, note, uploadToken, seq: r.seq,
@@ -2187,8 +2228,9 @@ io.on('connection', (socket) => {
       build: BUILD.full,
       // The room's hall, as its header names it ("Hall 2 › Legal"; a Main room by the hall's name): its key only for one
       // who sees the hall or is the admin (an account given a side room alone is told its name), and the rooms of it this
-      // page may move between, its switcher's (switcherFor: an account's page; none for a code page or the support view).
-      ...hallFacts(askerOf(socket), r, { page: !!acct && !isAdminView }),
+      // page may move between, its switcher's (switcherFor: an account's page; none for a code page or the support view),
+      // each with what is new there.
+      ...told,
       // Whether a message here could be sent into another room by its list (room:sendTargets would list one): the page
       // offers To: and the rooms of ↗ Send to only then. False On stage, where nothing leaves the room, for a seat that
       // may not post, and for the support view, which is unseated.
@@ -3448,15 +3490,18 @@ io.on('connection', (socket) => {
 function seenFor(room) { return room.seen ? Array.from(room.seen.values()) : []; }
 /**
  * Each page in a room of `hall` (its Main room), told its hall as its join was (hallFacts): its name, its key where the
- * page may know it, and the rooms its switcher moves between. Computed per page, so a side room's account that does not
- * see its hall is never handed its key; the admin's pages watching a room are not hall pages and are told nothing.
+ * page may know it, and the rooms its switcher moves between, each with what is new there; it watches those rooms from
+ * now (watchRooms: a room made joins them, one removed leaves them). Computed per page, so a side room's account that
+ * does not see its hall is never handed its key; the admin's pages watching a room are not hall pages and are told nothing.
  */
 function sendHallRooms(hall) {
   for (const r of store.roomsOf(hall.code)) {
     for (const sid of io.sockets.adapter.rooms.get(r.code) || []) {
       const s = io.sockets.sockets.get(sid);
       if (!s || s.data.userRoom !== r.code) continue;
-      s.emit('rooms:changed', hallFacts(askerOf(s), r, { page: !!s.data.account && !s.data.adminView }));
+      const told = hallFacts(askerOf(s), r, { page: !!s.data.account && !s.data.adminView });
+      watchRooms(s, told.rooms);
+      s.emit('rooms:changed', told);
     }
   }
 }

@@ -1612,6 +1612,11 @@ html[data-theme="dark"] input, html[data-theme="dark"] textarea { background: va
 .room-seg:hover { border-color: var(--c-action); color: var(--c-action); }
 .room-seg[aria-current="page"] { background: var(--c-action); border-color: var(--c-action); color: var(--c-on-action); font-weight: 700; }
 .room-seg:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
+/* A room's dot on the switcher: news this person has not read there (app.js Unread), the note's mark in its colour role,
+   or 🔥 where a priority message came. Its words are the room's accessible name and its tooltip ("Legal, new messages"),
+   so it is a shape and words, never its colour alone. */
+.room-dot { margin-left: var(--sp-1); line-height: 1; }
+.room-dot[data-tone="info"] { color: var(--c-info); }
 /* Your rooms: side rooms of halls this account does not see, by their hall's name. */
 .your-rooms { margin-top: var(--sp-6); }
 .your-rooms h2 { font-size: 1.1rem; margin: 0 0 var(--sp-2); }

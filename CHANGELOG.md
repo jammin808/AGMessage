@@ -4222,6 +4222,77 @@ room or for me 20c's and the admin's On stage settings 20d's; their rows land wi
 - Rolling back: 0.5.1 ignores `pages.json` (a guest's view with it) and keeps an account's `view` unread; its Board page
   draws the desk it always drew.
 
+**Unread dots on the room switcher** (the plan's Part 1, unit 21, its §3.4 as Part 5 §0 and §13.6 amend it
+(`rooms:activity` a `Latest` of 500 ms whose merge keeps any 🔥), §15.4's switcher row (a dot, not a count, with its
+words), §15.9's 1.4.1 row and §16.7's `room` row (Mark as read, set apart); global #56, the one unit §0.6 lets slip,
+landed in 0.6.0)
+- **A room of the switcher with a message this person has not read** carries a dot after its name: the note's mark (●, in
+  its colour role) for a message, 🔥 where a priority message is among them. A dot, not a count. Its words are the room's
+  accessible name and its tooltip ("Press, new messages", "Press, priority"; "Smoke AGM › Press · priority"), so it is a
+  shape and words, never its colour alone. The note's meaning in the marks' table now reads "something to read, not
+  urgent", a screen's message and a room's news alike.
+- **What is news**: a message that is not a system line. A presence line, a reaction, a pin, an answer or a help request's
+  state is no news. The store keeps each room's newest message and newest priority message by their change numbers
+  (`store.news`), read from the messages once and then kept as each comes; a message removed (deleted, or withdrawn by the
+  room it was sent from) or a room cleared has it read again, and the pages watching the room are told so at once, so no
+  dot stands for a message that has gone, live or after a reload. Which events are news is the op table's
+  (`lib/ops.js`: a message, a removal, a clear).
+- **What a page is told**: the join's `rooms` and each `rooms:changed` give every room of the switcher its `seq` (its
+  newest message's change number) and `prioritySeq` (its newest priority one's), 0 for none, at the end of each row. An
+  account's page (an admin's account's included) also joins the watchers of each other room of its switcher
+  (`watch:<key>`), and leaves those no longer in it as its hall's rooms are told again or the page moves to another room
+  on its own socket; a code page (the laptop's token admin's own among them, which has no switcher) and the support view
+  watch none. A message there, one removed or the room cleared tells them `rooms:activity {key, seq, priority,
+  prioritySeq}`: the room's key, which the page already has, its newest message's and its newest priority one's change
+  numbers as they stand when the frame goes (the page takes them as the room's now), and whether a priority message came
+  since the last frame; no words, no sender, no people. It is the eighth frame of state through `Latest`, 500 ms
+  (health's `latest.activity`): a burst is its first frame and then one a window, and the frame that holds a 🔥 says so,
+  however many plain messages fold in with it (the merge, `ops.mergeNews`, held by a test on a clock of its own).
+- **What has been read** is kept in this browser (`localStorage`, `agm.read|<room>|<account>`: a room's key, for a hall's
+  Main room its guest code until New code as the page's own address already holds it, and a number, never a word of a
+  message or a secret), by room and person: the newest change a page of the person's held in that room while it was
+  shown (as its seen receipt is sent), so a tab left open behind another reads nothing. A visit takes a room's dot off as
+  the switcher is tapped, and a page of the same browser in another room drops it as soon as it is read (the `storage`
+  event). **Mark as read** (the room's right-click, or Shift+F10 on it), set apart after Open, Open in a new tab and Copy
+  link, takes the dot off without opening the room, its toast with Undo; with nothing new there (another page read it
+  first) its toast says so. A room never read in this browser has its dot while it holds a message: a new device shows
+  what it has not seen. Where the browser keeps nothing (a save refused: storage blocked or full), the page holds what is
+  read itself, from the numbers its join told it: its dots are the news that came while it is open, and Mark as read
+  says "on this page alone: this browser keeps nothing", never that it kept what it could not.
+- Choices where the plan left room: `rooms[].seq` is the room's newest message's change number, not the room's own
+  change number, so the join's dot and the live one mean the same (the room's number counts presence lines, reactions
+  and pins too); `prioritySeq` is appended beside it, so a 🔥 is still a 🔥 after a move to another room (a page
+  navigation) or on a page opened after it came; a room read is the room a page was shown in, never one open behind
+  another tab; a room never read here counts as unread from its first message; the frame names nobody, so a person's
+  own message, written on another device or sent into that room from this one (↗ Send to), lights its room's dot here
+  until they open the room (its answer names no room the page watches, and a room's key in it is not worth the dot);
+  Mark as read is a catalogue group of its own (`3_mark`, between the ways in and what one hands out or sets up), so its
+  menu reads as the plan's whatever else fits beside it; the laptop's token admin's own page keeps the switcher's rule
+  (account pages alone), so it has no dots.
+- Tests: `test/halls.test.js` (new: a message in the Main room told to the pages that watch it by its numbers and its
+  priority alone; a Main-only member, a side room's member without the hall and a code guest told nothing; no page told
+  of its own room or of a presence line; the join's newest message and priority one, untouched by a reaction or a pin; a
+  burst of ten at most one frame a window after the first, the frame holding the 🔥 carrying it; a room made watched from
+  then; the newest message deleted, then the 🔥, each told live and the join reading the same; a page moved to another
+  room on its own socket watching its new switcher's rooms and not its own; a room cleared told as none; and the
+  switcher's rows with their numbers), `test/units.test.js` (`store.news` across messages, system lines, a pin and a
+  reaction, a reload from the log and from the snapshot, a removal, a clear and a message from before messages carried
+  their seq; which events are news, and the frame's merge on a clock of its own: ten messages in one window two frames,
+  the second carrying the fifth's 🔥, and a 🔥 folded with a removal still said), `test/catalog.test.js` (Mark as read on
+  a switcher's room with news, a 🔥 one offline, never on this room, the halls board or the simple view; its group of
+  its own, set apart before Copy guest code and Set up were they to fit beside it), `test/server.test.js` (health's
+  `latest` adds `activity`), `test/resilience.test.js` (the state frames' names add `activity`). The browser smoke:
+  Kim's switcher in Main
+  lights Press's dot for a message there, with its words, and 🔥 for a priority one; the room's doors offer Mark as read,
+  which takes the dot off, Undo putting it back; a visit to Press takes it off, and back in Main it stays off; a page of
+  Kim's whose storage refuses every save opens with no dot on Press, lights it for a message that comes, and its Mark as
+  read says it holds for that page alone; the switcher's first steps read each room's name (a dot follows it) and
+  Press, never read there, with Mark as read.
+- The papers: `README.md` (and its marks: ● a note, or news in a room of the switcher), `README.txt`, `docs/DESIGN.md`
+  (the eighth frame), `docs/ACCOUNTS.md`, `docs/ANALYSIS.md` (the room's menu, and the matrix's count, 74 sets and three
+  of This laptop), `docs/NODES.md` (health's `latest`), `SECURITY.md`, `CLAUDE.md`.
+- Rolling back: 0.5.1 has no switcher; the read marks stay in the browser, unread.
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after

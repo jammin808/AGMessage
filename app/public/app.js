@@ -189,13 +189,14 @@ function rejoin() {
     }
     // A side room's backstage seat is a Member's: its seat words follow the room's kind before anything is drawn with them.
     MAIN = res.main !== false;
+    // Who this is, before the switcher is drawn: what this person has read of each room is kept by room and person.
+    MY_UID = res.uid || MY_UID;
     hallTold(res);
     if (res.account) {
       NAME = res.account.name;
       document.getElementById('whoami').textContent = `${res.account.name} · ${res.account.roleLabel}`;
     } else if (!AS_ACCOUNT) document.getElementById('whoami').textContent = `${NAME} · ${roleLabel(res.role || ROLE)}`;
     if (res.identity) { IDENTITY = res.identity; try { localStorage.setItem('agm.id', IDENTITY); } catch { /* private mode: identity lives for this tab only */ } }
-    MY_UID = res.uid || MY_UID;
     UPLOAD_TOKEN = res.uploadToken || '';
     CAN_STAGE = !!res.canSendToStage;
     CAN_PROPOSE = !!res.canPropose;
@@ -353,15 +354,113 @@ function drawTitle(words = ROOM_NAME ? titleOf(MAIN, ROOM_NAME) : '') {
   const strong = document.querySelector('.app-title strong');
   if (strong && strong.textContent !== words) strong.textContent = words;
 }
-/** The rooms the server lists for this page, read by type: each by its key, name, whether it is Main, and its seat. */
+/** A change number as the server tells one, read by type: a whole number above 0, else 0 (none). */
+const seqOf = (n) => (Number.isInteger(n) && n > 0 ? n : 0);
+/**
+ * The rooms the server lists for this page, read by type: each by its key, name, whether it is Main, its seat, and what is
+ * new there (`seq`, its newest message's change number, and `prioritySeq`, its newest priority one's; 0 for none).
+ */
 function roomsFrom(list) {
   return (Array.isArray(list) ? list : []).filter((r) => r && typeof r.key === 'string' && r.key.length > 0)
-    .map((r) => ({ key: r.key, name: typeof r.name === 'string' ? r.name : '', main: r.main === true, seat: ['board', 'research', 'observer'].includes(r.seat) ? r.seat : 'observer' }));
+    .map((r) => ({ key: r.key, name: typeof r.name === 'string' ? r.name : '', main: r.main === true, seat: ['board', 'research', 'observer'].includes(r.seat) ? r.seat : 'observer',
+      seq: seqOf(r.seq), prioritySeq: seqOf(r.prioritySeq) }));
 }
+/**
+ * What this person has not read in the hall's other rooms, for a dot on the switcher (kind `room`'s Mark as read). The
+ * server tells this page what is new in each room of it, as it stands: the join's and each `rooms:changed`'s `rooms[].seq`
+ * and `prioritySeq` (its newest message's change number and its newest priority one's), and `rooms:activity` as a message
+ * comes, is removed or the room is cleared (the same two numbers, at most two frames a window), each taken as the room's
+ * news now, so a dot never stands for a message that has gone. What this person has read of a room is kept in this
+ * browser (localStorage, by room and person): the newest change a page of theirs held there while it was shown (here, as
+ * its seen receipt is), or Mark as read. A room with a message past it has a dot, 🔥 where a priority one is among them: a
+ * dot, not a count, since a change number counts every change, not messages. A room never read in this browser has its
+ * dot from its first message. Where this browser keeps nothing (storage blocked), this page holds what is read itself,
+ * from what it was first told of each room: its dots are the news that came while it is open, and Mark as read says so.
+ */
+const Unread = (() => {
+  const WORDS = Object.freeze({ news: 'new messages', priority: 'priority' });
+  const PREFIX = 'agm.read|';
+  /** Whether this browser keeps what is read: a private window or blocked site data refuses (or throws for) storage. */
+  const KEEPS = (() => {
+    try { localStorage.setItem('agm.readProbe', '1'); localStorage.removeItem('agm.readProbe'); return true; } catch { return false; /* storage blocked: this page holds what is read */ }
+  })();
+  /** What this page holds as read, by room, where the browser keeps nothing (or a save of it failed). */
+  const held = new Map();
+  /** Where this person's read of `room` is kept: an account's own page alone (a code page has no switcher). */
+  const keyOf = (room) => (AS_ACCOUNT && !ADMIN_VIEW && MY_UID ? PREFIX + room + '|' + MY_UID : '');
+  /** The newest change this person has read in `room`: as this browser keeps it, or as this page holds it; 0 for none. */
+  function readOf(room) {
+    const k = keyOf(room);
+    if (!k) return 0;
+    let kept = 0;
+    if (KEEPS) { try { kept = seqOf(Number(localStorage.getItem(k))); } catch { /* storage blocked since: what this page holds */ } }
+    return Math.max(kept, held.get(room) || 0);
+  }
+  /**
+   * `seq` kept as read in `room`, when it is past what is read (or, `back`, whatever it is: Undo's): 'browser' where this
+   * browser keeps it, 'page' where this page alone holds it (storage blocked or full), '' where nothing changed.
+   */
+  function keep(room, seq, back = false) {
+    const k = keyOf(room);
+    if (!k || (!back && seq <= readOf(room))) return '';
+    if (KEEPS) {
+      try {
+        if (seq > 0) localStorage.setItem(k, String(seq)); else localStorage.removeItem(k);
+        held.delete(room);
+        return 'browser';
+      } catch { /* storage blocked or full since: this page holds it */ }
+    }
+    held.set(room, seq);
+    return 'page';
+  }
+  /** The rooms as the server told them: where this browser keeps nothing, a room first told is read up to its news now. */
+  function told(rooms) {
+    if (!KEEPS) for (const r of rooms) if (!held.has(r.key)) held.set(r.key, Math.max(r.seq, r.prioritySeq));
+  }
+  /** What a room of the switcher holds that this person has not read: 'priority', 'news', or '' (and '' where nothing is kept). */
+  function of(r) {
+    if (!keyOf(r.key)) return '';
+    const read = readOf(r.key);
+    return r.prioritySeq > read ? 'priority' : r.seq > read ? 'news' : '';
+  }
+  const redraw = () => { drawSwitcher(); refreshOpenMenu(); };
+  /** This page's room is read up to the newest change it holds (while it is shown: reportSeen). */
+  function here() { if (lastSeq > 0) keep(ROOM, lastSeq); }
+  /** A change number as a frame tells one, read by type: a whole number, 0 or more, else null (the frame is not read). */
+  const countOf = (n) => (Number.isInteger(n) && n >= 0 ? n : null);
+  /** A room of the hall's news changed (`rooms:activity`, read by type): its numbers are the room's now, and its dot follows. */
+  function heard(a) {
+    if (outOf || !a || typeof a !== 'object' || typeof a.key !== 'string') return;
+    const r = ROOMS.find((x) => x.key === a.key);
+    const seq = countOf(a.seq);
+    const prioritySeq = countOf(a.prioritySeq);
+    if (!r || r.key === ROOM || seq === null || prioritySeq === null) return;
+    r.seq = seq;
+    r.prioritySeq = prioritySeq;
+    redraw();
+  }
+  /**
+   * Mark as read: everything `room` holds now is read. `was`, what was read before, for Undo; `kept`, where it is kept
+   * (keep's: 'browser', 'page', or '' where there was nothing new to mark).
+   */
+  function markRead(room) {
+    const r = ROOMS.find((x) => x.key === room);
+    const was = readOf(room);
+    const kept = r ? keep(room, Math.max(r.seq, r.prioritySeq)) : '';
+    redraw();
+    return { was, kept };
+  }
+  /** Undo of Mark as read: what was read before it, kept again. */
+  function restore(room, was) { keep(room, was, true); redraw(); }
+  // Another page of this browser read a room (another tab, or this person's move): the dots follow at once.
+  window.addEventListener('storage', (e) => { if (e.key === null || (typeof e.key === 'string' && e.key.startsWith(PREFIX))) redraw(); });
+  return Object.freeze({ WORDS, told, of, here, heard, markRead, restore });
+})();
 /** What the server told this page of its hall (the join's answer, a `rooms:changed`): the header and the switcher follow. */
 function hallTold(f) {
   if (typeof f.hallName === 'string') HALL_NAME = f.hallName;
   ROOMS = roomsFrom(f.rooms);
+  Unread.told(ROOMS);
   drawTitle();
   drawSwitcher();
 }
@@ -371,10 +470,13 @@ function switcherObject(key) {
   if (!r || outOf) return null;
   const current = r.key === ROOM;
   return { id: 'room:' + r.key, key: r.key, name: r.main ? 'Main' : r.name || 'A room', hall: HALL_NAME || 'A hall with no name', title: titleOf(r.main, r.name),
-    href: '/app.html?' + new URLSearchParams({ code: r.key, as: 'account', role: r.seat }).toString(), current, guestCode: current ? pageFacts.guestCode : '', hallKey: '' };
+    href: '/app.html?' + new URLSearchParams({ code: r.key, as: 'account', role: r.seat }).toString(), current, guestCode: current ? pageFacts.guestCode : '', hallKey: '',
+    news: current ? '' : Unread.of(r) };
 }
+// The room a tap on the switcher is moving to, while this page goes ('' otherwise): its mark stays there as the dots change.
+let movingKey = '';
 /** The switcher, with two rooms or more: each a segment kept by its key, `current` marked (this room, or the one tapped). */
-function drawSwitcher(current = ROOM) {
+function drawSwitcher(current = movingKey || ROOM) {
   switcherEl.hidden = outOf || ROOMS.length < 2;
   const keep = new Map([...switcherEl.querySelectorAll(':scope > a[data-key]')].map((a) => [a.dataset.key, a]));
   ROOMS.forEach((r, i) => {
@@ -384,8 +486,22 @@ function drawSwitcher(current = ROOM) {
     const o = switcherObject(r.key);
     if (!o) return;
     if (a.getAttribute('href') !== o.href) a.setAttribute('href', o.href);
-    if (a.textContent !== o.name) a.textContent = o.name;
-    if (a.title !== o.title) a.title = o.title;
+    // Its name, and its dot where there is news this person has not read: the mark of a note, or 🔥 where a priority
+    // message came, never its colour alone; the words say it (its accessible name, its tooltip), the room's name first.
+    let nameEl = a.querySelector(':scope > .room-seg-name');
+    let dot = a.querySelector(':scope > .room-dot');
+    if (!nameEl) { a.textContent = ''; nameEl = document.createElement('span'); nameEl.className = 'room-seg-name'; dot = document.createElement('span'); dot.className = 'room-dot'; dot.setAttribute('aria-hidden', 'true'); a.append(nameEl, dot); }
+    if (nameEl.textContent !== o.name) nameEl.textContent = o.name;
+    const news = r.key === current ? '' : o.news;
+    const glyph = news === 'priority' ? '🔥' : news ? AGM.mark('note') : '';
+    if (dot.textContent !== glyph) dot.textContent = glyph;
+    dot.hidden = !glyph;
+    if (news === 'news') dot.dataset.tone = AGM.MARKS.note.role; else delete dot.dataset.tone;
+    a.dataset.news = news;
+    const words = news ? o.name + ', ' + Unread.WORDS[news] : '';
+    if (words) a.setAttribute('aria-label', words); else a.removeAttribute('aria-label');
+    const tip = o.title + (news ? ' · ' + Unread.WORDS[news] : '');
+    if (a.title !== tip) a.title = tip;
     if (r.key === current) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     if (switcherEl.children[i] !== a) switcherEl.insertBefore(a, switcherEl.children[i] || null);
   });
@@ -394,8 +510,9 @@ function drawSwitcher(current = ROOM) {
 /** Moving to another room of the hall: this room's unsent words kept, the title and the mark the room's, before it opens. */
 function movingTo(o) {
   keepDraft();
+  movingKey = o.key;
   drawTitle(o.title);
-  drawSwitcher(o.key);
+  drawSwitcher();
 }
 switcherEl.addEventListener('click', (e) => {
   const a = e.target.closest && e.target.closest('a.room-seg[data-key]');
@@ -413,18 +530,26 @@ AGM.menu.door(switcherEl, (t) => {
   return { el: a, more: a, open: (at) => openObjectMenu('room', get, { node: a, more: a, at, opener: a, label: 'Actions for ' + get().name, header: (o) => o.title }) };
 });
 Object.assign(RUN, {
+  // What Mark as read did, said as it is: kept in this browser, held by this page alone (storage blocked), or nothing new
+  // there to mark (another page read it first); Undo where something was marked.
+  'room.markRead': (o) => {
+    const { was, kept } = Unread.markRead(o.key);
+    if (!kept) AGM.toast('Nothing new in ' + o.title + ' to mark as read.');
+    else AGM.toast(kept === 'page' ? 'Marked ' + o.title + ' as read on this page alone: this browser keeps nothing (its storage is blocked).' : 'Marked ' + o.title + ' as read.', { undo: () => Unread.restore(o.key, was) });
+  },
   'room.open': (o) => { movingTo(o); location.assign(o.href); },
   'room.tab': (o) => { window.open(o.href, '_blank', 'noopener'); },
   'room.copy': (o, { anchor }) => copyText(new URL(o.href, location.href).href, 'Copied the link to ' + o.title + '.', anchor),
   'room.code': (o, { anchor }) => copyText(o.guestCode, 'Copied the guest code of ' + o.title + ', ' + o.guestCode + '.', anchor),
 });
 socket.on('rooms:changed', (f) => { if (f && typeof f === 'object' && !outOf) { hallTold(f); refreshOpenMenu(); } });
+socket.on('rooms:activity', (a) => Unread.heard(a));
 // Whether a web page shown from this page would be taken now (a code guest's: the admin let its hall's backstage guests
 // show web pages, or stopped them, or the hall was unlocked): Show a web page… comes or goes on the Board chip and a person.
 socket.on('pages:rights', (r) => { if (r && typeof r.canWeb === 'boolean' && !ADMIN_VIEW) factsChanged({ canWeb: r.canWeb }); });
 // A page the browser kept and shows again (Back, from its cache) draws its own room again, not the one it was left for,
 // and holds its words itself: what was kept of them for its next load is let go, so a send from here never comes back.
-window.addEventListener('pageshow', (e) => { if (e.persisted) { drawTitle(); drawSwitcher(); dropDraft(); } });
+window.addEventListener('pageshow', (e) => { if (e.persisted) { movingKey = ''; drawTitle(); drawSwitcher(); dropDraft(); } });
 
 /**
  * Where this room's unsent words are kept for this tab while its person is in another room of the hall: by the room and
@@ -662,7 +787,10 @@ const seenBy = new Map();   // uid -> {name, role, seq}
 function noteSeen(s) { if (s && s.uid && s.uid !== MY_UID) seenBy.set(s.uid, s); }
 let seenTimer = null, seenSent = -1;
 function reportSeen() {
-  if (ADMIN_VIEW || document.visibilityState !== 'visible' || lastSeq <= seenSent) return;
+  if (ADMIN_VIEW || document.visibilityState !== 'visible') return;
+  // Shown, this room is read up to here: the other rooms' pages of this person drop its dot.
+  Unread.here();
+  if (lastSeq <= seenSent) return;
   clearTimeout(seenTimer);
   seenTimer = setTimeout(() => { seenSent = lastSeq; socket.emit('seen', { seq: lastSeq }); }, 600);
 }

@@ -96,6 +96,26 @@ function eventsOf(op, room) {
 }
 
 /**
+ * The events that change what is new in a room for the switchers that watch it (its newest message and its newest
+ * priority one, `store.news`): a message that is not a system line, a removal and a clear. A presence line, a reaction,
+ * a pin, an answer and a rename are no news.
+ */
+const NEWS_EVENTS = Object.freeze(['message', 'messageDeleted', 'roomReset']);
+/**
+ * What an event sent under `event` with `payload` tells a room's watchers, as a mark of the room's news frame: whether a
+ * priority (🔥) message came, or null where it is no news. It names nothing of the message: no words, no sender.
+ */
+function newsOf(event, payload) {
+  if (!NEWS_EVENTS.includes(event)) return null;
+  return { priority: event === 'message' && isRecord(payload) && !!payload.priority };
+}
+/**
+ * Two marks of one room's news folded into one: a priority message among them is never folded away by the plain ones
+ * after it. The frame reads the room's numbers when it is sent, so a mark carries none.
+ */
+const mergeNews = (a, b) => ({ priority: a.priority || b.priority });
+
+/**
  * `apply(room, op)`: the op committed (numbered, kept for resume, on disk: `commit`), each of its events sent to the hall
  * (`send(room, event, payload)`), the change marked (`changed(room)`), and the op answered. An op the table cannot send
  * is said (`refused(why)`) and nothing is committed, sent or marked: `apply()` answers null.
@@ -136,4 +156,4 @@ function lasted(ms) {
   return Math.floor(s / 86400) + ' d' + and(Math.floor((s % 86400) / 3600), 'h');
 }
 
-module.exports = { UPD_EVENTS, KINDS, EVENTS, LINKED, refusal, eventsOf, applier, forPage, opForPage, unlinked, placeOf, lasted };
+module.exports = { UPD_EVENTS, KINDS, EVENTS, LINKED, NEWS_EVENTS, refusal, eventsOf, applier, newsOf, mergeNews, forPage, opForPage, unlinked, placeOf, lasted };

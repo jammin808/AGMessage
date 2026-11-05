@@ -110,9 +110,13 @@ hall's crew answering the help of a side room of it the account is not given, wh
 straight into it there; the hall page's way back (`/halls.html?stay=1`) stays on the board. A hall page is told its hall
 (the join's `hall`, `hallName` and `rooms`): the hall's key only for an account that sees the hall, or the admin, never
 for one given a side room alone or a code guest; its name; and, for an account's page, the hall's rooms the account may
-enter, each with its seat there, which its switcher moves between, told again when a room is made, renamed or removed or
-the hall is renamed (`rooms:changed`). A code page (a guest's, and the laptop's token admin's own) and the support view
-move nowhere.
+enter, each with its seat there and what is new in it (`seq`, its newest message's change number, and `prioritySeq`, its
+newest priority one's), which its switcher moves between, told again when a room is made, renamed or removed or the hall
+is renamed (`rooms:changed`). That page watches the switcher's other rooms: a message in one, a message removed there or the room cleared tells it
+the room's news as it stands (`rooms:activity`: its newest message's and its newest priority one's change numbers, and
+whether a priority message came), never the words, the sender or who is there, and the room's dot lights where the
+person has not read that far in this browser (or, where the browser keeps nothing, since the page opened). A code page (a guest's, and the laptop's
+token admin's own) and the support view move nowhere and watch nothing.
 
 **Who sets rooms up.** Making a room beside a hall (`room:create`), renaming a room (`room:update`: a hall's Main room
 renamed is the hall renamed) and reading a room's settings (`room:settings`) are `halls.manage`'s and the admin's, as a

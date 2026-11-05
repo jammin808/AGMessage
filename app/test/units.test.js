@@ -281,6 +281,48 @@ test('store: a send is said once — byCid across add, del, reset, a compaction 
   assert.deepEqual(d.sentAs(d.get('ABC234'), 'u1', 'c2'), { id: 'm2', seq: 2, gone: true }, 'a reset\'s tombstones survive a restart');
 });
 
+test('store: what is new in a room, for the switcher\'s dot: its newest message and its newest priority one, never a system line, a reaction or a pin; read again after a removal or a clear, and after a reload from the log or the snapshot', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  const r = a.create('ABC234', 'Test');
+  const add = (id, extra = {}) => a.commit(r, { o: 'add', m: { id, type: 'text', text: id, at: 1, ...extra } }).s;
+  assert.deepEqual(a.news(r), { seq: 0, prioritySeq: 0 }, 'an empty room has none');
+  a.commit(r, { o: 'add', m: { id: 's1', type: 'system', text: 'Ana joined', at: 1 } });
+  assert.deepEqual(a.news(r), { seq: 0, prioritySeq: 0 }, 'a presence line is no news');
+  const one = add('m1');
+  const hot = add('m2', { priority: true });
+  const three = add('m3', { type: 'file' });
+  a.commit(r, { o: 'upd', id: 'm3', f: { pinned: true } });
+  a.commit(r, { o: 'upd', id: 'm1', f: { reactions: { '👍': ['u1'] } } });
+  a.commit(r, { o: 'add', m: { id: 's2', type: 'system', text: 'Ana left', at: 2 } });
+  assert.ok(r.seq > three);
+  assert.deepEqual(a.news(r), { seq: three, prioritySeq: hot }, 'kept as each comes: the newest message and the newest priority one');
+  // Read from the messages when it is first asked, on a reload from the log and from the snapshot alike.
+  const fromLog = new RoomStore(dir);
+  fromLog.loadAll(null, { compact: false });
+  assert.deepEqual(fromLog.news(fromLog.get('ABC234')), { seq: three, prioritySeq: hot }, 'replayed from the log');
+  a.compact('ABC234');
+  const fromSnap = new RoomStore(dir);
+  fromSnap.loadAll();
+  assert.deepEqual(fromSnap.news(fromSnap.get('ABC234')), { seq: three, prioritySeq: hot }, 'loaded from the snapshot');
+  // A removal reads the room again: no seq stands for a message that has gone.
+  a.commit(r, { o: 'del', id: 'm3' });
+  assert.deepEqual(a.news(r), { seq: hot, prioritySeq: hot });
+  a.commit(r, { o: 'del', id: 'm2' });
+  assert.deepEqual(a.news(r), { seq: one, prioritySeq: 0 });
+  const four = add('m4', { priority: true });
+  assert.deepEqual(a.news(r), { seq: four, prioritySeq: four });
+  // A clear leaves none, and the next message is news again.
+  a.commit(r, { o: 'reset' });
+  assert.deepEqual(a.news(r), { seq: 0, prioritySeq: 0 });
+  const five = add('m5');
+  assert.deepEqual(a.news(r), { seq: five, prioritySeq: 0 });
+  // A message kept from before messages carried their seq is none; the newest that carries one is read past it.
+  const old = a.create('DEF234', 'Old');
+  old.messages.push({ id: 'x1', type: 'text', text: 'before', priority: true }, { id: 'x2', type: 'text', text: 'numbered', seq: 7 }, { id: 'x3', type: 'text', text: 'after' });
+  assert.deepEqual(a.news(old), { seq: 7, prioritySeq: 0 });
+});
+
 test('store: the newest 500 tombstones are kept, in memory and in the snapshot; a snapshot without them loads with none', () => {
   const { GONE_KEEP } = require('../lib/store');
   assert.equal(GONE_KEEP, 500);
@@ -1508,6 +1550,37 @@ test('latest: merge folds what waits for a key with what is marked next, and is 
     [100, [['R1', { seq: 8, priority: true }], ['R2', { seq: 1, priority: false }]]],
   ], 'the priority marked first in the window is not folded away by the newer marks without it');
   assert.deepEqual(asked, [[6, 8], [8, 7]]);
+});
+
+test('latest: the switcher\'s news frame (server.js frames.activity, its merge ops.mergeNews): a message, a removal and a clear are news, nothing else, and none names the message; ten messages in one window are two frames, the second carrying the 🔥 the fifth was, however many plain ones follow it', () => {
+  // What each event the op table sends tells a room's watchers: whether a priority message came, or nothing.
+  assert.deepEqual(ops.NEWS_EVENTS, ['message', 'messageDeleted', 'roomReset']);
+  assert.ok(Object.isFrozen(ops.NEWS_EVENTS) && ops.NEWS_EVENTS.every((e) => ops.EVENTS.includes(e)), 'each an event apply() sends');
+  const hot = { id: 'm1', type: 'text', text: 'Doors now', from: { uid: 'u1', name: 'Ana' }, priority: true, seq: 9 };
+  assert.deepEqual(ops.EVENTS.map((e) => [e, ops.newsOf(e, hot)]).filter(([, n]) => n !== null),
+    [['message', { priority: true }], ['messageDeleted', { priority: false }], ['roomReset', { priority: false }]], 'a presence line, a reaction, a pin, an answer and a rename are no news');
+  assert.deepEqual([ops.newsOf('message', { ...hot, priority: false }), ops.newsOf('message', null), ops.newsOf('nothing', hot)], [{ priority: false }, { priority: false }, null]);
+  assert.deepEqual(Object.keys(ops.newsOf('message', hot)), ['priority'], 'no words, no sender, no number: the frame reads the room\'s numbers as it goes');
+  // The frame as server.js makes it: 500 ms, merged by ops.mergeNews. The first message goes at once; the nine after it,
+  // inside the window it opened, the fifth a 🔥, are one frame at its end that says the 🔥 came.
+  const say = (r, priority) => r.l.mark('HALL', ops.newsOf('message', { ...hot, priority }));
+  const r = latestRig({ name: 'activity', delayMs: 500, merge: ops.mergeNews });
+  say(r, false);
+  r.tick(0);
+  for (let i = 2; i <= 10; i++) { r.tick(40); say(r, i === 5); }
+  r.tick(500);
+  assert.deepEqual(r.flushed, [[0, [['HALL', { priority: false }]]], [500, [['HALL', { priority: true }]]]], 'two frames, the 🔥 in the second');
+  assert.deepEqual(r.l.stats(), { marks: 10, flushes: 2 });
+  // A 🔥 then a removal and a clear inside one window: still said, as one frame; the next window's frame, with no 🔥 in
+  // it, says none. Rooms apart are frames apart.
+  const q = latestRig({ name: 'activity', delayMs: 500, merge: ops.mergeNews });
+  say(q, true);
+  q.l.mark('HALL', ops.newsOf('messageDeleted', { messageId: 'm1', seq: 10 }));
+  q.l.mark('LEGAL', ops.newsOf('roomReset', { roomCode: 'LEGAL', seq: 3 }));
+  q.tick(0);
+  say(q, false);
+  q.tick(500);
+  assert.deepEqual(q.flushed, [[0, [['HALL', { priority: true }], ['LEGAL', { priority: false }]]], [500, [['HALL', { priority: false }]]]]);
 });
 
 test('latest: flushNow flushes what waits at once and starts the window again from it', () => {
