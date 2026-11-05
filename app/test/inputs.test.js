@@ -14,10 +14,10 @@ const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.joi
   .filter((e) => e !== 'disconnect');
 // Not sent from the admin socket: they start cloudflared or make a new certificate — real work, not an argument check.
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
-const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null, view: null, beforeSeq: null };
+const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null, view: null, beforeSeq: null, layer: null, arrive: null, role: null };
 // An object whose toString is not a function: String() throws on it, so a handler must never call String() on input.
 const U = { toString: 1 };
-const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U, view: U, beforeSeq: U };
+const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U, view: U, beforeSeq: U, layer: U, arrive: U, role: U };
 const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode: 5, messageId: {}, content: 'x', text: {} }, UNCONVERTIBLE];
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
@@ -105,7 +105,12 @@ test('client values are read by their type: a value String() cannot convert reac
     [ctl, 'page:push', { code: hall, to: { uid: U }, content: { kind: 'clock' } }], [ctl, 'page:push', { code: hall, to: U, content: { kind: 'clock' } }],
     [ctl, 'page:push', { code: U, to: 'board', content: { kind: 'clock' } }], [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'clock' }, cid: U }],
     [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'clock' }, ifSeq: U }],
+    // The information handed back alone (Take down), its layer and the take it names by type; an arrival by type.
+    [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'chat', layer: U }, ifSeq: U }], [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'chat', layer: U } }],
+    [ctl, 'page:push', { code: hall, to: 'board', content: { kind: 'web', url: 'https://vote.example.com/' }, arrive: U }],
     [ctl, 'page:status', { code: U }], [guest, 'page:report', { seq: U, state: U, words: U }], [guest, 'page:report', { seq: 1, state: 'shown', words: U, again: U }],
+    // A new invite link, its room and its seat by type: no room, and no seat that has a link.
+    [ctl, 'admin:newInvite', { roomCode: U, role: U }], [ctl, 'admin:newInvite', { roomCode: hall, role: U }], [ctl, 'admin:newInvite', U],
     // The admin's switch for a hall's backstage guests' web pages, each field by type.
     [ctl, 'admin:guestWeb', { roomCode: U, on: U }], [ctl, 'admin:guestWeb', { roomCode: U, on: true }], [ctl, 'admin:guestWeb', { roomCode: hall, on: U }],
     // The admin's choice of a person's chat view, each field by type: a view that is none, a room or a page that is none.
@@ -123,6 +128,8 @@ test('client values are read by their type: a value String() cannot convert reac
     if (ev === 'page:report') return arg.state === U ? 'A report is one of: shown, hidden, opened, failed, dismissed, minimised.' : 'That is not what this page is shown now.';
     if (arg.code === U) return 'No such hall.';
     if (arg.cid === U) return 'That act\'s id could not be read.';
+    if (arg.to === 'board' && arg.content && arg.content.kind === 'chat') return KINDS;
+    if (arg.arrive === U) return 'Information arrives over their chat or in their side bar.';
     if (arg.ifSeq === U) return 'That act\'s take could not be read.';
     if (arg.to === 'board' && arg.content && arg.content.kind === 'web') return 'A web page is shown by its https address, as a browser shows it.';
     return arg.to === 'board' ? KINDS : TARGETS;
@@ -145,6 +152,12 @@ test('client values are read by their type: a value String() cannot convert reac
     if (ev === 'room:sendTargets') assert.deepEqual(r, { ok: true, targets: [{ ref, name: 'Legal', hallName: 'Hall 3' }] }, 'a read takes no argument');
     if (ev === 'admin:setView') {
       assert.deepEqual(r, { ok: false, error: arg.view === U ? 'Choose By seat, Simple or Full.' : 'That person is not in this room now.' }, ev + ' ' + JSON.stringify(arg));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+    if (ev === 'admin:newInvite') {
+      const room = arg && arg.roomCode === hall;
+      assert.deepEqual(r, { ok: false, error: room ? 'Choose the link to replace: On stage, or Backstage (a side room\'s Member link).' : 'No such room.' }, ev + ' ' + JSON.stringify(arg));
       await new Promise((resolve) => setTimeout(resolve, 250));
       continue;
     }

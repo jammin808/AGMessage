@@ -29,7 +29,7 @@ async function startServer(dataDir, port) {
   child.kill();
   throw new Error('server did not start:\n' + out);
 }
-const { stopServer: stop, freePort, pngOf } = require('./helpers');   // asked over IPC, so it saves first on Windows too
+const { stopServer: stop, freePort, pngOf, inviteOf } = require('./helpers');   // asked over IPC, so it saves first on Windows too
 
 const emit = (s, ev, arg) => new Promise((resolve) => s.emit(ev, arg, resolve));
 const connect = (base, cookie) => new Promise((resolve, reject) => {
@@ -120,7 +120,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
 
   const board = await connect(base); sockets.push(board);
   const research = await connect(base); sockets.push(research);
-  const jb = await emit(board, 'join', { roomCode: code, name: 'Chair', role: 'board', uid: 'u-forged-client-id' });
+  const jb = await emit(board, 'join', { roomCode: code, name: 'Chair', role: 'board', uid: 'u-forged-client-id', invite: inviteOf(dataDir, code) });
   const jr = await emit(research, 'join', { roomCode: code, name: 'Ana', role: 'research' });
 
   await t.test('identities are issued by the server; a client-made id is replaced', () => {
@@ -212,7 +212,10 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.ok(lock.ok && lock.invites.board.includes('invite='));
     const a = await connect(base); sockets.push(a);
     const noInvite = await emit(a, 'join', { roomCode: code, name: 'Gate', role: 'board' });
-    assert.deepEqual([noInvite.ok, noInvite.role, noInvite.note], [true, 'observer', 'This room needs an invite link for that seat — you joined as an observer.']);
+    assert.deepEqual([noInvite.ok, noInvite.role, noInvite.note], [true, 'observer', 'On stage seats need the invite link — you joined as an observer.'], 'On stage: the words of every hall');
+    const g2 = await connect(base); sockets.push(g2);
+    const noResearch = await emit(g2, 'join', { roomCode: code, name: 'Gate 2', role: 'research' });
+    assert.deepEqual([noResearch.ok, noResearch.role, noResearch.note], [true, 'observer', 'This room needs an invite link for that seat — you joined as an observer.'], 'a locked room keeps its words for a backstage seat');
     const b = await connect(base); sockets.push(b);
     const inv = new URL(base + lock.invites.board).searchParams.get('invite');
     const withInvite = await emit(b, 'join', { roomCode: code, name: 'Director 2', role: 'board', invite: inv });
@@ -243,7 +246,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     const nul = await connect(base); sockets.push(nul);
     const ullj = await emit(nul, 'join', { roomCode: code, name: 'Null Role', role: null });
     const old = await connect(base); sockets.push(old);
-    const oj = await emit(old, 'join', { roomCode: code, name: 'Old Link', role: 'director' });
+    const oj = await emit(old, 'join', { roomCode: code, name: 'Old Link', role: 'director', invite: inviteOf(dataDir, code) });
     assert.deepEqual([nj.ok, nj.role, ullj.ok, ullj.role, oj.ok, oj.role], [true, 'observer', true, 'observer', true, 'board'], 'eleven refusals spent nothing of the code lock');
     assert.deepEqual((await seated()).filter((u) => / Role|Old Link/.test(u)).sort(), ['No Role:observer', 'Null Role:observer', 'Old Link:board']);
   });
@@ -329,7 +332,7 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     // Each join is said in the seat's words, the ones every page shows for it.
     for (const [name, role] of [['Bea', 'board'], ['Obi', 'observer']]) {
       const s = await connect(base); sockets.push(s);
-      assert.ok((await emit(s, 'join', { roomCode: named.code, name, role })).ok, name);
+      assert.equal((await emit(s, 'join', { roomCode: named.code, name, role, invite: inviteOf(dataDir, named.code) })).role, role, name);
     }
     const said = await connect(base); sockets.push(said);
     const joins = (await emit(said, 'join', { roomCode: named.code, name: 'Sal', role: 'observer' })).history.filter((m) => m.type === 'system').map((m) => m.text);
@@ -804,7 +807,7 @@ test('a first open carries the newest 200 messages, what a page keeps in view fr
   const ana = await open();
   const anaIn = await helpers.emit(ana, 'join', { roomCode: code, name: 'Ana', role: 'research' });
   const chair = await open();
-  assert.ok((await helpers.emit(chair, 'join', { roomCode: code, name: 'Chair', role: 'board' })).ok);
+  assert.equal((await helpers.emit(chair, 'join', { roomCode: code, name: 'Chair', role: 'board', invite: helpers.inviteOf(srv.dataDir, code) })).role, 'board');
   const say = async (s, payload) => { const r = await helpers.emit(s, 'message', payload); assert.ok(r.ok, JSON.stringify(r)); return r.id; };
   const agenda = await say(ana, { type: 'text', text: 'The agenda: item 4 is the capex review' });
   assert.ok((await helpers.emit(ana, 'pin', { messageId: agenda, pinned: true })).ok);
@@ -922,4 +925,93 @@ test('a first open carries the newest 200 messages, what a page keeps in view fr
     assert.ok(r.ok && Array.isArray(r.ops) && r.ops.some((op) => op.o === 'add' && op.m.text === 'while you were away'));
     assert.deepEqual(['history', 'older', 'more', 'files'].filter((k) => k in r), [], 'a resume carries none of a first open');
   });
+});
+
+test('On stage seats come from an invite, in open halls too: the code seats nobody there; an open hall keeps its On stage seats across a restart and an unlock keeps them; New On stage link voids the old one and keeps the seats held, one row with no link', async (t) => {
+  let srv = await helpers.startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await helpers.stopServer(srv.child); });
+  const open = async (cookie) => { const s = await helpers.connect(srv.base, cookie); sockets.push(s); return s; };
+  const admin = (await helpers.api(srv.base, 'POST', '/api/admin/login', { token: helpers.TOKEN })).cookie;
+  const code = (await helpers.api(srv.base, 'POST', '/api/rooms', { name: 'Open hall' }, { cookie: admin })).body.code;
+  let ctl = await open(admin);
+  const NOTE = 'On stage seats need the invite link — you joined as an observer.';
+  const join = async (args) => helpers.emit(await open(), 'join', { roomCode: code, ...args });
+  const seated = (r) => [r.ok, r.role, r.note];
+  const rows = (action) => fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action === action);
+  const seatsKept = () => {
+    // The room's saved seats, as its op log keeps them (settings.seats in its newest meta op that names them).
+    const ops = fs.readFileSync(path.join(srv.dataDir, 'rooms', code + '.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((o) => o.o === 'meta' && o.settings && o.settings.seats);
+    return ops.length ? Object.values(ops.at(-1).settings.seats).map((x) => [x.name, x.role]).sort() : [];
+  };
+
+  // An open hall: the code seats Backstage and Observer; On stage only with its link, which the Invites panel gives.
+  assert.deepEqual(seated(await join({ name: 'Walk-in', role: 'board' })), [true, 'observer', NOTE]);
+  assert.deepEqual(seated(await join({ name: 'Crew', role: 'research' })), [true, 'research', '']);
+  const invites = await helpers.emit(ctl, 'admin:invites', { roomCode: code });
+  assert.ok(invites.ok && invites.invites.board.includes('role=board&invite='), 'the On stage link, in an open hall too');
+  const link = new URL(srv.base + invites.invites.board).searchParams.get('invite');
+  assert.equal(link, helpers.inviteOf(srv.dataDir, code));
+  const chairJoin = await join({ name: 'Chair', role: 'board', invite: link });
+  assert.deepEqual(seated(chairJoin), [true, 'board', '']);
+  assert.deepEqual(seated(await join({ name: 'Wrong seat', role: 'research', invite: link })), [true, 'research', ''], 'an open hall\'s backstage needs no link');
+  // The admin seats a code guest On stage (S5): kept like an invited one.
+  const oz = await open();
+  const ozJoin = await helpers.emit(oz, 'join', { roomCode: code, name: 'Oz', role: 'observer' });
+  assert.ok((await helpers.emit(ctl, 'admin:setRole', { roomCode: code, socketId: oz.id, role: 'board' })).ok);
+  // Its On stage seats are saved with the room, its backstage and observer seats (the code's) not.
+  await helpers.until(() => JSON.stringify(seatsKept()) === JSON.stringify([['Chair', 'board'], ['Oz', 'board']]), 4000, 'the open hall\'s On stage seats saved');
+
+  // A restart: each comes back to its seat within the boot's first seconds, without a link; the backstage guest's seat
+  // was never kept, and a newcomer without one is an observer.
+  sockets.splice(0).forEach((s) => s.close());
+  srv = await helpers.restartServer(srv);
+  ctl = await open(admin);
+  assert.deepEqual(seated(await join({ name: 'Chair', role: 'board', uid: chairJoin.identity })), [true, 'board', '']);
+  assert.deepEqual(seated(await join({ name: 'Oz', role: 'board', uid: ozJoin.identity })), [true, 'board', '']);
+  assert.deepEqual(seated(await join({ name: 'Late', role: 'board' })), [true, 'observer', NOTE]);
+
+  // Locked, then unlocked: the unlock keeps the On stage seats and drops the rest; a restart after it seats the tablet again.
+  const crew = await open();
+  const crewJoin = await helpers.emit(crew, 'join', { roomCode: code, name: 'Crew 2', role: 'research' });
+  assert.ok((await helpers.emit(ctl, 'admin:lockRoles', { roomCode: code, on: true })).ok);
+  assert.ok(seatsKept().some(([n, r]) => n === 'Crew 2' && r === 'research'), 'a lock keeps every seat taken');
+  assert.ok((await helpers.emit(ctl, 'admin:lockRoles', { roomCode: code, on: false })).ok);
+  assert.deepEqual(seatsKept(), [['Chair', 'board'], ['Oz', 'board']], 'unlocked: the On stage seats kept, the rest dropped');
+  sockets.splice(0).forEach((s) => s.close());
+  srv = await helpers.restartServer(srv);
+  ctl = await open(admin);
+  assert.deepEqual(seated(await join({ name: 'Chair', role: 'board', uid: chairJoin.identity })), [true, 'board', '']);
+  assert.equal((await join({ name: 'Crew 2', role: 'research', uid: crewJoin.identity })).role, 'research', 'an open hall\'s backstage needs no seat kept');
+
+  // New On stage link: refused to anyone but the admin's page, for a seat that has no link, or a room that has none.
+  const guest = await open();
+  await helpers.emit(guest, 'join', { roomCode: code, name: 'Guest', role: 'research' });
+  assert.deepEqual(await helpers.emit(guest, 'admin:newInvite', { roomCode: code, role: 'board' }), { ok: false, error: 'Not admin' });
+  for (const role of ['observer', 'director', 5, undefined]) {
+    assert.deepEqual(await helpers.emit(ctl, 'admin:newInvite', { roomCode: code, role }), { ok: false, error: 'Choose the link to replace: On stage, or Backstage (a side room\'s Member link).' }, String(role));
+  }
+  assert.deepEqual(await helpers.emit(ctl, 'admin:newInvite', { roomCode: 'NOSUCH', role: 'board' }), { ok: false, error: 'No such room.' });
+  const legal = await helpers.emit(ctl, 'room:create', { hall: code, name: 'Legal' });
+  assert.deepEqual(await helpers.emit(ctl, 'admin:newInvite', { roomCode: legal.key, role: 'board' }), { ok: false, error: 'Choose the link to replace: On stage, or Backstage (a side room\'s Member link).' }, 'a side room has no stage');
+  assert.deepEqual(rows('room.invite'), [], 'refusals write no row');
+  // Made: the old link admits nobody new to the stage, the code is the same, the seats held stay; one row, no link in it.
+  const renewed = await helpers.emit(ctl, 'admin:newInvite', { roomCode: code, role: 'board' });
+  assert.ok(renewed.ok && renewed.invites.board !== invites.invites.board && renewed.invites.board.startsWith('/?code=' + code + '&role=board&invite='), JSON.stringify(renewed));
+  const fresh = new URL(srv.base + renewed.invites.board).searchParams.get('invite');
+  assert.equal(fresh, helpers.inviteOf(srv.dataDir, code, 'board', 1), 'the room\'s number for the seat, one up');
+  assert.deepEqual(seated(await join({ name: 'Old link', role: 'board', invite: link })), [true, 'observer', NOTE]);
+  assert.deepEqual(seated(await join({ name: 'New link', role: 'board', invite: fresh })), [true, 'board', '']);
+  assert.deepEqual(seated(await join({ name: 'Chair', role: 'board', uid: chairJoin.identity, invite: link })), [true, 'board', ''], 'a seat held keeps its seat');
+  assert.deepEqual(rows('room.invite').map((e) => [e.target, e.words]), [[code, 'a new On stage link (the old one no longer admits)']]);
+  assert.ok(!JSON.stringify(rows('room.invite')).includes(fresh) && !JSON.stringify(rows('room.invite')).includes(link), 'no link in the row');
+  assert.equal((await helpers.emit(ctl, 'admin:invites', { roomCode: code })).invites.board, renewed.invites.board, 'the panel gives the new link');
+  // Kept across a restart (the room's op log); the backstage link has a number of its own.
+  sockets.splice(0).forEach((s) => s.close());
+  srv = await helpers.restartServer(srv);
+  ctl = await open(admin);
+  assert.equal((await helpers.emit(ctl, 'admin:invites', { roomCode: code })).invites.board, renewed.invites.board);
+  const back = await helpers.emit(ctl, 'admin:newInvite', { roomCode: code, role: 'research' });
+  assert.deepEqual([back.ok, back.invites.board, new URL(srv.base + back.invites.research).searchParams.get('invite')], [true, renewed.invites.board, helpers.inviteOf(srv.dataDir, code, 'research', 1)]);
+  assert.deepEqual(rows('room.invite').at(-1).words, 'a new Backstage link (the old one no longer admits)');
 });

@@ -34,13 +34,22 @@
  * what it shows in a few words (lib/pages.js describePage), never a file. The answer is "sending", never "on screen":
  * each page says what it did with the take (`page:report`), and only those reports make the status (lib/pages.js
  * `Pages.status`), which a console reads (`page:status`) whenever it is told the hall's pages changed (`pages:changed`).
+ * Two layers (plan 4-§5.9.1): the show (Stagewatch, the clock, holding, blank) and information drawn over it (a web page
+ * now); `chat` hands back both, `{chat, layer: 'info'}` the information alone (Take down). Who may push which kind to
+ * whom, over what is up there now, is lib/pages.js `canShow` (pure): the operator (canPush) every kind, an account's
+ * information with stage.show; and an account seated backstage in a room of the hall (a side room on the Main room's
+ * list) by a right of its own (`conn.canShow`): information alone, to the people On stage alone, never over what the
+ * operator put up, on the target's take or on any page of theirs (refused `over`; taken `side`, kept beside the
+ * operator's, replacing nothing), and a take-down only of what such a seat put up, by the take it names (over the show,
+ * or beside it). Such a page reads the console too, the people On stage alone.
  * A web page (`web`, an https address its target's page frames) needs a right of its own beside canPush, stage.web
  * (conn.canWeb: an account's by its rights in the hall, a code guest's only while the admin lets the hall's backstage
  * guests show web pages); refused without it in words that say which, before its address is read. Its address goes to
  * the pages it is shown on, and back to the one who put it up: the answer, the console's status and the row name its host.
  * A push asked again with its client id (the outbox sends one again after a drop) is answered with what the first did.
- * The answer gives back what the target was shown before (`previous`), which the pusher's Undo puts up again as a take of
- * its own, and only as this pusher could show it itself: a picture shared in a room it may not read comes back as no
+ * The answer gives back what the target was shown before (`previous`), which the pusher's Undo of a show take puts up again
+ * as a take of its own (information is taken down, never put back: an Undo could pop up again what the Board had closed),
+ * and only as this pusher could show it itself: a picture shared in a room it may not read comes back as no
  * content (a file's path is its capability), so that take is never handed to it nor put back by it; a web page comes back
  * only to whoever put it up (the take keeps its pusher, `by.who`) and to the admin, so a pusher never reads another's
  * address (a query's token among it). A push that names the take it goes over (`ifSeq`: the Board chip's ↶ Back to) is
@@ -53,7 +62,7 @@
  * server's named effect (`viewChanged`), which reaches each page of theirs by its socket alone.
  */
 const { str } = require('../guard');
-const { cleanPage, describePage, personKey } = require('../pages');
+const { cleanPage, askedOf, canShow, describePage, personKey, layerOf, ARRIVALS } = require('../pages');
 const { mayChange } = require('../rbac');
 
 /** What the admin's support view is told of an act: it shows the person's page, and acts on nothing (as its doors say). */
@@ -62,6 +71,11 @@ const SUPPORT = 'This is someone else\'s view — act from your own page.';
 const BACKSTAGE = 'Do that from a backstage page.';
 /** What an account without display.control in the hall is told. */
 const NO_RIGHT = 'Your account may not change what people\'s pages show in this hall.';
+/**
+ * What an account that would show information on the Board's pages by a right of its own is told from a side room that
+ * is not on the Main room's list (who may not post into Main's chat draws over no Board tablet either).
+ */
+const OFF_LIST = 'This room may not send to the Main room\'s Board — ask an admin.';
 /** What a code guest seated backstage in an open hall's Main room is told: anyone with the code may sit there. */
 const OPEN_HALL = 'In an open hall, showing the Board needs an invite link or an account — ask the admin.';
 /** What an account that may change what people's pages show, but not show a web page there, is told (stage.web). */
@@ -84,6 +98,9 @@ const WEB_NOT_KEPT = 'A web page\'s address is kept sealed with this laptop\'s k
 /** A push asked for over a take (`ifSeq`, ↶ Back to) that is no longer what its target is shown: nothing changed. */
 const NEWER = 'Something newer is showing there now: nothing changed.';
 const IF_SEQ = 'That act\'s take could not be read.';
+/** An arrival that is none, or the show (or a hand-back) asked to arrive in the side bar: only information arrives there. */
+const ARRIVE_WORDS = 'Information arrives over their chat or in their side bar.';
+const SHOW_OVER = 'The show is drawn over the chat: only information arrives in the side bar.';
 /** What the support view is told of a report: it shows a person's page, and says nothing for it. */
 const SUPPORT_REPORTS = 'This is someone else\'s view: it reports nothing.';
 const NOT_SEATED = 'This page is not seated here: it reports nothing.';
@@ -118,7 +135,7 @@ const pagesWords = (n) => n + ' page' + (n === 1 ? '' : 's');
  * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, accounts, linkFor, pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, sendTo } = ctx;
+  const { store, audit, accounts, linkFor, sendersOf, pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, sendTo } = ctx;
 
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
   /**
@@ -131,18 +148,22 @@ function register(socket, conn, ctx) {
     if (!hall && socket.data.isAdmin) return NO_HALL;
     if (socket.data.adminView) return SUPPORT;
     if (conn.onStage()) return BACKSTAGE;
-    if (socket.data.account) return NO_RIGHT;
     const me = conn.me();
+    if (socket.data.account) {
+      const here = conn.room();
+      const shows = !!hall && !!here && here.hall === hall.code && here !== hall && !!me && me.role === 'research' && (conn.canIn('stage.show', hall) || conn.canIn('stage.web', hall));
+      return shows ? OFF_LIST : NO_RIGHT;
+    }
     return !!hall && conn.room() === hall && me && me.role === 'research' ? OPEN_HALL : BACKSTAGE_TEAM;
   };
   /**
    * The hall a page asks of by its key, or by the guest code it joined its Main room with (a guest's page knows its room
-   * by that code alone once New code parted it from the key), when it may push there; else null, with why answered
-   * (whyNot).
+   * by that code alone once New code parted it from the key), when it may push there (canPush) or show information on its
+   * Board's pages (canShow); else null, with why answered (whyNot).
    */
   const pushHall = (code, answer) => {
     const hall = store.get(code) || joinedHall(code);
-    if (hall && conn.canPush(hall)) return hall;
+    if (hall && (conn.canPush(hall) || conn.canShow(hall))) return hall;
     answer({ ok: false, error: whyNot(hall) });
     return null;
   };
@@ -172,17 +193,37 @@ function register(socket, conn, ctx) {
   /** Who a take says put it up: the name this page sits under, else the account's, else the actor's (the laptop). */
   const byName = () => { const me = conn.me(); const a = socket.data.account; return me ? me.name : a ? a.name || a.username : conn.actor().name; };
   /**
-   * Whether this page may show a web page in `hall` (which it may push in): true, or why not, in the words of who it is:
-   * a code guest's hall has its guests' web pages off; anyone else lacks the right.
+   * Whether this page may show a web page in `hall` (which it may push or show in): true, or why not, in the words of who
+   * it is: a code guest's hall has its guests' web pages off; anyone else lacks the right.
    */
   const webOf = (hall) => conn.canWeb(hall) || (conn.actor().t === 'code' ? GUESTS_WEB_OFF : NO_WEB);
+  /**
+   * The facts canShow reads (lib/pages.js) for this page in `hall`: whether it is the operator (canPush), who it is, its
+   * rights there, where it sits, and the target's information take now (`current`, with whether the operator put it up).
+   */
+  const showFacts = (hall, current, ifSeq) => {
+    const here = conn.room();
+    const me = conn.me();
+    return {
+      canPush: conn.canPush(hall), account: !!socket.data.account, admin: !!socket.data.isAdmin,
+      show: conn.canIn('stage.show', hall), web: webOf(hall), seat: me && !socket.data.adminView ? me.role : '', inHall: !!here && here.hall === hall.code,
+      post: !!here && conn.canIn('hall.post', here), files: !!here && conn.canIn('hall.files', here),
+      listed: !!here && (here === hall || sendersOf(hall.code).includes(here.code)), notPush: whyNot(hall),
+      current: current ? { seq: current.seq, op: current.by.op === true, kind: current.content.kind, name: current.by.name } : null,
+      ...(Number.isInteger(ifSeq) ? { ifSeq } : {}),
+    };
+  };
   /** Each page whose take moved told what it is shown now, by its socket's id: never a room, never a broadcast. */
   const tell = (hall, before) => { for (const s of takeSends(hall, before)) sendTo([s.sid], 'page:take', s.take); };
 
-  // A take on the Board's pages or one person's (plan 1-§5.3): the repeat of a push its client id names is answered with
-  // what the first did, before the rate; then the rate, then the hall and who may push there (one answer for both), what
-  // is shown and whom it is for. The store numbers it (a Board take puts away the older takes and answers of those seated On stage now), each
-  // page it moved is told, one row per target, the consoles are told, and the answer is "sending".
+  // A take on the Board's pages or one person's (plan 1-§5.3, 4-§5.9): the repeat of a push its client id names is
+  // answered with what the first did, before the rate; then the rate, then the hall and who may push or show there (one
+  // answer for both), whom it is for, what it asks to show and how it arrives, then who may push that kind to them over
+  // what is there now (lib/pages.js canShow: the operator's information stays up, a researcher's goes to the side bar),
+  // then what is shown, made safe. The store numbers it in its layers (a Board take puts away the older takes and
+  // answers, in its places, of those seated On stage now; an information take put away so joins Earlier; a researcher's
+  // side-bar push over the operator's information is kept beside it), each page it moved is told, one row per target,
+  // the consoles are told, and the answer is "sending", read from the place it went to.
   socket.on('page:push', (args, ack) => {
     if (!conn.gate(ack, { joined: false, bucket: null })) return;   // a repeat is answered as done before the rate: the token is taken below, before any lookup of the hall
     const answer = conn.ok(ack);
@@ -207,7 +248,54 @@ function register(socket, conn, ctx) {
     const board = a.to === 'board';
     const person = !board && isRecord(a.to) ? str(a.to.uid) : '';
     if (!board && !person) return answer({ ok: false, error: TARGETS });
+    // What it asks to show (its kind, and a hand-back's layer), read before anything else of it; then its layer: the show,
+    // the information, or both (a hand-back of both); and how an information take arrives (over their chat by default).
+    const want = askedOf(a.content);
+    if (!want) return answer({ ok: false, error: cleanPage(a.content).error });
+    const layer = want.kind === 'chat' ? (want.layer === 'info' ? 'info' : 'both') : layerOf(want.kind);
+    const arrive = a.arrive === undefined || a.arrive === null ? 'over' : a.arrive;
+    if (!ARRIVALS.includes(arrive)) return answer({ ok: false, error: ARRIVE_WORDS });
+    if (arrive === 'side' && (layer !== 'info' || want.kind === 'chat')) return answer({ ok: false, error: SHOW_OVER });
+    if (a.ifSeq !== undefined && a.ifSeq !== null && (!Number.isInteger(a.ifSeq) || a.ifSeq < 0)) return answer({ ok: false, error: IF_SEQ });
     const rooms = readable(hall);
+    const before = hallPages(hall.code);
+    const seated = before.filter((p) => !p.support);
+    // Whom it is for: the Board's pages, or the person's pages in the rooms this page may read (one of theirs open there).
+    const target = board ? boardOf(hall, seated, rooms) : seated.filter((p) => p.key === person && rooms.includes(p.room));
+    // A person with no page open is the admin's to take a take down from alone (a hand-back over their own take, named by
+    // its number, which is read below as any `ifSeq` is): the admin reads every room, and the take is the store's, so
+    // nothing names who sits where.
+    const away = !board && !target.length && socket.data.isAdmin && want.kind === 'chat' && Number.isInteger(a.ifSeq);
+    if (!board && !target.length && !away) return answer({ ok: false, error: NOT_HERE });
+    const to = board ? 'board' : person;
+    const name = board ? 'the Board' : target.length ? target[0].name : '';
+    // What the target is shown now in a place (the show, the information over it, beside it): the Board's own take, or the
+    // newest of the person's pages' (the store's, with no page of theirs open).
+    const wasIn = (l) => (board ? pages.current(hall.code, '', { board: true, layer: l }).take
+      : !target.length ? pages.current(hall.code, person, { layer: l }).take
+      : target.reduce((t, p) => { const c = (l === 'info' ? p.info : l === 'beside' ? p.beside : p.current).take; return c && (!t || c.seq > t.seq) ? c : t; }, null));
+    const info = wasIn('info');
+    const beside = wasIn('beside');
+    // A Take down (the information handed back alone, over the take it names) hands back that take: over the show, or
+    // beside it.
+    const takeDown = want.kind === 'chat' && layer === 'info' && Number.isInteger(a.ifSeq);
+    const named = !takeDown ? '' : beside && beside.seq === a.ifSeq ? 'beside' : 'info';
+    const was = named === 'beside' ? beside : wasIn(layer === 'info' ? 'info' : 'show');
+    // The operator's information drawn on one of the Board's pages in place of the Board's own (a person On stage shown one
+    // of their own): a researcher's push over the Board, or its Take down, would put it away there.
+    const opOf = (t) => !!t && t.by.op === true && t.content.kind !== 'chat';
+    const opOn = board && !opOf(info) ? target.map((p) => p.info.take).find(opOf) || null : null;
+    // Who may push this kind to them over what is up there now: the operator (canPush) as before; a researcher by a right
+    // of its own (canShow), never over the operator's information (its side bar instead), and taking down only its own.
+    const may = canShow({ ...showFacts(hall, named === 'beside' ? beside : info, a.ifSeq), ...(opOn && named !== 'beside' ? { opOn: { kind: opOn.content.kind } } : {}) }, want, board ? 'board' : { onStage: target.some((p) => p.board) }, arrive);
+    if (may !== true) return answer({ ok: false, error: may });
+    // A push that names the take it goes over (`ifSeq`: ↶ Back to, a Take down) is refused once anything newer is up in its
+    // place (a hand-back of both, in any; of the information, over the show or beside it), so it never undoes someone
+    // else's later take.
+    if (a.ifSeq !== undefined && a.ifSeq !== null) {
+      const up = (layer === 'both' ? [was, info, beside] : layer === 'info' ? [info, beside] : [was]).filter(Boolean);
+      if (!(up.length ? up : [null]).some((t) => (t ? t.seq : 0) === a.ifSeq)) return answer({ ok: false, error: NEWER });
+    }
     const facts = {
       stagewatch: !!linkFor(hall.code).base,
       readable: (url) => rooms.some((r) => r.messages.some((m) => m.type === 'file' && m.url === url)),
@@ -216,41 +304,32 @@ function register(socket, conn, ctx) {
     };
     const content = cleanPage(a.content, facts);
     if (content.error) return answer({ ok: false, error: content.error });
-    const before = hallPages(hall.code);
-    const seated = before.filter((p) => !p.support);
-    // Whom it is for: the Board's pages, or the person's pages in the rooms this page may read (one of theirs open there).
-    const target = board ? boardOf(hall, seated, rooms) : seated.filter((p) => p.key === person && rooms.includes(p.room));
-    // A person with no page open is the admin's to take a take down from alone (back to chat over their own take, named by
-    // its number, which is read below as any `ifSeq` is): the admin reads every room, and the take is the store's, so
-    // nothing names who sits where.
-    const away = !board && !target.length && socket.data.isAdmin && content.kind === 'chat' && Number.isInteger(a.ifSeq) ? pages.current(hall.code, person).take : null;
-    if (!board && !target.length && !away) return answer({ ok: false, error: NOT_HERE });
-    const to = board ? 'board' : person;
-    const name = board ? 'the Board' : target.length ? target[0].name : '';
-    // What the target is shown before this take: the Board's own take, or the newest of the person's pages. The answer
-    // gives it back (`previous`), so the pusher's Undo puts it up again as a take of its own; a push that names the take
-    // it goes over (`ifSeq`, ↶ Back to) is refused once anything newer is up, so it never undoes someone else's take.
-    // Its content is given back only as this pusher could push it itself (cleanPage, its own facts): a picture shared in
-    // a room it may not read, or Stagewatch once the hall has none, comes back as no content, and its page offers no Undo.
-    const was = board ? pages.current(hall.code, '', { board: true }).take : away || target.reduce((t, p) => (p.current.take && (!t || p.current.take.seq > t.seq) ? p.current.take : t), null);
-    if (a.ifSeq !== undefined && a.ifSeq !== null) {
-      if (!Number.isInteger(a.ifSeq) || a.ifSeq < 0) return answer({ ok: false, error: IF_SEQ });
-      if (a.ifSeq !== (was ? was.seq : 0)) return answer({ ok: false, error: NEWER });
-    }
     const onStage = [...new Set(seated.filter((p) => p.board).map((p) => p.key))];
+    // The operator's information (canPush) stays up: a researcher's side-bar push over it is kept beside it, superseding
+    // nothing over the show.
+    const op = conn.canPush(hall);
+    const aside = layer === 'info' && want.kind !== 'chat' && arrive === 'side' && !op && (opOf(info) || !!opOn);
     // A code guest's take is kept as one (`guest`): the web pages guests put up are counted when the admin turns them off.
     // A web page keeps who put it up (`who`): a later push's answer gives its address back to them alone, and the admin.
-    const take = pages.take(hall.code, to, content, { name: byName(), guest: conn.actor().t === 'code', ...(content.kind === 'web' && whoKey ? { who: whoKey } : {}) }, { onStage });
+    // An information take keeps whether its pusher held canPush (`op`).
+    const by = { name: byName(), guest: conn.actor().t === 'code', ...(layer !== 'show' && op ? { op: true } : {}), ...(content.kind === 'web' && whoKey ? { who: whoKey } : {}) };
+    const take = pages.take(hall.code, to, content, by, { onStage, arrive, aside, slot: named });
     if (!take) return answer({ ok: false, error: content.kind === 'web' ? WEB_NOT_KEPT : NOT_KEPT });
     tell(hall.code, before);
     const holding = holdingOf(hall.code);
-    // In the audit's voice: whom, how many of the Board's pages it reached, and what it shows in a few words, never a file.
-    write('page.push', hall.code, (board ? 'the Board (' + pagesWords(target.length) + ')' : name || AWAY) + ' → ' + describePage(take.content, { hallHolding: holding }));
+    // In the audit's voice: whom, how many of the Board's pages it reached, what it shows in a few words (never a file),
+    // and an arrival in the side bar.
+    const side = take.arrive === 'side' ? ', in their side bar' + (aside ? ', beside the operator\'s' : '') : named === 'beside' ? ', from their side bar' : '';
+    write('page.push', hall.code, (board ? 'the Board (' + pagesWords(target.length) + ')' : name || AWAY) + ' → ' + describePage(take.content, { hallHolding: holding }) + side);
     pagesChanged(hall.code);
-    const status = pages.status(hall.code, to, target, { name: board ? '' : name, hallHolding: holding });
+    // The status of the place it went to: beside the operator's, over the show, or the show.
+    const status = pages.status(hall.code, to, target, { name: board ? '' : name, hallHolding: holding, layer: aside || named === 'beside' ? 'beside' : layer === 'info' ? 'info' : 'show' });
     // A web page's address comes back to whoever put it up and to the admin alone: to any other pusher, no content.
     const back = was && (was.content.kind !== 'web' || conn.theAdmin() || (!!whoKey && was.by.who === whoKey)) ? cleanPage(pages.told(was.content), facts) : null;
-    const res = { ok: true, seq: take.seq, results: [{ key: to, name, ok: true, status }], previous: was ? { seq: was.seq, content: !back || back.error ? null : back } : null };
+    const res = {
+      ok: true, seq: take.seq, ...(take.arrive === 'side' ? { arrive: 'side' } : {}), ...(aside ? { aside: true } : {}),
+      results: [{ key: to, name, ok: true, status }], previous: was && !aside ? { seq: was.seq, content: !back || back.error ? null : back } : null,
+    };
     if (asked) {
       for (const k of pushed.keys()) if (!store.get(k)) pushed.delete(k);
       if (!pushed.has(hall.code)) pushed.set(hall.code, new Map());
@@ -292,9 +371,12 @@ function register(socket, conn, ctx) {
     answer({ ok: true });
   });
 
-  // Where a hall's people's pages stand (plan 1-§5.3): the Board's take, read from each Board page's report (its people
-  // named only to one who may read the Main room), and each person seated in a room of the hall this page may read, with
-  // theirs. A read, for whoever may push there, refused in the same words for a key that is no hall's.
+  // Where a hall's people's pages stand (plan 1-§5.3, 4-§5.9.1): the Board's take in each layer, read from each Board
+  // page's report (its people named only to one who may read the Main room), and each person seated in a room of the hall
+  // this page may read, with theirs: the show take's status, and the information over it (`info`, with how it arrived and
+  // whether the operator put it up). A read, for whoever may push (canPush) or show (canShow) there, refused in the same
+  // words for a key that is no hall's. One who may only show is told the people seated On stage alone, whom it may show,
+  // and a web take by its host, as everyone is.
   socket.on('page:status', (args, ack) => {
     if (!conn.gate(ack, { joined: false, bucket: conn.chatter })) return;
     const answer = conn.ok(ack);
@@ -303,17 +385,27 @@ function register(socket, conn, ctx) {
     if (!hall) return;
     const holding = holdingOf(hall.code);
     const rooms = readable(hall);
+    const onlyShows = !conn.canPush(hall);
     const seated = hallPages(hall.code).filter((p) => !p.support);
     const people = new Map();
     for (const p of seated) {
-      if (!rooms.includes(p.room)) continue;
+      if (!rooms.includes(p.room) || (onlyShows && !p.board)) continue;
       if (!people.has(p.key)) people.set(p.key, { key: p.key, name: p.name, room: store.isMain(p.room) ? 'Main' : p.room.name || '', list: [] });
       people.get(p.key).list.push(p);
     }
+    // Each target's show take, the information over it (`info`) and, while one is there, the information beside it
+    // (`beside`, in their side bar beside the operator's).
+    const both = (to, list, o) => {
+      const beside = pages.status(hall.code, to, list, { ...o, layer: 'beside' });
+      return { ...pages.status(hall.code, to, list, o), info: pages.status(hall.code, to, list, { ...o, layer: 'info' }), ...(beside.seq ? { beside } : {}) };
+    };
     answer({
       ok: true,
-      board: pages.status(hall.code, 'board', boardOf(hall, seated, rooms), { hallHolding: holding }),
-      people: Array.from(people.values(), (x) => ({ uid: x.key, name: x.name, room: x.room, ...pages.status(hall.code, x.key, x.list, { name: x.name, hallHolding: holding }) })),
+      board: both('board', boardOf(hall, seated, rooms), { hallHolding: holding }),
+      people: Array.from(people.values(), (x) => ({ uid: x.key, name: x.name, room: x.room, ...both(x.key, x.list, { name: x.name, hallHolding: holding }) })),
+      // Whether this asker's information pushes and Take downs hold stage.show (the admin's and a code guest's always; an
+      // account's by its right in the hall): its console greys what the server would refuse.
+      show: !socket.data.account || !!socket.data.isAdmin || conn.canIn('stage.show', hall),
     });
   });
 

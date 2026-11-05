@@ -192,7 +192,7 @@ const HANDLER_MAY = {
 /** A store or an edge one handler module requires by name, for the pure functions it holds, with why. */
 const HANDLER_ROWS = {
   'lib/handlers/takes.js': {
-    'lib/pages.js': { names: ['cleanPage', 'describePage', 'canShow', 'cleanSnippet', 'personKey'], why: 'the pages\' pure vocabulary, kept where it is tested (a person\'s key among it); the store itself reaches the module through its context' },
+    'lib/pages.js': { names: ['cleanPage', 'askedOf', 'describePage', 'canShow', 'cleanSnippet', 'personKey', 'layerOf', 'ARRIVALS'], why: 'the pages\' pure vocabulary, kept where it is tested (a person\'s key, what a pusher asked for, a kind\'s layer and the arrivals among it); the store itself reaches the module through its context' },
   },
 };
 
@@ -698,7 +698,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   assert.ok(inClosure(made), 'conn is made in the connection');
   const conn = groupAt(server, made + 'const conn = Object.freeze('.length);
   const keys = conn.entries.map(keyOf);
-  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'onStage', 'canIn', 'canPush', 'canWeb', 'theAdmin', 'admin', 'actor', 'canManageHall', 'codeTold', 'gate']);
+  assert.deepEqual(keys.map((k) => k.key), ['socket', 'room', 'me', 'ok', 'limited', 'writes', 'chatter', 'need', 'mayPost', 'allowed', 'onStage', 'canIn', 'canPush', 'canWeb', 'canShow', 'theAdmin', 'admin', 'actor', 'canManageHall', 'codeTold', 'gate']);
   assert.deepEqual(keys.filter((k) => k.value !== null).map((k) => [k.key, k.value]), [['room', '() => room'], ['me', '() => me']]);
   for (const { key } of keys.filter((k) => k.value === null && k.key !== 'socket')) {
     const decl = server.indexOf('  const ' + key + ' = ', at);
@@ -724,7 +724,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'invitesFor', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'io']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -754,7 +754,7 @@ test('(d) a planted handler module that requires past its row, or makes what it 
   assert.deepEqual(rooms("const { ...all } = require('../guard');"), ['lib/handlers/rooms.js:6: takes ... from lib/guard.js, which is not among its pure helpers (str, cleanText, mac, Bucket)']);
   // The one row: the takes module takes the pages' pure vocabulary by name; no other module requires the store.
   assert.deepEqual(run('lib/handlers/takes.js', "const { cleanPage, canShow } = require('../pages');"), []);
-  assert.deepEqual(run('lib/handlers/takes.js', "const { PagesStore } = require('../pages');"), ['lib/handlers/takes.js:6: takes PagesStore from lib/pages.js, which is not among its pure helpers (cleanPage, describePage, canShow, cleanSnippet, personKey)']);
+  assert.deepEqual(run('lib/handlers/takes.js', "const { PagesStore } = require('../pages');"), ['lib/handlers/takes.js:6: takes PagesStore from lib/pages.js, which is not among its pure helpers (cleanPage, askedOf, describePage, canShow, cleanSnippet, personKey, layerOf, ARRIVALS)']);
   assert.deepEqual(rooms("const { cleanPage } = require('../pages');"), ['lib/handlers/rooms.js:6: requires lib/pages.js: a store, a link or an edge reaches a handler module only through its context']);
   // Nothing it requires is made in it, however it is reached; a word in a comment or a string is not code.
   assert.deepEqual(rooms("const { Bucket } = require('../guard');\nconst b = new Bucket(5, 15);"), ['lib/handlers/rooms.js:7: makes what it requires (new Bucket): it is given the server\'s, through its context']);
@@ -1667,11 +1667,12 @@ test('(n) the kinds in step: lib/pages.js\'s KINDS and describePage\'s words are
   const words = pagesLib.KINDS.map((kind) => pagesLib.describePage({ kind }));
   assert.ok(words.every((w) => typeof w === 'string' && w), 'each kind has words: ' + words.join(', '));
   assert.equal(new Set(words).size, words.length, 'no two kinds share words: ' + words.join(', '));
-  // The take catalogue: the Board chip's show kinds are one entry each, `board.<kind>`, exactly the store's kinds in its
-  // order, and the page's names of them (SHOW_KINDS, which the console, a person's Show them ▸ and the take layer read).
+  // The take catalogue: the Board chip's kinds are one entry each, `board.<kind>`, exactly the store's kinds in its order,
+  // the show's (a hand-back and the show layer's) as radio, the information's not, and the page's names of them
+  // (SHOW_KINDS, which the console, a person's Show them ▸ and the take layer read).
   const C = catalogOf();
   const boardKinds = [...C.KINDS.board.filter((e) => e.verb === 'page:push' && e.radio).map((e) => e.id)];
-  assert.deepEqual(boardKinds, pagesLib.KINDS.map((k) => 'board.' + k));
+  assert.deepEqual(boardKinds, ['chat', ...pagesLib.SHOW_LAYER].map((k) => 'board.' + k));
   assert.deepEqual([...C.SHOW_KINDS.map((k) => k[0])], [...pagesLib.KINDS]);
   assert.deepEqual(kindsCatalogueProblems(C, pagesLib.KINDS), []);
   assert.deepEqual(kindsCatalogueProblems(C, ['chat', 'clock']), ['the store\'s kinds and the Board chip\'s are not one set: board.chat, board.stage, board.clock, board.holding, board.blank, board.web against board.chat, board.clock'], 'a kind the store has not fails it');
@@ -1686,7 +1687,10 @@ function catalogOf() {
 }
 /** The Board chip's show kinds against `kinds`: one set, in order. */
 function kindsCatalogueProblems(C, kinds) {
-  const ids = C.KINDS.board.filter((e) => e.verb === 'page:push' && e.radio).map((e) => e.id);
+  // The show's kinds, a radio each (the Board's pages show one at a time), then the information's, an entry each.
+  const radio = C.KINDS.board.filter((e) => e.verb === 'page:push' && e.radio).map((e) => e.id);
+  const info = C.KINDS.board.filter((e) => e.verb === 'page:push' && !e.radio && C.SHOW_KINDS.some((k) => 'board.' + k[0] === e.id)).map((e) => e.id);
+  const ids = [...radio, ...info];
   const want = kinds.map((k) => 'board.' + k);
   return JSON.stringify(ids) === JSON.stringify(want) ? [] : ['the store\'s kinds and the Board chip\'s are not one set: ' + ids.join(', ') + ' against ' + want.join(', ')];
 }

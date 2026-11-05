@@ -8,6 +8,7 @@ const path = require('path');
 const net = require('net');
 const { io } = require('socket.io-client');
 const { BUILD } = require('../lib/version');
+const guard = require('../lib/guard');
 
 const ROOT = path.join(__dirname, '..');
 const TOKEN = 'testadmintoken01';
@@ -768,7 +769,18 @@ async function docWorker(task, bytes, opts = {}, { without = [] } = {}) {
   return plain(answer);
 }
 
+/**
+ * The invite a room's admin hands out for a seat (lib/guard.js makeInvite: the room's guest code, the seat, the room's
+ * number for it), made with the server's own secret as its data folder keeps it: what the Invites panel's link carries,
+ * for a test to join as a guest who was sent that link. On stage needs one in every hall's Main room.
+ */
+function inviteOf(dataDir, code, role = 'board', n = 0) {
+  const hex = fs.readFileSync(path.join(dataDir, 'secret.key'), 'utf8').trim();
+  return guard.makeInvite(Buffer.from(hex, 'hex'), code, role, n);
+}
+
 module.exports = {
+  inviteOf,
   stagewatchQuery, ROOT, REPO, TOKEN, readSource, freePort, freeUdpPort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, pngOf, fakeStagewatch, fakeNode,
   filesUnder, handlerFiles, pageScripts,
   FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, auditMeter, acceptAll, brief,

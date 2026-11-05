@@ -113,6 +113,10 @@ const SEATS = {
   // backstage guest while the admin lets its guests (a code guest's comes and goes with pages:rights).
   adminWeb: seat({ role: 'research', uid: 'a-root', uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: true, screens: screens(2, true), guestCode: GC, codeOn: true, setsCode: true, admin: true, canPush: true, canWeb: true }),
   guestWeb: seat({ role: 'research', uid: ANA, uploadToken: 't', canSendToStage: true, canPropose: true, forwardable: false, guestCode: GC, codeOn: true, canPush: true, canWeb: true }),
+  // A Staff account backstage that may show information on the Board's pages by a right of its own (canShow: stage.show),
+  // and one granted stage.web as well.
+  staffShow: seat({ role: 'research', uid: 'a-sid', uploadToken: 't', canSendToStage: false, canPropose: false, forwardable: true, guestCode: '', codeOn: true, canShow: true }),
+  staffShowWeb: seat({ role: 'research', uid: 'a-sid', uploadToken: 't', canSendToStage: false, canPropose: false, forwardable: true, guestCode: '', codeOn: true, canShow: true, canWeb: true }),
   supportPush: seat({ role: 'research', uid: 'a-root', uploadToken: 't', forwardable: true, adminView: true, name: 'Kim', canPush: true }),
   boardFull: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, fullscreen: true }),
   boardSimpleFull: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', fullscreen: true }),
@@ -170,13 +174,29 @@ const TAKE_HOT = { ...TAKE, strip: true };
 const TAKE_FULL = { ...TAKE, full: true };
 // A web page shown to this page, with its address: Open in a new tab.
 const TAKE_WEB = { ...TAKE, kind: 'web', url: 'https://vote.example.com/poll/7' };
-const CARD = { id: 'card', seq: 4, kind: 'stage' };
+const CARD = { id: 'card', seq: 4, kind: 'stage', layer: 'show', side: false };
+// Information that arrived in the side bar, as a card: Show over the chat, Remove.
+const CARD_SIDE = { id: 'card', seq: 6, kind: 'web', layer: 'info', side: true };
+// Blank, with information from backstage held under it: a touch shows it.
+const TAKE_HELD = { ...TAKE, kind: 'blank', held: 1 };
+// An Earlier entry: information taken off this page lately, a Look.
+const PAST = { id: 'past:5', seq: 5, kind: 'web', url: 'https://vote.example.com/poll/7' };
 // The Board as the console reads it: on its chat, nothing shown yet; showing the clock on all 6 pages (this page's take,
 // over a Stagewatch take before it); the clock put up by someone else since; nobody On stage.
 const BOARD_CHAT = { id: 'board', seq: 0, kind: 'chat', pages: 6, on: 0, mark: '○', words: 'Nothing shown yet', showing: 'the chat', mine: null };
 const BOARD_MINE = { id: 'board', seq: 7, kind: 'clock', pages: 6, on: 6, mark: '✓', words: 'On all 6 Board pages', showing: 'the clock', mine: { seq: 7, previous: { kind: 'stage' }, time: '14:02' } };
 const BOARD_THEIRS = { ...BOARD_MINE, seq: 8, mine: null };
 const BOARD_EMPTY = { id: 'board', seq: 8, kind: 'holding', pages: 0, on: 0, mark: '✕', words: 'Nobody on the Board is online', showing: 'a holding slide', mine: null };
+// The information over the Board's show: a web page a researcher put up (canShow), and one the operator put up (canPush).
+const INFO_SHOWN = { seq: 9, kind: 'web', mark: '◇', words: 'Opened · AGMessage can\'t see inside web pages', showing: 'a web page on vote.example.com', arrive: 'over', op: false, on: 6, pages: 6 };
+const BOARD_INFO = { ...BOARD_MINE, info: INFO_SHOWN };
+const BOARD_OPERATOR = { ...BOARD_MINE, info: { ...INFO_SHOWN, op: true } };
+// The operator's over the show, and a researcher's beside it in their side bar; then that one alone, the operator's taken
+// down; and a researcher's over the show while the operator's is on one Board member's page (`opOn`).
+const BESIDE = { ...INFO_SHOWN, seq: 10, arrive: 'side', words: 'In the side bar on all 6 Board pages' };
+const BOARD_BESIDE = { ...BOARD_OPERATOR, beside: BESIDE };
+const BOARD_BESIDE_ONLY = { ...BOARD_MINE, info: null, beside: BESIDE };
+const BOARD_OP_ON = { ...BOARD_INFO, opOn: true };
 // The simple view's ⋯ sheet: standard text, dark, the screen not full, the hall as Leave names it; and at the bounds.
 const SHEET = { id: 'sheet', zoom: 1, dark: true, full: false, hall: 'Hall 2' };
 const SHEET_SMALLEST = { ...SHEET, zoom: 0.7, dark: false };
@@ -186,7 +206,7 @@ const SHEET_FULL = { ...SHEET, zoom: 2.2, full: true };
 const EARLIER = { id: 'earlier', more: true, find: '' };
 const EARLIER_NONE = { ...EARLIER, more: false };
 const QUOTE_EARLIER = { id: 'earlier:m8', more: true, find: 'm8' };
-const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB], card: [CARD], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER] };
+const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB, TAKE_HELD], card: [CARD, CARD_SIDE], past: [PAST], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY, BOARD_INFO, BOARD_OPERATOR, BOARD_BESIDE, BOARD_BESIDE_ONLY, BOARD_OP_ON], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER] };
 
 // ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
 const HALLS = [{ code: 'K7P2QX', name: 'Hall 2' }, { code: 'M3N4PQ', name: 'Legal' }];
@@ -229,6 +249,8 @@ const PAGE_OBJECTS = {
     account: { socketId: 's-ana', uid: 'a-ana', name: 'Ana', role: 'research', account: true, linkedRooms: ['M3N4PQ'], hall: 'Hall 2' },
     // On the hall page: a person whose key on people's pages the page knows, their pages showing the clock.
     keyed: { id: 'person:u-kim', uid: 'u-kim', name: 'Kim', role: 'research', key: 'u:u-kim', kind: 'clock' },
+    // And a web page over their clock, which Take down hands back.
+    keyedInfo: { id: 'person:u-kim', uid: 'u-kim', name: 'Kim', role: 'research', key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN },
   },
   adminMsg: {
     text: { id: 'm1', type: 'text', text: 'Capex is on slide 14', from: from(ANA, 'research', 'Ana'), at, hall: 'Hall 2' },
@@ -302,7 +324,7 @@ const PAGE_OBJECTS = {
 const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple, SEATS.researchSends], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
   compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple, SEATS.researchSends], chip: [SEATS.admin, SEATS.researchNoDesk], header: [SEATS.admin, SEATS.board, SEATS.research],
-  take: [SEATS.board, SEATS.boardSimple, SEATS.boardFull, SEATS.research], card: [SEATS.board, SEATS.boardSimple, SEATS.observer], sheet: [SEATS.boardSimple, SEATS.boardSimpleFull, SEATS.supportBoard], board: [SEATS.adminPush, SEATS.pushNoStagewatch, SEATS.adminWeb],
+  take: [SEATS.board, SEATS.boardSimple, SEATS.boardFull, SEATS.research], card: [SEATS.board, SEATS.boardSimple, SEATS.observer], past: [SEATS.board, SEATS.boardSimple, SEATS.observer], sheet: [SEATS.boardSimple, SEATS.boardSimpleFull, SEATS.supportBoard], board: [SEATS.adminPush, SEATS.pushNoStagewatch, SEATS.adminWeb, SEATS.staffShow],
   earlier: [SEATS.research, SEATS.boardSimple, SEATS.observer],
   adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board, SEATS.techPush, SEATS.guestWeb], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
   hall: [PAGE.board], room: [PAGE.board, SEATS.research], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
@@ -316,7 +338,7 @@ function pairsOf(kind) {
 }
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'sheet', 'board', 'earlier', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'past', 'sheet', 'board', 'earlier', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -422,7 +444,7 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false });
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false, canShow: false });
   // Whether the page may change what people's pages show, true alone; the hall's Stagewatch as the page is told it (none,
   // or switched off); the device's Fullscreen API, the page's own probe.
   assert.deepEqual([C.facts({ canPush: true }).canPush, C.facts({ canPush: 'yes' }).canPush, C.facts({ canPush: 1 }).canPush], [true, false, false]);
@@ -1064,6 +1086,11 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
   M.push(['person', 'techPush', { ...O.person.guest, key: 'u:u-kim', kind: 'clock' }, ['person.mention', 'person.show', 'person.chat']]);
   // A web page on their pages too, for a seat that may show one (canWeb).
   M.push(['person', 'guestWeb', { ...O.person.guest, key: 'u:u-kim', kind: 'clock' }, ['person.mention', 'person.show', 'person.web', 'person.chat']]);
+  // Information over their show: Take down, for the operator (canPush), and for a seat that may only show, on a person On
+  // stage alone (the console lists no one else to it).
+  M.push(['person', 'techPush', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.show', 'person.chat', 'person.takeDown']]);
+  M.push(['person', 'staffShowWeb', { ...O.person.guest, role: 'board', key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention', 'person.web', 'person.takeDown']]);
+  M.push(['person', 'staffShowWeb', { ...O.person.guest, key: 'u:u-kim', kind: 'clock', info: INFO_SHOWN }, ['person.mention']]);
   const facts = (seat) => PAGE[seat] || SEATS[seat];
   for (const [kind, seat, o, want] of M) assert.deepEqual(ids(kind, facts(seat), o), want, kind + ' · ' + seat + ' on ' + JSON.stringify(o).slice(0, 60));
   // Every act of these kinds is shown to some seat: none passes the matrix by its absence.
@@ -1253,7 +1280,11 @@ test('a take on this page: Back to chat and Minimise on its bar, Full screen onl
   assert.deepEqual(plain(C.shown('take', SEATS.boardSimpleFull, TAKE_HOT)).map((e) => e.id), ['take.chat', 'take.minimise', 'take.openChat', 'take.fullscreen']);
   // Escape minimises, never Back to chat; each act is the person's on their own page (self), Full screen the page's own.
   assert.equal(C.byKey('take', SEATS.board, TAKE, 'Escape').id, 'take.minimise');
-  assert.deepEqual(plain(C.KINDS.take.map((e) => [e.id, e.verb, e.mode])), [['take.chat', 'page:report', 'self'], ['take.minimise', 'page:report', 'self'], ['take.openChat', 'page:report', 'self'], ['take.tab', 'local', 'local'], ['take.fullscreen', 'local', 'local']]);
+  assert.deepEqual(plain(C.KINDS.take.map((e) => [e.id, e.verb, e.mode])), [['take.chat', 'page:report', 'self'], ['take.minimise', 'page:report', 'self'], ['take.openChat', 'page:report', 'self'], ['take.held', 'local', 'local'], ['take.tab', 'local', 'local'], ['take.fullscreen', 'local', 'local']]);
+  // Information held under the operator's blank: "1 from backstage" on blank's bar, the person's touch shows it; on no
+  // other kind, and never while nothing is held.
+  assert.deepEqual(plain(C.inline('take', SEATS.boardSimple, TAKE_HELD, Infinity)).map((i) => [i.id, i.label]), [['take.chat', 'Back to chat'], ['take.minimise', 'Minimise'], ['take.held', '1 from backstage']]);
+  assert.deepEqual([menu('board', { ...TAKE_HELD, held: 0 }), menu('board', { ...TAKE, held: 1 })], [['take.chat', 'take.minimise'], ['take.chat', 'take.minimise']]);
   // A web page: Open in a new tab in the layer's ⋯ and its right-click, in the full view only, wherever its address was
   // told; never on its bar, never in the simple view (the layer's buttons alone), never on another kind.
   assert.deepEqual(plain(C.inline('take', SEATS.boardFull, TAKE_WEB, Infinity)).map((i) => i.id), ['take.chat', 'take.minimise', 'take.fullscreen']);
@@ -1275,6 +1306,16 @@ test('a take minimised, as a card in the side bar: Show again, and Remove with U
   assert.deepEqual(plain(C.inline('card', SEATS.board, CARD)).map((i) => [i.id, i.label, i.icon]), [['card.show', 'Show again', '⤴'], ['card.remove', 'Remove', '🗑']]);
   assert.equal(C.entry('card', 'card.remove').undo, 'card.remove', 'Remove is taken back by its own Undo');
   assert.ok(plain(C.items('card', seat({ role: 'board', uid: CHAIR, adminView: true, name: 'Kim' }), CARD)).filter((i) => !i.sep).every((i) => i.disabled === C.supportWords('Kim')));
+  // Information that arrived in the side bar: Show over the chat, by the person's choice, and Remove; Look in the simple view.
+  assert.deepEqual(plain(C.inline('card', SEATS.board, CARD_SIDE)).map((i) => [i.id, i.label]), [['card.show', 'Show over the chat'], ['card.remove', 'Remove']]);
+  assert.deepEqual(plain(C.inline('card', SEATS.boardSimple, CARD_SIDE, Infinity)).map((i) => [i.id, i.label]), [['card.show', 'Look']]);
+});
+
+test('Earlier: the information taken off this page lately, each a Look on this page alone, for every seat; the support view acts on none', () => {
+  for (const s of ['board', 'observer', 'research']) assert.deepEqual(ids('past', SEATS[s], PAST), ['past.look'], s);
+  assert.deepEqual(plain(C.inline('past', SEATS.boardSimple, PAST, Infinity)).map((i) => [i.id, i.label, i.icon]), [['past.look', 'Look', '👁']], 'the simple view: its button');
+  assert.deepEqual(plain(C.KINDS.past.map((e) => [e.id, e.label, e.verb, e.mode])), [['past.look', 'Look', 'local', 'local']], 'a Look: no report, no take');
+  assert.ok(plain(C.items('past', SEATS.supportBoard, PAST)).every((i) => i.disabled === C.supportWords('Kim')));
 });
 
 test('the Board chip: the show kinds as radio, the one the Board shows checked and not chosen again; Stagewatch where the hall has one; ↶ Back to over this page\'s own take only; Screens & pages…', () => {
@@ -1300,10 +1341,10 @@ test('the Board chip: the show kinds as radio, the one the Board shows checked a
   for (const s of ['research', 'board', 'boardSimple', 'observer', 'viewer', 'staff', 'tech', 'admin']) for (const o of HALL_OBJECTS.board) assert.deepEqual(ids('board', SEATS[s], o), [], s);
   // The support view draws the person's doors, every one disabled.
   assert.ok(plain(C.items('board', SEATS.supportPush, BOARD_MINE)).filter((i) => !i.sep).every((i) => i.disabled === C.supportWords('Kim')));
-  // A web page on every Board page, for a seat that may show one (canWeb): its sixth kind, radio, checked while the
-  // Board's pages show one and chosen again for another address; absent without the right (the server refuses it).
+  // A web page on every Board page, for a seat that may show one (canWeb): information over the show, never a show kind
+  // (no radio), chosen again for another address; absent without the right (the server refuses it).
   assert.deepEqual(menu('adminWeb', BOARD_MINE).filter((i) => i !== '—').map((i) => i[0]), ['board.chat', 'board.stage', 'board.clock', 'board.holding', 'board.blank', 'board.web', 'board.back', 'board.screens']);
-  assert.deepEqual(menu('adminWeb', { ...BOARD_MINE, kind: 'web' })[5], ['board.web', 'Show a web page…', 'menuitemradio', true, '']);
+  assert.deepEqual(menu('adminWeb', BOARD_INFO)[5], ['board.web', 'Show a web page…', '', false, '']);
   assert.deepEqual(plain(C.inline('board', SEATS.adminWeb, BOARD_CHAT, Infinity)).map((i) => i.id), ['board.chat', 'board.stage', 'board.clock', 'board.holding', 'board.blank', 'board.web']);
   assert.equal(C.ready('board', 'board.web', SEATS.adminWeb, { ...BOARD_CHAT, kind: undefined }), 'Reading where their pages stand…');
   for (const s of ['adminPush', 'techPush', 'guestPush']) assert.ok(!C.ids('board', SEATS[s], BOARD_MINE).includes('board.web'), s + ': no web page without canWeb');
@@ -1312,6 +1353,36 @@ test('the Board chip: the show kinds as radio, the one the Board shows checked a
   assert.deepEqual([ask.title, ask.fields.map((x) => [x.name, x.max]), ask.choices.map((c) => [c.answer, c.label]), ask.no], ['Show a web page on the Board\'s pages', [['url', 2048]], [['preview', 'Preview'], ['show', 'Show it']], 'Cancel']);
   // The header's console item: Screens & pages… for whoever drives the screens or may change people's pages.
   assert.deepEqual(['guestPush', 'tech', 'research'].map((s) => ids('header', SEATS[s], HEADER).includes('header.screens')), [true, true, false]);
+  // Take down: the information over the show handed back, while there is some, else what is beside it; the operator's
+  // takes down anything, but an account's whose information pushes lack stage.show is greyed with the server's words.
+  assert.ok(!ids('board', SEATS.adminPush, BOARD_MINE).includes('board.takeDown'), 'nothing over the show: no Take down');
+  assert.deepEqual([C.ready('board', 'board.takeDown', SEATS.adminPush, BOARD_INFO), C.ready('board', 'board.takeDown', SEATS.adminPush, BOARD_OPERATOR)], [true, true]);
+  assert.deepEqual([C.downOf(SEATS.adminPush, BOARD_BESIDE).seq, C.downOf(SEATS.adminPush, BOARD_BESIDE_ONLY).seq, C.downOf(SEATS.adminPush, BOARD_MINE)], [9, 10, null]);
+  assert.equal(C.ready('board', 'board.takeDown', SEATS.techPush, { ...BOARD_INFO, show: false }), 'Showing files, pages and quotes on the stage needs its own right — ask an admin.');
+});
+
+test('the Board chip for a seat that may only show (canShow): Take down over its own kind of take, the operator\'s disabled with why; a web page with its right; no show kind, no ↶ Back to; Screens & pages…', () => {
+  const menu = (s, o) => plain(C.items('board', SEATS[s], o)).filter((i) => !i.sep).map((i) => [i.id, i.disabled]);
+  // A researcher's web page: taken down by a seat with its web right, greyed for one without (it could not have put it up).
+  assert.deepEqual(menu('staffShowWeb', BOARD_INFO), [['board.web', ''], ['board.takeDown', ''], ['board.screens', '']]);
+  assert.deepEqual(menu('staffShow', BOARD_INFO), [['board.takeDown', 'Web pages on the stage need their own right — ask an admin.'], ['board.screens', '']]);
+  assert.deepEqual(menu('staffShow', BOARD_OPERATOR), [['board.takeDown', 'The operator put this up — ask them.'], ['board.screens', '']]);
+  assert.deepEqual(menu('staffShow', BOARD_MINE), [['board.screens', '']], 'nothing over the show: nothing to take down');
+  // Beside the operator's, in their side bar: its own Take down names it, the operator's over the show left; the
+  // operator's on one Board member's page holds the Board's Take down back.
+  assert.deepEqual([C.downOf(SEATS.staffShowWeb, BOARD_BESIDE).seq, C.ready('board', 'board.takeDown', SEATS.staffShowWeb, BOARD_BESIDE)], [10, true]);
+  assert.deepEqual([C.downOf(SEATS.staffShowWeb, BOARD_BESIDE_ONLY).seq, C.ready('board', 'board.takeDown', SEATS.staffShowWeb, BOARD_BESIDE_ONLY)], [10, true]);
+  assert.equal(C.ready('board', 'board.takeDown', SEATS.staffShowWeb, BOARD_OP_ON), 'The operator is showing something on a Board page — ask them.');
+  // A person On stage: Take down of a researcher's on their pages, the operator's greyed.
+  const gil = { ...PAGE_OBJECTS.person.keyed, role: 'board', where: 'console', info: INFO_SHOWN };
+  assert.deepEqual([C.ready('person', 'person.takeDown', SEATS.staffShowWeb, gil), C.ready('person', 'person.takeDown', SEATS.staffShowWeb, { ...gil, info: { ...INFO_SHOWN, op: true } })], [true, 'The operator put this up — ask them.']);
+  assert.equal(C.downOf(SEATS.staffShowWeb, { ...gil, info: { ...INFO_SHOWN, op: true }, beside: BESIDE }).seq, 10, 'what is beside the operator\'s is its own');
+  assert.deepEqual(menu('staffShowWeb', BOARD_MINE).map((i) => i[0]), ['board.web', 'board.screens'], 'its stage.web: Show a web page…');
+  assert.deepEqual(['staffShow', 'staffShowWeb'].map((s) => ids('header', SEATS[s], HEADER).includes('header.screens')), [true, true], 'its console');
+  // A person: Show them a web page… with its right, on a person On stage alone (the console lists no one else to it).
+  const kim = PAGE_OBJECTS.person.keyed;
+  assert.deepEqual([ids('person', SEATS.staffShowWeb, { ...kim, role: 'board' }), ids('person', SEATS.staffShowWeb, { ...kim, role: 'research' }), ids('person', SEATS.staffShow, { ...kim, role: 'board' })],
+    [['person.mention', 'person.web'], ['person.mention'], ['person.mention']]);
 });
 
 test('a person, from a seat that may change what people\'s pages show: 📺 Show them ▸ the show kinds, the one their pages show checked; Back to chat on their pages, said already where they are', () => {

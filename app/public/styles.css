@@ -1986,6 +1986,13 @@ h1[tabindex="-1"]:focus, h3[tabindex="-1"]:focus { outline: none; }
 .take-card-by { font-size: var(--fs-sm); color: var(--c-ink-muted); }
 .take-card-by:empty { display: none; }
 .take-card-acts { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.take-card + .take-card { margin-top: var(--sp-2); }
+/* Information that arrived in the side bar is drawn in its card, over the dark of the stage, a web page framed there. */
+.take-card-box { display: flex; flex-direction: column; min-height: 6rem; max-height: 40vh; overflow: auto; border-radius: var(--radius-sm); background: var(--c-take); color: var(--stage-ink); }
+.take-card-box .take-web-frame { min-height: 14rem; }
+/* Earlier: what was taken off this page lately, each a Look */
+.take-earlier-head { font-size: var(--fs-sm); font-weight: 600; color: var(--c-ink-muted); padding-bottom: var(--sp-1); }
+.take-earlier .take-card { border-left-color: var(--c-border); }
 .doc-panel.collapsed .take-cards { display: none; }
 body[data-pushed][data-role="observer"] .doc-panel { display: flex; flex-direction: column; flex: 0 0 min(22rem, 40%); min-width: 0; background: var(--card); border-left: 1px solid var(--c-border); overflow: hidden; }
 @media (max-width: 800px) {
@@ -1999,7 +2006,8 @@ body[data-pushed][data-role="observer"] .doc-panel .doc-actions, body[data-pushe
   border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); font: inherit; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; cursor: pointer; }
 .board-chip[hidden] { display: none; }
 .board-chip:focus-visible { outline: 2px solid var(--c-action); outline-offset: 2px; }
-.board-chip .board-state[hidden] { display: none; }
+.board-chip .board-state[hidden], .board-chip .board-over[hidden] { display: none; }
+.board-chip .board-over-state { font-variant-numeric: tabular-nums; }
 .board-chip .board-state { font-variant-numeric: tabular-nums; }
 
 /* The console's tabs (Screens · People's pages), and its People's pages: the Board's row, then each person's */

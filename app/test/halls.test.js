@@ -19,7 +19,7 @@ const tlsmod = require('../lib/tls');
 const { buildContext } = require('../lib/context');
 const { cleanText } = require('../lib/guard');
 const { io } = require('socket.io-client');
-const { startServer, restartServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, fakeNode, freePort, pngOf, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, answer, once, wait, until, fakeStagewatch, fakeNode, freePort, pngOf, inviteOf, TOKEN } = require('./helpers');
 const wire = require('../lib/machinewire');
 
 // Fake node keys for the fake Stagewatches: the shape of a real one, so the test proves where each goes.
@@ -189,7 +189,7 @@ test('halls end to end: two Stagewatches, the board, help', async (t) => {
     await emit(pm, 'board:watch', {});
     const next = (pred) => new Promise((resolve) => { const on = (b) => { if (pred(b)) { pm.off('board', on); resolve(b); } }; pm.on('board', on); });
     const bea = await connect(base); sockets.push(bea);
-    assert.ok((await emit(bea, 'join', { roomCode: hallA, name: 'Bea', role: 'board' })).ok);
+    assert.equal((await emit(bea, 'join', { roomCode: hallA, name: 'Bea', role: 'board', invite: inviteOf(srv.dataDir, hallA) })).role, 'board');
     const mine = (b, id) => b.help.filter((h) => h.id === id).map((h) => [h.category, h.text, h.state, h.from]);
 
     // "Something else" is sent as 'Other'; Cancel request is the author's own delete.
@@ -358,10 +358,12 @@ test('a hall\'s Set up: its screens follow a removed Stagewatch at once; an unch
     const g = await connect(base); sockets.push(g);
     const metas = [];
     g.on('roomMeta', (m) => metas.push(m));
-    assert.ok((await emit(g, 'join', { roomCode: code, name: 'Gil', role: 'board' })).ok);
+    assert.ok((await emit(g, 'join', { roomCode: code, name: 'Gil', role: 'board', invite: inviteOf(srv.dataDir, code) })).ok);
     const seen = await screenOf(code);
     await until(() => seen.length > 0, 3000, 'the screen\'s first state');
     const n = seen.length;
+    // Gil's On stage seat, kept as he took it, is a change of the hall's own: read from here on.
+    metas.length = 0;
     // What halls.js sends on Save: the new name and a port with one digit too many.
     const refused = await save(code, { name: 'Ballroom', stagewatchUrl: '127.0.0.1:99240' });
     assert.deepEqual([refused.ok, /not a Stagewatch address/.test(refused.error)], [false, true], JSON.stringify(refused));
@@ -568,7 +570,8 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
   const ctl = await open(admin);
 
   const asAccount = async (cookie, code) => { const s = await open(cookie); const j = await emit(s, 'join', { roomCode: code, as: 'account' }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
-  const guest = async (code, name, role, extra = {}) => { const s = await open(); const j = await emit(s, 'join', { roomCode: code, name, role, ...extra }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
+  // On stage with the link the admin sent (an open hall's code seats nobody there).
+  const guest = async (code, name, role, extra = {}) => { const s = await open(); const j = await emit(s, 'join', { roomCode: code, name, role, ...(role === 'board' ? { invite: inviteOf(srv.dataDir, code) } : {}), ...extra }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
   const heard = (s, ...events) => { const got = []; for (const ev of events) s.on(ev, (v) => got.push([ev, v])); return got; };
   const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });   // events whose ack is their only argument
   const myRooms = (s) => ask(s, 'myRooms');
@@ -773,7 +776,7 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     const st = { last: -1, joined: false, identity: '', joins: 0, role: null, roomName: '', metas: [] };
     const rejoin = () => new Promise((resolve) => {
       st.joins++;
-      const who = cookie ? { as: 'account' } : { name, role, uid: st.identity };
+      const who = cookie ? { as: 'account' } : { name, role, uid: st.identity, ...(role === 'board' ? { invite: inviteOf(srv.dataDir, code) } : {}) };
       s.emit('join', { roomCode: code, since: st.joined ? st.last : undefined, ...who }, (r) => {
         assert.ok(r && r.ok, JSON.stringify(r));
         if (r.identity) st.identity = r.identity;
@@ -798,6 +801,8 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     const pages = [await page(hallF, 'Bo', 'board'), await page(hallF, 'Cy', 'board'), await page(hallF, 'Di', 'research')];
     await wait(200);
     lines.length = 0;
+    // The On stage seats an open hall keeps are saved as they are taken (numbered changes of their own): read from here on.
+    for (const p of pages) p.st.metas.length = 0;
     const before = pages.map((p) => p.st.last);
     const pm = await open(pat);
     assert.ok((await emit(pm, 'hall:configure', { code: hallF, name: 'Hall F (Main)' })).ok);
@@ -881,10 +886,10 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     // Eve's Wi-Fi drops; her page comes back on a new connection with what its link says: board, no invite.
     eve.s.close();
     await until(async () => !(await listed('Eve')), 3000, 'Eve\'s page gone');
-    const back = await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity });
+    const back = await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity, invite: '' });
     assert.deepEqual([back.j.role, back.j.note], ['board', ''], 'her seat, not an observer\'s');
     assert.ok((await emit(back.s, 'message', { type: 'text', text: 'Board still here' })).ok);
-    const second = await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity });
+    const second = await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity, invite: '' });
     assert.equal(second.j.role, 'board', 'a second page of hers, while the first is open');
 
     // The admin seats Oz backstage; the page reloads with that role in its link, and keeps it.
@@ -900,10 +905,10 @@ test('rights inside a hall: forwards, read-only members, the room list\'s role s
     assert.deepEqual(lines.filter(([, x]) => /joined|left/.test(x.text)).map(([, x]) => x.text), [], 'quiet: they never left');
 
     // Not a seat of theirs: another name on the same browser, another role, or after the admin's logout.
-    assert.equal((await guest(hallJ, 'Not Eve', 'board', { uid: eve.j.identity })).j.role, 'observer');
-    assert.equal((await guest(hallJ, 'Oz', 'board', { uid: oz.j.identity })).j.role, 'observer');
+    assert.equal((await guest(hallJ, 'Not Eve', 'board', { uid: eve.j.identity, invite: '' })).j.role, 'observer');
+    assert.equal((await guest(hallJ, 'Oz', 'board', { uid: oz.j.identity, invite: '' })).j.role, 'observer');
     assert.ok((await emit(ctl, 'admin:kick', { socketId: back.s.id })).ok);
-    assert.equal((await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity })).j.role, 'observer', 'logged out is not a drop');
+    assert.equal((await guest(hallJ, 'Eve', 'board', { uid: eve.j.identity, invite: '' })).j.role, 'observer', 'logged out is not a drop');
   });
 
   // A hall's code is a guest's way in (lookups and joins are rate limited and locked out): it is told only to those who
@@ -965,7 +970,7 @@ test('a locked hall\'s seats outlive the watchdog\'s restart for the pages back 
   const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
   const ctl = await connect(srv.base, admin); sockets.push(ctl);
   const code = (await api(srv.base, 'POST', '/api/rooms', { name: 'Main hall' }, { cookie: admin })).body.code;
-  const join = async (name, role, extra = {}) => { const s = await connect(srv.base); sockets.push(s); const j = await emit(s, 'join', { roomCode: code, name, role, ...extra }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
+  const join = async (name, role, extra = {}) => { const s = await connect(srv.base); sockets.push(s); const j = await emit(s, 'join', { roomCode: code, name, role, ...(role === 'board' ? { invite: inviteOf(srv.dataDir, code) } : {}), ...extra }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
   const kill = async () => {
     for (const s of sockets.splice(0)) s.close();
     srv.child.kill('SIGKILL');
@@ -982,7 +987,7 @@ test('a locked hall\'s seats outlive the watchdog\'s restart for the pages back 
   assert.equal(oz.j.role, 'observer');
   assert.ok((await emit(ctl, 'admin:setRole', { roomCode: code, socketId: oz.s.id, role: 'board' })).ok);
   oz.s.close();
-  const ozBack = await join('Oz Onstage', 'board', { uid: oz.j.identity });
+  const ozBack = await join('Oz Onstage', 'board', { uid: oz.j.identity, invite: '' });
   assert.equal(ozBack.j.role, 'board', 'the reload after the admin\'s change keeps the seat');
   assert.ok((await emit(ctl, 'admin:kick', { socketId: kim.s.id })).ok);
   await wait(300);
@@ -990,7 +995,7 @@ test('a locked hall\'s seats outlive the watchdog\'s restart for the pages back 
   // The server is killed and started again; Sam's and Oz's pages come back, Lee's does not (yet), Kim's was logged out.
   await kill();
   const sam2 = await join('Sam Backstage', 'research', { uid: sam.j.identity, since: sam.j.seq });
-  const oz2 = await join('Oz Onstage', 'board', { uid: oz.j.identity, since: ozBack.j.seq });
+  const oz2 = await join('Oz Onstage', 'board', { uid: oz.j.identity, since: ozBack.j.seq, invite: '' });
   const kim2 = await join('Kim Backstage', 'research', { uid: kim.j.identity });
   const post = await emit(sam2.s, 'message', { type: 'text', text: 'Slide 4 is next' });
   assert.deepEqual({ sam: [sam2.j.role, sam2.j.note], oz: [oz2.j.role, oz2.j.note], post: post.ok, kim: kim2.j.role },
@@ -1000,9 +1005,9 @@ test('a locked hall\'s seats outlive the watchdog\'s restart for the pages back 
   // taken up hold again.
   await wait(6500);
   await kill();
-  const lee2 = await join('Lee Onstage', 'board', { uid: lee.j.identity });
+  const lee2 = await join('Lee Onstage', 'board', { uid: lee.j.identity, invite: '' });
   const sam3 = await join('Sam Backstage', 'research', { uid: sam.j.identity });
-  const oz3 = await join('Oz Onstage', 'board', { uid: oz.j.identity });
+  const oz3 = await join('Oz Onstage', 'board', { uid: oz.j.identity, invite: '' });
   assert.deepEqual({ lee: [lee2.j.role, /invite/.test(lee2.j.note)], sam: sam3.j.role, oz: oz3.j.role }, { lee: ['observer', true], sam: 'research', oz: 'board' });
 });
 
@@ -1726,7 +1731,7 @@ test('rooms are made, renamed, reset and removed by those who set halls up; a si
   assert.deepEqual(accounts().tom, { halls: [hallA], rooms: [LEGAL], board: [] });
   // What Hall B's people's pages were shown goes with it; Hall A's, and the guest's chat view, stay as they were.
   await until(() => !fs.readFileSync(pagesFile, 'utf8').includes(hallB), 3000, 'the people\'s pages saved');
-  assert.deepEqual(JSON.parse(fs.readFileSync(pagesFile, 'utf8')), { v: 1, views: { 'u:uguestview01': { view: 'simple', at: 1 } }, halls: { [hallA]: hallAPages } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(pagesFile, 'utf8')), { v: 1, views: { 'u:uguestview01': { view: 'simple', at: 1 } }, halls: { [hallA]: { ...hallAPages, earlier: [] } } });
   assert.deepEqual(await emit(ctl2, 'nodes:command', { id: 'patb', line: 'CUE 2', mode: 'propose' }),
     { ok: false, error: 'Patterns B was linked for a hall that has been closed: link it again for a hall, or for every hall (Admin → Show network) — not proposed.' });
   assert.equal(sw.proposals.size, proposed, 'nothing reached the default Stagewatch\'s desk');

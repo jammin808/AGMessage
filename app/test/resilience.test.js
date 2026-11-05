@@ -908,16 +908,18 @@ test('a restart announces nobody: a 3-page hall back after a restart writes no "
   const join = async (base, args) => { const s = await h.connect(base); sockets.push(s); return { s, res: await h.emit(s, 'join', { roomCode: code, ...args }) }; };
   /** A page as the hall page keeps itself: who it is, and the newest change it holds (its join's seq, then each it hears). */
   async function page(name, role) {
-    const p = { name, role, seq: 0 };
-    const { s, res } = await join(srv.base, { name, role });
-    assert.ok(res.ok, name + ' joined');
+    const p = { name, role, seq: 0, lines: [] };
+    // On stage with the link the admin sent: an open hall's code seats nobody there, and its On stage seats are kept.
+    const { s, res } = await join(srv.base, { name, role, ...(role === 'board' ? { invite: h.inviteOf(srv.dataDir, code) } : {}) });
+    assert.equal(res.role, role, name + ' joined');
     p.uid = res.identity;
     p.seq = res.seq;
-    for (const ev of ['message', 'system']) s.on(ev, (m) => { if (Number.isInteger(m.seq) && m.seq > p.seq) p.seq = m.seq; });
+    for (const ev of ['message', 'system']) s.on(ev, (m) => { if (Number.isInteger(m.seq) && m.seq > p.seq) p.seq = m.seq; if (ev === 'system') p.lines.push(m.text); });
     return p;
   }
   const pages = [await page('Ana', 'research'), await page('Ben', 'board'), await page('Cy', 'observer')];
-  await h.until(() => pages[0].seq >= 3, 3000, 'Ana has heard the others join');   // each join is a numbered line
+  // Each join is a numbered line (Ben's On stage seat, kept as he takes it, a numbered change of its own before his).
+  await h.until(() => pages[0].lines.includes('Cy joined as an observer'), 3000, 'Ana has heard the others join');
   const joinedLines = (history) => history.filter((m) => m.type === 'system' && / joined /.test(m.text)).map((m) => m.text);
   /** The lines the hall gained after the stop, which left it at change `seq`. */
   const after = (history, seq) => history.filter((m) => m.seq > seq);

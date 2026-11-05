@@ -102,6 +102,11 @@ const ONLY_ADMIN_WEB = 'Only an admin may let backstage guests show web pages.';
 /** What the switch answers on a side room, and on an open hall, where no code guest shows anything. */
 const WEB_ON_MAIN = 'This is set on the hall\'s Main room.';
 const WEB_LOCK_FIRST = 'Lock the roles first: in an open hall, code guests show nothing.';
+/** The seats a room's invite links are for, by the room's kind, and each as a row says its link. */
+const LINK_SEATS = Object.freeze({ main: Object.freeze(['board', 'research']), side: Object.freeze(['research']) });
+const LINK_SAID = Object.freeze({ board: 'On stage', research: 'Backstage' });
+const NO_LINK = 'Choose the link to replace: On stage, or Backstage (a side room\'s Member link).';
+const NO_CODE = 'This room has no guest code: its links are made once it has one.';
 /** What `history:before` answers where it is not told where to read back from. */
 const EARLIER_FROM = 'Say where to read back from: beforeSeq, the change number of the oldest message this page holds.';
 /** What `history:message` answers for an id the room holds no message by. */
@@ -147,7 +152,7 @@ const made = new Map();
  * @param {object} ctx    the server's context, frozen (lib/gate.js `contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, sendersOf, sendsInto, setRoomSends, pages, tellWebRights } = ctx;
+  const { store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, sendersOf, sendsInto, setRoomSends, pages, tellWebRights } = ctx;
 
   /** A hall as a refusal names it: its name, or "This hall" when it has none. */
   const hallSaid = (hall) => hall.name || 'This hall';
@@ -532,6 +537,31 @@ function register(socket, conn, ctx) {
       : 'backstage guests may no longer show web pages' + (left.up ? ' (' + left.up + ' shown now ' + (left.up === 1 ? 'stays' : 'stay') + ' until taken down)' : ''));
     tellWebRights(room.code);
     answer({ ok: true, ...told });
+  });
+
+  // A new invite link for a seat (plan 4-§5.9.2.1): `{roomCode, role}`, the admin's (its page's gate), 'board' (On stage,
+  // a hall's Main room alone) or 'research' (Backstage; a side room's Member). The room's number for that seat goes up by
+  // one (`settings.invites`, a meta op its log keeps), so the link before it admits nobody new, without a new code: the
+  // seats already held stay (a seat is kept by who holds it, never by the link). One `room.invite` row, which carries no
+  // link; the answer is the room's links as they are now, as `admin:invites` gives them.
+  socket.on('admin:newInvite', (args, ack) => {
+    if (!conn.gate(ack, { joined: false, bucket: conn.writes, admin: true })) return;
+    const answer = conn.ok(ack);
+    const a = isRecord(args) ? args : {};
+    const room = roomOf(keyOf(a.roomCode));
+    if (!room) return answer({ ok: false, error: 'No such room.' });
+    const seats = LINK_SEATS[store.isMain(room) ? 'main' : 'side'];
+    if (typeof a.role !== 'string' || !seats.includes(a.role)) return answer({ ok: false, error: NO_LINK });
+    if (!store.guestCodeOf(room)) return answer({ ok: false, error: NO_CODE });
+    const was = isRecord(room.settings.invites) ? room.settings.invites : {};
+    const n = Number.isSafeInteger(was[a.role]) && was[a.role] > 0 ? was[a.role] : 0;
+    const next = {};
+    for (const role of seats) if (Number.isSafeInteger(was[role]) && was[role] > 0) next[role] = was[role];
+    next[a.role] = n + 1;
+    if (!apply(room, { o: 'meta', settings: { invites: next } })) return answer({ ok: false, error: OP_REFUSED });
+    const said = store.isMain(room) ? LINK_SAID[a.role] : 'Member';
+    write('room.invite', room.code, 'a new ' + said + ' link (the old one no longer admits)');
+    answer({ ok: true, invites: invitesFor(room), codeOn: store.codeOn(room) });
   });
 
   // A room's earlier messages (`{beforeSeq}`, the change number of the oldest message its page holds): the WINDOW before

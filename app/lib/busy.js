@@ -41,7 +41,7 @@ const ACTIVITY_MAX = 10_000;
 const KEYS = Object.freeze(['active', 'takes', 'help', 'countdowns', 'seats', 'screens', 'sockets']);
 
 const INPUT = new Set([
-  'actionResponse', 'admin:acceptCertificate', 'admin:createRoom', 'admin:deleteMessage', 'admin:deleteRoom', 'admin:guestWeb', 'admin:kick',
+  'actionResponse', 'admin:acceptCertificate', 'admin:createRoom', 'admin:deleteMessage', 'admin:deleteRoom', 'admin:guestWeb', 'admin:kick', 'admin:newInvite',
   'admin:linkRoom', 'admin:lockRoles', 'admin:postSummary', 'admin:renewCertificate', 'admin:resetRoom', 'admin:setRole',
   'admin:settings', 'admin:summary', 'admin:tunnelStart', 'admin:tunnelStop', 'admin:tunnelUntil', 'admin:unlinkRoom',
   'ai:draft', 'ai:options', 'delete', 'display:create', 'display:hallHolding', 'display:identify', 'display:remove',

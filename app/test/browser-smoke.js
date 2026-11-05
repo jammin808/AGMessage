@@ -18,7 +18,7 @@ const path = require('path');
 const http = require('http');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
-const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort, readSource, officeZip, wordParts, wordPicture, deckParts, deckShape, deckPicture, deckSlide, workbookParts } = require('./helpers');
+const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort, readSource, officeZip, wordParts, wordPicture, deckParts, deckShape, deckPicture, deckSlide, workbookParts, inviteOf } = require('./helpers');
 const { io: ioClient } = require('socket.io-client');
 const ops = require('../lib/ops');
 
@@ -753,7 +753,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await research.eval(`(() => { window.__seenFrames = []; socket.on('seen', (f) => window.__seenFrames.push(f)); })()`);
 
     // Board: joins, sees the message and the document on stage, on a browser with no Promise.withResolvers.
-    const board = await edge.tab(`${base}/app.html?code=${code}&name=Chair&role=board`, { init: NO_RESOLVERS, workerInit: NO_RESOLVERS });
+    const board = await edge.tab(`${base}/app.html?code=${code}&name=Chair&role=board&invite=${inviteOf(dataDir, code)}`, { init: NO_RESOLVERS, workerInit: NO_RESOLVERS });
     report(!!(await board.until('typeof joined !== "undefined" && joined && allMessages.some(m => m.text === "Capex is on slide 14")')), 'board view joins and sees the research message');
     // The word check reads what is hidden, what is in an attribute and a button the page put in a message, and nothing
     // people wrote or named, nor the history: a page given an old word in a closed dialog, in a title, in a message's own
@@ -836,7 +836,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const docsHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Readers hall' }) })).json()).code;
       const docsR = await edge.tab(`${base}/app.html?code=${docsHall}&name=Rea&role=research`, { init: DOC_PROBE });
       report(!!(await docsR.until('typeof joined !== "undefined" && joined && !!UPLOAD_TOKEN')), 'a backstage page joins the hall of documents');
-      const docsB = await edge.tab(`${base}/app.html?code=${docsHall}&name=Bo&role=board`, { init: DOC_PROBE });
+      const docsB = await edge.tab(`${base}/app.html?code=${docsHall}&name=Bo&role=board&invite=${inviteOf(dataDir, docsHall)}`, { init: DOC_PROBE });
       report(!!(await docsB.until('typeof joined !== "undefined" && joined')), 'a Board page joins it');
       docTabs.push(['documents, backstage', docsR], ['documents, On stage', docsB]);
       docsR.expectFailure(/\/api\/upload$/);   // a paced upload's 429, waited out below, is this step's own
@@ -1158,7 +1158,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const pat = await connect(base);
     const ben = await connect(base);
     await emit(pat, 'join', { roomCode: phoneHall, name: 'Pat', role: 'research' });
-    await emit(ben, 'join', { roomCode: phoneHall, name: 'Ben', role: 'board' });
+    await emit(ben, 'join', { roomCode: phoneHall, name: 'Ben', role: 'board', invite: inviteOf(dataDir, phoneHall) });
     // Sent at the pace a socket may write (its burst spent, a "busy" answer is tried again a moment later).
     const post = async (s, args) => { for (let i = 0; i < 60; i++) { const r = await emit(s, 'message', args); if (r && r.ok) return r; await sleep(250); } return null; };
     await post(ben, { type: 'text', text: 'From the stage: is slide 14 the one?' });
@@ -1167,7 +1167,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await post(pat, { type: 'text', text: 'Mic 2 is off', priority: true });
     const phones = {};
     for (const [seat, name] of [['board', 'Bea'], ['research', 'Rob'], ['observer', 'Oli']]) {
-      phones[seat] = await edge.tab(`${base}/app.html?code=${phoneHall}&name=${name}&role=${seat}`, { init: INK, metrics: PHONE });
+      phones[seat] = await edge.tab(`${base}/app.html?code=${phoneHall}&name=${name}&role=${seat}${seat === 'board' ? '&invite=' + inviteOf(dataDir, phoneHall) : ''}`, { init: INK, metrics: PHONE });
       await phones[seat].until(`typeof joined !== "undefined" && joined && allMessages.some((m) => m.priority)`);
     }
     // Bea's page draws the simple view by her seat; this pass reads the full view On stage, which the admin's Chat view
@@ -1850,7 +1850,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await users.eval(`(() => { document.getElementById('agmToast').textContent = ''; document.getElementById('userSave').click(); })()`);
     const kimUntouched = await users.until(`(document.getElementById('agmToast') || {}).textContent === 'Saved — nothing changed.' && !document.getElementById('userDialog').open`, 5000);
     report(tree === JSON.stringify({ hall: `Smoke AGM — Main room and hall rights (${code})`, board: 'On stage (Board member)', rooms: ['Press:false'], every: 'Every hall\'s Main room, including new ones (not their other rooms)',
-      views: ['By seat', 'Simple', 'Full'], view: '', groups: ['In the room:3', 'Show:5', 'Run AGMessage:5'], foot: 'sticky' }),
+      views: ['By seat', 'Simple', 'Full'], view: '', groups: ['In the room:3', 'Show:6', 'Run AGMessage:5'], foot: 'sticky' }),
       `the Accounts page's editor: each hall's Main room with On stage beside it and its rooms under it, Chat view, the rights in three groups, the footer in sight (${tree})`);
     report(!!kimGiven && kimNow === JSON.stringify({ rooms: [pressKey], board: [code], view: 'simple' }) && kimCell === 'GONE01 (Main); Smoke AGM (Main, Press) · On stage' && kimShown === JSON.stringify([true, true, 'simple'])
       && linkedTicks === JSON.stringify([[false, false], [true, true]]) && !!kimUntouched,
@@ -2993,9 +2993,18 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const op = await edge.tab(`${base}/app.html?code=${tkHall}&as=account&role=research`);
     await op.until(`typeof joined !== 'undefined' && joined && F.canPush && !document.getElementById('boardChip').hidden`, 10000);
     await op.eval(`new Promise((r) => socket.emit('hall:configure', { code: ROOM, stagewatchUrl: ${codeLiteral(sw.url)}, stagewatchKey: ${codeLiteral(KEY)} }, r))`);
-    const beaPad = await edge.tab(`${base}/app.html?code=${tkHall}&name=Bea&role=board`, { alone: true });
+    const beaPad = await edge.tab(`${base}/app.html?code=${tkHall}&name=Bea&role=board&invite=${inviteOf(dataDir, tkHall)}`, { alone: true });
     const obiPad = await edge.tab(`${base}/app.html?code=${tkHall}&name=Obi&role=observer`, { alone: true });
     for (const t of [beaPad, obiPad]) await t.until(`typeof joined !== 'undefined' && joined`, 10000);
+    // Joined with the On stage link, Bea's page takes the code and the invite out of its address (and the shared tablet's
+    // history), keeps them for this tab alone, and a reload in that tab rejoins On stage.
+    const ADDRESS = `JSON.stringify({ search: location.search, role: F.role, kept: (() => { try { return !!JSON.parse(sessionStorage.getItem('agm.join')).invite; } catch { return false; } })(), history: history.length })`;
+    const beaAddress = JSON.parse(await beaPad.until(`(() => { const v = ${ADDRESS}; return !/code=/.test(location.search) && v; })()`, 5000) || 'null');
+    await beaPad.eval(`window.__beforeReload = 1`);
+    await beaPad.send('Page.reload');
+    const beaReloaded = JSON.parse(await beaPad.until(`!window.__beforeReload && typeof joined !== 'undefined' && joined && ${ADDRESS}`, 10000) || 'null');
+    report(!!beaAddress && beaAddress.search === '?name=Bea&role=board' && beaAddress.role === 'board' && beaAddress.kept && !!beaReloaded && beaReloaded.search === '?name=Bea&role=board' && beaReloaded.role === 'board',
+      `after joining with the On stage link the address holds no code= or invite=, kept for this tab alone, and a reload in that tab rejoins On stage (${JSON.stringify({ beaAddress, beaReloaded })})`);
     // Bea's page draws the simple view by her seat; the take's and the card's doors below are the full view's, which the
     // admin's Chat view gives her live (moved on purpose: the simple view's take has its buttons alone, read with the web
     // page below, and its own pass, the Board's chat view's).
@@ -3186,8 +3195,15 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       credentialless: f.credentialless === true, title: f.title, src: f.src, frames: document.querySelectorAll('iframe').length }) : ''; })()`;
     const FRAMED = (url, host) => ({ sandbox: 'allow-scripts allow-same-origin', referrer: 'no-referrer', allow: '', credentialless: true, title: 'Web page from ' + host, src: url, frames: 1 });
     // From the console's Board row: Show a web page… asks for the address; Preview frames it on the operator's own page
-    // first, in the one frame; Show it there puts it on Bea's page, which reports ◇ opened once it loads (never ✓).
+    // first, in the one frame; Show it there puts it on Bea's page, which reports ◇ opened once it loads (never ✓). It is
+    // information over the show: the clock the Board shows stays under it, said so (◐ under a web page), and the chip reads
+    // both, the show and what is over it.
+    await boardRow('board.clock');
+    await layerOf(beaPad, `(v) => v.kind === 'clock'`, 5000);
     await unsay(op);
+    /** The console's Board row: what is over the show, in its words ('' for nothing). */
+    const BOARD_OVER = `(() => { const li = document.querySelector('#peoplePages li[data-key="board"]'); const m = li && /· over it: (.*)$/.exec(li.querySelector('.page-showing').textContent); return m ? m[1] : ''; })()`;
+    const CHIP_OVER = `(() => { const o = document.getElementById('boardOver'); return o.hidden ? '' : o.textContent.trim(); })()`;
     const webPushed = await boardRow('board.web');
     const webAsked = JSON.parse(await askWeb(WEB_OK, 'preview'));
     const previewFrame = JSON.parse(await op.until(`document.getElementById('webPreview').open && ${FRAME('#webPreviewBox iframe')}`, 5000) || 'null');
@@ -3197,15 +3213,16 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await op.eval(`document.getElementById('webPreviewShow').click()`);
     const beaWeb = JSON.parse(await beaPad.until(`document.getElementById('pageLayer').dataset.kind === 'web' && ${FRAME('#layerBox iframe')}`, 8000) || 'null');
     const beaWebBar = await beaPad.eval(`JSON.stringify({ note: document.querySelector('#layerBox .take-web-note').textContent, acts: [...document.querySelectorAll('#layerActs > [data-action]')].map((x) => x.dataset.action).filter((a) => a !== 'take.fullscreen'), what: document.getElementById('layerWhat').textContent.replace(/ · \\d.*$/, '') })`);
-    const webOpened = await op.until(`/^◇ /.test(${boardState}) && ${boardState}`, 10000);
-    const chipWeb = await op.until(`${BOARD_CHIP} === 'Board · 🌍 Web page ◇ 1/1' && ${BOARD_CHIP}`, 6000);
+    const webOpened = await op.until(`/\\(Opened/.test(${BOARD_OVER}) && ${BOARD_OVER}`, 10000);
+    const chipWeb = await op.until(`${BOARD_CHIP} === 'Board · 🕐 Clock ◐ 0/1' && ${CHIP_OVER} === '· 🌍 Web page ◇ 1/1' && ${BOARD_CHIP} + ' ' + ${CHIP_OVER}`, 6000);
+    const clockUnder = await op.until(`/^◐ Under a web page/.test(${boardState}) && ${boardState}`, 6000);
     const previewGone = await op.eval(`!document.getElementById('webPreview').open && !document.querySelector('#webPreviewBox iframe')`);
     await beaPad.shot(path.join(OUT, 'take-web.png'));
     report(webPushed === 'pushed' && JSON.stringify(webAsked) === JSON.stringify({ title: 'Show a web page on the Board\'s pages', answers: ['preview=Preview', 'show=Show it', 'no=Cancel'] })
       && JSON.stringify(previewFrame) === JSON.stringify(FRAMED(WEB_OK, 'agm-web.invalid')) && previewHost === 'agm-web.invalid' && beaBeforeShow !== 'web'
       && JSON.stringify(beaWeb) === JSON.stringify(FRAMED(WEB_OK, 'agm-web.invalid')) && previewGone
       && beaWebBar === JSON.stringify({ note: 'A web page chosen by Ana Admin (agm-web.invalid). Don\'t type passwords here.', acts: ['take.chat', 'take.minimise'], what: 'Shown to you: a web page · from Ana Admin' })
-      && webOpened === '◇ Opened · AGMessage can\'t see inside web pages' && chipWeb === 'Board · 🌍 Web page ◇ 1/1',
+      && webOpened === 'a web page on agm-web.invalid (Opened · AGMessage can\'t see inside web pages)' && chipWeb === 'Board · 🕐 Clock ◐ 0/1 · 🌍 Web page ◇ 1/1' && clockUnder === '◐ Under a web page',
       `Show a web page… asks for its address; Preview frames it on the operator's page alone, and Show it there puts it on Bea's page in the one frame (sandboxed for scripts alone, no referrer, no feature, no cookies, its host in its title), with AGMessage's strip and, in her simple view, the layer's buttons alone; it reads ◇ opened once it loads, never ✓ (${JSON.stringify({ webAsked, previewFrame, beaWeb, beaWebBar, webOpened, chipWeb })})`);
     // In the full view, Open in a new tab is in the layer's ⋯ (and its right-click), never on its bar: from the console,
     // Obi's row, Show them a web page… puts it on his page.
@@ -3226,11 +3243,117 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     await boardRow('board.web');
     await askWeb(WEB_STUCK, 'show');
     const stuckUp = JSON.parse(await beaPad.until(`(() => { const f = document.querySelector('#layerBox iframe'); return f && f.src === ${codeLiteral(WEB_STUCK)} && ${FRAME('#layerBox iframe')}; })()`, 4000) || 'null');
-    const stuckWaiting = await op.until(`/^◷ /.test(${boardState}) && ${boardState}`, 4000);
-    const stuckFailed = await op.until(`/^△ /.test(${boardState}) && ${boardState}`, 25000);
+    const stuckWaiting = await op.until(`/agm-test\\.invalid \\(Sending/.test(${BOARD_OVER}) && ${BOARD_OVER}`, 4000);
+    const stuckFailed = await op.until(`/agm-test\\.invalid \\(Couldn/.test(${BOARD_OVER}) && ${BOARD_OVER}`, 25000);
     const stuckBar = await beaPad.eval(`JSON.stringify([...document.querySelectorAll('#layerActs > [data-action]')].map((x) => x.dataset.action).filter((a) => a !== 'take.fullscreen'))`);
-    report(!!stuckUp && stuckUp.src === WEB_STUCK && /^◷ /.test(stuckWaiting) && stuckFailed === '△ Couldn\'t show it: the page did not load' && stuckBar === JSON.stringify(['take.chat', 'take.minimise']),
+    report(!!stuckUp && stuckUp.src === WEB_STUCK && /\(Sending/.test(stuckWaiting) && stuckFailed === 'a web page on agm-test.invalid (Couldn\'t show it: the page did not load)' && stuckBar === JSON.stringify(['take.chat', 'take.minimise']),
       `a web page that never loads is on Bea's page at once (${stuckWaiting}), and reads △ once its 15 s are up (${stuckFailed}), Back to chat still on its bar (${stuckBar})`);
+
+    // ---------------- Information over the show (unit 24): Back to chat returns to the show under it, Earlier keeps what
+    // was taken off (a Look), information over the operator's blank is held until a touch, and Take down hands back the
+    // information alone ----------------
+    await beaPad.eval(`document.querySelector('#layerActs [data-action="take.chat"]').click()`);
+    const backToClock = await layerOf(beaPad, `(v) => v.kind === 'clock'`, 5000);
+    const EARLIER_LIST = `JSON.stringify([...document.querySelectorAll('#takeEarlier .take-earlier-item')].map((li) => [li.querySelector('.take-card-name').textContent, [...li.querySelectorAll('[data-action]')].map((b) => b.dataset.action)]))`;
+    const beaEarlier = JSON.parse(await beaPad.until(`(() => { const v = ${EARLIER_LIST}; return JSON.parse(v).length === 2 && v; })()`, 5000) || 'null');
+    await beaPad.eval(`document.querySelector('#takeEarlier [data-action="past.look"]').click()`);
+    const lookFrame = await beaPad.until(`document.getElementById('webPreview').open && JSON.stringify({ host: document.getElementById('webPreviewHost').textContent, show: !document.getElementById('webPreviewShow').hidden, frames: document.querySelectorAll('#webPreviewBox iframe').length })`, 5000);
+    await beaPad.eval(`document.getElementById('webPreview').close()`);
+    report(!!backToClock && JSON.stringify(beaEarlier) === JSON.stringify([['agm-test.invalid', ['past.look']], ['agm-web.invalid', ['past.look']]])
+      && lookFrame === JSON.stringify({ host: 'agm-test.invalid', show: false, frames: 1 }),
+      `Back to chat on the web page returns Bea's page to the clock under it, and her side bar's Earlier keeps what was taken off, the last first, each a Look that frames it on her page alone with nothing to show from there (${JSON.stringify({ beaEarlier, lookFrame })})`);
+    // The operator's blank keeps the tablet dark: a web page put over it is held ("Held under blank"), and Bea's touch shows
+    // "1 from backstage", which draws it over the blank; Take down from the chip hands the information back alone, the
+    // blank under it again.
+    await boardRow('board.blank');
+    await layerOf(beaPad, `(v) => v.kind === 'blank'`, 5000);
+    await unsay(op);
+    await boardRow('board.web');
+    await askWeb(WEB_OK, 'show');
+    const heldSaid = await op.until(`/agm-web\\.invalid \\(Held under blank/.test(${BOARD_OVER}) && ${BOARD_OVER}`, 8000);
+    const stillBlank = await beaPad.eval(`document.getElementById('pageLayer').dataset.kind`);
+    await leftClick(beaPad, { x: 700, y: 500 });
+    const heldBar = await beaPad.until(`(() => { const b = document.querySelector('#layerActs [data-action="take.held"]'); return b && /1 from backstage/.test(b.textContent) && document.getElementById('pageLayer').dataset.kind === 'blank' && 'held'; })()`, 3000);
+    await beaPad.eval(`document.querySelector('#layerActs [data-action="take.held"]').click()`);
+    const heldShown = await beaPad.until(`document.getElementById('pageLayer').dataset.kind === 'web' && !!document.querySelector('#layerBox iframe') && 'web'`, 5000);
+    const heldOpened = await op.until(`/agm-web\\.invalid \\(Opened/.test(${BOARD_OVER}) && ${BOARD_OVER}`, 8000);
+    const takeDownRow = await chipPick('board.takeDown');
+    const downToBlank = await beaPad.until(`document.getElementById('pageLayer').dataset.kind === 'blank' && 'blank'`, 5000);
+    const overGone = await op.until(`${CHIP_OVER} === '' && ${BOARD_OVER} === '' && ${BOARD_CHIP}`, 6000);
+    report(heldSaid === 'a web page on agm-web.invalid (Held under blank)' && stillBlank === 'blank' && heldBar === 'held' && heldShown === 'web' && /\(Opened/.test(heldOpened || '')
+      && takeDownRow.label === 'Take down' && downToBlank === 'blank' && /^Board · 🌑 Blank/.test(overGone || ''),
+      `a web page over the operator's blank is held (${heldSaid}), Bea's touch shows "1 from backstage", which draws it over the blank; the chip's Take down hands the information back alone, her page back to the blank (${JSON.stringify({ stillBlank, heldBar, heldShown, takeDownRow, overGone })})`);
+
+    // ---------------- A researcher's own right (canShow, unit 24): a Staff account granted stage.web, backstage in the takes
+    // hall, has the Board chip and a reduced console (the Board and the people On stage alone). Over the operator's web
+    // page its Take down is disabled with why, and its own web page goes to the Board's side bar beside the operator's:
+    // drawn there in the one frame, the panel opened, its toast offering Take down (never Undo). Under the operator's page
+    // on Bea's layer it is said to be under it; once she minimises that, it is opened in her side bar. Show over the chat
+    // draws it over her chat; its own Take down takes it off there alone, the operator's left ----------------
+    const WEB_NOTES = 'https://agm-web.invalid/notes';
+    await chatViewOf('Bea', 'full');
+    await beaPad.until(`document.body.dataset.view === 'full'`, 5000);
+    await boardRow('board.chat');
+    await beaPad.until(`document.getElementById('pageLayer').hidden && 'chat'`, 5000);
+    await unsay(op);
+    await boardRow('board.web');
+    await askWeb(WEB_OK, 'show');
+    await beaPad.until(`(() => { const f = document.querySelector('#layerBox iframe'); return f && f.src === ${codeLiteral(WEB_OK)} && 'web'; })()`, 8000);
+    // Made by the admin account the operator's page is signed in as (the laptop's token makes no account).
+    const sueMade = await op.eval(`fetch('/api/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sue', name: 'Sue Staff', role: 'staff', halls: ['${tkHall}'], grant: ['stage.web'], password: 'notes on the lectern' }) }).then((r) => r.status)`);
+    const sueTab = await edge.tab(`${base}/build.js`, { alone: true });
+    await sueTab.until(`document.readyState === 'complete'`);
+    const sueIn = await sueTab.eval(`(async () => { for (let i = 0; i < 5; i++) { const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sue', password: 'notes on the lectern' }) }); if (r.status !== 429) return r.status; await new Promise((ok) => setTimeout(ok, 2100)); } return 429; })()`);
+    await sueTab.send('Page.navigate', { url: `${base}/app.html?code=${tkHall}&as=account&role=research` });
+    const sueReady = await sueTab.until(`typeof joined !== 'undefined' && joined && F.canShow && !F.canPush && F.canWeb && !document.getElementById('boardChip').hidden && !!Console.board() && !!Console.board().info && 'ready'`, 10000);
+    /** Sue's Board chip opened: each act's id, and the words of one that is disabled ('' for one that is not). */
+    const sueChip = async () => {
+      await sueTab.eval(`AGM.menu.close(); document.getElementById('boardChip').click()`);
+      await sueTab.until(`!!document.querySelector('.agm-menu [data-action]')`, 3000);
+      return JSON.parse(await sueTab.eval(`JSON.stringify([...document.querySelectorAll('.agm-menu [data-action]')].map((b) => [b.dataset.action, b.getAttribute('aria-disabled') === 'true' ? b.querySelector('.mi-why').textContent : '']))`));
+    };
+    const sueMenu = await sueChip();
+    const sueRows = JSON.parse(await sueTab.eval(PAGE_ROWS)).map((r) => r[0]);
+    await sueTab.eval(`document.querySelector('.agm-menu [data-action="board.web"]').click()`);
+    await sueTab.until(`!!document.querySelector('.agm-ask input[name="url"]')`, 3000);
+    await sueTab.eval(`(() => { const box = document.querySelector('.agm-ask'); box.querySelector('input[name="url"]').value = ${codeLiteral(WEB_NOTES)}; box.querySelector('[data-answer="show"]').click(); return true; })()`);
+    const sueSaid = await sueTab.until(TOAST_SAID, 5000);
+    const BESIDE_CARD = `(() => { const li = document.querySelector('#takeCards li.take-card-side[data-layer="beside"]'); const f = li && li.querySelector('.take-card-box iframe'); return f ? JSON.stringify({ sandbox: f.getAttribute('sandbox'), referrer: f.getAttribute('referrerpolicy'), allow: f.getAttribute('allow'),
+      credentialless: f.credentialless === true, title: f.title, src: f.src, open: !document.getElementById('docPanel').classList.contains('collapsed'), rail: document.getElementById('docExpandRail').textContent,
+      over: (document.querySelector('#layerBox iframe') || {}).src || '', acts: [...li.querySelectorAll('.take-card-acts [data-action]')].map((b) => b.dataset.action) }) : ''; })()`;
+    const beaBeside = JSON.parse(await beaPad.until(BESIDE_CARD, 8000) || 'null');
+    /** What Sue's console reads beside the operator's, and over the show: [mark, words]. */
+    const SUE_READS = (re) => `(() => { const b = Console.board(); return b && b.beside && b.info && ${re}.test(b.beside.words) ? JSON.stringify({ beside: [b.beside.mark, b.beside.words, b.beside.arrive, b.beside.op], info: [b.info.mark, b.info.words, b.info.op] }) : ''; })()`;
+    const sueUnder = JSON.parse(await sueTab.until(SUE_READS('/^Under/'), 10000) || 'null');
+    await beaPad.shot(path.join(OUT, 'take-beside.png'));
+    // Bea minimises the operator's page: hers is in view in the side bar now, and said opened there.
+    await beaPad.eval(`document.querySelector('#layerActs [data-action="take.minimise"]').click()`);
+    const sueOpened = JSON.parse(await sueTab.until(SUE_READS('/^Opened/'), 10000) || 'null');
+    const sueChipWords = await sueTab.eval(`document.getElementById('boardOver').textContent.trim()`);
+    await beaPad.shot(path.join(OUT, 'take-beside-open.png'));
+    // Show over the chat: Bea's own choice draws it on her layer, the operator's still a card.
+    await beaPad.eval(`document.querySelector('#takeCards li[data-layer="beside"] [data-action="card.show"]').click()`);
+    const beaRaised = await beaPad.until(`(() => { const f = document.querySelector('#layerBox iframe'); return f && f.src === ${codeLiteral(WEB_NOTES)} && !document.querySelector('#takeCards li[data-layer="beside"]') && !!document.querySelector('#takeCards li[data-layer="info"]') && 'over the chat'; })()`, 5000);
+    // Its own Take down, from Sue's chip, takes off what is beside the operator's alone: the operator's left.
+    const sueDownMenu = await sueChip();
+    await unsay(sueTab);
+    await sueTab.eval(`document.querySelector('.agm-menu [data-action="board.takeDown"]').click()`);
+    const sueDownSaid = await sueTab.until(TOAST_SAID, 5000);
+    const beaBack = await beaPad.until(`document.getElementById('pageLayer').hidden && !document.querySelector('#takeCards li[data-layer="beside"]') && !!document.querySelector('#takeCards li[data-layer="info"]') && 'back'`, 8000);
+    await sueTab.until(`!!Console.board() && !Console.board().beside && 'read'`, 5000);
+    const sueAfter = await sueChip();
+    await sueTab.eval(`AGM.menu.close()`);
+    report(sueMade === 200 && sueIn === 200 && sueReady === 'ready'
+      && JSON.stringify(sueMenu) === JSON.stringify([['board.web', ''], ['board.takeDown', 'The operator put this up — ask them.'], ['board.screens', '']]) && JSON.stringify(sueRows) === JSON.stringify(['board', 'Bea'])
+      && sueSaid === 'The web page on 1 Board page — in their side bar, beside what the operator is showing. · Take down'
+      && !!beaBeside && JSON.stringify(beaBeside) === JSON.stringify({ ...FRAMED(WEB_NOTES, 'agm-web.invalid'), frames: undefined, open: true, rail: '📺 On stage • 1', over: WEB_OK, acts: ['card.show', 'card.remove'] })
+      && !!sueUnder && JSON.stringify(sueUnder) === JSON.stringify({ beside: ['◐', 'Under a web page', 'side', false], info: ['◇', 'Opened · AGMessage can\'t see inside web pages', true] })
+      && !!sueOpened && JSON.stringify(sueOpened.beside) === JSON.stringify(['◇', 'Opened · AGMessage can\'t see inside web pages', 'side', false]) && /^▭ Bea minimised it/.test(sueOpened.info.slice(0, 2).join(' ')) && sueChipWords === '· 🌍 Web page ▭ 0/1'
+      && beaRaised === 'over the chat' && JSON.stringify(sueDownMenu.find((x) => x[0] === 'board.takeDown')) === JSON.stringify(['board.takeDown', ''])
+      && sueDownSaid === 'Taken down on 1 Board page.' && beaBack === 'back' && JSON.stringify(sueAfter.find((x) => x[0] === 'board.takeDown')) === JSON.stringify(['board.takeDown', 'The operator put this up — ask them.']),
+      `a Staff account granted stage.web reads the Board and the people On stage alone; over the operator's web page its Take down is disabled with why, and its own web page goes beside it, in Bea's side bar in the one frame, the panel opened, its toast offering Take down; under the operator's page on her layer it reads ◐ under it, and ◇ opened in her side bar once she minimises that; Show over the chat draws it on her layer, and its Take down takes it off there alone, the operator's left (${JSON.stringify({ sueMade, sueIn, sueReady, sueMenu, sueRows, sueSaid, beaBeside, sueUnder, sueOpened, sueChipWords, beaRaised, sueDownMenu, sueDownSaid, beaBack, sueAfter })})`);
+    await chipPick('board.takeDown');
+    await beaPad.until(`!document.querySelector('#takeCards li[data-layer="info"]') && 'gone'`, 5000);
 
     // A locked hall's backstage guest shows web pages only while the admin lets the hall's guests (S4): the Roles & invites
     // panel's switch, off and disabled with its words while the roles are open; locked, turned on, Rex's Board chip offers
@@ -3240,6 +3363,18 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const GUEST_WEB = `(() => { const row = document.getElementById('guestWebRow'); const box = document.getElementById('guestWeb'); return row.hidden || document.getElementById('invitesPanel').hidden ? '' : JSON.stringify({ label: box.parentElement.textContent.trim(), on: box.checked, disabled: box.disabled, words: document.getElementById('guestWebWords').textContent }); })()`;
     await admin.eval(`ADMIN_RUN['adminRoom.invites']({ code: '${tkHall}' })`);
     const switchOpen = JSON.parse(await admin.until(GUEST_WEB, 5000) || 'null');
+    // An open hall's panel shows its On stage link (On stage seats come from it, in open halls too), with New On stage
+    // link, which asks first and voids the link it replaces without changing the code.
+    const INVITE_ROWS = `(() => { const rows = [...document.querySelectorAll('#inviteLinks .invite-row')]; return rows.length ? JSON.stringify({ roles: rows.map((r) => r.dataset.role), words: document.querySelector('#inviteLinks .hint').textContent, renew: rows[0].querySelector('.invite-new').textContent, link: rows[0].querySelector('code').textContent }) : ''; })()`;
+    const openLinks = JSON.parse(await admin.until(INVITE_ROWS, 5000) || 'null');
+    await admin.eval(`document.querySelector('#inviteLinks .invite-new').click()`);
+    await admin.until(`!!document.querySelector('.agm-ask [data-answer=yes]')`, 3000);
+    await admin.eval(`document.querySelector('.agm-ask [data-answer=yes]').click()`);
+    const renewedLinks = JSON.parse(await admin.until(`(() => { const v = ${INVITE_ROWS}; return v && JSON.parse(v).link !== ${codeLiteral((openLinks && openLinks.link) || '')} && v; })()`, 5000) || 'null');
+    const inviteRow = fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.action === 'room.invite').pop();
+    report(!!openLinks && JSON.stringify(openLinks.roles) === '["board"]' && openLinks.words === 'Open: anyone with the code joins Backstage or as an Observer; On stage needs this link.' && openLinks.renew === '🔄 New On stage link'
+      && openLinks.link.includes('?code=' + tkHall + '&role=board&invite=') && !!renewedLinks && renewedLinks.link.includes('?code=' + tkHall + '&role=board&invite=') && !!inviteRow && inviteRow.words === 'a new On stage link (the old one no longer admits)',
+      `the Roles & invites panel shows an open hall's On stage link, with its words; New On stage link asks, then replaces it under the same code, one row with no link (${JSON.stringify({ openLinks, renewedLinks: renewedLinks && renewedLinks.link })})`);
     await admin.eval(`document.getElementById('lockRoles').click()`);
     const switchLocked = JSON.parse(await admin.until(`(() => { const v = ${GUEST_WEB}; return v && !JSON.parse(v).disabled && v; })()`, 5000) || 'null');
     await rexPad.send('Page.reload');
@@ -3261,10 +3396,10 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       `unlocking the hall turns its backstage guests' web pages off: the switch off and disabled again, and Rex's chip without Show a web page… (${JSON.stringify({ switchUnlocked, rexUnlocked })})`);
     await admin.eval(`document.getElementById('closeInvitesBtn').click()`);
 
-    const takesProblems = [['op', op], ['bea', beaPad], ['obi', obiPad], ['rex', rexPad]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
+    const takesProblems = [['op', op], ['bea', beaPad], ['obi', obiPad], ['rex', rexPad], ['sue', sueTab]].flatMap(([n, t]) => t.problems.map((p) => n + ': ' + p));
     report(takesProblems.length === 0, `the takes hall's pages: no console error and no CSP violation${takesProblems.length ? ' — ' + takesProblems.slice(0, 4).join(' | ') : ''}`);
     await op.eval(`document.getElementById('screensDialog').close()`);
-    for (const t of [beaPad, obiPad, rexPad, op]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
+    for (const t of [beaPad, obiPad, rexPad, sueTab, op]) { await t.send('Page.navigate', { url: 'about:blank' }); t.close(); }
 
     // The header's countdown chip is its own door (the account's: the speaker's screen and the countdown on its screens).
     await hallView.until(`!document.getElementById('stageChip').hidden && document.getElementById('stageChip').getAttribute('role') === 'button'`, 8000);
@@ -4546,7 +4681,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const bvLegs = {};
       const bvTabs = [];
       for (const [w, h, theme] of [[1180, 820, 'light'], [1180, 820, 'dark'], [390, 844, 'light'], [390, 844, 'dark'], [820, 1180, 'dark']]) {
-        const tab = await edge.tab(`${base}/app.html?code=${bvHall}&name=${encodeURIComponent('Margaret ' + w + theme)}&role=board`, { init: INK + (theme === 'light' ? LIGHT : ''), metrics: { width: w, height: h, phone: true }, alone: true });
+        const tab = await edge.tab(`${base}/app.html?code=${bvHall}&name=${encodeURIComponent('Margaret ' + w + theme)}&role=board&invite=${inviteOf(dataDir, bvHall)}`, { init: INK + (theme === 'light' ? LIGHT : ''), metrics: { width: w, height: h, phone: true }, alone: true });
         bvTabs.push(tab);
         await tab.until(ready, 10000);
         await tab.until(`document.fonts.status === 'loaded'`, 5000);
@@ -4768,13 +4903,13 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         if (m.type === 'childList' && m.target.id === 'feed' && [...m.addedNodes].some((n) => n.classList && n.classList.contains('msg'))) fed = true;
         if (m.type === 'attributes' && m.target === document.documentElement) seen.push(m.target.getAttribute('data-theme') + (fed ? '+feed' : '')); } })
         .observe(document, { attributes: true, childList: true, subtree: true, attributeFilter: ['data-theme'] }); })();`;
-      const fresh = await edge.tab(`${base}/app.html?code=${bvHall}&name=Nadia&role=board`, { init: FIRST_THEME, metrics: { width: 1180, height: 820, phone: true }, alone: true });
+      const fresh = await edge.tab(`${base}/app.html?code=${bvHall}&name=Nadia&role=board&invite=${inviteOf(dataDir, bvHall)}`, { init: FIRST_THEME, metrics: { width: 1180, height: 820, phone: true }, alone: true });
       const freshThemes = await fresh.until(`${ready} && JSON.stringify(window.__themes)`, 10000);
-      await fresh.send('Page.navigate', { url: `${base}/app.html?code=${bvHall}&name=Nadia&role=board` });
+      await fresh.send('Page.navigate', { url: `${base}/app.html?code=${bvHall}&name=Nadia&role=board&invite=${inviteOf(dataDir, bvHall)}` });
       const lastThemes = await fresh.until(`${ready} && JSON.stringify(window.__themes)`, 10000);
       await fresh.eval(`(() => { document.getElementById('headerMore').click(); [...document.querySelectorAll('#bvSheet [data-action="sheet.theme"]')].find((b) => b.textContent === 'Light').click(); return true; })()`);
       await fresh.until(`document.documentElement.dataset.theme === 'light'`, 3000);
-      await fresh.send('Page.navigate', { url: `${base}/app.html?code=${bvHall}&name=Nadia&role=board` });
+      await fresh.send('Page.navigate', { url: `${base}/app.html?code=${bvHall}&name=Nadia&role=board&invite=${inviteOf(dataDir, bvHall)}` });
       const stuck = await fresh.until(`${ready} && document.documentElement.dataset.theme`, 10000);
       await fresh.eval(`localStorage.removeItem('agm.theme'); true`);
       const otherPages = [];
@@ -4840,10 +4975,13 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       // the long do not fit); the sheet's last row reached by its scroll, and Leave asked in place there.
       const layout = {};
       for (const [w, h] of [[640, 1024], [1024, 640], [768, 1024], [1024, 768], [375, 667], [393, 659], [360, 780], [734, 343], [863, 360]]) {
-        const tab = await edge.tab(`${base}/app.html?code=${bvHall}&name=${encodeURIComponent('Board ' + w + 'x' + h)}&role=board`, { init: INK, metrics: { width: w, height: h, phone: true }, alone: true });
+        const tab = await edge.tab(`${base}/app.html?code=${bvHall}&name=${encodeURIComponent('Board ' + w + 'x' + h)}&role=board&invite=${inviteOf(dataDir, bvHall)}`, { init: INK, metrics: { width: w, height: h, phone: true }, alone: true });
         await tab.until(`typeof joined !== 'undefined' && joined && allMessages.some((m) => m.type === 'file')`, 10000);
         await tab.eval(`(() => { const m = allMessages.find((x) => x.type === 'file'); act('msg', 'msg.look', m, {}); return true; })()`);
         await tab.until(`document.body.dataset.shown === '1'`, 5000);
+        // The read waits until what it measures is drawn: a first open draws its newest 60 at once and the rest as the page
+        // is idle, and the joins and leaves of the devices before this one add to the hall's lines.
+        await tab.until(`[...feed.querySelectorAll(':scope > .msg[data-id]')].some((n) => (findMessage(n.dataset.id) || {}).text === 'Wrap up resolution 3 now, please.')`, 5000);
         const r = await bvRead(tab);
         await tab.eval(`document.getElementById('headerMore').click(); true`);
         const sheetEnd = await tab.until(`(() => { const s = document.getElementById('bvSheet'); if (s.hidden) return null; const leave = s.querySelector('[data-action="sheet.leave"]'); leave.scrollIntoView({ block: 'nearest' });
@@ -4867,7 +5005,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const NO_FULL = `(() => { delete Element.prototype.requestFullscreen; delete Element.prototype.webkitRequestFullscreen; delete Document.prototype.fullscreenEnabled; delete Document.prototype.webkitFullscreenEnabled; })();`;
       const floorRuns = {};
       for (const [name, init] of [['settings', FLOOR + NO_FULL], ['https', NO_FULL + `Object.defineProperty(window, 'isSecureContext', { get: () => false });`], ['battery', NO_FULL + `WakeLock.prototype.request = function () { return Promise.reject(new DOMException('Low battery', 'NotAllowedError')); };`]]) {
-        const tab = await edge.tab(`${base}/app.html?code=${bvHall}&name=${encodeURIComponent('Floor ' + name)}&role=board`, { init, metrics: { width: 1180, height: 820, phone: true }, alone: true });
+        const tab = await edge.tab(`${base}/app.html?code=${bvHall}&name=${encodeURIComponent('Floor ' + name)}&role=board&invite=${inviteOf(dataDir, bvHall)}`, { init, metrics: { width: 1180, height: 820, phone: true }, alone: true });
         await tab.until(`typeof joined !== 'undefined' && joined`, 10000);
         await tab.until(`Simple.awakeState() !== null`, 5000);
         await tab.eval(`document.getElementById('headerMore').click(); true`);

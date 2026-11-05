@@ -12,7 +12,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const vm = require('vm');
-const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStagewatch, fakeNode, TOKEN, readSource } = require('./helpers');
+const { ROOT, startServer, stopServer, api, connect, emit, once, until, fakeStagewatch, fakeNode, inviteOf, TOKEN, readSource } = require('./helpers');
 
 function loadCatalog() {
   const ctx = vm.createContext({});
@@ -102,7 +102,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   const ana = await seatOf({ name: 'Ana', role: 'research' });
   const seats = {
     research: ana,
-    board: await seatOf({ name: 'Chair', role: 'board' }),
+    board: await seatOf({ name: 'Chair', role: 'board', invite: inviteOf(srv.dataDir, hallA) }),
     observer: await seatOf({ name: 'Obs', role: 'observer' }),
     viewer: await seatOf({ as: 'account' }, vic),
     staff: await seatOf({ as: 'account' }, sid),
@@ -157,7 +157,9 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   // The rest of the hall page: each composer, the stage chip (the link up), the header's ⋯, and the people of the room as
   // the server lists them (a person: `person`'s hall half; the admin's rows fit the admin page alone).
   const composer = (form) => ({ id: 'compose:' + form, form, room: 'Hall A', file: form === 'file' ? 'capex.pdf' : '', replying: '', priority: false });
-  const people = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallA })).users.map((u) => ({ id: 'person:' + u.uid, uid: u.uid, name: u.name, role: u.role, key: (u.account ? 'a:' : 'u:') + u.uid, kind: 'clock', socketId: u.socketId, view: u.view }));
+  // Each with information over their show, so Take down on them is iterated too.
+  const INFO = { seq: 1, kind: 'web', mark: '◇', words: 'Opened', showing: 'a web page on vote.example.com', arrive: 'over', op: false, on: 1, pages: 1 };
+  const people = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallA })).users.map((u) => ({ id: 'person:' + u.uid, uid: u.uid, name: u.name, role: u.role, key: (u.account ? 'a:' : 'u:') + u.uid, kind: 'clock', socketId: u.socketId, view: u.view, info: INFO }));
   // What people's pages show: the Board as the console reads it (the clock up, so every other kind may be chosen), a
   // take on a page and its card (a page's own report, every seat's: no right hides it).
   const boardNow = (await emit(seats.admin.s, 'page:status', { code: hallA })).board;
@@ -167,7 +169,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     compose: ['director', 'text', 'action', 'file'].map(composer), chip: [{ id: 'stage', live: true, text: '04:30', words: 'Live from Stagewatch' }],
     header: [{ id: 'header', people: people.length, peopleShown: false, zoom: 1, dark: false, code: hallA, on: true, hall: 'Hall A', account: false, away: '/' }], person: people,
     take: [{ id: 'take', seq: 1, kind: 'clock', strip: true, full: false }], card: [{ id: 'card', seq: 1, kind: 'clock' }],
-    board: [{ id: 'board', seq: 1, kind: 'clock', pages: boardNow.pages, on: 0, mark: '◷', words: 'Sending', showing: 'the clock', mine: { seq: 1, previous: { kind: 'chat' }, time: '14:02' } }],
+    board: [{ id: 'board', seq: 1, kind: 'clock', pages: boardNow.pages, on: 0, mark: '◷', words: 'Sending', showing: 'the clock', mine: { seq: 1, previous: { kind: 'chat' }, time: '14:02' }, info: INFO }],
     // The room's earlier messages: Show earlier at the top of what a page holds, and a reply's Show it.
     earlier: [{ id: 'earlier', more: true, find: '' }, { id: 'earlier:' + messages[0].id, more: true, find: messages[0].id }],
   };
@@ -198,9 +200,13 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'display:list': () => ({ code: hallA }),
     // A show kind on the Board, or on the person; Back to over the take the object names (ifSeq).
     // A web page by an address of its own (Show a web page…, Show them a web page…).
+    // Take down: the information alone handed back, over the take it names.
     'page:push': (o, e) => {
       const web = { kind: 'web', url: 'https://vote.example.com/poll/7' };
+      const down = { content: { kind: 'chat', layer: 'info' }, ifSeq: o.info ? o.info.seq : 0 };
+      if (e.id === 'person.takeDown') return { code: hallA, to: { uid: o.key }, ...down };
       if (e.id.startsWith('person.')) return { code: hallA, to: { uid: o.key }, content: e.id === 'person.web' ? web : { kind: e.id === 'person.chat' ? 'chat' : 'blank' } };
+      if (e.id === 'board.takeDown') return { code: hallA, to: 'board', ...down };
       return { code: hallA, to: 'board', content: e.id === 'board.back' ? o.mine.previous : e.id === 'board.web' ? web : { kind: e.id.slice('board.'.length) }, ...(e.id === 'board.back' ? { ifSeq: o.seq } : {}) };
     },
     // A page's word on the take it is shown (the layer's acts, a card's): Back to chat on the object's take.
@@ -301,16 +307,19 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   // whether a message here may be sent into another room by its list, `sends`: no list names Hall A, so it may not; then
   // whether the page is the admin's own, `admin`, which a guest's is not; then what the page is shown over its chat,
   // `page`, whether it may push to people's pages, `canPush`, AGMessage's clock and zone, `now` and `tz`, and whether a web
-  // page pushed from it would be taken, `canWeb`; then the chat view it draws, `view`; then, on a first open, whether the
-  // room holds earlier messages, `more`, what a page keeps in view from before its newest, `older`, and its files, `files`).
+  // page pushed from it would be taken, `canWeb`; then whether it may show information on its Board's pages by a right of
+  // its own, `canShow`, the information over its show, `over`, its Earlier, `earlier`, and the information beside the
+  // operator's in its side bar, `beside`; then the chat view it draws,
+  // `view`; then, on a first open, whether the room holds earlier messages, `more`, what a page keeps in view from before
+  // its newest, `older`, and its files, `files`).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-20), again.sends, again.admin, again.page, again.canPush, again.canWeb, again.view, again.more, again.older, again.files], [true, [hallB],
-    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb', 'view', 'more', 'older', 'files'], false, false, null, false, false, 'full', false, [], []]);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-24), again.sends, again.admin, again.page, again.canPush, again.canWeb, again.canShow, again.over, again.earlier, again.beside, again.view, again.more, again.older, again.files], [true, [hallB],
+    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb', 'canShow', 'over', 'earlier', 'beside', 'view', 'more', 'older', 'files'], false, false, null, false, false, false, null, [], null, 'full', false, [], []]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
-  const bea = await join(beaA, hallA, 'Bea', 'board');
+  const bea = await join(beaA, hallA, 'Bea', 'board', { invite: inviteOf(srv.dataDir, hallA) });
   const beaB = await open();
   await join(beaB, hallB, 'Bea', 'research', { uid: bea.identity });
   assert.deepEqual([(await join(beaA, hallA, 'Bea', 'board', { uid: bea.identity })).forwardable, await rooms(beaA)], [false, []]);

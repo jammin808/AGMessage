@@ -7,6 +7,18 @@
  * numbers its takes with one counter, so a page shows the highest-numbered take addressed to it in each layer: its
  * person's, or the Board's when it sits On stage in Main. Latest wins, and `chat` hands a page back to its chat.
  *
+ * A page holds two layers (plan 4-§5.9.1): the show (Stagewatch, the clock, holding, blank: the operator's, canPush's
+ * alone) and information over it (a web page; files, pictures and quotes as they land), drawn over the show take and never
+ * replacing it. `chat` hands back both; `{kind: 'chat', layer: 'info'}` the information alone, which is all `canShow` may
+ * hand back, and only over a take `canShow` put up. An information take keeps whether its pusher held canPush (`by.op`),
+ * so a researcher's push never covers or takes down what the operator put over the Board's chat, on the Board's take or
+ * on one of its people's: it goes to their side bar instead (`arrive: 'side'`), kept beside the operator's (`beside`, a
+ * place of its own, numbered as every take is and reported on as one: "in the side bar"), superseding nothing. The newest
+ * information to a page puts away what is beside it, as it puts away the information over the show. An information take
+ * superseded, handed back or put away with Back to chat joins Earlier (at most BOUNDS.earlier a hall, the oldest going
+ * first), which a page draws in its side bar and opens as a Look: no report, no take. Who may push what is `canShow`
+ * (pure, below).
+ *
  * Attempts are not facts: a take is sent, and each page says what it did with it (a report). The status of a take is
  * read from those reports, page by page, never from the send: "sending" until every page that holds it said, "on every
  * page" only once each said it showed it (a hand-back to the chat never read as on screen), and a page put away (Back
@@ -14,10 +26,13 @@
  * answer (Back to chat, Minimise) counts only for the take it answered: a newer take shows again.
  *
  * Stored in `pages.json` (one write lane, written only once this copy holds its data folder: `hold()`): the takes by
- * hall and layer, the persons' answers, and the guests' chat views; each bounded, the oldest going first. A record of
+ * hall and layer, the persons' answers, each hall's Earlier list, and the guests' chat views; each bounded, the oldest
+ * going first. A record of
  * the wrong shape is dropped when it is read. The reports are the run's alone: never saved, and a page that goes takes
  * its report with it.
  *
+ *   askedOf(c)           : the kind and layer a pusher asked for, read before anything else of it, or null (pure)
+ *   canShow(f, k, to, a) : whether a push of a kind to a target may be made: true, or why not in words (pure)
  *   cleanPage(c, facts)  : a take a pusher asked for, made safe, or {error} (pure, fail closed)
  *   webUrl(v, selfHosts) : a web page's address made safe, {url, host}, or {error} (pure, fail closed)
  *   describePage(c, o)   : what a take shows, in a few words (pure)
@@ -33,15 +48,54 @@ const guard = require('./guard');
 const { clockOf } = require('./tunnelend');
 
 /**
- * The kinds a take may be, each a kind of the show layer: back to the chat; Stagewatch's countdown; AGMessage's clock;
- * a holding slide (the picture given, the hall's holding picture, or the AGMessage mark and the hall's name on black);
- * black; a web page (an https address, framed by the page). Anything else is refused, never defaulted.
+ * The kinds a take may be: back to the chat; Stagewatch's countdown; AGMessage's clock; a holding slide (the picture given,
+ * the hall's holding picture, or the AGMessage mark and the hall's name on black); black; a web page (an https address,
+ * framed by the page). Anything else is refused, never defaulted.
  */
 const KINDS = Object.freeze(['chat', 'stage', 'clock', 'holding', 'blank', 'web']);
 const KINDS_WORDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.';
-/** The layers a page holds, each with its own take and its own answer. Every kind of KINDS is the show layer's. */
-const LAYERS = Object.freeze(['show']);
-const layerOf = (kind) => (KINDS.includes(kind) ? 'show' : '');
+/** The layers a page holds, each with its own take and its own answer: the show, and information drawn over it. */
+const LAYERS = Object.freeze(['show', 'info']);
+/**
+ * Where a target's takes are kept, each place with its own take and its own answer, numbered by the hall's one counter: the
+ * two layers, and `beside`, a researcher's information that arrived in the side bar beside the operator's (plan 4-§5.9.1),
+ * drawn as a card there. A place shows the highest-numbered take addressed to the page; `beside` draws only a take put
+ * there so (`aside`): any other take there is the information that put it away, or a hand-back, and draws nothing.
+ */
+const SLOTS = Object.freeze(['show', 'info', 'beside']);
+/** The show layer's kinds: the operator's (canPush's alone). */
+const SHOW_LAYER = Object.freeze(['stage', 'clock', 'holding', 'blank']);
+/**
+ * The information layer's kinds, by name: a web page, and the document, picture and quote kinds whose rights `canShow`
+ * reads already (they are refused by cleanPage, as unknown kinds, until their kinds land).
+ */
+const INFO_LAYER = Object.freeze(['web', 'doc', 'image', 'snippet']);
+/** A kind's layer: 'show' or 'info'; '' for `chat`, whose layers are its own (layersOf), and for anything else. */
+const layerOf = (kind) => (SHOW_LAYER.includes(kind) ? 'show' : INFO_LAYER.includes(kind) ? 'info' : '');
+/** The layers a take's content changes: `chat` both, or the information alone (`layer: 'info'`); any other its kind's. */
+const layersOf = (c) => {
+  const kind = isRecord(c) ? own(c, 'kind') : undefined;
+  if (kind === 'chat') return own(c, 'layer') === 'info' ? ['info'] : ['show', 'info'];
+  const l = layerOf(kind);
+  return l ? [l] : [];
+};
+/**
+ * The places a take is kept in (SLOTS): a show kind the show's; `chat` all three (back to chat: nothing over the show and
+ * nothing beside it); an information take put beside the operator's (`aside`) `beside` alone; any other information take
+ * the information layer's, and `beside` with it (the newest information puts away what is beside it). A hand-back of the
+ * information alone (`{chat, layer: 'info'}`) the place it names (`slot`: the take its Take down names is over the show,
+ * or beside it), else both.
+ */
+const slotsOf = (c, { aside = false, slot = '' } = {}) => {
+  const layers = layersOf(c);
+  if (!layers.includes('info')) return layers;
+  if (own(c, 'kind') === 'chat') return layers.length > 1 ? [...SLOTS] : slot === 'info' || slot === 'beside' ? [slot] : ['info', 'beside'];
+  return aside ? ['beside'] : ['info', 'beside'];
+};
+/** How an information take arrives on a page: over its chat (the layer), or as an open card in its side bar. */
+const ARRIVALS = Object.freeze(['over', 'side']);
+/** A page is told the newest EARLIER_TOLD Earlier entries of its own (a hall keeps BOUNDS.earlier). */
+const EARLIER_TOLD = 10;
 /** A holding slide's picture: an image shared in AGMessage, of the types a screen shows (lib/displays.js). */
 const IMAGE_EXT = Object.freeze(['png', 'jpg', 'jpeg', 'gif', 'webp']);
 /**
@@ -100,7 +154,7 @@ const VIEWS = Object.freeze(['', 'simple', 'full']);
  * its one meaning there; test/modules.test.js holds each to that table, name and mark.
  */
 const MARKS = Object.freeze({ ok: '✓', partly: '◐', unseen: '◇', minimised: '▭', off: '○', waiting: '◷', couldNot: '△', fault: '✕' });
-const BOUNDS = Object.freeze({ views: 5000, personTakes: 200, answers: 500 });
+const BOUNDS = Object.freeze({ views: 5000, personTakes: 200, answers: 500, earlier: 20 });
 
 const HALL = /^[A-Z0-9]{4,12}$/;
 const PERSON = /^[au]:[A-Za-z0-9_-]{1,64}$/;
@@ -151,21 +205,36 @@ function webUrl(v, selfHosts = []) {
 }
 
 /**
+ * What a pusher asked for, read before anything else of it (pure): {kind, layer} for a kind of KINDS (`layer`, a hand-back's:
+ * 'info' for the information alone, '' for both), or null for anything else, which cleanPage refuses in its words. The
+ * rights (canShow) are read from it before an address is.
+ */
+function askedOf(c) {
+  const kind = isRecord(c) ? own(c, 'kind') : undefined;
+  if (typeof kind !== 'string' || !KINDS.includes(kind)) return null;
+  if (kind !== 'chat') return { kind, layer: '' };
+  const layer = own(c, 'layer');
+  return layer === undefined ? { kind, layer: '' } : layer === 'info' ? { kind, layer } : null;
+}
+
+/**
  * A take a pusher asked for, made safe, or {error} (pure). `facts` are the server's: `stagewatch`, whether the hall
  * has a Stagewatch linked; `readable(url)`, whether the file is in a message of a room of the hall the pusher may read;
  * `web`, true when this pusher may show a web page here (its own right, `stage.web`), else the words that say why not;
  * `selfHosts`, the names this AGMessage answers on (webUrl). Every result is a fresh object. An unknown kind, or a known
  * key of the wrong type, refuses the whole take with the kinds in words; a key it does not know is ignored. A `chat`
- * that names a layer is refused: the store keeps the show layer alone, so a hand-back of one layer is never widened to
- * every layer. Missing facts refuse what needs them: a web page's right is read before its address.
+ * names the information layer alone (`layer: 'info'`) or no layer (both): any other layer is refused, never widened to
+ * both. Missing facts refuse what needs them: a web page's right is read before its address.
  */
 function cleanPage(c, facts = {}) {
   const kind = isRecord(c) ? own(c, 'kind') : undefined;
   if (typeof kind !== 'string' || !KINDS.includes(kind)) return { error: KINDS_WORDS };
   switch (kind) {
-    case 'chat':
-      if (own(c, 'layer') !== undefined) return { error: KINDS_WORDS };
-      return { kind };
+    case 'chat': {
+      const asked = askedOf(c);
+      if (!asked) return { error: KINDS_WORDS };
+      return asked.layer ? { kind, layer: asked.layer } : { kind };
+    }
     case 'stage':
       if (!(facts && facts.stagewatch === true)) return { error: 'This hall has no Stagewatch linked — link one in Set up.' };
       return { kind };
@@ -196,6 +265,7 @@ function cleanPage(c, facts = {}) {
 function storedPage(c) {
   const kind = isRecord(c) ? own(c, 'kind') : undefined;
   if (typeof kind !== 'string' || !KINDS.includes(kind)) return null;
+  if (kind === 'chat') { const asked = askedOf(c); return asked ? (asked.layer ? { kind, layer: asked.layer } : { kind }) : null; }
   if (kind === 'web') {
     const host = own(c, 'host');
     const urlSealed = own(c, 'urlSealed');
@@ -208,6 +278,12 @@ function storedPage(c) {
 }
 
 /**
+ * What a take hands back says: a `chat` of both layers is "back to chat"; of the information alone, "the information
+ * taken down" (plan 4-§5.9.3, in the console's voice and the audit's alike).
+ */
+const handBack = (c) => (own(c, 'layer') === 'info' ? 'the information taken down' : 'back to chat');
+
+/**
  * What a take shows, in a few words, for the console and the audit alike (pure): no kind names a file or carries a
  * path. A holding slide with no picture of its own shows the hall's (`hallHolding`) when the hall has one, else the
  * AGMessage mark. No take is the chat; anything else, ''.
@@ -215,7 +291,7 @@ function storedPage(c) {
 function describePage(c, { hallHolding = '' } = {}) {
   if (!c) return 'the chat';
   switch (isRecord(c) ? own(c, 'kind') : undefined) {
-    case 'chat': return 'back to chat';
+    case 'chat': return handBack(c);
     case 'stage': return 'Stagewatch';
     case 'clock': return 'the clock';
     case 'holding': return own(c, 'image') || hallHolding ? 'a holding slide' : 'a holding slide with the AGMessage mark';
@@ -225,49 +301,149 @@ function describePage(c, { hallHolding = '' } = {}) {
   }
 }
 
+// ---------------------------------------------------------------- who may show what (plan 4-§5.9.2.2)
+const NO_WEB = 'Web pages on the stage need their own right — ask an admin.';
+const NO_SHOW = 'Showing files, pages and quotes on the stage needs its own right — ask an admin.';
+const BACKSTAGE_TEAM = 'Showing the Board is for the backstage team.';
+const ONLY_ON_STAGE = 'Only the people on stage can be shown this.';
+const NO_FILES = 'Your account may not share files here, so it shows quotes only.';
+const OFF_LIST = 'This room may not send to the Main room\'s Board — ask an admin.';
+const TAKE_DOWN_NAMES = 'Take down names the take it takes down.';
+/** An information kind in the words the console says it with ("a web page"), for the refusals that name one. */
+const INFO_SAID = Object.freeze({ web: 'a web page', doc: 'a document', image: 'a picture', snippet: 'a quote' });
+const infoSaid = (kind) => (Object.hasOwn(INFO_SAID, kind) ? INFO_SAID[kind] : 'something');
+/** What a researcher is told over the operator's information (an `over` push, or a take-down). */
+const operatorWords = (kind) => 'The operator is showing ' + infoSaid(kind) + ' — ask them, or send it to their side bar.';
+/** What a take-down is told once what it named is no longer up there. */
+const replacedWords = (cur) => (cur && cur.kind !== 'chat'
+  ? (cur.name || 'Someone') + '\'s ' + infoSaid(cur.kind).replace(/^an? /, '') + ' is up now — yours was already replaced.'
+  : 'Nothing is shown over the show there now — yours was already taken down.');
+
+/**
+ * Whether a push may be made (pure, over facts the server gathers): true, or the refusal in words. `kind` is the kind
+ * asked for, a string or {kind, layer} (a `chat` with `layer: 'info'` hands back the information alone: Take down; any
+ * other `chat`, both layers); `to` the Board ('board') or one person ({onStage}: whether they sit On stage in the hall's
+ * Main room); `arrive` an information take's way onto a page ('over' or 'side').
+ *
+ * `facts`: `canPush` (the operator's: the admin, display.control, a locked hall's backstage guest); `account` (an
+ * account's page, the admin's token's not), `admin`; `show` and `web` (stage.show, a boolean; a web page's right, true or
+ * why not in words, a code guest's by the hall's setting); `seat`, where it sits ('research', 'board', 'observer'),
+ * `inHall` (in a room of this hall), `post` and `files` there, `listed` (that room is the Main room or on its list);
+ * `notPush`, why this page may not push at all, in the words of who it is; `current`, the target's information take now
+ * ({seq, op, kind, name}, `op` whether its pusher held canPush) or null: over the show, or, for a take-down that names the
+ * take beside it, that one; `opOn`, the operator's information drawn on one of the target's pages in place of the
+ * target's own ({kind}: a person On stage shown one of their own while the Board's is a researcher's) or null; `ifSeq`, the
+ * take a take-down names.
+ *
+ *   1. canPush: every kind, any target, either layer and arrival; for an account, the information kinds and the take-down
+ *      with stage.show, a web page with its right.
+ *   2. Otherwise an account seated backstage in a room of the hall, where it may post, to the Board or a person On stage:
+ *      stage.show for a document, a picture or a quote (and its files right for a document or a picture), stage.web for a
+ *      web page, and a take-down of a kind it could have put up itself by those rights; from a side room, that room on the
+ *      Main room's list; never `over` the operator's information, the target's or on any page of theirs (its `side` is
+ *      taken), and a take-down only of the take it names, put up by canShow, while no page of theirs shows the operator's.
+ *      Never the show layer, nor a hand-back of both.
+ */
+function canShow(facts, kind, to, arrive = 'over') {
+  const f = isRecord(facts) ? facts : {};
+  const k = typeof kind === 'string' ? kind : isRecord(kind) ? own(kind, 'kind') : '';
+  const takeDown = k === 'chat' && isRecord(kind) && own(kind, 'layer') === 'info';
+  const info = takeDown || layerOf(k) === 'info';
+  const notPush = typeof f.notPush === 'string' && f.notPush ? f.notPush : BACKSTAGE_TEAM;
+  const webWhy = f.web === true ? true : typeof f.web === 'string' && f.web ? f.web : NO_WEB;
+  if (f.canPush === true) {
+    if (!info) return true;
+    if (k === 'web') return webWhy;
+    return f.account === true && f.admin !== true && f.show !== true ? NO_SHOW : true;
+  }
+  if (!info || f.account !== true) return notPush;
+  if (f.seat !== 'research' || f.inHall !== true || f.post !== true) return f.seat === 'board' ? notPush : BACKSTAGE_TEAM;
+  if (!(to === 'board' || (isRecord(to) && to.onStage === true))) return ONLY_ON_STAGE;
+  if (k === 'web') { if (webWhy !== true) return webWhy; }
+  else if (takeDown) { if (f.show !== true && f.web !== true) return NO_SHOW; }
+  else {
+    if (f.show !== true) return NO_SHOW;
+    if ((k === 'doc' || k === 'image') && f.files !== true) return NO_FILES;
+  }
+  if (f.listed !== true) return OFF_LIST;
+  const cur = isRecord(f.current) && whole(f.current.seq) ? f.current : null;
+  const opOn = isRecord(f.opOn) && typeof f.opOn.kind === 'string' ? f.opOn : null;
+  if (takeDown) {
+    if (!Number.isInteger(f.ifSeq)) return TAKE_DOWN_NAMES;
+    if (!cur || cur.kind === 'chat' || cur.seq !== f.ifSeq) return replacedWords(cur);
+    if (cur.op === true) return operatorWords(cur.kind);
+    if (opOn) return operatorWords(opOn.kind);
+    // Only what it could have put up itself: a web page by its web right, the other kinds by stage.show.
+    if (cur.kind === 'web') return webWhy;
+    return f.show === true ? true : NO_SHOW;
+  }
+  if (arrive !== 'side' && cur && cur.op === true && cur.kind !== 'chat') return operatorWords(cur.kind);
+  if (arrive !== 'side' && opOn) return operatorWords(opOn.kind);
+  return true;
+}
+
 /**
  * Who put a take up, as the store keeps it: their name; `guest` when a code guest did (a web page a guest showed is
- * counted when the admin stops guests showing them: Pages#guestWeb); and `who`, the pusher by its actor's kind and id
- * (`account:a…`, `code:u…`, `admin:host`), kept for a web page alone, whose address a push's answer gives back to its own
- * pusher and to no other (lib/handlers/takes.js). Neither goes to a page: a page is told the name alone.
+ * counted when the admin stops guests showing them: Pages#guestWeb); `op` when its pusher held canPush (the operator's
+ * information stays up: canShow); and `who`, the pusher by its actor's kind and id (`account:a…`, `code:u…`,
+ * `admin:host`), kept for a web page alone, whose address a push's answer gives back to its own pusher and to no other
+ * (lib/handlers/takes.js). None of `guest`, `op` or `who` goes to a page: a page is told the name alone.
  */
 const WHO = /^(?:account|code|admin):[A-Za-z0-9_-]{1,64}$/;
 const byOf = (by) => ({
   name: guard.cleanText(isRecord(by) ? by.name : '', 60),
   ...(isRecord(by) && by.guest === true ? { guest: true } : {}),
+  ...(isRecord(by) && by.op === true ? { op: true } : {}),
   ...(isRecord(by) && typeof by.who === 'string' && WHO.test(by.who) ? { who: by.who } : {}),
 });
-/** A take read back: {seq, content, by: {name, guest?, who?}, at}, its number at most the hall's, or null. */
+/**
+ * A take read back: {seq, content, by: {name, guest?, op?, who?}, at, arrive?, aside?}, its number at most the hall's, or
+ * null. `arrive` is kept only as 'side', an information take's way onto a page in its side bar ('over' when absent), and
+ * `aside` only with it: that take was put beside the operator's (kept `beside`).
+ */
 function storedTake(t, top) {
   if (!isRecord(t) || !whole(t.seq) || t.seq > top || !Number.isFinite(t.at) || !isRecord(t.by) || typeof t.by.name !== 'string') return null;
   const content = storedPage(t.content);
-  return content ? { seq: t.seq, content, by: byOf(t.by), at: t.at } : null;
+  if (!content || (t.arrive !== undefined && !(t.arrive === 'side' && layerOf(content.kind) === 'info'))) return null;
+  if (t.aside !== undefined && !(t.aside === true && t.arrive === 'side')) return null;
+  return { seq: t.seq, content, by: byOf(t.by), at: t.at, ...(t.arrive === 'side' ? { arrive: 'side' } : {}), ...(t.aside === true ? { aside: true } : {}) };
+}
+/** Whether a take read back belongs in a place (SLOTS): one of its layers, the information's never a take put beside. */
+const fitsSlot = (t, slot) => (slot === 'beside' ? layersOf(t.content).includes('info') : layersOf(t.content).includes(slot) && !(slot === 'info' && t.aside === true));
+/** An Earlier entry read back: a take of the information layer with whom it was for (`to`: 'board' or a person's key). */
+function storedEarlier(e, top) {
+  const t = isRecord(e) ? storedTake(e, top) : null;
+  return t && layerOf(t.content.kind) === 'info' && (e.to === 'board' || PERSON.test(guard.str(e.to))) ? { ...t, to: e.to } : null;
 }
 /** An answer read back: {seq, state, at}, or null. */
 function storedAnswer(a, top) {
   return isRecord(a) && whole(a.seq) && a.seq <= top && ANSWERS.includes(a.state) && Number.isFinite(a.at) ? { seq: a.seq, state: a.state, at: a.at } : null;
 }
-/** Each layer of `o` read by `read`, the layers that read whole kept, or null when none did. */
-function layersOf(o, read) {
+/** Each place of `o` (SLOTS) read by `read(value, slot)`, the places that read whole kept, or null when none did. */
+function readLayers(o, read) {
   if (!isRecord(o)) return null;
   const out = {};
-  for (const layer of LAYERS) { const r = read(own(o, layer)); if (r) out[layer] = r; }
+  for (const slot of SLOTS) { const r = read(own(o, slot), slot); if (r) out[slot] = r; }
   return Object.keys(out).length ? out : null;
 }
 /**
- * A hall's book read back: its counter, the Board's takes, each person's takes and answers; null when it is no book.
- * (A book numbers its own takes: it is no room's, and its counter is no room's change number.)
+ * A hall's book read back: its counter, the Board's takes, each person's takes and answers, and its Earlier list; null
+ * when it is no book. A take is kept only in a place it belongs (fitsSlot: a clock found in the information layer is no
+ * take there). (A book numbers its own takes: it is no room's, and its counter is no room's change number.)
  */
 function storedHall(book) {
   if (!isRecord(book) || !whole(book.seq, 0)) return null;
-  const take = (t) => storedTake(t, book.seq);
+  const take = (t, slot) => { const r = storedTake(t, book.seq); return r && fitsSlot(r, slot) ? r : null; };
   const answer = (a) => storedAnswer(a, book.seq);
   const keyed = (o, read) => {
     const out = {};
-    if (isRecord(o)) for (const [k, v] of Object.entries(o)) { const r = PERSON.test(k) ? layersOf(v, read) : null; if (r) out[k] = r; }
+    if (isRecord(o)) for (const [k, v] of Object.entries(o)) { const r = PERSON.test(k) ? readLayers(v, read) : null; if (r) out[k] = r; }
     return out;
   };
-  return { seq: book.seq, board: layersOf(book.board, take) || {}, people: keyed(book.people, take), answers: keyed(book.answers, answer) };
+  return {
+    seq: book.seq, board: readLayers(book.board, take) || {}, people: keyed(book.people, take), answers: keyed(book.answers, answer),
+    earlier: Array.isArray(book.earlier) ? book.earlier.slice(-BOUNDS.earlier).map((e) => storedEarlier(e, book.seq)).filter(Boolean) : [],
+  };
 }
 
 /** Names in words: "Ana", "Ana and Ben", "Ana, Ben and 2 more". */
@@ -324,33 +500,80 @@ class Pages {
   flush() { return this.lane.flushSync(); }
 
   /**
-   * A take: `content` as cleanPage made it, to `'board'` or a person's key, numbered next in its hall. A Board take puts
-   * away the older takes and answers, in its layer, of everyone seated On stage now (`onStage`, their keys): a Board page
-   * shows the highest-numbered take, so none of theirs could show there again. A person's take puts away that person's
-   * answer to an older one. A web page's address is kept sealed (`_kept`); `by.guest` marks a code guest's take. Returns
-   * the take, or null when a part is not one the store keeps (a web page this run cannot seal among them).
+   * A take: `content` as cleanPage made it, to `'board'` or a person's key, numbered next in its hall, in each place it
+   * changes (slotsOf: `chat` every one, a show kind the show's, information the layer over the show and what is beside
+   * it). A Board take puts away the older takes and answers, in its places, of everyone seated On stage now (`onStage`,
+   * their keys): a Board page shows the highest-numbered take, so none of theirs could show there again. A person's take
+   * puts away that person's answer to an older one. An information take put away so (superseded, handed back) joins
+   * Earlier, whom it was for with it. An information take keeps its arrival when it is `side`; with `aside` (a side push
+   * over the operator's information, plan 4-§5.9.1) it is kept `beside` alone, superseding nothing over the show. A
+   * hand-back of the information alone hands back the place `slot` names ('info' or 'beside', what its Take down named),
+   * else both. Where a place takes a take it does not draw (`beside` an information take over the show), it keeps that
+   * take's number as a hand-back, so nothing older beside it shows again. A web page's address is kept sealed (`_kept`);
+   * `by.guest` marks a code guest's take, `by.op` one its pusher held canPush for. Returns the take, or null when a part is
+   * not one the store keeps (a web page this run cannot seal among them).
    */
-  take(hall, to, content, by = {}, { onStage = [], at = Date.now() } = {}) {
+  take(hall, to, content, by = {}, { onStage = [], at = Date.now(), arrive = 'over', aside = false, slot = '' } = {}) {
     const clean = storedPage(this._kept(content));
-    if (!HALL.test(guard.str(hall)) || !(to === 'board' || PERSON.test(guard.str(to))) || !clean || !Number.isFinite(at)) return null;
-    const layer = layerOf(clean.kind);
-    const book = this.halls[hall] || (this.halls[hall] = { seq: 0, board: {}, people: {}, answers: {} });
+    if (!HALL.test(guard.str(hall)) || !(to === 'board' || PERSON.test(guard.str(to))) || !clean || !Number.isFinite(at) || !ARRIVALS.includes(arrive)) return null;
+    const side = arrive === 'side' && layerOf(clean.kind) === 'info';
+    const beside = aside === true && side;
+    const slots = slotsOf(clean, { aside: beside, slot });
+    const book = this.halls[hall] || (this.halls[hall] = { seq: 0, board: {}, people: {}, answers: {}, earlier: [] });
     book.seq += 1;
-    const t = { seq: book.seq, content: clean, by: byOf(by), at };
-    if (to === 'board') {
-      book.board[layer] = t;
-      for (const k of Array.isArray(onStage) ? onStage : []) {
-        if (typeof k !== 'string' || !PERSON.test(k)) continue;
-        this._drop(book.people, k, layer);
-        this._drop(book.answers, k, layer);
+    const t = { seq: book.seq, content: clean, by: byOf(by), at, ...(side ? { arrive: 'side' } : {}), ...(beside ? { aside: true } : {}) };
+    const kept = (s) => (s === 'beside' && !beside && clean.kind !== 'chat' ? { seq: t.seq, content: { kind: 'chat', layer: 'info' }, by: t.by, at } : t);
+    for (const s of slots) {
+      const k = kept(s);
+      if (to === 'board') {
+        this._earlier(book, own(book.board, s), 'board');
+        book.board[s] = k;
+        for (const key of Array.isArray(onStage) ? onStage : []) {
+          if (typeof key !== 'string' || !PERSON.test(key)) continue;
+          this._earlier(book, own(book.people, key) && own(book.people[key], s), key);
+          this._drop(book.people, key, s);
+          this._drop(book.answers, key, s);
+        }
+      } else {
+        this._earlier(book, own(book.people, to) && own(book.people[to], s), to);
+        book.people[to] = { ...(book.people[to] || {}), [s]: k };
+        this._drop(book.answers, to, s);
       }
-    } else {
-      book.people[to] = { ...(book.people[to] || {}), [layer]: t };
-      this._drop(book.answers, to, layer);
     }
     this._trim(book);
     this.save();
     return t;
+  }
+
+  /**
+   * An information take put away (`t`: superseded, handed back, Back to chat) joins the hall's Earlier list with whom it
+   * was for (`to`), once, at its end: the newest last. A hand-back, a show take and no take join nothing.
+   */
+  _earlier(book, t, to) {
+    if (!isRecord(t) || !isRecord(t.content) || layerOf(t.content.kind) !== 'info') return;
+    if (!Array.isArray(book.earlier)) book.earlier = [];
+    book.earlier = book.earlier.filter((e) => e.seq !== t.seq);
+    book.earlier.push({ ...t, to });
+  }
+
+  /**
+   * The Earlier entries a page is told (plan 4-§5.9.1): those for its person (`key`) and, on a page seated On stage in
+   * Main (`board`), the Board's, the newest EARLIER_TOLD, the newest first, each as {seq, content, by: {name}, at}: its
+   * content as the pages it was shown on are told it (`told`: a web page's address opened).
+   */
+  earlierOf(hall, key, { board = false } = {}) {
+    return this._earlierFor(hall, key, board).map((e) => ({ seq: e.seq, content: this.told(e.content), by: { name: e.by.name }, at: e.at }));
+  }
+  /** The numbers of the Earlier entries a page is told, as one word: what moved there, read without opening an address. */
+  earlierSaid(hall, key, { board = false } = {}) {
+    return this._earlierFor(hall, key, board).map((e) => e.seq).join(',');
+  }
+  /** The Earlier entries a page is told, as the store keeps them: the newest EARLIER_TOLD of its own, the newest first. */
+  _earlierFor(hall, key, board) {
+    const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
+    if (!book || !Array.isArray(book.earlier)) return [];
+    const mine = book.earlier.filter((e) => (PERSON.test(guard.str(key)) && e.to === key) || (board === true && e.to === 'board'));
+    return mine.slice(-EARLIER_TOLD).reverse();
   }
 
   /**
@@ -376,20 +599,20 @@ class Pages {
   }
 
   /**
-   * The web pages a code guest put up in a hall that stay up: the Board's take, and each person's not put away by them
-   * (Back to chat), whether or not a page of theirs is open now (one that comes back is shown it again), each as {to:
-   * 'board' or the person's key, seq}.
+   * The web pages a code guest put up in a hall that stay up (the information layer's): the Board's take, and each
+   * person's not put away by them (Back to chat), whether or not a page of theirs is open now (one that comes back is shown
+   * it again), each as {to: 'board' or the person's key, seq}.
    */
   guestWeb(hall) {
     const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
     if (!book) return [];
     const theirs = (t) => !!t && t.content.kind === 'web' && t.by.guest === true;
     const out = [];
-    const board = own(book.board, 'show');
+    const board = own(book.board, 'info');
     if (theirs(board)) out.push({ to: 'board', seq: board.seq });
     for (const [key, r] of Object.entries(book.people)) {
-      const t = own(r, 'show');
-      const a = own(book.answers, key) && own(book.answers[key], 'show');
+      const t = own(r, 'info');
+      const a = own(book.answers, key) && own(book.answers[key], 'info');
       if (theirs(t) && !(a && a.seq === t.seq && a.state === 'dismissed')) out.push({ to: key, seq: t.seq });
     }
     return out;
@@ -398,7 +621,7 @@ class Pages {
   /**
    * The web pages guests put up in a hall that stay up, as the admin is told them once guests may no longer show any (the
    * switch turned off, or the hall unlocked): {up}, their count, and while there are any `upWords` ("1 web page a guest
-   * showed is still up") and `takeDown`, the takes (Pages#guestWeb) the admin's Take it down hands back to chat.
+   * showed is still up") and `takeDown`, the takes (Pages#guestWeb) the admin's Take it down hands back.
    */
   guestWebLeft(hall) {
     const up = this.guestWeb(hall);
@@ -407,39 +630,57 @@ class Pages {
   }
 
   /**
-   * The take a page is shown now in a layer, and the person's answer to it: the highest-numbered of the person's own and,
-   * for a page seated On stage in Main (`board`), the Board's. The answer counts only when it answers that take.
+   * The take a page is shown now in a place (`layer`, of SLOTS), and the person's answer to it: the highest-numbered of the
+   * person's own and, for a page seated On stage in Main (`board`), the Board's. The answer counts only when it answers
+   * that take. In the information layer a `chat` is that layer handed back: nothing over the show. Beside it, only a take
+   * put there (`aside`) is shown: anything newer there put it away, and then nothing is (take null).
    */
   current(hall, key, { board = false, layer = 'show' } = {}) {
     const book = HALL.test(guard.str(hall)) ? own(this.halls, hall) : undefined;
-    if (!book || !LAYERS.includes(layer)) return { take: null, answer: null };
+    if (!book || !SLOTS.includes(layer)) return { take: null, answer: null };
     const mine = (PERSON.test(guard.str(key)) && own(book.people, key) && own(book.people[key], layer)) || null;
     const group = (board === true && own(book.board, layer)) || null;
     const take = mine && group ? (mine.seq > group.seq ? mine : group) : mine || group;
+    if (layer === 'beside' && !(take && take.aside === true)) return { take: null, answer: null };
     const a = take && own(book.answers, key) && own(book.answers[key], layer);
     return { take, answer: a && a.seq === take.seq ? a : null };
   }
 
   /**
+   * The place of the take a page is shown now whose number is `seq`: the show's, else the information's (never its
+   * hand-back, which draws nothing to report on), else beside it; '' for a number it is not shown in any.
+   */
+  _layerOf(hall, key, board, seq) {
+    for (const layer of SLOTS) {
+      const { take } = this.current(hall, key, { board, layer });
+      if (take && take.seq === seq && (layer === 'show' || take.content.kind !== 'chat')) return layer;
+    }
+    return '';
+  }
+
+  /**
    * One page says what it did with a take (its socket's id `sid`, its person's `key`, `board` when it sits On stage in
-   * Main, at `at`): counted only for the take that page is shown now, never an older one, and only in a state a take of
-   * its kind has. Back to chat and Minimise are the person's answer, kept with that take for all their pages. Back to
-   * chat is final for it once AGAIN_MS have passed; until then the person's Show it again (`again`) takes it back, and a
-   * card's Undo (`minimised`) makes it a Minimise again. A Minimise is taken back only by the person's Show again
-   * (`again`, a `shown` report): a page that drew the take and says so (`shown`, as it first draws or comes back into
-   * view) before it hears of the Minimise keeps it, so one device never undoes what the person did on another. Returns
-   * {ok, answer}, the person's answer to that take as it now stands, and `hiddenMs` when this report ends a Board page's
-   * time out of view with a take drawn on it; or {ok: false, error}; a report of no person, at no time, keeps nothing.
+   * Main, at `at`): counted only for a take that page is shown now in a place (its show take, the information over it, or
+   * the information beside it), never an older one, and only in a state a take of its kind has. Back to chat and Minimise are the person's answer,
+   * kept with that take for all their pages. Back to chat is final for it once AGAIN_MS have passed; until then the
+   * person's Show it again (`again`) takes it back, and a card's Undo (`minimised`) makes it a Minimise again. A Minimise is
+   * taken back only by the person's Show again (`again`, a `shown` report): a page that drew the take and says so (`shown`,
+   * as it first draws or comes back into view) before it hears of the Minimise keeps it, so one device never undoes what
+   * the person did on another. An information take put away with Back to chat joins Earlier. `words` say why a take is
+   * not drawn or where it is ("under a web page", "held under blank", "in the side bar"); a `hidden` report with none is a
+   * page out of view. Returns {ok, answer}, the person's answer to that take as it now stands, and `hiddenMs` when
+   * this report ends a Board page's time out of view with a take drawn on it; or {ok: false, error}; a report of no
+   * person, at no time, keeps nothing.
    */
   report(hall, sid, { key, board = false, seq, state, again = false, words = '', at = Date.now() } = {}) {
     if (!REPORTS.includes(state)) return { ok: false, error: 'A report is one of: ' + REPORTS.join(', ') + '.' };
     if (typeof sid !== 'string' || !sid) return { ok: false, error: 'No page to report for.' };
     if (!PERSON.test(guard.str(key)) || !Number.isFinite(at)) return { ok: false, error: 'No person to report for.' };
-    const { take, answer } = this.current(hall, key, { board });
-    if (!take || seq !== take.seq) return { ok: false, error: 'That is not what this page is shown now.' };
+    const layer = Number.isInteger(seq) ? this._layerOf(hall, key, board, seq) : '';
+    if (!layer) return { ok: false, error: 'That is not what this page is shown now.' };
+    const { take, answer } = this.current(hall, key, { board, layer });
     const states = reportsOf(take.content.kind);
     if (!states.includes(state)) return { ok: false, error: 'A page shown ' + describePage(take.content) + ' reports one of: ' + states.join(', ') + '.' };
-    const layer = layerOf(take.content.kind);
     const inView = inViewOf(take.content.kind);
     // Back to chat taken back: Show it again (in view, `again`) or a card's Undo (minimised), within AGAIN_MS of it.
     const undo = (state === inView && again === true) || state === 'minimised';
@@ -449,83 +690,115 @@ class Pages {
     }
     const book = this.halls[hall];
     let kept = answer;
-    if (ANSWERS.includes(state) && !(answer && answer.state === state)) kept = this._answer(book, key, layer, { seq, state, at });
-    else if (state === inView && again === true && answer) { this._drop(book.answers, key, layer); kept = null; }
+    if (ANSWERS.includes(state) && !(answer && answer.state === state)) {
+      kept = this._answer(book, key, layer, { seq, state, at });
+      // Put away with Back to chat, an information take is the person's to find again under Earlier.
+      if (state === 'dismissed' && layer !== 'show') this._earlier(book, take, own(book.board, layer) === take ? 'board' : key);
+    } else if (state === inView && again === true && answer) { this._drop(book.answers, key, layer); kept = null; }
     if (kept !== answer) { this._trim(book); this.save(); }
     // A Board page out of view (asleep, or another app in front) while a take is drawn on it: how long, from its first
     // such report to the report or the leave that ends it, a take that replaces another while it stays out of view
-    // included (health's peaks, `pageHiddenMs`).
-    const was = this._forget(sid);
-    const out = state === 'hidden' && board === true && take.content.kind !== 'chat';
+    // included (health's peaks, `pageHiddenMs`). Out of view is a `hidden` report with no words: one with words is a take
+    // drawn under another, or held, on a page in view.
+    const was = this._forget(sid, layer);
+    const said = guard.cleanText(words, 160);
+    const out = state === 'hidden' && !said && board === true && take.content.kind !== 'chat';
     const hiddenSince = out ? (was && was.hiddenSince) || at : 0;
     if (!this.live.has(hall)) this.live.set(hall, new Map());
-    this.live.get(hall).set(sid, { key, seq, state, words: guard.cleanText(words, 160), at, hiddenSince });
+    const reports = this.live.get(hall);
+    const mine = reports.get(sid) || {};
+    mine[layer] = { key, seq, state, words: said, at, hiddenSince };
+    reports.set(sid, mine);
     this.liveHall.set(sid, hall);
     const ended = !out && was && was.hiddenSince ? Math.max(0, at - was.hiddenSince) : -1;
     return { ok: true, answer: kept || null, ...(ended >= 0 ? { hiddenMs: ended } : {}) };
   }
 
   /**
-   * A page went (its socket closed, or it moved to another room): its report goes with it. Returns the hall it reported
-   * in and, when it was a Board page out of view while a take was drawn on it, for how long (`hiddenMs`); or null when it
-   * had reported nothing.
+   * A page went (its socket closed, or it moved to another room): its reports go with it. Returns the hall it reported
+   * in and, when it was a Board page out of view while a take was drawn on it, for how long (`hiddenMs`, the longest of
+   * its layers'); or null when it had reported nothing.
    */
   left(sid, at = Date.now()) {
-    const was = this._forget(sid);
-    if (!was) return null;
-    return { hall: was.hall, ...(was.hiddenSince && Number.isFinite(at) ? { hiddenMs: Math.max(0, at - was.hiddenSince) } : {}) };
-  }
-
-  /** A page's report taken out of the run's reports, with the hall it was in; null when it had none. */
-  _forget(sid) {
     const hall = this.liveHall.get(sid);
     if (hall === undefined) return null;
-    this.liveHall.delete(sid);
+    const since = SLOTS.map((layer) => this._forget(sid, layer)).filter((r) => r && r.hiddenSince).map((r) => r.hiddenSince);
+    return { hall, ...(since.length && Number.isFinite(at) ? { hiddenMs: Math.max(0, at - Math.min(...since)) } : {}) };
+  }
+
+  /** A page's report in one layer taken out of the run's reports, with the hall it was in; null when it had none. */
+  _forget(sid, layer) {
+    const hall = this.liveHall.get(sid);
+    if (hall === undefined) return null;
     const reports = this.live.get(hall);
-    const r = reports.get(sid);
-    reports.delete(sid);
-    if (!reports.size) this.live.delete(hall);
-    return { ...r, hall };
+    const mine = reports.get(sid) || {};
+    const r = own(mine, layer);
+    delete mine[layer];
+    if (!Object.keys(mine).length) {
+      reports.delete(sid);
+      this.liveHall.delete(sid);
+      if (!reports.size) this.live.delete(hall);
+    }
+    return r ? { ...r, hall } : null;
   }
 
   /**
-   * Where one page stands on the take it is shown now ({sid, key, board}): {seq, state, words, at}, its state the
-   * person's answer to that take, else the page's report on it, else `waiting`. A page's report of an answer (Back to
+   * Where one page stands on the take it is shown now in a layer ({sid, key, board}): {seq, state, words, at}, its state
+   * the person's answer to that take, else the page's report on it, else `waiting`. A page's report of an answer (Back to
    * chat, Minimise) is the person's answer, and counts only while that answer stands: once taken back (Show it again),
    * the page is waiting until it says what it does with the take again.
    */
-  pageState(hall, { sid, key, board = false } = {}) {
-    const { take, answer } = this.current(hall, key, { board });
+  pageState(hall, { sid, key, board = false } = {}, layer = 'show') {
+    const { take, answer } = this.current(hall, key, { board, layer });
     const seq = take ? take.seq : 0;
     if (answer) return { seq, state: answer.state, words: '', at: answer.at };
-    const r = this.live.has(hall) ? this.live.get(hall).get(sid) : undefined;
+    const mine = this.live.has(hall) ? this.live.get(hall).get(sid) : undefined;
+    const r = mine ? own(mine, layer) : undefined;
     if (r && r.key === key && r.seq === seq && !ANSWERS.includes(r.state)) return { seq, state: r.state, words: r.words, at: r.at };
     return { seq, state: 'waiting', words: '', at: 0 };
   }
 
   /**
-   * A take's status over the pages that hold it (see Pages.status): `to` the Board ('board') or a person's key, `pages`
-   * each open page of theirs ({sid, key, board, name}). The Board's take is the Board's; a person's is the newest take
-   * any of their pages is shown now. A page shown another take is said to show something else.
+   * A take's status over the pages that hold it (see Pages.status), in a layer: `to` the Board ('board') or a person's
+   * key, `pages` each open page of theirs ({sid, key, board, name}). The Board's take is the Board's; a person's is the
+   * newest take any of their pages is shown now. A page shown another take is said to show something else. In the
+   * information layer, nothing over the show (no take, or the layer handed back) is said so, and a take there says how it
+   * arrived (`arrive`) and whether the operator put it up (`op`): a researcher's Take down is only over its own kind.
+   * Beside it (`beside`), a take put there is read as any other, from the reports on it ("In the side bar on …"); with
+   * none, nothing is beside it (number 0).
    */
-  status(hall, to, pages = [], { name = '', hallHolding = '' } = {}) {
+  status(hall, to, pages = [], { name = '', hallHolding = '', layer = 'show' } = {}) {
     const list = Array.isArray(pages) ? pages : [];
-    const states = list.map((p) => ({ ...this.pageState(hall, p), name: p.name }));
+    const states = list.map((p) => ({ ...this.pageState(hall, p, layer), name: p.name }));
     let take = null;
-    if (to === 'board') take = this.current(hall, '', { board: true }).take;
-    else for (const p of list) { const t = this.current(hall, p.key, { board: p.board }).take; if (t && (!take || t.seq > take.seq)) take = t; }
+    if (to === 'board') take = this.current(hall, '', { board: true, layer }).take;
+    else for (const p of list) { const t = this.current(hall, p.key, { board: p.board, layer }).take; if (t && (!take || t.seq > take.seq)) take = t; }
     const seq = take ? take.seq : 0;
-    return Pages.status(take, states.map((s) => (s.seq === seq ? s : { ...s, state: 'other' })), { board: to === 'board', name, hallHolding });
+    if (layer !== 'show' && (!take || take.content.kind === 'chat')) return { ...Pages.nothingOver(take, list.length, { board: to === 'board', name, beside: layer === 'beside' }), arrive: layer === 'beside' ? 'side' : 'over', op: false };
+    const st = Pages.status(take, states.map((s) => (s.seq === seq ? s : { ...s, state: 'other' })), { board: to === 'board', name, hallHolding });
+    return layer !== 'show' ? { ...st, arrive: take.arrive === 'side' ? 'side' : 'over', op: take.by.op === true } : st;
+  }
+
+  /**
+   * The information layer's status with nothing over the show (pure): no take, or that layer handed back (`take`, a
+   * `chat`): ○ "Nothing over the show" (beside it, `beside`: "Nothing in their side bar"), or ✕ where no page of theirs is
+   * open; no page reports on it.
+   */
+  static nothingOver(take, n, { board = false, name = '', beside = false } = {}) {
+    const words = n ? (beside ? 'Nothing in their side bar' : 'Nothing over the show') : board ? 'Nobody on the Board is online' : name ? name + ' has no page open in this hall' : 'No page of theirs is open in this hall';
+    return { seq: take ? take.seq : 0, showing: take ? describePage(take.content) : 'nothing', kind: take ? 'chat' : '', mark: n ? MARKS.off : MARKS.fault, words, pages: n, on: 0 };
   }
 
   /**
    * A take's status (pure): `take` the one the target was given, `pages` each of the target's open pages with its state
-   * on it (`waiting`, a report's or an answer's state, or `other`: shown another take) and its person's `name`. One mark,
-   * one meaning, never colour alone, and the words person first: ✕ no page open; △ a page could not show it; ◷ sending,
-   * until every page has said; ○ every page went back to chat, or every page handed back to its chat by a `chat` take
-   * said it is there (back to chat is never "on screen"); ▭ every page minimised it; ◇ opened (a web page, which cannot
-   * be seen into); ✓ on every page; else ◐, how many show it (or, for a `chat` take, are back to chat) and why the rest
-   * do not. With them, what it shows (`showing`, in words, and its `kind`), and of its `pages` how many show it now (`on`).
+   * on it (`waiting`, a report's or an answer's state, or `other`: shown another take), the report's `words` and its
+   * person's `name`. One mark, one meaning, never colour alone, and the words person first: ✕ no page open; △ a page could
+   * not show it; ◷ sending, until every page has said; ○ every page went back to chat, or every page handed back to its
+   * chat by a `chat` take said it is there (back to chat is never "on screen"); ▭ every page minimised it; ◇ opened (a web
+   * page, which cannot be seen into); ✓ on every page (in the side bar, for one that arrived there); ◐ every page drew it
+   * under another take or held it ("under a web page"); else ◐, how many show it (or, for a `chat` take, are back to chat)
+   * and why the rest do not. With them, what it shows (`showing`, in words, and its `kind`), and of its `pages` how many
+   * show it now (`on`).
    */
   static status(take, pages, { board = false, name = '', hallHolding = '', clock = clockOf } = {}) {
     const list = Array.isArray(pages) ? pages : [];
@@ -550,6 +823,10 @@ class Pages {
     const minimised = of('minimised');
     if (dismissed.length === n) return out(MARKS.off, said(dismissed, 'went back to chat'));
     if (minimised.length === n) return out(MARKS.minimised, said(minimised, 'minimised it'));
+    // Drawn under another take or held (a `hidden` report with words): never on screen, and said with where it is.
+    const under = of('hidden').filter((p) => typeof p.words === 'string' && p.words);
+    const away = of('hidden').length - under.length;
+    if (under.length === n && new Set(under.map((p) => p.words)).size === 1) return out(MARKS.partly, under[0].words.charAt(0).toUpperCase() + under[0].words.slice(1));
     const opened = of('opened').length;
     const showing = of('shown').length + opened;
     const chat = isRecord(take.content) && take.content.kind === 'chat';
@@ -557,11 +834,14 @@ class Pages {
       if (opened) return out(MARKS.unseen, 'Opened · AGMessage can\'t see inside web pages');
       const whose = name ? name + '\'s' : 'their';
       const where = board ? (n === 1 ? 'the 1 Board page' : 'all ' + n + ' Board pages') : n === 1 ? whose + ' page' : 'all ' + n + ' of ' + whose + ' pages';
-      return chat ? out(MARKS.off, 'Back to chat on ' + where) : out(MARKS.ok, 'On ' + where);
+      if (chat) return out(MARKS.off, 'Back to chat on ' + where);
+      return out(MARKS.ok, (take.arrive === 'side' ? 'In the side bar on ' : 'On ') + where);
     }
     const why = [];
-    const hidden = of('hidden').length;
-    if (hidden) why.push(hidden + ' asleep or in another app');
+    if (away) why.push(away + ' asleep or in another app');
+    const byWords = new Map();
+    for (const p of under) byWords.set(p.words, (byWords.get(p.words) || 0) + 1);
+    for (const [w, k] of byWords) why.push(k + ' ' + w);
     if (dismissed.length) why.push(namesWords(dismissed.map((p) => p.name)) + ' went back to chat');
     if (minimised.length) why.push(namesWords(minimised.map((p) => p.name)) + ' minimised it');
     const other = of('other').length;
@@ -635,6 +915,7 @@ class Pages {
     }
     const answers = rows(book.answers);
     if (answers.length > BOUNDS.answers) for (const a of answers.slice(0, answers.length - BOUNDS.answers)) this._drop(book.answers, a.key, a.layer);
+    if (Array.isArray(book.earlier) && book.earlier.length > BOUNDS.earlier) book.earlier = book.earlier.slice(-BOUNDS.earlier);
   }
 
   /** The guests' views held to their bound: the one set longest ago goes first. */
@@ -646,4 +927,7 @@ class Pages {
   }
 }
 
-module.exports = { Pages, cleanPage, describePage, webUrl, personKey, layerOf, reportsOf, inViewOf, KINDS, LAYERS, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX };
+module.exports = {
+  Pages, cleanPage, askedOf, canShow, describePage, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SLOTS, SHOW_LAYER, INFO_LAYER, ARRIVALS, EARLIER_TOLD,
+  IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX,
+};

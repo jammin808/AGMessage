@@ -529,7 +529,7 @@ test('the stop: refused while busy without a typed reason, then saved and ended 
   }
   // Busy (a seated page wrote): no stop without a typed reason.
   const ana = await h.connect(srv.base); sockets.push(ana);
-  assert.ok((await h.emit(ana, 'join', { roomCode: code, name: 'Ana', role: 'board' })).ok);
+  assert.equal((await h.emit(ana, 'join', { roomCode: code, name: 'Ana', role: 'board', invite: h.inviteOf(srv.dataDir, code) })).role, 'board');
   assert.ok((await h.emit(ana, 'message', { type: 'text', text: 'Thank you all' })).ok);
   const held = await wire.stop({ port: relay.port, token: h.TOKEN, reason: 'upgrade', by: 'LAPTOP\\ana' });
   assert.deepEqual([held.status, held.json.busy, held.json.error], [409, true, 'Not stopped: AGMessage is busy (1 page active). Type a reason to stop it anyway.']);

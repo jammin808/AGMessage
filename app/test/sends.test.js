@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { RoomStore } = require('../lib/store');
-const { ROOT, startServer, restartServer, stopServer, api, connect, emit, once, until, wait, TOKEN, readSource } = require('./helpers');
+const { ROOT, startServer, restartServer, stopServer, api, connect, emit, once, until, wait, inviteOf, TOKEN, readSource } = require('./helpers');
 const ops = require('../lib/ops');
 
 /** An audit row as the tests read it: its target, its words, who. */
@@ -525,7 +525,7 @@ test('On stage nothing is sent into another room (owner answer B2): a Board gues
   const kib = (await api(srv.base, 'POST', '/api/auth/login', { username: 'kib', password: 'board pack on the lectern' })).cookie;
   const join = async (args, cookie) => { const s = await page(cookie); const j = await emit(s, 'join', args); assert.equal(j.ok, true, JSON.stringify(j)); return { s, j }; };
   const ana = await join({ roomCode: hallA, name: 'Ana', role: 'research' });
-  const chair = await join({ roomCode: hallA, name: 'Chair', role: 'board' });
+  const chair = await join({ roomCode: hallA, name: 'Chair', role: 'board', invite: inviteOf(srv.dataDir, hallA) });
   const kibStage = await join({ roomCode: hallA, as: 'account' }, kib);
   const kibLegal = await join({ roomCode: LEGAL, as: 'account' }, kib);
   assert.deepEqual([chair.j.role, kibStage.j.role, kibLegal.j.role], ['board', 'board', 'research']);

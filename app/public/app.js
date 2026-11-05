@@ -5,10 +5,20 @@
 if (document.documentElement.dataset.floor === 'old') throw new Error('This browser is below AGMessage\'s page floor: the hall page does not run here.');
 
 const qs = new URLSearchParams(location.search);
-const ROOM = (qs.get('code') || '').toUpperCase();
 // A signed-in account opens a hall with ?code=…&as=account (its name and rights come from the server); anyone else
 // with ?code=…&name=…&role=… from the join page.
 const AS_ACCOUNT = qs.get('as') === 'account';
+/**
+ * A guest's code and invite are credentials: once a join takes them, they leave the address (and the history of a
+ * venue's shared tablet) and stay in this tab alone (sessionStorage), for its own rejoins and reloads. A page opened with
+ * a code in its address reads that code (and that link's invite) and none kept.
+ */
+const JOIN_KEPT = 'agm.join';
+const keptJoin = (() => {
+  if (AS_ACCOUNT || qs.get('code')) return null;
+  try { const v = JSON.parse(sessionStorage.getItem(JOIN_KEPT) || 'null'); return v && typeof v.code === 'string' ? v : null; } catch { return null; }   // storage blocked or not JSON: nothing kept
+})();
+const ROOM = (qs.get('code') || (keptJoin ? keptJoin.code : '')).toUpperCase();
 let NAME = AS_ACCOUNT ? '' : (qs.get('name') || '');
 const ROLE = qs.get('role') || 'observer';
 // An account's way back is its halls board, which stays (?stay=1): an account with one room alone is taken straight into
@@ -22,7 +32,7 @@ const VIEW_OF = ADMIN_VIEW ? (qs.get('viewOf') || '') : '';
 // pick someone else's. MY_UID is the id inside it (what messages and reactions carry).
 let IDENTITY = localStorage.getItem('agm.id') || '';
 let MY_UID = '';
-const INVITE = qs.get('invite') || '';
+const INVITE = qs.get('invite') || (keptJoin && typeof keptJoin.invite === 'string' ? keptJoin.invite : '');
 let UPLOAD_TOKEN = '';
 let lastSeq = -1;            // the newest change we have; resume from here after a drop
 let joined = false;
@@ -47,7 +57,7 @@ const FULLSCREEN = !!(document.fullscreenEnabled || document.webkitFullscreenEna
 // The chat view this page draws (`view`: the join's, then each `view` the server tells it), and in the simple view what
 // waits for this person's answer (`waiting`), the message they tapped (`tapped`, its second door) and the question whose
 // answers they brought back to change (`changing`): the simple view's facts, the page's own (Simple, below).
-const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false, canPush: false, canWeb: false, fullscreen: FULLSCREEN, view: 'full', waiting: null, tapped: '', changing: '' };
+const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false, canPush: false, canWeb: false, canShow: false, fullscreen: FULLSCREEN, view: 'full', waiting: null, tapped: '', changing: '' };
 let F = AGM.catalog.facts(pageFacts);
 // Whether this page's room is its hall's Main room (the join's `main`; a hall until it answers): its seat words follow it
 // (roleLabel).
@@ -187,6 +197,8 @@ function rejoin() {
       location.replace(location.pathname + '?' + q.toString());
       return;
     }
+    // A guest's code and invite leave the address once the join took them, kept for this tab's own rejoins.
+    if (!AS_ACCOUNT && !ADMIN_VIEW) keepJoin();
     // A side room's backstage seat is a Member's: its seat words follow the room's kind before anything is drawn with them.
     MAIN = res.main !== false;
     // Who this is, before the switcher is drawn: what this person has read of each room is kept by room and person.
@@ -210,7 +222,7 @@ function rejoin() {
     factsChanged({ role: (them && them.role) || res.role || ROLE, uid: MY_UID, account: res.account || null, uploadToken: UPLOAD_TOKEN, canSendToStage: CAN_STAGE, canPropose: CAN_PROPOSE, ai: AI_ON, stage: res.stage || null,
       forwardable: them ? them.forwardable === true : !!res.forwardable, name: NAME,
       guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode, sends: them ? them.sends === true : !!res.sends, ...((them ? them.sends : res.sends) ? {} : { targets: [] }), admin: res.admin === true,
-      canPush: them ? them.canPush === true : res.canPush === true, canWeb: them ? them.canWeb === true : res.canWeb === true });
+      canPush: them ? them.canPush === true : res.canPush === true, canWeb: them ? them.canWeb === true : res.canWeb === true, canShow: them ? them.canShow === true : res.canShow === true });
     // The chat view, before a message is drawn with it: the support view draws the person's.
     Simple.setView(them ? them.view : res.view);
     drawChips();
@@ -258,6 +270,20 @@ function rejoin() {
     // The build serving now: on another, this page reloads itself at a quiet moment (below).
     AGM.reconnect.build.heard(res.build);
   });
+}
+/**
+ * A guest's code and invite, taken by the join, kept in this tab (sessionStorage) and taken out of the address and its
+ * history entry (history.replaceState): a reload in this tab rejoins with them, and the shared tablet's history holds
+ * neither. Where storage is blocked the address keeps them, so a reload still rejoins.
+ */
+function keepJoin() {
+  if (!qs.get('code') && !qs.get('invite')) return;
+  try { sessionStorage.setItem(JOIN_KEPT, JSON.stringify({ code: ROOM, invite: INVITE })); } catch { return; }   // storage blocked: the address keeps them
+  const q = new URLSearchParams(location.search);
+  q.delete('code');
+  q.delete('invite');
+  const rest = q.toString();
+  history.replaceState(history.state, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
 }
 /**
  * On another build than its server's, this page reloads itself (reconnect.js) at a quiet moment: connected and in its
@@ -1708,7 +1734,8 @@ function objectNow(kind, o) {
   if (kind === 'header') return headerObject();
   if (kind === 'board') return Console.board();
   if (kind === 'take') return Takes.object();
-  if (kind === 'card') return Takes.cardObject();
+  if (kind === 'card') return Takes.cardObject(o && o.layer);
+  if (kind === 'past') return Takes.pastObject(o && o.seq);
   return null;
 }
 /**
@@ -1804,8 +1831,8 @@ function sendTargets(o) {
 // ---------------- A person: a row of the People panel, and a message's sender (kind `person`, the hall page's half) ----------------
 /** A person as the catalogue sees them: who they are in this room. */
 // Their key on people's pages (an account's `a:<id>`, a guest's `u:<uid>`) and what their pages show now, as the console
-// reads it ('' where it lists no page of theirs, undefined until it has read): a seat that may change it shows them a
-// take, or hands them back to their chat.
+// reads it ('' where it lists no page of theirs, undefined until it has read), with the information on them (`info`,
+// `beside`: Take down's): a seat that may change it shows them a take, or hands them back to their chat.
 const personOf = (p) => {
   if (!p || typeof p.uid !== 'string' || !p.uid) return null;
   // An AI's line (the Minutes) is no person's page: no key, so no act on what pages show is offered on it.
@@ -1813,7 +1840,7 @@ const personOf = (p) => {
   // A row of the room's people also carries its page (`socketId`) and, on the admin's own page, the chat view the admin
   // chose for them (`view`): Chat view ▸ reads both; a message's sender carries neither.
   return { id: 'person:' + p.uid, uid: p.uid, name: String(p.name || ''), role: p.role || '', key, kind: key ? Console.kindOf(key) : '',
-    socketId: typeof p.socketId === 'string' ? p.socketId : '', view: typeof p.view === 'string' ? p.view : '' };
+    socketId: typeof p.socketId === 'string' ? p.socketId : '', view: typeof p.view === 'string' ? p.view : '', ...(key ? Console.takesOf(key) : {}) };
 };
 const personHeader = (p) => p.name + ' · ' + roleLabel(p.role);
 /**
@@ -2688,6 +2715,8 @@ Object.assign(RUN, {
 const docCollapseBtn = document.getElementById('docCollapseBtn');
 const docExpandRail = document.getElementById('docExpandRail');
 
+/** What hears the panel open or close (the takes' cards, once they are drawn: Takes). */
+let stageMoved = null;
 function setStageCollapsed(collapsed) {
   if (collapsed) {
     // Save current split widths so we can restore them on expand
@@ -2705,6 +2734,8 @@ function setStageCollapsed(collapsed) {
   }
   docPanel.classList.toggle('collapsed', !!collapsed);
   if (docExpandRail) docExpandRail.hidden = !collapsed;
+  // A card that arrived in the side bar is in view now, or no longer: said again.
+  if (stageMoved) stageMoved();
   localStorage.setItem('agm.stageCollapsed', collapsed ? '1' : '0');
   setTimeout(rerenderCurrentDoc, 60);
   if (!_applyingRemote) pushUserState('stageCollapsed', !!collapsed);
@@ -4002,9 +4033,10 @@ const Screens = (function () {
   // the one chosen shown (People's pages first for a page that drives no screen).
   let tab = 'screens';
   function tabs() {
-    const both = CAN_SCREENS && F.canPush;
+    const pages = F.canPush || F.canShow;
+    const both = CAN_SCREENS && pages;
     $('consoleTabs').hidden = !both;
-    const now = !CAN_SCREENS ? 'people' : !F.canPush ? 'screens' : tab;
+    const now = !CAN_SCREENS ? 'people' : !pages ? 'screens' : tab;
     for (const [name, button, pane] of [['screens', $('tabScreens'), $('screensPane')], ['people', $('tabPeople'), $('peoplePane')]]) {
       const on = name === now;
       button.classList.toggle('active', on);
@@ -4012,7 +4044,7 @@ const Screens = (function () {
       button.tabIndex = on ? 0 : -1;
       pane.hidden = !on;
     }
-    $('screensTitle').textContent = !CAN_SCREENS ? 'People\'s pages' : !F.canPush ? 'Screens in this hall' : 'Screens & pages';
+    $('screensTitle').textContent = !CAN_SCREENS ? 'People\'s pages' : !pages ? 'Screens in this hall' : 'Screens & pages';
   }
   function pick(name) { tab = name === 'people' ? 'people' : 'screens'; tabs(); }
   for (const [name, button] of [['screens', $('tabScreens')], ['people', $('tabPeople')]]) {
@@ -4102,106 +4134,195 @@ const Takes = (function () {
   const newOn = $('layerNew');
   const strip = $('layerStrip');
   const cards = $('takeCards');
+  const pastList = $('takeEarlier');
   const FIELD = 'input, textarea, select, [contenteditable="true"]';
   const WAIT_MS = 3000;
   /** How long Back to chat can be taken back (lib/pages.js AGAIN_MS): the toast's Show it again, a card's Undo. */
   const AGAIN_MS = 10000;
+  /**
+   * Where the takes this page is told are kept: the show, the information over it, and the information beside it (in the
+   * side bar beside the operator's: a card, said "in the side bar", drawn over the chat only by the person's choice).
+   */
+  const LAYERS = ['show', 'info', 'beside'];
   let renderer = null;     // pagelayer.mjs, once imported
   let loading = null;
-  let told = null;         // the take this page is told now: {seq, content, by, at, hallName, holding, answer}
+  // The takes this page is told now, one in each place (the show, information over it, information beside it): {seq,
+  // content, by, at, hallName, holding, answer, arrive}, or null for none.
+  const told = { show: null, info: null, beside: null };
+  let past = [];           // the information taken off this page lately, the newest first: {seq, content, by, at}
   let offset = 0;          // AGMessage's clock against this device's
   let tz = '';
   let stage = null;        // Stagewatch's frame, as this page is told it
   let drawnKey = '';       // the take the layer holds, drawn ('' for none)
   let drawing = '';        // a web page the layer holds while it loads, not yet said ('' for none)
-  let cardKey = '';        // the take the card holds
   let result = null;       // what the layer's drawing said: {state, words}
   let turn = 0;            // each draw's number: a draw a newer one overtook is let go
   let waiting = null;      // a draw waiting for a field to be left
   let again = 0;           // the take this person asked to see again: its next report says so (`again`)
-  let said = '';           // the last report sent on this socket, so the same is not said twice
+  const said = { show: '', info: '', beside: '' };   // the last report sent on this socket in each place, so the same is not said twice
+  // The information that arrived in the side bar (over the show's place, or beside it), which the person chose to see over
+  // the chat: its number, in each.
+  const raised = { info: 0, beside: 0 };
+  let unheld = 0;          // an information take held under blank, which the person touched to see
   let unread = 0;          // others' messages heard since the layer came up
   let hot = null;          // the newest 🔥 message from someone else since it came up
   let ticker = null;
+  // The cards in the side bar (📺 On stage), one for each place: a take minimised, or information that arrived there.
+  // {key, li, side, result} (`result`, what an arrived card's drawing said).
+  const cardOf = { show: null, info: null, beside: null };
 
   const load = () => {
     if (renderer) return Promise.resolve(renderer);
     if (!loading) loading = import('/pagelayer.mjs').then((m) => { renderer = m; return m; }, (e) => { loading = null; throw e; });
     return loading;
   };
-  const ctx = () => ({ stage, offset, tz, hallName: (told && told.hallName) || HALL_NAME, holding: (told && told.holding) || '', connected: socket.connected, by: (told && told.by && told.by.name) || '' });
+  const ctxOf = (t) => ({ stage, offset, tz, hallName: (t && t.hallName) || HALL_NAME, holding: (t && t.holding) || '', connected: socket.connected, by: (t && t.by && t.by.name) || '' });
   const visible = () => document.visibilityState === 'visible';
-  const keyOf = (t) => [t.seq, JSON.stringify(t.content), t.holding || '', t.hallName || ''].join('|');
-  /** A take's kind as a person reads it: "the clock", "Stagewatch". */
+  const keyOf = (t) => [t.seq, JSON.stringify(t.content), t.holding || '', t.hallName || '', t.arrive || ''].join('|');
+  /** A take's kind as a person reads it: "the clock", "Stagewatch", "a web page". */
   const kindWords = (kind) => (AGM.catalog.SHOW_KINDS.find((x) => x[0] === kind) || [0, 0, 'something'])[2];
   const byWords = (t) => (t.by && t.by.name ? 'from ' + t.by.name : '') + (t.at ? (t.by && t.by.name ? ' · ' : '') + formatTime(t.at) : '');
+  /** A take that draws something and was not put away with Back to chat (a hand-back draws nothing). */
+  const live = (t) => !!t && t.content.kind !== 'chat' && t.answer !== 'dismissed';
+  /** Information that arrived in the side bar and stays there until the person shows it over the chat. */
+  const inSide = (t) => t.arrive === 'side' && raised[t.layer] !== t.seq;
+  /** A take drawn over the chat by itself or by the person's choice: not minimised, not waiting in the side bar. */
+  const up = (t) => !!t && t.answer !== 'minimised' && !inSide(t);
+
+  /**
+   * Where each take this page is told is drawn now: on the layer (`over`, and its place): the information beside the
+   * operator's when the person chose to see it over the chat, else the information over the show, else the show; held
+   * under blank (`held`: blank is the operator's "keep this tablet dark"; a touch shows it); or as a card in the side bar
+   * (`cards`: minimised, or arrived there). A take that would be on the layer but for another drawn over it is `under` it.
+   */
+  function plan() {
+    const show = live(told.show) ? told.show : null;
+    const info = live(told.info) ? told.info : null;
+    const beside = live(told.beside) ? told.beside : null;
+    const blank = !!show && show.content.kind === 'blank' && show.answer !== 'minimised';
+    const besideUp = up(beside);
+    const infoUp = up(info);
+    const held = !besideUp && infoUp && blank && unheld !== info.seq ? info : null;
+    const over = besideUp ? beside : infoUp && !held ? info : show && show.answer !== 'minimised' ? show : null;
+    const card = (t) => (t && (t.answer === 'minimised' || inSide(t)) ? t : null);
+    return {
+      over, layer: !over ? '' : over === beside ? 'beside' : over === info ? 'info' : 'show', held, show, info, beside,
+      under: [show && show.answer !== 'minimised' ? show : null, infoUp && !held ? info : null].filter((t) => t && over && t !== over),
+      cards: { show: show && show.answer === 'minimised' ? show : null, info: card(info), beside: card(beside) },
+    };
+  }
+
+  /** A take as the server tells it (a place's `page:take`, the join's `page`, `over` and `beside`), read by type; null for none. */
+  function read(t, layerName) {
+    const ok = t && typeof t === 'object' && Number.isInteger(t.seq) && t.seq > 0 && t.content && typeof t.content === 'object' && typeof t.content.kind === 'string';
+    if (t && Number.isFinite(t.now)) offset = t.now - Date.now();
+    if (t && typeof t.tz === 'string') tz = t.tz;
+    return ok ? { seq: t.seq, layer: layerName, content: t.content, by: t.by && typeof t.by === 'object' ? t.by : null, at: Number.isFinite(t.at) ? t.at : 0, hallName: typeof t.hallName === 'string' ? t.hallName : '',
+      holding: typeof t.holding === 'string' ? t.holding : '', answer: t.answer === 'dismissed' || t.answer === 'minimised' ? t.answer : null, arrive: layerName !== 'show' && t.arrive === 'side' ? 'side' : 'over' } : null;
+  }
+  /** The Earlier entries as the server tells them, read by type: the newest first, at most 10. */
+  function readPast(list) {
+    return (Array.isArray(list) ? list : []).filter((e) => e && typeof e === 'object' && Number.isInteger(e.seq) && e.content && typeof e.content === 'object' && typeof e.content.kind === 'string').slice(0, 10)
+      .map((e) => ({ seq: e.seq, content: e.content, by: e.by && typeof e.by === 'object' ? e.by : null, at: Number.isFinite(e.at) ? e.at : 0 }));
+  }
 
   /** This page joined (or joined again, on a new socket, which has said nothing yet): what it is shown now. */
   function joined(res) {
     if (Number.isFinite(res.now)) offset = res.now - Date.now();
     if (typeof res.tz === 'string') tz = res.tz;
     stage = res.stage || null;
-    said = '';
-    tell(res.page || null);
-  }
-  /** What this page is shown now, as the server tells it: a take, or (number 0, no content) its chat. */
-  function tell(t) {
-    const ok = t && typeof t === 'object' && Number.isInteger(t.seq) && t.seq > 0 && t.content && typeof t.content === 'object' && typeof t.content.kind === 'string';
-    if (t && Number.isFinite(t.now)) offset = t.now - Date.now();
-    if (t && typeof t.tz === 'string') tz = t.tz;
-    told = ok ? { seq: t.seq, content: t.content, by: t.by && typeof t.by === 'object' ? t.by : null, at: Number.isFinite(t.at) ? t.at : 0, hallName: typeof t.hallName === 'string' ? t.hallName : '',
-      holding: typeof t.holding === 'string' ? t.holding : '', answer: t.answer === 'dismissed' || t.answer === 'minimised' ? t.answer : null } : null;
-    if (told && again && again !== told.seq) again = 0;
+    for (const l of LAYERS) said[l] = '';
+    told.show = read(res.page || null, 'show');
+    told.info = read(res.over || null, 'info');
+    told.beside = read(res.beside || null, 'beside');
+    past = readPast(res.earlier);
+    settle();
     apply();
+  }
+  /** What this page is shown now in a place, as the server tells it: a take, or (number 0, no content) nothing there. */
+  function tell(t) {
+    const layerName = t && (t.layer === 'info' || t.layer === 'beside') ? t.layer : 'show';
+    told[layerName] = read(t, layerName);
+    if (layerName === 'info' && t && Array.isArray(t.earlier)) past = readPast(t.earlier);
+    settle();
+    apply();
+  }
+  /** What the person chose stops counting once its take is gone: Show it again, a raised side card, a touch under blank. */
+  function settle() {
+    const seqs = LAYERS.map((l) => (told[l] ? told[l].seq : 0));
+    if (again && !seqs.includes(again)) again = 0;
+    for (const l of ['info', 'beside']) if (raised[l] && (!told[l] || told[l].seq !== raised[l])) raised[l] = 0;
+    if (unheld && (!told.info || told.info.seq !== unheld)) unheld = 0;
   }
   socket.on('page:take', (t) => tell(t));
 
   /**
-   * The page as the take it is told and the person's answer to it say: its chat, the layer, or the card. `asked`: the
-   * person asked for the layer (Show again), so it is drawn at once, a field holding the focus or not.
+   * The page as the takes it is told and the person's answers to them say: the layer (information over the show), the
+   * cards in its side bar, and Earlier; then each take said. `asked`: the person asked for the layer (Show again), so it
+   * is drawn at once, a field holding the focus or not.
    */
   function apply(asked) {
-    const t = told;
-    if (!t || t.answer === 'dismissed') { hideLayer(); dropCard(); return; }
-    if (t.content.kind === 'chat') { hideLayer(); dropCard(); say(); return; }
-    if (t.answer === 'minimised') { hideLayer(); showCard(); return; }
-    dropCard();
-    showLayer(asked === true);
+    const p = plan();
+    if (p.over) showLayer(p.over, asked === true); else hideLayer();
+    drawCards(p);
+    drawPast();
+    sayAll();
   }
 
   /**
-   * What this page does with the take it is told now, said to the server: on its chat (a hand-back), or the layer drawn,
-   * in view or not, or failed with why; with `again` where the person asked to see it again. Never for a take not drawn
-   * yet, nor one the person answered (their answer is theirs to say), nor from the support view.
+   * What this page does with each take it is told now, said to the server, one for each place: on its chat (a hand-back of
+   * the show), the layer drawn in view or not, failed with why, under what is drawn over it ("under a web page"), held
+   * under blank, or in the side bar; with `again` where the person asked to see it again. Never for a take not drawn yet,
+   * nor one the person answered (their answer is theirs to say), nor from the support view.
    */
-  function say() {
-    const t = told;
-    if (ADMIN_VIEW || !t) return;
-    let state;
-    if (t.content.kind === 'chat') state = visible() ? 'shown' : 'hidden';
-    else if (t.answer || drawnKey !== keyOf(t) || !result) return;
-    // A web page is never said to be seen: in view, it opened (nothing inside its frame can be read).
-    else state = result.state === 'failed' ? 'failed' : !visible() ? 'hidden' : result.state === 'opened' ? 'opened' : 'shown';
-    const words = state === 'failed' ? result.words : '';
-    const asked = again === t.seq && (state === 'shown' || state === 'opened');
-    if (asked) again = 0;
-    report({ seq: t.seq, state, words, ...(asked ? { again: true } : {}) }, asked);
+  function sayAll() {
+    if (ADMIN_VIEW) return;
+    const p = plan();
+    for (const l of LAYERS) {
+      const t = told[l];
+      if (!t) continue;
+      const st = stateOf(t, l, p);
+      if (!st) continue;
+      const asked = again === t.seq && (st.state === 'shown' || st.state === 'opened');
+      if (asked) again = 0;
+      report({ seq: t.seq, state: st.state, words: st.words, ...(asked ? { again: true } : {}) }, l, asked);
+    }
   }
-  /** A report on this page's take (page:report, the outbox's `self`): `act`, a person's act, whose refusal is said. */
-  function report(args, act) {
+  function stateOf(t, l, p) {
+    if (t.content.kind === 'chat') return l === 'show' ? { state: visible() ? 'shown' : 'hidden', words: '' } : null;
+    if (t.answer) return null;
+    // A web page is never said to be seen: in view, it opened (nothing inside its frame can be read).
+    const seen = (r) => (r.state === 'failed' ? { state: 'failed', words: r.words } : !visible() ? { state: 'hidden', words: '' } : { state: r.state === 'opened' ? 'opened' : 'shown', words: '' });
+    if (p.over === t) return drawnKey === keyOf(t) && result ? seen(result) : null;
+    if (p.held === t) return { state: 'hidden', words: 'held under blank' };
+    const c = cardOf[l];
+    if (l !== 'show' && p.cards[l] === t && c && c.side && c.key === keyOf(t)) {
+      if (!c.result) return null;
+      const r = seen(c.result);
+      if (r.state === 'failed') return r;
+      // Under the layer, which is drawn over the whole page, its side bar included: in the side bar, but not in view.
+      if (!layer.hidden && p.over) return { state: 'hidden', words: 'under ' + kindWords(p.over.content.kind) };
+      // The side bar collapsed, or behind the simple view's Shown to you tab: out of view.
+      if (!c.li.getClientRects().length) return { state: 'hidden', words: '' };
+      return { ...r, words: 'in the side bar' };
+    }
+    if (p.under.includes(t)) return { state: 'hidden', words: 'under ' + kindWords(p.over.content.kind) };
+    return null;
+  }
+  /** A report on a take of this page's (page:report, the outbox's `self`): `act`, a person's act, whose refusal is said. */
+  function report(args, l, act) {
     if (ADMIN_VIEW) return;
     const key = args.seq + '|' + args.state + '|' + (args.words || '') + '|' + !!args.again;
-    if (!act && key === said) return;
-    said = key;
-    AGM.outbox.self('page:report', args, 'show', (r) => { if (act && !(r && r.ok)) AGM.toast((r && r.error) || 'Not changed.', true); });
+    if (!act && key === said[l]) return;
+    said[l] = key;
+    AGM.outbox.self('page:report', args, l, (r) => { if (act && !(r && r.ok)) AGM.toast((r && r.error) || 'Not changed.', true); });
   }
-  document.addEventListener('visibilitychange', () => say());
+  document.addEventListener('visibilitychange', () => sayAll());
 
-  /** The layer drawn with the take told now, once no field being written in holds the focus (at most WAIT_MS). */
-  function showLayer(asked) {
-    const t = told;
+  /** The layer drawn with `t`, once no field being written in holds the focus (at most WAIT_MS). */
+  function showLayer(t, asked) {
     const key = keyOf(t);
-    if ((drawnKey === key || drawing === key) && !layer.hidden) { drawBarNow(); say(); return; }
+    if ((drawnKey === key || drawing === key) && !layer.hidden) { drawBarNow(); return; }
     if (waiting && waiting.key === key && !asked) return;
     if (waiting) waiting.cancel();
     const go = () => { waiting = null; draw(t, key); };
@@ -4213,28 +4334,30 @@ const Takes = (function () {
     timer = setTimeout(done, WAIT_MS);
     waiting = { key, cancel: () => { field.removeEventListener('blur', done); clearTimeout(timer); waiting = null; } };
   }
+  /** Whether `key` is still what the layer should draw. */
+  const stillOver = (key) => { const p = plan(); return !!p.over && keyOf(p.over) === key; };
   function draw(t, key) {
     const n = ++turn;
     load().then((m) => {
-      const drawn = m.render(box, t.content, ctx());
+      const drawn = m.render(box, t.content, ctxOf(t));
       // A web page is on the layer as it loads (up to 15 s): the person sees it come, and it is said once it has.
-      if (t.content.kind === 'web' && n === turn && told && keyOf(told) === key) { drawing = key; open(t); }
+      if (t.content.kind === 'web' && n === turn && stillOver(key)) { drawing = key; open(t); }
       return drawn;
     }).then((r) => {
-      if (n !== turn || !told || keyOf(told) !== key) return;
+      if (n !== turn || !stillOver(key)) return;
       drawing = '';
       result = r && typeof r === 'object' ? r : { state: 'failed', words: 'it could not be drawn' };
       drawnKey = key;
       delete layer.dataset.touched;   // a new take: a blank one's bar waits for a touch again
       open(t);
-      say();
+      sayAll();
     }, () => {
       if (n !== turn) return;
       box.textContent = '';
       result = { state: 'failed', words: 'this page could not load what draws it' };
       drawnKey = key;
       open(t);
-      say();
+      sayAll();
     });
   }
   /** The layer up, over the page: its words, its bar, its clock; the focus on it unless a field holds it. */
@@ -4272,77 +4395,194 @@ const Takes = (function () {
     if (openOn && openOn.kind === 'take') AGM.menu.close();
   }
 
-  // ---- the card: a take the person minimised, at the top of the side bar (📺 On stage), with Show again and Remove
-  function showCard() {
-    const t = told;
-    const key = keyOf(t);
-    if (cardKey === key) { drawCardBar(); return; }
-    load().then((m) => {
-      if (!told || keyOf(told) !== key || told.answer !== 'minimised') return;
-      cards.textContent = '';
+  // ---- the cards: a take the person minimised, or information that arrived in the side bar (📺 On stage), one for each
+  // place, with Show again (over the chat) and Remove
+  function drawCards(p) {
+    for (const l of LAYERS) {
+      const t = p.cards[l];
+      if (!t) { dropCard(l); continue; }
+      const side = l !== 'show' && t.answer !== 'minimised';
+      const key = keyOf(t) + (side ? '|side' : '');
+      const c = cardOf[l];
+      if (c && c.key === key) { drawCardBar(l); continue; }
+      dropCard(l);
       const li = document.createElement('li');
-      li.className = 'take-card';
+      li.className = 'take-card' + (side ? ' take-card-side' : '');
       li.dataset.key = 'take:' + t.seq;
+      li.dataset.layer = l;
       li.tabIndex = -1;
-      const by = document.createElement('span');
-      by.className = 'take-card-by';
-      by.textContent = byWords(t);
-      const bar = document.createElement('span');
-      bar.className = 'take-card-acts';
-      li.append(m.card(t.content, ctx()), by, bar);
-      cards.append(li);
+      cardOf[l] = { key: keyOf(t), li, side, result: null };
+      // In the order of the places: the show's card first, then the information's, then what is beside it.
+      const next = LAYERS.slice(LAYERS.indexOf(l) + 1).map((x) => cardOf[x] && cardOf[x].li).find((x) => !!x && x.parentNode === cards);
+      cards.insertBefore(li, next || null);
       cards.hidden = false;
-      cardKey = key;
       document.body.dataset.pushed = '1';
       drawRail();
-      drawCardBar();
-      ticking();
-    }, () => AGM.toast('This page could not load what draws a take: reload it.', true));
+      // Information that arrives in the side bar opens it, once.
+      if (side) setStageCollapsed(false);
+      load().then((m) => {
+        const now = cardOf[l];
+        if (!now || now.li !== li) return;
+        const by = document.createElement('span');
+        by.className = 'take-card-by';
+        by.textContent = byWords(t);
+        const bar = document.createElement('span');
+        bar.className = 'take-card-acts';
+        li.append(m.card(t.content, ctxOf(t)), by);
+        if (side) {
+          // Drawn in the card, as on the layer, and said "in the side bar" once it has.
+          const inner = document.createElement('div');
+          inner.className = 'take-card-box';
+          li.append(inner);
+          Promise.resolve(m.render(inner, t.content, ctxOf(t))).then((r) => {
+            if (cardOf[l] !== now) return;
+            now.result = r && typeof r === 'object' ? r : { state: 'failed', words: 'it could not be drawn' };
+            sayAll();
+          }, () => { if (cardOf[l] === now) { now.result = { state: 'failed', words: 'this page could not load what draws it' }; sayAll(); } });
+        }
+        li.append(bar);
+        drawCardBar(l);
+        ticking();
+      }, () => AGM.toast('This page could not load what draws a take: reload it.', true));
+    }
   }
-  function dropCard() {
-    if (!cardKey && cards.hidden) return;
-    const had = cards.contains(document.activeElement);
-    cards.textContent = '';
-    cards.hidden = true;
-    cardKey = '';
-    delete document.body.dataset.pushed;
+  function dropCard(l) {
+    const c = cardOf[l];
+    if (!c) return;
+    const had = c.li.contains(document.activeElement);
+    c.li.remove();
+    cardOf[l] = null;
+    if (!cards.children.length) { cards.hidden = true; if (!past.length) delete document.body.dataset.pushed; }
     drawRail();
     ticking();
     if (had && !layer.hidden) layer.focus({ preventScroll: true });
     if (openOn && openOn.kind === 'card') AGM.menu.close();
   }
-  /** The collapsed panel's rail says a take waits in it: "📺 On stage • 1". */
+  /** How many cards the side bar holds now: a take minimised, information arrived there (beside the operator's too). */
+  const carded = () => LAYERS.filter((l) => !!cardOf[l]).length;
+  /** The collapsed panel's rail says what waits in it: "📺 On stage • 2". */
   function drawRail() {
     const rail = document.getElementById('docExpandRail');
-    if (rail) rail.textContent = cardKey ? '📺 On stage • 1' : '📺 On stage ⇤';
+    const n = carded();
+    if (rail) rail.textContent = n ? '📺 On stage • ' + n : '📺 On stage ⇤';
   }
+
+  // ---- Earlier: the information taken off this page lately, each opened with a Look (no report, no take)
+  /** The Earlier entries drawn: those this page is told, but the information it is shown now (over the show or beside it). */
+  const pastNow = () => past.filter((e) => !['info', 'beside'].some((l) => told[l] && told[l].seq === e.seq && live(told[l])));
+  function drawPast() {
+    const list = pastNow();
+    const keys = list.map((e) => 'past:' + e.seq).join(',');
+    if (pastList.dataset.keys === keys) { drawPastBars(); return; }
+    pastList.dataset.keys = keys;
+    const had = pastList.contains(document.activeElement);
+    pastList.textContent = '';
+    pastList.hidden = !list.length;
+    if (list.length) document.body.dataset.pushed = '1';
+    else if (!carded()) delete document.body.dataset.pushed;
+    if (!list.length) { if (had) feed.focus(); return; }
+    load().then((m) => {
+      if (pastList.dataset.keys !== keys) return;
+      const head = document.createElement('li');
+      head.className = 'take-earlier-head';
+      head.textContent = 'Earlier';
+      pastList.append(head);
+      for (const e of list) {
+        const li = document.createElement('li');
+        li.className = 'take-card take-earlier-item';
+        li.dataset.key = 'past:' + e.seq;
+        li.tabIndex = -1;
+        const by = document.createElement('span');
+        by.className = 'take-card-by';
+        by.textContent = byWords(e);
+        const bar = document.createElement('span');
+        bar.className = 'take-card-acts';
+        li.append(m.card(e.content, ctxOf(e)), by, bar);
+        pastList.append(li);
+      }
+      drawPastBars();
+    }, () => AGM.toast('This page could not load what draws a take: reload it.', true));
+  }
+  const pastObject = (seq) => { const e = pastNow().find((x) => x.seq === seq); return e ? { id: 'past:' + e.seq, seq: e.seq, kind: e.content.kind, url: e.content.kind === 'web' && typeof e.content.url === 'string' ? e.content.url : '' } : null; };
+  function drawPastBars() {
+    for (const li of pastList.querySelectorAll('.take-earlier-item')) {
+      const o = pastObject(Number(li.dataset.key.slice(5)));
+      if (o) drawBar(li.querySelector('.take-card-acts'), 'past', o, { words: true, more: 'More for this', keysOn: li });
+    }
+  }
+  /** A Look at an Earlier entry: a web page framed on this page alone (Preview), with nothing to show from it. */
+  function look(o) {
+    if (o.kind !== 'web' || !o.url) { AGM.toast('This page cannot open that one again.', true); return; }
+    load().then((m) => Preview.open(m, o.url, null), () => AGM.toast('This page could not load what draws a web page: reload it.', true));
+  }
+  function pastDoor(t) {
+    const li = t.closest && t.closest('.take-earlier-item');
+    if (!li || !pastList.contains(li)) return null;
+    const seq = Number(li.dataset.key.slice(5));
+    const more = li.querySelector('.obj-more');
+    return { el: li, more, open: (at) => openObjectMenu('past', () => pastObject(seq), { node: li, more, at, opener: li.contains(document.activeElement) ? document.activeElement : more || li, label: 'Earlier', header: () => 'Shown earlier' }) };
+  }
+  pastList.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action^="past."], [data-more]');
+    const door = el && pastDoor(el);
+    if (!door) return;
+    e.preventDefault();
+    if (el.dataset.more) {
+      if (openOn && openOn.kind === 'past') { AGM.menu.close(); return; }
+      door.open({ anchor: el });
+      return;
+    }
+    const o = pastObject(Number(door.el.dataset.key.slice(5)));
+    if (o) act('past', el.dataset.action, o, { anchor: door.more || el, node: door.el, opener: el });
+  });
+  AGM.menu.door(pastList, pastDoor);
 
   // ---- the objects the catalogue reads, and their bars
   /** A web page's address as the take carries it ('' for any other kind): Open in a new tab opens it. */
   const urlOf = (t) => (t && t.content.kind === 'web' && typeof t.content.url === 'string' ? t.content.url : '');
-  const object = () => (!layer.hidden && told ? { id: 'take', seq: told.seq, kind: told.content.kind, strip: !!hot, full: fullNow() === layer, url: urlOf(told) } : null);
-  const cardObject = () => (cardKey && told && told.answer === 'minimised' ? { id: 'card', seq: told.seq, kind: told.content.kind } : null);
+  /**
+   * The take on the layer, as the catalogue reads it: `seq`, `kind`, `layer`, `strip` (a 🔥 message out of view), `full`
+   * (the layer fills the screen), `url` (a web page's), `held` (information held under this blank: a touch shows it).
+   */
+  const object = () => {
+    if (layer.hidden) return null;
+    const p = plan();
+    const t = p.over;
+    return t && keyOf(t) === (drawnKey || drawing) ? { id: 'take', seq: t.seq, kind: t.content.kind, layer: p.layer, strip: !!hot, full: fullNow() === layer, url: urlOf(t), held: p.held ? 1 : 0 } : null;
+  };
+  /** A card as the catalogue reads it: `seq`, `kind`, `layer`, `side` (arrived in the side bar, not minimised). */
+  const cardObject = (l) => {
+    const which = LAYERS.includes(l) ? [l] : LAYERS;
+    for (const x of which) {
+      const c = cardOf[x];
+      const t = told[x];
+      if (c && t && c.key === keyOf(t)) return { id: 'card', seq: t.seq, kind: t.content.kind, layer: x, side: c.side };
+    }
+    return null;
+  };
   function drawBarNow() {
     const o = object();
     if (!o) return;
     drawBar(acts, 'take', o, { words: true, all: true, more: 'More for what is shown to you' });
-    const open = $('layerOpenChat');
+    const openChat = $('layerOpenChat');
     const why = AGM.catalog.ready('take', 'take.openChat', F, o);
-    if (why === true) { open.removeAttribute('aria-disabled'); open.removeAttribute('title'); } else { open.setAttribute('aria-disabled', 'true'); open.title = why; }
+    if (why === true) { openChat.removeAttribute('aria-disabled'); openChat.removeAttribute('title'); } else { openChat.setAttribute('aria-disabled', 'true'); openChat.title = why; }
   }
-  function drawCardBar() {
-    const o = cardObject();
-    const li = cards.querySelector('.take-card');
-    if (o && li) drawBar(li.querySelector('.take-card-acts'), 'card', o, { words: true, more: 'More for this card', keysOn: li });
+  function drawCardBar(l) {
+    const o = cardObject(l);
+    const c = cardOf[l];
+    const bar = c && c.li.querySelector('.take-card-acts');
+    if (o && bar) drawBar(bar, 'card', o, { words: true, more: 'More for this card', keysOn: c.li });
   }
   const takeHeader = () => what.textContent;
-  const cardHeader = (o) => 'Minimised: ' + kindWords(o.kind);
+  const cardHeader = (o) => (o.side ? 'In your side bar: ' : 'Minimised: ') + kindWords(o.kind);
   const takeDoor = () => (layer.hidden ? null : { el: layer, more: acts.querySelector('.obj-more'), open: (at) => openObjectMenu('take', object, { node: layer, more: acts.querySelector('.obj-more'), at, opener: layer.contains(document.activeElement) ? document.activeElement : layer, label: 'Shown to you', header: takeHeader }) });
   function cardDoor(t) {
     const li = t.closest && t.closest('.take-card');
     if (!li || !cards.contains(li)) return null;
+    const l = li.dataset.layer;
     const more = li.querySelector('.obj-more');
-    return { el: li, more, open: (at) => openObjectMenu('card', cardObject, { node: li, more, at, opener: li.contains(document.activeElement) ? document.activeElement : more || li, label: 'Card actions', header: cardHeader }) };
+    return { el: li, more, layer: l, open: (at) => openObjectMenu('card', () => cardObject(l), { node: li, more, at, opener: li.contains(document.activeElement) ? document.activeElement : more || li, label: 'Card actions', header: cardHeader }) };
   }
   // Got it on the strip answers the backstage team (msg.ack) and clears the strip: what it answers is answered.
   $('layerGotIt').addEventListener('click', (e) => {
@@ -4375,10 +4615,10 @@ const Takes = (function () {
     e.preventDefault();
     if (el.dataset.more) {
       if (openOn && openOn.kind === 'card') { AGM.menu.close(); return; }
-      openObjectMenu('card', cardObject, { node: door.el, more: el, opener: el, label: 'Card actions', header: cardHeader });
+      door.open({ anchor: el });
       return;
     }
-    const o = cardObject();
+    const o = cardObject(door.layer);
     if (o) act('card', el.dataset.action, o, { anchor: door.more || el, node: door.el, opener: el });
   });
   AGM.menu.door(cards, cardDoor);
@@ -4393,52 +4633,75 @@ const Takes = (function () {
     act('take', 'take.minimise', o, { node: layer, opener: layer });
   }, true);
 
-  // ---- the person's acts on their own page: the page acts at once, then says so
-  /** Back to chat, from the layer or from the card (Remove), with the toast's way back for 10 s. */
-  function backToChat(from) {
-    const t = told;
+  // ---- the person's acts on their own page: the page acts at once, then says so. Each acts on the layer drawn on top
+  // (the information over the show), or on the card it is on.
+  /** Back to chat on a layer's take, from the layer or from its card (Remove), with the toast's way back for 10 s. */
+  function backToChat(from, l) {
+    const t = told[l];
     if (!t) return;
     const seq = t.seq;
     t.answer = 'dismissed';
-    report({ seq, state: 'dismissed', words: '' }, true);
+    report({ seq, state: 'dismissed', words: '' }, l, true);
     apply();
     const at = Date.now();
     const card = from === 'card';
-    AGM.toast(card ? 'Removed from On stage: you are on your chat.' : 'Back to chat.', {
+    // Back to chat on information returns to what is under it, where there is something.
+    const under = l !== 'show' && plan().over;
+    const words = card ? 'Removed from On stage' + (under ? ': ' + kindWords(under.content.kind) + ' is under it.' : ': you are on your chat.')
+      : under ? 'Back to ' + kindWords(under.content.kind) + '.' : 'Back to chat.';
+    AGM.toast(words, {
       undoLabel: card ? 'Undo' : 'Show it again',
       undo: () => {
-        if (!told || told.seq !== seq || told.answer !== 'dismissed') return;
+        const now = told[l];
+        if (!now || now.seq !== seq || now.answer !== 'dismissed') return;
         if (Date.now() - at > AGAIN_MS) { AGM.toast('Back to chat was chosen more than 10 s ago: it can no longer be brought back.', true); return; }
-        if (card) { told.answer = 'minimised'; report({ seq, state: 'minimised', words: '' }, true); apply(); return; }
-        told.answer = null;
+        if (card) { now.answer = 'minimised'; report({ seq, state: 'minimised', words: '' }, l, true); apply(); return; }
+        now.answer = null;
         again = seq;
         apply(true);
       },
     });
   }
-  /** Minimise: the take goes into the side bar as a card, which opens once for it; Undo shows it again. */
-  function minimise() {
-    const t = told;
+  /** Minimise: the layer's take goes into the side bar as a card, which opens once for it; Undo shows it again. */
+  function minimise(l) {
+    const t = told[l];
     if (!t || t.answer) return;
     t.answer = 'minimised';
-    report({ seq: t.seq, state: 'minimised', words: '' }, true);
+    if (l !== 'show' && raised[l] === t.seq) raised[l] = 0;
+    report({ seq: t.seq, state: 'minimised', words: '' }, l, true);
     apply();
     setStageCollapsed(false);
     const seq = t.seq;
-    AGM.toast('Minimised to 📺 On stage.', { undo: () => { if (told && told.seq === seq && told.answer === 'minimised') showAgain(); } });
+    AGM.toast('Minimised to 📺 On stage.', { undo: () => { const now = told[l]; if (now && now.seq === seq && now.answer === 'minimised') showAgain(l); } });
   }
-  /** Show again (a card's, or Minimise's Undo): the layer drawn again, and said with `again`. */
-  function showAgain() {
-    const t = told;
-    if (!t || t.answer !== 'minimised') return;
-    t.answer = null;
-    again = t.seq;
+  /**
+   * Show again (a card's, or Minimise's Undo): the take drawn over the chat again, and said with `again`; information that
+   * arrived in the side bar, drawn over the chat by the person's choice.
+   */
+  function showAgain(l) {
+    const t = told[l];
+    if (!t) return;
+    if (t.answer === 'minimised') {
+      t.answer = null;
+      again = t.seq;
+      if (l !== 'show' && t.arrive === 'side') raised[l] = t.seq;
+      apply(true);
+      return;
+    }
+    if (l !== 'show' && !t.answer && inSide(t)) { raised[l] = t.seq; apply(true); }
+  }
+  /** "1 from backstage", on blank's bar: the information held under it, drawn over the blank by the person's touch. */
+  function unhold() {
+    const p = plan();
+    if (!p.held) return;
+    unheld = p.held.seq;
     apply(true);
   }
   /** Open chat, from the 🔥 strip: minimised, and the 🔥 message brought into view with the focus on it. */
   function openChat() {
     const m = hot;
-    minimise();
+    const p = plan();
+    if (p.layer) minimise(p.layer);
     const node = m && messagesById.get(m.id);
     if (node) { node.scrollIntoView({ block: 'center' }); if (node.hasAttribute('tabindex')) node.focus({ preventScroll: true }); }
   }
@@ -4465,12 +4728,14 @@ const Takes = (function () {
   }
   Object.assign(RUN, {
     'take.tab': (o) => openTab(o),
-    'take.chat': () => backToChat('layer'),
-    'take.minimise': () => minimise(),
+    'take.chat': (o) => backToChat('layer', o.layer),
+    'take.minimise': (o) => minimise(o.layer),
     'take.openChat': () => openChat(),
     'take.fullscreen': () => fullscreen(),
-    'card.show': () => showAgain(),
-    'card.remove': () => backToChat('card'),
+    'take.held': () => unhold(),
+    'card.show': (o) => showAgain(o.layer),
+    'card.remove': (o) => backToChat('card', o.layer),
+    'past.look': (o) => look(o),
   });
 
   // ---- what happens in the room while the layer covers it
@@ -4505,42 +4770,56 @@ const Takes = (function () {
   // ---- the clock and Stagewatch's time, live while one is drawn
   function tickNow() {
     if (!renderer) return;
-    if (!layer.hidden) renderer.tick(layer, ctx());
-    if (!cards.hidden) renderer.tick(cards, ctx());
+    if (!layer.hidden) renderer.tick(layer, ctxOf(told.show));
+    if (!cards.hidden) renderer.tick(cards, ctxOf(told.show));
   }
   function ticking() {
-    const live = (!layer.hidden && /^(clock|stage)$/.test(layer.dataset.kind || '')) || (!cards.hidden && !!cards.querySelector('[data-live]'));
-    if (live && !ticker) ticker = setInterval(tickNow, 500);
-    if (!live && ticker) { clearInterval(ticker); ticker = null; }
+    const isLive = (!layer.hidden && /^(clock|stage)$/.test(layer.dataset.kind || '')) || (!cards.hidden && !!cards.querySelector('[data-live]'));
+    if (isLive && !ticker) ticker = setInterval(tickNow, 500);
+    if (!isLive && ticker) { clearInterval(ticker); ticker = null; }
   }
   /** Stagewatch's frame moved: a countdown drawn shows it at once. */
   function stageFrame(v) { stage = v; tickNow(); }
   /** The page's facts changed (connected, the support view): the bars drawn again. */
-  function redraw() { drawBarNow(); drawCardBar(); if (!layer.hidden) drawNews(); }
+  function redraw() { drawBarNow(); for (const l of LAYERS) drawCardBar(l); drawPastBars(); if (!layer.hidden) drawNews(); }
+  /** The side bar opened or closed, or its tab was chosen: a card that arrived there is in view now, or no longer. */
+  function seen() { sayAll(); }
+  stageMoved = seen;
 
-  return { joined, stage: stageFrame, heard, redraw, object, cardObject, carded: () => !!cardKey, current: () => told, load };
+  return {
+    joined, stage: stageFrame, heard, redraw, seen, object, cardObject, pastObject, carded, earlier: () => pastNow().length, load,
+    current: () => told.show, over: () => told.info,
+  };
 })();
 
 // ---------------- What people's pages show: the console's People's pages, and the Board chip ----------------
-// For a page that may change what its hall's people's pages show (canPush): it reads where they stand (page:status) as it
-// joins, as the console opens and whenever it is told they changed (pages:changed, a signal), and draws the Board chip in
-// the header and the console's People's pages from that one read. A choice is a take of its own (page:push), said with
-// whom it reaches, and its Undo for 10 s puts back what was shown before, a take of its own over the one it undoes
-// (`ifSeq`, so it never undoes someone else's later take); beyond that, the Board chip's ↶ Back to does the same while
-// this page's take is still the Board's. A take made that way offers no undo of its own.
+// For a page that may change what its hall's people's pages show (canPush), or show information on its Board's pages by a
+// right of its own (canShow): it reads where they stand (page:status) as it joins, as the console opens and whenever it
+// is told they changed (pages:changed, a signal), and draws the Board chip in the header and the console's People's pages
+// from that one read, each with the show, the information over it and what is beside it. A choice is a take of its own
+// (page:push), said with whom it reaches. A show take's Undo for 10 s puts back what was shown before, a take of its own
+// over the one it undoes (`ifSeq`, so it never undoes someone else's later take); beyond that, the Board chip's ↶ Back to
+// does the same while this page's take is still the Board's. Information offers Take down for 10 s instead, never older
+// information put back; the Board's and a person's Take down hand back the information alone, over the show or beside
+// it. A take made that way offers no undo of its own. A page that may only show (canShow) is told the people seated On
+// stage alone, and over the operator's information on their pages sends its own to their side bar, beside it.
 const Console = (function () {
   const $ = (id) => document.getElementById(id);
   const chip = $('boardChip');
   const list = $('peoplePages');
   /** How a choice is said, by its kind: "The clock on 6 Board pages." */
   const SAID = { chat: 'Back to chat', stage: 'Stagewatch', clock: 'The clock', holding: 'Holding', blank: 'Blank', web: 'The web page' };
+  const said = (content) => (content.kind === 'chat' && content.layer === 'info' ? 'Taken down' : SAID[content.kind] || 'It');
+  /** The information layer's kinds (lib/pages.js), which a take of draws over the show. */
+  const INFO = ['web'];
   let status = null;       // page:status's answer: {board, people}
   let mine = null;         // this page's own take on the Board: {seq, previous, time}
   let asking = false;
   let again = false;
+  const may = () => F.canPush || F.canShow;
 
   function read() {
-    if (!F.canPush || ADMIN_VIEW || !HALL_KEY || !socket.connected) return;
+    if (!may() || ADMIN_VIEW || !HALL_KEY || !socket.connected) return;
     if (asking) { again = true; return; }
     asking = true;
     socket.emit('page:status', { code: HALL_KEY }, (r) => {
@@ -4556,6 +4835,19 @@ const Console = (function () {
   /** What a status row's take shows now: its kind, or chat for nothing shown and for every page back on its chat. */
   const kindNow = (row) => (!row || !row.seq || !row.kind || AGM.markOf(row.mark) === 'off' ? 'chat' : row.kind);
   /**
+   * The information in a status row ({seq, kind, mark, words, showing, arrive, op}), or null for none: over the show
+   * (`info`), or in their side bar beside the operator's (`beside`); what Take down hands back, and whether the operator put
+   * it up (`op`: a researcher's Take down is only over its own kind).
+   */
+  const takeIn = (i) => (i && i.seq && i.kind && i.kind !== 'chat' ? { seq: i.seq, kind: i.kind, mark: i.mark, words: i.words, showing: i.showing, arrive: i.arrive === 'side' ? 'side' : 'over', op: i.op === true, on: i.on, pages: i.pages } : null);
+  const infoOf = (row) => takeIn(row && row.info);
+  const besideOf = (row) => takeIn(row && row.beside);
+  /**
+   * The operator's information drawn on a Board page in place of the Board's own, as the console lists the people On stage
+   * (a seat that may only show is told them alone): its Take down of the Board's is then the server's to refuse.
+   */
+  const opOnBoard = (b) => !F.canPush && !!status && Array.isArray(status.people) && status.people.some((p) => { const i = infoOf(p); return !!i && i.op && (!b || !b.info || b.info.seq !== i.seq); });
+  /**
    * What a person's pages show now: a kind (chat for their chat), '' where the console's read lists no page of theirs in
    * the hall's rooms this page may read, and undefined until that read has come.
    */
@@ -4564,36 +4856,50 @@ const Console = (function () {
     const p = Array.isArray(status.people) ? status.people.find((x) => x.uid === key) : null;
     return p ? kindNow(p) : '';
   };
-  /** The Board as the catalogue reads it (kind `board`), for a page that may change what it is shown. */
+  /** The Board as the catalogue reads it (kind `board`), for a page that may change what it is shown or show on it. */
   function board() {
-    if (!F.canPush) return null;
+    if (!may()) return null;
     const b = status && status.board;
+    const info = infoOf(b);
     return { id: 'board', seq: b ? b.seq : 0, kind: b ? kindNow(b) : undefined, pages: b ? b.pages : 0, on: b ? b.on : 0, mark: b ? b.mark : '', words: b ? b.words : '', showing: b ? b.showing : '',
-      mine: mine && b && mine.seq === b.seq ? mine : null };
+      mine: mine && b && mine.seq === b.seq ? mine : null, info, beside: besideOf(b), show: !status || status.show !== false, opOn: opOnBoard({ info }) };
   }
-  const boardHeader = (o) => (!status ? 'The Board' : o.pages ? 'The Board · ' + o.pages + (o.pages === 1 ? ' page · ' : ' pages · ') + o.words : 'No Board page is open: what you show arrives when one joins.');
+  /** What is over the show and beside it, in words: " · over it: a web page on … (Opened …) · in their side bar: …". */
+  const infoWords = (o) => (o.info ? ' · over it: ' + o.info.showing + ' (' + o.info.words + ')' : '') + (o.beside ? ' · in their side bar: ' + o.beside.showing + ' (' + o.beside.words + ')' : '');
+  const boardHeader = (o) => (!status ? 'The Board' : o.pages ? 'The Board · ' + o.pages + (o.pages === 1 ? ' page · ' : ' pages · ') + o.words + infoWords(o) : 'No Board page is open: what you show arrives when one joins.');
 
-  /** A take on the Board's pages or a person's, said with whom it reaches, and Undo for 10 s (over it, `ifSeq`). */
-  function push(to, content, { ifSeq, undoable = true, name = '' } = {}) {
+  /**
+   * A take on the Board's pages or a person's, said with whom it reaches. A show take offers Undo for 10 s (over it,
+   * `ifSeq`): what was there before, or their chat. Information offers Take down for 10 s instead, the information handed
+   * back over that take alone, never older content put back (which could pop up again what the Board had closed); it is
+   * kept beside the operator's (`aside`) where the operator's information is up, said so. A Take down offers nothing.
+   */
+  function push(to, content, { ifSeq, undoable = true, name = '', arrive = '' } = {}) {
     const onBoard = to === 'board';
-    AGM.outbox.now('page:push', { code: HALL_KEY, to, content, ...(Number.isInteger(ifSeq) ? { ifSeq } : {}) }, (r) => {
+    const info = INFO.includes(content.kind);
+    const handBack = content.kind === 'chat' && content.layer === 'info';
+    AGM.outbox.now('page:push', { code: HALL_KEY, to, content, ...(Number.isInteger(ifSeq) ? { ifSeq } : {}), ...(arrive ? { arrive } : {}) }, (r) => {
       if (!r || !r.ok) { AGM.toast((r && r.error) || 'Nothing was shown.', true); read(); return; }
       const st = Array.isArray(r.results) && r.results[0] ? r.results[0].status : null;
-      // What was shown before, as the server gives it back: their chat where nothing was, else its content; none where
-      // this page could not put it up itself (a picture in a room it may not read), and then no Undo is offered.
+      // What was shown before in the show layer, as the server gives it back: their chat where nothing was, else its
+      // content; none where this page could not put it up itself (a picture in a room it may not read), and then no Undo is
+      // offered.
       const was = !r.previous ? { kind: 'chat' } : r.previous.content || null;
-      const undo = undoable && !!was;
-      if (onBoard) mine = undo ? { seq: r.seq, previous: was, time: formatTime(Date.now()) } : null;
+      const undo = undoable && !info && !handBack && !!was;
+      if (onBoard && !info && !handBack) mine = undo ? { seq: r.seq, previous: was, time: formatTime(Date.now()) } : null;
       const n = st ? st.pages : 0;
       const whom = onBoard ? (n ? ' on ' + n + (n === 1 ? ' Board page' : ' Board pages') : ': no Board page is open — it arrives when one joins') : ' on ' + (name || 'their') + '\'s pages';
-      AGM.toast((SAID[content.kind] || 'It') + whom + '.', undo ? { undo: () => push(to, was, { ifSeq: r.seq, undoable: false, name }) } : undefined);
+      const where = r.aside ? ' — in their side bar, beside what the operator is showing' : r.arrive === 'side' ? ' — in their side bar' : '';
+      const down = info && undoable ? { undoLabel: 'Take down', undo: () => push(to, { kind: 'chat', layer: 'info' }, { ifSeq: r.seq, undoable: false, name }) } : undefined;
+      AGM.toast(said(content) + whom + where + '.', undo ? { undo: () => push(to, was, { ifSeq: r.seq, undoable: false, name }) } : down);
       read();
     });
   }
   /**
    * A web page by the address its ask was answered with: checked first as a frame checks it (pagelayer.mjs webAddress),
    * then shown (Show it), or framed on this page alone first (Preview), whose own Show it runs the act again with that
-   * answer, through the one checked path (act), on the object as it is then.
+   * answer, through the one checked path (act), on the object as it is then. A page that may only show sends it to the
+   * side bar where the operator's information is up on the Board (the server refuses it over that).
    */
   function web(to, kind, id, get, { values, choice, opener }, name = '') {
     const url = values && typeof values.url === 'string' ? values.url : '';
@@ -4601,11 +4907,16 @@ const Console = (function () {
       const w = m.webAddress(url);
       if (w.error) { AGM.toast(w.error, true); return; }
       if (choice === 'preview') { Preview.open(m, w.url, () => { const o = get(); if (o) act(kind, id, o, { opener, answered: { values: { url: w.url }, choice: 'show' } }); else AGM.toast(AGM.catalog.WORDS.gone, true); }); return; }
-      push(to, { kind: 'web', url: w.url }, { name });
+      // Over the operator's information on their pages, a page that may only show sends it to their side bar.
+      const o = to === 'board' ? board() : rowOf(to.uid);
+      const side = !F.canPush && !!o && ((!!o.info && o.info.op) || !!o.opOn);
+      push(to, { kind: 'web', url: w.url }, { name, ...(side ? { arrive: 'side' } : {}) });
     }, () => AGM.toast('This page could not load what draws a web page: reload it.', true));
   }
   Object.assign(RUN, {
     'board.back': (o) => push('board', o.mine.previous, { ifSeq: o.seq, undoable: false }),
+    'board.takeDown': (o) => { const t = AGM.catalog.downOf(F, o); if (t) push('board', { kind: 'chat', layer: 'info' }, { ifSeq: t.seq, undoable: false }); },
+    'person.takeDown': (p) => { const t = AGM.catalog.downOf(F, p); if (t) push({ uid: p.key }, { kind: 'chat', layer: 'info' }, { ifSeq: t.seq, undoable: false, name: p.name }); },
     'board.screens': () => Screens.show('people'),
     'person.show': (p, { value }) => { if (typeof value === 'string') push({ uid: p.key }, { kind: value }, { name: p.name }); },
     'person.chat': (p) => push({ uid: p.key }, { kind: 'chat' }, { name: p.name }),
@@ -4623,7 +4934,7 @@ const Console = (function () {
     if (door) door.open({ anchor: chip });
   });
   function drawChip() {
-    const show = F.canPush && !outOf;
+    const show = may() && !outOf;
     chip.hidden = !show;
     if (!show) return;
     const b = status && status.board;
@@ -4640,13 +4951,40 @@ const Console = (function () {
     state.hidden = !mark && !words;
     let sr = chip.querySelector(':scope > .sr-only');
     if (!sr) { sr = document.createElement('span'); sr.className = 'sr-only'; chip.appendChild(sr); }
-    sr.textContent = b ? ': ' + b.words : '';
-    chip.title = (b ? 'The Board: ' + b.words : 'The Board') + ' — choose what its pages show (or right-click, or Shift+F10)';
+    // The information over the show, after it: "🌍 Web page ✓ 6/6"; with none over the show, what is in their side bar
+    // beside it: "🌍 Web page in the side bar ◇ 6/6".
+    const over = $('boardOver');
+    const i = o.info;
+    const shown = i || o.beside;
+    over.hidden = !shown;
+    if (shown) {
+      const k = AGM.catalog.SHOW_KINDS.find((x) => x[0] === shown.kind);
+      const e = k ? AGM.catalog.entry('board', 'board.' + k[0]) : null;
+      over.textContent = '';
+      const name = document.createElement('span');
+      name.className = 'board-over-what';
+      name.textContent = '· ' + (e ? e.icon + ' ' : '') + (k ? k[1] : 'Shown') + (shown === i ? ' ' : ' in the side bar ');
+      const st = document.createElement('span');
+      st.className = 'board-over-state';
+      AGM.chip(st, AGM.markOf(shown.mark) || 'fault', shown.on + '/' + shown.pages);
+      over.append(name, st);
+    }
+    const s = o.beside;
+    sr.textContent = b ? ': ' + b.words + (i ? '; over it: ' + i.showing + ', ' + i.words : '') + (s ? '; in their side bar: ' + s.showing + ', ' + s.words : '') : '';
+    chip.title = (b ? 'The Board: ' + b.words : 'The Board') + (i ? '; over it: ' + i.showing : '') + (s ? '; in their side bar: ' + s.showing : '') + ' — ' + (F.canPush ? 'choose what its pages show' : 'show it something, or take yours down') + ' (or right-click, or Shift+F10)';
   }
 
   // ---- the console's People's pages: the Board's row, then each person, each with its status and its acts
   /** A person the console lists, as the catalogue reads a person (kind `person`, `where`: the console). */
-  const personRow = (p) => ({ id: 'person:' + p.uid, uid: p.uid.slice(2), name: String(p.name || ''), role: '', key: p.uid, kind: kindNow(p), where: 'console' });
+  const personRow = (p) => ({ id: 'person:' + p.uid, uid: p.uid.slice(2), name: String(p.name || ''), role: '', key: p.uid, kind: kindNow(p), where: 'console', ...takesOf(p.uid) });
+  /**
+   * The information on a person's pages, as the console reads it, for their Take down: over the show (`info`) and beside it
+   * (`beside`), with whether this page's information pushes hold stage.show (`show`); none until it has read.
+   */
+  function takesOf(key) {
+    const p = status && Array.isArray(status.people) ? status.people.find((x) => x.uid === key) : null;
+    return p ? { info: infoOf(p), beside: besideOf(p), show: status.show !== false } : { info: null, beside: null, show: !status || status.show !== false };
+  }
   const rowOf = (key) => {
     if (key === 'board') return board();
     const p = status && Array.isArray(status.people) ? status.people.find((x) => x.uid === key) : null;
@@ -4654,7 +4992,7 @@ const Console = (function () {
   };
   function drawPeople() {
     const words = $('peoplePagesWords');
-    if (!F.canPush || !status) { list.textContent = ''; words.textContent = F.canPush ? 'Reading where people\'s pages stand…' : ''; return; }
+    if (!may() || !status) { list.textContent = ''; words.textContent = may() ? 'Reading where people\'s pages stand…' : ''; return; }
     const rows = [{ key: 'board', row: status.board, name: status.board.pages ? 'On stage (Board) — all ' + status.board.pages : 'On stage (Board) — nobody yet', o: board() }]
       .concat(status.people.map((p) => ({ key: p.uid, row: p, name: p.name + (p.room ? ' · ' + p.room : ''), o: personRow(p) })));
     const have = new Map([...list.querySelectorAll(':scope > li[data-key]')].map((li) => [li.dataset.key, li]));
@@ -4681,7 +5019,7 @@ const Console = (function () {
       }
       li.querySelector('.page-who').textContent = r.name;
       AGM.chip(li.querySelector('.page-state'), AGM.markOf(r.row.mark) || 'fault', r.row.words);
-      li.querySelector('.page-showing').textContent = r.row.seq ? 'Showing: ' + r.row.showing : 'Showing: their chat';
+      li.querySelector('.page-showing').textContent = (r.row.seq ? 'Showing: ' + r.row.showing : 'Showing: their chat') + infoWords({ info: infoOf(r.row), beside: besideOf(r.row) });
       if (r.key === 'board') drawBar(li.querySelector('.page-acts'), 'board', r.o, { words: true, all: true, more: 'More for the Board', keysOn: li });
       else drawBar(li.querySelector('.page-acts'), 'person', r.o, { more: 'More for ' + r.o.name, keysOn: li });
       const at = prev ? prev.nextElementSibling : list.firstElementChild;
@@ -4689,7 +5027,7 @@ const Console = (function () {
       prev = li;
     }
     for (const gone of have.values()) gone.remove();
-    words.textContent = status.people.length ? '' : 'Nobody else is in this hall\'s rooms you may read.';
+    words.textContent = status.people.length ? '' : F.canPush ? 'Nobody else is in this hall\'s rooms you may read.' : 'Nobody is seated On stage now.';
   }
   function rowDoor(t) {
     const li = t.closest && t.closest('li[data-key]');
@@ -4723,7 +5061,7 @@ const Console = (function () {
     Screens.tabs();
     refreshOpenMenu();
   }
-  return { read, draw, board, kindOf, chipDoor };
+  return { read, draw, board, kindOf, takesOf, chipDoor };
 })();
 
 // ---------------- A web page previewed: framed on this page alone, before it is shown on anyone's ----------------
@@ -4740,7 +5078,9 @@ const Preview = (function () {
     box.textContent = '';
     box.append(made.frame);
     $('webPreviewHost').textContent = made.host;
-    then = show;
+    then = typeof show === 'function' ? show : null;
+    // A Look (an Earlier entry's) shows nothing from here: no Show it.
+    $('webPreviewShow').hidden = !then;
     AGM.openDialog(dlg);
   }
   dlg.addEventListener('close', () => { box.textContent = ''; then = null; });
@@ -5030,8 +5370,8 @@ const Simple = (function () {
   });
 
   // ---- what is shown to this person: a column at 900 px wide or more, a tab below, drawn only while it holds something
-  /** How many things are shown to this person now: a take minimised into the side bar, a file open there. */
-  const shownCount = () => (Takes.carded() ? 1 : 0) + (currentDocMsgId ? 1 : 0);
+  /** How many things are shown to this person now: the takes in the side bar's cards, its Earlier, a file open there. */
+  const shownCount = () => Takes.carded() + Takes.earlier() + (currentDocMsgId ? 1 : 0);
   function layout() {
     const n = isSimple() ? shownCount() : 0;
     body.dataset.shown = String(n);
@@ -5056,15 +5396,17 @@ const Simple = (function () {
     $('tabShown').setAttribute('aria-pressed', String(body.dataset.tab === 'shown'));
     if (body.dataset.tab === 'shown') rerenderCurrentDoc();
     drawStrip();
+    Takes.seen();
   }
   $('tabChat').addEventListener('click', () => pickTab('chat'));
   $('tabShown').addEventListener('click', () => pickTab('shown'));
   const shownWatch = new MutationObserver(() => layout());
   shownWatch.observe($('takeCards'), { childList: true, attributes: true, attributeFilter: ['hidden'] });
+  shownWatch.observe($('takeEarlier'), { childList: true, attributes: true, attributeFilter: ['hidden'] });
   shownWatch.observe($('docDisplay'), { childList: true });
   // On stage content keeps no copy: in the simple view a long press or a right-click on it opens no menu, the browser's
   // own included (its door answers as a menu that is open, and opens none), and nothing is dragged out.
-  for (const id of ['takeCards', 'docDisplay', 'pageLayer']) {
+  for (const id of ['takeCards', 'takeEarlier', 'docDisplay', 'pageLayer']) {
     const el = $(id);
     AGM.menu.door(el, () => (isSimple() ? { el, more: null, open: () => true } : null));
     el.addEventListener('dragstart', (e) => { if (isSimple()) e.preventDefault(); });

@@ -10,7 +10,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { startServer, restartServer, stopServer, api, connect, emit, once, wait, until, TOKEN } = require('./helpers');
+const { startServer, restartServer, stopServer, api, connect, emit, once, wait, until, inviteOf, TOKEN } = require('./helpers');
 
 /** An audit row as the tests read it: its target, its words, who. */
 const rowsOf = (dataDir, action) => fs.readFileSync(path.join(dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
@@ -258,7 +258,7 @@ test('who is told a room\'s guest code: the admin, those who set halls up, an ac
     pages[who].joined = j;
   }
   const chair = await listen('chair', undefined);
-  const onStage = await emit(chair, 'join', { roomCode: hallA, name: 'Chair', role: 'board' });
+  const onStage = await emit(chair, 'join', { roomCode: hallA, name: 'Chair', role: 'board', invite: inviteOf(srv.dataDir, hallA) });
   const obs = await listen('obs', undefined);
   const obsIn = await emit(obs, 'join', { roomCode: hallA, name: 'Obi', role: 'observer' });
   const lou = await listen('lou', undefined);

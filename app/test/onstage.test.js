@@ -5,7 +5,7 @@
 // account), on that page alone. The seat's limit itself is pure (rbac.seatAllows, in test/accounts.test.js).
 const test = require('node:test');
 const assert = require('node:assert');
-const { startServer, stopServer, api, connect, emit, answer, until, wait, fakeStagewatch, pngOf, TOKEN } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, answer, until, wait, fakeStagewatch, pngOf, inviteOf, TOKEN } = require('./helpers');
 
 const STAYS = 'Messages from On stage stay in this room.';
 const BACKSTAGE = 'Do that from a backstage page.';
@@ -25,7 +25,8 @@ test('an On stage seat chats, answers and asks for help; it shares no file, asks
   const hall = async (name) => (await api(base, 'POST', '/api/rooms', { name }, { cookie: admin })).body.code;
   const [hallA, hallB, hallC, hallD] = [await hall('Hall A'), await hall('Hall B'), await hall('Hall C'), await hall('Hall D')];
   const ctl = await open(admin);
-  const guest = async (code, name, role, extra = {}) => { const s = await open(); const j = await emit(s, 'join', { roomCode: code, name, role, ...extra }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
+  // On stage with the link the admin sent (an open hall's code seats nobody there).
+  const guest = async (code, name, role, extra = {}) => { const s = await open(); const j = await emit(s, 'join', { roomCode: code, name, role, ...(role === 'board' ? { invite: inviteOf(srv.dataDir, code) } : {}), ...extra }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
   const ask = (s, ev) => new Promise((resolve) => { s.emit(ev, resolve); });   // an event whose ack is its only argument
   const messagesOf = async (code) => (await emit(ctl, 'admin:watchRoom', { roomCode: code })).messages;
   // A hall's newest number, read by a page already seated there joining again on its own socket (not announced).
@@ -274,7 +275,7 @@ test('a Board account is held to the On stage seat on its On stage page alone: i
   const MEDIA = (await asked(ctl, 'room:create', { hall: hall2, name: 'Media' })).key;
   // Hall 2's own Stagewatch, with a show desk: the speaker's screen is there for every seat whose rights allow it.
   assert.ok((await emit(ctl, 'hall:configure', { code: hall2, stagewatchUrl: sw.url, stagewatchKey: 'swk_board_account_key_01' })).ok);   // secret-scan: fixture
-  const guest = async (code, name, role) => { const s = await open(); const j = await emit(s, 'join', { roomCode: code, name, role }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
+  const guest = async (code, name, role) => { const s = await open(); const j = await emit(s, 'join', { roomCode: code, name, role, ...(role === 'board' ? { invite: inviteOf(srv.dataDir, code) } : {}) }); assert.ok(j.ok, JSON.stringify(j)); return { s, j }; };
   const ana = await guest(hall2, 'Ana', 'research');
   await until(async () => { const r = await emit(ana.s, 'stage:targets', {}); return r.canSend && r.canPropose; }, 8000, 'Hall 2\'s link and its desk');
   // Kim, a Tech of Hall 2 and Hall 3 who drives the show network, is given Hall 2's On stage seat and its Legal room; Ada,

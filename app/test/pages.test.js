@@ -8,7 +8,10 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Pages, cleanPage, describePage, webUrl, personKey, layerOf, reportsOf, inViewOf, KINDS, LAYERS, IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX } = require('../lib/pages');
+const {
+  Pages, cleanPage, askedOf, canShow, describePage, webUrl, personKey, layerOf, layersOf, reportsOf, inViewOf, KINDS, LAYERS, SHOW_LAYER, INFO_LAYER, ARRIVALS, EARLIER_TOLD,
+  IMAGE_EXT, STAGE_TYPES, TRANSFER_ONLY, REPORTS, ANSWERS, AGAIN_MS, VIEWS, MARKS, BOUNDS, WEB_MAX,
+} = require('../lib/pages');
 const { cleanContent } = require('../lib/displays');
 const guard = require('../lib/guard');
 const { VIEWS: ACCOUNT_VIEWS } = require('../lib/accounts');
@@ -21,6 +24,8 @@ const ANA = 'a:aanaaccount01';
 const BEN = 'u:ubenguest0001';
 const CY = 'u:ucyguest00001';
 const PIC = '/uploads/1730000000000-abcdefghijkl-stage.png';
+/** A web take as the store keeps it: its host and its address sealed (lib/secretbox.js's shape). */
+const WEB_KEPT = { kind: 'web', host: 'vote.example.com', urlSealed: 'enc1:c2VhbGVk' };
 const KINDS_WORDS = { error: 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.' };
 const dirs = [];
 const folder = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-pages-')); dirs.push(d); return d; };
@@ -60,13 +65,22 @@ test('cleanPage: each kind in its clean shape, a fresh object, with the keys it 
     assert.notEqual(clean, asked);
   }
   assert.deepEqual(cleanPage({ kind: 'holding', text: 'x' }), { kind: 'holding' });
-  // Back to chat of one layer is a hand-back the store does not keep: refused, never widened to every layer.
-  for (const layer of ['info', 'show', null, 5, '']) assert.deepEqual(cleanPage({ kind: 'chat', layer }), KINDS_WORDS, JSON.stringify(layer));
+  // The information handed back alone (Take down) is a hand-back of its own; any other layer is refused, never widened
+  // to both.
+  assert.deepEqual(cleanPage({ kind: 'chat', layer: 'info', seq: 3 }), { kind: 'chat', layer: 'info' });
+  for (const layer of ['show', null, 5, '', 'INFO', ['info']]) assert.deepEqual(cleanPage({ kind: 'chat', layer }), KINDS_WORDS, JSON.stringify(layer));
   assert.deepEqual(cleanPage({ kind: 'clock', layer: 'info' }), { kind: 'clock' }, 'a layer is chat\'s word alone: on another kind it is a key not known');
   assert.deepEqual(KINDS, ['chat', 'stage', 'clock', 'holding', 'blank', 'web']);
-  assert.ok(Object.isFrozen(KINDS) && KINDS.every((k) => layerOf(k) === 'show'), 'every kind is the show layer\'s');
-  assert.deepEqual(LAYERS, ['show']);
+  // Two layers: the show (the operator's) and the information drawn over it; a hand-back's are its own.
+  assert.deepEqual(LAYERS, ['show', 'info']);
+  assert.ok(Object.isFrozen(KINDS) && Object.isFrozen(LAYERS));
+  assert.deepEqual(KINDS.map((k) => [k, layerOf(k)]), [['chat', ''], ['stage', 'show'], ['clock', 'show'], ['holding', 'show'], ['blank', 'show'], ['web', 'info']]);
+  assert.deepEqual([layersOf({ kind: 'chat' }), layersOf({ kind: 'chat', layer: 'info' }), layersOf({ kind: 'clock' }), layersOf({ kind: 'web' }), layersOf({ kind: 'brand' })], [['show', 'info'], ['info'], ['show'], ['info'], []]);
+  assert.deepEqual([SHOW_LAYER, INFO_LAYER, ARRIVALS], [['stage', 'clock', 'holding', 'blank'], ['web', 'doc', 'image', 'snippet'], ['over', 'side']]);
   assert.equal(layerOf('brand'), '');
+  // What a pusher asked for, read before anything else of it.
+  assert.deepEqual([askedOf({ kind: 'web', url: 5 }), askedOf({ kind: 'chat' }), askedOf({ kind: 'chat', layer: 'info' }), askedOf({ kind: 'chat', layer: 'show' }), askedOf({ kind: 'brand' }), askedOf('chat')],
+    [{ kind: 'web', layer: '' }, { kind: 'chat', layer: '' }, { kind: 'chat', layer: 'info' }, null, null, null]);
 });
 
 test('cleanPage: Stagewatch only where the hall has one linked', () => {
@@ -321,7 +335,7 @@ test('a Board take puts away the older takes and answers of everyone seated On s
 });
 
 test('the bounds: 200 person takes and 500 answers a hall, 5,000 guests\' views, the oldest going first', () => {
-  assert.deepEqual(BOUNDS, { views: 5000, personTakes: 200, answers: 500 });
+  assert.deepEqual(BOUNDS, { views: 5000, personTakes: 200, answers: 500, earlier: 20 });
   const p = store();
   const key = (i) => 'u:ubound' + String(i).padStart(6, '0');
   for (let i = 0; i < 201; i++) {
@@ -550,13 +564,23 @@ test('a record of the wrong shape is dropped as the file is read; the rest is ke
     halls: {
       [HALL]: {
         seq: 6,
-        board: { show: take(6), info: take(5) },
+        // Beside the operator's, a take put there (`aside`, arriving in the side bar) is kept; one that did not arrive there,
+        // whose mark is not true, a show kind there, or one put beside found over the show, is dropped.
+        board: { show: take(6), info: take(5), beside: { ...take(5, WEB_KEPT), arrive: 'side', aside: true } },
         people: {
           [ANA]: { show: take(4) }, [BEN]: { show: take(7) }, [CY]: { show: take(3, { kind: 'brand' }) }, 'u:umissing01': { show: { seq: 2, content: { kind: 'clock' }, at: 5 } },
+          'u:uaside0001': { beside: { ...take(1, WEB_KEPT), aside: true } }, 'u:uaside0002': { info: { ...take(1, WEB_KEPT), arrive: 'side', aside: true }, beside: take(1) },
+          'u:uaside0003': { beside: { ...take(1, WEB_KEPT), arrive: 'side', aside: 'yes' } },
           'u:uholding01': { show: take(2, { kind: 'holding', image: '/uploads/../x.png' }) }, 'u:uholding02': { show: take(1, { kind: 'holding', image: PIC, drop: 1 }) },
           nokey: { show: take(1) }, 'u:unoshow001': { info: take(1) }, 'u:uattext001': { show: { ...take(1), at: 'now' } },
         },
         answers: { [ANA]: { show: { seq: 4, state: 'dismissed', at: 9 } }, [BEN]: { show: { seq: 6, state: 'shown', at: 9 } }, [CY]: { show: { seq: 9, state: 'dismissed', at: 9 } }, 'u:uans00001': 'dismissed' },
+        // Earlier holds information taken off a page, with whom it was for: a show take, a target that is none, a number
+        // past the hall's or an arrival that is none are dropped.
+        earlier: [
+          { ...take(2, WEB_KEPT), to: 'board' }, { ...take(3, WEB_KEPT), to: ANA, arrive: 'side' }, { ...take(4), to: 'board' }, { ...take(5, WEB_KEPT), to: 'everyone' },
+          { ...take(9, WEB_KEPT), to: 'board' }, { ...take(5, WEB_KEPT), to: BEN, arrive: 'under' }, { ...take(1, WEB_KEPT) },
+        ],
       },
       lowercase: { seq: 1, board: {}, people: {}, answers: {} },
       HALLC3: { seq: 1.5, board: {}, people: {}, answers: {} },
@@ -569,9 +593,10 @@ test('a record of the wrong shape is dropped as the file is read; the rest is ke
   assert.equal(p.unread, '');
   assert.deepEqual(Object.fromEntries(p.views), { 'u:ugood00001': { view: 'simple', at: 1 }, 'u:ugood00002': { view: 'full', at: 2 } });
   assert.deepEqual(Object.keys(p.halls), [HALL, 'HALLD4']);
-  assert.deepEqual(p.halls.HALLD4, { seq: 2, board: {}, people: {}, answers: {} }, 'a hall\'s parts that do not read are empty, its counter kept');
+  assert.deepEqual(p.halls.HALLD4, { seq: 2, board: {}, people: {}, answers: {}, earlier: [] }, 'a hall\'s parts that do not read are empty, its counter kept');
   const h = p.halls[HALL];
-  assert.deepEqual(h.board, { show: take(6) }, 'a layer the store does not keep is dropped');
+  assert.deepEqual(h.board, { show: take(6), beside: { ...take(5, WEB_KEPT), arrive: 'side', aside: true } }, 'a take in a layer its content does not change (a clock over the show) is dropped');
+  assert.deepEqual(h.earlier, [{ ...take(2, WEB_KEPT), to: 'board' }, { ...take(3, WEB_KEPT), to: ANA, arrive: 'side' }]);
   assert.deepEqual(h.people, { [ANA]: { show: take(4) }, 'u:uholding02': { show: take(1, { kind: 'holding', image: PIC }) } });
   assert.deepEqual(h.answers, { [ANA]: { show: { seq: 4, state: 'dismissed', at: 9 } } });
   // A file whose whole is not one: nothing kept, and the next take numbers from 1. Neither file there: the same.
@@ -600,7 +625,7 @@ test('hold(): nothing is written until this copy holds its data folder; then wha
   assert.equal(p.dirty, true);
   p.hold();
   p.flush();
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { v: 1, views: { 'u:uguest00001': { view: 'simple', at: 2 } }, halls: { [HALL]: { seq: 1, board: { show: { seq: 1, content: { kind: 'clock' }, by: { name: 'Ada' }, at: 1 } }, people: {}, answers: {} } } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { v: 1, views: { 'u:uguest00001': { view: 'simple', at: 2 } }, halls: { [HALL]: { seq: 1, board: { show: { seq: 1, content: { kind: 'clock' }, by: { name: 'Ada' }, at: 1 } }, people: {}, answers: {}, earlier: [] } } });
   assert.equal(p.dirty, false);
   if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600, 'read by this account alone');
   // Held with nothing changed: nothing is written.
@@ -698,9 +723,10 @@ test('a web take is kept sealed beside its host, never its address in clear; tol
   assert.ok(text.includes('"host":"vote.example.com"'));
   // Read back by this machine: the take as it was; by a store whose key is another's, its address opens as none.
   const again = new Pages(p.file, { seal: secretbox.seal, open: secretbox.open });
-  assert.deepEqual(again.current(HALL, '', { board: true }).take, t);
+  assert.deepEqual(again.current(HALL, '', { board: true, layer: 'info' }).take, t, 'a web page is information over the show');
+  assert.equal(again.current(HALL, '', { board: true }).take, null, 'and never the show');
   const elsewhere = new Pages(p.file);
-  assert.deepEqual(elsewhere.told(elsewhere.current(HALL, '', { board: true }).take.content), { kind: 'web', url: '', host: 'vote.example.com' });
+  assert.deepEqual(elsewhere.told(elsewhere.current(HALL, '', { board: true, layer: 'info' }).take.content), { kind: 'web', url: '', host: 'vote.example.com' });
   // A run that cannot seal (no machine key: seal throws, or seals nothing) keeps no web take, and numbers none.
   for (const seal of [() => { throw new Error('no machine key'); }, () => '', () => 'plain https://x/']) {
     const q = new Pages(path.join(folder(), 'pages.json'), { seal, open: secretbox.open });
@@ -715,13 +741,14 @@ test('a web take is kept sealed beside its host, never its address in clear; tol
   // A web take read from a file in a shape no store of ours writes is dropped: an address in clear, a host that is not one, a seal that is not one.
   const file = path.join(folder(), 'pages.json');
   const take = (seq, c) => ({ seq, content: c, by: { name: 'Gil' }, at: 5 });
-  fs.writeFileSync(file, JSON.stringify({ v: 1, halls: { [HALL]: { seq: 5, board: { show: take(5, t.content) }, people: {
-    [ANA]: { show: take(1, { kind: 'web', url: VOTE, host: 'vote.example.com' }) }, [BEN]: { show: take(2, { kind: 'web', host: 'Vote.Example.com', urlSealed: t.content.urlSealed }) },
-    [CY]: { show: take(3, { kind: 'web', host: 'vote.example.com', urlSealed: VOTE }) }, 'u:uok0000001': { show: take(4, { ...t.content, extra: VOTE }) },
+  fs.writeFileSync(file, JSON.stringify({ v: 1, halls: { [HALL]: { seq: 5, board: { info: take(5, t.content) }, people: {
+    [ANA]: { info: take(1, { kind: 'web', url: VOTE, host: 'vote.example.com' }) }, [BEN]: { info: take(2, { kind: 'web', host: 'Vote.Example.com', urlSealed: t.content.urlSealed }) },
+    [CY]: { info: take(3, { kind: 'web', host: 'vote.example.com', urlSealed: VOTE }) }, 'u:uok0000001': { info: take(4, { ...t.content, extra: VOTE }) },
+    'u:ushow00001': { show: take(4, t.content) },
   }, answers: {} } } }));
   const read = new Pages(file, { seal: secretbox.seal, open: secretbox.open });
-  assert.deepEqual(read.halls[HALL].board, { show: take(5, t.content) });
-  assert.deepEqual(read.halls[HALL].people, { 'u:uok0000001': { show: take(4, t.content) } }, 'the keys it does not know left behind');
+  assert.deepEqual(read.halls[HALL].board, { info: take(5, t.content) });
+  assert.deepEqual(read.halls[HALL].people, { 'u:uok0000001': { info: take(4, t.content) } }, 'the keys it does not know left behind, and a web page in the show layer dropped');
 });
 
 test('a web page reports opened, never shown: in view it opened (◇, never ✓), and Show it again says opened', () => {
@@ -730,18 +757,19 @@ test('a web page reports opened, never shown: in view it opened (◇, never ✓)
   const t = p.take(HALL, ANA, content, { name: 'Tom' }, { at: 100 });
   assert.deepEqual(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'shown', at: 101 }), { ok: false, error: 'A page shown a web page on vote.example.com reports one of: opened, hidden, failed, dismissed, minimised.' });
   const page = { sid: 's1', key: ANA, board: false, name: 'Ana' };
-  assert.deepEqual(p.status(HALL, ANA, [page], { name: 'Ana' }).mark, MARKS.waiting, 'sending until the page says');
+  const INFO = { layer: 'info' };
+  assert.deepEqual(p.status(HALL, ANA, [page], { name: 'Ana', ...INFO }).mark, MARKS.waiting, 'sending until the page says');
   assert.deepEqual(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'opened', at: 102 }), { ok: true, answer: null });
-  const st = p.status(HALL, ANA, [page], { name: 'Ana' });
+  const st = p.status(HALL, ANA, [page], { name: 'Ana', ...INFO });
   assert.deepEqual([st.mark, st.words, st.showing, st.kind, st.on], [MARKS.unseen, 'Opened · AGMessage can\'t see inside web pages', 'a web page on vote.example.com', 'web', 1]);
   assert.ok(!JSON.stringify(st).includes('poll/7'), 'the status names the host alone');
   // Not loaded in time: △ with its words. Back to chat, then Show it again within 10 s: said opened, with `again`.
   assert.ok(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'failed', words: 'the page did not load', at: 103 }).ok);
-  assert.deepEqual([p.status(HALL, ANA, [page]).mark, p.status(HALL, ANA, [page]).words], [MARKS.couldNot, 'Couldn\'t show it: the page did not load']);
+  assert.deepEqual([p.status(HALL, ANA, [page], INFO).mark, p.status(HALL, ANA, [page], INFO).words], [MARKS.couldNot, 'Couldn\'t show it: the page did not load']);
   assert.equal(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'dismissed', at: 104 }).answer.state, 'dismissed');
   assert.deepEqual(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'shown', again: true, at: 105 }).ok, false, 'shown is no web page\'s word, even to show it again');
   assert.deepEqual(p.report(HALL, 's1', { key: ANA, seq: t.seq, state: 'opened', again: true, at: 106 }), { ok: true, answer: null });
-  assert.equal(p.status(HALL, ANA, [page]).mark, MARKS.unseen);
+  assert.equal(p.status(HALL, ANA, [page], INFO).mark, MARKS.unseen);
 });
 
 test('the web pages a guest put up that stay up: the Board\'s, and each person\'s not put away, a page of theirs open or not; an account\'s and an older one are not; counted in words for the admin', () => {
@@ -754,9 +782,12 @@ test('the web pages a guest put up that stay up: the Board\'s, and each person\'
   p.take(HALL, ANA, content, { name: 'Tom' });
   p.take(OTHER, 'board', content, { name: 'Gil', guest: true });
   assert.deepEqual(p.guestWeb(HALL), [{ to: 'board', seq: board.seq }, { to: BEN, seq: ben.seq }, { to: CY, seq: cy.seq }]);
-  // Put away by its person (Back to chat): no longer up for them. A take after it: the guest's is no longer shown.
+  // Put away by its person (Back to chat): no longer up for them. A show take after it leaves it up, over the show; the
+  // information taken down (or another's over it) and the guest's is no longer shown.
   assert.ok(p.report(HALL, 's1', { key: CY, seq: cy.seq, state: 'dismissed' }).ok);
   p.take(HALL, 'board', { kind: 'clock' }, { name: 'Tom' });
+  assert.deepEqual(p.guestWeb(HALL), [{ to: 'board', seq: board.seq }, { to: BEN, seq: ben.seq }]);
+  p.take(HALL, 'board', { kind: 'chat', layer: 'info' }, { name: 'Tom', op: true });
   assert.deepEqual(p.guestWeb(HALL), [{ to: BEN, seq: ben.seq }]);
   assert.deepEqual(p.guestWeb('__proto__'), []);
   // As the admin is told them once guests may no longer show web pages: a count, and while any stay, words and the takes.
@@ -764,4 +795,232 @@ test('the web pages a guest put up that stay up: the Board\'s, and each person\'
   const ana = p.take(HALL, ANA, content, { name: 'Gil', guest: true });
   assert.deepEqual(p.guestWebLeft(HALL), { up: 2, upWords: '2 web pages guests showed are still up', takeDown: [{ to: BEN, seq: ben.seq }, { to: ANA, seq: ana.seq }] });
   assert.deepEqual([p.guestWebLeft('HALLC3'), p.guestWebLeft('__proto__')], [{ up: 0 }, { up: 0 }]);
+});
+
+// ---------------------------------------------------------------- the two layers, and who may show what (plan 4-§5.9)
+test('two layers: information over the show, never replacing it; a hand-back of the information alone leaves the show; a hand-back of both clears both; answers per layer', () => {
+  const p = sealing();
+  const web = cleanPage({ kind: 'web', url: VOTE }, { web: true });
+  const clock = p.take(HALL, 'board', { kind: 'clock' }, { name: 'Tom' });
+  const info = p.take(HALL, 'board', web, { name: 'Sue' }, { onStage: [ANA] });
+  // A Board page is shown both: the clock in the show, the web page over it.
+  assert.deepEqual([p.current(HALL, ANA, { board: true }).take.seq, p.current(HALL, ANA, { board: true, layer: 'info' }).take.seq], [clock.seq, info.seq]);
+  // Each layer's take is reported on by its number: the clock drawn under the web page says so, and the console reads it.
+  const page = { sid: 's1', key: ANA, board: true, name: 'Ana' };
+  assert.deepEqual(p.report(HALL, 's1', { key: ANA, board: true, seq: clock.seq, state: 'hidden', words: 'under a web page', at: 10 }), { ok: true, answer: null });
+  assert.deepEqual(p.report(HALL, 's1', { key: ANA, board: true, seq: info.seq, state: 'opened', at: 11 }), { ok: true, answer: null });
+  const show = p.status(HALL, 'board', [page]);
+  const over = p.status(HALL, 'board', [page], { layer: 'info' });
+  assert.deepEqual([show.mark, show.words, show.on], [MARKS.partly, 'Under a web page', 0], 'drawn underneath: never shown');
+  assert.deepEqual([over.mark, over.showing, over.arrive, over.op], [MARKS.unseen, 'a web page on vote.example.com', 'over', false]);
+  // Back to chat on the information is an answer in its layer: the show take's stands.
+  assert.equal(p.report(HALL, 's1', { key: ANA, board: true, seq: info.seq, state: 'dismissed', at: 12 }).answer.state, 'dismissed');
+  assert.deepEqual([p.current(HALL, ANA, { board: true }).answer, p.current(HALL, ANA, { board: true, layer: 'info' }).answer.state], [null, 'dismissed']);
+  // A show take leaves the information as it is; the information taken down (a hand-back of the information alone) leaves
+  // the show as it is.
+  const blank = p.take(HALL, 'board', { kind: 'blank' }, { name: 'Tom' }, { onStage: [ANA] });
+  assert.equal(p.current(HALL, ANA, { board: true, layer: 'info' }).take.seq, info.seq);
+  const down = p.take(HALL, 'board', cleanPage({ kind: 'chat', layer: 'info' }), { name: 'Tom', op: true }, { onStage: [ANA] });
+  assert.deepEqual([p.current(HALL, ANA, { board: true }).take.seq, p.current(HALL, ANA, { board: true, layer: 'info' }).take.content], [blank.seq, { kind: 'chat', layer: 'info' }]);
+  assert.equal(describePage(down.content), 'the information taken down');
+  const none = p.status(HALL, 'board', [page], { layer: 'info' });
+  assert.deepEqual([none.mark, none.words, none.kind, none.showing], [MARKS.off, 'Nothing over the show', 'chat', 'the information taken down'], 'nothing over the show waits for no report');
+  // A report on the information's hand-back is no report: it draws nothing.
+  assert.deepEqual(p.report(HALL, 's1', { key: ANA, board: true, seq: down.seq, state: 'shown', at: 13 }), { ok: false, error: 'That is not what this page is shown now.' });
+  // A hand-back of both clears both, with one number.
+  p.take(HALL, 'board', web, { name: 'Tom', op: true });
+  const both = p.take(HALL, 'board', cleanPage({ kind: 'chat' }), { name: 'Tom', op: true }, { onStage: [ANA] });
+  assert.deepEqual([p.current(HALL, ANA, { board: true }).take.seq, p.current(HALL, ANA, { board: true, layer: 'info' }).take.seq], [both.seq, both.seq]);
+  assert.ok(p.report(HALL, 's1', { key: ANA, board: true, seq: both.seq, state: 'shown', at: 14 }).ok, 'reported on as the show\'s hand-back');
+});
+
+test('supersede per layer: a Board take puts away the older takes and answers of those On stage in its layer alone; a Board web page leaves a person\'s clock', () => {
+  const p = sealing();
+  const web = cleanPage({ kind: 'web', url: VOTE }, { web: true });
+  const clock = p.take(HALL, ANA, { kind: 'clock' }, { name: 'Tom' });
+  const theirs = p.take(HALL, ANA, web, { name: 'Tom' });
+  assert.ok(p.report(HALL, 's1', { key: ANA, board: true, seq: clock.seq, state: 'minimised' }).ok);
+  const board = p.take(HALL, 'board', cleanPage({ kind: 'web', url: 'https://news.example.org/' }, { web: true }), { name: 'Sue' }, { onStage: [ANA, BEN] });
+  // Ana's own clock and its answer stay (the show layer); her own web page goes, superseded, into Earlier for her.
+  assert.deepEqual(p.current(HALL, ANA, { board: true }), { take: clock, answer: { seq: clock.seq, state: 'minimised', at: p.halls[HALL].answers[ANA].show.at } });
+  assert.equal(p.current(HALL, ANA, { board: true, layer: 'info' }).take.seq, board.seq);
+  assert.deepEqual(p.halls[HALL].people[ANA], { show: clock });
+  assert.deepEqual(p.earlierOf(HALL, ANA).map((e) => e.seq), [theirs.seq]);
+  // A newer Board take in the information replaces the Board's, which joins Earlier for the Board.
+  const next = p.take(HALL, 'board', web, { name: 'Sue' }, { onStage: [ANA] });
+  assert.deepEqual(p.earlierOf(HALL, ANA, { board: true }).map((e) => e.seq), [board.seq, theirs.seq], 'the newest first, the Board\'s and her own');
+  assert.deepEqual(p.earlierOf(HALL, BEN).map((e) => e.seq), [], 'a person not On stage is told none of the Board\'s');
+  assert.deepEqual(p.earlierOf(HALL, BEN, { board: true }).map((e) => e.seq), [board.seq]);
+  assert.equal(p.current(HALL, ANA, { board: true, layer: 'info' }).take.seq, next.seq);
+  // An Earlier entry is told as its pages were told it: its address opened, its pusher by name alone.
+  const told = p.earlierOf(HALL, BEN, { board: true })[0];
+  assert.deepEqual([told.content, told.by, Object.keys(told)], [{ kind: 'web', url: 'https://news.example.org/', host: 'news.example.org' }, { name: 'Sue' }, ['seq', 'content', 'by', 'at']]);
+});
+
+test('Earlier: information superseded, handed back or put away joins it once, at most 20 a hall, a page told its newest 10; a show take never', () => {
+  const p = sealing();
+  const web = (n) => cleanPage({ kind: 'web', url: 'https://example.com/' + n }, { web: true });
+  const first = p.take(HALL, 'board', web(0), { name: 'Tom' });
+  p.take(HALL, 'board', { kind: 'clock' }, { name: 'Tom' });
+  p.take(HALL, 'board', { kind: 'blank' }, { name: 'Tom' });
+  assert.deepEqual(p.earlierOf(HALL, ANA, { board: true }), [], 'a show take superseded joins nothing');
+  // Put away with Back to chat by one Board member: it joins Earlier for the Board, once, however many put it away.
+  assert.ok(p.report(HALL, 's1', { key: ANA, board: true, seq: first.seq, state: 'dismissed', at: 1 }).ok);
+  assert.ok(p.report(HALL, 's2', { key: BEN, board: true, seq: first.seq, state: 'dismissed', at: 2 }).ok);
+  assert.deepEqual(p.halls[HALL].earlier.map((e) => [e.seq, e.to]), [[first.seq, 'board']]);
+  // Handed back: it is there once still; then 24 more, 20 kept, the oldest gone.
+  p.take(HALL, 'board', cleanPage({ kind: 'chat', layer: 'info' }), { name: 'Tom', op: true });
+  assert.equal(p.halls[HALL].earlier.length, 1);
+  for (let i = 1; i <= 24; i++) p.take(HALL, 'board', web(i), { name: 'Tom' });
+  assert.equal(p.halls[HALL].earlier.length, BOUNDS.earlier);
+  assert.ok(!p.halls[HALL].earlier.some((e) => e.seq === first.seq), 'the oldest went first');
+  const told = p.earlierOf(HALL, ANA, { board: true });
+  assert.equal(told.length, EARLIER_TOLD);
+  assert.ok(told.every((e, i) => i === 0 || e.seq < told[i - 1].seq), 'the newest first');
+  // Kept across a restart, as read back.
+  p.flush();
+  assert.deepEqual(new Pages(p.file, { seal: secretbox.seal, open: secretbox.open }).earlierOf(HALL, ANA, { board: true }), told);
+});
+
+test('arrivals: information in the side bar is said so; over the operator\'s it is kept beside it, superseding nothing, reported on as any take; the newest information, a hand-back of both, or a Take down that names it puts it away; a show take never arrives there', () => {
+  const p = sealing();
+  const web = cleanPage({ kind: 'web', url: VOTE }, { web: true });
+  const news = cleanPage({ kind: 'web', url: 'https://news.example.org/' }, { web: true });
+  const side = p.take(HALL, 'board', web, { name: 'Sue' }, { arrive: 'side' });
+  assert.equal(side.arrive, 'side');
+  const page = { sid: 's1', key: ANA, board: true, name: 'Ana' };
+  assert.ok(p.report(HALL, 's1', { key: ANA, board: true, seq: side.seq, state: 'opened', words: 'in the side bar' }).ok);
+  assert.deepEqual(p.status(HALL, 'board', [page], { layer: 'info' }).arrive, 'side');
+  // Nothing is beside it: a side arrival with no operator's information up is the layer's own take.
+  assert.deepEqual([p.current(HALL, ANA, { board: true, layer: 'beside' }).take, p.status(HALL, 'board', [page], { layer: 'beside' }).seq], [null, 0]);
+  // A show take asked to arrive there is kept as arriving over: the show is always drawn over the chat.
+  assert.equal(p.take(HALL, 'board', { kind: 'clock' }, { name: 'Tom' }, { arrive: 'side' }).arrive, undefined);
+  assert.equal(p.take(HALL, 'board', { kind: 'clock' }, { name: 'Tom' }, { arrive: 'under' }), null, 'an arrival that is none: nothing numbered');
+  // The operator's information, then a researcher's side push over it (aside): kept beside it, the operator's still over
+  // the show, the first side take put away into Earlier, the one beside it not (it is up).
+  const op = p.take(HALL, 'board', web, { name: 'Tom', op: true }, { onStage: [ANA] });
+  const aside = p.take(HALL, 'board', news, { name: 'Sue' }, { arrive: 'side', aside: true, onStage: [ANA] });
+  assert.deepEqual([aside.arrive, aside.aside], ['side', true]);
+  const over = () => p.current(HALL, ANA, { board: true, layer: 'info' }).take;
+  const beside = () => p.current(HALL, ANA, { board: true, layer: 'beside' }).take;
+  assert.deepEqual([over().seq, over().by.op, beside().seq], [op.seq, true, aside.seq]);
+  assert.deepEqual(p.earlierOf(HALL, ANA, { board: true }).map((e) => e.seq), [side.seq]);
+  // Reported on as any take: sending until the page says, then where it is; the operator's over it reported apart.
+  const said = (o) => [o.seq, o.mark, o.words, o.arrive, o.op];
+  assert.deepEqual(said(p.status(HALL, 'board', [page], { layer: 'beside' })), [aside.seq, MARKS.waiting, 'Sending', 'side', false]);
+  assert.deepEqual(p.report(HALL, 's1', { key: ANA, board: true, seq: aside.seq, state: 'opened', words: 'in the side bar' }), { ok: true, answer: null });
+  assert.deepEqual(said(p.status(HALL, 'board', [page], { layer: 'beside' })), [aside.seq, MARKS.unseen, 'Opened · AGMessage can\'t see inside web pages', 'side', false]);
+  assert.ok(p.report(HALL, 's1', { key: ANA, board: true, seq: op.seq, state: 'opened' }).ok, 'and the operator\'s, over the show');
+  // Kept across a restart, in its place.
+  p.flush();
+  const again = new Pages(p.file, { seal: secretbox.seal, open: secretbox.open });
+  assert.deepEqual([again.current(HALL, ANA, { board: true, layer: 'beside' }).take.seq, again.current(HALL, ANA, { board: true, layer: 'info' }).take.seq], [aside.seq, op.seq]);
+  // The operator's Take down of its own (naming the take over the show) leaves what is beside it.
+  const opDown = p.take(HALL, 'board', { kind: 'chat', layer: 'info' }, { name: 'Tom', op: true }, { onStage: [ANA], slot: 'info' });
+  assert.deepEqual([over().seq, over().content, beside().seq], [opDown.seq, { kind: 'chat', layer: 'info' }, aside.seq]);
+  // The researcher's Take down naming it hands back that alone, into Earlier.
+  const down = p.take(HALL, 'board', { kind: 'chat', layer: 'info' }, { name: 'Sue' }, { onStage: [ANA], slot: 'beside' });
+  assert.deepEqual([beside(), over().seq, p.earlierOf(HALL, ANA, { board: true })[0].seq], [null, opDown.seq, aside.seq]);
+  assert.equal(p.status(HALL, 'board', [page], { layer: 'beside' }).words, 'Nothing in their side bar');
+  assert.ok(down.seq > opDown.seq);
+  // The newest information over the show puts away what is beside it: nothing older beside it shows again, a person's
+  // own included.
+  const aside2 = p.take(HALL, ANA, news, { name: 'Sue' }, { arrive: 'side', aside: true });
+  assert.equal(beside().seq, aside2.seq, 'beside it on Ana\'s pages alone');
+  const newer = p.take(HALL, 'board', web, { name: 'Ben' }, { onStage: [] });
+  assert.deepEqual([beside(), over().seq], [null, newer.seq], 'Ana was not seated now: her own beside it is older than the Board\'s newest');
+  // A hand-back of both clears it too.
+  const aside3 = p.take(HALL, 'board', news, { name: 'Sue' }, { arrive: 'side', aside: true, onStage: [ANA] });
+  assert.equal(beside().seq, aside3.seq);
+  p.take(HALL, 'board', { kind: 'chat' }, { name: 'Tom' }, { onStage: [ANA] });
+  assert.equal(beside(), null);
+  // Held under blank and drawn under another take are said with words: never on screen, and not out of view.
+  const op2 = p.take(HALL, 'board', web, { name: 'Tom', op: true });
+  const blank = p.take(HALL, 'board', { kind: 'blank' }, { name: 'Tom' });
+  assert.deepEqual(p.report(HALL, 's1', { key: ANA, board: true, seq: op2.seq, state: 'hidden', words: 'held under blank', at: 20 }), { ok: true, answer: null }, 'no time out of view: the page is in view');
+  assert.ok(p.report(HALL, 's1', { key: ANA, board: true, seq: blank.seq, state: 'shown', at: 21 }).ok);
+  const held = p.status(HALL, 'board', [page], { layer: 'info' });
+  assert.deepEqual([held.mark, held.words], [MARKS.partly, 'Held under blank']);
+  const mixed = Pages.status({ seq: 4, content: { kind: 'clock' }, by: { name: 'Tom' } }, [{ state: 'shown', name: 'A' }, { state: 'hidden', words: '', name: 'B' }, { state: 'hidden', words: 'under a web page', name: 'C' }], { board: true });
+  assert.equal(mixed.words, '1 of 3 showing · 1 asleep or in another app · 1 under a web page');
+});
+
+test('canShow: who may show what on the Board\'s pages, each row of the table and each refusal in its words', () => {
+  const OPERATOR = 'The operator is showing a web page — ask them, or send it to their side bar.';
+  const NO_SHOW = 'Showing files, pages and quotes on the stage needs its own right — ask an admin.';
+  const NO_WEB = 'Web pages on the stage need their own right — ask an admin.';
+  const GUESTS_OFF = 'Web pages from backstage guests are off in this hall — ask the admin.';
+  const OPEN_HALL = 'In an open hall, showing the Board needs an invite link or an account — ask the admin.';
+  const TEAM = 'Showing the Board is for the backstage team.';
+  const NO_RIGHT = 'Your account may not change what people\'s pages show in this hall.';
+  const KINDS_ASKED = ['doc', 'image', 'snippet', 'web', { kind: 'chat', layer: 'info' }];
+  const SHOW = ['stage', 'clock', 'holding', 'blank', 'chat'];
+  // A researcher's own information up (pushed by canShow), which its Take down names.
+  const staff = { canPush: false, account: true, show: true, web: NO_WEB, seat: 'research', inHall: true, post: true, files: true, listed: true, notPush: NO_RIGHT, current: { seq: 3, op: false, kind: 'snippet', name: 'Sue' }, ifSeq: 3 };
+  const verdicts = (f, to = 'board', arrive) => KINDS_ASKED.map((k) => canShow(f, k, to, arrive));
+  // The admin, and Tech, Senior, Manager by their presets: every kind, any target, either layer and arrival.
+  for (const f of [{ canPush: true, admin: true, account: false, web: true }, { canPush: true, account: true, show: true, web: true }]) {
+    assert.deepEqual(verdicts(f, { onStage: false }, 'side'), [true, true, true, true, true]);
+    for (const k of SHOW) assert.equal(canShow(f, k, 'board'), true);
+  }
+  // A Tech with stage.show revoked: the show layer only, its web page by its own right.
+  const tech = { canPush: true, account: true, show: false, web: true };
+  assert.deepEqual(verdicts(tech), [NO_SHOW, NO_SHOW, NO_SHOW, true, NO_SHOW]);
+  for (const k of SHOW) assert.equal(canShow(tech, k, 'board'), true);
+  assert.deepEqual(verdicts({ ...tech, web: NO_WEB })[3], NO_WEB);
+  // A locked hall's backstage guest (canPush): every kind; a web page only while the admin's switch is on.
+  const guest = { canPush: true, account: false, web: GUESTS_OFF };
+  assert.deepEqual(verdicts(guest), [true, true, true, GUESTS_OFF, true]);
+  assert.equal(canShow({ ...guest, web: true }, 'web', 'board'), true);
+  // An open hall's backstage guest: nothing, every kind, in the words of who it is.
+  const open = { canPush: false, account: false, seat: 'research', inHall: true, post: true, notPush: OPEN_HALL };
+  for (const k of [...KINDS_ASKED, ...SHOW]) assert.equal(canShow(open, k, 'board'), OPEN_HALL, JSON.stringify(k));
+  // A Staff account backstage: documents, pictures and quotes to the Board or a person On stage, over or in the side bar;
+  // never a web page without its right, never the show, never a hand-back of both.
+  assert.deepEqual(verdicts(staff), [true, true, true, NO_WEB, true]);
+  assert.deepEqual(verdicts(staff, { onStage: true }, 'side'), [true, true, true, NO_WEB, true]);
+  for (const k of SHOW) assert.equal(canShow(staff, k, 'board'), NO_RIGHT, k);
+  assert.equal(canShow({ ...staff, web: true }, 'web', 'board'), true, 'with stage.web granted');
+  // Its own files right revoked: quotes only. Its stage.show revoked and no stage.web: nothing.
+  assert.deepEqual(verdicts({ ...staff, files: false }), ['Your account may not share files here, so it shows quotes only.', 'Your account may not share files here, so it shows quotes only.', true, NO_WEB, true]);
+  assert.deepEqual(verdicts({ ...staff, show: false }), [NO_SHOW, NO_SHOW, NO_SHOW, NO_WEB, NO_SHOW]);
+  // A take-down only of a kind it could have put up itself: a web page by its web right, a quote by stage.show.
+  const TAKE_DOWN = { kind: 'chat', layer: 'info' };
+  const webUp = { ...staff, current: { seq: 3, op: false, kind: 'web', name: 'Sue' } };
+  assert.equal(canShow({ ...webUp, show: false, web: true }, TAKE_DOWN, 'board', 'over'), true, 'its web pages taken down by its web right');
+  assert.equal(canShow({ ...staff, show: false, web: true }, TAKE_DOWN, 'board', 'over'), NO_SHOW, 'a quote, never by the web right alone');
+  assert.equal(canShow(webUp, TAKE_DOWN, 'board'), NO_WEB, 'a web page, never by stage.show alone');
+  assert.equal(canShow(staff, TAKE_DOWN, 'board'), true, 'a quote by stage.show');
+  // An observer seat (a Viewer granted the rights, Staff with hall.post revoked), On stage, a side room's Member guest.
+  assert.deepEqual(verdicts({ ...staff, seat: 'observer', post: false, web: true }), [TEAM, TEAM, TEAM, TEAM, TEAM]);
+  assert.deepEqual(verdicts({ ...staff, seat: 'board', notPush: 'Do that from a backstage page.' }), Array(5).fill('Do that from a backstage page.'));
+  assert.deepEqual(verdicts({ canPush: false, account: false, seat: 'research', notPush: TEAM }), Array(5).fill(TEAM));
+  // Only the people on stage: a person who is not is no one canShow reaches.
+  assert.deepEqual(verdicts(staff, { onStage: false }), Array(5).fill('Only the people on stage can be shown this.'));
+  // From a side room off the Main room's list: nothing, a take-down included.
+  assert.deepEqual(verdicts({ ...staff, listed: false, ifSeq: 4, current: { seq: 4, op: false, kind: 'web', name: 'Ben' } }), [...Array(3).fill('This room may not send to the Main room\'s Board — ask an admin.'), NO_WEB, 'This room may not send to the Main room\'s Board — ask an admin.']);
+  // Over the operator's information: refused over, taken in the side bar; its take-down refused.
+  const opUp = { ...staff, web: true, current: { seq: 7, op: true, kind: 'web', name: 'Tom' } };
+  assert.deepEqual(verdicts(opUp, 'board', 'over').slice(0, 4), Array(4).fill(OPERATOR));
+  assert.deepEqual(verdicts(opUp, 'board', 'side').slice(0, 4), [true, true, true, true]);
+  assert.equal(canShow({ ...opUp, ifSeq: 7 }, { kind: 'chat', layer: 'info' }, 'board'), OPERATOR);
+  // The operator's information on one of the Board's pages (a person On stage shown their own) while the Board's own is a
+  // researcher's: over the Board refused, the side bar taken, and the Take down of the Board's refused (it would put the
+  // operator's away there).
+  const opOn = { ...staff, web: true, current: { seq: 9, op: false, kind: 'web', name: 'Ben' }, ifSeq: 9, opOn: { kind: 'web' } };
+  assert.deepEqual(verdicts(opOn, 'board', 'over').slice(0, 4), Array(4).fill(OPERATOR));
+  assert.deepEqual(verdicts(opOn, 'board', 'side').slice(0, 4), [true, true, true, true]);
+  assert.equal(canShow(opOn, { kind: 'chat', layer: 'info' }, 'board'), OPERATOR);
+  assert.equal(canShow({ ...opOn, opOn: 'web' }, { kind: 'chat', layer: 'info' }, 'board'), true, 'a fact that is not one is none');
+  // A take-down names the take it takes down, put up by canShow, still up.
+  const mineUp = { ...staff, web: true, ifSeq: undefined, current: { seq: 9, op: false, kind: 'web', name: 'Ben' } };
+  assert.equal(canShow(mineUp, { kind: 'chat', layer: 'info' }, 'board'), 'Take down names the take it takes down.');
+  assert.equal(canShow({ ...mineUp, ifSeq: 8 }, { kind: 'chat', layer: 'info' }, 'board'), 'Ben\'s web page is up now — yours was already replaced.');
+  assert.equal(canShow({ ...mineUp, ifSeq: 9 }, { kind: 'chat', layer: 'info' }, 'board'), true);
+  assert.equal(canShow({ ...staff, ifSeq: 9, current: null }, { kind: 'chat', layer: 'info' }, 'board'), 'Nothing is shown over the show there now — yours was already taken down.');
+  // Between two researchers the latest wins: over another's is taken.
+  assert.equal(canShow(mineUp, 'snippet', 'board', 'over'), true);
+  // Facts that are none refuse.
+  assert.equal(canShow(null, 'web', 'board'), TEAM);
+  assert.equal(canShow({}, 'clock', 'board'), TEAM);
 });

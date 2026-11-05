@@ -492,34 +492,58 @@
 
   /**
    * The watched room's invite links, made with its guest code: On stage and Backstage in a hall's Main room, a Member's
-   * in a side room (no seat there is On stage); said where its code is off, since a link then admits nobody new.
+   * in a side room (no seat there is On stage); said where its code is off, since a link then admits nobody new. An open
+   * hall's Main room still shows its On stage link: On stage seats come from it, in open halls too (owner answer 10).
+   * Each link has New … link, which voids it without changing the code; the seats already held stay.
    */
   function showInvites(on) {
     const box = $('inviteLinks');
     box.textContent = '';
     const main = !currentRoom || currentRoom.main !== false;
-    if (!on) { box.textContent = main ? 'Open: anyone with the code can join in any seat.' : 'Open: anyone with the code can join as a Member or an Observer.'; return; }
-    socket.emit('admin:invites', { roomCode: currentRoom.code }, (res) => {
-      if (!res || !res.ok) return;
+    if (!on && !main) { box.textContent = 'Open: anyone with the code can join as a Member or an Observer.'; return; }
+    const room = currentRoom.code;
+    socket.emit('admin:invites', { roomCode: room }, (res) => {
+      if (!res || !res.ok || !currentRoom || currentRoom.code !== room) return;
+      box.textContent = '';
+      if (!on) {
+        const open = document.createElement('p'); open.className = 'hint';
+        open.textContent = 'Open: anyone with the code joins Backstage or as an Observer; On stage needs this link.';
+        box.appendChild(open);
+      }
       if (!res.codeOn) {
         const off = document.createElement('p'); off.className = 'hint';
         off.textContent = 'This room\'s guest code is off: these links admit nobody new until it is on.';
         box.appendChild(off);
       }
-      for (const role of ['board', 'research'].filter((x) => res.invites[x])) {
+      for (const role of (on ? ['board', 'research'] : ['board']).filter((x) => res.invites[x])) {
         const url = location.origin + res.invites[role];
         const row = document.createElement('div');
         row.className = 'invite-row';
-        const lab = document.createElement('strong'); lab.textContent = role === 'board' ? 'On stage link' : main ? 'Backstage link' : 'Member link';
+        row.dataset.role = role;
+        const what = role === 'board' ? 'On stage' : main ? 'Backstage' : 'Member';
+        const lab = document.createElement('strong'); lab.textContent = what + ' link';
         const code = document.createElement('code'); code.textContent = url;
         const copy = document.createElement('button'); copy.className = 'btn ghost small'; copy.type = 'button'; copy.textContent = '📋 Copy';
         copy.onclick = () => AGM.copy(url, { said: 'Copied the ' + lab.textContent + '.', anchor: copy, say });
-        row.append(lab, code, copy);
+        const renew = document.createElement('button'); renew.className = 'btn ghost small invite-new'; renew.type = 'button'; renew.textContent = '🔄 New ' + what + ' link';
+        renew.onclick = () => newInvite(renew, role, what, on);
+        row.append(lab, code, copy, renew);
         box.appendChild(row);
       }
       const tip = document.createElement('p'); tip.className = 'hint';
-      tip.textContent = 'Send each link only to that group. If you open the tunnel, these links work from anywhere — replace localhost with the public address.';
+      tip.textContent = 'Send each link only to that group, and make a new one after a shared device used it. If you open the tunnel, these links work from anywhere — replace localhost with the public address.';
       box.appendChild(tip);
+    });
+  }
+  /** New … link: asked first, since the link out there stops admitting anyone new; the seats already held stay. */
+  function newInvite(btn, role, what, on) {
+    AGM.ask(btn, { title: 'Make a new ' + what + ' link?', words: 'The link you sent before stops admitting anyone new. People seated with it keep their seats. The code stays.', yes: 'New ' + what + ' link', no: 'Keep this one', danger: true }, { opener: btn }).then((a) => {
+      if (!a.yes) return;
+      AGM.outbox.now('admin:newInvite', { roomCode: currentRoom.code, role }, (r) => {
+        if (!r || !r.ok) { say((r && r.error) || 'No new link.', true); return; }
+        say('A new ' + what + ' link: the old one no longer admits anyone new.');
+        showInvites(on);
+      });
     });
   }
 
@@ -657,20 +681,21 @@
         say(res.on ? 'Backstage guests may show web pages in this hall.' : 'Backstage guests may no longer show web pages in this hall.' + (res.up ? ' ' + res.upWords + '.' : ''));
       });
     };
-    // Take it down: each web page a guest put up that stays after the switch went off, handed back to the chat of the
-    // pages it is on, over that take alone (`ifSeq`), so nothing put up since is taken down with it.
+    // Take it down: each web page a guest put up that stays after the switch went off, the information taken down from the
+    // pages it is on (what the show put up under it stays), over that take alone (`ifSeq`), so nothing put up since is
+    // taken down with it.
     $('guestWebDown').onclick = () => {
       const list = guestWebDown.slice();
       const hall = currentRoom.code;
       let left = list.length;
       const refused = [];
       for (const t of list) {
-        AGM.outbox.now('page:push', { code: hall, to: t.to === 'board' ? 'board' : { uid: t.to }, content: { kind: 'chat' }, ifSeq: t.seq }, (r) => {
+        AGM.outbox.now('page:push', { code: hall, to: t.to === 'board' ? 'board' : { uid: t.to }, content: { kind: 'chat', layer: 'info' }, ifSeq: t.seq }, (r) => {
           if (!r || !r.ok) refused.push((r && r.error) || 'Not taken down.');
           if (--left) return;
           guestWebDown = [];
           drawGuestWeb({ locked: $('lockRoles').checked, on: $('guestWeb').checked });
-          if (refused.length) say(refused[0], true); else say(list.length === 1 ? 'The web page is taken down: their pages are back on chat.' : 'The web pages are taken down: their pages are back on chat.');
+          if (refused.length) say(refused[0], true); else say(list.length === 1 ? 'The web page is taken down: their pages show what is under it.' : 'The web pages are taken down: their pages show what is under them.');
         });
       }
     };

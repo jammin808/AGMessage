@@ -88,6 +88,46 @@ and never a guest of an open hall, where anyone with the code may sit backstage.
 in a room of the hall the operator may read; anyone else is "not in this hall now". The console names the Board's
 people only to one who may read the hall's Main room.
 
+### Two layers: the show, and information over it
+
+A page holds two takes at once. **The show** is the operator's: Stagewatch, the clock, holding, blank. **Information** is
+drawn over it: a web page now, and files, pictures and quotes as they land. Each layer is numbered by the hall's one
+counter, answered by the person on its own, and told to the page in its own word (`page:take` names its `layer`); the
+join answers the show (`page`), the information over it (`over`), the page's Earlier (`earlier`) and the information
+beside the operator's in its side bar (`beside`).
+
+- **Over, never instead.** Information is drawn over the show take; the show take under it says so ("hidden" with "under
+  a web page", which the console reads "◐ Under a web page", never ✓), and comes back when the person goes back to chat
+  on the information. A show take never replaces the information, nor the information the show.
+- **Held under blank.** Blank is the operator's "keep this tablet dark": information put over it is held (the page says
+  "held under blank"), the bar, once touched, reads **1 from backstage**, and a tap on it shows it.
+- **In the side bar.** Information may arrive in the person's side bar instead of over their chat (`arrive: 'side'`): an
+  open card drawn there, which opens the side bar once, is counted on its rail and says "in the side bar" (or, while a
+  take on the layer covers the page and its side bar, "under" it: not in view); its **Show over the chat** puts it on
+  the layer by the person's choice. A show take always arrives over.
+- **Beside the operator's.** A researcher's side-bar push while the operator's information is up is kept in a place of
+  its own (`beside`): the operator's stays over the show, the researcher's is a card in the side bar beside it, numbered,
+  told (`page:take {layer: 'beside'}`), reported on and read back (`page:status`'s `beside`) as any take. The newest
+  information to them, a hand-back of both, or a Take down that names it puts it away into Earlier; the operator's own
+  Take down leaves it.
+- **Handing back.** Back to chat on the Board chip (`chat`) hands back both layers at once, and what is beside them;
+  **Take down** (`{chat, layer: 'info'}` with the take it names, `ifSeq`) hands back that information alone, over the show
+  or beside it, the show staying up.
+- **Earlier.** Information superseded, handed back or put away with Back to chat joins the hall's Earlier list (20 a
+  hall, the oldest going first, kept in `pages.json`), and each page is told the newest ten of its own (the Board's, on a
+  page seated On stage, and its person's), drawn under the cards in its side bar. **Look** opens one on that page alone,
+  with no report and no take.
+- **Who may show information, and over what.** The operator (`canPush`, above), the information kinds with `stage.show`
+  for an account; and an account seated backstage in a room of the hall by a right of its own (`canShow`: `stage.show`,
+  and `stage.web` for a web page), to the Board or one person seated On stage, from a side room only while it is on the
+  Main room's list. **What the operator put up stays up**, the target's own or on any page of theirs (a person On stage
+  the operator showed a page of their own): a `canShow` push over it is refused ("The operator is showing a web page —
+  ask them, or send it to their side bar.") and taken in the side bar, kept beside it; between two researchers the latest
+  wins. A `canShow` Take down names the take it takes down (`ifSeq`), takes down only one such a seat put up ("The
+  operator put this up — ask them."), only of a kind its own rights would put up (a web page by `stage.web`, the others by
+  `stage.show`), and not while the operator's is on a page of theirs. A page that may only show is told the people
+  seated On stage alone, and its console hears what changed as the operator's does.
+
 ### A web page
 
 A web page is shown by its https address: a voting page, a live document, a site the Board should look at. It needs a
@@ -144,18 +184,27 @@ when the hall is renamed. The longest a Board page said it
 was asleep or behind another app while a take was on it is kept for the show day (health's `peaks.pageHiddenMs`).
 
 Each take is one `page.push` row in the audit log: who, whom ("the Board (6 pages)", or the person's name) and what
-kind of thing ("the clock", "a holding slide", "a web page on vote.example.com"), never a file or an address. Nothing of a take is on the halls board, in the context
+kind of thing ("the clock", "a holding slide", "a web page on vote.example.com", "the information taken down", with ",
+in their side bar" for an arrival there), never a file or an address. Nothing of a take is on the halls board, in the context
 another show system reads, or in the AI's brief.
 
 ### Showing it: the Board chip and the console
 
 A page that may show people's pages has the **Board chip** in its header: what the Board's pages show and how many show
-it ("Board · 🕐 Clock ✓ 6/6"; "Board · ✕ nobody on stage" with no Board page open). A click on it, a right-click or
+it ("Board · 🕐 Clock ✓ 6/6"; "Board · ✕ nobody on stage" with no Board page open), and the information over it after it
+("Board · 🕐 Clock ◐ 0/6 · 🌍 Web page ◇ 6/6"), or with nothing over the show what is in their side bar ("· 🌍 Web page in
+the side bar ◇ 6/6"). Its menu holds **⤵ Take down** while information is up (over the show, else beside it): for a
+page that may only show (`canShow`) it shows only that and **Show a web page…** (with `stage.web`), Take down taking
+down what that page's kind of seat put up, disabled over the operator's information with "The operator put this up —
+ask them." (and, for an account whose information pushes lack `stage.show`, with that right's words, read from
+`page:status`'s `show`). A person's menu holds the same **⤵ Take down** for their information. A click on it, a right-click or
 Shift+F10 opens its menu: **Back to chat · Show Stagewatch · Show the clock · Show holding · Show blank**, and **Show a
 web page…** for a page that may show one, the one the Board shows checked (choosing it again says "Already showing the clock."; Stagewatch is greyed where the hall has none
 linked), then **↶ Back to …** and **Screens & pages…**. A choice goes at once, and the toast names whom it reached
 ("The clock on 6 Board pages.") with **Undo** for 10 s, which puts back what was shown before as a take of its own (none
-is offered where that was a picture shared in a room this page may not read). After
+is offered where that was a picture shared in a room this page may not read). Information offers **Take down** for 10 s
+instead, over that take alone, never Undo: older information is never put back up, which could reopen on every tablet
+what the Board had closed. After
 that, the chip's **↶ Back to Stagewatch (undo your Clock, 14:02)** does the same while this page's take is still the
 Board's: it is sent over that take, so it never undoes someone else's later take, and a take made by an Undo or a Back to
 offers no undo of its own.
@@ -226,18 +275,23 @@ and its repeat makes a second take of the same content. Each page is sent `page:
 holding, now, tz, answer}` by its socket's id, never as a room's broadcast, and answers `page:report {seq, state, words,
 again}` (`shown`, `hidden`, `failed`, `dismissed`, `minimised`; acked); a `shown` with `again` or a `minimised` within
 10 s of a `dismissed` takes Back to chat back, and a person's act refused (after 10 s) tells that page again what it is
-shown. A push may name the take it goes over (`ifSeq`: Undo and ↶ Back to), refused "Something newer is showing there
-now: nothing changed." once a newer take is up, and its answer gives back what was shown before (`previous: {seq,
-content}`, or null), its content only as the pusher could show it itself: a picture shared in a room it may not read
-comes back as `content: null`, and that page offers no Undo. A guest's console names its hall by the code it joined
-with, and a repeat of its push by that code is answered with what the first did. A hall's consoles hear `pages:changed
-{}` at most once per 150 ms in a burst and read `page:status {code}` again (each row also giving what it shows, `kind`,
-and how many of its pages show it, `on`); a hall's screens consoles hear `displays:changed {}`, in every room of the
-hall, naming nothing, and read their hall's list again. The hall page draws a take with `app/public/pagelayer.mjs`
-(loaded at its first take; it draws and answers what it drew, holding no socket) and its console and the Board chip in
-`app/public/app.js` (`Takes`, `Console`). A page's join answers `page` (what it is shown now)
-and `canPush`; the admin's view of someone names them (`viewOf`), is shown what they are shown and told their chat view
-as it changes, and its join answers, at the end, their facts as their page holds them (`person: {role, view, canPush,
-sends, forwardable}`, or null), so it can draw exactly their doors. A key that is no hall's is refused in the words a
-hall the asker may not push in gets, by `page:push` and `page:status` alike; only the admin is told "No such hall."
+shown. Two layers and a place beside them ("Two layers: the show, and information over it", above): `page:take` names
+its place (`layer`: `show`, `info` or `beside`) and an information take how it arrives (`arrive`); `page:push` takes
+`arrive: 'over' | 'side'` for information, and a Take down is `{kind: 'chat', layer: 'info'}` with the take it names;
+each `page:status` row adds `info` and, while one is there, `beside`, and the answer `show` (whether the asker's
+information holds `stage.show`). A push may name the take it goes over (`ifSeq`: Undo, ↶ Back to and Take down), refused
+"Something newer is showing there now: nothing changed." once a newer take is up, and its answer gives back what was
+shown before (`previous: {seq, content}`, or null), its content only as the pusher could show it itself: a picture
+shared in a room it may not read comes back as `content: null`, and that page offers no Undo. A guest's console names
+its hall by the code it joined with, and a repeat of its push by that code is answered with what the first did. A hall's
+consoles hear `pages:changed {}` at most once per 150 ms in a burst and read `page:status {code}` again (each row also
+giving what it shows, `kind`, and how many of its pages show it, `on`); a hall's screens consoles hear `displays:changed
+{}`, in every room of the hall, naming nothing, and read their hall's list again. The hall page draws a take with
+`app/public/pagelayer.mjs` (loaded at its first take; it draws and answers what it drew, holding no socket) and its
+console and the Board chip in `app/public/app.js` (`Takes`, `Console`). A page's join answers `page` (what it is shown
+now), `canPush`, `canWeb`, `canShow`, `over`, `earlier` and `beside`; the admin's view of someone names them (`viewOf`),
+is shown what they are shown and told their chat view as it changes, and its join answers, at the end, their facts as
+their page holds them (`person: {role, view, canPush, sends, forwardable}`, or null), so it can draw exactly their
+doors. A key that is no hall's is refused in the words a hall the asker may not push in gets, by `page:push` and
+`page:status` alike; only the admin is told "No such hall."
 Tests: `app/test/displays.test.js`, `app/test/pages.test.js`, `app/test/takes.test.js` and the browser smoke.

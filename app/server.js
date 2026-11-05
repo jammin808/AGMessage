@@ -904,9 +904,10 @@ function movedWithinHall(room, uid, name) {
   return found;
 }
 // The watchdog's restart drops every page at once and starts with nobody seated: a locked room's code-guest seats (board
-// and research) are saved with the room (settings.seats: uid -> {name, role}, in its op log like a message: what every
-// page in the hall already reads in its people list), and for the boot's first seconds a page that comes back takes its
-// saved seat as from a drop. A seat not taken up by then is gone.
+// and research), and an open hall's On stage seats (which come from an invite or the admin, never from the code alone),
+// are saved with the room (settings.seats: uid -> {name, role}, in its op log like a message: what every page in the hall
+// already reads in its people list), and for the boot's first seconds a page that comes back takes its saved seat as from
+// a drop. A seat not taken up by then is gone. An open hall's backstage and observer seats come from its code: none kept.
 const BOOT_AT = Date.now();
 const BOOT_SEAT_MS = Math.max(1000, Number(process.env.AGM_BOOT_SEAT_MS) || 30_000);
 const savedSeat = (room, uid) => (room.settings.seats && Object.hasOwn(room.settings.seats, uid) ? room.settings.seats[uid] : null);
@@ -951,10 +952,17 @@ function seatsSaved(room, seats) {
   const keys = Object.keys(seats);
   return keys.length === Object.keys(room.settings.seats || {}).length && keys.every((uid) => { const s = savedSeat(room, uid); return !!s && s.name === seats[uid].name && s.role === seats[uid].role; });
 }
-/** A locked room's saved seats follow the seats it holds: one numbered change, only when they differ. */
+/** The On stage seats of `seats`: what an open hall's Main room keeps, and an unlock keeps. */
+const boardSeats = (seats) => Object.fromEntries(Object.entries(seats).filter(([, s]) => s.role === 'board'));
+/**
+ * The seats a room keeps (saved) follow the seats it holds: a locked room's every code-guest seat, an open hall's Main
+ * room its On stage seats alone (plan 4-§5.9.2.1). One numbered change, only when they differ.
+ */
 function syncSeats(room) {
-  if (!store.hasRoom(room.code) || !room.settings.lockRoles) return;
-  const next = seatsNow(room);
+  if (!store.hasRoom(room.code)) return;
+  const locked = room.settings.lockRoles === true;
+  if (!locked && !store.isMain(room)) return;
+  const next = locked ? seatsNow(room) : boardSeats(seatsNow(room));
   if (!seatsSaved(room, next)) apply(room, { o: 'meta', settings: { seats: next } });
 }
 // The boot's first seconds are over: a seat saved before the restart that nobody took up goes, as after a drop's grace.
@@ -2042,11 +2050,20 @@ io.on('connection', (socket) => {
     if (socket.data.account) return canIn('display.control', hall);
     return !!me && room === hall && me.role === 'research' && hall.settings.lockRoles === true;
   };
-  // Whether this page may show a web page on people's pages in a hall (`hall`, its Main room): canPush, and the right of
-  // its own, stage.web (plan 4-§5.9.2.2). The admin holds it; an account by its rights in the hall; a code guest, whom
-  // canPush admits only backstage in a locked Main room, only while the admin lets that hall's backstage guests show web
-  // pages (`guestWeb`, which an unlock turns off). Read when asked, as canPush is.
-  const canWeb = (hall) => canPush(hall) && (!!socket.data.isAdmin || (socket.data.account ? canIn('stage.web', hall) : hall.settings.guestWeb === true));
+  // Whether this page may show information on the Board's pages of a hall (`hall`, its Main room) by a right of its own
+  // and not as the operator (plan 4-§5.9.2.2, `canShow` rule 2, for some kind: "otherwise", so never where canPush holds):
+  // an account (never a code guest, owner answer 10) seated backstage in a room of the hall where it may post, holding
+  // stage.show or stage.web in the hall, whose room is the Main room or one on the Main room's list (who may not post into
+  // Main's chat draws over no Board tablet either). Never On stage nor the support view. Which kind, to whom and over what
+  // is lib/pages.js canShow's, read at each push. Read when asked, as canPush is.
+  const canShow = (hall) => !!hall && store.isMain(hall) && !socket.data.adminView && !onStage() && !!socket.data.account && !!me && !!room && room.hall === hall.code
+    && me.role === 'research' && canIn('hall.post', room) && (canIn('stage.show', hall) || canIn('stage.web', hall)) && (room === hall || sendersOf(hall.code).includes(room.code)) && !canPush(hall);
+  // Whether this page may show a web page on people's pages in a hall (`hall`, its Main room): canPush or canShow, and the
+  // right of its own, stage.web (plan 4-§5.9.2.2). The admin holds it; an account by its rights in the hall; a code guest,
+  // whom canPush admits only backstage in a locked Main room, only while the admin lets that hall's backstage guests show
+  // web pages (`guestWeb`, which an unlock turns off). Read when asked, as canPush is.
+  const canWeb = (hall) => (canPush(hall) && (!!socket.data.isAdmin || (socket.data.account ? canIn('stage.web', hall) : hall.settings.guestWeb === true)))
+    || (canShow(hall) && canIn('stage.web', hall));
   // "The admin" the owner's answers name (plan §0.8 C14): the laptop's token, or an account whose role is admin, through
   // the tunnel only where admins may sign in there (isAdmin's rule). An account an admin granted settings.manage passes
   // the admin page's gate (`admin`) and is not this.
@@ -2126,12 +2143,14 @@ io.on('connection', (socket) => {
       }
       // A side room has no stage: its seats are a Member's (backstage) and an observer's. Not code guessing: no lock.
       if (!isAdminView && !store.isMain(r) && cleanRole === 'board') return ack({ ok: false, error: ON_STAGE_IN_MAIN });
-      // Seated already: the role stays. Otherwise, in a locked room, board and research seats need the admin's invite link
-      // (made with the room's guest code, so a renewed code voids it) or a seat this person already holds there.
+      // Seated already: the role stays. Otherwise an On stage seat, in every hall's Main room, locked or open, and in a
+      // locked room a backstage seat too, needs the admin's invite link (made with the room's guest code and the room's
+      // number for that seat, so a renewed code or a New On stage link voids it) or a seat this person already holds there
+      // (one the admin gave them included). An open hall's code seats nobody On stage (owner answer 10).
       if (seated(id)) cleanRole = me.role;
-      else if (r.settings.lockRoles && cleanRole !== 'observer' && !socket.data.isAdmin && !guard.checkInvite(SECRET, store.guestCodeOf(r), cleanRole, invite) && !holdsSeat(r, id, cleanName, cleanRole)) {
+      else if ((cleanRole === 'board' || (r.settings.lockRoles && cleanRole !== 'observer')) && !socket.data.isAdmin && !guard.checkInvite(SECRET, store.guestCodeOf(r), cleanRole, invite, inviteNumber(r, cleanRole)) && !holdsSeat(r, id, cleanName, cleanRole)) {
+        note = cleanRole === 'board' ? 'On stage seats need the invite link — you joined as an observer.' : 'This room needs an invite link for that seat — you joined as an observer.';
         cleanRole = 'observer';
-        note = 'This room needs an invite link for that seat — you joined as an observer.';
       }
       // A code guest cannot take the name of someone with an account: staff are who they say they are.
       if (!isAdminView && accounts.list().some((a) => a.name.toLowerCase() === cleanName.toLowerCase())) {
@@ -2173,8 +2192,10 @@ io.on('connection', (socket) => {
     const shows = isAdminView ? Array.from(r.users.values()).find((u) => u.uid === guard.str(viewOf)) : null;
     const showsKey = shows ? personKey(shows.uid, !!shows.acct) : '';
     socket.data.viewOf = showsKey ? { uid: shows.uid, key: showsKey, name: shows.name } : null;
-    // Whether this page may change what its hall's people's pages show, as it joins: its console hears pages:changed.
+    // Whether this page may change what its hall's people's pages show (canPush), or show information on its Board's pages
+    // (canShow), as it joins: its console hears pages:changed.
     socket.data.pushes = canPush(store.get(r.hall)) ? r.hall : '';
+    socket.data.shows = canShow(store.get(r.hall)) ? r.hall : '';
 
     // A page back after the restart this process booted from names the last change it holds, and this hall has it: the
     // restart line already says what happened, so it is not announced again. Presence words only: no right reads it.
@@ -2265,11 +2286,19 @@ io.on('connection', (socket) => {
       // What this page is shown over its chat now and the person's answer to it (takeTold; null: its chat), so a page back
       // from a drop or a restart shows what it showed; the support view the person's it shows. Whether this page may
       // change what its hall's people's pages show (canPush: its console's), and AGMessage's clock and zone.
-      page: shownHere && shownHere.current.take ? takeTold(r.hall, shownHere.current) : null,
+      page: shownHere && shownHere.current.take ? takeTold(r.hall, shownHere.current, 'show') : null,
       canPush: !!socket.data.pushes, now: Date.now(), tz: TIME_ZONE,
-      // Whether a web page pushed from this page would be taken (canWeb: canPush and stage.web); a code guest's follows
-      // the admin's switch for its hall live (`pages:rights`).
+      // Whether a web page pushed from this page would be taken (canWeb: canPush or canShow, and stage.web); a code guest's
+      // follows the admin's switch for its hall live (`pages:rights`).
       canWeb: canWeb(store.get(r.hall)),
+      // Whether this page may show information on its Board's pages by a right of its own (canShow: its console's Board chip
+      // and On stage people); the information drawn over its show take now (`over`, as `page` is told: null for none); and
+      // the information taken off its pages lately, the newest first (`earlier`, its side bar's Earlier: a Look each).
+      canShow: !!socket.data.shows,
+      over: shownHere && shownHere.info.take && shownHere.info.take.content.kind !== 'chat' ? takeTold(r.hall, shownHere.info, 'info') : null,
+      earlier: shownHere ? pages.earlierOf(r.hall, shownHere.key, { board: shownHere.board }) : [],
+      // The information beside it, in its side bar beside the operator's (as `over` is told: null for none).
+      beside: shownHere && shownHere.beside.take ? takeTold(r.hall, shownHere.beside, 'beside') : null,
       // The chat view this page draws (plan 1-§6): the person's own choice, else the simple view On stage and the full
       // view elsewhere; told again live (`view`) when the admin or the Accounts page changes it. The support view draws
       // the person's, which its `person` says.
@@ -2471,6 +2500,7 @@ io.on('connection', (socket) => {
     view: drawnView(chosenView(me ? personKey(me.uid, !!me.acct) : ''), socket.data.seat),
     canPush: !!socket.data.pushes,
     canWeb: !!room && canWeb(store.get(room.hall)),
+    canShow: !!socket.data.shows,
     sends: !!room && !onStage() && allowed('hall.post') && sendsInto(room).length > 0,
     forwardable: !!me && !!room && forwardTargets(null).rooms.length > 0,
   });
@@ -3199,7 +3229,7 @@ io.on('connection', (socket) => {
     for (const [sid, seat] of seats) {
       seat.role = role;
       const s = io.sockets.sockets.get(sid);
-      if (s) { s.data.seat = role; s.data.pushes = ''; s.emit('roleChanged', { role }); }
+      if (s) { s.data.seat = role; s.data.pushes = ''; s.data.shows = ''; s.emit('roleChanged', { role }); }
     }
     const moved = new Set(seats.map(([sid]) => sid));
     for (const t of uploadTokens.values()) if (moved.has(t.sid) && !t.may()) t.revoked = true;
@@ -3215,8 +3245,9 @@ io.on('connection', (socket) => {
     if (!admin(ack)) return;
     const r = store.room(roomCode);
     if (!r) return ok(ack)({ ok: false, error: 'Room not found' });
-    // Locked, the seats taken now are kept (saved, so a restart keeps them too); unlocked, there is nothing to keep.
-    const seats = on ? seatsNow(r) : {};
+    // Locked, the seats taken now are kept (saved, so a restart keeps them too); unlocked, a hall's Main room keeps its On
+    // stage seats (they came from an invite or the admin, as an open hall's do) and nothing else.
+    const seats = on ? seatsNow(r) : store.isMain(r) ? boardSeats(seatsNow(r)) : {};
     // A change is the lock switched, or a lock that keeps other seats than it kept (compared as syncSeats compares them,
     // so seats saved in another order are no change); an unlock is a change only for a locked room.
     const changed = on ? !r.settings.lockRoles || !seatsSaved(r, seats) : !!r.settings.lockRoles;
@@ -3466,7 +3497,7 @@ io.on('connection', (socket) => {
   // page's socket but a screen's (a screen's returned at the top): the hall page's, the admin page's and the halls
   // board's. The rooms module is given the server's context, the takes module the takes context, which holds nothing
   // that makes a room's op or sends to a room (`ctx`, at the end of this file).
-  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, onStage, canIn, canPush, canWeb, theAdmin, admin, actor, canManageHall, codeTold, gate });
+  const conn = Object.freeze({ socket, room: () => room, me: () => me, ok, limited, writes, chatter, need, mayPost, allowed, onStage, canIn, canPush, canWeb, canShow, theAdmin, admin, actor, canManageHall, codeTold, gate });
   roomVerbs.register(socket, conn, ctx);
   takeVerbs.register(socket, conn, takesCtx);
 
@@ -3604,12 +3635,14 @@ function displaysChanged(code) {
 // the hall's Main room) or to one person, numbered, each page saying what it did with it (lib/handlers/takes.js). A take
 // reaches a page by its socket's id, never by a room's broadcast or a room's op.
 /**
- * The pages open now in a hall's rooms, as people's pages read them, each with the take it is shown now (pages.current)
- * and the person's answer to it: each page seated in a room ({sid, key, board, name, room, support: false}) and each
- * admin's support view of a person seated in that room ({…, support: true}: shown that person's take, it never reports).
- * `key` is the person's (an account's `a:<id>`, every device of it; a guest's `u:<uid>`, that device); `board`, whether
- * the person sits On stage in the hall's Main room there. A page that has gone is among none: a room's seats are its
- * pages open now.
+ * The pages open now in a hall's rooms, as people's pages read them, each with the takes it is shown now in each layer
+ * (pages.current) and the person's answer to each: each page seated in a room ({sid, key, board, name, room, support:
+ * false}) and each admin's support view of a person seated in that room ({…, support: true}: shown that person's takes,
+ * it never reports). `current` (with `seq` and `answer`) is the show layer's, `info` the information layer's, `beside`
+ * the information beside it (in its side bar, beside the operator's), and `earlier` the newest of its Earlier entries, as
+ * a page is told them (pages.earlierOf), their numbers in a word. `key` is
+ * the person's (an account's `a:<id>`, every device of it; a guest's `u:<uid>`, that device); `board`, whether the person
+ * sits On stage in the hall's Main room there. A page that has gone is among none: a room's seats are its pages open now.
  */
 function hallPages(hall) {
   const out = [];
@@ -3617,7 +3650,10 @@ function hallPages(hall) {
     const main = store.isMain(r);
     const add = (sid, key, board, name, support) => {
       const current = pages.current(hall, key, { board });
-      out.push({ sid, key, board, name, room: r, support, seq: current.take ? current.take.seq : 0, answer: current.answer ? current.answer.state : null, current });
+      const info = pages.current(hall, key, { board, layer: 'info' });
+      const beside = pages.current(hall, key, { board, layer: 'beside' });
+      const earlier = pages.earlierSaid(hall, key, { board });
+      out.push({ sid, key, board, name, room: r, support, seq: current.take ? current.take.seq : 0, answer: current.answer ? current.answer.state : null, current, info, beside, earlier });
     };
     for (const [sid, u] of r.users) { const key = personKey(u.uid, !!u.acct); if (key) add(sid, key, main && u.role === 'board', u.name, false); }
     for (const sid of io.sockets.adapter.rooms.get(r.code) || []) {
@@ -3628,30 +3664,44 @@ function hallPages(hall) {
   }
   return out;
 }
+/** A layer's take and answer on a page as a word, so a change of either is seen: its number and the answer. */
+const layerSaid = (c) => (c.take ? c.take.seq : 0) + '|' + (c.answer ? c.answer.state : '');
 /**
- * What a page is told of the take it is shown now (`page:take`, and the join's `page`): its number, what it shows, who put
- * it up and when, the hall's name and holding picture (a holding slide with no picture of its own shows the hall's),
- * AGMessage's clock and zone (a clock take is drawn in them), and the person's answer to it ('dismissed', 'minimised' or
- * null). Shown nothing (no take, or none since a seat moved): number 0 and no content, the page's chat. No key or code.
- * A web page's address is opened here, for the page it is shown on and nothing else (pages.told).
+ * What a page is told of the take it is shown now in a layer (`page:take`, and the join's `page` and `over`): the layer,
+ * its number, what it shows, who put it up and when, the hall's name and holding picture (a holding slide with no picture
+ * of its own shows the hall's), AGMessage's clock and zone (a clock take is drawn in them), and the person's answer to it
+ * ('dismissed', 'minimised' or null). Shown nothing (no take, or none since a seat moved): number 0 and no content, the
+ * page's chat, or nothing over the show. An information take says how it arrives (`arrive`: 'over' or 'side'; beside the
+ * operator's, `layer: 'beside'`, always 'side'), and the information layer's word carries the page's Earlier entries
+ * (`earlier`, given as pages.earlierOf gives them). No key or
+ * code. A web page's address is opened here, for the page it is shown on and nothing else (pages.told).
  */
-function takeTold(hall, { take, answer }) {
+function takeTold(hall, { take, answer }, layer = 'show', earlier = null) {
   const h = store.get(hall);
   return {
-    seq: take ? take.seq : 0, content: take ? pages.told(take.content) : null, by: take ? { name: take.by.name } : null, at: take ? take.at : 0,
+    layer, seq: take ? take.seq : 0, content: take ? pages.told(take.content) : null, by: take ? { name: take.by.name } : null, at: take ? take.at : 0,
     hallName: (h && h.name) || '', holding: displays.hallHolding(hall), now: Date.now(), tz: TIME_ZONE, answer: answer ? answer.state : null,
+    ...(layer !== 'show' ? { arrive: take && take.arrive === 'side' ? 'side' : 'over' } : {}),
+    ...(earlier ? { earlier } : {}),
   };
 }
 /**
- * The pages of `before` (hallPages, read before a change) still open whose take, or their person's answer to it, is not
- * what they were shown: each with what to tell it now ({sid, take}). One the change did not move is told nothing.
+ * The pages of `before` (hallPages, read before a change) still open whose take in a layer, or their person's answer to
+ * it, is not what they were shown, or whose Earlier entries moved: each with what to tell it now ({sid, take}), one for
+ * each place that moved (the information layer's carrying its Earlier; beside it, its own). One the change did not move
+ * is told nothing.
  */
 function takeSends(hall, before) {
   const now = new Map(hallPages(hall).map((p) => [p.sid, p]));
   const out = [];
   for (const was of before) {
     const p = now.get(was.sid);
-    if (p && (p.seq !== was.seq || p.answer !== was.answer)) out.push({ sid: p.sid, take: takeTold(hall, p.current) });
+    if (!p) continue;
+    // A page told again from nothing (`seq: -1`) is told both layers.
+    const fresh = was.seq === -1;
+    if (fresh || p.seq !== was.seq || p.answer !== was.answer) out.push({ sid: p.sid, take: takeTold(hall, p.current, 'show') });
+    if (fresh || !was.info || layerSaid(p.info) !== layerSaid(was.info) || p.earlier !== was.earlier) out.push({ sid: p.sid, take: takeTold(hall, p.info, 'info', pages.earlierOf(hall, p.key, { board: p.board })) });
+    if (fresh || !was.beside || layerSaid(p.beside) !== layerSaid(was.beside)) out.push({ sid: p.sid, take: takeTold(hall, p.beside, 'beside') });
   }
   return out;
 }
@@ -3663,7 +3713,7 @@ function takeSends(hall, before) {
 function retell(hall, which) {
   for (const p of hallPages(hall)) {
     const s = p.current.take && which(p.current.take.content) ? io.sockets.sockets.get(p.sid) : null;
-    if (s) s.emit('page:take', takeTold(hall, p.current));
+    if (s) s.emit('page:take', takeTold(hall, p.current, 'show'));
   }
   pagesChanged(hall);
 }
@@ -3674,11 +3724,14 @@ const holdingOf = (hall) => displays.hallHolding(hall);
  * (`frames.pages`), and each reads `page:status` again, so the newest state is what it reads.
  */
 function pagesChanged(hall) { frames.pages.mark(hall); }
-/** `pages:changed` to each page in a room of the hall whose push held for it at its join (`pushes`): a signal, no content. */
+/**
+ * `pages:changed` to each page in a room of the hall whose push (canPush) or show (canShow) held for it at its join
+ * (`pushes`, `shows`): a signal, no content.
+ */
 function tellPushers(hall) {
   for (const p of hallPages(hall)) {
     const s = io.sockets.sockets.get(p.sid);
-    if (s && s.data.pushes === hall) s.emit('pages:changed', {});
+    if (s && (s.data.pushes === hall || s.data.shows === hall)) s.emit('pages:changed', {});
   }
 }
 /**
@@ -3856,14 +3909,24 @@ function sweepSessions() {
 setInterval(sweepSessions, SESSION_SWEEP_MS).unref();
 
 /**
- * A room's invite links, made with its guest code (a renewed code voids the links made with the one before): On stage and
- * backstage in a hall's Main room, a Member's in a side room, which has no stage. None for a room with no code.
+ * A room's number for a seat's invite link (`settings.invites[role]`, a whole number, 0 when absent): New On stage link
+ * (or New Backstage link) adds one, which voids the link before it without changing the code.
+ */
+function inviteNumber(room, role) {
+  const all = room && isRecord(room.settings.invites) ? room.settings.invites : null;
+  const n = all && Object.hasOwn(all, role) ? all[role] : 0;
+  return Number.isSafeInteger(n) && n > 0 ? n : 0;
+}
+/**
+ * A room's invite links, made with its guest code (a renewed code voids the links made with the one before) and its
+ * number for each seat (inviteNumber): On stage and backstage in a hall's Main room, a Member's in a side room, which has
+ * no stage. None for a room with no code.
  */
 function invitesFor(room) {
   const code = store.guestCodeOf(room);
   const out = {};
   if (!code) return out;
-  for (const role of store.isMain(room) ? ['board', 'research'] : ['research']) out[role] = `/?code=${code}&role=${role}&invite=${guard.makeInvite(SECRET, code, role)}`;
+  for (const role of store.isMain(room) ? ['board', 'research'] : ['research']) out[role] = `/?code=${code}&role=${role}&invite=${guard.makeInvite(SECRET, code, role, inviteNumber(room, role))}`;
   return out;
 }
 
@@ -5143,14 +5206,15 @@ function firstWrites() {
 // effects, `settings` to read (a handler module never writes it: test/modules.test.js (j)), a message made from what a page
 // sent (`readSend`, `messageOf`, its file on disk `uploadOnDisk`, a new id `makeMessageId`), the rooms that may send into
 // a room (`sendersOf`, read, and `sendsInto`, the rooms a room may send into; `setRoomSends`, its one writer, the rooms
-// module's alone), the Stagewatch a hall follows and its frame, what people's pages are shown (the `pages` store, the
+// module's alone), a room's invite links (`invitesFor`, made with the server's secret), the Stagewatch a hall follows and
+// its frame, what people's pages are shown (the `pages` store, the
 // pages open in a hall with what each is shown, `hallPages`, those a change moved, `takeSends`, the hall's holding
 // picture, `holdingOf`, the consoles told, `pagesChanged`, and a Board page's time out of view kept in the day's peaks,
 // `pageHidden`), and `io` for the rooms module. The takes module's holds no io, apply or systemMessage: it reaches a page
 // by its socket's id alone (`sendTo`, over io's open sockets, read by the gate's module and never handed in), never a
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
-  store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
+  store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, invitesFor, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
   pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, io,
 });
 

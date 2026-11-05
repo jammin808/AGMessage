@@ -56,7 +56,12 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 - **Accounts and codes.** Crew, project managers and admins sign in as themselves (a signed-in browser opens its halls,
   never a guest's seat); presenters and guests join with a room's 6-character code, typed first: the join page names the
   room it opens ("Legal · Hall 2") and offers that room's seats only — On stage only from an On stage invite link,
-  Backstage and Observer in a hall's Main room, Member and Observer in its other rooms. A code is shown only to those who
+  Backstage and Observer in a hall's Main room, Member and Observer in its other rooms. **On stage seats come from an
+  invite link, an account or the admin, in open halls too**: a hall's code alone seats nobody On stage. The admin's
+  Roles & invites panel shows the hall's On stage link, open or locked, and **New On stage link** replaces it without
+  changing the code (the seats already taken stay); a hall page joined with a link takes the code and the link out of
+  its address once it is in, kept for that tab alone, and a hall's On stage seats are kept across a restart and an
+  unlock. A code is shown only to those who
   may know it (the admin, those who set halls up, an account whose rights already hold what the code gives, a guest the
   code it typed; never On stage, a Viewer or a Staff account in a Main room). Roles (admin, project manager,
   senior tech, tech, staff, viewer), halls per person, and single rights an admin can add or remove. An account is
@@ -88,7 +93,15 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 - **People's screens.** The Board's pages (everyone seated On stage) or one person's can be shown Stagewatch's
   countdown, the clock, a holding slide, black or a **web page** over their chat, from the header's Board chip ("Board ·
   🕐 Clock ✓ 6/6", Undo for 10 s) or the console's People's pages, each page confirming what it showed only while it is
-  in view. A web page (an https address, previewed on the operator's own page first if they like) needs a right of its
+  in view. **Information is drawn over the show**: a web page goes over the clock (or whatever the show has up) and
+  never replaces it — Back to chat on it returns to the clock, which says it is under it meanwhile ("◐ under a web
+  page"); over the operator's blank it waits ("1 from backstage", a touch shows it); it can arrive in the person's side
+  bar instead of over their chat; and what was taken off a page is kept under **Earlier** in its side bar, a Look each.
+  The backstage team shows information by a right of its own, **Show files, pages and quotes** (`stage.show`: Staff,
+  Tech, Senior and Manager accounts hold it), to the people On stage alone, and never over what the operator put up (it
+  goes to their side bar then, a card beside the operator's that each page confirms like any take); their Board chip's
+  and a person's **Take down** takes down only what they put up. Information pushed offers **Take down** for 10 s, never
+  Undo (a show take keeps its Undo). A side room shows the Board only when it is on the Main room's list. A web page (an https address, previewed on the operator's own page first if they like) needs a right of its
   own, **Web pages** (`stage.web`: Tech, Senior and Manager accounts hold it); it opens in a sandboxed frame with no
   referrer, under a strip saying who chose it and not to type passwords there, and reads ◇ opened, never ✓, since
   AGMessage cannot see inside it. A locked hall's backstage code guests show web pages only while the admin turns on

@@ -165,6 +165,30 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   the hall, so no side room's page is sent the hall's key that way. The page draws a take with a module that holds no
   socket (`public/pagelayer.mjs`, held by the module fence), from plain values: a holding picture only of AGMessage's
   own uploads, and every word with `textContent`.
+- **On stage by invite.** An On stage seat needs the On stage invite link in every hall's Main room, open or locked, or a
+  seat already held there, an account given the hall's On stage seat, or the admin's seating: an open hall's code alone
+  seats nobody On stage ("On stage seats need the invite link — you joined as an observer."), so a guest who only has the
+  code reads nothing the Board is shown. An invite is a MAC of the room's guest code, the seat and the room's number for
+  that seat: **New On stage link** (the admin's, `admin:newInvite`) voids the link it replaces without changing the code,
+  keeps the seats held, and writes one `room.invite` row with no link in it; a new code voids every link. A hall page
+  joined with a link takes the code and the invite out of its address and its history entry once it is in, kept in that
+  tab's `sessionStorage` alone, so a venue's shared tablet keeps neither in its history. An open hall's On stage seats are
+  kept with the hall across a restart (for the boot's first seconds, as a locked hall's are), and an unlock keeps them.
+  The residual: an invite link passed on admits whoever holds it, as in a locked hall; New On stage link is the remedy.
+- **Information shown on people's pages is a right of its own**, `stage.show` ("Show files, pages and quotes to the people
+  on stage"; the Manager, Senior tech, Tech and Staff presets hold it, not Viewer), and it governs every account's
+  information, the operator's included: a Tech with it taken back is refused the take-down. An account seated backstage
+  in a room of the hall may show information without `display.control` (`canShow`, pure, in `lib/pages.js`): to the
+  Board or one person seated On stage alone, from a side room only while that room is on the Main room's list, never the
+  show layer, never over what the operator put up, on the target's take or on any page of theirs (refused over; taken in
+  the person's side bar, kept beside the operator's, where it replaces nothing), and a take-down only of what such a seat
+  put up, by the take it names, of a kind its own rights would put up, and not while the operator's is on a page of
+  theirs. Information pushed offers Take down, never an Undo that would put older information back on every tablet. A
+  code guest never shows by this
+  right: an open hall's shows nothing, and an observer seat (a Viewer's, a Staff account's without `hall.post`) nothing,
+  whatever it was granted. A console that may only show reads the people seated On stage alone, and a web take by its
+  host. **Information is drawn over the show, never in its place**, so a researcher's push never takes down the
+  operator's clock or voting page.
 - A web page on people's pages needs a right of its own, `stage.web`, beside the right every take needs: the admin's,
   an account's in the hall (the Tech, Senior tech and Manager presets hold it; Staff and Viewers do not unless given it),
   and a code guest's only in a locked hall whose admin turned on its backstage guests' web pages (`admin:guestWeb`, off

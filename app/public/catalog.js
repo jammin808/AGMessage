@@ -53,6 +53,11 @@
     onChat: 'Already on chat.',
     reading: 'Reading where their pages stand…',
     noPage: 'They have no page open in this hall now.',
+    // Take down (board.takeDown, person.takeDown), refused as the server words it (lib/pages.js canShow).
+    noShow: 'Showing files, pages and quotes on the stage needs its own right — ask an admin.',
+    noWeb: 'Web pages on the stage need their own right — ask an admin.',
+    operatorUp: 'The operator put this up — ask them.',
+    operatorOn: 'The operator is showing something on a Board page — ask them.',
     linkDown: 'Stagewatch is not connected right now — nothing is queued; try again when it is.',
     linkKey: 'Stagewatch has not accepted this AGMessage\'s key yet — nothing is queued; try again in a moment.',
     linkRefused: 'Stagewatch refused this AGMessage\'s key — nothing can be sent until an admin enters a node key it lists (Halls → Set up).',
@@ -88,6 +93,32 @@
     // A web page is chosen by its address: another may follow the one shown.
     if (o.kind === kind && kind !== 'web') return kind === 'chat' ? WORDS.onChat : 'Already showing ' + SHOW_KINDS.find((x) => x[0] === kind)[2] + '.';
     return true;
+  };
+  /**
+   * The information Take down hands back on a target, as the console reads it (`info`, over the show; `beside`, in their
+   * side bar beside the operator's, each {seq, kind, op}): for the operator (canPush), what is over the show, else what is
+   * beside it; for a seat that may only show, what a researcher put over the show, else what is beside it, else the
+   * operator's (offered disabled); null for nothing.
+   */
+  const downOf = (f, o) => {
+    const info = o && o.info ? o.info : null;
+    const beside = o && o.beside ? o.beside : null;
+    return (f.canPush ? info || beside : (info && !info.op ? info : beside || info)) || null;
+  };
+  /**
+   * Why Take down cannot hand that back now, or true: the server's words for an account whose information pushes lack
+   * stage.show (`o.show`, the console's read: false), for the operator's own take or one on any of the target's pages
+   * (`o.opOn`) to a seat that may only show, and for a kind such a seat could not put up itself (a web page without its
+   * right).
+   */
+  const downWhy = (f, o) => {
+    const t = downOf(f, o);
+    if (!t) return true;
+    if (f.canPush) return o.show === false ? WORDS.noShow : true;
+    if (t.op) return WORDS.operatorUp;
+    if (o.opOn && t === o.info) return WORDS.operatorOn;
+    if (t.kind === 'web') return f.canWeb ? true : WORDS.noWeb;
+    return o.show === false ? WORDS.noShow : true;
   };
   /** One of the Board chip's show kinds: radio, the kind the Board's pages show now checked (and not chosen twice). */
   const boardKind = (kind, label, icon, rank) => ({ id: 'board.' + kind, label, icon, group: '2_send', inline: () => rank, verb: 'page:push', mode: 'now', radio: (f, o) => showsNow(o) === kind,
@@ -393,8 +424,8 @@
       { id: 'header.people', label: (f, o) => 'People · ' + o.people, icon: '👫', group: '3_keep', verb: 'local', mode: 'local',
         checked: (f, o) => !!o.peopleShown, may: () => true, fits: () => true },
       // Screens & pages…: the hall's console, its screens (read with display:list as it opens) for a seat that drives them,
-      // and its people's pages for one that may change what they show.
-      { id: 'header.screens', label: 'Screens & pages…', icon: '⧉', group: '3_keep', verb: 'display:list', mode: 'now', may: (f) => f.canScreens || f.canPush, fits: () => true },
+      // and its people's pages for one that may change what they show, or show information on the Board's.
+      { id: 'header.screens', label: 'Screens & pages…', icon: '⧉', group: '3_keep', verb: 'display:list', mode: 'now', may: (f) => f.canScreens || f.canPush || f.canShow, fits: () => true },
       { id: 'header.size', label: 'Text size', icon: 'Aa', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: () => true,
         submenu: (f, o) => TEXT_SIZES.map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: Math.round(o.zoom * 100) === Math.round(value * 100) })) },
       { id: 'header.theme', label: 'Dark theme', icon: '🌙', group: '3_keep', verb: 'local', mode: 'local', checked: (f, o) => !!o.dark, may: () => true, fits: () => true },
@@ -419,6 +450,10 @@
       // Escape minimises, never sends back to chat: a key pressed by mistake loses nothing.
       { id: 'take.minimise', label: 'Minimise', icon: '🔽', key: 'Escape', group: '1_respond', inline: () => 2, verb: 'page:report', mode: 'self', may: () => true, fits: () => true },
       { id: 'take.openChat', label: 'Open chat', icon: '🗨', group: '1_respond', verb: 'page:report', mode: 'self', may: () => true, fits: (f, o) => !!o.strip },
+      // Information from backstage held under the operator's blank (`held`): a touch shows it over the blank, by the
+      // person's own choice; until then the page says it is held.
+      { id: 'take.held', label: (f, o) => o.held + ' from backstage', icon: '📬', group: '1_respond', inline: () => 4, verb: 'local', mode: 'local',
+        may: () => true, fits: (f, o) => o.kind === 'blank' && o.held > 0 },
       // A web page, opened by the person in a tab of its own, outside AGMessage (its address, `url`): where a site refuses
       // to be framed, or a password is asked for, the person's browser is the place for it. In the layer's ⋯ and its
       // right-click, in the full view only: the simple view keeps the layer's buttons alone.
@@ -429,12 +464,19 @@
       { id: 'take.fullscreen', label: (f, o) => (o.full ? 'Leave full screen' : 'Full screen'), icon: '⛶', group: '3_keep', inline: () => 3, verb: 'local', mode: 'local',
         may: () => true, fits: (f) => f.fullscreen },
     ],
-    // A take minimised into the side bar (📺 On stage), as a card: Show again draws it over the page again; Remove puts it
-    // away (Back to chat), with Undo for 10 s (the server takes Back to chat back within 10 s). `seq`, `kind`.
+    // A take minimised into the side bar (📺 On stage), or information that arrived there (`side`), as a card: Show again
+    // draws it over the page; Remove puts it away (Back to chat), with Undo for 10 s (the server takes Back to chat back
+    // within 10 s). `seq`, `kind`, `layer` (the show's, or the information's), `side`.
     card: [
-      // In the simple view a card's one act is 👁 Look (Shown to you); the full view keeps ⤴ Show again.
-      { id: 'card.show', label: (f) => (full(f) ? 'Show again' : 'Look'), icon: (f) => (full(f) ? '⤴' : '👁'), group: '1_respond', inline: () => 1, verb: 'page:report', mode: 'self', may: () => true, fits: () => true },
+      // In the simple view a card's one act is 👁 Look (Shown to you); the full view keeps ⤴ Show again (an arrival in the
+      // side bar: Show over the chat).
+      { id: 'card.show', label: (f, o) => (!full(f) ? 'Look' : o.side ? 'Show over the chat' : 'Show again'), icon: (f) => (full(f) ? '⤴' : '👁'), group: '1_respond', inline: () => 1, verb: 'page:report', mode: 'self', may: () => true, fits: () => true },
       { id: 'card.remove', label: 'Remove', icon: '🗑', group: '9_danger', inline: () => 2, verb: 'page:report', mode: 'self', undo: 'card.remove', may: () => true, fits: (f) => full(f) },
+    ],
+    // Earlier: information taken off this person's page lately (superseded, handed back, put away), in its side bar under
+    // the cards. Opening one is a Look on this page alone: no report, no take. `seq`, `kind`, `url` (a web page's).
+    past: [
+      { id: 'past.look', label: 'Look', icon: '👁', group: '1_respond', inline: () => 1, verb: 'local', mode: 'local', may: () => true, fits: () => true },
     ],
     // The simple view's ⋯ sheet: what is set once a session, each a row of its own, never a menu (the simple view has
     // none). `zoom` (the text size), `dark` (the theme), `full` (the device's screen is full now), `hall` (as Leave's ask
@@ -461,11 +503,18 @@
       boardKind('clock', 'Show the clock', '🕐', 3),
       boardKind('holding', 'Show holding', '🖼', 4),
       boardKind('blank', 'Show blank', '🌑', 5),
-      // A web page on every Board page: for a seat that may show one (`canWeb`: canPush and stage.web), by its address.
-      { ...boardKind('web', 'Show a web page…', '🌍', 6), may: (f) => f.canPush && f.canWeb, confirm: () => webAsk('on the Board\'s pages') },
+      // A web page on every Board page, over the show: for a seat that may show one (`canWeb`: canPush or canShow, and
+      // stage.web), by its address; from a seat that may only show, to their side bar where the operator's is up.
+      { id: 'board.web', label: 'Show a web page…', icon: '🌍', group: '2_send', inline: () => 6, verb: 'page:push', mode: 'now',
+        may: (f) => (f.canPush || f.canShow) && f.canWeb, fits: () => true, ready: (f, o) => kindWhy(f, o, 'web'), confirm: () => webAsk('on the Board\'s pages') },
       { id: 'board.back', label: (f, o) => 'Back to ' + kindName(o.mine && o.mine.previous && o.mine.previous.kind) + ' (undo your ' + kindName(o.kind) + ', ' + String((o.mine && o.mine.time) || '') + ')', icon: '↶', group: '3_keep', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush, fits: (f, o) => !!o.mine && o.mine.seq === o.seq },
-      { id: 'board.screens', label: 'Screens & pages…', icon: '⧉', group: '4_manage', verb: 'display:list', mode: 'now', may: (f) => f.canPush, fits: () => true },
+      // Take down: the information handed back on every Board page (`info` over the show, `beside` in their side bar: the
+      // console's read), over that take alone (downOf). A seat that may only show takes down only what such a seat put up:
+      // the operator's is theirs.
+      { id: 'board.takeDown', label: 'Take down', icon: '⤵', group: '3_keep', verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush || f.canShow, fits: (f, o) => !!downOf(f, o), ready: (f, o) => downWhy(f, o) },
+      { id: 'board.screens', label: 'Screens & pages…', icon: '⧉', group: '4_manage', verb: 'display:list', mode: 'now', may: (f) => f.canPush || f.canShow, fits: () => true },
     ],
     // The room's earlier messages: a page opens a room with its newest (the join's first open) and reads further back a
     // page at a time (history:before), at the top of what it holds (Show earlier: `more`, the server's word that there
@@ -548,12 +597,19 @@
       { id: 'person.show', label: 'Show them', icon: '📺', group: '2_send', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, ''),
         submenu: (f, o) => SHOW_KINDS.filter((x) => x[0] !== 'chat' && x[0] !== 'web').map(([value, label]) => { const why = kindWhy(f, o, value); return { value, label, role: 'menuitemradio', checked: showsNow(o) === value, ...(why === true ? {} : { disabled: why }) }; }) },
-      // A web page on every page of theirs in the hall, by its address: for a seat that may show one (`canWeb`).
+      // A web page on every page of theirs in the hall, by its address: for a seat that may show one (`canWeb`); one that
+      // may only show is listed the people On stage alone.
       { id: 'person.web', label: 'Show them a web page…', icon: '🌍', group: '2_send', verb: 'page:push', mode: 'now',
-        may: (f) => f.canPush && f.canWeb, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, 'web'),
-        confirm: (f, o) => webAsk('on ' + (o.name ? o.name + '\'s' : 'their') + ' pages') },
+        may: (f) => (f.canPush || f.canShow) && f.canWeb, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0 && (f.canPush || o.where === 'console' || o.role === 'board'),
+        ready: (f, o) => kindWhy(f, o, 'web'), confirm: (f, o) => webAsk('on ' + (o.name ? o.name + '\'s' : 'their') + ' pages') },
       { id: 'person.chat', label: 'Back to chat on their pages', icon: '💬', group: '2_send', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, 'chat') },
+      // Take down: the information on their pages handed back alone (their `info` over the show, or `beside` it, as the
+      // console reads them), the show under it left; for a seat that may only show, on a person On stage, and only what such
+      // a seat put up.
+      { id: 'person.takeDown', label: 'Take down', icon: '⤵', group: '2_send', verb: 'page:push', mode: 'now',
+        may: (f) => f.canPush || f.canShow, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0 && !!downOf(f, o) && (f.canPush || o.where === 'console' || o.role === 'board'),
+        ready: (f, o) => downWhy(f, o) },
       // Chat view ▸: the admin's choice of the view a person's pages draw (By seat: the simple view On stage, the full view
       // elsewhere), for anyone seated in the room, a guest or an account, on the admin page and in the hall page's People
       // panel (the admin's own page, which is told each person's choice, `view`).
@@ -827,6 +883,10 @@
       // Whether a web page shown from this page would be taken (the join's `canWeb`, a code guest's as `pages:rights`
       // says it now; for the support view, the person's): Show a web page… on the Board chip, Show them a web page… on a person.
       canWeb: s.canWeb === true,
+      // Whether this page may show information on its Board's pages by a right of its own (the join's `canShow`: an
+      // account backstage with stage.show or stage.web; for the support view, the person's): the Board chip with Take down,
+      // and the console's people On stage.
+      canShow: s.canShow === true,
     });
   }
 
@@ -952,6 +1012,6 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, downOf, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
   Object.assign(root.AGM = root.AGM || {}, { catalog });
 })(typeof window !== 'undefined' ? window : globalThis);

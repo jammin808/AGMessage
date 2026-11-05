@@ -4725,6 +4725,172 @@ place, and the hidden things of revision 3 (the owner's answer 13, "Hidden thing
 - Rolling back: nothing is stored. 0.5.1's page draws documents as it did; its worker's response keeps the page's
   policy again, so JPEG 2000 pictures go undrawn.
 
+**On stage seats come from an invite; showing on the Board's pages is a right of its own; information is drawn over the
+show** (the plan's Part 4, unit 24, its §5.9.1 (two layers), §5.9.2.1 (On stage by invite), §5.9.2.2 (`stage.show`,
+`canShow`), §5.11's rights and rows and §9's row 24, with design §2.3, §2.6, §3.1, §3.3, §5.2-§5.5 and §7.4-§7.5 as Part
+4 §0 amends them; the owner's answer 10, "Board pages should be more secure and not available to guests in an open hall.
+Web pages need rights of their own.", confirmed "Right", the readings S5 and S13, "Defaults"; global #60)
+- **On stage seats come from an invite link, an account or the admin, in open halls too.** In every hall's Main room, a
+  code guest asking for On stage without the On stage link (or a seat it already holds there) joins as an observer: "On
+  stage seats need the invite link — you joined as an observer." A locked room keeps its words for a backstage seat. In
+  0.5.1 an open hall's code seated anyone On stage. **On the upgrade**, a Board tablet that joined an open hall with its
+  code rejoins as an observer with those words: **send the On stage link to presenters and board members before the
+  show.** An open hall's code guests no longer reach the Board's pages. The join page offered On stage only from an On
+  stage link already; a remembered On stage falls back to Observer, as before.
+- **The links are numbered and can be replaced.** An invite is a MAC of the room's guest code, the seat and the room's
+  number for that seat (`settings.invites`, a meta op in the room's log; number 0 is MACed as 0.5.1's, so its links keep
+  working until the first change). The admin's Roles & invites panel shows the hall's **On stage link** whether its
+  roles are open ("Open: anyone with the code joins Backstage or as an Observer; On stage needs this link.") or locked,
+  each link with **🔄 New On stage link** (New Backstage link, a side room's New Member link), which asks first and then
+  voids the link it replaces without changing the code, keeps the seats already held, and writes one `room.invite` row
+  ("a new On stage link (the old one no longer admits)", never the link). The verb is `admin:newInvite {roomCode,
+  role}`, the admin page's (its gate), in `lib/handlers/rooms.js`, counted as input by the busy line; a new code still
+  voids every link.
+- **The link leaves the address bar.** A guest's hall page, once its join is taken, takes `code=` and `invite=` out of
+  its address and its history entry (`history.replaceState`) and keeps them in that tab's `sessionStorage` for its own
+  rejoins and reloads; where storage is blocked the address keeps them. In 0.5.1 the invite stayed in the address, and
+  so in the history of a venue's shared tablet. An account's page keeps its address.
+- **An open hall keeps its On stage seats** across a restart, as a locked hall keeps its seats: they come from an invite
+  or the admin, so they are saved with the room (`settings.seats`, its On stage seats alone: an open hall's backstage
+  and observer seats come from the code and are not kept), and a page back in the boot's first seconds takes its seat
+  again. **Unlocking a hall keeps its On stage seats** and drops the rest; 0.5.1 dropped every saved seat. The admin may
+  still seat a code guest On stage from the room's people list, and that seat is kept the same way (S5).
+- **`stage.show`, a right of its own**: "Show files, pages and quotes to the people on stage", a hall's right in the
+  Show group beside `stage.web`, in the presets of **Manager, Senior tech, Tech and Staff** (and the admin), not Viewer;
+  given and taken back per account on the Accounts page. **It governs every account's information**, the operator's
+  included: a Tech with it taken back is refused the take-down ("Showing files, pages and quotes on the stage needs its
+  own right — ask an admin."), though `display.control` lets it put up every show kind. **On upgrade**, Staff, Tech,
+  Senior tech and Manager accounts hold it (S13): **Staff can now draw information over the Board's chat**, which
+  0.5.1's side panel did not (the Staff role reads "Their halls: messages and files, and what they show the people on
+  stage").
+- **Information is drawn over the show, never in its place.** A page holds two layers: the show (Stagewatch, the clock,
+  holding, blank), which only the operator puts up, and information over it — a web page now, the document, picture and
+  quote kinds as their units land. A web page put up over the clock leaves the clock under it, which reports `hidden`
+  with "under a web page" (the console: "◐ Under a web page", never ✓), and Back to chat on the web page returns the
+  page to the clock. A Board take puts away older takes of those On stage in its own layer alone: a web page to the
+  Board leaves one Board member's clock as it is. `chat` hands back both layers at once; **Take down** (`{kind: 'chat',
+  layer: 'info'}`, "the information taken down") hands back the information alone. **Over the operator's blank**
+  information is held: the tablet stays dark, its bar (once touched) reads **📬 1 from backstage**, and a tap shows it;
+  the page says "held under blank". **In the side bar**: information may arrive as an open card in the person's side bar
+  (`page:push`'s `arrive: 'side'`), drawn there, opening the side bar once, counted on its rail and said "in the side
+  bar" (while a take on the layer covers the page, side bar included, said "under …" instead: not in view), with **Show
+  over the chat** and Remove; a show take always arrives over ("The show is drawn over the chat: only information
+  arrives in the side bar."). **Beside the operator's**: a researcher's side-bar push while the operator's information
+  is up is kept in a place of its own (`beside`), so the operator's stays over the show and the researcher's is a card
+  beside it, numbered, told (`page:take` with `layer: 'beside'`, the join's `beside`), reported on and read back
+  (`page:status`'s `beside`) as any take; the newest information to them, a hand-back of both, or a Take down that names
+  it puts it away into Earlier, and the operator's own Take down leaves it. Each layer is told in a word of its own
+  (`page:take` gains `layer`; an information take's `arrive` and the page's Earlier), each answered on its own (Back to
+  chat, Minimise), and reported on by its number; a page out of view says `hidden` with no words, one drawn under
+  another or held says why, so health's out-of-view peak reads only the first. A hand-back of both names, with `ifSeq`,
+  a take up in any of them.
+- **Earlier.** Information superseded, handed back or put away with Back to chat joins the hall's Earlier list (at most
+  20 a hall, in `pages.json`, the oldest going first); each page is told the newest ten of its own (the Board's on a
+  page seated On stage, and its person's), drawn under the cards in its side bar, each with **👁 Look**, which opens it
+  on that page alone (a web page in the Preview's frame, with nothing to show from there): no report, no take.
+- **Who may show what (`canShow`, pure, in `lib/pages.js`).** The operator (`canPush`) as before, the information kinds
+  and the take-down needing `stage.show` for an account, a web page `stage.web`. Beside it, **an account seated
+  backstage in a room of the hall** may show information by a right of its own (and only where the operator's push does
+  not hold: an operator's page reads `canShow` false): with `stage.show` (and `stage.web` for a web page), **to the
+  Board or one person seated On stage** alone ("Only the people on stage can be shown this."), from a side room only
+  while that room is on the Main room's list ("This room may not send to the Main room's Board — ask an admin.", every
+  kind, the take-down included), and **never over what the operator put up**, on the target's own take or on any page of
+  theirs (a person On stage the operator showed a page of their own, while the Board's is a researcher's): an `over`
+  push there is refused ("The operator is showing a web page — ask them, or send it to their side bar.") and a side-bar
+  push kept beside it (each information take keeps whether its pusher held canPush, `by.op`). Its Take down names the
+  take it takes down, over the show or beside it, takes down only one such a seat put up, only of a kind it could put up
+  itself (a web page by `stage.web`, the other kinds by `stage.show`), and not while the operator's is on a page of
+  theirs ("Take down names the take it takes down."; "Ben's web page is up now — yours was already replaced."). An open
+  hall's code guest shows nothing, an observer seat (a Viewer granted the rights, Staff without `hall.post`) nothing.
+  The join answer appends **`canShow`**, **`over`** (the information over the show, told as `page` is), **`earlier`**
+  and **`beside`** (the information beside the operator's) right after `canWeb`; `canWeb` now also holds for a `canShow`
+  page with `stage.web`; the support view's `person` facts carry `canShow`; the connection's context gains `canShow`,
+  the server's context `invitesFor`.
+- **The console for `canShow`.** Screens & pages… and the Board chip are shown to a page that may only show; the chip
+  reads the show and what is over it ("Board · 🕐 Clock ◐ 0/6 · 🌍 Web page ◇ 6/6"), or, with nothing over the show, what
+  is in their side bar ("· 🌍 Web page in the side bar ◇ 6/6"); its menu holds **⤵ Take down** while information is up
+  (what a researcher put over the show, else what is beside the operator's; disabled over the operator's with "The
+  operator put this up — ask them.", while the operator's is on a Board member's page with "The operator is showing
+  something on a Board page — ask them.", and for a kind it could not put up with that right's words; an operator
+  account without `stage.show` sees it greyed with the server's words, read from `page:status`'s `show`) and Show a web
+  page… with `stage.web`, which goes to the side bar while the operator's information is up on the target's pages. Its
+  People's pages list the people seated On stage alone (`page:status` filters them on the server), each row with what is
+  over the show and beside it ("· over it: a web page on vote.example.com (◇ …) · in their side bar: …"), and a person's
+  menu holds **⤵ Take down** of their information too (`person.takeDown`, the operator's and a page that may only show
+  alike); `page:status` and `pages:changed` reach such a page as an operator's, a web take by its host alone. **A push
+  of information offers Take down for 10 s, never Undo**: Undo put the older information back, which could pop a page
+  the Board had closed back up on every tablet; a show take keeps its Undo. The admin page's Take it down (a guest's web
+  page left up) takes the information down and leaves the show.
+- Rolling back to 0.5.1: a `pages.json` with two layers and Earlier is ignored as 0.5.1 ignores the whole file; a hall's
+  `invites` numbers are kept and read by nothing (a link made after New On stage link no longer admits under 0.5.1,
+  whose links are number 0's); an open hall's saved On stage seats are read as 0.5.1 reads a locked hall's, and an open
+  hall seats anyone On stage again; `stage.show` on an account is ignored.
+- Choices where the plan left room: the information layer's kinds are a web page alone until the document, picture and
+  quote units land (`canShow` reads their rights by name already); `page:status` keeps the show's status where unit 18's
+  readers (the chip, the console's rows, the support view) read it and adds `info` and `beside` to each row, where the
+  plan wrote `{show, info}`: the same facts, one level less; a push's answer adds `arrive` and `aside` only when they
+  apply; a side-bar push over the operator's information is kept in a place of its own beside it (the plan says it
+  "draws in the side bar beside the operator's take and supersedes nothing", which one information place could not
+  hold), and a side arrival with nothing of the operator's up takes the information layer as any push does; the newest
+  information to a page puts away what is beside it, latest winning there as over the show; an information take put away
+  with Back to chat by one Board member joins Earlier for the Board; the operator's information on one Board member's
+  page holds back a researcher's push over the Board and its Take down (refused, not put away there), rather than a
+  precedence of the operator's over newer Board takes; a seat that may only show takes down only a kind its own rights
+  would put up (the plan gives either right the take-down; the narrower reading of "only over its own kind of take" is
+  taken); the join's new keys follow `canWeb` directly, `beside` after `earlier` (the chat view's `view` and a first
+  open's keys, added by later units, follow them); the hall page drops `code=` and `invite=` from a guest's page alone
+  (an account's page keeps its address); the backstage link's number and button come with the On stage link's; New …
+  link asks first; the Staff role's words name what it shows.
+- Tests: `test/pages.test.js` (`canShow` by kind strings and facts, each row of the table and each refusal's words: the
+  operator, a Tech without `stage.show`, a locked hall's guest with and without the switch, an open hall's guest, Staff
+  with and without `stage.web` and `hall.files`, an observer seat, On stage, a target not On stage, a side room off the
+  list, over the operator's information and in the side bar, the operator's on one page of the Board's, a take-down with
+  and without its take and of a kind its rights would not put up; the two layers, the clock under the web page and Back
+  to chat on it as an answer in its layer, the information taken down, a hand-back of both; supersede per layer; Earlier
+  once, bounded at 20, ten told the newest first, read back; arrivals, a take kept beside the operator's, reported on,
+  read back after a restart, left by the operator's Take down, taken down by its own, put away by newer information and
+  a hand-back of both, held under blank and "under …" in the status; a record of the wrong shape dropped by layer, a
+  take beside the operator's among them), `test/server.test.js` (an open hall's code guest asking On stage seated an
+  observer with the words, with the link On stage; a guest the admin seated On stage kept by the open hall's saved seats
+  across a restart, the backstage seats not; unlocking keeping the On stage seats and a restart after it seating the
+  tablet again; New On stage link refused to a guest and for a seat or a room that has none, then the old link an
+  observer's, the new one On stage, a held seat kept, one row with no link, kept across a restart, a backstage link
+  numbered too; a locked room's backstage words), `test/takes.test.js` (end to end, a Staff researcher with `stage.web`
+  over the Board's clock, the clock under it and back on Back to chat; the join's keys; the console's read of the people
+  On stage alone and by host; the show refused, a person not On stage, a Viewer's observer seat, Sal without
+  `stage.web`; a side-bar push to a person; the show never to the side bar; a Tech without `stage.show` refused the
+  take-down; over the operator's web page refused, kept beside it with its own status (◷ until Gil's page says, then ◇),
+  told to Gil's page in its place, its row's words, taken down by its number, the operator's still up; the operator's
+  web page on Gil's pages alone holding back Sue's push over the Board, her Take down of the Board's and her push over
+  it to Gil, her side bar taken; Take down by its take; a side room off the list refused for every kind and its console,
+  on the list shown; held under blank; a hand-back of both; Earlier and `beside` on a rejoin; an operator's page reading
+  `canShow` false; and the earlier tests moved: a web page is information, Staff a console, the guests' Take it down the
+  information's), `test/accounts.test.js` (`stage.show` in the presets of Manager, Senior, Tech and Staff, not Viewer,
+  grant and revoke, never On stage or a code guest's; `giveable` and `view.giveable` gain it, on purpose; the Show group
+  of six), `test/catalog.test.js` (Take down, its words over the operator's, on one Board member's page, for a kind
+  without its right and for an operator without `stage.show`, what it names over the show or beside it; a person's Take
+  down in the seat matrix; 1 from backstage; a side card's Show over the chat; Earlier's Look; the Board chip for a page
+  that may only show; Show a web page… no radio), `test/modules.test.js` (`canShow` in the connection's context,
+  `invitesFor` in the server's, the takes module's pure helpers, the Board chip's kinds by layer), `test/inputs.test.js`
+  (`layer`, `arrive` and `admin:newInvite` by type), `test/menus.test.js` (the join's keys, `beside` among them; the
+  Board's and a person's Take down refused to every seat whose rights hide it), and the joins that sit On stage in an
+  open hall across the suites given the link (`test/helpers.js` `inviteOf`, the invite the panel gives, made with the
+  server's secret), on purpose. The browser smoke: after joining with the On stage link the address holds no `code=` or
+  `invite=` and a reload rejoins On stage; the web page drawn over the clock, the clock "◐ Under a web page" and the
+  chip reading both; Back to chat back to the clock, Earlier with its Looks; a web page held under blank, "1 from
+  backstage", Take down from the chip; a Staff account granted `stage.web`: its chip and its console of the people On
+  stage, Take down disabled over the operator's web page, its own web page beside it in Bea's side bar in the one frame
+  (the panel opened, the toast's Take down), read ◐ under the operator's page on her layer and ◇ opened in her side bar
+  once she minimises that, Show over the chat drawing it on her layer, and its Take down taking it off there alone, the
+  operator's left; the Invites panel's On stage link in an open hall and New On stage link. The Board's chat view's
+  layout leg waits until the message it measures is drawn (a first open draws its newest 60 at once and the rest as the
+  page is idle; read sooner, a size now and then found it missing).
+- The papers: `README.md`, `README.txt` (On stage by invite, the link before the show and after a shared device,
+  information over the show, the backstage team's right), `docs/ACCOUNTS.md` (`stage.show`, who may show what, the
+  links, `room.invite`), `docs/DISPLAYS.md` (two layers, Earlier, the chip), `SECURITY.md` (On stage by invite,
+  `stage.show` and `canShow`), `docs/ANALYSIS.md` (the takes module's helpers, the kinds by layer, the inputs),
+  `CLAUDE.md`.
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after

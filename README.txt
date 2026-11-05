@@ -219,6 +219,18 @@ Every day of the event
   seat. A code that opens nothing says so under it: "No hall or room has
   that code." A code switched off, or replaced by New code, reads the
   same, except for someone already seated there.
+- On stage seats come from the On stage invite link, an account or the
+  admin, in open halls too: the code alone seats nobody On stage ("On
+  stage seats need the invite link - you joined as an observer."). Before
+  the show, send the On stage link (Admin -> a hall -> Roles & invites,
+  shown whether the hall is open or locked) to the presenters and board
+  members; their tablets keep the seat through a dropped Wi-Fi, a
+  reload, a restart of AGMessage and an unlock of the hall. After a
+  shared device was used, make a new one: "New On stage link" there stops
+  the old link at once without changing the code (people already seated
+  keep their seats). A hall page joined with a link takes the code and
+  the link out of its address once it is in, so the device's history does
+  not keep them; a reload in that tab still gets back in.
 - On stage: read, reply, answer the backstage team's questions, send
   Priority and ask for Help. On stage seats cannot share files, ask
   questions or send to other rooms: what they write stays in their room,
@@ -636,6 +648,28 @@ puts it in the side bar's On stage, and Show again there brings it back.
 A take waits while someone is typing, and a priority message still shows
 over it.
 
+Information (a web page now; files, pictures and quotes as they come) is
+drawn over the show, never in its place: a web page goes over the clock,
+the console's Board row reads the clock "under a web page", and Back to
+chat on the web page brings the clock back. Over the operator's blank it
+waits: the tablet stays dark, its bar (once touched) reads "1 from
+backstage", and a tap shows it. It can be sent to the person's side bar
+instead of over their chat. What was taken off a page is listed under
+Earlier in its side bar, and a tap opens it again there, on that tablet
+alone.
+
+The backstage team shows information by a right of its own, "Show files,
+pages and quotes" (Staff, Tech, Senior and Manager accounts hold it;
+remove it on the Accounts page and that account shows none): to the
+people On stage only, and from a room other than the Main room only when
+that room is on the Main room's "May send in..." list. What the operator
+put over the Board's chat stays up: the backstage team's push goes to
+their side bar then, as a card beside the operator's (each tablet says
+when it has it), and the Board chip's Take down, or a person's, takes
+down only what the backstage team put up ("The operator put this up -
+ask them."). After showing information, the toast offers Take down for
+10 seconds, never Undo: what the Board had closed never comes back.
+
 A web page (a voting page, a live document) is shown by its https
 address: Show a web page... on the Board chip, or Show them a web
 page... on a person, then Preview to see it on your own page first, or
@@ -658,7 +692,8 @@ pages on people's pages", off by default, only on a hall's Main room
 and only while its roles are locked. Unlocking the hall turns it off.
 Turning it off, or unlocking, stops their next web page; one already up
 stays until someone takes it down, and the panel offers Take it down,
-even for a person who has no page open now.
+even for a person who has no page open now: it takes the web page down
+and leaves the show under it.
 
 Stagewatch (the countdown) for each hall
 ----------------------------------------

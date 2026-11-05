@@ -25,7 +25,7 @@
           <span class="status-chip conn-chip" id="connChip"><span class="chip-mark" id="connDot" role="img" aria-label="Connecting" title="Connecting">◷</span><span class="conn-words" id="connWords" hidden>Offline · reconnecting</span></span>
           <span class="status-chip stage-chip" id="stageChip" hidden title="Live from Stagewatch"><b id="stageTime">--:--</b> <span id="stageTitle"></span></span>
           <!-- What the Board's pages show, for a seat that may change it (app.js, kind `board`): its menu puts a kind on them. -->
-          <button class="status-chip board-chip" id="boardChip" type="button" aria-haspopup="menu" aria-expanded="false" hidden><span class="board-what" id="boardWhat">Board</span><span class="board-state" id="boardState"></span></button>
+          <button class="status-chip board-chip" id="boardChip" type="button" aria-haspopup="menu" aria-expanded="false" hidden><span class="board-what" id="boardWhat">Board</span><span class="board-state" id="boardState"></span><span class="board-over" id="boardOver" hidden></span></button>
         </span>
         <button id="helpBtn" class="btn small help-btn status-chip" type="button" aria-haspopup="dialog" title="Ask this room and the hall's crew for help" hidden><span class="chip-mark" aria-hidden="true" hidden></span><span class="chip-words">Help</span></button>
         <span class="sr-only" id="helpStatus" role="status"></span>
@@ -173,8 +173,10 @@
         <button id="docCollapseBtn" class="doc-collapse-btn" type="button" title="Collapse / expand">⇥</button>
       </header>
 
-      <!-- A take this person minimised, as a card at the top of the panel: Show again, Remove (app.js, kind `card`). -->
+      <!-- A take this person minimised, or information that arrived in the side bar, as a card at the top of the panel: Show
+           again, Remove (app.js, kind `card`); then Earlier, the information taken off this page lately, each a Look (kind `past`). -->
       <ul class="take-cards" id="takeCards" aria-label="Shown to you" hidden></ul>
+      <ul class="take-cards take-earlier" id="takeEarlier" aria-label="Earlier" hidden></ul>
 
       <div class="doc-display" id="docDisplay">
         <div class="empty-state">

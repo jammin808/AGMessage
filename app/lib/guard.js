@@ -83,12 +83,18 @@ function checkIdentity(secret, token) {
   return safeEqual(token.slice(dot + 1), mac(secret, 'uid:' + id)) ? id : null;
 }
 
-// ---------- role invites: a link that lets its holder join a locked room as board / research ----------
-function makeInvite(secret, room, role) {
-  return role[0] + '.' + mac(secret, 'invite:' + room + ':' + role, 16);
+// ---------- role invites: a link that seats its holder On stage (in every hall's Main room), or backstage in a locked room ----------
+/**
+ * An invite for a seat (`role`) in the room whose guest code is `room`, by the room's number for that seat (`n`, a whole
+ * number: New On stage link adds one). The MAC covers the code, the seat and the number, so a new code voids every link
+ * and a new number voids the one before it alone. Number 0 is MACed without it, as the links made before numbers were.
+ */
+function makeInvite(secret, room, role, n = 0) {
+  const k = Number.isSafeInteger(n) && n > 0 ? n : 0;
+  return role[0] + '.' + mac(secret, 'invite:' + room + ':' + role + (k ? ':' + k : ''), 16);
 }
-function checkInvite(secret, room, role, token) {
-  return typeof token === 'string' && token.length < 40 && safeEqual(token, makeInvite(secret, room, role));
+function checkInvite(secret, room, role, token, n = 0) {
+  return typeof token === 'string' && token.length < 40 && safeEqual(token, makeInvite(secret, room, role, n));
 }
 
 // ---------- token bucket: `rate` per second, bursts of `burst` ----------
