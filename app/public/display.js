@@ -75,28 +75,50 @@
   // late never paints over, or appears beside, the one taken after it. A PDF page is drawn off screen and copied in at
   // once: the slide on air is never cleared to be redrawn, and a state that changes nothing about the page or the
   // screen's size (a rename, a reconnect, a new holding image) leaves it alone. One pdf.js worker serves the page's life
-  // and one document is open at a time: stepping through a deck reuses it, another PDF closes it.
-  let pdfjs = null, pdfWorker = null, pdfOpen = null;   // pdfOpen: {url, task}
+  // and one document is open at a time: stepping through a deck reuses it, another PDF closes it. pdf.js runs as on the
+  // hall page (docview.mjs): no script, no XFA, no image over PDF_MAX_IMAGE pixels, and a document whose first page is
+  // not drawn within PDF_DEADLINE is failed ("the file took too long to read") and destroyed with the shared worker,
+  // which may be the one stuck, the next document making a new one.
+  /** A document's first page drawn within this many ms (docview.mjs's BOUNDS.pdfMs). */
+  const PDF_DEADLINE = 20000;
+  /** pdf.js leaves out an image larger than this many pixels (its default is no limit). */
+  const PDF_MAX_IMAGE = 16777216;
+  let pdfjs = null, pdfWorker = null, pdfOpen = null;   // pdfOpen: {url, task, timer, drawn, expired, onExpire}
   let fileGen = 0, drawnKey = '', drawnWords = '';
   function loadPdfjs() {
     pdfjs = pdfjs || import('/vendor/pdf.min.mjs').then((lib) => {
       lib.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.min.mjs';
-      pdfWorker = new lib.PDFWorker();
       return lib;
     }, (e) => { pdfjs = null; throw e; });
     return pdfjs;
   }
+  /** The page's one pdf.js worker, made again only after the last was destroyed at a deadline. */
+  function sharedWorker(lib) {
+    if (!pdfWorker || pdfWorker.destroyed) pdfWorker = new lib.PDFWorker();
+    return pdfWorker;
+  }
   function openPdf(lib, url) {
     if (!pdfOpen || pdfOpen.url !== url) {
       const old = pdfOpen;
-      pdfOpen = { url, task: lib.getDocument({ url, worker: pdfWorker, withCredentials: false, isEvalSupported: false, enableXfa: false }) };
-      if (old) closePdf(old.task);
+      const open = { url, task: lib.getDocument({ url, worker: sharedWorker(lib), withCredentials: false, isEvalSupported: false, enableXfa: false, maxImageSize: PDF_MAX_IMAGE }), drawn: false, expired: false, onExpire: null };
+      open.timer = setTimeout(() => {
+        if (open.drawn) return;
+        open.expired = true;
+        try { open.task.destroy(); } catch { /* a document already destroyed */ }
+        if (pdfWorker) { try { pdfWorker.destroy(); } catch { /* a worker already gone */ } pdfWorker = null; }
+        if (pdfOpen === open) pdfOpen = null;
+        if (open.onExpire) open.onExpire();
+      }, PDF_DEADLINE);
+      pdfOpen = open;
+      if (old) closePdf(old);
     }
     return pdfOpen;
   }
   // Frees a document in the shared worker (the worker stays): once it has finished loading, since one closed mid-load
   // fails inside the worker when its data arrives, or after 30 s whatever it is doing.
-  function closePdf(task) {
+  function closePdf(open) {
+    clearTimeout(open.timer);
+    const task = open.task;
     let closed = false;
     const close = () => { if (!closed) { closed = true; task.destroy(); } };
     task.promise.then(close, close);
@@ -123,6 +145,8 @@
       const lib = await loadPdfjs();
       if (!current()) return;
       open = openPdf(lib, c.url);
+      // Its deadline passing fails the take on screen now, if this take is still the screen's.
+      open.onExpire = () => { if (!current()) return; canvas.hidden = true; drawnKey = ''; report(false, 'the file took too long to read'); };
       const doc = await open.task.promise;
       loaded = true;
       if (!current()) return;
@@ -133,6 +157,8 @@
       const off = document.createElement('canvas');
       off.width = Math.floor(vp.width); off.height = Math.floor(vp.height);
       await page.render({ canvasContext: off.getContext('2d'), viewport: vp }).promise;
+      open.drawn = true;
+      clearTimeout(open.timer);
       page.cleanup();
       if (!current()) return;
       canvas.width = off.width; canvas.height = off.height;
@@ -143,8 +169,10 @@
       drawnWords = (c.page || 1) > doc.numPages ? 'the PDF has ' + doc.numPages + ' pages: showing the last' : '';
       report(true, drawnWords);
     } catch (e) {
-      // A document that did not load, or did not render for the take on screen, is opened afresh next time.
-      if (open && pdfOpen === open && (!loaded || current())) { pdfOpen = null; closePdf(open.task); }
+      // A document past its deadline has said so; one that did not load, or did not render for the take on screen, is
+      // opened afresh next time.
+      if (open && open.expired) return;
+      if (open && pdfOpen === open && (!loaded || current())) { pdfOpen = null; closePdf(open); }
       if (!current()) return;   // a newer take closed this document or took the screen: nothing to say about this one
       canvas.hidden = true; drawnKey = '';
       report(false, 'the PDF did not render: ' + String(e && e.message || e).slice(0, 80));

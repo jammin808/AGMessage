@@ -4518,6 +4518,213 @@ switch at the largest hall's size, and keeps or changes the 200 with it)
 - Rolling back: 0.5.1 checks no archive or picture past its first bytes, and reads no `upload.refused` row (the audit
   log keeps it, as every row). A file 0.6.0 refused was never kept; one it kept is the bytes uploaded.
 
+**Files are read in the page by bounded readers into one block model; Word has pages; the PDF worker may draw JPEG 2000**
+(the plan's Part 4, unit 23, its §5.10.1 (`public/docmodel.mjs`, `public/docview.mjs`, `public/docworker.js`,
+`public/wordpages.js`), §5.10.2's rules for pdf.js, SheetJS and mammoth, §5.10.3's refusals and bounds, §5.10.4 (Word's
+pages, the owner's answer 14), §5.10.5 (`CSP_PDF_WORKER`, the owner's answer 15), §5.9.6's page box, zoom, find and kept
+place, and the hidden things of revision 3 (the owner's answer 13, "Hidden things never shown"); global #59)
+- **The readers left `app.js`.** The On stage panel draws a file through `public/docview.mjs`, imported at the first file
+  opened, over pure readers in `public/docmodel.mjs`: one block model (headings, paragraphs, items, quotes, code, tables
+  on their grid, pictures) for every type. `buildDocPreview`, its renderers, `loadPdfJs` and `sanitizeHtml` (with its two
+  `innerHTML` sinks) are gone from `app.js`, and the hall page no longer loads mammoth or SheetJS. What each type looks
+  like now: a **CSV is a grid** (RFC 4180, its delimiter sniffed among `,` `;` and tab, a byte-order mark dropped; 0.5.1
+  drew it as text), a text file is its lines (UTF-8, else windows-1252, as Excel and Notepad save), Markdown is its
+  blocks (headings, paragraphs, items, quotes, fenced code, pipe tables; inline marks as typed), **PowerPoint is an
+  outline** (each slide's title, its points by level, its tables and pictures; 0.5.1 had no preview), and **Word and
+  Excel keep their words, tables and pictures but no longer their inline styling** (bold, italic, colours, links; a
+  workbook's `sheet_to_html` styling). A sheet or a CSV shows its first 5,000 rows ("Showing the first 5,000 rows.") and
+  its first 256 columns ("Showing the first 256 columns."), and at most 100,000 cells, so a wide one's rows are cut to
+  fit ("Showing the first 390 rows."); a table in a Word file, a deck or a Markdown file is held to the same 256 columns
+  and 100,000 cells ("Showing the first 12 rows and 256 columns of this table."); a text or Markdown file shows its first
+  20,000 lines ("Showing the first 20,000 lines."). A sheet's rows are counted from its first, so one whose data begins
+  lower down is said cut where it is. A formula is never computed: the value its application saved is shown, and one
+  saved without a value reads "formula — no saved value", whatever its type (a text, a true or false, an error), never a
+  blank, FALSE or "undefined".
+- **The page box, zoom, find and the kept place.** A bar above the document: a number to type, ‹ ›, "of 48", PageUp and
+  PageDown (the page of a PDF, the slide of a deck, the line of text or Markdown, the row of a CSV, a workbook's sheet
+  tabs); for a PDF or a picture, −, Fit width, Fit page, + and a pinch; and a find box whose Next goes to each match, on a
+  page not drawn yet too. A resize, a collapse or the splitter keeps the page, the zoom and the place within the page:
+  the view is laid out again where it was, and a PDF is no longer fetched and drawn again whole. Folded away, the view is
+  left as it was and its place stands (a page asked for meanwhile is kept for later); opened again, it goes back there by
+  itself. 0.5.1 showed a read-only page chip and rebuilt the PDF from the top.
+- **Word has pages** (the owner's answer 14). They are the ones Word wrote into the file (`public/wordpages.js`, a tag
+  scanner over the parts' text): where Word saved its layout (`w:lastRenderedPageBreak`), a paragraph's page is 1 + the
+  breaks before it and the page box reads "p. 12 of 30"; where it did not (a file from a tool with no layout), the
+  explicit breaks (a page break, `w:pageBreakBefore` set or through its style's `w:basedOn` chain, a section that
+  starts a new page) give pages that are lower bounds, read "≈ p. 12 of ≈ 30" with "Word's last saved layout is missing
+  or out of date: pages are approximate" as its title, as does a file whose `<Pages>` disagrees with its breaks. Each
+  drawn block is placed on Word's paragraph by its text; one that cannot be is approximate. A section that numbers its
+  pages its own way adds "the printed page numbers differ here". The AI's text of a Word file marks where each page
+  starts ("— p. 12 —", "— ≈ p. 12 —"), so a draft can cite a page.
+- **Word, Excel and PowerPoint are read in the document worker** (`public/docworker.js`), never on the page: one worker
+  per file, ended when it answers, 15 s after it starts, or when the document is closed, whichever is first ("This file
+  took too long to read, so it is not shown.", and on a backstage seat "⬇ Download opens it in its own application.").
+  It holds the file to the upload's archive check again (`public/zipcore.js`, the server's own core), and every entry's
+  name to the one every reader finds: printable ASCII, a canonical path (no `.` or `..` part, no empty one, no leading
+  `/` or `\`), the same in its local header, which JSZip inside mammoth reads it from, as in the directory checked, and
+  none twice whatever its case; a folder entry with data in it, or any of these, is "packed in a way AGMessage will not
+  open". The archive check itself, at upload too, now refuses an entry carrying an Info-ZIP Unicode Path field, a second
+  name JSZip would read in place of the one checked. It inflates each part with `DecompressionStream('deflate-raw')` no further than its declared size, and refuses a
+  file any entry of which, whatever its name or encoding (UTF-16 too), declares a document type or an entity before
+  SheetJS, mammoth or AGMessage's readers see it. A workbook is held to the archive check by its bytes, not its name: an
+  `.xls` is read as an Excel 97-2003 file only when it is one, and anything else is refused. mammoth and SheetJS load in
+  the worker only, each for its own task; SheetJS reads with `dense`, `sheetRows`, no HTML and no VBA, and the worker
+  hands the page no more than a sheet's first 256 columns and 100,000 cells. mammoth's xmldom advisories (`VENDOR.json`'s
+  `xmldom-parse`) are now bounded by that worker's 15 s. A device without `DecompressionStream('deflate-raw')` (below
+  the document floor, Safari 16.4 and Chrome 103: the matrix's D1) now reads "this device cannot open documents — ask
+  for a picture" for a Word, Excel or PowerPoint file on the panel, where 0.5.1 drew Word and Excel through the page's
+  own mammoth and SheetJS; a picture reaches it through the stage's stand-in, with the stage's devices unit.
+- **Hidden things are never shown on the Board's pages** (the owner's answer 13). On every seat but backstage (the
+  admin's support view reads as backstage) hidden sheets ("very hidden" alike), rows and columns, hidden slides, a
+  Markdown comment and hidden raw HTML are not drawn, and a line above the document says how many were left out ("1
+  hidden row and 1 hidden column not shown", "2 hidden sheets not shown", "1 hidden slide not shown"); a backstage seat draws hidden
+  rows, columns, sheets and slides muted and marked "hidden", so the researcher knows what the file holds. A slide's
+  shape, picture, frame or group marked hidden is never read with all it holds, and presenter notes are never opened.
+  **Word's hidden text never reaches mammoth**: every run hidden by `w:vanish` or `w:specVanish` (on the run, through its
+  character style or its paragraph's style, through the style of each table it sits in or the default table style,
+  through a `w:basedOn` chain up to 10 links, or by the document's defaults) is removed from the main document, the
+  footnotes, the endnotes and the comments, each found as mammoth finds it (the package's relationships, then the main
+  document's, under whatever names, else the fixed ones: `wordpages.js` `partsOf`) and judged by the styles part mammoth
+  reads, and mammoth is handed a copy of the file repacked with those parts (`zipcore.repack`: every other part's bytes
+  copied as they are, the replaced ones stored with their CRC-32); `w:val="0"` keeps a run. A hidden mark that cannot be
+  resolved refuses the file: "This Word file has hidden text AGMessage could not leave out — show a picture or a quote."
+  Those are a chain past 10 links, a style the file does not have or writes twice, a table style whose conditional
+  format (its first row, its bands) hides text, a run's mark or a table's style read after the text it governs began, and
+  WordprocessingML bound to a prefix other than `w` or as the default namespace, which mammoth, reading namespaces,
+  would read and the scanner could not; where a file names more than one default style of a type, each is read, and any
+  that hides hides. A relationships part written any other way than Office writes one is refused
+  too ("This file cannot be read."). mammoth 1.13.0 drew hidden text as ordinary text; tracked deletions and comments it
+  leaves out, as before. The AI's text leaves every hidden part out on every seat.
+- **The AI's copy of a document's text is read only on a backstage seat** (and the support view), capped as before
+  (80 pages of a PDF, 60,000 characters). A Board page reads none.
+- **Pictures in a document are the page's own.** mammoth's pictures leave the worker as bytes with a placeholder
+  (`agm-img:<n>`), and the page draws each through an object URL it makes and revokes with the document, never an
+  address from the file or the worker. A picture's size is read from its header before anything decodes it, by the
+  reader the server's upload check uses, now a core the server, the page and its worker share (`public/imagecore.js`;
+  `lib/imagesize.js` keeps its file reads and words): in the worker for a picture inside a Word file or a deck, which
+  then leaves without its bytes, and on the page for a picture shared on its own, before it is decoded. One over 40
+  megapixels is never decoded on the device ("This picture is too big for this device."), and one in EMF or WMF, or
+  whose size cannot be read, reads "a picture this browser cannot show". An external picture or a link is never
+  fetched, and nothing is live. Every reader fetches its file with `cache: 'no-store'` (a PDF is read by pdf.js's own
+  range requests).
+- **HTML is parsed in one place** (`parseInert`, in `public/docmodel.mjs`): an inert `<template>`, walked into plain
+  data, with `<style>`, `<script>`, `<noscript>`, `<template>` and anything marked `hidden`, `display:none` or
+  `visibility:hidden` left out, and no parsed node put in the page, where a `<meta http-equiv=refresh>` would have
+  navigated a Board tablet and a `<style>` applied. mammoth's HTML and a Markdown file's raw HTML reach the page only
+  through it. A new lint rule, `agm/inert-html`, holds the documents' modules to it.
+- **pdf.js**: one worker for the page's life, each document destroyed when it closes (0.5.1 never destroyed one on the
+  hall page), pages fetched as they come into view rather than every page up front, no image over 16,777,216 pixels
+  (`maxImageSize`), and a deadline: a PDF whose first page is not drawn within 20 s is failed with "the file took too
+  long to read", and its loading and the shared worker are destroyed, the next PDF making a new one. Script, XFA, `eval`
+  and annotations stay off. A screen runs pdf.js the same way (`display.js`): no image over 16,777,216 pixels, and a PDF
+  whose first page is not drawn within 20 s fails its take with "the file took too long to read", its loading and the
+  screen's worker destroyed, the next PDF drawing through a new one.
+- **JPEG 2000 pictures in a PDF draw** (the owner's answer 15), on the panel and on screens: pdf.js's worker decodes
+  them with WebAssembly, which its own response now allows (`CSP_PDF_WORKER` in `lib/guard.js`: the strict policy with
+  `script-src 'self' 'wasm-unsafe-eval'`, given to exactly the pdf.js worker files `VENDOR.json` lists, by path, never
+  to a page, pdf.js's own module or the document worker). Under the page's policy the worker could not compile its
+  decoder, and those pictures were left undrawn.
+- Choices where the plan left room: the PPTX outline reads its parts with a small XML tree reader in
+  `public/docmodel.mjs`, not `DOMParser`, so it runs under `node --test` (it refuses a declared document type as the
+  worker does); a picked word, line or cell (`pick`) and the PDF text layer are the stage's picks unit's, so the view
+  answers `place`, `goto`, `visible`, `find`, `text` and `destroy` now; SheetJS reads with `cellFormula` and `cellStyles`
+  on (the formula's text never leaves the worker, nothing is computed), since without them a formula saved without a
+  value, and hidden rows and columns, cannot be told; a rendered break or a page break before any of a paragraph's text
+  puts the paragraph on the next page, rather than spanning two; a Word style the file does not have is a hidden mark
+  that cannot be resolved, as the plan lists it, so a file naming one is refused; a chain past 10 links for a page break
+  only makes the pages approximate, but the same chain refuses the file where it could hide a run; a PDF is read by
+  pdf.js's own requests (ranges), whose caching is the upload's response's, `no-store` from the stage's file unit;
+  mammoth and SheetJS are listed as running in a worker (`runs: worker`); a formula saved without its value is told
+  apart from a saved FALSE or "" by the worker writing such a cell, in the copy SheetJS reads, as an error with no
+  value (`t="e"`, its `<v>` taken out), the one shape SheetJS leaves without a value; a sheet's rows are cut where
+  SheetJS cuts them, at the sheet's 5,000th row; the column bound is 256, an Excel 97-2003 sheet's whole width, and the
+  cell bound 100,000, the first draw of 5,000 rows at 20 columns; a table cut keeps its spans inside the cut.
+- Measured, in headless Chromium in the build container: a 2,316-byte workbook with cells at A1 and XFD1000 read by the
+  worker as 1,000 × 16,384 = 16,384,000 cells in 3 s (362 MB in Node), and 5 MB of commas parsed on the page to one
+  row of 5,000,001 fields and planned in 2.7 s before any of it was drawn; the first draw of a grid grows with its
+  cells: 50,000 in 1.9 s, 100,000 in 2.0 s, 130,000 in 3.9 s, 250,000 in 4.2 s, 500,000 in 9.1 s, 512,000 (2,000 × 256)
+  in 13.2 s. The same workbook now reads as 390 × 256 = 99,840 cells in 0.15 s, the commas as one row of 256 in 0.05 s.
+  Not measured this round: the 5,000-row, 100,000-cell and 20,000-line first draws on the rig's laptop and the device
+  matrix's D2 and D4 (the plan's bench), and Word's pages against Word's own for ten paragraphs of each of the owner's
+  files (the fixture README's bench); the bounds are these numbers until then.
+- Tests: `test/docmodel.test.js` (new: text decoded by its byte-order mark, UTF-8 or windows-1252; RFC 4180 CSV with
+  quotes, line ends and "" and the delimiter sniffed; the 5,000-row and 20,000-line bounds and their words, the worker's
+  row bound the same number; Markdown's blocks with their lines, pipe tables, a comment left out over lines and kept in
+  code, raw HTML read by the inert reader or left out; the occupancy grid's column C; HTML walked into plain data that
+  `structuredClone` takes, without `<style>`, `<script>`, `<noscript>`, `<template>`, a refresh, hidden elements or a
+  picture not the worker's; the XML reader refusing a declared document type; a deck's outline in its order, its hidden
+  shape, picture and group and its notes absent, a `show="0"` slide marked and absent from the Board's and an
+  observer's drawing; the document worker, run as a browser runs a worker, handing back a deck's slides and the pictures
+  they name, a workbook's sheets with "very hidden" and hidden sheets, rows and columns flagged and a formula with no
+  saved value marked, a declared document type and a macro part refused; what each seat draws of the workbook, with
+  "1 hidden row and 1 hidden column not shown" and "2 hidden sheets not shown", and the AI's text without them; a Word
+  file's text with its page marks; `readInWorker` answering in time, ending a stand-in worker at its cap, and an answer
+  after it changing nothing), `test/wordpages.test.js` (new, the XML built in the test: rendered breaks give pages and a
+  paragraph holding one spans two; a hard break before Word's rendered break counts once; explicit breaks alone give
+  "breaks" and approximate; `w:pageBreakBefore` direct, through a 10-link chain and cut past it; sections with no type,
+  continuous and odd page; `<Pages>` disagreeing gives "word-stale"; blocks placed by their text with empty paragraphs
+  and deleted text dropped, one not found approximate; `w:pgNumType` marks the pages; a declared document type refused
+  before the scan; a run hidden directly, by `w:specVanish`, through `w:rStyle`, its paragraph's `w:pStyle`, a `w:basedOn`
+  chain, the default styles and `w:docDefaults` removed, in a text box too, while `w:val="0"`, tracked old formatting and
+  a paragraph mark's own keep theirs; a chain past 10, a loop and a missing style refused; and the document worker
+  handing mammoth a file whose HTML, pages and text hold no hidden run, deleted text or comment, its pages from Word's
+  breaks, its picture as bytes behind `agm-img:1`), `test/zipcore.test.js` (new: an archive listed, a part's stored
+  bytes found, CRC-32 as `node:zlib` has it; `repack` copying every other part's local header, data and descriptor byte
+  for byte, the replaced part stored with its CRC-32, the copy passing the check; mammoth reading the replaced part and
+  not the one it replaced), `test/server.test.js` (`/vendor/pdf.worker.min.mjs`'s policy holds `'wasm-unsafe-eval'` and
+  no `'unsafe-eval'`, the strict policy otherwise; the pages, the screen page, pdf.js's module, the readers and near
+  misses of the worker's path do not), `test/vendor.test.js` (mammoth and SheetJS run in the document worker and are
+  loaded only by its `importScripts`; the pdf.js workers listed are the ones `lib/guard.js` gives WebAssembly),
+  `test/lint-rules.test.js` (`agm/inert-html`: each refused shape, the one parse in `parseInert` let through, the config
+  holding the three modules, and exactly one `innerHTML` site among them), `test/resilience.test.js` (the four new page
+  files at 0 synchronous calls; a dedicated worker's channel told apart from a window's in the message guard),
+  `test/modules.test.js` (rule (m) reads `docview.mjs`, `docmodel.mjs` and the document worker; `PAGE_CORES` gains
+  `lib/imagesize.js` → `public/imagecore.js`). And for what Word's hidden text, the bounds and the place could miss:
+  `test/wordpages.test.js` holds a table's style hiding its cells (through `w:basedOn`, as the default table style, in a
+  nested table), a conditional format's mark, a missing table style and one named after its runs refused, a style id
+  written twice refused where it reaches a run and two default styles each read, a mark after a
+  run's text or inside a markup-compatibility wrapper refused while a paragraph mark's own and tracked old formatting are
+  not, WordprocessingML under another prefix, as the default namespace, by a character reference or in capitals refused,
+  a relationships part read as mammoth reads one and refused when written otherwise, `partsOf` finding the parts by
+  relationship and falling back as mammoth does, and through the worker: a main document named `word/document2.xml` with
+  its styles and footnotes renamed, `w:docDefaults` and a hidden table style stripped; another prefix, the default
+  namespace, a prefixed styles part, a conditional format and an odd relationships part refused; a local header naming
+  another part, a name with `.`, `..`, `//`, a leading `/`, a `\` or a letter past ASCII, two names differing in case, a
+  folder with data and a Unicode Path name refused; a declaration in a part named like no XML and in UTF-16 found; a
+  device with no `DecompressionStream` told apart; a picture over 40 megapixels or of no readable size handed back with
+  no bytes. `test/docmodel.test.js` holds the 256 columns and 100,000 cells of a CSV (one line of 5,000,000 commas, a
+  file 300 columns wide, a quoted field read past) and of a table (a span held to the columns, rows cut and their spans
+  ended at the cut, a Markdown table's cut), the delimiter sniffed from the first 64 KiB, the worker's `COLS`, `CELLS`
+  and `PIXELS` the page's, `readInWorker` ending a worker at once when its document closes, and through the worker: a
+  formula with no saved value marked as text, true or false, error, empty `<v>` or a shared formula's first cell while a
+  saved "", FALSE and error stay; a sheet with cells at A1 and XFD1000 read as 390 × 256; one whose data begins at row
+  11 cut at its 5,000th row and said so; an Excel 97-2003 file read, an HTML table named `.xls` refused and a zip named
+  `.xls` held to the archive check; a deck's picture over the bound without its bytes. `test/zipcore.test.js` holds the
+  Unicode Path refusal and the external attributes listed; `test/imagesize.test.js` the header reader as one core, the
+  same sizes from `require` and from the classic script, a picture named by its bytes. Binary fixtures under
+  `app/test/fixtures/` with a README line each (how it was made, its SHA-256): a six-page board pack exported tagged and
+  untagged by LibreOffice Writer, its flat OpenDocument source, and a JPEG 2000 PDF. The browser smoke: a CSV is a grid;
+  Markdown without its comment or hidden raw HTML; an Excel file read through the worker, its hidden parts marked
+  backstage and absent on the Board's seat with their count, the AI's text on the backstage seat only; a PowerPoint
+  outline without its hidden shape, its hidden slide marked backstage and absent on the Board; a Word file converted in
+  the worker reading "p. 1 of 3" and going to p. 3, its hidden run nowhere, its picture an object URL the page made and
+  revoked with the document; "≈ p. 1 of ≈ 2" from explicit breaks; one pdf.js worker for several PDFs, each closed one
+  destroyed, the AI's text by page backstage and none on the Board; the page box keeping its page across a resize; find
+  moving to a page not yet drawn; the JPEG 2000 fixture drawn on the panel and on a screen with no error; a stuck PDF
+  failed at its deadline and its worker replaced; `parseInert` in a real browser running nothing and adopting nothing;
+  the page box keeping p. 4 across a collapse of the panel and its opening again; an Excel 97-2003 file through the
+  worker under the strict policy; on a screen, a PDF held past its deadline (run there at 1.5 s by the smoke's probe)
+  failing its take with its words and ending its worker, the next PDF drawing through a new one.
+  The smoke's PDF read imports `loadPdfJs` from `docview.mjs`, and its Board's Word file reads as blocks, its bold
+  dropped, on purpose.
+- The papers: `README.md`, `README.txt` (the panel's documents, their words and limits), `SECURITY.md`,
+  `docs/DESIGN.md` (parsed in the page, bounded and inert), `docs/ANALYSIS.md` (`agm/inert-html`, the guard's files,
+  the worker's lint and channel, the vendor fence), `docs/DISPLAYS.md` (JPEG 2000 on screens),
+  `THIRD-PARTY-NOTICES.md` and `VENDOR.json` (where mammoth and SheetJS run, and what now bounds xmldom's advisories),
+  `CLAUDE.md`.
+- Rolling back: nothing is stored. 0.5.1's page draws documents as it did; its worker's response keeps the page's
+  policy again, so JPEG 2000 pictures go undrawn.
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after

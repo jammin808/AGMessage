@@ -32,6 +32,7 @@ const IO_BUILTINS = ['fs', 'net', 'http', 'https', 'dgram', 'tls', 'os', 'dns', 
  */
 const PAGE_CORES = Object.freeze({
   'lib/zipcheck.js → public/zipcore.js': 'the archive check: one core for the upload and the page\'s document worker',
+  'lib/imagesize.js → public/imagecore.js': 'a picture\'s size from its header: one reader for the upload, the take, the page and its document worker',
 });
 /** Only the composition root, server.js, requires these: the HTTP domain and the handler modules. */
 const ROOT_ONLY = (f) => f === 'lib/http-accounts.js' || /^lib\/handlers\/[^/]+\.js$/.test(f);
@@ -1617,7 +1618,8 @@ test('(l) a planted any-room call without its reason, a row without its call, an
 // ---------------------------------------------------------------- (m) the renderer has no socket
 /**
  * What a page's ES modules (every `public/*.mjs` outside vendor/: a take's renderer, pagelayer.mjs, and the documents'
- * readers that join it) name of the wire, once their comments are taken out: a socket, `io(` or `.emit(`. They draw what
+ * readers, docview.mjs and docmodel.mjs) and the document worker name of the wire, once their comments are taken out: a
+ * socket, `io(` or `.emit(`. They draw what
  * they are given and answer what they drew; the page that loads them alone says it to the server, so what a page did
  * with a take is said in one place.
  */
@@ -1629,9 +1631,9 @@ function rendererProblems(files) {
   }
   return problems;
 }
-test('(m) the renderer has no socket: a page\'s ES modules name no socket, io( or .emit(', () => {
-  const modules = pageScripts().filter((f) => f.endsWith('.mjs'));
-  assert.ok(modules.includes('public/pagelayer.mjs'), 'the take\'s renderer is read: ' + modules.join(', '));
+test('(m) the renderer has no socket: a page\'s ES modules, and the document worker, name no socket, io( or .emit(', () => {
+  const modules = [...pageScripts().filter((f) => f.endsWith('.mjs')), 'public/docworker.js'];
+  for (const f of ['public/pagelayer.mjs', 'public/docview.mjs', 'public/docmodel.mjs']) assert.ok(modules.includes(f), 'a renderer is read: ' + f + ' among ' + modules.join(', '));
   assert.deepEqual(rendererProblems(sourcesOf(modules)), []);
   // Planted: a socket, io( and .emit( each fail it; the words in a comment, and a URL's //, do not.
   const ok = "// it holds no socket: io() and .emit() are the page's\n/* socket */ const u = 'https://x/y'; export const f = () => u;\n";

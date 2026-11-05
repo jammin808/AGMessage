@@ -288,10 +288,24 @@ const CSP = policy("'self' blob:");
  * other page, the screen page and the transcript among them, frames nothing but AGMessage's own.
  */
 const CSP_HALL = policy("'self' blob: https:");
+/**
+ * pdf.js's worker's own policy: CSP, and it may compile and run WebAssembly ('wasm-unsafe-eval', never eval), which its
+ * JPEG 2000 decoder is. A worker loaded by its address runs under the policy its own script is served with, never its
+ * page's, so this one response alone carries it.
+ */
+const CSP_PDF_WORKER = policy("'self' blob:").replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'");
+/**
+ * The pdf.js worker files public/vendor/VENDOR.json lists (each entry of pdfjs-dist that runs as a worker; a test holds
+ * the two lists equal), each by its exact path: no prefix, no other file, ever gets CSP_PDF_WORKER.
+ */
+const PDF_WORKERS = Object.freeze(['/vendor/pdf.worker.min.mjs']);
 
-/** A page's headers: the hall page (`/app.html`) frames https pages (CSP_HALL), every other answer only AGMessage's own (CSP). */
+/**
+ * A page's headers: the hall page (`/app.html`) frames https pages (CSP_HALL), pdf.js's worker may run WebAssembly
+ * (CSP_PDF_WORKER), and every other answer has only AGMessage's own (CSP).
+ */
 function pageHeaders(req, res, next) {
-  res.setHeader('Content-Security-Policy', req.path === '/app.html' ? CSP_HALL : CSP);
+  res.setHeader('Content-Security-Policy', req.path === '/app.html' ? CSP_HALL : PDF_WORKERS.includes(req.path) ? CSP_PDF_WORKER : CSP);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -339,6 +353,6 @@ function validUploadUrl(url) {
 
 module.exports = {
   readSecret, makeSecret, mac, safeEqual, cleanText, readCookie, newIdentity, checkIdentity, makeInvite, checkInvite,
-  Bucket, Buckets, Places, Lockout, limitKey, laneOf, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, CSP_HALL, str,
+  Bucket, Buckets, Places, Lockout, limitKey, laneOf, clientIp, isHostMachine, loopbackHost, pageHeaders, CSP, CSP_HALL, CSP_PDF_WORKER, PDF_WORKERS, str,
   UPLOAD_TYPES, uploadType, validUploadUrl, extOf,
 };

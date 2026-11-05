@@ -10,3 +10,5 @@ app/public/vendor/** -text
 # The audit verifier's files carry LF on every checkout, so a release's verifier is the same bytes whichever system
 # built it (verify-audit.js also reads its page parts as LF, which the page's CSP hashes need).
 app/verify/** text eol=lf
+# The test fixtures are the bytes their README names, by SHA-256, on every checkout.
+app/test/fixtures/** -text

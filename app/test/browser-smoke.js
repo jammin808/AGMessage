@@ -18,7 +18,7 @@ const path = require('path');
 const http = require('http');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
-const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort } = require('./helpers');
+const { fakeStagewatch, fakeNode, chainOf, unzipTo, keyedLogWithPoints, FIXTURE_KEY, connect, emit, freePort, readSource, officeZip, wordParts, wordPicture, deckParts, deckShape, deckPicture, deckSlide, workbookParts } = require('./helpers');
 const { io: ioClient } = require('socket.io-client');
 const ops = require('../lib/ops');
 
@@ -353,6 +353,10 @@ function colourPng(w, h, rgb) {
 // A screen page's counters, set before its own scripts: pdf.js workers started and ended, and how often the visible file
 // canvas was resized (which clears it) and was still blank on the next frame.
 const SCREEN_PROBE = `(() => {
+  // The screen's PDF deadline (display.js PDF_DEADLINE, 20 s) runs here at 1.5 s, so a stuck PDF is failed within the
+  // smoke's wait: only that timer, known by its 20 s and what it does; every other timer keeps its own length.
+  const later = window.setTimeout;
+  window.setTimeout = function (fn, ms, ...rest) { return later.call(this, fn, ms === 20000 && typeof fn === 'function' && String(fn).includes('expired') ? 1500 : ms, ...rest); };
   window.__workers = { made: 0, ended: 0 };
   const W = window.Worker;
   const end = W.prototype.terminate;
@@ -414,6 +418,30 @@ const RACED = (id, close, reopen) => `(async () => { const d = document.getEleme
   ${reopen}
   const heard = await late;
   return JSON.stringify({ shut, heard, open: ${FALLBACK_OPEN(id)}, backdrops: document.querySelectorAll('.agm-backdrop').length }); })()`;
+// A document page's counters, set before its own scripts: each worker it starts, by its address, and each object URL it
+// makes and revokes (a document's pictures are drawn through the page's own, revoked with the document).
+const DOC_PROBE = `(() => {
+  const workers = window.__docWorkers = [];
+  const W = window.Worker;
+  window.Worker = class extends W { constructor(u, o) { super(u, o); workers.push(String(u)); } };
+  const urls = window.__urls = { made: [], revoked: [] };
+  const make = URL.createObjectURL, revoke = URL.revokeObjectURL;
+  URL.createObjectURL = function (b) { const u = make.call(URL, b); urls.made.push(u); return u; };
+  URL.revokeObjectURL = function (u) { urls.revoked.push(u); return revoke.call(URL, u); };
+})();`;
+/** A fixture's bytes (test/fixtures, README there): read as bytes, never as text. */
+const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name));
+/** An Excel 97-2003 workbook of `rows` (a compound file, never zipped), written by the vendored SheetJS. */
+function xlsOf(rows) {
+  const vm = require('vm');
+  const ctx = vm.createContext({ TextDecoder, TextEncoder });
+  vm.runInContext('globalThis.self = globalThis;' + readSource(path.join(__dirname, '..', 'public', 'vendor', 'xlsx.full.min.js')), ctx);
+  const book = ctx.XLSX.utils.book_new();
+  ctx.XLSX.utils.book_append_sheet(book, ctx.XLSX.utils.aoa_to_sheet(rows), 'Budget');
+  return Buffer.from(ctx.XLSX.write(book, { type: 'array', bookType: 'biff8' }));
+}
+/** Where a JPEG 2000 fixture's yellow rectangle is drawn on its page, as a share of the page's width and height. */
+const JPX_YELLOW = { x: 236 / 612, y: 162 / 792 };
 const NO_RESOLVERS = `(() => { delete Promise.withResolvers; globalThis.__resolversAtStart = typeof Promise.withResolvers; return globalThis.__resolversAtStart; })();`;
 /**
  * pdf.js's worker on a tab opened with NO_RESOLVERS as its workerInit: each one running, what it began with and has now,
@@ -714,7 +742,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const bytes = Uint8Array.from(atob('${pdfB64}'), c => c.charCodeAt(0));
       const fd = new FormData(); fd.append('file', new Blob([bytes], { type: 'application/pdf' }), 'capex.pdf');
       const up = await (await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-AGM-Upload': UPLOAD_TOKEN } })).json();
-      const pdfjs = await loadPdfJs();
+      const pdfjs = await (await import('/docview.mjs')).loadPdfJs();
       const doc = await pdfjs.getDocument({ url: up.url, isEvalSupported: false }).promise;
       const text = (await (await doc.getPage(1)).getTextContent()).items.map(i => i.str).join(' ');
       await new Promise((r) => socket.emit('message', { type: 'file', url: up.url, filename: 'capex.pdf', mime: 'application/pdf' }, r));
@@ -790,14 +818,225 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const m = allMessages.find((x) => x.filename === 'board-pack.docx');
       if (!m) return null;
       if (window.__openedDocx !== m.id) { window.__openedDocx = m.id; openDocInPanel(m); }
-      const h = document.querySelector('#docDisplay .doc-html');
-      if (!h) return null;
-      if (h.querySelector('.error')) return { error: h.textContent };
-      const b = h.querySelector('strong');
-      return b ? { strong: b.textContent, text: h.textContent } : null;
+      const h = document.querySelector('#docDisplay .dv .doc-html');
+      if (!h) return document.querySelector('#docDisplay .error') ? { error: document.querySelector('#docDisplay .error').textContent } : null;
+      const ps = [...h.querySelectorAll('p')].map((p) => p.textContent);
+      return ps.length >= 2 ? { ps, strong: h.querySelectorAll('strong, b').length } : null;
     })()`);
-    report(!!boardDocx && boardDocx.strong === 'Board pack' && boardDocx.text.includes('Item 4: the capex review'),
-      `a Word file draws on the Board's panel through mammoth 1.13.0, its bold kept (${JSON.stringify(boardDocx)})`);
+    report(!!boardDocx && JSON.stringify(boardDocx.ps) === JSON.stringify(['Board pack', 'Item 4: the capex review']) && boardDocx.strong === 0,
+      `a Word file draws on the Board's panel through mammoth 1.13.0 in the document worker, its text as blocks and its inline styling dropped (${JSON.stringify(boardDocx)})`);
+
+    // The readers (docview.mjs over docmodel.mjs and the document worker), in a hall of their own (named to sort after the
+    // Outbox hall, whose row the halls board's steps take as its first), on a backstage page and
+    // a Board page: each type drawn by its reader, hidden parts on the backstage seat only and marked, Word's pages, the
+    // page box, find and the kept place, one pdf.js worker for the page's life, a stuck PDF's deadline, the AI's text on the
+    // backstage seat only, a document's pictures through the page's own object URLs, and HTML parsed inert.
+    const docTabs = [];
+    {
+      const docsHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Readers hall' }) })).json()).code;
+      const docsR = await edge.tab(`${base}/app.html?code=${docsHall}&name=Rea&role=research`, { init: DOC_PROBE });
+      report(!!(await docsR.until('typeof joined !== "undefined" && joined && !!UPLOAD_TOKEN')), 'a backstage page joins the hall of documents');
+      const docsB = await edge.tab(`${base}/app.html?code=${docsHall}&name=Bo&role=board`, { init: DOC_PROBE });
+      report(!!(await docsB.until('typeof joined !== "undefined" && joined')), 'a Board page joins it');
+      docTabs.push(['documents, backstage', docsR], ['documents, On stage', docsB]);
+      docsR.expectFailure(/\/api\/upload$/);   // a paced upload's 429, waited out below, is this step's own
+      // Uploads are paced (a burst of 4, then one every 2 s): a refusal to slow down is waited out and sent again.
+      const docUp = (name, mime, buf) => docsR.eval(`(async () => {
+        const bytes = Uint8Array.from(atob('${buf.toString('base64')}'), (c) => c.charCodeAt(0));
+        let up = {};
+        for (let i = 0; i < 6; i++) {
+          const fd = new FormData(); fd.append('file', new Blob([bytes], { type: '${mime}' }), '${name}');
+          const r = await fetch('/api/upload', { method: 'POST', body: fd, headers: { 'X-AGM-Upload': UPLOAD_TOKEN } });
+          up = await r.json();
+          if (r.status !== 429) break;
+          await new Promise((res) => setTimeout(res, 2500));
+        }
+        if (!up.url) return JSON.stringify(up);
+        await new Promise((r) => socket.emit('message', { type: 'file', url: up.url, filename: '${name}', mime: '${mime}' }, r));
+        return up.url;
+      })()`);
+      // A page's way to open a file in its panel and wait for the drawing (the hall's own file messages open themselves too;
+      // the newest drawing is the one that stands).
+      const OPEN_DOC = `window.__openDoc = async (name) => {
+        const end = Date.now() + 30000;
+        let m = null;
+        while (Date.now() < end && !(m = allMessages.find((x) => x.filename === name))) await new Promise((r) => setTimeout(r, 50));
+        if (!m) return { state: 'no message ' + name };
+        openDocInPanel(m);
+        const n = docDrawing;
+        while (Date.now() < end && !(docDrawing === n && docView && docDisplay.querySelector('.dv'))) await new Promise((r) => setTimeout(r, 30));
+        if (docDrawing !== n || !docView) return { state: 'not opened' };
+        const drawn = await docView.ready;
+        return { ...drawn, words: drawn.words || '' };
+      };`;
+      await docsR.eval(OPEN_DOC);
+      await docsB.eval(OPEN_DOC);
+      const W_P = (t, extra = '') => '<w:p>' + extra + '<w:r><w:t>' + t + '</w:t></w:r></w:p>';
+      const RENDERED = '<w:r><w:lastRenderedPageBreak/></w:r>';
+      const wordRendered = officeZip(wordParts({ body: W_P('Minutes of the board') + '<w:p>' + RENDERED + '<w:r><w:t>Item two</w:t></w:r></w:p>' + '<w:p><w:r><w:t>The chart</w:t></w:r>' + wordPicture('rId10', 'Capex chart') + '</w:p>' + '<w:p>' + RENDERED + '<w:r><w:t>Item three</w:t></w:r><w:r><w:rPr><w:vanish/></w:rPr><w:t>SECRETRUN</w:t></w:r></w:p>', pages: 3, media: { 'chart.png': colourPng(48, 24, [0, 160, 0]) } }));
+      const wordExplicit = officeZip(wordParts({ body: W_P('First') + '<w:p><w:r><w:br w:type="page"/><w:t>Second</w:t></w:r></w:p>' }));
+      const deckFile = officeZip(deckParts([
+        { xml: deckSlide(deckShape('Q3 results', { ph: 'title' }) + deckShape(['Revenue up', 'Costs flat'], { ph: 'body' }) + deckShape('HIDDENSHAPE', { hidden: true }) + deckPicture('rId1')), rels: [['rId1', 'image', '../media/chart.png']] },
+        { xml: deckSlide(deckShape('HIDDENSLIDE', { ph: 'title' }), '0') },
+      ], { 'chart.png': colourPng(48, 24, [0, 0, 160]) }));
+      const uploadsOk = [];
+      for (const [name, mime, buf] of [
+        ['budget.csv', 'text/csv', Buffer.from('Item,Cost\r\nPlant,"4,5"\r\nStaff,2\r\n')],
+        ['photo.png', 'image/png', colourPng(64, 36, [255, 0, 0])],
+        ['notes.md', 'text/markdown', Buffer.from('# Notes\n\nVisible <!-- SECRETCOMMENT --> words\n\n<span hidden>SECRETSPAN</span> shown\n')],
+        ['budget.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', officeZip(workbookParts())],
+        ['old-budget.xls', 'application/vnd.ms-excel', xlsOf([['Item', 'Cost'], ['Plant', 4]])],
+        ['results.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', deckFile],
+        ['minutes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', wordRendered],
+        ['draft.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', wordExplicit],
+        ['pack-tagged.pdf', 'application/pdf', fixture('board-pack-tagged.pdf')],
+        ['pack-untagged.pdf', 'application/pdf', fixture('board-pack-untagged.pdf')],
+        ['picture-jpx.pdf', 'application/pdf', fixture('jpeg2000.pdf')],
+        ['stuck.pdf', 'application/pdf', fixture('board-pack-untagged.pdf')],
+      ]) uploadsOk.push([name, /^\/uploads\//.test(await docUp(name, mime, buf))]);
+      report(uploadsOk.every(([, ok]) => ok), `the documents are uploaded (${JSON.stringify(uploadsOk)})`);
+      const urlOf = (name) => docsR.eval(`allMessages.find((m) => m.filename === '${name}').url`);
+      const opened = (tab, name) => tab.eval(`window.__openDoc('${name}')`);
+      const DRAWN = `(() => { const d = document.getElementById('docDisplay'); return { text: d.textContent, notice: (d.querySelector('.dv-notice:not([hidden])') || {}).textContent || '' }; })()`;
+
+      // CSV is a grid, a quoted comma one cell's.
+      const csvOpen = await opened(docsR, 'budget.csv');
+      const csvGrid = await docsR.eval(`[...document.querySelectorAll('#docDisplay table.dv-grid tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent))`);
+      report(csvOpen.state === 'shown' && JSON.stringify(csvGrid) === JSON.stringify([['Item', 'Cost'], ['Plant', '4,5'], ['Staff', '2']]), `a CSV is drawn as a grid (${JSON.stringify({ csvOpen, csvGrid })})`);
+
+      // Markdown: its comment and its hidden raw HTML are not drawn.
+      const mdOpen = await opened(docsR, 'notes.md');
+      const md = await docsR.eval(DRAWN);
+      report(mdOpen.state === 'shown' && /Notes/.test(md.text) && /Visible\s+words/.test(md.text) && /shown/.test(md.text) && !/SECRETCOMMENT|SECRETSPAN/.test(md.text), `a Markdown file is drawn without its comment or its hidden raw HTML (${JSON.stringify({ mdOpen, text: md.text.slice(0, 200) })})`);
+
+      // A picture: drawn from its bytes through the page's own object URL, with the zoom.
+      const imgOpen = await opened(docsR, 'photo.png');
+      const imgSeen = await docsR.eval(`(() => { const i = document.querySelector('#docDisplay img.dv-img'); return i && { own: i.src.startsWith('blob:') && window.__urls.made.includes(i.src), w: i.naturalWidth, zoom: [...document.querySelectorAll('#docDisplay .dv-zoom button')].map((b) => b.textContent) }; })()`);
+      await docsR.eval(`document.querySelector('#docDisplay .dv-zoom button:last-child').click()`);
+      const zoomed = await docsR.eval(`document.querySelector('#docDisplay img.dv-img').getBoundingClientRect().width`);
+      report(imgOpen.state === 'shown' && !!imgSeen && imgSeen.own && imgSeen.w === 64 && JSON.stringify(imgSeen.zoom) === JSON.stringify(['−', 'Fit width', 'Fit page', '+']) && zoomed > 64,
+        `a picture is drawn from its bytes through the page's own object URL, with − Fit width Fit page + (${JSON.stringify({ imgOpen, imgSeen, zoomed })})`);
+
+      // An Excel file reads in the document worker: on the backstage seat its hidden row, column and sheets drawn marked, a
+      // formula with no saved value said so, and the AI's text without them; on the Board's, none of them, and how many.
+      const xlsxR = await opened(docsR, 'budget.xlsx');
+      const xlsxRSeen = await docsR.until(`docForAi.text && JSON.stringify({ workers: window.__docWorkers.filter((u) => /docworker\\.js$/.test(u)).length, hiddenRow: !!document.querySelector('#docDisplay tr.dv-hidden'), hiddenCol: [...document.querySelectorAll('#docDisplay th.dv-hidden')].map((t) => t.textContent), noValue: [...document.querySelectorAll('#docDisplay td.dv-novalue')].map((t) => t.textContent), tabs: [...document.querySelectorAll('#docDisplay .sheet-tab')].map((t) => t.textContent), ai: docForAi.text })`);
+      const xr = JSON.parse(xlsxRSeen || 'null');
+      report(xlsxR.state === 'shown' && !!xr && xr.workers >= 1 && xr.hiddenRow && JSON.stringify(xr.hiddenCol) === JSON.stringify(['B hidden']) && JSON.stringify(xr.noValue) === JSON.stringify(['formula — no saved value'])
+        && JSON.stringify(xr.tabs) === JSON.stringify(['Budget', 'Salaries (hidden)', 'Old (hidden)']) && /Item/.test(xr.ai) && !/SECRET|VERYHIDDEN|JUSTHIDDEN/.test(xr.ai),
+      `an Excel file reads through the document worker: on the backstage seat its hidden parts drawn marked, a formula with no saved value said, the AI's text without them (${JSON.stringify({ xlsxR, xr })})`);
+      const xlsxB = await opened(docsB, 'budget.xlsx');
+      const xb = await docsB.eval(`(() => { const d = document.getElementById('docDisplay'); return { text: d.textContent, notice: (d.querySelector('.dv-notice') || {}).textContent, rows: d.querySelectorAll('tbody tr').length, ai: docForAi.text }; })()`);
+      report(xlsxB.state === 'shown' && !/SECRET|VERYHIDDEN|JUSTHIDDEN|Salaries|hidden\)/.test(xb.text.replace(xb.notice, '')) && xb.notice === '2 hidden sheets not shown 1 hidden row and 1 hidden column not shown' && xb.rows === 2 && xb.ai === '',
+        `on the Board's seat the same file draws no hidden sheet, row or column, says how many, and fills no AI text (${JSON.stringify({ xlsxB, xb })})`);
+
+      // An Excel 97-2003 file (a compound file, never zipped) reads in the same worker under the same policy.
+      const xlsR = await opened(docsR, 'old-budget.xls');
+      const xlsGrid = await docsR.eval(`[...document.querySelectorAll('#docDisplay table.dv-grid tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent))`);
+      report(xlsR.state === 'shown' && JSON.stringify(xlsGrid) === JSON.stringify([['Item', 'Cost'], ['Plant', '4']]), `an Excel 97-2003 file reads through the document worker (${JSON.stringify({ xlsR, xlsGrid })})`);
+
+      // PowerPoint: an outline, its hidden shape never read; its hidden slide drawn marked backstage, absent on the Board.
+      const pptR = await opened(docsR, 'results.pptx');
+      const pr = await docsR.eval(`(() => ({ slides: [...document.querySelectorAll('#docDisplay .dv-slide')].map((s) => s.querySelector('.dv-slidemark').textContent), text: document.getElementById('docDisplay').textContent, img: document.querySelectorAll('#docDisplay img.dv-pic').length }))()`);
+      const pptB = await opened(docsB, 'results.pptx');
+      const pb = await docsB.eval(DRAWN);
+      report(pptR.state === 'shown' && JSON.stringify(pr.slides) === JSON.stringify(['Slide 1', 'Slide 2 — hidden slide']) && /Q3 results/.test(pr.text) && /Revenue up/.test(pr.text) && !/HIDDENSHAPE|PRESENTERNOTE/.test(pr.text) && pr.img === 1
+        && pptB.state === 'shown' && !/HIDDENSLIDE|HIDDENSHAPE/.test(pb.text) && pb.notice === '1 hidden slide not shown',
+      `a PowerPoint file shows its outline, its hidden shape never read, its hidden slide marked backstage and not on the Board (${JSON.stringify({ pptR, pr, pptB, pb })})`);
+
+      // Word: converted in the worker, its pages from its own breaks ("p. 1 of 3"; "≈ p. 1 of ≈ 2" from explicit breaks
+      // alone), the hidden run nowhere, its picture through an object URL the page made and revoked with the document.
+      const docxR = await opened(docsR, 'minutes.docx');
+      const dr = JSON.parse(await docsR.until(`docForAi.text && JSON.stringify({ words: docView.placeWords(), text: document.getElementById('docDisplay').textContent, ai: docForAi.text,
+        pics: [...document.querySelectorAll('#docDisplay img')].map((i) => i.src), made: window.__urls.made.slice(), blobs: [...document.querySelectorAll('#docDisplay [src^="blob:"]')].map((n) => n.getAttribute('src')) })`) || 'null');
+      await docsR.eval(`docView.goto({ page: 3 })`);
+      const third = await docsR.until(`docView.placeWords() === 'p. 3 of 3' && docView.placeWords()`, 5000);
+      await docsR.eval(`dismissDoc()`);
+      const revoked = await docsR.eval(`window.__urls.revoked.slice()`);
+      report(docxR.state === 'shown' && !!dr && dr.words === 'p. 1 of 3' && third === 'p. 3 of 3' && !/SECRETRUN/.test(dr.text) && !/SECRETRUN/.test(dr.ai) && /— p\. 2 —/.test(dr.ai) && /— p\. 3 —/.test(dr.ai)
+        && dr.pics.length === 1 && dr.pics[0].startsWith('blob:') && dr.made.includes(dr.pics[0]) && dr.blobs.every((b) => dr.made.includes(b)) && revoked.includes(dr.pics[0]),
+      `a Word file converts in the worker: its page box reads "p. 1 of 3" from Word's rendered breaks and goes to p. 3, the hidden run is not drawn nor in the AI's text (marked by page), and its picture is the page's own object URL, revoked with the document (${JSON.stringify({ docxR, dr: dr && { ...dr, text: dr.text.slice(0, 80) }, third, revokedPic: dr && revoked.includes(dr.pics[0]) })})`);
+      const draftR = await opened(docsR, 'draft.docx');
+      const draftWords = await docsR.eval(`docView.placeWords()`);
+      report(draftR.state === 'shown' && draftWords === '≈ p. 1 of ≈ 2', `a Word file with only explicit page breaks reads "≈ p. 1 of ≈ 2" (${JSON.stringify({ draftR, draftWords })})`);
+
+      // PDFs: one pdf.js worker serves several documents and each one closed is destroyed; the AI's text on the backstage
+      // seat only; the page box keeps its page across a resize; find moves to a match on a page not yet drawn; a JPEG 2000
+      // picture draws.
+      const PAGE_DRAWN = (n) => `(() => { const c = document.querySelector('#docDisplay .dv-page[data-page="${n}"] canvas'); return !!c && !c.classList.contains('pdf-page-pending'); })()`;
+      const pdfOpens = [];
+      for (const name of ['pack-tagged.pdf', 'pack-untagged.pdf', 'pack-tagged.pdf']) pdfOpens.push((await opened(docsR, name)).state);
+      const pdfAi = await docsR.until(`/Quorum|quorum/.test(docForAi.text) && docForAi.text.slice(0, 30)`);
+      const pdfOne = await docsR.eval(`(async () => (await import('/docview.mjs')).pdfState())()`);
+      const pdfWorkers = await docsR.eval(`window.__docWorkers.filter((u) => /pdf\\.worker\\.min\\.mjs/.test(u)).length`);
+      report(pdfOpens.every((x) => x === 'shown') && pdfOne.workers === 1 && pdfOne.open === 1 && pdfWorkers === 1 && /^\[page 1\]/.test(pdfAi || ''),
+        `one pdf.js worker serves several PDFs, each one closed destroyed, and the AI's text is the PDF's, by page (${JSON.stringify({ pdfOpens, pdfOne, pdfWorkers, pdfAi })})`);
+      const pdfB = await opened(docsB, 'pack-tagged.pdf');
+      await sleep(600);
+      const pdfBAi = await docsB.eval(`docForAi.text`);
+      report(pdfB.state === 'shown' && pdfBAi === '', `the Board's seat draws the PDF and reads no AI text from it (${JSON.stringify({ pdfB, pdfBAi })})`);
+      await docsR.eval(`docView.goto({ page: 4 })`);
+      const atFour = await docsR.until(`docView.place().page === 4 && docView.placeWords()`, 5000);
+      await docsR.resize(1100, 820);
+      await sleep(900);
+      const keptPlace = await docsR.until(`docView.place().page === 4 && ${PAGE_DRAWN(4)} && docView.placeWords()`, 8000);
+      await docsR.resize(1400, 900);
+      await sleep(600);
+      report(atFour === 'p. 4 of 6' && keptPlace === 'p. 4 of 6', `the page box keeps its page across a resize (${JSON.stringify({ atFour, keptPlace })})`);
+      // And across a collapse: folded away the view is left as it was, its place standing, and opened again it goes back.
+      await docsR.eval(`docView.goto({ page: 4 })`);
+      await docsR.until(`docView.place().page === 4`, 5000);
+      await docsR.eval(`setStageCollapsed(true)`);
+      await sleep(600);
+      const folded = await docsR.eval(`({ page: docView.place().page, shown: document.getElementById('docDisplay').getBoundingClientRect().width > 0 })`);
+      await docsR.eval(`setStageCollapsed(false)`);
+      await sleep(900);
+      const unfolded = await docsR.until(`docView.place().page === 4 && ${PAGE_DRAWN(4)} && docView.placeWords()`, 8000);
+      report(folded.page === 4 && !folded.shown && unfolded === 'p. 4 of 6', `the page box keeps its page across a collapse of the panel and its opening again (${JSON.stringify({ folded, unfolded })})`);
+      // Opened afresh, at its first page: page 5 is not drawn until find goes there.
+      await opened(docsR, 'pack-untagged.pdf');
+      await docsR.until(`docView.place().page === 1 && ${PAGE_DRAWN(1)}`, 8000);
+      const fiveBefore = await docsR.eval(PAGE_DRAWN(5));
+      const found = await docsR.eval(`docView.find('quorum')`);
+      const fiveAfter = await docsR.until(`docView.place().page === 5 && ${PAGE_DRAWN(5)} && document.querySelector('#docDisplay .dv-found').textContent`, 8000);
+      report(fiveBefore === false && !!found && found.page === 5 && !!fiveAfter, `find moves to a match on a page not yet drawn, and draws it (${JSON.stringify({ fiveBefore, found, fiveAfter })})`);
+      const JPX_PIXEL = (sel) => `(() => { const c = document.querySelector('${sel}'); if (!c || !c.width || c.classList.contains('pdf-page-pending')) return null;
+        const p = c.getContext('2d').getImageData(Math.floor(c.width * ${JPX_YELLOW.x}), Math.floor(c.height * ${JPX_YELLOW.y}), 1, 1).data; return [p[0], p[1], p[2]]; })()`;
+      const jpxOpen = await opened(docsR, 'picture-jpx.pdf');
+      const jpxPanel = await docsR.until(`(() => { const p = ${JPX_PIXEL('#docDisplay .dv-page[data-page="1"] canvas')}; return p && p[0] > 200 && p[1] > 150 && p[2] < 110 ? p : null; })()`, 10000);
+      report(jpxOpen.state === 'shown' && !!jpxPanel, `a JPEG 2000 picture in a PDF draws on the panel: pdf.js's worker may run WebAssembly (${JSON.stringify({ jpxOpen, jpxPanel })})`);
+
+      // A stuck PDF: its first page not drawn by its deadline, it is failed with words, the shared worker is destroyed with
+      // it, and the next PDF makes a new one and draws.
+      const stuckUrl = await urlOf('stuck.pdf');
+      docsR.expectFailure(/stuck\.pdf$/);
+      await docsR.hold('*stuck.pdf*', 6000);
+      const stuck = await docsR.eval(`(async () => {
+        const mod = await import('/docview.mjs');
+        const before = mod.pdfState().workers;
+        const box = document.createElement('div');
+        document.body.appendChild(box);
+        const v = mod.open(box, { url: '${stuckUrl}' }, { seat: 'research', name: 'stuck.pdf', deadline: 1500 });
+        const r = await v.ready;
+        v.destroy(); box.remove();
+        return { r, before, after: mod.pdfState() };
+      })()`);
+      await docsR.release();
+      const afterStuck = await opened(docsR, 'pack-untagged.pdf');
+      const newWorker = await docsR.eval(`(async () => (await import('/docview.mjs')).pdfState())()`);
+      report(stuck.r.state === 'failed' && stuck.r.words === 'the file took too long to read' && stuck.after.workers === stuck.before && afterStuck.state === 'shown' && newWorker.workers === stuck.before + 1,
+        `a PDF whose first page is not drawn by its deadline fails with its words and takes the shared worker with it; the next PDF makes a new one and draws (${JSON.stringify({ stuck, afterStuck, newWorker })})`);
+
+      // HTML is parsed inert: nothing in it runs, loads or applies, and what comes back is plain data.
+      const inert = await docsR.eval(`(async () => {
+        const m = await import('/docmodel.mjs');
+        const r = m.parseInert('<meta http-equiv="refresh" content="0;url=/halls.html"><style>body{display:none}</style><script>window.__ran=1</script><p>Shown <span hidden>SECRETA</span><span style="display:none">SECRETB</span><b style="visibility:hidden">SECRETC</b></p><template>SECRETD</template><noscript>SECRETE</noscript><img src="/x.png" onerror="window.__ran=2">');
+        await new Promise((res) => setTimeout(res, 300));
+        return { blocks: structuredClone(r.blocks), ran: window.__ran || 0, metas: document.querySelectorAll('meta[http-equiv]').length, shown: getComputedStyle(document.body).display !== 'none', path: location.pathname };
+      })()`);
+      report(JSON.stringify(inert.blocks) === JSON.stringify([{ kind: 'p', text: 'Shown', at: { block: 1 } }]) && inert.ran === 0 && inert.metas === 0 && inert.shown && inert.path === '/app.html',
+        `parseInert reads HTML through an inert template into plain data: no script ran, no refresh or style reached the page, hidden text left out (${JSON.stringify(inert)})`);
+    }
 
     // The outbox, in a hall of its own (a listener seated there hears each message the hall gets): a send while the
     // socket is down lands once after the reconnect, and its composer empties only after the ok; a refusal keeps the text
@@ -2082,6 +2321,13 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const afterLoss = !!(await proj.until(BLUE_AGAIN, 5000));
     await hallView.eval(`new Promise((r) => socket.emit('display:update', { id: '${projId}', name: 'Projector' }, r))`);
     report(restored && afterLoss, `a slide whose canvas lost its GPU context is drawn again, never taken as still on screen (on restore: ${restored ? 'drawn' : 'blank'}; on a rename while lost: ${afterLoss ? 'drawn' : 'blank'})`);
+    // A JPEG 2000 picture in a PDF draws on a screen too, with no error: pdf.js's worker there may run WebAssembly.
+    const jpxUrl = await upload('picture-jpx.pdf', 'application/pdf', fixture('jpeg2000.pdf'));
+    const jpxTake = await takeOn(projId, { kind: 'file', url: jpxUrl, name: 'picture-jpx.pdf', page: 1 });
+    const jpxSt = await shownAt(jpxTake.seq);
+    const jpxScreen = await proj.until(`(() => { const c = document.getElementById('fileCanvas'); if (c.hidden || !c.width) return null;
+      const p = c.getContext('2d').getImageData(Math.floor(c.width * ${JPX_YELLOW.x}), Math.floor(c.height * ${JPX_YELLOW.y}), 1, 1).data; return p[0] > 200 && p[1] > 150 && p[2] < 110 ? [p[0], p[1], p[2]] : null; })()`, 8000);
+    report(!!jpxSt && !!jpxScreen && proj.problems.length === 0, `a JPEG 2000 picture in a PDF draws on a screen, with no error (${JSON.stringify({ shown: jpxSt && jpxSt.words, jpxScreen, problems: proj.problems.slice(0, 2) })})`);
     const pastEnd = await takeOn(projId, { kind: 'file', url: agenda, name: 'agenda.pdf', page: 7 });
     const pastSt = await shownAt(pastEnd.seq);
     report(!!pastSt && /^on screen: the PDF has 2 pages: showing the last$/.test(pastSt.words), `a page past the end: the screen's note reaches the console beside ✓ (${pastSt && pastSt.mark} ${pastSt && pastSt.words} — ${pastSt && pastSt.showing})`);
@@ -2104,6 +2350,22 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     while (Date.now() < missEnd && (st = await projStatus()).state !== 'error') await sleep(200);
     seen = await proj.eval(FILE_SEEN);
     report(st.state === 'error' && st.seq === missing.seq && !seen.canvas && !seen.img, `a PDF that does not render says △ and leaves black, not the page before it (${st.mark} ${st.words}; canvas ${seen.canvas ? 'visible' : 'hidden'})`);
+    // A PDF whose first page is not drawn by its deadline is failed with its words, and its loading and the screen's
+    // pdf.js worker are ended with it; the next PDF makes a new worker and draws.
+    const stuckPdf = await upload('stuck-screen.pdf', 'application/pdf', colourPdf([{ w: 800, h: 450, rgb: '0 1 0', text: 'Stuck' }]));
+    const workersBefore = await proj.eval(`({ ...window.__workers })`);
+    proj.expectFailure(/stuck-screen\.pdf$/);
+    await proj.hold('*stuck-screen.pdf*', 5000);
+    const stuckTake = await takeOn(projId, { kind: 'file', url: stuckPdf, name: 'stuck-screen.pdf', page: 1 });
+    const stuckEnd = Date.now() + 8000;
+    while (Date.now() < stuckEnd && !((st = await projStatus()).state === 'error' && st.seq === stuckTake.seq)) await sleep(200);
+    const workersAfter = await proj.eval(`({ ...window.__workers })`);
+    await proj.release();
+    const afterStuckTake = await takeOn(projId, { kind: 'file', url: agenda, name: 'agenda.pdf', page: 1 });
+    const afterStuckSt = await shownAt(afterStuckTake.seq, 10000);
+    const workersLast = await proj.eval(`({ ...window.__workers })`);
+    report(st.state === 'error' && st.seq === stuckTake.seq && /the file took too long to read/.test(st.words) && workersAfter.ended === workersBefore.ended + 1 && !!afterStuckSt && workersLast.made === workersBefore.made + 1,
+      `a PDF not drawn by the screen's deadline fails with its words, its worker ended with it, and the next PDF draws through a new one (${JSON.stringify({ state: st.state, words: st.words, workersBefore, workersAfter, workersLast, next: afterStuckSt && afterStuckSt.mark })})`);
 
     // The Screens console: a page typed for one PDF is not carried to the next one offered; a take on every ticked screen
     // is one request, and a screen it could not reach is named; a holding image picked but not saved survives refreshes.
@@ -4637,7 +4899,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(Date.now() - helpResolvedAt >= 30_000 && JSON.stringify(restedChip) === JSON.stringify({ words: 'Help', state: '', red: false, said: '' }),
       `"✓ Resolved" goes after 30 s: ${Math.round((Date.now() - helpResolvedAt) / 1000)} s after It's sorted, Help reads Help again (${JSON.stringify(restedChip)})`);
 
-    const tabs = [['research', research], ['board', board], ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer taken straight into its hall', vicStraight], ['a Viewer\'s hall', viewerHall], ['a Board account\'s halls board, hall and switcher', kimTab], ['a Staff account\'s halls board, which it answers help from', sidBoard], ['the admin page with Members…', adminM], ['a halls board of rooms alone', louBoard], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3], ['a phone as On stage', phones.board], ['a phone backstage', phones.research], ['a phone as an observer', phones.observer]];
+    const tabs = [['research', research], ['board', board], ...docTabs, ['admin', admin], ['sign-in and halls', signin], ['accounts', users], ['hall as an account', hallView], ['hall as a Staff account', staffHall], ['display', screen], ['projector display', proj], ['foyer display (no zones)', foyer], ['a Viewer\'s halls board', viewerBoard], ['a Viewer taken straight into its hall', vicStraight], ['a Viewer\'s hall', viewerHall], ['a Board account\'s halls board, hall and switcher', kimTab], ['a Staff account\'s halls board, which it answers help from', sidBoard], ['the admin page with Members…', adminM], ['a halls board of rooms alone', louBoard], ['a code link, signed in then out', codeLink], ['a guest\'s hall link, signed in', asGuest], ['a code link with a one-time password', otpLink], ['the audit log of a 0.5.1 log, cut', audit2], ['Accept on Health', admin2], ['the browser verifier, from disk', checker], ['Split on Health', admin3], ['the archive under the audit log', users3], ['a phone as On stage', phones.board], ['a phone backstage', phones.research], ['a phone as an observer', phones.observer]];
     // The smoke's own premise: every page it drove is visible, as on a device of its own (a hidden page is frozen).
     const hidden = [];
     for (const [name, tab] of tabs) if ((await tab.eval('document.visibilityState')) !== 'visible') hidden.push(name);

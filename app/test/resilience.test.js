@@ -552,7 +552,9 @@ test('guard rails: no eval, no key in a URL, and synchronous file calls only whe
   for (const f of ['lib/auditexport.js', 'lib/auditarchive.js', 'lib/zip.js', 'verify/verify-audit.js', 'verify/page.js']) assert.ok(files.includes(f), f + ' is read, at 0 synchronous calls');
   // The upload checks run on every upload of a type the stage can show, before its answer: each reads its file through
   // fs.promises, so neither the archive's directory nor an image's header holds the loop.
-  for (const f of ['lib/uploadcheck.js', 'lib/zipcheck.js', 'lib/imagesize.js', 'public/zipcore.js']) assert.ok(files.includes(f), f + ' is read, at 0 synchronous calls');
+  for (const f of ['lib/uploadcheck.js', 'lib/zipcheck.js', 'lib/imagesize.js', 'public/zipcore.js', 'public/imagecore.js']) assert.ok(files.includes(f), f + ' is read, at 0 synchronous calls');
+  // The documents' readers run on a person's page and in its document worker: none may hold either.
+  for (const f of ['public/wordpages.js', 'public/docmodel.mjs', 'public/docview.mjs', 'public/docworker.js']) assert.ok(files.includes(f), f + ' is read, at 0 synchronous calls');
   // Synchronous fs calls block every meeting on the server while they run. These are allowed — each with its reason —
   // and the count may not grow without someone deciding it here.
   const allowed = {
@@ -652,7 +654,7 @@ test('guard rails: the stylesheet draws with its tokens: hex colours only in the
   // out lowers HEX_CAP with them, and none raises it (as the coverage gate only goes up). Muted words and icons read in
   // --c-ink-muted, at 4.5:1 for words and 3:1 for icons in both themes; an opacity between 0 and 1 fades whatever
   // is under it below that, so none is written (a toast or a switch hidden at 0 and shown at 1 is not muted ink).
-  const HEX_CAP = 253;
+  const HEX_CAP = 246;
   const css = readSource(path.join(ROOT, 'public', 'styles.css'));
   const { outside, tokens } = hexOutsideTokens(css);
   assert.deepEqual(tokens, { ':root': 1, 'html[data-theme="dark"]': 1 }, 'the tokens are defined in one :root block and redefined in one dark block');
@@ -872,22 +874,27 @@ test('guard rails: a page makes one frame by script, framePage\'s (pagelayer.mjs
 });
 
 test('guard rails: a page posts a message only to its own origin, and hears one only after checking who sent it', () => {
-  let posts = 0, listeners = 0;
+  // A dedicated worker's channel is the one other: the document worker a page made (readInWorker's `worker`), and that
+  // worker's own `self`, post and hear each other only, so they name no origin; nothing else may.
+  const workerChannel = (f, receiver) => (f === 'public/docmodel.mjs' && receiver === 'worker') || (f === 'public/docworker.js' && receiver === 'self');
+  let posts = 0, listeners = 0, workerPosts = 0;
   for (const f of pageScripts()) {
     const src = readSource(path.join(ROOT, f));
-    const read = [...src.matchAll(/\.postMessage\s*\(([^;]*)\)\s*;/g)];
+    const read = [...src.matchAll(/(\w+)\.postMessage\s*\(([^;]*)\)\s*;/g)];
     assert.equal(read.length, (src.match(/\.postMessage\s*\(/g) || []).length, `${f}: every postMessage is one statement the guard reads`);
     for (const m of read) {
+      if (workerChannel(f, m[1])) { workerPosts++; continue; }
       posts++;
-      assert.match(m[1], /,\s*location\.origin\s*$/, `${f}: postMessage names this origin as its target, never '*' (${m[0]})`);
+      assert.match(m[2], /,\s*location\.origin\s*$/, `${f}: postMessage names this origin as its target, never '*' (${m[0]})`);
     }
     const heard = (src.match(/addEventListener\(\s*['"]message['"]/g) || []).length;
     const checked = (src.match(/addEventListener\(\s*['"]message['"]\s*,\s*\(?\s*(\w+)\s*\)?\s*=>\s*\{\s*if \(\1\.source !== [\w.]+ \|\| \1\.origin !== location\.origin\) return;/g) || []).length;
     assert.equal(checked, heard, `${f}: every message listener is an arrow function whose first line returns unless the sending window and its origin are the ones expected`);
-    assert.ok(!/\bonmessage\s*=/.test(src), `${f}: no onmessage handler (a listener the guard reads instead)`);
+    for (const m of src.matchAll(/(\w+)\.onmessage\s*=|\bonmessage\s*=/g)) assert.ok(workerChannel(f, m[1]), `${f}: no onmessage handler but a dedicated worker's (a listener the guard reads instead): ${m[0]}`);
     listeners += heard;
   }
   assert.ok(posts >= 1 && listeners >= 1, 'the guard reads the pages\' posts and listeners (the admin page\'s Resync, the support view\'s listener)');
+  assert.ok(workerPosts >= 3, 'and the document worker\'s channel: the page\'s task, the worker\'s answer and its refusal');
 });
 
 // ---------------------------------------------------------------- a restart announces nobody

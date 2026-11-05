@@ -57,7 +57,7 @@
       "version": "1.13.0",
       "purl": "pkg:npm/mammoth@1.13.0",
       "build": "browser",
-      "runs": "page",
+      "runs": "worker",
       "licence": "BSD-2-Clause",
       "copyright": "Copyright (c) 2013, Michael Williamson",
       "notice": "licenses/mammoth",
@@ -113,7 +113,7 @@
       "package": "xlsx",
       "version": "0.20.3",
       "build": "full",
-      "runs": "page",
+      "runs": "worker",
       "licence": "Apache-2.0",
       "copyright": "Copyright (C) 2012-present   SheetJS LLC",
       "notice": "licenses/xlsx",
@@ -133,8 +133,8 @@
   "assessments": {
     "xmldom-parse": {
       "applies": true,
-      "why": "mammoth parses every part of a Word file with xmldom's DOMParser, so a crafted .docx keeps the page that draws it busy for a long time, or short of memory, until that page is reloaded: the panel of whoever opens it, and every Board panel in the hall, where a file sent into the hall opens itself. The server and the other pages are not affected.",
-      "mitigation": "Today only the upload cap (25 MB a file) and who may send into a hall bound it. In 0.6.0's plan (docs/plan/0.6.0/PLAN.md) unit 23 moves mammoth into a worker the page ends at a deadline, and unit 26 ends a file opening itself on the Board's panel. No mammoth release bundles a fixed xmldom (0.8.15 or later): 1.13.0, the newest, was built with 0.8.6."
+      "why": "mammoth parses every part of a Word file with xmldom's DOMParser, so a crafted .docx keeps whatever parses it busy for a long time, or short of memory: the document worker of the panel of whoever opens it, and of every Board panel in the hall, where a file sent into the hall opens itself. The server and the other pages are not affected.",
+      "mitigation": "mammoth runs only in the page's document worker (app/public/docworker.js), which the page ends 15 s after it starts (docmodel.mjs readInWorker), and is handed only a file that passed the archive check (zipcore.js) with no part declaring a document type or an entity; the page itself goes on. In 0.6.0's plan (docs/plan/0.6.0/PLAN.md) unit 26 ends a file opening itself on the Board's panel. No mammoth release bundles a fixed xmldom (0.8.15 or later): 1.13.0, the newest, was built with 0.8.6."
     },
     "xmldom-well-formed": {
       "applies": true,

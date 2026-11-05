@@ -96,8 +96,13 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   way out: Back to chat (with Show it again for 10 s), Minimise into the side bar's 📺 On stage (Escape does that), Show
   again from there, and for a web page, in the full view, Open in a new tab; a 🔥 message breaks through, and a take never takes the focus
   from words being written. [docs/DISPLAYS.md](docs/DISPLAYS.md)
-- **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, images) shared and
-  pushed to the on-stage panel or to screens, PDFs on iPads from iPadOS 16.4 (pdf.js's legacy build); pins, replies,
+- **Messages that land.** Action prompts with tap-to-answer buttons; documents (PDF, Word, Excel, PowerPoint, CSV,
+  Markdown, text, images) shared and pushed to the on-stage panel or to screens, PDFs on iPads from iPadOS 16.4 (pdf.js's
+  legacy build), JPEG 2000 pictures in them included. The panel reads each file on the device, by bounded readers (Word,
+  Excel and PowerPoint in a worker with a 15 s deadline), with a page box, zoom, find and the place kept; **Word has page
+  numbers**, Word's own ("≈" where its layout is missing); a CSV is a grid, PowerPoint an outline, and Word and Excel keep
+  their words, tables and pictures without their styling. **Hidden things are never shown on the Board's pages**: hidden
+  sheets, rows, columns, slides and shapes, presenter notes, Markdown comments and Word's hidden text; pins, replies,
   reactions, priority, seen receipts. The hall page fits a phone, its words and icons at WCAG AA contrast in light and
   dark. Its header is the same at every width: the room's name, its status (the connection, the countdown), Help and a
   ⋯ that holds People, Screens & pages…, the text size, the theme, the guest code and Leave, with the room switcher on a row of
@@ -223,7 +228,8 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
 - **Secure by default.** Encrypted connections (HTTPS on the same port, `/tls` to trust it), pinned links between show
   systems, sealed keys, a strict Content-Security-Policy, uploads checked by content (and a Word, Excel or PowerPoint
   file's archive and a picture's size checked before anyone opens them: one with macros, packed past AGMessage's bounds,
-  or a picture over 100 megapixels or that cannot be read is refused in words), rate limits and lockouts. It
+  or a picture over 100 megapixels or that cannot be read is refused in words), documents parsed only in the page, their
+  HTML parsed inert, and WebAssembly only in pdf.js's worker, rate limits and lockouts. It
   loads only what it ships (never a module from a folder above `app`, where another account may have planted one) and
   runs only what it names by its absolute path: its own `bin\cloudflared.exe`, and Windows' programs under `SystemRoot`.
   [SECURITY.md](SECURITY.md) · [docs/DESIGN.md](docs/DESIGN.md)

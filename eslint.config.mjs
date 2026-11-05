@@ -10,7 +10,7 @@ const require = createRequire(new URL('./app/package.json', import.meta.url));
 const js = require('@eslint/js');
 const security = require('eslint-plugin-security');
 const globals = require('globals');
-const agm = { rules: { 'no-unescaped-html': require('./eslint-rules/no-unescaped-html.js'), 'test-helpers': require('./eslint-rules/test-helpers.js') } };
+const agm = { rules: { 'no-unescaped-html': require('./eslint-rules/no-unescaped-html.js'), 'inert-html': require('./eslint-rules/inert-html.js'), 'test-helpers': require('./eslint-rules/test-helpers.js') } };
 
 // The calls AGMessage never makes, with the reason each (the house's banned-API list).
 const bannedProperties = [
@@ -142,19 +142,29 @@ export default [
   },
   { files: ['app/public/**/*.mjs'], languageOptions: { sourceType: 'module', globals: { ...globals.browser } }, rules: { 'agm/no-unescaped-html': 'error', 'no-alert': 'error', ...pageFloor } },
   { files: ['app/public/**/*.js', 'app/public/**/*.mjs'], ignores: ['app/public/common.js', 'app/public/display.js'], rules: marksFromTable },
-  // The archive check's one core, for the server (lib/zipcheck.js, by require) and the page's document worker (a classic
-  // script): pure over the bytes it is handed, so no global of Node's or of a page's but the language's own (the pages'
-  // own names and libraries' included), `module` there only to be exported where there is one, and nothing loaded.
+  // The pure cores the page's document worker loads as classic scripts, also loadable by require: the archive check's
+  // (zipcore.js, the server's too, through lib/zipcheck.js), a picture's size from its header (imagecore.js, the
+  // server's too, through lib/imagesize.js) and Word's pages and hidden text (wordpages.js). Pure over
+  // what they are handed, so no global of Node's or of a page's but the language's own (the pages' own names and
+  // libraries' included), `module` there only to be exported where there is one, and nothing loaded.
   {
-    files: ['app/public/zipcore.js'],
+    files: ['app/public/zipcore.js', 'app/public/imagecore.js', 'app/public/wordpages.js'],
     languageOptions: { globals: { ...Object.fromEntries([...Object.keys(globals.node), ...Object.keys(globals.browser), 'io', 'pdfjsLib', 'mammoth', 'XLSX', 'AGM'].map((name) => [name, 'off'])), module: 'writable' } },
     rules: {
       'no-restricted-syntax': ['error', ...marksFromTable['no-restricted-syntax'].slice(1),
-        { selector: "MemberExpression[object.name='module'][property.name!='exports']", message: 'zipcore.js is pure: `module` is there only to export it' },
-        { selector: 'ImportExpression', message: 'zipcore.js is pure: it loads nothing' },
-        { selector: "CallExpression[callee.name='require']", message: 'zipcore.js is pure: it loads nothing' }],
+        { selector: "MemberExpression[object.name='module'][property.name!='exports']", message: 'a pure core: `module` is there only to export it' },
+        { selector: 'ImportExpression', message: 'a pure core loads nothing' },
+        { selector: "CallExpression[callee.name='require']", message: 'a pure core loads nothing' }],
     },
   },
+  // The document worker: a worker's globals, not a page's (no document, no window), the cores and libraries it loads
+  // with importScripts by their names, and no page's own names.
+  {
+    files: ['app/public/docworker.js'],
+    languageOptions: { globals: { ...Object.fromEntries([...Object.keys(globals.browser), 'io', 'pdfjsLib', 'AGM'].map((name) => [name, 'off'])), ...globals.worker, AGMZip: 'readonly', AGMWord: 'readonly', AGMImage: 'readonly', XLSX: 'readonly', mammoth: 'readonly' } },
+  },
+  // The documents' modules parse HTML in one place, parseInert, and adopt nothing parsed into the page (agm/inert-html).
+  { files: ['app/public/docmodel.mjs', 'app/public/docview.mjs', 'app/public/docworker.js'], rules: { 'agm/inert-html': 'error' } },
   // The first script of every page with people says the floor's words below it, so it parses there: ES5 only (a newer
   // syntax is a parse error), `var` with it.
   { files: ['app/public/theme-init.js'], languageOptions: { ecmaVersion: 5 }, rules: { 'no-var': 'off', 'prefer-const': 'off' } },

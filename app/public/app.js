@@ -2532,8 +2532,7 @@ function openDocInPanel(msg, opts) {
   }
   docPanel.classList.toggle('priority', !!msg.priority);
   docTitleEl.textContent = msg.filename || '';
-  docDisplay.innerHTML = '';
-  docDisplay.appendChild(buildDocPreview(msg));
+  drawDoc(msg, null);
   if (msg.caption) {
     docCaptionEl.textContent = msg.caption;
     docCaptionEl.hidden = false;
@@ -2546,258 +2545,48 @@ function openDocInPanel(msg, opts) {
   drawDocActs();
 }
 
-function fileExt(name) {
-  if (!name) return '';
-  const i = name.lastIndexOf('.');
-  return i >= 0 ? name.slice(i + 1).toLowerCase() : '';
-}
-
-/** The document on stage as plain text, for AI drafts (capped). */
+// The panel's document is drawn by docview.mjs (imported at the first file opened): the readers, the page box, zoom,
+// find and the kept place are its, and the drawing is chosen by this page's own seat, never by the file. The AI's copy
+// of the document's text is read only on a backstage seat (the admin's support view reads as one).
+/** This page's seat as the readers read it: the research seat (Backstage, or the support view), the Board's, or an observer's. */
+const docSeat = () => (ADMIN_VIEW || pageFacts.role === 'research' ? 'research' : pageFacts.role === 'board' ? 'board' : 'observer');
+let docViewMod = null;     // docview.mjs, once imported
+let docView = null;        // the view drawing the panel's document now
+let docDrawing = 0;        // each drawing numbered: only the newest may draw or set the AI's text
+/** The document on stage as plain text, for AI drafts (capped by the reader, hidden parts left out). */
 const docForAi = { id: null, name: '', text: '' };
-function setDocText(msg, text) {
-  if (currentDocMsgId && msg.id !== currentDocMsgId) return;
-  docForAi.id = msg.id; docForAi.name = msg.filename || ''; docForAi.text = String(text || '').slice(0, 60000);
-}
-
-/** Office documents become HTML here: keep the formatting, drop anything active. */
-function sanitizeHtml(html) {
-  const t = document.createElement('template');
-  // The sanitiser's own parse: a <template> runs nothing, and only what survives the filter below leaves it.
-  // eslint-disable-next-line agm/no-unescaped-html -- this is the escaper: the markup is parsed inert, then filtered
-  t.innerHTML = String(html || '');
-  t.content.querySelectorAll('script,style,iframe,object,embed,link,meta,base,form,input,button,textarea,select,svg,math').forEach((n) => n.remove());
-  t.content.querySelectorAll('*').forEach((el) => {
-    for (const a of Array.from(el.attributes)) {
-      const n = a.name.toLowerCase(), v = a.value.trim().toLowerCase();
-      if (n.startsWith('on') || n === 'srcdoc' || n === 'formaction') el.removeAttribute(a.name);
-      else if ((n === 'href' || n === 'src' || n === 'xlink:href') && !(v.startsWith('http:') || v.startsWith('https:') || v.startsWith('#') || v.startsWith('data:image/'))) el.removeAttribute(a.name);
-    }
-    if (el.tagName === 'A') { el.setAttribute('target', '_blank'); el.setAttribute('rel', 'noopener noreferrer'); }
-  });
-  return t.innerHTML;
-}
-
-function buildDocPreview(msg) {
-  const wrap = document.createElement('div');
-  wrap.className = 'doc-preview';
-  const mime = (msg.mime || '').toLowerCase();
-  const ext = fileExt(msg.filename);
-
-  if (mime.startsWith('image/') ||
-      ['png','jpg','jpeg','gif','webp','svg','bmp'].includes(ext)) {
-    const img = document.createElement('img');
-    img.src = msg.url; img.alt = msg.filename;
-    wrap.appendChild(img);
-    return wrap;
+async function drawDoc(msg, at) {
+  const n = ++docDrawing;
+  if (docView) { docView.destroy(); docView = null; }
+  docForAi.id = null; docForAi.name = ''; docForAi.text = '';
+  docDisplay.textContent = '';
+  const wait = document.createElement('p');
+  wait.className = 'muted';
+  wait.textContent = 'Opening ' + (msg.filename || 'the file') + '…';
+  docDisplay.appendChild(wait);
+  try {
+    if (!docViewMod) docViewMod = await import('/docview.mjs');
+  } catch {
+    if (n !== docDrawing) return;
+    wait.className = 'error';
+    wait.textContent = 'This device could not load the document reader.';
+    return;
   }
-
-  if (mime === 'application/pdf' || ext === 'pdf') {
-    const host = document.createElement('div');
-    host.className = 'doc-pdf-canvas';
-    host.innerHTML = '<p class="muted">Rendering PDF…</p>';
-    wrap.appendChild(host);
-    renderPdfInline(msg.url, host, msg).catch((e) => {
-      host.innerHTML = `<p class="error">Couldn't render PDF: ${escapeHtml(e.message)}</p>`;
-    });
-    return wrap;
-  }
-
-  if (mime.startsWith('text/') || ['txt','md','log','json'].includes(ext)) {
-    const host = document.createElement('pre');
-    host.className = 'doc-text';
-    host.textContent = 'Loading…';
-    wrap.appendChild(host);
-    fetch(msg.url).then((r) => r.text()).then((t) => {
-      host.textContent = t;
-      setDocText(msg, t);
-    }).catch((e) => { host.textContent = "Couldn't load: " + e.message; });
-    return wrap;
-  }
-
-  if (ext === 'docx' || mime.includes('officedocument.wordprocessingml')) {
-    const host = document.createElement('div');
-    host.className = 'doc-html';
-    host.innerHTML = '<p class="muted">Rendering Word document…</p>';
-    wrap.appendChild(host);
-    fetch(msg.url).then((r) => r.arrayBuffer()).then((ab) => {
-      if (typeof mammoth === 'undefined') throw new Error('Word renderer not loaded');
-      mammoth.extractRawText({ arrayBuffer: ab.slice(0) }).then((r) => setDocText(msg, r.value)).catch(() => {});
-      return mammoth.convertToHtml({ arrayBuffer: ab });
-    }).then(({ value }) => {
-      host.innerHTML = value ? sanitizeHtml(value) : '<p class="muted">(empty document)</p>';
-    }).catch((e) => {
-      host.innerHTML = `<p class="error">Couldn't render this Word doc: ${escapeHtml(e.message)}</p>`;
-    });
-    return wrap;
-  }
-
-  if (ext === 'xlsx' || ext === 'xls' || ext === 'csv' ||
-      mime.includes('officedocument.spreadsheetml') ||
-      mime === 'application/vnd.ms-excel' ||
-      mime === 'text/csv') {
-    const host = document.createElement('div');
-    host.className = 'doc-html doc-sheet';
-    host.innerHTML = '<p class="muted">Rendering spreadsheet…</p>';
-    wrap.appendChild(host);
-    fetch(msg.url).then((r) => r.arrayBuffer()).then((ab) => {
-      if (typeof XLSX === 'undefined') throw new Error('Spreadsheet renderer not loaded');
-      const wb = XLSX.read(ab, { type: 'array' });
-      try { setDocText(msg, wb.SheetNames.slice(0, 8).map((n) => '# ' + n + '\n' + XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n\n')); } catch { /* the preview still shows; only the AI's copy of the text is missing */ }
-      host.innerHTML = '';
-      const view = document.createElement('div');
-      view.className = 'sheet-view';
-      const showSheet = (name) => {
-        view.innerHTML = sanitizeHtml(XLSX.utils.sheet_to_html(wb.Sheets[name], { editable: false }));
-      };
-      if (wb.SheetNames.length > 1) {
-        const tabs = document.createElement('div');
-        tabs.className = 'sheet-tabs';
-        wb.SheetNames.forEach((name, i) => {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'sheet-tab' + (i === 0 ? ' active' : '');
-          b.textContent = name;
-          b.onclick = () => {
-            tabs.querySelectorAll('.sheet-tab').forEach((t) => t.classList.remove('active'));
-            b.classList.add('active');
-            showSheet(name);
-          };
-          tabs.appendChild(b);
-        });
-        host.appendChild(tabs);
-      }
-      host.appendChild(view);
-      showSheet(wb.SheetNames[0]);
-    }).catch((e) => {
-      host.innerHTML = `<p class="error">Couldn't render spreadsheet: ${escapeHtml(e.message)}</p>`;
-    });
-    return wrap;
-  }
-
-  const card = document.createElement('div');
-  card.className = 'doc-file-card';
-  card.innerHTML =
-    `<div class="ico">📄</div>` +
-    `<div class="meta">` +
-      `<strong>${escapeHtml(msg.filename)}</strong>` +
-      `<small>${escapeHtml(prettyMime(mime))}</small>` +
-      `<small class="muted">Inline preview not available — save as PDF to push for best results.</small>` +
-    `</div>`;
-  wrap.appendChild(card);
-  return wrap;
-}
-
-let _pdfjs = null;
-async function loadPdfJs() {
-  if (!_pdfjs) {
-    _pdfjs = await import('/vendor/pdf.min.mjs');
-    _pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.min.mjs';
-  }
-  return _pdfjs;
-}
-
-async function renderPdfInline(url, host, msg) {
-  const pdfjs = await loadPdfJs();
-  const pdf = await pdfjs.getDocument({ url, withCredentials: false, isEvalSupported: false, enableXfa: false }).promise;
-  // Text for AI drafts, in the background (first 80 pages).
-  if (msg) {
-    (async () => {
-      const parts = [];
-      for (let i = 1; i <= Math.min(pdf.numPages, 80); i++) {
-        try { const tc = await (await pdf.getPage(i)).getTextContent(); parts.push('[page ' + i + '] ' + tc.items.map((x) => x.str).join(' ')); } catch (e) { break; }
-        if (parts.join('\n').length > 60000) break;
-      }
-      setDocText(msg, parts.join('\n'));
-    })();
-  }
-  host.innerHTML = '';
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const containerWidth = host.clientWidth || 360;
-
-  // Pre-create placeholder canvases sized correctly so the scrollbar reflects
-  // the full document height — but only render a page when it scrolls into
-  // view. This keeps a 200-page board pack snappy.
-  const canvases = [];
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const c = document.createElement('canvas');
-    c.className = 'pdf-page pdf-page-pending';
-    c.dataset.pageNum = String(i);
-    host.appendChild(c);
-    canvases.push(c);
-  }
-
-  async function sizePlaceholder(c, pageNum) {
-    const page = await pdf.getPage(pageNum);
-    const baseViewport = page.getViewport({ scale: 1 });
-    const scale = (containerWidth - 8) / baseViewport.width;
-    const vp = page.getViewport({ scale });
-    c.width = Math.floor(vp.width * dpr);
-    c.height = Math.floor(vp.height * dpr);
-    c.style.width = vp.width + 'px';
-    c.style.height = vp.height + 'px';
-    c._pageRef = page;
-    c._viewport = vp;
-  }
-  await Promise.all(canvases.map((c, i) => sizePlaceholder(c, i + 1)));
-
-  // Page indicator: a small sticky chip in the top-right showing
-  // "page N / total". Created here (only for multi-page PDFs) so it
-  // is a child of host and is auto-cleared when docDisplay.innerHTML
-  // is reset on dismiss / new doc / rerender. See styles for the
-  // sticky positioning.
-  let indicator = null;
-  if (pdf.numPages > 1) {
-    indicator = document.createElement("div");
-    indicator.className = "doc-page-indicator";
-    indicator.textContent = "1 / " + pdf.numPages;
-    host.insertBefore(indicator, host.firstChild);
-  }
-
-  const observer = new IntersectionObserver((entries) => {
-    for (const ent of entries) {
-      if (!ent.isIntersecting) continue;
-      const c = ent.target;
-      observer.unobserve(c);
-      if (!c._pageRef || !c._viewport) continue;
-      const ctx = c.getContext('2d');
-      ctx.save(); ctx.scale(dpr, dpr);
-      c._pageRef.render({ canvasContext: ctx, viewport: c._viewport }).promise.then(() => {
-        c.classList.remove('pdf-page-pending');
-      });
-    }
-  }, { root: host, rootMargin: '300px 0px' });
-  for (const c of canvases) observer.observe(c);
-
-  // Track which page currently sits in the centre band of the
-  // viewport. Negative rootMargin shrinks the observation root
-  // to a thin strip near the top-centre, so usually only one
-  // page intersects at a time. We still track the full set in
-  // case multiple pages overlap the band (small pages, big
-  // viewport) and pick the lowest-numbered one as "current".
-  if (indicator) {
-    const intersecting = new Set();
-    const indObs = new IntersectionObserver((entries) => {
-      for (const ent of entries) {
-        const n = parseInt(ent.target.dataset.pageNum, 10);
-        if (!n) continue;
-        if (ent.isIntersecting) intersecting.add(n);
-        else intersecting.delete(n);
-      }
-      if (intersecting.size > 0) {
-        const current = Math.min.apply(null, Array.from(intersecting));
-        indicator.textContent = current + " / " + pdf.numPages;
-      }
-    }, {
-      root: docDisplay,
-      rootMargin: "-40% 0px -55% 0px",
-      threshold: 0,
-    });
-    for (const c of canvases) indObs.observe(c);
-  }
+  if (n !== docDrawing) return;
+  docDisplay.textContent = '';
+  const view = docViewMod.open(docDisplay, { url: msg.url }, { at, seat: docSeat(), name: msg.filename, mime: msg.mime });
+  docView = view;
+  const drawn = await view.ready;
+  if (n !== docDrawing || drawn.state !== 'shown') return;
+  const text = await view.text();
+  if (n !== docDrawing || !text) return;
+  docForAi.id = msg.id; docForAi.name = msg.filename || ''; docForAi.text = text;
 }
 
 function dismissDoc() {
   currentDocMsgId = null;
+  docDrawing++;
+  if (docView) { docView.destroy(); docView = null; }
   drawDocActs();
   docForAi.id = null; docForAi.name = ''; docForAi.text = '';
   docPanel.dataset.state = 'empty';
@@ -2929,29 +2718,11 @@ if (HAS_STAGE && localStorage.getItem('agm.stageCollapsed') === '1') {
   setStageCollapsed(true);
 }
 
+/** The panel's document laid out again for its new size (a resize, a collapse, the splitter), at the place it was. */
 function rerenderCurrentDoc() {
-  if (!currentDocMsgId) return;
-  const m = findMessage(currentDocMsgId);
-  if (!m || m.type !== 'file') return;
-  const ext = (m.filename || '').toLowerCase().split('.').pop();
-  const mime = (m.mime || '').toLowerCase();
-  // Only PDFs are size-sensitive (canvas). Images / Word / Excel / text reflow naturally.
-  if (mime === 'application/pdf' || ext === 'pdf') {
-    docDisplay.innerHTML = '';
-    docDisplay.appendChild(buildDocPreview(m));
-  }
+  if (currentDocMsgId && docView) docView.refit();
 }
 
-
-function prettyMime(m) {
-  if (!m) return 'file';
-  if (m === 'application/pdf') return 'PDF';
-  if (m.includes('wordprocessingml')) return 'Word document';
-  if (m.includes('presentationml')) return 'PowerPoint';
-  if (m.includes('spreadsheetml')) return 'Excel';
-  if (m.startsWith('text/')) return 'Text';
-  return m;
-}
 
 // ---------------- Splitter (drag to resize columns) ----------------
 

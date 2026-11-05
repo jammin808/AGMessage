@@ -12,7 +12,7 @@ const path = require('path');
 const imagesize = require('../lib/imagesize');
 const guard = require('../lib/guard');
 const { STAGE_TYPES } = require('../lib/pages');
-const { startServer, stopServer, api, connect, emit, pngOf, TOKEN } = require('./helpers');
+const { startServer, stopServer, api, connect, emit, pngOf, TOKEN, ROOT, readSource } = require('./helpers');
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const be16 = (n) => Buffer.from([n >> 8, n & 255]);
@@ -237,4 +237,26 @@ test('at upload: a 400 MP PNG or JPEG and a JPEG whose size cannot be read leave
   const rows = entries.filter((e) => e.action === 'upload.refused');
   assert.deepEqual(rows.map((e) => [e.target, e.actor, e.words]), refused.map((r, i) => [hall, { t: 'code', id: seats[i].identity.split('.')[0], name: 'Ana ' + (i + 1) }, r[3]]), 'one row each, in the hall, by its uploader');
   assert.ok(!JSON.stringify(entries).includes('stage-plot'), 'no row names a file');
+});
+
+test('the header reader is one core: lib/imagesize.js requires public/imagecore.js, the page and its worker load it as a classic script, and each reads the same sizes; it names a picture by its bytes', async () => {
+  const vm = require('node:vm');
+  const core = require('../public/imagecore.js');
+  const scope = vm.createContext({});
+  vm.runInContext('globalThis.self = globalThis;', scope);
+  vm.runInContext(readSource(path.join(ROOT, 'public', 'imagecore.js')), scope, { filename: 'imagecore.js' });
+  const there = scope.AGMImage;
+  assert.equal(imagesize.sizeFrom, core.sizeFrom, 'the server\'s reader is the core\'s');
+  const pngHead = (w, h) => { const b = Buffer.from(pngOf(1, 1)); b.writeUInt32BE(w, 16); b.writeUInt32BE(h, 20); return b; };
+  const gifHead = Buffer.from('GIF89a\x10\x00\x08\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x10\x00\x08\x00\x00', 'latin1');
+  const jpegHead = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xc0, 0, 11, 8, 0, 48, 0, 64, 3, 0, 0, 0]);
+  const webpHead = Buffer.alloc(30); webpHead.write('RIFF', 0); webpHead.write('WEBP', 8); webpHead.write('VP8X', 12); webpHead.writeUIntLE(99, 24, 3); webpHead.writeUIntLE(49, 27, 3);
+  for (const [bytes, expected] of [[pngHead(640, 480), { type: 'png', width: 640, height: 480 }], [gifHead, { type: 'gif', width: 16, height: 8 }], [jpegHead, { type: 'jpg', width: 64, height: 48 }], [webpHead, { type: 'webp', width: 100, height: 50 }]]) {
+    assert.deepEqual(await core.sizeOf(bytes), expected);
+    assert.deepEqual(JSON.parse(JSON.stringify(await there.sizeOf(new Uint8Array(bytes)))), expected, 'the classic script reads it alike');
+  }
+  assert.equal(core.sniff(pngHead(1, 1)), 'png');
+  assert.equal(await core.sizeOf(Buffer.from('BM a bitmap')), null, 'a type no reader here knows is no size');
+  assert.equal(await core.sizeOf(Buffer.concat([Buffer.from([0x89]), Buffer.from('PNG\r\n\x1a\n'), Buffer.alloc(4)])), null, 'a PNG with no IHDR');
+  assert.deepEqual([core.REACH, core.JPEG_SEGMENTS, core.GIF_BLOCKS, core.GIF_WINDOW], [imagesize.REACH, imagesize.JPEG_SEGMENTS, imagesize.GIF_BLOCKS, imagesize.GIF_WINDOW]);
 });

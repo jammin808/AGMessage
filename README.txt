@@ -559,6 +559,54 @@ all brings the rest back). The first Tab on each page is a "Skip to ..."
 link, and each list is one Tab stop: the arrow keys move between its
 rows.
 
+Documents in the On stage panel
+-------------------------------
+A file opened in the panel (Look, or Enter on it) is read on this
+device, never on the laptop: PDF, Word, Excel, PowerPoint, CSV,
+Markdown, text and pictures. Above it, a bar:
+  - The page box: type a number, or ‹ and ›, or PageUp and PageDown.
+    It says the page for a PDF, the slide for PowerPoint, the line for
+    text and Markdown, the row for a CSV, and tabs for a workbook's
+    sheets. A Word file's pages are the ones Word saved with the file:
+    "p. 12 of 30", or "≈ p. 12 of ≈ 30" where Word's own layout is
+    missing or out of date (a file not saved by Word, or saved by a tool
+    that writes no layout), and "the printed page numbers differ here"
+    where a section numbers its pages its own way.
+  - Zoom, for a PDF or a picture: −, Fit width, Fit page, +, or pinch.
+  - Find: type a word and press Next; it goes to each match in turn, on
+    a page not drawn yet too.
+  The place is kept: resizing the window, folding the panel or moving
+the splitter leaves you on the page you were reading.
+What each file looks like: a CSV is a grid; PowerPoint is an outline
+(each slide's title, its points and tables, its pictures), never the
+slide as designed (export it to PDF for that); Word and Excel keep
+their words, tables and pictures but not their fonts, colours or bold;
+formulas are never worked out, the value Excel saved is shown, and one
+saved without a value says "formula — no saved value".
+Hidden things never reach the Board's pages: hidden sheets (very hidden
+too), rows and columns, hidden slides, hidden shapes, presenter notes,
+Markdown comments and Word's hidden text are left out there, with words
+saying how many ("1 hidden row not shown"). Backstage sees hidden rows,
+columns, sheets and slides drawn grey and marked "hidden", so you know
+what the file holds; Word's hidden text is left out everywhere, and a
+Word file whose hidden text cannot be told apart says "This Word file
+has hidden text AGMessage could not leave out — show a picture or a
+quote."
+Limits, each said where it applies: a sheet or a CSV shows its first
+5,000 rows ("Showing the first 5,000 rows.") and its first 256 columns
+("Showing the first 256 columns."), and no more than 100,000 cells, so
+a very wide sheet shows fewer rows ("Showing the first 390 rows."); a
+table in a Word file or a deck the same; a text file its first 20,000
+lines. A picture over 40 megapixels says "This picture is too big for
+this device." and is never opened on the device. A Word, Excel or
+PowerPoint file that takes more than 15 seconds to read says "This file
+took too long to read, so it is not shown." (open it in its own
+application instead); a PDF whose first page takes more than 20 seconds
+says the file took too long to read, on the panel and on a screen. On a
+device older than iPadOS 16.4 (or Chrome 103) a Word, Excel or
+PowerPoint file says "this device cannot open documents — ask for a
+picture".
+
 Screens (projector PC, lectern monitor, foyer TV)
 -------------------------------------------------
 In a hall, the header's ⋯ -> Screens & pages... -> Add screen. The screen's link
@@ -929,6 +977,12 @@ Troubleshooting
   Safari 16.4 or later (iPadOS and iOS 16.4), Chrome 103 or later, or a
   current Firefox. On an older device, share the page as a picture (an
   image) instead.
+
+- A Word, Excel or PowerPoint file "took too long to read", or "cannot
+  be read": the device gave up after 15 seconds, or the file is not one
+  AGMessage reads (a part of it declares a document type, or it is
+  packed in a way Office never packs one). Save it again from Office, or
+  as a PDF, and share that.
 
 - Forgot a password: an admin sets a new one-time password on the
   Accounts page. Lost the only admin

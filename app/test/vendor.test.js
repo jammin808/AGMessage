@@ -168,8 +168,15 @@ test('vendor: nothing ships that no page loads, and every page loads only what i
   assert.deepEqual(Object.keys(manifest.files).filter((f) => !loaded.has(f)).sort(), [], 'every listed file is loaded by a page (a file nothing loads is not shipped)');
   for (const [file, e] of entries) {
     const by = pages.filter((f) => read('app/public/' + f).includes('/vendor/' + file));
-    if (e.runs === 'worker') assert.ok(by.length && by.every((f) => read('app/public/' + f).includes("workerSrc = '/vendor/" + file + "'")), file + ' is loaded as pdf.js\'s worker, and only so');
+    // A worker's file is loaded as pdf.js's worker, or by the document worker's importScripts, and by nothing else: no
+    // page loads it with a <script>, so it never runs on the page.
+    const asWorker = (f) => read('app/public/' + f).includes("workerSrc = '/vendor/" + file + "'") || (f === 'docworker.js' && read('app/public/' + f).includes("importScripts('/vendor/" + file + "')"));
+    if (e.runs === 'worker') assert.ok(by.length && by.every(asWorker), file + ' is loaded as a worker\'s, and only so');
   }
+  assert.deepEqual(entries.filter(([, e]) => e.runs === 'worker' && e.package !== 'pdfjs-dist').map(([f]) => f).sort(), ['mammoth.browser.min.js', 'xlsx.full.min.js'], 'mammoth and SheetJS run in the document worker');
+  // pdf.js's worker alone runs WebAssembly: lib/guard.js gives CSP_PDF_WORKER to exactly the pdf.js worker files listed.
+  const guard = require('../lib/guard');
+  assert.deepEqual([...guard.PDF_WORKERS].sort(), entries.filter(([, e]) => e.package === 'pdfjs-dist' && e.runs === 'worker').map(([f]) => '/vendor/' + f).sort(), 'the pdf.js workers listed are the ones given WebAssembly');
 });
 
 test('vendor: the stale and fragile go — no pdf.js 3.11.174 worker, mammoth 1.13.0, pdf.js 4.10.38\'s legacy build with its floor', () => {

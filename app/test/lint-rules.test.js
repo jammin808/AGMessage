@@ -61,6 +61,51 @@ test('agm/no-unescaped-html: escaped, literal, counted and named-safe values pas
   ]) assert.deepEqual(findings(code), [], code);
 });
 
+// HTML is parsed in one place (agm/inert-html): in the documents' modules, outside parseInert, every way of turning markup
+// into nodes or of moving parsed nodes into the page is refused, each by a case of its own; inside parseInert the one
+// parse passes; and the three modules hold exactly one innerHTML site between them, parseInert's.
+test('agm/inert-html: outside parseInert, DOMParser as HTML, importNode, adoptNode, document.write and writeln, parseHTMLUnsafe and a template\'s .content are refused; exactly one innerHTML site in the documents\' modules', async () => {
+  const inertRule = require('../eslint-rules/inert-html');
+  const own = [{ plugins: { agm: { rules: { 'inert-html': inertRule } } }, languageOptions: { ecmaVersion: 2025, sourceType: 'module' }, rules: { 'agm/inert-html': 'error' } }];
+  const ids = (code) => linter.verify(code, own).map((m) => m.ruleId);
+  for (const code of [
+    'new DOMParser().parseFromString(html, "text/html");',
+    'new DOMParser().parseFromString(html, `text/html`);',
+    'const p = new DOMParser(); p.parseFromString(html, type);',
+    'document.importNode(node, true);',
+    'document.adoptNode(node);',
+    'document.write(html);',
+    'document.writeln(html);',
+    'Document.parseHTMLUnsafe(html);',
+    'el.setHTMLUnsafe(html);',
+    'range.createContextualFragment(html);',
+    'export const f = (t) => t.content.cloneNode(true);',
+    'box.innerHTML = "";',
+    'box.outerHTML = x;',
+    'box.insertAdjacentHTML("beforeend", x);',
+  ]) assert.deepEqual(ids(code), ['agm/inert-html'], code);
+  assert.deepEqual(ids('function notParseInert(html) { const t = document.createElement("template"); t.innerHTML = html; return t.content; }'), ['agm/inert-html', 'agm/inert-html'], 'the same parse under another name: its innerHTML and its .content');
+  for (const code of [
+    'export function parseInert(html) { const t = document.createElement("template"); t.innerHTML = String(html); return walk(t.content); }',
+    'export const parseInert = (html) => { const t = document.createElement("template"); t.innerHTML = html; return t.content; };',
+    'new DOMParser().parseFromString(xml, "application/xml");',
+    'el.textContent = "<b>x</b>";',
+    'const text = (await page.getTextContent()).items;',
+  ]) assert.deepEqual(ids(code), [], code);
+  // The config holds the three modules to it, and the tree passes.
+  const repo = path.join(__dirname, '..', '..');
+  const eslint = new ESLint({ cwd: repo });
+  const found = async (code, file) => (await eslint.lintText(code, { filePath: path.join(repo, file) }))[0].messages.map((m) => m.ruleId);
+  for (const file of ['app/public/docmodel.mjs', 'app/public/docview.mjs']) assert.ok((await found('export const f = (n) => document.importNode(n, true);\n', file)).includes('agm/inert-html'), file);
+  assert.ok((await found('self.f = (n) => n.content;\n', 'app/public/docworker.js')).includes('agm/inert-html'), 'docworker.js');
+  let sites = 0;
+  for (const file of ['docmodel.mjs', 'docview.mjs', 'docworker.js']) {
+    const code = readSource(path.join('app', 'public', file)).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+    sites += (code.match(/\binnerHTML\b/g) || []).length;
+  }
+  assert.equal(sites, 1, 'parseInert\'s, and no other');
+});
+
 // The page floor's half in the lint (eslint.config.mjs, as `npm run lint` reads it): on a page, what Safari lacks is
 // reached only through its helper or behind its probe, and the user agent is never read however it is reached;
 // theme-init.js, which says the floor's words below it, parses as ES5.

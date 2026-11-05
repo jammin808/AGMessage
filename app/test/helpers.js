@@ -624,9 +624,154 @@ function unzipTo(buf, dir) {
   return top;
 }
 
+// ---------------------------------------------------------------- Office files and the page's document worker
+/**
+ * A zip of an Office file's parts ({name: text or bytes}), in their order, each deflated as Office writes them (stored
+ * where `stored` names it; with a data descriptor after it, bit 3, where `descriptors` names it). For the readers'
+ * disagreements: `localNames` {name: the name its local header gives instead}, `extras` {name: the bytes of its
+ * directory record's extra field}, `external` {name: its external attributes}.
+ */
+function officeZip(parts, { stored = [], descriptors = [], localNames = {}, extras = {}, external = {} } = {}) {
+  const zlib = require('zlib');
+  const local = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, content] of Object.entries(parts)) {
+    const data = typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content);
+    const method = stored.includes(name) ? 0 : 8;
+    const body = method === 8 ? zlib.deflateRawSync(data) : data;
+    const n = Buffer.from(name, 'utf8');
+    const ln = Object.hasOwn(localNames, name) ? Buffer.from(localNames[name], 'utf8') : n;
+    const extra = Object.hasOwn(extras, name) ? Buffer.from(extras[name]) : Buffer.alloc(0);
+    const crc = zlib.crc32(data);
+    const late = descriptors.includes(name);
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0); head.writeUInt16LE(20, 4); head.writeUInt16LE(late ? 8 : 0, 6); head.writeUInt16LE(method, 8);
+    if (!late) { head.writeUInt32LE(crc, 14); head.writeUInt32LE(body.length, 18); head.writeUInt32LE(data.length, 22); }
+    head.writeUInt16LE(ln.length, 26);
+    const after = Buffer.alloc(late ? 16 : 0);
+    if (late) { after.writeUInt32LE(0x08074b50, 0); after.writeUInt32LE(crc, 4); after.writeUInt32LE(body.length, 8); after.writeUInt32LE(data.length, 12); }
+    const dir = Buffer.alloc(46);
+    dir.writeUInt32LE(0x02014b50, 0); dir.writeUInt16LE(20, 4); dir.writeUInt16LE(20, 6); dir.writeUInt16LE(late ? 8 : 0, 8); dir.writeUInt16LE(method, 10);
+    dir.writeUInt32LE(crc, 16); dir.writeUInt32LE(body.length, 20); dir.writeUInt32LE(data.length, 24); dir.writeUInt16LE(n.length, 28);
+    dir.writeUInt16LE(extra.length, 30); dir.writeUInt32LE(Object.hasOwn(external, name) ? external[name] : 0, 38); dir.writeUInt32LE(offset, 42);
+    local.push(head, ln, body, after);
+    central.push(dir, n, extra);
+    offset += head.length + ln.length + body.length + after.length;
+  }
+  const cd = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length / 3, 8); end.writeUInt16LE(central.length / 3, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, cd, end]);
+}
+
+const OOXML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+const W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+const RELS_NS = 'xmlns="http://schemas.openxmlformats.org/package/2006/relationships"';
+const relsOf = (list) => OOXML + '<Relationships ' + RELS_NS + '>' + list.map(([id, type, target]) => '<Relationship Id="' + id + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/' + type + '" Target="' + target + '"/>').join('') + '</Relationships>';
+const typesOf = (overrides) => OOXML + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>'
+  + overrides.map(([part, type]) => '<Override PartName="' + part + '" ContentType="' + type + '"/>').join('') + '</Types>';
+/**
+ * A Word file's parts: `body` the body's XML, `styles` the styles' (the part left out where it is absent), `pages` the
+ * `<Pages>` docProps/app.xml declares, `media` {name: bytes} under word/media with an image relationship each (rId10…).
+ */
+function wordParts({ body, styles, pages, media = {} } = {}) {
+  const parts = {
+    '[Content_Types].xml': typesOf([['/word/document.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml']]),
+    '_rels/.rels': relsOf([['rId1', 'officeDocument', 'word/document.xml'], ['rId2', 'extended-properties', 'docProps/app.xml']]),
+    'word/document.xml': OOXML + '<w:document ' + W_NS + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>' + (body || '') + '</w:body></w:document>',
+    'word/_rels/document.xml.rels': relsOf([...(styles !== undefined ? [['rId1', 'styles', 'styles.xml']] : []), ...Object.keys(media).map((m, i) => ['rId' + (10 + i), 'image', 'media/' + m])]),
+  };
+  if (styles !== undefined) parts['word/styles.xml'] = OOXML + '<w:styles ' + W_NS + '>' + styles + '</w:styles>';
+  if (pages !== undefined) parts['docProps/app.xml'] = OOXML + '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Microsoft Office Word</Application><Pages>' + pages + '</Pages></Properties>';
+  for (const [m, bytes] of Object.entries(media)) parts['word/media/' + m] = bytes;
+  return parts;
+}
+/** A picture's run in a Word body, its bytes the relationship `rId` names. */
+const wordPicture = (rId, alt) => '<w:r><w:drawing><wp:inline><wp:extent cx="952500" cy="952500"/><wp:docPr id="1" name="Picture 1" descr="' + alt + '"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="p.png" descr="' + alt + '"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="' + rId + '"/></pic:blipFill><pic:spPr/></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>';
+
+const P_NS = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+/** A slide's shape: its paragraphs' text, a placeholder's type (`ph`: 'title', 'body', 'ftr' …), `hidden`, a level. */
+const deckShape = (text, { ph, hidden, lvl, id = 2 } = {}) => '<p:sp><p:nvSpPr><p:cNvPr id="' + id + '" name="s"' + (hidden ? ' hidden="1"' : '') + '/><p:cNvSpPr/><p:nvPr>' + (ph ? '<p:ph' + (ph === 'body' ? '' : ' type="' + ph + '"') + '/>' : '') + '</p:nvPr></p:nvSpPr><p:txBody><a:bodyPr/>'
+  + [].concat(text).map((t) => '<a:p>' + (lvl ? '<a:pPr lvl="' + lvl + '"/>' : '') + '<a:r><a:t>' + t + '</a:t></a:r></a:p>').join('') + '</p:txBody></p:sp>';
+/** A slide's picture, its bytes the slide's relationship `rId` names. */
+const deckPicture = (rId, { hidden } = {}) => '<p:pic><p:nvPicPr><p:cNvPr id="5" name="Picture" descr="A chart"' + (hidden ? ' hidden="1"' : '') + '/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="' + rId + '"/></p:blipFill><p:spPr/></p:pic>';
+/** A slide holding `inner` (shapes, pictures, frames), `show` its show attribute where given ("0": hidden). */
+const deckSlide = (inner, show) => OOXML + '<p:sld ' + P_NS + (show === undefined ? '' : ' show="' + show + '"') + '><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>' + inner + '</p:spTree></p:cSld></p:sld>';
+/** A deck's parts: `slides` [{xml, rels}] in the presentation's order (named in the reverse order), its notes, and media. */
+function deckParts(slides, media = {}) {
+  const parts = {
+    '[Content_Types].xml': typesOf([['/ppt/presentation.xml', 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml']]),
+    '_rels/.rels': relsOf([['rId1', 'officeDocument', 'ppt/presentation.xml']]),
+    'ppt/presentation.xml': OOXML + '<p:presentation ' + P_NS + '><p:sldIdLst>' + slides.map((_, i) => '<p:sldId id="' + (256 + i) + '" r:id="rId' + (10 + slides.length - i) + '"/>').join('') + '</p:sldIdLst></p:presentation>',
+    'ppt/_rels/presentation.xml.rels': relsOf(slides.map((_, i) => ['rId' + (10 + slides.length - i), 'slide', 'slides/slide' + (i + 1) + '.xml'])),
+  };
+  slides.forEach((x, i) => {
+    parts['ppt/slides/slide' + (i + 1) + '.xml'] = x.xml;
+    parts['ppt/slides/_rels/slide' + (i + 1) + '.xml.rels'] = relsOf(x.rels || []);
+  });
+  parts['ppt/notesSlides/notesSlide1.xml'] = OOXML + '<p:notes ' + P_NS + '><p:cSld><p:spTree>' + deckShape('PRESENTERNOTE', { ph: 'body' }) + '</p:spTree></p:cSld></p:notes>';
+  for (const [name, bytes] of Object.entries(media)) parts['ppt/media/' + name] = bytes;
+  return parts;
+}
+
+const X_NS = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+const sheetCell = (ref, v) => '<c r="' + ref + '" t="inlineStr"><is><t>' + v + '</t></is></c>';
+/**
+ * A workbook: Budget (column B and row 2 hidden, a formula saved without its value, one with it) and two hidden sheets,
+ * Salaries ("very hidden") and Old, each hidden word in capitals.
+ */
+const workbookParts = () => ({
+  '[Content_Types].xml': typesOf([['/xl/workbook.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml']]),
+  '_rels/.rels': relsOf([['rId1', 'officeDocument', 'xl/workbook.xml']]),
+  'xl/workbook.xml': OOXML + '<workbook ' + X_NS + '><sheets><sheet name="Budget" sheetId="1" r:id="rId1"/><sheet name="Salaries" sheetId="2" state="veryHidden" r:id="rId2"/><sheet name="Old" sheetId="3" state="hidden" r:id="rId3"/></sheets></workbook>',
+  'xl/_rels/workbook.xml.rels': relsOf([['rId1', 'worksheet', 'worksheets/sheet1.xml'], ['rId2', 'worksheet', 'worksheets/sheet2.xml'], ['rId3', 'worksheet', 'worksheets/sheet3.xml']]),
+  'xl/worksheets/sheet1.xml': OOXML + '<worksheet ' + X_NS + '><cols><col min="2" max="2" width="9" hidden="1" customWidth="1"/></cols><sheetData>'
+    + '<row r="1">' + sheetCell('A1', 'Item') + sheetCell('B1', 'SECRETCOL') + sheetCell('C1', 'Cost') + '</row>'
+    + '<row r="2" hidden="1">' + sheetCell('A2', 'SECRETROW') + '</row>'
+    + '<row r="3">' + sheetCell('A3', 'Total') + '<c r="C3"><f>SUM(C1:C2)</f></c><c r="D3"><f>1+1</f><v>2</v></c></row></sheetData></worksheet>',
+  'xl/worksheets/sheet2.xml': OOXML + '<worksheet ' + X_NS + '><sheetData><row r="1">' + sheetCell('A1', 'VERYHIDDEN') + '</row></sheetData></worksheet>',
+  'xl/worksheets/sheet3.xml': OOXML + '<worksheet ' + X_NS + '><sheetData><row r="1">' + sheetCell('A1', 'JUSTHIDDEN') + '</row></sheetData></worksheet>',
+});
+
+/**
+ * The page's document worker (public/docworker.js) run as a browser runs a worker: in a context of its own, its
+ * importScripts reading AGMessage's own files by their address, handed one task ({task, bytes, opts}, the bytes copied
+ * into the worker's own ArrayBuffer) and answering it once. Resolves the answer as plain data (picture bytes as Buffers).
+ * `without` names globals a device lacks (a browser with no `DecompressionStream`, say).
+ */
+async function docWorker(task, bytes, opts = {}, { without = [] } = {}) {
+  const vm = require('vm');
+  const globals = {
+    console, setTimeout, clearTimeout, setImmediate, clearImmediate, queueMicrotask,
+    TextDecoder, TextEncoder, Blob, DecompressionStream, ReadableStream, WritableStream, TransformStream,
+  };
+  for (const name of without) delete globals[name];
+  const ctx = vm.createContext(globals);
+  vm.runInContext('globalThis.self = globalThis;', ctx);
+  ctx.importScripts = (...urls) => {
+    for (const u of urls) vm.runInContext(readSource(path.join(ROOT, 'public', ...String(u).replace(/^\//, '').split('/'))), ctx, { filename: u });
+  };
+  let answer;
+  const heard = new Promise((resolve) => { ctx.postMessage = (m) => { answer = m; resolve(); }; });
+  vm.runInContext(readSource(path.join(ROOT, 'public', 'docworker.js')), ctx, { filename: 'docworker.js' });
+  const ab = vm.runInContext('(n) => new ArrayBuffer(n)', ctx)(bytes.length);
+  new Uint8Array(ab).set(bytes);
+  ctx.onmessage({ data: { task, bytes: ab, opts } });
+  await heard;
+  const plain = (v) => {
+    if (v && typeof v === 'object' && typeof v.byteLength === 'number' && !Array.isArray(v)) return Buffer.from(new Uint8Array(v.buffer || v, v.byteOffset || 0, v.byteLength));
+    if (Array.isArray(v)) return Array.from(v, plain);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plain(x)]));
+    return v;
+  };
+  return plain(answer);
+}
+
 module.exports = {
   stagewatchQuery, ROOT, REPO, TOKEN, readSource, freePort, freeUdpPort, wait, until, startServer, stopServer, restartServer, api, connect, emit, answer, once, pngOf, fakeStagewatch, fakeNode,
   filesUnder, handlerFiles, pageScripts,
   FIXTURE_KEY, OTHER_KEY, HOST, auditKeys, recordsOf, auditLog, serverKey, serverAudit, chainOf, keyedChainOf, keyedLogWithPoints, auditMeter, acceptAll, brief,
   readZip, unzipTo, SEED_WORDS,
+  officeZip, wordParts, wordPicture, relsOf, typesOf, OOXML, W_NS, deckParts, deckShape, deckPicture, deckSlide, workbookParts, docWorker,
 };

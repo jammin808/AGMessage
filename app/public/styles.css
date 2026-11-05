@@ -269,15 +269,6 @@ body[data-role="research"] .doc-panel {
   height: 100%; min-height: 160px; text-align: center; color: var(--muted);
 }
 .doc-display .empty-state p { margin: .25rem 0; }
-.doc-preview img {
-  max-width: 100%; max-height: 100%;
-  display: block; margin: 0 auto;
-  border-radius: 8px; border: 1px solid var(--border); background: #fff;
-}
-.doc-pdf-canvas {
-  display: flex; flex-direction: column; gap: .55rem;
-  background: #f1f3f7; padding: .25rem; border-radius: 6px;
-}
 .pdf-page {
   display: block; margin: 0 auto;
   background: #fff;
@@ -285,15 +276,6 @@ body[data-role="research"] .doc-panel {
   border-radius: 4px;
   max-width: 100%;
 }
-.doc-file-card {
-  display: flex; gap: .75rem; align-items: center;
-  background: #fff; border: 1px solid var(--border); border-radius: 10px;
-  padding: 1rem;
-}
-.doc-file-card .ico { font-size: 2rem; }
-.doc-file-card .meta strong { display: block; word-break: break-word; }
-.doc-file-card .meta small { color: var(--muted); }
-.doc-file-card .meta small.muted { display: block; margin-top: .2rem; }
 
 .doc-caption { margin: 0; padding: .55rem .85rem; background: #fff8e6; border-top: 1px solid #f3dfb8; color: #6a4a00; font-style: italic; }
 .doc-actions { display: flex; gap: .4rem; padding: .55rem .65rem; border-top: 1px solid var(--border); background: #fff; flex: 0 0 auto; }
@@ -360,6 +342,46 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
   cursor: pointer; font-size: .85rem; color: var(--ink);
 }
 .sheet-tab.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+/* A document drawn by docview.mjs: its bar (the page box, zoom, find) stays at the top of the panel as it scrolls; a
+   hidden row, column, sheet or slide (drawn on a backstage seat only) reads muted and says "hidden" in words */
+.dv-bar {
+  position: sticky; top: calc(-1 * var(--sp-4)); z-index: 1;
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2);
+  margin: calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4)) var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--c-surface-raised); border-bottom: 1px solid var(--c-border); color: var(--c-ink);
+}
+.dv-bar:empty { display: none; }
+.dv-bar .btn.small { min-height: var(--target-min); }
+.dv-place, .dv-zoom, .dv-find { display: inline-flex; align-items: center; gap: var(--sp-1); margin: 0; }
+.dv-pre, .dv-of, .dv-found, .dv-differs { font-size: var(--fs-sm); }
+.dv-found, .dv-differs { color: var(--c-ink-muted); }
+.dv-n { width: 3.5em; text-align: center; font-size: var(--fs-md); padding: var(--sp-1); border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); }
+.dv-q { width: 9em; font-size: var(--fs-md); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-raised); color: var(--c-ink); }
+.dv-notice { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); color: var(--c-ink-muted); }
+.dv-pdf { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
+/* a pinch on a PDF or a picture is its zoom, not the page's */
+.dv[data-kind="pdf"] .dv-body, .dv[data-kind="image"] .dv-body { touch-action: pan-x pan-y; }
+.dv-body:focus { outline: 2px solid var(--c-action); outline-offset: 2px; }
+.dv-body:focus:not(:focus-visible) { outline: none; }
+.dv-page { position: relative; max-width: none; }
+.dv-page canvas { display: block; }
+.dv-img { display: block; margin: 0 auto; max-width: none; border: 1px solid var(--c-border); }
+.dv-lines { white-space: pre-wrap; }
+.dv-line { min-height: 1.2em; }
+.dv-grid { border-collapse: collapse; font-size: var(--fs-sm); }
+.dv-grid th, .dv-grid td { border: 1px solid var(--c-border); padding: var(--sp-1) var(--sp-2); vertical-align: top; color: var(--c-ink); }
+.dv-grid th { font-weight: 600; color: var(--c-ink-muted); white-space: nowrap; }
+.dv-hidden, .dv-grid .dv-hidden, .dv-grid .dv-hidden th { color: var(--c-ink-muted); font-style: italic; }
+.dv-novalue { color: var(--c-ink-muted); font-style: italic; }
+.dv-li { margin: var(--sp-1) 0; }
+.dv-marker { color: var(--c-ink-muted); }
+.dv-code { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-sm); }
+.dv-pic { display: block; max-width: 100%; height: auto; }
+.dv-pagemark, .dv-slidemark { margin: var(--sp-4) 0 var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--c-border); font-size: var(--fs-xs); color: var(--c-ink-muted); }
+.dv-slide { margin-bottom: var(--sp-4); }
+.dv-hit { outline: 3px solid var(--c-action); outline-offset: 2px; }
 
 /* Error message inside the panel */
 .doc-display .error {
@@ -741,9 +763,7 @@ html[data-theme="dark"] .doc-html th { background: #1f2840; }
 html[data-theme="dark"] .doc-html th, html[data-theme="dark"] .doc-html td { border-color: var(--border); }
 html[data-theme="dark"] .sheet-tab { background: #1f2840; color: var(--ink); border-color: var(--border); }
 html[data-theme="dark"] .sheet-tab.active { background: var(--brand); color: #0f1421; border-color: var(--brand); }
-html[data-theme="dark"] .doc-pdf-canvas { background: #131a2a; }
 html[data-theme="dark"] .pdf-page { background: #fff; }   /* keep PDF canvas page bg white */
-html[data-theme="dark"] .doc-file-card { background: #1f2840; border-color: var(--border); color: var(--ink); }
 html[data-theme="dark"] .doc-caption { background: #2a2010; border-color: #3a2e15; color: #f5d8a0; }
 
 /* People panel pills */
@@ -1035,7 +1055,6 @@ html[data-theme="dark"] .room-code-big { color: #b8c8ff; }
 
 /* PDFs / images max-width follows the panel naturally */
 .pdf-page { max-width: 100%; height: auto; }
-.doc-preview img { max-width: 100%; height: auto; }
 
 /* Dark-mode tweaks */
 html[data-theme="dark"] .doc-expand-rail {
@@ -1244,38 +1263,6 @@ html[data-theme="dark"] .linked-chip .unlink-room { color: #f5d8a0; }
 .research-compose #textPane:not(.hidden) > .row.end {
   margin-top: 0;
   flex: 0 0 auto;
-}
-
-/* On-stage doc panel: page indicator and ergonomics
-   --------------------------------------------------
-   Multi-page PDFs (and only PDFs — DOCX/XLSX/text are single-blob)
-   show a sticky "N / total" chip in the top-right corner of the doc
-   panel so admin/research/board users always know their position. The
-   chip is appended inside .doc-pdf-canvas in renderPdfInline; it is
-   auto-cleared when docDisplay.innerHTML is reset on dismiss or
-   rerender, so we don't need lifecycle plumbing. */
-.doc-page-indicator {
-  position: sticky;
-  top: 6px;
-  align-self: flex-end;
-  z-index: 5;
-  background: rgba(15, 23, 42, .82);
-  color: #fff;
-  padding: .3rem .7rem;
-  border-radius: 999px;
-  font-size: calc(.9rem * var(--zoom-msg, 1));
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: .02em;
-  margin-right: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .22);
-  pointer-events: none;
-  user-select: none;
-}
-html[data-theme="dark"] .doc-page-indicator {
-  background: rgba(241, 245, 249, .92);
-  color: #0f172a;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .55);
 }
 
 /* Wider, easier-to-grab scrollbar on the on-stage doc area. The director

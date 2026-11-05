@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
+<office:automatic-styles>
+<style:style style:name="H0" style:family="paragraph"><style:text-properties fo:font-size="20pt" fo:font-weight="bold"/></style:style>
+<style:style style:name="H1" style:family="paragraph"><style:paragraph-properties fo:break-before="page"/><style:text-properties fo:font-size="20pt" fo:font-weight="bold"/></style:style>
+<style:style style:name="Body" style:family="paragraph"><style:text-properties fo:font-size="12pt"/></style:style>
+</office:automatic-styles>
+<office:body><office:text>
+<text:h text:style-name="H0" text:outline-level="1">Page 1: Agenda</text:h>
+<text:p text:style-name="Body">This is page 1 of the board pack, about agenda.</text:p>
+<text:h text:style-name="H1" text:outline-level="1">Page 2: Minutes</text:h>
+<text:p text:style-name="Body">This is page 2 of the board pack, about minutes.</text:p>
+<text:h text:style-name="H1" text:outline-level="1">Page 3: Finance</text:h>
+<text:p text:style-name="Body">This is page 3 of the board pack, about finance.</text:p>
+<text:list><text:list-item><text:p>Revenue up</text:p></text:list-item><text:list-item><text:p>Costs flat</text:p></text:list-item></text:list>
+<table:table table:name="T1"><table:table-column table:number-columns-repeated="3"/><table:table-row><table:table-cell office:value-type="string"><text:p>Item</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>Q1</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>Q2</text:p></table:table-cell></table:table-row><table:table-row><table:table-cell office:value-type="string"><text:p>Plant</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>4</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>5</text:p></table:table-cell></table:table-row><table:table-row><table:table-cell office:value-type="string"><text:p>Staff</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>2</text:p></table:table-cell><table:table-cell office:value-type="string"><text:p>2</text:p></table:table-cell></table:table-row></table:table>
+<text:h text:style-name="H1" text:outline-level="1">Page 4: Capex</text:h>
+<text:p text:style-name="Body">This is page 4 of the board pack, about capex.</text:p>
+<text:h text:style-name="H1" text:outline-level="1">Page 5: Quorum</text:h>
+<text:p text:style-name="Body">This is page 5 of the board pack, about quorum.</text:p>
+<text:p text:style-name="Body">The quorum was met with nine members present.</text:p>
+<text:h text:style-name="H1" text:outline-level="1">Page 6: Close</text:h>
+<text:p text:style-name="Body">This is page 6 of the board pack, about close.</text:p>
+</office:text></office:body></office:document>

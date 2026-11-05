@@ -57,6 +57,30 @@ test('AGMessage server: security, resume, persistence', async (t) => {
     assert.match(mjs.headers.get('content-type') || '', /javascript/);
   });
 
+  // pdf.js's worker decodes JPEG 2000 with WebAssembly, and a worker loaded by its address runs under its own script's
+  // policy: that one response, by its exact path, may compile WebAssembly ('wasm-unsafe-eval', never 'unsafe-eval'); the
+  // pages, the screen page, pdf.js's own module, the document worker and the readers keep the strict policy.
+  await t.test('pdf.js\'s worker alone may run WebAssembly: its own response, by its exact path', async () => {
+    const scriptSrc = (csp) => { const m = /(?:^|;\s*)script-src ([^;]+)/.exec(csp || ''); return m ? m[1] : null; };
+    const worker = await fetch(base + '/vendor/pdf.worker.min.mjs');
+    assert.equal(worker.status, 200);
+    const workerCsp = worker.headers.get('content-security-policy');
+    assert.equal(scriptSrc(workerCsp), "'self' 'wasm-unsafe-eval'");
+    assert.ok(!/'unsafe-eval'/.test(workerCsp), 'WebAssembly only, never eval');
+    const strict = (await fetch(base + '/index.html')).headers.get('content-security-policy');
+    assert.equal(workerCsp, strict.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'"), 'the strict policy but its script-src');
+    for (const p of ['/app.html', '/display.html', '/d/' + 'a'.repeat(43), '/vendor/pdf.min.mjs', '/docworker.js', '/docview.mjs', '/docmodel.mjs', '/wordpages.js']) {
+      const r = await fetch(base + p);
+      assert.equal(r.status, 200, p);
+      assert.equal(scriptSrc(r.headers.get('content-security-policy')), "'self'", p + ': the strict script-src');
+    }
+    // Near misses of the worker's path (not served) never carry it either.
+    for (const p of ['/vendor/pdf.worker.min.mjs.map', '/VENDOR/pdf.worker.min.mjs', '/vendor/pdf.worker.min.mjs/', '/vendor/x/pdf.worker.min.mjs']) {
+      const r = await fetch(base + p);
+      assert.ok(!/wasm-unsafe-eval/.test(r.headers.get('content-security-policy') || ''), p + ': no WebAssembly');
+    }
+  });
+
   // admin login from this machine, then a room
   const login = await fetch(base + '/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN }) });
   assert.equal(login.status, 200);

@@ -48,7 +48,8 @@ Copyright (c) 2024, Mozilla Foundation, `licenses/openjpeg/pdf.js.openjpeg-LICEN
 
 ## mammoth 1.13.0
 
-Word documents (`.docx`) become HTML in the page. https://github.com/mwilliamson/mammoth.js
+Word documents (`.docx`) become HTML in the page's document worker (`app/public/docworker.js`), which the page ends at its
+deadline. https://github.com/mwilliamson/mammoth.js
 
 ### `mammoth.browser.min.js`
 
@@ -86,7 +87,8 @@ Word documents (`.docx`) become HTML in the page. https://github.com/mwilliamson
 
 ## SheetJS Community Edition 0.20.3
 
-Spreadsheets (`.xlsx`, `.xls`, `.csv`) are read in the page. Taken from SheetJS's own distribution
+Spreadsheets (`.xlsx`, `.xls`) are read in the page's document worker (`app/public/docworker.js`); a `.csv` is read by
+AGMessage's own reader. Taken from SheetJS's own distribution
 (https://cdn.sheetjs.com), never from npm's `xlsx`, which stopped at 0.18.5, before CVE-2023-30533 and CVE-2024-22363
 were fixed. https://sheetjs.com
 
@@ -113,7 +115,7 @@ library listed here.
 
 | Library | Advisories | Applies here | Why |
 |---|---|---|---|
-| @xmldom/xmldom 0.8.6 | GHSA-8344-3jmq-59r6, GHSA-x4fp-j954-r2f4, GHSA-965w-775f-mr7g, GHSA-93r5-fhx6-vmg9 (high: quadratic time or memory, or a regular expression's backtracking, on crafted XML) | Yes | mammoth parses every part of a Word file with xmldom, so a crafted `.docx` keeps the page that draws it busy, or short of memory, until it is reloaded: the panel of whoever opens it, and every Board panel in the hall, where a file sent into the hall opens itself. The server and the other pages are not affected. Today only the upload cap (25 MB) and who may send into a hall bound it; 0.6.0's readers move mammoth into a worker the page ends at a deadline, and a file stops opening itself on the Board's panel. No mammoth release bundles the fixed xmldom (0.8.15). |
+| @xmldom/xmldom 0.8.6 | GHSA-8344-3jmq-59r6, GHSA-x4fp-j954-r2f4, GHSA-965w-775f-mr7g, GHSA-93r5-fhx6-vmg9 (high: quadratic time or memory, or a regular expression's backtracking, on crafted XML) | Yes | mammoth parses every part of a Word file with xmldom, so a crafted `.docx` keeps the page that draws it busy, or short of memory, until it is reloaded: the panel of whoever opens it, and every Board panel in the hall, where a file sent into the hall opens itself. The server and the other pages are not affected. mammoth runs in the page's document worker, which the page ends after 15 s, and is handed only a file that passed the archive check, with no part declaring a document type or an entity: a crafted file costs that worker its 15 s, and the page goes on. In 0.6.0's plan a file also stops opening itself on the Board's panel (unit 26). No mammoth release bundles the fixed xmldom (0.8.15). |
 | @xmldom/xmldom 0.8.6 | GHSA-6h8r-xr42-gp59 (moderate: a not-well-formed end tag accepted) | Yes, harmlessly | Such a part is read instead of refused and the file drawn as read; nothing AGMessage decides rests on a part being well-formed. |
 | @xmldom/xmldom 0.8.6 | GHSA-wh4c-j3r5-mjhp, GHSA-2v35-w6hq-6mfw, GHSA-f6ww-3ggp-fr8h, GHSA-x6wf-f3px-wcqx, GHSA-j759-j44w-7fr8, GHSA-w2rr-34g9-rvrj, GHSA-4w3w-2rp5-g8jm, GHSA-c7q8-3ch8-vqpv, GHSA-27p8-2357-5qqv (high), GHSA-6gmq-8vp8-gcm6 (moderate): serializing a DOM, or building one to serialize | No | mammoth uses xmldom only to parse. It never serializes a DOM nor builds one with `createElement`, `setAttribute`, `createProcessingInstruction` or `createDocumentType` (it writes XML with xmlbuilder), and AGMessage never calls xmldom. |
 | jszip 3.7.1 | GHSA-36fh-84j7-cv5h (moderate: path traversal through an entry's name) | No | It needs a program that writes a zip's entries to disk under their own names; mammoth reads the Word file's parts in memory, and nothing is written. |

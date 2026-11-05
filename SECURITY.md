@@ -40,9 +40,10 @@ audit`, and a step of the Security workflow's weekly run) asks npm's registry fo
 does not assess. Each assessment says whether the advisory applies here, why, and what bounds it, and the SBOM carries
 it as that vulnerability's analysis. The one that applies today: the XML parser inside mammoth (xmldom 0.8.6, which
 mammoth 1.13.0, its newest release, still bundles) can be kept busy for a long time, or run short of memory, by a
-crafted Word file, which holds the page that draws it (the panel of whoever opens it, and the Board's panels, where a
-file sent into the hall opens itself) until it is reloaded; the server and other pages are not affected. Until 0.6.0's
-readers run mammoth in a worker with a deadline, the upload cap and who may send into a hall are what bound it.
+crafted Word file. mammoth runs only in the page's document worker, which the page ends 15 s after it starts (or as
+soon as the document is closed), and is handed only a file that passed the archive check with no entry declaring a
+document type or an entity, so such a file costs the worker of the page that opens it its 15 s and the page goes on; the
+server and other pages are not affected.
 `THIRD-PARTY-NOTICES.md` lists each advisory and its assessment.
 
 ## Recommended repository settings
@@ -380,13 +381,51 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   record signature in the file): an end record that does not end the file or carries a comment, a record signature after
   the one chosen, ZIP64 records out of their place or unmarked, and a part with two ZIP64 fields are refused, and a test
   runs the vendored readers over every archive the check passes. The check reads declared sizes only: a directory that
-  understates what a part inflates to is the document reader's to stop as it inflates. A picture's size is read from
+  understates what a part inflates to is the document reader's to stop as it inflates, and it does: the page's document
+  worker inflates a part only as far as its declared size. A picture's size is read from
   its header (`lib/imagesize.js`: PNG, WebP, a GIF's screen grown to hold its first frame as browsers draw it, and a
   JPEG's frame header, each walk of at most 64 segments or blocks, never past the first megabyte) and refused over 100
   megapixels or where it cannot be read. A check that cannot finish refuses the file. A refused file leaves the disk and
   is one `upload.refused` audit row in its hall, at the upload's own address, which names the type and the bound, never
   the file. Formulas, external references and links inside a file are the readers' (they are never
-  computed, fetched or live on the stage); the upload checks bound what the readers are handed. A file message
+  computed, fetched or live on the stage); the upload checks bound what the readers are handed.
+- Documents are parsed only by the browser of the person looking, never on the server, by bounded readers
+  (`public/docview.mjs` over `public/docmodel.mjs`). A Word, Excel or PowerPoint file is read in a worker of the page's
+  (`public/docworker.js`) that the page ends 15 s after it starts, or when the document is closed: it holds the file to
+  the upload's archive check again (the one core), holds every entry's name to the one every reader finds (printable
+  ASCII, a canonical path, the same in its local header, which JSZip reads, as in the directory checked, none twice
+  whatever its case; the archive check itself refuses an Info-ZIP Unicode Path name, at upload too), inflates a part only
+  as far as its declared size, and refuses the file if any entry, whatever its name, declares a document type or an
+  entity, before SheetJS, mammoth or AGMessage's own readers see it. A PDF is read by pdf.js with no script, no XFA, no
+  `eval`, no annotation (so no live link) and no image over 16,777,216 pixels, on the panel and on a screen; one pdf.js
+  worker serves a page and each document closed is destroyed, and a PDF whose first page is not drawn within 20 s is
+  failed and takes that worker with it. A sheet or a CSV is drawn to its first 5,000 rows and 256 columns and at most
+  100,000 cells (a wide one's rows cut to fit, in the worker before anything reaches the page), a table in a document to
+  256 columns and 100,000 cells, a text file to its first 20,000 lines, each cut said; formulas are never computed (a
+  formula saved without its value says so, whatever its type). A picture's size is read from its header before anything
+  decodes it (`public/imagecore.js`, the server's own reader): in the document worker for one inside an Office file, on
+  the page for a picture shared on its own, and one over 40 megapixels, or whose size cannot be read, is never decoded on
+  the device. HTML (mammoth's, and a Markdown file's raw HTML) is parsed
+  in one place, `parseInert`: an inert `<template>` walked into plain data, so nothing in it runs, loads or applies and no
+  parsed node is put in the page; a lint rule refuses every other way to turn markup into nodes in those modules. The
+  readers fetch a file with `cache: 'no-store'`, and a document's pictures are drawn through object URLs the page makes
+  and revokes with the document, never an address from the file or the worker.
+- Hidden things are not drawn on the Board's pages: on every seat but backstage (the admin's support view reads as
+  backstage) a hidden sheet ("very hidden" too), row or column, a hidden slide, a Markdown comment or hidden raw HTML is
+  left out with words saying how many; a slide's hidden shapes and its presenter notes are never read; and Word's hidden
+  text (`w:vanish`, `w:specVanish`, on the run, through its character or paragraph style, the style of a table it sits
+  in, or the document's defaults) is removed before mammoth reads the file, on every seat, from the main document, the
+  footnotes, the endnotes and the comments found as mammoth finds them (by relationship, under whatever names), judged
+  by the styles part mammoth reads. A hidden mark that cannot be resolved refuses the file: a style the file does not
+  have or writes twice, a chain of styles past 10 links, a table style's conditional format that hides, a mark written after a run's
+  text, or WordprocessingML bound to a prefix other than `w` or as the default namespace, which a reader that resolves
+  namespaces would read and the scanner could not. The backstage seat sees hidden
+  rows, columns, sheets and slides drawn muted and marked "hidden". The AI's copy of a document's text is read only on a
+  backstage seat, and leaves every hidden part out.
+- pdf.js's worker alone may run WebAssembly, which its JPEG 2000 decoder needs: its own response
+  (`/vendor/pdf.worker.min.mjs`, by that exact path) carries `script-src 'self' 'wasm-unsafe-eval'` (`CSP_PDF_WORKER`,
+  never `'unsafe-eval'`); every page, the screen page, pdf.js's own module and the document worker keep `script-src
+  'self'`. A worker loaded by its address runs under its own script's policy, never its page's. A file message
   is posted only in the room its upload was made for, by the person it was made by (the upload token's room and person,
   kept with the upload for its hour in memory, `freshUploads`), or again in a room a message of which holds it already;
   any other link is refused and nothing posted (another room's file or upload, another person's upload not yet posted,
@@ -399,7 +438,9 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   the hall's own files).
 - Pages carry a strict Content-Security-Policy with no inline script. The page lint (`agm/no-unescaped-html`) refuses,
   whatever they are given, a frame's `srcdoc`, `setHTMLUnsafe(`, `createContextualFragment(` and a computed
-  `el['innerHTML']`.
+  `el['innerHTML']`; in the documents' modules (`agm/inert-html`) every parse of HTML outside `parseInert` (`innerHTML`,
+  `DOMParser` as HTML, `document.write`, `parseHTMLUnsafe`) and every move of a parsed node into the page (`importNode`,
+  `adoptNode`, a template's `.content`) is refused.
 - Links to Stagewatch, Patterns and PlayMap pin each peer's certificate; keys travel in headers, never in a URL. A
   Stagewatch certificate is pinned only once Stagewatch accepted the link's key; the key goes in no request but the one
   that asks for that verdict until then; and refused keys are asked again at most once a minute, shared by every link

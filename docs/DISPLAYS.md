@@ -55,8 +55,12 @@ A screen keeps one PDF open and draws each page off screen before it swaps it in
 the slide, and a rename or a reconnect leaves the picture alone. A slide the browser had to clear (its graphics reset)
 is drawn again, never taken as still on screen. A file taken earlier that is still loading never paints over the one
 taken after it. PDFs are drawn by pdf.js 4.10.38's legacy build, which a screen's browser runs from Safari 16.4 (iPadOS
-and iOS 16.4), Chrome 103 or Firefox ESR, older iPads included. On a browser older than that a PDF take says **△** and
-the screen is black: share the page as an image and take that instead.
+and iOS 16.4), Chrome 103 or Firefox ESR, older iPads included, a picture stored as JPEG 2000 among them (pdf.js's worker
+may run the WebAssembly that decodes it, by its own response's policy). On a browser older than that a PDF take says
+**△** and the screen is black: share the page as an image and take that instead. A PDF whose first page is not drawn
+within 20 s says **△** "the file took too long to read" and leaves black, and the screen's pdf.js worker is ended with
+it, the next PDF drawing through a new one; an image inside a PDF over 16,777,216 pixels is left out of the page, as on
+the hall page's panel.
 
 ## Managing screens
 
