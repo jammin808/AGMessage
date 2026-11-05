@@ -475,6 +475,13 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 .feed-wrap { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .new-divider { display: flex; align-items: center; gap: var(--sp-2); color: var(--c-action); font-size: var(--fs-xs); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .new-divider::before, .new-divider::after { content: ''; flex: 1 1 auto; border-top: 2px solid var(--c-action); }
+/* A room opens with its newest messages: Show earlier sits above the oldest of them while the room holds earlier ones,
+   and a reply whose quoted message is earlier than those shown says so, with Show it. Each is a text action in the
+   action's ink, never faded. */
+.feed-earlier { align-self: center; display: flex; justify-content: center; }
+.feed-earlier .msg-act { color: var(--c-action); border: 1px solid var(--c-border); padding: 0 var(--sp-3); }
+.quote-earlier { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); font-style: normal; color: var(--c-ink-muted); }
+.quote-earlier .msg-act { color: var(--c-action); }
 .new-below {
   position: absolute; left: 50%; bottom: var(--sp-3); transform: translateX(-50%); z-index: var(--z-panel);
   min-height: var(--target-touch); min-width: var(--target-touch); padding: 0 var(--sp-4);

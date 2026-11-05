@@ -14,10 +14,10 @@ const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.joi
   .filter((e) => e !== 'disconnect');
 // Not sent from the admin socket: they start cloudflared or make a new certificate — real work, not an argument check.
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
-const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null, view: null };
+const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null, view: null, beforeSeq: null };
 // An object whose toString is not a function: String() throws on it, so a handler must never call String() on input.
 const U = { toString: 1 };
-const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U, view: U };
+const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U, view: U, beforeSeq: U };
 const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode: 5, messageId: {}, content: 'x', text: {} }, UNCONVERTIBLE];
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
@@ -111,6 +111,10 @@ test('client values are read by their type: a value String() cannot convert reac
     // The admin's choice of a person's chat view, each field by type: a view that is none, a room or a page that is none.
     [ctl, 'admin:setView', { roomCode: U, socketId: U, view: U }], [ctl, 'admin:setView', { roomCode: U, socketId: U, view: 'simple' }],
     [ctl, 'admin:setView', { roomCode: hall, socketId: U, view: 'full' }],
+    // A room's earlier messages, read back from a change number that is none (and from no room: the admin's page sits in none),
+    // and one of them read by an id that is none.
+    [guest, 'history:before', { beforeSeq: U }], [guest, 'history:before', U], [ctl, 'history:before', { beforeSeq: U }],
+    [guest, 'history:message', { messageId: U }], [guest, 'history:message', U], [ctl, 'history:message', { messageId: U }],
   ];
   // What each is answered: the field it could not read named, and nothing shown, numbered or reported.
   const KINDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.';
@@ -147,6 +151,11 @@ test('client values are read by their type: a value String() cannot convert reac
     if (ev === 'admin:guestWeb') {
       assert.deepEqual(r, { ok: false, error: arg.on === U ? 'Say whether backstage guests may show web pages: on (true) or off (false).' : 'No such room.' }, ev + ' ' + JSON.stringify(arg));
       await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+    if (ev === 'history:before' || ev === 'history:message') {
+      const words = ev === 'history:before' ? 'Say where to read back from: beforeSeq, the change number of the oldest message this page holds.' : 'That message is not in this room any more.';
+      assert.deepEqual(r, { ok: false, error: s === ctl ? 'Not joined' : words }, ev + ' ' + JSON.stringify(arg));
       continue;
     }
     if (ev.startsWith('page:')) {

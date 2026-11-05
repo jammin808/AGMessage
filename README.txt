@@ -261,6 +261,14 @@ Every day of the event
   "↓ 3 new" at the bottom says how many came and takes you there. A "New"
   line sits above the first message that came since you last touched the
   page. Nothing flashes. The hall page fits a phone held upright.
+- Earlier messages: a hall page opens with the room's newest 200 messages,
+  however long the day, and with every pinned message, help request not
+  yet resolved and question not yet answered from before them. "Show
+  earlier" at the top of the messages brings the 200 before, and again
+  until there are no more. A reply whose message is earlier than those
+  shown says "Earlier — Show it": press Show it to bring it and go to it.
+  A message pinned later, however early, comes to the pinned strip at
+  once on every page.
 - When the event is over, close the black window (or press Ctrl+C in it).
   Halls, history and accounts are kept for next time.
 
@@ -1012,6 +1020,12 @@ Security
 Reliability and speed
   - Every change has a sequence number. A phone that drops off the Wi-Fi for a
     moment gets only what it missed when it reconnects, not the whole history.
+  - A page opening a hall is sent its newest 200 messages, not the whole
+    day's, so the messages a phone on mobile data waits for do not grow
+    with the day. What still grows with it: the list of the room's files,
+    and the earlier messages it keeps in view (pinned, help not yet
+    resolved, questions not yet answered). The newest are drawn at once,
+    the rest just after.
   - A message you send shows "◷ Sending" until AGMessage has it, and its box
     keeps your words until then. Written while the connection is down, it
     waits on the page ("◷ Waiting — it goes when the connection is back"),

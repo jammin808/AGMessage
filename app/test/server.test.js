@@ -763,3 +763,139 @@ test('state frames: no per-message deflate; a join storm\'s people list and a bu
     assert.ok(latest.seen.flushes >= 2 && latest.seen.flushes <= 3, 'and sent in two or three frames: ' + JSON.stringify(latest.seen));
   });
 });
+
+test('a first open carries the newest 200 messages, what a page keeps in view from before them and every file; earlier ones come a page at a time with history:before, and one pinned since by its id with history:message', async (t) => {
+  const srv = await helpers.startServer();
+  const sockets = [];
+  t.after(async () => { sockets.forEach((s) => s.close()); await helpers.stopServer(srv.child); });
+  const open = async (cookie) => { const s = await helpers.connect(srv.base, cookie); sockets.push(s); return s; };
+  const admin = (await helpers.api(srv.base, 'POST', '/api/admin/login', { token: helpers.TOKEN })).cookie;
+  const code = (await helpers.api(srv.base, 'POST', '/api/rooms', { name: 'Long day' }, { cookie: admin })).body.code;
+  const ctl = await open(admin);
+  const watch = async () => (await helpers.emit(ctl, 'admin:watchRoom', { roomCode: code })).messages;
+  const ids = (list) => list.map((m) => m.id);
+
+  // The day's start: an agenda pinned, a picture shared, a question nobody has answered, one answered, a help request
+  // still open and one resolved, and a message a reply will quote much later.
+  const ana = await open();
+  const anaIn = await helpers.emit(ana, 'join', { roomCode: code, name: 'Ana', role: 'research' });
+  const chair = await open();
+  assert.ok((await helpers.emit(chair, 'join', { roomCode: code, name: 'Chair', role: 'board' })).ok);
+  const say = async (s, payload) => { const r = await helpers.emit(s, 'message', payload); assert.ok(r.ok, JSON.stringify(r)); return r.id; };
+  const agenda = await say(ana, { type: 'text', text: 'The agenda: item 4 is the capex review' });
+  assert.ok((await helpers.emit(ana, 'pin', { messageId: agenda, pinned: true })).ok);
+  const f = new FormData();
+  f.append('file', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])], { type: 'image/png' }), 'stage.png');
+  const up = await (await fetch(srv.base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': anaIn.uploadToken }, body: f })).json();
+  const picture = await say(ana, { type: 'file', url: up.url, filename: 'stage.png', mime: 'image/png' });
+  const asked = await say(ana, { type: 'action', text: 'Ready for questions?', options: ['Yes', 'No'] });
+  const answered = await say(ana, { type: 'action', text: 'Proxies counted?', options: ['Yes', 'No'] });
+  assert.ok((await helpers.emit(chair, 'actionResponse', { messageId: answered, optionIndex: 0 })).ok);
+  const help = await say(chair, { type: 'help', category: 'Sound', text: 'mic 3 is dead' });
+  const sorted = await say(chair, { type: 'help', category: 'Presenter', text: 'water, please' });
+  assert.ok((await helpers.emit(ana, 'help:respond', { code, messageId: sorted, state: 'resolved' })).ok);
+  const quoted = await say(chair, { type: 'text', text: 'Can we take questions after item 4?' });
+  const doomed = await say(chair, { type: 'text', text: 'Is the lectern mic on?' });
+  // Then the day: 16 people backstage, 25 messages each, in two bursts each socket's bucket takes (15 at once, and 10 once
+  // it has filled again).
+  const crew = [];
+  for (let w = 0; w < 16; w++) {
+    const s = await open();
+    assert.ok((await helpers.emit(s, 'join', { roomCode: code, name: 'Crew ' + w, role: 'research' })).ok);
+    crew.push(s);
+  }
+  const burst = (from, n) => Promise.all(crew.map((s, w) => Promise.all(Array.from({ length: n }, (_, i) => say(s, { type: 'text', text: 'note ' + w + '.' + (from + i) })))));
+  await burst(0, 15);
+  await helpers.wait(2200);
+  await burst(15, 10);
+  // A reply to a message its author then removes: its quote says the message has gone, so no page reads back to it.
+  const toDoomed = await say(ana, { type: 'text', text: 'It is now', replyTo: doomed });
+  assert.ok((await helpers.emit(chair, 'delete', { messageId: doomed })).ok);
+  const reply = await say(ana, { type: 'text', text: 'Yes, after item 4', replyTo: quoted });
+  const all = await watch();
+  assert.ok(all.length > 400, 'the room holds ' + all.length + ' messages');
+
+  await t.test('a join without since: the newest 200, the pinned message, the open help and the unanswered question from before them, every file, and more', async () => {
+    const reader = await open();
+    const j = await helpers.emit(reader, 'join', { roomCode: code, name: 'Reader', role: 'observer' });
+    assert.ok(j.ok, JSON.stringify(j));
+    // The room as it was answered: the reader's own joined line comes after the answer.
+    const now = (await watch()).slice(0, -1);
+    assert.equal((await watch()).at(-1).text, 'Reader joined as an observer');
+    assert.deepEqual(ids(j.history), ids(now.slice(-200)), 'the newest 200, oldest first');
+    assert.deepEqual([ids(j.older), j.more], [[agenda, asked, help], true], 'pinned, help not resolved and questions not answered, in the room\'s order');
+    assert.deepEqual(j.files, [{ id: picture, url: up.url, filename: 'stage.png', mime: 'image/png' }], 'every file of the room, its message held or not');
+    assert.ok(!j.history.some((m) => m.id === quoted) && j.history.at(-1).id === reply && j.history.at(-1).replyTo.id === quoted && !j.history.at(-1).replyTo.gone, 'a reply whose quoted message is earlier than the window');
+    assert.deepEqual(j.history.find((m) => m.id === toDoomed).replyTo, { id: doomed, name: 'Chair', snippet: 'Is the lectern mic on?', gone: true }, 'a reply whose quoted message has gone says so');
+    assert.deepEqual(Object.keys(j).slice(-3), ['more', 'older', 'files'], 'appended at the end of the answer');
+    assert.equal(j.seq, now.at(-1).seq);
+
+    // Read back from the window's oldest, a page at a time, until nothing is left: every message once, in order. A change
+    // made to a message the page did not hold (a reaction) is in it when it comes.
+    assert.ok((await helpers.emit(ana, 'react', { messageId: quoted, emoji: '👍', on: true })).ok);
+    const pagesRead = [];
+    let before = j.history[0].seq;
+    let more = j.more;
+    while (more) {
+      const r = await helpers.emit(reader, 'history:before', { beforeSeq: before });
+      assert.deepEqual(Object.keys(r), ['ok', 'history', 'more'], JSON.stringify(r).slice(0, 200));
+      assert.ok(r.ok && r.history.length > 0 && r.history.length <= 200);
+      pagesRead.unshift(r.history);
+      before = r.history[0].seq;
+      more = r.more;
+    }
+    assert.equal(pagesRead.length, Math.ceil((now.length - 200) / 200), 'pages of 200');
+    const room = await watch();
+    assert.deepEqual(ids(pagesRead.flat().concat(j.history)), ids(room.slice(0, j.history.length + pagesRead.flat().length)), 'every message once, in the room\'s order');
+    const read = pagesRead.flat().find((m) => m.id === quoted);
+    assert.deepEqual(read.reactions.map((x) => [x.name, x.emoji]), [['Ana', '👍']], 'read as it stands now');
+    assert.ok(!pagesRead.flat().some((m) => m.id === doomed), 'a message removed is never read back');
+    // Before the first message: nothing, and no more.
+    assert.deepEqual(await helpers.emit(reader, 'history:before', { beforeSeq: pagesRead[0][0].seq }), { ok: true, history: [], more: false });
+  });
+
+  await t.test('a message pinned since a page opened, earlier than what it holds, is read by its id with history:message, as it stands', async () => {
+    const reader = await open();
+    const j = await helpers.emit(reader, 'join', { roomCode: code, name: 'Later', role: 'observer' });
+    assert.ok(j.ok && ![...j.history, ...j.older].some((m) => m.id === answered), 'the page holds no answered question from the day\'s start');
+    const heard = new Promise((resolve) => reader.once('pinUpdate', resolve));
+    assert.ok((await helpers.emit(ana, 'pin', { messageId: answered, pinned: true })).ok);
+    const pin = await heard;
+    assert.deepEqual([pin.messageId, pin.pinned, Number.isInteger(pin.seq)], [answered, true, true], 'the page hears the pin of a message it does not hold, and no record with it');
+    const got = await helpers.emit(reader, 'history:message', { messageId: answered });
+    assert.deepEqual([Object.keys(got), got.message.id, got.message.pinned, got.message.responses.map((x) => x.name)], [['ok', 'message'], answered, true, ['Chair']], 'the record as it stands: pinned, its answer in it');
+    assert.equal((await helpers.emit(reader, 'history:message', { messageId: toDoomed })).message.replyTo.gone, true, 'a reply whose quoted message has gone says so here too');
+    const words = 'That message is not in this room any more.';
+    assert.deepEqual([await helpers.emit(reader, 'history:message', { messageId: doomed }), await helpers.emit(reader, 'history:message', { messageId: 'nope' })], [{ ok: false, error: words }, { ok: false, error: words }], 'one removed, and an id the room holds none by');
+    assert.ok((await helpers.emit(ana, 'pin', { messageId: answered, pinned: false })).ok);
+  });
+
+  await t.test('history:before and history:message are read by type, behind the gate: joined, one chatter token per ask', async () => {
+    const words = 'Say where to read back from: beforeSeq, the change number of the oldest message this page holds.';
+    const page = await open();
+    assert.deepEqual(await helpers.emit(page, 'history:before', { beforeSeq: 5 }), { ok: false, error: 'Not joined' }, 'a page in no room reads none');
+    assert.deepEqual(await helpers.emit(page, 'history:message', { messageId: agenda }), { ok: false, error: 'Not joined' }, 'nor a message of any room');
+    assert.ok((await helpers.emit(page, 'join', { roomCode: code, name: 'Typist', role: 'observer' })).ok);
+    for (const bad of [null, {}, { beforeSeq: '40' }, { beforeSeq: 0 }, { beforeSeq: -3 }, { beforeSeq: 2.5 }, { beforeSeq: [7] }]) {
+      assert.deepEqual(await helpers.emit(page, 'history:before', bad), { ok: false, error: words }, JSON.stringify(bad));
+    }
+    for (const bad of [null, {}, { messageId: 7 }, { messageId: [agenda] }, { messageId: '' }]) {
+      assert.deepEqual(await helpers.emit(page, 'history:message', bad), { ok: false, error: 'That message is not in this room any more.' }, JSON.stringify(bad));
+    }
+    // The chatter bucket holds 20: a burst of 30 asks is answered, the rest refused for the rate, which the page asks again.
+    const burst = await Promise.all(Array.from({ length: 30 }, (_, i) => (i % 2 ? helpers.emit(page, 'history:before', { beforeSeq: 9 }) : helpers.emit(page, 'history:message', { messageId: agenda }))));
+    const slow = burst.filter((r) => !r.ok);
+    assert.ok(slow.length >= 5 && slow.every((r) => r.error === 'Slow down a little.' && r.busy === true), JSON.stringify(slow.slice(0, 2)) + ' of ' + slow.length);
+  });
+
+  await t.test('a resume is unchanged: what the page missed, and no window', async () => {
+    const back = await open();
+    const first = await helpers.emit(back, 'join', { roomCode: code, name: 'Back', role: 'observer' });
+    back.close();
+    await say(ana, { type: 'text', text: 'while you were away' });
+    const again = await open();
+    const r = await helpers.emit(again, 'join', { roomCode: code, name: 'Back', role: 'observer', uid: first.identity, since: first.seq });
+    assert.ok(r.ok && Array.isArray(r.ops) && r.ops.some((op) => op.o === 'add' && op.m.text === 'while you were away'));
+    assert.deepEqual(['history', 'older', 'more', 'files'].filter((k) => k in r), [], 'a resume carries none of a first open');
+  });
+});

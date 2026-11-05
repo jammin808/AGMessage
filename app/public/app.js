@@ -241,7 +241,7 @@ function rejoin() {
         if (done.toEnd) scrollToBottom();
       }
     } else {
-      renderHistory(res.history || []);
+      renderHistory(res);
     }
     lastSeq = Math.max(lastSeq, res.seq || 0);
     joined = true;
@@ -296,6 +296,7 @@ function factsChanged(patch) {
   drawChips();
   Takes.redraw();
   Console.draw();
+  Earlier.redraw();
   refreshOpenMenu();
 }
 
@@ -723,11 +724,14 @@ socket.on('seen', (frame) => {
 socket.on('roomReset', ({ seq } = {}) => { if (bump(seq)) onReset(); });
 socket.on('roomMeta', ({ name, seq } = {}) => { if (bump(seq)) setRoomTitle(name); });
 function onReset() {
-  // Admin cleared the room. Wipe local state but stay joined; what this page holds for sending is still drawn.
+  // Admin cleared the room. Wipe local state but stay joined; what this page holds for sending is still drawn. The room
+  // has no earlier messages and no files now.
+  Earlier.stop();
   feed.innerHTML = '';
   forgetPlace();
   messagesById.clear();
   allMessages.length = 0;
+  roomFiles.clear();
   for (const node of echoes.values()) feed.appendChild(node);
   refreshPinned();
   refreshDocPinnedList();
@@ -958,17 +962,43 @@ const feed = document.getElementById('feed');
 const feedRoving = AGM.roving(feed, { item: '.msg[data-key]', start: 'last', skip: '[data-type="action"][data-pinned="1"]' });
 const tpl = document.getElementById('msgTpl');
 const messagesById = new Map();
+// Every message this page holds, in the room's order: those drawn (messagesById) and those waiting to be drawn (`undrawn`,
+// by id: a first open's and each earlier page's, drawn a chunk at a time above what is drawn, Earlier below). A record is
+// held from the moment it comes, so a change heard while it waits reaches it, and it is drawn as it is then.
 const allMessages = [];
+const undrawn = new Map();
 function findMessage(id) { return allMessages.find((m) => m.id === id); }
 function isMine(msg) { return !!(msg.from && (MY_UID ? msg.from.uid === MY_UID : msg.from.name === NAME)); }
+// Every file of the room by its message's id, held or not: the first open's index (`files`), then each file that comes and
+// goes. What the page lists of the room's files (Holding's pictures) reads it, never only the messages it holds.
+const roomFiles = new Map();
+/** A file of the index, read by type: its id, address, name and kind, or null. */
+function fileEntry(f) {
+  if (!f || typeof f.id !== 'string' || !f.id || typeof f.url !== 'string' || !f.url) return null;
+  return { id: f.id, url: f.url, filename: typeof f.filename === 'string' ? f.filename : '', mime: typeof f.mime === 'string' ? f.mime : '' };
+}
+/** A file message heard (or held), into the room's files. */
+function noteFile(msg) { const f = msg && msg.type === 'file' ? fileEntry(msg) : null; if (f) roomFiles.set(f.id, f); }
 
-function renderHistory(history) {
+/**
+ * A first open (a join that named no change it held, or one whose gap the server no longer holds): the room's newest
+ * messages and what a page keeps in view from before them, the newest drawn at once and the rest above them as the page is
+ * idle (Earlier.open), and the room's files. Nothing held before stays: a page drawn afresh.
+ */
+function renderHistory(res) {
+  Earlier.stop();
   feed.innerHTML = '';
   forgetPlace();
   messagesById.clear();
   allMessages.length = 0;
   for (const node of echoes.values()) feed.appendChild(node);
-  for (const m of history) addMessage(m, { silent: true });
+  const history = (Array.isArray(res.history) ? res.history : []).filter((m) => m && typeof m.id === 'string');
+  const older = (Array.isArray(res.older) ? res.older : []).filter((m) => m && typeof m.id === 'string');
+  roomFiles.clear();
+  // A server that sends no index (an older build's) has sent every message: its files are theirs.
+  if (Array.isArray(res.files)) res.files.forEach((f) => { const e = fileEntry(f); if (e) roomFiles.set(e.id, e); });
+  else older.concat(history).forEach(noteFile);
+  Earlier.open(older, history, res.more === true);
   Simple.waits();
   refreshPinned();
   refreshDocPinnedList();
@@ -985,17 +1015,29 @@ function renderHistory(history) {
 function addMessage(msg, { silent = false, arrived = false } = {}) {
   // One of this person's held sends, now the server's message: its echo goes, and the outbox lets go of it.
   if (msg && typeof msg.cid === 'string' && msg.from && MY_UID && msg.from.uid === MY_UID) AGM.outbox.landed(msg.cid);
-  if (!msg || messagesById.has(msg.id)) {
-    if (msg && messagesById.has(msg.id)) {
-      const el = messagesById.get(msg.id);
-      rerenderMessage(el, msg);
-      const idx = allMessages.findIndex((m) => m.id === msg.id);
-      if (idx >= 0) allMessages[idx] = msg;
-      if (msg.type === 'help') HelpChip.draw();
-      Simple.waits();
-    }
+  if (!msg) return;
+  // Held and waiting to be drawn: its newer record is the one drawn when its turn comes.
+  if (undrawn.has(msg.id)) {
+    const idx = allMessages.findIndex((m) => m.id === msg.id);
+    if (idx >= 0) allMessages[idx] = msg;
+    undrawn.set(msg.id, msg);
     return;
   }
+  if (messagesById.has(msg.id)) {
+    const el = messagesById.get(msg.id);
+    rerenderMessage(el, msg);
+    const idx = allMessages.findIndex((m) => m.id === msg.id);
+    if (idx >= 0) allMessages[idx] = msg;
+    if (msg.type === 'help') HelpChip.draw();
+    Simple.waits();
+    return;
+  }
+  allMessages.push(msg);
+  noteFile(msg);
+  drawAtEnd(msg, { silent, arrived });
+}
+/** A message held now drawn below everything the hall has drawn (what this page holds for sending stays below it). */
+function drawAtEnd(msg, { silent = false, arrived = false } = {}) {
   // Comings and goings fold into one quiet line instead of burying the conversation. What this page holds for sending
   // stays below everything the hall has.
   const oldest = echoes.size ? echoes.values().next().value : null;
@@ -1007,14 +1049,12 @@ function addMessage(msg, { silent = false, arrived = false } = {}) {
     prev.dataset.parts = parts.join('\u0001');
     prev.textContent = parts.join(' · ');
     messagesById.set(msg.id, prev);
-    allMessages.push(msg);
     if (follow) toEnd();
     return;
   }
   const el = renderMessage(msg);
   feed.insertBefore(el, firstEcho);
   messagesById.set(msg.id, el);
-  allMessages.push(msg);
   if (msg.type === 'help' && isMine(msg)) HelpChip.draw();
   if (arrived) keepPlace(el, msg, follow);
   if (arrived) Takes.heard(msg);
@@ -1029,11 +1069,17 @@ function addMessage(msg, { silent = false, arrived = false } = {}) {
 
 function removeMessageLocal(id) {
   const node = messagesById.get(id);
+  const idx = allMessages.findIndex((m) => m.id === id);
+  // Where the earlier messages are read back from and drawn above moves on from a message that goes.
+  if (idx >= 0) Earlier.removed(id, allMessages[idx + 1] || null, node || null);
   if (node) node.remove();
   tidyDivider();
   messagesById.delete(id);
-  const idx = allMessages.findIndex((m) => m.id === id);
+  undrawn.delete(id);
+  roomFiles.delete(id);
   if (idx >= 0) allMessages.splice(idx, 1);
+  // Held or not, it has gone from the room: no reply's quote offers to read back to it.
+  Earlier.goneFrom(id);
   refreshPinned();
   refreshDocPinnedList();
   if (currentDocMsgId === id) dismissDoc();
@@ -1041,6 +1087,372 @@ function removeMessageLocal(id) {
   refreshOpenMenu();
   Simple.waits();
 }
+
+// ---------------- The room's earlier messages: a first open is bounded, and older ones come on request ----------------
+/**
+ * A page opens a room with its newest messages (the join's first open: `history`, the room's newest, and `older`, what a
+ * page keeps in view from before them, every pinned message, help not resolved and every question not answered) and reads
+ * further back a page at a time (history:before, the catalogue's earlier.show), from the oldest message of the newest run
+ * it holds (`topId`): Show earlier at the top of that run while the server says there are earlier ones (`more`), and Show
+ * it on a reply whose quoted message it does not hold, read back until that message is there and then gone to. A quote
+ * whose message has gone from the room (the server's `replyTo.gone`, or a removal heard here) offers no Show it. A
+ * message pinned since the page opened that it does not hold is read by its id (history:message) and held among the
+ * older ones, so every pinned message is in view, as at a first open.
+ *
+ * The newest FIRST of a first open are drawn at once, the reader at the end; everything else is drawn above them a
+ * chunk at a time as the page is idle (AGM.idle: each chunk stops when its 8 ms are spent), newest first and the
+ * reader's place kept, so the feed a first open draws at once does not grow with the room and the page answers while
+ * the rest is drawn (the pinned strip draws every pinned message it holds at once, drawn in the feed yet or not). A
+ * record is held (allMessages, in the room's order) as it comes, before it is drawn, and an answer is held in the
+ * callback that hears it, before any change heard after it, so a change to it heard meanwhile is in it when it is drawn;
+ * a change to a message the page does not hold changes nothing drawn, and that message, read later, is the server's
+ * record as it stands. The older messages a first open keeps in view are drawn above the run in the room's order, and
+ * earlier messages read later take their places among them. Every placing is a step of the one queue, so what is drawn
+ * above where is read in the order it was asked for. One read back at a time (a Show it asked during another read
+ * follows it); a page drawn afresh (a first open again, the room cleared) ends whatever was being read or drawn.
+ */
+const Earlier = (function () {
+  const FIRST = 60;
+  const ASK_MS = 15000;
+  const TRIES = 3;
+  const UNREAD = 'Earlier messages could not be read now — try again in a moment.';
+  const NOT_HERE = 'That message is not in this room any more.';
+  let more = false;      // the server holds messages before the run that this page does not
+  let topId = '';        // the oldest message of the run of the room's newest messages this page holds
+  let steps = [];        // what is left to draw above, newest first: {id} a held record to draw, {at} where to draw next
+  let anchor = null;     // the node the next record is drawn above (null: above what this page holds for sending)
+  let task = null;       // the idle chunk asked for (its cancel)
+  let reading = null;    // the read back under way (its promise)
+  let readingFor = '';   // what it reads back to: '' a page (Show earlier), else the quoted message's id (Show it)
+  let waiters = [];      // resolved once every step is drawn
+  let era = 0;           // a page drawn afresh ends what an earlier era read or drew
+  const gone = new Set();      // messages heard removed from the room in this era, held or not
+  const fetching = new Set();  // messages kept in view being read by their id
+  const gap = document.createElement('div');
+  gap.className = 'feed-earlier';
+  let button = null;
+  /** The catalogue's object: the run's top (Show earlier), or a quoted message to read back to (Show it, `find`). */
+  const object = (find) => ({ id: find ? 'earlier:' + find : 'earlier', more, find: find || '' });
+  /** The first message this page holds for sending (drawn below everything the hall has), or null. */
+  const firstEcho = () => { const e = echoes.size ? echoes.values().next().value : null; return e && e.parentNode === feed ? e : null; };
+  /** A record held: this person's held send among them is let go by the outbox, as one heard live is. */
+  const hold = (m) => {
+    if (typeof m.cid === 'string' && m.from && MY_UID && m.from.uid === MY_UID) AGM.outbox.landed(m.cid);
+    allMessages.push(m);
+  };
+
+  /** A first open: `older` and `history` held in the room's order, the newest FIRST drawn now and the rest as the page is idle. */
+  function open(older, history, isMore) {
+    more = isMore;
+    topId = history.length ? history[0].id : '';
+    const now = history.slice(-FIRST);
+    const rest = older.concat(history.slice(0, history.length - now.length));
+    for (const m of rest) { hold(m); undrawn.set(m.id, m); }
+    for (const m of now) { hold(m); drawAtEnd(m, { silent: true }); }
+    anchor = now.length ? messagesById.get(now[0].id) || null : null;
+    steps = rest.map((m) => ({ id: m.id })).reverse();
+    schedule();
+  }
+
+  /**
+   * One step: a held record drawn above the anchor (a presence line folded into the one below it), or where the next is
+   * drawn (`at`: above that drawn message, or '' above what this page holds for sending).
+   */
+  function drawStep(step) {
+    if (Object.prototype.hasOwnProperty.call(step, 'at')) {
+      const n = step.at ? messagesById.get(step.at) : null;
+      if (!step.at) anchor = null; else if (n && n.parentNode === feed) anchor = n;
+      return;
+    }
+    const m = undrawn.get(step.id);
+    if (!m) return;   // removed while it waited
+    undrawn.delete(step.id);
+    const below = anchor && anchor.parentNode === feed ? anchor : firstEcho();
+    if (m.type === 'system' && PRESENCE.test(m.text || '') && below && below.classList.contains('presence')) {
+      const parts = [m.text].concat(below.dataset.parts ? below.dataset.parts.split('\u0001') : [below.textContent]).slice(-6);
+      below.dataset.parts = parts.join('\u0001');
+      below.textContent = parts.join(' · ');
+      messagesById.set(m.id, below);
+      return;
+    }
+    const el = renderMessage(m);
+    feed.insertBefore(el, below);
+    messagesById.set(m.id, el);
+    anchor = el;
+  }
+
+  /** The next chunk asked of the idle page, or, with nothing left to draw, the run's top marked and whoever waited told. */
+  function schedule() {
+    if (task) return;
+    if (!steps.length) {
+      drawGap();
+      requote();
+      const w = waiters;
+      waiters = [];
+      w.forEach((r) => r());
+      return;
+    }
+    const mine = era;
+    task = AGM.idle((deadline) => {
+      task = null;
+      if (mine !== era) return;
+      const run = () => { do drawStep(steps.shift()); while (steps.length && deadline.timeRemaining() > 0); };
+      // The reader at the end stays there; anyone else keeps what they read where it was on the screen.
+      if (place.atEnd) { run(); feed.scrollTop = feed.scrollHeight; } else holdView(run, gap);
+      refreshPinned();
+      refreshDocPinnedList();
+      HelpChip.draw();
+      refreshSeenLines();
+      Simple.waits();
+      schedule();
+    });
+  }
+  /** Once every record held is drawn. */
+  const drawn = () => new Promise((r) => { if (!steps.length && !task) r(); else waiters.push(r); });
+
+  /** Where to read back from: the change number of the run's oldest message that has one, else after the newest change. */
+  function cursor() {
+    const at = topId ? allMessages.findIndex((m) => m.id === topId) : -1;
+    if (at >= 0) for (let i = at; i < allMessages.length; i++) if (Number.isInteger(allMessages[i].seq) && allMessages[i].seq > 0) return allMessages[i].seq;
+    return Math.max(1, lastSeq + 1);
+  }
+  /**
+   * A read of the room (`send`, a plain emit handed its answer's callback): `heard` given its answer (null: none within
+   * ASK_MS) in the callback that hears it, before any change heard after it, so what it holds is the record those changes
+   * then reach; resolved with what it says.
+   */
+  function ask(send, heard) {
+    return new Promise((resolve) => {
+      let over = false;
+      const timer = setTimeout(() => { over = true; resolve(heard(null)); }, ASK_MS);
+      send((r) => { if (over) return; clearTimeout(timer); resolve(heard(r)); });
+    });
+  }
+  /**
+   * An earlier page, oldest first, held above the run in the room's order: a message held already (one kept in view) stays
+   * where it is and the ones before it go above it. Its oldest is the run's top now. Whether the run reached back further
+   * (`moved`), and how many messages it held that the page did not (`added`).
+   */
+  function merge(batch) {
+    const list = batch.filter((m) => m && typeof m.id === 'string');
+    const was = topId ? allMessages.findIndex((m) => m.id === topId) : -1;
+    let at = was >= 0 ? was : allMessages.length;
+    let added = 0;
+    steps.push({ at: was >= 0 ? topId : '' });
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i];
+      const held = allMessages.findIndex((x) => x.id === m.id);
+      if (held >= 0) { if (held < at) { at = held; steps.push({ at: m.id }); } continue; }
+      if (gone.has(m.id)) continue;   // removed after the server read it
+      allMessages.splice(at, 0, m);
+      undrawn.set(m.id, m);
+      noteFile(m);
+      steps.push({ id: m.id });
+      added++;
+    }
+    const moved = list.length > 0 && list[0].id !== topId;
+    if (list.length) topId = list[0].id;
+    return { moved, added };
+  }
+
+  /**
+   * Read back a page with something new in it (`find` empty: Show earlier), or until the message `find` is held (Show it),
+   * then go to it. Each page is drawn before the next is asked for. A refusal for the rate is asked again after a second;
+   * any other says why, and those are the words left: the message is said not to be in the room only where the room was
+   * read back to its start without it, or its removal was heard. Show earlier asked during a read is that read; Show it
+   * asked during a read for something else follows it.
+   */
+  function load(find) {
+    const want = find || '';
+    if (reading) {
+      if (!want || readingFor === want) return reading;
+      const mine = era;
+      return reading.then(() => (mine === era ? load(want) : undefined));
+    }
+    const mine = era;
+    readingFor = want;
+    reading = (async () => {
+      let failed = '';
+      try {
+        for (;;) {
+          await drawn();
+          if (mine !== era || (want && (findMessage(want) || gone.has(want))) || !more) break;
+          const got = await ask((answer) => socket.emit('history:before', { beforeSeq: cursor() }, answer), (r) => {
+            if (mine !== era) return null;
+            if (r && r.busy) return { busy: true };
+            if (!r || !r.ok || !Array.isArray(r.history)) return { failed: (r && r.error) || UNREAD };
+            const merged = merge(r.history);
+            more = merged.moved && r.more === true;
+            schedule();
+            return merged;
+          });
+          if (!got) break;
+          if (got.busy) { await new Promise((wake) => { setTimeout(wake, 1000); }); continue; }
+          if (got.failed) { failed = got.failed; AGM.toast(failed, true); break; }
+          // A page of messages held already (those kept in view): the next is asked for before anything is said.
+          if (!want && got.added > 0) break;
+        }
+        await drawn();
+      } finally {
+        if (mine === era) { reading = null; readingFor = ''; }
+      }
+      if (mine !== era) return;
+      drawGap();
+      requote();
+      if (!want) return;
+      const node = messagesById.get(want);
+      if (node) showFound(node); else if (!failed) AGM.toast(NOT_HERE, true);
+    })();
+    drawGap();
+    return reading;
+  }
+
+  /** Show earlier, above the run's top while the server holds earlier messages and everything held is drawn. */
+  function drawGap() {
+    const node = topId && !steps.length && !task ? messagesById.get(topId) : null;
+    const item = node && more ? AGM.catalog.inline('earlier', F, object(''), 1)[0] : null;
+    if (!item) { gap.remove(); return; }
+    if (!button) {
+      button = actButton(item, true);
+      button.addEventListener('click', (e) => { e.preventDefault(); act('earlier', 'earlier.show', object(''), { anchor: button, node: gap, opener: button }); });
+      gap.appendChild(button);
+    } else drawActButton(button, item, true);
+    button.setAttribute('aria-busy', reading ? 'true' : 'false');
+    if (gap.parentNode !== feed || gap.nextSibling !== node) holdView(() => feed.insertBefore(gap, node), gap);
+  }
+
+  /** Whether a reply's quote offers Show it: its message is not held, not gone from the room, and the server holds earlier ones. */
+  const quoting = (id) => more && !findMessage(id) && !gone.has(id);
+  /** A reply's quote whose message is earlier than those held: it says so, with Show it (the catalogue's earlier.show). */
+  function quote(el, id) {
+    if (!quoting(id)) return;
+    const item = AGM.catalog.inline('earlier', F, object(id), 1)[0];
+    if (!item) return;
+    el.dataset.earlier = '1';
+    el.title = 'The message it answers is earlier than those shown here';
+    const line = document.createElement('span');
+    line.className = 'quote-earlier';
+    line.append('Earlier — ', actButton(item, true));
+    el.appendChild(line);
+  }
+  /** Each reply whose quote said Show it, drawn again where its message is held now, has gone, or nothing earlier is left. */
+  function requote() {
+    for (const q of document.querySelectorAll('.reply-quote[data-earlier="1"]')) {
+      if (quoting(q.dataset.goto)) continue;
+      const node = q.closest('.msg[data-id]');
+      const m = node && findMessage(node.dataset.id);
+      if (m) rerenderMessage(node, m);
+    }
+  }
+  /** The page's facts changed (connected or not, the support view): Show earlier and each Show it say what they say now. */
+  function redraw() {
+    drawGap();
+    for (const b of document.querySelectorAll('.reply-quote[data-earlier="1"] .msg-act')) {
+      const q = b.closest('.reply-quote');
+      const item = AGM.catalog.inline('earlier', F, object(q.dataset.goto), 1)[0];
+      if (item) drawActButton(b, item, true);
+    }
+  }
+
+  /**
+   * A message gone from the room: the run's top moves to the message after it, a step still to draw above it draws above
+   * that one, and the anchor moves below it.
+   */
+  function removed(id, next, node) {
+    if (id === topId) topId = next ? next.id : '';
+    for (const s of steps) if (s.at === id) s.at = next ? next.id : '';
+    if (node && node === anchor) anchor = node.nextElementSibling;
+    if (node && node === gap.nextSibling) gap.remove();
+  }
+  /**
+   * A removal heard (live or resumed), whether the page held the message or not: every reply held that quotes it says it
+   * has gone, so none offers to read back to it, and no read brings it back.
+   */
+  function goneFrom(id) {
+    if (typeof id !== 'string' || !id) return;
+    gone.add(id);
+    for (const m of allMessages) {
+      if (m.replyTo && m.replyTo.id === id && !m.replyTo.withdrawn && !m.replyTo.gone) m.replyTo = Object.assign({}, m.replyTo, { gone: true });
+    }
+    requote();
+  }
+
+  /**
+   * A message pinned that this page does not hold (earlier than what it holds): read by its id, asked again after a
+   * second for the rate or no answer, and held among the older ones while it is still pinned; one the room no longer
+   * holds is left.
+   */
+  function fetchKept(id) {
+    if (typeof id !== 'string' || !id || findMessage(id) || fetching.has(id) || gone.has(id)) return;
+    fetching.add(id);
+    const mine = era;
+    const tries = (left) => {
+      ask((answer) => socket.emit('history:message', { messageId: id }, answer), (r) => {
+        if (mine !== era) return;
+        if ((!r || r.busy) && left > 1) { setTimeout(() => { if (mine === era) tries(left - 1); }, 1000); return; }
+        fetching.delete(id);
+        if (r && r.ok && r.message && r.message.id === id && r.message.pinned && !findMessage(id) && !gone.has(id)) keep(r.message);
+      });
+    };
+    tries(TRIES);
+  }
+  /**
+   * A message read by its id held in the room's order (before the first held message with a later change number), and
+   * drawn above that one as the older ones are, once what was asked for before it is drawn.
+   */
+  function keep(m) {
+    const key = Number.isInteger(m.seq) ? m.seq : 0;
+    let at = allMessages.findIndex((x) => Number.isInteger(x.seq) && x.seq > key);
+    if (at < 0) at = allMessages.length;
+    const next = allMessages[at] || null;
+    allMessages.splice(at, 0, m);
+    undrawn.set(m.id, m);
+    noteFile(m);
+    steps.push({ at: next ? next.id : '' }, { id: m.id });
+    refreshPinned();
+    refreshDocPinnedList();
+    schedule();
+  }
+
+  /** A page drawn afresh: whatever was being read or drawn ends, and nothing earlier is offered until it says so. */
+  function stop() {
+    era++;
+    if (task) task();
+    task = null;
+    steps = [];
+    anchor = null;
+    topId = '';
+    more = false;
+    reading = null;
+    readingFor = '';
+    undrawn.clear();
+    gone.clear();
+    fetching.clear();
+    gap.remove();
+    const w = waiters;
+    waiters = [];
+    w.forEach((r) => r());
+  }
+
+  return { open, load, stop, removed, goneFrom, fetchKept, quote, quoting, redraw, object, more: () => more };
+})();
+/** A message gone to: brought into view and marked a moment. */
+function showFound(target) {
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.add('found');
+  setTimeout(() => target.classList.remove('found'), 1500);
+}
+/**
+ * A reply's quote tapped: the message it answers, gone to where it is drawn; held but still being drawn, gone to once it
+ * is; earlier than those held, read back until it is there (Show it, the catalogue's earlier.show).
+ */
+function goToQuoted(id, from) {
+  const target = messagesById.get(id);
+  if (target) { showFound(target); return; }
+  if (findMessage(id)) { Earlier.load(id); return; }
+  if (Earlier.quoting(id)) act('earlier', 'earlier.show', Earlier.object(id), { anchor: from, opener: from });
+}
+Object.assign(RUN, { 'earlier.show': (o) => Earlier.load(o.find) });
 
 // A presence line: "Ana joined Backstage", "Ben joined On stage", "Wes joined as an observer", "Ana left"; an older line in a
 // hall's history ("Ana joined as research") is one too.
@@ -1098,6 +1510,10 @@ function rerenderMessage(node, msg) {
       '<em>' + escapeHtml(msg.replyTo.withdrawn ? marked('withdrawn', 'withdrawn') : (msg.replyTo.snippet || '').slice(0, 120)) + '</em>';
     rt.title = 'Click to scroll to original';
     rt.dataset.goto = msg.replyTo.id;
+    // Its message gone from the room (the server's word, or a removal heard here): nothing to read back to. Else, earlier
+    // than those this page holds: "Earlier — Show it".
+    if (msg.replyTo.gone) rt.title = 'The message it answers is no longer in this room';
+    else if (!msg.replyTo.withdrawn) Earlier.quote(rt, msg.replyTo.id);
     body.appendChild(rt);
   }
 
@@ -1243,6 +1659,8 @@ function drawActs(node, msg) {
   // cannot run now.
   const shown = new Set(AGM.catalog.shown('msg', F, msg).map((e) => e.id));
   for (const b of node.querySelectorAll('.body button[data-action]')) {
+    // A quote's Show it is the room's earlier messages' act (Earlier), not the message's.
+    if (b.closest('.reply-quote')) continue;
     const id = b.dataset.action;
     const why = shown.has(id) ? AGM.catalog.ready('msg', id, F, msg) : AGM.catalog.WORDS.gone;
     if (why === true) { b.removeAttribute('aria-disabled'); b.removeAttribute('title'); } else { b.setAttribute('aria-disabled', 'true'); b.title = why; }
@@ -1469,15 +1887,9 @@ function onMsgClick(e) {
     senderDoor(el).open({ anchor: el });
     return;
   }
-  if (el.dataset.goto) {
-    const target = messagesById.get(el.dataset.goto);
-    if (target) {
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      target.classList.add('found');
-      setTimeout(() => target.classList.remove('found'), 1500);
-    }
-    return;
-  }
+  // A reply's quote (and its Show it): the message it answers.
+  const quoted = el.closest('.reply-quote[data-goto]');
+  if (quoted) { e.preventDefault(); goToQuoted(quoted.dataset.goto, el); return; }
   e.preventDefault();
   if (el.dataset.more) {
     if (openOn && openOn.kind === 'msg' && openOn.id === msg.id) { AGM.menu.close(); return; }
@@ -1978,12 +2390,13 @@ function updateActionResponses(messageId, responses) {
   // There can be multiple matching elements: the original message in the
   // feed AND a clone in the pinned strip. Update them all.
   const els = document.querySelectorAll(`.action-responses[data-for="${messageId}"]`);
-  if (!els.length) return;
   const msg = findMessage(messageId);
   // This person's own answer before and after: the simple view draws it, and nobody else's.
   const ownOf = (list) => { const r = (Array.isArray(list) ? list : []).find((x) => x.uid === MY_UID); return r ? [r.optionIndex, r.note || '', r.at || 0].join('|') : ''; };
   const ownWas = msg ? ownOf(msg.responses) : '';
+  // Its record first: one held and not drawn yet is drawn with the answers it has by then.
   if (msg) msg.responses = responses;
+  if (!els.length) return;
   els.forEach((el) => renderResponses(el, { responses, options: msg?.options || [] }));
   const node = messagesById.get(messageId);
   if (node) node.classList.add('answered');
@@ -2035,6 +2448,8 @@ function renderResponses(container, msg) {
 function setMessagePinned(messageId, pinned) {
   const data = findMessage(messageId);
   if (data) data.pinned = pinned;
+  // Pinned and not held (earlier than what this page holds): read, so it is in view as every pinned message is.
+  else if (pinned) Earlier.fetchKept(messageId);
   const node = messagesById.get(messageId);
   if (node && node.classList.contains('msg')) {
     node.dataset.pinned = pinned ? '1' : '0';
@@ -2063,7 +2478,8 @@ function refreshPinned(onlyId) {
   const strip = document.getElementById('pinnedStrip');
   const list = document.getElementById('pinnedList');
   const have = new Map([...list.querySelectorAll(':scope > .msg[data-id]')].map((n) => [n.dataset.id, n]));
-  const want = allMessages.filter((m) => m.pinned && m.type !== 'file' && m.type !== 'system' && messagesById.has(m.id));
+  // Every pinned message held, drawn in the feed yet or not (a first open draws its older ones as the page is idle).
+  const want = allMessages.filter((m) => m.pinned && m.type !== 'file' && m.type !== 'system' && (messagesById.has(m.id) || undrawn.has(m.id)));
   let prev = null;
   for (const m of want) {
     let copy = have.get(m.id);
@@ -3229,11 +3645,12 @@ function toEnd() { if (catchUp) catchUp.toEnd = true; else scrollToBottom(); }
  * Move something within the feed and keep what the reader sees where it was on the screen: the first message in view
  * is put back where it was. A browser that anchors scrolling (overflow-anchor) has already kept it, and the correction
  * is 0; one that does not (Safari before 27) would otherwise pull the feed up under the reader's eyes when the divider
- * leaves a place above the view.
+ * leaves a place above the view. `skip`: a row that is moved itself (Show earlier, above earlier messages drawn under
+ * it), never the one kept.
  */
-function holdView(move) {
+function holdView(move, skip = null) {
   const top = feed.getBoundingClientRect().top;
-  const anchor = [...feed.children].find((n) => n !== place.divider && n.getBoundingClientRect().bottom > top);
+  const anchor = [...feed.children].find((n) => n !== place.divider && n !== skip && n.getBoundingClientRect().bottom > top);
   const was = anchor ? anchor.getBoundingClientRect().top : 0;
   move();
   if (anchor) feed.scrollTop += anchor.getBoundingClientRect().top - was;
@@ -3724,7 +4141,8 @@ const Screens = (function () {
     const pickH = $('holdingPick');
     const want = holdingChoice !== null ? holdingChoice : holding;
     pickH.length = 1;
-    const images = allMessages.filter((m) => m.type === 'file' && /^image\/(png|jpeg|gif|webp)$/.test(m.mime || ''));
+    // Every picture of the room, its messages held or not (the first open's index of its files).
+    const images = [...roomFiles.values()].filter((m) => /^image\/(png|jpeg|gif|webp)$/.test(m.mime));
     for (const m of images) { const o = document.createElement('option'); o.value = m.url; o.textContent = m.filename; pickH.appendChild(o); }
     pickH.value = want;
     if (pickH.value !== want) { pickH.value = holding; holdingChoice = null; }   // the picked image is gone from the hall

@@ -1753,6 +1753,104 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(padHelp === shownWith('helpTitle') && padHelpClosed === closedTo('helpBtn') && padAsk === JSON.stringify({ focused: 'Keep it open', fixed: true }) && padAskGone === 'kept' && floorPad.problems.length === 0,
       `the hall page at the floor: Help opens through AGM.openDialog's own (${padHelp}), a category sends it and closes it (${padHelpClosed}), and the chip's ask opens in place, Keep it open focused, Escape keeping the request (${padAsk}; ${padAskGone})`);
     floorPad.close();
+    // A first open is bounded (unit 32): a hall of a long day opens with its newest 200 messages, the newest 60 drawn at
+    // once and the rest above them through AGM.idle; Show earlier draws the ones before above, the reader's place kept; a
+    // change to a message the page does not hold changes nothing drawn and is in it once it comes; a reply whose quoted
+    // message is earlier says "Earlier — Show it", which reads back to it and goes to it, and one whose quoted message has
+    // gone says nothing of the kind; a read that fails keeps its own words; Show it pressed while Show earlier reads still
+    // goes to its message. At the floor (no requestIdleCallback), AGM.idle's timer draws the rest; a message pinned after
+    // the page opened, earlier than what it holds, comes to its pinned strip; a removal heard takes a quote's Show it away.
+    const longDay = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Long day' }) })).json()).code;
+    // Sixteen people backstage, fifteen messages each (a burst each socket's bucket takes at once), each connection asked
+    // again after a second while the address's connections are spent by the pages open.
+    const seedSocket = async () => {
+      for (let i = 0; i < 20; i++) {
+        try { return await connect(base); } catch { await sleep(1000); /* the address's connections spent: asked again */ }
+      }
+      throw new Error('no connection for the long day');
+    };
+    const seeders = [];
+    const sayLong = async (s, payload) => { const r = await emit(s, 'message', payload); if (!r || !r.ok) throw new Error('not said: ' + JSON.stringify(r)); return r.id; };
+    for (let w = 0; w < 16; w++) {
+      const s = await seedSocket();
+      seeders.push(s);
+      const j = await emit(s, 'join', { roomCode: longDay, name: 'Crew ' + w, role: 'research' });
+      if (!j || !j.ok) throw new Error('the long day refused a join: ' + JSON.stringify(j));
+    }
+    const firstWord = await sayLong(seeders[0], { type: 'text', text: 'The first word of the day' });
+    const reactLater = await sayLong(seeders[0], { type: 'text', text: 'React to this one later' });
+    const takenBack = await sayLong(seeders[0], { type: 'text', text: 'This one is taken back' });
+    await Promise.all(seeders.map((s, w) => Promise.all(Array.from({ length: w === 0 ? 12 : 15 }, (_, i) => sayLong(s, { type: 'text', text: 'Note ' + w + '.' + i })))));
+    await sleep(1200);
+    const toDoomed = await sayLong(seeders[1], { type: 'text', text: 'Answering the one taken back', replyTo: takenBack });
+    const taken = await emit(seeders[0], 'delete', { messageId: takenBack });
+    if (!taken || !taken.ok) throw new Error('the long day kept a message its author removed: ' + JSON.stringify(taken));
+    const answer = await sayLong(seeders[1], { type: 'text', text: 'Answering the first word', replyTo: firstWord });
+    // A page whose idle callbacks are held until the smoke lets them run: what a first open draws before the page is idle.
+    const HOLD_IDLE = `(() => { window.__idleHeld = []; window.requestIdleCallback = (fn) => { window.__idleHeld.push(fn); return window.__idleHeld.length; }; window.cancelIdleCallback = () => {}; })();`;
+    const longTab = await edge.tab(`${base}/app.html?code=${longDay}&name=Lena&role=research`, { init: HOLD_IDLE });
+    // The window is the first 200 held (what comes live, the page's own joined line among it, is held after them).
+    const openedFirst = await longTab.until(`typeof joined !== 'undefined' && joined && allMessages.length >= 200 && JSON.stringify({ held: allMessages.length, window: allMessages.slice(0, 200).filter((m) => messagesById.has(m.id)).length, drawn: messagesById.size, waiting: undrawn.size, newest: messagesById.has(${codeLiteral(answer)}), atEnd: feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40, asked: window.__idleHeld.length, gap: !!document.querySelector('.feed-earlier') })`);
+    // What a reaction to a message the page does not hold changes: nothing drawn (its change heard, by its number).
+    const beforeReact = await longTab.eval(`(() => { window.__feedWas = feed.innerHTML; window.__seqWas = lastSeq; return lastSeq; })()`);
+    await emit(seeders[2], 'react', { messageId: reactLater, emoji: '👍', on: true });
+    const unheld = await longTab.until(`lastSeq > window.__seqWas && JSON.stringify({ same: feed.innerHTML === window.__feedWas, held: allMessages.some((m) => m.id === ${codeLiteral(reactLater)}) })`, 5000);
+    // The page idle: each chunk it was asked for run, as many as it asks for, each within its 8 ms.
+    const RUN_IDLE = `(() => { let n = 0; while (window.__idleHeld.length && n < 200) { for (const fn of window.__idleHeld.splice(0)) { n++; fn({ didTimeout: false, timeRemaining: () => 50 }); } } return n; })()`;
+    const chunks = await longTab.eval(RUN_IDLE);
+    const ORDERED = `(() => { const at = new Map(allMessages.map((m, i) => [m.id, i])); const seen = [...feed.querySelectorAll(':scope > [data-id]')].map((n) => at.get(n.dataset.id)); return seen.every((x, i) => typeof x === 'number' && (i === 0 || x > seen[i - 1])); })()`;
+    const longDrawn = await longTab.until(`undrawn.size === 0 && JSON.stringify({ drawn: messagesById.size, held: allMessages.length, ordered: ${ORDERED}, gap: (document.querySelector('.feed-earlier .msg-act') || {}).textContent || '', above: (document.querySelector('.feed-earlier') || {}).nextElementSibling === messagesById.get(allMessages[0].id), atEnd: feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40 })`, 5000);
+    const opened1 = openedFirst && JSON.parse(openedFirst);
+    const drawn1 = longDrawn && JSON.parse(longDrawn);
+    report(!!opened1 && opened1.held >= 200 && opened1.window === 60 && opened1.waiting === 140 && opened1.drawn === opened1.held - 140 && opened1.newest && opened1.atEnd && opened1.asked === 1 && !opened1.gap
+      && !!drawn1 && drawn1.drawn === drawn1.held && drawn1.held >= 200 && drawn1.ordered && drawn1.gap === 'Show earlier' && drawn1.above && drawn1.atEnd && chunks >= 1,
+      `a hall of a long day (its change ${beforeReact}) opens with its newest 200: the newest 60 drawn at once, the reader at the end (${openedFirst}), the rest above them in ${chunks} AGM.idle chunk(s), in the room's order, Show earlier above the oldest (${longDrawn})`);
+    report(!!unheld && JSON.parse(unheld).same === true && JSON.parse(unheld).held === false, `a change to a message the page does not hold changes nothing drawn (${unheld})`);
+    // Show earlier, read from the top: the earlier ones drawn above, what was read kept where it was on the screen, the
+    // reaction made meanwhile on the message it was made to; nothing earlier is left, so Show earlier goes.
+    await longTab.eval(`feed.scrollTop = 0`);
+    await sleep(100);
+    const topWas = await longTab.eval(`(() => { window.__topWas = allMessages[0].id; return messagesById.get(window.__topWas).getBoundingClientRect().top; })()`);
+    await longTab.eval(`document.querySelector('.feed-earlier .msg-act').click()`);
+    const earlier = await longTab.until(`${RUN_IDLE} >= 0 && undrawn.size === 0 && messagesById.has(${codeLiteral(reactLater)}) && JSON.stringify({ held: allMessages.length, drawn: messagesById.size, first: allMessages[0].text || '', ordered: ${ORDERED}, gap: !!document.querySelector('.feed-earlier'), kept: Math.round(messagesById.get(window.__topWas).getBoundingClientRect().top - ${Number(topWas) || 0}), reaction: messagesById.get(${codeLiteral(reactLater)}).querySelector('.reactions').textContent.includes('👍') })`, 8000);
+    const read1 = earlier && JSON.parse(earlier);
+    report(!!read1 && read1.held > 200 && read1.drawn === read1.held && read1.ordered && !read1.gap && Math.abs(read1.kept) <= 2 && read1.reaction && /joined|The first word/.test(read1.first) && longTab.problems.length === 0,
+      `Show earlier draws the earlier messages above, what was read kept in place, and a message changed while it was not held comes with its change (${earlier})${longTab.problems.length ? ' — ' + longTab.problems.slice(0, 3).join(' | ') : ''}`);
+    longTab.close();
+    // A reply whose quoted message is earlier than those held: "Earlier — Show it", which reads back to it and goes to it.
+    const quoteTab = await edge.tab(`${base}/app.html?code=${longDay}&name=Quinn&role=research`);
+    const QUOTE = `messagesById.get(${codeLiteral(answer)}).querySelector('.reply-quote')`;
+    const GONE_QUOTE = `messagesById.get(${codeLiteral(toDoomed)}).querySelector('.reply-quote')`;
+    const quoteSays = await quoteTab.until(`typeof joined !== 'undefined' && joined && undrawn.size === 0 && messagesById.has(${codeLiteral(answer)}) && messagesById.has(${codeLiteral(toDoomed)}) && !allMessages.some((m) => m.id === ${codeLiteral(firstWord)}) && !!${QUOTE}.querySelector('.quote-earlier') && JSON.stringify({ words: ${QUOTE}.querySelector('.quote-earlier').textContent, ready: !${QUOTE}.querySelector('.quote-earlier .msg-act').hasAttribute('aria-disabled'), gone: !${GONE_QUOTE}.querySelector('.quote-earlier') && ${GONE_QUOTE}.title })`, 8000);
+    // A read back the server refuses: its words stay, and the page does not say the message has gone.
+    await quoteTab.eval(`(() => { window.__emit = socket.emit; socket.emit = function (ev, ...a) { if (ev !== 'history:before') return window.__emit.call(this, ev, ...a); const cb = a[a.length - 1]; setTimeout(() => cb({ ok: false, error: 'Refused for the smoke' }), 0); return this; }; ${QUOTE}.querySelector('.quote-earlier .msg-act').click(); })()`);
+    await quoteTab.until(`(document.getElementById('agmToast') || {}).textContent === 'Refused for the smoke'`, 5000);
+    await sleep(400);
+    const failed = await quoteTab.eval(`(() => { socket.emit = window.__emit; return JSON.stringify({ toast: document.getElementById('agmToast').textContent, held: allMessages.some((m) => m.id === ${codeLiteral(firstWord)}), offered: !!${QUOTE}.querySelector('.quote-earlier .msg-act') }); })()`);
+    // Show earlier, and Show it pressed while its read is under way: Show it follows that read, and goes to its message.
+    await quoteTab.eval(`(() => { document.querySelector('.feed-earlier .msg-act').click(); ${QUOTE}.querySelector('.quote-earlier .msg-act').click(); })()`);
+    const wentTo = await quoteTab.until(`messagesById.has(${codeLiteral(firstWord)}) && messagesById.get(${codeLiteral(firstWord)}).classList.contains('found') && JSON.stringify({ found: true, quote: !${QUOTE}.querySelector('.quote-earlier'), ordered: ${ORDERED} })`, 8000);
+    report(quoteSays === JSON.stringify({ words: 'Earlier — Show it', ready: true, gone: 'The message it answers is no longer in this room' }) && !!wentTo && JSON.parse(wentTo).found && JSON.parse(wentTo).quote && JSON.parse(wentTo).ordered && quoteTab.problems.length === 0,
+      `a reply whose quoted message is earlier says "Earlier — Show it", ready, and one whose message has gone says no such thing (${quoteSays}); Show it pressed while Show earlier reads follows that read and goes to its message (${wentTo})${quoteTab.problems.length ? ' — ' + quoteTab.problems.slice(0, 3).join(' | ') : ''}`);
+    report(failed === JSON.stringify({ toast: 'Refused for the smoke', held: false, offered: true }), `a read back that fails keeps its own words, never "not in this room" (${failed})`);
+    quoteTab.close();
+    // At the floor, where requestIdleCallback is gone: AGM.idle's timer draws the rest.
+    const floorLong = await edge.tab(`${base}/app.html?code=${longDay}&name=Flo&role=observer`, { init: FLOOR });
+    const floorDrawn = await floorLong.until(`typeof joined !== 'undefined' && joined && typeof window.requestIdleCallback === 'undefined' && undrawn.size === 0 && JSON.stringify({ held: allMessages.length, drawn: messagesById.size, ordered: ${ORDERED}, gap: !!document.querySelector('.feed-earlier') })`, 8000);
+    report(!!floorDrawn && JSON.parse(floorDrawn).held >= 200 && JSON.parse(floorDrawn).drawn === JSON.parse(floorDrawn).held && JSON.parse(floorDrawn).ordered && JSON.parse(floorDrawn).gap && floorLong.problems.length === 0,
+      `at the floor, a long day's first open draws the rest through AGM.idle's timer (${floorDrawn})${floorLong.problems.length ? ' — ' + floorLong.problems.slice(0, 3).join(' | ') : ''}`);
+    // Pinned by someone else after the page opened, earlier than what it holds: read by its id, in the pinned strip and in
+    // the feed among the older ones, in the room's order.
+    const pinnedEarly = await emit(seeders[2], 'pin', { messageId: reactLater, pinned: true });
+    const pinCame = await floorLong.until(`!!document.querySelector('#pinnedList .msg[data-id=${JSON.stringify(reactLater)}]') && undrawn.size === 0 && JSON.stringify({ strip: !document.getElementById('pinnedStrip').hidden, feed: messagesById.has(${codeLiteral(reactLater)}), pinned: findMessage(${codeLiteral(reactLater)}).pinned, ordered: ${ORDERED}, gap: !!document.querySelector('.feed-earlier') })`, 8000);
+    // A removal heard of a message the page does not hold: the quote of it no longer offers to read back to it.
+    const offeredBefore = await floorLong.eval(`!!${QUOTE}.querySelector('.quote-earlier')`);
+    const takenFirst = await emit(seeders[0], 'delete', { messageId: firstWord });
+    const unoffered = await floorLong.until(`!${QUOTE}.querySelector('.quote-earlier') && ${QUOTE}.title`, 5000);
+    report(!!pinnedEarly && pinnedEarly.ok && pinCame === JSON.stringify({ strip: true, feed: true, pinned: true, ordered: true, gap: true }) && offeredBefore === true && !!takenFirst && takenFirst.ok && unoffered === 'The message it answers is no longer in this room' && floorLong.problems.length === 0,
+      `a message pinned after the page opened, earlier than what it holds, comes to its pinned strip and its place in the feed (${pinCame}); a removal heard takes a quote's Show it away (${offeredBefore} → ${unoffered})${floorLong.problems.length ? ' — ' + floorLong.problems.slice(0, 3).join(' | ') : ''}`);
+    floorLong.close();
+    seeders.forEach((s) => s.close());
     // With no <dialog> at all beside it (below Safari 15.4): the Accounts page's Add a person opens the same way, its Cancel
     // closes it without leaving the page and saves nothing; Escape closes it; Enter in a field submits through Save, the
     // dialog's own submit carrying it as its submitter (a form of method "dialog" would otherwise be sent to the page's

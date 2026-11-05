@@ -168,6 +168,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     header: [{ id: 'header', people: people.length, peopleShown: false, zoom: 1, dark: false, code: hallA, on: true, hall: 'Hall A', account: false, away: '/' }], person: people,
     take: [{ id: 'take', seq: 1, kind: 'clock', strip: true, full: false }], card: [{ id: 'card', seq: 1, kind: 'clock' }],
     board: [{ id: 'board', seq: 1, kind: 'clock', pages: boardNow.pages, on: 0, mark: '◷', words: 'Sending', showing: 'the clock', mine: { seq: 1, previous: { kind: 'chat' }, time: '14:02' } }],
+    // The room's earlier messages: Show earlier at the top of what a page holds, and a reply's Show it.
+    earlier: [{ id: 'earlier', more: true, find: '' }, { id: 'earlier:' + messages[0].id, more: true, find: messages[0].id }],
   };
   assert.ok(people.length >= 7, 'the room\'s people, as the join lists them');
 
@@ -205,6 +207,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     'page:report': (o) => ({ seq: o.seq, state: 'dismissed' }),
     // The person's chat view, the admin's (Chat view ▸ in the People panel).
     'admin:setView': (o) => ({ roomCode: hallA, socketId: o.socketId, view: 'full' }),
+    // The room's earlier messages, read back from its newest change.
+    'history:before': () => ({ beforeSeq: 1 }),
   };
   // The verbs no right hides from any seat, so none is sent below as a seat it is hidden from, each with why. Every entry
   // is still iterated by its `may` alone: one of these an entry hides from a seat by a right is refused like any other,
@@ -213,6 +217,9 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     // A page's report on its own take: every seated page's, whatever its rights; the server refuses it from the support
     // view and from a page seated nowhere (test/takes.test.js).
     'page:report': 'every seated page reports on its own take',
+    // A room's earlier messages: every seated page reads its own room, the support view included; the server refuses a
+    // page seated nowhere and a change number it cannot read (test/server.test.js).
+    'history:before': 'every seated page reads its own room\'s earlier messages',
   };
   // The acts the hall page draws: each that fits some seat's facts and some object here (a kind's rows another page draws
   // never fit this one).
@@ -294,12 +301,13 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   // whether a message here may be sent into another room by its list, `sends`: no list names Hall A, so it may not; then
   // whether the page is the admin's own, `admin`, which a guest's is not; then what the page is shown over its chat,
   // `page`, whether it may push to people's pages, `canPush`, AGMessage's clock and zone, `now` and `tz`, and whether a web
-  // page pushed from it would be taken, `canWeb`; then the chat view it draws, `view`).
+  // page pushed from it would be taken, `canWeb`; then the chat view it draws, `view`; then, on a first open, whether the
+  // room holds earlier messages, `more`, what a page keeps in view from before its newest, `older`, and its files, `files`).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-17), again.sends, again.admin, again.page, again.canPush, again.canWeb, again.view], [true, [hallB],
-    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb', 'view'], false, false, null, false, false, 'full']);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-20), again.sends, again.admin, again.page, again.canPush, again.canWeb, again.view, again.more, again.older, again.files], [true, [hallB],
+    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb', 'view', 'more', 'older', 'files'], false, false, null, false, false, 'full', false, [], []]);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board');

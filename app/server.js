@@ -2189,9 +2189,12 @@ io.on('connection', (socket) => {
     if ((acct || isAdminView) && !stillSeated && !Number.isInteger(since)) {
       readAsAdmin(actor(), socket.data.account, r, (n) => (isAdminView ? 'opened ' + cleanName + '\'s view of ' + n : 'entered ' + n + ' as the admin'), socket.data.ip);
     }
-    // Resume: just what they missed, when we still have it; otherwise the whole history. Each as a page is sent it
-    // (lib/ops.js forPage): a stage send's and a proposal's record without the link it went to, which names the hall's key.
+    // Resume: just what they missed, when we still have it; otherwise a first open (store.firstOpen): the room's newest
+    // messages, what a page keeps in view from before them, whether there are earlier ones (asked for with history:before)
+    // and the room's files. Each as a page is sent it (lib/ops.js forPage): a stage send's and a proposal's record without
+    // the link it went to, which names the hall's key.
     const missed = Number.isInteger(since) ? store.opsSince(r, since) : null;
+    const opened = missed ? null : store.firstOpen(r);
     // Every room of a hall follows its hall's Stagewatch: its countdown, and its sends and proposals by this seat's rights
     // there (a side room's guest holds none; an account its stage.send in the hall), as the frames sent to it do.
     const sw = linkFor(r.hall);
@@ -2207,7 +2210,7 @@ io.on('connection', (socket) => {
     ack({
       ok: true, roomCode: code, roomName: r.name || '', role: cleanRole, name: cleanName, adminView: isAdminView,
       identity, uid: id, note, uploadToken, seq: r.seq,
-      ...(missed ? { ops: missed.map(ops.opForPage) } : { history: r.messages.map(ops.forPage) }),
+      ...(missed ? { ops: missed.map(ops.opForPage) } : { history: opened.history.map(ops.forPage) }),
       users: roomUserSummary(r, { links: socket.data.isAdmin }),
       ai: !!aiKey(), stage: stagePayload(sw),
       canSendToStage: !!(sw.base && sw.key && sw.keyState !== 'refused') && allowed('stage.send'),
@@ -2253,6 +2256,10 @@ io.on('connection', (socket) => {
       // The admin's support view: the facts of the person it shows (their seat, chat view, canPush, sends and
       // forwardable), so it draws exactly their doors (R8); null when it shows nobody. No other page is told any.
       ...(isAdminView ? { person: theirs ? theirs() : null } : {}),
+      // A first open's bounds (never a resume's): whether the room holds messages before `history` that it did not carry
+      // (`more`: Show earlier asks for them), the older ones a page keeps in view however old (`older`: pinned, help not
+      // resolved, questions not answered), and every file of the room (`files`), so its lists are whole.
+      ...(opened ? { more: opened.more, older: opened.older.map(ops.forPage), files: opened.files } : {}),
     });
 
     if (!isAdminView) {

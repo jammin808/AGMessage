@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const guard = require('../lib/guard');
-const { RoomStore } = require('../lib/store');
+const { RoomStore, WINDOW } = require('../lib/store');
 const nodes = require('../lib/nodes');
 const ai = require('../lib/ai');
 const { readSource } = require('./helpers');
@@ -321,6 +321,92 @@ test('store: what is new in a room, for the switcher\'s dot: its newest message 
   const old = a.create('DEF234', 'Old');
   old.messages.push({ id: 'x1', type: 'text', text: 'before', priority: true }, { id: 'x2', type: 'text', text: 'numbered', seq: 7 }, { id: 'x3', type: 'text', text: 'after' });
   assert.deepEqual(a.news(old), { seq: 7, prioritySeq: 0 });
+});
+
+test('store: a first open carries the newest WINDOW messages, the older ones a page keeps in view, whether earlier ones were left out, and every file; before() reads back a page at a time', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-store-'));
+  const a = new RoomStore(dir);
+  assert.equal(WINDOW, 200, 'the window: 200 messages');
+  const r = a.create('ABC234', 'Test');
+  const add = (id, extra = {}) => a.commit(r, { o: 'add', m: { id, type: 'text', text: id, at: 1, ...extra } }).s;
+  // A small room: everything, nothing older, nothing left out.
+  add('t0');
+  add('f0', { type: 'file', url: '/uploads/f0.png', filename: 'stage.png', mime: 'image/png', caption: 'kept off the index' });
+  const small = a.firstOpen(r);
+  assert.deepEqual([small.history.map((m) => m.id), small.older, small.more, small.files], [['t0', 'f0'], [], false, [{ id: 'f0', url: '/uploads/f0.png', filename: 'stage.png', mime: 'image/png' }]]);
+  assert.equal(small.history[1], r.messages[1], 'the room\'s records themselves, never copies');
+  // Before the window: a pinned message, a help request still open and one on the way, one resolved, a question nobody
+  // answered and one answered, and plain messages; then 500 more.
+  add('pin', { pinned: true });
+  add('helpOpen', { type: 'help', category: 'Sound', help: { state: 'open' } });
+  add('helpComing', { type: 'help', category: 'Vision', help: { state: 'coming', by: 'Ana' } });
+  add('helpDone', { type: 'help', category: 'Other', help: { state: 'resolved', by: 'Ana' } });
+  add('askOpen', { type: 'action', text: 'Ready?', options: ['Yes'], responses: [] });
+  add('askDone', { type: 'action', text: 'Proxies?', options: ['Yes'], responses: [{ uid: 'u1', name: 'Chair', optionIndex: 0 }] });
+  add('old', { type: 'file', url: '/uploads/old.pdf', filename: 'pack.pdf', mime: 'application/pdf' });
+  a.commit(r, { o: 'add', m: { id: 's1', type: 'system', text: 'Ana joined Backstage', at: 1 } });
+  const seqOf = {};
+  for (let i = 0; i < 500; i++) seqOf['m' + i] = add('m' + i);
+  const first = a.firstOpen(r);
+  const ids = (list) => list.map((m) => m.id);
+  const run = (from, to) => Array.from({ length: to - from }, (_, i) => 'm' + (from + i));
+  assert.deepEqual(ids(first.history), run(300, 500), 'the newest 200, oldest first');
+  assert.deepEqual(ids(first.older), ['pin', 'helpOpen', 'helpComing', 'askOpen'], 'pinned, help not resolved and questions not answered, in the room\'s order');
+  assert.equal(first.more, true, 'messages before the window were left out');
+  assert.deepEqual(first.files.map((f) => f.id), ['f0', 'old'], 'every file of the room, held in the window or not');
+  // Read back from the window's oldest: the 200 before it, then the rest, the older ones a first open kept among them.
+  const back = a.before(r, seqOf.m300);
+  assert.deepEqual([ids(back.history), back.more], [run(100, 300), true]);
+  const last = a.before(r, seqOf.m100);
+  assert.deepEqual([ids(last.history), last.more], [['t0', 'f0', 'pin', 'helpOpen', 'helpComing', 'helpDone', 'askOpen', 'askDone', 'old', 's1', ...run(0, 100)], false]);
+  assert.equal(last.history[2], r.messages[2], 'the room\'s records as they stand');
+  assert.deepEqual(ids(a.before(r, r.messages[0].seq).history), [], 'nothing before the first');
+  assert.equal(a.before(r, r.messages[0].seq).more, false);
+  // Past the newest change: the newest page; a message kept from before messages carried their seq is read by its place.
+  assert.deepEqual(ids(a.before(r, r.seq + 50).history), ids(r.messages.slice(-200)));
+  const legacy = a.create('DEF234', 'Old');
+  legacy.messages.push({ id: 'x1', type: 'text', text: 'a' }, { id: 'x2', type: 'text', text: 'b', seq: 5 }, { id: 'x3', type: 'text', text: 'c' }, { id: 'x4', type: 'text', text: 'd', seq: 9 });
+  assert.deepEqual([ids(a.before(legacy, 9).history), ids(a.before(legacy, 5).history), ids(a.before(legacy, 9, 1).history), a.before(legacy, 9, 1).more], [['x1', 'x2', 'x3'], ['x1'], ['x3'], true]);
+  // An answer, a resolution, an unpin: each moves a message out of what a first open keeps in view.
+  a.commit(r, { o: 'upd', id: 'askOpen', f: { responses: [{ uid: 'u1', name: 'Chair', optionIndex: 0 }] } });
+  a.commit(r, { o: 'upd', id: 'helpComing', f: { help: { state: 'resolved', by: 'Ana' } } });
+  a.commit(r, { o: 'upd', id: 'pin', f: { pinned: false } });
+  assert.deepEqual(ids(a.firstOpen(r).older), ['helpOpen']);
+  // Everything before the window carried with it (a pinned one): nothing was left out.
+  const kept = a.create('GHJ234', 'Kept');
+  a.commit(kept, { o: 'add', m: { id: 'k0', type: 'text', text: 'agenda', pinned: true, at: 1 } });
+  for (let i = 0; i < 200; i++) a.commit(kept, { o: 'add', m: { id: 'k' + (i + 1), type: 'text', text: 'x', at: 1 } });
+  const whole = a.firstOpen(kept);
+  assert.deepEqual([whole.history.length, ids(whole.older), whole.more], [200, ['k0'], false]);
+  // Only messages a first open carries left before a page read back: nothing more to show, though messages are left.
+  const pins = a.create('MNP234', 'Pins');
+  for (const id of ['p1', 'p2']) a.commit(pins, { o: 'add', m: { id, type: 'text', text: id, pinned: true, at: 1 } });
+  for (let i = 0; i < 400; i++) a.commit(pins, { o: 'add', m: { id: 'q' + i, type: 'text', text: 'x', at: 1 } });
+  const pinsOpen = a.firstOpen(pins);
+  const page1 = a.before(pins, pinsOpen.history[0].seq);
+  assert.deepEqual([pinsOpen.more, ids(pinsOpen.older), page1.history.length, page1.history[0].id, page1.more], [true, ['p1', 'p2'], 200, 'q0', false], 'what is left before the page is what a first open carried');
+  const page2 = a.before(pins, page1.history[0].seq);
+  assert.deepEqual([ids(page2.history), page2.more], [['p1', 'p2'], false], 'and is still read back when asked for');
+  // A reply whose quoted message has gone from the room: a copy whose quote says so, in a first open, a read back and a
+  // message read by its id; a quote of a message still there, and one withdrawn (which says so already), as they are.
+  const q = a.create('JKL234', 'Quotes');
+  const quoteOf = (id, extra = {}) => ({ id, name: 'Ana', snippet: id, ...extra });
+  a.commit(q, { o: 'add', m: { id: 'orig', type: 'text', text: 'original', at: 1 } });
+  a.commit(q, { o: 'add', m: { id: 'stays', type: 'text', text: 'stays', at: 1 } });
+  a.commit(q, { o: 'add', m: { id: 'r1', type: 'text', text: 'to the removed', at: 1, replyTo: quoteOf('orig') } });
+  a.commit(q, { o: 'add', m: { id: 'r2', type: 'text', text: 'to the one there', at: 1, replyTo: quoteOf('stays') } });
+  a.commit(q, { o: 'add', m: { id: 'r3', type: 'text', text: 'to the withdrawn', at: 1, replyTo: quoteOf('w', { snippet: '', withdrawn: true }) } });
+  a.commit(q, { o: 'del', id: 'orig' });
+  const quotes = a.firstOpen(q);
+  assert.deepEqual(quotes.history.map((m) => [m.id, m.replyTo ? m.replyTo.gone === true : null]), [['stays', null], ['r1', true], ['r2', false], ['r3', false]]);
+  assert.deepEqual(quotes.history[1].replyTo, { id: 'orig', name: 'Ana', snippet: 'orig', gone: true }, 'who wrote it and its words kept, as the record keeps them');
+  assert.deepEqual([q.byId.get('r1').replyTo.gone, quotes.history[2] === q.byId.get('r2'), quotes.history[3] === q.byId.get('r3')], [undefined, true, true], 'the records unchanged, and the others the records themselves');
+  assert.equal(a.before(q, q.seq + 1).history[1].replyTo.gone, true, 'read back the same');
+  assert.deepEqual([a.readMessage(q, 'r1').replyTo.gone, a.readMessage(q, 'r2') === q.byId.get('r2')], [true, true], 'and read by its id');
+  assert.deepEqual([a.readMessage(q, 'orig'), a.readMessage(q, ''), a.readMessage(q, 7), a.readMessage(q, 'nope')], [null, null, null, null], 'an id the room holds no message by reads none');
+  // A room cleared opens with nothing.
+  a.commit(r, { o: 'reset' });
+  assert.deepEqual(a.firstOpen(r), { history: [], older: [], more: false, files: [] });
 });
 
 test('store: the newest 500 tombstones are kept, in memory and in the snapshot; a snapshot without them loads with none', () => {

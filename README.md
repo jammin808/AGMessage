@@ -108,6 +108,12 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   marks the first that arrived since you last touched the page, instead of a fill that fades. A sent message shows "◷
   Sending" until AGMessage has it, and is never posted twice; one written while the connection is down waits on the
   page, a reload included, and is sent when it is back, marked with its wait ("written 14:02 · sent 14:06 (offline)").
+  A hall page opens with the room's newest 200 messages, however long its day, and every pinned message, help request
+  not yet resolved and question not yet answered from before them; the newest are drawn at once and the rest as the
+  page is idle, so the messages a phone through the internet link is sent as it opens a hall no longer grow with the
+  day (what still grows is the room's list of files and those earlier messages it keeps in view). **Show earlier** at the
+  top reads back 200 at a time, and a reply whose quoted message is earlier says "Earlier — Show it", which reads back
+  to it; a message pinned later, however early, comes to every page's pinned strip at once.
   Every change is numbered and written to an append-only log before it is answered: a phone that drops off the Wi-Fi
   catches up with just what it missed, and a crash of AGMessage or of a browser loses nothing; a power cut can lose the
   last few seconds (what AGMessage has taken is in the system's file cache at once, and on the disk once the system

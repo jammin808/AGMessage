@@ -467,6 +467,14 @@
         may: (f) => f.canPush, fits: (f, o) => !!o.mine && o.mine.seq === o.seq },
       { id: 'board.screens', label: 'Screens & pages…', icon: '⧉', group: '4_manage', verb: 'display:list', mode: 'now', may: (f) => f.canPush, fits: () => true },
     ],
+    // The room's earlier messages: a page opens a room with its newest (the join's first open) and reads further back a
+    // page at a time (history:before), at the top of what it holds (Show earlier: `more`, the server's word that there
+    // are earlier ones), or on a reply whose quoted message it does not hold (Show it: `find`, that message's id, read
+    // back until it is there). Every seat reads its room; the support view draws it as it draws every door, disabled.
+    earlier: [
+      { id: 'earlier.show', label: (f, o) => (o.find ? 'Show it' : 'Show earlier'), group: '3_keep', inline: () => 1, verb: 'history:before', mode: 'now',
+        may: () => true, fits: (f, o) => o.more === true },
+    ],
 
     // ------------------------------------------------------------ the admin page (adminFacts) and Set up's Rooms (boardFacts)
     // A room in the admin page's list, and the room it watches (its header): a hall (its Main room) or one of its side

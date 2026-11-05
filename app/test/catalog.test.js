@@ -36,6 +36,8 @@ const REQUIRED = ['react', 'actionResponse', 'help:respond', 'ai:draft', 'stage:
   'room:send',
   // people's pages: a take pushed (the Board chip, a person's Show them ▸) and a page's report on its own (the layer, a card)
   'page:push', 'page:report',
+  // a room's earlier messages (earlier: Show earlier, and a reply's Show it)
+  'history:before',
   // the admin page, the halls board and the Accounts page (adminRoom, person, adminMsg, link, tunnel, hall, help, account, audit)
   'admin:watchRoom', 'admin:summary', 'admin:invites', 'admin:resetRoom', 'admin:deleteRoom', 'admin:setRole', 'admin:linkRoom', 'admin:unlinkRoom', 'admin:kick', 'admin:deleteMessage',
   // a hall's rooms made and renamed (adminRoom)
@@ -179,7 +181,12 @@ const BOARD_EMPTY = { id: 'board', seq: 8, kind: 'holding', pages: 0, on: 0, mar
 const SHEET = { id: 'sheet', zoom: 1, dark: true, full: false, hall: 'Hall 2' };
 const SHEET_SMALLEST = { ...SHEET, zoom: 0.7, dark: false };
 const SHEET_FULL = { ...SHEET, zoom: 2.2, full: true };
-const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB], card: [CARD], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY] };
+// The room's earlier messages: Show earlier while the server holds some (`more`), none once it holds none; a reply's Show
+// it, its quoted message (`find`) earlier than those held.
+const EARLIER = { id: 'earlier', more: true, find: '' };
+const EARLIER_NONE = { ...EARLIER, more: false };
+const QUOTE_EARLIER = { id: 'earlier:m8', more: true, find: 'm8' };
+const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB], card: [CARD], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY], earlier: [EARLIER, EARLIER_NONE, QUOTE_EARLIER] };
 
 // ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
 const HALLS = [{ code: 'K7P2QX', name: 'Hall 2' }, { code: 'M3N4PQ', name: 'Legal' }];
@@ -296,6 +303,7 @@ const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple, SEATS.researchSends], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
   compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple, SEATS.researchSends], chip: [SEATS.admin, SEATS.researchNoDesk], header: [SEATS.admin, SEATS.board, SEATS.research],
   take: [SEATS.board, SEATS.boardSimple, SEATS.boardFull, SEATS.research], card: [SEATS.board, SEATS.boardSimple, SEATS.observer], sheet: [SEATS.boardSimple, SEATS.boardSimpleFull, SEATS.supportBoard], board: [SEATS.adminPush, SEATS.pushNoStagewatch, SEATS.adminWeb],
+  earlier: [SEATS.research, SEATS.boardSimple, SEATS.observer],
   adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board, SEATS.techPush, SEATS.guestWeb], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
   hall: [PAGE.board], room: [PAGE.board, SEATS.research], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
@@ -308,7 +316,7 @@ function pairsOf(kind) {
 }
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'sheet', 'board', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'sheet', 'board', 'earlier', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -569,6 +577,18 @@ test('what a seat may do but not now is shown, disabled, with the words why; the
   const sv = plain(C.items('msg', SEATS.support, OBJECTS.boardText)).filter((i) => !i.sep).flatMap((i) => (i.children || [i]));
   assert.ok(sv.length > 5 && sv.every((i) => i.disabled === 'This is Kim\'s view — act from your own page.'), JSON.stringify(sv.map((i) => i.disabled)));
   assert.equal(C.ready('msg', 'msg.copy', SEATS.support, OBJECTS.boardText), C.supportWords('Kim'), 'a local act too');
+});
+
+test('the room\'s earlier messages: Show earlier and a reply\'s Show it for every seat while the server holds earlier ones, none once it holds none; offline and in the support view, shown and disabled with why', () => {
+  const shown = (s, o) => plain(C.inline('earlier', SEATS[s], o, 2)).map((i) => [i.id, i.label, i.disabled]);
+  for (const s of Object.keys(SEATS)) {
+    const why = SEATS[s].support ? C.supportWords(SEATS[s].support) : SEATS[s].connected ? '' : C.WORDS.offline;
+    assert.deepEqual([shown(s, EARLIER), shown(s, QUOTE_EARLIER), shown(s, EARLIER_NONE)], [[['earlier.show', 'Show earlier', why]], [['earlier.show', 'Show it', why]], []], s + ': every seat reads its room, a page at a time');
+  }
+  // A read of the room's own earlier messages: it sends history:before at once, and waits for no outbox.
+  assert.deepEqual([C.entry('earlier', 'earlier.show').verb, C.entry('earlier', 'earlier.show').mode], ['history:before', 'now']);
+  // A text action of its own: the simple view, which has no menu, draws it as the full view does.
+  assert.deepEqual([plain(C.items('earlier', SEATS.boardSimple, EARLIER)), plain(C.items('earlier', SEATS.research, EARLIER)).map((i) => i.id)], [[], ['earlier.show']]);
 });
 
 test('the inline bar: at most two, the lowest ranks, Reply then the seat\'s main act', () => {

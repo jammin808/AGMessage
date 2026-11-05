@@ -11,7 +11,9 @@
  *
  * Recent ops stay in memory (a ring per room), so a client that drops off for a moment resumes
  * with just what it missed (`opsSince(seq)`) instead of reloading the whole history — the game
- * netcode pattern: sequence numbers, deltas while they cover the gap, a full snapshot otherwise.
+ * netcode pattern: sequence numbers, deltas while they cover the gap, a first open otherwise. A first open is bounded
+ * (`firstOpen`): the room's newest WINDOW messages and what a page keeps in view from before them, the earlier ones read
+ * back a WINDOW at a time (`before`).
  *
  * Halls and rooms. A hall is its Main room: `rooms`, `get` and `has` mean a hall, by its key, and every reader that
  * means a hall reads them and nothing else. A hall's other rooms (Legal, Media) are side rooms: each a room as a Main
@@ -70,6 +72,31 @@ const SIDE_RE = /^([A-Z0-9]{4,12})\.([A-Z0-9]{4,12})$/;
 const SIDE_MAX = 20;        // side rooms per hall: a bound, not a governor (each is a switcher button and its files)
 const GONE_KEEP = 500;      // tombstones kept per room, the newest
 const RETIRED_KEEP = 3;     // a room's earlier guest codes kept, the newest: each admits only a person seated there
+// The room's newest messages a first open carries, and each page of earlier ones (`firstOpen`, `before`): a bound on the
+// run of messages one answer sends however long a room's history. What a first open also carries from before its window
+// is not bounded by it: the messages a page keeps in view (keptInView) and the room's file index grow with the day.
+const WINDOW = 200;
+
+/**
+ * Whether a message older than a first open's window is still carried with it: one a page keeps in view however old it
+ * is. A pinned message (the pinned strip), a help request not yet resolved (Help's chip, its answers), and a question
+ * nobody has answered yet (the Board answers it where it is drawn).
+ */
+const keptInView = (m) => !!m && (!!m.pinned
+  || (m.type === 'help' && !(m.help && m.help.state === 'resolved'))
+  || (m.type === 'action' && !(Array.isArray(m.responses) && m.responses.length > 0)));
+/** A file as the first open's index names it: its message's id, its address, its name and its kind. */
+const fileEntry = (m) => ({ id: m.id, url: m.url, filename: m.filename, mime: m.mime });
+/**
+ * A message as a page reading the room is sent it (a first open, a read back, one message read): a reply whose quoted
+ * message is no longer in the room (removed; a withdrawn one's quote says so already) is a copy whose quote says it has
+ * gone (`replyTo.gone`), so no page offers to read back to it; every other message is the room's record itself.
+ */
+function asRead(room, m) {
+  const q = m && m.replyTo;
+  if (!q || typeof q !== 'object' || q.withdrawn || typeof q.id !== 'string' || room.byId.has(q.id)) return m;
+  return { ...m, replyTo: { ...q, gone: true } };
+}
 
 /**
  * Every field a snapshot holds, and the change that makes it differ from the snapshot on disk, which makes its room dirty:
@@ -536,6 +563,47 @@ class RoomStore {
   }
 
   /**
+   * What a page opens a room with (a join that names no change it holds): its newest WINDOW messages (`history`, oldest
+   * first), and of those before them only what a page keeps in view however old it is (`older`, in the room's order: every
+   * pinned message, help not yet resolved and every question nobody has answered yet); whether messages before the window
+   * were left out (`more`), which `before` reads; and every file of the room (`files`: its id, address, name and kind, in
+   * the room's order), so a page lists them all without holding their messages. Its run of messages is bounded by the
+   * window, whatever the room's whole history; what it keeps in view from before them and its file index are not, and
+   * grow with the day. Each message is as a reader is sent it (asRead).
+   */
+  firstOpen(room, n = WINDOW) {
+    const list = room.messages;
+    const start = Math.max(0, list.length - n);
+    const older = list.slice(0, start).filter(keptInView);
+    const read = (m) => asRead(room, m);
+    return { history: list.slice(start).map(read), older: older.map(read), more: older.length < start, files: list.filter((m) => m && m.type === 'file').map(fileEntry) };
+  }
+
+  /**
+   * The `n` messages before a change (`beforeSeq`, a page's oldest message's seq): those before the first message whose
+   * seq is it or later (all of them where none is), oldest first, each as a reader is sent it (asRead), and whether any
+   * came before those that a first open does not carry (`more`): the page that reads back holds those it keeps in view
+   * already (a first open's `older`, a message pinned since read with `readMessage`), so where only they are left there
+   * is nothing more to show. A message kept from before messages carried their seq is read by its place, as it stands
+   * among the others.
+   */
+  before(room, beforeSeq, n = WINDOW) {
+    const list = room.messages;
+    let end = list.findIndex((m) => m && Number.isInteger(m.seq) && m.seq >= beforeSeq);
+    if (end < 0) end = list.length;
+    const start = Math.max(0, end - n);
+    let more = false;
+    for (let i = 0; i < start && !more; i++) more = !keptInView(list[i]);
+    return { history: list.slice(start, end).map((m) => asRead(room, m)), more };
+  }
+
+  /** One message of the room by its id, as a reader is sent it (asRead), or null where the room holds none by it. */
+  readMessage(room, id) {
+    const m = typeof id === 'string' && id ? room.byId.get(id) : null;
+    return m ? asRead(room, m) : null;
+  }
+
+  /**
    * What a snapshot of the room holds, its fields in SNAPSHOT_FIELDS' order: the object compact() writes. Its guest code
    * and its earlier ones only when it has them, so a hall never renewed is written as 0.5.1 wrote it.
    */
@@ -677,4 +745,4 @@ function readCodes(data, key) {
   return { guestCode, retired: [...new Set(listed)].slice(-RETIRED_KEEP) };
 }
 
-module.exports = { RoomStore, GONE_KEEP, COMPACT_EVERY, SNAPSHOT_FIELDS, SNAPSHOT_OPTIONAL, RETIRED_KEEP, CODE_RE, SIDE_RE, SIDE_MAX };
+module.exports = { RoomStore, GONE_KEEP, COMPACT_EVERY, SNAPSHOT_FIELDS, SNAPSHOT_OPTIONAL, RETIRED_KEEP, CODE_RE, SIDE_RE, SIDE_MAX, WINDOW };

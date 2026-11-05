@@ -58,6 +58,9 @@ const READS = new Set([
   'join', 'seen', 'myRooms', 'board:watch', 'userState:push', 'userState:requestPeers', 'stage:targets', 'display:list',
   'display:shown', 'hall:settings', 'nodes:list', 'admin:invites', 'admin:listRooms', 'admin:watchRoom', 'admin:laptop',
   'admin:tunnelStatus', 'room:settings', 'room:sendTargets', 'page:status', 'disconnect',
+  // A room's earlier messages read back (Show earlier, a reply's Show it), and one it keeps in view read by its id (a
+  // message pinned since a page opened): reads of what the room holds, changing nothing.
+  'history:before', 'history:message',
 ]);
 
 /** A count as the line keeps it: a whole number from 0, anything else 0. */

@@ -750,7 +750,7 @@ test('a person\'s chat view: the join\'s view by the seat, the admin\'s choice f
   const tomPage = await page(tom.cookie, 'Tom backstage');
   await joined(tomPage, { roomCode: hall, as: 'account' });
   assert.deepEqual([gilJoin.view, riaJoin.view, beaJoin.view], ['simple', 'full', 'simple']);
-  assert.equal(Object.keys(gilJoin).at(-1), 'view', 'the join\'s view, appended at its end');
+  assert.deepEqual(Object.keys(gilJoin).slice(-4), ['view', 'more', 'older', 'files'], 'the join\'s view, appended at its end before a first open\'s bounds');
 
   // The admin page reads the room's people, with the view the admin chose for each ('' by the seat).
   const ctl = await page(admin, 'the admin page');

@@ -47,9 +47,15 @@
  * its log keeps it across a restart, and an unlock turns it off in its own op), one `room.guestWeb` row, and each guest
  * page seated backstage there told at once what it may now show (`tellWebRights`). Turned off, a web page a guest put up
  * stays until someone takes it down: the answer counts them and names their targets, for the admin's Take it down.
+ *
+ * A room's earlier messages (owner answer 33, plan 5-§11 unit 32): a page opens a room with its newest messages (the
+ * join's first open, `store.firstOpen`) and asks for the ones before them a page at a time (`history:before`), and for
+ * one it keeps in view that it does not hold (`history:message`: a message pinned since), each message the room's record
+ * as it stands, so a change made to it while it was not on the page is in it, and a reply whose quoted message has gone
+ * says so (`store.readMessage`'s reading).
  */
 const { str, cleanText } = require('../guard');
-const { placeOf, lasted } = require('../ops');
+const { placeOf, lasted, forPage } = require('../ops');
 
 /** What a seat On stage is told of a send out of its room: what it writes stays in its room's feed (owner answer B2). */
 const STAYS_HERE = 'Messages from On stage stay in this room.';
@@ -96,6 +102,10 @@ const ONLY_ADMIN_WEB = 'Only an admin may let backstage guests show web pages.';
 /** What the switch answers on a side room, and on an open hall, where no code guest shows anything. */
 const WEB_ON_MAIN = 'This is set on the hall\'s Main room.';
 const WEB_LOCK_FIRST = 'Lock the roles first: in an open hall, code guests show nothing.';
+/** What `history:before` answers where it is not told where to read back from. */
+const EARLIER_FROM = 'Say where to read back from: beforeSeq, the change number of the oldest message this page holds.';
+/** What `history:message` answers for an id the room holds no message by. */
+const NOT_IN_ROOM = 'That message is not in this room any more.';
 /** "3 guest pages", "1 guest page": a count of pages, never who. */
 const guestPagesWords = (n) => n + ' guest page' + (n === 1 ? '' : 's');
 
@@ -522,6 +532,28 @@ function register(socket, conn, ctx) {
       : 'backstage guests may no longer show web pages' + (left.up ? ' (' + left.up + ' shown now ' + (left.up === 1 ? 'stays' : 'stay') + ' until taken down)' : ''));
     tellWebRights(room.code);
     answer({ ok: true, ...told });
+  });
+
+  // A room's earlier messages (`{beforeSeq}`, the change number of the oldest message its page holds): the WINDOW before
+  // it, oldest first, each as a page is sent it, and whether there are more before those. A read of the room this page
+  // sits in, every seat's and the support view's, never another room's: it names no room. One chatter token per ask.
+  socket.on('history:before', (args, ack) => {
+    if (!conn.gate(ack, { bucket: conn.chatter })) return;
+    const answer = conn.ok(ack);
+    const a = isRecord(args) ? args : {};
+    if (!Number.isInteger(a.beforeSeq) || a.beforeSeq < 1) return answer({ ok: false, error: EARLIER_FROM });
+    const got = store.before(conn.room(), a.beforeSeq);
+    answer({ ok: true, history: got.history.map(forPage), more: got.more });
+  });
+
+  // One message of this page's room (`{messageId}`), as a page is sent it: a message a page keeps in view however old,
+  // which it does not hold (one pinned since its first open, earlier than what it holds). A read of the room this page
+  // sits in, every seat's and the support view's, never another room's: it names no room. One chatter token per ask.
+  socket.on('history:message', (args, ack) => {
+    if (!conn.gate(ack, { bucket: conn.chatter })) return;
+    const answer = conn.ok(ack);
+    const m = store.readMessage(conn.room(), str((isRecord(args) ? args : {}).messageId));
+    answer(m ? { ok: true, message: forPage(m) } : { ok: false, error: NOT_IN_ROOM });
   });
 }
 

@@ -133,6 +133,11 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   downloaded, or a copy someone there forwarded or sent on into another room, and a file's link keeps working while any
   room (the copy here among them) or screen holds it. Each withdrawal is one `room.withdraw` row, never the words or a
   file's name; a repeat changes nothing and writes none.
+- A page opens a room with its newest 200 messages, and reads earlier ones (`history:before {beforeSeq}`, and one by its
+  id, `history:message {messageId}`, as a message pinned since it opened) only of the room it sits in: neither verb
+  names a room, so neither is a way into another, and a page seated nowhere is refused before anything is read. Each
+  ask takes a token of the connection's chatter bucket first, so reading a long day back is paced, and is answered with
+  at most 200 messages. What they read is what a first open sent whole before 0.6.0.
 - A take on people's pages (`page:push`) is the admin's, an account's with `display.control` in the hall, or a code
   guest's seated backstage in the hall's Main room while its seats are locked (the seat came from an invite, or was one
   the admin kept by locking the room, who sees and may move each seat kept): never a page seated On stage, the admin's
@@ -304,9 +309,9 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   names its hall's key (its Main room's address, and its guest code until New code) only to a watcher who sees the hall:
   an account given a side room alone is told the hall's name, or that it has none, never its key. A line sent to the
   speaker's screen or asked of the show desk keeps, on its record, the link it went to, which a hall's own Stagewatch
-  names by the hall's key; a room's pages are sent the record without it (`lib/ops.js` `forPage`), live, in the history,
-  in the changes a page missed and in the show desk's answer to the page that asked, so a send made from a side room
-  tells its readers nothing of the hall's key.
+  names by the hall's key; a room's pages are sent the record without it (`lib/ops.js` `forPage`), live, in a first open
+  and in the earlier messages a page reads back, in the changes a page missed and in the show desk's answer to the page
+  that asked, so a send made from a side room tells its readers nothing of the hall's key.
 - A connection refused for its rate says when to try again (`retryMs`, read from that address's own bucket, with a
   random spread) and nothing else: no address and no count; the page waits it out. A page that comes back in a
   restart's first 30 s naming a change its hall holds is not announced again: that is the "joined" words only, and its

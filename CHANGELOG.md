@@ -4293,6 +4293,122 @@ landed in 0.6.0)
   of This laptop), `docs/NODES.md` (health's `latest`), `SECURITY.md`, `CLAUDE.md`.
 - Rolling back: 0.5.1 has no switcher; the read marks stay in the browser, unread.
 
+**A first open carries the newest 200 messages; older ones come on request** (the plan's Part 5, unit 32, its §11 and §9
+rows, with §0's amendment of §3.3 (the join's `history` windowed), §13.3.2's trade-off (frames undeflated, so a first
+open would grow with a hall's whole day), §14.2 (`history:before` in `lib/handlers/rooms.js`) and §15.10's
+`requestIdleCallback` row; global #57, landed in 0.6.0 without a reading by the owner's answer 33, "Yes they can,
+Unknown quantities.", to remote phones through the tunnel. No number is quoted: reading 1 times Show earlier and a room
+switch at the largest hall's size, and keeps or changes the 200 with it)
+- **A first open** (a join that names no change it holds, or one whose gap the server no longer holds) carries the
+  room's newest 200 messages (`history`, oldest first), and, appended at the end of the answer, whether the room holds
+  messages before them that it did not carry (`more`), what a page keeps in view from before them however old (`older`,
+  in the room's order: every pinned message, every help request not yet resolved, every question nobody has answered
+  yet) and an index of every file of the room (`files`: each one's message id, address, name and kind), so a list of the
+  room's files is whole without its messages. Each message is the room's record as a page is sent it (`forPage`, no
+  link). A resume is unchanged: just what the page missed, and none of these keys.
+- **Earlier messages** come a page at a time: `history:before {beforeSeq}` (in `lib/handlers/rooms.js`, behind the gate:
+  seated in a room that is still here, then one token of the connection's chatter bucket) answers the 200 messages
+  before the first message whose change number is `beforeSeq` or later, oldest first, and whether any came before those
+  that a first open does not carry (`more`: where only the messages a page keeps in view are left, it holds them already,
+  and there is nothing more to show). It names no room: a page reads only the room it sits in, every seat and the
+  support view alike. A `beforeSeq` that is not a whole number above 0 is refused with words ("Say where to read back
+  from: …"), never read as none. A message kept from before messages carried their change number is read by its place
+  among the others.
+- **A message pinned since a page opened**, earlier than what the page holds, is read by its id: the page hears the pin
+  of a message it does not hold and asks `history:message {messageId}` (beside `history:before`, behind the same gate
+  and bucket, of the page's own room only; an id the room holds no message by is refused, "That message is not in this
+  room any more."), asked again after a second for the rate or no answer, and holds it among the older ones, in its
+  pinned strip and in the feed in the room's order, so every pinned message is in view on every page, as it was when
+  every page held every message. The pinned strip draws every pinned message the page holds at once, drawn in the feed
+  yet or not, so a first open's pinned agenda is there before its older messages are drawn.
+- **A reply whose quoted message has gone from the room** (its author or the admin removed it) is sent with its quote
+  marked `gone` (`replyTo.gone`, in a first open, a read back and a message read by its id: a copy, the record
+  unchanged), and a page that hears a removal marks the replies it holds the same, so such a quote never offers Show it
+  and no read goes back through the day for a message that is not there.
+- **On the hall page** the newest 60 of a first open are drawn at once, the reader at the end, and everything else it
+  holds above them a chunk at a time as the page is idle (`AGM.idle`: each chunk stops when its 8 ms are spent; on a
+  browser without `requestIdleCallback`, its timer), newest first, the reader's place kept, so the run of messages a
+  first open sends and the feed it draws at once no longer grow with the day (what still grows with it is the room's file
+  index and the earlier messages a page keeps in view), and the page answers a tap while the rest is drawn. The older messages
+  a first open keeps in view are drawn above the newest in the room's order. **Show earlier** sits above the oldest of
+  the newest run while the room holds earlier ones (the catalogue's new kind `earlier`, its one act `earlier.show`, verb
+  `history:before`, mode `now`: shown to every seat, disabled with why offline and in the support view): it draws the
+  200 before above, each taking its place among the older ones already drawn, the message the reader was reading kept
+  where it was on the screen, and goes once nothing earlier is left. A reply whose quoted message is earlier than those
+  held says "**Earlier — Show it**" in its quote: Show it reads back, a page at a time, until that message is there, and
+  goes to it (as a tap on a quote whose message is drawn always did); a quote whose message has gone from the room says
+  so. A read that fails keeps its own words in the toast (no answer, or the server's refusal); "That message is not in
+  this room any more." is said only where the room was read back to its start without it, or its removal was heard.
+  Show earlier pressed during a read is that read; Show it pressed during a read for something else follows it and
+  goes to its message. A page of messages the page held already (those kept in view) is followed by the next before
+  Show earlier is drawn again. An answer is held in the callback that hears it, before any change heard after it, so a
+  change made just after the server read a message is in it.
+- **A change to a message the page does not hold** (a reaction, a pin, an answer, a help request's state) changes
+  nothing drawn; the message, read later, is the server's record as it stands, the change in it. A message the page
+  holds but has not drawn yet is held from the moment it comes (in the room's order), so a change heard while it waits
+  is in it when it is drawn, a question's answers among them (`updateActionResponses` keeps them on the record before it
+  looks for one drawn). A message removed while it waits is never drawn.
+- **Holding's pictures** in Screens & pages read the room's file index, so a picture shared hours before the window is
+  still offered.
+- Choices where the plan left room: the window counts every entry of the room (a presence line too), as `history` always
+  has, and pages back by the same 200; "open help" is a request not yet resolved (open, or someone on the way), and an
+  "unanswered prompt" a question with no answer from anyone yet; the older messages a page keeps in view ride in a key
+  of their own (`older`), not inside `history`, so `history` stays the newest run and its first message's change number
+  is where Show earlier reads back from; `more` is true only where something before the window was left out (a room
+  whose every earlier message is pinned has nothing more to show); `files` lists every file of the room, not only those
+  outside the window, so a page keeps one index current from the join and the changes it hears; the new keys are
+  appended at the end of the join's answer, after `view` (and the support view's `person`); Show earlier is a catalogue
+  kind of its own, and Show it the same act with the quoted message's id (`find`), so both are drawn from the one row;
+  Show earlier waits until what a first open holds is drawn, and a page reads one page at a time; a read refused for the
+  rate is asked again after a second; Show earlier and Show it in the support view are drawn disabled, as every door
+  there is (the admin reads a room whole on the admin page); a quote of a message the page does not hold says Show it
+  only while the room holds earlier messages; a quote of a removed message keeps the words it quoted, as it always has
+  (only a withdrawal takes them out), and says it has gone only in its title; a message pinned since is held only while
+  it is still pinned when its answer comes, and one the room no longer holds is left; a 🔥 message older than the window
+  that still waits for a Board member's Got it is not carried by a first open (the plan's list of what a page keeps in
+  view is pinned, open help and unanswered questions; what waits is per person), so after a reload it no longer shows as
+  waiting in the simple view unless it is pinned.
+- Tests: `test/units.test.js` (new: `store.firstOpen` and `store.before` on 510 messages: the newest 200, the pinned
+  message, the open help, the one on the way and the unanswered question from before them and not the resolved help or
+  the answered question, `more`, every file, the records themselves; the 200 before, then the rest; nothing before the
+  first; past the newest change the newest page; a message without a change number read by its place; an answer, a
+  resolution and an unpin taking a message out of what is kept; a room whose every earlier message is kept has no more,
+  and a read back whose only earlier messages are kept says no more and still reads them when asked; a reply whose quoted
+  message was removed marked `gone` in a first open, a read back and `readMessage`, its record unchanged, a reply to a
+  message still there and one to a withdrawn message the records themselves; an id the room holds none by read as none;
+  a cleared room), `test/server.test.js` (new, end to end on a room of more than 400 messages: a join's window, `older`,
+  `files` and `more`, at the end of the answer, a reply to a removed message marked `gone` and one to an earlier message
+  not; read back to the start a page of 200 at a time, every message once in the room's order, a reaction made meanwhile
+  to a message not held in it when it comes, the removed message never; nothing before the first; a question pinned
+  after a page opened heard as a pin alone and read with `history:message` as it stands (pinned, its answer in it), a
+  removed message and an unknown id refused in their words; a page in no room refused both verbs, each `beforeSeq` that
+  is no whole number above 0 and each `messageId` that is no id refused in its words, a burst of both past the chatter
+  bucket refused for the rate with `busy`; a resume with none of the new keys), `test/inputs.test.js` (`beforeSeq` and
+  `messageId` null and unconvertible to both verbs, from a guest and from the admin's page in no room), `test/catalog.test.js` (the
+  kind `earlier`: every seat shown Show earlier and Show it while the room holds earlier messages and none once it does
+  not, offline and the support view disabled with why; the required verb `history:before`), `test/menus.test.js`
+  (`history:before` the second verb no right hides, with why; the join's last keys gain `more`, `older` and `files`, on
+  purpose, as `test/takes.test.js`'s do); `test/busy.test.js` is unchanged, its fence (every verb a handler registers
+  is input or a read) holding `history:before` and `history:message`, which `lib/busy.js` names as reads, so reading a
+  room back makes no hall busy. The browser smoke, on a hall of a long day (sixteen
+  people, more than 250 messages): with the page's idle work held, the newest 60 of the window drawn and the other 140
+  held, the reader at the end; a reaction to a message the page does not hold changes nothing drawn; let idle, the rest
+  drawn above in the room's order and Show earlier above the oldest; read from the top, Show earlier draws the earlier
+  ones above, the message the reader was reading in place to 2 px, the reacted message with its reaction, and goes; a
+  fresh page's reply to the day's first message says "Earlier — Show it", and a reply to a message its author removed
+  says nothing of the kind, its title saying the message has gone; a read back the server refuses keeps its words in the
+  toast and the quote keeps its Show it; Show earlier and then Show it pressed at once: Show it follows the read and goes
+  to the first message; at the floor (no `requestIdleCallback`) the rest drawn by `AGM.idle`'s timer, with no script
+  error; a message pinned by someone else after the page opened, earlier than it holds, comes to its pinned strip and
+  its place in the feed, in the room's order, Show earlier still above; and the removal of a message the page does not
+  hold, heard, takes the Show it from the quote of it.
+- The papers: `README.md`, `README.txt`, `docs/DESIGN.md` (the sequence row and the frames row), `docs/DEVICES.md`
+  (`requestIdleCallback`'s row, the floor leg), `docs/ANALYSIS.md` (the kind `earlier`, the fuzz's keys), `SECURITY.md`,
+  `CLAUDE.md`.
+- Rolling back: 0.5.1 reads no `history:before` or `history:message` and sends a first open whole; a 0.6.0 page served by it shows no Show
+  earlier and lists the files of what it was sent. A 0.5.1 page cached across the upgrade draws the newest 200 alone,
+  without the older ones kept in view, until it reloads onto 0.6.0 (it is told to, 5 minutes after the start).
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after
