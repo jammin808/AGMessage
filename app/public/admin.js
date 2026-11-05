@@ -345,11 +345,11 @@ function personObject(sid) {
   return { ...u, hall: hallName(), linkedNames, main: watchedIsMain() };
 }
 const hallName = () => (currentRoom ? currentRoom.title || roomNameForCode(currentRoom.code) || currentRoom.code : '');
-/** The people, drawn in place by their page's id: Name, Seat (a code guest's select; an account's follows its rights), May forward to, and the ⋯. */
+/** The people, drawn in place by their page's id: Name, Seat (a code guest's select; an account's follows its rights), Chat view, May forward to, and the ⋯. */
 function renderUsers(users) {
   const tb = document.getElementById('usersTbody');
   if (!users.length) {
-    tb.innerHTML = '<tr><td colspan="4" class="muted">No-one has joined yet.</td></tr>';
+    tb.innerHTML = '<tr><td colspan="5" class="muted">No-one has joined yet.</td></tr>';
     ADMIN.refresh();
     return;
   }
@@ -362,12 +362,12 @@ function renderUsers(users) {
       tr = document.createElement('tr');
       tr.dataset.key = u.socketId;
       tr.className = 'person-row';
-      for (let i = 0; i < 4; i++) tr.appendChild(document.createElement('td'));
+      for (let i = 0; i < 5; i++) tr.appendChild(document.createElement('td'));
       const bar = document.createElement('span');
       bar.className = 'obj-bar';
       tr.lastElementChild.appendChild(bar);
     }
-    const [nameTd, seatTd, linksTd] = tr.children;
+    const [nameTd, seatTd, viewTd, linksTd] = tr.children;
     const nameHtml = `<strong>${escapeHtml(u.name)}</strong>`;
     if (nameTd.innerHTML !== nameHtml) nameTd.innerHTML = nameHtml;
     // A code guest's seat is set here; an account's follows its rights, which are set on the Accounts page.
@@ -378,6 +378,11 @@ function renderUsers(users) {
     } else if (!sel) {
       seatTd.innerHTML = `<select class="role-select" aria-label="Seat of ${escapeHtml(u.name)}">${roleOptionsHtml(u.role)}</select>`;
     } else if (document.activeElement !== sel) sel.value = u.role;
+    // The chat view the admin chose for the person (Chat view ▸ in the row's ⋯ is the same act): a guest's or an account's.
+    const viewSel = viewTd.querySelector('.view-select');
+    const viewNow = typeof u.view === 'string' ? u.view : '';
+    if (!viewSel) viewTd.innerHTML = `<select class="view-select" aria-label="Chat view of ${escapeHtml(u.name)}">${chatViewOptionsHtml(viewNow)}</select>`;
+    else if (document.activeElement !== viewSel) viewSel.value = viewNow;
     const linksHtml = (u.linkedRooms || []).map((rm) => {
       const nm = roomNameForCode(rm);
       const labelHtml = nm
@@ -409,6 +414,18 @@ usersTbody.addEventListener('change', (e) => {
   sel.value = seatValue(o.role);
   const get = () => personObject(tr.dataset.key);
   ADMIN.act('person', 'person.seat', o, { value: want, anchor: sel, node: tr, opener: sel, get, gone: 'That person has left the hall.' });
+});
+// A person's chat view chosen in its select is the catalogue's Chat view ▸ with that value; the select shows the view the
+// server keeps until it answers.
+usersTbody.addEventListener('change', (e) => {
+  const sel = e.target.closest('.view-select');
+  const tr = sel && sel.closest('tr[data-key]');
+  const o = tr && personObject(tr.dataset.key);
+  if (!o) return;
+  const want = sel.value;
+  sel.value = typeof o.view === 'string' ? o.view : '';
+  const get = () => personObject(tr.dataset.key);
+  ADMIN.act('person', 'person.chatView', o, { value: want, anchor: sel, node: tr, opener: sel, get, gone: 'That person has left the hall.' });
 });
 // A link's × takes back that one hall: the catalogue's No longer forward into ▸, as unticking it in the menu is.
 usersTbody.addEventListener('click', (e) => {
@@ -557,6 +574,10 @@ function escapeHtml(s) {
 }
 /** Whether the watched room is a hall's Main room (a side room has no stage: no seat there is On stage). */
 function watchedIsMain() { return !currentRoom || currentRoom.main !== false; }
+/** The chat views a person's pages may draw, in the catalogue's words (By seat, Simple, Full), the one chosen selected. */
+function chatViewOptionsHtml(current) {
+  return AGM.catalog.CHAT_VIEWS.map(([v, label]) => '<option value="' + escapeHtml(v) + '"' + (v === current ? ' selected' : '') + '>' + escapeHtml(label) + '</option>').join('');
+}
 /** The seat picker's options, the person's own selected: On stage only in a hall's Main room. */
 function roleOptionsHtml(current) {
   return (watchedIsMain() ? ['board', 'research', 'observer'] : ['research', 'observer']).map((r) => '<option value="' + r + '"' + (r === current ? ' selected' : '') + '>' + escapeHtml(seatWord(r)) + '</option>').join('');
@@ -693,6 +714,16 @@ Object.assign(ADMIN_RUN, {
       if (res && res.ok) { if (sel) sel.value = seatValue(c.value); return; }
       say((res && res.error) || 'Not moved to that seat.', true);
       if (sel) sel.value = seatValue(o.role);
+    });
+  },
+  // The view the person's pages draw: said once the server has it; the row's select follows the people list it sends.
+  'person.chatView': (o, c) => {
+    if (typeof c.value !== 'string') return;
+    AGM.outbox.now('admin:setView', { roomCode: currentRoom.code, socketId: o.socketId, view: c.value }, (res) => {
+      const sel = document.querySelector('#usersTbody > tr[data-key="' + CSS.escape(o.socketId) + '"] .view-select');
+      if (res && res.ok) { if (sel) sel.value = c.value; say(o.name + (res.already ? '\'s chat view is ' : '\'s chat view: ') + AGM.catalog.CHAT_VIEWS.find(([v]) => v === c.value)[1] + '.'); return; }
+      say((res && res.error) || 'Not changed.', true);
+      if (sel) sel.value = typeof o.view === 'string' ? o.view : '';
     });
   },
   // A hall ticked already is unticked: that is No longer forward into ▸, its own act.

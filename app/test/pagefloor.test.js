@@ -21,8 +21,8 @@ const plain = (v) => JSON.parse(JSON.stringify(v));   // a value from the page's
 const settle = () => new Promise((r) => { setImmediate(r); });
 
 /** theme-init.js run as the head of a page runs it. `weakRef: false` is a browser below the floor. */
-function themeInit({ weakRef = true, theme = 'dark', blocked = false, readyState = 'loading' } = {}) {
-  const attrs = {};
+function themeInit({ weakRef = true, theme = 'dark', blocked = false, readyState = 'loading', page = '', lastView = null } = {}) {
+  const attrs = page ? { 'data-page': page } : {};
   const listeners = {};
   const body = {
     children: [],
@@ -32,12 +32,12 @@ function themeInit({ weakRef = true, theme = 'dark', blocked = false, readyState
   const document = {
     readyState,
     body,
-    documentElement: { setAttribute: (k, v) => { attrs[k] = String(v); } },
+    documentElement: { setAttribute: (k, v) => { attrs[k] = String(v); }, getAttribute: (k) => (Object.hasOwn(attrs, k) ? attrs[k] : null) },
     addEventListener: (ev, fn) => { (listeners[ev] = listeners[ev] || []).push(fn); },
     createElement: (tag) => ({ tag, className: '', text: '', appendChild(n) { this.text += n.text; return n; } }),
     createTextNode: (text) => ({ text }),
   };
-  const localStorage = { getItem: (k) => { if (blocked) throw new Error('The operation is insecure.'); return k === 'agm.theme' ? theme : null; } };
+  const localStorage = { getItem: (k) => { if (blocked) throw new Error('The operation is insecure.'); return k === 'agm.theme' ? theme : k === 'agm.lastView' ? lastView : null; } };
   const atWindow = [];
   const ctx = vm.createContext({ document, localStorage, addEventListener: (ev, fn, capture) => { atWindow.push({ ev, fn, capture }); } });
   vm.runInContext('globalThis.window = globalThis;' + (weakRef ? '' : ' delete globalThis.WeakRef;'), ctx);
@@ -77,6 +77,14 @@ test('theme-init.js: above the floor the theme is set and nothing else; below it
   blocked.fire('DOMContentLoaded');
   assert.deepEqual(blocked.body.children.map((n) => n.text), [FLOOR_WORDS]);
   assert.deepEqual(themeInit({ blocked: true }).attrs, {}, 'storage blocked above the floor: the page keeps its light theme');
+  // A theme never chosen: light, but on the hall page (its markup says data-page="app") last drawn in the Board's simple
+  // view, which starts in Dark: dark before its first frame. Any other page reads it as light, whatever view was last
+  // drawn; a theme chosen is that theme everywhere.
+  const first = (o) => themeInit({ theme: null, ...o }).attrs['data-theme'];
+  assert.deepEqual([first({ page: 'app', lastView: 'simple' }), first({ page: 'app', lastView: 'full' }), first({ page: 'app' }), first({ lastView: 'simple' }), first({ page: 'halls', lastView: 'simple' })],
+    ['dark', 'light', 'light', 'light', 'light']);
+  assert.deepEqual([themeInit({ theme: 'light', page: 'app', lastView: 'simple' }).attrs['data-theme'], themeInit({ theme: 'dark', page: 'app', lastView: 'full' }).attrs['data-theme']], ['light', 'dark'], 'a theme chosen holds');
+  assert.deepEqual(themeInit({ theme: 'purple', page: 'app', lastView: 'simple' }).attrs['data-theme'], 'dark', 'a stored value that is no theme is none');
 });
 
 /** common.js run as a page runs it, with a document, navigator, clock and timers of the test's own. */

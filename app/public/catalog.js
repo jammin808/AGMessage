@@ -38,6 +38,9 @@
    * standard to twice it, for a reader at a glance under lights (the page's own bounds are 0.7 and 2.2, app.js setZoom).
    */
   const TEXT_SIZES = Object.freeze([[0.85, 'Small'], [1, 'Standard'], [1.15, 'Large'], [1.3, 'Larger'], [1.6, 'Very large'], [2, 'Largest']].map((x) => Object.freeze(x)));
+  /** The page's own bounds of the text size (app.js setZoom), which the sheet's Aa− and Aa+ step between by a tenth. */
+  const ZOOM_MIN = 0.7;
+  const ZOOM_MAX = 2.2;
   const REACTIONS = Object.freeze(['👍', '👎', '❤️', '🎉', '🤔', '👀', '😂', '🔥']);
   const WORDS = Object.freeze({
     offline: 'Not connected — AGMessage is reconnecting.',
@@ -126,10 +129,20 @@
   const setsUp = (f) => (onAdmin(f) ? f.admin : !!f.manageHalls);
   const newestPlain = (f) => (f.waiting.plain.length ? f.waiting.plain[f.waiting.plain.length - 1] : '');
   /**
-   * The simple view's one response place for a message: each waiting 🔥 message, and the newest waiting plain one (the
-   * page says which wait: a message from backstage waits for this person until their 👍, a reply to it, or an answer).
+   * Whether a question's answers are drawn for this person: always in the full view; in the simple view until they have
+   * answered it (its line then says how, with Change), and again once they chose Change.
    */
-  const respondsHere = (f, o) => f.waiting.priority.includes(o.id) || (!o.priority && newestPlain(f) === o.id);
+  const asking = (f, o) => o.type === 'action' && (full(f) || answered(f, o) === null || f.changing === o.id);
+  /**
+   * The simple view's one response place for a message: each waiting 🔥 message, the newest waiting plain one (the page
+   * says which wait: a message from backstage waits for this person until their 👍, a reply to it, or an answer), and
+   * the message the person tapped (the second door, `tapped`), for that one alone.
+   */
+  const respondsHere = (f, o) => f.waiting.priority.includes(o.id) || (!o.priority && newestPlain(f) === o.id) || (!!f.tapped && f.tapped === o.id);
+  /** Whether a message waits for this person's answer (the page reads it from the room's messages: `waiting`). */
+  const waits = (f, o) => f.waiting.priority.includes(o.id) || f.waiting.plain.includes(o.id);
+  /** Got all N: the newest waiting plain message answers every plain one that waits, N of them; any other, itself. */
+  const answersAll = (f, o) => !o.priority && newestPlain(f) === o.id && f.waiting.plain.length > 1;
   /** A hall as an ask names it: its name, else its code; a side room by its hall's name and its own ("Hall 2 › Legal"). */
   const hallOf = (o) => String(o.hall || o.name || o.code || 'this hall');
   /** A room of the admin's list that is a hall (its Main room): every room is, but a side room (`main: false`). */
@@ -140,6 +153,8 @@
    *  Main room's, and a side room's, which has no stage and whose backstage seat is a Member's. */
   const SEATS = Object.freeze([['board', 'On stage'], ['research', 'Backstage'], ['observer', 'Observer']]);
   const SEATS_SIDE = Object.freeze([['research', 'Member'], ['observer', 'Observer']]);
+  /** The chat views the admin chooses between, in the Accounts page's words: '' by the person's seat. */
+  const CHAT_VIEWS = Object.freeze([['', 'By seat'], ['simple', 'Simple'], ['full', 'Full']].map((x) => Object.freeze(x)));
   const seatOf = (role) => (role === 'director' ? 'board' : role);
   /**
    * The ask before a room's guest code is switched off (the design's three-way choice): the guest pages in with it stay
@@ -219,21 +234,27 @@
     msg: [
       // 👍 Got it: the simple view's answer to the backstage team, one per message it answers (Got all N answers each
       // plain message waiting); the full view's React ▸ 👍 is the same fact, so it has none.
-      { id: 'msg.ack', label: (f, o) => (!o.priority && f.waiting.plain.length > 1 ? 'Got all ' + f.waiting.plain.length : 'Got it'), icon: '👍', group: '1_respond',
+      { id: 'msg.ack', label: (f, o) => (answersAll(f, o) ? 'Got all ' + f.waiting.plain.length : 'Got it'), icon: '👍', group: '1_respond',
         inline: () => 1, verb: 'react', mode: 'hold', may: (f) => f.post,
-        fits: (f, o) => !full(f) && !!o.from && o.from.role === 'research' && (o.type === 'text' || o.type === 'file') && !reacted(f, o, '👍') && respondsHere(f, o) },
+        fits: (f, o) => !full(f) && !!o.from && o.from.role === 'research' && (o.type === 'text' || o.type === 'file') && !reacted(f, o, '👍') && waits(f, o) && respondsHere(f, o) },
+      // In the simple view Reply sits beside Got it, and on a message tapped (answered or not): another's message or file,
+      // never one's own (its status words are its line), a question (its answers are) or a line of the room's.
       { id: 'msg.reply', label: 'Reply', icon: '↩', key: 'R', group: '1_respond', inline: (f) => (full(f) ? 1 : 2), verb: 'local', mode: 'local',
-        may: (f) => f.post, fits: (f, o) => full(f) || respondsHere(f, o) },
+        may: (f) => f.post, fits: (f, o) => full(f) || (!!o.from && !mine(f, o) && (o.type === 'text' || o.type === 'file') && respondsHere(f, o)) },
       { id: 'msg.react', label: 'React', icon: '😊', key: 'E', group: '1_respond', verb: 'react', mode: 'now',
         may: (f) => f.post, fits: (f) => full(f),
         submenu: (f, o) => REACTIONS.map((e) => ({ value: e, label: e, role: 'menuitemcheckbox', checked: reacted(f, o, e) })) },
       { id: 'msg.answer', label: 'Answer', icon: '☑', group: '1_respond', verb: 'actionResponse', mode: 'hold',
-        may: (f) => f.post, fits: (f, o) => o.type === 'action' && Array.isArray(o.options) && o.options.length > 0,
+        may: (f) => f.post, fits: (f, o) => o.type === 'action' && Array.isArray(o.options) && o.options.length > 0 && asking(f, o),
         submenu: (f, o) => o.options.map((opt, i) => ({ value: i, label: String(opt), role: 'menuitemradio', checked: answered(f, o) === i })) },
       { id: 'msg.answerWords', label: 'Answer in words…', icon: '✎', group: '1_respond', verb: 'actionResponse', mode: 'hold',
-        may: (f) => f.post, fits: (f, o) => o.type === 'action',
+        may: (f) => f.post, fits: (f, o) => o.type === 'action' && asking(f, o),
         confirm: () => ({ title: 'Answer in words', words: 'Your answer goes to everyone in this room, under the question.',
-          fields: [{ name: 'note', label: 'Your answer', max: 200 }], yes: 'Send answer', no: 'Cancel' }) },
+          fields: [{ name: 'note', label: 'Your answer…', max: 200 }], yes: 'Send answer', no: 'Cancel' }) },
+      // Change: in the simple view an answered question reads "You answered Yes · 14:10 · Change", and Change brings its
+      // answers back (one's own answer is replaced by the next, actionResponse). The full view keeps them drawn.
+      { id: 'msg.change', label: 'Change', icon: '🔁', group: '1_respond', verb: 'local', mode: 'local',
+        may: (f) => f.post, fits: (f, o) => o.type === 'action' && !asking(f, o) },
       // Help requests are answered by the backstage team; a seat On stage marks only its own request resolved (from its
       // Help chip in the simple view).
       { id: 'msg.helpRespond', label: 'On my way', icon: '▷', group: '1_respond', verb: 'help:respond', mode: 'hold',
@@ -409,8 +430,22 @@
     // A take minimised into the side bar (📺 On stage), as a card: Show again draws it over the page again; Remove puts it
     // away (Back to chat), with Undo for 10 s (the server takes Back to chat back within 10 s). `seq`, `kind`.
     card: [
-      { id: 'card.show', label: 'Show again', icon: '⤴', group: '1_respond', inline: () => 1, verb: 'page:report', mode: 'self', may: () => true, fits: () => true },
+      // In the simple view a card's one act is 👁 Look (Shown to you); the full view keeps ⤴ Show again.
+      { id: 'card.show', label: (f) => (full(f) ? 'Show again' : 'Look'), icon: (f) => (full(f) ? '⤴' : '👁'), group: '1_respond', inline: () => 1, verb: 'page:report', mode: 'self', may: () => true, fits: () => true },
       { id: 'card.remove', label: 'Remove', icon: '🗑', group: '9_danger', inline: () => 2, verb: 'page:report', mode: 'self', undo: 'card.remove', may: () => true, fits: (f) => full(f) },
+    ],
+    // The simple view's ⋯ sheet: what is set once a session, each a row of its own, never a menu (the simple view has
+    // none). `zoom` (the text size), `dark` (the theme), `full` (the device's screen is full now), `hall` (as Leave's ask
+    // names it). Full screen only where the device has the Fullscreen API (`fullscreen`, a probe at load). Leave asks in
+    // place: it loses nothing, but a Board member who leaves stops getting messages from backstage.
+    sheet: [
+      { id: 'sheet.size', label: 'Text size', icon: 'Aa', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: (f) => !full(f),
+        submenu: (f, o) => [{ value: -0.1, label: 'Aa−' }, { value: 0.1, label: 'Aa+' }].map((v) => ({ ...v, disabled: (v.value < 0 ? o.zoom <= ZOOM_MIN : o.zoom >= ZOOM_MAX) ? 'The text is as ' + (v.value < 0 ? 'small' : 'large') + ' as it goes.' : '' })) },
+      { id: 'sheet.theme', label: 'Theme', icon: '🌙', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: (f) => !full(f),
+        submenu: (f, o) => [['light', 'Light'], ['dark', 'Dark']].map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: (value === 'dark') === !!o.dark })) },
+      { id: 'sheet.fullscreen', label: (f, o) => (o.full ? 'Leave full screen' : 'Full screen'), icon: '⛶', group: '3_keep', verb: 'local', mode: 'local', may: () => true, fits: (f) => !full(f) && f.fullscreen },
+      { id: 'sheet.leave', label: 'Leave the hall…', icon: '←', group: '4_manage', verb: 'local', mode: 'local', may: () => true, fits: (f) => !full(f),
+        confirm: (f, o) => ({ title: 'Leave ' + hallOf(o) + '?', words: 'You\'ll stop getting messages from backstage.', yes: 'Leave', no: 'Stay' }) },
     ],
     // The Board chip (the header's, for a seat that may change what people's pages show: canPush): what the Board's pages
     // show, as the console reads it. Its menu (a click on it, a right-click, Shift+F10) puts a show kind on every Board
@@ -509,6 +544,12 @@
         confirm: (f, o) => webAsk('on ' + (o.name ? o.name + '\'s' : 'their') + ' pages') },
       { id: 'person.chat', label: 'Back to chat on their pages', icon: '💬', group: '2_send', verb: 'page:push', mode: 'now',
         may: (f) => f.canPush, fits: (f, o) => onHall(f) && full(f) && typeof o.key === 'string' && o.key.length > 0, ready: (f, o) => kindWhy(f, o, 'chat') },
+      // Chat view ▸: the admin's choice of the view a person's pages draw (By seat: the simple view On stage, the full view
+      // elsewhere), for anyone seated in the room, a guest or an account, on the admin page and in the hall page's People
+      // panel (the admin's own page, which is told each person's choice, `view`).
+      { id: 'person.chatView', label: 'Chat view', icon: '🗔', group: '4_manage', verb: 'admin:setView', mode: 'now',
+        may: (f) => f.admin, fits: (f, o) => (onAdmin(f) || (onHall(f) && full(f))) && typeof o.socketId === 'string' && o.socketId.length > 0,
+        submenu: (f, o) => CHAT_VIEWS.map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: (typeof o.view === 'string' ? o.view : '') === value })) },
       { id: 'person.seat', label: 'Seat', icon: '💺', group: '4_manage', verb: 'admin:setRole', mode: 'now',
         may: (f) => f.admin, fits: (f, o) => onAdmin(f) && !o.account,
         submenu: (f, o) => (o.main === false ? SEATS_SIDE : SEATS).map(([value, label]) => ({ value, label, role: 'menuitemradio', checked: seatOf(o.role) === value })) },
@@ -745,6 +786,10 @@
       ask: post && role !== 'board',          // a question for the Board comes from backstage
       respondHelp: post && role !== 'board',  // others' help requests are answered by the backstage team
       waiting: Object.freeze({ plain: idList(waiting.plain), priority: idList(waiting.priority) }),
+      // The message the person tapped in the simple view (its second door: its own row, for it alone), or ''.
+      tapped: typeof s.tapped === 'string' ? s.tapped : '',
+      // The question whose answers the person brought back in the simple view to change theirs (Change), or ''.
+      changing: typeof s.changing === 'string' ? s.changing : '',
       files: typeof s.uploadToken === 'string' && s.uploadToken.length > 0,
       canSendToStage: !!s.canSendToStage, canPropose: !!s.canPropose, stageWhy: stageWhy(s.stage),
       ai: !!s.ai,
@@ -830,7 +875,7 @@
   function itemOf(kind, e, f, o, inFold) {
     const r = ready(kind, e.id, f, o);
     const item = {
-      id: e.id, label: call(inFold && e.short ? e.short : e.label, f, o), icon: e.icon || '', key: e.key || '', group: e.group,
+      id: e.id, label: call(inFold && e.short ? e.short : e.label, f, o), icon: call(e.icon, f, o) || '', key: e.key || '', group: e.group,
       disabled: r === true ? '' : r, held: r === true && e.mode === 'hold' && !f.connected && !f.support ? WORDS.held : '',
       submenu: typeof e.submenu === 'function', asks: !!(e.confirm && e.confirm(f, o)),
     };
@@ -892,6 +937,6 @@
     return shown(kind, f, o).find((e) => e.key === k) || null;
   }
 
-  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, KINDS, supportWords, stageWhy, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
+  const catalog = Object.freeze({ GROUPS, REACTIONS, WORDS, FOLDS, SHOW_KINDS, CHAT_VIEWS, ZOOM_MIN, ZOOM_MAX, KINDS, supportWords, stageWhy, facts, adminFacts, boardFacts, accountFacts, actorKey, entry, shown, ready, items, ids, inline, submenu, byKey, placeOf, lasted });
   Object.assign(root.AGM = root.AGM || {}, { catalog });
 })(typeof window !== 'undefined' ? window : globalThis);

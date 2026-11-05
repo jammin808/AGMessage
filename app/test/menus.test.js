@@ -54,6 +54,8 @@ const ON_STAGE_WORDS = {
   'room:update': 'Not admin',
   // What people's pages show is changed from a backstage page (the Board chip, a person's Show them ▸).
   'page:push': 'Do that from a backstage page.',
+  // A person's chat view is the admin's to choose, whatever the seat: refused as every seat but the admin is.
+  'admin:setView': 'Not admin',
 };
 
 test('every act hidden from a seat by its rights is refused by the server as that seat, with words, and changes nothing', async (t) => {
@@ -87,13 +89,15 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   await until(async () => { const r = await emit(probe, 'stage:targets', {}); return r.canSend && r.canPropose; }, 8000, 'the link and its desk');
   probe.close();
 
-  // A seat: its socket, joined in hall A, and its facts as its page reads them.
+  // A seat: its socket, joined in hall A, and its facts as its page reads them, in the full view: the server refuses an
+  // act by the seat whatever the view, and the full view draws every act a right hides (the simple view draws fewer, by
+  // what fits there), so each is sent.
   const seatOf = async (join, cookie) => {
     const s = await open(cookie);
     const j = await emit(s, 'join', { roomCode: hallA, ...join });
     assert.ok(j.ok, JSON.stringify(j));
     const screens = await emit(s, 'display:list', { code: hallA });
-    return { s, j, f: C.facts({ ...j, screens: screens && screens.ok ? screens : null, connected: true }) };
+    return { s, j, f: C.facts({ ...j, view: 'full', screens: screens && screens.ok ? screens : null, connected: true }) };
   };
   const ana = await seatOf({ name: 'Ana', role: 'research' });
   const seats = {
@@ -108,6 +112,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     boardAccount: await seatOf({ as: 'account' }, kib),
   };
   assert.deepEqual(Object.fromEntries(Object.entries(seats).map(([k, v]) => [k, v.f.role])), { research: 'research', board: 'board', observer: 'observer', viewer: 'observer', staff: 'research', tech: 'research', techNoWeb: 'research', admin: 'research', boardAccount: 'board' });
+  // The view each page draws, from the join: the simple view On stage, a Board guest's and a Board account's alike.
+  assert.deepEqual(Object.fromEntries(Object.entries(seats).map(([k, v]) => [k, v.j.view])), { research: 'full', board: 'simple', observer: 'full', viewer: 'full', staff: 'full', tech: 'full', techNoWeb: 'full', admin: 'full', boardAccount: 'simple' });
   assert.deepEqual(Object.fromEntries(Object.entries(seats).map(([k, v]) => [k, [v.f.canPush, v.f.canWeb]])),
     { research: [false, false], board: [false, false], observer: [false, false], viewer: [false, false], staff: [false, false], tech: [true, true], techNoWeb: [true, false], admin: [true, true], boardAccount: [false, false] },
     'who may change what people\'s pages show, and who may show a web page there, from the join');
@@ -151,7 +157,7 @@ test('every act hidden from a seat by its rights is refused by the server as tha
   // The rest of the hall page: each composer, the stage chip (the link up), the header's ⋯, and the people of the room as
   // the server lists them (a person: `person`'s hall half; the admin's rows fit the admin page alone).
   const composer = (form) => ({ id: 'compose:' + form, form, room: 'Hall A', file: form === 'file' ? 'capex.pdf' : '', replying: '', priority: false });
-  const people = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallA })).users.map((u) => ({ id: 'person:' + u.uid, uid: u.uid, name: u.name, role: u.role, key: (u.account ? 'a:' : 'u:') + u.uid, kind: 'clock' }));
+  const people = (await emit(seats.admin.s, 'admin:watchRoom', { roomCode: hallA })).users.map((u) => ({ id: 'person:' + u.uid, uid: u.uid, name: u.name, role: u.role, key: (u.account ? 'a:' : 'u:') + u.uid, kind: 'clock', socketId: u.socketId, view: u.view }));
   // What people's pages show: the Board as the console reads it (the clock up, so every other kind may be chosen), a
   // take on a page and its card (a page's own report, every seat's: no right hides it).
   const boardNow = (await emit(seats.admin.s, 'page:status', { code: hallA })).board;
@@ -197,6 +203,8 @@ test('every act hidden from a seat by its rights is refused by the server as tha
     },
     // A page's word on the take it is shown (the layer's acts, a card's): Back to chat on the object's take.
     'page:report': (o) => ({ seq: o.seq, state: 'dismissed' }),
+    // The person's chat view, the admin's (Chat view ▸ in the People panel).
+    'admin:setView': (o) => ({ roomCode: hallA, socketId: o.socketId, view: 'full' }),
   };
   // The verbs no right hides from any seat, so none is sent below as a seat it is hidden from, each with why. Every entry
   // is still iterated by its `may` alone: one of these an entry hides from a seat by a right is refused like any other,
@@ -286,12 +294,12 @@ test('the join\'s forwardable is the forward picker\'s rule: a hall to send to, 
   // whether a message here may be sent into another room by its list, `sends`: no list names Hall A, so it may not; then
   // whether the page is the admin's own, `admin`, which a guest's is not; then what the page is shown over its chat,
   // `page`, whether it may push to people's pages, `canPush`, AGMessage's clock and zone, `now` and `tz`, and whether a web
-  // page pushed from it would be taken, `canWeb`).
+  // page pushed from it would be taken, `canWeb`; then the chat view it draws, `view`).
   const anaB = await open();
   await join(anaB, hallB, 'Ana', 'research', { uid: first.identity });
   const again = await join(anaA, hallA, 'Ana', 'research', { uid: first.identity });
-  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-16), again.sends, again.admin, again.page, again.canPush, again.canWeb], [true, [hallB],
-    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb'], false, false, null, false, false]);
+  assert.deepEqual([again.forwardable, await rooms(anaA), Object.keys(again).slice(-17), again.sends, again.admin, again.page, again.canPush, again.canWeb, again.view], [true, [hallB],
+    ['forwardable', 'main', 'guestCode', 'codeOn', 'setsCode', 'build', 'hall', 'hallName', 'rooms', 'sends', 'admin', 'page', 'canPush', 'now', 'tz', 'canWeb', 'view'], false, false, null, false, false, 'full']);
   // On stage, nothing leaves the room: false, though the same person sits backstage in B.
   const beaA = await open();
   const bea = await join(beaA, hallA, 'Bea', 'board');
@@ -421,6 +429,7 @@ test('every act of the admin page, the halls board and the Accounts page hidden 
     'admin:watchRoom': (o) => ({ roomCode: o.code }), 'admin:summary': (o) => ({ roomCode: o.code }), 'admin:invites': (o) => ({ roomCode: o.code }),
     'admin:resetRoom': (o) => ({ roomCode: o.code }), 'admin:deleteRoom': (o) => ({ roomCode: o.code, purgeFiles: true }),
     'admin:setRole': (o) => ({ roomCode: hallA, socketId: o.socketId, role: 'observer' }), 'admin:linkRoom': (o) => ({ socketId: o.socketId, targetRoom: hallB }),
+    'admin:setView': (o) => ({ roomCode: hallA, socketId: o.socketId, view: 'full' }),
     'admin:unlinkRoom': (o) => ({ socketId: o.socketId, targetRoom: o.linkedRooms[0] }), 'admin:settings': () => ({ stagewatchUrl: 'http://127.0.0.1:9' }),
     'admin:kick': (o) => ({ socketId: o.socketId }), 'admin:deleteMessage': (o) => ({ roomCode: hallA, messageId: o.id }),
     'nodes:link': (o) => ({ id: o.id, token: 'not-the-token' }), 'nodes:unlink': (o) => ({ id: o.id }), 'nodes:acceptCertificate': (o) => ({ id: o.id, fingerprint: '0123456789abcdef' }),

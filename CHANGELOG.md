@@ -4103,6 +4103,125 @@ take was refused as no kind, every page carried one strict policy, and no page c
   switch, `room.guestWeb`), `docs/DESIGN.md`, `SECURITY.md` (the hall page's https frames, what the sandbox does not
   stop), `docs/ANALYSIS.md` (the lint's four sinks, the one frame, the inputs), `CLAUDE.md`.
 
+**The Board's chat view: the chat first, compact, one response place per screen** (the plan's Part 7, unit 20a, its §17.2
+and §17.7 with §17.1's `msg.ack`, the sheet and the facts of the simple view, carrying Part 1's unit 20 (its §6 server
+half: `view` in the join's answer and live, `admin:setView`, the admin page's and the People panel's Chat view), as Part 7
+§0.1-§0.3 amend Part 1 §5.8 and §6 and Part 5 §15.5, §15.10 and §16; the owner's ask of 2026-10-26 ("Main focus is the
+chat and messages … more minimal and more focused on direct response and clear communication") and answers B4 (Got it
+tells the backstage team with the name), B5 (🔥 Priority), B6 and 21 (dark first) and 22 ("Board will use a mixture of
+devices"); the mock (`docs/plan/0.6.0/board-view/`) as the design. The clock or countdown is unit 20b's, every pin for the
+room or for me 20c's and the admin's On stage settings 20d's; their rows land with them)
+- **A page seated On stage draws the simple view** unless the admin chooses Full for that person, and any page draws it
+  where the admin chooses Simple: a backstage page there writes in the simple view's composer (🔥 Priority, the words,
+  Send), its words and a reply begun moving with it as the view changes. The join's answer says the view (`view`, its
+  last key), and `view` tells each page of the person's again live; no page reloads. **The admin chooses** in the admin page's people rows (a **Chat view** select
+  beside Seat, and Chat view ▸ in the row's ⋯) and in the hall page's People panel (the person's ⋯, the admin's own page,
+  full view): By seat (simple On stage, full elsewhere), Simple or Full, `admin:setView {roomCode, socketId, view}` (the
+  takes module, behind the admin page's gate; for an account from an account's page, `rbac.mayChange` as the Accounts
+  page's `PATCH` reads it). A guest's choice is kept by their uid in `pages.json`, an account's on the account; every page
+  of the person's and the admin's view of them are told it, and one row says it (`person.view` "Rita (guest) → simple
+  view", `user.update` "view → simple"). The admin's people list carries each person's choice (`view`), sent again live to
+  the admin's pages in each room a page of the person's sits in (and to no other page, whose list says no view) after a
+  choice made there or on the Accounts page. Before, an
+  account's view could be set on the Accounts page and no page drew it.
+- **One reading column**, at most 46 rem, with no card, no badge, no ⋯ and no right-click menu: the author's name (You
+  for one's own; "On stage" after it only where the author sits On stage, backstage said to a screen reader alone), 🔥
+  Priority or Question beside it with a rule of their colour, the time, the words at 22 px on a tablet and 20 px on a
+  phone (× Text size), and status words at the end of the line: "👍 You: got it" on a message this person got, Sent or
+  "Seen by Ana" (a backstage seat's receipt; "Seen by Ana and 2 more") on one's own. Reactions, seen lines under others'
+  messages, presence lines, People, To:, the switcher, ✨, 📎 and the question tab are not drawn; the server refuses what
+  the seat may not do whatever the view.
+- **One response place per screen**: 👍 Got it and ↩ Reply after the words of the newest message from backstage that waits
+  for this person (**Got all 3** when three wait, which answers each: three 👍, held together in the outbox in one step,
+  each its own send, so none is lost and none made twice), and of each waiting 🔥 message (Got it filled); an older
+  waiting message draws none, and a tap on it (or Enter on it in the feed) brings its own row back, for it alone: Got it
+  where it waits, and Reply; on one answered (by a 👍 or a reply), Reply alone; on one's own message, a question or a
+  line of the room's, nothing. What waits is read from the room's
+  messages (this person's 👍, a reply of theirs that quotes it, their answer), never a field of its own. **Got it tells the
+  backstage team, with the name**: the reaction row now carries the reactor's seat (`role`), and a backstage page draws
+  "👍 Margaret got it" (and "Margaret and Tom", "… and 2 more") beside the reactions. A 🔥 message from another Board
+  member gets Reply only.
+- **A question**: its words at the body size and weight 600, its answers 48 px, then **Answer in words…** (a field of 200
+  characters, asked in place, never a `prompt()`); answered, "You answered Yes · 14:10 · Change" (or the words given),
+  Change bringing the answers back (`msg.change`), the one chosen pressed and the answer given said under them until a new
+  one replaces it. Another's answer meanwhile leaves the answers and the focus where they are: the question is drawn again
+  only when this person's own answer changes. Others' tallies are the backstage team's to read.
+- **The 🔥 strip**: the newest priority message from backstage that waits holds a strip above the chat **only while it is
+  out of view** (an `IntersectionObserver` on it, or behind the Shown to you tab; without one, always), its words cut to
+  three lines (two under 700 px tall, one under 500), Got it after them, "+1 more" with another; Got it answers the one
+  shown. The strip is a status region, so its words are written only when they change. While a take covers the page, the take layer's own 🔥 strip has **👍 Got it** beside Open chat.
+- Scrolled up, "↓ 3 new · 1 question" names the questions among what came below; with nobody backstage in the room for 10
+  s, "○ Nobody backstage is online. Use Help if you need someone." sits over the composer until someone comes back; an
+  empty chat reads "Nothing yet. Messages from backstage appear here.".
+- **The composer**: **🔥 Priority** first (a pressed toggle, "🔥 Priority" over 600 px wide and "🔥" at 600 or less, its
+  name Priority either way, off after every send), the field (18 px over 600 px wide, 16 px at 600 or less, by the width
+  alone) ("Message everyone here…" as its label and its placeholder, or
+  "Message everyone…" where the long words do not fit the field, measured in its own font), Send; replying, "↩ Replying to
+  Tom Okafor: …" with × Cancel and Escape. A refused send keeps its words in the field, the server's words said on it.
+- **The header**: the hall's name (muted), the countdown where the hall has one (the clock by default is unit 20b's),
+  Help and ⋯, on one row at every width as the header's own unit drew it, save that down 5 s or more "Offline ·
+  reconnecting" is a phone's second row (a tablet says it before Help); the seat is said in the sheet's footer. **The ⋯ sheet** (no menu): Text size (Aa− · 100% · Aa+), Theme
+  (Light · Dark), Full screen where the device has the Fullscreen API (a probe at load), why the device may sleep where
+  the screen cannot be kept awake (`AGM.awake()`, asked as the view starts: HTTPS, its settings or its battery), and Leave
+  the hall…, asked in place ("Leave Hall 2? You'll stop getting messages from backstage." · Leave · Stay); a bottom sheet
+  on a phone, never taller than the screen (`100vh`, then `100dvh`) and scrolled within it. Text size scales the whole
+  chat: the words, names, times, the cue words, the answers, Answer in words…, the response, the answered line and the
+  strip; the header and the sheet stay as they are.
+- **Shown to you** (the side bar, "📺 Shown to you"): a 360 px column at 900 px wide or more while something is shown (a
+  file opened there, a take minimised), its 36 px rail (which names it) while nothing is; under 900 px two tabs, **Chat** and **📺 Shown to you · 1**
+  (`aria-pressed` buttons), drawn only while something is shown. A minimised take's card has one act, 👁 Look. On stage
+  content keeps no copy there: a long press or a right-click opens nothing (the browser's own menu included), nothing is
+  dragged out, and iOS offers no save; the full view's pictures drag as before.
+- **Dark until the person chooses Light** (B6): a simple view with no theme chosen draws dark, and the hall page
+  remembers the view it last drew (`agm.lastView`), which `theme-init.js` reads on the hall page alone (`<html
+  data-page="app">`), so a device last used there paints dark before its first frame; every other page, and the full view,
+  read an unchosen theme as light. Light chosen in the sheet sticks. What the admin's support view relays to the person's
+  pages now says so (`support: true`), and the simple view takes no theme from it: only the person turns a Board page
+  light, and the person's Light still reaches the support view.
+- **Only Tab, Enter and Escape act**: the single keys of the full view (R, E, F, P, D) do nothing there, Enter on a message
+  brings its row and moves to its response, and the Escape order is an open menu, an open ask, the take layer
+  (minimised), the reply, then the composer, from a message as from anywhere else.
+- **By size, never by device** (answer 22): the rules above; the viewport meta's `interactive-widget=resizes-content` and,
+  where a browser keeps the layout behind its keyboard (an iPad), the page follows `visualViewport.height` while the
+  view is at its own scale (a pinch-zoom makes the page no smaller); the header's
+  and composer's paddings clear a notch; the view's rules write physical sides only. A reader at the end of the chat stays
+  there as the strip, the tabs or the line over the composer come and go.
+- **The board rules' mis-scoped selectors** are rewritten: the stylesheet's `body[data-role="director"]` halves are gone
+  (the page names the seat `board`), and the left column takes the whole width only on an observer's page, which has no
+  side bar. The colour of a control's edge is a token (`--c-edge`); the two board rules this touched draw with tokens (the
+  pinned strip's own colour goes, the base rule's `--accent-soft` drawing it, and a question's shadow is `--shadow`), so
+  the stylesheet's hex colours outside its tokens go down by one (`test/resilience.test.js`, 253).
+- Choices where the plan left room: Answer in words… is the house's ask in place (`AGM.ask`) with one field, rather than a
+  field of its own inside the question; Change is a catalogue act (`msg.change`); Leave the hall… ends with "…", as every
+  act that asks first does; Cancel reads "× Cancel" (✕ is the table's fault mark); a "Seen by" past two names reads
+  "Seen by Ana and 2 more"; the strip waits for the observer's first word before it shows, so it never flashes as a
+  message is drawn; Shown to you counts a file opened on the panel and a minimised take; the admin's Chat view applies to any seat in any room, as the Accounts page's does; the full view keeps
+  its words and its "↓ n new"; the phone's second header row for Stagewatch's line waits for the readout of unit 20b,
+  which owns its words, and until then the header keeps its one row (the name gives way first, then the countdown's
+  title); the catalogue's id for the admin's Chat view is `person.chatView`, `person.view` being Open
+  their view already; the Accounts page's Chat view stays its editor's select (no `account.view` row).
+- Tests: `test/takes.test.js` (new: the join's view by the seat, the admin's choice for a guest and an account told to every
+  page of theirs and their support view and nobody else, kept in `pages.json` and on the account, a reload drawing it, the
+  people list's `view`, sent again live to the admin's page alone after `admin:setView` and after the Accounts page's
+  `PATCH`, one row each, already and refused cases, a manager with `settings.manage` refused an account's; the support
+  view's relay marked `support`; a 👍 carrying the seat), `test/catalog.test.js` (the second door, Got it
+  never Got all on an older message, Reply alone on one answered by a reply, nothing on one's own message, a question or
+  a line of the room's, Change, the sheet's rows and their bounds, Chat view ▸ by page and seat, the facts'
+  `tapped` and `changing`), `test/menus.test.js` (`admin:setView` refused as every seat but the admin, in the On stage table
+  too; the join's views by seat; the join's last key), `test/inputs.test.js` (`admin:setView` by type),
+  `test/pagefloor.test.js` (`theme-init.js`: dark first on the hall page last drawn simple, light everywhere else),
+  `test/modules.test.js` ((f)'s allow-list loses `view`, which the hall page hears; (l)'s two readers; the takes module's
+  `personKey`; the contexts' parts, `viewChanged` the one added), `test/resilience.test.js` (the hex colours, 253). The
+  browser smoke: the device legs, the layout leg and the floor leg's chat-view steps (`docs/DEVICES.md` §6), with the
+  admin page's Chat view select and the People panel's Chat view ▸ each choosing a view the server keeps and says back; and, moved on purpose: the phone pass and the takes' doors read an On stage page in the
+  full view, which the admin's Chat view gives it live (and By seat gives back); Kim's switcher steps read her account
+  with Chat view Full (the simple view leaves the switcher out); the On stage composer reads 🔥 Priority, the words, Send
+  and ⋯; the admin page's people heads read Chat view before May forward to.
+- The papers: `README.md`, `README.txt`, `docs/ACCOUNTS.md` (the admin's Chat view, `person.view`), `docs/DEVICES.md` (§6, the
+  chat view's rows), `docs/DESIGN.md`, `docs/ANALYSIS.md` ((f)'s allow-list), `SECURITY.md`, `CLAUDE.md`.
+- Rolling back: 0.5.1 ignores `pages.json` (a guest's view with it) and keeps an account's `view` unread; its Board page
+  draws the desk it always drew.
+
 **Fixed**
 - A hall's side rooms keep the order they were made in. The store ordered them by the millisecond each was made, and
   two made in the same millisecond by their keys, which are random: CI's Node 26 run listed twenty rooms made one after

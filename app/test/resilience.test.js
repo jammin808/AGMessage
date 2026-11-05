@@ -649,7 +649,7 @@ test('guard rails: the stylesheet draws with its tokens: hex colours only in the
   // out lowers HEX_CAP with them, and none raises it (as the coverage gate only goes up). Muted words and icons read in
   // --c-ink-muted, at 4.5:1 for words and 3:1 for icons in both themes; an opacity between 0 and 1 fades whatever
   // is under it below that, so none is written (a toast or a switch hidden at 0 and shown at 1 is not muted ink).
-  const HEX_CAP = 254;
+  const HEX_CAP = 253;
   const css = readSource(path.join(ROOT, 'public', 'styles.css'));
   const { outside, tokens } = hexOutsideTokens(css);
   assert.deepEqual(tokens, { ':root': 1, 'html[data-theme="dark"]': 1 }, 'the tokens are defined in one :root block and redefined in one dark block');

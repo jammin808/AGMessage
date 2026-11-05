@@ -814,20 +814,39 @@ function roomUserSummary(room, { links = false } = {}) {
     socketId: sid, uid: u.uid, name: u.name, role: u.role,
     ...(links ? { linkedRooms: u.linkedRooms instanceof Set ? Array.from(u.linkedRooms) : [] } : {}),
     account: !!u.acct,
+    // The admin's list alone: the chat view the admin chose for the person ('' by their seat), its Chat view's choice.
+    ...(links ? { view: chosenView(personKey(u.uid, !!u.acct)) } : {}),
   }));
 }
 /** Who is in the room changed: its people list goes to every page in it once per 100 ms at most (`frames.people`). */
 function emitUsers(room) { frames.people.mark(room.code); }
+/** The admin's pages in a room (by socket id): each is told the people list with what only the admin reads. */
+function adminsIn(room) {
+  return Array.from(io.sockets.adapter.rooms.get(room.code) || []).filter((sid) => { const s = io.sockets.sockets.get(sid); return !!(s && s.data.isAdmin); });
+}
 /**
  * The room's people to every page in it: one broadcast without the links (framed once, however many are in the hall,
  * since frames are not deflated), and the admin's pages, a few, each the list with them (their chips and Unlink).
  */
 function sendPeople(room) {
-  const admins = Array.from(io.sockets.adapter.rooms.get(room.code) || []).filter((sid) => { const s = io.sockets.sockets.get(sid); return !!(s && s.data.isAdmin); });
+  const admins = adminsIn(room);
   io.to(room.code).except(admins).emit('users', roomUserSummary(room));
   if (!admins.length) return;
   const full = roomUserSummary(room, { links: true });
   for (const sid of admins) io.sockets.sockets.get(sid).emit('users', full);
+}
+/**
+ * What only the admin's list says of a room's people changed (the chat view chosen for one of them): that list goes again
+ * to the admin's pages in the room, each by its socket, and to no other page, whose list says none of it; never a room
+ * broadcast. The room named by its key; the number of pages told.
+ */
+function usersChanged(code) {
+  const r = store.room(code);
+  const admins = r ? adminsIn(r) : [];
+  if (!admins.length) return 0;
+  const full = roomUserSummary(r, { links: true });
+  for (const sid of admins) io.sockets.sockets.get(sid).emit('users', full);
+  return admins.length;
 }
 /** Every seat one person has in a room ([socketId, seat] pairs): the room list shows the person once, so what the admin
  *  does to that row (role, link, logout) is done to each of their pages there. */
@@ -2185,6 +2204,10 @@ io.on('connection', (socket) => {
       // Whether a web page pushed from this page would be taken (canWeb: canPush and stage.web); a code guest's follows
       // the admin's switch for its hall live (`pages:rights`).
       canWeb: canWeb(store.get(r.hall)),
+      // The chat view this page draws (plan 1-§6): the person's own choice, else the simple view On stage and the full
+      // view elsewhere; told again live (`view`) when the admin or the Accounts page changes it. The support view draws
+      // the person's, which its `person` says.
+      view: isAdminView ? 'full' : drawnView(chosenView(personKey(id, !!acct)), cleanRole),
       // The admin's support view: the facts of the person it shows (their seat, chat view, canPush, sends and
       // forwardable), so it draws exactly their doors (R8); null when it shows nobody. No other page is told any.
       ...(isAdminView ? { person: theirs ? theirs() : null } : {}),
@@ -2311,7 +2334,8 @@ io.on('connection', (socket) => {
     if (want === i >= 0) return ok(ack)({ ok: true, already: true });
     if (!writes.take()) return limited(ack);
     if (i >= 0) reactions.splice(i, 1);
-    else { if (reactions.length >= 200) return ok(ack)({ ok: false, error: 'Too many reactions' }); reactions.push({ uid: me.uid, name: me.name, emoji, at: Date.now() }); }
+    // The reactor's seat with it, so a page can say who answered how: a Board member's 👍 reads "Margaret got it".
+    else { if (reactions.length >= 200) return ok(ack)({ ok: false, error: 'Too many reactions' }); reactions.push({ uid: me.uid, name: me.name, emoji, at: Date.now(), role: me.role }); }
     if (!apply(room, { o: 'upd', id: messageId, f: { reactions } })) return ok(ack)(OP_REFUSED);
     ok(ack)({ ok: true });
   });
@@ -2374,7 +2398,7 @@ io.on('connection', (socket) => {
   // (`person`), so it draws exactly their doors, each disabled; it has none of its own.
   const ownFacts = () => ({
     role: me ? me.role : '',
-    view: drawnView(socket.data.accountId ? accounts.get(socket.data.accountId) : null, socket.data.seat),
+    view: drawnView(chosenView(me ? personKey(me.uid, !!me.acct) : ''), socket.data.seat),
     canPush: !!socket.data.pushes,
     canWeb: !!room && canWeb(store.get(room.hall)),
     sends: !!room && !onStage() && allowed('hall.post') && sendsInto(room).length > 0,
@@ -2450,7 +2474,10 @@ io.on('connection', (socket) => {
     if (!room || !me || !chatter.take()) return;
     const state = userStateOf(payload);
     if (!state) return;
-    try { for (const p of await io.in(room.code).fetchSockets()) if (syncPeer(p)) p.emit('userState:push', state); } catch { /* ignore */ }
+    // A state relayed from the admin's support view says so (`support`): the person's simple view takes no theme from it,
+    // so only the person turns a Board page light.
+    const sent = socket.data.adminView ? { ...state, support: true } : state;
+    try { for (const p of await io.in(room.code).fetchSockets()) if (syncPeer(p)) p.emit('userState:push', sent); } catch { /* ignore */ }
   });
 
   // ----- AI (the backstage team and the admin): drafts only
@@ -3689,20 +3716,28 @@ const SIGNED_OUT = 'Signed out — sign in again to carry on.';
 /**
  * An account changed (role, rights, halls, rooms, On stage halls, password, turned off, removed): every socket it has
  * open is told and closed, so its next connection is judged by the rights it has now — never by the ones it had. Its chat
- * view alone is no right: each of its pages in a room is told the view it draws now (`view`), and none is closed.
+ * view alone is no right: each of its pages in a room is told the view it draws now (`view`), none is closed, and the
+ * admin's people rows of those rooms say the new choice.
  */
 function accountChanged(id, what) {
-  if (what === 'view') return viewChanged(id);
+  if (what === 'view') { viewChanged(personKey(id, true)); return undefined; }
   return endSockets((s) => s.data.accountId === id, what, 'Your account was changed by an admin — reconnecting with your current rights.');
 }
 /**
- * The chat view a page draws (plan 1-§6, "How it is chosen"): the person's own, an account's `view`, when one is chosen;
- * else the simple view for the seat it is drawn for when that is On stage (a hall's Main room's alone), else the full
- * view; a page seated nowhere (the admin's support view, for itself) holds no seat. A view is no right: no check reads it.
+ * The chat view a page draws (plan 1-§6, "How it is chosen"): the person's own choice (`chosen`: an account's `view`, a
+ * guest's kept by their uid, chosenView), when one is made; else the simple view for the seat it is drawn for when that
+ * is On stage (a hall's Main room's alone), else the full view; a page seated nowhere (the admin's support view, for
+ * itself) holds no seat. A view is no right: no check reads it.
  */
-function drawnView(account, seat) {
-  if (account && (account.view === 'simple' || account.view === 'full')) return account.view;
+function drawnView(chosen, seat) {
+  if (chosen === 'simple' || chosen === 'full') return chosen;
   return seat === 'board' ? 'simple' : 'full';
+}
+/** A person's own chat view, by their key ('a:<account id>', 'u:<uid>'): 'simple', 'full', or '' (by their seat). */
+function chosenView(key) {
+  if (typeof key !== 'string') return '';
+  if (key.startsWith('a:')) { const a = accounts.get(key.slice(2)); return a && (a.view === 'simple' || a.view === 'full') ? a.view : ''; }
+  return key.startsWith('u:') ? pages.viewOf(key.slice(2)) : '';
 }
 /** The seat a person (`uid`) holds in the room `key` names now, or '' where they hold none. */
 function seatHeld(key, uid) {
@@ -3711,17 +3746,26 @@ function seatHeld(key, uid) {
   return u ? u.role : '';
 }
 /**
- * An account's chat view changed: each of its pages seated in a room is told the view to draw, live, and so is the
- * admin's view of that person (`viewOf`), the view the person's seat there draws (plan 1-§5.5); nothing is closed.
+ * A person's chat view changed (`key`: 'a:<account id>' for an account, 'u:<uid>' for a guest): each of their pages
+ * seated in a room is told the view to draw, live, and so is the admin's view of that person (`viewOf`), the view the
+ * person's seat there draws (plan 1-§5.5); nothing is closed. The admin's people rows of each room a page of theirs sits
+ * in say the new choice (usersChanged). A guest's pages are those of its uid that joined with a code, an account's those
+ * signed in to it. The number of pages told.
  */
-function viewChanged(id) {
-  const account = accounts.get(id);
-  const key = personKey(id, true);
+function viewChanged(key) {
+  const chosen = chosenView(key);
+  const account = key.startsWith('a:');
+  const id = key.slice(2);
+  let told = 0;
+  const rooms = new Set();
   for (const [, s] of io.sockets.sockets) {
     if (!s.data || !s.data.userRoom) continue;
-    if (s.data.accountId === id && !s.data.adminView) s.emit('view', { view: drawnView(account, s.data.seat) });
-    else if (s.data.adminView && s.data.viewOf && s.data.viewOf.key === key) s.emit('view', { view: drawnView(account, seatHeld(s.data.userRoom, s.data.viewOf.uid)) });
+    const theirs = account ? s.data.accountId === id : !s.data.accountId && s.data.uid === id;
+    if (theirs && !s.data.adminView) { s.emit('view', { view: drawnView(chosen, s.data.seat) }); told++; rooms.add(s.data.userRoom); }
+    else if (s.data.adminView && s.data.viewOf && s.data.viewOf.key === key) { s.emit('view', { view: drawnView(chosen, seatHeld(s.data.userRoom, s.data.viewOf.uid)) }); told++; }
   }
+  for (const code of rooms) usersChanged(code);
+  return told;
 }
 
 /**
@@ -5034,7 +5078,7 @@ function firstWrites() {
 // room's op or a room's broadcast.
 const { ctx, takesCtx } = contexts({
   store, apply, systemMessage, readSend, messageOf, uploadOnDisk, makeMessageId, removeUnused, fileNamesOf, audit, accounts, boardDirty, newSideRoom, renameRoom, roomNameRefused, newGuestCode, guestPagesOf, sendGuestsOut, codeChanged, settings, sendersOf, sendsInto, setRoomSends, linkFor, stagePayload,
-  pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, io,
+  pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, tellWebRights, viewChanged, io,
 });
 
 // The installed node reads its keys before it holds its folder, and stops with their words when it may not run on them.

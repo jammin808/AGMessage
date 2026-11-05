@@ -74,6 +74,11 @@ reporting, and branch protection on `main` requiring the CI and Security checks.
   told its hall by the join and again as its rooms change (`hall`, `hallName`, `rooms`: the key only for one who sees
   the hall or is the admin, the rooms only for an account's own page, each one it may enter). A change of the chat
   view alone is no right and closes no page; any other change of an account still ends every page it has open. The
+  admin chooses a person's chat view where they sit (`admin:setView`: the admin page's gate, then, for an account from an
+  account's page, `rbac.mayChange` as the Accounts page's own `PATCH` reads it), a guest's kept by their uid; the view a
+  page draws changes no check the server makes: On stage the seat's limit holds in either view. What one person's pages
+  relay to each other from the admin's support view says so (`support: true`), and the Board's simple view takes no theme
+  from it. The
   Accounts page's halls-and-rooms tree and a room's Members… (on the admin page and in a hall's Set up) are pages over the
   same routes: Members… is offered on the server's word that the account manages accounts (`manageUsers`,
   `canManageUsers`), sends one `PATCH /api/users/:id` per account it changes, and each is judged by `rbac.mayChange` as

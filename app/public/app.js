@@ -44,7 +44,10 @@ const readOnly = () => document.body.dataset.role === 'observer';
 // drawn from the catalogue's entries for them. A page binds only what each act does: RUN, by the entry's id.
 // Whether this device can show a take full screen (the Fullscreen API: an iPhone has none), read once here and sent nowhere.
 const FULLSCREEN = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled) && (typeof document.documentElement.requestFullscreen === 'function' || typeof document.documentElement.webkitRequestFullscreen === 'function');
-const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false, canPush: false, canWeb: false, fullscreen: FULLSCREEN };
+// The chat view this page draws (`view`: the join's, then each `view` the server tells it), and in the simple view what
+// waits for this person's answer (`waiting`), the message they tapped (`tapped`, its second door) and the question whose
+// answers they brought back to change (`changing`): the simple view's facts, the page's own (Simple, below).
+const pageFacts = { role: ROLE, uid: '', account: null, uploadToken: '', canSendToStage: false, canPropose: false, ai: false, stage: null, forwardable: false, sends: false, targets: [], adminView: ADMIN_VIEW, name: NAME, screens: null, connected: false, guestCode: '', codeOn: false, setsCode: false, admin: false, canPush: false, canWeb: false, fullscreen: FULLSCREEN, view: 'full', waiting: null, tapped: '', changing: '' };
 let F = AGM.catalog.facts(pageFacts);
 // Whether this page's room is its hall's Main room (the join's `main`; a hall until it answers): its seat words follow it
 // (roleLabel).
@@ -84,7 +87,12 @@ document.querySelectorAll('a[href="/"].btn').forEach((a) => { a.href = HOME; if 
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
 }
-applyTheme(localStorage.getItem('agm.theme') || 'light');
+// The theme the person chose on this browser, or '' where none was (or storage cannot be read): the full view then draws
+// light and the simple view dark (Simple.setView), as theme-init.js painted it from the view this page last drew.
+function chosenTheme() {
+  try { const t = localStorage.getItem('agm.theme'); return t === 'light' || t === 'dark' ? t : ''; } catch { return ''; }
+}
+applyTheme(chosenTheme() || document.documentElement.dataset.theme || 'light');
 /** Dark theme on or off, kept for this browser and handed to this person's other pages. */
 function toggleTheme() {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
@@ -109,8 +117,18 @@ applyZoom();
 
 
 
-if (ROLE === 'board') document.getElementById('directorCompose').hidden = false;
-if (ROLE === 'research') document.getElementById('researchCompose').hidden = false;
+/**
+ * The composer this page draws: none for a seat that only reads; the On stage composer (🔥 Priority, the words, Send) On
+ * stage, and for any seat in the simple view, whose composer it is; the backstage team's tabs otherwise. It follows the
+ * chat view as it changes, live (Simple.setView).
+ */
+function drawComposerSeat() {
+  const reads = readOnly();
+  const simple = F.view === 'simple';
+  document.getElementById('directorCompose').hidden = reads || !(ROLE === 'board' || simple);
+  document.getElementById('researchCompose').hidden = reads || ROLE !== 'research' || simple;
+}
+drawComposerSeat();
 
 // ---------------- Socket ----------------
 // The socket comes back by itself (reconnect.js): after a refusal at the server's pace, after a drop, and at once when the
@@ -132,6 +150,8 @@ function drawConnection(st) {
   connDot.setAttribute('aria-label', name);
   connDot.title = name;
   connWords.hidden = !st.dot;
+  // Down 5 s or more: the simple view on a phone says it on a second row of the header (styles.css).
+  document.body.dataset.down = st.dot ? '1' : '0';
 }
 // Every write goes through the outbox (outbox.js): what a person wrote is held until the server answers it, and drawn
 // here meanwhile (drawHeld, below).
@@ -190,11 +210,13 @@ function rejoin() {
       forwardable: them ? them.forwardable === true : !!res.forwardable, name: NAME,
       guestCode: typeof res.guestCode === 'string' ? res.guestCode : '', codeOn: !!res.codeOn, setsCode: !!res.setsCode, sends: them ? them.sends === true : !!res.sends, ...((them ? them.sends : res.sends) ? {} : { targets: [] }), admin: res.admin === true,
       canPush: them ? them.canPush === true : res.canPush === true, canWeb: them ? them.canWeb === true : res.canWeb === true });
+    // The chat view, before a message is drawn with it: the support view draws the person's.
+    Simple.setView(them ? them.view : res.view);
     drawChips();
     drawAiButtons();
     if (res.note) AGM.toast(res.note);
     if (res.role && res.role !== ROLE) { document.body.dataset.role = res.role; }
-    if (readOnly()) { document.getElementById('directorCompose').hidden = true; document.getElementById('researchCompose').hidden = true; }
+    drawComposerSeat();
     drawSkip();
     // What this person wrote here and had not sent when they moved to another room of the hall, back in its composer.
     if (!joined) takeDraft();
@@ -587,6 +609,7 @@ function onReset() {
   HelpChip.draw();
   if (typeof dismissDoc === 'function') dismissDoc();
   refreshOpenMenu();
+  Simple.waits();
 }
 // A message sent to the speaker's screen: Stagewatch's receipt, then the speaker's acknowledgement, on that message.
 function setStage(messageId, stage) {
@@ -626,6 +649,8 @@ function setReactions(messageId, reactions) {
   // Its pinned copy says the same, and so does its open menu (React ▸'s checks).
   if (msg && msg.pinned) refreshPinned(messageId);
   if (openOn && openOn.kind === 'msg' && openOn.id === messageId) refreshOpenMenu();
+  // A 👍 of this person's answers it (Got it): what waits is read again.
+  Simple.waits();
 }
 socket.on('messageDeleted', ({ messageId, seq }) => {
   if (!bump(seq)) return;
@@ -656,6 +681,8 @@ function refreshSeenLines() {
     const text = marked('ok', 'Seen by ') + (who.length <= 3 ? who.join(', ') : who.slice(0, 3).join(', ') + ' +' + (who.length - 3));
     if (line.textContent !== text) line.textContent = text;
   }
+  // The simple view says it at the end of the message's own line: Sent, or Seen by the backstage seats that read it.
+  for (const m of mine) { const node = messagesById.get(m.id); if (node) Simple.said(node, m); }
 }
 
 // ---------------- Stage (Stagewatch): the live timer, for everyone in the hall ----------------
@@ -734,7 +761,7 @@ function drawChips() {
 const stageDoor = () => ({ el: stageChipEl, more: stageChipEl, open: (at) => openObjectMenu('chip', () => stageNow, { node: stageChipEl, more: stageChipEl, at, opener: stageChipEl, label: 'Countdown actions', header: (o) => o.words }) });
 /** The door of what a right-click or Shift+F10 on the header meets: the countdown's chip that is a door, else the header's menu. */
 function headerDoor(t) {
-  if (outOf || !t.closest || t.closest('#roomSwitcher, #helpBtn, .agm-ask')) return null;
+  if (outOf || F.view === 'simple' || !t.closest || t.closest('#roomSwitcher, #helpBtn, .agm-ask')) return null;
   if (t.closest('#stageChip') && stageChipEl.getAttribute('aria-haspopup') === 'menu') return stageDoor();
   if (t.closest('#boardChip')) return Console.chipDoor();
   return { el: headerBar, more: headerMore, open: (at) => openHeaderMenu(at) };
@@ -750,6 +777,8 @@ stageChipEl.addEventListener('click', onChip);
 stageChipEl.addEventListener('keydown', onChip);
 headerMore.addEventListener('click', (e) => {
   e.preventDefault();
+  // The simple view's ⋯ opens its sheet: no menu there (R7).
+  if (F.view === 'simple') { Simple.sheet(); return; }
   if (openOn && openOn.kind === 'header') { AGM.menu.close(); return; }
   openHeaderMenu({ anchor: headerMore });
 });
@@ -812,6 +841,7 @@ function renderHistory(history) {
   allMessages.length = 0;
   for (const node of echoes.values()) feed.appendChild(node);
   for (const m of history) addMessage(m, { silent: true });
+  Simple.waits();
   refreshPinned();
   refreshDocPinnedList();
   HelpChip.draw();
@@ -834,6 +864,7 @@ function addMessage(msg, { silent = false, arrived = false } = {}) {
       const idx = allMessages.findIndex((m) => m.id === msg.id);
       if (idx >= 0) allMessages[idx] = msg;
       if (msg.type === 'help') HelpChip.draw();
+      Simple.waits();
     }
     return;
   }
@@ -864,6 +895,8 @@ function addMessage(msg, { silent = false, arrived = false } = {}) {
   // does any file while a take this person minimised waits at the panel's top.
   if (!silent && msg.type === 'file' && HAS_STAGE && !msg.sentFrom && !msg.forwardedFrom && !Takes.carded()) openDocInPanel(msg, { fromPush: true });
   if (msg.type === 'file') refreshDocPinnedList();
+  // What waits for this person's answer, read again (the simple view): a message, or a reply of theirs that answers one.
+  Simple.waits();
 }
 
 function removeMessageLocal(id) {
@@ -878,6 +911,7 @@ function removeMessageLocal(id) {
   if (currentDocMsgId === id) dismissDoc();
   HelpChip.draw();
   refreshOpenMenu();
+  Simple.waits();
 }
 
 // A presence line: "Ana joined Backstage", "Ben joined On stage", "Wes joined as an observer", "Ana left"; an older line in a
@@ -912,10 +946,17 @@ function rerenderMessage(node, msg) {
   const rt = node.querySelector('.role-tag');
   const time = node.querySelector('time');
   const body = node.querySelector('.body');
+  const simple = F.view === 'simple';
   if (msg.from) {
-    rt.textContent = roleLabel(msg.from.role);
+    // The simple view says the exception in words: "On stage" after a name that also sits there; backstage, the
+    // default author here, is said to a screen reader alone (", backstage,"), never as a badge.
+    const seat = msg.from.role === 'director' ? 'board' : msg.from.role;
+    rt.textContent = simple ? (seat === 'board' ? 'On stage' : seat === 'research' ? ', backstage,' : '') : roleLabel(msg.from.role);
     rt.dataset.role = msg.from.role;
+    rt.classList.toggle('sr-only', simple && seat !== 'board');
   }
+  const badge = node.querySelector('.priority-badge');
+  if (badge) badge.textContent = simple ? '🔥 Priority' : '🔥 HIGH';
   time.textContent = formatTime(msg.at);
   node.querySelector('.pinned-mark').hidden = !msg.pinned;
   body.innerHTML = '';
@@ -985,6 +1026,7 @@ function rerenderMessage(node, msg) {
     body.prepend(meta);
   }
   drawActs(node, msg);
+  Simple.said(node, msg);
   // A message in the pinned strip is drawn there from its record (no copy of this node), so it acts as it does here.
   if (msg.pinned && messagesById.get(msg.id) === node) refreshPinned(msg.id);
   if (openOn && openOn.kind === 'msg' && openOn.id === msg.id) refreshOpenMenu();
@@ -1055,8 +1097,20 @@ function drawBar(bar, kind, o, { words = false, more = 'More actions', keysOn = 
 }
 function drawActs(node, msg) {
   senderName(node, msg);
-  const bar = node.querySelector(':scope > header .msg-acts');
-  if (bar) drawBar(bar, 'msg', msg, { keysOn: node });
+  // The full view's acts sit in the message's header with its ⋯; the simple view's (Got it, Reply) after its words, as
+  // text actions, so a response follows what it answers in the page's order, and it has no ⋯ (no menu).
+  const head = node.querySelector(':scope > header .msg-acts');
+  let resp = node.querySelector(':scope > .msg-response');
+  const simple = F.view === 'simple';
+  if (simple && !resp && head) {
+    resp = document.createElement('div');
+    resp.className = 'msg-response';
+    node.querySelector(':scope > .body').after(resp);
+  }
+  const bar = simple ? resp : head;
+  const other = simple ? head : resp;
+  if (other && other.childElementCount) { other.textContent = ''; drawnActs.delete(other); }
+  if (bar) drawBar(bar, 'msg', msg, { keysOn: node, words: simple });
   // The body's own doors (a prompt's answers, a help request's answers) are the same entries, and say why when they
   // cannot run now.
   const shown = new Set(AGM.catalog.shown('msg', F, msg).map((e) => e.id));
@@ -1210,7 +1264,10 @@ const personOf = (p) => {
   if (!p || typeof p.uid !== 'string' || !p.uid) return null;
   // An AI's line (the Minutes) is no person's page: no key, so no act on what pages show is offered on it.
   const key = p.ai ? '' : (p.account || p.acct ? 'a:' : 'u:') + p.uid;
-  return { id: 'person:' + p.uid, uid: p.uid, name: String(p.name || ''), role: p.role || '', key, kind: key ? Console.kindOf(key) : '' };
+  // A row of the room's people also carries its page (`socketId`) and, on the admin's own page, the chat view the admin
+  // chose for them (`view`): Chat view ▸ reads both; a message's sender carries neither.
+  return { id: 'person:' + p.uid, uid: p.uid, name: String(p.name || ''), role: p.role || '', key, kind: key ? Console.kindOf(key) : '',
+    socketId: typeof p.socketId === 'string' ? p.socketId : '', view: typeof p.view === 'string' ? p.view : '' };
 };
 const personHeader = (p) => p.name + ' · ' + roleLabel(p.role);
 /**
@@ -1231,7 +1288,9 @@ function senderName(node, msg) {
     was.replaceWith(el);
   }
   if (door) el.dataset.person = p.uid; else delete el.dataset.person;
-  if (el.textContent !== msg.from.name) el.textContent = msg.from.name;
+  // The simple view names one's own messages You.
+  const name = F.view === 'simple' && isMine(msg) ? 'You' : msg.from.name;
+  if (el.textContent !== name) el.textContent = name;
   el.classList.toggle('acct', !!msg.from.acct);
   el.title = (msg.from.acct ? 'Signed in with an AGMessage account' : 'Joined with a code') + (door ? ' — choose it for what you can do with ' + msg.from.name : '');
 }
@@ -1266,6 +1325,11 @@ function findMsgDoor(t) {
   return node && !node.classList.contains('echo') ? msgDoor(node) : null;
 }
 function onMsgClick(e) {
+  // The simple view's second door: a tap on a message (not on one of its buttons or links) brings its own row back.
+  if (F.view === 'simple' && !e.target.closest('button, a, input, textarea, select, [data-goto]')) {
+    const tapped = e.target.closest('.msg[data-id]');
+    if (tapped && !tapped.classList.contains('echo') && this.contains(tapped)) Simple.tap(tapped.dataset.id);
+  }
   const el = e.target.closest('[data-action], [data-more], [data-goto], [data-person]');
   if (!el || !this.contains(el)) return;
   const node = el.closest('.msg[data-id]');
@@ -1308,9 +1372,15 @@ function onMsgKey(e) {
   if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
   const node = e.target;
   if (!node || !node.matches || !node.matches('.msg[data-id]')) return;
-  // Escape on a message (no menu or ask open: theirs end first, as they hear it first) goes back to the composer.
-  if (e.key === 'Escape') { const field = composerField(); if (field) { e.preventDefault(); field.focus(); } return; }
+  // Escape on a message (no menu or ask open: theirs end first, as they hear it first) goes back to the composer; in the
+  // simple view its own order (Simple) takes a reply begun back first, so it is left to it.
+  if (e.key === 'Escape') { if (F.view === 'simple') return; const field = composerField(); if (field) { e.preventDefault(); field.focus(); } return; }
   const msg = findMessage(node.dataset.id);
+  // The simple view acts on Tab, Enter and Escape alone: Enter on a message brings its own row and moves to its response.
+  if (F.view === 'simple') {
+    if (e.key === 'Enter' && msg) { e.preventDefault(); Simple.tap(msg.id, { focus: true }); }
+    return;
+  }
   const entry = msg && AGM.catalog.byKey('msg', F, msg, e.key);
   if (!entry) return;
   e.preventDefault();
@@ -1359,11 +1429,16 @@ function neighbour(node) {
   return n;
 }
 Object.assign(RUN, {
-  // Got it answers the backstage team with this person's 👍, held through a blip; Got all N answers each plain message
-  // that waits, one send each.
+  // Got it answers the backstage team with this person's 👍, held through a blip; Got all N (on the newest plain message
+  // waiting) answers each plain message that waits, one send each; any other, itself alone. Its second door closes.
   'msg.ack': (m) => {
-    for (const id of m.priority ? [m.id] : F.waiting.plain) AGM.outbox.hold('react', { messageId: id, emoji: '👍', on: true });
+    const plain = F.waiting.plain;
+    const all = !m.priority && plain.length > 1 && plain[plain.length - 1] === m.id;
+    for (const id of all ? plain : [m.id]) AGM.outbox.hold('react', { messageId: id, emoji: '👍', on: true });
+    Simple.tap('');
   },
+  // Change: a question this person answered shows its answers again, to give another (their answer is replaced).
+  'msg.change': (m) => Simple.change(m.id),
   'msg.reply': (m) => beginReply(m),
   'msg.react': (m, { value }) => {
     const on = !(m.reactions || []).some((r) => r.uid === MY_UID && r.emoji === value);
@@ -1719,6 +1794,10 @@ function renderActionBody(msg) {
   }
   const btnRow = document.createElement('div');
   btnRow.className = 'action-buttons';
+  // This person's own answer, which the simple view draws in place of the answers until Change brings them back, and
+  // then marks the one chosen among them (pressed).
+  const mine = (msg.responses || []).find((r) => r.uid === MY_UID) || null;
+  const simple = F.view === 'simple';
   if (shown.has('msg.answer')) msg.options.forEach((opt, i) => {
     const b = document.createElement('button');
     b.type = 'button';
@@ -1726,6 +1805,7 @@ function renderActionBody(msg) {
     b.dataset.action = 'msg.answer';
     b.dataset.value = String(i);
     b.textContent = opt;
+    if (simple) b.setAttribute('aria-pressed', String(!!mine && mine.optionIndex === i));
     const held = heldAnswers.get('answer|' + msg.id);
     if (held && held.option === i) { b.textContent = marked('waiting', opt); b.dataset.state = 'sending'; }
     btnRow.appendChild(b);
@@ -1739,6 +1819,25 @@ function renderActionBody(msg) {
     btnRow.appendChild(other);
   }
   if (btnRow.childElementCount) wrap.appendChild(btnRow);
+  // The simple view, once this person has answered: "You answered Yes · 14:10 · Change" (or the words they gave), and
+  // Change (msg.change) brings the answers back, the line staying under them without Change while they choose again;
+  // others' tallies are the backstage team's to read.
+  if (simple && mine && (shown.has('msg.change') || F.changing === msg.id)) {
+    const line = document.createElement('p');
+    line.className = 'bv-answered';
+    const opt = mine.optionIndex >= 0 ? msg.options[mine.optionIndex] : null;
+    line.textContent = (opt !== null && opt !== undefined ? 'You answered ' + opt : 'You answered: “' + (mine.note || '') + '”') + (mine.at ? ' · ' + formatTime(mine.at) : '');
+    if (shown.has('msg.change')) {
+      line.append(' · ');
+      const change = document.createElement('button');
+      change.type = 'button';
+      change.className = 'bv-text-act';
+      change.dataset.action = 'msg.change';
+      change.textContent = AGM.catalog.entry('msg', 'msg.change').label;
+      line.appendChild(change);
+    }
+    wrap.appendChild(line);
+  }
   const tally = document.createElement('div');
   tally.className = 'action-responses';
   tally.dataset.for = msg.id;
@@ -1753,10 +1852,16 @@ function updateActionResponses(messageId, responses) {
   const els = document.querySelectorAll(`.action-responses[data-for="${messageId}"]`);
   if (!els.length) return;
   const msg = findMessage(messageId);
+  // This person's own answer before and after: the simple view draws it, and nobody else's.
+  const ownOf = (list) => { const r = (Array.isArray(list) ? list : []).find((x) => x.uid === MY_UID); return r ? [r.optionIndex, r.note || '', r.at || 0].join('|') : ''; };
+  const ownWas = msg ? ownOf(msg.responses) : '';
   if (msg) msg.responses = responses;
   els.forEach((el) => renderResponses(el, { responses, options: msg?.options || [] }));
   const node = messagesById.get(messageId);
   if (node) node.classList.add('answered');
+  // The simple view draws this person's own answer in place of the answers, and no tally: the question is drawn again
+  // only when their own answer changed (which ends a Change), so another's answer never takes away their choice or focus.
+  if (node && msg && F.view === 'simple' && ownOf(responses) !== ownWas) { if (F.changing === messageId) factsChanged({ changing: '' }); rerenderMessage(node, msg); }
   // Its pinned copy says the same, and so does its open menu (Answer ▸'s choice).
   if (node && node.dataset.pinned === '1') refreshPinned(messageId);
   if (openOn && openOn.kind === 'msg' && openOn.id === messageId) refreshOpenMenu();
@@ -2306,12 +2411,15 @@ function prettyMime(m) {
 
 // ---------------- Splitter (drag to resize columns) ----------------
 
-(function initSplit() {
+/** The split this browser kept for the full view, drawn again (the simple view lays its column out by the screen's size). */
+function restoreSplit() {
   if (!HAS_STAGE) return;
   const key = window.innerWidth <= 800 ? 'agm.splitPctV' : 'agm.splitPct';
-  const saved = parseFloat(localStorage.getItem(key));
+  let saved = NaN;
+  try { saved = parseFloat(localStorage.getItem(key)); } catch { /* storage blocked: the default split */ }
   if (saved && saved >= 20 && saved <= 85) applySplit(saved);
-})();
+}
+restoreSplit();
 window.addEventListener('resize', () => {
   // PDF needs re-render when the user resizes the browser, debounced.
   clearTimeout(window.__pdfResizeTimer);
@@ -2320,6 +2428,8 @@ window.addEventListener('resize', () => {
 
 function applySplit(leftPct) {
   if (!leftCol || !docPanelEl) return;
+  // The simple view's column and tabs follow the screen's size alone: no split is drawn over them.
+  if (pageFacts.view === 'simple') { leftCol.style.flex = ''; docPanelEl.style.flex = ''; return; }
   leftCol.style.flex = `0 0 ${leftPct}%`;
   docPanelEl.style.flex = `0 0 ${100 - leftPct}%`;
 }
@@ -2413,6 +2523,7 @@ function renderUsers(users) {
   }
   for (const gone of have.values()) gone.remove();
   if (openOn && (openOn.kind === 'person' || openOn.kind === 'header')) refreshOpenMenu();
+  Simple.people(people);
 }
 function drawPersonRow(li) {
   const p = personNow(li.dataset.key);
@@ -2442,6 +2553,14 @@ peopleList.addEventListener('click', (e) => {
 AGM.menu.door(peopleList, personDoor);
 AGM.roving(peopleList, { item: 'li[data-key]' });
 Object.assign(RUN, {
+  // The admin's choice of the view this person's pages draw: told to their pages at once, and their row redrawn.
+  'person.chatView': (p, { value }) => {
+    if (typeof value !== 'string') return;
+    AGM.outbox.now('admin:setView', { roomCode: ROOM, socketId: p.socketId, view: value }, (r) => {
+      if (!r || !r.ok) { AGM.toast((r && r.error) || 'Not changed.', true); return; }
+      AGM.toast(p.name + '\'s pages draw ' + (value === 'simple' ? 'the simple view' : value === 'full' ? 'the full view' : 'the view of their seat') + (r.already ? ' already.' : ' now.'));
+    });
+  },
   // @ Mention: the person's name in the composer, where the cursor is, and the focus there to go on writing.
   'person.mention': (p) => {
     const field = composerField({ text: true });
@@ -2959,6 +3078,7 @@ const newBelow = document.getElementById('newBelow');
 const place = {
   atEnd: true,      // the feed was within a line of the bottom when it was last moved, by the reader or the page
   unread: 0,        // messages from others drawn below a feed the reader had scrolled up
+  asks: 0,          // the questions among them (the simple view names them)
   touched: false,   // the person touched the page since the divider was put where it is
   divider: null,
 };
@@ -3007,13 +3127,19 @@ function keepPlace(el, msg, follow) {
     place.touched = false;
   }
   if (follow) toEnd();
-  else if (news) drawNewBelow(place.unread + 1);
+  else if (news) drawNewBelow(place.unread + 1, place.asks + (msg.type === 'action' ? 1 : 0));
 }
-function drawNewBelow(n) {
+/**
+ * "↓ n new" below a feed scrolled up; the simple view names the questions among them: "↓ 3 new · 1 question", or
+ * "↓ 1 question" when they are all questions.
+ */
+function drawNewBelow(n, asks = 0) {
   place.unread = n;
+  place.asks = n ? asks : 0;
   newBelow.hidden = n === 0;
-  newBelow.textContent = '↓ ' + n + ' new';
-  newBelow.setAttribute('aria-label', n + (n === 1 ? ' new message' : ' new messages') + ' below');
+  const q = (k) => k + (k === 1 ? ' question' : ' questions');
+  newBelow.textContent = F.view !== 'simple' || !place.asks ? '↓ ' + n + ' new' : n === place.asks ? '↓ ' + q(n) : '↓ ' + n + ' new · ' + q(place.asks);
+  newBelow.setAttribute('aria-label', n + (n === 1 ? ' new message' : ' new messages') + (F.view === 'simple' && place.asks ? ', ' + q(place.asks) + ',' : '') + ' below');
 }
 /** The divider stays only above a message: when the one under it goes, it sits above the next, or goes with none. */
 function tidyDivider() {
@@ -3136,8 +3262,10 @@ socket.on('userState:request', () => {
   }
 });
 
-socket.on('userState:push', ({ key, value }) => {
+socket.on('userState:push', ({ key, value, support } = {}) => {
   if (window.AGM_DEBUG_SYNC) console.log('[sync] recv', key, value);
+  // The simple view takes no theme from the admin's support view (`support`): only the person turns a Board page light.
+  if (key === 'theme' && support === true && F.view === 'simple') return;
   _applyingRemote = true;
   try {
     if (key === 'theme' && (value === 'light' || value === 'dark')) {
@@ -3206,6 +3334,14 @@ function renderReactions(node, reactions) {
     pill.disabled = !F.post;
     rx.appendChild(pill);
   }
+  // A Board member's 👍 is their Got it (the simple view's answer to the backstage team): said with their names.
+  const got = reactions.filter((r) => r.emoji === '👍' && (r.role === 'board' || r.role === 'director')).map((r) => r.name);
+  if (got.length) {
+    const line = document.createElement('span');
+    line.className = 'got-line';
+    line.textContent = '👍 ' + (got.length === 1 ? got[0] : got.length === 2 ? got[0] + ' and ' + got[1] : got.slice(0, 2).join(', ') + ' and ' + (got.length - 2) + ' more') + ' got it';
+    rx.appendChild(line);
+  }
   rx.hidden = false;
 }
 
@@ -3218,11 +3354,9 @@ function beginReply(msg) {
     snippet: msg.text || msg.filename || (msg.type === 'action' ? msg.text : ''),
   };
   renderReplyChip();
-  const el = document.getElementById(ROLE === 'board' ? 'directorInput' : 'textInput');
+  // The words' field of the composer drawn (the backstage composer's Message tab opened for it), so the chip is seen.
+  const el = composerField({ text: true });
   if (el) el.focus();
-  // Switch the research compose to the text tab so the chip is visible
-  const textTab = document.querySelector('.compose-tabs .tab[data-tab="text"]');
-  if (textTab && !textTab.classList.contains('active')) textTab.click();
 }
 function cancelReply() {
   replyState = null;
@@ -3242,7 +3376,7 @@ function renderReplyChip() {
   }
   chip.innerHTML = '<span>↩ Replying to <strong>' + escapeHtml(replyState.name) + '</strong>: <em>' +
     escapeHtml((replyState.snippet || '').slice(0, 80)) + '</em></span>' +
-    '<button type="button" class="reply-cancel" title="Cancel the reply (Esc)" aria-label="Cancel the reply">×</button>';
+    '<button type="button" class="reply-cancel" title="Cancel the reply (Esc)" aria-label="Cancel the reply">' + (F.view === 'simple' ? '× Cancel' : '×') + '</button>';
   const x = chip.querySelector('.reply-cancel');
   x.addEventListener('click', () => { const o = composeObject(); if (o) act('compose', 'compose.cancelReply', o, { opener: x, anchor: x }); });
 }
@@ -3893,6 +4027,14 @@ const Takes = (function () {
     const more = li.querySelector('.obj-more');
     return { el: li, more, open: (at) => openObjectMenu('card', cardObject, { node: li, more, at, opener: li.contains(document.activeElement) ? document.activeElement : more || li, label: 'Card actions', header: cardHeader }) };
   }
+  // Got it on the strip answers the backstage team (msg.ack) and clears the strip: what it answers is answered.
+  $('layerGotIt').addEventListener('click', (e) => {
+    e.preventDefault();
+    const h = hotNow();
+    if (!h) return;
+    act('msg', 'msg.ack', h, { anchor: e.currentTarget, node: layer, opener: e.currentTarget });
+    if (AGM.catalog.ready('msg', 'msg.ack', F, h) === true) { hot = null; drawNews(); }
+  });
   layer.addEventListener('click', (e) => {
     const el = e.target.closest('[data-action^="take."], [data-more]');
     if (!el || !layer.contains(el)) return;
@@ -4021,9 +4163,21 @@ const Takes = (function () {
     if (msg.priority) hot = msg; else unread++;
     drawNews();
   }
+  /** The 🔥 message in the strip as the catalogue reads it now (its record, its reactions included), or null. */
+  const hotNow = () => (hot ? findMessage(hot.id) || hot : null);
   function drawNews() {
     newOn.textContent = unread ? unread + ' new' : '';
     strip.hidden = !hot;
+    // The simple view's Got it beside Open chat, on a 🔥 message from backstage that waits for this person (msg.ack).
+    const h = hotNow();
+    const got = $('layerGotIt');
+    got.hidden = !(h && AGM.catalog.shown('msg', F, h).some((e) => e.id === 'msg.ack'));
+    // Its words only while it is drawn, so the strip's text never reads a button it does not show.
+    got.textContent = got.hidden ? '' : '👍 Got it';
+    if (!got.hidden) {
+      const why = AGM.catalog.ready('msg', 'msg.ack', F, h);
+      if (why === true) { got.removeAttribute('aria-disabled'); got.removeAttribute('title'); } else { got.setAttribute('aria-disabled', 'true'); got.title = why; }
+    }
     if (hot) {
       $('layerStripFrom').textContent = '🔥 ' + ((hot.from && hot.from.name) || 'Someone') + ':';
       $('layerStripText').textContent = hot.type === 'file' ? (hot.filename || 'a file') : hot.type === 'help' ? 'needs help' + (hot.category ? ' (' + hot.category + ')' : '') : String(hot.text || '');
@@ -4045,7 +4199,7 @@ const Takes = (function () {
   /** Stagewatch's frame moved: a countdown drawn shows it at once. */
   function stageFrame(v) { stage = v; tickNow(); }
   /** The page's facts changed (connected, the support view): the bars drawn again. */
-  function redraw() { drawBarNow(); drawCardBar(); }
+  function redraw() { drawBarNow(); drawCardBar(); if (!layer.hidden) drawNews(); }
 
   return { joined, stage: stageFrame, heard, redraw, object, cardObject, carded: () => !!cardKey, current: () => told, load };
 })();
@@ -4342,3 +4496,426 @@ const ToStagewatch = (function () {
   });
   return { open };
 })();
+
+// ---------------- The Board's chat view: the simple view ----------------
+// The view a person's page draws is the server's (the join's `view`, then each `view` it tells): the simple view for a
+// seat On stage unless the admin chose Full, the full view elsewhere. The simple view is the chat first and compact:
+// one reading column, one response place per screen after the words it answers (Got it and Reply on the newest message
+// from backstage that waits for this person, and on each 🔥 one; a tap brings any other's own row back), questions with
+// their answers, a 🔥 strip only while its message is out of view, the composer with 🔥 Priority first, and a ⋯ sheet in
+// place of the header's menu. It has no menu door and acts on Tab, Enter and Escape alone. Everything it shows is drawn
+// from facts the server already sends: what waits is this page's reading of the room's messages, never a field of its
+// own. Its layout follows the screen's size and each feature a probe, never the device's name (styles.css).
+const Simple = (function () {
+  const body = document.body;
+  const root = document.documentElement;
+  let view = 'full';
+  // Whether the screen can be kept awake: AGM.awake's last word ({held} or {held: false, why, words}), or null not asked.
+  let awake = null;
+  let stopAwake = null;
+  // Who is backstage in the room, and since when nobody (the line over the composer says so after 10 s).
+  const ALONE_MS = 10_000;
+  let aloneTimer = null;
+  // The 🔥 message the strip would hold, and whether its node is in view (IntersectionObserver, where the browser has it):
+  // unknown until the observer has said, and the strip waits for it, so it never comes and goes as a message is drawn.
+  let hotId = '';
+  let hotSeen = null;
+  // What the strip says now, as last drawn: it is a status region, so its words are written only when they change, and a
+  // screen reader says the 🔥 message once, not again with every message drawn.
+  let stripSaid = '';
+  const seer = typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver((entries) => { for (const en of entries) if (en.target.dataset.id === hotId) hotSeen = en.isIntersecting; drawStrip(); }, { root: feed, threshold: 0.5 })
+    : null;
+  // The feed's height moves with what the simple view draws around it (the strip, the line over the composer, the tabs):
+  // a reader at its end stays at its end.
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (isSimple() && place.atEnd) feed.scrollTop = feed.scrollHeight; }).observe(feed);
+  let watched = null;
+  const $ = (id) => document.getElementById(id);
+  const isSimple = () => view === 'simple';
+
+  /** The view to draw now: the body says it, the facts carry it, every message is drawn again, the theme follows. */
+  function setView(v) {
+    const next = v === 'simple' ? 'simple' : 'full';
+    const was = view;
+    const atEnd = place.atEnd;
+    view = next;
+    body.dataset.view = next;
+    // The hall page's first paint reads the view it last drew (theme-init.js); the support view is the admin's browser.
+    if (!ADMIN_VIEW) { try { localStorage.setItem('agm.lastView', next); } catch { /* storage blocked: the first paint is light */ } }
+    // A theme never chosen: dark in the simple view, light in the full view (the Board's view starts in Dark).
+    if (!chosenTheme()) applyTheme(next === 'simple' ? 'dark' : 'light');
+    factsChanged({ view: next, waiting: next === 'simple' ? waitingNow() : null, tapped: '', changing: '' });
+    drawComposerSeat();
+    if (was !== next) {
+      // A backstage page's words go with it to the composer the view draws, and so does a reply begun.
+      if (ROLE === 'research') {
+        const [from, to] = next === 'simple' ? [textInput, dInput] : [dInput, textInput];
+        if (from.value && !to.value) { to.value = from.value; from.value = ''; }
+      }
+      const chip = $('replyChip');
+      if (chip) chip.remove();
+      for (const m of allMessages) { const n = messagesById.get(m.id); if (n && n.classList.contains('msg')) rerenderMessage(n, m); }
+      refreshPinned();
+      renderReplyChip();
+      drawComposers();
+      drawSkip();
+      drawNewBelow(place.unread, place.asks);
+      if (atEnd) { feed.scrollTop = feed.scrollHeight; place.atEnd = true; }
+    }
+    const head = document.querySelector('.doc-panel-header strong');
+    if (head) head.textContent = next === 'simple' ? '📺 Shown to you' : '📺 On stage';
+    // The full view's split, dragged and kept, is not the simple view's: its column follows the screen's size.
+    if (was !== next) { if (next === 'simple') applySplit(0); else restoreSplit(); }
+    if (next === 'simple' && !ADMIN_VIEW && !stopAwake) stopAwake = AGM.awake((st) => { awake = st; if (sheetOpen()) drawSheet(); });
+    if (next !== 'simple' && stopAwake) { stopAwake(); stopAwake = null; awake = null; }
+    if (next !== 'simple') closeSheet(false);
+    drawAlone(people);
+    layout();
+    fitPlaceholder();
+    drawStrip();
+    drawEmpty();
+    Takes.redraw();
+  }
+
+  /**
+   * What waits for this person's answer: a message of someone else's (text or a file) that they have not answered by
+   * their 👍, a reply of theirs that quotes it, or (for a question, which is not here) their answer. A plain one only from
+   * backstage, the oldest first; a 🔥 one from anyone else.
+   */
+  function waitingNow() {
+    const plain = [];
+    const priority = [];
+    if (!MY_UID) return { plain, priority };
+    const replied = new Set(allMessages.filter((m) => isMine(m) && m.replyTo && m.replyTo.id).map((m) => m.replyTo.id));
+    for (const m of allMessages) {
+      if (!m.from || isMine(m) || !(m.type === 'text' || m.type === 'file')) continue;
+      if (replied.has(m.id) || (Array.isArray(m.reactions) && m.reactions.some((r) => r.uid === MY_UID && r.emoji === '👍'))) continue;
+      if (m.priority) priority.push(m.id);
+      else if (m.from.role === 'research') plain.push(m.id);
+    }
+    return { plain, priority };
+  }
+  /** What waits read again, once after whatever this task draws (a history is many messages, read once). */
+  let waitsDue = false;
+  function waits() {
+    if (!isSimple() || waitsDue) return;
+    waitsDue = true;
+    Promise.resolve().then(() => {
+      waitsDue = false;
+      if (!isSimple()) return;
+      // A response drawn or taken away moves what is below it: a reader at the end of the chat stays at its end.
+      const end = place.atEnd || nearEnd();
+      factsChanged({ waiting: waitingNow() });
+      if (end) { feed.scrollTop = feed.scrollHeight; place.atEnd = true; }
+      for (const m of allMessages) { const n = messagesById.get(m.id); if (n && n.classList.contains('msg')) said(n, m); }
+      drawStrip();
+      drawEmpty();
+    });
+  }
+
+  /**
+   * A message's status words, at the end of its author's line, in the simple view: on one of this person's own,
+   * "Sent", or "Seen by Ana" once a backstage seat has read it ("Seen by Ana and 2 more" past two); on another's, "👍 You:
+   * got it" once they answered it so.
+   */
+  function said(node, m) {
+    const el = node.querySelector(':scope > header .bv-said');
+    if (!el) return;
+    let words = '';
+    if (isSimple() && m.from && m.type !== 'system') {
+      if (isMine(m)) {
+        const by = Number.isInteger(m.seq) ? Array.from(seenBy.values()).filter((x) => x.role === 'research' && x.seq >= m.seq).map((x) => x.name) : [];
+        words = !by.length ? 'Sent' : by.length <= 2 ? 'Seen by ' + by.join(' and ') : 'Seen by ' + by[0] + ' and ' + (by.length - 1) + ' more';
+      } else if (Array.isArray(m.reactions) && m.reactions.some((r) => r.uid === MY_UID && r.emoji === '👍')) words = '👍 You: got it';
+    }
+    if (el.textContent !== words) el.textContent = words;
+  }
+
+  /** The second door: the message tapped (or Enter on it) shows its own row, Got it where it waits, and Reply. */
+  function tap(id, { focus = false } = {}) {
+    if (!isSimple()) return;
+    if (F.tapped !== id) factsChanged({ tapped: id || '' });
+    if (!focus || !id) return;
+    const node = messagesById.get(id);
+    const first = node && node.querySelector(':scope > .msg-response button, .body button[data-action]');
+    if (first) first.focus();
+  }
+  /** Change: a question answered shows its answers again, the first focused. */
+  function change(id) {
+    factsChanged({ changing: id });
+    const m = findMessage(id);
+    const node = messagesById.get(id);
+    if (!m || !node) return;
+    rerenderMessage(node, m);
+    const first = node.querySelector('.action-btn');
+    if (first) first.focus();
+  }
+
+  /** Nobody backstage in the room's people for 10 s: one muted line over the composer, until one joins. */
+  function drawAlone(list) {
+    const line = $('bvAlone');
+    const anyone = (Array.isArray(list) ? list : []).some((u) => u.role === 'research');
+    if (!isSimple() || anyone || outOf) {
+      clearTimeout(aloneTimer);
+      aloneTimer = null;
+      line.hidden = true;
+      return;
+    }
+    if (line.hidden && !aloneTimer) aloneTimer = setTimeout(() => { aloneTimer = null; if (isSimple()) { AGM.toned(line, AGM.mark('off') + ' Nobody backstage is online. Use Help if you need someone.'); line.hidden = false; } }, ALONE_MS);
+  }
+
+  /** The feed's own words while it holds nothing to read yet. */
+  function drawEmpty() {
+    $('bvEmpty').hidden = !isSimple() || allMessages.some((m) => m.type !== 'system') || echoes.size > 0;
+  }
+
+  // ---- the 🔥 strip: the newest 🔥 message from backstage that waits, only while it is out of view
+  function drawStrip() {
+    const strip = $('bvStrip');
+    const hot = isSimple() ? F.waiting.priority.map(findMessage).filter((m) => m && m.from && m.from.role === 'research') : [];
+    const m = hot.length ? hot[hot.length - 1] : null;
+    const id = m ? m.id : '';
+    if (id !== hotId) {
+      hotId = id;
+      hotSeen = null;
+      if (seer && watched) seer.unobserve(watched);
+      watched = id ? messagesById.get(id) || null : null;
+      if (seer && watched) seer.observe(watched);
+    }
+    // Without the observer the strip always shows: the safe failure. Behind the Shown to you tab it is out of view.
+    const inView = !!seer && hotSeen !== false && body.dataset.tab !== 'shown';
+    strip.hidden = !m || inView;
+    if (strip.hidden) { stripSaid = ''; return; }
+    const from = (m.from.name || 'Backstage') + ':';
+    const text = m.type === 'file' ? m.filename || 'a file' : String(m.text || '');
+    const others = hot.length - 1;
+    // Got it as the catalogue draws it now (its label, and why it cannot act while the page is not connected).
+    const ack = AGM.catalog.inline('msg', F, m).filter((i) => i.id === 'msg.ack').map((i) => [i.label, i.disabled, i.held]);
+    const said = JSON.stringify([m.id, from, text, others, ack]);
+    if (said === stripSaid) return;
+    stripSaid = said;
+    $('bvStripFrom').textContent = from;
+    $('bvStripText').textContent = text;
+    const acts = $('bvStripActs');
+    acts.dataset.id = m.id;
+    // Drawn whole each time it changes: Reply is the feed's, so the strip keeps Got it alone.
+    drawnActs.delete(acts);
+    drawBar(acts, 'msg', m, { words: true });
+    for (const b of acts.querySelectorAll('[data-action]:not([data-action="msg.ack"])')) b.remove();
+    const more = $('bvStripMore');
+    more.hidden = others < 1;
+    more.textContent = '+' + others + ' more';
+  }
+  $('bvStrip').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-action="msg.ack"]');
+    const m = b && findMessage($('bvStripActs').dataset.id);
+    if (m) act('msg', 'msg.ack', m, { anchor: b, opener: b });
+  });
+
+  // ---- what is shown to this person: a column at 900 px wide or more, a tab below, drawn only while it holds something
+  /** How many things are shown to this person now: a take minimised into the side bar, a file open there. */
+  const shownCount = () => (Takes.carded() ? 1 : 0) + (currentDocMsgId ? 1 : 0);
+  function layout() {
+    const n = isSimple() ? shownCount() : 0;
+    body.dataset.shown = String(n);
+    const tabs = $('bvTabs');
+    tabs.hidden = !isSimple() || n === 0;
+    $('shownCount').textContent = String(n);
+    if (n === 0 && body.dataset.tab === 'shown') pickTab('chat');
+    if (!body.dataset.tab) body.dataset.tab = 'chat';
+    // What is shown is On stage content: in the simple view it is never dragged out or saved by a long press. The full
+    // view's pictures drag as they always have (the take layer's own never do: pagelayer.mjs), so only what this marked
+    // is let go again.
+    const simple = isSimple();
+    for (const img of document.querySelectorAll('#takeCards img, #docDisplay img, #pageLayer img')) {
+      if (simple && img.getAttribute('draggable') !== 'false') { img.setAttribute('draggable', 'false'); img.dataset.bvDrag = '1'; }
+      else if (!simple && img.dataset.bvDrag) { img.removeAttribute('draggable'); delete img.dataset.bvDrag; }
+    }
+    drawStrip();
+  }
+  function pickTab(which) {
+    body.dataset.tab = which === 'shown' ? 'shown' : 'chat';
+    $('tabChat').setAttribute('aria-pressed', String(body.dataset.tab === 'chat'));
+    $('tabShown').setAttribute('aria-pressed', String(body.dataset.tab === 'shown'));
+    if (body.dataset.tab === 'shown') rerenderCurrentDoc();
+    drawStrip();
+  }
+  $('tabChat').addEventListener('click', () => pickTab('chat'));
+  $('tabShown').addEventListener('click', () => pickTab('shown'));
+  const shownWatch = new MutationObserver(() => layout());
+  shownWatch.observe($('takeCards'), { childList: true, attributes: true, attributeFilter: ['hidden'] });
+  shownWatch.observe($('docDisplay'), { childList: true });
+  // On stage content keeps no copy: in the simple view a long press or a right-click on it opens no menu, the browser's
+  // own included (its door answers as a menu that is open, and opens none), and nothing is dragged out.
+  for (const id of ['takeCards', 'docDisplay', 'pageLayer']) {
+    const el = $(id);
+    AGM.menu.door(el, () => (isSimple() ? { el, more: null, open: () => true } : null));
+    el.addEventListener('dragstart', (e) => { if (isSimple()) e.preventDefault(); });
+  }
+
+  // ---- the composer's placeholder: its long words where they fit the field, measured in the field's own font
+  const LONG = 'Message everyone here…';
+  const SHORT = 'Message everyone…';
+  let ruler = null;
+  function fitPlaceholder() {
+    const field = $('directorInput');
+    if (!field) return;
+    // The full view keeps its words; the simple view measures them against its field.
+    if (!isSimple()) { if (field.placeholder !== LONG) field.placeholder = LONG; return; }
+    if (!field.clientWidth) return;
+    const cs = getComputedStyle(field);
+    const room = field.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    if (!ruler) ruler = document.createElement('canvas').getContext('2d');
+    if (!ruler) return;
+    ruler.font = [cs.fontStyle, cs.fontWeight, cs.fontSize, cs.fontFamily].join(' ');
+    const words = ruler.measureText(LONG).width <= room ? LONG : SHORT;
+    if (field.placeholder !== words) field.placeholder = words;
+  }
+  let fitting = false;
+  window.addEventListener('resize', () => {
+    if (fitting) return;
+    fitting = true;
+    requestAnimationFrame(() => { fitting = false; fitPlaceholder(); layout(); });
+  });
+  // An iPad keeps the layout behind its on-screen keyboard (it reads no interactive-widget): the view follows the visual
+  // viewport's height, so the replying line and Send stay above the keyboard.
+  // A pinch-zoom resizes the visual viewport too, and the page is not made smaller for it: the rule holds only while the
+  // view is at its own scale, and lets go of the height otherwise.
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      if (!isSimple()) return;
+      const vv = window.visualViewport;
+      if (Math.abs((vv.scale || 1) - 1) > 0.01) { delete body.dataset.vv; return; }
+      root.style.setProperty('--vv-h', Math.round(vv.height) + 'px');
+      body.dataset.vv = '1';
+    });
+  }
+
+  // ---- the ⋯ sheet: what is set once a session
+  const sheetEl = $('bvSheet');
+  const rowsEl = $('bvSheetRows');
+  const sheetOpen = () => !sheetEl.hidden;
+  const fullNow = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+  /** The sheet as the catalogue reads it: the text size, the theme, the screen full or not, the hall as Leave names it. */
+  const sheetObject = () => ({ id: 'sheet', zoom: currentZoom, dark: root.dataset.theme === 'dark', full: !!fullNow(), hall: HALL_NAME || ROOM_NAME || 'this hall' });
+  function button(id, label, value, extra) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'bv-sheet-btn';
+    b.dataset.action = id;
+    if (value !== undefined) b.dataset.value = String(value);
+    b.textContent = label;
+    if (extra) extra(b);
+    return b;
+  }
+  function row(label, ...parts) {
+    const r = document.createElement('div');
+    r.className = 'bv-sheet-row';
+    const l = document.createElement('span');
+    l.className = 'bv-sheet-label';
+    l.textContent = label;
+    r.append(l, ...parts);
+    return r;
+  }
+  function drawSheet() {
+    const o = sheetObject();
+    const shown = AGM.catalog.shown('sheet', F, o);
+    rowsEl.textContent = '';
+    for (const e of shown) {
+      if (e.id === 'sheet.size') {
+        const vals = AGM.catalog.submenu('sheet', e.id, F, o) || [];
+        const pct = document.createElement('span');
+        pct.className = 'bv-sheet-pct';
+        pct.textContent = Math.round(currentZoom * 100) + '%';
+        const [down, up] = vals.map((v) => button(e.id, v.label, v.value, (b) => { b.setAttribute('aria-label', v.value < 0 ? 'Smaller text' : 'Larger text'); if (v.disabled) { b.setAttribute('aria-disabled', 'true'); b.title = v.disabled; } }));
+        rowsEl.appendChild(row(e.label, down, pct, up));
+      } else if (e.id === 'sheet.theme') {
+        const vals = AGM.catalog.submenu('sheet', e.id, F, o) || [];
+        rowsEl.appendChild(row(e.label, ...vals.map((v) => button(e.id, v.label, v.value, (b) => b.setAttribute('aria-pressed', String(!!v.checked))))));
+      } else {
+        const label = typeof e.label === 'function' ? e.label(F, o) : e.label;
+        const r = document.createElement('div');
+        r.className = 'bv-sheet-row';
+        r.appendChild(button(e.id, label, undefined, (b) => { b.classList.add('bv-sheet-wide'); }));
+        rowsEl.appendChild(r);
+      }
+    }
+    // Why the screen may sleep: a row of its own, before Leave, only while the screen cannot be kept awake.
+    if (awake && awake.held === false && awake.words) {
+      const p = document.createElement('p');
+      p.className = 'bv-sheet-awake';
+      p.setAttribute('role', 'status');
+      p.textContent = awake.words;
+      const leave = rowsEl.querySelector('[data-action="sheet.leave"]');
+      rowsEl.insertBefore(p, leave ? leave.parentNode : null);
+    }
+    // The support view acts on nothing: every row says whose view it is (R8).
+    for (const b of rowsEl.querySelectorAll('button[data-action]')) {
+      const why = AGM.catalog.ready('sheet', b.dataset.action, F, o);
+      if (why !== true) { b.setAttribute('aria-disabled', 'true'); b.title = why; }
+    }
+    $('bvSheetFoot').textContent = [NAME, roleLabel(F.role)].filter(Boolean).join(' · ');
+  }
+  function openSheet() {
+    if (!isSimple() || outOf) return;
+    drawSheet();
+    sheetEl.hidden = false;
+    headerMore.setAttribute('aria-expanded', 'true');
+    const first = rowsEl.querySelector('button');
+    if (first) first.focus();
+  }
+  function closeSheet(refocus) {
+    if (sheetEl.hidden) return;
+    sheetEl.hidden = true;
+    AGM.ask.close();
+    headerMore.setAttribute('aria-expanded', 'false');
+    if (refocus) headerMore.focus();
+  }
+  function sheet() { if (sheetOpen()) closeSheet(true); else openSheet(); }
+  rowsEl.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-action]');
+    if (!b) return;
+    e.preventDefault();
+    const value = b.dataset.value === undefined ? undefined : b.dataset.action === 'sheet.size' ? Number(b.dataset.value) : b.dataset.value;
+    if (b.getAttribute('aria-disabled') === 'true') { AGM.toast(b.title, true); return; }
+    act('sheet', b.dataset.action, sheetObject(), { anchor: b, opener: b, value });
+  });
+  // A tap outside the sheet (not on its ⋯) closes it, as Escape does.
+  document.addEventListener('pointerdown', (e) => {
+    if (!sheetOpen() || sheetEl.contains(e.target) || headerMore.contains(e.target) || (e.target.closest && e.target.closest('.agm-ask'))) return;
+    closeSheet(false);
+  }, true);
+  Object.assign(RUN, {
+    'sheet.size': (o, { value }) => { if (typeof value === 'number' && Number.isFinite(value)) setZoom(currentZoom + value); drawSheet(); fitPlaceholder(); },
+    'sheet.theme': (o, { value }) => {
+      if (value !== 'light' && value !== 'dark') return;
+      try { localStorage.setItem('agm.theme', value); } catch { /* storage blocked: this page only */ }
+      applyTheme(value);
+      pushUserState('theme', value);
+      drawSheet();
+    },
+    'sheet.fullscreen': () => {
+      if (fullNow()) { const leave = document.exitFullscreen || document.webkitExitFullscreen; if (leave) Promise.resolve(leave.call(document)).catch(() => {}); return; }
+      const el = document.documentElement;
+      const ask = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (ask) Promise.resolve(ask.call(el)).catch(() => AGM.toast('This device did not go full screen.', true));
+    },
+    'sheet.leave': () => { closeSheet(false); keepDraft(); location.href = HOME; },
+  });
+  for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, () => { if (sheetOpen()) drawSheet(); });
+
+  // ---- the Escape order: an open menu, an open ask, the take layer (minimised), Answer in words (its ask), the reply,
+  // then the focus returns to the composer. Each before it hears Escape first and stops it there.
+  document.addEventListener('keydown', (e) => {
+    if (!isSimple() || e.key !== 'Escape' || e.defaultPrevented) return;
+    if (AGM.menu.isOpen() || AGM.ask.isOpen() || document.querySelector('dialog[open]')) return;
+    if (sheetOpen()) { e.preventDefault(); closeSheet(true); return; }
+    if (F.tapped) factsChanged({ tapped: '' });
+    if (replyState) { e.preventDefault(); cancelReply(); }
+    const field = composerField();
+    if (field && document.activeElement !== field) { e.preventDefault(); field.focus(); }
+  });
+
+  return { setView, waits, said, tap, change, people: drawAlone, sheet, layout, isSimple, awakeState: () => awake };
+})();
+socket.on('view', (v) => { if (v && typeof v.view === 'string') Simple.setView(v.view); });

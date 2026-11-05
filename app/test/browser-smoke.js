@@ -931,6 +931,14 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       phones[seat] = await edge.tab(`${base}/app.html?code=${phoneHall}&name=${name}&role=${seat}`, { init: INK, metrics: PHONE });
       await phones[seat].until(`typeof joined !== "undefined" && joined && allMessages.some((m) => m.priority)`);
     }
+    // Bea's page draws the simple view by her seat; this pass reads the full view On stage, which the admin's Chat view
+    // gives her (moved on purpose: the Board's chat view has its own pass, below). Told live, with no reload.
+    const phoneAdmin = await connect(base, cookie);
+    const beaSid = (await emit(phoneAdmin, 'admin:watchRoom', { roomCode: phoneHall })).users.find((u) => u.name === 'Bea').socketId;
+    const beaFull = await emit(phoneAdmin, 'admin:setView', { roomCode: phoneHall, socketId: beaSid, view: 'full' });
+    const beaFullNow = await phones.board.until(`document.body.dataset.view === 'full' && F.view === 'full' && 'full'`);
+    report(!!beaFull && beaFull.ok && beaFullNow === 'full', `the admin's Chat view gives an On stage page the full view, live (${JSON.stringify(beaFull)})`);
+    phoneAdmin.close();
     for (const [seat, tab] of Object.entries(phones)) await readOldWords('the hall page on a phone, ' + { board: 'On stage', research: 'Backstage', observer: 'Observer' }[seat], tab);
     const hallDeck = JSON.parse(await phones.board.eval(`JSON.stringify({ chip: document.querySelector('.app-title strong').textContent, people: document.querySelector('#peoplePanel h3').textContent,
       placeholder: document.getElementById('directorInput').placeholder, label: document.getElementById('directorInput').getAttribute('aria-label') })`));
@@ -2628,6 +2636,13 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     const beaPad = await edge.tab(`${base}/app.html?code=${tkHall}&name=Bea&role=board`, { alone: true });
     const obiPad = await edge.tab(`${base}/app.html?code=${tkHall}&name=Obi&role=observer`, { alone: true });
     for (const t of [beaPad, obiPad]) await t.until(`typeof joined !== 'undefined' && joined`, 10000);
+    // Bea's page draws the simple view by her seat; the take's and the card's doors below are the full view's, which the
+    // admin's Chat view gives her live (moved on purpose: the simple view's take has its buttons alone, read with the web
+    // page below, and its own pass, the Board's chat view's).
+    const chatViewOf = (who, view) => op.eval(`new Promise((r) => socket.emit('admin:setView', { roomCode: ROOM, socketId: (people.find((u) => u.name === ${codeLiteral(who)}) || {}).socketId, view: ${codeLiteral(view)} }, (a) => r(JSON.stringify(a))))`);
+    await op.until(`people.some((u) => u.name === 'Bea')`, 5000);
+    const beaFullView = await chatViewOf('Bea', 'full');
+    report(beaFullView === JSON.stringify({ ok: true, view: 'full' }) && !!(await beaPad.until(`document.body.dataset.view === 'full' && F.view === 'full'`, 5000)), `the admin's Chat view gives Bea's On stage page the full view, live (${beaFullView})`);
     const unsay = (t) => t.eval(`(() => { const x = document.getElementById('agmToast'); if (x) { x.textContent = ''; x.classList.remove('show'); } return true; })()`);
     // The Board chip: "Board · Chat" with one Board page and nothing shown; a click, a right-click and Shift+F10 open its
     // menu alike.
@@ -2777,6 +2792,16 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       `an observer has no side bar until a take shown to them is minimised: from the console's row, Show them ▸ Clock reaches Obi's page, and Minimise puts it in a side bar of its own with its card (${JSON.stringify({ obiPanelBefore, obiMenu, obiRail })})`);
 
     // ---------------- A web page on people's pages (unit 19): its own right, the one frame, opened or not loaded ----------------
+    // Bea back to the view by her seat, the simple view, live: from the People panel of the admin's own page, her row's
+    // Chat view ▸ (Full checked, as the admin's people list says it), By seat.
+    const beaBySeat = JSON.parse(await op.eval(`(() => { const u = people.find((x) => x.name === 'Bea'); const p = u && personNow(u.uid); if (!p) return 'null';
+      const shown = AGM.catalog.shown('person', F, p).some((e) => e.id === 'person.chatView');
+      const sub = (AGM.catalog.submenu('person', 'person.chatView', F, p) || []).map((v) => v.label + (v.checked ? ' ✓' : ''));
+      act('person', 'person.chatView', p, { value: '' }); return JSON.stringify({ shown, sub }); })()`) || 'null');
+    const beaSimpleAgain = await beaPad.until(`document.body.dataset.view === 'simple' && F.view === 'simple' && 'simple'`, 5000);
+    const beaRowSays = await op.until(`(() => { const u = people.find((x) => x.name === 'Bea'); return u && u.view === '' && 'by seat'; })()`, 5000);
+    report(!!beaBySeat && beaBySeat.shown && JSON.stringify(beaBySeat.sub) === JSON.stringify(['By seat', 'Simple', 'Full ✓']) && beaSimpleAgain === 'simple' && beaRowSays === 'by seat',
+      `the People panel's Chat view ▸ on the admin's own page (By seat · Simple · Full, Full checked) gives Bea's page back the view by her seat, the simple view, live, and her row says it (${JSON.stringify({ beaBySeat, beaRowSays })})`);
     // The browser answers the venue's web page itself (agm-web.invalid: a page of a few words) and never answers the stuck
     // one (agm-test.invalid) before the page's 15 s are up: what each frame then does is what a real site's would.
     const WEB_OK = 'https://agm-web.invalid/vote';
@@ -3060,20 +3085,36 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     // composer, pin, reaction or answer offered. A help request offers no forward.
     await admin.eval(`watchRoom('${code}')`);
     report(!!(await admin.until(`Array.from(document.querySelectorAll('#usersTbody tr')).some((tr) => tr.textContent.includes('Ana Admin') && !tr.querySelector('.role-select') && tr.querySelector('.role-fixed')) && !!document.querySelector('#usersTbody .role-select')`)), 'the admin\'s room list: an account\'s role is its rights (no select), a code guest\'s has one');
+    // A backstage guest's Chat view chosen in the admin page's row (its select is the row's Chat view ▸): the server keeps
+    // it and says it back in the admin's people list, live; then By seat again (a backstage seat's view is the full view
+    // either way, so its page draws what it drew).
+    const viewRow = `[...document.querySelectorAll('#usersTbody tr[data-key]')].find((tr) => { const s = tr.querySelector('.role-select'); return s && s.value === 'research' && tr.querySelector('.view-select'); })`;
+    const pickView = (v) => admin.eval(`(() => { const tr = ${viewRow}; if (!tr) return ''; const sel = tr.querySelector('.view-select'); sel.value = ${codeLiteral(v)}; sel.dispatchEvent(new Event('change', { bubbles: true })); return tr.dataset.key; })()`);
+    const keptView = (sid) => admin.eval(`new Promise((r) => socket.emit('admin:watchRoom', { roomCode: ${codeLiteral(code)} }, (a) => { const u = a && a.ok && a.users.find((x) => x.socketId === ${codeLiteral(sid)}); r(u ? u.view : null); }))`);
+    const viewSid = await pickView('full');
+    const viewHeads = await admin.eval(`[...document.querySelectorAll('.admin-users th')].map((t) => t.textContent).join(' · ')`);
+    const viewFull = viewSid && await admin.until(`(() => { const tr = document.querySelector('#usersTbody tr[data-key=' + JSON.stringify(${codeLiteral(viewSid)}) + ']'); return tr && tr.querySelector('.view-select').value === 'full' && 'full'; })()`, 5000);
+    const keptFull = viewSid ? await keptView(viewSid) : null;
+    await pickView('');
+    const viewSeat = viewSid && await admin.until(`(() => { const tr = document.querySelector('#usersTbody tr[data-key=' + JSON.stringify(${codeLiteral(viewSid)}) + ']'); return tr && tr.querySelector('.view-select').value === '' && 'by seat'; })()`, 5000);
+    const keptSeat = viewSid ? await keptView(viewSid) : null;
+    const viewWords = await admin.eval(`[...document.querySelector('#usersTbody .view-select').options].map((o) => o.textContent).join(' · ')`);
+    report(!!viewSid && viewFull === 'full' && keptFull === 'full' && viewSeat === 'by seat' && keptSeat === '' && viewWords === 'By seat · Simple · Full',
+      `the admin page's Chat view select (${viewWords}; the heads ${viewHeads}) sets a backstage guest's view, which the server keeps (${keptFull}), and By seat again (${JSON.stringify(keptSeat)})`);
     // The admin page in the copy deck's words, watching a hall; then every page read says no old word in its chrome.
     const adminDeck = JSON.parse(await admin.eval(`JSON.stringify({
       tagline: document.querySelector('#loginPanel .tagline').textContent, newHall: document.getElementById('newSessionBtn').textContent,
       halls: document.querySelector('.admin-sidebar h3').textContent, none: document.getElementById('noRooms').textContent,
       code: document.querySelector('#roomHeader span.muted').textContent, clear: AGM.catalog.entry('adminRoom', 'adminRoom.clear').label,
       close: AGM.catalog.entry('adminRoom', 'adminRoom.remove').label(ADMIN_F, roomObject('${code}')), closing: AGM.catalog.entry('adminRoom', 'adminRoom.remove').confirm(ADMIN_F, roomObject('${code}')).title.slice(0, 11),
-      people: document.querySelector('#usersSection h3').textContent, forward: document.querySelectorAll('.admin-users th')[2].textContent,
+      people: document.querySelector('#usersSection h3').textContent, view: document.querySelectorAll('.admin-users th')[2].textContent, forward: document.querySelectorAll('.admin-users th')[3].textContent,
       local: document.querySelector('#tunnelOffState p').textContent.trim().split('\\n')[0], empty: [...document.querySelectorAll('#adminEmpty p')].map((p) => p.textContent) })`));
     report(JSON.stringify(adminDeck) === JSON.stringify({
       tagline: 'Halls, rooms and people, for the admin.', newHall: 'New hall', halls: 'Halls', none: 'No halls yet. Choose New hall to make one.', code: 'Code',
-      clear: 'Clear messages…', close: 'Close hall…', closing: 'Close hall ', people: 'People in this room', forward: 'May forward to',
+      clear: 'Clear messages…', close: 'Close hall…', closing: 'Close hall ', people: 'People in this room', view: 'Chat view', forward: 'May forward to',
       local: 'AGMessage is reachable only on the venue\'s network now.',
       empty: ['Choose a hall on the left, or New hall.', 'Each room has a 6-character guest code: share it with the people who join without an account.'],
-    }), `the admin page says hall, room and code: New hall, Halls, Code, Clear messages…, Close hall…, People in this room, May forward to (${JSON.stringify(adminDeck)})`);
+    }), `the admin page says hall, room and code: New hall, Halls, Code, Clear messages…, Close hall…, People in this room, Chat view, May forward to (${JSON.stringify(adminDeck)})`);
     // A seat has one name on the admin page too: the people's seats, an account's, the live feed's tags and the lock.
     const adminSeats = await admin.until(`(() => {
       const tags = [...new Set([...document.querySelectorAll('#adminFeed .role-tag')].map((t) => t.textContent))].sort();
@@ -3351,7 +3392,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       `Board members… lists who sits On stage in the hall, and says a tick gives the hall too to an account that does not reach it; Let them forward into ▸ lists every other room by its hall (${boardMembers}; ${forwardRooms})`);
     await research.eval(`Promise.all([new Promise((r) => socket.emit('message', { type: 'help', category: 'Sound', text: 'radio mic 3 dead' }, r)), new Promise((r) => socket.emit('message', { type: 'action', text: 'Ready for Q&A?', options: ['Yes', 'No'] }, r))])`);
     // On stage, what is written stays in the room: no message offers ↗, a text, a file or a question, and nothing that
-    // is not hidden is drawn for it; the Board's composer has no file or question door.
+    // is not hidden is drawn for it; the Board's composer has no file or question door, and 🔥 Priority comes first.
     const boardForward = await board.until(`(() => {
       const kinds = new Set(Array.from(document.querySelectorAll('.msg[data-type]')).map((n) => n.dataset.type));
       if (!['text', 'file', 'action'].every((k) => kinds.has(k))) return null;
@@ -3359,7 +3400,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       return JSON.stringify({ forward: allMessages.filter((m) => AGM.catalog.ids('msg', F, m).includes('msg.send')).length + Array.from(document.querySelectorAll('.msg [data-action="msg.send"]')).filter(shown).length,
         composer: Array.from(document.querySelectorAll('#directorCompose button, #directorCompose input')).filter(shown).map((b) => b.id || (b.classList.contains('send-btn') ? 'send' : b.classList.contains('compose-more') ? 'more' : b.outerHTML)) });
     })()`);
-    report(boardForward === JSON.stringify({ forward: 0, composer: ['directorInput', 'dirPriorityBtn', 'send', 'more'] }), `an On stage page offers no forward on any message, and its composer holds the words, 🔥, Send and its ⋯ (${boardForward})`);
+    report(boardForward === JSON.stringify({ forward: 0, composer: ['dirPriorityBtn', 'directorInput', 'send', 'more'] }), `an On stage page offers no forward on any message, and its composer holds 🔥 Priority, the words, Send and its ⋯ (${boardForward})`);
     // Help requests are answered by the backstage team: an On stage page draws no On my way or Resolved on someone else's
     // request and only Resolved on its own, which it marks; a backstage page draws both on the Board's. Someone else is
     // Cy, on a socket of her own: the smoke's pages share this browser's one identity, so each is the same person.
@@ -3484,7 +3525,8 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
     report(linkInStep(louRoomDoors) && louRoomDoors.want === JSON.stringify(['room.open', 'room.tab', 'room.copy', 'room.code']), `a room under Your rooms: right-click = Shift+F10 = Open, Open in a new tab, Copy link, Copy guest code, and no Set up (${louRoomDoors.want}; ${louRoomDoors.right} / ${louRoomDoors.key})`);
 
     // Kim, a Board account of Smoke AGM, is given Press again (Members… took it away above): two rooms, so the halls page
-    // is the question and lists both: the
+    // is the question and lists both. Her account reads the full view (Chat view: Full), whose header holds the switcher
+    // the simple view leaves out: the
     // hall's link seated On stage, Press a room button seated backstage. The hall opens On stage at once (no second load
     // for its seat), named "Smoke AGM", its switcher Main · Press with Main marked. A tap on Press moves the title and the
     // mark before the page goes (read as it goes), keeps what Kim wrote and had not sent, and opens Press seated backstage;
@@ -3495,7 +3537,7 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
       const signIn = async (username, password) => { for (let i = 0; i < 5; i++) { const r = await send('/api/auth/login', { username, password }); if (r.status !== 429) return r.status; await new Promise((ok) => setTimeout(ok, 2100)); } return 429; };
       const ana = await signIn('ana', 'the green room kettle');
       const kim = (await (await fetch('/api/users')).json()).users.find((u) => u.username === 'kim');
-      const given = await send('/api/users/' + kim.id, { rooms: ['${pressKey}'] }, 'PATCH');
+      const given = await send('/api/users/' + kim.id, { rooms: ['${pressKey}'], view: 'full' }, 'PATCH');
       return ana === 200 && given.status === 200 ? signIn('kim', 'mixing desk on stage left') : 'ana ' + ana + ', given ' + given.status; })()`);
     const LOADS = `(() => { if (location.pathname !== '/app.html') return;
       try { sessionStorage.setItem('agm.smokeLoads', String(Number(sessionStorage.getItem('agm.smokeLoads') || 0) + 1)); } catch { /* none kept */ }
@@ -4027,6 +4069,398 @@ const NO_ZONES = `(() => { const D = Intl.DateTimeFormat;
         report(p.length === 0, `${name}: no script errors or CSP violations${p.length ? ' — ' + p.slice(0, 3).join(' | ') : ''}`);
         t.close();
       }
+    }
+
+    // ---------------- The Board's chat view (unit 20a): the simple view on the device legs, the layout leg and the floor leg ----------------
+    // A hall of its own: Ana backstage (from here), three plain notes, a question and a 🔥 one; then a Board page per leg,
+    // each a device of its own (`alone`: fresh storage, so nothing chosen), with touch and a mobile viewport at the stage
+    // addendum's three sizes, both themes at 1180×820 and 390×844 and dark at 820×1180, and a Board account's page.
+    {
+      const bvHall = (await (await fetch(base + '/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ name: 'Board hall' }) })).json()).code;
+      const bvAdmin = await connect(base, cookie);
+      const ana = await connect(base);
+      const anaJoin = await emit(ana, 'join', { roomCode: bvHall, name: 'Ana Ribeiro', role: 'research' });
+      const say = async (args) => { for (let i = 0; i < 60; i++) { const r = await emit(ana, 'message', args); if (r && r.ok) return r; await sleep(250); } return null; };
+      for (const text of ['Slides 3 to 6 are loaded for the resolutions.', 'Could you confirm the proxy count before the vote?']) await say({ type: 'text', text });
+      const asked = await say({ type: 'action', text: 'Ready to take questions from the floor?', options: ['Yes', 'No', 'In 5 min'] });
+      await say({ type: 'text', text: 'Wrap up resolution 3 now, please.', priority: true });
+      await say({ type: 'text', text: 'Tom has the roving mic.' });
+      const ready = `typeof joined !== 'undefined' && joined && allMessages.some((m) => m.text === 'Tom has the roving mic.')`;
+      // What a Board page draws, read as a person sees it: the view and theme; the header's controls; each response's
+      // buttons; a question's; the composer's; what is never drawn there; the body's size; each response after its words;
+      // a 44 px band through each control's centre hitting it; the placeholder in its field; no sideways scroll; the column
+      // or the tabs; and the ink of the body, a name, a time, the cue words and a response at 4.5:1 or more.
+      const BV_READ = `(() => {
+        const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+        const msgs = [...feed.querySelectorAll(':scope > .msg[data-id]')];
+        const byText = (t) => msgs.find((n) => (findMessage(n.dataset.id) || {}).text === t);
+        const ctrls = (el) => (el ? [...el.querySelectorAll('button, input, a[href], select, textarea')].filter(vis) : []);
+        const resp = (t) => { const n = byText(t); return n ? ctrls(n.querySelector(':scope > .msg-response')).map((b) => b.dataset.action + ':' + b.textContent.trim()) : null; };
+        const q = byText('Ready to take questions from the floor?');
+        const NEVER = ['compose.attach', 'compose.draft', 'msg.react', 'msg.send', 'compose.sendTo', 'msg.sendBack', 'msg.pin', 'msg.delete', 'msg.screens', 'msg.sendNow', 'msg.speaker', 'msg.helpRespond'];
+        const never = NEVER.filter((a) => [...document.querySelectorAll('[data-action="' + a + '"]')].some(vis))
+          .concat(['#researchCompose', '#composeTo', '#peoplePanel', '#roomSwitcher', '#aiDraftBtn', '.obj-more', '.msg .reactions', '.sys.presence'].filter((sel) => [...document.querySelectorAll(sel)].some(vis)));
+        const field = document.getElementById('directorInput'); const cs = getComputedStyle(field);
+        const ruler = document.createElement('span'); ruler.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:' + [cs.fontStyle, cs.fontWeight, cs.fontSize, cs.fontFamily].join(' ');
+        ruler.textContent = field.placeholder; document.body.appendChild(ruler);
+        const room = field.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        const fits = ruler.getBoundingClientRect().width <= room; ruler.textContent = 'Message everyone here…';
+        const longFits = ruler.getBoundingClientRect().width <= room; ruler.remove();
+        const banded = [...document.querySelectorAll('.app-meta button, .msg-response button, .action-btn, .answer-words-btn, #directorForm button, #directorForm input, .bv-tab, .bv-strip button, #bvSheet button')].filter(vis);
+        const missed = banded.filter((b) => { const r = b.getBoundingClientRect(); const cx = r.left + r.width / 2, cy = r.top + r.height / 2; const fr = feed.getBoundingClientRect();
+          if (cy - 22 < 0 || cy + 22 > innerHeight || (feed.contains(b) && (cy - 22 < fr.top || cy + 22 > fr.bottom))) return false;
+          return ![cy - 21, cy + 21].every((y) => { const e = document.elementFromPoint(cx, y); return !!e && (e === b || b.contains(e)); }); }).map((b) => b.dataset.action || b.id || b.textContent.trim());
+        const hot = byText('Wrap up resolution 3 now, please.');
+        const ink = [hot.querySelector('.body p'), hot.querySelector('.from'), hot.querySelector('time'), hot.querySelector('.priority-badge'), q && q.querySelector('.ask-word'), hot.querySelector('.msg-response .msg-act')].filter(Boolean).map((el) => +__ink(el).ratio.toFixed(2));
+        return JSON.stringify({ view: document.body.dataset.view, theme: document.documentElement.dataset.theme,
+          header: ctrls(document.querySelector('.app-meta')).map((b) => b.id), newest: resp('Tom has the roving mic.'), older: resp('Could you confirm the proxy count before the vote?'), hot: resp('Wrap up resolution 3 now, please.'),
+          question: q ? ctrls(q).map((b) => b.dataset.action) : null, composer: ctrls(document.getElementById('directorCompose')).map((b) => b.id || b.dataset.action || b.className),
+          never, body: parseFloat(getComputedStyle(byText('Tom has the roving mic.').querySelector('.body p')).fontSize) / (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--zoom-msg')) || 1),
+          order: msgs.every((n) => { const r = n.querySelector(':scope > .msg-response'); return !r || !r.childElementCount || !!(n.querySelector(':scope > .body').compareDocumentPosition(r) & 4); }),
+          missed, placeholder: field.placeholder, label: field.getAttribute('aria-label'), fits, longFits, scroll: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          column: vis(document.getElementById('docPanel')) && !vis(document.getElementById('bvTabs')), tabs: vis(document.getElementById('bvTabs')), ink, feedHeight: Math.round(feed.getBoundingClientRect().height) }); })()`;
+      const bvRead = async (tab) => JSON.parse(await tab.eval(BV_READ) || 'null');
+      const LIGHT = `(() => { try { localStorage.setItem('agm.theme', 'light'); } catch { /* none */ } })();`;
+      const bvLegs = {};
+      const bvTabs = [];
+      for (const [w, h, theme] of [[1180, 820, 'light'], [1180, 820, 'dark'], [390, 844, 'light'], [390, 844, 'dark'], [820, 1180, 'dark']]) {
+        const tab = await edge.tab(`${base}/app.html?code=${bvHall}&name=${encodeURIComponent('Margaret ' + w + theme)}&role=board`, { init: INK + (theme === 'light' ? LIGHT : ''), metrics: { width: w, height: h, phone: true }, alone: true });
+        bvTabs.push(tab);
+        await tab.until(ready, 10000);
+        await tab.until(`document.fonts.status === 'loaded'`, 5000);
+        bvLegs[w + 'x' + h + ' ' + theme] = await bvRead(tab);
+        await tab.shot(path.join(OUT, `board-chat-${w}x${h}-${theme}.png`));
+      }
+      const legOk = (r, w, h, theme) => !!r && r.view === 'simple' && r.theme === theme && JSON.stringify(r.header) === JSON.stringify(['helpBtn', 'headerMore'])
+        && JSON.stringify(r.newest) === JSON.stringify(['msg.ack:👍Got all 3', 'msg.reply:↩Reply']) && JSON.stringify(r.older) === '[]'
+        && JSON.stringify(r.hot) === JSON.stringify(['msg.ack:👍Got it', 'msg.reply:↩Reply']) && JSON.stringify(r.question) === JSON.stringify(['msg.answer', 'msg.answer', 'msg.answer', 'msg.answerWords'])
+        && JSON.stringify(r.composer) === JSON.stringify(['dirPriorityBtn', 'directorInput', 'compose.send']) && r.never.length === 0
+        && r.body === (Math.min(w, h) >= 600 ? 22 : 20) && r.order && r.missed.length === 0 && r.fits && r.label === 'Message everyone here…' && r.scroll && r.ink.length === 6 && r.ink.every((x) => x >= 4.5);
+      // Nothing shown yet: at 1180 px wide Shown to you is its 36 px rail, which says what it is; at 390 px it is not drawn.
+      const RAIL = `JSON.stringify({ width: Math.round(document.getElementById('docPanel').getBoundingClientRect().width), words: getComputedStyle(document.getElementById('docPanel'), '::before').content })`;
+      const railWide = JSON.parse(await bvTabs[0].eval(RAIL));
+      const railPhone = JSON.parse(await bvTabs[2].eval(RAIL));
+      report(railWide.width === 36 && railWide.words === '"📺 Shown to you"' && railPhone.width === 0,
+        `with nothing shown, Shown to you is its rail at 900 px wide or more (${JSON.stringify(railWide)}) and is not drawn on a phone (${JSON.stringify(railPhone)})`);
+      // Down 5 s or more: "Offline · reconnecting" is the phone's second header row, under the name, Help and ⋯; on a
+      // tablet it sits before Help on its one row. Back, the phone's header is one row again.
+      const DOWN = (dot) => `(() => { drawConnection({ back: ${!dot}, connected: false, dot: ${dot}, stopped: false }); const w = document.getElementById('connWords'), h = document.getElementById('helpBtn'), m = document.getElementById('headerMore'), t = document.querySelector('.app-title');
+        const wr = w.getBoundingClientRect(), hr = h.getBoundingClientRect(), mr = m.getBoundingClientRect(), tr = t.getBoundingClientRect();
+        return JSON.stringify({ words: w.hidden ? '' : w.textContent, below: !w.hidden && wr.top >= Math.max(hr.bottom, tr.bottom) - 1, before: !w.hidden && wr.right <= hr.left + 1 && Math.abs((wr.top + wr.bottom) / 2 - (hr.top + hr.bottom) / 2) < hr.height / 2,
+          oneRow: Math.abs(hr.top - mr.top) < 2 && Math.abs((tr.top + tr.bottom) / 2 - (hr.top + hr.bottom) / 2) < hr.height / 2, scroll: document.documentElement.scrollWidth <= document.documentElement.clientWidth }); })()`;
+      const downPhone = JSON.parse(await bvTabs[2].eval(DOWN(true)));
+      const backPhone = JSON.parse(await bvTabs[2].eval(DOWN(false)));
+      const downTablet = JSON.parse(await bvTabs[0].eval(DOWN(true)));
+      await bvTabs[0].eval(DOWN(false));
+      report(downPhone.words === 'Offline · reconnecting' && downPhone.below && downPhone.oneRow && downPhone.scroll && backPhone.words === '' && backPhone.oneRow
+        && downTablet.words === 'Offline · reconnecting' && downTablet.before && !downTablet.below && downTablet.oneRow,
+        `down 5 s, "Offline · reconnecting" is the phone's second header row (the name, Help and ⋯ on the first) and sits before Help on a tablet's one row (${JSON.stringify({ downPhone, backPhone, downTablet })})`);
+      report(Object.entries(bvLegs).every(([k, r]) => { const [wh, theme] = k.split(' '); const [w, h] = wh.split('x').map(Number); return legOk(r, w, h, theme); }),
+        `the Board's chat view on the device legs (1180×820 and 390×844 in both themes, 820×1180 in dark; touch, a mobile viewport): dark until chosen, the header Help and ⋯ alone, 👍 Got all 3 and ↩ Reply after the newest plain message's words and none on an older one, Got it and Reply on the 🔥 one, a question's three answers and Answer in words…, the composer 🔥 Priority, the field and Send, nothing of the backstage team's (no 📎 ✨ ❓ 😊 ↗ To: ↩ Send back 📌 🗑 ⧉ 🖥 📝, no ⋯ on a message, no reactions or presence lines), 22 px text on a tablet and 20 px on a phone, each response after its words, a 44 px band through each control hitting it, the placeholder whole in its field, no sideways scroll, and the body, a name, a time, the cue words and a response at 4.5:1 or more (${JSON.stringify(bvLegs)})`);
+      // At 820×1180 a file shown to the Board (opened on the panel as it arrives) brings the tabs, and no side column.
+      const up = await (async () => { const f = new FormData(); f.append('file', new Blob([tinyPdf()], { type: 'application/pdf' }), 'proxies.pdf'); return (await fetch(base + '/api/upload', { method: 'POST', headers: { 'X-AGM-Upload': anaJoin.uploadToken }, body: f })).json(); })();
+      const filed = await say({ type: 'file', url: up.url, filename: 'proxies.pdf', mime: 'application/pdf' });
+      const upright = bvTabs[4];
+      const uprightShown = JSON.parse(await upright.until(`allMessages.some((m) => m.type === 'file') && document.body.dataset.shown === '1' && JSON.stringify({ tabs: !document.getElementById('bvTabs').hidden && getComputedStyle(document.getElementById('bvTabs')).display !== 'none',
+        pressed: [...document.querySelectorAll('#bvTabs button')].map((b) => b.textContent + ':' + b.getAttribute('aria-pressed')), side: document.getElementById('docPanel').getClientRects().length > 0 })`, 10000) || 'null');
+      await upright.eval(`document.getElementById('tabShown').click()`);
+      const uprightTab = JSON.parse(await upright.until(`document.body.dataset.tab === 'shown' && JSON.stringify({ chat: document.getElementById('leftCol').getClientRects().length > 0, panel: document.getElementById('docPanel').getClientRects().length > 0, head: document.querySelector('.doc-panel-header strong').textContent })`, 5000) || 'null');
+      await upright.eval(`document.getElementById('tabChat').click()`);
+      report(!!filed && JSON.stringify(uprightShown) === JSON.stringify({ tabs: true, pressed: ['Chat:true', '📺 Shown to you · 1:false'], side: false }) && JSON.stringify(uprightTab) === JSON.stringify({ chat: false, panel: true, head: '📺 Shown to you' }),
+        `at 820×1180 (a tablet upright) what is shown is a tab, not a column: Chat and 📺 Shown to you · 1, two pressed buttons, the second showing the panel in the chat's place (${JSON.stringify({ uprightShown, uprightTab })})`);
+
+      // A Board account (a Tech given Board hall's On stage seat), on a device of its own at 1180×820: the same view. It is
+      // made by the admin account (the laptop's token makes none), signed in as every sign-in from this address is, a
+      // turn away waiting its turn.
+      const signInAs = async (username, password) => { for (let i = 0; i < 6; i++) { const r = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) }); if (r.status !== 429) return r; await sleep(2100); } return null; };
+      let anaIn = await signInAs('ana', 'the green room kettle');
+      if (!anaIn || anaIn.status !== 200) {
+        await fetch(base + '/api/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' }) });
+        anaIn = await signInAs('ana', 'the green room kettle');
+      }
+      const anaCookie = anaIn && anaIn.status === 200 ? anaIn.headers.get('set-cookie').split(';')[0] : '';
+      const boardAcct = await fetch(base + '/api/users', { method: 'POST', headers: { 'content-type': 'application/json', cookie: anaCookie }, body: JSON.stringify({ username: 'meg', name: 'Meg Board', role: 'tech', halls: [bvHall], board: [bvHall], password: 'lectern and water glass' }) });
+      const megTab = await edge.tab(`${base}/build.js`, { metrics: { width: 1180, height: 820, phone: true }, init: INK, alone: true });
+      await megTab.until(`document.readyState === 'complete'`);
+      const megIn = await megTab.eval(`(async () => { for (let i = 0; i < 5; i++) { const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'meg', password: 'lectern and water glass' }) }); if (r.status !== 429) return r.status; await new Promise((ok) => setTimeout(ok, 2100)); } return 429; })()`);
+      await megTab.send('Page.navigate', { url: `${base}/app.html?code=${bvHall}&as=account&role=board` });
+      await megTab.until(ready, 10000);
+      const megRead = await bvRead(megTab);
+      report(boardAcct.status === 200 && megIn === 200 && !!megRead && megRead.view === 'simple' && megRead.theme === 'dark' && JSON.stringify(megRead.header) === JSON.stringify(['helpBtn', 'headerMore'])
+        && JSON.stringify(megRead.composer) === JSON.stringify(['dirPriorityBtn', 'directorInput', 'compose.send']) && megRead.never.length === 0 && megRead.missed.length === 0 && megRead.body === 22,
+        `a Board account's page is the Board's chat view too: dark, Help and ⋯, the composer of three, nothing of the backstage team's (${JSON.stringify(megRead)})`);
+
+      // The behaviour, on Margaret's tablet (1180×820, dark) with Rob's backstage page beside it.
+      const meg = bvTabs[1];
+      const rob = await edge.tab(`${base}/app.html?code=${bvHall}&name=Rob&role=research`, { alone: true });
+      await rob.until(ready, 10000);
+      // Only Tab, Enter and Escape act: R on a message begins no reply; a right-click opens no menu of AGMessage's.
+      await meg.eval(`(() => { const n = [...feed.querySelectorAll('.msg[data-id]')].find((x) => (findMessage(x.dataset.id) || {}).text === 'Tom has the roving mic.'); n.focus(); return true; })()`);
+      await press(meg, 'R');
+      const noKey = await meg.eval(`!document.getElementById('replyChip') && !AGM.menu.isOpen()`);
+      const bodyAt = await meg.eval(`(() => { const n = [...feed.querySelectorAll('.msg[data-id]')].find((x) => (findMessage(x.dataset.id) || {}).text === 'Tom has the roving mic.'); const r = n.querySelector('.body p').getBoundingClientRect(); return { x: r.left + 10, y: r.top + r.height / 2 }; })()`);
+      await rightClick(meg, bodyAt);
+      const noMenu = await meg.eval(`!AGM.menu.isOpen() && !document.querySelector('.agm-menu')`);
+      // The second door: a tap on an older waiting message brings its own Got it (never Got all) and Reply.
+      await tapAt(meg, `#feed .msg[data-id="${(await meg.eval(`allMessages.find((m) => m.text === 'Slides 3 to 6 are loaded for the resolutions.').id`))}"] .body p`);
+      const second = await meg.until(`(() => { const m = allMessages.find((x) => x.text === 'Slides 3 to 6 are loaded for the resolutions.'); const b = [...messagesById.get(m.id).querySelectorAll('.msg-response button')]; return b.length ? JSON.stringify(b.map((x) => x.textContent.trim())) : null; })()`, 5000);
+      // Reply quotes it, the composer focused; Escape takes the reply back.
+      await meg.eval(`[...messagesById.get(allMessages.find((m) => m.priority).id).querySelectorAll('.msg-response button')].find((b) => b.dataset.action === 'msg.reply').click()`);
+      const replying = await meg.until(`(() => { const c = document.getElementById('replyChip'); return c && document.activeElement === document.getElementById('directorInput') && c.textContent; })()`, 3000);
+      await press(meg, 'Escape');
+      const unreplied = await meg.until(`!document.getElementById('replyChip') && 'gone'`, 3000);
+      report(noKey && noMenu && second === JSON.stringify(['👍Got it', '↩Reply']) && /Replying to Ana Ribeiro/.test(replying || '') && unreplied === 'gone',
+        `the simple view acts on Tab, Enter and Escape alone (R begins nothing, a right-click opens no menu of AGMessage's); a tap on an older waiting message brings its own 👍 Got it and ↩ Reply; Reply quotes, Escape takes it back (${JSON.stringify({ noKey, noMenu, second, replying })})`);
+      // Got all 4 on the newest plain message waiting (the file shown since): four 👍, one per waiting plain message, each
+      // then "👍 You: got it"; backstage reads "👍 Margaret … got it".
+      const gotLabel = await meg.eval(`(() => { const b = [...messagesById.get(allMessages.find((m) => m.type === 'file').id).querySelectorAll('.msg-response button')].find((x) => x.dataset.action === 'msg.ack'); const t = b.textContent.trim(); b.click(); return t; })()`);
+      const gotAll = await meg.until(`(() => { const plain = allMessages.filter((m) => (m.type === 'text' || m.type === 'file') && !m.priority && m.from && m.from.role === 'research');
+        const mine = plain.filter((m) => (m.reactions || []).some((r) => r.uid === MY_UID && r.emoji === '👍' && r.role === 'board'));
+        return mine.length === 4 && plain.every((m) => messagesById.get(m.id).querySelector('.bv-said').textContent === '👍 You: got it') && JSON.stringify({ reacted: mine.length, buttons: plain.map((m) => messagesById.get(m.id).querySelectorAll('.msg-response button').length) }); })()`, 8000);
+      const robSaw = await rob.until(`(() => { const m = allMessages.find((x) => x.text === 'Tom has the roving mic.'); const l = m && messagesById.get(m.id).querySelector('.got-line'); return l && /^👍 Margaret 1180dark got it$/.test(l.textContent) && l.textContent; })()`, 8000);
+      report(gotLabel === '👍Got all 4' && !!gotAll && !!robSaw, `👍 Got all 4 answers each plain message waiting, one 👍 each, held together in the outbox, each then "👍 You: got it"; the backstage page reads "${robSaw}" (${gotLabel}; ${gotAll})`);
+      // Answer in words: an ask in place with a field of 200 characters (no prompt()), the answer stored at most 200; then
+      // "You answered: “…” · Change".
+      await meg.eval(`messagesById.get('${asked.id}').querySelector('.answer-words-btn').click()`);
+      const askField = await meg.until(`(() => { const a = document.querySelector('.agm-ask'); const i = a && a.querySelector('input'); return i && JSON.stringify({ max: i.maxLength, label: i.getAttribute('aria-label') || (i.labels && i.labels[0] && i.labels[0].textContent) || '' }); })()`, 3000);
+      await meg.eval(`(() => { const i = document.querySelector('.agm-ask input'); i.value = 'Yes, after the vote on resolution 3. ' + 'x'.repeat(240); i.dispatchEvent(new Event('input', { bubbles: true })); [...document.querySelectorAll('.agm-ask button')].find((b) => b.textContent === 'Send answer').click(); return true; })()`);
+      const answered = await meg.until(`(() => { const m = findMessage('${asked.id}'); const r = (m.responses || []).find((x) => x.uid === MY_UID); const line = messagesById.get(m.id).querySelector('.bv-answered');
+        return r && line && JSON.stringify({ note: r.note.length, line: /^You answered: “Yes, after the vote/.test(line.textContent) && /· Change$/.test(line.textContent), answers: messagesById.get(m.id).querySelectorAll('.action-btn').length }); })()`, 8000);
+      report(!!askField && JSON.parse(askField).max === 200 && JSON.stringify(JSON.parse(answered || 'null')) === JSON.stringify({ note: 200, line: true, answers: 0 }) && !meg.problems.some((p) => /native/.test(p)),
+        `Answer in words… opens one field in place, 200 characters (${askField}), never a prompt(); the answer is stored at 200 and the question then reads "You answered: “…” · Change", its answers gone (${answered})`);
+      // Change brings the answers back, the first focused and the answer given said under them (no Change while choosing);
+      // another's answer meanwhile leaves the answers and the focus where they are; a new answer replaces the person's own.
+      await meg.eval(`messagesById.get('${asked.id}').querySelector('[data-action="msg.change"]').click()`);
+      const changing = await meg.until(`(() => { const n = messagesById.get('${asked.id}'); const b = [...n.querySelectorAll('.action-btn')]; return b.length === 3 && document.activeElement === b[0]
+        && JSON.stringify({ pressed: b.map((x) => x.getAttribute('aria-pressed')), line: (n.querySelector('.bv-answered') || {}).textContent || '' }); })()`, 3000);
+      const othersAnswer = await emit(ana, 'actionResponse', { messageId: asked.id, optionIndex: 1 });
+      await meg.until(`(findMessage('${asked.id}').responses || []).some((r) => r.name === 'Ana Ribeiro') && 'heard'`, 5000);
+      const keptChoosing = await meg.eval(`(() => { const n = messagesById.get('${asked.id}'); const b = [...n.querySelectorAll('.action-btn')]; return JSON.stringify({ answers: b.length, focus: document.activeElement === b[0], changing: F.changing === '${asked.id}' }); })()`);
+      await meg.eval(`messagesById.get('${asked.id}').querySelector('.action-btn[data-value="0"]').click()`);
+      const changedTo = await meg.until(`(() => { const n = messagesById.get('${asked.id}'); const l = n.querySelector('.bv-answered'); const r = (findMessage('${asked.id}').responses || []).find((x) => x.uid === MY_UID);
+        return l && r && r.optionIndex === 0 && /^You answered Yes · .+ · Change$/.test(l.textContent) && n.querySelectorAll('.action-btn').length === 0 && !F.changing && l.textContent; })()`, 5000);
+      const choosing = JSON.parse(changing || 'null');
+      report(!!choosing && JSON.stringify(choosing.pressed) === JSON.stringify(['false', 'false', 'false']) && /^You answered: “Yes, after the vote/.test(choosing.line) && !/Change$/.test(choosing.line)
+        && !!othersAnswer && othersAnswer.ok && keptChoosing === JSON.stringify({ answers: 3, focus: true, changing: true }) && !!changedTo,
+        `Change brings the answers back with the answer given under them, and another's answer meanwhile leaves them and the focus in place; a new answer then reads "${changedTo}" (${JSON.stringify({ changing, keptChoosing })})`);
+      // 🔥 Priority: pressed, then a send carries priority and the toggle is off again; a refused send keeps its words and
+      // says the server's.
+      await meg.eval(`(() => { document.getElementById('dirPriorityBtn').click(); return true; })()`);
+      const pressed = await meg.eval(`document.getElementById('dirPriorityBtn').getAttribute('aria-pressed')`);
+      await meg.eval(`(() => { const i = document.getElementById('directorInput'); i.value = 'Five more minutes on resolution 3.'; i.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#directorForm .send-btn').click(); return true; })()`);
+      const sentHot = await meg.until(`allMessages.some((m) => m.text === 'Five more minutes on resolution 3.' && m.priority === true && m.from.uid === MY_UID) && document.getElementById('dirPriorityBtn').getAttribute('aria-pressed') === 'false' && document.getElementById('directorInput').value === '' && 'sent'`, 8000);
+      await meg.eval(`(() => { const e = socket.emit; socket.emit = function (ev, p, ...rest) { if (ev === 'message' && !window.__refusedOnce) { window.__refusedOnce = true; p = { ...p, heldMs: -1 }; } return e.call(this, ev, p, ...rest); };
+        const i = document.getElementById('directorInput'); i.value = 'This one is refused.'; i.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#directorForm .send-btn').click(); return true; })()`);
+      const refusedKept = await meg.until(`(() => { const echo = [...feed.querySelectorAll('.msg.echo')].find((n) => /This one is refused/.test(n.textContent)); return echo && /Not sent: That message's wait could not be read\\./.test(echo.textContent) && document.getElementById('directorInput').value === 'This one is refused.' && 'kept'; })()`, 8000);
+      report(pressed === 'true' && sentHot === 'sent' && refusedKept === 'kept', `🔥 Priority is a pressed toggle, the message carries priority and the toggle is off after the send; a refused send keeps its words in the field and says the server's (${JSON.stringify({ pressed, sentHot, refusedKept })})`);
+      // One's own message says what is true at the end of its line: You, then Sent (or Seen by Rob, whose page reads it),
+      // then "Seen by … and N more" once more of backstage have read it (two more backstage seats here, and Ana).
+      const OWN = `(() => { const m = allMessages.find((x) => x.text === 'Five more minutes on resolution 3.'); const n = m && messagesById.get(m.id); return n ? JSON.stringify([n.querySelector(':scope > header .from').textContent, n.querySelector(':scope > header .bv-said').textContent]) : null; })()`;
+      const ownFirst = JSON.parse(await meg.until(OWN, 3000) || 'null');
+      const ownSeq = await meg.eval(`allMessages.find((m) => m.text === 'Five more minutes on resolution 3.').seq`);
+      const readers = [];
+      for (const name of ['Ben Backstage', 'Cleo Backstage']) { const r = await connect(base); readers.push(r); await emit(r, 'join', { roomCode: bvHall, name, role: 'research' }); r.emit('seen', { seq: ownSeq }); }
+      ana.emit('seen', { seq: ownSeq });
+      const ownSeen = JSON.parse(await meg.until(`(() => { const r = ${OWN}; return r && /^Seen by .+ and [2-9] more$/.test(JSON.parse(r)[1]) && r; })()`, 8000) || 'null');
+      report(!!ownFirst && ownFirst[0] === 'You' && /^(Sent|Seen by [^,]+)$/.test(ownFirst[1]) && !!ownSeen && ownSeen[0] === 'You',
+        `one's own message reads "You", then "${ownFirst && ownFirst[1]}" at the end of its line, then "${ownSeen && ownSeen[1]}" once more of backstage have read it`);
+      await meg.eval(`(() => { const echo = [...feed.querySelectorAll('.msg.echo')].find((n) => /This one is refused/.test(n.textContent)); const edit = echo && [...echo.querySelectorAll('button')].find((b) => b.textContent === 'Edit'); if (edit) edit.click(); document.getElementById('directorInput').value = ''; return true; })()`);
+      // The 🔥 strip: only while its message is out of view. A run of notes pushes it up; scrolled to the top, it is in
+      // view and the strip goes; at the end it is out of view and the strip holds it, "+1 more" with a second; its Got it
+      // answers the one it shows.
+      for (let i = 1; i <= 14; i++) await say({ type: 'text', text: 'Agenda note ' + i + ': the next speaker is on the second microphone, please keep the lectern clear.' });
+      await say({ type: 'text', text: 'The livestream is running ten seconds late.', priority: true });
+      for (let i = 15; i <= 26; i++) await say({ type: 'text', text: 'Agenda note ' + i + ': the speaker after next waits in the wings with the second microphone.' });
+      const stripAtEnd = await meg.until(`(() => { const s = document.getElementById('bvStrip'); return !s.hidden && getComputedStyle(s).display !== 'none' && JSON.stringify({ text: document.getElementById('bvStripText').textContent, more: document.getElementById('bvStripMore').hidden ? '' : document.getElementById('bvStripMore').textContent, got: [...s.querySelectorAll('button')].map((b) => b.textContent.trim()) }); })()`, 8000);
+      await meg.eval(`(() => { const n = messagesById.get(allMessages.find((m) => m.text === 'The livestream is running ten seconds late.').id); n.scrollIntoView({ block: 'center' }); return true; })()`);
+      const stripInView = await meg.until(`document.getElementById('bvStrip').hidden && 'gone'`, 5000);
+      await meg.eval(`scrollToBottom(); true`);
+      await meg.until(`!document.getElementById('bvStrip').hidden`, 5000);
+      await meg.eval(`document.querySelector('#bvStrip button[data-action="msg.ack"]').click()`);
+      const stripGot = await meg.until(`(() => { const m = allMessages.find((x) => x.text === 'The livestream is running ten seconds late.'); const next = document.getElementById('bvStrip').hidden ? '' : document.getElementById('bvStripText').textContent;
+        return (m.reactions || []).some((r) => r.uid === MY_UID && r.emoji === '👍') && next === 'Wrap up resolution 3 now, please.' && JSON.stringify({ next }); })()`, 8000);
+      report(!!stripAtEnd && JSON.parse(stripAtEnd).text === 'The livestream is running ten seconds late.' && JSON.parse(stripAtEnd).more === '+1 more' && JSON.stringify(JSON.parse(stripAtEnd).got) === JSON.stringify(['👍Got it']) && stripInView === 'gone' && JSON.parse(stripGot || 'null') && JSON.parse(stripGot).next === 'Wrap up resolution 3 now, please.',
+        `the 🔥 strip holds the newest priority message only while it is out of view, with "+1 more" and its Got it alone; scrolled into view it goes; its Got it answers the one shown, and the strip moves to the next (${JSON.stringify({ stripAtEnd, stripInView, stripGot })})`);
+      // ↓ n new, scrolled up: it names a question among them.
+      await meg.eval(`(() => { feed.scrollTop = 0; feed.dispatchEvent(new Event('scroll')); return true; })()`);
+      await meg.until('!place.atEnd', 3000);
+      await say({ type: 'text', text: 'One more thing for the chair.' });
+      await say({ type: 'action', text: 'Move the break to 15:30?', options: ['Yes', 'No'] });
+      const newWords = await meg.until(`!newBelow.hidden && newBelow.textContent === '↓ 2 new · 1 question' && newBelow.textContent`, 5000);
+      report(newWords === '↓ 2 new · 1 question', `scrolled up, "↓ n new" names a question among them (${newWords})`);
+      await meg.eval(`scrollToBottom(); true`);
+      // The Escape order: a take over an open reply minimises the take first, and the reply stays; then Escape takes the
+      // reply back. While the take is up, a 🔥 message from backstage breaks through with Got it beside Open chat.
+      await meg.eval(`[...messagesById.get(allMessages.find((m) => m.text === 'Wrap up resolution 3 now, please.').id).querySelectorAll('.msg-response button')].find((b) => b.dataset.action === 'msg.reply').click()`);
+      await meg.until(`!!document.getElementById('replyChip')`, 3000);
+      const blank = await emit(bvAdmin, 'page:push', { code: bvHall, to: 'board', content: { kind: 'clock' } });
+      await meg.until(`!document.getElementById('pageLayer').hidden`, 8000);
+      await say({ type: 'text', text: 'Mic 4 is live now.', priority: true });
+      const layerGot = await meg.until(`(() => { const g = document.getElementById('layerGotIt'); return !document.getElementById('layerStrip').hidden && !g.hidden && JSON.stringify([g.textContent, document.getElementById('layerOpenChat').textContent]); })()`, 8000);
+      await meg.eval(`document.getElementById('layerGotIt').click()`);
+      const layerAcked = await meg.until(`(() => { const m = allMessages.find((x) => x.text === 'Mic 4 is live now.'); return (m.reactions || []).some((r) => r.uid === MY_UID && r.emoji === '👍') && document.getElementById('layerStrip').hidden && 'acked'; })()`, 8000);
+      await meg.eval(`document.getElementById('pageLayer').focus(); true`);
+      await meg.until(`document.activeElement === document.getElementById('pageLayer')`, 3000);
+      await press(meg, 'Escape');
+      const escTake = await meg.until(`document.getElementById('pageLayer').hidden && !!document.getElementById('replyChip') && 'minimised, reply kept'`, 5000);
+      // Minimised, the take is a card in Shown to you with one act, 👁 Look.
+      const cardActs = await meg.until(`(() => { const b = [...document.querySelectorAll('#takeCards .take-card button')].filter((x) => x.getClientRects().length); return b.length ? JSON.stringify(b.map((x) => x.textContent.trim())) : null; })()`, 3000);
+      await meg.eval(`document.getElementById('directorInput').focus(); true`);
+      await press(meg, 'Escape');
+      const escReply = await meg.until(`!document.getElementById('replyChip') && 'reply gone'`, 5000);
+      // The Board's pages back on their chat, so the pages that join below draw the chat.
+      const chatAgain = await emit(bvAdmin, 'page:push', { code: bvHall, to: 'board', content: { kind: 'chat' } });
+      report(!!chatAgain && chatAgain.ok && !!blank && blank.ok && layerGot === JSON.stringify(['👍 Got it', 'Open chat']) && layerAcked === 'acked' && escTake === 'minimised, reply kept' && escReply === 'reply gone' && cardActs === JSON.stringify(['👁Look']),
+        `the take layer's 🔥 strip has 👍 Got it beside Open chat, and Got it answers it (react on); Escape minimises a take over an open reply first, then takes the reply back; the card it leaves in Shown to you has one act, 👁 Look (${JSON.stringify({ layerGot, layerAcked, escTake, escReply, cardActs })})`);
+      // The ⋯ sheet: Text size, Theme, Leave the hall (no Full screen row where the device has no Fullscreen API: headless
+      // Chromium's probe reads it); Leave asks in place and Stay keeps the page; the footer names the person and the seat.
+      await meg.eval(`document.getElementById('headerMore').click()`);
+      const sheet = await meg.until(`(() => { const s = document.getElementById('bvSheet'); return !s.hidden && JSON.stringify({ rows: [...s.querySelectorAll('.bv-sheet-row')].map((r) => [...r.children].map((c) => c.textContent.trim()).join(' ')), foot: document.getElementById('bvSheetFoot').textContent, focus: s.contains(document.activeElement), full: F.fullscreen }); })()`, 3000);
+      await meg.eval(`document.querySelector('#bvSheet [data-action="sheet.leave"]').click()`);
+      const leaveAsk = await meg.until(`(() => { const a = document.querySelector('.agm-ask'); return a && a.textContent.replace(/\\s+/g, ' '); })()`, 3000);
+      await meg.eval(`[...document.querySelectorAll('.agm-ask button')].find((b) => b.textContent === 'Stay').click()`);
+      const stayed = await meg.until(`!document.querySelector('.agm-ask') && location.pathname === '/app.html' && joined && 'stayed'`, 3000);
+      const awake = await meg.eval(`JSON.stringify(Simple.awakeState())`);
+      const sheetRows = sheet ? JSON.parse(sheet) : null;
+      report(!!sheetRows && JSON.stringify(sheetRows.rows) === JSON.stringify(['Text size Aa− 100% Aa+', 'Theme Light Dark', ...(sheetRows.full ? ['Full screen'] : []), 'Leave the hall…']) && sheetRows.foot === 'Margaret 1180dark · On stage' && sheetRows.focus
+        && /Leave Board hall\?\s*You'll stop getting messages from backstage\./.test(leaveAsk || '') && stayed === 'stayed' && awake !== 'null',
+        `the ⋯ sheet holds Text size, Theme, Full screen where the device has it, and Leave the hall (asked in place: "${leaveAsk}"; Stay keeps the page), its footer the person and the seat, and the screen's wake lock was asked through AGM.awake (${JSON.stringify({ sheet, awake })})`);
+      await press(meg, 'Escape');
+      // Text size scales the whole chat: the words, the answers, Answer in words…, the response, and the strip; the header
+      // stays as it is.
+      const SIZES = `JSON.stringify(Object.fromEntries([['words', '#feed .msg[data-id] .body p'], ['answer', '#feed .action-btn'], ['inWords', '#feed .answer-words-btn'], ['response', '#feed .msg-response .msg-act'],
+        ['strip', '.bv-strip-words'], ['stripKind', '.bv-strip-kind'], ['header', '.app-title strong']].map(([k, sel]) => { const el = document.querySelector(sel); return [k, el ? parseFloat(getComputedStyle(el).fontSize) : null]; })))`;
+      const atOne = JSON.parse(await meg.eval(SIZES));
+      await meg.eval(`setZoom(1.5); true`);
+      const atMore = JSON.parse(await meg.eval(SIZES));
+      await meg.eval(`setZoom(1); true`);
+      const grew = Object.fromEntries(Object.keys(atOne).map((k) => [k, atOne[k] && atMore[k] ? +(atMore[k] / atOne[k]).toFixed(2) : null]));
+      report(Object.entries(grew).every(([k, r]) => (k === 'header' ? r === 1 : r !== null && Math.abs(r - 1.5) <= 0.02)),
+        `Text size at 150% scales the words, the answers, Answer in words…, the response and the 🔥 strip by 1.5, and leaves the header as it is (${JSON.stringify({ atOne, grew })})`);
+      // Dark: a fresh device draws dark before the feed has a message; a device last used in the simple view paints dark
+      // before its first frame (the theme theme-init.js sets, read as it sets it); Light chosen in the sheet sticks; on
+      // that device the join page and the halls board, which read no view, paint light.
+      // Each theme the page is given in order, marked "+feed" once a message is in the feed (the records in the order they
+      // happened: the theme's, and the feed's own).
+      const FIRST_THEME = `(() => { const seen = window.__themes = []; let fed = false; new MutationObserver((list) => { for (const m of list) {
+        if (m.type === 'childList' && m.target.id === 'feed' && [...m.addedNodes].some((n) => n.classList && n.classList.contains('msg'))) fed = true;
+        if (m.type === 'attributes' && m.target === document.documentElement) seen.push(m.target.getAttribute('data-theme') + (fed ? '+feed' : '')); } })
+        .observe(document, { attributes: true, childList: true, subtree: true, attributeFilter: ['data-theme'] }); })();`;
+      const fresh = await edge.tab(`${base}/app.html?code=${bvHall}&name=Nadia&role=board`, { init: FIRST_THEME, metrics: { width: 1180, height: 820, phone: true }, alone: true });
+      const freshThemes = await fresh.until(`${ready} && JSON.stringify(window.__themes)`, 10000);
+      await fresh.send('Page.navigate', { url: `${base}/app.html?code=${bvHall}&name=Nadia&role=board` });
+      const lastThemes = await fresh.until(`${ready} && JSON.stringify(window.__themes)`, 10000);
+      await fresh.eval(`(() => { document.getElementById('headerMore').click(); [...document.querySelectorAll('#bvSheet [data-action="sheet.theme"]')].find((b) => b.textContent === 'Light').click(); return true; })()`);
+      await fresh.until(`document.documentElement.dataset.theme === 'light'`, 3000);
+      await fresh.send('Page.navigate', { url: `${base}/app.html?code=${bvHall}&name=Nadia&role=board` });
+      const stuck = await fresh.until(`${ready} && document.documentElement.dataset.theme`, 10000);
+      await fresh.eval(`localStorage.removeItem('agm.theme'); true`);
+      const otherPages = [];
+      for (const pageUrl of [`${base}/?code=${bvHall}`, `${base}/halls.html`]) {
+        await fresh.send('Page.navigate', { url: pageUrl });
+        otherPages.push(await fresh.until(`document.readyState === 'complete' && JSON.stringify([localStorage.getItem('agm.lastView'), (window.__themes || [])[0] || document.documentElement.dataset.theme])`, 10000));
+      }
+      // A fresh device: light first (nothing chosen, no view drawn yet), then dark, with no message in the feed yet.
+      const freshList = JSON.parse(freshThemes || '[]');
+      const darkAt = freshList.indexOf('dark');
+      report(freshList[0] === 'light' && darkAt > 0 && !freshList.slice(0, darkAt).some((t) => /\+feed$/.test(t))
+        && JSON.parse(lastThemes || '[]')[0] === 'dark' && stuck === 'light' && otherPages.every((p) => p === JSON.stringify(['simple', 'light'])),
+        `the simple view starts in Dark: a fresh device turns dark at its join, before the feed is drawn (${freshThemes}); one last used there paints dark first (${lastThemes}); Light chosen in the sheet sticks (${stuck}); the join page and the halls board there paint light (${JSON.stringify(otherPages)})`);
+      // The admin's support view of Margaret: its theme never turns her page light (support: true), and her own Light
+      // reaches it.
+      const megUid = await meg.eval('MY_UID');
+      const support = await edge.tab(`${base}/app.html?code=${bvHall}&name=${encodeURIComponent('Margaret 1180dark')}&role=board&adminView=1&viewOf=${megUid}`);
+      await support.until(`typeof joined !== 'undefined' && joined && document.body.dataset.view === 'simple'`, 10000);
+      await support.eval(`socket.emit('userState:push', { key: 'theme', value: 'light' }); true`);
+      await sleep(1200);
+      const megAfter = await meg.eval(`JSON.stringify([document.documentElement.dataset.theme, localStorage.getItem('agm.theme')])`);
+      await meg.eval(`(() => { document.getElementById('headerMore').click(); [...document.querySelectorAll('#bvSheet [data-action="sheet.theme"]')].find((b) => b.textContent === 'Light').click(); document.getElementById('headerMore').click(); return true; })()`);
+      const supportLight = await support.until(`document.documentElement.dataset.theme === 'light' && 'light'`, 5000);
+      report(megAfter === JSON.stringify(['dark', null]) && supportLight === 'light', `the admin's support view toggled to Light leaves the Board page dark and its theme unchosen (${megAfter}); the Board page's own Light reaches the support view (${supportLight})`);
+      // A backstage page the admin sets to Simple writes in the simple view's composer (🔥 Priority, the words, Send), its
+      // Reply focusing that field; By seat again, it has its own tabs back.
+      const robSid = (await emit(bvAdmin, 'admin:watchRoom', { roomCode: bvHall })).users.find((u) => u.name === 'Rob').socketId;
+      const robSimple = await emit(bvAdmin, 'admin:setView', { roomCode: bvHall, socketId: robSid, view: 'simple' });
+      const VIS = (sel) => `(document.querySelector('${sel}') || { getClientRects: () => [] }).getClientRects().length > 0`;
+      const robComposer = await rob.until(`document.body.dataset.view === 'simple' && ${VIS('#directorCompose')} && !${VIS('#researchCompose')} && 'simple'`, 5000);
+      await rob.eval(`(() => { const b = [...document.querySelectorAll('#feed .msg-response [data-action="msg.reply"]')].filter((x) => x.getClientRects().length); b[b.length - 1].click(); return true; })()`);
+      const robReplying = await rob.until(`(() => { const f = document.getElementById('directorInput'); const c = document.getElementById('replyChip'); return document.activeElement === f && f.getClientRects().length > 0 && c && document.getElementById('directorCompose').contains(c) && 'replying'; })()`, 3000);
+      await rob.eval(`(() => { const i = document.getElementById('directorInput'); i.value = 'Noted, from backstage.'; i.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#directorForm .send-btn').click(); return true; })()`);
+      const robSent = await rob.until(`allMessages.some((m) => m.text === 'Noted, from backstage.' && m.from.uid === MY_UID && m.replyTo && m.replyTo.id) && 'sent'`, 8000);
+      await emit(bvAdmin, 'admin:setView', { roomCode: bvHall, socketId: robSid, view: '' });
+      const robFull = await rob.until(`document.body.dataset.view === 'full' && ${VIS('#researchCompose')} && !${VIS('#directorCompose')} && 'full'`, 5000);
+      report(!!robSimple && robSimple.ok && robComposer === 'simple' && robReplying === 'replying' && robSent === 'sent' && robFull === 'full',
+        `a backstage page the admin sets to Simple draws the simple view's composer, Reply focusing its field, and sends from it; By seat again, its own composer is back (${JSON.stringify({ robComposer, robReplying, robSent, robFull })})`);
+      // Nobody backstage: with every backstage page gone for 10 s, one line over the composer, which goes when one comes back.
+      rob.close();
+      ana.close();
+      for (const r of readers) r.close();
+      const aloneAt = Date.now();
+      const alone = await meg.until(`(() => { const l = document.getElementById('bvAlone'); return !l.hidden && l.textContent; })()`, 15000);
+      const aloneAfter = Date.now() - aloneAt;
+      const back = await connect(base);
+      await emit(back, 'join', { roomCode: bvHall, name: 'Ana Ribeiro', role: 'research', uid: anaJoin.identity });
+      const aloneGone = await meg.until(`document.getElementById('bvAlone').hidden && 'gone'`, 5000);
+      back.close();
+      report(alone === '○ Nobody backstage is online. Use Help if you need someone.' && aloneAfter >= 9000 && aloneGone === 'gone',
+        `with nobody backstage in the room for 10 s, "${alone}" sits over the composer (after ${Math.round(aloneAfter / 1000)} s), and goes when someone backstage comes back`);
+      // The device that went to the join page and the halls board signed out was refused who it is there (401): no fault.
+      const quiet = (t) => t.problems.filter((x) => !(t === fresh && /status of 401 \(Unauthorized\)/.test(x)));
+      for (const [name, t] of [...bvTabs.map((t, i) => ['the Board\'s chat view on device leg ' + (i + 1), t]), ['a Board account\'s chat view', megTab], ['a fresh Board device', fresh], ['the support view of a Board page', support]]) {
+        const p = quiet(t);
+        report(p.length === 0, `${name}: no script errors or CSP violations${p.length ? ' — ' + p.slice(0, 3).join(' | ') : ''}`);
+        t.close();
+      }
+
+      // The layout leg: nine more sizes, each across one of the rules (owner answer 22), a Board guest at each, the file
+      // opened on its panel (👁 Look): the column at 900 px wide or more and the tabs below; 22 px where the smaller side is
+      // 600 px or more; no sideways scroll; a 44 px band through each control; the placeholder whole (the short words where
+      // the long do not fit); the sheet's last row reached by its scroll, and Leave asked in place there.
+      const layout = {};
+      for (const [w, h] of [[640, 1024], [1024, 640], [768, 1024], [1024, 768], [375, 667], [393, 659], [360, 780], [734, 343], [863, 360]]) {
+        const tab = await edge.tab(`${base}/app.html?code=${bvHall}&name=${encodeURIComponent('Board ' + w + 'x' + h)}&role=board`, { init: INK, metrics: { width: w, height: h, phone: true }, alone: true });
+        await tab.until(`typeof joined !== 'undefined' && joined && allMessages.some((m) => m.type === 'file')`, 10000);
+        await tab.eval(`(() => { const m = allMessages.find((x) => x.type === 'file'); act('msg', 'msg.look', m, {}); return true; })()`);
+        await tab.until(`document.body.dataset.shown === '1'`, 5000);
+        const r = await bvRead(tab);
+        await tab.eval(`document.getElementById('headerMore').click(); true`);
+        const sheetEnd = await tab.until(`(() => { const s = document.getElementById('bvSheet'); if (s.hidden) return null; const leave = s.querySelector('[data-action="sheet.leave"]'); leave.scrollIntoView({ block: 'nearest' });
+          const a = leave.getBoundingClientRect(), b = s.getBoundingClientRect(); return JSON.stringify({ inView: a.top >= 0 && a.bottom <= innerHeight && a.top >= b.top - 1 && a.bottom <= b.bottom + 1, tall: b.height <= innerHeight + 1 }); })()`, 3000);
+        await tab.eval(`document.querySelector('#bvSheet [data-action="sheet.leave"]').click(); true`);
+        const asks = await tab.until(`!!document.querySelector('.agm-ask') && 'asks'`, 3000);
+        await press(tab, 'Escape');
+        layout[w + 'x' + h] = { ...r, sheetEnd: JSON.parse(sheetEnd || 'null'), asks, problems: tab.problems.length };
+        console.log(`the Board's chat view at ${w}×${h}: the feed is ${r && r.feedHeight} px tall (a record, not a pass mark)`);
+        tab.close();
+      }
+      const layoutOk = (k, r) => { const [w, h] = k.split('x').map(Number);
+        return !!r && r.view === 'simple' && r.column === (w >= 900) && r.tabs === (w < 900) && r.body === (Math.min(w, h) >= 600 ? 22 : 20) && r.scroll && r.missed.length === 0 && r.fits
+          && r.placeholder === (r.longFits ? 'Message everyone here…' : 'Message everyone…') && r.label === 'Message everyone here…' && !!r.sheetEnd && r.sheetEnd.inView && r.sheetEnd.tall && r.asks === 'asks' && r.problems === 0; };
+      report(Object.entries(layout).every(([k, r]) => layoutOk(k, r)),
+        `the layout leg at nine sizes: the Shown to you column at 900 px wide or more and the tabs below, 22 px where the smaller side is 600 px or more, no sideways scroll, a 44 px band through each control, the placeholder whole (the short words where the long do not fit the field, measured), the sheet within the screen with Leave reached and asked in place, no script error (${JSON.stringify(Object.fromEntries(Object.entries(layout).map(([k, r]) => [k, r && { column: r.column, tabs: r.tabs, body: r.body, scroll: r.scroll, missed: r.missed, placeholder: r.placeholder, fits: r.fits, sheetEnd: r.sheetEnd, asks: r.asks, problems: r.problems }])))})`);
+
+      // The floor leg's chat-view steps: no Fullscreen API (both its forms gone) and no Wake Lock: no Full screen row in the
+      // sheet and none on a take, and the sheet says why the device may sleep; not a secure context: the HTTPS words; a
+      // lock the device refuses (NotAllowedError): the battery words.
+      const NO_FULL = `(() => { delete Element.prototype.requestFullscreen; delete Element.prototype.webkitRequestFullscreen; delete Document.prototype.fullscreenEnabled; delete Document.prototype.webkitFullscreenEnabled; })();`;
+      const floorRuns = {};
+      for (const [name, init] of [['settings', FLOOR + NO_FULL], ['https', NO_FULL + `Object.defineProperty(window, 'isSecureContext', { get: () => false });`], ['battery', NO_FULL + `WakeLock.prototype.request = function () { return Promise.reject(new DOMException('Low battery', 'NotAllowedError')); };`]]) {
+        const tab = await edge.tab(`${base}/app.html?code=${bvHall}&name=${encodeURIComponent('Floor ' + name)}&role=board`, { init, metrics: { width: 1180, height: 820, phone: true }, alone: true });
+        await tab.until(`typeof joined !== 'undefined' && joined`, 10000);
+        await tab.until(`Simple.awakeState() !== null`, 5000);
+        await tab.eval(`document.getElementById('headerMore').click(); true`);
+        floorRuns[name] = await tab.until(`(() => { const s = document.getElementById('bvSheet'); if (s.hidden) return null; const w = s.querySelector('.bv-sheet-awake');
+          return JSON.stringify({ full: !!s.querySelector('[data-action="sheet.fullscreen"]'), fact: F.fullscreen, words: w ? w.textContent : '' }); })()`, 3000);
+        report(tab.problems.length === 0, `the floor leg's chat view (${name}): no script error${tab.problems.length ? ' — ' + tab.problems.slice(0, 3).join(' | ') : ''}`);
+        tab.close();
+      }
+      const floorWant = {
+        settings: JSON.stringify({ full: false, fact: false, words: 'This device may sleep: set its screen to stay on in its own settings (Auto-Lock or Screen timeout).' }),
+        https: JSON.stringify({ full: false, fact: false, words: 'This device may sleep: open AGMessage over HTTPS.' }),
+        battery: JSON.stringify({ full: false, fact: false, words: 'This device would not stay awake (its battery may be low): plug it in.' }),
+      };
+      report(Object.keys(floorWant).every((k) => floorRuns[k] === floorWant[k]), `the floor leg: no Fullscreen API, no Full screen row and no ⛶ (the fact is false); the sheet says why the device may sleep, by cause (${JSON.stringify(floorRuns)})`);
+      bvAdmin.close();
     }
 
     // Oli's page, untouched since "First new" arrived 30 s or more ago and every message since: its New divider is

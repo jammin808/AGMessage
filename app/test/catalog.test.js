@@ -114,6 +114,11 @@ const SEATS = {
   supportPush: seat({ role: 'research', uid: 'a-root', uploadToken: 't', forwardable: true, adminView: true, name: 'Kim', canPush: true }),
   boardFull: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, fullscreen: true }),
   boardSimpleFull: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', fullscreen: true }),
+  // The simple view's second door: an older waiting message tapped (its own row), and one this person answered tapped
+  // (Reply alone); a question answered, its answers brought back by Change.
+  boardSimpleTapped: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] }, tapped: 'm8' }),
+  boardSimpleTappedGot: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] }, tapped: 'm2' }),
+  boardSimpleChanging: seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m8', 'm9'], priority: ['m10'] }, changing: 'm11' }),
   supportBoard: seat({ role: 'board', uid: 'a-root', uploadToken: null, forwardable: false, adminView: true, name: 'Kim' }),
 };
 const from = (uid, role, name) => ({ uid, role, name });
@@ -128,6 +133,8 @@ const OBJECTS = {
   anaOld: { id: 'm8', type: 'text', text: 'Slides are loaded', from: from(ANA, 'research', 'Ana'), at, reactions: [] },
   anaNote: { id: 'm9', type: 'text', text: 'Doors open in five', from: from(ANA, 'research', 'Ana'), at, reactions: [] },
   anaHot: { id: 'm10', type: 'text', text: 'Wrap up now', priority: true, from: from(ANA, 'research', 'Ana'), at, reactions: [] },
+  // A question the Chair answered: in the simple view its line says how, with Change.
+  anaAnswered: { id: 'm11', type: 'action', text: 'Proxies counted?', options: ['Yes', 'No'], responses: [{ uid: CHAIR, name: 'Chair', role: 'board', optionIndex: 0, note: '', at }], from: from(ANA, 'research', 'Ana'), at },
   // What Hall 2's Main room sent into this room, and this room's copy of what it sent there.
   fromHall: { id: 'm12', type: 'text', text: 'Is the contract signed?', from: from(ANA, 'research', 'Ana'), at, reactions: [], sentFrom: { roomName: 'Hall 2', hallName: 'Hall 2', ref: 'rH2aaaaaaaaaaaaaaa' } },
   // What this seat itself sent here from Hall 2: here it is that room's, not its sender's to delete.
@@ -168,7 +175,11 @@ const BOARD_CHAT = { id: 'board', seq: 0, kind: 'chat', pages: 6, on: 0, mark: '
 const BOARD_MINE = { id: 'board', seq: 7, kind: 'clock', pages: 6, on: 6, mark: '✓', words: 'On all 6 Board pages', showing: 'the clock', mine: { seq: 7, previous: { kind: 'stage' }, time: '14:02' } };
 const BOARD_THEIRS = { ...BOARD_MINE, seq: 8, mine: null };
 const BOARD_EMPTY = { id: 'board', seq: 8, kind: 'holding', pages: 0, on: 0, mark: '✕', words: 'Nobody on the Board is online', showing: 'a holding slide', mine: null };
-const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB], card: [CARD], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY] };
+// The simple view's ⋯ sheet: standard text, dark, the screen not full, the hall as Leave names it; and at the bounds.
+const SHEET = { id: 'sheet', zoom: 1, dark: true, full: false, hall: 'Hall 2' };
+const SHEET_SMALLEST = { ...SHEET, zoom: 0.7, dark: false };
+const SHEET_FULL = { ...SHEET, zoom: 2.2, full: true };
+const HALL_OBJECTS = { compose: Object.values(COMPOSE), chip: [STAGE], header: [HEADER, HEADER_OFF, HEADER_UNTOLD, HEADER_ACCOUNT], take: [TAKE, TAKE_HOT, TAKE_FULL, TAKE_WEB], card: [CARD], sheet: [SHEET, SHEET_SMALLEST, SHEET_FULL], board: [BOARD_CHAT, BOARD_MINE, BOARD_THEIRS, BOARD_EMPTY] };
 
 // ---------------------------------------------------------------- the other pages' seats and objects, as their answers make them
 const HALLS = [{ code: 'K7P2QX', name: 'Hall 2' }, { code: 'M3N4PQ', name: 'Legal' }];
@@ -281,7 +292,7 @@ const PAGE_OBJECTS = {
 const KIND_SEATS = {
   msg: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple, SEATS.researchSends], file: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple], screen: [SEATS.admin, SEATS.researchNoDesk, SEATS.boardSimple],
   compose: [SEATS.admin, SEATS.researchNoDesk, SEATS.board, SEATS.boardSimple, SEATS.researchSends], chip: [SEATS.admin, SEATS.researchNoDesk], header: [SEATS.admin, SEATS.board, SEATS.research],
-  take: [SEATS.board, SEATS.boardSimple, SEATS.boardFull, SEATS.research], card: [SEATS.board, SEATS.boardSimple, SEATS.observer], board: [SEATS.adminPush, SEATS.pushNoStagewatch, SEATS.adminWeb],
+  take: [SEATS.board, SEATS.boardSimple, SEATS.boardFull, SEATS.research], card: [SEATS.board, SEATS.boardSimple, SEATS.observer], sheet: [SEATS.boardSimple, SEATS.boardSimpleFull, SEATS.supportBoard], board: [SEATS.adminPush, SEATS.pushNoStagewatch, SEATS.adminWeb],
   adminRoom: [PAGE.admin, PAGE.adminNoAi, PAGE.adminUsers, PAGE.boardAdmin], person: [PAGE.admin, SEATS.research, SEATS.board, SEATS.techPush, SEATS.guestWeb], adminMsg: [PAGE.admin], link: [PAGE.admin], tunnel: [PAGE.admin], laptop: [PAGE.admin],
   hall: [PAGE.board], room: [PAGE.board, SEATS.research], help: [PAGE.board], account: [PAGE.accountsAdmin], audit: [PAGE.accountsAdmin, PAGE.filtered],
 };
@@ -294,7 +305,7 @@ function pairsOf(kind) {
 }
 
 test('the entries: kind.verb ids, known groups in order with danger last, labels, keys, icons that are no marks', () => {
-  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'board', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
+  assert.deepEqual(KINDS, ['msg', 'file', 'screen', 'compose', 'chip', 'header', 'take', 'card', 'sheet', 'board', 'adminRoom', 'person', 'adminMsg', 'link', 'tunnel', 'laptop', 'hall', 'room', 'help', 'account', 'audit'], 'the kinds landed so far');
   const seen = new Set();
   for (const kind of KINDS) {
     const list = C.KINDS[kind];
@@ -400,7 +411,7 @@ test('one word for one act: "…" for an act that asks first or opens a dialog, 
 
 test('the facts: read from the server\'s answers, the link\'s words by its state, and nothing a page could name for itself', () => {
   const f = plain(C.facts({ role: 'director', uid: 'u1', uploadToken: '', canSendToStage: 1, stage: { status: 'connected' }, forwardable: 'yes', screens: { manage: true, displays: [{}, {}] }, connected: true }));
-  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false });
+  assert.deepEqual(f, { page: 'hall', role: 'board', view: 'full', uid: 'u1', post: true, viewer: false, pin: true, ask: false, respondHelp: false, waiting: { plain: [], priority: [] }, tapped: '', changing: '', files: false, canSendToStage: true, canPropose: false, stageWhy: '', ai: false, canScreens: true, screensManage: true, screens: 2, forwardable: true, sends: false, targets: [], mayKnowCode: false, setsCode: false, admin: false, connected: true, support: '', canPush: false, stagewatch: true, fullscreen: false, canWeb: false });
   // Whether the page may change what people's pages show, true alone; the hall's Stagewatch as the page is told it (none,
   // or switched off); the device's Fullscreen API, the page's own probe.
   assert.deepEqual([C.facts({ canPush: true }).canPush, C.facts({ canPush: 'yes' }).canPush, C.facts({ canPush: 1 }).canPush], [true, false, false]);
@@ -453,6 +464,7 @@ test('the seat matrix: what each seat is shown on each message', () => {
       chairHelp: ['msg.reply', 'msg.react', 'msg.helpResolve', 'msg.pin', 'msg.copy', 'msg.delete'],
       cyHelp: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'],
       anaNote: ['msg.reply', 'msg.react', 'msg.pin', 'msg.copy'],
+      anaAnswered: ['msg.reply', 'msg.react', 'msg.answer', 'msg.answerWords', 'msg.pin', 'msg.copy'],
     },
     // On stage, the simple view: no menu, its acts are its buttons. The newest plain message waiting and each 🔥 one
     // waiting carry Got it and Reply; an older one waiting, one's own message and the help requests carry none; a
@@ -460,7 +472,13 @@ test('the seat matrix: what each seat is shown on each message', () => {
     boardSimple: {
       anaNote: ['msg.ack', 'msg.reply'], anaHot: ['msg.ack', 'msg.reply'], anaOld: [], anaText: [], boardText: [],
       anaQuestion: ['msg.answer', 'msg.answerWords'], anaFile: ['msg.look'], chairHelp: [], cyHelp: [], system: [],
+      // A question answered: its line and Change, the answers gone until Change brings them back.
+      anaAnswered: ['msg.change'],
     },
+    // A tap brings a message's own row back: Got it where it waits (Got it, never Got all), Reply; on one answered, Reply.
+    boardSimpleTapped: { anaOld: ['msg.ack', 'msg.reply'], anaNote: ['msg.ack', 'msg.reply'], anaText: [] },
+    boardSimpleTappedGot: { anaText: ['msg.reply'], anaOld: [] },
+    boardSimpleChanging: { anaAnswered: ['msg.answer', 'msg.answerWords'], anaQuestion: ['msg.answer', 'msg.answerWords'] },
     // An observer and a Viewer: Copy, and Send to only for text where they may post elsewhere; no pin, no Look, no
     // Download (their pages hold no file's link).
     observer: { boardText: ['msg.copy'], anaFile: [], anaQuestion: ['msg.copy'], chairHelp: ['msg.copy'] },
@@ -598,6 +616,61 @@ test('the menu: groups apart, a fold as one item of its entries, flat when one i
   }
 });
 
+test('the simple view\'s second door: a tap brings a message\'s own row, Got it (never Got all) where it waits, Reply; Change brings a question\'s answers back', () => {
+  const label = (f, o) => { const i = plain(C.inline('msg', f, o)).find((x) => x.id === 'msg.ack'); return i ? i.label : null; };
+  assert.equal(label(SEATS.boardSimpleTapped, OBJECTS.anaOld), 'Got it', 'an older one tapped answers itself alone');
+  assert.equal(label(SEATS.boardSimpleTapped, OBJECTS.anaNote), 'Got all 2', 'the newest still answers every plain one');
+  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimpleTapped, OBJECTS.anaOld)).map((i) => [i.id, i.icon]), [['msg.ack', '👍'], ['msg.reply', '↩']], 'its row: Got it then Reply');
+  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimpleTappedGot, OBJECTS.anaText)).map((i) => i.id), ['msg.reply'], 'one answered: Reply alone');
+  assert.deepEqual(plain(C.inline('msg', SEATS.boardSimple, OBJECTS.anaOld)), [], 'untapped, an older one has no buttons');
+  // A message this person answered by a reply waits no more (the page leaves it out of `waiting`): tapped, Reply alone,
+  // never Got it. One's own message tapped draws no button (its status words are its line); nor does a line of the room's.
+  const tapped = (id) => seat({ role: 'board', uid: CHAIR, uploadToken: null, forwardable: false, view: 'simple', waiting: { plain: ['m9'], priority: [] }, tapped: id });
+  assert.deepEqual(plain(C.inline('msg', tapped('m8'), OBJECTS.anaOld)).map((i) => i.id), ['msg.reply'], 'answered by a reply, then tapped: Reply alone');
+  assert.deepEqual(plain(C.inline('msg', tapped('m1'), OBJECTS.boardText)).map((i) => i.id), [], 'one\'s own message tapped: no button');
+  assert.deepEqual(plain(C.inline('msg', tapped('m7'), OBJECTS.system)).map((i) => i.id), [], 'a line of the room\'s tapped: no button');
+  assert.deepEqual(plain(C.inline('msg', tapped('m4'), OBJECTS.anaQuestion)).map((i) => i.id), [], 'a question tapped: its answers are its row');
+  // Change: the simple view's own act on a question answered (local), never the full view's, nor on a question not answered.
+  const change = C.entry('msg', 'msg.change');
+  assert.deepEqual([change.verb, change.mode, change.label], ['local', 'local', 'Change']);
+  assert.deepEqual([SEATS.boardSimple, SEATS.board, SEATS.boardSimpleChanging].map((f) => change.fits(f, OBJECTS.anaAnswered)), [true, false, false]);
+  assert.equal(change.fits(SEATS.boardSimple, OBJECTS.anaQuestion), false, 'nothing to change on a question not answered');
+  assert.equal(change.fits(SEATS.boardSimple, OBJECTS.anaText), false, 'a question\'s act alone');
+});
+
+test('the simple view\'s ⋯ sheet: Text size, Theme, Full screen only where the device has it, Leave asked in place; none in the full view; the support view acts on none', () => {
+  const shown = (f, o) => plain(C.shown('sheet', f, o)).map((e) => e.id);
+  assert.deepEqual(shown(SEATS.boardSimple, SHEET), ['sheet.size', 'sheet.theme', 'sheet.leave'], 'a device without the Fullscreen API: no Full screen row');
+  assert.deepEqual(shown(SEATS.boardSimpleFull, SHEET), ['sheet.size', 'sheet.theme', 'sheet.fullscreen', 'sheet.leave']);
+  assert.deepEqual([shown(SEATS.board, SHEET), shown(SEATS.boardFull, SHEET), shown(SEATS.research, SHEET)], [[], [], []], 'the full view has its header\'s ⋯');
+  assert.deepEqual(ids('sheet', SEATS.boardSimpleFull, SHEET), [], 'no menu: the sheet draws its rows');
+  // Text size steps by a tenth between the page's bounds; the theme is one of two, the one drawn checked.
+  const sub = (id, o) => plain(C.submenu('sheet', id, SEATS.boardSimple, o));
+  assert.deepEqual(sub('sheet.size', SHEET).map((v) => [v.label, v.value, v.disabled]), [['Aa−', -0.1, ''], ['Aa+', 0.1, '']]);
+  assert.deepEqual(sub('sheet.size', SHEET_SMALLEST).map((v) => v.disabled), ['The text is as small as it goes.', '']);
+  assert.deepEqual(sub('sheet.size', SHEET_FULL).map((v) => v.disabled), ['', 'The text is as large as it goes.']);
+  assert.deepEqual(sub('sheet.theme', SHEET).map((v) => [v.value, v.checked]), [['light', false], ['dark', true]]);
+  assert.deepEqual(sub('sheet.theme', SHEET_SMALLEST).map((v) => [v.value, v.checked]), [['light', true], ['dark', false]]);
+  assert.deepEqual([SHEET, SHEET_FULL].map((o) => C.entry('sheet', 'sheet.fullscreen').label(SEATS.boardSimpleFull, o)), ['Full screen', 'Leave full screen']);
+  // Leave asks in place, in the sheet's words; it is not a danger (it loses nothing).
+  assert.deepEqual(plain(C.entry('sheet', 'sheet.leave').confirm(SEATS.boardSimple, SHEET)), { title: 'Leave Hall 2?', words: 'You\'ll stop getting messages from backstage.', yes: 'Leave', no: 'Stay' });
+  // Every row is local, and the support view draws the person's, every one disabled with whose view it is (R8).
+  for (const e of C.KINDS.sheet) assert.deepEqual([e.verb, e.mode], ['local', 'local'], e.id);
+  for (const id of shown(SEATS.supportBoard, SHEET)) assert.equal(C.ready('sheet', id, SEATS.supportBoard, SHEET), 'This is Kim\'s view — act from your own page.', id);
+});
+
+test('Chat view ▸: the admin\'s choice of the view a person\'s pages draw, By seat · Simple · Full, the one chosen checked; on the hall page only in the full view and on a person of the room', () => {
+  const values = (f, o) => plain(C.submenu('person', 'person.chatView', f, o)).map((v) => [v.value, v.label, v.checked]);
+  assert.deepEqual(values(PAGE.admin, { socketId: 's-kim', uid: 'u-kim', name: 'Kim', view: 'simple' }), [['', 'By seat', false], ['simple', 'Simple', true], ['full', 'Full', false]]);
+  assert.deepEqual(values(PAGE.admin, { socketId: 's-kim', uid: 'u-kim', name: 'Kim' }).map((v) => v[2]), [true, false, false], 'none chosen: By seat');
+  const e = C.entry('person', 'person.chatView');
+  assert.deepEqual([e.verb, e.mode, e.group], ['admin:setView', 'now', '4_manage']);
+  const row = { id: 'person:u-kim', uid: 'u-kim', name: 'Kim', role: 'research', key: 'u:u-kim', socketId: 's-kim', view: '' };
+  // The hall page: the admin's own page, in the full view, on a person of the People panel (a sender's name has no page).
+  assert.deepEqual([SEATS.admin, SEATS.research, SEATS.boardSimple, SEATS.support].map((f) => plain(C.shown('person', f, row)).some((x) => x.id === 'person.chatView')), [true, false, false, false]);
+  assert.equal(plain(C.shown('person', SEATS.admin, { ...row, socketId: '' })).some((x) => x.id === 'person.chatView'), false, 'a sender carries no page');
+});
+
 test('Got it: the simple view\'s answer to backstage, held, rank 1, "Got all N" for N plain messages waiting', () => {
   const e = C.entry('msg', 'msg.ack');
   assert.deepEqual([e.verb, e.mode, e.group, e.inline(SEATS.boardSimple, OBJECTS.anaNote)], ['react', 'hold', '1_respond', 1]);
@@ -648,7 +721,7 @@ test('a file and a screen: what each seat is shown, its bar, and its asks', () =
   assert.deepEqual([plain(C.entry('msg', 'msg.delete').confirm(SEATS.researchSends, OBJECTS.sentThere)).words, plain(C.entry('msg', 'msg.delete').confirm(SEATS.researchSends, OBJECTS.sentWithdrawn)).words],
     ['“brief.pdf” goes from everyone\'s page in this room now. It stays in Hall 2: withdraw it first to take it from there, which this copy alone can do. This cannot be undone.',
       '“Wrong room” goes from everyone\'s page in this room now. This cannot be undone.']);
-  assert.deepEqual(plain(C.entry('msg', 'msg.answerWords').confirm(SEATS.board, OBJECTS.anaQuestion)).fields, [{ name: 'note', label: 'Your answer', max: 200 }], 'answered in a field of 200 characters, as the server keeps');
+  assert.deepEqual(plain(C.entry('msg', 'msg.answerWords').confirm(SEATS.board, OBJECTS.anaQuestion)).fields, [{ name: 'note', label: 'Your answer…', max: 200 }], 'answered in a field of 200 characters, as the server keeps');
 });
 
 test('a single key on the focused object: R E F P D, Enter, Delete or Backspace, each the act that carries it', () => {
@@ -883,8 +956,9 @@ test('the other pages\' matrix: what each seat is shown on each object of the ad
     ['adminRoom', 'boardCrew', O.adminRoom.listed, []],
     ['adminRoom', 'boardCrew', O.adminRoom.side, []],
     // A person: a code guest's seat is the admin's to set; an account's follows its rights (no Seat).
-    ['person', 'admin', O.person.guest, ['person.seat', 'person.forward', 'person.view', 'person.kick']],
-    ['person', 'admin', O.person.account, ['person.forward', 'person.unforward', 'person.view', 'person.kick']],
+    // Chat view ▸ first, for every person seated here, a guest's or an account's.
+    ['person', 'admin', O.person.guest, ['person.chatView', 'person.seat', 'person.forward', 'person.view', 'person.kick']],
+    ['person', 'admin', O.person.account, ['person.chatView', 'person.forward', 'person.unforward', 'person.view', 'person.kick']],
     ['person', 'notAdmin', O.person.guest, []],
     ['adminMsg', 'admin', O.adminMsg.text, ['adminMsg.copy', 'adminMsg.delete']],
     ['adminMsg', 'admin', O.adminMsg.file, ['adminMsg.delete']],

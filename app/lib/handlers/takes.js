@@ -47,9 +47,14 @@
  * refused once anything newer is up, so it never undoes someone else's later take. The admin's take-down of a person's
  * take (back to chat over it, by its number) is taken with no page of theirs open: what a guest put up for them would
  * otherwise show again when they come back (lib/pages.js Pages#guestWeb counts it).
+ *
+ * A chat view (plan 1-§6): `admin:setView {roomCode, socketId, view}`, the admin's, sets the view a person's pages draw
+ * (By seat, Simple or Full), kept for a guest by their uid and for an account on it, and tells their pages by the
+ * server's named effect (`viewChanged`), which reaches each page of theirs by its socket alone.
  */
 const { str } = require('../guard');
-const { cleanPage, describePage } = require('../pages');
+const { cleanPage, describePage, personKey } = require('../pages');
+const { mayChange } = require('../rbac');
 
 /** What the admin's support view is told of an act: it shows the person's page, and acts on nothing (as its doors say). */
 const SUPPORT = 'This is someone else\'s view — act from your own page.';
@@ -82,6 +87,13 @@ const IF_SEQ = 'That act\'s take could not be read.';
 /** What the support view is told of a report: it shows a person's page, and says nothing for it. */
 const SUPPORT_REPORTS = 'This is someone else\'s view: it reports nothing.';
 const NOT_SEATED = 'This page is not seated here: it reports nothing.';
+/** A chat view the admin sets: '' by the person's seat (On stage simple, elsewhere full), or one for them alone. */
+const VIEWS = Object.freeze(['', 'simple', 'full']);
+/** Each view in an audit row's words, as the Accounts page's rows say it (lib/http-accounts.js). */
+const VIEW_SAID = Object.freeze({ '': 'by seat', simple: 'simple', full: 'full' });
+const VIEW_WORDS = 'Choose By seat, Simple or Full.';
+/** The person a chat view is set for has no page in that room now (or the room is gone). */
+const NOT_IN_ROOM = 'That person is not in this room now.';
 /** A client id as a page makes one (public/outbox.js), as a send's is read (server.js `CID_RE`). */
 const CID = /^[A-Za-z0-9_-]{1,40}$/;
 /**
@@ -106,7 +118,7 @@ const pagesWords = (n) => n + ' page' + (n === 1 ? '' : 's');
  * @param {object} ctx    the takes context, frozen: none of lib/gate.js `ROOM_SENDS` (`contexts`)
  */
 function register(socket, conn, ctx) {
-  const { store, audit, linkFor, pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, sendTo } = ctx;
+  const { store, audit, accounts, linkFor, pages, hallPages, takeSends, holdingOf, pagesChanged, pageHidden, selfHosts, viewChanged, sendTo } = ctx;
 
   const write = (action, target, words) => audit.write(conn.actor(), action, target, words, socket.data.ip);
   /**
@@ -303,6 +315,44 @@ function register(socket, conn, ctx) {
       board: pages.status(hall.code, 'board', boardOf(hall, seated, rooms), { hallHolding: holding }),
       people: Array.from(people.values(), (x) => ({ uid: x.key, name: x.name, room: x.room, ...pages.status(hall.code, x.key, x.list, { name: x.name, hallHolding: holding }) })),
     });
+  });
+
+  // The admin's choice of a person's chat view (plan 1-§6, "How it is changed"): By seat (''), Simple or Full, for the
+  // person seated on `socketId` in the room `roomCode` names, from the admin page's people rows or the hall page's People
+  // panel. A guest's is kept by their uid (pages.json), an account's on the account (accounts.json), as the Accounts page
+  // sets it: an account reached from an account's page only where the Accounts page would let that account change it.
+  // Every page of the person's, and the admin's view of them, is told the view to draw now (`view`), live, nothing
+  // closed; the admin's people rows (and theirs alone) are drawn again; one row says it. A view is no right: no check
+  // reads it.
+  socket.on('admin:setView', (args, ack) => {
+    if (!conn.gate(ack, { joined: false, bucket: conn.writes, admin: true })) return;
+    const answer = conn.ok(ack);
+    const a = isRecord(args) ? args : {};
+    const view = a.view === null ? '' : a.view;
+    if (typeof view !== 'string' || !VIEWS.includes(view)) return answer({ ok: false, error: VIEW_WORDS });
+    // The room by its key; a page that names its own room by the code it joined with (the token's page) means its own.
+    const own = conn.room();
+    const room = own && keyOf(a.roomCode) === keyOf(socket.data.joinedAs) ? own : store.room(keyOf(a.roomCode));
+    const target = room ? room.users.get(str(a.socketId)) : undefined;
+    if (!target) return answer({ ok: false, error: NOT_IN_ROOM });
+    const key = personKey(target.uid, !!target.acct);
+    if (!key) return answer({ ok: false, error: NOT_IN_ROOM });
+    const said = VIEW_SAID[view];
+    if (target.acct) {
+      const account = accounts.get(target.uid);
+      if (!account) return answer({ ok: false, error: NOT_IN_ROOM });
+      const actor = socket.data.account;
+      const refusal = actor ? mayChange(actor, account, { view }, { activeAdmins: accounts.activeAdmins() }) : null;
+      if (refusal) return answer({ ok: false, error: refusal });
+      if (!accounts.update(account.id, { view }).length) return answer({ ok: true, already: true, view });
+      write('user.update', account.username, 'view → ' + said);
+    } else {
+      if (pages.viewOf(target.uid) === view) return answer({ ok: true, already: true, view });
+      if (!pages.setView(target.uid, view)) return answer({ ok: false, error: NOT_IN_ROOM });
+      write('person.view', room.hall, target.name + ' (guest) → ' + (view ? said + ' view' : 'the view by their seat'));
+    }
+    viewChanged(key);
+    answer({ ok: true, view });
   });
 }
 

@@ -175,7 +175,7 @@ const HANDLER_MAY = {
 /** A store or an edge one handler module requires by name, for the pure functions it holds, with why. */
 const HANDLER_ROWS = {
   'lib/handlers/takes.js': {
-    'lib/pages.js': { names: ['cleanPage', 'describePage', 'canShow', 'cleanSnippet'], why: 'the pages\' pure vocabulary, kept where it is tested; the store itself reaches the module through its context' },
+    'lib/pages.js': { names: ['cleanPage', 'describePage', 'canShow', 'cleanSnippet', 'personKey'], why: 'the pages\' pure vocabulary, kept where it is tested (a person\'s key among it); the store itself reaches the module through its context' },
   },
 };
 
@@ -707,7 +707,7 @@ test('(d), (i), (j) the contexts: conn made in the connection after each helper 
   const call = groupAt(server, built + 'const { ctx, takesCtx } = contexts('.length - 1);
   assert.equal(call.entries.length, 1, 'contexts() is given the parts and nothing else');
   const parts = groupAt(server, call.at[0]).entries.map(keyOf);
-  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'io']);
+  assert.deepEqual(parts.map((k) => k.key), ['store', 'apply', 'systemMessage', 'readSend', 'messageOf', 'uploadOnDisk', 'makeMessageId', 'removeUnused', 'fileNamesOf', 'audit', 'accounts', 'boardDirty', 'newSideRoom', 'renameRoom', 'roomNameRefused', 'newGuestCode', 'guestPagesOf', 'sendGuestsOut', 'codeChanged', 'settings', 'sendersOf', 'sendsInto', 'setRoomSends', 'linkFor', 'stagePayload', 'pages', 'hallPages', 'takeSends', 'holdingOf', 'pagesChanged', 'pageHidden', 'selfHosts', 'tellWebRights', 'viewChanged', 'io']);
   assert.ok(parts.every((k) => k.value === null), 'each part by its own name');
   const declared = new Map();
   for (const m of server.matchAll(/^(?:const|let|var|class|function\*?|async function\*?)\s+([A-Za-z_$][\w$]*)/gm)) if (!declared.has(m[1])) declared.set(m[1], m.index);
@@ -737,7 +737,7 @@ test('(d) a planted handler module that requires past its row, or makes what it 
   assert.deepEqual(rooms("const { ...all } = require('../guard');"), ['lib/handlers/rooms.js:6: takes ... from lib/guard.js, which is not among its pure helpers (str, cleanText, mac, Bucket)']);
   // The one row: the takes module takes the pages' pure vocabulary by name; no other module requires the store.
   assert.deepEqual(run('lib/handlers/takes.js', "const { cleanPage, canShow } = require('../pages');"), []);
-  assert.deepEqual(run('lib/handlers/takes.js', "const { PagesStore } = require('../pages');"), ['lib/handlers/takes.js:6: takes PagesStore from lib/pages.js, which is not among its pure helpers (cleanPage, describePage, canShow, cleanSnippet)']);
+  assert.deepEqual(run('lib/handlers/takes.js', "const { PagesStore } = require('../pages');"), ['lib/handlers/takes.js:6: takes PagesStore from lib/pages.js, which is not among its pure helpers (cleanPage, describePage, canShow, cleanSnippet, personKey)']);
   assert.deepEqual(rooms("const { cleanPage } = require('../pages');"), ['lib/handlers/rooms.js:6: requires lib/pages.js: a store, a link or an edge reaches a handler module only through its context']);
   // Nothing it requires is made in it, however it is reached; a word in a comment or a string is not code.
   assert.deepEqual(rooms("const { Bucket } = require('../guard');\nconst b = new Bucket(5, 15);"), ['lib/handlers/rooms.js:7: makes what it requires (new Bucket): it is given the server\'s, through its context']);
@@ -973,9 +973,7 @@ const PAGE_NAMED_BY_EXPRESSION = {
  * hall page hears linkedRoomsChanged, which keeps its `forwardable` fact live, and page:take and pages:changed, which its
  * take layer and its console draw.
  */
-const UNHEARD = {
-  view: 'an account\'s chat view changed alone, told to its pages in a room, which stay open (the plan\'s Part 1 unit 9): the hall page draws the simple view, and hears this, with Part 7 unit 20a (#55)',
-};
+const UNHEARD = {};
 /**
  * A verb a handler file registers that no page sends yet, with why. The fence fails on a row a page sends, or that no
  * handler file registers. None now: the hall page's take layer reports (page:report), and its console reads and pushes
@@ -1543,6 +1541,7 @@ const ANY_ROOM = {
     'a Main room renamed renames its hall: the rooms that send into any room of the hall are told to ask again',
     'people\'s pages: a person\'s take reaches every page of theirs in any room of the hall, and a Board take the hall\'s Main room',
     'the admin\'s view of a person is told the chat view their seat draws in the room it shows, Main or side',
+    'a room\'s people list told again, by its key, Main or side, when what its admin\'s rows say of a person changed (their chat view)',
   ],
   'lib/handlers/rooms.js': [
     'a hall full of rooms says how many it holds',
@@ -1553,6 +1552,7 @@ const ANY_ROOM = {
   ],
   'lib/handlers/takes.js': [
     'the rooms of a hall a pusher may read, Main or side: a holding picture shared in them, and the people a push names or a console lists seated in them',
+    'the room the admin names a person\'s chat view in, by its key, Main or side: the person seated there',
   ],
 };
 /** A call to one of the store's any-room readers, however it is spaced. */

@@ -166,6 +166,22 @@ show network with [Stagewatch](https://github.com/jammin808/Stagewatch), Pattern
   never share files, ask questions, forward or send anything into another room or answer other people's help requests: the
   server refuses each by the seat, for the admin and an account seated On stage too. An account seated On stage in a
   hall answers none of that hall's help requests from its halls board either, but marks its own sorted.
+- **The Board's chat view.** A page seated On stage draws the simple view, chat first and compact, unless the admin
+  chooses Full for that person (a guest's choice kept by their device, an account's on the account; Chat view on the
+  admin page's people rows, in the hall page's People panel for the admin, and on the Accounts page). One reading column
+  of messages with no card and no badge; one response place per screen: **👍 Got it** and **↩ Reply** after the words of
+  the newest message from backstage that waits for this person ("Got all 3" when three wait) and of each waiting 🔥
+  message, and a tap on any other message brings its own row back. Got it tells the backstage team, with the name ("👍
+  Margaret got it" on their page), and the message reads "👍 You: got it". A question's answers are 48 px, with
+  **Answer in words…**; once answered it reads "You answered Yes · 14:10 · Change". A 🔥 message out of view is held in a
+  strip above the chat (and on a take's strip, with Got it beside Open chat); "↓ 3 new · 1 question" below a chat scrolled
+  up; "○ Nobody backstage is online" when no one backstage has been in the room for 10 s. The composer is **🔥 Priority**,
+  "Message everyone here…" and Send, and keeps its words when a send is refused. The header holds the hall's name, Help
+  and ⋯, whose sheet holds Text size, Theme, Full screen (where the device offers it), why the device may sleep, and Leave
+  the hall, asked in place. It **starts in Dark** until the person chooses Light, and paints dark before its first frame
+  on a device last used there; the admin's support view never turns it light. It works on iPads old and new, Android
+  tablets and phones, upright or sideways: the Shown to you column at 900 px wide or more and two tabs, Chat and 📺 Shown
+  to you, below; 22 px text on a tablet and 20 px on a phone. Only Tab, Enter and Escape act on it, and it opens no menu.
 - **Remote phones.** Through the built-in Cloudflare tunnel, up to 150 at once — a Quick Tunnel's 200 in-flight
   requests, less room for page loads and files — and half of them at most from one network (an IPv6 phone counted by
   its /64, so a phone that changes its address is still one network). A page that has not joined a room within 20 s

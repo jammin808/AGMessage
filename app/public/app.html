@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-page="app">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
   <title>AGMessage</title>
   <link rel="stylesheet" href="/styles.css" />
   <script src="/theme-init.js"></script>
@@ -34,7 +34,21 @@
     </div>
     <!-- The rooms of this hall this person may move between, this one marked (app.js, drawSwitcher): shown with two or more. -->
     <nav class="room-switcher" id="roomSwitcher" aria-label="Rooms of this hall" hidden></nav>
+    <!-- The simple view under 900 px wide: the chat and what is shown to this person, two pressed buttons, drawn only while
+         something is shown (app.js, Simple). -->
+    <div class="bv-tabs" id="bvTabs" role="group" aria-label="Chat or what is shown to you" hidden>
+      <button type="button" class="bv-tab" id="tabChat" aria-pressed="true">Chat</button>
+      <button type="button" class="bv-tab" id="tabShown" aria-pressed="false">📺 Shown to you · <span id="shownCount">0</span></button>
+    </div>
   </header>
+
+  <!-- The simple view's ⋯ sheet (kind `sheet`): text size, theme, full screen where the device has it, why the screen may
+       sleep, and Leave, asked in place; a bottom sheet on a phone, never taller than the screen and scrolled within it. -->
+  <section class="bv-sheet" id="bvSheet" role="dialog" aria-modal="false" aria-labelledby="bvSheetTitle" hidden>
+    <h2 class="sr-only" id="bvSheetTitle">Settings for this page</h2>
+    <div class="bv-sheet-rows" id="bvSheetRows"></div>
+    <p class="bv-sheet-foot" id="bvSheetFoot"></p>
+  </section>
 
   <!-- Out of the hall: the server's words and the way back, in place of the hall (app.js, outOfHall). -->
   <section class="out-of-hall" id="outOfHall" role="alert" hidden>
@@ -60,15 +74,26 @@
         <button class="btn ghost small" type="button" id="movedOk">Got it</button>
       </p>
 
+      <!-- The simple view's 🔥 strip: the newest priority message from backstage that waits for this person, only while
+           it is out of view (scrolled away, or behind the Shown to you tab), with Got it after its words. -->
+      <div class="bv-strip" id="bvStrip" role="status" hidden>
+        <p class="bv-strip-words"><span class="bv-strip-kind">🔥 Priority</span> <strong id="bvStripFrom"></strong> <span id="bvStripText"></span></p>
+        <span class="bv-strip-acts" id="bvStripActs"></span>
+        <span class="bv-strip-more" id="bvStripMore" hidden></span>
+      </div>
+
       <div class="feed-wrap">
         <main class="feed" id="feed" aria-live="polite" tabindex="-1"></main>
         <button class="new-below" id="newBelow" type="button" hidden>↓ 0 new</button>
+        <p class="bv-empty" id="bvEmpty" hidden>Nothing yet. Messages from backstage appear here.</p>
       </div>
+      <p class="bv-alone" id="bvAlone" hidden>Nobody backstage is online. Use Help if you need someone.</p>
 
       <section class="compose director-compose" id="directorCompose" hidden>
         <form id="directorForm">
+          <!-- 🔥 Priority first: a toggle, off after every send; its word on a tablet, its mark on a phone, its name always -->
+          <button type="button" class="btn ghost priority-btn" id="dirPriorityBtn" data-priority="0" aria-pressed="false" aria-label="Priority" title="Mark as high priority"><span aria-hidden="true">🔥</span><span class="pri-word" aria-hidden="true"> Priority</span></button>
           <input id="directorInput" maxlength="300" placeholder="Message everyone here…" aria-label="Message everyone here…" />
-          <button type="button" class="btn ghost priority-btn" id="dirPriorityBtn" data-priority="0" aria-pressed="false" title="Mark as high priority">🔥</button>
           <button class="btn primary send-btn" type="submit" aria-label="Send"><span class="send-icon" aria-hidden="true">➤</span><span class="send-word">Send</span></button>
         </form>
       </section>
@@ -183,6 +208,8 @@
     <div class="layer-box" id="layerBox"></div>
     <div class="layer-strip" id="layerStrip" role="alert" hidden>
       <span class="layer-strip-words"><strong id="layerStripFrom"></strong> <span id="layerStripText"></span></span>
+      <!-- The simple view's Got it on a 🔥 message from backstage (the catalogue's msg.ack), beside Open chat -->
+      <button class="btn small layer-strip-got" id="layerGotIt" type="button" data-action="msg.ack" hidden></button>
       <button class="btn small layer-strip-open" id="layerOpenChat" type="button" data-action="take.openChat">Open chat</button>
     </div>
   </section>
@@ -293,8 +320,10 @@
         <span class="from"></span>
         <span class="role-tag"></span>
         <span class="priority-badge">🔥 HIGH</span>
+        <span class="ask-word">Question</span>
         <span class="pinned-mark" hidden><span aria-hidden="true">📌</span> Pinned</span>
         <time></time>
+        <span class="bv-said"></span>
         <span class="msg-acts"></span>
       </header>
       <div class="body"></div>

@@ -14,10 +14,10 @@ const EVENTS = [...new Set(handlerFiles().flatMap((f) => [...readSource(path.joi
   .filter((e) => e !== 'disconnect');
 // Not sent from the admin socket: they start cloudflared or make a new certificate — real work, not an argument check.
 const ADMIN_SKIP = new Set(['admin:tunnelStart', 'admin:tunnelStop', 'admin:renewCertificate']);
-const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null };
+const NULLS = { roomCode: null, code: null, id: null, messageId: null, text: null, content: null, seq: null, targetRoom: null, socketId: null, line: null, state: null, hall: null, cid: null, on: null, heldMs: null, until: null, codeOn: null, newCode: null, keepGuests: null, sendFrom: null, sendBack: null, to: null, replyTo: null, uid: null, kind: null, url: null, again: null, ifSeq: null, view: null };
 // An object whose toString is not a function: String() throws on it, so a handler must never call String() on input.
 const U = { toString: 1 };
-const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U };
+const UNCONVERTIBLE = { roomCode: U, code: U, id: U, messageId: U, name: U, text: U, caption: U, options: [U], content: { kind: 'message', text: U }, seq: U, targetRoom: U, line: U, state: U, hall: U, words: U, destination: U, urgency: U, image: U, token: U, url: U, cid: U, heldMs: U, until: U, sendFrom: [U], sendBack: [U], to: U, replyTo: U, uid: U, kind: U, again: U, ifSeq: U, view: U };
 const SHAPES = [null, 7, 'x', true, [], {}, NULLS, { code: {}, id: [], roomCode: 5, messageId: {}, content: 'x', text: {} }, UNCONVERTIBLE];
 
 // Each send: with an answer callback (the server may answer it) or without; either way at most 400 ms is waited.
@@ -108,6 +108,9 @@ test('client values are read by their type: a value String() cannot convert reac
     [ctl, 'page:status', { code: U }], [guest, 'page:report', { seq: U, state: U, words: U }], [guest, 'page:report', { seq: 1, state: 'shown', words: U, again: U }],
     // The admin's switch for a hall's backstage guests' web pages, each field by type.
     [ctl, 'admin:guestWeb', { roomCode: U, on: U }], [ctl, 'admin:guestWeb', { roomCode: U, on: true }], [ctl, 'admin:guestWeb', { roomCode: hall, on: U }],
+    // The admin's choice of a person's chat view, each field by type: a view that is none, a room or a page that is none.
+    [ctl, 'admin:setView', { roomCode: U, socketId: U, view: U }], [ctl, 'admin:setView', { roomCode: U, socketId: U, view: 'simple' }],
+    [ctl, 'admin:setView', { roomCode: hall, socketId: U, view: 'full' }],
   ];
   // What each is answered: the field it could not read named, and nothing shown, numbered or reported.
   const KINDS = 'Choose what to show: back to chat, Stagewatch, the clock, holding, blank or a web page.';
@@ -136,6 +139,11 @@ test('client values are read by their type: a value String() cannot convert reac
     // A room's hall, key and name that are no strings are read as none, and refused for it: no room is made or named.
     // A send into another room names its room, its message and its words by type: each refused for what it lacks.
     if (ev === 'room:sendTargets') assert.deepEqual(r, { ok: true, targets: [{ ref, name: 'Legal', hallName: 'Hall 3' }] }, 'a read takes no argument');
+    if (ev === 'admin:setView') {
+      assert.deepEqual(r, { ok: false, error: arg.view === U ? 'Choose By seat, Simple or Full.' : 'That person is not in this room now.' }, ev + ' ' + JSON.stringify(arg));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
     if (ev === 'admin:guestWeb') {
       assert.deepEqual(r, { ok: false, error: arg.on === U ? 'Say whether backstage guests may show web pages: on (true) or off (false).' : 'No such room.' }, ev + ' ' + JSON.stringify(arg));
       await new Promise((resolve) => setTimeout(resolve, 250));

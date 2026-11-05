@@ -38,6 +38,7 @@ html[data-floor="old"] body > .agm-floor { display: block !important; max-width:
   --c-ok: #15803d; --c-warn: #b45309; --c-info: #1c3f9e; --c-off: var(--c-ink-muted);
   --c-fault: #b91c1c;   /* red only here: 🔥, open help, a fault */   --c-on-fault: #ffffff;
   --c-ask: #8a3d04;     /* a question's rule and word, apart from warn (△ could not) */
+  --c-edge: #737c8c;    /* a control's edge on the Board's chat view: 3:1 or more on the page and on a card */
   --c-seat-board: #7c3aed; --c-seat-backstage: #0369a1; --c-seat-observer: #545d6b;
   --c-other-room: #0f766e;   /* the ↘ From and ↗ Sent edges */
   /* the names the components read: each a role above, or a colour of its own */
@@ -202,8 +203,8 @@ button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
   overflow: hidden;
   background: var(--bg);
 }
-/* When no doc panel (research/observer), left column takes the full width */
-body:not([data-role="director"]) .left-col { flex: 1 1 100%; }
+/* When no doc panel (an observer's page), the left column takes the full width */
+body[data-role="observer"] .left-col { flex: 1 1 100%; }
 
 /* People panel — sits inside left column, no longer page-wide */
 .people-panel { background: #fff; border-bottom: 1px solid var(--border); padding: .7rem 1rem; flex: 0 0 auto; }
@@ -235,7 +236,7 @@ body:not([data-role="director"]) .left-col { flex: 1 1 100%; }
 
 /* Right column: doc panel — full-height, 50% width for directors */
 .doc-panel { display: none; }
-body[data-role="director"] .doc-panel, body[data-role="board"] .doc-panel,
+body[data-role="board"] .doc-panel,
 body[data-role="research"] .doc-panel {
   display: flex; flex-direction: column;
   flex: 0 0 50%;
@@ -315,9 +316,9 @@ body[data-role="research"] .doc-panel {
 .pinned-item .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Director: clickable file in feed re-frames it on the stage panel */
-body[data-role="director"] .file.clickable, body[data-role="board"] .file.clickable,
+body[data-role="board"] .file.clickable,
 body[data-role="research"] .file.clickable { cursor: zoom-in; }
-body[data-role="director"] .file.clickable:hover, body[data-role="board"] .file.clickable:hover,
+body[data-role="board"] .file.clickable:hover,
 body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 
 /* Inline document renderers */
@@ -371,7 +372,7 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 @media (max-width: 800px) {
   .main-row { flex-direction: column; }
   .left-col { flex: 1 1 auto; }
-  body[data-role="director"] .doc-panel, body[data-role="board"] .doc-panel,
+  body[data-role="board"] .doc-panel,
   body[data-role="research"] .doc-panel {
     /* Stacked layout default: 50/50 split, but never let the panel eat
        more than 75% so the chat keeps at least 25% (matching the
@@ -525,21 +526,20 @@ body[data-role="research"] .file.clickable:hover { outline: 2px solid var(--acce
 /* Director overrides: every font-size is calc()'d against the same
    --zoom-msg variable that .feed uses, so the A+/A− buttons reliably
    scale chat text in director view. */
-body[data-role="director"] .feed, body[data-role="board"] .feed { padding: .9rem; gap: .75rem; }
-body[data-role="director"] .msg, body[data-role="board"] .msg {
+body[data-role="board"] .feed { padding: .9rem; gap: .75rem; }
+body[data-role="board"] .msg {
   font-size: calc(1.05rem * var(--zoom-msg, 1));
   padding: .9rem 1.05rem;
 }
-body[data-role="director"] .msg.is-action, body[data-role="board"] .msg.is-action { box-shadow: 0 2px 10px rgba(217,119,6,.18); }
-body[data-role="director"] .action-text, body[data-role="board"] .action-text {
+body[data-role="board"] .msg.is-action { box-shadow: var(--shadow); }
+body[data-role="board"] .action-text {
   font-size: calc(1.18rem * var(--zoom-msg, 1));
   line-height: 1.35;
 }
-body[data-role="director"] .action-btn, body[data-role="board"] .action-btn {
+body[data-role="board"] .action-btn {
   font-size: calc(1rem * var(--zoom-msg, 1));
   padding: .8rem 1.3rem;
 }
-body[data-role="director"] .pinned-strip, body[data-role="board"] .pinned-strip { background: #fff7e6; }
 /* Message headers (name + role tag + time) scale too, in BOTH roles */
 .msg header { font-size: calc(.85rem * var(--zoom-msg, 1)); }
 
@@ -593,11 +593,11 @@ body[data-role="director"] .pinned-strip, body[data-role="board"] .pinned-strip 
   left: -3px; right: -3px; top: 0; bottom: 0;
 }
 .split-resizer:hover { background: var(--brand); }
-body[data-role="director"] .split-resizer, body[data-role="board"] .split-resizer,
+body[data-role="board"] .split-resizer,
 body[data-role="research"] .split-resizer { display: block; }
 
 @media (max-width: 800px) {
-  body[data-role="director"] .split-resizer, body[data-role="board"] .split-resizer { display: none; }
+  body[data-role="board"] .split-resizer { display: none; }
 }
 
 /* ====================================================================
@@ -628,6 +628,7 @@ html[data-theme="dark"] {
   --c-ok: #34d399; --c-warn: #f0a14a; --c-info: #b8c8ff;
   --c-fault: #fca5a5; --c-on-fault: #0f1421;
   --c-ask: #f0a14a;
+  --c-edge: #6f7c9a;
   --c-seat-board: #a78bfa; --c-seat-backstage: #7dd3fc; --c-seat-observer: #94a3b8;
   --c-other-room: #5eead4;
   --brand-dark: #3a6cdf; --card: #1a2032; --accent: #f0a14a; --accent-soft: #2a2010; --research: #38bdf8;
@@ -998,13 +999,13 @@ html[data-theme="dark"] .room-code-big { color: #b8c8ff; }
 
 /* Mobile / narrow: stack vertically, splitter is a horizontal bar */
 @media (max-width: 800px) {
-  body[data-role="director"] .split-resizer, body[data-role="board"] .split-resizer,
+  body[data-role="board"] .split-resizer,
   body[data-role="research"] .split-resizer {
     display: block;
     width: 100%; height: 8px; flex: 0 0 8px;
     cursor: row-resize;
   }
-  body[data-role="director"] .doc-panel, body[data-role="board"] .doc-panel,
+  body[data-role="board"] .doc-panel,
   body[data-role="research"] .doc-panel {
     /* Same cap in this duplicate rule block */
     flex: 0 0 50%;
@@ -1014,7 +1015,7 @@ html[data-theme="dark"] .room-code-big { color: #b8c8ff; }
     box-shadow: 0 -2px 8px rgba(0,0,0,.04);
   }
   /* When collapsed in mobile, the panel becomes a thin horizontal bar */
-  body[data-role="director"] .doc-panel.collapsed, body[data-role="board"] .doc-panel.collapsed,
+  body[data-role="board"] .doc-panel.collapsed,
   body[data-role="research"] .doc-panel.collapsed {
     flex: 0 0 36px !important;
     width: 100%; max-width: 100%; height: 36px;
@@ -2016,3 +2017,187 @@ body[data-pushed][data-role="observer"] .doc-panel .doc-actions, body[data-pushe
 .page-state { font-size: var(--fs-sm); font-weight: 600; }
 .page-showing { font-size: var(--fs-sm); color: var(--c-ink-muted); }
 .page-acts { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+
+/* ===================== The Board's chat view: the simple view (body[data-view="simple"], app.js Simple) =====================
+   The chat first and compact: one reading column, no card, no badge, one response place per screen after the words it
+   answers. It lays out by the viewport's size, never the device: the Shown to you column at 900 px wide or more and two
+   tabs below; 22 px text where the viewport's smaller side is 600 px or more (a tablet either way up), 20 px on a phone;
+   the phone's header and composer at 600 px wide or less; the 🔥 strip's lines by height. Its rules write top, right,
+   bottom, left, margin-left and margin-right, never inset or a logical property (Chrome 84 to 86 have neither), and every
+   colour is a token, in both themes. Nothing in it moves. */
+.ask-word, .bv-said { display: none; }
+.bv-tabs[hidden], .bv-strip[hidden], .bv-alone[hidden], .bv-empty[hidden], .bv-sheet[hidden], .bv-strip-more[hidden] { display: none; }
+/* A Board member's 👍 on a backstage page: who got it, in words beside the reactions */
+.got-line { font-size: var(--fs-sm); color: var(--c-ink-muted); align-self: center; }
+
+body[data-view="simple"] { --bv-body: 1.25rem; --bv-field: 1rem; }
+/* The body by the viewport's smaller side (a tablet either way up); the composer's field by its width alone, as the
+   phone's composer is drawn at 600 px wide or less */
+@media (min-width: 600px) and (min-height: 600px) {
+  body[data-view="simple"] { --bv-body: 1.375rem; }
+}
+@media (min-width: 600.02px) {
+  body[data-view="simple"] { --bv-field: 1.125rem; }
+}
+body[data-view="simple"][data-vv].app-page { height: var(--vv-h); }
+
+/* The header: the hall's name (muted), the readout, Help and ⋯; the seat is said in the sheet's footer */
+body[data-view="simple"] .app-header { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+body[data-view="simple"] .app-bar .app-title strong { font-size: var(--fs-title); font-weight: 500; color: var(--c-ink-muted); }
+body[data-view="simple"] .app-bar .app-title .whoami,
+body[data-view="simple"] #peoplePanel, body[data-view="simple"] #roomSwitcher, body[data-view="simple"] #movedLine,
+body[data-view="simple"] #researchCompose, body[data-view="simple"] .compose-to, body[data-view="simple"] .split-resizer,
+body[data-view="simple"] .msg .reactions, body[data-view="simple"] .msg .seen-line, body[data-view="simple"] .sys.presence,
+body[data-view="simple"] .msg > header .msg-acts, body[data-view="simple"] .action-responses,
+body[data-view="simple"] .docs-files, body[data-view="simple"] #docExpandRail { display: none; }
+body[data-view="simple"] .stage-chip { font-size: var(--fs-readout); }
+/* Help keeps its word whole: the hall's name gives way first */
+body[data-view="simple"] .app-bar .app-meta > .help-btn { flex: none; white-space: nowrap; }
+/* A phone's header is one row; down 5 s or more, "Offline · reconnecting" is its second row, under the name, Help and ⋯
+   (a tablet says it before Help, on its one row) */
+@media (max-width: 600px) {
+  body[data-view="simple"][data-down="1"] .app-bar { flex-wrap: wrap; }
+  body[data-view="simple"][data-down="1"] .app-bar .app-meta { display: contents; }
+  body[data-view="simple"][data-down="1"] .app-bar .app-status { order: 9; flex: 0 0 100%; }
+}
+
+/* The two tabs under 900 px wide, while something is shown: Chat, and 📺 Shown to you · n */
+body[data-view="simple"] .bv-tabs { display: flex; gap: var(--sp-2); }
+.bv-tab {
+  flex: 1 1 0; min-height: var(--target-touch); padding: 0 var(--sp-3); border-radius: var(--radius-sm);
+  border: 2px solid var(--c-edge); background: var(--c-surface-raised); color: var(--c-ink); font: inherit; font-weight: 600; cursor: pointer;
+}
+.bv-tab[aria-pressed="true"] { background: var(--c-action); border-color: var(--c-action); color: var(--c-on-action); }
+@media (min-width: 900px) { body[data-view="simple"] .bv-tabs { display: none; } }
+
+/* Shown to you: a 360 px column at 900 px wide or more, gone while it holds nothing; below, the second tab's page */
+body[data-view="simple"] .main-row { flex-direction: row; }
+body[data-view="simple"] .left-col { flex: 1 1 auto; }
+body[data-view="simple"] .doc-panel { display: flex; flex-direction: column; flex: 0 0 360px; max-width: 360px; background: var(--c-surface); border-left: 1px solid var(--c-border); box-shadow: none; }
+body[data-view="simple"][data-shown="0"] .doc-panel { display: none; }
+/* At 900 px wide or more, nothing shown: the column is its rail, which says where what is shown will be, and the chat
+   takes the rest of the width */
+@media (min-width: 900px) {
+  body[data-view="simple"][data-shown="0"] .doc-panel { display: flex; flex: 0 0 36px; min-width: 36px; max-width: 36px; align-items: center; }
+  body[data-view="simple"][data-shown="0"] .doc-panel > * { display: none; }
+  body[data-view="simple"][data-shown="0"] .doc-panel::before {
+    content: '📺 Shown to you'; writing-mode: vertical-rl; padding: var(--sp-4) 0; font-size: var(--fs-sm); font-weight: 600; color: var(--c-ink-muted);
+  }
+}
+body[data-view="simple"] .doc-panel .doc-display { background: var(--c-surface); }
+@media (max-width: 899.98px) {
+  body[data-view="simple"] .doc-panel { display: none; }
+  body[data-view="simple"][data-tab="shown"] .doc-panel { display: flex; flex: 1 1 auto; max-width: none; max-height: none; border-left: 0; }
+  body[data-view="simple"][data-tab="shown"] .left-col { display: none; }
+}
+/* On stage content keeps no copy: a long press on iOS offers no save, and nothing is dragged out */
+body[data-view="simple"] .take-cards, body[data-view="simple"] .doc-display, body[data-view="simple"] .page-layer { -webkit-touch-callout: none; }
+
+/* The feed: one reading column, at most 46 rem, centred, no card, no border, no badge */
+body[data-view="simple"] .feed { padding: var(--sp-3) max(16px, env(safe-area-inset-left)); gap: var(--sp-4); align-items: stretch; }
+body[data-view="simple"] .feed > *, body[data-view="simple"] .bv-strip, body[data-view="simple"] .bv-alone,
+body[data-view="simple"] #directorForm, body[data-view="simple"] .reply-chip { width: 100%; max-width: 46rem; margin-left: auto; margin-right: auto; }
+body[data-view="simple"] .feed .msg, body[data-view="simple"] .feed .msg.mine, body[data-view="simple"] .feed .msg.priority,
+body[data-view="simple"] .feed .msg.is-action, body[data-view="simple"] #pinnedList .msg {
+  align-self: stretch; max-width: 46rem; background: transparent; border: 0; border-left: 4px solid transparent; border-radius: 0;
+  box-shadow: none; padding: var(--sp-1) 0 var(--sp-1) var(--sp-3); font-size: calc(var(--bv-body) * var(--zoom-msg, 1)); color: var(--c-ink);
+}
+body[data-view="simple"] .feed .msg.priority { border-left-color: var(--c-fault); }
+body[data-view="simple"] .feed .msg.is-action { border-left-color: var(--c-ask); }
+body[data-view="simple"] .msg > header { font-size: calc(var(--fs-md) * var(--zoom-msg, 1)); gap: 0 var(--sp-2); color: var(--c-ink-muted); margin-bottom: var(--sp-1); }
+body[data-view="simple"] .msg .from, body[data-view="simple"] .msg.mine .from, body[data-view="simple"] .msg.priority .from { font-weight: 600; color: var(--c-ink); }
+body[data-view="simple"] .msg time { margin-left: 0; font-size: calc(var(--fs-sm) * var(--zoom-msg, 1)); color: var(--c-ink-muted); }
+body[data-view="simple"] .msg .role-tag { background: none; padding: 0; text-transform: none; letter-spacing: 0; font-size: inherit; font-weight: 400; color: var(--c-ink-muted); }
+body[data-view="simple"] .msg .priority-badge { background: none; color: var(--c-fault); padding: 0; border-radius: 0; letter-spacing: 0; animation: none; font-size: calc(var(--fs-readout) * var(--zoom-msg, 1)); font-weight: 700; }
+body[data-view="simple"] .msg.is-action .ask-word { display: inline; color: var(--c-ask); font-size: calc(var(--fs-readout) * var(--zoom-msg, 1)); font-weight: 700; }
+body[data-view="simple"] .msg .bv-said { display: inline; font-size: calc(var(--fs-sm) * var(--zoom-msg, 1)); color: var(--c-ink-muted); }
+body[data-view="simple"] .msg.mine .body { color: var(--c-ink-muted); }
+body[data-view="simple"] .msg .body p { line-height: 1.4; max-width: 36em; }
+body[data-view="simple"] .msg .reply-quote { font-size: calc(var(--fs-sm) * var(--zoom-msg, 1)); color: var(--c-ink-muted); background: none; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The response: Got it (or Got all N) and Reply after the words, text actions, 36 px drawn and 44 px to the finger */
+body[data-view="simple"] .msg-response, body[data-view="simple"] .bv-strip-acts { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-top: 6px; }
+body[data-view="simple"] .msg-response .msg-act, body[data-view="simple"] .bv-strip-acts .msg-act, .bv-text-act {
+  position: relative; min-height: 36px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); background: none;
+  color: var(--c-action); font: inherit; font-size: calc(var(--fs-md) * var(--zoom-msg, 1)); font-weight: 600; cursor: pointer;
+}
+body[data-view="simple"] .msg-response .msg-act::before, body[data-view="simple"] .bv-strip-acts .msg-act::before, .bv-text-act::before { content: ''; position: absolute; top: -4px; right: 0; bottom: -4px; left: 0; }
+body[data-view="simple"] .msg-response .msg-act .act-words { font-size: inherit; }
+body[data-view="simple"] .msg.priority .msg-response .msg-act[data-action="msg.ack"], body[data-view="simple"] .bv-strip-acts .msg-act[data-action="msg.ack"] { background: var(--c-action); color: var(--c-on-action); }
+
+/* A question: its words at the body size and weight 600, its answers 48 px, Answer in words… a text action */
+body[data-view="simple"] .action-text, body[data-view="simple"] .msg.is-action .action-text { font-size: inherit; font-weight: 600; line-height: 1.4; }
+body[data-view="simple"] .action-buttons { gap: var(--sp-2); margin-top: var(--sp-2); }
+body[data-view="simple"] .action-btn {
+  min-height: var(--target-answer); min-width: 96px; padding: 0 var(--sp-4); font-size: calc(var(--fs-readout) * var(--zoom-msg, 1)); font-weight: 600;
+  border: 2px solid var(--c-edge); background: var(--c-surface-raised); color: var(--c-ink);
+}
+body[data-view="simple"] .action-btn:hover { border-color: var(--c-action); color: var(--c-action); background: var(--c-surface-raised); }
+body[data-view="simple"] .action-btn:focus-visible { border-color: var(--c-action); color: var(--c-action); background: var(--c-surface-raised); }
+/* The answer this person chose, while Change brings the answers back */
+body[data-view="simple"] .action-btn[aria-pressed="true"] { border-color: var(--c-action); color: var(--c-action); }
+body[data-view="simple"] .answer-words-btn { position: relative; min-height: 36px; border: 0; background: none; color: var(--c-action); font-size: calc(var(--fs-md) * var(--zoom-msg, 1)); font-weight: 600; text-decoration: none; }
+body[data-view="simple"] .answer-words-btn::before { content: ''; position: absolute; top: -4px; right: 0; bottom: -4px; left: 0; }
+body[data-view="simple"] .bv-answered { margin: var(--sp-2) 0 0; font-size: calc(var(--fs-md) * var(--zoom-msg, 1)); color: var(--c-ink-muted); }
+@media (max-width: 600px) {
+  body[data-view="simple"] .action-btn { flex: 1 1 0; min-width: 0; }
+  body[data-view="simple"] .answer-words-btn { flex: 0 0 100%; justify-content: flex-start; padding-left: 0; }
+}
+
+/* The 🔥 strip, above the feed while its message is out of view: three lines, two under 700 px tall, one under 500 */
+body[data-view="simple"] .bv-strip {
+  display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 0 var(--sp-3); padding: var(--sp-2) max(16px, env(safe-area-inset-left));
+  border-left: 4px solid var(--c-fault); background: var(--c-surface-raised); border-bottom: 1px solid var(--c-border); flex: 0 0 auto;
+}
+.bv-strip-words { margin: 0; font-size: calc(var(--bv-body) * var(--zoom-msg, 1)); line-height: 1.4; color: var(--c-ink); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.bv-strip-kind { color: var(--c-fault); font-weight: 700; font-size: calc(var(--fs-readout) * var(--zoom-msg, 1)); }
+body[data-view="simple"] .bv-strip-acts { margin-top: 0; }
+.bv-strip-more { grid-column: 1 / -1; font-size: calc(var(--fs-sm) * var(--zoom-msg, 1)); color: var(--c-ink-muted); }
+@media (max-height: 699.98px) { .bv-strip-words { -webkit-line-clamp: 2; } }
+@media (max-height: 499.98px) { .bv-strip-words { -webkit-line-clamp: 1; } }
+
+/* Over the composer: ↓ n new (48 px), Nobody backstage, and the empty feed's words */
+body[data-view="simple"] .new-below { min-height: var(--target-answer); }
+body[data-view="simple"] .bv-alone { margin: 0 auto; padding: var(--sp-2) max(16px, env(safe-area-inset-left)); font-size: var(--fs-md); color: var(--c-ink-muted); }
+body[data-view="simple"] .bv-empty { position: absolute; top: 40%; left: 0; right: 0; margin: 0; padding: 0 var(--sp-4); text-align: center; font-size: var(--bv-body); color: var(--c-ink-muted); }
+
+/* The composer: 🔥 Priority, the field (18 px on a tablet, 16 px on a phone), Send; each 48 px tall */
+body[data-view="simple"] .director-compose { padding: var(--sp-2) max(16px, env(safe-area-inset-right)) max(var(--sp-2), env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+body[data-view="simple"] #directorForm { display: flex; gap: var(--sp-2); align-items: stretch; }
+body[data-view="simple"] #directorForm > * { min-height: var(--target-answer); }
+body[data-view="simple"] .director-compose input#directorInput { font-size: var(--bv-field); padding: 0 var(--sp-3); border: 2px solid var(--c-edge); background: var(--c-surface-raised); color: var(--c-ink); }
+body[data-view="simple"] .priority-btn { min-width: var(--target-touch); padding: 0 var(--sp-3); gap: var(--sp-1); border: 2px solid var(--c-edge); font-size: var(--fs-readout); }
+body[data-view="simple"] .priority-btn.on { border-color: var(--c-fault); box-shadow: none; }
+.priority-btn .pri-word { display: none; }
+body[data-view="simple"] .priority-btn .pri-word { display: inline; }
+body[data-view="simple"] .reply-chip { font-size: var(--fs-md); }
+body[data-view="simple"] .reply-chip .reply-cancel { min-height: var(--target-touch); padding: 0 var(--sp-2); color: var(--c-action); font-size: var(--fs-md); font-weight: 600; }
+@media (max-width: 600px) {
+  body[data-view="simple"] .priority-btn .pri-word { display: none; }
+  body[data-view="simple"] .priority-btn { padding: 0; }
+  body[data-view="simple"] #directorForm { gap: 6px; }
+  body[data-view="simple"] .director-compose input#directorInput { padding: 0 12px; }
+}
+
+/* The ⋯ sheet: 56 px rows, never taller than the screen and scrolled within it; a bottom sheet on a phone */
+.bv-sheet {
+  position: fixed; top: 64px; right: max(16px, env(safe-area-inset-right)); z-index: var(--z-menu);
+  width: 360px; max-width: calc(100vw - 32px); max-height: calc(100vh - 80px); max-height: calc(100dvh - 80px); overflow: auto;
+  background: var(--c-surface-raised); color: var(--c-ink); border: 1px solid var(--c-border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow); padding: var(--sp-2) var(--sp-4);
+}
+.bv-sheet-row { display: flex; align-items: center; gap: var(--sp-2); min-height: 56px; border-bottom: 1px solid var(--c-border); }
+.bv-sheet-label { flex: 1 1 auto; font-weight: 600; }
+.bv-sheet-pct { min-width: 3.5em; text-align: center; font-variant-numeric: tabular-nums; }
+.bv-sheet-btn {
+  min-height: var(--target-touch); min-width: var(--target-touch); padding: 0 var(--sp-3); border-radius: var(--radius-sm);
+  border: 2px solid var(--c-edge); background: var(--c-surface-raised); color: var(--c-ink); font: inherit; cursor: pointer;
+}
+.bv-sheet-btn[aria-pressed="true"] { background: var(--c-action); border-color: var(--c-action); color: var(--c-on-action); }
+.bv-sheet-btn[aria-disabled="true"] { cursor: default; }
+.bv-sheet-wide { flex: 1 1 auto; text-align: left; border: 0; padding-left: 0; font-weight: 600; }
+.bv-sheet-awake { margin: 0; padding: var(--sp-3) 0; border-bottom: 1px solid var(--c-border); color: var(--c-ink); }
+.bv-sheet-foot { margin: 0; padding: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-sm); color: var(--c-ink-muted); }
+@media (max-width: 600px) {
+  .bv-sheet { top: auto; right: 0; bottom: 0; left: 0; width: auto; max-width: none; max-height: 100vh; max-height: 100dvh; border-radius: var(--radius-md) var(--radius-md) 0 0; padding-bottom: max(var(--sp-2), env(safe-area-inset-bottom)); }
+}

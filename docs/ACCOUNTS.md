@@ -92,7 +92,15 @@ viewer reaches that hall, and its hall's name; `giveableRooms`): the admin every
 and on each account's row only those (`otherRooms` counts the rest), never a guest code. A change of the chat view alone is
 no change of rights: the account's pages in a room are told the view each draws now (`view`: its own choice, else the
 simple view On stage and the full view elsewhere) and stay open; any other change still ends its pages, which reconnect
-with the rights it has now. `/api/halls` gives each hall's row the seat the account joins its Main room with (`seat`) and
+with the rights it has now. **The admin also chooses a person's chat view where they sit**, a code guest's as well as an
+account's: Chat view (By seat, Simple, Full) on the admin page's people rows, beside Seat, and in the person's ⋯ in the
+hall page's People panel, for the admin's own page (`admin:setView`, behind the admin page's gate; for an account, from
+an account's page, only where the Accounts page would let that account change it, `rbac.mayChange`: a manager given
+`settings.manage` alone sets a guest's and is refused an account's, "You may not manage accounts."). A guest's is kept by
+their uid in `pages.json` (a device's, as their identity is), an account's on the account; each of the person's pages,
+and the admin's view of them, is told it at once, and nothing is closed. The join's answer says the view a page draws
+(`view`, its last key), and the admin's people list each person's choice (`view`, '' by the seat), sent again to the
+admin's pages, and to no other page, as a choice is made there or on the Accounts page. `/api/halls` gives each hall's row the seat the account joins its Main room with (`seat`) and
 the hall's side rooms it may enter (`rooms`, each with its key, name, people, guest code where it may know it, whether the
 code admits and its seat there), and lists apart the side rooms it may enter in a hall it does not see, by that hall's
 name and never its key; the halls board does the same (`rooms` on each row, `yourRooms` apart). Each way in carries that
@@ -440,7 +448,9 @@ another program held as they were removed, kept, and whether it opens again at t
 control that changes nothing), a hall's rooms (`room.create`: "Legal in Hall 2 (code off)"; `room.update`: a side room
 renamed, "name → Media"; a hall's Main room renamed is `hall.update`, as its Set up writes it), an account's side rooms,
 On stage halls and chat view (`user.create` and `user.update`: "rooms → Legal (Hall 2) LGQ4MZP8", each room by its name,
-its hall's and its key, never a guest code; "board → On stage in H7K2QA"; "view → simple", "view → by seat"), the admin's reads of a
+its hall's and its key, never a guest code; "board → On stage in H7K2QA"; "view → simple", "view → by seat", from the Accounts page or the admin's Chat view alike), a guest's chat view set by the
+admin (`person.view`, by the hall's key: "Rita (guest) → simple view", "… → the view by their seat"; one row for each
+change, none for one that changes nothing), the admin's reads of a
 side room its account is not given (`room.read`, once each: a page entered, never a resume; a watch begun; a transcript;
 a person's view opened; the AI asked for its minutes, its messages handed to it whatever it answers; the laptop's token is given none, so its reads always write one; never
 what was read), a room's guest code switched or renewed (`room.code`, by the room's key: "code on", "code off (3 guest

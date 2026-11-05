@@ -706,3 +706,133 @@ test('a web page: a right of its own (stage.web); its address told only to the p
   assert.deepEqual(await act(ctl2, 'admin:guestWeb', { roomCode: hall, on: false }), { ok: true, already: true, on: false, up: 0 });
   assert.deepEqual(await act(ria2, 'page:push', { code: hall, to: 'board', content: web }), { ok: false, error: GUESTS_OFF });
 });
+
+test('a person\'s chat view: the join\'s view by the seat, the admin\'s choice for a guest (kept by their uid) or an account, told live to every page of theirs and their support view and nobody else, one row each, the admin\'s alone; the support view\'s relayed state says so; a reaction carries its seat', { timeout: 120_000 }, async (t) => {
+  const srv = await startServer();
+  t.after(() => stopServer(srv.child));
+  const sockets = [];
+  t.after(() => sockets.forEach((s) => s.close()));
+  const heard = new Map();
+  const page = async (cookie, who) => {
+    const s = await connect(srv.base, cookie);
+    sockets.push(s);
+    heard.set(s, []);
+    s.onAny((ev, ...args) => heard.get(s).push([ev, args[0]]));
+    s.who = who;
+    return s;
+  };
+  const views = (s) => heard.get(s).filter(([ev]) => ev === 'view').map(([, v]) => v.view);
+  const joined = async (s, args) => { const r = await emit(s, 'join', args); assert.equal(r.ok, true, s.who + ': ' + JSON.stringify(r)); return r; };
+  const rows = (action) => fs.readFileSync(path.join(srv.dataDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.action === action).map((e) => [e.target, e.words]);
+  const kept = () => { try { return JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'pages.json'), 'utf8')).views; } catch { return null; } };
+
+  const admin = (await api(srv.base, 'POST', '/api/setup', { token: TOKEN, username: 'ana', name: 'Ana Admin', password: 'the green room kettle' })).cookie;
+  const hall = (await api(srv.base, 'POST', '/api/rooms', { name: 'Hall 2' }, { cookie: admin })).body.code;
+  const account = async (username, name, role, extra) => {
+    const made = await api(srv.base, 'POST', '/api/users', { username, name, role, password: PASSWORD, ...extra }, { cookie: admin });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    return { id: made.body.user.id, cookie: (await api(srv.base, 'POST', '/api/auth/login', { username, password: PASSWORD })).cookie };
+  };
+  const bea = await account('bea', 'Bea Board', 'staff', { halls: [hall], board: [hall] });
+  const tom = await account('tom', 'Tom Tech', 'tech', { halls: [hall] });
+  // A manager given settings.manage: the admin page's gate admits it; it manages no account.
+  const max = await account('max', 'Max Manager', 'staff', { halls: [hall], grant: ['settings.manage'] });
+
+  // The join's view: by the seat, none chosen yet: simple On stage, a guest's or an account's, full backstage.
+  const gil = await page(undefined, 'Gil On stage');
+  const gilJoin = await joined(gil, { roomCode: hall, name: 'Gil', role: 'board' });
+  const gil2 = await page(undefined, 'Gil\'s second device');
+  await joined(gil2, { roomCode: hall, name: 'Gil', role: 'board', uid: gilJoin.identity });
+  const ria = await page(undefined, 'Ria backstage');
+  const riaJoin = await joined(ria, { roomCode: hall, name: 'Ria', role: 'research' });
+  const beaPage = await page(bea.cookie, 'Bea On stage');
+  const beaJoin = await joined(beaPage, { roomCode: hall, as: 'account' });
+  const tomPage = await page(tom.cookie, 'Tom backstage');
+  await joined(tomPage, { roomCode: hall, as: 'account' });
+  assert.deepEqual([gilJoin.view, riaJoin.view, beaJoin.view], ['simple', 'full', 'simple']);
+  assert.equal(Object.keys(gilJoin).at(-1), 'view', 'the join\'s view, appended at its end');
+
+  // The admin page reads the room's people, with the view the admin chose for each ('' by the seat).
+  const ctl = await page(admin, 'the admin page');
+  const watched = await emit(ctl, 'admin:watchRoom', { roomCode: hall });
+  const sid = (name) => watched.users.find((u) => u.name === name).socketId;
+  assert.deepEqual(watched.users.map((u) => [u.name, u.view]).sort(), [['Bea Board', ''], ['Gil', ''], ['Ria', ''], ['Tom Tech', '']]);
+  // The admin's support view of Gil: told the view his pages draw.
+  const gilView = await page(admin, 'the admin\'s view of Gil');
+  const gilViewJoin = await joined(gilView, { roomCode: hall, name: 'Gil', role: 'board', adminView: true, viewOf: gilJoin.uid });
+  assert.equal(gilViewJoin.person.view, 'simple');
+
+  // The admin's people rows hear each choice live (`users`, to the admin's pages alone): no other page's list says it, so
+  // no other page is sent its list again.
+  const lists = (s) => heard.get(s).filter(([ev]) => ev === 'users').map(([, v]) => v);
+  const viewIn = (s, name) => { const l = lists(s).at(-1) || []; const u = l.find((x) => x.name === name); return u ? u.view : undefined; };
+  await wait(300);
+  const others = [gil, gil2, ria, beaPage, tomPage];
+  const before = others.map((s) => lists(s).length);
+
+  // A guest's view chosen: both of Gil's devices and the admin's view of him told, nobody else; kept by his uid; one row.
+  assert.deepEqual(await act(ctl, 'admin:setView', { roomCode: hall, socketId: sid('Gil'), view: 'full' }), { ok: true, view: 'full' });
+  await until(() => [gil, gil2, gilView].every((s) => views(s).length === 1), 4000, 'Gil\'s pages told');
+  assert.deepEqual([views(gil), views(gil2), views(gilView), views(ria), views(beaPage), views(tomPage)], [['full'], ['full'], ['full'], [], [], []]);
+  await until(() => viewIn(ctl, 'Gil') === 'full', 4000, 'the admin page\'s people rows say Gil\'s view');
+  await wait(300);
+  assert.deepEqual(others.map((s) => lists(s).length), before, 'no other page is sent its people list for a chat view');
+  assert.ok(lists(ctl).at(-1).every((u) => 'view' in u) && others.every((s) => lists(s).every((l) => l.every((u) => !('view' in u)))), 'only the admin\'s list says a view');
+  await until(() => kept() && kept()['u:' + gilJoin.uid], 4000, 'pages.json keeps it');
+  assert.equal(kept()['u:' + gilJoin.uid].view, 'full');
+  // Asked again as it stands: already, no row and nobody told.
+  assert.deepEqual(await act(ctl, 'admin:setView', { roomCode: hall, socketId: sid('Gil'), view: 'full' }), { ok: true, already: true, view: 'full' });
+  // Backstage set to Simple; and Gil back to his seat's (simple On stage), which pages.json no longer keeps.
+  assert.deepEqual(await act(ctl, 'admin:setView', { roomCode: hall, socketId: sid('Ria'), view: 'simple' }), { ok: true, view: 'simple' });
+  assert.deepEqual(await act(ctl, 'admin:setView', { roomCode: hall, socketId: sid('Gil'), view: '' }), { ok: true, view: '' });
+  await until(() => views(ria).length === 1 && views(gil).length === 2, 4000, 'Ria and Gil told again');
+  assert.deepEqual([views(ria), views(gil), views(gil2)], [['simple'], ['full', 'simple'], ['full', 'simple']]);
+  await until(() => kept() && !kept()['u:' + gilJoin.uid] && kept()['u:' + riaJoin.uid], 4000, 'pages.json keeps Ria\'s, and Gil\'s no longer');
+  // A reload keeps it: Ria's next join draws the simple view.
+  const ria2 = await page(undefined, 'Ria, reloaded');
+  assert.equal((await joined(ria2, { roomCode: hall, name: 'Ria', role: 'research', uid: riaJoin.identity })).view, 'simple');
+
+  // An account's view chosen: kept on the account, its page told, its row the Accounts page's words.
+  assert.deepEqual(await act(ctl, 'admin:setView', { roomCode: hall, socketId: sid('Bea Board'), view: 'full' }), { ok: true, view: 'full' });
+  await until(() => views(beaPage).length === 1, 4000, 'Bea\'s page told');
+  assert.deepEqual(views(beaPage), ['full']);
+  const users = (await api(srv.base, 'GET', '/api/users', undefined, { cookie: admin })).body.users;
+  assert.equal(users.find((u) => u.username === 'bea').view, 'full');
+  // The admin's people list says each choice now, live and as read again.
+  await until(() => viewIn(ctl, 'Bea Board') === 'full' && viewIn(ctl, 'Ria') === 'simple' && viewIn(ctl, 'Gil') === '', 4000, 'the admin page\'s rows live');
+  assert.deepEqual((await emit(ctl, 'admin:watchRoom', { roomCode: hall })).users.map((u) => [u.name, u.view]).sort(), [['Bea Board', 'full'], ['Gil', ''], ['Ria', 'simple'], ['Tom Tech', '']]);
+  assert.deepEqual(rows('person.view'), [[hall, 'Gil (guest) → full view'], [hall, 'Ria (guest) → simple view'], [hall, 'Gil (guest) → the view by their seat']]);
+  assert.deepEqual(rows('user.update').filter(([, w]) => /^view/.test(w)), [['bea', 'view → full']]);
+  // The Accounts page's Chat view (PATCH) reaches the account's pages and the admin page's rows alike.
+  assert.equal((await api(srv.base, 'PATCH', '/api/users/' + bea.id, { view: 'simple' }, { cookie: admin })).status, 200);
+  await until(() => views(beaPage).length === 2 && viewIn(ctl, 'Bea Board') === 'simple', 4000, 'the PATCH told Bea\'s page and the admin page\'s rows');
+  assert.deepEqual(views(beaPage), ['full', 'simple']);
+  assert.equal((await api(srv.base, 'PATCH', '/api/users/' + bea.id, { view: 'full' }, { cookie: admin })).status, 200);
+  await until(() => viewIn(ctl, 'Bea Board') === 'full', 4000, 'and back');
+
+  // The admin's alone: a Tech's page is not the admin's; a manager with settings.manage sets a guest's, and no account's
+  // (the Accounts page's own rule); a view that is none, and a person not in the room, are refused in words.
+  assert.deepEqual(await act(tomPage, 'admin:setView', { roomCode: hall, socketId: sid('Gil'), view: 'full' }), { ok: false, error: 'Not admin' });
+  const maxPage = await page(max.cookie, 'Max on the admin page');
+  assert.deepEqual(await act(maxPage, 'admin:setView', { roomCode: hall, socketId: sid('Bea Board'), view: 'simple' }), { ok: false, error: 'You may not manage accounts.' });
+  assert.deepEqual(await act(maxPage, 'admin:setView', { roomCode: hall, socketId: sid('Gil'), view: 'full' }), { ok: true, view: 'full' });
+  assert.deepEqual(await act(ctl, 'admin:setView', { roomCode: hall, socketId: sid('Gil'), view: 'tiny' }), { ok: false, error: 'Choose By seat, Simple or Full.' });
+  assert.deepEqual(await act(ctl, 'admin:setView', { roomCode: hall, socketId: 'nobody', view: 'full' }), { ok: false, error: 'That person is not in this room now.' });
+  assert.equal((await api(srv.base, 'GET', '/api/users', undefined, { cookie: admin })).body.users.find((u) => u.username === 'bea').view, 'full', 'unchanged by the refusal');
+
+  // The support view's relayed state says it came from there (the simple view takes no theme from it); the person's own
+  // pages relay theirs as they are.
+  gilView.emit('userState:push', { key: 'theme', value: 'light' });
+  gil2.emit('userState:push', { key: 'theme', value: 'dark' });
+  const pushes = (s) => heard.get(s).filter(([ev]) => ev === 'userState:push').map(([, v]) => v);
+  await until(() => pushes(gil).length === 2, 4000, 'Gil\'s page told both');
+  assert.deepEqual(pushes(gil), [{ key: 'theme', value: 'light', support: true }, { key: 'theme', value: 'dark' }]);
+  assert.deepEqual(pushes(gilView), [{ key: 'theme', value: 'dark' }], 'the support view hears the person\'s, never with support');
+
+  // A Board member's 👍 carries the seat, so the backstage page says who got it.
+  const said = await act(tomPage, 'message', { type: 'text', text: 'Doors open in five' });
+  assert.ok(said.ok);
+  assert.deepEqual(await act(gil, 'react', { messageId: said.id, emoji: '👍', on: true }), { ok: true });
+  const reacted = (await emit(ctl, 'admin:watchRoom', { roomCode: hall })).messages.find((m) => m.id === said.id).reactions;
+  assert.deepEqual(reacted.map((r) => [r.name, r.emoji, r.role]), [['Gil', '👍', 'board']]);
+});

@@ -219,6 +219,27 @@ Every day of the event
   where the backstage team reads it. Help requests are answered by the
   backstage team: On stage, you mark your own request sorted, and have no
   "On my way" or "Resolved" on anyone else's.
+- The Board's chat view (an On stage seat's page, unless the admin chooses
+  Full for that person): the chat first. Under the newest message from
+  backstage that waits for you, and under each waiting Priority message:
+  "Got it" (it tells the backstage team, with your name; "Got all 3" when
+  three wait) and "Reply". Tap any other message for its own Got it and
+  Reply. A question: tap an answer, or "Answer in words..."; "Change"
+  picks another. Your Priority messages: press Priority before Send; it
+  is off again after each send. A Priority message you scrolled away from
+  waits in a strip above the chat. The view starts in Dark.
+  The ... (top right) holds Text size (Aa- and Aa+), Theme (Light or
+  Dark), Full screen (where the device has it) and Leave the hall.
+  On an iPad mini, or with the tablet further away than an arm's length,
+  press Aa+ in ... -> Text size.
+  If ... says the device may sleep, open AGMessage with https:// (trust
+  the certificate once, /tls) or set the screen to stay on in the
+  device's settings (Auto-Lock or Screen timeout).
+  An iPhone has no Full screen: hold it upright for the most chat.
+- The admin chooses a person's chat view (By seat, Simple or Full): Chat
+  view in the admin page's people list (beside Seat), in the person's ...
+  in the hall page's People list, or on the Accounts page for an account.
+  By seat is Simple On stage and Full everywhere else.
 - A browser signed in to an account opens its halls from the halls board,
   never with a code: a code link opened there says so and offers "Open your
   halls" or "Sign out". To join as a guest on that device, sign out first.

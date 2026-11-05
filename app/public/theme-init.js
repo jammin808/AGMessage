@@ -8,10 +8,15 @@
   'use strict';
   var root = document.documentElement;
   var WORDS = 'This browser is too old for AGMessage. Update this device (iPadOS or iOS 14.5, or Chrome 84, or later), or use another.';
+  // A theme never chosen is light, but on the hall page (`data-page="app"`, its markup's) last drawn in the Board's simple
+  // view, which starts in Dark: so a device last used there paints dark before its first frame. Every other page reads
+  // an unset theme as light, whatever view the hall page last drew. Storage that cannot be read is no theme chosen.
   try {
-    root.setAttribute('data-theme', localStorage.getItem('agm.theme') || 'light');
+    var theme = localStorage.getItem('agm.theme');
+    if (theme !== 'light' && theme !== 'dark') theme = root.getAttribute('data-page') === 'app' && localStorage.getItem('agm.lastView') === 'simple' ? 'dark' : 'light';
+    root.setAttribute('data-theme', theme);
     root.setAttribute('data-theme-pending', '1');
-  } catch (e) { /* storage blocked: the page keeps its light theme */ }
+  } catch (e) { /* storage blocked: the page keeps its light theme, and the simple view turns dark at its join */ }
   if (typeof window.WeakRef === 'function') return;
   root.setAttribute('data-floor', 'old');
   // No form on the page is ever sent below the floor, whether or not the stylesheet that hides it arrived: a form whose
